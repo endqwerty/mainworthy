@@ -44,3 +44,13 @@ preference:
   needs a simple way to do incremental aggregation (for example in the
   database or an in-process job queue) without a separate analytics system
   to run at the start.
+
+### Added with the layered self-hosting decision (0002)
+
+- **Embedded and server modes:** the store works embedded in one process
+  for the Local layer and as a server database for Server and Cloud, with one
+  schema and query layer. The benchmark runs in both modes.
+- **One self-contained artifact:** a single binary or one container image
+  with no build step for the user.
+- **Optional cache:** any cache is added only when the benchmark shows a
+  budget miss without it, and never carries correctness.
