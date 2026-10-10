@@ -190,8 +190,13 @@ starts at 20 users, custom price), QMetry (standalone).
 4. **API rate limits are a tier feature** (TestRail 100 to 300, Qase 150 to
    1,000, Xray 60 to 100 req/min). Casebook principle 6 (everything has an
    API) can be a differentiator if limits are generous.
-5. **Everyone is adding AI and MCP servers** (Qase, Testiny, Testomat.io,
-   PractiTest). Not a differentiator any more; likely table stakes.
+5. **MCP servers are appearing** (Qase, Testiny, Testomat.io, PractiTest
+   list one; Qase includes it on the free plan). Only the existence was
+   seen on pricing pages, not depth: whether they cover authoring and
+   running or only reading, scoped tokens, or agent identity in history is
+   **open**. Agent access is Casebook's priority 2
+   ([product-vision.md](product-vision.md)), so test these servers hands-on
+   before assuming parity or a gap.
 6. **Self-hosting is rare and expensive** except Kiwi TCMS and TestLink, both
    of which are dated or basic. A modern self-hosted tool has a clear opening
    if Daniel wants to host on the home server (open question 2).
@@ -203,6 +208,7 @@ starts at 20 users, custom price), QMetry (standalone).
 - Any claim about performance at tens of thousands of cases: only reviews,
   no measurement. A benchmark against TestRail or Qase needs trial accounts.
 - Import and export formats of every tool (relevant to open question 5).
+- Depth of competitors' MCP servers (finding 5).
 - Daniel's own experience with each tool.
 - Smaller vendors not covered: TestMonitor, Tuskr, TestCollab, Squash TM,
   Kualitee, aqua cloud.
