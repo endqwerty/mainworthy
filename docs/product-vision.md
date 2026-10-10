@@ -174,6 +174,22 @@ one of them is available through the API and MCP, and stays fast at scale).
   (incremental on ingest, not a nightly batch), and reading it adds no
   noticeable cost to listing cases.
 
+## Deployment: self-hostable in layers
+
+Casebook is self-hosted in three layers from one build: Local (one process
+on a person's machine, zero configuration), Server (a team on a home server
+or small host) and Cloud (several instances, optional cache, workers). No
+feature is layer-specific and a cache is never required for correctness.
+See [decisions/0002-layered-self-hosting.md](decisions/0002-layered-self-hosting.md).
+
+## Research before implementation
+
+UX is the priority most often claimed and least often measured. Before the
+first product code, the UX research plan ([ux-research-plan.md](ux-research-plan.md))
+audits the incumbents on ten core jobs, builds an intent model of what users
+mean at each step, and tests measured prototypes. The phased plan is in
+[roadmap.md](roadmap.md).
+
 ## Principles (draft, to be challenged)
 
 1. **A test case is a versioned document, not a row.** Every edit is a version;
@@ -204,6 +220,7 @@ one of them is available through the API and MCP, and stays fast at scale).
 - Import from TestRail, Qase and CSV.
 - MCP server and a shipped agent skill (priority 2).
 - Basic reports: pass rate over time, coverage by requirement, automation rate, flaky cases.
+- Runs as the Local layer with no configuration, and as the Server layer on the home server from the same build.
 
 ## Non-goals (for now)
 
