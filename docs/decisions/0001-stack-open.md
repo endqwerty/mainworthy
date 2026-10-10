@@ -30,3 +30,17 @@ preference:
   the bar.
 - **Ops:** runs on the home server and on a small host; one deployable if
   possible.
+
+### Added with the versioning, CI and flaky-detection requirements
+
+- **Write-heavy result stream:** the data store must take a high volume of
+  small appended result rows, keep full per-case history cheaply, and answer
+  "last N results for this case" and "outcomes per commit" queries fast. Add
+  these two queries and a 10,000-result ingest to the benchmark, with a
+  history of many millions of results, not only 1M.
+- **Immutable versions:** storing and diffing versions of a structured
+  document must be cheap and not require rewriting rows.
+- **Incremental computation:** flaky state is updated on ingest; the stack
+  needs a simple way to do incremental aggregation (for example in the
+  database or an in-process job queue) without a separate analytics system
+  to run at the start.
