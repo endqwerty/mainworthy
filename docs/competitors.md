@@ -1,5 +1,9 @@
 # Competitor notes
 
+See [competitive-analysis.md](competitive-analysis.md) for the researched,
+source-linked comparison (13 tools, pricing, verified vs reported). This file
+keeps the original hypotheses and Daniel's notes.
+
 **Provenance:** the "possible gaps" below are hypotheses from general knowledge
 of these products, not verified findings and not yet checked against current
 pricing or features. The most valuable input is Daniel's own experience: add it

@@ -23,6 +23,7 @@ Manage test cases, plans, runs and results for a software team, with:
 | File | What |
 | --- | --- |
 | [docs/product-vision.md](docs/product-vision.md) | the problem, principles, scope, non-goals |
+| [docs/competitive-analysis.md](docs/competitive-analysis.md) | researched comparison of 13 tools: pricing, gating, verified vs reported |
 | [docs/competitors.md](docs/competitors.md) | what each existing tool does, and hypotheses on where it falls short |
 | [docs/open-questions.md](docs/open-questions.md) | decisions that need Daniel's input before design starts |
 | [docs/decisions/](docs/decisions/) | architecture decision records |
