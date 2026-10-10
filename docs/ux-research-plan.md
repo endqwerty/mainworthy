@@ -176,8 +176,9 @@ recruited users:
 - Round 2 mock meets the input-to-paint budget in the product vision on 10k
   cases and completes J1 to J4 and J8 without lost input; the architectural
   requirements it surfaced are written into the stack criteria.
-- Open questions that block the data model (real-time collaboration, offline,
-  review workflow, gate model) have answers recorded as decision records.
+- Open questions that block the data model have answers recorded as decision
+  records: collaboration and offline are answered in decision 0004 (the mock
+  tests its live-update candidates); review workflow and gate model remain.
 
 ## Non-goals of the research
 

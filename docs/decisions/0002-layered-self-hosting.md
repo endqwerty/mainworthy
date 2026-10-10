@@ -30,7 +30,7 @@ its own decision.
    status callbacks, tracker links) work in Local only when it can reach
    those services; that is a prerequisite, not a feature difference.
    Offline browser editing with later synchronisation is a separate question
-   (open question 9) and is not promised here.
+   (open question 9, answered in decision 0004: online-first, no sync promised).
 3. **Layer is configuration, not a fork.** The same build reads its layer from
    configuration (database URL, cache URL, storage location). Moving up a
    layer is export plus import, preserving identities, versions, history,
