@@ -54,3 +54,15 @@ preference:
   with no build step for the user.
 - **Optional cache:** any cache is added only when the benchmark shows a
   budget miss without it, and never carries correctness.
+
+### Added with the multi-user and offline decision (0004)
+
+- **Idempotent, version-checked writes:** every write takes a client-generated
+  id and the base version it started from, and the store rejects or reports
+  a conflict instead of overwriting. Benchmark concurrent edits to the same
+  case, not only throughput.
+- **Change notifications:** the server can push "this changed" events to
+  clients over one channel; losing an event must be repaired by refetch.
+  Live co-editing of text (CRDT or OT) is not a criterion.
+- **Client cache that can queue:** the front end can hold pending writes with
+  their base versions, show them as pending and replay them on reconnect.

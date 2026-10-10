@@ -23,8 +23,10 @@ use of incumbents and reviewed mocks; no interviews or recruited sessions.
 - Traceability and gate views designed.
 - Two mock rounds: static screens, then an instrumented feasibility mock
   that tests the interaction model and data flow together.
-- Answer the open questions that shape the data model (collaboration,
-  offline, review workflow, gate model) and record them as decisions.
+- Answer the open questions that shape the data model and record them as
+  decisions: collaboration and offline are done (decision 0004; the mock
+  tests which live-update candidates earn their place); review workflow
+  default and gate model remain.
 
 Exit: see the plan's exit criteria.
 
