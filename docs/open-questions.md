@@ -10,3 +10,5 @@ in `docs/decisions/`.
 5. Is importing from an existing TestRail/Qase/ADO instance a launch requirement?
 6. Any language, framework or database preference or dislike? (Stack is intentionally undecided.)
 7. Product name: `Casebook` is a placeholder.
+8. Real-time collaboration (two people editing a case at once) or last-save-wins with conflict warnings? It shapes the data layer and the UI cache.
+9. Should the UI work offline or on a bad connection (local-first), or is online-only fine?
