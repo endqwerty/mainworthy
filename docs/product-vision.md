@@ -174,21 +174,42 @@ one of them is available through the API and MCP, and stays fast at scale).
   (incremental on ingest, not a nightly batch), and reading it adds no
   noticeable cost to listing cases.
 
+## Scope and the process spectrum
+
+Software QA only (decision 0003). Teams range from loose and
+automation-heavy to regulated with strict gates and sign-offs; Casebook
+serves the whole range with one data model and per-project policy switches
+(review required, approval to run, release gates, evidence freeze,
+sign-off), with presets for each profile. The full CI/CD flow is in scope
+for every profile.
+
+### Traceability as a view
+
+Requirement to cases to versions to runs and results to commits, builds and
+deployments to defects, navigable in both directions. A coverage matrix per
+release, a gap list (requirements without passing results on the released
+versions) and a gate status that says why a release is or is not allowed.
+Every link is available through the API and MCP. Designed in phase 0 of the
+roadmap; see `docs/ux/traceability-views.md` once written.
+
 ## Deployment: self-hostable in layers
 
 Casebook is self-hosted in three layers from one build: Local (one process
 on a person's machine, zero configuration), Server (a team on a home server
-or small host) and Cloud (several instances, optional cache, workers). No
-feature is layer-specific and a cache is never required for correctness.
+or small host) and Cloud (one organisation on several instances, optional
+cache, workers). No feature is layer-specific and a cache is never required
+for correctness.
 See [decisions/0002-layered-self-hosting.md](decisions/0002-layered-self-hosting.md).
 
 ## Research before implementation
 
 UX is the priority most often claimed and least often measured. Before the
 first product code, the UX research plan ([ux-research-plan.md](ux-research-plan.md))
-audits the incumbents on ten core jobs, builds an intent model of what users
-mean at each step, and tests measured prototypes. The phased plan is in
-[roadmap.md](roadmap.md).
+does desk research, audits the incumbents hands-on on a fixed set of jobs,
+writes team profiles across the process spectrum and an intent model of what
+users mean at each step, and reviews measured mocks that test the
+interaction and the architecture together. No user interviews. The phased
+plan is in [roadmap.md](roadmap.md).
 
 ## Principles (draft, to be challenged)
 
@@ -214,6 +235,8 @@ mean at each step, and tests measured prototypes. The phased plan is in
   custom fields), shared steps.
 - Case versioning with diff, restore, and version-stamped results.
 - Plans and runs, manual execution UI, result statuses, attachments, defects links.
+- Requirement links, traceability views (matrix, chain, gap list) and release gates with policy switches per project.
+- Export and import of a whole project, preserving history (also the path from Local to Server).
 - Ingest of automated results via API, CLI and a GitHub Actions step (JUnit XML first), with commit/branch/attempt metadata and an unlinked-results inbox.
 - Manual / automated / both on every case, with automation rate and stale or unlinked automated-test reports.
 - Automatic flaky detection with evidence, quarantine and PR status that respects it.
@@ -225,6 +248,9 @@ mean at each step, and tests measured prototypes. The phased plan is in
 ## Non-goals (for now)
 
 - Being a full issue tracker or ALM.
+- Hardware, laboratory or other non-software QA.
+- Regulatory certification or compliance claims; the model records what a
+  regulated team needs, the claims come later if a real team needs them.
 - Test code generation or execution infrastructure.
 - Multi-tenant SaaS billing.
 
