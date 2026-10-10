@@ -77,10 +77,107 @@ thinking is a defect.
   in a browser test on the real UI and has a budget like the backend does.
   A change that breaks the budget does not merge.
 
+## Core capabilities (must-have, added 2026-10-10)
+
+These sit beside the three ranked priorities: they are not optional extras,
+and each one is also bound by the speed and agent-access priorities (every
+one of them is available through the API and MCP, and stays fast at scale).
+
+### Versioning of test cases
+
+- A case has a stable ID and an append-only list of immutable versions. A
+  version records the author (person or agent), time, a short reason (optional
+  to write, easy to add) and the full content.
+- Diff between any two versions, field by field and step by step, in the UI
+  and through the API/MCP. Restore an old version (creates a new version, never
+  rewrites history).
+- A run and every result record the exact version they executed. Reports can
+  say "this failure was on version 7; version 8 changed step 3."
+- Plans and suites reference cases, not copies. A plan chooses to follow the
+  latest version or pin one; the default is latest for planning and pinned at
+  the moment a run starts.
+- Moves, renames of folders, tag edits and bulk edits are versioned the same
+  way, so a bulk change is one undoable, attributable event.
+- Draft vs published: edits (especially by agents) can be proposed and
+  reviewed before they become the current version. Open question: whether
+  this is a per-project setting (see open questions).
+
+### CI integration
+
+- Ingest is an API first, with a small CLI and a ready-made GitHub Actions
+  step on top of it; other CI systems use the CLI or API. Must not need a
+  plugin per CI vendor.
+- Formats: JUnit XML first (every runner can produce it), then the common
+  JSON reports (for example Playwright, Jest/Vitest, pytest), and TRX for
+  .NET. A neutral open report format (such as CTRF) is worth supporting if
+  verification shows it is alive and adopted; treat as a hypothesis until
+  checked.
+- Each ingest is tagged with commit SHA, branch, PR number, build URL,
+  environment, and the retry attempt number. This metadata is what makes flaky
+  detection and traceability to code possible, so it is required for CI
+  uploads, not optional.
+- Ingest is idempotent (re-sending the same report does not double count) and
+  tolerant (unknown tests do not fail the upload).
+- Mapping a test result to a case: by a stable automated-test identifier
+  (path + name, or an explicit case ID annotation in the test). Results with
+  no match land in an "unlinked" inbox, from which a person or an agent can
+  link them to an existing case or create a new case in one step. Optional
+  auto-create per project.
+- Results flow back: a commit status or PR check with the summary and a link,
+  plus a deep link from a failure to the case, its version and its history.
+- Draft budget: ingest of a 10,000-result report is accepted in under 2 s and
+  visible in reports within 5 s.
+
+### Automated vs manual tracking
+
+- Every case has an execution type: manual, automated, or both (a manual
+  case that also has an automated counterpart). Changing it is a versioned
+  edit.
+- A case links to zero or more automated tests (identifiers as above), and
+  the link is checked from the other direction: the system knows when a
+  linked automated test stopped reporting (stale), when an automated test
+  has no case (unlinked), and when a manual run was recorded for a case that
+  also has an automated test.
+- Reports answer, at any time, per project/folder/tag/requirement: how many
+  cases are manual, automated, both; the automation rate over time; the
+  automation backlog (manual cases ranked by how often they run and how long
+  they take); which manual cases were not run in the last N days.
+- Manual and automated results stay one result stream (principle 3). The
+  type is a filter, not a separate model.
+
+### Automatic flaky detection
+
+- No setup: detection runs on ingest and needs no manual tagging.
+- Signals, strongest first:
+  1. The same test, same commit (same code), different outcomes, including
+     fail-then-pass on a retry attempt in one run or across reruns of the
+     same commit.
+  2. Alternating outcomes on a stable branch (main) over a window of recent
+     runs, without a relevant case/code change in between (the case version
+     and commit tell us that).
+  3. A failure whose error signature changes between occurrences (timeouts,
+     connection errors) as a weak supporting signal.
+- Classification separates infrastructure and environment failures
+  (timeout, runner crashed, setup failure) from assertion failures, when the
+  report allows, so a bad runner does not mark every test flaky.
+- Each case gets a flakiness state (stable, suspected, flaky), a score with
+  the evidence behind it (the runs and commits that show it), and a trend.
+  The score and the thresholds are explainable and tunable per project.
+- Quarantine: a flaky case can be marked quarantined. Its results are still
+  recorded but it does not fail the PR status or the pass-rate headline. It
+  leaves quarantine on a person's decision or after a run of clean results,
+  never silently.
+- Flaky cases get an owner-visible list, a notification option, and a link to
+  an issue in the external tracker. Reports show flaky rate, top offenders, and
+  time lost to reruns.
+- Draft budget: the flaky state of a case updates within seconds of ingest
+  (incremental on ingest, not a nightly batch), and reading it adds no
+  noticeable cost to listing cases.
+
 ## Principles (draft, to be challenged)
 
 1. **A test case is a versioned document, not a row.** Every edit is a version;
-   a run records the exact version it executed.
+   a run records the exact version it executed (see "Versioning of test cases").
 2. **Separate the definition of a test from the act of running it.** Plans,
    suites and runs are cheap views over cases, not copies of them.
 3. **Automated and manual results are one stream.** CI results and human
@@ -99,12 +196,14 @@ thinking is a defect.
 
 - Projects, folders/tags, test cases (steps, expected results, preconditions,
   custom fields), shared steps.
-- Case versioning with diff.
+- Case versioning with diff, restore, and version-stamped results.
 - Plans and runs, manual execution UI, result statuses, attachments, defects links.
-- Ingest of automated results (for example JUnit XML) via API.
+- Ingest of automated results via API, CLI and a GitHub Actions step (JUnit XML first), with commit/branch/attempt metadata and an unlinked-results inbox.
+- Manual / automated / both on every case, with automation rate and stale or unlinked automated-test reports.
+- Automatic flaky detection with evidence, quarantine and PR status that respects it.
 - Import from TestRail, Qase and CSV.
 - MCP server and a shipped agent skill (priority 2).
-- Basic reports: pass rate over time, coverage by requirement, flaky cases.
+- Basic reports: pass rate over time, coverage by requirement, automation rate, flaky cases.
 
 ## Non-goals (for now)
 
