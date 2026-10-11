@@ -18,7 +18,10 @@ use of incumbents and reviewed mocks; no interviews or recruited sessions.
 
 - Desk research and a hands-on friction audit of incumbents on the core
   jobs, including their MCP servers.
-- Three process-spectrum team profiles; Daniel's own notes first.
+- User flows ([ux/flows.md](ux/flows.md)): what people and agents do end to
+  end, corrected by Daniel's account of his own team's workflow first.
+  They set the benchmark workload mix and the first MCP operations.
+- Three process-spectrum team profiles, written as walks through the flows.
 - Intent model and interaction hypotheses with rejection criteria.
 - Traceability and gate views designed.
 - Two mock rounds: static screens, then an instrumented feasibility mock

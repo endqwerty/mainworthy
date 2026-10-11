@@ -20,3 +20,4 @@ in `docs/decisions/`.
 15. Regulated profile depth: do we need electronic signatures with legal weight, retention rules or an audit export format in the first usable version, or is identity-and-time sign-off enough until a real regulated team asks?
 16. Requirements source: are requirements linked from an external tracker only (Jira, ADO, GitHub issues), or can a project hold its own lightweight requirement list for the traceability views?
 17. Deployment events: how does Casebook learn that a build was deployed (CI step, webhook, or manual) so traceability reaches deployments?
+18. Your own workflow, as evidence for `docs/ux/flows.md`: walk through your team's last release. Where do cases live today, who writes and runs them, what runs in CI, who decides go or no-go, and which steps annoyed you? A few messy paragraphs are enough; this is the only first-hand data we have.
