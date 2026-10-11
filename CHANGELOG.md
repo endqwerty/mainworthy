@@ -9,3 +9,4 @@
 - 2026-10-10: docs: decision 0004 (multi-user baseline, no live text co-editing by default, conflict detection by base version, online-first with a small offline allowance); open questions 8 and 9 answered; stack criteria extended.
 - 2026-10-10: docs: first draft of end-to-end user flows (docs/ux/flows.md, hypotheses), added to the research plan and roadmap phase 0; open question 18 asks for Daniel's own workflow.
 - 2026-10-10: docs: decision 0005 (audience is teams in general; Daniel's cross-team career is practitioner evidence, not the customer), decision 0006 (agent token cost as a measured, budgeted property for adversarial review and testing); flows F13 and F14, agent jobs A4 to A6, question 1 answered, questions 18 and 19 rewritten or added.
+- 2026-10-11: AGENTS.md: after a squash merge, move the T3 branch onto origin/main so the branch diff does not show merged work as new.
