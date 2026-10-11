@@ -1,7 +1,8 @@
 # Casebook: rules for coding agents
 
-A test case management system. Owner: Daniel (`endqwerty`). Personal project:
-act freely, deliver end to end. Your global `~/.<agent>/AGENTS.md` applies too.
+A test case management system. Owner: Daniel (`endqwerty`). Personal project,
+but Daniel reviews every change on GitHub before it lands. Your global
+`~/.<agent>/AGENTS.md` applies too.
 
 Read [README.md](README.md) first, then `docs/product-vision.md`,
 `docs/competitors.md` and `docs/open-questions.md`.
@@ -26,15 +27,28 @@ is short on disk).
 
 ## Delivery
 
-Work on the T3 branch in your worktree, open a PR with `gh pr create`, link it
-to the thread, merge it yourself (`gh pr merge --rebase`, keep the branch), then
-move the branch onto the merge so T3 does not keep showing the merged commits
-as new changes (a rebase or squash merge leaves the branch's own commits outside `main`):
+Delivery: **review-first**. Daniel merges; you do not.
+
+Work on the T3 branch in your worktree and follow the `build` skill: check the
+change, get the independent verification `verify` asks for, open a non-draft PR
+with a standalone description (`gh pr create`), link it to the thread, and stop.
+Do not merge, arm auto-merge, close the PR or push to `main`, even when the
+checks are green. Opening the PR does not start a watcher; use `babysit` when
+Daniel asks you to get an open PR merge-ready. Only Daniel saying, in the
+current thread, to merge identified work lets you land it (the `ship` skill,
+with its gates; the merge method is rebase, `gh pr merge --rebase`, keeping the
+branch). "Keep going" or a budget request is not that.
+
+After Daniel has merged and you start new work on the same T3 branch, move the
+branch onto the merge first, so T3 does not keep showing the merged commits as
+new changes (a rebase or squash merge leaves the branch's own commits outside
+`main`):
 
 ```
 git fetch && git reset --hard origin/main && git push --force-with-lease origin HEAD
 ```
 
-Only after the PR is merged and the branch holds nothing unmerged. Then check
-`git rev-list --count origin/main..HEAD` prints 0 (local `main` can be checked out in another worktree and stale). State the final `du -sh .` in your
+Only when the previous PR is merged and the branch holds nothing unmerged. Then
+check `git rev-list --count origin/main..HEAD` prints 0 (local `main` can be
+checked out in another worktree and stale). State the final `du -sh .` in your
 last message.
