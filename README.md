@@ -29,6 +29,9 @@ Manage test cases, plans, runs and results for a software team, with:
 | [docs/competitors.md](docs/competitors.md) | what each existing tool does, and hypotheses on where it falls short |
 | [docs/roadmap.md](docs/roadmap.md) | phased plan with exit criteria; phase 0 is UX research |
 | [docs/decisions/0003-scope-software-qa-and-process-spectrum.md](docs/decisions/0003-scope-software-qa-and-process-spectrum.md) | software QA only; one model, policy switches across loose to regulated teams |
+| [docs/decisions/0005-generic-audience-and-practitioner-evidence.md](docs/decisions/0005-generic-audience-and-practitioner-evidence.md) | for teams in general; Daniel's cross-team experience is practitioner evidence, not the customer |
+| [docs/decisions/0006-agent-token-efficiency.md](docs/decisions/0006-agent-token-efficiency.md) | agent token cost for adversarial review and testing is measured and budgeted like latency |
+| [docs/ux/flows.md](docs/ux/flows.md) | end-to-end user flows by actor, as hypotheses |
 | [docs/ux-research-plan.md](docs/ux-research-plan.md) | how friction is measured before code: desk research, hands-on audit, jobs, profiles, intent model, mocks |
 | [docs/open-questions.md](docs/open-questions.md) | decisions that need Daniel's input before design starts |
 | [docs/decisions/](docs/decisions/) | architecture decision records |
