@@ -6,14 +6,21 @@ triggers it, what they hand to whom, what is read and written, and how often.
 Flows come first because they decide what the jobs, the mocks, the operation
 layer and the benchmark workload must cover.
 
+**Audience: teams in general, not any one team** (decision 0005). The flows
+are for software QA teams from a startup to a large enterprise, and are
+checked on two axes: process strictness (loose to regulated, the profiles)
+and organisation scale (one person, one team, many teams sharing standards).
+
 **Status: every flow here is a hypothesis.** No interviews are planned, so
 nothing below is observed behaviour. It is written from general QA practice
 and the competitor analysis, and it is meant to be wrong in places. Each flow
 has an "Open" line naming what would confirm or reject it. The sources that
 can do that without recruiting users, in order of weight:
 
-1. Daniel's account of how his own team tests and releases (open question 18).
-   This is the only first-hand evidence available.
+1. Daniel's experience as a QA engineer across enterprise, large, small and
+   startup teams (open question 18): practitioner judgment on how flows and
+   pain differ by kind of team. The best first-hand source available, and a
+   single source with its own bias.
 2. The hands-on friction audit of incumbents: what their users are forced to do
    shows what they were trying to do.
 3. Vendor docs, release notes and public complaint threads (labelled Verified,
@@ -32,7 +39,7 @@ Frequencies are guesses, marked "(guess)", for sizing the workload only.
 | Lead | Plans a release's testing, reads coverage and results, decides go or no-go. |
 | Approver | Regulated profile only: reviews and signs case changes and runs. |
 | Reader | Product owner, support, auditor. Reads results and traceability; never edits. |
-| Agent | Authors, runs, reports and links under its own identity and token scope. |
+| Agent | Authors, runs, reports, links, reviews and tests under its own identity and token scope. |
 | CI system | Sends results and asks for gate status. Not a person, but the highest-volume writer. |
 | Admin | Installs, configures projects and policies, issues tokens, imports data. |
 
@@ -214,16 +221,59 @@ what is open.
 - **Jobs:** J13, A2. **Frequency (guess):** rare, but every flow above depends
   on it.
 
+### F13. Agent adversarial review
+
+- **Actor / trigger:** an Agent acting as reviewer, started by a Developer,
+  Author or Lead, or automatically when a PR opens, a spec changes or an
+  agent has authored cases (F8).
+- **Steps:** ask for the impact set of the change (affected cases,
+  requirements, last results, risk signals) → read only those cases at their
+  current versions, skipping versions already reviewed unless asked for fresh
+  eyes → challenge them: missing or weak expected results, ambiguous steps,
+  uncovered paths, tests that cannot fail, duplicates → record findings
+  against the case versions → a person triages each finding: accept (becomes
+  a proposed edit or a new case), reject with a reason, or defer.
+- **Done when:** every finding is triaged and a later review of unchanged
+  versions costs almost nothing.
+- **Profiles:** loose teams may let the agent apply accepted findings
+  directly; regulated teams keep a named human approver on each.
+- **Jobs:** A4, A5, J8 (decision 0006). **Frequency (guess):** per PR in
+  automation-heavy teams; the flow where naive agent access spends the most
+  tokens.
+- **Open:** what reviewers really look for; whether people want findings as
+  comments, proposals or issues; whether a shared ledger of earlier findings
+  helps or biases the next reviewer.
+
+### F14. Agent adversarial testing
+
+- **Actor / trigger:** an Agent, started by a Lead or Developer when a build
+  reaches a test environment, or on a schedule.
+- **Steps:** receive a charter (the relevant cases and requirements, known
+  flaky or failing areas, earlier findings) → try to break the software with
+  its own tools, outside Casebook → record results against cases in one
+  batch and record new findings with reproduction steps → a person triages:
+  link a defect, or turn a finding into a regression case.
+- **Done when:** findings are reproducible and linked, and new regression
+  cases are proposed.
+- **Boundary:** Casebook supplies context and records outcomes. It does not
+  run the software or provide the agent's browser or API tooling (non-goal).
+- **Jobs:** A6, A1, A3. **Frequency (guess):** unknown; depends on how cheap
+  the context and the recording are.
+- **Open:** how a charter is best expressed; how to tell a real finding from
+  noise cheaply.
+
 ## Rhythm: how the flows fit together
 
-Hypothesised, per profile. This is the part most in need of Daniel's account.
+Hypothesised, per profile. This is the part most in need of Daniel's
+comparison across the kinds of team he has worked in. Organisation scale
+(many teams, shared standards) is not yet in the table.
 
 | Cadence | Loose | Standard | Regulated |
 | --- | --- | --- | --- |
-| Every push | F5 | F5 | F5 |
+| Every push | F5, F13 | F5, F13 | F5 |
 | Daily | F5 triage, F2 a case now and then | F5 triage, F2, F3 | F5, F2 with review |
 | Weekly | F3 occasionally | F3, F6 | F3 with approval |
-| Per release | short F4, glance at F7 | F4, F7 | F4 with approval, F7, F10 |
+| Per release | short F4, glance at F7 | F4, F7, F14 | F4 with approval, F7, F10 |
 | Rare | F11, F12 | F11, F12 | F11, F12 |
 
 ## Gaps against the core jobs
@@ -237,6 +287,9 @@ Hypothesised, per profile. This is the part most in need of Daniel's account.
   in the audit.
 - **Missing the first step of F5:** nobody has defined how a team connects CI
   for the first time. Add a job once question 11 is answered.
+- **Flows 13 and 14 have no human-only counterpart job**; they are new with
+  agents, so there is no incumbent baseline except what the competitors' MCP
+  servers allow (hands-on audit).
 - **Cross-actor handoffs are untested by any job.** F4 (Lead to Executor),
   F8 (Agent to reviewer) and F10 (Lead to Approver) are where tools usually
   lose people. The mocks must cover a handoff, not only a screen.
@@ -255,6 +308,10 @@ Hypothesised, per profile. This is the part most in need of Daniel's account.
   0004).
 - **MCP first set:** the operations an agent needs for F2, F5/F6 and F8 are
   the first to define in the one-operation layer.
+- **Agent token cost:** F13 and F14 are where an agent can read a whole
+  suite without need. The operation layer needs impact queries, changed-since
+  reads and findings from the start (decision 0006), and the benchmark
+  measures tokens served per job next to latency.
 - **First five minutes:** F1 is the adoption gate and the only flow the Local
   layer must serve with no setup.
 
@@ -265,4 +322,5 @@ Hypothesised, per profile. This is the part most in need of Daniel's account.
 - The benchmark spec (roadmap phase 1) takes its workload mix from the flows
   once Daniel has corrected them; the dataset sizes and budgets do not wait.
 - Each profile in `docs/ux/profiles.md` is written as a walk through the
-  flows above with the policy switches that differ.
+  flows above with the policy switches that differ, and checked for
+  organisation scale as well as strictness (decision 0005).

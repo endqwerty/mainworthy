@@ -6,6 +6,11 @@ friction; this plan finds where that friction is, what users intend when they
 hit it, and which interactions remove it. It runs before implementation
 (roadmap phase 0) and keeps running alongside it.
 
+**Audience (decision 0005):** software QA teams in general, not any one
+team. Daniel's experience across enterprise, large, small and startup teams
+is the main first-hand evidence, used as practitioner judgment and checked
+against public evidence.
+
 **Method constraint (Daniel, 2026-10-10):** no user interviews or recruited
 usability sessions. The research is desk research, hands-on use of the
 incumbents, careful written reasoning, and mock-ups that test both the
@@ -71,8 +76,9 @@ event in the friction catalogue: clicks, keystrokes, waits over 100 ms
 dialogs, page loads, lost input. Mark a job "unsupported" rather than
 forcing it.
 
-The same session tries each vendor's MCP server on the agent jobs (A1 to A3),
-closing the open item on MCP depth in the competitive analysis.
+The same session tries each vendor's MCP server on the agent jobs (A1 to A6),
+recording tokens as well as capability, closing the open item on MCP depth
+in the competitive analysis.
 
 ### 3. Core jobs
 
@@ -101,21 +107,34 @@ all, with what identity and scope, and does history record it).
 | A1 | Agent reads a folder, writes three cases, runs a result | possible through MCP under its own identity; history shows it |
 | A2 | Agent is restricted to read-only on one project | enforced by the token, not by convention |
 | A3 | Agent reports a CI result set and links unlinked tests | idempotent; unlinked inbox shows what it could not match |
+| A4 | Agent reviews a 5-file change adversarially: finds the affected cases, challenges them, records 3 findings | affected set comes from the change, not a scan of the suite; findings stored against case versions; tokens within budget |
+| A5 | The same agent re-reviews after one case changed | only the changed case and its dependents are read; reviewed unchanged versions skipped unless fresh eyes is asked for; tokens a small fraction of A4 |
+| A6 | Agent runs an adversarial test session over 20 cases and records results plus 2 new findings with reproduction steps | results written in one batch; findings linked; regression cases proposed; tokens within budget |
+
+**Token measure (decision 0006).** Every agent job is also judged on tokens:
+a scripted reference agent with a fixed model and tokenizer runs the job, and
+we count the tokens of tool definitions, requests and responses, and the
+number of calls. Budgets come from a baseline: the same job through each
+incumbent's MCP server (audit) and through a naive list-and-get-everything
+use of Casebook's own API.
 
 ### 3b. Flows
 
 The jobs are single tasks; flows are what people and agents do end to end
 across a day and a release, with triggers, handoffs and rough frequency.
 First draft: [ux/flows.md](ux/flows.md), all hypotheses. They are corrected
-by Daniel's account of his own team's workflow (open question 18), the
+by Daniel's comparison of the kinds of team he has worked in (open question 18), the
 friction audit and the mocks, and they set the workload mix for the
 benchmark and the first operations of the MCP surface. Jobs are added or
 changed where flows expose a gap.
 
 ### 4. Process spectrum profiles
 
-Three written personas of teams, not people, used to check every design
-against the spectrum in decision 0003:
+Three written personas of teams, not people, built from practitioner
+experience and public evidence rather than from any real team, used to check
+every design against the spectrum in decision 0003. They are also checked
+for organisation scale (one person, one team, many teams), which varies
+independently of strictness (decision 0005):
 
 - **Loose:** a small product team; tests are mostly automated, manual checks
   before release, nobody signs anything, speed matters most.

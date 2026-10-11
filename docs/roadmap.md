@@ -19,7 +19,8 @@ use of incumbents and reviewed mocks; no interviews or recruited sessions.
 - Desk research and a hands-on friction audit of incumbents on the core
   jobs, including their MCP servers.
 - User flows ([ux/flows.md](ux/flows.md)): what people and agents do end to
-  end, corrected by Daniel's account of his own team's workflow first.
+  end, corrected first by Daniel's comparison of the kinds of team he has worked in
+  (decision 0005).
   They set the benchmark workload mix and the first MCP operations.
 - Three process-spectrum team profiles, written as walks through the flows.
 - Intent model and interaction hypotheses with rejection criteria.
@@ -44,6 +45,8 @@ Exit: see the plan's exit criteria.
   transactional semantics, concurrent writes and search as well as latency.
 - Prototype the one-operation layer: a handful of operations exposed through
   REST, MCP and a CLI from one definition, to prove the generation path.
+  Measure the tokens served for A1 and A4 on it against the naive baseline
+  (decision 0006).
 - Decide the stack. Supersede decision 0001 with the result, add `t3.json`
   scripts, the check command, stack rules in `AGENTS.md` and a worktree
   release step, in the same change.
@@ -64,7 +67,7 @@ project. Ships as a single artifact that starts with no configuration.
 
 Exit: human jobs J1 to J4, J7, J8, J11, J12 and J15 pass on the real product
 at or better than the mock's measures; agent jobs A1 and A2 pass through
-MCP; latency budgets hold on the benchmark data.
+MCP with their token cost recorded; latency budgets hold on the benchmark data.
 
 ## Phase 3: Runs, CI ingest, traceability and gates
 
@@ -76,7 +79,7 @@ traceability views from phase 0 (matrix, chain, gap list). Release gates and
 the PR and deploy status that enforce them. Reader access and scoped agent
 tokens per project.
 
-Exit: J5, J6, J9, J10, J13 and J14 pass; A3 passes; ingest budgets hold;
+Exit: J5, J6, J9, J10, J13 and J14 pass; A3 passes; A4 to A6 pass within their token budgets; ingest budgets hold;
 flaky state updates incrementally on ingest; each of the three profiles can
 run its workflow end to end with policy switches only.
 

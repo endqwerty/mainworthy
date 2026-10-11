@@ -66,3 +66,14 @@ preference:
   Live co-editing of text (CRDT or OT) is not a criterion.
 - **Client cache that can queue:** the front end can hold pending writes with
   their base versions, show them as pending and replay them on reconnect.
+
+### Added with the agent token-efficiency decision (0006)
+
+- **Cheap "changed since":** an efficient change feed per case, folder,
+  project and requirement, and a content hash on every version, so agents
+  can read only what changed. Benchmark it next to the latency budgets.
+- **Indexed traceability links:** requirement to case to result to commit
+  must be queryable in both directions fast enough to serve impact sets
+  (the cases and results a change touches) without scanning the suite.
+- **Field selection and stable cursors** in the query layer, so a response
+  carries only the fields asked for.

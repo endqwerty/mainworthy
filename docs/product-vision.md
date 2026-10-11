@@ -48,6 +48,13 @@ When two goals conflict, the higher one wins.
   case history. A human can review them as a diff and accept or revert, the
   same way as any other version.
 - The OpenAPI description and the MCP tool list come from the same source.
+- **Token efficiency.** Agents doing adversarial review and testing should
+  spend fewer tokens because of Casebook, not more. The tokens served to
+  finish an agent job are measured and budgeted like latency: impact sets
+  from a change instead of suite scans, "changed since" reads instead of
+  re-reading, stored findings so reviews are not rediscovered, failure
+  digests instead of raw logs, small tool definitions. See
+  [decisions/0006-agent-token-efficiency.md](decisions/0006-agent-token-efficiency.md).
 - "Current cutting edge" is a moving target. Treat MCP and Agent Skills as the
   starting position and re-check the state of the art (and verify the exact
   spec versions) when the MCP work starts; record what is chosen in a decision
@@ -176,7 +183,8 @@ one of them is available through the API and MCP, and stays fast at scale).
 
 ## Scope and the process spectrum
 
-Software QA only (decision 0003). Teams range from loose and
+Software QA only (decision 0003), for teams in general from a startup to a
+large enterprise, not for any one team (decision 0005). Teams range from loose and
 automation-heavy to regulated with strict gates and sign-offs; Casebook
 serves the whole range with one data model and per-project policy switches
 (review required, approval to run, release gates, evidence freeze,
