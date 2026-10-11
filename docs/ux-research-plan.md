@@ -102,6 +102,16 @@ all, with what identity and scope, and does history record it).
 | A2 | Agent is restricted to read-only on one project | enforced by the token, not by convention |
 | A3 | Agent reports a CI result set and links unlinked tests | idempotent; unlinked inbox shows what it could not match |
 
+### 3b. Flows
+
+The jobs are single tasks; flows are what people and agents do end to end
+across a day and a release, with triggers, handoffs and rough frequency.
+First draft: [ux/flows.md](ux/flows.md), all hypotheses. They are corrected
+by Daniel's account of his own team's workflow (open question 18), the
+friction audit and the mocks, and they set the workload mix for the
+benchmark and the first operations of the MCP surface. Jobs are added or
+changed where flows expose a gap.
+
 ### 4. Process spectrum profiles
 
 Three written personas of teams, not people, used to check every design
@@ -159,6 +169,7 @@ recruited users:
 | --- | --- |
 | `sources.md` | desk research sources with labels and the specifics each gave |
 | `friction-catalogue.md` | every friction event: tool, job, what happened, what the user meant, cost, idea for removing it |
+| `flows.md` | end-to-end flows by actor, with triggers, handoffs, profile differences and open points |
 | `jobs.md` | the core jobs above with baseline measures per incumbent and "unsupported" marks |
 | `profiles.md` | the three process-spectrum profiles and their workflows |
 | `intent-model.md` | the intent specification per job |
