@@ -27,9 +27,9 @@ is short on disk).
 ## Delivery
 
 Work on the T3 branch in your worktree, open a PR with `gh pr create`, link it
-to the thread, merge it yourself (`gh pr merge --squash`, keep the branch), then
+to the thread, merge it yourself (`gh pr merge --rebase`, keep the branch), then
 move the branch onto the merge so T3 does not keep showing the merged commits
-as new changes (a squash leaves the branch's own commits outside `main`):
+as new changes (a rebase or squash merge leaves the branch's own commits outside `main`):
 
 ```
 git fetch && git reset --hard origin/main && git push --force-with-lease origin HEAD
