@@ -422,6 +422,11 @@ function sequence(seed: number, preset: string): Problem | null {
 	let gatesBefore: Map<number, string> | null = null;
 	let keptFrom: string | null = null;
 	let settled: unknown = null;
+	// What this test remembers by itself about each question's answer in force: whether the test saw a dispute
+	// when that answer was given, and who its parties were. An answer given to a dispute stays kept from them
+	// after the runs stop showing it (the disputed result set aside by `mistaken`, the run closed).
+	const answeredAsDispute = new Map<number, Set<number>>();
+	const seen: { now: { no: number; parties: Set<number> | null } | null } = { now: null };
 	// Whether this policy keeps this failure question from this person, read from the rows as they are before the
 	// command: who reported a failure with its cause in its scope, and who has a result in a slot that disputes it.
 	const keptFromAnswering = (no: number, as: Actor): boolean => {
@@ -456,16 +461,23 @@ function sequence(seed: number, preset: string): Problem | null {
 				);
 			}),
 		);
-		const party = disputing.some(
-			(slot) =>
-				rows(
-					"SELECT 1 AS n FROM slot_results s JOIN results r ON r.id = s.result WHERE s.slot = ? AND r.actor = ? LIMIT 1",
-					Number(slot.id),
-					as.id,
-				).length > 0,
+		const parties = new Set<number>();
+		for (const slot of disputing)
+			for (const row of rows<{ actor: number }>(
+				"SELECT DISTINCT r.actor FROM slot_results s JOIN results r ON r.id = s.result WHERE s.slot = ?",
+				Number(slot.id),
+			))
+				parties.add(Number(row.actor));
+		seen.now = { no, parties: disputing.length > 0 ? parties : null };
+		if (preset === "strict") return reported;
+		// `standard` keeps a disputed failure from its parties: a dispute the runs show now, or the one this
+		// question's answer in force was given to.
+		const decided = rows<{ state: string }>("SELECT state FROM questions WHERE no = ?", no)[0]?.state === "decided";
+		const before = decided ? answeredAsDispute.get(no) : undefined;
+		return (
+			(disputing.length > 0 && (reported || parties.has(as.id))) ||
+			(before !== undefined && (reported || before.has(as.id)))
 		);
-		// `strict` keeps every failure from whoever reported it; `standard` keeps a disputed one from its parties.
-		return preset === "strict" ? reported : disputing.length > 0 && (reported || party);
 	};
 
 	try {
@@ -655,6 +667,17 @@ function sequence(seed: number, preset: string): Problem | null {
 						last: trace.slice(-12),
 					};
 			}
+			// What the answer just given was given to, for the next time somebody touches it.
+			const touched = seen.now;
+			if (touched !== null) {
+				const status = (settled as { status?: string }[] | null)?.[0]?.status;
+				if (status === "decided") {
+					const kept = new Set([...(answeredAsDispute.get(touched.no) ?? []), ...(touched.parties ?? [])]);
+					if (touched.parties !== null) answeredAsDispute.set(touched.no, kept);
+					else answeredAsDispute.delete(touched.no);
+				} else if (status === "reopened") answeredAsDispute.delete(touched.no);
+			}
+			seen.now = null;
 			keptFrom = null;
 			settled = null;
 			const problem = audit();
