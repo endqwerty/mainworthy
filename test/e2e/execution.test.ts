@@ -438,7 +438,9 @@ async function cases(server: Server, count: number) {
 			if (!grant) throw new Error("Executor token missing");
 			await server.api("admin", { do: "token.revoke", id: grant.id });
 			await view.page.keyboard.press("Enter");
-			await view.page.waitForFunction(() => document.querySelector(".run-last")?.textContent?.includes("Each result records"));
+			await view.page.waitForFunction(() =>
+				document.querySelector(".run-last")?.textContent?.includes("Each result records"),
+			);
 			await view.page.waitForFunction(() => document.querySelector('[data-slot="1"]')?.textContent?.includes("yours"));
 			expect(await view.page.getByRole("textbox", { name: "Result note" }).inputValue()).toBe("Keep this failure note");
 			expect(
