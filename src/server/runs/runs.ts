@@ -193,7 +193,6 @@ const Q = {
 	disputedSlots: sql<{ project: number; signature: number }, { run: number; causes: string }>(
 		`SELECT s.run AS run, s.causes AS causes FROM slots s JOIN runs r ON r.id = s.run
 		 WHERE s.state = 'disputed' AND r.project = $project AND r.origin = 'planned'
-		   AND (r.state = 'open' OR json_extract(r.tally, '$.disputed') > 0)
 		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
 	),
 	failingCauses: sql<{ run: number }, { signature: number; target: number }>(
@@ -719,9 +718,10 @@ export function runsShowing(db: Db, project: number, signature: number): number[
 
 /**
  * Is this cause in dispute now: does a planned run have a slot where one producer's failure with it stands
- * beside another's pass? An open run, or a closed one that shows a dispute nobody has settled (the answer it
- * was closed on was withdrawn). Read from the slots as they are, not from the report that happens to be
- * arriving: a report that touches no slot does not make a dispute go away.
+ * beside another's pass? Any planned run, open or closed: a run that closed on an answer still holds the two
+ * results that disagree, and what is done to that answer changes how the closed run counts them. Read from the
+ * slots as they are, not from the report that happens to be arriving: a report that touches no slot does not
+ * make a dispute go away.
  */
 export function inDispute(db: Db, project: number, signature: number, scope: string): boolean {
 	for (const slot of db.all(Q.disputedSlots, { project, signature })) {

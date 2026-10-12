@@ -134,6 +134,9 @@ const Q = {
 		"UPDATE questions SET state = $state, decision = $decision, rev = $seq WHERE id = $id",
 	),
 	setAsk: sql<{ id: number; ask: string }>("UPDATE questions SET ask = $ask WHERE id = $id"),
+	setParties: sql<{ id: number; parties: string }>(
+		"UPDATE questions SET evidence = json_set(evidence, '$.parties', json($parties)) WHERE id = $id",
+	),
 	setFacts: sql<{ id: number; facts: string; parties: string }>(
 		`UPDATE questions SET evidence = json_set(evidence, '$.facts', json($facts), '$.parties', json($parties))
 		 WHERE id = $id`,
@@ -338,6 +341,13 @@ export function setQuestionState(
 
 export const setQuestionAsk = (ctx: Ctx, question: QuestionRow, ask: Ask): void => {
 	ctx.db.run(Q.setAsk, { id: question.id, ask: JSON.stringify(ask) });
+};
+
+/** Adds to the parties a question keeps: whoever a dispute about its cause is kept from. */
+export const addQuestionParties = (ctx: Ctx, question: QuestionRow, parties: readonly number[]): void => {
+	const kept = json<{ parties?: number[] }>(question.evidence).parties ?? [];
+	const all = [...new Set([...kept, ...parties])];
+	if (all.length !== kept.length) ctx.db.run(Q.setParties, { id: question.id, parties: JSON.stringify(all) });
 };
 
 /**

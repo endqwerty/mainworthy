@@ -58,6 +58,7 @@ import {
 import { caseById, caseRef } from "../suite/suite.ts";
 import { disputeParties, HANDLERS, runsAbout } from "./kinds.ts";
 import {
+	addQuestionParties,
 	alsoAbout,
 	answersOf,
 	attachEvidence,
@@ -177,6 +178,10 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 	for (const { question, decision } of standing) {
 		if (!stillHolds(decision, occurrence)) continue;
 		noteCarried(ctx, question, r.refs);
+		// A dispute that arises while an answer stands is not asked about (issue #70), but who it is kept from
+		// is kept all the same: the standing answer may not be changed or withdrawn by either of them.
+		const parties = (r.evidence as { parties?: number[] }).parties;
+		if (parties && parties.length > 0) addQuestionParties(ctx, question, parties);
 		return { s: "carried", question, decision };
 	}
 	// A decision that covers certain targets still stands on those when the cause turns up on another one: the
