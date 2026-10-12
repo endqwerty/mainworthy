@@ -34,8 +34,10 @@ not the same things done worse.
    the effective result per test (`run_tests`), and the same tally and verdict function read both. A test has one
    row per **lane** (the target, the job and the producer that reported it): a newer attempt in a lane replaces
    the one before it, and nothing from another lane can, so one job's pass never hides another job's failure of
-   the same test, and somebody else's upload never clears a pipeline's. A slot keeps every cause failing in it,
-   and is excused only when each of them is.
+   the same test, and somebody else's upload never clears a pipeline's. Slots follow the same rule (a pass in
+   one job or environment never replaces a failure in another), keep every cause failing in them, and are
+   excused only when each cause is. A run planned over evidence that already fails joins the questions already
+   asked about those failures, so an answer reaches it and it is never blocked by a failure nobody is asked about.
 3. **A test's eligibility for a case comes from the link, not from the case body.** The design had the case
    declare `auto` in `methods`. A link exists only through a `map` decision or the test's own annotation, so
    declaring it again is a second place to maintain (principle P6). Whether a test may fill a given slot is the
@@ -61,8 +63,9 @@ not the same things done worse.
    block the thread. This is the design's horizon made real rather than a departure, but the mechanism
    (generator steps driven by one of two drivers) is new and is the part to review.
 7. **A closed run refuses results.** The design re-raises the sign-off when a late upload arrives. Here the
-   report is refused with a message saying how to reopen the run (withdraw the sign-off). A correction reaches
-   only open runs; a closed run keeps what it was closed on. Deferred (#48).
+   report is refused with a message saying how to reopen the run (withdraw the sign-off). A correction withdraws
+   the result it names wherever that counted (the commit's gate, open runs, runs planned later), whatever attempt
+   number either carries; a closed run keeps what it was closed on. Deferred (#48).
 8. **Holds:** `basis-changes`, `this-target`, a date, and "while a fact holds" are built. "N clean runs" and
    "until the linked defect closes" are not (#38, #32). A decision held for one target (an infrastructure failure)
    excuses the build it was given for and no other: not the next commit, and not another environment of the same
@@ -101,6 +104,7 @@ not the same things done worse.
     the same number from another repository is its own change, keyed `<repository>#pr:12`. The same commit can
     exist in two repositories (a fork): each has its own gate, a change's gate is always its own repository's,
     and a commit reported for more than one repository must be named with `repo` (it is refused, never guessed).
+    A line belongs to a repository too: what was decided about one repository's trunk does not cover another's.
 18. **Test keys of the form `case:<n>` are reserved** for the manual test of a case. A report that uses one for an
     automated test is refused.
 
