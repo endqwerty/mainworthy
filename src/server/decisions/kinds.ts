@@ -22,14 +22,11 @@ import { actorById } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
-import { decisionOf, type Witness } from "../kernel/witness.ts";
+import type { Witness } from "../kernel/witness.ts";
 import { clauseFor, currentPolicy } from "../policy/policy.ts";
 import {
-	baseScopesOf,
 	closeRun,
 	discountFailures,
-	failingWithCause,
-	failsOnBase,
 	findRun,
 	gateOf,
 	partiesTo,
@@ -51,16 +48,7 @@ import {
 	seal,
 } from "../suite/suite.ts";
 import type { Raise, Raised } from "./decisions.ts";
-import {
-	type DecisionRow,
-	decisionById,
-	dropRests,
-	type HoldTerm,
-	type QuestionRow,
-	questionById,
-	refsOf,
-	restOn,
-} from "./questions.ts";
+import { type DecisionRow, decisionById, type HoldTerm, type QuestionRow, questionById, refsOf } from "./questions.ts";
 
 type Tools = { raise: (ctx: Ctx, r: Raise) => Raised };
 
@@ -335,37 +323,6 @@ function openPlannedAbout(ctx: Ctx, question: QuestionRow): RunRow[] {
 	});
 }
 
-/**
- * What an "already failing on the base" answer is about and whether it is true now: the tests that fail with the
- * cause on the build the answer is for (those its commit's gate counts, and those an agent reports, which are
- * asked about without being counted). True means there is at least one and each of them fails on the base with
- * this cause, by what the base's gate counts at this moment.
- */
-export function inheritedNow(
-	ctx: Ctx,
-	question: QuestionRow,
-	seenOn: number,
-): { target: ReturnType<typeof mustTarget>; tests: number[]; holds: boolean } {
-	const subject = json<{ signature: number }>(question.subject);
-	const target = mustTarget(ctx.db, seenOn);
-	const tests = failingWithCause(ctx.db, target, subject.signature);
-	const holds = tests.length > 0 && tests.every((test) => failsOnBase(ctx.db, target, test, subject.signature));
-	return { target, tests, holds };
-}
-
-/**
- * Writes down what an inherited answer rests on, replacing what was written before: the tests above, in the
- * scope the base's results are in and in the change's own scope (a later report can move the change onto another
- * base, or show the cause failing in a test the base passes). Called when the answer is given, each time it is
- * carried to a new result, and each time it is checked again and still true: so the list follows the evidence.
- */
-export function restInherited(ctx: Ctx, question: QuestionRow, decision: number, seenOn: number): void {
-	const subject = json<{ scope: string }>(question.subject);
-	const { target, tests } = inheritedNow(ctx, question, seenOn);
-	dropRests(ctx, decision);
-	restOn(ctx, decision, [...baseScopesOf(ctx.db, target), subject.scope], tests);
-}
-
 const failureHandler: Handler<"failure"> = {
 	effect(ctx, witness, question, answer) {
 		const subject = json<{ signature: number; scope: string }>(question.subject);
@@ -378,13 +335,6 @@ const failureHandler: Handler<"failure"> = {
 			return { corrected };
 		}
 		const klass = failureClass(answer);
-		if (answer.is === "inherited") {
-			// The question may have been asked while the base failed and answered after it stopped. The answer is
-			// held to the base as it is now, for every failure the question is about.
-			const seenOn = json<{ targetId?: number }>(question.evidence).targetId;
-			if (seenOn === undefined || !inheritedNow(ctx, question, seenOn).holds)
-				throw conflict("the base does not show this failure now, so it is not inherited; choose another answer");
-		}
 		// A decision that holds on certain targets excuses those and no other.
 		const policy = currentPolicy(ctx.db, ctx.project.id);
 		const here = failureHandler
@@ -401,10 +351,6 @@ const failureHandler: Handler<"failure"> = {
 		// gate is never left blocked by a failure nobody is being asked about.
 		const covered = here?.until === "this-target" ? here.targets : null;
 		const [decidedOn] = covered ?? [];
-		// "Already failing on the base" stands on the base's results: what it rests on is written down, so a
-		// report or a correction there has this answer checked again.
-		if (answer.is === "inherited" && decidedOn !== undefined)
-			restInherited(ctx, question, decisionOf(witness, "failure"), decidedOn);
 		const reask =
 			decidedOn === undefined
 				? []
@@ -424,7 +370,6 @@ const failureHandler: Handler<"failure"> = {
 		const effects = json<{ corrected?: [number, number][]; class?: string }>(decision.effects);
 		if (effects.corrected) restoreFailures(ctx, decision.id);
 		if (effects.class) dropExcuse(ctx, subject.signature, subject.scope, decision.id);
-		dropRests(ctx, decision.id);
 	},
 	holds({ question, answer, now, policy }) {
 		const basis = untilBasisChanges(question);
@@ -439,14 +384,9 @@ const failureHandler: Handler<"failure"> = {
 					? [{ until: "this-target", targets }]
 					: basis;
 			case "inherited":
-				// True of the build it was seen on: every test that fails there with this cause fails on the base
-				// too. It says nothing about another commit of the change, where the same cause may be failing in
-				// a test the base passes. The next commit is asked about on its own (and a rule may answer again).
-				return [
-					...basis,
-					{ until: "fact-gone", fact: "hint:fails-on-base" },
-					...(targets.length > 0 ? [{ until: "this-target" as const, targets }] : []),
-				];
+				// A person's judgement about the build they were looking at: this was already failing where the
+				// change started. It covers that build and no other; the next commit is asked about on its own.
+				return targets.length > 0 ? [{ until: "this-target", targets }] : basis;
 			case "defect":
 			case "test":
 			case "expected":

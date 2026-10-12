@@ -165,11 +165,9 @@ export const ANSWER_HELP = {
 } as const satisfies Record<Kind, Record<string, string>>;
 
 /**
- * The answers that make sense for one question, in key order. "Already failing on the base" is offered only
- * where Casebook's own results show it (every test failing with the cause on this build fails on the base too):
- * it is an answer the evidence backs and that is checked again when the base moves, not an opinion. "The failure
- * was a mistake" exists only where a pass and a fail disagree. The queue offers exactly these, and the server
- * refuses a failure answer outside them.
+ * The answers that make sense for one question, in key order. A failure on trunk cannot be "already failing on
+ * the base", and "the failure was a mistake" exists only where a pass and a fail disagree. The queue offers
+ * exactly these, and the server refuses a failure answer outside them.
  */
 export function applicableAnswers(kind: Kind, facts: ReadonlySet<string>): string[] {
 	switch (kind) {
@@ -184,7 +182,7 @@ export function applicableAnswers(kind: Kind, facts: ReadonlySet<string>): strin
 				"expected",
 				"flaky",
 				"infra",
-				...(facts.has("hint:fails-on-base") ? ["inherited"] : []),
+				...(facts.has("scope:change") ? ["inherited"] : []),
 				...(facts.has("hint:disputed") ? ["mistaken"] : []),
 			];
 		case "finding":
@@ -232,7 +230,6 @@ export const Predicate = z.union([
 		"scope:change",
 		"scope:trunk",
 		"scope:run",
-		"hint:fails-on-base",
 		"hint:disputed",
 		"category:defect",
 		"verdict:passed",
@@ -264,7 +261,7 @@ export const PolicySettings = z.object({
 	holds: z.object({
 		/** A `flaky` answer stops carrying forward after this many days. */
 		flakyDays: z.number().int().min(1).max(365),
-		/** An `inherited` or `infra` excuse covers this target only when true. */
+		/** An `infra` excuse covers the build it was given for, and no other, when true. */
 		infraThisTargetOnly: z.boolean(),
 	}),
 });

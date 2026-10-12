@@ -23,7 +23,6 @@ import {
 } from "../../core/runs.ts";
 import {
 	type Applied,
-	agentLanesWithCause,
 	type BatchRow,
 	batchById,
 	changeById,
@@ -187,10 +186,6 @@ const Q = {
 	failingCauses: sql<{ run: number }, { signature: number; target: number }>(
 		`SELECT DISTINCT signature, target FROM run_tests
 		 WHERE run = $run AND outcome IN ('fail', 'error') AND signature IS NOT NULL`,
-	),
-	failingWithCause: sql<{ run: number; signature: number }, { test: number }>(
-		`SELECT DISTINCT test FROM run_tests
-		 WHERE run = $run AND signature = $signature AND outcome IN ('fail', 'error')`,
 	),
 	failingOfCause: sql<{ run: number; signature: number; target: number }, { test: number; result: number }>(
 		`SELECT test, result FROM run_tests
@@ -680,24 +675,6 @@ export function runsShowing(db: Db, project: number, signature: number): number[
 }
 
 /**
- * The tests that fail with this cause on this target's commit now: those its gate counts, and those an agent
- * reports (which no gate counts, but which are asked about). What a statement about the cause on this commit,
- * such as "already failing on the base", has to be true of.
- */
-export function failingWithCause(db: Db, target: TargetRow, signature: number): number[] {
-	const commit = db.get(Q.changeRun, { project: target.project, what: target.what });
-	const tests = new Set(commit ? db.all(Q.failingWithCause, { run: commit.id, signature }).map((row) => row.test) : []);
-	// An agent's lanes are folded by the same rule as everybody's: another job's pass or a later skip does not
-	// replace a failure, exactly as it does not in a slot.
-	for (const lane of agentLanesWithCause(db, target.project, target.what, signature)) {
-		const held = heldInLane(db, lane, (result) => result.method === "agent");
-		if (held && (held.outcome === "fail" || held.outcome === "error") && held.signature === signature)
-			tests.add(lane.test);
-	}
-	return [...tests];
-}
-
-/**
  * The result that counts in a lane (one producer's results for one test from one job on one target): its
  * uncorrected history, less what a decision has judged a mistake, folded by `replacesInLane`.
  */
@@ -930,9 +907,9 @@ export const causeKey = (signature: number, scope: string): string => `${signatu
 /**
  * Does this test already fail, with this cause, where the change started? That is the base commit the change
  * names, and only that: where the change names none, or Casebook has no result of this test on it, the answer
- * is no. A hint for the person or the rule that answers; it never excuses anything by itself. Because a rule may
- * act on it, it reads what the base's gate counts: the effective result per lane, after attempts and
- * corrections, never an agent's result and never another repository's.
+ * is no. It is a hint shown to the person who answers, as of the moment a report arrives; nothing is excused by
+ * it and no answer stands on it. It reads what the base's gate counts: the effective result per lane, after
+ * attempts and corrections, never an agent's result and never another repository's.
  */
 export function failsOnBase(db: Db, target: TargetRow, test: number, signature: number): boolean {
 	const base = baseRunOf(db, target);
@@ -949,12 +926,6 @@ function baseRunOf(db: Db, target: TargetRow): RunRow | null {
 	if (!change?.base_sha) return null;
 	const what = codeWhat(change.repo, change.base_sha);
 	return what === target.what ? null : db.get(Q.changeRun, { project: target.project, what });
-}
-
-/** The scope the base's results are in, for a target of a change that names a base: a report there can change `failsOnBase`. */
-export function baseScopesOf(db: Db, target: TargetRow): string[] {
-	const scope = baseRunOf(db, target)?.scope;
-	return scope ? [scope] : [];
 }
 
 /**

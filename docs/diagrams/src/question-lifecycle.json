@@ -355,7 +355,7 @@
         "basis-changes: the material evidence hash must still match the decision basis.",
         "this-target: the occurrence must name a target the answer covers. infra uses this by default, so one cause can hold several answers at once, one per environment. raise checks them all before asking.",
         "time: the current time must be before at. flaky combines this with basis-changes; flakyDays defaults to 14.",
-        "fact-gone: the occurrence must still contain fact. inherited combines basis-changes with hint:fails-on-base.",
+        "results-named: a mistaken answer covers the results it named and nothing reported later. A new failure of the same cause is asked about again.",
         "stillHolds requires every term. An occurrence on another target is asked about and leaves the answer standing. Any other miss withdraws the effect, records expired or outdated, recomputes the runs that rested on it and opens a new epoch with prior linked."
       ]
     },

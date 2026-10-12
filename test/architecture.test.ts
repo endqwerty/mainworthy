@@ -150,7 +150,7 @@ describe("the module map", () => {
 				"excuses",
 			],
 			"server/runs": ["runs", "run_tests", "slots", "slot_results", "depends_on"],
-			"server/decisions": ["questions", "question_refs", "answers", "decisions", "decision_rests"],
+			"server/decisions": ["questions", "question_refs", "answers", "decisions"],
 		};
 		const ownerOf = new Map(
 			Object.entries(owners).flatMap(([layer, tables]) => tables.map((table) => [table, layer] as const)),

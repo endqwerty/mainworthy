@@ -153,9 +153,6 @@ const Q = {
 		`INSERT INTO changes (project, key, repo, base_sha, head_sha, branch, title, url, files, rev)
 		 VALUES ($project, $key, $repo, $base, $head, $branch, $title, $url, $files, $rev)`,
 	),
-	changesHeadedBy: sql<{ project: number; commit: string }, { id: number }>(
-		"SELECT id FROM changes WHERE project = $project AND head_sha = $commit",
-	),
 	updateChange: sql<{
 		id: number;
 		base: string | null;
@@ -265,15 +262,6 @@ const Q = {
 		                      outcome, attempt, duration_ms, signature, message, detail, at_step, steps, note, run, corrects, at)
 		 VALUES ($project, $test, $seq, $ord, $batch, $target, $method, $actor, $basis, $basisCase, $basisVersion, $basisClaim,
 		         $outcome, $attempt, $duration, $signature, $message, $detail, $atStep, $steps, $note, $run, $corrects, $at)`,
-	),
-	agentLanes: sql<
-		{ project: number; what: string; signature: number },
-		{ target: number; test: number; actor: number; job: string }
-	>(
-		`SELECT DISTINCT r.target AS target, r.test AS test, r.actor AS actor, b.job AS job
-		 FROM targets t JOIN results r ON r.target = t.id JOIN batches b ON b.id = r.batch
-		 WHERE t.project = $project AND t.what = $what AND r.method = 'agent' AND r.signature = $signature
-		   AND r.outcome IN ('fail', 'error')`,
 	),
 	laneHistory: sql<{ target: number; test: number; actor: number; job: string }, ResultRow>(
 		`SELECT r.* FROM results r JOIN batches b ON b.id = r.batch
@@ -481,13 +469,6 @@ function upsertChange(ctx: Ctx, key: string, input: Extract<TargetIn, { commit: 
 	}
 	return ctx.db.get(Q.changeById, { id: existing.id }) ?? existing;
 }
-
-/**
- * The changes whose head is this commit. A report that moves a change onto another base does so as it names the
- * change's head, so these are the changes whose base the report may have moved.
- */
-export const changesHeadedBy = (db: Db, project: number, commit: string): number[] =>
-	db.all(Q.changesHeadedBy, { project, commit }).map((row) => row.id);
 
 export function mustTarget(db: Db, id: number): TargetRow {
 	const row = db.get(Q.targetById, { id });
@@ -956,17 +937,6 @@ export const unlinkedInFile = (db: Db, project: number, file: string): TestRow[]
 export const unlinkedCount = (db: Db, project: number): number => db.get(Q.unlinkedCount, { project })?.n ?? 0;
 export const signatureById = (db: Db, id: number): SignatureRow | null => db.get(Q.signatureById, { id });
 export const resultById = (db: Db, id: number): ResultRow | null => db.get(Q.resultById, { id });
-
-/**
- * The lanes (target, test, agent, job) in which an agent has reported a failure with this cause on a commit. Which
- * of them still fail is the caller's to say, by folding each lane's history with the one lane rule.
- */
-export const agentLanesWithCause = (
-	db: Db,
-	project: number,
-	what: string,
-	signature: number,
-): { target: number; test: number; actor: number; job: string }[] => db.all(Q.agentLanes, { project, what, signature });
 
 /**
  * Every result one producer reported for one test from one job on one target that it has not since corrected,

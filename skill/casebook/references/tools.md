@@ -75,7 +75,7 @@ Create or change test cases. Each edit of an existing case names the version it 
 | `edits[][policy].clauses` | `array<object>` | no |  |
 | `edits[][policy].clauses[].id` | `string` | yes |  |
 | `edits[][policy].clauses[].kind` | `"adopt" \| "map" \| "failure" \| "finding" \| "signoff"` | yes |  |
-| `edits[][policy].clauses[].when` | `array<"always" \| "author:human" \| "author:agent" \| "author:ci" \| "conflict" \| "policy" \| "scope:change" \| "scope:trunk" \| "scope:run" \| "hint:fails-on-base" \| "hint:disputed" \| "category:defect" \| "verdict:passed" \| string>` | yes |  |
+| `edits[][policy].clauses[].when` | `array<"always" \| "author:human" \| "author:agent" \| "author:ci" \| "conflict" \| "policy" \| "scope:change" \| "scope:trunk" \| "scope:run" \| "hint:disputed" \| "category:defect" \| "verdict:passed" \| string>` | yes |  |
 | `edits[][policy].clauses[].ask` | `object` | yes |  |
 | `edits[][policy].clauses[].ask.who` | `"rule" \| "member" \| "admin" \| "author"` | yes |  |
 | `edits[][policy].clauses[].ask.agents` | `"answer" \| "advise" \| "none"` | yes |  |

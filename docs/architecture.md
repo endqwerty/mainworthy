@@ -98,7 +98,8 @@ one gate, because the file has one writer.
    their slots filled where the acceptance rule admits the result.
 5. **Raise**: one `failure` question per cause, in the scope of the pull request, the trunk or the run. If that
    cause already has a decision that still holds, the answer is carried forward and nobody is asked. If the
-   failure already fails where the change started, a loose project's rule excuses it, as a recorded decision.
+   failure already fails on the commit the change started from, the question says so, as a hint for the person
+   who answers.
 6. **Verdict**: `passed`, `failed` (a decision attributed a failure to this commit: it needs a fix), `blocked`
    (a failure nobody has explained, or a dispute: it needs a decision) or `pending` (evidence is missing, or
    nothing was proven at all).

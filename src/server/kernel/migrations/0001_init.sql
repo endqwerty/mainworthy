@@ -486,17 +486,6 @@ CREATE INDEX decisions_question ON decisions (question, id);
 CREATE INDEX decisions_seq ON decisions (project, seq);
 CREATE INDEX decisions_expiry ON decisions (project, expires_at) WHERE expires_at IS NOT NULL;
 
--- What an "already failing on the base" answer rests on: the tests it found failing where the change started,
--- by the scope those results are in. When a report or a correction touches one of them there, the answer is
--- checked again, so it never outlives the base failure it stood on.
-CREATE TABLE decision_rests (
-	project INTEGER NOT NULL,
-	scope TEXT NOT NULL,
-	test INTEGER NOT NULL,
-	decision INTEGER NOT NULL REFERENCES decisions (id),
-	PRIMARY KEY (project, scope, test, decision)
-) STRICT, WITHOUT ROWID;
-CREATE INDEX decision_rests_decision ON decision_rests (decision);
 
 -- The policy is a clause table. Each change is a new version; the highest version is in force.
 CREATE TABLE policies (

@@ -16,16 +16,7 @@ import {
 	type ReportReceipt,
 } from "../../core/ops.ts";
 import { clip } from "../../core/text.ts";
-import {
-	answer,
-	type Raise,
-	type Raised,
-	raise,
-	raiseFailure,
-	recheckInherited,
-	refold,
-	undo,
-} from "../decisions/decisions.ts";
+import { answer, type Raise, type Raised, raise, raiseFailure, refold, undo } from "../decisions/decisions.ts";
 import { raiseAdopt } from "../decisions/kinds.ts";
 import { decisionById, type QuestionRow, questionRef } from "../decisions/questions.ts";
 import {
@@ -33,12 +24,10 @@ import {
 	applySteps,
 	type BatchRow,
 	batchById,
-	changesHeadedBy,
 	ensureTarget,
 	keepReceipt,
 	markProcessed,
 	mustTarget,
-	scopeOf,
 	type TargetRow,
 	testRef,
 	unlinkedInFile,
@@ -179,15 +168,6 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 	// This commit may be where a change started: an answer that a failure was already there is checked again
 	// for the tests it touched. And a report on a change may have moved the change onto another base: then every
 	// such answer for the change is checked.
-	const moved = new Set([scopeOf(target, batch.run)]);
-	for (const run of runs) if (run.origin === "change" && run.scope !== null) moved.add(run.scope);
-	for (const scope of moved)
-		recheckInherited(
-			ctx,
-			scope,
-			target.change !== null ? null : [...new Set(applied.results.map((result) => result.test.id))],
-		);
-	recheckRebased(ctx, target);
 	const gated = runs.find((run) => run.origin === "change") ?? runs.find((run) => run.id === batch.run) ?? null;
 	const fresh = gated ? runById(ctx.db, gated.id) : null;
 	const receipt: ReportReceipt = {
@@ -233,18 +213,6 @@ function brief(ctx: Ctx, raised: Raised, tests: number): QuestionBrief {
 	};
 }
 
-/**
- * A report can say that a change now starts somewhere else (a pull request pointed at another base). It says so
- * as it names the change's head, so every change headed by this report's commit has its "already failing on the
- * base" answers checked against the base it has now. Read from what is stored, not remembered from the moment
- * the report was accepted: a report applied after a restart checks them just the same.
- */
-function recheckRebased(ctx: Ctx, target: TargetRow): void {
-	if (target.commit_sha === null) return;
-	for (const change of changesHeadedBy(ctx.db, ctx.project.id, target.commit_sha))
-		recheckInherited(ctx, `change:${change}`, null);
-}
-
 /** Tests that arrived with no case, by file: one `map` question per file, which a loose project's rule answers. */
 function raiseMap(ctx: Ctx, file: string, producer: ActorKind): Raised {
 	const tests = file === "(no file)" ? [] : unlinkedInFile(ctx.db, ctx.project.id, file);
@@ -280,13 +248,7 @@ export function processBatch(ctx: Ctx, batchId: number): ReportReceipt {
  */
 export function* reportSteps(ctx: Ctx, input: ReportInput): Generator<Pause, ReportReceipt, void> {
 	const { batch, fresh } = acceptReport(ctx, input);
-	if (!fresh && batch.receipt !== null) {
-		// The same results again add nothing. But the report may say the change now starts somewhere else (a
-		// pull request pointed at another base, the same commit): answers that a failure was already on the old
-		// base are checked against the new one.
-		recheckRebased(ctx, mustTarget(ctx.db, batch.target));
-		return { ...json<ReportReceipt>(batch.receipt), fresh: false };
-	}
+	if (!fresh && batch.receipt !== null) return { ...json<ReportReceipt>(batch.receipt), fresh: false };
 	if (fresh) yield COMMIT;
 	return yield* processBatchSteps(ctx, batch.id);
 }

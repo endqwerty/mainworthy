@@ -30,7 +30,6 @@ import {
 	type Blocker,
 	causeKey,
 	type FailingGroup,
-	failingWithCause,
 	failsOnBase,
 	newestInScope,
 	passesAny,
@@ -45,7 +44,7 @@ import {
 	unexplainedShown,
 } from "../runs/runs.ts";
 import { caseById, caseRef } from "../suite/suite.ts";
-import { HANDLERS, inheritedNow, restInherited, runsAbout } from "./kinds.ts";
+import { HANDLERS, runsAbout } from "./kinds.ts";
 import {
 	alsoAbout,
 	answersOf,
@@ -66,7 +65,6 @@ import {
 	questionById,
 	questionRef,
 	refsOf,
-	restingOn,
 	type Signer,
 	setDecisionEffects,
 	setQuestionAsk,
@@ -85,7 +83,7 @@ export type Raise = {
 	evidence: Record<string, unknown>;
 	/** The part of the evidence an answer stands on. When it changes, earlier answers no longer apply. */
 	material: unknown;
-	/** Policy facts (`scope:change`, `hint:fails-on-base`, `author:agent`, ...). */
+	/** Policy facts (`scope:change`, `hint:disputed`, `author:agent`, ...). */
 	facts: readonly string[];
 	/** Things the question is about: `C-311`, `R-4`, `T-12`, `pr:482`. */
 	refs: readonly string[];
@@ -165,9 +163,6 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 	for (const { question, decision } of standing) {
 		if (!stillHolds(decision, occurrence)) continue;
 		noteCarried(ctx, question, r.refs);
-		// An inherited answer carried to another result of the build rests on that result's test too.
-		if (r.target !== undefined && json<{ is?: string }>(decision.answer).is === "inherited")
-			restInherited(ctx, question, decision.id, r.target);
 		return { s: "carried", question, decision };
 	}
 	// A decision that covers certain targets still stands on those when the cause turns up on another one: the
@@ -177,8 +172,8 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 	let ended: QuestionRow | null = null;
 	for (const { question, decision } of standing) {
 		// An answer given for certain targets is judged only by what is reported about those targets. The same
-		// cause on another commit, with other facts (not inherited there, not disputed there), says nothing about
-		// it: without this, a rule's answer for one commit and a failure on another would undo each other for ever.
+		// cause on another commit, with other facts (not disputed there), says nothing about it: without this, an
+		// answer for one commit and a failure on another could undo each other for ever.
 		const here = json<HoldTerm[]>(decision.holds).find((term) => term.until === "this-target");
 		if (here?.until === "this-target" && (r.target === undefined || !here.targets.includes(r.target))) continue;
 		if (stillHolds(decision, occurrence, { anyTarget: true })) continue;
@@ -351,8 +346,6 @@ export function stillHolds(
 				return options.anyTarget || (occurrence.target !== undefined && term.targets.includes(occurrence.target));
 			case "time":
 				return occurrence.now < term.at;
-			case "fact-gone":
-				return occurrence.facts.includes(term.fact);
 			case "results-named":
 				// It covers the results it named and no occurrence reported since. Like a target term, that is not a
 				// reason to withdraw it: what it decided about those results stands.
@@ -737,21 +730,19 @@ export function raiseFailure(
 		const row = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;
 		tests.set(test.id, { id: test.id, t: testRef(test), name: test.name, case: row ? caseRef(row) : null });
 	}
+	// Two kinds of hint. `disputed` is a fact about the evidence: it decides which answers apply and who may
+	// give them, and an answer stands on it. `fails-on-base` is shown and nothing more: every failing test of
+	// this report also fails, with this cause, on the commit the change started from, as Casebook had it when
+	// the report arrived. No rule acts on it and no answer stands on it; a person reads it and decides.
 	const hints: string[] = [];
-	// "Already failing on the base" is a statement about the cause, so it must be true of every test that fails
-	// with it on this commit now, not only of those in the report that happens to be arriving: how a pipeline
-	// splits its results over reports must not change what a rule may excuse.
-	if (scopeKind === "change") {
-		// Every test that fails with the cause on this commit now: those of this report, those its gate counts,
-		// and those an agent reports.
-		const failingNow = new Set([
-			...group.tests.map((test) => test.id),
-			...failingWithCause(ctx.db, target, group.signature.id),
-		]);
-		if (failingNow.size > 0 && [...failingNow].every((test) => failsOnBase(ctx.db, target, test, group.signature.id)))
-			hints.push("hint:fails-on-base");
-	}
 	if (group.disputed) hints.push("hint:disputed");
+	const shown = [...hints];
+	if (
+		scopeKind === "change" &&
+		group.tests.length > 0 &&
+		group.tests.every((test) => failsOnBase(ctx.db, target, test.id, group.signature.id))
+	)
+		shown.push("hint:fails-on-base");
 	const change = target.change !== null ? changeById(ctx.db, target.change) : null;
 	const listed = [...tests.values()];
 	const cases = [...new Set(listed.flatMap((test) => (test.case ? [test.case] : [])))];
@@ -769,7 +760,7 @@ export function raiseFailure(
 			count: listed.length,
 			target: target.commit_sha ? target.commit_sha.slice(0, 12) : target.what,
 			branch: target.branch,
-			hints: hints.map((hint) => hint.slice(5)),
+			hints: shown.map((hint) => hint.slice(5)),
 			producers: [...new Set([...(earlier.producers ?? []), input.by])],
 			// Every target this question has seen the cause on: an answer that holds "here only" covers these.
 			targets: [...new Set([...(earlier.targets ?? []), target.id])],
@@ -826,41 +817,6 @@ function askUnexplained(ctx: Ctx, run: RunRow): boolean {
 	return asked;
 }
 
-/**
- * The base of a change moved: a report, a correction or a newer attempt changed what some tests show in `scope`.
- * Every "already failing on the base" answer that rests on one of those tests there is checked again against
- * what the base shows now. One that is no longer true is ended, with a row in the ledger, and the runs that
- * rested on it are recomputed, which asks about the failure again. So the answer never outlives its reason, and
- * nobody has to report the change again to find out. `tests` null means any test of the scope.
- */
-export function recheckInherited(ctx: Ctx, scope: string, tests: readonly number[] | null): void {
-	for (const id of restingOn(ctx.db, ctx.project.id, scope, tests)) {
-		const decision = decisionById(ctx.db, id);
-		const question = decision ? questionById(ctx.db, decision.question) : null;
-		if (!decision || !question || question.state !== "decided" || question.decision !== decision.id) continue;
-		const subject = json<{ signature?: number }>(question.subject);
-		const here = json<HoldTerm[]>(decision.holds).find((term) => term.until === "this-target");
-		const [seenOn] = here?.until === "this-target" ? here.targets : [];
-		if (subject.signature === undefined || seenOn === undefined) continue;
-		if (inheritedNow(ctx, question, seenOn).holds) {
-			// Still true. What it rests on may have moved (another base, another failing test): written down anew.
-			restInherited(ctx, question, decision.id, seenOn);
-			continue;
-		}
-		HANDLERS[question.kind].revert(ctx, question, decision);
-		lapse(ctx, question, decision, ctx.now);
-		const runs = [...runsDependingOn(ctx.db, decision.id), ...runsAbout(ctx, question)];
-		refold(ctx, runs);
-		// The question asked in its place names every run that rested on the ended answer, a closed one too.
-		const asked = openFor(ctx.db, ctx.project.id, question.fingerprint, seenOn);
-		const named = runs.flatMap((id) => {
-			const run = runById(ctx.db, id);
-			return run ? [runRef(run)] : [];
-		});
-		if (asked && alsoAbout(ctx, asked, named) > 0) refold(ctx, runs);
-	}
-}
-
 // ── Keeping runs in step ───────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -869,8 +825,7 @@ export function recheckInherited(ctx: Ctx, scope: string, tests: readonly number
  */
 export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveStale?: boolean } = {}): void {
 	// Runs whose counted results a decision changed on the way here (`ctx.recompute`) come along.
-	const changed = [...ctx.recompute];
-	const ids = new Set([...runIds, ...changed]);
+	const ids = new Set([...runIds, ...ctx.recompute]);
 	ctx.recompute.clear();
 	for (const id of ids) {
 		const existing = runById(ctx.db, id);
@@ -907,11 +862,6 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 			refs: [runRef(run)],
 			runs: [],
 		});
-	}
-	// A commit whose counted results a decision changed may be the base of a change.
-	for (const id of changed) {
-		const scope = runById(ctx.db, id)?.scope;
-		if (scope) recheckInherited(ctx, scope, null);
 	}
 	// Anything a step above changed in turn.
 	if (ctx.recompute.size > 0) refold(ctx, [], options);

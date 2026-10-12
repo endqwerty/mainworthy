@@ -145,18 +145,28 @@ describe("a red report", () => {
 describe("a change against its base", () => {
 	const failure = { 4: "expected 90.00, got 100.00" };
 
-	test("loose: a failure already failing on the base is excused by the rule, as a recorded decision", () => {
+	test("a failure the base has too is shown as such, and a person may call it inherited for that build", () => {
 		h.call("report", ciReport({ commit: "base0001", n: 10, fail: failure }));
 		decide(first(queue().items), { is: "defect" }); // trunk is red and somebody owns it
-		const pr = h.call<ReportReceipt>(
-			"report",
-			ciReport({ commit: "feat0001", branch: "feature", pr: 482, base: "base0001", n: 10, fail: failure }),
-		);
-		expect(pr.questions[0]).toMatchObject({ how: "decided by rule", answer: "inherited", by: "policy" });
-		expect(pr.gate?.verdict).toBe("passed");
-		expect(pr.gate?.tally.excused).toBe(1);
-		const ledger = h.call<InboxReply>("inbox", { state: "decided", kind: "failure" });
-		expect(ledger.items.find((item) => item.decision?.rule === "failure-on-base")).toBeDefined();
+		const change = (commit: string) =>
+			ciReport({ commit, branch: "feature", pr: 482, base: "base0001", n: 10, fail: failure });
+		const pr = h.call<ReportReceipt>("report", change("feat0001"));
+		// No rule excuses it: the base comparison is a hint for the person who answers.
+		expect(pr.questions[0]).toMatchObject({ how: "new", state: "open" });
+		expect(pr.gate?.verdict).toBe("blocked");
+		const asked = queue().items.find((item) => item.about.includes("pr:482"));
+		if (!asked) throw new Error("the change's failure was not asked about");
+		expect((asked.evidence as { hints: string[] }).hints).toContain("fails-on-base");
+		expect(asked.answers).toContain("inherited");
+		expect(decide(asked, { is: "inherited" })).toMatchObject({ status: "decided" });
+		expect(h.call<GateStatus>("gate", { change: "pr:482" })).toMatchObject({
+			verdict: "passed",
+			tally: { excused: 1 },
+		});
+		// It was said of that build. The next push is asked about again.
+		const next = h.call<ReportReceipt>("report", change("feat0001b"));
+		expect(next.questions[0]).toMatchObject({ how: "new", state: "open" });
+		expect(next.gate?.verdict).toBe("blocked");
 	});
 
 	test("loose: a failure the change introduced is a question, and it blocks the change", () => {
@@ -387,40 +397,17 @@ describe("a question that gains occurrences while open", () => {
 });
 
 describe("which answers apply", () => {
-	test("'inherited' is offered only where the base shows the failure; 'mistaken' only where results disagree", () => {
+	test("a trunk failure cannot be called inherited or mistaken; a change's failure can be inherited", () => {
 		h.call("report", ciReport({ commit: "9999999a", n: 2, fail: { 0: "expected 1, got 2" } }));
 		const trunk = first(queue().items);
 		expect(trunk.answers).toEqual(["defect", "test", "expected", "flaky", "infra"]);
 		expect(decide(trunk, { is: "inherited" })).toMatchObject({ status: "invalid" });
 		expect(decide(trunk, { is: "mistaken" })?.needs).toContain("does not apply");
-		// A change that fails a test its base passes: nothing in the evidence says it was already failing.
 		h.call(
 			"report",
 			ciReport({ commit: "9999999b", branch: "feature", pr: 12, n: 2, fail: { 1: "expected 3, got 4" } }),
 		);
 		const change = queue().items.find((item) => item.about.includes("pr:12"));
-		expect(change?.answers).toEqual(["defect", "test", "expected", "flaky", "infra"]);
-		// Under a policy that leaves it to a person, a change that fails what its base fails is offered `inherited`.
-		const standard = harness({ preset: "standard" });
-		try {
-			standard.call("report", ciReport({ commit: "9999999a", n: 2, fail: { 0: "expected 1, got 2" } }));
-			standard.call(
-				"report",
-				ciReport({
-					commit: "9999999c",
-					branch: "feature",
-					pr: 13,
-					base: "9999999a",
-					n: 2,
-					fail: { 0: "expected 1, got 2" },
-				}),
-			);
-			const inherited = standard
-				.call<InboxReply>("inbox", { kind: "failure" })
-				.items.find((item) => item.about.includes("pr:13"));
-			expect(inherited?.answers).toEqual(["defect", "test", "expected", "flaky", "infra", "inherited"]);
-		} finally {
-			standard.close();
-		}
+		expect(change?.answers).toEqual(["defect", "test", "expected", "flaky", "infra", "inherited"]);
 	});
 });

@@ -474,7 +474,7 @@
       "title": "The open-question path shown here",
       "items": [
         "raise attaches to an open question instead of creating another. A decided question carries forward only while stillHolds is true.",
-        "A loose project uses failure-on-base to decide inherited when the same cause fails on the base. That rule still records a decision.",
+        "When the same cause fails on the base commit the change names, the question shows that as a hint. No rule answers on it; a person may answer inherited for that build.",
         "Carried or rule answers may remove the need for the human steps. The shown path has a new unexplained cause, so gate is blocked.",
         "An agent answer returns advised. toItem exposes current-evidence advice; the question stays open and the gate stays blocked."
       ]
@@ -486,7 +486,7 @@
         "The person chooses i: infra. settle records the decision and mints a Witness. setExcuse makes this cause excused for this target.",
         "refold changes the tally and verdict in the same transaction. With no other failures or missing evidence, casebook gate exits 0.",
         "The pipeline tests did not run again. The original failing results remain in the record.",
-        "defect, test and expected are attributed and make the gate failed, exit 1. flaky and inherited are excused. mistaken resolves a disputed planned slot."
+        "defect, test and expected are attributed and make the gate failed, exit 1. flaky, infra and inherited are excused. mistaken resolves a disputed planned slot."
       ]
     }
   ]

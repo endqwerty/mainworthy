@@ -51,20 +51,19 @@ not the same things done worse.
    **What an agent reports never moves a commit's gate.** It is recorded and shown, a failure it reports is put to
    a person as a question that holds nothing, and it counts only in a planned run that asked for agents on a case
    that admits them (decision 0009, "agent evidence in gates").
-4. **Two failure answers were added, one replaced.** `inherited` (already failing on the base: the answer the
-   loose preset's rule gives, which the design left unnamed; offered only where Casebook's own results show it) and `mistaken` (a disputed slot: the failing result
-   was wrong). `mistaken` replaces the design's `resolve { trust: [...] }`; any other failure answer on a disputed
-   slot also resolves it, by saying what the failure was. "Already failing on the base" reads what the base's
-   own gate counts (its effective results, after attempts and corrections), never an agent's result and never
-   another repository's. The base is the commit the change names and only that: where a change names none, or
-   Casebook has no result of the test on it, nothing is inherited (an earlier fallback to "the newest commit on
-   trunk" made the base a moving thing and was removed), and it must be true of every test that fails with the cause on the commit, not only
-   of those in the report that is arriving: how a pipeline splits its results over reports changes nothing.
-   The answer covers the build it was given for, like an infrastructure answer: another commit of the change,
-   where the same cause may be failing in a test the base passes, is asked about on its own (and the loose rule
-   answers again when it is inherited there too). The answer records which tests it found failing on the base;
-   a report, a correction or a newer attempt that touches one of them there has the answer checked again, and
-   one that is no longer true is ended at once, with the failure asked about again.
+4. **Two failure answers were added, one replaced.** `inherited` (already failing where the change started,
+   which the design left unnamed) and `mistaken` (a disputed slot: the failing result was wrong). `mistaken`
+   replaces the design's `resolve { trust: [...] }`; any other failure answer on a disputed slot also resolves
+   it, by saying what the failure was.
+   **`inherited` is a person's answer, not a rule's.** The design's loose policy excuses by itself a failure
+   that the change's base already has. That was built, and cut back after five review rounds kept finding ways
+   for such an answer to outlive its evidence (the base corrected, the change pointed at another base, an
+   agent's failure with the same cause, a rule and an open run undoing each other). What is left is sound and
+   small: a person may answer `inherited` on a change's failure; it covers the build it was given for, like an
+   infrastructure answer, and the next commit is asked about again. Casebook shows what it knows as a hint on
+   the question (`fails-on-base`: every failing test of the report also fails, with this cause, on the base
+   commit the change names, by what that commit's gate counts when the report arrives). Nothing is excused by
+   the hint and no answer stands on it. The automatic version, with what it has to get right, is #69.
    `mistaken` is a judgement on the results it named. They stop counting in the run and in their commit's gate;
    the same failure reported again later is a new result and is asked about again; and the decision is not
    withdrawn because the cause turns up again. Where a clause keeps a decision from the producers of the evidence, a producer is
@@ -92,7 +91,8 @@ not the same things done worse.
    and the lane is folded again from its whole history, so if the correction decides nothing (a skip) the attempt
    before it stands again. A closed run keeps what it was closed on; reopened, it is asked about every failure
    it still shows. Deferred (#48).
-8. **Holds:** `basis-changes`, `this-target`, a date, and "while a fact holds" are built. "N clean runs" and
+8. **Holds:** `basis-changes`, `this-target`, a date and `results-named` (a `mistaken` answer: the results it
+   named and nothing later) are built. "N clean runs" and
    "until the linked defect closes" are not (#38, #32). A decision held for one target (an infrastructure failure)
    excuses the build it was given for and no other: not the next commit, and not another environment of the same
    commit. Where the question had already seen the cause in another environment of that commit, that one is asked
