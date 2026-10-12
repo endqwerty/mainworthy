@@ -1,0 +1,42 @@
+# The check, and Casebook testing itself: the test results of this repository are reported to Casebook with the
+# one pipeline line a user would add, and the job's result is Casebook's gate.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Set these in the repository to report to a deployed Casebook. Without them the job starts its own.
+      CASEBOOK_URL: ${{ vars.CASEBOOK_URL }}
+      CASEBOOK_TOKEN: ${{ secrets.CASEBOOK_TOKEN }}
+      CASEBOOK_PROJECT: ${{ vars.CASEBOOK_PROJECT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - name: Tests
+        id: tests
+        continue-on-error: true
+        run: bun test src test --reporter=junit --reporter-outfile=test-results/junit.xml
+      - name: Start a Casebook for this job
+        if: env.CASEBOOK_URL == ''
+        run: |
+          CASEBOOK_DATA="$RUNNER_TEMP/casebook" CASEBOOK_PORT=7357 bun src/cli/main.ts serve &
+          for i in $(seq 1 50); do curl -fsS http://127.0.0.1:7357/healthz >/dev/null && break; sleep 0.2; done
+      - name: Report the results to Casebook
+        run: bun src/cli/main.ts report test-results/junit.xml
+      - name: Gate
+        run: bun src/cli/main.ts gate
