@@ -4,6 +4,7 @@ import { CaseBody, emptyBody } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
 import { parseOutline } from "../../core/outline.ts";
 import { useQueryOp } from "../lib/data.ts";
+import { proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { DiffView, ProducerGlyph } from "../ui/index.tsx";
@@ -20,8 +21,9 @@ export function assertionComparison(message: string): { expected: string; observ
 
 const Test = z.object({ t: z.string(), name: z.string(), case: z.string().nullable().optional() });
 export const MapEvidence = z.object({ file: z.string(), tests: z.array(Test), count: z.number() });
-const FailureEvidence = z.object({
-	message: z.string(),
+export const FailureEvidence = z.object({
+	message: z.string().nullable(),
+	sample: z.number().nullable().optional(),
 	tests: z.array(Test),
 	count: z.number(),
 	target: z.string(),
@@ -114,8 +116,9 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 		enabled: parsed.success,
 	});
 	const proposal = Proposal.safeParse(read.data?.find((row) => parsed.success && row.ref === parsed.data.proposal));
-	const error =
-		read.error?.message ?? (read.data && !proposal.success ? "The proposal edits could not be read." : null);
+	const error = !parsed.success
+		? "The proposal evidence could not be read."
+		: (read.error?.message ?? (read.data && !proposal.success ? "The proposal edits could not be read." : null));
 	return (
 		<div
 			className={question.producer === "agent" ? "prop" : "ev"}
@@ -221,7 +224,7 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 	);
 }
 
-function FindingSuggestion({ evidence }: { evidence: z.infer<typeof FindingEvidence> }) {
+function FindingSuggestion({ evidence, q }: { evidence: z.infer<typeof FindingEvidence>; q: string }) {
 	const { project } = useApp();
 	const read = useQueryOp({
 		project,
@@ -247,7 +250,19 @@ function FindingSuggestion({ evidence }: { evidence: z.infer<typeof FindingEvide
 			/>
 		);
 	}
-	if (!current.success) return <p className="dim">{read.error?.message ?? "Reading the suggested edit…"}</p>;
+	if (!current.success || current.data.ref !== evidence.case) {
+		const error =
+			read.error?.message ?? (!read.isFetching && read.data ? "The suggested edit could not be read." : null);
+		return (
+			<div
+				data-finding-evidence={q}
+				data-finding-read={error ? "error" : "loading"}
+				data-finding-error={error ?? undefined}
+			>
+				<p className="dim">{error ?? "Reading the suggested edit…"}</p>
+			</div>
+		);
+	}
 	const after = {
 		...current.data,
 		steps: current.data.steps.map((step) =>
@@ -256,7 +271,46 @@ function FindingSuggestion({ evidence }: { evidence: z.infer<typeof FindingEvide
 				: step,
 		),
 	};
-	return <DiffView before={current.data} after={after} />;
+	return (
+		<div data-finding-evidence={q} data-finding-read="ready">
+			<DiffView before={current.data} after={after} />
+		</div>
+	);
+}
+
+const SignoffEvidence = z.object({
+	run: z.string(),
+	name: z.string(),
+	verdict: z.string(),
+	tally: z.record(z.string(), z.number()),
+});
+export function evidenceMessage(question: QuestionItem): string | null {
+	const parsed =
+		question.kind === "failure"
+			? FailureEvidence.safeParse(question.evidence)
+			: question.kind === "finding"
+				? FindingEvidence.safeParse(question.evidence)
+				: question.kind === "map"
+					? MapEvidence.safeParse(question.evidence)
+					: question.kind === "signoff"
+						? SignoffEvidence.safeParse(question.evidence)
+						: AdoptEvidence.safeParse(question.evidence);
+	return parsed.success ? null : "The evidence could not be read. Refresh before answering.";
+}
+
+export function questionReadMessage(question: QuestionItem): string | null {
+	const error = evidenceMessage(question);
+	if (error) return error;
+	if (question.kind === "adopt") return proposalReadMessage(question.q);
+	if (question.kind === "finding") {
+		const parsed = FindingEvidence.safeParse(question.evidence);
+		if (parsed.success && parsed.data.suggest && !("case" in parsed.data.suggest)) {
+			const card = document.querySelector<HTMLElement>(`[data-finding-evidence="${CSS.escape(question.q)}"]`);
+			if (card?.dataset.findingRead !== "ready")
+				return card?.dataset.findingError ?? "Still reading the suggested edit. Read it before answering.";
+		}
+	}
+	return null;
 }
 
 export function QuestionEvidence({ question, full }: { question: QuestionItem; full: boolean }) {
@@ -265,7 +319,7 @@ export function QuestionEvidence({ question, full }: { question: QuestionItem; f
 			const parsed = FailureEvidence.safeParse(question.evidence);
 			if (!parsed.success) return <p className="dim">The failure evidence could not be read. Refresh to try again.</p>;
 			const evidence = parsed.data;
-			const comparison = assertionComparison(evidence.message);
+			const comparison = assertionComparison(evidence.message ?? question.title);
 			return (
 				<>
 					{comparison && (
@@ -280,7 +334,7 @@ export function QuestionEvidence({ question, full }: { question: QuestionItem; f
 							</div>
 						</div>
 					)}
-					<pre className="queue-log">{evidence.message}</pre>
+					<pre className="queue-log">{evidence.message ?? question.title}</pre>
 					<div className="dim">
 						{evidence.target} · {evidence.branch ?? evidence.scope} · {evidence.count}{" "}
 						{evidence.count === 1 ? "test shares" : "tests share"} this cause
@@ -315,7 +369,7 @@ export function QuestionEvidence({ question, full }: { question: QuestionItem; f
 					<p>{evidence.note}</p>
 					{evidence.case && <RefLink refValue={evidence.case} />}
 					{evidence.repro && <pre className="queue-log">{evidence.repro}</pre>}
-					<FindingSuggestion evidence={evidence} />
+					<FindingSuggestion evidence={evidence} q={question.q} />
 				</div>
 			);
 		}

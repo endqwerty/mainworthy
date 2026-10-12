@@ -380,6 +380,15 @@ for (const preset of ["strict", "standard"]) {
 				await page.waitForFunction(() => document.querySelector(".queue-last")?.textContent?.includes("· recorded"));
 				await page.locator("#answer-extra").waitFor({ state: "detached" });
 				await page.keyboard.press("u");
+				if (preset === "strict") {
+					await input.fill("Read the newer evidence and withdraw the earlier answer");
+					await page.keyboard.press("Enter");
+					await eventually(
+						() => server.api("get", { refs: [question.q] }),
+						(rows) => rows[0]?.state === "open",
+					);
+					await input.waitFor({ state: "detached" });
+				}
 				await page.locator(`[data-current-question="${question.q}"]`).waitFor();
 				await page.keyboard.press(key);
 				expect(await input.inputValue()).toBe("");

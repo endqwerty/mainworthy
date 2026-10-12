@@ -100,7 +100,7 @@ export function CasePane({
 	seal: () => void;
 	rapid: () => void;
 	conflict: ConflictState | null;
-	onResolved: () => void;
+	onResolved: (state: ConflictState, body: CaseBody) => void;
 	hasDraft?: boolean;
 }) {
 	const { project, session, setStatus, overlayOpen } = useApp();
@@ -243,7 +243,7 @@ export function CasePane({
 							<span className="draft-public-state">Draft kept on this device. Press e to continue.</span>
 						)}
 					</div>
-					{conflict && <ConflictCard state={conflict} resolved={onResolved} />}
+					{conflict && <ConflictCard key={JSON.stringify(conflict.mine)} state={conflict} resolved={onResolved} />}
 					{draft ? (
 						<BodyEditor draft={draft} change={change} seal={seal} rapid={rapid} />
 					) : (
@@ -623,7 +623,13 @@ function pageProposal(q: string): boolean {
 	return true;
 }
 
-function ConflictCard({ state, resolved }: { state: ConflictState; resolved: () => void }) {
+function ConflictCard({
+	state,
+	resolved,
+}: {
+	state: ConflictState;
+	resolved: (state: ConflictState, body: CaseBody) => void;
+}) {
 	const { project, setStatus } = useApp();
 	const owner = useRef(deviceSession()).current;
 	const [body, setBody] = useState(state.merged);
@@ -696,7 +702,7 @@ function ConflictCard({ state, resolved }: { state: ConflictState; resolved: () 
 			);
 			if (reply[0]?.status === "decided") {
 				setStatus("Conflict resolved. Both earlier versions remain in the timeline.");
-				resolved();
+				resolved(state, body);
 			} else setStatus(reply[0]?.needs ?? "The evidence changed. Read both edits again.");
 		} catch (error) {
 			setStatus(error instanceof Error ? error.message : "Conflict could not be resolved");

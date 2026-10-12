@@ -9,11 +9,10 @@ import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/dat
 import { deviceKey, deviceSession, sessionCurrent } from "../lib/device.ts";
 import { randomId } from "../lib/ids.ts";
 import { type Binding, useBindings } from "../lib/keys.ts";
-import { proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, KeyCap, ListRow, ProducerGlyph } from "../ui/index.tsx";
-import { FindingEvidence, MapEvidence, QuestionEvidence } from "./evidence.tsx";
+import { evidenceMessage, FindingEvidence, MapEvidence, QuestionEvidence, questionReadMessage } from "./evidence.tsx";
 import "./queue.css";
 
 const kindLabels: Record<Kind, string> = {
@@ -32,7 +31,10 @@ const kindNames: Record<Kind, string> = {
 };
 type DecisionEntry = { question: QuestionItem; answer: Record<string, unknown> };
 type LastAnswer = { entries: DecisionEntry[]; confirmed: Promise<boolean> };
-type InlineAnswer = { entries: DecisionEntry[]; field: "ref" | "reason"; value: string };
+type InlineAnswer = { entries: DecisionEntry[]; field: "ref" | "reason"; value: string } & (
+	| { kind: "answer" }
+	| { kind: "withdrawal"; prior: LastAnswer }
+);
 
 export function QueueScreen() {
 	const { project } = useApp();
@@ -72,7 +74,9 @@ function QueueWorkbench() {
 	const inlineRef = useRef<HTMLInputElement>(null);
 	const extraInputs = useRef(new Map<string, string>());
 	const actionNo = useRef(0);
-	const undoing = useRef(new Set<string>());
+	const undoing = useRef(new Set<LastAnswer>());
+	const isUndoing = (ref: string) =>
+		[...undoing.current].some((answer) => answer.entries.some((entry) => entry.question.q === ref));
 	const pendingAnswers = useRef(new Set<string>());
 	const seenRoute = useRef<string | null>(null);
 	useEffect(() => {
@@ -106,7 +110,7 @@ function QueueWorkbench() {
 				const next = previous.filter((question) => {
 					if (
 						pendingAnswers.current.has(question.q) ||
-						undoing.current.has(question.q) ||
+						isUndoing(question.q) ||
 						question.state !== input.state ||
 						(input.kind && question.kind !== input.kind)
 					)
@@ -143,19 +147,30 @@ function QueueWorkbench() {
 			state === "open" &&
 			!items.some((item) => item.q === current.q) &&
 			!pendingAnswers.current.has(current.q) &&
-			!undoing.current.has(current.q),
+			!isUndoing(current.q),
 	);
 	const settled = Boolean(
 		current &&
 			state === "open" &&
 			!items.some((item) => item.q === current.q) &&
 			!pendingAnswers.current.has(current.q) &&
-			!undoing.current.has(current.q) &&
+			!isUndoing(current.q) &&
 			settledState.success &&
 			settledState.data.q === current.q &&
 			settledState.data.state !== "open",
 	);
 	const counts = inbox.data?.pages[0]?.counts ?? {};
+	useEffect(() => {
+		if (inline && !inline.entries.some((entry) => entry.question.q === current?.q)) setInline(null);
+	}, [current?.q, inline]);
+	const listed = items.map((item) => item.q).join(",");
+	useEffect(() => {
+		const listedRefs = new Set(listed.split(","));
+		const removed = [...selected].filter((ref) => !listedRefs.has(ref));
+		if (!removed.length) return;
+		setSelected((previous) => new Set([...previous].filter((ref) => listedRefs.has(ref))));
+		setStatus(`${removed.join(", ")} removed from the selection because it is no longer listed.`);
+	}, [listed, selected, setStatus]);
 	useEffect(() => {
 		if (route.ref) setCursor(route.ref);
 	}, [route.ref]);
@@ -220,7 +235,7 @@ function QueueWorkbench() {
 	}
 	function startInline(entries: DecisionEntry[], field: InlineAnswer["field"]): void {
 		const first = entries[0];
-		setInline({ entries, field, value: first ? readExtra(first, field) : "" });
+		setInline({ kind: "answer", entries, field, value: first ? readExtra(first, field) : "" });
 		if (current) navigate(routeUrl({ project, screen: "queue", ref: current.q }), { replace: true });
 	}
 	function rememberInline(next: InlineAnswer): void {
@@ -245,13 +260,20 @@ function QueueWorkbench() {
 	}
 	function submit(entries: DecisionEntry[], reason?: string, extra?: InlineAnswer): void {
 		if (!entries.length || !sessionCurrent(owner)) return;
-		if (unavailable && entries.some((entry) => entry.question.q === current?.q)) {
+		if (entries.some((entry) => !items.some((item) => item.q === entry.question.q))) {
 			setStatus(
 				settled
 					? "This question was settled elsewhere. Your note is kept."
 					: "Reading this question before answering. Your note is kept.",
 			);
 			return;
+		}
+		for (const entry of entries) {
+			const message = questionReadMessage(entry.question);
+			if (message) {
+				setStatus(message);
+				return;
+			}
 		}
 		const action = ++actionNo.current;
 		const refs = new Set(entries.map((entry) => entry.question.q));
@@ -361,6 +383,11 @@ function QueueWorkbench() {
 			return;
 		}
 		if (!current || state !== "open" || current.you === "forbidden" || inline) return;
+		const readError = questionReadMessage(current);
+		if (readError) {
+			setStatus(readError);
+			return;
+		}
 		if (current.answers && !current.answers.includes(is)) {
 			setStatus("This answer does not apply to the current evidence.");
 			return;
@@ -399,8 +426,7 @@ function QueueWorkbench() {
 			return;
 		}
 		for (const question of questions) {
-			if (question.kind !== "adopt") continue;
-			const message = proposalReadMessage(question.q);
+			const message = questionReadMessage(question);
 			if (message) {
 				setStatus(message);
 				return;
@@ -439,9 +465,22 @@ function QueueWorkbench() {
 		}
 		submit(entries);
 	}
-	function undo(questions = last?.entries.map((entry) => entry.question) ?? []): void {
-		questions = questions.filter((question) => !undoing.current.has(question.q));
+	function undo(
+		questions = last?.entries.map((entry) => entry.question) ?? [],
+		reason?: string,
+		extra?: InlineAnswer,
+	): void {
 		if (!questions.length) return;
+		const prior =
+			extra?.kind === "withdrawal"
+				? extra.prior
+				: state === "decided"
+					? {
+							entries: questions.map((question) => ({ question, answer: question.decision?.answer ?? {} })),
+							confirmed: Promise.resolve(true),
+						}
+					: last;
+		if (!prior || undoing.current.has(prior)) return;
 		if (questions.some((question) => question.kind === "adopt")) {
 			setStatus("An adopted edit stays in history. Restore the earlier case version to undo it.");
 			setLastMessage(
@@ -449,8 +488,21 @@ function QueueWorkbench() {
 			);
 			return;
 		}
-		const prior = state === "decided" ? null : last;
-		for (const question of questions) undoing.current.add(question.q);
+		if (!reason && questions.some((q) => q.needs.includes("with a reason"))) {
+			const entries = questions.map((question) => ({ question, answer: { is: "withdraw" } }));
+			const first = entries[0];
+			setCursor(first?.question.q ?? null);
+			setInline({
+				kind: "withdrawal",
+				prior,
+				entries,
+				field: "reason",
+				value: first ? readExtra(first, "reason") : "",
+			});
+			return;
+		}
+		setInline(null);
+		undoing.current.add(prior);
 		setLast(null);
 		const reopened = new Set<string>();
 		const action = ++actionNo.current;
@@ -462,7 +514,11 @@ function QueueWorkbench() {
 			async () => {
 				if (prior && !(await prior.confirmed)) return;
 				for (const question of questions) {
-					const replies = await call("decide", { undo: question.q, cmd: randomId() }, { project, owner });
+					const replies = await call(
+						"decide",
+						{ undo: question.q, cmd: randomId(), ...(reason ? { reason } : {}) },
+						{ project, owner },
+					);
 					const reply = replies[0];
 					if (!sessionCurrent(owner)) return;
 					if (reply?.status !== "reopened") {
@@ -472,6 +528,10 @@ function QueueWorkbench() {
 						if (current.state !== "open") throw new Error(reply?.needs ?? "The decision could not be withdrawn.");
 					}
 					reopened.add(question.q);
+					if (extra) {
+						const entry = extra.entries.find((entry) => entry.question.q === question.q);
+						if (entry) clearExtra(entry, extra);
+					}
 				}
 				if (action === actionNo.current) {
 					setLast(null);
@@ -520,13 +580,16 @@ function QueueWorkbench() {
 							})),
 						},
 				);
-				const message = error instanceof Error ? error.message : "The decision could not be withdrawn.";
-				setLastMessage(message);
-				setStatus(message);
+				const message = `${questions.map((q) => q.q).join(", ")} is still decided: the withdrawal failed. ${error instanceof Error ? error.message : "Try again."} Press u to retry.`;
+				if (action === actionNo.current) {
+					setLast(prior);
+					setLastMessage(message);
+					setStatus(message);
+				}
 				void invalidateProject(project);
 			})
 			.finally(() => {
-				for (const question of questions) undoing.current.delete(question.q);
+				undoing.current.delete(prior);
 			});
 	}
 	function move(delta: number): void {
@@ -599,6 +662,7 @@ function QueueWorkbench() {
 							type="button"
 							aria-pressed={state === "open"}
 							onClick={() => {
+								setInline(null);
 								setState("open");
 								setCursor(null);
 								setSelected(new Set());
@@ -610,6 +674,7 @@ function QueueWorkbench() {
 							type="button"
 							aria-pressed={state === "decided"}
 							onClick={() => {
+								setInline(null);
 								setState("decided");
 								setCursor(null);
 								setSelected(new Set());
@@ -624,6 +689,7 @@ function QueueWorkbench() {
 						type="button"
 						aria-pressed={kind === null}
 						onClick={() => {
+							setInline(null);
 							setKind(null);
 							setCursor(null);
 							setSelected(new Set());
@@ -637,6 +703,7 @@ function QueueWorkbench() {
 							key={value}
 							aria-pressed={kind === value}
 							onClick={() => {
+								setInline(null);
 								setKind(value);
 								setCursor(null);
 								setSelected(new Set());
@@ -648,8 +715,15 @@ function QueueWorkbench() {
 				</nav>
 				{state === "decided" && (
 					<label className="queue-rules">
-						<input type="checkbox" checked={rules} onChange={(event) => setRules(event.target.checked)} /> Show unlinked
-						tests decided by rules
+						<input
+							type="checkbox"
+							checked={rules}
+							onChange={(event) => {
+								setInline(null);
+								setRules(event.target.checked);
+							}}
+						/>{" "}
+						Show unlinked tests decided by rules
 					</label>
 				)}
 				<div className="pane-scroll" role="listbox" aria-label="Questions" aria-multiselectable="true">
@@ -658,6 +732,7 @@ function QueueWorkbench() {
 							<ListRow
 								selected={current?.q === question.q || selected.has(question.q)}
 								onClick={() => {
+									setInline(null);
 									setCursor(question.q);
 									navigate(routeUrl({ project, screen: "queue", ref: question.q }), { replace: true });
 								}}
@@ -766,6 +841,7 @@ function QueueWorkbench() {
 										type="button"
 										key={key}
 										disabled={
+											Boolean(evidenceMessage(current)) ||
 											unavailable ||
 											current.you === "forbidden" ||
 											Boolean(inline) ||
@@ -794,11 +870,16 @@ function QueueWorkbench() {
 						className="queue-inline"
 						onSubmit={(event) => {
 							event.preventDefault();
-							if (settled) {
-								setStatus("This question was settled elsewhere. Your note is kept.");
+
+							if (inline.field === "reason" && !inline.value.trim()) return;
+							if (inline.kind === "withdrawal") {
+								undo(
+									inline.entries.map((entry) => entry.question),
+									inline.value.trim(),
+									inline,
+								);
 								return;
 							}
-							if (inline.field === "reason" && !inline.value.trim()) return;
 							submit(
 								inline.entries.map((entry) => ({
 									...entry,
@@ -813,7 +894,11 @@ function QueueWorkbench() {
 						}}
 					>
 						<label htmlFor="answer-extra">
-							{inline.field === "ref" ? "Defect reference, optional" : "Reason required by policy"}
+							{inline.kind === "withdrawal"
+								? "Reason for withdrawing the answer"
+								: inline.field === "ref"
+									? "Defect reference, optional"
+									: "Reason required by policy"}
 						</label>
 						<input
 							className="form-input"

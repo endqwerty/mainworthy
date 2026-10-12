@@ -70,19 +70,7 @@ export async function call<O extends OpName>(
 			throw new ApiError("unauthenticated", "The session changed. Your input is kept for the person who typed it.");
 	};
 	assertOwner();
-	if (owner && ["propose", "decide", "report", "plan", "announce", "admin"].includes(op)) {
-		const current = await session({
-			owner,
-			...(options.signal ? { signal: options.signal } : {}),
-			keepalive: options.keepalive ?? false,
-		});
-		assertOwner();
-		if (current.actor !== owner.person)
-			refuse({
-				code: "unauthenticated",
-				message: "The session now belongs to another person. Sign in again; your input is kept.",
-			});
-	}
+
 	const project =
 		options.project ??
 		(typeof location === "undefined" ? "scratch" : decodeURIComponent(location.pathname.split("/")[2] ?? "scratch"));
@@ -91,6 +79,7 @@ export async function call<O extends OpName>(
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
+			...(owner ? { "X-Casebook-As": encodeURIComponent(owner.person) } : {}),
 			...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
 		},
 		body: JSON.stringify(input),

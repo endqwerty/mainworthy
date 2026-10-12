@@ -203,6 +203,7 @@ check(
 				results: [{ test: { case: "C-1" }, outcome: "fail", note: "External failure" }],
 			});
 			await page.locator(".proof-block").getByText("person · fail", { exact: false }).waitFor();
+			await page.locator(".timeline-block .why").filter({ hasText: "External failure" }).first().waitFor();
 			expect(await page.locator(".timeline-block").innerText()).toContain("External failure");
 		} finally {
 			await h.close();

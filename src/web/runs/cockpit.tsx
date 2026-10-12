@@ -71,6 +71,9 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const [local, setLocal] = useState<Map<number, LocalFill>>(new Map());
 	const [cursor, setCursor] = useState<number | null>(null);
 	const stepPrefix = deviceKey("run-step", `${project}:${runRef}:`, owner.person);
+	const digitSequence = useRef({ slot: 0, at: 0 });
+	const consumedNotes = useRef(new Map<number, string>());
+	const consumedSteps = useRef(new Map<number, string>());
 	const [steps, setSteps] = useState<Record<string, string>>(() => readNotes(stepPrefix));
 	const [noting, setNoting] = useState<Slot | null>(null);
 	// A note belongs to its slot and is kept on this device from the first key until the server has the result:
@@ -78,6 +81,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const notePrefix = deviceKey("run-note", `${project}:${runRef}:`, owner.person);
 	const [notes, setNotes] = useState<Record<string, string>>(() => readNotes(notePrefix));
 	const setNoteOf = (slotId: number, text: string): void => {
+		consumedNotes.current.delete(slotId);
 		storeNote(`${notePrefix}${slotId}`, text);
 		setNotes((previous) => {
 			const next = { ...previous };
@@ -118,8 +122,25 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	function setStep(value: string | ((previous: string) => string)): void {
 		if (!current) return;
 		const next = typeof value === "function" ? value(step) : value;
+		consumedSteps.current.delete(current.id);
 		storeNote(`${stepPrefix}${current.id}`, next);
 		setSteps((prior) => ({ ...prior, [current.id]: next }));
+	}
+	useEffect(() => {
+		const interrupt = (event: KeyboardEvent) => {
+			if (!/^\d$/.test(event.key)) digitSequence.current = { slot: 0, at: 0 };
+		};
+		window.addEventListener("keydown", interrupt, true);
+		return () => window.removeEventListener("keydown", interrupt, true);
+	}, []);
+	function clearStep(slotId: number, sent: string): void {
+		if (storedNote(`${stepPrefix}${slotId}`) !== sent) return;
+		storeNote(`${stepPrefix}${slotId}`, "");
+		setSteps((prior) => {
+			const next = { ...prior };
+			delete next[slotId];
+			return next;
+		});
 	}
 	const next = current
 		? [
@@ -177,10 +198,14 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	function record(
 		outcome: RunOutcome,
 		slot = current,
-		text = slot ? (notes[slot.id] ?? "") : "",
+		text = slot && consumedNotes.current.get(slot.id) !== notes[slot.id] ? (notes[slot.id] ?? "") : "",
 		advance = true,
 	): Promise<ReportReceipt> | null {
-		if (!slot || !sessionCurrent(owner) || run?.state !== "open" || !session.can.includes("produce")) return null;
+		if (!slot || !sessionCurrent(owner) || !session.can.includes("produce")) return null;
+		if (run?.state !== "open") {
+			setStatus("This run is closed. No result was recorded; your note is kept.");
+			return null;
+		}
 		const slotId = slot.id;
 		slot = slots.find((item) => item.id === slotId) ?? slot;
 		if (external(slot)) {
@@ -221,7 +246,10 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				},
 		);
 		const pinnedInput = { refs: [slot.case], version: slot.version };
-		const failedStep = outcome === "fail" ? Number(steps[slot.id] ?? "") : 0;
+		const marked = steps[slot.id] ?? "";
+		const failedStep = outcome === "fail" && consumedSteps.current.get(slot.id) !== marked ? Number(marked) : 0;
+		if (text && text === notes[slot.id]) consumedNotes.current.set(slot.id, text);
+		consumedSteps.current.set(slot.id, marked);
 		const priorWrite = writes.current.get(slot.id);
 		const rollback = confirmedSlots.current.get(slot.id) ?? slot;
 		queued.current.set(slot.id, fill.result);
@@ -245,7 +273,10 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			if (!body.methods.includes(method))
 				throw new Error("This pinned case does not admit your method. Its slot needs another producer.");
 			const atStep = failedStep > 0 ? body.steps[failedStep - 1]?.id : undefined;
-			if (failedStep > 0 && !atStep) throw new Error(`The pinned case has no step ${failedStep}. Your note is kept.`);
+			if (failedStep > 0 && !atStep) {
+				clearStep(slot.id, marked);
+				throw new Error(`The pinned case has no step ${failedStep}. The mark was cleared; your note is kept`);
+			}
 			const recent = latest.current.get(slot.id);
 			const corrects =
 				previous && previous.result > 0 && (!recent || previous.at > recent.at)
@@ -274,14 +305,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			// The server has it: the device's copy of the note has done its work. A note typed for this slot while
 			// the request was on its way is newer than what was recorded, and stays.
 			if (storedNote(`${notePrefix}${slot.id}`) === text) setNoteOf(slot.id, "");
-			if (outcome === "fail" && Number(storedNote(`${stepPrefix}${slot.id}`)) === failedStep) {
-				storeNote(`${stepPrefix}${slot.id}`, "");
-				setSteps((prior) => {
-					const next = { ...prior };
-					delete next[slot.id];
-					return next;
-				});
-			}
+			clearStep(slot.id, marked);
 			if (queued.current.get(slot.id) === fill.result)
 				setLocal((value) => new Map(value).set(slot.id, { fill: saved, questions: receipt.questions, pending: false }));
 			setStatus(
@@ -293,6 +317,8 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		writes.current.set(slot.id, request);
 		void request.catch((error: unknown) => {
 			if (!sessionCurrent(owner) || writes.current.get(slot.id) !== request) return;
+			if (consumedNotes.current.get(slot.id) === text) consumedNotes.current.delete(slot.id);
+			if (consumedSteps.current.get(slot.id) === marked) consumedSteps.current.delete(slot.id);
 			const restored = confirmedSlots.current.get(slot.id) ?? rollback;
 			queryClient.setQueryData<InfiniteData<Api["find"]["reply"]>>(
 				cacheKey,
@@ -377,6 +403,13 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				noteRef.current?.blur();
 			},
 		},
+		...["escape", "backspace"].map((key) => ({
+			key,
+			label: "Clear step mark",
+			handler: () => setStep(""),
+			when: () => active() && Boolean(step),
+			hidden: true,
+		})),
 		{ key: "j", label: "Next slot", handler: () => move(1), when: active },
 		{ key: "k", label: "Previous slot", handler: () => move(-1), when: active },
 		{ key: "arrowdown", label: "Next slot", handler: () => move(1), when: active, hidden: true },
@@ -384,7 +417,13 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		...Array.from({ length: 10 }, (_, digit) => ({
 			key: String(digit),
 			label: `Mark step digit ${digit}`,
-			handler: () => setStep((value) => `${value}${digit}`.replace(/^0+/, "")),
+			handler: () => {
+				if (!current) return;
+				const previous = digitSequence.current;
+				const append = previous.slot === current.id && performance.now() - previous.at < 600;
+				setStep((value) => `${append ? value : ""}${digit}`.replace(/^0+/, ""));
+				digitSequence.current = { slot: current.id, at: performance.now() };
+			},
 			when: () => active() && canRecord,
 			hidden: true,
 		})),

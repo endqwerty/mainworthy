@@ -118,3 +118,84 @@ premise, stale optimistic data after a same-person sign-in, and creation reads
 that ran before their ref existed. Each was corrected and its affected test was
 rerun. The later exploratory run overlapped an in-progress source edit and
 failed one app-startup wait. Neither exploratory run is counted as a final pass.
+
+## Round 4 implementation checks
+
+This pass follows `UI-R4-FIXES.md` and the completed ui-r4a, ui-r4b and
+ui-r4c reports. Only `src/web` and `test/e2e` are owned by this implementation
+worker. The lead retains commits, publishing and independent verification of
+the combined revision.
+
+Every reported cause has a browser regression in `test/e2e/round4.test.ts`.
+The tests run the real Bun server and SQLite database, drive Chromium keys and
+clicks, hold or refuse requests at the browser, and inspect recorded values.
+The original regressions failed before their implementation changes. The
+close/reload regressions also failed against a clean HEAD export with the old
+session-read guard, while the actor-header version recorded exactly one case.
+A fixture initially grouped three numbered failure messages into one cause;
+its corrected messages make three distinct questions and were rerun before
+changing the queue. Strict reason fixtures report through a pipeline token so
+the signed-in person is allowed to answer.
+
+| Finding | Cause and implementation files | Regression |
+| --- | --- | --- |
+| R4A-1 | A saved request and conflict card described earlier text. `suite/index.tsx` rebuilds the conflict from the live draft, refreshes it as typing continues and retains later edits when a merge completes; `case/pane.tsx` resets the card's merge choices when its text changes and returns the exact card state that was resolved. | `conflict keeps later…` checks title and step changes, with and without another seal; `a conflict after a missing reply…` checks failed send, further typing, another producer's edit and resolution. |
+| R4A-2 | Definitive refusals and rejected questions retained their saved request/card, and copied session storage reused a tab identity. `suite/index.tsx` releases refused requests and rejected conflict cards; `lib/ids.ts` assigns new documents their own id and checks live identities by BroadcastChannel. | `duplicated tabs…`, `a refused command…`, and `a conflict rejected through API/UI…`; `drafts.test.ts` now requires a fresh command after a definitive refusal. |
+| R4A-3 | A pending reply consulted only the active editor and cleared newer stored text after navigation. `suite/index.tsx` retains each live draft independently, reconciles its reply and seals its newer text without moving the current cursor. | Existing and new cases, with a held applied reply, leaving by click, j, another screen, Shift+Enter and the idle seal. |
+| R4A-4 / R4C-1 | A session read could precede a cookie change. `lib/api.ts` sends `X-Casebook-As` on operation reads and writes and removes the read before a write. | Case, run and queue requests change the shared cookie immediately before reaching the server; the header names Alice, no session read precedes the write, no record is attributed to Bob, and private text remains under Alice's keys. |
+| R4A-5 | A new window automatically restored another live window's capture. `lib/ids.ts`, `main.tsx` and `suite/index.tsx` exchange live owner identities before restoration and keep a capture with its live owner. | `a live window's unfinished capture…` checks no editor in the second window and one complete case on the server. |
+| R4B-1 | Null failure values failed parsing, and unread non-proposal evidence still accepted answers. `queue/evidence.tsx` accepts null message/sample, displays the fallback title and dispute hints, validates all evidence kinds and marks a suggested edit's read state; `queue/index.tsx` guards both keys and buttons. | Malformed failure/finding/map/signoff/adopt evidence; nullable failure values; a later pipeline pass disputes a failing slot, with fresh permissions; held and failed suggested-edit reads refuse all answers. |
+| R4B-2 | Marks appended forever and remained attached to later results. `runs/cockpit.tsx` clears a mark with Escape/Backspace, replaces digits after 600 ms or another key, consumes it for its result, and clears it after any recorded outcome or a nonexistent-step refusal. | Escape, Backspace, a pause, another key, pass and an invalid step; rapid `1 2` still marks step twelve. The earlier `R3B-4` test still proves a failed valid mark survives reload and retry. |
+| R4B-3 | The first withdrawal locked the question rather than its answer. `queue/index.tsx` tracks withdrawals by their answer object and queues later withdrawals in key order. | Hold the first answer through `f u i u t`; all five requests target the original question and it ends as Test. |
+| R4B-4 | Inline fields outlived their question selection and checked the displayed question. `queue/index.tsx` closes fields on row/view changes, keeps their device text and checks every entry's own question before submission. | Reference and strict reason fields, each leaving by row, kind and state; return restores the text. The earlier external-settlement regression still refuses Enter and Escape. |
+| R4B-5 | Bulk selection retained questions that had disappeared. `queue/index.tsx` removes unlisted refs and reports which were removed. | Settle the only selected question elsewhere, observe the notice, then answer another question normally. |
+| R4B-6 | A failed withdrawal discarded its retry state and named no operation. `queue/index.tsx` retains the answer and reports that its withdrawal failed. | Refuse the first withdrawal, then press u again and prove the question reopens. |
+| R4B-7 | Recording returned silently for a closed run. `runs/cockpit.tsx` explains the closed run before returning and keeps the note. | Close the run through another producer while a note is being typed, then press Enter. |
+| R4B-8 | A note awaiting acknowledgement became the default for a later result. `runs/cockpit.tsx` tracks consumed note text until it is edited or its result fails. | Hold the failure through `Enter u u p`; the final pass has no failure note. |
+| R4C-2 | Strict withdrawals supplied no reason and offered no field. `queue/index.tsx` gives withdrawals their own reason input and device key. | Answer with a strict reason, withdraw with a separate reason and prove the question reopens; `recovery.test.ts` now completes that reason flow before checking the cleared answer input. |
+| R4C-3 | A shortcut moved focus while its key was still held, letting repeats type into the new field. `lib/keys.ts` swallows that opening key's repeats until keyup. | Capture, edit, failure note, run planner, defect reference and token actor; a fresh press and subsequent text repeats still type normally. |
+| R4C-4 | A departing page could not continue after the extra session read. `lib/api.ts` sends the guarded keepalive write directly. | Close and reload immediately after typing; the server holds the case before return, and recovery makes no duplicate. |
+| R4C-5 | A refused EventSource had no recovery path. `lib/data.ts` checks the session on stream errors, shows sign-in on authentication failure, retries other failures and invalidates on reconnect; `app.tsx` supplies its connection status. | Idle 401 after token revocation shows sign-in; a 502 reconnects and an externally created case appears. |
+
+The existing lost-reply recovery remains an immutable replay of an unknown
+command outcome followed by the current draft under a fresh command. A known
+conflict, rejection or API refusal releases that replay immediately. Removing
+all replays, including an unknown create after its reply was lost, requires a
+project- and actor-scoped command-outcome read from the server. The current
+registry exposes no such lookup; matching a case by title would not establish
+which command created it. This is the remaining limit of the brief's literal
+"never send a remembered request" requirement. No server/core files were
+changed by this worker.
+
+Before final full runs, TypeScript passed, Biome checked 59 files without
+changes, and architecture passed 12 tests. A preflight run used earlier
+assertions about command reuse and strict undo, and failed those assertions;
+they now check the required fresh-command and withdrawal-reason behaviour.
+A pending run correction timed out once in that mixed-revision preflight and
+passed its isolated rerun. Final full runs below judge the final source.
+
+The latency check measures trusted input to the next animation-frame
+opportunity, with the focused field, typed value and selected destination
+checked inside that frame. It uses 200 samples per path on real 2,000- and
+10,000-case datasets and fails above 100 ms. These are budget checks, with no
+speedup or physical-paint claim. The machine has 16 cores and was shared with
+other work; its load average was about 8 to 9 before these final runs.
+
+The first attempted pair ended with an early assertion in the existing
+`A-5 external reports refresh the open case proof and timeline` test: the case
+proof had refreshed while the independent timeline query was still in flight.
+`round3-capture.test.ts` now waits for the actual result row's note before
+asserting the timeline contents. It passes locally and fails in a scratch
+export when the report-to-timeline invalidation is removed, so the wait still
+proves that invalidation. The pair was restarted after this test correction.
+
+Two consecutive complete `bun test test/e2e` runs on the final implementation
+and tests each report **163 pass, 0 fail, 748 expect() calls**, across 18 files,
+in **265.31 seconds** and **272.57 seconds**. Both include all 61 new round-4
+checks, the real 30-second idle test and both 200-sample latency datasets.
+Their largest printed p95 was 16.7 ms, below the unchanged 100 ms budget.
+`bunx tsc --noEmit` passes; `bunx biome check src/web test/e2e` checks 59 files
+with no fixes; `bun test test/architecture.test.ts` passes 12 tests with 31
+expectations. No independent verdict on this new implementation is claimed;
+the lead must obtain one for the combined current revision. No commit, push,
+pull request or worktree release was performed by this worker.

@@ -62,6 +62,14 @@ function keyOf(event: KeyboardEvent): string {
 }
 export function useKeyboard(): void {
 	useEffect(() => {
+		const openingKeys = new Set<string>();
+		const release = (event: KeyboardEvent) => openingKeys.delete(event.code);
+		const suppress = (event: KeyboardEvent) => {
+			if (event.repeat && openingKeys.has(event.code)) {
+				event.preventDefault();
+				event.stopImmediatePropagation();
+			}
+		};
 		const handle = (event: KeyboardEvent) => {
 			if (
 				event.defaultPrevented ||
@@ -91,7 +99,15 @@ export function useKeyboard(): void {
 				event.preventDefault();
 				chord = "";
 				if (event.repeat && !["j", "k", "arrowdown", "arrowup", "arrowleft", "arrowright"].includes(key)) return;
+				const before = document.activeElement;
 				flushSync(binding.handler);
+				const after = document.activeElement;
+				if (
+					after !== before &&
+					after instanceof HTMLElement &&
+					(after.matches("input,textarea") || after.isContentEditable)
+				)
+					openingKeys.add(event.code);
 				return;
 			}
 			if (
@@ -109,7 +125,13 @@ export function useKeyboard(): void {
 				chordAt = performance.now();
 			} else chord = "";
 		};
+		window.addEventListener("keydown", suppress, true);
+		window.addEventListener("keyup", release, true);
 		window.addEventListener("keydown", handle);
-		return () => window.removeEventListener("keydown", handle);
+		return () => {
+			window.removeEventListener("keydown", suppress, true);
+			window.removeEventListener("keyup", release, true);
+			window.removeEventListener("keydown", handle);
+		};
 	}, []);
 }

@@ -51,7 +51,7 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"a failed seal keeps the typed text and retry uses the same command",
+	"a refused seal keeps the typed text and retries under a fresh command",
 	async () => {
 		const server = await startServer();
 		const browser = await openPage(server);
@@ -81,7 +81,7 @@ test.skipIf(!browserAvailable)(
 			await page.waitForURL("**/suite/c/1");
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
 			expect(commands.length).toBeGreaterThanOrEqual(2);
-			expect(new Set(commands).size).toBe(1);
+			expect(commands[0]).not.toBe(commands.at(-1));
 		} finally {
 			await browser.close();
 			await server.stop();

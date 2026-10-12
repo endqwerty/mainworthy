@@ -185,7 +185,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 	}, []);
 	const registry = useKeyRegistry();
 	useKeyboard();
-	useEvents(project);
+	useEvents(project, setStatus);
 	const folders = useQueryOp({ project, op: "find", input: { in: "folders" } });
 	const tags = useQueryOp({ project, op: "find", input: { in: "tags" }, enabled: suiteOpen });
 	const tagRows = useMemo(
