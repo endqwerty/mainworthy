@@ -999,6 +999,90 @@ describe("what a run and a change may count", () => {
 		expect(gate({ run: planned.run }).verdict).toBe("blocked");
 	});
 
+	test("a reopened run knows a result was corrected even where a decision had already set it aside", () => {
+		seed(1, ["human", "auto"]);
+		const ci = pipeline();
+		const target = { repo: "app", commit: "corrected001", branch: "main" };
+		const planned = plan({ name: "Release", select: {}, accepts: { repo: "app", commit: target.commit } });
+		const failed = report({ target, results: [linked("fail", "old cause")] }, ci);
+		report({ target, results: [linked("pass")] });
+		const asked = open("failure");
+		expect(decide(asked, { is: "mistaken" }).status).toBe("decided");
+		const signoff = open("signoff", "decided");
+		// While the run is closed, the pipeline withdraws its failure: the test did not run.
+		report({ target, results: [{ ...linked("skip"), corrects: first(failed.results) }] }, ci);
+		h.call("decide", { undo: signoff.q, reason: "look again" });
+		// The `mistaken` answer is withdrawn too. The failure it had set aside was withdrawn by its producer
+		// meanwhile, so it does not come back: the run and the commit read the same.
+		h.call("decide", { undo: asked.q, reason: "not needed" });
+		expect(rows("SELECT corrected, discounted_by FROM slot_results WHERE result = ?", first(failed.results))).toEqual([
+			{ corrected: 1, discounted_by: null },
+		]);
+		expect(gate({ commit: target.commit, repo: "app" }).verdict).toBe("passed");
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
+	test("the first pipeline to report a change says where its head is, whatever an agent said before", () => {
+		const ci = pipeline();
+		const older = { repo: "app", commit: "older001", branch: "main" };
+		report({ target: older, results: [{ test: { key: "one" }, outcome: "pass" }] }, ci);
+		// An agent names a pull request nobody has reported, on a commit of its own, with a base, a title and files.
+		report(
+			{
+				target: {
+					repo: "app",
+					commit: "agent001",
+					pr: 7,
+					branch: "feature",
+					base: "agentbase",
+					title: "From agent",
+					files: ["agent.ts"],
+				},
+				results: [{ test: { key: "agent" }, outcome: "skip" }],
+			},
+			explorer(),
+		);
+		expect(gate({ change: "pr:7" })).toMatchObject({ run: null, verdict: "pending" });
+		// The pipeline's first report of the pull request is for a commit Casebook saw before the agent's.
+		report(
+			{
+				target: { ...older, pr: 7, branch: "feature", base: "realbase", title: "Pipeline", files: ["real.ts"] },
+				attempt: 2,
+				results: [{ test: { key: "one" }, outcome: "fail", failure: { message: "real failure" } }],
+			},
+			ci,
+		);
+		expect(rows("SELECT head_sha, base_sha, title, files FROM changes WHERE key = 'pr:7'")).toEqual([
+			{ head_sha: "older001", base_sha: "realbase", title: "Pipeline", files: '["real.ts"]' },
+		]);
+		expect(gate({ change: "pr:7" }).verdict).toBe("blocked");
+		// And an agent's early sighting of a commit does not make the pipeline's later report of it look old.
+		report(
+			{
+				target: { repo: "app", commit: "early001", pr: 8, branch: "other" },
+				results: [{ test: { key: "agent" }, outcome: "skip" }],
+			},
+			explorer(),
+		);
+		report(
+			{
+				target: { repo: "app", commit: "head0001", pr: 8, branch: "other" },
+				results: [{ test: { key: "one" }, outcome: "pass" }],
+			},
+			ci,
+		);
+		report(
+			{
+				target: { repo: "app", commit: "early001", pr: 8, branch: "other" },
+				results: [{ test: { key: "one" }, outcome: "pass" }],
+			},
+			ci,
+		);
+		expect(first(rows<{ head_sha: string }>("SELECT head_sha FROM changes WHERE key = 'pr:8'")).head_sha).toBe(
+			"early001",
+		);
+	});
+
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {
 		const ci = pipeline();
 		const head = "c2c2c2c200000000000000000000000000000002";
@@ -1888,6 +1972,21 @@ describe("what a caller is told", () => {
 			ok: false,
 			error: { code: "conflict" },
 		});
+	});
+
+	test("a retry is the same request however a client orders the keys of its objects", () => {
+		const cmd = "reordered-request-01";
+		const body = (fields: Record<string, string>) => ({ title: "Ordered", methods: ["human"], fields });
+		const made = h.raw("propose", { cmd, edits: [{ op: "create", body: body({ a: "one", b: "two" }) }] });
+		expect(made.ok).toBe(true);
+		expect(h.raw("propose", { edits: [{ op: "create", body: body({ b: "two", a: "one" }) }], cmd })).toEqual(made);
+		// The order of a list is part of what was asked.
+		const two = (titles: string[]) => ({
+			cmd: "reordered-request-02",
+			edits: titles.map((title) => ({ op: "create", outline: title })),
+		});
+		expect(h.raw("propose", two(["First", "Second"])).ok).toBe(true);
+		expect(h.raw("propose", two(["Second", "First"]))).toMatchObject({ ok: false, error: { code: "conflict" } });
 	});
 
 	test("an instance command sent twice returns its first reply", () => {

@@ -77,7 +77,17 @@ const reused = () => new OpError("conflict", "this command id was already used f
  */
 const changed = () =>
 	new OpError("conflict", "this command id was already used for another request; send new content under a new id");
-const digest = (input: unknown): string => createHash("sha256").update(JSON.stringify(input)).digest("hex");
+/**
+ * The digest of a request: the same for two serialisations of one request. The keys of every object are put in
+ * order first (a client may write a record's keys in any order); the order of a list is part of what was asked.
+ */
+const ordered = (_key: string, value: unknown): unknown => {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+	const out: Record<string, unknown> = {};
+	for (const key of Object.keys(value).sort()) out[key] = (value as Record<string, unknown>)[key];
+	return out;
+};
+const digest = (input: unknown): string => createHash("sha256").update(JSON.stringify(input, ordered)).digest("hex");
 /** Stored in place of a reply that held a secret. */
 const WITHHELD = "(reply not kept: it held a secret)";
 

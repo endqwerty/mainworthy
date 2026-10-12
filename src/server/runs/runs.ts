@@ -271,6 +271,9 @@ const Q = {
 		"UPDATE slot_results SET discounted_by = NULL WHERE slot = $slot AND result = $result AND discounted_by = $decision",
 	),
 	slotsOfResult: sql<{ result: number }, { slot: number }>("SELECT slot FROM slot_results WHERE result = $result"),
+	heldBy: sql<{ slot: number }, { result: number; corrected: number; discounted_by: number | null }>(
+		"SELECT result, corrected, discounted_by FROM slot_results WHERE slot = $slot",
+	),
 	admittedTo: sql<{ slot: number }, { result: number; admitted: string }>(
 		"SELECT result, admitted FROM slot_results WHERE slot = $slot AND corrected = 0 AND discounted_by IS NULL",
 	),
@@ -1262,17 +1265,21 @@ export function reopenRun(ctx: Ctx, run: RunRow, decision: number): void {
 function catchUp(ctx: Ctx, run: RunRow): void {
 	const exercises = obligationsOf(run).filter((o): o is ExerciseObligation => o.kind === "exercise");
 	const slots = ctx.db.all(Q.slotsOfRun, { run: run.id, after: -1, limit: 1_000_000 });
+	// Every row, whatever else is recorded on it: a result a decision set aside can have been corrected too, and
+	// if that decision is withdrawn later the correction must already be known here.
 	for (const slot of slots) {
-		for (const { result } of ctx.db.all(Q.admittedTo, { slot: slot.id })) {
-			if (isWithdrawn(ctx.db, result)) ctx.db.run(Q.correctInSlot, { slot: slot.id, result });
+		for (const held of ctx.db.all(Q.heldBy, { slot: slot.id })) {
+			if (held.corrected === 0 && isWithdrawn(ctx.db, held.result))
+				ctx.db.run(Q.correctInSlot, { slot: slot.id, result: held.result });
 		}
 	}
 	const targets = targetsOfRun(ctx.db, run).map((target) => target.id);
 	if (targets.length > 0) fillFromPrior(ctx, run, exercises, targets);
 	for (const slot of slots) {
-		for (const { result } of ctx.db.all(Q.admittedTo, { slot: slot.id })) {
-			const judged = ctx.db.get(Q.judgedBy, { result });
-			if (judged) ctx.db.run(Q.discount, { slot: slot.id, result, decision: judged.decision });
+		for (const held of ctx.db.all(Q.heldBy, { slot: slot.id })) {
+			if (held.discounted_by !== null) continue;
+			const judged = ctx.db.get(Q.judgedBy, { result: held.result });
+			if (judged) ctx.db.run(Q.discount, { slot: slot.id, result: held.result, decision: judged.decision });
 		}
 		refreshSlot(ctx, slot, exercises.find((o) => o.id === slot.obligation) ?? null);
 	}

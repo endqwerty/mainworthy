@@ -323,8 +323,9 @@ const Q = {
 		 ON CONFLICT (project, signature, scope, target)
 		 DO UPDATE SET decision = excluded.decision, class = excluded.class, expires_at = excluded.expires_at`,
 	),
-	firstSeen: sql<{ project: number; what: string }, { seq: number | null }>(
-		"SELECT min(first_seq) AS seq FROM targets WHERE project = $project AND what = $what",
+	firstCounted: sql<{ project: number; what: string }, { seq: number | null }>(
+		`SELECT min(b.seq) AS seq FROM batches b JOIN targets t ON t.id = b.target
+		 WHERE t.project = $project AND t.what = $what AND b.method != 'agent'`,
 	),
 	// Every target of a commit, with no cap: which results a run counts and which repository a commit belongs
 	// to are decided from this list, and a list cut short would decide them wrongly without saying so.
@@ -417,9 +418,12 @@ function changeKey(db: Db, project: number, key: string, repo: string | null): s
 	return !holder || holder.repo === repo ? key : `${repo ?? "(no repository)"}#${key}`;
 }
 
-/** When a commit was first reported in this project, or null when it never was. */
+/**
+ * When a pipeline or a person first reported a commit in this project, or null when none has. An agent's report
+ * of a commit does not count: the order of a change's commits is the order in which the gates heard of them.
+ */
 const firstSeen = (db: Db, project: number, repo: string | null, commit: string): number | null =>
-	db.get(Q.firstSeen, { project, what: codeWhat(repo, commit) })?.seq ?? null;
+	db.get(Q.firstCounted, { project, what: codeWhat(repo, commit) })?.seq ?? null;
 
 /**
  * Records a change, or moves it to a new head. The head only moves forward: to a commit first reported after the
@@ -430,20 +434,22 @@ const firstSeen = (db: Db, project: number, repo: string | null, commit: string)
 function upsertChange(ctx: Ctx, key: string, input: Extract<TargetIn, { commit: string }>): ChangeRow {
 	const existing = ctx.db.get(Q.change, { project: ctx.project.id, key });
 	// What an agent says about a change is not what the change is: no gate counts its results, so its report
-	// neither moves the head nor rewrites the base, the title or the files. (It can name a change nobody has
-	// reported yet; the first pipeline or person to report then says where its head is.)
-	if (existing && ctx.actor.kind === "agent") return existing;
+	// neither moves the head nor rewrites the base, the title or the files. It can name a change nobody has
+	// reported yet, and then the change has no head: the first pipeline or person to report it says where its
+	// head is, and what its base, title and files are.
+	const advisory = ctx.actor.kind === "agent";
+	if (existing && advisory) return existing;
 	if (!existing) {
 		const { lastId } = ctx.db.run(Q.insertChange, {
 			project: ctx.project.id,
 			key,
 			repo: input.repo ?? null,
-			base: input.base ?? null,
-			head: input.commit,
+			base: advisory ? null : (input.base ?? null),
+			head: advisory ? null : input.commit,
 			branch: input.branch ?? null,
-			title: input.title ?? null,
-			url: input.url ?? null,
-			files: JSON.stringify(input.files ?? []),
+			title: advisory ? null : (input.title ?? null),
+			url: advisory ? null : (input.url ?? null),
+			files: JSON.stringify(advisory ? [] : (input.files ?? [])),
 			rev: ctx.seq,
 		});
 		ctx.touched.add(key);
