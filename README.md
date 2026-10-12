@@ -7,6 +7,13 @@ A test case management system for software QA, built to fix what is annoying abo
 preview: what is missing is listed in [decision 0012](docs/decisions/0012-mvp-scope-and-departures.md) and
 tracked in the GitHub milestone *Backlog to 1.0* (one page of it: issue #64).
 
+![The suite: cases on the left with their proof by person, pipeline and agent; the case as a document on the right](docs/ui/screenshots/suite-light.png)
+
+The other screens, in both themes, are in [docs/ui/screenshots](docs/ui/screenshots): the
+[queue](docs/ui/screenshots/queue-dark.png), a [run](docs/ui/screenshots/runs-light.png), a
+[change](docs/ui/screenshots/changes-light.png), a [case with its diff](docs/ui/screenshots/case-light.png) and
+[settings](docs/ui/screenshots/settings-light.png).
+
 ## Start (no account, no configuration)
 
 ```

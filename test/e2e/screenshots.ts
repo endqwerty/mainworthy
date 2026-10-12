@@ -31,7 +31,7 @@ try {
 				await harness.page.getByRole("region", { name: "Case diff" }).first().waitFor();
 			}
 			await mkdir("docs/ui/screenshots", { recursive: true });
-			await harness.page.screenshot({ path: `docs/ui/screenshots/builder1-${item.name}-${theme}.png` });
+			await harness.page.screenshot({ path: `docs/ui/screenshots/${item.name}-${theme}.png` });
 			console.info(`Saved ${item.name} ${theme}`);
 		}
 	}
