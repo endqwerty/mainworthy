@@ -179,7 +179,7 @@ durability cannot be shown does not carry a record that is supposed to be true.
 
 The engine is one process. One connection writes; reads run on reader threads, each with its own read-only
 connection that sees only what is committed. A write waits its turn at a gate instead of blocking the thread. A
-large report is accepted in one short transaction, then applied in slices of 500 results. Before this was built,
+large report is accepted in one short transaction, then applied in slices of 200 results. Before this was built,
 a 10,000-result report held every read for 0.3 to 0.65 seconds.
 
 ## Risks, and what would expose each early

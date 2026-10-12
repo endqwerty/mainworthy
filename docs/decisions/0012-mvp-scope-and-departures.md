@@ -34,10 +34,13 @@ not the same things done worse.
    the effective result per test (`run_tests`), and the same tally and verdict function read both. A test has one
    row per **lane** (the target, the job and the producer that reported it): a newer attempt in a lane replaces
    the one before it, and nothing from another lane can, so one job's pass never hides another job's failure of
-   the same test, and somebody else's upload never clears a pipeline's. Slots follow the same rule (a pass in
-   one job or environment never replaces a failure in another), keep every cause failing in them, and are
-   excused only when each cause is. A run planned over evidence that already fails joins the questions already
-   asked about those failures, so an answer reaches it and it is never blocked by a failure nobody is asked about.
+   the same test, and somebody else's upload never clears a pipeline's. The same attempt reported twice keeps the
+   worse outcome: only a higher attempt number or an explicit correction clears a failure. Slots follow the same
+   rule (a pass in one job or environment never replaces a failure in another), keep every cause failing in
+   them, and are excused only when each cause is. Each cause is answered in the scope of the target it was seen
+   on, so a run that counts the same commit in two repositories keeps their failures and their answers apart. A
+   run planned over evidence that already fails joins the questions already asked about those failures, so an
+   answer reaches it and it is never blocked by a failure nobody is asked about.
 3. **A test's eligibility for a case comes from the link, not from the case body.** The design had the case
    declare `auto` in `methods`. A link exists only through a `map` decision or the test's own annotation, so
    declaring it again is a second place to maintain (principle P6). Whether a test may fill a given slot is the
@@ -51,13 +54,18 @@ not the same things done worse.
 4. **Two failure answers were added, one replaced.** `inherited` (already failing on the base: the answer the
    loose preset's rule gives, which the design left unnamed) and `mistaken` (a disputed slot: the failing result
    was wrong). `mistaken` replaces the design's `resolve { trust: [...] }`; any other failure answer on a disputed
-   slot also resolves it, by saying what the failure was.
+   slot also resolves it, by saying what the failure was. "Already failing on the base" reads what the base's
+   own gate counts (its effective results, after attempts and corrections), never an agent's result and never
+   another repository's. Where a clause keeps a decision from the producers of the evidence, a producer is
+   anyone who reported a failure with that cause in that scope, and anyone with a result in a slot that disputes
+   it. That is read from the results when the answer is given, so it does not depend on how the question came
+   to be asked (carried from an earlier answer, or asked again).
 5. **Drafts live in the browser.** The design autosaves into a server-side open proposal that others see as
    "draft by Dana". With one user that buys nothing; the draft is kept on the device and survives reload and
    crash (commitment L2), and a sealed proposal goes through the same path as designed. Server-side drafts are
    deferred with presence (#35).
 6. **A report is two transactions, applied in slices.** Acceptance commits first, so every reader sees the gate
-   turn pending before anything is applied (commitment C5); then the batch is applied in slices of 500 results,
+   turn pending before anything is applied (commitment C5); then the batch is applied in slices of 200 results,
    and the server answers reads between slices from a second, read-only connection. Measured before this
    change: a 10,000-result report held the one thread for 0.3 to 0.65 s. Writes queue at a gate; they never
    block the thread. This is the design's horizon made real rather than a departure, but the mechanism
@@ -73,10 +81,16 @@ not the same things done worse.
    about again at once, so the gate of the newest commit is never left blocked by a failure nobody is being asked
    about. (An older commit of the same change that showed the cause stays unexplained and is not asked about
    again: a newer commit has replaced it.) An answer names the evidence its author saw, and that includes the
-   latest build: one prepared before a newer build failed is a conflict. A question
-   about a failure is closed without an answer only when the newest commit shows one of its tests passing;
-   silence (a job that has not reported, a run over other cases) closes nothing. When a hold runs out by the
-   clock, the expiry is a row in the ledger that the next answer supersedes.
+   latest build: one prepared before a newer build failed is a conflict. So one cause can have several answers
+   in force, one per environment. Each stands until it is withdrawn where it was given; a new failure is first
+   checked against all of them, and only what none covers is asked about. A question
+   about a failure is closed without an answer only when nothing that speaks for it still shows the failure (the
+   newest commit's run, and every open planned run the question names) and something shows it gone: one of its
+   tests passing on the newest commit, or a planned run that showed it and no longer does. Silence (a job that
+   has not reported, a run over other cases, a pipeline's pass where the run asked for an agent) closes nothing.
+   When a hold runs out by the clock, the expiry is a row in the ledger that the next answer supersedes. When an
+   answer stops holding, every run that rested on it is recomputed at once and the question asked in its place
+   names them, a run that has since closed included.
 9. **The review basis is the case version plus the change key,** not the patch tree hash. A changed patch under
    the same pull request does not yet invalidate a review. Deferred (#49).
 10. **The export is the whole instance,** as newline-delimited JSON, imported into an empty instance. Per-project

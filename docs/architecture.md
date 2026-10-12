@@ -88,7 +88,7 @@ one gate, because the file has one writer.
 2. **Accept**, first transaction: the results are stored under a key made from their content, so the same
    report twice is a no-op. Every run this commit matters to is marked as waiting. From this commit on, the gate
    reads `pending`: nobody is served the verdict from before the upload.
-3. **Apply**, second transaction, in slices of 500 results, so a ten-thousand-result report does not freeze
+3. **Apply**, second transaction, in slices of 200 results, so a ten-thousand-result report does not freeze
    anyone's screen. For each result: find or create the test; work out the **basis** (exact if a run pinned the
    version or the test names it, assumed at the case's current version if the test is linked to a case,
    unresolved if there is no case; never a silent guess); normalise the failure message into a **signature**, so

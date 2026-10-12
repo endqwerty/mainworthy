@@ -63,6 +63,9 @@ describe("capture", () => {
 		const first = h.call<Proposed>("propose", input);
 		const second = h.call<Proposed>("propose", input);
 		expect(second).toEqual(first);
+		const count = (table: string) =>
+			h.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n;
+		expect([count("cases"), count("versions"), count("proposals"), count("decisions")]).toEqual([1, 1, 1, 1]);
 		expect(h.call<{ count: number }>("find", { in: "folders" }).count).toBe(1);
 	});
 
@@ -159,6 +162,10 @@ describe("organising", () => {
 		const edits = Array.from({ length: 300 }, (_, i) => ({ op: "create", outline: `Case ${i}`, folder: "inbox" }));
 		h.call("propose", { edits });
 		const cases = Array.from({ length: 300 }, (_, i) => `C-${i + 1}`);
+		const count = (table: string) =>
+			h.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n ?? 0;
+		const proposals = count("proposals");
+		const decisions = count("decisions");
 		const before = h.app.db.raw.query<{ seq: number }, []>("SELECT seq FROM projects").get()?.seq ?? 0;
 		const reply = h.call<Proposed>("propose", {
 			edits: [{ op: "place", cases, folder: "checkout/regression", tags: { add: ["regression"] } }],
@@ -166,6 +173,7 @@ describe("organising", () => {
 		expect(reply.status).toBe("adopted");
 		const after = h.app.db.raw.query<{ seq: number }, []>("SELECT seq FROM projects").get()?.seq ?? 0;
 		expect(after).toBe(before + 1);
+		expect([count("proposals") - proposals, count("decisions") - decisions]).toEqual([1, 1]);
 		const found = h.call<{ items: { ref: string; tags: string[] }[] }>("find", {
 			folder: "checkout/regression",
 			limit: 500,

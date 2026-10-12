@@ -594,7 +594,7 @@ export function failuresShown(ctx: Ctx, run: RunRow): { group: FailingGroup; tar
 			const signature = signatureById(ctx.db, cause);
 			if (!signature) continue;
 			// Each cause is asked about in the scope of the target it was seen on.
-			const scope = run.scope ?? scopeOf(mustTarget(ctx.db, seenOn), run.id);
+			const scope = scopeIn(ctx.db, run, seenOn);
 			const key = causeKey(cause, scope);
 			let entry = out.get(key);
 			for (const fill of fills) {
@@ -722,11 +722,27 @@ export function scopeOfRun(db: Db, run: RunRow): string {
 	return target ? scopeOf(target, run.id) : `run:${run.id}`;
 }
 
-/** Whether no newer run exists in this run's scope (the same change, or trunk). A planned run is its own scope. */
-export function isLatestInScope(db: Db, run: RunRow): boolean {
-	if (run.origin !== "change" || run.scope === null) return true;
-	const newest = db.get(Q.newestChangeRun, { project: run.project, scope: run.scope });
-	return (newest?.id ?? run.id) === run.id;
+/** The run of the newest commit in a change's or a line's scope: the one that speaks for the scope. */
+export function newestInScope(db: Db, project: number, scope: string): RunRow | null {
+	const newest = db.get(Q.newestChangeRun, { project, scope })?.id;
+	return newest ? runById(db, newest) : null;
+}
+
+/** The scope in which a failure seen on this target is answered, for this run. */
+const scopeIn = (db: Db, run: RunRow, target: number): string => run.scope ?? scopeOf(mustTarget(db, target), run.id);
+
+/**
+ * Everyone with a result in a slot of this run that shows the cause in this scope: whoever reported the failure
+ * and whoever reported otherwise. They are the parties to a dispute about it.
+ */
+export function partiesTo(db: Db, run: RunRow, signature: number, scope: string): Set<number> {
+	const parties = new Set<number>();
+	for (const slot of db.all(Q.slotsBySignature, { run: run.id, signature })) {
+		const fills = fillsOf(db, slot.id);
+		if (!fills.some((fill) => fill.signature === signature && scopeIn(db, run, fill.target) === scope)) continue;
+		for (const fill of fills) parties.add(fill.actor);
+	}
+	return parties;
 }
 
 export type Retallied = {
@@ -779,13 +795,10 @@ export function failsOnBase(db: Db, target: TargetRow, test: number, signature: 
 }
 
 /**
- * Recomputes a run's tally, the questions blocking it and its verdict from the facts, and stores them. Called in
- * the transaction of every event that can change them: an applied batch, a decision, a withdrawn decision.
- * `blockers` are the open questions about this run.
+ * What a run shows right now: its tally, the causes it shows with no excuse in force, and the decisions its
+ * excused failures rest on. Read from the results and the excuses; nothing is stored.
  */
-export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): Retallied {
-	const run = runById(ctx.db, runId);
-	if (!run) throw new Error(`run ${runId} is missing`);
+function count(db: Db, run: RunRow): { tally: Tally; failing: Set<string>; depends: Map<number, number | null> } {
 	const tally: Tally = emptyTally();
 	const failing = new Set<string>();
 	const depends = new Map<number, number | null>();
@@ -797,7 +810,7 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 		if (run.scope !== null) return run.scope;
 		let found = scopes.get(target);
 		if (found === undefined) {
-			found = scopeOf(mustTarget(ctx.db, target), run.id);
+			found = scopeOf(mustTarget(db, target), run.id);
 			scopes.set(target, found);
 		}
 		return found;
@@ -808,7 +821,7 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 	 * environment of the same commit, stays unexplained until it is answered there.
 	 */
 	const excuseOf = (signature: number, target: number) => {
-		return excuseFor(ctx.db, run.project, signature, scopeFor(target), target);
+		return excuseFor(db, run.project, signature, scopeFor(target), target);
 	};
 
 	const classify = (signature: number | null, target: number, n: number): void => {
@@ -828,14 +841,14 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 	};
 
 	if (run.origin === "change") {
-		for (const row of ctx.db.all(Q.runTestGroups, { run: run.id })) {
+		for (const row of db.all(Q.runTestGroups, { run: run.id })) {
 			if (row.outcome === "pass") tally.pass += row.n;
 			else if (row.outcome === "skip") tally.skipped += row.n;
 			else if (row.outcome === "blocked") tally.missing += row.n;
 			else classify(row.signature, row.target, row.n);
 		}
 	} else {
-		for (const row of ctx.db.all(Q.slotGroups, { run: run.id })) {
+		for (const row of db.all(Q.slotGroups, { run: run.id })) {
 			if (row.state === "satisfied" || row.state === "waived") tally.pass += row.n;
 			else if (row.state === "missing") tally.missing += row.n;
 			else if (row.state === "skipped") {
@@ -844,7 +857,7 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 			}
 		}
 		// A failing or disputed slot counts once, by all of its causes: it is excused only when every one is.
-		for (const slot of ctx.db.all(Q.failingSlots, { run: run.id })) {
+		for (const slot of db.all(Q.failingSlots, { run: run.id })) {
 			const disputed = slot.state === "disputed";
 			const causes = json<Cause[]>(slot.causes);
 			const excuses = causes.map(([signature, target]) => excuseOf(signature, target));
@@ -863,11 +876,26 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 	const jobs = obligationsOf(run).flatMap((o) => (o.kind === "jobs" ? o.jobs : []));
 	if (jobs.length > 0) {
 		const reported = new Set<string>();
-		for (const target of targetsOfRun(ctx.db, run)) {
-			for (const job of processedJobs(ctx.db, target.id)) reported.add(job);
+		for (const target of targetsOfRun(db, run)) {
+			for (const job of processedJobs(db, target.id)) reported.add(job);
 		}
 		tally.missing += jobs.filter((job) => !reported.has(job)).length;
 	}
+	return { tally, failing, depends };
+}
+
+/** The causes a run shows with no excuse in force, by `causeKey`: what an open failure question is about. */
+export const unexplainedIn = (db: Db, run: RunRow): Set<string> => count(db, run).failing;
+
+/**
+ * Recomputes a run's tally, the questions blocking it and its verdict from the facts, and stores them. Called in
+ * the transaction of every event that can change them: an applied batch, a decision, a withdrawn decision.
+ * `blockers` are the open questions about this run.
+ */
+export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): Retallied {
+	const run = runById(ctx.db, runId);
+	if (!run) throw new Error(`run ${runId} is missing`);
+	const { tally, failing, depends } = count(ctx.db, run);
 
 	// The questions whose answers this run is waiting for. A failure question is one of them exactly when this run
 	// shows its cause unexplained: the run is blocked by that failure whatever the policy says a question may hold,
@@ -1038,12 +1066,19 @@ export function reopenRun(ctx: Ctx, run: RunRow, decision: number): void {
  * which each discounted result records. Returns the slot and result pairs, so withdrawing the decision can put
  * them back.
  */
-export function discountFailures(ctx: Ctx, witness: Witness, run: RunRow, signature: number): [number, number][] {
+export function discountFailures(
+	ctx: Ctx,
+	witness: Witness,
+	run: RunRow,
+	signature: number,
+	scope: string,
+): [number, number][] {
 	const decision = decisionOf(witness, "failure");
 	const corrected: [number, number][] = [];
 	for (const slot of ctx.db.all(Q.slotsBySignature, { run: run.id, signature })) {
 		for (const fill of fillsOf(ctx.db, slot.id)) {
-			if (fill.signature !== signature) continue;
+			// Only the failures the question is about: the same cause seen in another repository is another question.
+			if (fill.signature !== signature || scopeIn(ctx.db, run, fill.target) !== scope) continue;
 			ctx.db.run(Q.discount, { slot: slot.id, result: fill.id, decision });
 			corrected.push([slot.id, fill.id]);
 		}

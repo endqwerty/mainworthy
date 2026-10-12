@@ -263,6 +263,9 @@ const Q = {
 		 VALUES ($project, $test, $seq, $ord, $batch, $target, $method, $actor, $basis, $basisCase, $basisVersion, $basisClaim,
 		         $outcome, $attempt, $duration, $signature, $message, $detail, $atStep, $steps, $note, $run, $corrects, $at)`,
 	),
+	producedOn: sql<{ project: number; signature: number; actor: number }, { target: number; run: number | null }>(
+		"SELECT DISTINCT target, run FROM results WHERE project = $project AND signature = $signature AND actor = $actor",
+	),
 	resultById: sql<{ id: number }, ResultRow>("SELECT * FROM results WHERE id = $id"),
 	previousOnTarget: sql<{ target: number; test: number }, { id: number; outcome: Outcome }>(
 		"SELECT id, outcome FROM results WHERE target = $target AND test = $test ORDER BY attempt DESC, id DESC LIMIT 1",
@@ -914,6 +917,17 @@ export const unlinkedInFile = (db: Db, project: number, file: string): TestRow[]
 export const unlinkedCount = (db: Db, project: number): number => db.get(Q.unlinkedCount, { project })?.n ?? 0;
 export const signatureById = (db: Db, id: number): SignatureRow | null => db.get(Q.signatureById, { id });
 export const resultById = (db: Db, id: number): ResultRow | null => db.get(Q.resultById, { id });
+
+/**
+ * Where an actor has reported a failure with this cause: each target, and the run it was typed into if any. Read
+ * from the results themselves, so it is complete however the question about the cause came to be asked.
+ */
+export const producedCause = (
+	db: Db,
+	project: number,
+	signature: number,
+	actor: number,
+): { target: number; run: number | null }[] => db.all(Q.producedOn, { project, signature, actor });
 export const lastResultsOfTest = (db: Db, project: number, test: number, limit: number): ResultRow[] =>
 	db.all(Q.lastOfTest, { project, test, limit });
 /**

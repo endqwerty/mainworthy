@@ -1,6 +1,7 @@
 // The HTTP surface on a real listener: who gets in, in each mode, and that every operation is there.
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
@@ -18,9 +19,9 @@ afterEach(async () => {
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function boot(mode: Config["mode"], ownerToken: string | null = null): Instance {
-	const dataDir = mkdtempSync(join(tmpdir(), "casebook-http-"));
-	dirs.push(dataDir);
+function boot(mode: Config["mode"], ownerToken: string | null = null, existing?: string): Instance {
+	const dataDir = existing ?? mkdtempSync(join(tmpdir(), "casebook-http-"));
+	if (!existing) dirs.push(dataDir);
 	const instance = start({ dataDir, host: "127.0.0.1", port: 0, mode, owner: "daniel", ownerToken }, () => ({
 		ui: null,
 	}));
@@ -324,8 +325,15 @@ describe("server mode", () => {
 
 	test("with no token configured, one is generated on first start and only then", async () => {
 		const instance = boot("server");
-		expect(instance.generatedToken).toMatch(/^cb_[0-9A-Za-z]{32}$/);
-		expect((await post(instance, "/api/p/scratch/find", {}, bearer(instance.generatedToken ?? ""))).status).toBe(200);
+		const token = instance.generatedToken ?? "";
+		expect(token).toMatch(/^cb_[0-9A-Za-z]{32}$/);
+		expect((await post(instance, "/api/p/scratch/find", {}, bearer(token))).status).toBe(200);
+		// The same data directory started again: no second token, and the first one still opens the door.
+		await instance.stop();
+		const again = boot("server", null, instance.app.config.dataDir);
+		expect(again.generatedToken).toBeNull();
+		expect((await post(again, "/api/p/scratch/find", {}, bearer(token))).status).toBe(200);
+		expect(again.app.db.raw.query("SELECT count(*) AS n FROM tokens").get()).toEqual({ n: 1 });
 	});
 
 	test("a token carries its actor's capabilities and nothing more", async () => {
@@ -580,20 +588,37 @@ describe("request size", () => {
 		const big = new Uint8Array(65 * 1024 * 1024).fill(32);
 		const declared = await fetch(`${instance.url}/api/p/scratch/find`, { method: "POST", headers, body: big });
 		expect(declared.status).toBe(413);
-		// the same size streamed with no Content-Length: counted while reading
-		let sent = 0;
-		const stream = new ReadableStream<Uint8Array>({
-			pull(controller) {
-				if (sent >= 65) return controller.close();
-				sent++;
-				controller.enqueue(new Uint8Array(1024 * 1024).fill(32));
-			},
+		// The same size streamed with no Content-Length: counted while reading. Sent over a plain socket, so the
+		// status is the one the server wrote and not a guess made when a client library gives up on the upload.
+		const { hostname, port } = new URL(instance.url);
+		const streamed = await new Promise<string>((resolve) => {
+			const socket = connect(Number(port), hostname);
+			let reply = "";
+			// One megabyte as one chunk of a chunked body, written whole so the framing survives backpressure.
+			const megabyte = Buffer.alloc(1024 * 1024, 32);
+			const chunk = Buffer.concat([Buffer.from(`${megabyte.length.toString(16)}\r\n`), megabyte, Buffer.from("\r\n")]);
+			let sent = 0;
+			const send = (): void => {
+				while (sent < 65 && !socket.destroyed) {
+					sent++;
+					if (!socket.write(chunk)) return void socket.once("drain", send);
+				}
+				if (!socket.destroyed) socket.write("0\r\n\r\n");
+			};
+			socket.on("error", () => {}); // the server may reset the connection once it has answered
+			socket.on("data", (chunk) => {
+				reply += chunk.toString("latin1");
+			});
+			socket.on("close", () => resolve(reply.split("\r\n")[0] ?? ""));
+			socket.on("connect", () => {
+				socket.write(
+					`POST /api/p/scratch/find HTTP/1.1\r\nHost: ${hostname}:${port}\r\nContent-Type: application/json\r\n` +
+						"Authorization: Bearer owner-secret-0123456789\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+				);
+				send();
+			});
 		});
-		const streamed = await fetch(`${instance.url}/api/p/scratch/find`, { method: "POST", headers, body: stream }).then(
-			(response) => response.status,
-			() => 413, // the server may close the connection before the client finishes sending
-		);
-		expect(streamed).toBe(413);
+		expect(streamed).toBe("HTTP/1.1 413 Payload Too Large");
 		const login = await fetch(`${instance.url}/api/login`, {
 			method: "POST",
 			body: JSON.stringify({ token: "x".repeat(10_000) }),

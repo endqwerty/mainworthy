@@ -27,18 +27,18 @@ import { clauseFor, currentPolicy } from "../policy/policy.ts";
 import {
 	type Blocker,
 	causeKey,
-	findRun,
-	isLatestInScope,
+	newestInScope,
 	passesAny,
 	type RunRow,
 	retally,
 	runById,
 	runRef,
 	runsDependingOn,
-	scopeOfRun,
+	unexplainedIn,
 } from "../runs/runs.ts";
-import { HANDLERS } from "./kinds.ts";
+import { HANDLERS, runsAbout } from "./kinds.ts";
 import {
+	alsoAbout,
 	answersOf,
 	attachEvidence,
 	type DecisionRow,
@@ -49,6 +49,7 @@ import {
 	insertDecision,
 	insertQuestion,
 	latestByFingerprint,
+	liveByFingerprint,
 	mustQuestion,
 	noteCarried,
 	openQuestionsOn,
@@ -116,11 +117,15 @@ function blockedRuns(blocks: Blocks, runs: Raise["runs"]): number[] {
 }
 
 /**
- * The one way a question comes to exist. Looks up the latest question for this cause and then:
- * none: opens one; open: attaches the new occurrence; decided and the decision still holds: carries the answer
- * forward (no new question); decided and it no longer holds: withdraws that standing and asks again, with the old
- * answer linked. If the policy's clause for the question is a rule, the rule answers at once and the decision is
- * recorded like any other.
+ * The one way a question comes to exist. Looks at what is already asked and decided about this cause and then:
+ * nothing: opens a question; a decision that still holds for this occurrence: carries the answer forward (no new
+ * question); an open question: attaches the occurrence; otherwise asks again, with the old answer linked. A
+ * decision that no longer holds is withdrawn on the way, and every run that rested on it is recomputed. If the
+ * policy's clause for the question is a rule, the rule answers at once and the decision is recorded like any other.
+ *
+ * A cause can have more than one answer in force. One that holds for certain targets (an infrastructure failure
+ * in one environment) leaves the cause open elsewhere, where it is asked and answered on its own. So every
+ * standing decision about the cause is looked at, never only the newest question's.
  */
 export function raise(ctx: Ctx, r: Raise): Raised {
 	const fingerprint = contentHash({ kind: r.kind, key: r.key });
@@ -132,9 +137,30 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 	const hash = seenHash(basis, r.target);
 	const latest = latestByFingerprint(ctx.db, ctx.project.id, fingerprint);
 	if (!latest) return open(ctx, r, fingerprint, hash, basis, 0, null);
-	if (latest.state === "open") {
+	const occurrence = { hash: basis, target: r.target, facts: r.facts, now: ctx.now };
+	const standing = standingOn(ctx, fingerprint);
+	for (const { question, decision } of standing) {
+		if (!stillHolds(decision, occurrence)) continue;
+		noteCarried(ctx, question, r.refs);
+		return { s: "carried", question, decision };
+	}
+	// A decision that covers certain targets still stands on those when the cause turns up on another one: the
+	// new occurrence is asked about, and what was decided where it was decided is left as it is. Any other way
+	// of no longer holding (the evidence changed, the time ran out, a fact is gone) withdraws its standing.
+	const rested: number[] = [];
+	let ended: QuestionRow | null = null;
+	for (const { question, decision } of standing) {
+		if (stillHolds(decision, occurrence, { anyTarget: true })) continue;
+		HANDLERS[question.kind].revert(ctx, question, decision);
+		lapse(ctx, question, decision, occurrence.now);
+		rested.push(...runsDependingOn(ctx.db, decision.id));
+		ended ??= question;
+	}
+	const joined = openFor(ctx.db, ctx.project.id, fingerprint, r.target);
+	let raised: Raised;
+	if (joined) {
 		const clause = clauseFor(currentPolicy(ctx.db, ctx.project.id), { kind: r.kind, facts: new Set(r.facts) });
-		const question = attachEvidence(ctx, latest, {
+		const question = attachEvidence(ctx, joined, {
 			title: r.title,
 			evidence: stored(r),
 			hash,
@@ -144,26 +170,47 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 		});
 		if (clause.ask.who === "rule" && !heldOpen(ctx, question, basis)) {
 			setQuestionAsk(ctx, question, clause.ask);
-			return settleByRule(ctx, question, clause.id, clause.answer);
-		}
-		return { s: "attached", question };
+			raised = settleByRule(ctx, question, clause.id, clause.answer);
+		} else raised = { s: "attached", question };
+	} else {
+		// Asked again. It follows the question whose answer just ended, so that answer's chain runs on through it.
+		raised = open(ctx, r, fingerprint, hash, basis, latest.epoch + 1, (ended ?? latest).id);
 	}
-	if (latest.state === "decided" && latest.decision !== null) {
-		const decision = decisionById(ctx.db, latest.decision);
-		const occurrence = { hash: basis, target: r.target, facts: r.facts, now: ctx.now };
-		if (decision && stillHolds(decision, occurrence)) {
-			noteCarried(ctx, latest, r.refs);
-			return { s: "carried", question: latest, decision };
-		}
-		// A decision that covers certain targets still stands on those when the cause turns up on another one: the
-		// new occurrence is asked about, and what was decided where it was decided is left as it is. Any other way
-		// of no longer holding (the evidence changed, the time ran out, a fact is gone) withdraws its standing.
-		if (decision && !stillHolds(decision, occurrence, { anyTarget: true })) {
-			HANDLERS[latest.kind].revert(ctx, latest, decision);
-			lapse(ctx, latest, decision, occurrence.now);
-		}
+	// The runs that counted a failure as excused by a decision withdrawn above: an earlier commit of the change,
+	// a run planned on it, a run since closed. The question asked in its place names them, and they are recomputed
+	// now: none is left reading `passed` on an answer that no longer stands, or blocked with nobody asked.
+	if (rested.length > 0) {
+		const named = rested.flatMap((id) => {
+			const run = runById(ctx.db, id);
+			return run ? [runRef(run)] : [];
+		});
+		alsoAbout(ctx, raised.question, named);
+		refold(ctx, rested);
 	}
-	return open(ctx, r, fingerprint, hash, basis, latest.epoch + 1, latest.id);
+	return raised;
+}
+
+/** The decisions in force about a cause, newest question first. */
+function standingOn(ctx: Ctx, fingerprint: string): { question: QuestionRow; decision: DecisionRow }[] {
+	return liveByFingerprint(ctx.db, ctx.project.id, fingerprint).flatMap((question) => {
+		const decision =
+			question.state === "decided" && question.decision !== null ? decisionById(ctx.db, question.decision) : null;
+		return decision ? [{ question, decision }] : [];
+	});
+}
+
+/**
+ * The open question a new occurrence of a cause joins: the one that has already seen this target, else the
+ * newest. Usually there is at most one; two when an answer for one environment was withdrawn while the other
+ * environment's question is still open.
+ */
+export function openFor(db: Db, project: number, fingerprint: string, target: number | undefined): QuestionRow | null {
+	const opened = liveByFingerprint(db, project, fingerprint).filter((question) => question.state === "open");
+	const seenHere =
+		target === undefined
+			? undefined
+			: opened.find((question) => (json<{ targets?: number[] }>(question.evidence).targets ?? []).includes(target));
+	return seenHere ?? opened[0] ?? null;
 }
 
 const seenHash = (basis: string, target: number | undefined): string => contentHash({ basis, target: target ?? null });
@@ -344,7 +391,8 @@ export function answer(
 		actor: ctx.actor,
 		ask,
 		isAuthor: HANDLERS[question.kind].isAuthor(ctx, question),
-		isProducer: HANDLERS[question.kind].isProducer(ctx, question),
+		// Read from the results, and only where the clause asks: most clauses do not.
+		isProducer: ask.notProducer && HANDLERS[question.kind].isProducer(ctx, question),
 	});
 	if (standing === "forbidden") return reply(question, "forbidden", { needs: describeAsk(ask) });
 	if (ask.reason === "required" && !input.reason?.trim()) return reply(question, "invalid", { needs: "a reason" });
@@ -373,13 +421,18 @@ export function answer(
 
 /**
  * A question that was asked again after its decision stopped holding is history: the newer question is the one to
- * answer or to undo. Answering the old one would decide the same cause twice.
+ * answer or to undo. Answering the old one would decide the same cause twice. A question that is open, or whose
+ * decision is still in force, is answered and undone where it is, even when the cause has since been asked about
+ * for another target: that question is about the other target, and its answer is not this one's.
  */
 function askedAgain(ctx: Ctx, question: QuestionRow): string | null {
+	if (question.state === "open") return null;
 	const latest = latestByFingerprint(ctx.db, ctx.project.id, question.fingerprint);
-	return latest && latest.id !== question.id
-		? `this question was asked again as ${questionRef(latest)}; answer that one`
-		: null;
+	if (!latest || latest.id === question.id) return null;
+	const inForce = liveByFingerprint(ctx.db, ctx.project.id, question.fingerprint).some(
+		(live) => live.id === question.id,
+	);
+	return inForce ? null : `this question was asked again as ${questionRef(latest)}; answer that one`;
 }
 
 /**
@@ -402,11 +455,10 @@ function settle(
 			supersedes = prior.id;
 		}
 	} else {
-		// A reopened question: the new decision follows the last row in its ledger (a withdrawal or an expiry), or
-		// for a question asked again after its hold ended, the decision of the question before it.
-		supersedes =
-			decisionsOf(ctx.db, question.id).at(-1)?.id ??
-			(question.prior !== null ? (questionById(ctx.db, question.prior)?.decision ?? null) : null);
+		// A reopened question: the new decision follows the last row in its ledger (a withdrawal or an expiry). For
+		// a question asked again after its hold ended, it follows the row that says so on the question before it. One
+		// asked again because the earlier answer covered other targets supersedes nothing: that answer still stands.
+		supersedes = decisionsOf(ctx.db, question.id).at(-1)?.id ?? endedBefore(ctx, question);
 	}
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	const holds = handler.holds({ question, answer: given, now: ctx.now, policy });
@@ -422,46 +474,98 @@ function settle(
 	setDecisionEffects(ctx, decision.id, effects);
 	const about = runsAbout(ctx, question);
 	if (Array.isArray(effects.reask) && effects.reask.length > 0) askAgain(ctx, question, effects.reask as number[]);
+	about.push(...answeredElsewhere(ctx, question, decision));
 	refold(ctx, [...about, ...(supersedes !== null ? runsDependingOn(ctx.db, supersedes) : [])]);
 	return { decision: { ...decision, effects: JSON.stringify(effects) }, effects };
 }
 
+/** The row that ended the answer of the question this one was asked after, if it was asked for that reason. */
+function endedBefore(ctx: Ctx, question: QuestionRow): number | null {
+	const before = question.prior !== null ? questionById(ctx.db, question.prior) : null;
+	const last = before?.decision != null ? decisionById(ctx.db, before.decision) : null;
+	const is = last ? json<{ is?: string }>(last.answer).is : undefined;
+	return last && (is === "expired" || is === "outdated") ? last.id : null;
+}
+
+/**
+ * Closes the other open questions about the same cause that this decision has just answered: every target they
+ * had seen the cause on is now covered. Nobody is left asked about something that has a valid answer. Returns the
+ * runs those questions named, to be recomputed.
+ */
+function answeredElsewhere(ctx: Ctx, question: QuestionRow, decision: DecisionRow): number[] {
+	const runs: number[] = [];
+	for (const other of liveByFingerprint(ctx.db, ctx.project.id, question.fingerprint)) {
+		if (other.id === question.id || other.state !== "open") continue;
+		const seen = json<{ facts?: string[]; targets?: number[]; targetId?: number }>(other.evidence);
+		const targets = seen.targets ?? (seen.targetId !== undefined ? [seen.targetId] : []);
+		const covered =
+			targets.length > 0 &&
+			targets.every((target) =>
+				stillHolds(decision, { hash: other.basis, target, facts: seen.facts ?? [], now: ctx.now }),
+			);
+		if (!covered) continue;
+		runs.push(...runsAbout(ctx, other));
+		setQuestionState(ctx, other, "dissolved", null);
+	}
+	return runs;
+}
+
 /**
  * Opens the question again for targets its decision did not cover. The new question follows the decided one
- * (`prior`), shows the same evidence and holds the same runs, so the person who answered for one environment is
- * asked about the other with their first answer in view.
+ * (`prior`) and shows the same evidence, so the person who answered for one environment is asked about the other
+ * with their first answer in view. It names the runs that still show the cause unexplained, and no others. A
+ * target that another answer in force already covers, or that an open question about this cause already lists,
+ * is not asked about a second time.
  */
 function askAgain(ctx: Ctx, question: QuestionRow, targets: readonly number[]): void {
-	const latest = targets.at(-1);
-	if (latest === undefined) return;
 	const {
 		facts,
 		targetId: _decided,
 		...shown
 	} = json<Record<string, unknown> & { facts?: string[] }>(question.evidence);
-	const runs = json<number[]>(question.blocks).flatMap((id) => {
+	const others = liveByFingerprint(ctx.db, ctx.project.id, question.fingerprint).filter(
+		(other) => other.id !== question.id,
+	);
+	const pending = targets.filter(
+		(target) =>
+			!others.some((other) => {
+				if (other.state === "open")
+					return (json<{ targets?: number[] }>(other.evidence).targets ?? []).includes(target);
+				const decision = other.decision !== null ? decisionById(ctx.db, other.decision) : null;
+				return (
+					decision !== null && stillHolds(decision, { hash: question.basis, target, facts: facts ?? [], now: ctx.now })
+				);
+			}),
+	);
+	const latest = pending.at(-1);
+	if (latest === undefined) return;
+	const subject = json<Record<string, unknown> & { signature?: number; scope?: string }>(question.subject);
+	const key =
+		subject.signature !== undefined && subject.scope !== undefined ? causeKey(subject.signature, subject.scope) : null;
+	const runs = runsAbout(ctx, question).flatMap((id) => {
 		const run = runById(ctx.db, id);
-		return run ? [run] : [];
+		return run && (key === null || unexplainedIn(ctx.db, run).has(key)) ? [run] : [];
 	});
+	const newest = latestByFingerprint(ctx.db, ctx.project.id, question.fingerprint) ?? question;
 	open(
 		ctx,
 		{
 			kind: question.kind,
 			key: "",
-			subject: json<Record<string, unknown>>(question.subject),
+			subject,
 			title: question.title,
 			producer: question.producer,
-			evidence: { ...shown, targets: [...targets] },
+			evidence: { ...shown, targets: pending },
 			material: null,
 			facts: facts ?? [],
-			refs: refsOf(ctx.db, question.id),
+			refs: [...refsOf(ctx.db, question.id).filter((about) => !/^R-\d+$/.test(about)), ...runs.map(runRef)],
 			runs,
 			target: latest,
 		},
 		question.fingerprint,
 		seenHash(question.basis, latest),
 		question.basis,
-		question.epoch + 1,
+		newest.epoch + 1,
 		question.id,
 	);
 }
@@ -504,20 +608,6 @@ export function undo(ctx: Ctx, input: { q: string; reason: string | undefined })
 // ── Keeping runs in step ───────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The runs a question is about: every run it names, whether or not it blocks them. A decision on a failure changes
- * how those runs count the failure even where policy lets the run proceed.
- */
-function runsAbout(ctx: Ctx, question: QuestionRow): number[] {
-	const ids = new Set(json<number[]>(question.blocks));
-	for (const about of refsOf(ctx.db, question.id)) {
-		if (!/^R-\d+$/.test(about)) continue;
-		const run = findRun(ctx.db, ctx.project.id, about);
-		if (run) ids.add(run.id);
-	}
-	return [...ids];
-}
-
-/**
  * Recomputes the given runs and acts on what follows: a planned run that has just passed gets its sign-off
  * question (which a rule may answer and so close the run).
  */
@@ -526,7 +616,7 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 		const existing = runById(ctx.db, id);
 		if (!existing) continue;
 		const result = retally(ctx, id, blockersOf(ctx, existing));
-		if (options.dissolveStale) dissolveStale(ctx, result.run, result.failing);
+		if (options.dissolveStale) dissolveStale(ctx, result.run);
 		if (!result.wantsSignoff) continue;
 		const run = result.run;
 		raise(ctx, {
@@ -557,30 +647,66 @@ function blockersOf(ctx: Ctx, run: RunRow): Blocker[] {
 
 /**
  * A failure question about a cause that stopped failing is closed as dissolved: nobody should be asked why
- * something failed after it passed. The question and its history remain.
- *
- * Absence is not proof. In a change's or trunk's scope the question is dissolved only when the newest commit's run
- * shows one of the question's own tests passing: a newer commit whose failing job has not reported yet, or a
- * report that holds only an agent's results, says nothing about it. A planned run that shares a change's scope
- * never dissolves that scope's questions; a run that is its own scope does, when its slots no longer show the cause.
+ * something failed after it passed. The question and its history remain. Called for each run a report counted
+ * toward, about the questions that name the run or its scope.
  */
-function dissolveStale(ctx: Ctx, run: RunRow, failing: ReadonlySet<string>): void {
-	const scope = scopeOfRun(ctx.db, run);
-	const own = run.origin === "change" || scope === `run:${run.id}`;
-	// Only the newest run of a scope speaks for it: a late report for an older commit must not close a question
-	// that the current commit still raises.
-	if (!own || !isLatestInScope(ctx.db, run)) return;
-	for (const open of openQuestionsOn(ctx.db, ctx.project.id, `scope:${scope}`)) {
-		const question = questionById(ctx.db, open.id);
-		if (question?.kind !== "failure") continue;
-		const subject = json<{ signature: number; scope: string }>(question.subject);
-		if (subject.scope !== scope || failing.has(causeKey(subject.signature, subject.scope))) continue;
-		if (run.origin === "change") {
-			const tests = (json<{ tests?: { id: number }[] }>(question.evidence).tests ?? []).map((test) => test.id);
-			if (!passesAny(ctx.db, run.id, tests)) continue;
+function dissolveStale(ctx: Ctx, run: RunRow): void {
+	const candidates = new Set<number>();
+	for (const about of [runRef(run), ...(run.scope !== null ? [`scope:${run.scope}`] : [])]) {
+		for (const open of openQuestionsOn(ctx.db, ctx.project.id, about)) {
+			if (open.kind === "failure") candidates.add(open.id);
 		}
-		setQuestionState(ctx, question, "dissolved", null);
 	}
+	const shown = new Map<number, Set<string>>();
+	for (const id of candidates) {
+		const question = questionById(ctx.db, id);
+		if (question?.state !== "open" || !stoppedFailing(ctx, question, shown)) continue;
+		setQuestionState(ctx, question, "dissolved", null);
+		// A run that listed this question among those it waits for is recomputed without it.
+		for (const about of runsAbout(ctx, question)) {
+			const named = runById(ctx.db, about);
+			if (named && json<string[]>(named.blocking).includes(questionRef(question)))
+				retally(ctx, named.id, blockersOf(ctx, named));
+		}
+	}
+}
+
+/**
+ * Has the cause of this question stopped failing everywhere that speaks for it? Two kinds of run speak: the run
+ * of the newest commit in the question's scope (an older commit's late report says nothing about the current
+ * one), and every open planned run the question names. None of them may still show the cause unexplained: a
+ * question is never closed while a run it would unblock is blocked by it. A planned run counts what it asked for,
+ * so a pipeline's pass does not clear a slot that asked for an agent.
+ *
+ * And absence is not proof. Something must show the failure gone: one of the question's own tests passing in the
+ * newest commit's run (a newer commit whose failing job has not reported yet says nothing), or a planned run
+ * that showed the cause and no longer does, which only a newer attempt, a correction or a decision can bring about.
+ */
+function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number, Set<string>>): boolean {
+	const subject = json<{ signature: number; scope: string }>(question.subject);
+	const key = causeKey(subject.signature, subject.scope);
+	const shows = (run: RunRow): boolean => {
+		let causes = shown.get(run.id);
+		if (!causes) {
+			causes = unexplainedIn(ctx.db, run);
+			shown.set(run.id, causes);
+		}
+		return causes.has(key);
+	};
+	let gone = false;
+	const newest = newestInScope(ctx.db, ctx.project.id, subject.scope);
+	if (newest) {
+		if (shows(newest)) return false;
+		const tests = (json<{ tests?: { id: number }[] }>(question.evidence).tests ?? []).map((test) => test.id);
+		gone = passesAny(ctx.db, newest.id, tests);
+	}
+	for (const id of runsAbout(ctx, question)) {
+		const run = runById(ctx.db, id);
+		if (run?.origin !== "planned" || run.state !== "open") continue;
+		if (shows(run)) return false;
+		gone = true;
+	}
+	return gone;
 }
 
 /**
@@ -671,6 +797,6 @@ export function mayAnswer(ctx: Ctx, row: QuestionRow): "counts" | "advice" | "fo
 		actor: ctx.actor,
 		ask: ask.who === "rule" ? { ...ask, who: "member" } : ask,
 		isAuthor: handler.isAuthor(ctx, row),
-		isProducer: handler.isProducer(ctx, row),
+		isProducer: ask.notProducer && handler.isProducer(ctx, row),
 	});
 }

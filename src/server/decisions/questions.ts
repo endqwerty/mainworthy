@@ -77,6 +77,15 @@ const Q = {
 	latest: sql<{ project: number; fingerprint: string }, QuestionRow>(
 		"SELECT * FROM questions WHERE project = $project AND fingerprint = $fingerprint ORDER BY epoch DESC LIMIT 1",
 	),
+	// The questions of one cause that are open or whose decision is in force. A decision that stopped holding left
+	// a row saying so (`expired`, `outdated`) as its question's decision: that question is history.
+	live: sql<{ project: number; fingerprint: string }, QuestionRow>(
+		`SELECT q.* FROM questions q LEFT JOIN decisions d ON d.id = q.decision
+		 WHERE q.project = $project AND q.fingerprint = $fingerprint
+		   AND (q.state = 'open' OR (q.state = 'decided' AND d.id IS NOT NULL
+		        AND json_extract(d.answer, '$.is') NOT IN ('expired', 'outdated', 'withdrawn')))
+		 ORDER BY q.epoch DESC, q.id DESC`,
+	),
 	byNo: sql<{ project: number; no: number }, QuestionRow>(
 		"SELECT * FROM questions WHERE project = $project AND no = $no",
 	),
@@ -210,6 +219,13 @@ export const questionRef = (row: { no: number }): string => ref("question", row.
 export const latestByFingerprint = (db: Db, project: number, fingerprint: string): QuestionRow | null =>
 	db.get(Q.latest, { project, fingerprint });
 
+/**
+ * Every question about a cause that is open or decided with the decision still in force, newest first. Usually
+ * one. More when an answer held for certain targets only and the cause was asked about again for the others.
+ */
+export const liveByFingerprint = (db: Db, project: number, fingerprint: string): QuestionRow[] =>
+	db.all(Q.live, { project, fingerprint });
+
 export const questionById = (db: Db, id: number): QuestionRow | null => db.get(Q.byId, { id });
 
 export function mustQuestion(db: Db, project: number, text: string): QuestionRow {
@@ -283,6 +299,11 @@ export function attachEvidence(
 	for (const about of input.refs) ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id });
 	ctx.touched.add(questionRef(question));
 	return questionById(ctx.db, question.id) ?? question;
+}
+
+/** Adds things a question is about, so each of them lists it. */
+export function alsoAbout(ctx: Ctx, question: QuestionRow, refs: readonly string[]): void {
+	for (const about of refs) ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id });
 }
 
 export function noteCarried(ctx: Ctx, question: QuestionRow, refs: readonly string[]): void {

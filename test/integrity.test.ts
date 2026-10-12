@@ -942,6 +942,152 @@ describe("what a decision may change", () => {
 		expect(ledger.map((row) => JSON.parse(row.answer).is)).toEqual(["flaky", "expired", "defect"]);
 		expect(ledger.map((row) => row.supersedes)).toEqual([null, ledger[0]?.id ?? -1, ledger[1]?.id ?? -1]);
 	});
+
+	test("a pipeline's pass does not close the question about a failure a planned run still shows", () => {
+		seed(1, ["human", "agent"]);
+		const agent = h.actor("agent", "agent", ["read", "produce"]);
+		const pipeline = h.actor("pipeline", "ci", ["read", "produce"]);
+		const planned = plan({
+			name: "Agent run",
+			select: {},
+			accepts: { commit: "agentq01" },
+			require: exercise(["agent"]),
+		});
+		const target = { commit: "agentq01", branch: "main" };
+		const one = { test: { key: "one" }, annotation: { case: "C-1", version: 1 } };
+		report({ target, results: [{ ...one, outcome: "fail", failure: { message: "same cause" } }] }, agent);
+		const question = open("failure");
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [question.q] });
+		// The pipeline's result cannot fill a slot that asked for an agent, so the run still shows the failure.
+		report({ target, results: [{ ...one, outcome: "pass" }] }, pipeline);
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [question.q] });
+		expect(open("failure").q).toBe(question.q);
+		expect(decide(open("failure"), { is: "flaky" }).status).toBe("decided");
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
+	test("the question about an agent's failure closes when the agent's next attempt passes", () => {
+		seed(1, ["human", "agent"]);
+		const agent = h.actor("agent", "agent", ["read", "produce"]);
+		const planned = plan({
+			name: "Agent run",
+			select: {},
+			accepts: { commit: "agentq02" },
+			require: exercise(["agent"]),
+		});
+		const target = { commit: "agentq02", branch: "main" };
+		const one = { test: { key: "one" }, annotation: { case: "C-1", version: 1 } };
+		report({ target, results: [{ ...one, outcome: "fail", failure: { message: "same cause" } }] }, agent);
+		expect(gate({ run: planned.run }).verdict).toBe("blocked");
+		report({ target, attempt: 2, results: [{ ...one, outcome: "pass" }] }, agent);
+		expect(h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items).toEqual([]);
+		expect(rows("SELECT state FROM questions WHERE kind = 'failure'")).toEqual([{ state: "dissolved" }]);
+		expect(gate({ run: planned.run }).open).toEqual([]);
+	});
+
+	test("an answer for one environment still stands after the other environment was asked about", () => {
+		const target = (env: string) => ({ commit: "twoenv01", branch: "main", env });
+		const failing = { test: { key: "one" }, outcome: "fail", failure: { message: "same cause" } };
+		for (const env of ["staging", "production"]) report({ target: target(env), results: [failing] });
+		const production = open("failure");
+		expect(decide(production, { is: "infra" }).status).toBe("decided");
+		const staging = open("failure");
+		expect(staging.q).not.toBe(production.q);
+		expect(decide(staging, { is: "infra" }).status).toBe("decided");
+		expect(gate({ commit: "twoenv01" }).verdict).toBe("passed");
+
+		// The same cause in production again: it was decided there, and nobody is asked a second time.
+		const later = report({ target: target("production"), attempt: 2, results: [failing] });
+		expect(later.questions.map((q) => [q.q, q.how])).toEqual([[production.q, "already decided"]]);
+		expect(h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items).toEqual([]);
+		expect(later.gate?.verdict).toBe("passed");
+
+		// It is withdrawn where it was made, and only production is open again.
+		const undone = first(h.call<DecideReply[]>("decide", { undo: production.q }));
+		expect(undone.status).toBe("reopened");
+		expect(gate({ commit: "twoenv01" })).toMatchObject({ verdict: "blocked", open: [production.q] });
+		expect(rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 1 }]);
+		// Answered again, it does not ask about staging a second time: staging's answer stands.
+		expect(decide(open("failure"), { is: "infra" }).status).toBe("decided");
+		expect(h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items).toEqual([]);
+		expect(gate({ commit: "twoenv01" }).verdict).toBe("passed");
+		expect(rows("SELECT count(*) AS n FROM questions WHERE kind = 'failure'")).toEqual([{ n: 2 }]);
+	});
+
+	test("whoever reported the failure cannot settle the dispute about it, whoever raised the dispute", () => {
+		usePolicy("standard");
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "First" },
+				{ op: "create", outline: "Second" },
+			],
+		});
+		const planned = plan({ name: "Keep open", select: {} });
+		const other = h.actor("other", "human", ["read", "produce", "answer"]);
+		const third = h.actor("third", "human", ["read", "produce", "answer"]);
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "fail", note: "same failure" }] });
+		decide(open("failure"), { is: "flaky" });
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, other);
+		const dispute = open("failure");
+		expect((dispute.evidence as { hints: string[] }).hints).toContain("disputed");
+		// The owner reported the failure, the other member the pass: neither may say which of them was wrong.
+		expect(decide(dispute, { is: "mistaken" }).status).toBe("forbidden");
+		expect(decide(dispute, { is: "mistaken" }, other).status).toBe("forbidden");
+		expect(rows("SELECT count(*) AS n FROM slot_results WHERE discounted_by IS NOT NULL")).toEqual([{ n: 0 }]);
+		expect(decide(dispute, { is: "mistaken" }, third).status).toBe("decided");
+	});
+
+	test("a producer whose failure took on an existing answer cannot replace that answer", () => {
+		usePolicy("strict");
+		const one = h.actor("one", "human", ["read", "produce", "answer"]);
+		const two = h.actor("two", "human", ["read", "produce", "answer"]);
+		const results = [{ test: { key: "one" }, outcome: "fail", failure: { message: "same failure" } }];
+		report({ target: { commit: "carry001", branch: "main" }, results }, one);
+		expect(decide(open("failure"), { is: "flaky" }, h.owner, { reason: "seen before" }).status).toBe("decided");
+		report({ target: { commit: "carry001", branch: "main" }, job: "other", results }, two);
+		const decided = open("failure", "decided");
+		expect(decide(decided, { is: "infra" }, two, { reason: "it is mine" }).status).toBe("forbidden");
+		expect(decide(decided, { is: "infra" }, one, { reason: "it is mine" }).status).toBe("forbidden");
+		expect(rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure'")).toHaveLength(1);
+	});
+
+	test("when a carried answer stops holding, every run that rested on it is recomputed", () => {
+		seed();
+		const failing = { test: { key: "one" }, outcome: "fail", failure: { message: "same cause" } };
+		const main = { repo: "app", commit: "basefail1", branch: "main" };
+		report({ target: main, results: [failing] });
+		const pr = (commit: string) => ({ repo: "app", commit, base: "basefail1", pr: 1, branch: "feature" });
+		// The first commit of the change fails as its base does: the loose policy's rule calls that inherited.
+		expect(report({ target: pr("headfail1"), results: [failing] }).gate?.verdict).toBe("passed");
+		// The base is fixed, and the next commit of the change still fails: the rule's answer no longer applies.
+		report({ target: main, attempt: 2, results: [{ test: { key: "one" }, outcome: "pass" }] });
+		expect(report({ target: pr("headfail2"), results: [failing] }).gate?.verdict).toBe("blocked");
+		// The earlier commit rested on the same answer. Its gate is recomputed, not left reading `passed`.
+		expect(gate({ commit: "headfail1", repo: "app" }).verdict).toBe("blocked");
+	});
+
+	test("a run closed on an answer that later stops holding names the question asked in its place", () => {
+		seed();
+		const failing = {
+			test: { key: "one" },
+			outcome: "fail",
+			failure: { message: "same cause" },
+			annotation: { case: "C-1", version: 1 },
+		};
+		const main = { repo: "app", commit: "basefail1", branch: "main" };
+		const head = { repo: "app", commit: "headfail1", base: "basefail1", pr: 1, branch: "feature" };
+		report({ target: main, results: [failing] });
+		report({ target: head, results: [failing] });
+		// Planned over the failure the rule called inherited: it passes on that answer, and the rule closes it.
+		const planned = plan({ name: "Prior plan", select: {}, accepts: { commit: "headfail1", repo: "app" } });
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+		report({ target: main, attempt: 2, results: [{ ...failing, outcome: "pass", failure: undefined }] });
+		report({ target: head, attempt: 2, results: [failing] });
+		const asked = open("failure");
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [asked.q] });
+		expect(decide(asked, { is: "flaky" }).status).toBe("decided");
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
 });
 
 describe("what a caller is told", () => {

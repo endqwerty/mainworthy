@@ -11,7 +11,9 @@ import {
 	findTest,
 	linkTest,
 	mustTarget,
+	producedCause,
 	restoreLink,
+	scopeOf,
 	setExcuse,
 	testById,
 	unlinkedInFile,
@@ -22,7 +24,16 @@ import { json } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 import type { Witness } from "../kernel/witness.ts";
 import { clauseFor, currentPolicy } from "../policy/policy.ts";
-import { closeRun, discountFailures, reopenRun, restoreFailures, runById } from "../runs/runs.ts";
+import {
+	closeRun,
+	discountFailures,
+	findRun,
+	partiesTo,
+	type RunRow,
+	reopenRun,
+	restoreFailures,
+	runById,
+} from "../runs/runs.ts";
 import {
 	adopt,
 	bodyOf,
@@ -35,7 +46,7 @@ import {
 	seal,
 } from "../suite/suite.ts";
 import type { Raise, Raised } from "./decisions.ts";
-import { type DecisionRow, decisionById, type HoldTerm, type QuestionRow, questionById } from "./questions.ts";
+import { type DecisionRow, decisionById, type HoldTerm, type QuestionRow, questionById, refsOf } from "./questions.ts";
 
 type Tools = { raise: (ctx: Ctx, r: Raise) => Raised };
 
@@ -288,15 +299,35 @@ function folderFor(file: string): string {
 	return parts.length > 0 ? parts.slice(0, 3).join("/") : "Automated";
 }
 
+/**
+ * The runs a question is about: every run it names, whether or not it holds them back. A decision on a failure
+ * changes how those runs count the failure even where policy lets the run proceed.
+ */
+export function runsAbout(ctx: Ctx, question: QuestionRow): number[] {
+	const ids = new Set(json<number[]>(question.blocks));
+	for (const about of refsOf(ctx.db, question.id)) {
+		if (!/^R-\d+$/.test(about)) continue;
+		const run = findRun(ctx.db, ctx.project.id, about);
+		if (run) ids.add(run.id);
+	}
+	return [...ids];
+}
+
+/** The planned runs a question names that are still open: the ones whose slots a decision on it can change. */
+function openPlannedAbout(ctx: Ctx, question: QuestionRow): RunRow[] {
+	return runsAbout(ctx, question).flatMap((id) => {
+		const run = runById(ctx.db, id);
+		return run?.origin === "planned" && run.state === "open" ? [run] : [];
+	});
+}
+
 const failureHandler: Handler<"failure"> = {
 	effect(ctx, witness, question, answer) {
 		const subject = json<{ signature: number; scope: string }>(question.subject);
 		if (answer.is === "mistaken") {
 			const corrected: [number, number][] = [];
-			for (const runId of json<number[]>(question.blocks)) {
-				const run = runById(ctx.db, runId);
-				if (run?.origin === "planned") corrected.push(...discountFailures(ctx, witness, run, subject.signature));
-			}
+			for (const run of openPlannedAbout(ctx, question))
+				corrected.push(...discountFailures(ctx, witness, run, subject.signature, subject.scope));
 			if (corrected.length === 0)
 				throw invalid("`mistaken` is for a disputed result in a planned run; this failure has none");
 			return { corrected };
@@ -364,8 +395,23 @@ const failureHandler: Handler<"failure"> = {
 		}
 	},
 	isAuthor: () => false,
+	/**
+	 * A producer of a failure question's evidence is anyone whose result a decision on it would judge: who raised
+	 * an occurrence (kept on the question), who has reported a failure with this cause in this scope, and who has
+	 * a result in a slot that shows it, on either side of a dispute. The last two are read from the results, so
+	 * nobody stops being a producer because an answer was carried to their failure or the cause was asked again.
+	 */
 	isProducer(ctx, question) {
-		return (json<{ producers?: number[] }>(question.evidence).producers ?? []).includes(ctx.actor.id);
+		const subject = json<{ signature: number; scope: string }>(question.subject);
+		const actor = ctx.actor.id;
+		if ((json<{ producers?: number[] }>(question.evidence).producers ?? []).includes(actor)) return true;
+		const reported = producedCause(ctx.db, ctx.project.id, subject.signature, actor).some(
+			(seen) => scopeOf(mustTarget(ctx.db, seen.target), seen.run) === subject.scope,
+		);
+		if (reported) return true;
+		return openPlannedAbout(ctx, question).some((run) =>
+			partiesTo(ctx.db, run, subject.signature, subject.scope).has(actor),
+		);
 	},
 	undoable: true,
 	undoHint: "",

@@ -45,10 +45,17 @@ describe("the presets", () => {
 	});
 
 	test("every answer has one key, and no two answers of a kind share a key", () => {
+		// The two answers with no key of their own: a merge carries the merged text, and `unlink` is not offered in
+		// the queue. Every other answer a kind accepts must have a key, so removing one from the table fails here.
+		const keyless: Record<string, string[]> = { adopt: ["merge"], map: ["unlink"] };
 		for (const kind of KINDS) {
 			const keys = ANSWER_KEYS[kind] as Record<string, string>;
 			const answers = Object.values(keys);
 			expect(new Set(answers).size).toBe(answers.length);
+			const accepted = (ANSWERS[kind].options as readonly { shape: { is: { value: string } } }[]).map(
+				(option) => option.shape.is.value,
+			);
+			expect([...answers, ...(keyless[kind] ?? [])].sort()).toEqual([...accepted].sort());
 			for (const answer of answers)
 				expect(
 					ANSWERS[kind].safeParse({

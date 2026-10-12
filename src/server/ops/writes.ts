@@ -16,9 +16,9 @@ import {
 	type ReportReceipt,
 } from "../../core/ops.ts";
 import { clip } from "../../core/text.ts";
-import { answer, type Raise, type Raised, raise, refold, undo } from "../decisions/decisions.ts";
+import { answer, openFor, type Raise, type Raised, raise, refold, undo } from "../decisions/decisions.ts";
 import { raiseAdopt } from "../decisions/kinds.ts";
-import { decisionById, latestByFingerprint, type QuestionRow, questionRef } from "../decisions/questions.ts";
+import { decisionById, type QuestionRow, questionRef } from "../decisions/questions.ts";
 import {
 	accept,
 	applySteps,
@@ -227,15 +227,14 @@ function raiseFailure(
 	const scopeKind = group.scope.startsWith("change:") ? "change" : group.scope.startsWith("line:") ? "trunk" : "run";
 	const key = `${group.signature.hash}|${group.scope}`;
 	// One question per cause: an occurrence adds its tests to the open question instead of opening another.
-	const open = latestByFingerprint(ctx.db, ctx.project.id, contentHash({ kind: "failure", key }));
-	const earlier =
-		open?.state === "open"
-			? json<{
-					tests?: { id: number; t: string; name: string; case: string | null }[];
-					producers?: number[];
-					targets?: number[];
-				}>(open.evidence)
-			: {};
+	const open = openFor(ctx.db, ctx.project.id, contentHash({ kind: "failure", key }), target.id);
+	const earlier = open
+		? json<{
+				tests?: { id: number; t: string; name: string; case: string | null }[];
+				producers?: number[];
+				targets?: number[];
+			}>(open.evidence)
+		: {};
 	const tests = new Map((earlier.tests ?? []).map((test) => [test.id, test]));
 	for (const test of group.tests) {
 		const row = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;

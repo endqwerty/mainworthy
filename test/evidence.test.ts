@@ -329,7 +329,8 @@ describe("the horizon", () => {
 });
 
 describe("work the server does on its own", () => {
-	test("a report accepted before a crash is applied on the next start; the gate was pending meanwhile", () => {
+	// The recovery step on its own. `test/restart.test.ts` kills a real server in the middle of a report.
+	test("a report that was accepted and never applied is applied by recovery, once; the gate was pending meanwhile", () => {
 		h.call("report", ciReport({ commit: "6666666a", n: 4 }));
 		h.app.db.transaction(() => {
 			const project = findProject(h.app.db, "scratch");

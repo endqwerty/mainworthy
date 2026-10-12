@@ -340,6 +340,8 @@ CREATE INDEX results_target ON results (target, test, attempt);
 CREATE INDEX results_signature ON results (project, signature, seq DESC) WHERE signature IS NOT NULL;
 CREATE INDEX results_case ON results (basis_case, method, seq DESC) WHERE basis_case IS NOT NULL;
 CREATE INDEX results_corrects ON results (corrects) WHERE corrects IS NOT NULL;
+-- Who reported a failure with a given cause, and where: read when policy keeps a decision from its producers.
+CREATE INDEX results_producer ON results (project, signature, actor, target, run) WHERE signature IS NOT NULL;
 
 -- The same test with different outcomes on the same code: the strongest flaky signal. Recorded on ingest.
 CREATE TABLE flips (
