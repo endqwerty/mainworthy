@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { z } from "zod";
 import type { Api } from "../../core/api.ts";
@@ -11,6 +11,7 @@ import { cleanTitle, firstStep } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
 import { ApiError, call } from "../lib/api.ts";
 import { invalidateProject, queryClient, useQueryOp } from "../lib/data.ts";
+import { deviceSession, sessionCurrent } from "../lib/device.ts";
 import {
 	activeDraft,
 	type Draft,
@@ -21,8 +22,8 @@ import {
 	removeDraft,
 	writeDraft,
 } from "../lib/drafts.ts";
-import { randomId } from "../lib/ids.ts";
-import { navigate, readRoute, refUrl, routeUrl } from "../lib/router.ts";
+import { draftOwner, randomId } from "../lib/ids.ts";
+import { navigate, readRoute, refUrl, routeEntry, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, ProofStrip } from "../ui/index.tsx";
 import { useSuiteBindings } from "./bindings.ts";
@@ -46,6 +47,15 @@ const ResolvedEdit = z.object({
 
 export function SuiteScreen() {
 	const { project, route, setStatus, openPalette, overlayOpen } = useApp();
+	const owner = useRef(deviceSession()).current;
+	const windowId = useRef(draftOwner()).current;
+	const ownedDraft = useCallback(
+		(saved: Draft): Draft =>
+			saved.owner === windowId
+				? saved
+				: { ...saved, owner: windowId, cmd: randomId(), sent: saved.ref === null ? saved.sent : null },
+		[windowId],
+	);
 	const tagFilter = new URLSearchParams(location.search)
 		.getAll("tag")
 		.filter((tag) => TAG.test(tag))
@@ -54,8 +64,9 @@ export function SuiteScreen() {
 	const [search, setSearch] = useState("");
 	const [draftStored, setDraftStored] = useState(true);
 	const [draft, setDraftState] = useState<Draft | null>(() => {
-		const saved = route.ref ? readDraft({ project, id: route.ref }) : activeDraft(project);
-		return saved?.dirty || saved?.ref === null ? saved : null;
+		const saved =
+			routeEntry() === "initial" ? (route.ref ? readDraft({ project, id: route.ref }) : activeDraft(project)) : null;
+		return saved?.dirty ? ownedDraft(saved) : null;
 	});
 	const draftRef = useRef(draft);
 	const [captures, setCaptures] = useState(() => new Map(readDrafts(project).map((draft) => [draft.id, draft])));
@@ -170,13 +181,14 @@ export function SuiteScreen() {
 		// Sealing gives the live editor its case URL. Its draft is already current, even after storage was cleared.
 		if (previous.folder === route.folder && latest && latest.ref === route.ref) return;
 		if (latest?.ref === null) setCaptures((prior) => new Map(prior).set(latest.id, latest));
-		const saved = route.ref ? null : activeDraft(project);
-		const restored = saved?.ref === null ? saved : null;
+		const historyDraft = z.object({ draft: z.string() }).safeParse(history.state);
+		const saved = !route.ref && historyDraft.success ? readDraft({ project, id: historyDraft.data.draft }) : null;
+		const restored = saved?.ref === null ? ownedDraft(saved) : null;
 		draftRef.current = restored;
 		setDraftState(restored);
-		setSelected(route.ref ?? restored?.ref ?? null);
+		setSelected(route.ref);
 		setConflict(route.ref ? (conflicts.current.get(route.ref) ?? null) : null);
-	}, [project, route.folder, route.ref]);
+	}, [project, route.folder, route.ref, ownedDraft]);
 	useEffect(() => {
 		if (selected === null && cases[0] && !draftRef.current) setSelected(cases[0].ref);
 	}, [cases, selected]);
@@ -190,7 +202,24 @@ export function SuiteScreen() {
 		}
 	}
 	function change(next: Draft, focus = false): void {
-		const changed = { ...next, at: Date.now() };
+		if (!sessionCurrent(owner)) return;
+		const prior = draftRef.current;
+		const contentChanged =
+			prior &&
+			JSON.stringify([prior.body, prior.tags, prior.covers, prior.folder]) !==
+				JSON.stringify([next.body, next.tags, next.covers, next.folder]);
+		const changed = {
+			...next,
+			sent: prior?.id === next.id ? prior.sent : next.sent,
+			owner: windowId,
+			cmd:
+				contentChanged && prior?.id === next.id && prior.sent?.input.cmd === prior.cmd
+					? randomId()
+					: prior?.id === next.id
+						? prior.cmd
+						: next.cmd,
+			at: Date.now(),
+		};
 		draftRef.current = changed;
 		try {
 			writeDraft({ project, draft: changed });
@@ -210,7 +239,7 @@ export function SuiteScreen() {
 			!snapshot.body.title.trim() &&
 			!snapshot.body.steps.some((step) => step.action.trim())
 		) {
-			removeDraft({ project, id: snapshot.id });
+			removeDraft({ project, id: snapshot.id, owner: windowId });
 			setCaptures((previous) => {
 				if (!previous.has(snapshot.id)) return previous;
 				const next = new Map(previous);
@@ -227,17 +256,22 @@ export function SuiteScreen() {
 	}
 	async function sealDraft({ keepalive = false }: { keepalive?: boolean } = {}): Promise<void> {
 		const snapshot = draftRef.current;
-		if (!snapshot || dropEmpty(snapshot) || !snapshot.dirty) return;
+		if (!sessionCurrent(owner)) return;
+		if (!snapshot || dropEmpty(snapshot)) return;
+		if (!snapshot.dirty) {
+			removeDraft({ project, id: snapshot.id, owner: windowId });
+			return;
+		}
 		setCaptures((previous) => new Map(previous).set(snapshot.id, snapshot));
 		const existing = pending.current.get(snapshot.id);
 		if (existing) {
 			await existing;
 			pending.current.delete(snapshot.id);
-			if (draftRef.current?.id === snapshot.id) await sealDraft({ keepalive });
+			if (sessionCurrent(owner) && draftRef.current?.id === snapshot.id) await sealDraft({ keepalive });
 			return;
 		}
-		const cleaned = cleanTitle(snapshot);
-		const body: CaseBody = {
+		let cleaned = cleanTitle(snapshot);
+		let body: CaseBody = {
 			...cleaned.body,
 			steps: cleaned.body.steps
 				.filter((step) => step.action.trim())
@@ -245,7 +279,13 @@ export function SuiteScreen() {
 		};
 		const fingerprint = JSON.stringify({ body, tags: cleaned.tags, covers: cleaned.covers, folder: snapshot.folder });
 		if (snapshot.submission.kind === "waiting" && snapshot.submission.fingerprint === fingerprint) return;
-		const command = snapshot.cmd;
+		const source = snapshot;
+		const recovered = snapshot.sent;
+		if (recovered) {
+			body = recovered.body;
+			cleaned = { ...cleaned, tags: recovered.tags, covers: recovered.covers };
+		}
+		let moreToSend = false;
 		const task = (async () => {
 			try {
 				let after = snapshot.after;
@@ -253,6 +293,7 @@ export function SuiteScreen() {
 					const predecessor = after;
 					const request = pending.current.get(predecessor);
 					if (request) await request;
+					if (!sessionCurrent(owner)) return;
 					after = adoptedRefs.current.get(predecessor) ?? null;
 				}
 				const edits: Edit[] =
@@ -280,16 +321,46 @@ export function SuiteScreen() {
 										automate: body.automate,
 									},
 								},
-								...(cleaned.tags.length
-									? [{ op: "place", cases: [snapshot.ref], tags: { add: cleaned.tags } } satisfies Edit]
+								...(cleaned.tags.some((tag) => !source.originalTags.includes(tag)) ||
+								source.originalTags.some((tag) => !cleaned.tags.includes(tag))
+									? [
+											{
+												op: "place",
+												cases: [source.ref ?? ""],
+												tags: {
+													add: cleaned.tags.filter((tag) => !source.originalTags.includes(tag)),
+													remove: source.originalTags.filter((tag) => !cleaned.tags.includes(tag)),
+												},
+											} satisfies Edit,
+										]
 									: []),
-								...cleaned.covers.map(
-									(requirement) => ({ op: "cover", case: snapshot.ref ?? "", requirement, on: true }) satisfies Edit,
-								),
+								...cleaned.covers
+									.filter((requirement) => !source.originalCovers.includes(requirement))
+									.map(
+										(requirement) => ({ op: "cover", case: source.ref ?? "", requirement, on: true }) satisfies Edit,
+									),
+								...source.originalCovers
+									.filter((requirement) => !cleaned.covers.includes(requirement))
+									.map(
+										(requirement) => ({ op: "cover", case: source.ref ?? "", requirement, on: false }) satisfies Edit,
+									),
 							];
-				const reply = await call("propose", { cmd: command, edits }, { project, keepalive });
+				const request = recovered?.input ?? { cmd: source.cmd, edits };
+				if (!sessionCurrent(owner)) return;
+				const sent = recovered ?? { input: request, body, tags: cleaned.tags, covers: cleaned.covers };
+				const outgoing = draftRef.current;
+				if (outgoing?.id === source.id) {
+					const sending = { ...outgoing, sent };
+					draftRef.current = sending;
+					setDraftState(sending);
+					try {
+						writeDraft({ project, draft: sending });
+					} catch {}
+				}
+				const reply = await call("propose", request, { project, keepalive, owner });
+				if (!sessionCurrent(owner)) return;
 				if (reply.status === "conflict" && reply.question && snapshot.ref && reply.proposal) {
-					const proposal = (await call("get", { refs: [reply.proposal] }, { project }))[0];
+					const proposal = (await call("get", { refs: [reply.proposal] }, { project, owner }))[0];
 					const rawEdits = proposal && Array.isArray(proposal.edits) ? proposal.edits : [];
 					const edit = rawEdits
 						.map((item: unknown) => ResolvedEdit.safeParse(item))
@@ -317,6 +388,7 @@ export function SuiteScreen() {
 						const next: Draft = {
 							...latest,
 							cmd: randomId(),
+							sent: null,
 							submission: { kind: "waiting", question: reply.question, fingerprint },
 						};
 						draftRef.current = next;
@@ -337,7 +409,8 @@ export function SuiteScreen() {
 				let adoptedTags = cleaned.tags;
 				let adoptedCovers = cleaned.covers;
 				if (ref) {
-					const rows = await call("get", { refs: [ref], version }, { project });
+					const rows = await call("get", { refs: [ref], version }, { project, owner });
+					if (!sessionCurrent(owner)) return;
 					const received = CaseView.parse(rows[0]);
 					adopted = bodyOf(received);
 					adoptedTags = received.tags;
@@ -389,7 +462,7 @@ export function SuiteScreen() {
 						return next;
 					});
 				}
-				removeDraft({ project, id: snapshot.id });
+				removeDraft({ project, id: snapshot.id, owner: windowId });
 				conflicts.current.delete(snapshot.id);
 				const latest = draftRef.current;
 				if (latest?.id === snapshot.id && ref) {
@@ -414,8 +487,21 @@ export function SuiteScreen() {
 						body: mergeBodies({ base: body, mine: normalized.body, theirs: adopted }).merged,
 						original: adopted,
 						submission: { kind: "none" },
-						tags: [...new Set([...adoptedTags, ...normalized.tags])],
-						covers: [...new Set([...adoptedCovers, ...normalized.covers])],
+						tags: [
+							...new Set([
+								...adoptedTags.filter((tag) => !cleaned.tags.includes(tag) || normalized.tags.includes(tag)),
+								...normalized.tags.filter((tag) => !cleaned.tags.includes(tag)),
+							]),
+						],
+						covers: [
+							...new Set([
+								...adoptedCovers.filter((link) => !cleaned.covers.includes(link) || normalized.covers.includes(link)),
+								...normalized.covers.filter((link) => !cleaned.covers.includes(link)),
+							]),
+						],
+						originalTags: adoptedTags,
+						originalCovers: adoptedCovers,
+						sent: null,
 						dirty: more,
 						cmd: randomId(),
 						caret: latest.caret.field === "capture-title" ? { ...latest.caret, field: "title" } : latest.caret,
@@ -426,6 +512,7 @@ export function SuiteScreen() {
 						focusDraft(next);
 					} else setDraftState(next);
 					setSelected(ref);
+					moreToSend = Boolean(recovered && more);
 					if (more) writeDraft({ project, draft: next });
 					if (
 						readRoute().project === project &&
@@ -437,6 +524,7 @@ export function SuiteScreen() {
 				setStatus(`Version ${version}, by you, just now`);
 				void invalidateProject(project);
 			} catch (error) {
+				if (!sessionCurrent(owner)) return;
 				setStatus(
 					`${error instanceof Error ? error.message : "Could not record this version"}. Your draft is kept on this device.`,
 				);
@@ -445,6 +533,7 @@ export function SuiteScreen() {
 		pending.current.set(snapshot.id, task);
 		await task;
 		pending.current.delete(snapshot.id);
+		if (moreToSend && sessionCurrent(owner)) await sealDraft({ keepalive });
 	}
 	useEffect(() => {
 		const current = draftRef.current;
@@ -464,6 +553,8 @@ export function SuiteScreen() {
 				original,
 				tags: view.tags,
 				covers: view.covers,
+				originalTags: view.tags,
+				originalCovers: view.covers,
 				folder: view.folder.path,
 				cmd: randomId(),
 			};
@@ -482,7 +573,7 @@ export function SuiteScreen() {
 		};
 		const reload = () => {
 			const latest = draftRef.current;
-			if (latest?.dirty) writeDraft({ project, draft: latest });
+			if (sessionCurrent(owner) && latest?.dirty) writeDraft({ project, draft: latest });
 		};
 		window.addEventListener("casebook:leave", leave);
 		document.addEventListener("visibilitychange", visibility);
@@ -493,7 +584,7 @@ export function SuiteScreen() {
 			window.removeEventListener("pagehide", reload);
 			if (draftRef.current?.dirty) void sealRef.current();
 		};
-	}, [project]);
+	}, [project, owner]);
 	useEffect(() => {
 		if (!draft?.dirty || conflict) return;
 		const at = draft.at;
@@ -529,6 +620,10 @@ export function SuiteScreen() {
 			original: body,
 			tags: tagFilter ? tagFilter.split(",") : [],
 			covers: [],
+			originalTags: [],
+			originalCovers: [],
+			owner: windowId,
+			sent: null,
 			folder,
 			after: retain && previous ? previous.id : (previous?.ref ?? selectedRow?.ref ?? previous?.after ?? null),
 			caret: { field: "title", start: 0, end: 0 },
@@ -540,6 +635,7 @@ export function SuiteScreen() {
 		setConflict(null);
 		flushSync(() => {
 			navigate(`/p/${encodeURIComponent(project)}/suite${location.search}`, { seal: false });
+			history.replaceState({ draft: next.id }, "");
 			draftRef.current = next;
 			setDraftState(next);
 			setSelected(null);
@@ -561,7 +657,10 @@ export function SuiteScreen() {
 		}
 		if (!view) return;
 		const saved = readDraft({ project, id: view.ref });
-		const next = draftRef.current?.ref === view.ref ? draftRef.current : (saved ?? editDraft(view));
+		const next =
+			draftRef.current?.ref === view.ref && draftRef.current.dirty
+				? draftRef.current
+				: ownedDraft(saved ?? editDraft(view));
 		setConflict(conflicts.current.get(view.ref) ?? null);
 		change(
 			saved ? next : { ...next, caret: { field: "title", start: next.body.title.length, end: next.body.title.length } },
@@ -580,12 +679,13 @@ export function SuiteScreen() {
 	function resumeCapture(saved: Draft): void {
 		const previous = draftRef.current;
 		if (previous?.dirty) setCaptures((prior) => new Map(prior).set(previous.id, previous));
-		const next = readDraft({ project, id: saved.id }) ?? saved;
+		const next = ownedDraft(readDraft({ project, id: saved.id }) ?? saved);
 		flushSync(() => {
 			setSelected(null);
 			setConflict(null);
 			change(next);
 			navigate(`/p/${encodeURIComponent(project)}/suite${location.search}`, { seal: false });
+			history.replaceState({ draft: next.id }, "");
 		});
 		focusDraft(draftRef.current ?? next);
 	}
@@ -656,12 +756,13 @@ export function SuiteScreen() {
 		const rollback = optimisticPlacement(edits);
 		const previous = undo.current?.queued ? null : undo.current;
 		const count = selection().length;
-		const ready = call("propose", { edits }, { project });
+		const ready = call("propose", { edits }, { project, owner });
 		const action: PlacementUndo = { edits: inverse, ready, queued: false };
 		undo.current = action;
 		setStatus(`${count} case${count === 1 ? "" : "s"} changing. Press u to undo.`);
 		try {
 			const reply = await ready;
+			if (!sessionCurrent(owner)) return;
 			if (reply.status !== "adopted") {
 				rollback();
 				setHidden(new Set());
@@ -673,6 +774,7 @@ export function SuiteScreen() {
 			setPicked(new Set());
 			if (!action.queued || reply.status !== "adopted") await invalidateProject(project);
 		} catch (error) {
+			if (!sessionCurrent(owner)) return;
 			rollback();
 			setHidden(new Set());
 			if (undo.current === action) undo.current = previous;
@@ -751,7 +853,9 @@ export function SuiteScreen() {
 			if (original.status !== "adopted") return;
 			optimisticPlacement(action.edits);
 			try {
-				const reply = action.edits.length ? await call("propose", { edits: action.edits }, { project }) : original;
+				const reply = action.edits.length
+					? await call("propose", { edits: action.edits }, { project, owner })
+					: original;
 				if (reply.status === "adopted") {
 					if (undo.current === action) undo.current = null;
 					setStatus("Undone. The inverse change is recorded.");
@@ -775,7 +879,7 @@ export function SuiteScreen() {
 				setStatus("Version 1 is the first version.");
 				return;
 			}
-			await call("propose", { edits: [{ op: "restore", case: view.ref, to: previous }] }, { project });
+			await call("propose", { edits: [{ op: "restore", case: view.ref, to: previous }] }, { project, owner });
 			draftRef.current = null;
 			setDraftState(null);
 			setStatus("Previous version restored as a new version.");
@@ -842,7 +946,9 @@ export function SuiteScreen() {
 					<span id="lcount">
 						{list.error
 							? "Cases unavailable"
-							: `${(list.data?.pages[0]?.count ?? cases.length).toLocaleString()} cases`}
+							: list.isPending
+								? "Reading cases…"
+								: `${(list.data?.pages[0]?.count ?? cases.length).toLocaleString()} cases`}
 					</span>
 					{picked.size > 0 && <span className="bulk-indicator">{picked.size} selected</span>}
 					<label className="fwrap">
@@ -923,9 +1029,11 @@ export function SuiteScreen() {
 					{rows.length === 0 ? (
 						list.error ? null : (
 							<EmptyState>
-								{search
-									? "No matching cases. Change the filter, or press c to capture one."
-									: "No cases yet. Press c and start typing."}
+								{list.isPending
+									? "Reading cases…"
+									: search
+										? "No matching cases. Change the filter, or press c to capture one."
+										: "No cases yet. Press c and start typing."}
 							</EmptyState>
 						)
 					) : (
@@ -1035,7 +1143,7 @@ export function SuiteScreen() {
 				change={change}
 				begin={(field = "title") => {
 					if (view) {
-						const next = readDraft({ project, id: view.ref }) ?? editDraft(view);
+						const next = ownedDraft(readDraft({ project, id: view.ref }) ?? editDraft(view));
 						setConflict(conflicts.current.get(view.ref) ?? null);
 						const parts = field.split(":");
 						const step = next.body.steps.find((item) => item.id === parts[0]);
@@ -1084,7 +1192,7 @@ export function SuiteScreen() {
 							void call(
 								"propose",
 								{ edits: [{ op: "folder", name: folderText, ...(route.folder ? { parent: route.folder } : {}) }] },
-								{ project },
+								{ project, owner },
 							)
 								.then(() => {
 									setCreatingFolder(false);

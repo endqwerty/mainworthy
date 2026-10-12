@@ -113,16 +113,23 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 		input: { refs: [parsed.success ? parsed.data.proposal : ""] },
 		enabled: parsed.success,
 	});
-	const proposal = Proposal.safeParse(read.data?.[0]);
+	const proposal = Proposal.safeParse(read.data?.find((row) => parsed.success && row.ref === parsed.data.proposal));
+	const error =
+		read.error?.message ?? (read.data && !proposal.success ? "The proposal edits could not be read." : null);
 	return (
-		<div className={question.producer === "agent" ? "prop" : "ev"}>
+		<div
+			className={question.producer === "agent" ? "prop" : "ev"}
+			data-proposal-evidence={question.q}
+			data-proposal-read={proposal.success ? "ready" : error ? "error" : "loading"}
+			data-proposal-error={error ?? undefined}
+		>
 			{parsed.success && (
 				<p>
 					<ProducerGlyph kind={question.producer} /> {parsed.data.author} proposes {parsed.data.proposal}
 					{parsed.data.reason && `: ${parsed.data.reason}`}
 				</p>
 			)}
-			{read.error && <p role="status">{read.error.message}</p>}
+			{error && <p role="status">{error}</p>}
 			{proposal.success
 				? proposal.data.edits.map((edit) => {
 						const editKey = JSON.stringify(edit);
@@ -209,7 +216,7 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 							}
 						}
 					})
-				: !read.error && <p className="dim">Reading the proposed edits…</p>}
+				: !error && <p className="dim">Reading the proposed edits…</p>}
 		</div>
 	);
 }

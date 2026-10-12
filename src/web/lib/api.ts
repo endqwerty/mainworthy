@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Api, Envelope, OpName, SessionInfo } from "../../core/api.ts";
+import { type DeviceSession, deviceSession, sessionCurrent, suspendDeviceSession } from "./device.ts";
 
 const Wire = z.discriminatedUnion("ok", [
 	z.object({ ok: z.literal(true), result: z.unknown(), seq: z.number().nullable().optional() }),
@@ -41,11 +42,20 @@ export class ApiError extends Error {
 }
 export const unauthenticatedEvent = "casebook:unauthenticated";
 function refuse(error: Extract<Envelope<unknown>, { ok: false }>["error"], message = error.message): never {
-	if (error.code === "unauthenticated" && typeof window !== "undefined")
+	if (error.code === "unauthenticated" && typeof window !== "undefined") {
+		suspendDeviceSession();
 		window.dispatchEvent(new Event(unauthenticatedEvent));
+	}
 	throw new ApiError(error.code, message);
 }
-export type CallOptions = { project?: string; url?: string; token?: string; signal?: AbortSignal; keepalive?: boolean };
+export type CallOptions = {
+	project?: string;
+	url?: string;
+	token?: string;
+	signal?: AbortSignal;
+	keepalive?: boolean;
+	owner?: DeviceSession;
+};
 
 /** The operation map owns input and reply types; wire envelopes are validated at this boundary. */
 export async function call<O extends OpName>(
@@ -53,6 +63,26 @@ export async function call<O extends OpName>(
 	input: Api[O]["input"],
 	options: CallOptions = {},
 ): Promise<Api[O]["reply"]> {
+	const owner =
+		typeof window !== "undefined" && !options.token && !options.url ? (options.owner ?? deviceSession()) : null;
+	const assertOwner = (): void => {
+		if (owner && !sessionCurrent(owner))
+			throw new ApiError("unauthenticated", "The session changed. Your input is kept for the person who typed it.");
+	};
+	assertOwner();
+	if (owner && ["propose", "decide", "report", "plan", "announce", "admin"].includes(op)) {
+		const current = await session({
+			owner,
+			...(options.signal ? { signal: options.signal } : {}),
+			keepalive: options.keepalive ?? false,
+		});
+		assertOwner();
+		if (current.actor !== owner.person)
+			refuse({
+				code: "unauthenticated",
+				message: "The session now belongs to another person. Sign in again; your input is kept.",
+			});
+	}
 	const project =
 		options.project ??
 		(typeof location === "undefined" ? "scratch" : decodeURIComponent(location.pathname.split("/")[2] ?? "scratch"));
@@ -68,11 +98,23 @@ export async function call<O extends OpName>(
 		keepalive: options.keepalive ?? false,
 	});
 	const envelope = Wire.parse(await response.json());
+	assertOwner();
 	if (!envelope.ok) refuse(envelope.error);
 	return envelope.result as Api[O]["reply"];
 }
-export async function session(): Promise<SessionInfo> {
-	const envelope = Wire.parse(await (await fetch("/api/session")).json());
+export async function session(
+	options: { owner?: DeviceSession; signal?: AbortSignal; keepalive?: boolean } = {},
+): Promise<SessionInfo> {
+	const envelope = Wire.parse(
+		await (
+			await fetch("/api/session", {
+				...(options.signal ? { signal: options.signal } : {}),
+				keepalive: options.keepalive ?? false,
+			})
+		).json(),
+	);
+	if (options.owner && !sessionCurrent(options.owner))
+		throw new ApiError("unauthenticated", "The session changed. Your input is kept.");
 	if (!envelope.ok) refuse(envelope.error);
 	return Session.parse(envelope.result);
 }

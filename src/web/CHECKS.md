@@ -43,3 +43,78 @@ Round-2 closeout: `bun run typecheck` passes; `bunx biome check src/web test/e2e
 Closeout after UI-3, UI-4, UI-5 and the acknowledgement-wait correction: `bun run typecheck` passed; Biome checked 50 files with no fixes; architecture passed 12 tests. `bun test test/e2e`: **41 pass, 0 fail, 274 expectations, 81.44 seconds**. Capture, sign-in and placement passed 15 targeted tests; the two adjusted triage/execution session tests also passed independently.
 
 The final full-run L1 estimates (30 events per path, event to next animation frame) were: 2,000 cases, capture p50/p95 10.6/14.4 ms and typing 14.8/15.1 ms; 10,000 cases, capture 10.7/14.6 ms and typing 15.0/15.2 ms. J1 used eight control keys beyond text; D2 used 20 answers plus three navigation keys; J5 used 11 controls plus 12 note characters. These are local Chromium frame opportunities, not a hardware display guarantee or a comparative speedup.
+
+## Round 3 implementation checks
+
+This pass follows `UI-R3-FIXES.md` and the completed reports ui-r3a, ui-r3b,
+ui-r3c and ui-r3x. The lead owns the engine, the combined independent verdict,
+commits and delivery. This builder changes only `src/web` and `test/e2e`.
+
+| Finding | Cause and repair | Changed implementation | Browser check |
+| --- | --- | --- | --- |
+| A-1 | A sent command was reused with changed text. Keep its exact request for an unchanged replay, then send newer text with a new command and the recovered case/version. | `lib/drafts.ts`, `suite/index.tsx` | `round3-capture.test.ts`: `A-1 new` and `A-1 edit`; `drafts.test.ts`: L2 now continues the sentence and proves the server received it. |
+| A-2 | Shared storage supplied another window's command and pending request. Existing-case drafts fork their command when another window resumes them; the window identity survives its own reload. A reply clears only that window's stored draft. | `lib/ids.ts`, `lib/drafts.ts`, `suite/index.tsx` | `round3-capture.test.ts`: shared windows with disjoint and conflicting edits, plus a second window opening during an applied, held reply. |
+| A-3 | Clean drafts were stored and preferred to the current case, and seals resent all placement metadata. Ignore clean stored drafts, open a clean editor from the current case, and send only tag/link deltas from the draft's baseline. | `lib/drafts.ts`, `suite/model.ts`, `suite/index.tsx` | `round3-capture.test.ts`: clean and dirty drafts after another producer removes a tag and requirement link; the clean case also receives a newer title. |
+| A-4 | A view navigation restored the active capture as an editor. Restore on a document opening or the capture's own history entry, while folder/filter navigation stays in read mode. | `lib/router.ts`, `suite/index.tsx` | `round3-capture.test.ts`: folder keys with a refused capture; `recovery.test.ts`: Back/Forward still restores the draft. |
+| A-5 | Report events did not name the case, so its open read and timeline stayed cached. Invalidate both on every report. | `lib/data.ts` | `round3-capture.test.ts`: external pass/fail proof and timeline on the already-open case. |
+| A-6 | Every character reparsed an existing delimiter. Split only a delimiter overlapping the newly inserted text. | `case/editor.tsx` | `round3-capture.test.ts`: append to `Open Settings > Billing` without an expected result; the existing round-2 menu-path test still covers an action with an expected result. |
+| R3B-1 | The answer after undo overtook the undo. Serialize writes per question, while their selection changes remain synchronous. | `queue/index.tsx` | `round3-interactions.test.ts`: hold the first answer through `f u i`, then prove request order and the final Infrastructure decision. |
+| R3B-2 | The first cursor was derived from changing data, and a disappeared question fell back to the first row. Pin the first shown object; retain a settled question and its editable text, and keep a filled run slot's note editable. Refuse note submission against its fresh external fill. | `queue/index.tsx`, `runs/cockpit.tsx` | `round3-interactions.test.ts`: a new question, settlement of the selected question while its reference is typed, and another producer filling the selected run slot mid-sentence. Enter and Escape leave the external decision intact. |
+| R3B-3 | Run undo moved selection from its eventual reply. Move it at the key press and queue the correction immediately behind the original result. | `runs/cockpit.tsx` | `round3-interactions.test.ts`: pending pass, immediate undo, then a note on a newly selected slot while both replies arrive. |
+| R3B-4 | The step mark was global transient state and was cleared before a failed result could be retried. Store it per person/run/slot and clear only the mark acknowledged by a successful failure result. | `runs/cockpit.tsx` | `round3-interactions.test.ts`: `2 f`, refusal, reload, retry, and the exact pinned step ID in the timeline. |
+| R3C-1 | The absence of a diff satisfied the old visibility check. Mark rendered proposal evidence as ready and gate keys and buttons on that state, including the case proposal's base read. Show pending/read-error text. | `lib/proposals.ts`, `case/pane.tsx`, `queue/evidence.tsx`, `queue/index.tsx` | `round3-interactions.test.ts`: a/r and buttons, on case and queue, with both held and failed reads; release the held read and prove the answer then records. D2 now waits for each rendered proposal. |
+| R3C-2 | Closing the palette lost the originating field. Remember it when opening and restore focus on cancellation, preserving its selection. | `app.tsx` | `round3-interactions.test.ts`: case, run note and queue reference, each with Escape and Ctrl+K, then the rest of the sentence. |
+| R3C-3 | Project administration was mistaken for instance administration. Expose the instance grants separately; only those grants offer token/project creation, while the project's policy preset remains available. | `ui/context.tsx`, `app.tsx`, `settings/index.tsx` | `round3-session.test.ts`: a scoped project admin changes policy but has neither instance creation form. |
+| R3C-4 | Recording handlers ignored key repeat. Ignore repeated bound actions and native repeated submission, while preserving navigation and ordinary held text in fields. | `lib/keys.ts`, `case/editor.tsx`, `app.tsx`, `queue/index.tsx`, `runs/cockpit.tsx` | `round3-interactions.test.ts`: held pass versus held j, and twenty held a repeats on a tall proposal versus held p text in an editor. |
+| R3C-5 | A changed select retained focus and consumed plain shortcuts. Blur selects after changes. | `app.tsx`, `settings/index.tsx`, `case/pane.tsx`, `runs/planner.tsx` | `round3-session.test.ts`: focus the project and policy selects, change them, then use c and j. |
+| R3C-6 | An unreadable policy fell back to loose, and a pending suite read looked empty. Show the refusal and withhold the policy; show reading state until the suite read completes. | `app.tsx`, `settings/index.tsx`, `suite/index.tsx` | `round3-session.test.ts`: a held inaccessible Suite read, its refusal, and Settings for that project's real strict policy. |
+| R3-1 | A pending seal and device cleanup used the replacement session. Bind requests, queued writes, callbacks and cleanup to the originating session generation, and discard old work after refusal or a person change. Clear optimistic cached data on refusal without clearing private input. | `lib/device.ts`, `lib/api.ts`, `app.tsx`, `suite/index.tsx`, `queue/index.tsx`, `runs/cockpit.tsx`, `case/pane.tsx` | `round3-session.test.ts`: applied Alice seal with a held reply, newer Alice text, real refusal, Bob's own draft, then the old reply; no Bob version or draft deletion. |
+| R3-2 | Another tab replaced the shared cookie without notifying the old page. Broadcast the person change through storage, suspend old pages, and compare the session person before writes; every reply also checks its originating generation. | `lib/device.ts`, `lib/api.ts`, `app.tsx` | `round3-session.test.ts`: real Alice/Bob tokens in one browser context, both an existing-case draft and a run note. The old tab shows sign-in and retains Alice's input without a write. |
+
+The initial regression runs reproduced the defects before their implementation
+changes. The first select test did not focus its select and passed; the stronger
+version was checked with a failing mutation. Fixture corrections were rerun
+before judging the failures: A-5 uses a second run because
+the first one closes after its pass; A-1 waits for either the replay refusal or
+acknowledgement before checking the lost sentence. The strengthened select test
+focuses the select before changing it. Temporarily removing its blur fails with
+`Expected: 1, Received: 0` editors. The additional pending-window test failed
+because its conflict card never appeared, then passed after separating that
+window's request.
+
+The stronger proof check holds every later case-list read and samples the badge,
+row proof and pane proof on animation frames. It passes on the implementation;
+removing only `proof: received.proof` makes it fail with `Expected: true,
+Received: false`. A late refetch cannot repair that assertion. J1 now holds writes
+for 500 ms and asserts eight control keys instead of only printing the count.
+L2 has no conditional server assertion. Sign-in checks accept the real 401 from
+the new session preflight, which refuses the write before its operation is sent.
+The Back/Forward and HTTP-plan tests wait for creation before reading a new ref.
+
+The latency tests are unchanged. They check 200 actual destinations, caret/input
+state and populated scrolling frames on each seeded size, then confirm the typed
+case in the server. These are headless animation-frame budget checks, not a claim
+of a performance improvement or a measurement of physical display paint. The
+final full runs include both 2,000 and 10,000 cases; no skip flag is used.
+
+No server/core edit is needed for these client repairs. The lead's independent
+verification of the combined revision remains required. No commit, push, pull
+request or worktree release was performed by this builder.
+
+Final checks on the frozen implementation and tests:
+
+- `bunx tsc --noEmit`: exit 0, no diagnostics.
+- `bunx biome check src/web test/e2e`: `Checked 58 files in 59ms. No fixes applied.`
+- `bun test test/architecture.test.ts`: `12 pass`, `0 fail`, `31 expect() calls`.
+- First final `bun test test/e2e`: `102 pass`, `0 fail`, `619 expect() calls`, 17 files, **204.72 s**.
+- Second consecutive final `bun test test/e2e`: `102 pass`, `0 fail`, `619 expect() calls`, 17 files, **202.28 s**.
+- Both final browser runs include the real 30-second idle seal and all eight latency checks on 2,000 and 10,000 cases. No browser suite or large-data check is skipped.
+- Checksums of every owned TypeScript, TSX, CSS and HTML file match through the final runs. The sorted checksum manifest hashes to `720660fd1fd16f0bf3daa6e2c1ef584facd6a4afee97fa5ceea1b19efe644eaf`.
+- The final re-read of ui-r3c still lists R3C-1 through R3C-6, with no additional finding.
+
+Two exploratory complete runs preceded these final runs. The first exposed the
+old 401-endpoint waits, the weak J1 count, proposal reads missing from D2's
+premise, stale optimistic data after a same-person sign-in, and creation reads
+that ran before their ref existed. Each was corrected and its affected test was
+rerun. The later exploratory run overlapped an in-progress source edit and
+failed one app-startup wait. Neither exploratory run is counted as a final pass.

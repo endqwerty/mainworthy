@@ -101,6 +101,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 				id="run-selection"
 				value={mode}
 				onChange={(event) => {
+					event.currentTarget.blur();
 					const value = z.enum(["all", "folder", "tag", "text"]).parse(event.target.value);
 					setMode(value);
 					setFilter("");
@@ -116,7 +117,10 @@ export function RunPlanner({ close }: { close: () => void }) {
 					className="form-input"
 					aria-label="Folder"
 					value={filter}
-					onChange={(event) => setFilter(event.target.value)}
+					onChange={(event) => {
+						event.currentTarget.blur();
+						setFilter(event.target.value);
+					}}
 				>
 					<option value="">All folders</option>
 					{parsedFolders.success &&

@@ -90,7 +90,17 @@ export function useKeyboard(): void {
 			if (binding) {
 				event.preventDefault();
 				chord = "";
+				if (event.repeat && !["j", "k", "arrowdown", "arrowup", "arrowleft", "arrowright"].includes(key)) return;
 				flushSync(binding.handler);
+				return;
+			}
+			if (
+				event.repeat &&
+				(key === "enter" || key === "space") &&
+				target instanceof HTMLElement &&
+				target.closest("button,form")
+			) {
+				event.preventDefault();
 				return;
 			}
 			if (candidates.some((item) => item.key.toLowerCase().startsWith(`${key} `))) {

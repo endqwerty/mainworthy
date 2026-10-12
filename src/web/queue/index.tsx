@@ -6,9 +6,10 @@ import { ANSWER_HELP, ANSWER_KEYS, ANSWER_LABELS, ANSWERS, KINDS, type Kind } fr
 import type { InboxReply, QuestionItem } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
-import { deviceKey } from "../lib/device.ts";
+import { deviceKey, deviceSession, sessionCurrent } from "../lib/device.ts";
 import { randomId } from "../lib/ids.ts";
 import { type Binding, useBindings } from "../lib/keys.ts";
+import { proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, KeyCap, ListRow, ProducerGlyph } from "../ui/index.tsx";
@@ -40,6 +41,23 @@ export function QueueScreen() {
 
 function QueueWorkbench() {
 	const { project, route, overlayOpen, openPalette, setStatus } = useApp();
+	const owner = useRef(deviceSession()).current;
+	const writes = useRef(new Map<string, Promise<unknown>>());
+	const refActions = useRef(new Map<string, number>());
+	const shown = useRef(new Map<string, QuestionItem>());
+	function ordered<T>(refs: string[], write: () => Promise<T>): Promise<T> {
+		const prior = refs.map((ref) => writes.current.get(ref));
+		const task = Promise.all(prior).then(() => {
+			if (!sessionCurrent(owner)) throw new Error("The session changed. Your input is kept.");
+			return write();
+		});
+		for (const ref of refs)
+			writes.current.set(
+				ref,
+				task.catch(() => undefined),
+			);
+		return task;
+	}
 	const [state, setState] = useState<"open" | "decided">("open");
 	const [kind, setKind] = useState<Kind | null>(null);
 	const [cursor, setCursor] = useState<string | null>(route.ref);
@@ -110,10 +128,36 @@ function QueueWorkbench() {
 			(state !== "open" || !hidden.has(item.q)) &&
 			(rules || item.kind !== "map" || !item.decision?.rule),
 	);
-	const current = items.find((item) => item.q === cursor) ?? items[0];
+	for (const question of items) shown.current.set(question.q, question);
+	if (cursor === null && items[0]) setCursor(items[0].q);
+	const current = cursor === null ? items[0] : (items.find((item) => item.q === cursor) ?? shown.current.get(cursor));
+	const settledRead = useQueryOp({
+		project,
+		op: "get",
+		input: { refs: [cursor ?? ""] },
+		enabled: Boolean(cursor && !items.some((item) => item.q === cursor)),
+	});
+	const settledState = z.object({ q: z.string(), state: z.string() }).safeParse(settledRead.data?.[0]);
+	const unavailable = Boolean(
+		current &&
+			state === "open" &&
+			!items.some((item) => item.q === current.q) &&
+			!pendingAnswers.current.has(current.q) &&
+			!undoing.current.has(current.q),
+	);
+	const settled = Boolean(
+		current &&
+			state === "open" &&
+			!items.some((item) => item.q === current.q) &&
+			!pendingAnswers.current.has(current.q) &&
+			!undoing.current.has(current.q) &&
+			settledState.success &&
+			settledState.data.q === current.q &&
+			settledState.data.state !== "open",
+	);
 	const counts = inbox.data?.pages[0]?.counts ?? {};
 	useEffect(() => {
-		setCursor(route.ref);
+		if (route.ref) setCursor(route.ref);
 	}, [route.ref]);
 	useEffect(() => {
 		if (inline) inlineRef.current?.focus();
@@ -162,7 +206,7 @@ function QueueWorkbench() {
 		if (select) setCursor(questions[0]?.q ?? null);
 	}
 	function extraKey(entry: DecisionEntry, field: InlineAnswer["field"]): string {
-		return deviceKey("queue-input", `${project}:${entry.question.q}:${String(entry.answer.is)}:${field}`);
+		return deviceKey("queue-input", `${project}:${entry.question.q}:${String(entry.answer.is)}:${field}`, owner.person);
 	}
 	function readExtra(entry: DecisionEntry, field: InlineAnswer["field"]): string {
 		const key = extraKey(entry, field);
@@ -200,10 +244,21 @@ function QueueWorkbench() {
 		} catch {}
 	}
 	function submit(entries: DecisionEntry[], reason?: string, extra?: InlineAnswer): void {
-		if (!entries.length) return;
+		if (!entries.length || !sessionCurrent(owner)) return;
+		if (unavailable && entries.some((entry) => entry.question.q === current?.q)) {
+			setStatus(
+				settled
+					? "This question was settled elsewhere. Your note is kept."
+					: "Reading this question before answering. Your note is kept.",
+			);
+			return;
+		}
 		const action = ++actionNo.current;
 		const refs = new Set(entries.map((entry) => entry.question.q));
-		for (const ref of refs) pendingAnswers.current.add(ref);
+		for (const ref of refs) {
+			pendingAnswers.current.add(ref);
+			refActions.current.set(ref, action);
+		}
 		const index = items.findIndex((item) => item.q === current?.q);
 		const next = items.slice(index + 1).find((item) => !refs.has(item.q)) ?? items.find((item) => !refs.has(item.q));
 		setHidden((previous) => new Set([...previous, ...refs]));
@@ -226,11 +281,12 @@ function QueueWorkbench() {
 		}));
 		const one = all[0];
 		if (!one) return;
-		const confirmed = call("decide", all.length === 1 ? { ...one, cmd: randomId() } : { all, cmd: randomId() }, {
-			project,
-		})
+		const confirmed = ordered([...refs], () =>
+			call("decide", all.length === 1 ? { ...one, cmd: randomId() } : { all, cmd: randomId() }, { project, owner }),
+		)
 			.then(async (replies) => {
-				for (const ref of refs) pendingAnswers.current.delete(ref);
+				if (!sessionCurrent(owner)) return false;
+				for (const ref of refs) if (refActions.current.get(ref) === action) pendingAnswers.current.delete(ref);
 				if (extra)
 					for (const entry of entries)
 						if (
@@ -263,7 +319,8 @@ function QueueWorkbench() {
 						setLast(null);
 					}
 					await invalidateProject(project);
-					const fresh = await call("inbox", { state: "open", limit: 500 }, { project });
+					if (!sessionCurrent(owner)) return false;
+					const fresh = await call("inbox", { state: "open", limit: 500 }, { project, owner });
 					setRestored((previous) => previous.map((item) => fresh.items.find((q) => q.q === item.q) ?? item));
 					return false;
 				}
@@ -271,13 +328,14 @@ function QueueWorkbench() {
 				await invalidateProject(project);
 				setHidden((previous) => {
 					const next = new Set(previous);
-					for (const ref of refs) next.delete(ref);
+					for (const ref of refs) if (refActions.current.get(ref) === action) next.delete(ref);
 					return next;
 				});
 				return true;
 			})
 			.catch((error: unknown) => {
-				for (const ref of refs) pendingAnswers.current.delete(ref);
+				if (!sessionCurrent(owner)) return false;
+				for (const ref of refs) if (refActions.current.get(ref) === action) pendingAnswers.current.delete(ref);
 				bringBack(
 					entries.map((entry) => entry.question),
 					false,
@@ -294,6 +352,14 @@ function QueueWorkbench() {
 		setLast({ entries, confirmed });
 	}
 	function answer(is: string, suggested?: Record<string, unknown>): void {
+		if (unavailable) {
+			setStatus(
+				settled
+					? "This question was settled elsewhere. Your note is kept; choose another question to answer."
+					: "Reading this question before answering. Your note is kept.",
+			);
+			return;
+		}
 		if (!current || state !== "open" || current.you === "forbidden" || inline) return;
 		if (current.answers && !current.answers.includes(is)) {
 			setStatus("This answer does not apply to the current evidence.");
@@ -331,6 +397,14 @@ function QueueWorkbench() {
 			};
 			pick(0, []);
 			return;
+		}
+		for (const question of questions) {
+			if (question.kind !== "adopt") continue;
+			const message = proposalReadMessage(question.q);
+			if (message) {
+				setStatus(message);
+				return;
+			}
 		}
 		const finding = FindingEvidence.safeParse(current.evidence);
 		const parsed = ANSWERS[current.kind].safeParse(
@@ -383,38 +457,43 @@ function QueueWorkbench() {
 		bringBack(questions.map((q) => ({ ...q, state: "open", decision: null })));
 		setState("open");
 		setLastMessage(`${questions.map((q) => q.q).join(", ")} · withdrawing the answer`);
-		void (async () => {
-			if (prior && !(await prior.confirmed)) return;
-			for (const question of questions) {
-				const replies = await call("decide", { undo: question.q, cmd: randomId() }, { project });
-				const reply = replies[0];
-				if (reply?.status !== "reopened") {
-					const current = z
-						.object({ q: z.string(), state: z.string() })
-						.parse((await call("get", { refs: [question.q] }, { project }))[0]);
-					if (current.state !== "open") throw new Error(reply?.needs ?? "The decision could not be withdrawn.");
+		void ordered(
+			questions.map((q) => q.q),
+			async () => {
+				if (prior && !(await prior.confirmed)) return;
+				for (const question of questions) {
+					const replies = await call("decide", { undo: question.q, cmd: randomId() }, { project, owner });
+					const reply = replies[0];
+					if (!sessionCurrent(owner)) return;
+					if (reply?.status !== "reopened") {
+						const current = z
+							.object({ q: z.string(), state: z.string() })
+							.parse((await call("get", { refs: [question.q] }, { project }))[0]);
+						if (current.state !== "open") throw new Error(reply?.needs ?? "The decision could not be withdrawn.");
+					}
+					reopened.add(question.q);
 				}
-				reopened.add(question.q);
-			}
-			if (action === actionNo.current) {
-				setLast(null);
-				setLastMessage("Answer withdrawn. Both decisions stay in the ledger.");
-				setStatus("Answer withdrawn. Both decisions stay in the ledger.");
-			}
-			await invalidateProject(project);
-			const cached = queryClient.getQueryData<InfiniteData<InboxReply>>([
-				...queryKey({ project, op: "inbox", input: { state: "open", ...(kind ? { kind } : {}), limit: 100 } }),
-				"pages",
-			]);
-			setRestored((previous) =>
-				previous.filter(
-					(question) =>
-						!reopened.has(question.q) ||
-						!cached?.pages.some((page) => page.items.some((item) => item.q === question.q)),
-				),
-			);
-		})()
+				if (action === actionNo.current) {
+					setLast(null);
+					setLastMessage("Answer withdrawn. Both decisions stay in the ledger.");
+					setStatus("Answer withdrawn. Both decisions stay in the ledger.");
+				}
+				await invalidateProject(project);
+				const cached = queryClient.getQueryData<InfiniteData<InboxReply>>([
+					...queryKey({ project, op: "inbox", input: { state: "open", ...(kind ? { kind } : {}), limit: 100 } }),
+					"pages",
+				]);
+				setRestored((previous) =>
+					previous.filter(
+						(question) =>
+							!reopened.has(question.q) ||
+							!cached?.pages.some((page) => page.items.some((item) => item.q === question.q)),
+					),
+				);
+			},
+		)
 			.catch((error: unknown) => {
+				if (!sessionCurrent(owner)) return;
 				const unconfirmed = new Set(
 					questions.filter((question) => !reopened.has(question.q)).map((question) => question.q),
 				);
@@ -672,6 +751,7 @@ function QueueWorkbench() {
 						{state === "open" && (
 							<div className="queue-answers">
 								<div className="queue-needs">
+									{settled && <p>This question was settled elsewhere. Your note is kept.</p>}
 									{current.you === "forbidden"
 										? `You cannot settle this. Needs ${current.needs}.`
 										: current.you === "advice"
@@ -686,6 +766,7 @@ function QueueWorkbench() {
 										type="button"
 										key={key}
 										disabled={
+											unavailable ||
 											current.you === "forbidden" ||
 											Boolean(inline) ||
 											(current.answers && !current.answers.includes(is))
@@ -713,6 +794,10 @@ function QueueWorkbench() {
 						className="queue-inline"
 						onSubmit={(event) => {
 							event.preventDefault();
+							if (settled) {
+								setStatus("This question was settled elsewhere. Your note is kept.");
+								return;
+							}
 							if (inline.field === "reason" && !inline.value.trim()) return;
 							submit(
 								inline.entries.map((entry) => ({
@@ -737,6 +822,10 @@ function QueueWorkbench() {
 							value={inline.value}
 							onChange={(event) => rememberInline({ ...inline, value: event.target.value })}
 							onKeyDown={(event) => {
+								if (event.repeat && (event.key === "Enter" || event.key === "Escape")) {
+									event.preventDefault();
+									return;
+								}
 								if (event.key === "Escape") {
 									event.preventDefault();
 									if (inline.field === "ref") submit(inline.entries, undefined, inline);

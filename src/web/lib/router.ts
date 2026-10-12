@@ -3,11 +3,17 @@ import { useSyncExternalStore } from "react";
 export type Screen = "suite" | "case" | "queue" | "runs" | "changes" | "settings";
 export type Route = { project: string; screen: Screen; ref: string | null; folder: string | null };
 const changed = "casebook:route";
+let entry: "initial" | "navigation" | "history" = "initial";
+export const routeEntry = (): typeof entry => entry;
 function subscribe(listener: () => void): () => void {
-	window.addEventListener("popstate", listener);
+	const popped = () => {
+		entry = "history";
+		listener();
+	};
+	window.addEventListener("popstate", popped);
 	window.addEventListener(changed, listener);
 	return () => {
-		window.removeEventListener("popstate", listener);
+		window.removeEventListener("popstate", popped);
 		window.removeEventListener(changed, listener);
 	};
 }
@@ -69,6 +75,7 @@ export function refUrl({ project, ref }: { project: string; ref: string }): stri
 export function navigate(path: string, options: { replace?: boolean; seal?: boolean } = {}): void {
 	if (path === location.pathname + location.search) return;
 	if (options.seal !== false) window.dispatchEvent(new Event("casebook:leave"));
+	entry = "navigation";
 	if (options.replace) history.replaceState(null, "", path);
 	else history.pushState(null, "", path);
 	window.dispatchEvent(new Event(changed));

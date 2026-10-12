@@ -51,7 +51,9 @@ for (const surface of ["case draft", "run note"]) {
 				await server.api("admin", { do: "token.revoke", id: tokenId });
 				const refused = page.waitForResponse(
 					(response) =>
-						response.status() === 401 && response.url().endsWith(surface === "case draft" ? "/propose" : "/report"),
+						response.status() === 401 &&
+						(response.url().endsWith("/session") ||
+							response.url().endsWith(surface === "case draft" ? "/propose" : "/report")),
 				);
 				await page.keyboard.press(surface === "case draft" ? "Escape" : "Enter");
 				await refused;

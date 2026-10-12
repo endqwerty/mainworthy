@@ -24,14 +24,23 @@ test.skipIf(!browserAvailable)(
 					: null,
 			);
 			expect(selection).toEqual({ start: 30, end: 30, focused: true });
-			const stored = await server.api("find", { in: "cases" });
-			if (stored.items.length) {
-				const ref = stored.items[0]?.ref;
-				if (typeof ref !== "string") throw new Error("Case ref missing");
-				expect((await server.api("get", { refs: [ref] }))[0]?.steps).toMatchObject([
-					{ action: "The coupon should preserve the" },
-				]);
-			}
+			await page.keyboard.type(" discount after reload");
+			await page.keyboard.press("Escape");
+			const stored = await eventually(
+				() => server.api("find", { in: "cases" }),
+				(rows) => rows.items.length === 1,
+			);
+			const ref = stored.items[0]?.ref;
+			if (typeof ref !== "string") throw new Error("Case ref missing");
+			await eventually(
+				() => server.api("get", { refs: [ref] }),
+				(rows) =>
+					z.array(z.object({ action: z.string() })).parse(rows[0]?.steps)[0]?.action ===
+					"The coupon should preserve the discount after reload",
+			);
+			expect((await server.api("get", { refs: [ref] }))[0]?.steps).toMatchObject([
+				{ action: "The coupon should preserve the discount after reload" },
+			]);
 			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser.close();

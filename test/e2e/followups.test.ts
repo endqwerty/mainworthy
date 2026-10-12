@@ -155,7 +155,11 @@ test.skipIf(!browserAvailable)(
 			await page.getByLabel("Folder", { exact: true }).selectOption("HTTP cases");
 			await page.getByText("2 matching cases", { exact: true }).waitFor();
 			await page.getByRole("button", { name: "Enter Plan run", exact: true }).click();
-			const run = z.object({ ref: z.string() }).parse((await server.api("find", { in: "runs" })).items[0]).ref;
+			const planned = await eventually(
+				() => server.api("find", { in: "runs" }),
+				(rows) => rows.items.length === 1,
+			);
+			const run = z.object({ ref: z.string() }).parse(planned.items[0]).ref;
 			await page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
 			await page.keyboard.press("p");
 			await page.waitForSelector('[data-run-document="C-2"][data-active="true"][data-ready="true"]');

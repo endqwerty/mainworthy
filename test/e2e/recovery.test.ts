@@ -476,10 +476,11 @@ test.skipIf(!browserAvailable)(
 			);
 			await page.keyboard.type(" continued");
 			await page.keyboard.press("Escape");
-			const rows = await eventually(
-				() => server.api("get", { refs: ["C-2"] }),
-				(rows) => rows[0]?.version === 1,
+			await eventually(
+				() => server.api("find", { in: "cases" }),
+				(rows) => rows.items.some((row) => row.ref === "C-2"),
 			);
+			const rows = await server.api("get", { refs: ["C-2"] });
 			expect(rows[0]?.steps).toMatchObject([{ action: "Back navigation step continued" }]);
 			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({ title: "Existing", version: 1 });
 			expect(browser.loads()).toBe(1);

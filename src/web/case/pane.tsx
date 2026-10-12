@@ -1,11 +1,13 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { mergeBodies } from "../../core/merge3.ts";
 import { Automate, CaseBody } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
+import { deviceSession, sessionCurrent } from "../lib/device.ts";
 import type { Draft } from "../lib/drafts.ts";
+import { proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { bodyOf, CaseView, editDraft } from "../suite/model.ts";
 import { useApp } from "../ui/context.tsx";
@@ -102,6 +104,7 @@ export function CasePane({
 	hasDraft?: boolean;
 }) {
 	const { project, session, setStatus, overlayOpen } = useApp();
+	const owner = useRef(deviceSession()).current;
 	const ref = draft?.ref ?? view?.ref ?? null;
 	const timelineInput = { ref: ref ?? "C-0", limit: 100 };
 	const timeline = useQueryOp({ project, op: "timeline", input: timelineInput, enabled: ref !== null });
@@ -112,6 +115,11 @@ export function CasePane({
 	const proposals = timelineData?.questions.filter((q) => q.kind === "adopt" && q.state === "open") ?? [];
 	async function answerProposal(answer: "accept" | "reject", question = proposals[0]): Promise<void> {
 		if (!question) return;
+		const message = proposalReadMessage(question.q);
+		if (message) {
+			setStatus(message);
+			return;
+		}
 		const key = queryKey({ project, op: "timeline", input: timelineInput });
 		const before = queryClient.getQueryData(key);
 		queryClient.setQueryData<typeof timeline.data>(key, (previous) =>
@@ -121,7 +129,7 @@ export function CasePane({
 			const reply = await call(
 				"decide",
 				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: answer } },
-				{ project },
+				{ project, owner },
 			);
 			if (reply[0]?.status !== "decided" && reply[0]?.status !== "already") {
 				queryClient.setQueryData(key, before);
@@ -135,6 +143,7 @@ export function CasePane({
 			}
 			void invalidateProject(project);
 		} catch (error) {
+			if (!sessionCurrent(owner)) return;
 			queryClient.setQueryData(key, before);
 			setStatus(error instanceof Error ? error.message : "The answer failed");
 		}
@@ -157,6 +166,12 @@ export function CasePane({
 	function answerByKey(answer: "accept" | "reject"): void {
 		const question = proposals[0];
 		if (!question) return;
+		const message = proposalReadMessage(question.q);
+		if (message) {
+			revealProposal(question.q);
+			setStatus(message);
+			return;
+		}
 		const key = answer === "accept" ? "a" : "r";
 		if (!proposalInView(question.q)) {
 			revealProposal(question.q);
@@ -506,7 +521,7 @@ function ProposalCard({
 	const { project } = useApp();
 	const proposal = typeof question.evidence.proposal === "string" ? question.evidence.proposal : "P-0";
 	const data = useQueryOp({ project, op: "get", input: { refs: [proposal] }, enabled: proposal !== "P-0" });
-	const row = data.data?.[0];
+	const row = data.data?.find((item) => item.ref === proposal);
 	const edits = row && Array.isArray(row.edits) ? row.edits : [];
 	const body = edits
 		.map((edit: unknown) =>
@@ -528,14 +543,28 @@ function ProposalCard({
 		enabled: Boolean(edit?.case && edit.base),
 	});
 	const base = CaseView.safeParse(baseQuery.data?.[0]);
-	const proposed = edit
-		? base.success
-			? mergeBodies({ base: bodyOf(base.data), mine: edit.mine ?? edit.body, theirs: current }).merged
-			: (edit.mine ?? edit.body)
-		: null;
+	const needsBase = Boolean(edit?.case && edit.base);
+	const ready = Boolean(
+		edit && (!needsBase || (base.success && base.data.ref === edit.case && base.data.version === edit.base)),
+	);
+	const error =
+		data.error?.message ??
+		baseQuery.error?.message ??
+		(data.data && !edit ? "The proposal edits could not be read." : null);
+	const proposed =
+		ready && edit
+			? base.success
+				? mergeBodies({ base: bodyOf(base.data), mine: edit.mine ?? edit.body, theirs: current }).merged
+				: (edit.mine ?? edit.body)
+			: null;
 
 	return (
-		<div className={`ev ${question.producer === "agent" ? "prop" : ""}`} data-proposal={question.q}>
+		<div
+			className={`ev ${question.producer === "agent" ? "prop" : ""}`}
+			data-proposal={question.q}
+			data-proposal-read={ready ? "ready" : error ? "error" : "loading"}
+			data-proposal-error={error ?? undefined}
+		>
 			<ProducerGlyph kind={question.producer} />
 			<div>
 				<b className={question.producer === "agent" ? "agentv" : ""}>
@@ -545,6 +574,7 @@ function ProposalCard({
 				<p className="why">
 					Proposed, waiting for a person. {typeof row?.reason === "string" ? row.reason : question.title}
 				</p>
+				{!ready && <p role="status">{error ?? "Reading the proposed edits…"}</p>}
 				{proposed && <DiffView before={current} after={proposed} />}
 				<div className="pbtn">
 					<button type="button" className="out" onClick={() => answer("accept")}>
@@ -595,6 +625,7 @@ function pageProposal(q: string): boolean {
 
 function ConflictCard({ state, resolved }: { state: ConflictState; resolved: () => void }) {
 	const { project, setStatus } = useApp();
+	const owner = useRef(deviceSession()).current;
 	const [body, setBody] = useState(state.merged);
 	const fields: { key: string; mine: string; current: string; set: (text: string) => void }[] = [
 		{
@@ -652,7 +683,7 @@ function ConflictCard({ state, resolved }: { state: ConflictState; resolved: () 
 
 	async function resolve(): Promise<void> {
 		try {
-			const questions = await call("inbox", { on: state.ref, kind: "adopt" }, { project });
+			const questions = await call("inbox", { on: state.ref, kind: "adopt" }, { project, owner });
 			const question = questions.items.find((item) => item.q === state.q);
 			if (!question) {
 				setStatus("This conflict was answered elsewhere. Your draft is still kept.");
@@ -661,7 +692,7 @@ function ConflictCard({ state, resolved }: { state: ConflictState; resolved: () 
 			const reply = await call(
 				"decide",
 				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "merge", body } },
-				{ project },
+				{ project, owner },
 			);
 			if (reply[0]?.status === "decided") {
 				setStatus("Conflict resolved. Both earlier versions remain in the timeline.");
@@ -791,7 +822,10 @@ function CaseProperties({ body, change }: { body: CaseBody; change: (body: CaseB
 				Automation{" "}
 				<select
 					value={body.automate}
-					onChange={(event) => change({ ...body, automate: Automate.parse(event.target.value) })}
+					onChange={(event) => {
+						event.currentTarget.blur();
+						change({ ...body, automate: Automate.parse(event.target.value) });
+					}}
 				>
 					<option value="none">Not requested</option>
 					<option value="wanted">Wanted</option>

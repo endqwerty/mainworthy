@@ -28,15 +28,23 @@ export function SettingsScreen() {
 	return <SettingsWorkbench key={project} />;
 }
 function SettingsWorkbench() {
-	const { project, session, overlayOpen, refreshSession, setStatus } = useApp();
+	const { project, session, instanceCan, overlayOpen, refreshSession, setStatus } = useApp();
 	const [section, setSection] = useState("Policy");
 	const [switching, setSwitching] = useState<string | null>(null);
 	const [policyMessage, setPolicyMessage] = useState("");
 	const admin = session.can.includes("admin");
-	const policyRead = useQueryOp({ project, op: "admin", input: { do: "policy.show", project }, enabled: admin });
+	const instanceAdmin = instanceCan.includes("admin");
+	const currentProject = session.projects.find((p) => p.key === project);
+	const mayRead = session.can.includes("read");
+	const policyRead = useQueryOp({
+		project,
+		op: "admin",
+		input: { do: "policy.show", project },
+		enabled: instanceAdmin && mayRead,
+	});
 	const parsedPolicy = Policy.safeParse(policyRead.data);
 	const policy = parsedPolicy.success ? parsedPolicy.data : null;
-	const preset = policy?.preset ?? session.projects.find((p) => p.key === project)?.policy ?? "loose";
+	const preset = policy?.preset ?? session.projects.find((p) => p.key === project)?.policy ?? "Policy unavailable";
 	const actorRef = useRef<HTMLInputElement>(null);
 	const projectRef = useRef<HTMLInputElement>(null);
 	useBindings([
@@ -55,7 +63,7 @@ function SettingsWorkbench() {
 		{
 			key: "n",
 			label: section === "Tokens" ? "New token" : "New project",
-			when: () => !overlayOpen && admin && (section === "Tokens" || section === "Projects"),
+			when: () => !overlayOpen && instanceAdmin && (section === "Tokens" || section === "Projects"),
 			handler: () => (section === "Tokens" ? actorRef.current?.focus() : projectRef.current?.focus()),
 		},
 	]);
@@ -124,7 +132,8 @@ function SettingsWorkbench() {
 					<span className="dim">{project}</span>
 				</div>
 				<div className="pane-scroll detail-body">
-					{section === "Policy" && (
+					{!mayRead && <p role="status">Your session may not read this project.</p>}
+					{section === "Policy" && mayRead && currentProject && (
 						<>
 							<div className="settings-policy-head">
 								<div>
@@ -138,7 +147,10 @@ function SettingsWorkbench() {
 										aria-label="Policy preset"
 										value={switching ?? preset}
 										disabled={!admin || Boolean(switching)}
-										onChange={(event) => void changePolicy(event.target.value)}
+										onChange={(event) => {
+											event.currentTarget.blur();
+											void changePolicy(event.target.value);
+										}}
 									>
 										{Preset.options.map((name) => (
 											<option key={name} value={name}>
@@ -169,7 +181,11 @@ function SettingsWorkbench() {
 								{policyMessage}
 							</p>
 							{policyRead.error && <p role="status">{policyRead.error.message}</p>}
-							{!admin && <p className="dim">An admin can read the clause table and change the policy.</p>}
+							{!instanceAdmin && (
+								<p className="dim">
+									An instance admin can read the clause table; a project admin can change the policy.
+								</p>
+							)}
 							{policy && (
 								<>
 									<SectionHeading>Clause table · first match wins</SectionHeading>
@@ -217,7 +233,7 @@ function SettingsWorkbench() {
 						</>
 					)}
 					{section === "Tokens" &&
-						(admin ? (
+						(instanceAdmin ? (
 							<TokenSettings actorRef={actorRef} />
 						) : (
 							<EmptyState>An admin creates and revokes tokens.</EmptyState>
@@ -300,7 +316,10 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 					className="form-input"
 					id="token-kind"
 					value={kind}
-					onChange={(event) => setKind(z.enum(["human", "agent", "ci"]).parse(event.target.value))}
+					onChange={(event) => {
+						event.currentTarget.blur();
+						setKind(z.enum(["human", "agent", "ci"]).parse(event.target.value));
+					}}
 				>
 					<option value="agent">Agent</option>
 					<option value="ci">Pipeline</option>
@@ -423,7 +442,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 	);
 }
 function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElement | null> }) {
-	const { session, project, refreshSession, setStatus } = useApp();
+	const { session, instanceCan, project, refreshSession, setStatus } = useApp();
 	const [key, setKey] = useState("");
 	const [name, setName] = useState("");
 	const [preset, setPreset] = useState("loose");
@@ -446,7 +465,7 @@ function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElem
 					<span className="dim">{p.key === project ? "Current" : "Switch"}</span>
 				</button>
 			))}
-			{session.can.includes("admin") && (
+			{instanceCan.includes("admin") && (
 				<>
 					<SectionHeading>Create a project</SectionHeading>
 					<form
@@ -501,7 +520,10 @@ function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElem
 							className="form-input"
 							id="project-preset"
 							value={preset}
-							onChange={(event) => setPreset(event.target.value)}
+							onChange={(event) => {
+								event.currentTarget.blur();
+								setPreset(event.target.value);
+							}}
 						>
 							{Preset.options.map((p) => (
 								<option key={p} value={p}>

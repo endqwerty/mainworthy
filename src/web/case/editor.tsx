@@ -141,7 +141,23 @@ export function BodyEditor({
 		else {
 			const [id, part] = field.split(":");
 			const step = body.steps.find((step) => step.id === id);
-			const split = part === "action" && step?.expected === null ? splitExpected(text) : null;
+			let split: ReturnType<typeof splitExpected> | null = null;
+			if (part === "action" && step?.expected === null) {
+				let start = 0;
+				while (start < Math.min(step.action.length, text.length) && step.action[start] === text[start]) start++;
+				let end = text.length;
+				let beforeEnd = step.action.length;
+				while (end > start && beforeEnd > start && text[end - 1] === step.action[beforeEnd - 1]) {
+					end--;
+					beforeEnd--;
+				}
+				for (let at = text.indexOf(" > "); at >= 0; at = text.indexOf(" > ", at + 1)) {
+					if (end > start && start < at + 3 && end > at) {
+						split = { action: text.slice(0, at).trimEnd(), expected: text.slice(at + 3).trim() || null };
+						break;
+					}
+				}
+			}
 			body = {
 				...body,
 				steps: body.steps.map((step) =>
@@ -177,6 +193,10 @@ export function BodyEditor({
 	}
 	function keys(event: KeyboardEvent<HTMLTextAreaElement>, field: string): void {
 		if (event.nativeEvent.isComposing) return;
+		if (event.repeat && (event.key === "Enter" || event.key === "Escape")) {
+			event.preventDefault();
+			return;
+		}
 		if (event.key === "Escape" || (event.key === "Enter" && (event.metaKey || event.ctrlKey))) {
 			event.preventDefault();
 			seal();

@@ -6,3 +6,15 @@ export function randomId(): string {
 	}).join("");
 	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+
+export function draftOwner(): string {
+	try {
+		const stored = sessionStorage.getItem("casebook:draft-window");
+		if (stored) return stored;
+		const id = randomId();
+		sessionStorage.setItem("casebook:draft-window", id);
+		return id;
+	} catch {
+		return randomId();
+	}
+}

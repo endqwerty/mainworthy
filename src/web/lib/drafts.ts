@@ -1,31 +1,45 @@
 import { z } from "zod";
 import { CaseBody, Step } from "../../core/model.ts";
+import { ProposeInput } from "../../core/ops.ts";
 import { deviceKey } from "./device.ts";
 
 const DraftBody = CaseBody.extend({
 	steps: z.array(Step.extend({ action: z.string(), expected: z.string().nullable() })),
 });
-const Draft = z.object({
-	id: z.string(),
-	ref: z.string().nullable(),
-	base: z.number(),
-	body: DraftBody,
-	original: CaseBody,
-	tags: z.array(z.string()),
-	covers: z.array(z.string()),
-	folder: z.string(),
-	after: z.string().nullable(),
-	caret: z.object({ field: z.string(), start: z.number(), end: z.number() }),
-	dirty: z.boolean(),
-	at: z.number(),
-	cmd: z.string(),
-	submission: z
-		.discriminatedUnion("kind", [
-			z.object({ kind: z.literal("none") }),
-			z.object({ kind: z.literal("waiting"), question: z.string(), fingerprint: z.string() }),
-		])
-		.default({ kind: "none" }),
-});
+const Draft = z
+	.object({
+		id: z.string(),
+		ref: z.string().nullable(),
+		base: z.number(),
+		body: DraftBody,
+		original: CaseBody,
+		tags: z.array(z.string()),
+		covers: z.array(z.string()),
+		originalTags: z.array(z.string()).optional(),
+		originalCovers: z.array(z.string()).optional(),
+		owner: z.string().default(""),
+		sent: z
+			.object({ input: ProposeInput, body: CaseBody, tags: z.array(z.string()), covers: z.array(z.string()) })
+			.nullable()
+			.default(null),
+		folder: z.string(),
+		after: z.string().nullable(),
+		caret: z.object({ field: z.string(), start: z.number(), end: z.number() }),
+		dirty: z.boolean(),
+		at: z.number(),
+		cmd: z.string(),
+		submission: z
+			.discriminatedUnion("kind", [
+				z.object({ kind: z.literal("none") }),
+				z.object({ kind: z.literal("waiting"), question: z.string(), fingerprint: z.string() }),
+			])
+			.default({ kind: "none" }),
+	})
+	.transform((draft) => ({
+		...draft,
+		originalTags: draft.originalTags ?? draft.tags,
+		originalCovers: draft.originalCovers ?? draft.covers,
+	}));
 export type Draft = z.infer<typeof Draft>;
 export function draftKey({ project, id }: { project: string; id: string }): string {
 	return deviceKey("draft", `${project}:${id}`);
@@ -37,7 +51,7 @@ export function readDraft({ project, id }: { project: string; id: string }): Dra
 		const text = localStorage.getItem(draftKey({ project, id }));
 		if (!text) return null;
 		const result = Draft.safeParse(JSON.parse(text));
-		return result.success ? result.data : null;
+		return result.success && result.data.dirty ? result.data : null;
 	} catch {
 		return null;
 	}
@@ -45,6 +59,7 @@ export function readDraft({ project, id }: { project: string; id: string }): Dra
 /** Each input writes synchronously, so even closing before the next frame preserves text and caret. */
 export function writeDraft({ project, draft }: { project: string; draft: Draft }): void {
 	knownStepIds({ project, id: draft.id, ids: [...draft.body.steps, ...draft.original.steps].map((step) => step.id) });
+	if (!draft.dirty) return;
 	localStorage.setItem(draftKey({ project, id: draft.id }), JSON.stringify(draft));
 	localStorage.setItem(activeKey(project), draft.id);
 }
@@ -69,7 +84,11 @@ export function readDrafts(project: string): Draft[] {
 	} catch {}
 	return drafts.sort((a, b) => a.at - b.at);
 }
-export function removeDraft({ project, id }: { project: string; id: string }): void {
+export function removeDraft({ project, id, owner }: { project: string; id: string; owner?: string }): void {
+	if (owner) {
+		const stored = readDraft({ project, id });
+		if (stored && stored.owner !== owner) return;
+	}
 	localStorage.removeItem(draftKey({ project, id }));
 	if (localStorage.getItem(activeKey(project)) === id) localStorage.removeItem(activeKey(project));
 }

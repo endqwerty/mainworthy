@@ -117,6 +117,10 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server);
 		try {
 			const { page } = browser;
+			await page.route("**/propose", async (route) => {
+				await Bun.sleep(500);
+				await route.continue();
+			});
 			let textKeys = 0;
 			const type = async (text: string) => {
 				textKeys += text.length;
@@ -169,6 +173,7 @@ test.skipIf(!browserAvailable)(
 			expect(browser.dialogs).toEqual([]);
 			expect(browser.loads()).toBe(1);
 			expect(browser.errors).toEqual([]);
+			expect((await keyCount(page)) - textKeys).toBe(8);
 			console.info(
 				`J1: ${(await keyCount(page)) - textKeys} control keys beyond text; plus 3 typed delimiter characters. 0 dialogs, 0 document loads after opening.`,
 			);

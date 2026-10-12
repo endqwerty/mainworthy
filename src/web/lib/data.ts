@@ -58,7 +58,11 @@ export function useEvents(project: string): void {
 					const op = query.queryKey[1];
 					if (op === "find" || op === "inbox" || op === "gate" || op === "impact" || op === "admin") return true;
 					// A proposal's event names its proposal and question, so an open case's timeline must be read again.
-					if (op === "timeline" && parsed.data.op === "propose") return true;
+					if (
+						(op === "timeline" && parsed.data.op === "propose") ||
+						((op === "get" || op === "timeline") && parsed.data.op === "report")
+					)
+						return true;
 					const input = JSON.stringify(query.queryKey[2]) ?? "";
 					return (
 						refs.length === 0 || refs.some((ref) => input.includes(ref)) || refs.some((ref) => !/^[CQRPT]-/.test(ref))

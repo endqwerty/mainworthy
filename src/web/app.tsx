@@ -5,7 +5,7 @@ import { CaseScreen } from "./case/index.tsx";
 import { ChangesScreen } from "./changes/index.tsx";
 import { ApiError, login, session, unauthenticatedEvent } from "./lib/api.ts";
 import { queryClient, useEvents, useQueryOp } from "./lib/data.ts";
-import { setDevicePerson } from "./lib/device.ts";
+import { deviceSession, sessionPersonKey, setDevicePerson, suspendDeviceSession } from "./lib/device.ts";
 import { useBindings, useKeyboard, useKeyRegistry } from "./lib/keys.ts";
 import { navigate, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
 import { QueueScreen } from "./queue/index.tsx";
@@ -63,10 +63,21 @@ export function App() {
 		}
 	}, []);
 	useEffect(() => {
-		const refused = () => setAuth({ kind: "signin" });
+		const refused = () => {
+			suspendDeviceSession();
+			queryClient.clear();
+			setAuth({ kind: "signin" });
+		};
+		const changed = (event: StorageEvent) => {
+			if (event.key === sessionPersonKey && event.newValue !== deviceSession().person) refused();
+		};
+		window.addEventListener("storage", changed);
 		window.addEventListener(unauthenticatedEvent, refused);
 		void refreshSession();
-		return () => window.removeEventListener(unauthenticatedEvent, refused);
+		return () => {
+			window.removeEventListener(unauthenticatedEvent, refused);
+			window.removeEventListener("storage", changed);
+		};
 	}, [refreshSession]);
 	useEffect(() => {
 		const media = matchMedia("(prefers-color-scheme: dark)");
@@ -95,7 +106,7 @@ export function App() {
 				</span>
 			</div>
 		);
-	return <Workbench info={auth.session} refreshSession={refreshSession} />;
+	return <Workbench key={auth.session.actor} info={auth.session} refreshSession={refreshSession} />;
 }
 function SignIn({ onLogin }: { onLogin: () => Promise<void> }) {
 	const [token, setToken] = useState("");
@@ -140,6 +151,21 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 		"Drafts stay on this device. A version is recorded when you leave, press ⌘↵, or pause for 30 seconds.",
 	);
 	const [palette, setPalette] = useState<PaletteOptions | null>(null);
+	const paletteOrigin = useRef<HTMLElement | null>(null);
+	const openPalette = useCallback((options: PaletteOptions = {}): void => {
+		paletteOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		setHelp(false);
+		setPalette(options);
+	}, []);
+	const closePalette = useCallback((chosen = false): void => {
+		setPalette(null);
+		const origin = paletteOrigin.current;
+		paletteOrigin.current = null;
+		if (!chosen)
+			queueMicrotask(() => {
+				if (origin?.isConnected) origin.focus();
+			});
+	}, []);
 	const [help, setHelp] = useState(false);
 	const [inInput, setInInput] = useState(false);
 	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -186,7 +212,8 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				label: "Jump to or run",
 				handler: () => {
 					setHelp(false);
-					setPalette((current) => (current ? null : {}));
+					if (palette) closePalette();
+					else openPalette();
 				},
 			},
 			{
@@ -203,12 +230,12 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				hidden: true,
 				when: () => palette !== null || help,
 				handler: () => {
-					setPalette(null);
+					closePalette();
 					setHelp(false);
 				},
 			},
 		],
-		[project, palette, help],
+		[project, palette, help, openPalette, closePalette],
 	);
 	useBindings(globalKeys);
 	useEffect(() => {
@@ -241,12 +268,10 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				project,
 				route,
 				// A screen asks what the caller may do in the project it shows, not on the instance.
-				session: { ...info, can: info.projects.find((entry) => entry.key === project)?.can ?? info.can },
+				session: { ...info, can: info.projects.find((entry) => entry.key === project)?.can ?? [] },
+				instanceCan: info.can,
 				setStatus,
-				openPalette: (options = {}) => {
-					setHelp(false);
-					setPalette(options);
-				},
+				openPalette,
 				refreshSession,
 				overlayOpen: palette !== null || help,
 			}}
@@ -268,7 +293,10 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 								className="project-select"
 								aria-label="Project"
 								value={project}
-								onChange={(event) => navigate(routeUrl({ project: event.target.value, screen: "suite" }))}
+								onChange={(event) => {
+									event.currentTarget.blur();
+									navigate(routeUrl({ project: event.target.value, screen: "suite" }));
+								}}
 							>
 								{info.projects.map((p) => (
 									<option key={p.key} value={p.key}>
@@ -280,7 +308,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 							<span className="proj">{project}</span>
 						)}
 					</div>
-					<button className="search" type="button" onClick={() => setPalette({})}>
+					<button className="search" type="button" onClick={() => openPalette()}>
 						<span>Jump to or run…</span>
 						<KeyCap>⌘K</KeyCap>
 					</button>
@@ -419,7 +447,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 					</div>
 				</footer>
 			</div>
-			{palette && <Palette project={project} options={palette} close={() => setPalette(null)} />}{" "}
+			{palette && <Palette project={project} options={palette} close={closePalette} />}{" "}
 			{help && (
 				<div className="overlay" data-overlay="help">
 					<button type="button" className="overlay-backdrop" aria-label="Close keys" onClick={() => setHelp(false)} />
@@ -452,7 +480,15 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 		</AppContext.Provider>
 	);
 }
-function Palette({ project, options, close }: { project: string; options: PaletteOptions; close: () => void }) {
+function Palette({
+	project,
+	options,
+	close,
+}: {
+	project: string;
+	options: PaletteOptions;
+	close: (chosen?: boolean) => void;
+}) {
 	const [text, setText] = useState("");
 	const [cursor, setCursor] = useState(0);
 	const registry = useKeyRegistry();
@@ -498,13 +534,13 @@ function Palette({ project, options, close }: { project: string; options: Palett
 	const choose = (index: number) => {
 		const item = items[index];
 		if (item) {
-			close();
+			close(true);
 			item.handler();
 		}
 	};
 	return (
 		<div className="overlay" data-overlay="palette">
-			<button type="button" className="overlay-backdrop" aria-label="Close palette" onClick={close} />
+			<button type="button" className="overlay-backdrop" aria-label="Close palette" onClick={() => close()} />
 			<section className="pal" aria-label={options.title ?? "Command palette"}>
 				<input
 					className="palette-input"
@@ -525,6 +561,7 @@ function Palette({ project, options, close }: { project: string; options: Palett
 						}
 						if (event.key === "Enter") {
 							event.preventDefault();
+							if (event.repeat) return;
 							choose(cursor);
 						}
 					}}

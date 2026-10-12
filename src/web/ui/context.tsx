@@ -7,6 +7,7 @@ export type AppContext = {
 	project: string;
 	route: Route;
 	session: SessionInfo;
+	instanceCan: readonly string[];
 	setStatus: (text: string) => void;
 	openPalette: (options?: PaletteOptions) => void;
 	refreshSession: () => Promise<void>;
