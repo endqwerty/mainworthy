@@ -9,6 +9,8 @@ import { BUDGETS } from "../bench/contracts.ts";
 import { buildDataset, openDataset, Parameters } from "../bench/dataset.ts";
 import { measure, table } from "../bench/measure.ts";
 import { ingestWorkload, prepareRecentChanges, readWorkloads, saveWorkload } from "../bench/workloads.ts";
+import type { InboxReply } from "../src/core/ops.ts";
+import { harness } from "./helpers.ts";
 
 test("on-disk hot paths stay inside the design budgets", async () => {
 	const root = resolve(".casebook", "bench");
@@ -56,3 +58,49 @@ test("on-disk hot paths stay inside the design budgets", async () => {
 		rmSync(dir, { recursive: true, force: true });
 	}
 }, 20_000);
+
+/**
+ * Counted, not timed: the work one report does must not grow with the number of questions it settles times the
+ * size of the runs that waited for them. At product scale this was fourteen seconds for a report that should
+ * take one (a pipeline going green after a bad day closes thousands of questions at once).
+ */
+test("a report that makes many failures go away recomputes each run once, not once per question", () => {
+	const h = harness();
+	try {
+		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const causes = 300;
+		// Letters the signature keeps apart: digits and anything that reads as an identifier are normalised away.
+		const word = (i: number) => [...String(i).padStart(3, "0")].map((digit) => "ghijklmnop"[Number(digit)]).join("");
+		const results = (outcome: "pass" | "fail") =>
+			Array.from({ length: causes }, (_, i) => ({
+				test: { key: `suite/t${i}` },
+				outcome,
+				...(outcome === "fail" ? { failure: { message: `the ${word(i)} widget did not answer` } } : {}),
+			}));
+		const counts = () => h.call<InboxReply>("inbox", { kind: "failure", state: "open", limit: 1 }).counts;
+		h.call("report", { target: { commit: "a".repeat(40), branch: "main" }, job: "unit", results: results("fail") }, ci);
+		expect(counts().failure).toBe(causes);
+
+		let tallies = 0;
+		const db = h.app.db;
+		const all = db.all.bind(db);
+		db.all = ((statement: { text: string }, ...args: unknown[]) => {
+			if (statement.text.includes("GROUP BY outcome, signature, target")) tallies++;
+			return (all as (...rest: unknown[]) => unknown[])(statement, ...args);
+		}) as typeof db.all;
+		try {
+			h.call(
+				"report",
+				{ target: { commit: "b".repeat(40), branch: "main" }, job: "unit", results: results("pass") },
+				ci,
+			);
+		} finally {
+			db.all = all;
+		}
+		expect(counts().failure ?? 0).toBe(0);
+		// Two commits' runs, each read a few times in one report: nowhere near once per question.
+		expect(tallies).toBeLessThan(12);
+	} finally {
+		h.close();
+	}
+});

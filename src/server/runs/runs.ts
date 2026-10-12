@@ -191,9 +191,12 @@ const Q = {
 		 WHERE r.project = $project AND r.origin = 'planned'
 		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
 	),
-	// Starts from the disputed slots (a partial index): there are few, however many runs there are.
+	// Starts from the disputed slots, by their partial index, and only then looks at each one's run: there are
+	// few disputed slots however many runs there are, and this is read for every failure question a queue page
+	// shows. (Left to itself the planner starts from the project's open runs, which is every commit ever reported.)
 	disputedSlots: sql<{ project: number; signature: number }, { id: number; run: number; causes: string }>(
-		`SELECT s.id AS id, s.run AS run, s.causes AS causes FROM slots s JOIN runs r ON r.id = s.run
+		`SELECT s.id AS id, s.run AS run, s.causes AS causes
+		 FROM slots s INDEXED BY slots_disputed CROSS JOIN runs r ON r.id = s.run
 		 WHERE s.state = 'disputed' AND r.project = $project AND r.origin = 'planned'
 		   AND (r.state = 'open' OR json_extract(r.tally, '$.disputed') > 0)
 		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,

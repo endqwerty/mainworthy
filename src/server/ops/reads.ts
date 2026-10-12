@@ -19,7 +19,7 @@ import {
 	TimelineInput,
 } from "../../core/ops.ts";
 import type { Tally } from "../../core/runs.ts";
-import { mayAnswer, toItem } from "../decisions/decisions.ts";
+import { toItem, toItemFor } from "../decisions/decisions.ts";
 import {
 	ledgerPage,
 	mustQuestion,
@@ -116,7 +116,7 @@ export function inbox(ctx: Ctx, input: InboxInput): InboxReply {
 		)
 			.filter((row) => row.state === input.state && (!input.kind || row.kind === input.kind))
 			.slice(0, limit);
-		return { counts, items: rows.map((row) => ({ ...toItem(ctx.db, row), you: mayAnswer(ctx, row) })), cursor: null };
+		return { counts, items: rows.map((row) => toItemFor(ctx, row)), cursor: null };
 	}
 	if (input.state === "decided") {
 		// The ledger's cursor is the revision and the id of the last row: many questions are decided at one revision.
@@ -133,7 +133,7 @@ export function inbox(ctx: Ctx, input: InboxInput): InboxReply {
 	const last = page.at(-1);
 	const cursor =
 		rows.length > limit && last ? (input.state === "open" ? String(last.rank) : `${last.rev}.${last.id}`) : null;
-	return { counts, items: page.map((row) => ({ ...toItem(ctx.db, row), you: mayAnswer(ctx, row) })), cursor };
+	return { counts, items: page.map((row) => toItemFor(ctx, row)), cursor };
 }
 
 export const inboxOp = defineOp({

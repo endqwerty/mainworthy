@@ -1185,19 +1185,31 @@ function dissolveStale(ctx: Ctx, run: RunRow): void {
 		}
 	}
 	const shown = new Map<number, Set<string>>();
+	// One report can make thousands of questions go away, all waited for by the same run: it is recomputed once,
+	// when they are all closed, not once for each.
+	const waited = new Set<number>();
 	for (const id of candidates) {
 		const question = questionById(ctx.db, id);
-		if (question?.state === "open" && stoppedFailing(ctx, question, shown)) dissolve(ctx, question);
+		if (question?.state === "open" && stoppedFailing(ctx, question, shown)) dissolve(ctx, question, waited);
+	}
+	for (const id of waited) {
+		const named = runById(ctx.db, id);
+		if (named) retally(ctx, named.id, blockersOf(ctx, named));
 	}
 }
 
-/** Closes a question as dissolved, and recomputes each run that listed it among those it waits for. */
-function dissolve(ctx: Ctx, question: QuestionRow): void {
+/**
+ * Closes a question as dissolved, and recomputes each run that listed it among those it waits for. Given
+ * `later`, it names those runs there instead and the caller recomputes them when it has closed all it will.
+ */
+function dissolve(ctx: Ctx, question: QuestionRow, later?: Set<number>): void {
 	setQuestionState(ctx, question, "dissolved", null);
 	for (const about of runsAbout(ctx, question)) {
+		if (later?.has(about)) continue;
 		const named = runById(ctx.db, about);
-		if (named && json<string[]>(named.blocking).includes(questionRef(question)))
-			retally(ctx, named.id, blockersOf(ctx, named));
+		if (!named || !json<string[]>(named.blocking).includes(questionRef(question))) continue;
+		if (later) later.add(named.id);
+		else retally(ctx, named.id, blockersOf(ctx, named));
 	}
 }
 
@@ -1329,7 +1341,20 @@ function askNow(db: Db, question: QuestionRow, facts: ReadonlySet<string>): Ask 
 /** A question as the queue, a case page and an agent see it. */
 export function toItem(db: Db, row: QuestionRow): QuestionItem {
 	const facts = factsNow(db, row);
-	const ask = askNow(db, row, facts);
+	return itemOf(db, row, facts, askNow(db, row, facts));
+}
+
+/**
+ * A question as its reader sees it in the queue: the item, and what the reader's own answer would be worth. The
+ * facts and who is asked are read once for both: a queue page reads them for every question it shows.
+ */
+export function toItemFor(ctx: Ctx, row: QuestionRow): QuestionItem & { you: "counts" | "advice" | "forbidden" } {
+	const facts = factsNow(ctx.db, row);
+	const ask = askNow(ctx.db, row, facts);
+	return { ...itemOf(ctx.db, row, facts, ask), you: standingFor(ctx, row, ask) };
+}
+
+function itemOf(db: Db, row: QuestionRow, facts: ReadonlySet<string>, ask: Ask): QuestionItem {
 	const stored = json<Record<string, unknown> & { hints?: string[] }>(row.evidence);
 	const hints = (stored.hints ?? []).filter((hint) => hint !== "disputed");
 	if (facts.has("hint:disputed")) hints.unshift("disputed");
@@ -1376,8 +1401,7 @@ export function toItem(db: Db, row: QuestionRow): QuestionItem {
 }
 
 /** Whether the acting actor may settle this question, so a surface can show the keys or say who is needed. */
-export function mayAnswer(ctx: Ctx, row: QuestionRow): "counts" | "advice" | "forbidden" {
-	const ask = askNow(ctx.db, row, factsNow(ctx.db, row));
+function standingFor(ctx: Ctx, row: QuestionRow, ask: Ask): "counts" | "advice" | "forbidden" {
 	const handler = HANDLERS[row.kind];
 	return standingOf({
 		actor: ctx.actor,
