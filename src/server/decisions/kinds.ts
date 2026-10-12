@@ -323,6 +323,20 @@ function openPlannedAbout(ctx: Ctx, question: QuestionRow): RunRow[] {
 	});
 }
 
+/**
+ * Everybody with a result in a slot of an open run that disputes this question's cause: the parties to the
+ * dispute as the runs show it now. Kept on the question when the dispute is raised and when it is answered
+ * (`parties` in its evidence), because the runs stop showing it once it is settled: the disputed result is set
+ * aside, or the run closes on the answer. Whoever a dispute was kept from stays kept from its answer.
+ */
+export function disputeParties(ctx: Ctx, question: QuestionRow): number[] {
+	const subject = json<{ signature: number; scope: string }>(question.subject);
+	const parties = new Set<number>();
+	for (const run of openPlannedAbout(ctx, question))
+		for (const actor of partiesTo(ctx.db, run, subject.signature, subject.scope)) parties.add(actor);
+	return [...parties];
+}
+
 const failureHandler: Handler<"failure"> = {
 	effect(ctx, witness, question, answer) {
 		const subject = json<{ signature: number; scope: string }>(question.subject);
@@ -413,7 +427,8 @@ const failureHandler: Handler<"failure"> = {
 	isProducer(ctx, question) {
 		const subject = json<{ signature: number; scope: string }>(question.subject);
 		const actor = ctx.actor.id;
-		if ((json<{ producers?: number[] }>(question.evidence).producers ?? []).includes(actor)) return true;
+		const kept = json<{ producers?: number[]; parties?: number[] }>(question.evidence);
+		if ((kept.producers ?? []).includes(actor) || (kept.parties ?? []).includes(actor)) return true;
 		const reported = producedCause(ctx.db, ctx.project.id, subject.signature, actor).some(
 			(seen) => scopeOf(mustTarget(ctx.db, seen.target), seen.run) === subject.scope,
 		);

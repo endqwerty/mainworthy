@@ -388,9 +388,17 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 	const advisory = ctx.actor.kind === "agent";
 	const placed = first !== undefined && firstSeen(ctx.db, project, input.repo ?? null, input.commit) !== null;
 	const settled = first !== undefined && (placed || advisory);
-	const trunk = input.pr === undefined && input.branch !== undefined && TRUNK_BRANCHES.has(input.branch);
+	const trunk = !advisory && input.pr === undefined && input.branch !== undefined && TRUNK_BRANCHES.has(input.branch);
 	let change: ChangeRow | null = null;
-	if (!trunk) {
+	if (advisory) {
+		// An agent's word about a branch or a pull request is not taken, and no change is made because an agent
+		// named one (the name stays free for whoever really reports it). A commit only an agent has reported is on
+		// its own, like a commit reported by its hash alone; one that is placed already is where it is.
+		if (first === undefined) {
+			const key = changeKey(ctx.db, project, `commit:${input.commit.slice(0, 12)}`, input.repo ?? null);
+			change = upsertChange(ctx, key, input);
+		}
+	} else if (!trunk) {
 		const key =
 			input.pr !== undefined
 				? `pr:${input.pr}`
@@ -408,7 +416,9 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 	// run; two scopes inside it would let one line's answer classify the other line's failure.
 	const place = settled
 		? { line: first.line, branch: first.branch, change: first.change }
-		: { line: trunk ? "trunk" : "change", branch: input.branch ?? null, change: change?.id ?? null };
+		: advisory
+			? { line: "change", branch: null, change: change?.id ?? null }
+			: { line: trunk ? "trunk" : "change", branch: input.branch ?? null, change: change?.id ?? null };
 	// The first report a gate counts, for a commit only an agent had reported: every target of it moves there.
 	// (Applying that report recomputes every run that counts the commit: see `firstCountedReport`.)
 	if (first !== undefined && !settled) ctx.db.run(Q.placeCommit, { project, what, ...place });
@@ -425,6 +435,14 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 		seq: ctx.seq,
 	});
 	return mustTarget(ctx.db, lastId);
+}
+
+/**
+ * The change a commit was given for itself when only an agent had reported it (`commit:<hash>`), or null. Its
+ * scope is where the agent's findings were asked about until a pipeline or a person said where the commit is.
+ */
+export function ownChangeOf(db: Db, project: number, repo: string | null, commit: string): ChangeRow | null {
+	return db.get(Q.change, { project, key: changeKey(db, project, `commit:${commit.slice(0, 12)}`, repo) });
 }
 
 /** The key of a change in a repository: the plain key, unless another repository holds it in this project. */

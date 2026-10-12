@@ -181,6 +181,16 @@ test("an agent completes a real session, with hashes, advice, and compact reads"
 		);
 		const created = proposed.cases[0];
 		if (!created) throw new Error("No case was created");
+		// The pull request's pipeline has reported its head: that is what makes `pr:482` exist. (What an agent
+		// says about where a commit is counts for nothing until a pipeline or a person has reported the commit.)
+		h.call(
+			"report",
+			{
+				target: { commit: "9f3c2ab", pr: 482, branch: "coupon-total", files: ["tests/checkout.spec.ts"] },
+				results: [{ test: { key: "tests/other.spec.ts::smoke" }, outcome: "pass" }],
+			},
+			h.actor("pipeline", "ci", ["read", "produce"]),
+		);
 		const reported = resultOf(
 			await call("report", {
 				target: { commit: "9f3c2ab", pr: 482, files: ["tests/checkout.spec.ts"] },
@@ -254,8 +264,9 @@ test("an agent completes a real session, with hashes, advice, and compact reads"
 			await call("gate", { commit: "9f3c2ab" }),
 			z.object({ verdict: z.enum(["passed", "failed", "blocked", "pending"]), open: z.array(z.string()) }),
 		);
-		// What an agent reports is put to a person as a question, and never moves a commit's gate (decision 0009).
-		expect(gate.verdict).toBe("pending");
+		// What an agent reports is put to a person as a question, and never moves a commit's gate (decision 0009):
+		// the gate reads what the pipeline reported, a pass, whatever the agent found.
+		expect(gate.verdict).toBe("passed");
 		expect(gate.open).toEqual([]);
 		console.log(
 			`tokens served: ${wire.reduce((sum, message) => sum + encode(message).length, 0)}; ${wire.length} messages; definitions once; o200k_base`,

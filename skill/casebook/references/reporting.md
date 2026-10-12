@@ -8,7 +8,7 @@ Each result names an automated test with `test: {key, name, file}` or a case wit
 
 Read the receipt's counts, `basis`, questions, rejected results, and gate. A refused result has a reason in `rejected`; fix the input before reporting it again. An automated result kept without the case it claimed has its reason in `declined`. A recorded result does not by itself mean the gate passed.
 
-An agent's results are recorded and shown, but no commit's gate counts them. They count only in a planned run that asked for agents, on a case that admits them. A failure you report is put to a person as a question. Where only an agent has shown the failure, a pipeline's pass does not close the question: it stays open until a person answers. A commit that only an agent has reported has no gate: it reads `pending` with nothing counted.
+An agent's results are recorded and shown, but no commit's gate counts them. They count only in a planned run that asked for agents, on a case that admits them. A failure you report is put to a person as a question. Where only an agent has shown the failure, a pipeline's pass does not close the question: it stays open until a person answers. A commit that only an agent has reported has no gate: it reads `pending` with nothing counted. The `pr` or `branch` you name is not taken either: until a pipeline or a person reports that commit, your findings on it are asked about under the commit itself, and they move to its pull request or line when one of them does.
 
 ## Exact basis
 

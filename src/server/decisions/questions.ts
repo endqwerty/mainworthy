@@ -134,8 +134,9 @@ const Q = {
 		"UPDATE questions SET state = $state, decision = $decision, rev = $seq WHERE id = $id",
 	),
 	setAsk: sql<{ id: number; ask: string }>("UPDATE questions SET ask = $ask WHERE id = $id"),
-	setFacts: sql<{ id: number; facts: string }>(
-		"UPDATE questions SET evidence = json_set(evidence, '$.facts', json($facts)) WHERE id = $id",
+	setFacts: sql<{ id: number; facts: string; parties: string }>(
+		`UPDATE questions SET evidence = json_set(evidence, '$.facts', json($facts), '$.parties', json($parties))
+		 WHERE id = $id`,
 	),
 	addRef: sql<{ project: number; ref: string; question: number }>(
 		"INSERT OR IGNORE INTO question_refs (project, ref, question) VALUES ($project, $ref, $question)",
@@ -339,9 +340,17 @@ export const setQuestionAsk = (ctx: Ctx, question: QuestionRow, ask: Ask): void 
 	ctx.db.run(Q.setAsk, { id: question.id, ask: JSON.stringify(ask) });
 };
 
-/** Keeps on a question the policy facts its answer was given under, so that changing the answer is held to them. */
-export const setQuestionFacts = (ctx: Ctx, question: QuestionRow, facts: readonly string[]): void => {
-	ctx.db.run(Q.setFacts, { id: question.id, facts: JSON.stringify(facts) });
+/**
+ * Keeps on a question the policy facts its answer was given under and the parties to the dispute it settled, so
+ * that changing or withdrawing the answer is held to the same clause and kept from the same people.
+ */
+export const setQuestionFacts = (
+	ctx: Ctx,
+	question: QuestionRow,
+	facts: readonly string[],
+	parties: readonly number[],
+): void => {
+	ctx.db.run(Q.setFacts, { id: question.id, facts: JSON.stringify(facts), parties: JSON.stringify(parties) });
 };
 
 export const refsOf = (db: Db, question: number): string[] => db.all(Q.refsOf, { question }).map((r) => r.ref);

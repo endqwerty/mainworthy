@@ -1172,6 +1172,70 @@ describe("what a run and a change may count", () => {
 		expect(now.open).toEqual([asked.q]);
 	});
 
+	test("until a pipeline or a person reports a commit, what an agent says about where it is counts for nothing", () => {
+		const ci = pipeline();
+		const fail = { test: { key: "t0" }, outcome: "fail", failure: { message: "agent found it" } };
+		// An agent reports two commits nobody has: one as a commit of main, one as the head of pr:9 in a repository.
+		report({ target: { repo: "app", commit: "lone00001", branch: "main" }, results: [fail] }, explorer());
+		report({ target: { repo: "app", commit: "lone00002", pr: 9, branch: "feature" }, results: [fail] }, explorer());
+		// Neither is on trunk or in a pull request: each is on its own, as a commit reported by its hash alone is.
+		// No pull request exists because an agent named one, so the name stays free for whoever really reports it.
+		expect(
+			rows(
+				"SELECT t.commit_sha, t.line, t.branch, c.key FROM targets t JOIN changes c ON c.id = t.change ORDER BY t.id",
+			),
+		).toEqual([
+			{ commit_sha: "lone00001", line: "change", branch: null, key: "commit:lone00001" },
+			{ commit_sha: "lone00002", line: "change", branch: null, key: "commit:lone00002" },
+		]);
+		expect(rows("SELECT key FROM changes WHERE key LIKE 'pr:%'")).toEqual([]);
+		// Its failures are asked about there, so an answer to one is an answer about that commit and no line.
+		const asked = h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items;
+		expect(asked).toHaveLength(2);
+		expect(decide(first(asked), { is: "flaky" }).status).toBe("decided");
+		report({ target: { repo: "app", commit: "trunk0009", branch: "main" }, results: [fail] }, ci);
+		expect(gate({ commit: "trunk0009", repo: "app" }).verdict).toBe("blocked");
+		// On a commit a pipeline has placed, an agent's naming of a pull request makes none either.
+		report({ target: { repo: "app", commit: "trunk0009", pr: 12, branch: "x" }, results: [fail] }, explorer());
+		expect(rows("SELECT key FROM changes WHERE key LIKE 'pr:%'")).toEqual([]);
+	});
+
+	test("what an agent found on a commit is asked about where the commit is, once a pipeline says where that is", () => {
+		seed(1, ["human", "agent"]);
+		const ci = pipeline();
+		const commit = "found0002";
+		// An agent reviews a pull request before its pipeline has reported: a case fails.
+		report(
+			{
+				target: { repo: "app", commit, pr: 482, branch: "feature" },
+				results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "total is wrong" } }],
+			},
+			explorer(),
+		);
+		const early = open("failure");
+		expect(early.about).not.toContain("pr:482");
+		// The pipeline reports the commit as the head of pr:482. The agent's finding is the pull request's now:
+		// asked about there, with the pull request and the case named, and no longer where it was first put.
+		report(
+			{
+				target: { repo: "app", commit, pr: 482, branch: "feature" },
+				results: [{ test: { key: "t" }, outcome: "pass" }],
+			},
+			ci,
+		);
+		const asked = h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items;
+		expect(asked).toHaveLength(1);
+		const moved = first(asked);
+		expect(moved.q).not.toBe(early.q);
+		expect(moved.about).toEqual(expect.arrayContaining(["pr:482", "C-1"]));
+		expect(moved.evidence).toMatchObject({ message: "total is wrong", scope: "pr:482" });
+		// It still holds no gate: no gate counts an agent's result.
+		expect(moved.blocks).toEqual([]);
+		expect(gate({ change: "pr:482" }).verdict).toBe("passed");
+		const impact = h.call<{ cases: { id: string; why: string[] }[] }>("impact", { change: "pr:482" });
+		expect(impact.cases).toEqual([expect.objectContaining({ id: "C-1", why: ["question"] })]);
+	});
+
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {
 		const ci = pipeline();
 		const head = "c2c2c2c200000000000000000000000000000002";
@@ -1579,10 +1643,15 @@ describe("what a decision may change", () => {
 		report({ target, results: [{ ...one, outcome: "fail", failure: { message: "same cause" } }] }, agent);
 		const question = open("failure");
 		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [question.q] });
-		// The pipeline's result cannot fill a slot that asked for an agent, so the run still shows the failure.
+		// The pipeline's result cannot fill a slot that asked for an agent, so the run still shows the failure. (It
+		// is the first report of the commit that a gate counts, so the question is asked where the commit is.)
 		report({ target, results: [{ ...one, outcome: "pass" }] }, pipeline);
-		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [question.q] });
-		expect(open("failure").q).toBe(question.q);
+		const still = open("failure");
+		expect(h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items).toHaveLength(1);
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [still.q] });
+		// A second report by the pipeline changes nothing about it: the same question stays.
+		report({ target, job: "again", results: [{ ...one, outcome: "pass" }] }, pipeline);
+		expect(open("failure").q).toBe(still.q);
 		expect(decide(open("failure"), { is: "flaky" }).status).toBe("decided");
 		expect(gate({ run: planned.run }).verdict).toBe("passed");
 	});
@@ -1760,6 +1829,52 @@ describe("what a decision may change", () => {
 				"reopened",
 			);
 		});
+	});
+
+	test("everybody a dispute was kept from stays kept from its answer: whoever passed as well as whoever failed", () => {
+		usePolicy("standard");
+		seed(2, ["human", "auto"]);
+		const alice = h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
+		const bob = h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
+		const carol = h.actor("carol", "human", ["read", "produce", "answer", "plan"]);
+		let n = 0;
+		for (const shape of ["plan after the reports", "an answer before the dispute"])
+			for (const select of [{}, { cases: ["C-1"] }])
+				for (const given of ["mistaken", "flaky"])
+					for (const mode of ["undo", "replace"]) {
+						const label = `${shape}, ${"cases" in select ? "run closes" : "run stays open"}, ${given}, ${mode}`;
+						const target = { repo: "app", commit: `parties${String(n++).padStart(3, "0")}`, branch: "main" };
+						const result = (outcome: string) => ({
+							test: { key: `one-${n}` },
+							annotation: { case: "C-1", version: 1 },
+							outcome,
+							...(outcome === "fail" ? { failure: { message: `cause ${n}` } } : {}),
+						});
+						const planNow = () => plan({ name: label, select, accepts: { repo: "app", commit: target.commit } });
+						// The question about this cause as it stands: open, or decided and still in force.
+						const latest = () => {
+							const about = ["open", "decided"]
+								.flatMap((state) => h.call<InboxReply>("inbox", { kind: "failure", state, limit: 500 }).items)
+								.filter((item) => item.title === `cause ${n}`)
+								.sort((a, b) => Number(b.q.slice(2)) - Number(a.q.slice(2)));
+							return first(about);
+						};
+						if (shape !== "plan after the reports") planNow();
+						report({ target, results: [result("fail")] }, alice);
+						if (shape !== "plan after the reports")
+							expect(decide(latest(), { is: "expected" }, alice).status).toBe("decided");
+						report({ target, results: [result("pass")] }, bob);
+						if (shape === "plan after the reports") planNow();
+						// Bob passed what Alice failed: neither may settle it. Carol, who reported neither, does.
+						expect(decide(latest(), { is: "infra" }, bob).status).toBe("forbidden");
+						expect(["decided", "already"]).toContain(decide(latest(), { is: given }, carol).status);
+						// It stays out of Bob's hands afterwards, whatever the slot and the run look like now.
+						const reply =
+							mode === "undo"
+								? first(h.call<DecideReply[]>("decide", { undo: latest().q, reason: "no" }, bob))
+								: decide(latest(), { is: given === "flaky" ? "infra" : "flaky" }, bob);
+						expect(`${label}: ${reply.status}`).toBe(`${label}: forbidden`);
+					}
 	});
 
 	test("withdrawing an answer needs what giving it needs: not the producer, and a reason where one is required", () => {

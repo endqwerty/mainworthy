@@ -63,7 +63,12 @@ not the same things done worse.
    the runs as they are, not from the report that is arriving. Nor does it make a commit current: a commit only
    an agent has reported has no run and no gate to read (`pending`, nothing counted), is not the newest commit
    of its line or change, and an agent's report never moves a change's head or rewrites its base, title or
-   files. And a pipeline's pass says nothing about a failure only an agent showed: such a question stays open
+   files. Nor does it say where a commit is: a branch or a pull request an agent names is not taken, and no
+   change exists because an agent named one. Until a pipeline or a person reports a commit, what an agent found
+   on it is asked about under the commit itself. The first such report says where the commit is; the agent's
+   open questions about it are then asked there instead, and every run that counts the commit is recomputed.
+   The cost: `impact` for a pull request does not show an agent's finding on a commit until the pull request's
+   pipeline has reported that commit. And a pipeline's pass says nothing about a failure only an agent showed: such a question stays open
    until a person answers it.
 4. **Two failure answers were added, one replaced.** `inherited` (already failing where the change started,
    which the design left unnamed) and `mistaken` (a disputed slot: the failing result was wrong). `mistaken`
@@ -93,7 +98,10 @@ not the same things done worse.
    because whether a slot disputes the cause is read from the runs when the answer is given, changed or
    withdrawn, and when the question is shown. An answer given to a dispute stays an answer to a dispute while
    it is in force, also after it has set the disputed result aside or the run has closed on it: the people the
-   clause kept it from cannot take it back or put their own in its place. Withdrawing an answer is held to the clause
+   clause kept it from cannot take it back or put their own in its place. Who they are (whoever failed and
+   whoever passed in the disputed slot) is kept on the question from the moment the dispute is raised or
+   answered, and from one question about the cause to the next, because the runs stop showing it once the
+   dispute is settled. Withdrawing an answer is held to the clause
    the policy in force now has for that answer: who may, and whether a reason is owed. (The policy in force,
    not the one the answer was given under: an administrator who relaxes the policy relaxes withdrawals too.)
 5. **Drafts live in the browser.** The design autosaves into a server-side open proposal that others see as
@@ -186,7 +194,7 @@ not the same things done worse.
     A line belongs to a repository too: what was decided about one repository's trunk does not cover another's.
     The "already failing on the base" hint reads only the change's own repository, and only results a gate would
     count (never an agent's). One commit, one place where its failures are answered: the line or the change it was first reported
-    on by a pipeline or a person (where an agent said a commit is holds only until one of them reports it). A later report of the same commit from somewhere else (a pull request's head that reached trunk, a result
+    on by a pipeline or a person (an agent's word about where a commit is is not taken; see departure 3). A later report of the same commit from somewhere else (a pull request's head that reached trunk, a result
     typed into a run that counts the commit, a pipeline that sends only the hash) is that commit and is answered
     there. The cost: trunk does not see a fast-forwarded head as its own until the next commit (#68).
 18. **Test keys of the form `case:<n>` are reserved** for the manual test of a case. A report that uses one for an

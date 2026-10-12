@@ -16,7 +16,16 @@ import {
 	type ReportReceipt,
 } from "../../core/ops.ts";
 import { clip } from "../../core/text.ts";
-import { answer, type Raise, type Raised, raise, raiseFailure, refold, undo } from "../decisions/decisions.ts";
+import {
+	answer,
+	askWhereCommitIs,
+	type Raise,
+	type Raised,
+	raise,
+	raiseFailure,
+	refold,
+	undo,
+} from "../decisions/decisions.ts";
 import { raiseAdopt } from "../decisions/kinds.ts";
 import { decisionById, type QuestionRow, questionRef } from "../decisions/questions.ts";
 import {
@@ -168,6 +177,7 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 	// answered there from now on.
 	if (target.commit_sha !== null && firstCountedReport(ctx.db, batch, target)) {
 		for (const id of plannedCounting(ctx.db, ctx.project.id, target.commit_sha)) ctx.recompute.add(id);
+		askWhereCommitIs(ctx, target);
 	}
 	refold(
 		ctx,

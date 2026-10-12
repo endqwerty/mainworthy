@@ -19,7 +19,17 @@ import {
 } from "../../core/kinds.ts";
 import type { DecideReply, QuestionItem } from "../../core/ops.ts";
 import { clip } from "../../core/text.ts";
-import { changeById, excuseFor, mustTarget, signatureById, type TargetRow, testRef } from "../evidence/evidence.ts";
+import {
+	changeById,
+	excuseFor,
+	mustTarget,
+	ownChangeOf,
+	scopeOf,
+	signatureById,
+	type TargetRow,
+	testById,
+	testRef,
+} from "../evidence/evidence.ts";
 import { actorLabel, ruleActor } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json } from "../kernel/db.ts";
@@ -33,6 +43,7 @@ import {
 	failsOnBase,
 	inDispute,
 	newestInScope,
+	partiesTo,
 	passesAny,
 	type RunRow,
 	retally,
@@ -45,7 +56,7 @@ import {
 	unexplainedShown,
 } from "../runs/runs.ts";
 import { caseById, caseRef } from "../suite/suite.ts";
-import { HANDLERS, runsAbout } from "./kinds.ts";
+import { disputeParties, HANDLERS, runsAbout } from "./kinds.ts";
 import {
 	alsoAbout,
 	answersOf,
@@ -473,7 +484,11 @@ export function answer(
 			// The facts this answer is given under stay with the question while the answer is in force: an answer
 			// given to a dispute is still an answer to a dispute after it has set the disputed result aside, or
 			// the run has closed on it, and changing or withdrawing it is held to the same clause.
-			if (question.kind === "failure") setQuestionFacts(ctx, question, [...facts]);
+			if (question.kind === "failure") {
+				const kept = json<{ parties?: number[] }>(question.evidence).parties ?? [];
+				const parties = facts.has("hint:disputed") ? [...new Set([...kept, ...disputeParties(ctx, question)])] : kept;
+				setQuestionFacts(ctx, question, [...facts], parties);
+			}
 			return settle(ctx, question, [signer], given);
 		});
 		return reply(question, "decided", { decision: settled.decision.id, effects: settled.effects });
@@ -765,9 +780,21 @@ export function raiseFailure(
 				message?: string | null;
 				sample?: number | null;
 				producers?: number[];
+				parties?: number[];
 				targets?: number[];
 			}>(open.evidence)
 		: {};
+	// The parties to a dispute about this cause, kept from one question about it to the next: what the open
+	// question holds, or what the question this one follows held, and whoever has a result in a slot that
+	// disputes it now. (The runs stop showing them once the dispute is settled; see `disputeParties`.)
+	const before = open ?? latestByFingerprint(ctx.db, ctx.project.id, contentHash({ kind: "failure", key }));
+	const parties = new Set(before ? (json<{ parties?: number[] }>(before.evidence).parties ?? []) : []);
+	if (group.disputed) {
+		for (const run of group.runs) {
+			if (run.origin !== "planned") continue;
+			for (const actor of partiesTo(ctx.db, run, group.signature.id, group.scope)) parties.add(actor);
+		}
+	}
 	const tests = new Map((earlier.tests ?? []).map((test) => [test.id, test]));
 	for (const test of group.tests) {
 		const row = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;
@@ -820,6 +847,7 @@ export function raiseFailure(
 			branch: target.branch,
 			hints: shown.map((hint) => hint.slice(5)),
 			producers: [...new Set([...(earlier.producers ?? []), input.by])],
+			parties: [...parties],
 			// Every target this question has seen the cause on. An answer that holds "here only" covers the
 			// latest of them; the others of that commit are asked about again.
 			targets: [...new Set([...(earlier.targets ?? []), target.id])],
@@ -880,6 +908,60 @@ function askUnexplained(ctx: Ctx, run: RunRow): boolean {
 }
 
 // ── Keeping runs in step ───────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Asks, where a commit now is, the open questions an agent's reports raised about it. Until a pipeline or a
+ * person reports a commit, what an agent found on it is asked about under the commit itself: nobody a gate
+ * listens to has said which line or pull request it belongs to. The first such report says so, and each of those
+ * questions is then asked there instead, through the one door every failure goes through (so it joins a
+ * question already open there, or meets an answer in force there), and is closed where it was. Its answers, if
+ * it had any, stay in its history; an answer given under the commit itself excused nothing a gate counts.
+ */
+export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
+	if (target.commit_sha === null) return;
+	const own = ownChangeOf(ctx.db, ctx.project.id, target.repo, target.commit_sha);
+	if (!own || own.id === target.change) return;
+	const before = `change:${own.id}`;
+	for (const asked of openQuestionsOn(ctx.db, ctx.project.id, `scope:${before}`)) {
+		const question = questionById(ctx.db, asked.id);
+		if (question?.kind !== "failure" || question.state !== "open") continue;
+		const subject = json<{ signature: number; scope: string }>(question.subject);
+		const signature = subject.scope === before ? signatureById(ctx.db, subject.signature) : null;
+		if (!signature) continue;
+		const seen = json<{
+			tests?: { id: number; counted?: boolean }[];
+			targets?: number[];
+			sample?: number | null;
+			message?: string | null;
+			producers?: number[];
+		}>(question.evidence);
+		const tests = (seen.tests ?? []).flatMap((test) => {
+			const row = testById(ctx.db, test.id);
+			return row ? [row] : [];
+		});
+		const by = seen.producers?.at(-1) ?? ctx.actor.id;
+		for (const id of seen.targets ?? []) {
+			const where = mustTarget(ctx.db, id);
+			raiseFailure(ctx, {
+				group: {
+					signature,
+					scope: scopeOf(where, null),
+					tests,
+					results: seen.sample != null ? [seen.sample] : [],
+					message: seen.message ?? null,
+					disputed: false,
+					counted: false,
+					gateTests: (seen.tests ?? []).flatMap((test) => (test.counted ? [test.id] : [])),
+					runs: [],
+				},
+				target: where,
+				by,
+				producer: question.producer,
+			});
+		}
+		setQuestionState(ctx, question, "dissolved", null);
+	}
+}
 
 /**
  * Recomputes the given runs and acts on what follows: a planned run that has just passed gets its sign-off
