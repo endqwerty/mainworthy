@@ -1466,6 +1466,33 @@ describe("what a run and a change may count", () => {
 		).toEqual(["infra", "outdated"]);
 	});
 
+	test("placing a commit whose failure was answered in sixty environments asks about each of them once", () => {
+		const ci = pipeline();
+		const commit = "manyenvs01";
+		const fail = { test: { key: "one" }, outcome: "fail", failure: { message: "same cause" } };
+		const envs = Array.from({ length: 60 }, (_, i) => `env-${i}`);
+		// The agent reports all of them, and then a person answers each in turn: an answer for one environment
+		// leaves the others asked about, in a question that still lists what it had seen.
+		for (const env of envs) report({ target: { repo: "app", commit, env }, results: [fail] }, explorer());
+		for (const _ of envs) expect(decide(open("failure"), { is: "infra" }).status).toBe("decided");
+		expect(h.call<InboxReply>("inbox", { kind: "failure", limit: 500 }).items).toEqual([]);
+		// The pipeline's first report of the commit is applied: every answer given about the commit on its own
+		// ends, and the failure is asked about where the commit is, once for each environment.
+		const placed = report(
+			{ target: { repo: "app", commit, env: "ci", pr: 7 }, results: [{ test: { key: "t" }, outcome: "pass" }] },
+			ci,
+		);
+		expect(placed.counts.total).toBe(1);
+		expect(gate({ commit, repo: "app" }).verdict).toBe("passed");
+		const asked = h.call<InboxReply>("inbox", { kind: "failure", limit: 500 }).items;
+		expect(asked).toHaveLength(1);
+		expect((first(asked).evidence as { targets: number[]; scope: string }).scope).toBe("pr:7");
+		expect((first(asked).evidence as { targets: number[] }).targets).toHaveLength(60);
+		expect(rows("SELECT count(*) AS n FROM decisions WHERE json_extract(answer, '$.is') = 'outdated'")).toEqual([
+			{ n: 60 },
+		]);
+	});
+
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {
 		const ci = pipeline();
 		const head = "c2c2c2c200000000000000000000000000000002";

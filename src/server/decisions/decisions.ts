@@ -1002,12 +1002,36 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 	const own = ownChangeOf(ctx.db, ctx.project.id, target.repo, target.commit_sha);
 	if (!own || own.id === target.change) return;
 	const before = `change:${own.id}`;
+	type Seen = {
+		tests?: { id: number; counted?: boolean }[];
+		count?: number;
+		targets?: number[];
+		sample?: number | null;
+		message?: string | null;
+		producers?: number[];
+		parties?: number[];
+	};
+	// What there is to ask about again, by cause: gathered from every question about the commit before anything
+	// is asked, so that each cause is asked about once for each target however many questions had seen it (an
+	// answer for one environment leaves the others in a question that still lists them all).
+	const causes = new Map<
+		number,
+		{
+			question: QuestionRow;
+			seen: Seen;
+			targets: Set<number>;
+			disputed: boolean;
+			parties: Set<number>;
+			runs: Set<number>;
+			count: number;
+		}
+	>();
+	const moved: QuestionRow[] = [];
 	for (const asked of questionsOn(ctx.db, ctx.project.id, `scope:${before}`)) {
 		const question = questionById(ctx.db, asked.id);
 		if (question?.kind !== "failure") continue;
 		const subject = json<{ signature: number; scope: string }>(question.subject);
-		const signature = subject.scope === before ? signatureById(ctx.db, subject.signature) : null;
-		if (!signature) continue;
+		if (subject.scope !== before) continue;
 		const standing =
 			question.state === "decided" && question.decision !== null ? decisionById(ctx.db, question.decision) : null;
 		const inForce =
@@ -1017,33 +1041,42 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 		// Whether this is a dispute, read before anything is taken away: asked about again where the commit is,
 		// a dispute is still a dispute, kept from the same people, and no rule for plain failures answers it.
 		const disputed = factsNow(ctx.db, question).has("hint:disputed");
-		const named = new Set(runsAbout(ctx, question));
+		const seen = json<Seen>(question.evidence);
+		const cause = causes.get(subject.signature) ?? {
+			question,
+			seen,
+			targets: new Set<number>(),
+			disputed: false,
+			parties: new Set<number>(),
+			runs: new Set<number>(),
+			count: 0,
+		};
+		causes.set(subject.signature, cause);
+		cause.disputed ||= disputed;
+		cause.count = Math.max(cause.count, seen.count ?? 0);
+		if (disputed)
+			for (const actor of [...(seen.parties ?? []), ...disputeParties(ctx, question)]) cause.parties.add(actor);
+		for (const id of runsAbout(ctx, question)) cause.runs.add(id);
+		for (const id of seen.targets ?? []) cause.targets.add(id);
 		if (standing && inForce) {
-			for (const id of runsDependingOn(ctx.db, standing.id)) named.add(id);
+			for (const id of runsDependingOn(ctx.db, standing.id)) cause.runs.add(id);
 			HANDLERS[question.kind].revert(ctx, question, standing);
 			lapse(ctx, question, standing, ctx.now);
-		}
-		const seen = json<{
-			tests?: { id: number; counted?: boolean }[];
-			count?: number;
-			targets?: number[];
-			sample?: number | null;
-			message?: string | null;
-			producers?: number[];
-			parties?: number[];
-		}>(question.evidence);
-		const parties = disputed ? [...new Set([...(seen.parties ?? []), ...disputeParties(ctx, question)])] : [];
-		const tests = (seen.tests ?? []).flatMap((test) => {
+		} else moved.push(question);
+	}
+	for (const [id, cause] of causes) {
+		const signature = signatureById(ctx.db, id);
+		if (!signature) continue;
+		const tests = (cause.seen.tests ?? []).flatMap((test) => {
 			const row = testById(ctx.db, test.id);
 			return row ? [row] : [];
 		});
-		const by = seen.producers?.at(-1) ?? ctx.actor.id;
-		const refs = [...named].flatMap((id) => {
-			const run = runById(ctx.db, id);
-			return run ? [runRef(run)] : [];
+		const refs = [...cause.runs].flatMap((run) => {
+			const row = runById(ctx.db, run);
+			return row ? [runRef(row)] : [];
 		});
-		for (const id of seen.targets ?? []) {
-			const where = mustTarget(ctx.db, id);
+		for (const at of cause.targets) {
+			const where = mustTarget(ctx.db, at);
 			// Only what moved: a target that is still where the question is about stays its to ask about.
 			if (scopeOf(where, null) === before) continue;
 			const raised = raiseFailure(ctx, {
@@ -1051,24 +1084,27 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 					signature,
 					scope: scopeOf(where, null),
 					tests,
-					results: seen.sample != null ? [seen.sample] : [],
-					message: seen.message ?? null,
-					disputed,
+					results: cause.seen.sample != null ? [cause.seen.sample] : [],
+					message: cause.seen.message ?? null,
+					disputed: cause.disputed,
 					counted: false,
-					gateTests: (seen.tests ?? []).flatMap((test) => (test.counted ? [test.id] : [])),
+					gateTests: (cause.seen.tests ?? []).flatMap((test) => (test.counted ? [test.id] : [])),
 					runs: [],
 				},
 				target: where,
-				by,
-				producer: question.producer,
-				parties,
-				...(seen.count !== undefined ? { count: seen.count } : {}),
+				by: cause.seen.producers?.at(-1) ?? ctx.actor.id,
+				producer: cause.question.producer,
+				parties: [...cause.parties],
+				...(cause.count > 0 ? { count: cause.count } : {}),
 			});
 			if (raised.s === "open" || raised.s === "attached") alsoAbout(ctx, raised.question, refs);
 		}
-		for (const id of named) ctx.recompute.add(id);
+		for (const run of cause.runs) ctx.recompute.add(run);
+	}
+	for (const question of moved) {
+		const seen = json<Seen>(question.evidence);
 		const left = (seen.targets ?? []).some((id) => scopeOf(mustTarget(ctx.db, id), null) === before);
-		if (question.state === "open" && !left) setQuestionState(ctx, question, "dissolved", null);
+		if (!left) setQuestionState(ctx, question, "dissolved", null);
 	}
 }
 
