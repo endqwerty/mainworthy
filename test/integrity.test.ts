@@ -372,6 +372,28 @@ describe("what a result may prove", () => {
 		expect(gate({ run: later.run }).verdict).toBe("blocked");
 	});
 
+	test("'already failing on the base' is never concluded from an agent's result or another repository", () => {
+		const agent = h.actor("explorer", "agent", ["read", "produce"]);
+		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const fail = (target: Record<string, unknown>) => ({
+			target,
+			results: [{ test: { key: "same-test" }, outcome: "fail", failure: { message: "same failure" } }],
+		});
+		// Only an agent says the base fails: the loose rule must not excuse the pipeline's failure on the head.
+		report(fail({ repo: "app", commit: "agentbase1", branch: "main" }), agent);
+		const head = report(fail({ repo: "app", commit: "cihead0001", branch: "feature", pr: 9, base: "agentbase1" }), ci);
+		expect(head.gate?.verdict).toBe("blocked");
+		// Another repository's trunk fails with the same cause, and this change's own base was never reported.
+		report(fail({ repo: "a", commit: "atrunk0001", branch: "main" }), ci);
+		const other = report(fail({ repo: "b", commit: "bhead00001", branch: "feature", pr: 9, base: "bbase00001" }), ci);
+		expect(other.gate?.verdict).toBe("blocked");
+		// The rule still does its job on real evidence: the same repository's base, reported by a pipeline.
+		report(fail({ repo: "c", commit: "cbase00001", branch: "main" }), ci);
+		const real = report(fail({ repo: "c", commit: "chead00001", branch: "feature", pr: 9, base: "cbase00001" }), ci);
+		expect(real.gate?.verdict).toBe("passed");
+		expect(first(real.questions).answer).toBe("inherited");
+	});
+
 	test("what was decided about one repository's trunk says nothing about another's", () => {
 		const fail = (repo: string, commit: string) => ({
 			target: { repo, commit, branch: "main" },

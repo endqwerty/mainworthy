@@ -70,7 +70,10 @@ not the same things done worse.
    "until the linked defect closes" are not (#38, #32). A decision held for one target (an infrastructure failure)
    excuses the build it was given for and no other: not the next commit, and not another environment of the same
    commit. Where the question had already seen the cause in another environment of that commit, that one is asked
-   about again at once, so a gate is never left blocked by a failure nobody is being asked about. A question
+   about again at once, so the gate of the newest commit is never left blocked by a failure nobody is being asked
+   about. (An older commit of the same change that showed the cause stays unexplained and is not asked about
+   again: a newer commit has replaced it.) An answer names the evidence its author saw, and that includes the
+   latest build: one prepared before a newer build failed is a conflict. A question
    about a failure is closed without an answer only when the newest commit shows one of its tests passing;
    silence (a job that has not reported, a run over other cases) closes nothing. When a hold runs out by the
    clock, the expiry is a row in the ledger that the next answer supersedes.
@@ -105,6 +108,8 @@ not the same things done worse.
     exist in two repositories (a fork): each has its own gate, a change's gate is always its own repository's,
     and a commit reported for more than one repository must be named with `repo` (it is refused, never guessed).
     A line belongs to a repository too: what was decided about one repository's trunk does not cover another's.
+    The "already failing on the base" hint reads only the change's own repository, and only results a gate would
+    count (never an agent's).
 18. **Test keys of the form `case:<n>` are reserved** for the manual test of a case. A report that uses one for an
     automated test is refused.
 

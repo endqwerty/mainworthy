@@ -3,6 +3,34 @@ import { parseCase } from "../../src/core/markdown.ts";
 import { browserAvailable, eventually, keyCount, openPage, paste, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
+	"UI-3 capture from a case URL creates a new case without editing the selected case",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", body: { title: "Original case", steps: [{ id: "aa", action: "Original step", expected: null }] } }] });
+		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = browser;
+			await page.getByRole("button", { name: "Original case", exact: true }).waitFor();
+			await page.keyboard.press("c");
+			await page.keyboard.type("New case");
+			await page.keyboard.press("Enter");
+			await page.keyboard.type("New step");
+			await page.keyboard.press("Escape");
+			const rows = await eventually(() => server.api("find", { in: "cases" }), (reply) => reply.count === 2);
+			expect(rows.items.map((row) => row.title)).toContain("New case");
+			const cases = await server.api("get", { refs: ["C-1", "C-2"] });
+			expect(cases[0]).toMatchObject({ title: "Original case", version: 1, steps: [{ id: "aa", action: "Original step" }] });
+			expect(cases[1]).toMatchObject({ title: "New case", version: 1, steps: [{ action: "New step" }] });
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
 	"an ordinary edit preserves custom fields omitted from JSON case reads",
 	async () => {
 		const server = await startServer();

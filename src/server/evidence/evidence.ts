@@ -287,12 +287,17 @@ const Q = {
 		`SELECT outcome, at, basis, basis_version FROM results WHERE basis_case = $id AND method = $method
 		 ORDER BY seq DESC, ord DESC LIMIT 1`,
 	),
-	latestOnTrunk: sql<{ project: number; test: number }, { outcome: Outcome; signature: number | null }>(
+	latestOnTrunk: sql<
+		{ project: number; test: number; repo: string | null },
+		{ outcome: Outcome; signature: number | null }
+	>(
 		`SELECT r.outcome, r.signature FROM results r JOIN targets t ON t.id = r.target
-		 WHERE r.project = $project AND r.test = $test AND t.line = 'trunk' ORDER BY r.seq DESC, r.ord DESC LIMIT 1`,
+		 WHERE r.project = $project AND r.test = $test AND r.method <> 'agent' AND t.line = 'trunk' AND t.repo IS $repo
+		 ORDER BY r.seq DESC, r.ord DESC LIMIT 1`,
 	),
 	latestOnTarget: sql<{ target: number; test: number }, { outcome: Outcome; signature: number | null }>(
-		"SELECT outcome, signature FROM results WHERE target = $target AND test = $test ORDER BY attempt DESC, id DESC LIMIT 1",
+		`SELECT outcome, signature FROM results WHERE target = $target AND test = $test AND method <> 'agent'
+		 ORDER BY attempt DESC, id DESC LIMIT 1`,
 	),
 	ofBatch: sql<{ batch: number; limit: number }, ResultRow>(
 		"SELECT * FROM results WHERE batch = $batch ORDER BY ord LIMIT $limit",
@@ -1036,8 +1041,10 @@ export function proofOf(db: Db, row: { id: number; head: number }): Record<Metho
 
 /**
  * Does this test already fail, with the same cause, where the change started? The base commit if Casebook has
- * results for it, otherwise the latest result on trunk. A hint for the person or the rule that answers; it never
- * excuses anything by itself.
+ * results for it, otherwise the latest result on the trunk of the change's own repository. A hint for the person
+ * or the rule that answers; it never excuses anything by itself. Because a rule may act on it, it reads only what
+ * a commit's gate would count: a pipeline's or a person's results, never an agent's, and never another
+ * repository's.
  */
 export function failsOnBase(db: Db, target: TargetRow, test: number, signature: number): boolean {
 	if (target.line !== "change" || target.change === null) return false;
@@ -1051,7 +1058,7 @@ export function failsOnBase(db: Db, target: TargetRow, test: number, signature: 
 			if (latest) return latest.signature === signature && latest.outcome !== "pass";
 		}
 	}
-	const trunk = db.get(Q.latestOnTrunk, { project: target.project, test });
+	const trunk = db.get(Q.latestOnTrunk, { project: target.project, test, repo: change?.repo ?? target.repo });
 	return trunk !== null && trunk.outcome !== "pass" && trunk.signature === signature;
 }
 
