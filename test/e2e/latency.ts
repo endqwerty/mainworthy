@@ -7,7 +7,11 @@ function percentile(values: number[], fraction: number): number {
 	const sorted = [...values].sort((a, b) => a - b);
 	return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)] ?? Infinity;
 }
-for (const cases of [2000, 10000]) {
+/**
+ * The test for one size of suite. Each size has a file of its own (`latency-2000.test.ts`, `latency-10000.test.ts`):
+ * a test is half a minute of samples taken at the frame rate, and one file would be the longest of the check.
+ */
+export function latency(cases: 2000 | 10000): void {
 	test.skipIf(!browserAvailable || (cases === 10000 && process.env.CASEBOOK_SKIP_10K === "1"))(
 		`L1 input and virtual scrolling with ${cases.toLocaleString()} real cases`,
 		async () => {
