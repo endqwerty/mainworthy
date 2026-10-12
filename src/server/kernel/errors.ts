@@ -1,0 +1,34 @@
+/** Why an operation did not run. `conflict` is for a stale base or a duplicate; a rule that says no is `forbidden`. */
+export type ErrorCode = "invalid" | "unauthenticated" | "forbidden" | "not_found" | "conflict" | "internal";
+
+/**
+ * The one error type an operation throws. Throwing inside a write rolls the whole command back, so a failed
+ * operation leaves no rows behind.
+ */
+export class OpError extends Error {
+	readonly code: ErrorCode;
+	readonly details: Record<string, unknown> | undefined;
+
+	constructor(code: ErrorCode, message: string, details?: Record<string, unknown>) {
+		super(message);
+		this.name = "OpError";
+		this.code = code;
+		this.details = details;
+	}
+}
+
+export const invalid = (message: string, details?: Record<string, unknown>) => new OpError("invalid", message, details);
+export const notFound = (what: string) => new OpError("not_found", `${what} not found`);
+export const forbidden = (message: string, details?: Record<string, unknown>) =>
+	new OpError("forbidden", message, details);
+export const conflict = (message: string, details?: Record<string, unknown>) =>
+	new OpError("conflict", message, details);
+
+export const HTTP_STATUS: Record<ErrorCode, number> = {
+	invalid: 400,
+	unauthenticated: 401,
+	forbidden: 403,
+	not_found: 404,
+	conflict: 409,
+	internal: 500,
+};
