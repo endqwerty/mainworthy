@@ -159,7 +159,7 @@ check(
 			gate.release();
 			await page.getByText("Their title changed again", { exact: true }).first().waitFor();
 			await page.getByText("Nothing was adopted", { exact: false }).first().waitFor();
-			expect(await title(page).inputValue()).toBe("My title");
+			expect(await title(page).inputValue()).toBe("My hand-written merge");
 			expect((await drafts(page)).join(" ")).toContain("My hand-written merge");
 			const next = (await server.api("inbox", { on: "C-1", kind: "adopt" })).items[0];
 			expect(next?.q).not.toBe(first?.q);
@@ -256,11 +256,14 @@ for (const answer of ["reject", "merge"] satisfies ("reject" | "merge")[])
 				await returned.goto(`${server.url}/p/scratch/suite/c/1`);
 				await title(returned).waitFor();
 				await returned.locator(".conflict-card").waitFor({ state: "detached" });
-				await returned.getByText("draft is kept", { exact: false }).first().waitFor();
-				expect(await title(returned).inputValue()).toBe("Draft typed in the card");
+				await returned
+					.getByText(answer === "reject" ? "draft is kept" : "later text is kept", { exact: false })
+					.first()
+					.waitFor();
+				expect(await title(returned).inputValue()).toBe("My title");
 				await title(returned).press("End");
 				await returned.keyboard.type(" still editable");
-				expect(await title(returned).inputValue()).toBe("Draft typed in the card still editable");
+				expect(await title(returned).inputValue()).toBe("My title still editable");
 			} finally {
 				await h.close();
 				await server.stop();
