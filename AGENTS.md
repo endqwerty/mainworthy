@@ -48,6 +48,15 @@ GitHub milestone `Backlog to 1.0`. How it fits together: `docs/architecture.md`.
 - Secrets never enter the repo, logs or chat.
 - Competitor claims in `docs/competitors.md` are hypotheses until verified;
   do not build on one without checking it.
+- Briefing a verifier: write the brief as a QA review of application logic and say
+  that everything runs locally. On 2026-10-12 a Codex verifier was stopped by its
+  provider's content filter in the middle of a run whose brief used the vocabulary
+  of security testing ("forge", "escalate", "hostile"); the same checks in plain
+  words ran to the end. Have it write each finding to its report as it confirms it,
+  so a run that is cut off still leaves its findings.
+- A delegated worker that ends with "Selected model is at capacity" has stopped for
+  good: read what it left in the tree, finish or re-delegate the rest, and do not
+  wait for it.
 
 ## Model profile
 

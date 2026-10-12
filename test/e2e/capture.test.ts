@@ -213,6 +213,10 @@ test.skipIf(!browserAvailable)(
 					(value) => value[0]?.version === version,
 				);
 				expect(rows[0]?.steps).toMatchObject([{ id, action: `Replacement ${version}` }]);
+				await page.waitForFunction(
+					(value) => document.querySelector(".cstate")?.textContent?.includes(`v${value}`),
+					version,
+				);
 				if (version === 2) {
 					await page.reload();
 					await page.getByRole("button", { name: "Stable step identity", exact: true }).waitFor();

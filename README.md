@@ -5,7 +5,7 @@ One place where manual, automated and agent testing land, and one queue of the d
 A test case management system for software QA, built to fix what is annoying about TestRail, Qase, Jira
 (Xray, Zephyr) and Azure DevOps Test Plans. **Status: MVP (2026-10-12).** It runs, it is tested, and it is a
 preview: what is missing is listed in [decision 0012](docs/decisions/0012-mvp-scope-and-departures.md) and
-tracked in the GitHub milestone *Backlog to 1.0*.
+tracked in the GitHub milestone *Backlog to 1.0* (one page of it: issue #64).
 
 ## Start (no account, no configuration)
 
@@ -62,7 +62,9 @@ $ casebook mcp                   # stdio; or point the client at http://127.0.0.
 ```
 
 Ten tools; start with `impact`. The skill that teaches an agent the case model is in
-[skill/casebook](skill/casebook/SKILL.md). An agent's answers are advice unless the policy says otherwise.
+[skill/casebook](skill/casebook/SKILL.md). An agent's answers are advice unless the policy says otherwise, and
+what an agent reports is shown and asked about but never moves a commit's gate: it counts only in a run that
+asked for agents.
 
 ## Get stricter when you need to
 
@@ -92,6 +94,7 @@ $ casebook export --out casebook.ndjson.gz     # every fact, decision and docume
 | `bun run check` | type-check, lint and every test, including the latency budgets and the browser tests |
 | `bun run dev` | the server on `127.0.0.1:7357`, restarting on change |
 | `bun bench/run.ts` | the benchmark on 100,000 cases and 1,000,000 results (`--quick` for a small one) |
+| `bun bench/external.ts <dataset>` | reads, reports and saves under load, with the load generator in its own process |
 | `bun run build` | one self-contained executable in `dist/` |
 
 Rules for contributors, people and agents: [AGENTS.md](AGENTS.md).
