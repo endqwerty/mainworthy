@@ -192,8 +192,10 @@ const Q = {
 	setReceipt: sql<{ id: number; receipt: string }>("UPDATE batches SET receipt = $receipt WHERE id = $id"),
 	accepted: sql<readonly [], BatchRow>("SELECT * FROM batches WHERE state = 'accepted' ORDER BY id"),
 	processedJobs: sql<{ target: number }, { job: string }>(
-		"SELECT DISTINCT job FROM batches WHERE target = $target AND state = 'processed'",
+		`SELECT DISTINCT job FROM batches WHERE target = $target AND state = 'processed' AND method = 'auto'
+		 AND EXISTS (SELECT 1 FROM results r WHERE r.batch = batches.id AND r.outcome IN ('pass', 'fail', 'error'))`,
 	),
+	correctionOf: sql<{ result: number }, { id: number }>("SELECT id FROM results WHERE corrects = $result LIMIT 1"),
 	testByKey: sql<{ project: number; key: string }, TestRow>(
 		"SELECT * FROM tests WHERE project = $project AND key = $key",
 	),
@@ -427,6 +429,10 @@ const firstSeen = (db: Db, project: number, repo: string | null, commit: string)
  */
 function upsertChange(ctx: Ctx, key: string, input: Extract<TargetIn, { commit: string }>): ChangeRow {
 	const existing = ctx.db.get(Q.change, { project: ctx.project.id, key });
+	// What an agent says about a change is not what the change is: no gate counts its results, so its report
+	// neither moves the head nor rewrites the base, the title or the files. (It can name a change nobody has
+	// reported yet; the first pipeline or person to report then says where its head is.)
+	if (existing && ctx.actor.kind === "agent") return existing;
 	if (!existing) {
 		const { lastId } = ctx.db.run(Q.insertChange, {
 			project: ctx.project.id,
@@ -598,8 +604,15 @@ export function accept(
 
 export const batchById = (db: Db, id: number): BatchRow | null => db.get(Q.batchById, { id });
 export const acceptedBatches = (db: Db): BatchRow[] => db.all(Q.accepted);
+/**
+ * The jobs that have reported for a target, for a run that requires a job: a pipeline's report (or a person
+ * passing one on) that ran something. An agent's report under the job's name is not the job, and a report in
+ * which everything was skipped or could not run says the job ran nothing.
+ */
 export const processedJobs = (db: Db, target: number): Set<string> =>
 	new Set(db.all(Q.processedJobs, { target }).map((r) => r.job));
+/** Whether its producer has since corrected this result. */
+export const isWithdrawn = (db: Db, result: number): boolean => db.get(Q.correctionOf, { result }) !== null;
 
 // ── Apply ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -986,6 +999,28 @@ export function targetsWithCommit(db: Db, project: number, commit: string): Targ
 	if (commit.length < 7 || !/^[0-9a-f]+$/i.test(commit)) return [];
 	const rows = db.all(Q.targetsByCommitPrefix, { project, low: commit, high: `${commit}\uffff` });
 	return new Set(rows.map((row) => row.commit_sha)).size === 1 ? rows : [];
+}
+
+/**
+ * The whole hash meant by the commit a run is planned for. A run stands for one commit from then on, so an
+ * abbreviation is settled once, here: the text itself when a commit with exactly that hash was reported or none
+ * starts with it, the one reported commit that starts with it, and a refusal when more than one does.
+ */
+export function resolveCommit(db: Db, project: number, commit: string): string {
+	if (db.all(Q.targetsByCommit, { project, commit }).length > 0) return commit;
+	if (commit.length < 7 || !/^[0-9a-f]+$/i.test(commit)) return commit;
+	const found = new Set<string>();
+	for (const row of db.all(Q.targetsByCommitPrefix, { project, low: commit, high: `${commit}\uffff` }))
+		if (row.commit_sha !== null) found.add(row.commit_sha);
+	if (found.size > 1) {
+		throw invalid(
+			`${commit} is the start of ${found.size} commits (${[...found]
+				.slice(0, 3)
+				.map((sha) => sha.slice(0, 16))
+				.join(", ")}): give more of the hash`,
+		);
+	}
+	return [...found][0] ?? commit;
 }
 
 /**

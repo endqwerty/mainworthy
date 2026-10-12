@@ -195,7 +195,7 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 			blocks: blockedRuns(clause.blocks, r.runs),
 			refs: r.refs,
 		});
-		if (clause.ask.who === "rule" && !heldOpen(ctx, question, basis)) {
+		if (clause.ask.who === "rule" && !heldOpen(ctx, question, basis) && !overruled(ctx, question, clause.answer)) {
 			setQuestionAsk(ctx, question, clause.ask);
 			raised = settleByRule(ctx, question, clause.id, clause.answer);
 		} else raised = { s: "attached", question };
@@ -277,6 +277,30 @@ function heldOpen(ctx: Ctx, question: QuestionRow, hash: string): boolean {
 	return last !== undefined && json<{ is?: string }>(last.answer).is === "withdrawn" && last.basis === hash;
 }
 
+/**
+ * A person answered this question, or the one it follows, against what the rule's clause answers, and that
+ * answer has since ended because the evidence moved or its time ran out. The rule does not take the question
+ * back: it was overruled by someone with the right to, so a person is asked the next time too, until a person
+ * gives the answer the rule would. (A withdrawal alone is not a refusal: see `heldOpen`.)
+ */
+function overruled(ctx: Ctx, question: QuestionRow | null, ruleAnswer: unknown): boolean {
+	const rule = ruleActor(ctx.db).id;
+	const wanted = (ruleAnswer as { is?: string } | undefined)?.is;
+	let at = question;
+	for (let hops = 0; at && hops < 100; hops++) {
+		const given = decisionsOf(ctx.db, at.id).filter(
+			(decision) => !["expired", "outdated", "withdrawn"].includes(json<{ is?: string }>(decision.answer).is ?? ""),
+		);
+		const last = given.at(-1);
+		if (last) {
+			const byPerson = json<Signer[]>(last.signers).some((signer) => signer.by !== rule);
+			return byPerson && json<{ is?: string }>(last.answer).is !== wanted;
+		}
+		at = at.prior !== null ? questionById(ctx.db, at.prior) : null;
+	}
+	return false;
+}
+
 function open(
 	ctx: Ctx,
 	r: Raise,
@@ -287,7 +311,11 @@ function open(
 	prior: number | null,
 ): Raised {
 	const policy = currentPolicy(ctx.db, ctx.project.id);
-	const clause = clauseFor(policy, { kind: r.kind, facts: new Set(r.facts) });
+	const found = clauseFor(policy, { kind: r.kind, facts: new Set(r.facts) });
+	// Where the clause is a rule that a person has overruled on this question, a person is asked.
+	const refused =
+		found.ask.who === "rule" && prior !== null && overruled(ctx, questionById(ctx.db, prior), found.answer);
+	const clause = refused ? { ...found, ask: { ...found.ask, who: "member" as const } } : found;
 	const question = insertQuestion(ctx, {
 		kind: r.kind,
 		subject: r.subject,

@@ -893,6 +893,153 @@ describe("what a result may prove", () => {
 	});
 });
 
+describe("what a run and a change may count", () => {
+	const pipeline = () => h.actor("pipeline", "ci", ["read", "produce"]);
+	const explorer = () => h.actor("explorer", "agent", ["read", "produce"]);
+	const linked = (outcome: string, message = "boom") => ({
+		test: { key: "t1" },
+		annotation: { case: "C-1", version: 1 },
+		outcome,
+		...(outcome === "fail" ? { failure: { message } } : {}),
+	});
+
+	test("a run planned by an abbreviated commit counts the one commit it names", () => {
+		seed(2, ["human", "auto"]);
+		const a = "abcdef1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+		const b = "abcdef1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+		const ci = pipeline();
+		report({ target: { commit: a, branch: "main" }, results: [linked("fail")] }, ci);
+		// One commit starts with these seven characters: the run is planned for that commit, by its whole hash.
+		const one = plan({ name: "By prefix", select: {}, accepts: { commit: "abcdef1" } });
+		expect(rows<{ accepts: string }>("SELECT accepts FROM runs WHERE no = ?", Number(one.run.slice(2)))).toEqual([
+			{ accepts: JSON.stringify({ commit: a }) },
+		]);
+		report({ target: { commit: b, branch: "main" }, results: [linked("pass")] }, ci);
+		// The other commit's pass is not this run's: its slot still shows the failure of the commit it counts.
+		expect(
+			rows<{ commit_sha: string }>(
+				`SELECT DISTINCT t.commit_sha FROM slot_results s JOIN results r ON r.id = s.result
+				 JOIN targets t ON t.id = r.target WHERE s.run = ?`,
+				Number(one.run.slice(2)),
+			),
+		).toEqual([{ commit_sha: a }]);
+		expect(gate({ run: one.run }).verdict).toBe("blocked");
+		// A result typed into the run is recorded on that commit, not on a commit named by the abbreviation.
+		report({ run: one.run, results: [{ test: { case: "C-2" }, outcome: "pass" }] });
+		expect(rows("SELECT 1 AS n FROM targets WHERE commit_sha = 'abcdef1'")).toEqual([]);
+		// Two commits start with it now: a run cannot be planned for both.
+		expect(() => plan({ name: "Which", select: {}, accepts: { commit: "abcdef1" } })).toThrow("abcdef1");
+		expect(plan({ name: "Exact", select: {}, accepts: { commit: b } }).run).toBeDefined();
+	});
+
+	test("only a pipeline's report that ran something meets a run's requirement that a job reported", () => {
+		usePolicy("standard");
+		seed(1);
+		const commit = "c0ffee0000000000000000000000000000000001";
+		const planned = plan({
+			name: "Release",
+			select: {},
+			accepts: { commit },
+			require: [
+				{ id: "x", kind: "exercise", methods: ["human"], basis: "exact-or-assumed", minActors: 1 },
+				{ id: "jobs", kind: "jobs", jobs: ["e2e"] },
+			],
+		});
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		const waiting = () => {
+			const now = gate({ run: planned.run });
+			return { verdict: now.verdict, missing: now.tally.missing };
+		};
+		expect(waiting()).toEqual({ verdict: "pending", missing: 1 });
+		const target = { commit, branch: "main" };
+		// An agent, which the run never asked for, reports under the job's name.
+		report({ target, job: "e2e", results: [{ test: { key: "probe" }, outcome: "pass" }] }, explorer());
+		expect(waiting()).toEqual({ verdict: "pending", missing: 1 });
+		// The pipeline's job reports that it ran nothing.
+		const ci = pipeline();
+		report({ target, job: "e2e", results: [{ test: { key: "spec::a" }, outcome: "skip" }] }, ci);
+		expect(waiting()).toEqual({ verdict: "pending", missing: 1 });
+		// It runs: the requirement is met.
+		report({ target, job: "e2e", attempt: 2, results: [{ test: { key: "spec::a" }, outcome: "pass" }] }, ci);
+		expect(waiting()).toEqual({ verdict: "passed", missing: 0 });
+	});
+
+	test("a run reopened after its evidence changed counts the evidence as it is now", () => {
+		seed(1, ["human", "auto"]);
+		const commit = "feedface00000000000000000000000000000001";
+		const target = { commit, branch: "main" };
+		const ci = pipeline();
+		const planned = plan({ name: "Release", select: {}, accepts: { commit } });
+		const pass = report({ target, job: "e2e", results: [linked("pass")] }, ci);
+		const stored = () =>
+			first(rows<{ state: string; verdict: string }>("SELECT state, verdict FROM runs WHERE origin = 'planned'"));
+		expect(stored()).toEqual({ state: "closed", verdict: "passed" });
+		// The pipeline withdraws its pass: the test failed. The closed run keeps what it was closed on.
+		report({ target, job: "e2e", results: [{ ...linked("fail"), corrects: first(pass.results) }] }, ci);
+		expect(gate({ commit }).verdict).toBe("blocked");
+		expect(stored()).toEqual({ state: "closed", verdict: "passed" });
+		// Its sign-off is withdrawn: the run is live again, and shows what the commit shows.
+		h.call("decide", { undo: open("signoff", "decided").q, reason: "the pass was withdrawn" });
+		expect(stored()).toEqual({ state: "open", verdict: "blocked" });
+		expect(slots(planned.run).map((slot) => slot.state)).toEqual(["failing"]);
+		expect(h.call<InboxReply>("inbox", { kind: "signoff", limit: 50 }).items).toEqual([]);
+		expect(open("failure").about).toContain(planned.run);
+	});
+
+	test("a result that arrived while a run was closed counts when the run is reopened", () => {
+		seed(1, ["human", "auto"]);
+		const commit = "feedface00000000000000000000000000000002";
+		const ci = pipeline();
+		const planned = plan({ name: "Release", select: {}, accepts: { commit } });
+		report({ target: { commit, branch: "main", env: "prod" }, results: [linked("pass")] }, ci);
+		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("closed");
+		// Another environment of the same commit fails after the run was closed.
+		report({ target: { commit, branch: "main", env: "staging" }, results: [linked("fail")] }, ci);
+		h.call("decide", { undo: open("signoff", "decided").q, reason: "staging failed" });
+		expect(gate({ run: planned.run }).verdict).toBe("blocked");
+	});
+
+	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {
+		const ci = pipeline();
+		const head = "c2c2c2c200000000000000000000000000000002";
+		const trunk = "t3t3t3t300000000000000000000000000000003";
+		const fail = { test: { key: "t1" }, outcome: "fail", failure: { message: "boom" } };
+		report(
+			{ target: { commit: head, base: "b1b1b1b1", repo: "acme/web", pr: 7, branch: "feature" }, results: [fail] },
+			ci,
+		);
+		const before = gate({ change: "pr:7" });
+		expect(before.verdict).toBe("blocked");
+		report(
+			{
+				target: { commit: trunk, repo: "acme/web", branch: "main" },
+				results: [{ test: { key: "t1" }, outcome: "pass" }],
+			},
+			ci,
+		);
+		// An agent says a commit that passes on trunk is the pull request's.
+		const probe = { test: { key: "other" }, outcome: "skip" };
+		report({ target: { commit: trunk, repo: "acme/web", pr: 7, branch: "feature" }, results: [probe] }, explorer());
+		expect(gate({ change: "pr:7" })).toEqual(before);
+		// And a commit nobody else has reported.
+		const unseen = "dddddddd00000000000000000000000000000004";
+		report({ target: { commit: unseen, repo: "acme/web", pr: 7, branch: "feature" }, results: [probe] }, explorer());
+		expect(gate({ change: "pr:7" })).toEqual(before);
+		expect(first(rows<{ head_sha: string }>("SELECT head_sha FROM changes WHERE key = 'pr:7'")).head_sha).toBe(head);
+		// The pull request's own failure is still the one people are asked about.
+		expect(open("failure").blocks).toEqual([before.run as string]);
+		// When the pipeline reports that commit, it is the head.
+		report(
+			{
+				target: { commit: unseen, repo: "acme/web", pr: 7, branch: "feature" },
+				results: [{ test: { key: "t1" }, outcome: "pass" }],
+			},
+			ci,
+		);
+		expect(first(rows<{ head_sha: string }>("SELECT head_sha FROM changes WHERE key = 'pr:7'")).head_sha).toBe(unseen);
+	});
+});
+
 describe("what a decision may change", () => {
 	test("standing cannot cite a decision that is not in the ledger", () => {
 		report(ciReport({ commit: "witness1", n: 1, fail: { 0: "bug" } }));
@@ -1187,6 +1334,34 @@ describe("what a decision may change", () => {
 		expect(gate({ commit: "gone0001" })).toEqual(older);
 	});
 
+	test("a rule does not sign off again a run that a person refused to sign off", () => {
+		seed(2);
+		const planned = plan({ name: "Release", select: {} });
+		const pass = (ref: string, attempt = 1) =>
+			report({ run: planned.run, attempt, results: [{ test: { case: ref }, outcome: "pass" }] });
+		pass("C-1");
+		pass("C-2");
+		const stored = () =>
+			first(rows<{ state: string; verdict: string }>("SELECT state, verdict FROM runs WHERE origin = 'planned'"));
+		// Under `loose` a passing run is signed off by rule. A person takes that back and refuses it.
+		expect(stored()).toEqual({ state: "closed", verdict: "passed" });
+		h.call("decide", { undo: open("signoff", "decided").q, reason: "not yet" });
+		expect(decide(open("signoff"), { is: "reject" }, h.owner, { reason: "coverage is thin" }).status).toBe("decided");
+		expect(stored()).toEqual({ state: "open", verdict: "passed" });
+		// One more result arrives. The run shows something new, so it is asked about again: of a person. The rule
+		// does not answer over the head of whoever refused it.
+		pass("C-1", 2);
+		expect(stored()).toEqual({ state: "open", verdict: "passed" });
+		const asked = open("signoff");
+		expect(asked.needs).toContain("member");
+		// And again when the next one arrives, while the question is still open.
+		pass("C-2", 2);
+		expect(stored()).toEqual({ state: "open", verdict: "passed" });
+		// A person approving closes it.
+		expect(decide(open("signoff"), { is: "approve" }).status).toBe("decided");
+		expect(stored()).toEqual({ state: "closed", verdict: "passed" });
+	});
+
 	test("a question about a disputed result stays a dispute, whoever reports the cause next", () => {
 		usePolicy("standard");
 		h.call("propose", {
@@ -1314,6 +1489,9 @@ describe("what a decision may change", () => {
 	});
 
 	test("a failure already explained is not asked about again because somebody else then passed", () => {
+		// Who may answer is judged when the answer is given. Under `standard` a dispute is kept from the people
+		// who reported the results; this answer was given before there was one, and it stands. (That the order of
+		// the answer and the second result matters is a recorded limit of answers per cause: issue #70.)
 		usePolicy("standard");
 		h.call("propose", {
 			edits: [
@@ -1427,8 +1605,16 @@ describe("what a decision may change", () => {
 			.items.find((item) => item.kind === "signoff");
 		if (!signoff) throw new Error("the run was not signed off");
 		h.call("decide", { undo: question.q });
-		// The commit passes on a newer attempt; the closed run keeps the failure it was closed on.
-		result("pass", 2);
+		// The case is edited and the commit passes on a newer attempt, proving the new version. The run is pinned
+		// to the version it was planned on, so that pass is not its evidence: reopened, it still shows the failure.
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Case 1, reworded" } }] });
+		report({
+			target: { commit: "reopen01", branch: "main" },
+			attempt: 2,
+			results: [{ test: { key: "one" }, annotation: { case: "C-1", version: 2 }, outcome: "pass" }],
+		});
+		expect(gate({ commit: "reopen01" }).verdict).toBe("passed");
+		expect(h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items).toEqual([]);
 		expect(first(h.call<DecideReply[]>("decide", { undo: signoff.q })).status).toBe("reopened");
 		const asked = h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items;
 		expect(asked).toHaveLength(1);

@@ -3,7 +3,7 @@
 // A run does not own results. It says which targets count and what it needs; results from any producer fill it
 // when the acceptance rule admits them (core/runs.ts). This module keeps each run's projections (slot states, tally,
 // verdict) in step with the facts, in the transaction that changes them.
-import type { Policy } from "../../core/kinds.ts";
+import type { ActorKind, Policy } from "../../core/kinds.ts";
 import type { CaseBody, MethodKind } from "../../core/model.ts";
 import type { GateStatus } from "../../core/ops.ts";
 import {
@@ -29,9 +29,11 @@ import {
 	changeByKey,
 	codeWhat,
 	excuseFor,
+	isWithdrawn,
 	laneHistory,
 	mustTarget,
 	processedJobs,
+	resolveCommit,
 	resultById,
 	resultsOfCaseOnTargets,
 	type SignatureRow,
@@ -392,10 +394,10 @@ const acceptsOf = (run: RunRow): TargetMatch => json<TargetMatch>(run.accepts);
 // ── Which runs a target matters to ─────────────────────────────────────────────────────────────────────────
 
 /** The run that gates a commit, created the first time anything is reported for it. */
-export function ensureChangeRun(ctx: Ctx, target: TargetRow): RunRow | null {
+export function ensureChangeRun(ctx: Ctx, target: TargetRow, create = true): RunRow | null {
 	if (target.line === "session" || target.commit_sha === null) return null;
 	const found = ctx.db.get(Q.changeRun, { project: ctx.project.id, what: target.what });
-	if (found) return found;
+	if (found || !create) return found;
 	const change = target.change !== null ? changeById(ctx.db, target.change) : null;
 	const where = change ? change.key : (target.branch ?? target.line);
 	const no = ctx.nextNo("run");
@@ -428,18 +430,22 @@ function matches(run: RunRow, target: TargetRow, typedInto: number | null): bool
 	const accepts = acceptsOf(run);
 	if ("self" in accepts) return typedInto === run.id;
 	if (target.commit_sha === null) return false;
-	const sameCommit = target.commit_sha === accepts.commit || target.commit_sha.startsWith(accepts.commit);
+	// One commit, by its whole hash: an abbreviation was settled when the run was planned (`resolveCommit`).
 	return (
-		sameCommit &&
+		target.commit_sha === accepts.commit &&
 		(accepts.repo === undefined || accepts.repo === target.repo) &&
 		(accepts.env === undefined || accepts.env === target.env)
 	);
 }
 
-/** Every run a batch on this target counts toward: the commit's change run, and each planned run that accepts it. */
-export function runsFor(ctx: Ctx, target: TargetRow, typedInto: number | null): RunRow[] {
+/**
+ * Every run a batch on this target counts toward: the commit's change run, and each planned run that accepts it.
+ * A commit gets its run from the first report a gate counts. An agent's report does not make one: a commit only
+ * an agent has reported has no gate to read, and is not the newest commit of its line or change.
+ */
+export function runsFor(ctx: Ctx, target: TargetRow, typedInto: number | null, producer: ActorKind): RunRow[] {
 	const out: RunRow[] = [];
-	const change = ensureChangeRun(ctx, target);
+	const change = ensureChangeRun(ctx, target, producer !== "agent");
 	if (change) out.push(change);
 	for (const run of ctx.db.all(Q.openPlanned, { project: ctx.project.id })) {
 		if (matches(run, target, typedInto)) out.push(run);
@@ -1128,17 +1134,25 @@ export function plan(
 	const exercises = input.require.filter((o): o is ExerciseObligation => o.kind === "exercise");
 	if (exercises.length === 0) throw invalid("a planned run needs at least one exercise obligation");
 
-	const no = ctx.nextNo("run");
+	// A run stands for one commit: an abbreviated hash is settled now, and one that fits two commits is refused.
+	const accepts: TargetMatch =
+		"commit" in input.accepts
+			? { ...input.accepts, commit: resolveCommit(ctx.db, ctx.project.id, input.accepts.commit) }
+			: input.accepts;
 	// A commit that exists in two repositories is refused here unless the run says which: the run would otherwise
 	// count evidence about either.
-	if ("commit" in input.accepts) targetByCommit(ctx.db, ctx.project.id, input.accepts.commit, input.accepts.repo);
+	if ("commit" in accepts) targetByCommit(ctx.db, ctx.project.id, accepts.commit, accepts.repo);
+	else if (input.require.some((o) => o.kind === "jobs")) {
+		throw invalid("a run that counts only what is typed into it cannot wait for a job: plan it for a commit");
+	}
+	const no = ctx.nextNo("run");
 	const what = null;
 	const { lastId } = ctx.db.run(Q.insert, {
 		project: ctx.project.id,
 		no,
 		name: input.name,
 		origin: "planned",
-		accepts: JSON.stringify(input.accepts),
+		accepts: JSON.stringify(accepts),
 		what,
 		scope: null,
 		require: JSON.stringify(input.require),
@@ -1235,6 +1249,34 @@ export function reopenRun(ctx: Ctx, run: RunRow, decision: number): void {
 	if (run.signoff !== decision) return;
 	ctx.db.run(Q.setState, { id: run.id, state: "open", signoff: null, rev: ctx.seq });
 	ctx.touched.add(runRef(run));
+	catchUp(ctx, run);
+}
+
+/**
+ * A reopened run is live again, so it counts the evidence as it is now and not as it was when the run was
+ * closed. While closed it kept what it was closed on: a correction, a `mistaken` decision and a later report did
+ * not reach it. Now they do: a result its producer corrected is withdrawn here too, one a decision called a
+ * mistake is discounted here too, the results reported for its targets meanwhile are admitted, and every slot is
+ * rebuilt. The caller recomputes the run, which asks about each failure it now shows.
+ */
+function catchUp(ctx: Ctx, run: RunRow): void {
+	const exercises = obligationsOf(run).filter((o): o is ExerciseObligation => o.kind === "exercise");
+	const slots = ctx.db.all(Q.slotsOfRun, { run: run.id, after: -1, limit: 1_000_000 });
+	for (const slot of slots) {
+		for (const { result } of ctx.db.all(Q.admittedTo, { slot: slot.id })) {
+			if (isWithdrawn(ctx.db, result)) ctx.db.run(Q.correctInSlot, { slot: slot.id, result });
+		}
+	}
+	const targets = targetsOfRun(ctx.db, run).map((target) => target.id);
+	if (targets.length > 0) fillFromPrior(ctx, run, exercises, targets);
+	for (const slot of slots) {
+		for (const { result } of ctx.db.all(Q.admittedTo, { slot: slot.id })) {
+			const judged = ctx.db.get(Q.judgedBy, { result });
+			if (judged) ctx.db.run(Q.discount, { slot: slot.id, result, decision: judged.decision });
+		}
+		refreshSlot(ctx, slot, exercises.find((o) => o.id === slot.obligation) ?? null);
+	}
+	ctx.recompute.add(run.id);
 }
 
 /**
@@ -1375,19 +1417,19 @@ export function gate(
 		} else throw invalid("gate needs a commit, a run or a change");
 		run = what ? ctx.db.get(Q.changeRun, { project: ctx.project.id, what }) : null;
 	}
-	if (!run) {
-		return {
-			run: null,
-			verdict: "pending",
-			reason: "pending: nothing has been reported for this commit",
-			tally: { ...emptyTally() },
-			open: [],
-			url: null,
-			stale: false,
-		};
-	}
-	return gateOf(ctx, run);
+	return run ? gateOf(ctx, run) : nothingCounted();
 }
+
+/** The gate of a commit no pipeline or person has reported: nothing is proven. An agent's report does not change that. */
+export const nothingCounted = (): GateStatus => ({
+	run: null,
+	verdict: "pending",
+	reason: "pending: nothing a gate counts has been reported for this commit",
+	tally: { ...emptyTally() },
+	open: [],
+	url: null,
+	stale: false,
+});
 
 export function gateOf(ctx: Ctx, run: RunRow): GateStatus {
 	const tally = json<Tally>(run.tally);

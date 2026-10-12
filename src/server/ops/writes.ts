@@ -46,6 +46,7 @@ import {
 	gateOf,
 	mustRun,
 	noteAccepted,
+	nothingCounted,
 	pinnedVersions,
 	plan,
 	runAccepts,
@@ -127,7 +128,7 @@ export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; f
 	}
 
 	const accepted = accept(ctx, { target, run: run?.id ?? null, report: input, nonce: input.cmd ?? `${ctx.seq}` });
-	if (accepted.fresh) noteAccepted(ctx, runsFor(ctx, target, run?.id ?? null), accepted.batch.seq);
+	if (accepted.fresh) noteAccepted(ctx, runsFor(ctx, target, run?.id ?? null, ctx.actor.kind), accepted.batch.seq);
 	return accepted;
 }
 
@@ -139,9 +140,9 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 	const batch = batchById(ctx.db, batchId);
 	if (!batch) throw notFound(`batch ${batchId}`);
 	const target = mustTarget(ctx.db, batch.target);
-	const runs = runsFor(ctx, target, batch.run);
-	const pinned = batch.run !== null ? pinnedVersions(ctx.db, batch.run) : new Map<number, number>();
 	const producer = actorLabel(ctx.db, batch.actor).kind;
+	const runs = runsFor(ctx, target, batch.run, producer);
+	const pinned = batch.run !== null ? pinnedVersions(ctx.db, batch.run) : new Map<number, number>();
 	const applied = yield* applySteps(ctx, batch, producer, (caseId) => pinned.get(caseId) ?? null);
 	const groups = yield* applyBatchSteps(ctx, { batch, target, applied: applied.results, runs });
 
@@ -165,9 +166,6 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 		runs.map((run) => run.id),
 		{ dissolveStale: true },
 	);
-	// This commit may be where a change started: an answer that a failure was already there is checked again
-	// for the tests it touched. And a report on a change may have moved the change onto another base: then every
-	// such answer for the change is checked.
 	const gated = runs.find((run) => run.origin === "change") ?? runs.find((run) => run.id === batch.run) ?? null;
 	const fresh = gated ? runById(ctx.db, gated.id) : null;
 	const receipt: ReportReceipt = {
@@ -184,7 +182,7 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 		rejected: applied.rejected,
 		declined: applied.declined,
 		results: applied.results.length <= 200 ? applied.results.map((r) => r.id) : [],
-		gate: fresh ? gateOf(ctx, fresh) : null,
+		gate: fresh ? gateOf(ctx, fresh) : target.commit_sha !== null ? nothingCounted() : null,
 	};
 	keepReceipt(ctx, batch, receipt);
 	return receipt;
