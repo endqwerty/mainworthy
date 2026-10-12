@@ -4,9 +4,10 @@ Casebook is one process and one SQLite file. A deployment is one container with 
 database container to run, upgrade or back up separately (decision 0010).
 
 **What is verified:** the image builds, starts, serves the UI and the API, keeps its data across a restart, and
-passes its health check, all on the development machine (see the pull request for the commands and output).
-**What is not:** a deployment on Coolify itself. Nothing has been deployed to the home server; the steps below
-follow Coolify's Docker Compose build pack and are yours to run.
+passes its health check on the development machine. It also runs on Daniel's Coolify (since 2026-10-12, the
+steps under "On Coolify" as they were done): `/healthz` answers, a request with no token gets 401, and a browser
+signed in with the owner token over plain HTTP and saved a case through the page.
+**What is not:** a restore from a backup on that instance, and an upgrade of an instance that holds data.
 
 ## The container
 
@@ -32,17 +33,28 @@ The process runs as an unprivileged user (uid 10001). The health check is `caseb
 
 ## On Coolify
 
-1. **New resource → Docker Compose**, from this repository (it is private: use the GitHub App or a deploy key),
-   compose file `compose.yaml`, branch `main`.
-2. **Environment:** set `CASEBOOK_OWNER_TOKEN` (mark it as a secret) and `CASEBOOK_OWNER`.
-3. **Storage:** the compose file declares the volume `casebook-data` at `/data`. Leave it as a named volume, or
-   bind it to a path you back up.
-4. **Network:** either give the service a domain (Coolify's proxy terminates TLS and forwards to port 7357), or
-   keep it off the public internet and reach it over the tailnet with a Tailscale sidecar, the way the other
-   tailnet-only app on that host is set up. Casebook holds test evidence and tokens: prefer the tailnet until
-   accounts exist (#30) and sign-in is rate limited (no issue yet).
-5. **Health check:** path `/healthz`, port 7357. The image also declares its own.
-6. Deploy. Read the log for the owner token if you did not set one.
+How the instance on the home server was set up. It takes about five minutes through Coolify's API or its
+dashboard.
+
+1. **A deploy key.** The repository is private. Add a read-only deploy key to it on GitHub and give Coolify the
+   private half (Security → Private Keys).
+2. **New resource → Docker Compose**, from this repository with that key: compose file `/compose.yaml`, the
+   branch to follow (`main`).
+3. **Environment:** Coolify reads `CASEBOOK_OWNER_TOKEN` and `CASEBOOK_OWNER` from the compose file. Set the
+   token to a long random string (`openssl rand -hex 32`) and the owner to your name, before the first start.
+4. **Storage:** the compose file declares the volume `casebook-data` at `/data`. Coolify creates it as a named
+   volume. Bind it to a path you back up if you have one.
+5. **Network:** the compose file publishes port 7357 on the host, so the instance answers at
+   `http://<host>:7357` on the networks that reach the host: on the home server, the LAN and the tailnet. That
+   is plain HTTP, and every request needs a token. Casebook holds test evidence and tokens: keep it off the
+   public internet until accounts exist (#30) and sign-in is rate limited (no issue yet). For HTTPS, give the
+   service a domain in Coolify (its proxy terminates TLS and forwards to 7357) or add a Tailscale sidecar with
+   its own name.
+6. **Deploy**, then check: `curl http://<host>:7357/healthz` answers `{"ok":true,"version":"…"}`. Open the page
+   and paste the owner token.
+
+Nothing redeploys by itself. After a change lands on the branch, press Redeploy in Coolify or call its API
+(`POST /api/v1/deploy?uuid=<application>`).
 
 To have this repository report its own test results to that instance, set the repository variables
 `CASEBOOK_URL` and `CASEBOOK_PROJECT` and the secret `CASEBOOK_TOKEN` (a `ci` token:
