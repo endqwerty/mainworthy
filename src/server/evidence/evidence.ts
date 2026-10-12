@@ -270,8 +270,9 @@ const Q = {
 	lastOfTest: sql<{ project: number; test: number; limit: number }, ResultRow>(
 		"SELECT * FROM results WHERE project = $project AND test = $test ORDER BY seq DESC, ord DESC LIMIT $limit",
 	),
-	lastOfCase: sql<{ id: number; limit: number }, ResultRow>(
-		"SELECT * FROM results WHERE basis_case = $id ORDER BY seq DESC, ord DESC LIMIT $limit",
+	lastOfCaseByMethod: sql<{ id: number; method: string; limit: number }, ResultRow>(
+		`SELECT * FROM results WHERE basis_case = $id AND method = $method
+		 ORDER BY seq DESC, ord DESC LIMIT $limit`,
 	),
 	latestOfCaseByMethod: sql<
 		{ id: number; method: string },
@@ -828,8 +829,17 @@ export const signatureById = (db: Db, id: number): SignatureRow | null => db.get
 export const resultById = (db: Db, id: number): ResultRow | null => db.get(Q.resultById, { id });
 export const lastResultsOfTest = (db: Db, project: number, test: number, limit: number): ResultRow[] =>
 	db.all(Q.lastOfTest, { project, test, limit });
-export const lastResultsOfCase = (db: Db, caseId: number, limit: number): ResultRow[] =>
-	db.all(Q.lastOfCase, { id: caseId, limit });
+/**
+ * The newest results recorded for a case, from every producer. Read as three short index ranges (one per method)
+ * and merged, so a case with ten thousand pipeline results costs the same as one with ten.
+ */
+export function lastResultsOfCase(db: Db, caseId: number, limit: number): ResultRow[] {
+	const methods: readonly MethodKind[] = ["human", "auto", "agent"];
+	return methods
+		.flatMap((method) => db.all(Q.lastOfCaseByMethod, { id: caseId, method, limit }))
+		.sort((a, b) => b.seq - a.seq || b.ord - a.ord)
+		.slice(0, limit);
+}
 export const resultsOfBatch = (db: Db, batch: number, limit: number): ResultRow[] =>
 	db.all(Q.ofBatch, { batch, limit });
 export const flipCount = (db: Db, project: number, test: number): number =>

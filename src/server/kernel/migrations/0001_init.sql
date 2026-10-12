@@ -120,6 +120,8 @@ CREATE TABLE cases (
 ) STRICT;
 CREATE INDEX cases_folder ON cases (project, folder, rank);
 CREATE INDEX cases_rev ON cases (project, rev);
+-- Counts by state and folder (the folder tree, "2,000 cases", a plan's selection) read this index and no rows.
+CREATE INDEX cases_state ON cases (project, state, folder);
 
 CREATE TABLE case_tags (
 	project INTEGER NOT NULL,
@@ -190,6 +192,8 @@ CREATE VIRTUAL TABLE search_docs USING fts5 (
 	title, body, tags, project UNINDEXED,
 	tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3'
 );
+-- `ORDER BY rank` weighs a match in the title above one in the tags above one in the steps.
+INSERT INTO search_docs (search_docs, rank) VALUES ('rank', 'bm25(8.0, 1.0, 4.0)');
 
 CREATE TABLE requirements (
 	id INTEGER PRIMARY KEY,
@@ -423,6 +427,8 @@ CREATE TABLE questions (
 ) STRICT;
 CREATE INDEX questions_fingerprint ON questions (project, fingerprint, epoch DESC);
 CREATE INDEX questions_queue ON questions (project, state, owner, rank);
+-- The counts per kind in the queue header read this index and no rows, however many questions are open.
+CREATE INDEX questions_kinds ON questions (project, state, owner, kind);
 CREATE INDEX questions_rev ON questions (project, rev);
 
 -- Which things a question is about, so a case, a run, a test or a change can list its questions.
@@ -432,6 +438,7 @@ CREATE TABLE question_refs (
 	question INTEGER NOT NULL REFERENCES questions (id),
 	PRIMARY KEY (project, ref, question)
 ) STRICT, WITHOUT ROWID;
+CREATE INDEX question_refs_question ON question_refs (question);
 
 -- Append-only. An answer names the evidence it was given on; `counts` says whether policy counted it or took
 -- it as advice.

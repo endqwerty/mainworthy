@@ -9,6 +9,16 @@ import { notFound } from "../kernel/errors.ts";
 import { type CaseRow, type FolderIndex, type FolderRow, folderIndex, mustCase, type VersionRow } from "./suite.ts";
 
 const Q = {
+	caseByNo: sql<{ project: number; no: number }, CaseRow>("SELECT * FROM cases WHERE project = $project AND no = $no"),
+	searchAny: sql<{ match: string; project: number; limit: number }, { rowid: number }>(
+		"SELECT rowid FROM search_docs WHERE search_docs MATCH $match AND project = $project LIMIT $limit",
+	),
+	searchRanked: sql<{ match: string; project: number; limit: number }, { rowid: number }>(
+		"SELECT rowid FROM search_docs WHERE search_docs MATCH $match AND project = $project ORDER BY rank LIMIT $limit",
+	),
+	searchNewest: sql<{ match: string; project: number; limit: number }, { rowid: number }>(
+		"SELECT rowid FROM search_docs WHERE search_docs MATCH $match AND project = $project ORDER BY rowid DESC LIMIT $limit",
+	),
 	countsByFolder: sql<{ project: number }, { folder: number; n: number }>(
 		"SELECT folder, count(*) AS n FROM cases WHERE project = $project AND state = 'active' GROUP BY folder",
 	),
@@ -78,6 +88,12 @@ export const archivedCases = (db: Db, project: number, limit: number): CaseRow[]
 		project,
 		limit,
 	]);
+
+/**
+ * The most matches a search scores for relevance. Beyond this a word is too common for a ranking to help, and
+ * scoring every match is what makes a search slow; such a search returns the newest matches instead.
+ */
+export const RANKED_MATCHES = 2000;
 
 /** Turns what a person typed into an FTS5 query: every word must match, and the last one matches as a prefix. */
 export function ftsQuery(text: string): string | null {
@@ -157,21 +173,44 @@ export function listCases(
 		const match = ftsQuery(query.text);
 		const found: CaseRow[] = [];
 		if (direct) {
-			const row = ctx.db.raw
-				.query<CaseRow, [number, number]>("SELECT * FROM cases WHERE project = ? AND no = ?")
-				.get(project, Number(direct[1]));
+			const row = ctx.db.get(Q.caseByNo, { project, no: Number(direct[1]) });
 			if (row) found.push(row);
 		}
+		let broad = false;
 		if (match) {
-			const rows = ctx.db.allDynamic<CaseRow>(
-				`SELECT c.* FROM search_docs s JOIN cases c ON c.id = s.rowid
-				 WHERE s.search_docs MATCH ? AND ${where.join(" AND ")}
-				 ORDER BY bm25(search_docs, 8.0, 1.0, 4.0) LIMIT ?`,
-				[match, ...params, query.limit],
-			);
-			for (const row of rows) if (!found.some((f) => f.id === row.id)) found.push(row);
+			// Work inside the full-text index first and fetch only the survivors: joining every match to its case
+			// before sorting costs a row read per match, and a common word matches tens of thousands of cases.
+			const filtered = where.length > 2 || query.state === "archived";
+			const cut = Math.min(Math.max(query.limit * (filtered ? 20 : 3), 200), RANKED_MATCHES);
+			const args = { project, limit: cut };
+			// How many match? Stop counting at the limit: this read is bounded whatever the word.
+			const probe = ctx.db.all(Q.searchAny, { match, project, limit: RANKED_MATCHES + 1 });
+			let ranked: number[];
+			if (probe.length <= RANKED_MATCHES) {
+				// Few enough to score every one: order by relevance.
+				ranked = ctx.db.all(Q.searchRanked, { match, ...args }).map((row) => row.rowid);
+			} else {
+				// Too many for relevance to mean anything, and scoring them all would make the user wait. Newest
+				// first, matches in the title before matches in the steps; the caller is told to narrow the search.
+				broad = true;
+				const inTitle = ctx.db.all(Q.searchNewest, { match: `title : (${match})`, ...args }).map((row) => row.rowid);
+				const seen = new Set(inTitle);
+				const anywhere =
+					inTitle.length >= cut ? [] : ctx.db.all(Q.searchNewest, { match, ...args }).map((row) => row.rowid);
+				ranked = [...inTitle, ...anywhere.filter((id) => !seen.has(id))].slice(0, cut);
+			}
+			if (ranked.length > 0) {
+				const order = new Map(ranked.map((id, i) => [id, i]));
+				const rows = ctx.db.allDynamic<CaseRow>(
+					`SELECT c.* FROM cases c WHERE c.id IN (${placeholders(ranked.length)}) AND ${where.join(" AND ")}`,
+					[...ranked, ...params],
+				);
+				rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+				for (const row of rows) if (!found.some((f) => f.id === row.id)) found.push(row);
+			}
 		}
-		return { items: found.slice(0, query.limit), cursor: null, count: found.length };
+		// For a broad search the true number of matches is unknown by design: null says "more than shown".
+		return { items: found.slice(0, query.limit), cursor: null, count: broad ? null : found.length };
 	}
 
 	// The count is of the whole selection, not the page, so a list can say "2,000 cases" and a plan "214 selected".

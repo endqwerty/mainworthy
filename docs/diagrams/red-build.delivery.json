@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "receiptId": "1a18245c-c43e-4f5d-9fe7-d1c493a1a48f",
+  "receiptId": "44a9af22-0f3a-4827-a15d-fd3013660697",
   "status": "current",
   "command": "deliver",
   "type": "sequence",
   "input": "/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/docs/diagrams/src/red-build.json",
   "output": "/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/docs/diagrams/red-build.html",
   "specification": {
-    "sha256": "6f64918812820a39a50fce322bf83114dd85d4dfc2542e9326ef08316916b2f5",
-    "bytes": 12060
+    "sha256": "a18af0bca5fbd74f704a101b5fe82e32281686f18cb90a539e259c5600c0cd1e",
+    "bytes": 12061
   },
   "artifact": {
-    "sha256": "646a670410948108cf88c533268d13ee6273baa2b0461339c6e7699a04fa1649",
-    "bytes": 778449
+    "sha256": "8b66168bf8d48a4a59f1f19da791bd07fef0f122ea461f3f83c173d943cfa188",
+    "bytes": 778455
   }
 }

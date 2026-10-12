@@ -382,7 +382,7 @@ export const GetInput = z.object({
 export type GetInput = z.infer<typeof GetInput>;
 
 export const FindInput = z.object({
-	in: z.enum(["cases", "tests", "runs", "folders", "requirements", "slots", "changes"]).default("cases"),
+	in: z.enum(["cases", "tests", "runs", "folders", "tags", "requirements", "slots", "changes"]).default("cases"),
 	text: z.string().max(200).optional(),
 	folder: FolderRef.optional(),
 	deep: z.boolean().optional().describe("With `folder`: include its subfolders."),

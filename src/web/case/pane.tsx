@@ -194,7 +194,7 @@ export function CasePane({
 					</div>
 					{conflict && <ConflictCard state={conflict} resolved={onResolved} />}
 					{draft ? (
-						<BodyEditor key={draft.id} draft={draft} change={change} seal={seal} rapid={rapid} />
+						<BodyEditor draft={draft} change={change} seal={seal} rapid={rapid} />
 					) : (
 						<ReadBody body={body} tags={view?.tags ?? []} begin={begin} />
 					)}

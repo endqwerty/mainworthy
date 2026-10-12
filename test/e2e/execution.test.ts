@@ -125,6 +125,8 @@ async function cases(server: Server, count: number) {
 			}
 			await page.getByText("proves nothing about a build.", { exact: false }).waitFor();
 			const loads = view.loads();
+			const reports: unknown[] = [];
+			page.on("request", (request) => { if (request.url().endsWith("/report")) reports.push(request.postDataJSON()); });
 			for (let i = 0; i < 8; i++) {
 				await page.keyboard.press("p");
 				if (i === 0)
@@ -133,14 +135,17 @@ async function cases(server: Server, count: number) {
 							document.querySelector('[data-run-document="C-2"][data-active="true"] [data-step]') ===
 							Reflect.get(window, "nextStep"),
 					);
-				await eventually(
+				try { await eventually(
 					() => server.api("find", { in: "slots", run: planned.run }),
 					(rows) =>
 						Slot.array()
 							.parse(rows.items)
 							.filter((slot) => slot.fills.some((fill) => fill.by === "daniel" && fill.outcome === "pass")).length ===
 						i + 1,
-				);
+				); } catch (error) {
+					console.info("J5 failed pass", i + 1, "reports", JSON.stringify(reports), "page", await page.evaluate(() => ({ current: document.querySelector("[data-active=true]")?.getAttribute("data-run-document"), status: document.querySelector("#stat")?.textContent, controls: document.querySelector(".run-controls")?.textContent })), "slots", JSON.stringify((await server.api("find", { in: "slots", run: planned.run })).items));
+					throw error;
+				}
 			}
 			await page.keyboard.press("f");
 			expect(

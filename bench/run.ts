@@ -200,6 +200,13 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		`Mixed: ${mixed.readsPerSecond.toFixed(1)} reads/s; longest read during a 10,000-result ingest ${mixed.longestReadDuringIngest.toFixed(2)} ms (${mixed.longestReadOp}).`,
 	);
 	console.log(
+		`Readers-only control: p95 ${mixed.control.p95.toFixed(2)} ms, ${mixed.control.readsPerSecond.toFixed(1)} reads/s. This in-process HTTP test also measures reader saturation. Correctness checks consumed ${mixed.validationMs.toFixed(1)} ms outside response timers.`,
+	);
+	for (const op of mixed.byOperation)
+		console.log(
+			`  HTTP ${op.name}: control p95 ${op.control.p95.toFixed(2)} ms; mixed p95 ${op.mixed.p95.toFixed(2)} ms; mixed n=${op.mixed.n}, errors=${op.mixed.errors}`,
+		);
+	console.log(
 		`Report apply transactions: p50 ${mixed.ingestTransactions.p50.toFixed(2)} ms, p95 ${mixed.ingestTransactions.p95.toFixed(2)} ms, max ${mixed.ingestTransactions.max.toFixed(2)} ms, including reads between apply slices. Acceptance transaction p95 ${mixed.acceptTransactions.p95.toFixed(2)} ms.`,
 	);
 	console.log(
@@ -220,7 +227,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 			diagnostic.push(result);
 			const hottest = result.queries[0];
 			console.log(
-				`Diagnostic ${result.name}: ${result.cpuMs.toFixed(1)} CPU ms / ${result.wallMs.toFixed(1)} wall ms; top SQL ${hottest?.ms.toFixed(1) ?? "0"} ms in ${hottest?.calls ?? 0} calls; ${hottest?.plan.join("; ") ?? "no SELECT plan"}`,
+				`Diagnostic ${result.name}: ${result.cpuMs.toFixed(1)} CPU ms / ${result.wallMs.toFixed(1)} wall ms, ${result.fileInputs} file inputs, ${result.majorFaults} major faults; top SQL ${hottest?.ms.toFixed(1) ?? "0"} ms in ${hottest?.calls ?? 0} calls; ${hottest?.plan.join("; ") ?? "no SELECT plan"}`,
 			);
 		}
 	} finally {
@@ -244,7 +251,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		},
 		rows,
 		repetitions,
-		mixed,
+		mixed: { ...mixed, measurements: mixed.measurements.map(({ samples: _samples, ...summary }) => summary) },
 		diagnostic,
 		loads,
 		loadEnd: loadavg(),

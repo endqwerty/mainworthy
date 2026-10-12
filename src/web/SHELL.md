@@ -49,6 +49,7 @@ Use `when: () => !overlayOpen` for normal screen handlers. `mod` is Ctrl or Cmd.
 Plain keys are ignored in input fields. Escape and modified keys still work.
 Call preventDefault in an input's local handler to keep global keys from firing.
 The same registry feeds footer hints, the palette and the `?` sheet.
+A key handler commits its synchronous React updates before the next key.
 `openPalette({title?, items?})` accepts `{id, label, detail?, handler}` items.
 `openPalette({title, onPickCase: ref => ...})` opens searchable case pick mode.
 The palette closes before invoking the choice callback. No native dialogs.

@@ -376,13 +376,7 @@ export const getOp = defineOp({
 
 // ── find ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-type Found = {
-	count: number | null;
-	items: Record<string, unknown>[];
-	cursor: string | null;
-	folders?: unknown;
-	tags?: unknown;
-};
+type Found = { count: number | null; items: Record<string, unknown>[]; cursor: string | null };
 
 function caseRow(ctx: Ctx, row: CaseRow, rich: boolean): Record<string, unknown> {
 	const base: Record<string, unknown> = {
@@ -448,8 +442,11 @@ export function find(ctx: Ctx, input: FindInput): Found {
 		}
 		case "folders": {
 			const tree = folderTree(ctx.db, project);
-			return { count: tree.total, items: tree.folders, cursor: null, tags: tagCounts(ctx.db, project) };
+			return { count: tree.total, items: tree.folders, cursor: null };
 		}
+		// Kept apart from the folder tree, which every screen loads: counting tags reads every tag row.
+		case "tags":
+			return { count: null, items: tagCounts(ctx.db, project), cursor: null };
 		case "requirements":
 			return { count: null, items: requirementList(ctx.db, project), cursor: null };
 		case "runs": {

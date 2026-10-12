@@ -192,6 +192,24 @@ describe("organising", () => {
 		expect(h.call<{ items: unknown[] }>("find", { text: '"*) OR 1=1 --' }).items).toEqual([]);
 	});
 
+	test("a search too broad to rank is bounded: newest first, title matches first, and it says the count is unknown", () => {
+		const batch = (from: number, n: number) =>
+			Array.from({ length: n }, (_, i) => ({ op: "create", outline: `Common thing ${from + i}\n  Step > Result` }));
+		h.call("propose", { edits: batch(0, 1100) });
+		h.call("propose", { edits: batch(1100, 1000) });
+		h.call("propose", { edits: [{ op: "create", outline: "Rare needle\n  A common step > Result" }] });
+		const broad = h.call<{ count: number | null; items: { ref: string; title: string }[] }>("find", {
+			text: "common",
+			limit: 5,
+		});
+		expect(broad.count).toBeNull(); // more than can be ranked: the caller is told the number is not known
+		expect(broad.items.map((c) => c.ref)).toEqual(["C-2100", "C-2099", "C-2098", "C-2097", "C-2096"]); // in the title, newest first
+		const narrow = h.call<{ count: number | null; items: { ref: string }[] }>("find", { text: "common needle" });
+		expect(narrow).toMatchObject({ count: 1, items: [{ ref: "C-2101" }] });
+		const ranked = h.call<{ count: number | null; items: { ref: string }[] }>("find", { text: "thing 1500" });
+		expect(ranked.count).toBe(1);
+	});
+
 	test("archiving hides a case from lists and keeps it readable", () => {
 		h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
 		h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });

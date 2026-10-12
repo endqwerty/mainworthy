@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
 
 export type Binding = {
 	key: string;
@@ -89,7 +90,7 @@ export function useKeyboard(): void {
 			if (binding) {
 				event.preventDefault();
 				chord = "";
-				binding.handler();
+				flushSync(binding.handler);
 				return;
 			}
 			if (candidates.some((item) => item.key.toLowerCase().startsWith(`${key} `))) {

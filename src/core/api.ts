@@ -40,7 +40,8 @@ export type Api = {
 	get: { input: In<typeof GetInput>; reply: Rows };
 	find: {
 		input: In<typeof FindInput>;
-		reply: { count: number | null; items: Rows; cursor: string | null; tags?: { tag: string; n: number }[] };
+		/** `count` is null when it is not known: a page of a list, or a search too broad to count. */
+		reply: { count: number | null; items: Rows; cursor: string | null };
 	};
 	impact: { input: In<typeof ImpactInput>; reply: Record<string, unknown> };
 	since: { input: In<typeof SinceInput>; reply: { changed: Rows; settled: Rows; cursor: string } };
