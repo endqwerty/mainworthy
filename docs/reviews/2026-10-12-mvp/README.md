@@ -76,6 +76,21 @@ findings that do not block are issue #79.
 `5cc2b3a` and `5df1747` were rebased onto the stacked branch `t3/mvp-product-delivery`: find them there by
 their subject lines ("one record of a conflict", "one live window owns a case's draft"), not by these hashes.
 
+## The check-speed work (pull request #80)
+
+Written by Claude Opus 5.5.
+
+| Review | Commit | Reviewer | Verdict | Report |
+| --- | --- | --- | --- | --- |
+| The parallel check, the split test files, the shared browser set-up and CI in shards | `6d7d12c` | GPT 6 Astra (Codex) | ISSUES (2 blockers) | [check-speed-r1.md](check-speed-r1.md) |
+| The fix for the first finding (a test file in which every test was skipped) | `4a4f1fa` | GPT 6 Astra (Codex) | ISSUES (1 blocker) | [check-speed-r2.md](check-speed-r2.md) |
+
+Both findings of the first are dealt with: the gate job fails on a test file in which every test was skipped,
+and the pull request's description counts eight jobs, not nine. The second check passed every report Bun
+writes and found one more shape, a test that takes its file from its suite, which no report in this
+repository has. The commit after it counts those tests for their suite's file. That last commit has not had
+an independent look.
+
 ## A failure that was the tests' and not the product's
 
 [route-race.md](route-race.md): why a browser test that installs a network route and presses a key at once can

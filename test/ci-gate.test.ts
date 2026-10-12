@@ -15,6 +15,8 @@ type Shard = {
 	files: Record<string, string | null | typeof SKIPPED>;
 	exit?: number;
 	seconds?: number;
+	/** The report's text, where a test wants one that `files` cannot describe. */
+	xml?: string;
 };
 
 /** A report as Bun writes it. */
@@ -58,7 +60,7 @@ async function gate(shards: Shard[], options: { repository?: string[]; missing?:
 				if (options.missing?.includes(shard.name)) continue;
 				const failed = Object.values(shard.files).some((failure) => failure !== null);
 				const outcome = { exit: shard.exit ?? (failed ? 1 : 0), seconds: shard.seconds ?? 60 };
-				await writeFile(join(root, "test-results", `${shard.name}.xml`), junit(shard.files));
+				await writeFile(join(root, "test-results", `${shard.name}.xml`), shard.xml ?? junit(shard.files));
 				await writeFile(join(root, "test-results", `${shard.name}.json`), JSON.stringify(outcome));
 			}
 			const child = Bun.spawn(
@@ -143,6 +145,21 @@ test("a test file whose tests were all skipped fails the job, though the gate pa
 	expect(result.output).toContain("::error::tests-2: every test of test/c.test.ts was skipped");
 	expect(result.code).toBe(1);
 }, 20_000);
+
+test("a test that takes its file from its suite is counted for that file", async () => {
+	// Other producers of JUnit put the file on the suite only. Bun puts it on every test.
+	const inherited = junit({ "test/c.test.ts": null }).replace(/(<testcase\b[^>]*?) file="[^"]+"/g, "$1");
+	expect(inherited).not.toMatch(/<testcase\b[^>]* file=/);
+	const withReport = (xml: string): Shard[] =>
+		green.map((shard) => (shard.name === "tests-2" ? { ...shard, xml, exit: 0 } : shard));
+	const ran = await gate(withReport(inherited));
+	expect(ran.output).not.toContain("::error::");
+	expect(ran.code).toBe(0);
+	const skipped = inherited.replace(/<testcase\b([^>]*?)\s*\/>/g, "<testcase$1>\n      <skipped />\n    </testcase>");
+	const none = await gate(withReport(skipped));
+	expect(none.output).toContain("::error::tests-2: every test of test/c.test.ts was skipped");
+	expect(none.code).toBe(1);
+}, 40_000);
 
 test("tests that exited with a failure the report does not show fail the job", async () => {
 	// A test file that does not load is an error for Bun and is absent from its JUnit file.
