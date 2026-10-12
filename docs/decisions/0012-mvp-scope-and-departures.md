@@ -69,7 +69,8 @@ not the same things done worse.
    moment it is accepted: every run that counts the commit waits for it (`pending`) and is recomputed when it
    is applied; the questions about the commit are asked there instead; and an answer already given about the
    commit on its own ends in the ledger like any answer whose ground has moved, with the question asked in its
-   place naming the runs that rested on it, a closed one included.
+   place naming the runs that rested on it, a closed one included. Each cause is asked about once for each
+   build there, and a dispute is still a dispute there, kept from the same people.
    The cost: `impact` for a pull request does not show an agent's finding on a commit until the pull request's
    pipeline has reported that commit. And a pipeline's pass says nothing about a failure only an agent showed: such a question stays open
    until a person answers it.
@@ -120,7 +121,8 @@ not the same things done worse.
    deferred with presence (#35).
 6. **A report is two transactions, applied in slices.** Acceptance commits first, so every reader sees the gate
    turn pending before anything is applied (commitment C5); then the batch is applied in slices of 200 results,
-   and reads are answered meanwhile by reader threads, each with its own read-only connection. Measured before this
+   and reads are answered meanwhile by reader threads, each with its own read-only connection. A run planned
+   while a report it will count is accepted and not yet applied waits for that report from the start. Measured before this
    change: a 10,000-result report held the one thread for 0.3 to 0.65 s. Writes queue at a gate; they never
    block the thread. This is the design's horizon made real rather than a departure, but the mechanism
    (generator steps driven by one of two drivers) is new and is the part to review.
