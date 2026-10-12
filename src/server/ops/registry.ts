@@ -1,5 +1,7 @@
 // The operation registry: the one public entry to the server. HTTP routes, the OpenAPI document, the MCP tools,
 // the CLI commands and the web client are all generated from OPS, so a capability exists on every surface or on none.
+
+import { createHash } from "node:crypto";
 import type { z } from "zod";
 import type { Capability } from "../../core/kinds.ts";
 import { malformedText } from "../../core/text.ts";
@@ -68,6 +70,14 @@ export type Reply =
 	| { ok: false; error: { code: ErrorCode; message: string; details?: Record<string, unknown> } };
 
 const reused = () => new OpError("conflict", "this command id was already used for something else");
+/**
+ * A command id names one request. Sent again unchanged it is a retry and gets the first reply; sent again with
+ * other content it is refused. Answering it with the first reply would tell a client that kept an id while its
+ * user typed on that the longer text was saved.
+ */
+const changed = () =>
+	new OpError("conflict", "this command id was already used for another request; send new content under a new id");
+const digest = (input: unknown): string => createHash("sha256").update(JSON.stringify(input)).digest("hex");
 /** Stored in place of a reply that held a secret. */
 const WITHHELD = "(reply not kept: it held a secret)";
 
@@ -110,6 +120,7 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 	const cmd =
 		typeof input === "object" && input !== null && "cmd" in input && typeof input.cmd === "string" ? input.cmd : null;
 	const writing = op.effect === "write";
+	const request = cmd && writing ? digest(input) : "";
 	if (writing && app.db.inTransaction)
 		return fail("internal", "a write is in progress; writes go through invokeAsync, which queues them");
 
@@ -124,6 +135,7 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 				const prior = cmd ? findCommand(app.db, cmd) : null;
 				if (prior) {
 					if (prior.op !== op.name || prior.actor !== actor.id || prior.project !== 0) throw reused();
+					if (prior.request !== request) throw changed();
 					const kept = json<unknown>(prior.outcome);
 					if (kept === WITHHELD) {
 						throw new OpError(
@@ -136,7 +148,7 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 				const made = op.run(env, input);
 				if (cmd) {
 					const outcome = op.secret?.(input) ? WITHHELD : made;
-					recordInstanceCommand(app.db, { id: cmd, op: op.name, actor: actor.id, at: env.now, outcome });
+					recordInstanceCommand(app.db, { id: cmd, op: op.name, actor: actor.id, at: env.now, outcome, request });
 				}
 				return made;
 			});
@@ -167,6 +179,7 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 					// The same id from the same actor for the same operation in the same project, or it is a conflict:
 					// a reply recorded for one project is never returned for another.
 					if (prior.op !== op.name || prior.actor !== actor.id || prior.project !== found.id) throw reused();
+					if (prior.request !== request) throw changed();
 					app.db.commit();
 					return { ok: true, result: json<unknown>(prior.outcome), seq: prior.seq };
 				}
@@ -196,7 +209,7 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 					yield;
 				}
 			} else result = op.run(ctx, input);
-			if (cmd) recordCommand(ctx, { id: cmd, op: op.name, outcome: result });
+			if (cmd) recordCommand(ctx, { id: cmd, op: op.name, outcome: result, request });
 			stampSeq(ctx);
 			app.db.commit();
 			publish();

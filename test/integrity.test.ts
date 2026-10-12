@@ -1869,6 +1869,27 @@ describe("what a caller is told", () => {
 		expect(cross).toMatchObject({ ok: false, error: { code: "conflict" } });
 	});
 
+	test("a command id sent again with another request is refused, not answered with the first reply", () => {
+		const cmd = "same-command-02";
+		const made = h.raw("propose", { cmd, edits: [{ op: "create", outline: "Typed so far" }] });
+		expect(made.ok).toBe(true);
+		// The same id with more text in it: a client that kept the id while the person typed on. Replaying the
+		// first reply would tell it the longer text was saved.
+		const more = h.raw("propose", { cmd, edits: [{ op: "create", outline: "Typed so far, and then some" }] });
+		expect(more).toMatchObject({ ok: false, error: { code: "conflict" } });
+		expect(more.ok ? "" : more.error.message).toContain("another request");
+		expect(rows("SELECT count(*) AS n FROM cases")).toEqual([{ n: 1 }]);
+		// The unchanged request is still a retry.
+		expect(h.raw("propose", { cmd, edits: [{ op: "create", outline: "Typed so far" }] })).toEqual(made);
+		// The same for a command on the instance.
+		const admin = h.raw("admin", { do: "project.create", key: "first-key", cmd: "admin-command-02" });
+		expect(admin.ok).toBe(true);
+		expect(h.raw("admin", { do: "project.create", key: "second-key", cmd: "admin-command-02" })).toMatchObject({
+			ok: false,
+			error: { code: "conflict" },
+		});
+	});
+
 	test("an instance command sent twice returns its first reply", () => {
 		const input = { do: "project.create", key: "idempotent-admin", cmd: "admin-command-01" };
 		const made = h.raw("admin", input);

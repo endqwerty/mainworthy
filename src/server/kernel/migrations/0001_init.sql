@@ -77,7 +77,9 @@ CREATE TABLE commands (
 	at INTEGER NOT NULL,
 	seq INTEGER NOT NULL,
 	touched TEXT NOT NULL,
-	outcome TEXT NOT NULL
+	outcome TEXT NOT NULL,
+	-- a digest of what was sent: the same id with another request is refused, never answered with this reply
+	request TEXT NOT NULL
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX commands_seq ON commands (project, seq);
 

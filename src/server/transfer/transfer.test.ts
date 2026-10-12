@@ -36,7 +36,17 @@ const fixtures: Record<string, Row[]> = {
 		{ project: 23, name: "case", value: -9_223_372_036_854_775_808n },
 	],
 	commands: [
-		{ id: "cmd-雪", project: 23, op: "propose", actor: 71, at: time, seq: 1, touched: '[ "C-1" ]', outcome: "{}" },
+		{
+			id: "cmd-雪",
+			project: 23,
+			op: "propose",
+			actor: 71,
+			at: time,
+			seq: 1,
+			touched: '[ "C-1" ]',
+			outcome: "{}",
+			request: "0f1e2d",
+		},
 	],
 	folders: [
 		{ id: 43, project: 23, parent: null, name: "", rank: "a0", state: "active", rev: 1 },

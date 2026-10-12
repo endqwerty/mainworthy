@@ -55,9 +55,10 @@ const Q = {
 	insertProject: sql<{ org: number; key: string; name: string; at: number }>(
 		"INSERT INTO projects (org, key, name, created_at) VALUES ($org, $key, $name, $at)",
 	),
-	command: sql<{ id: string }, { outcome: string; op: string; actor: number; project: number; seq: number }>(
-		"SELECT outcome, op, actor, project, seq FROM commands WHERE id = $id",
-	),
+	command: sql<
+		{ id: string },
+		{ outcome: string; op: string; actor: number; project: number; seq: number; request: string }
+	>("SELECT outcome, op, actor, project, seq, request FROM commands WHERE id = $id"),
 	insertCommand: sql<{
 		id: string;
 		project: number;
@@ -67,9 +68,10 @@ const Q = {
 		seq: number;
 		touched: string;
 		outcome: string;
+		request: string;
 	}>(
-		`INSERT INTO commands (id, project, op, actor, at, seq, touched, outcome)
-		 VALUES ($id, $project, $op, $actor, $at, $seq, $touched, $outcome)`,
+		`INSERT INTO commands (id, project, op, actor, at, seq, touched, outcome, request)
+		 VALUES ($id, $project, $op, $actor, $at, $seq, $touched, $outcome, $request)`,
 	),
 };
 
@@ -93,7 +95,7 @@ export const findCommand = (db: Db, id: string) => db.get(Q.command, { id });
  */
 export function recordInstanceCommand(
 	db: Db,
-	input: { id: string; op: string; actor: number; at: number; outcome: unknown },
+	input: { id: string; op: string; actor: number; at: number; outcome: unknown; request: string },
 ): void {
 	db.run(Q.insertCommand, {
 		id: input.id,
@@ -104,11 +106,12 @@ export function recordInstanceCommand(
 		seq: 0,
 		touched: "[]",
 		outcome: JSON.stringify(input.outcome ?? null),
+		request: input.request,
 	});
 }
 
 /** Records that a command ran, with its reply, so a retry of the same id is a no-op. */
-export function recordCommand(ctx: Ctx, input: { id: string; op: string; outcome: unknown }): void {
+export function recordCommand(ctx: Ctx, input: { id: string; op: string; outcome: unknown; request: string }): void {
 	ctx.db.run(Q.insertCommand, {
 		id: input.id,
 		project: ctx.project.id,
@@ -118,6 +121,7 @@ export function recordCommand(ctx: Ctx, input: { id: string; op: string; outcome
 		seq: ctx.seq,
 		touched: JSON.stringify([...ctx.touched]),
 		outcome: JSON.stringify(input.outcome ?? null),
+		request: input.request,
 	});
 }
 
