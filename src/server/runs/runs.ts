@@ -23,12 +23,14 @@ import {
 } from "../../core/runs.ts";
 import {
 	type Applied,
+	acceptedBatches,
 	type BatchRow,
 	batchById,
 	changeById,
 	changeByKey,
 	codeWhat,
 	excuseFor,
+	firstCountedReport,
 	isWithdrawn,
 	laneHistory,
 	mustTarget,
@@ -1249,7 +1251,26 @@ export function plan(
 					targets.map((t) => t.id),
 				)
 			: 0;
+	inheritAccepted(ctx, run);
 	return { run: retally(ctx, run.id, []).run, slots: rank, already };
+}
+
+/**
+ * A run planned while a report it will count is accepted and not yet applied waits for that report from the
+ * start, exactly as a run that existed when the report arrived: it reads `pending` until the report is applied,
+ * and is not signed off on what it showed before. The reports are the ones applying them will mark applied for
+ * this run: those on a target the run counts, and the first report of its commit that a gate counts.
+ */
+function inheritAccepted(ctx: Ctx, run: RunRow): void {
+	const accepts = acceptsOf(run);
+	if (!("commit" in accepts)) return;
+	for (const batch of acceptedBatches(ctx.db)) {
+		if (batch.project !== run.project) continue;
+		const target = mustTarget(ctx.db, batch.target);
+		if (target.commit_sha !== accepts.commit) continue;
+		if (matches(run, target, batch.run) || firstCountedReport(ctx.db, batch, target))
+			ctx.db.run(Q.accepted, { id: run.id, seq: batch.seq });
+	}
 }
 
 function fillFromPrior(

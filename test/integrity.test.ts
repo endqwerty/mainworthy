@@ -1369,6 +1369,43 @@ describe("what a run and a change may count", () => {
 		expect(gate({ run: (runs[0] as PlanReply).run }).verdict).toBe("blocked");
 	});
 
+	test("a run planned while a report for its commit waits to be applied waits for it too", () => {
+		seed(1, ["human", "auto"]);
+		const ci = pipeline();
+		const commit = "waiting001";
+		const target = { commit, branch: "main" };
+		report({ target, results: [linked("pass")] }, ci);
+		// The pipeline's next attempt fails. It is accepted and, for whatever reason, not applied yet.
+		const project = findProject(h.app.db, "scratch");
+		if (!project) throw new Error("no project");
+		h.app.db.transaction(() => {
+			const ctx = makeCtx(h.app, project, ci, true);
+			acceptReport(ctx, {
+				target,
+				attempt: 2,
+				results: [
+					{
+						test: { key: "t1" },
+						annotation: { case: "C-1", version: 1 },
+						outcome: "fail",
+						failure: { message: "boom" },
+					},
+				],
+			});
+			stampSeq(ctx);
+		});
+		expect(gate({ commit }).verdict).toBe("pending");
+		// A run planned over that commit now sees the older pass. It must not pass on it, let alone be closed.
+		const planned = plan({ name: "Release", select: {}, accepts: { commit } });
+		expect(gate({ run: planned.run }).verdict).toBe("pending");
+		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("open");
+		recoverAccepted(h.app);
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", stale: false });
+		expect(
+			first(rows<{ outstanding: number }>("SELECT outstanding FROM runs WHERE origin = 'planned'")).outstanding,
+		).toBe(0);
+	});
+
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {
 		const ci = pipeline();
 		const head = "c2c2c2c200000000000000000000000000000002";
