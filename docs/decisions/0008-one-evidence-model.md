@@ -1,0 +1,117 @@
+# 0008: One evidence model: explicit basis, runs as requests, decisions as the only writer of standing
+
+- Date: 2026-10-11
+- Status: proposed (synthesised from the design arena; mechanisms to be
+  proven in the phase 1 prototype)
+
+Full sketch: `docs/product-design.md` sections 6 and 7. This record states
+the decisions that the sketch depends on.
+
+## Decision
+
+1. **Three kinds of write, three kinds of writer.** Producers (a person, a
+   pipeline, an agent, under their own identity) append **evidence**:
+   proposals, results, findings. Detectors derive **questions** from evidence,
+   one per cause, by fingerprint; nobody writes a question. **Decisions**
+   answer questions and are the only thing whose effect changes standing:
+   the current version of a case, a test-to-case link, an excuse, a
+   quarantine, a waiver, a sign-off, the policy. Standing writers take a
+   witness that only the decision machinery can mint.
+
+2. **Every result carries an explicit basis.** `exact` (a pinned run slot, a
+   version manifest written before the tests ran, or a `@C-311@v7`
+   annotation), `assumed` (the case's current version at ingest, recorded as
+   an assumption), or `unresolved` (a test with no case; history only). No
+   path stamps a version silently. A project policy says which bases qualify
+   for its gates: loose accepts `exact-or-assumed`; regulated requires
+   `exact`. This is the resolution between "prepare before every CI run" and
+   "stamp the current head": both are allowed, both are honest, policy
+   chooses.
+
+3. **A run is a request for evidence, not an owner of results.** Results
+   belong to a target (code, artifact, or a named session with no build
+   identity). A run is a predicate over targets plus slots pinned to case
+   versions and an explicit completeness requirement (methods, independent
+   actors, required CI jobs, qualifying basis). A result from any producer
+   fills a matching slot. A PR check, a regression pass and a release are one
+   object. A session target never satisfies a change run.
+
+4. **The gate has four verdicts** and reading it computes nothing: `passed`,
+   `failed` (needs a fix), `blocked` (needs a decision: an open or disputed
+   question), `pending` (needs evidence: unfilled slots or missing required
+   jobs). Accepting an upload sets matching open runs to `pending` in the
+   acceptance transaction, before parsing, so a stale green is never served.
+
+5. **A review is never a runtime pass.** Findings and reviewed-basis rows
+   are evidence of review; only a run requirement of kind review accepts
+   them, and policy may require an independent human. A review with zero
+   findings is still recorded.
+
+6. **Detectors suggest; decisions excuse.** A failure already failing on the
+   base of a change, a quarantined test, a signature seen before: these are
+   hints in the question's evidence digest. The excuse is a decision, which a
+   rule clause may make instantly under a loose preset, and which is in the
+   ledger with its clause either way.
+
+7. **Answers are basis-checked and holds expire visibly.** An answer names
+   the evidence hash it was given on; a quorum counts only answers on the
+   current evidence. A decision carries forward under a hold (until the basis
+   changes, this target only, a date, N clean runs, or a linked defect
+   closes); an expired hold re-raises the question on the next occurrence
+   and re-folds the runs that depended on it.
+
+8. **Two hashes per case version.** The version hash identifies the document
+   (history, diff, restore). The claim hash covers the claim class only
+   (preconditions, steps, expected results, expanded fragments) and is stable
+   under retitling, retagging, moving and linking. It is a reuse signal for
+   people and agents ("proven on this claim", "reviewed at this basis") and a
+   policy option for gates; it never transfers proof by itself.
+
+9. **Autosave into a private open proposal; a version exists when a sealed
+   proposal is adopted.** Others see the draft as a draft. Sealing happens on
+   leaving the case, an explicit key, or idle. A bulk edit is one proposal,
+   one question, one decision, with a computable inverse.
+
+10. **Tests exist without cases.** A `Test` is a first-class evidence subject
+    with history, flakiness and a place in the gate whether or not it is ever
+    mapped to a case; mapping is a `map` question raised when policy asks.
+
+11. **One operation registry, seventeen operations, ten agent tools.** Wire
+    formats are parsed in adapters before an operation is invoked. REST,
+    MCP, CLI, OpenAPI, the palette, the skill's reference pages and the
+    budget tests are generated from the registry.
+
+## Stack criteria added (for decision 0001)
+
+- A per-project sequence assigned in commit order, so changed-since, export
+  and audit are one ordered range read.
+- Batched point reads and writes of 10,000 keys inside one transaction.
+- An index-only count on the open-queue key.
+- Full-text document replacement inside the writing transaction.
+- A canonical text round trip (`print ∘ parse = id`) as a check.
+
+## Consequences
+
+- Decision 0003's five switches become rows of the clause table; the record
+  stands, its mechanism is generalised.
+- Decision 0006's findings ledger becomes the ledger of all decisions; review
+  reuse is keyed by a basis that includes the relevant patch.
+- The roadmap's phase 2 becomes the thin cross-producer slice in
+  `docs/product-design.md` section 9.
+- Open question 16 gets a proposed answer: a local requirement row that may
+  mirror a tracker item one way.
+
+## Alternatives rejected
+
+- **Exact-or-unresolved only** (candidates A and B): honest, but makes a
+  drop-in `casebook report` useless for gates until a team adds a manifest
+  step. The assumed basis keeps drop-in useful and visible.
+- **Stamp the current head and call it the version** (candidates C and D as
+  written): guesses silently. Rejected by the judge and here.
+- **Claim hash as automatic proof transfer** (candidate C): a hash proves the
+  text is the same, not that a runner executed it. Kept as a signal and a
+  policy option.
+- **Results as decisions** (the extreme of candidate D's lens): a 10M-row
+  union of two shapes with an authority check on every machine result.
+- **Separate manual, automation and agent modules with a reporting layer**:
+  the incumbents' shape; three shapes to reconcile.

@@ -56,6 +56,19 @@ skeleton builds and runs its check command.
 
 ## Phase 2: Core vertical slice (Local layer)
 
+**Revised 2026-10-11 (decisions 0007, 0008; `docs/product-design.md` section 9).**
+Phase 2 is the thin slice "one red build, three producers": capture and
+versioning, `report` for CI and manual results with explicit basis, change
+runs with the four-verdict gate, planned runs with slots any producer fills,
+the decision machinery with the `adopt`, `failure`, `map` and `finding`
+kinds, Suite, Queue, Case, Run and Change screens, CLI, MCP, `impact`,
+`since`, `check`, export and import. Fragments, custom fields, the flaky
+detector, requirements coverage, gates, sign-off and freeze move to phase 3.
+The exit criteria are the jobs and fixtures listed in the design. The text
+below is the earlier plan, kept for its exit criteria on the jobs it still
+covers.
+
+
 One project, folders, cases with steps, shared steps, custom fields,
 versioning with diff and restore, proposed edits with review (the policy
 switch from decision 0003, so J8 is possible), search, bulk move and retag

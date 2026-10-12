@@ -18,7 +18,21 @@ in `docs/decisions/`.
 13. Competitor trial accounts: which can be opened for the hands-on audit (Qase, Testiny, Testmo, TestRail trial; a Jira with Xray or an Azure DevOps org)? No interviews are planned (`docs/ux-research-plan.md`).
 14. Local layer footprint: is a native single binary required, or is a container acceptable for the Local layer too?
 15. Regulated profile depth: do we need electronic signatures with legal weight, retention rules or an audit export format in the first usable version, or is identity-and-time sign-off enough until a real regulated team asks?
-16. Requirements source: are requirements linked from an external tracker only (Jira, ADO, GitHub issues), or can a project hold its own lightweight requirement list for the traceability views?
+16. Requirements source: are requirements linked from an external tracker only (Jira, ADO, GitHub issues), or can a project hold its own lightweight requirement list for the traceability views? Proposed answer 2026-10-11 (decision 0008): a local requirement row that may mirror a tracker item one way; confirm.
 17. Deployment events: how does Casebook learn that a build was deployed (CI step, webhook, or manual) so traceability reaches deployments?
 18. Compare the kinds of team you have worked in (enterprise, large, small, startup) as evidence for `docs/ux/flows.md`. For each: where cases lived, who wrote and ran them, what ran in CI, who decided go or no-go, what broke at that size, and what annoyed you most. Where did the flows differ most between them, and is organisation scale (many teams sharing standards) a different axis from process strictness? A few messy paragraphs per kind of team is enough; this is the only first-hand data we have.
 19. Adversarial review and testing (decision 0006): is the reading right (agents challenging cases and changes; agents trying to break the software using the cases as a map)? Which agent clients should the token measurements use first (Claude Code, Codex, Cursor, others), and do you already know where agents waste the most tokens today?
+
+From the product design synthesis (2026-10-11, `docs/product-design.md`,
+decisions 0007 and 0008):
+
+20. Home screen: the design makes Suite (capture) the default home with the queue count in the header, and lets a user whose day is triage set Queue as home. From your experience across team sizes, who opens the tool daily, and is that right?
+21. Assumed basis: a drop-in CI report stamps results with the case's current version as a recorded assumption, and a loose project's gates accept it. Is that the right default for a new project, with `exact` required under the standard or only the regulated preset?
+22. Agent evidence in gates: may an agent's result fill a run slot by default (loose), or only when a run or a gate opts in? May an agent's answer settle any question kind in the loose preset (the draft lets a rule settle most things and agents answer only `map` and `duplicate`)?
+23. Sealed proposals: autosave goes to a private draft and becomes a version on leaving the case, an explicit key or 30 s idle, so colleagues see an edit seconds later. Acceptable in a loose team? Should opening the case by someone else force a seal?
+24. Who may excuse a failure on their own PR? The standard preset draft lets the change author answer `defect`, `test` and `expected` but not `flaky` or `infra`. Too strict, too loose, or right? (Extends question 12.)
+25. Hold windows: `flaky` holds 14 days or until 20 clean trunk runs; `infra` holds for one target only; `defect` holds until 5 clean runs or the tracker item closes. What would you have wanted in the teams you worked in?
+26. Will manual testers name the build? Results filling a release run depends on manual results carrying a target. Do testers know which build is on the environment, or must Casebook learn it from a deploy announcement and offer it?
+27. Slice order: the design trades the roadmap's authoring-first phase 2 for a thin slice across all three producers and the queue, with fragments and custom fields moving later. Agreed?
+28. The principle order and the floor in decision 0007, in particular F3 ("not measurably better than the incumbents on the audit jobs" is a reason not to ship): confirm or adjust.
+
