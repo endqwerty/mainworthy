@@ -180,7 +180,7 @@ const Q = {
 	),
 	failingWithCause: sql<{ run: number; signature: number }, { test: number }>(
 		`SELECT DISTINCT test FROM run_tests
-		 WHERE run = $run AND signature = $signature AND outcome IN ('fail', 'error') LIMIT 500`,
+		 WHERE run = $run AND signature = $signature AND outcome IN ('fail', 'error')`,
 	),
 	failingOfCause: sql<{ run: number; signature: number; target: number }, { test: number; result: number }>(
 		`SELECT test, result FROM run_tests
@@ -195,8 +195,15 @@ const Q = {
 	dropLane: sql<{ run: number; test: number; lane: string }>(
 		"DELETE FROM run_tests WHERE run = $run AND test = $test AND lane = $lane",
 	),
-	discounted: sql<{ result: number }, { slot: number }>(
-		"SELECT slot FROM slot_results WHERE result = $result AND discounted_by IS NOT NULL LIMIT 1",
+	// A result judged a mistake is discounted in every slot it is admitted to, by the decision that judged it.
+	judgedBy: sql<{ result: number }, { decision: number }>(
+		"SELECT discounted_by AS decision FROM slot_results WHERE result = $result AND discounted_by IS NOT NULL LIMIT 1",
+	),
+	discountedBy: sql<{ decision: number }, { slot: number; result: number }>(
+		"SELECT slot, result FROM slot_results WHERE discounted_by = $decision",
+	),
+	discountsOfRun: sql<{ run: number }, { decision: number }>(
+		"SELECT DISTINCT discounted_by AS decision FROM slot_results WHERE run = $run AND discounted_by IS NOT NULL",
 	),
 	effectiveOfTest: sql<{ run: number; test: number }, { outcome: string; signature: number | null }>(
 		"SELECT outcome, signature FROM run_tests WHERE run = $run AND test = $test",
@@ -969,6 +976,13 @@ function count(db: Db, run: RunRow): { tally: Tally; failing: Set<string>; depen
 		}
 	}
 
+	// A run also rests on the decisions that judged results in its slots a mistake: it is recomputed with them.
+	if (run.origin === "planned") {
+		for (const row of db.all(Q.discountsOfRun, { run: run.id })) {
+			if (!depends.has(row.decision)) depends.set(row.decision, null);
+		}
+	}
+
 	const jobs = obligationsOf(run).flatMap((o) => (o.kind === "jobs" ? o.jobs : []));
 	if (jobs.length > 0) {
 		const reported = new Set<string>();
@@ -1131,7 +1145,11 @@ function fillFromPrior(
 				caseMethods: methodsOf(ctx.db, slot, result),
 			});
 			if (!admitted) continue;
+			// A result a decision has judged a mistake is admitted as that: it counts here no more than it does in
+			// the run it was judged in or in its commit's gate, and it returns here too if the decision is withdrawn.
+			const judged = ctx.db.get(Q.judgedBy, { result: result.id });
 			ctx.db.run(Q.admit, { slot: slot.id, result: result.id, run: run.id, admitted });
+			if (judged) ctx.db.run(Q.discount, { slot: slot.id, result: result.id, decision: judged.decision });
 			any = true;
 		}
 		if (any && refreshSlot(ctx, slot, obligation).state === "satisfied") satisfied++;
@@ -1158,9 +1176,10 @@ export function reopenRun(ctx: Ctx, run: RunRow, decision: number): void {
 }
 
 /**
- * A `mistaken` answer on a disputed slot: the failing results stop counting there. Standing: only by a decision,
- * which each discounted result records. Returns the slot and result pairs, so withdrawing the decision can put
- * them back.
+ * A `mistaken` answer on a disputed slot: the failing results it names stop counting. Not only in that slot: a
+ * result judged a mistake is discounted in every open run that admitted it and leaves its commit's gate, so the
+ * same evidence never counts in one place and not in another. Standing: only by a decision, which each
+ * discounted result records. Returns the slot and result pairs.
  */
 export function discountFailures(
 	ctx: Ctx,
@@ -1171,36 +1190,47 @@ export function discountFailures(
 ): [number, number][] {
 	const decision = decisionOf(witness, "failure");
 	const corrected: [number, number][] = [];
+	const touched = new Set<number>();
 	for (const slot of ctx.db.all(Q.slotsBySignature, { run: run.id, signature })) {
 		for (const fill of fillsOf(ctx.db, slot.id)) {
 			// Only the failures the question is about: the same cause seen in another repository is another question.
 			if (fill.signature !== signature || scopeIn(ctx.db, run, fill.target) !== scope) continue;
-			ctx.db.run(Q.discount, { slot: slot.id, result: fill.id, decision });
-			corrected.push([slot.id, fill.id]);
-			// A result decided to be a mistake does not hold its commit's gate either.
+			for (const held of ctx.db.all(Q.slotsOfResult, { result: fill.id })) {
+				const where = slotById(ctx.db, held.slot);
+				const of = where ? runById(ctx.db, where.run) : null;
+				// A closed run keeps what it was closed on.
+				if (!where || of?.state !== "open") continue;
+				ctx.db.run(Q.discount, { slot: where.id, result: fill.id, decision });
+				corrected.push([where.id, fill.id]);
+				touched.add(where.id);
+			}
 			const commit = commitRunOf(ctx.db, run.project, fill.target);
 			if (commit) refoldLaneOf(ctx, commit, fill.id);
 		}
-		const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
-		refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
 	}
+	for (const id of touched) refreshSlotById(ctx, id);
 	return corrected;
 }
 
 /**
- * Puts back the failing results the `mistaken` decision `decision` discounted, and only those: a result its
- * producer has since corrected stays corrected, and one another decision discounted stays discounted.
+ * Puts back everything the `mistaken` decision `decision` discounted, in every slot that holds it, and only
+ * that: a result its producer has since corrected stays corrected, and one another decision discounted stays
+ * discounted.
  */
-export function restoreFailures(ctx: Ctx, pairs: readonly [number, number][], decision: number): void {
-	for (const [slotId, result] of pairs) {
-		const { changes } = ctx.db.run(Q.undiscount, { slot: slotId, result, decision });
-		if (changes > 0) recount(ctx, result);
-		const slot = slotById(ctx.db, slotId);
-		const run = slot ? runById(ctx.db, slot.run) : null;
-		if (!slot || !run) continue;
-		const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
-		refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
-	}
+export function restoreFailures(ctx: Ctx, decision: number): void {
+	const rows = ctx.db.all(Q.discountedBy, { decision });
+	for (const row of rows) ctx.db.run(Q.undiscount, { slot: row.slot, result: row.result, decision });
+	for (const result of new Set(rows.map((row) => row.result))) recount(ctx, result);
+	for (const slot of new Set(rows.map((row) => row.slot))) refreshSlotById(ctx, slot);
+}
+
+function refreshSlotById(ctx: Ctx, id: number): void {
+	const slot = slotById(ctx.db, id);
+	const run = slot ? runById(ctx.db, slot.run) : null;
+	if (!slot || !run) return;
+	const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
+	refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
+	ctx.touched.add(runRef(run));
 }
 
 const commitRunOf = (db: Db, project: number, target: number): RunRow | null =>
@@ -1228,7 +1258,7 @@ function refoldLaneOf(ctx: Ctx, commit: RunRow, id: number): void {
 	const before = ctx.db.get(Q.laneRow, { run: commit.id, test: result.test, lane });
 	let held: ReturnType<typeof resultById> = null;
 	for (const next of laneHistory(ctx.db, { target: result.target, test: result.test, actor: result.actor, job })) {
-		if (next.method === "agent" || ctx.db.get(Q.discounted, { result: next.id })) continue;
+		if (next.method === "agent" || ctx.db.get(Q.judgedBy, { result: next.id })) continue;
 		if (!held || replacesInLane(held, next)) held = next;
 	}
 	ctx.db.run(Q.dropLane, { run: commit.id, test: result.test, lane });

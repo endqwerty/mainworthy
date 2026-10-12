@@ -366,7 +366,7 @@ const failureHandler: Handler<"failure"> = {
 	revert(ctx, question, decision) {
 		const subject = json<{ signature: number; scope: string }>(question.subject);
 		const effects = json<{ corrected?: [number, number][]; class?: string }>(decision.effects);
-		if (effects.corrected) restoreFailures(ctx, effects.corrected, decision.id);
+		if (effects.corrected) restoreFailures(ctx, decision.id);
 		if (effects.class) dropExcuse(ctx, subject.signature, subject.scope, decision.id);
 	},
 	holds({ question, answer, now, policy }) {

@@ -809,6 +809,49 @@ describe("what a result may prove", () => {
 		expect(outcome("old first")).toEqual(together);
 	});
 
+	test("'already failing on the base' holds for every failing test of the cause, however many there are", () => {
+		const fail = (i: number) => ({ test: { key: `t${i}` }, outcome: "fail", failure: { message: "same cause" } });
+		const many = Array.from({ length: 600 }, (_, i) => fail(i));
+		// On the base 600 tests fail with one cause and one more passes. On the change all 601 fail with it.
+		report({
+			target: { repo: "app", commit: "base0002", branch: "main" },
+			results: [...many, { test: { key: "t600" }, outcome: "pass" }],
+		});
+		const head = { repo: "app", commit: "head0002", base: "base0002", branch: "feature", pr: 2 };
+		expect(report({ target: head, results: [...many, fail(600)] }).gate).toMatchObject({
+			verdict: "blocked",
+			tally: { unexplained: 601 },
+		});
+		// One of the inherited failures is reported again. Nothing changed, and nothing is excused.
+		expect(report({ target: head, attempt: 2, results: [fail(0)] }).gate).toMatchObject({
+			verdict: "blocked",
+			tally: { unexplained: 601, excused: 0 },
+		});
+	});
+
+	test("a result judged a mistake counts in no run planned afterwards, and comes back everywhere when the judgement is withdrawn", () => {
+		seed();
+		const other = h.actor("other", "human", ["read", "produce"]);
+		const target = { commit: "judged01", branch: "main" };
+		const one = { test: { key: "one" }, annotation: { case: "C-1", version: 1 } };
+		report({ target, results: [{ ...one, outcome: "fail", failure: { message: "same cause" } }] });
+		report({ target, results: [{ ...one, outcome: "pass" }] }, other);
+		const before = plan({ name: "Before", select: {}, accepts: { commit: "judged01" } });
+		const dispute = open("failure");
+		expect(decide(dispute, { is: "mistaken" }).status).toBe("decided");
+		expect(gate({ run: before.run }).tally).toMatchObject({ pass: 1, disputed: 0 });
+		// Planned again over the same results: the judged result is not counted here either, and nobody is asked.
+		const after = plan({ name: "After", select: {}, accepts: { commit: "judged01" } });
+		expect(gate({ run: after.run }).tally).toMatchObject({ pass: 1, disputed: 0 });
+		expect(h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items).toEqual([]);
+		// Withdrawn: the result counts again in the commit's gate and in both runs.
+		h.call("decide", { undo: open("signoff", "decided").q });
+		expect(first(h.call<DecideReply[]>("decide", { undo: dispute.q })).status).toBe("reopened");
+		expect(gate({ commit: "judged01" }).tally.unexplained).toBe(1);
+		expect([first(slots(before.run)).state, first(slots(after.run)).state]).toEqual(["disputed", "disputed"]);
+		expect(gate({ run: after.run }).verdict).toBe("blocked");
+	});
+
 	test("an automated test cannot take the key of a case's manual test", () => {
 		seed(2);
 		const taken = h.raw("report", {

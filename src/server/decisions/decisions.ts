@@ -697,16 +697,13 @@ export function raiseFailure(
 	// "Already failing on the base" is a statement about the cause, so it must be true of every test that fails
 	// with it on this commit now, not only of those in the report that happens to be arriving: how a pipeline
 	// splits its results over reports must not change what a rule may excuse.
-	const failingNow = new Set([
-		...group.tests.map((test) => test.id),
-		...failingWithCause(ctx.db, target, group.signature.id),
-	]);
-	if (
-		scopeKind === "change" &&
-		failingNow.size > 0 &&
-		[...failingNow].every((test) => failsOnBase(ctx.db, target, test, group.signature.id))
-	) {
-		hints.push("hint:fails-on-base");
+	if (scopeKind === "change") {
+		const failingNow = new Set([
+			...group.tests.map((test) => test.id),
+			...failingWithCause(ctx.db, target, group.signature.id),
+		]);
+		if (failingNow.size > 0 && [...failingNow].every((test) => failsOnBase(ctx.db, target, test, group.signature.id)))
+			hints.push("hint:fails-on-base");
 	}
 	if (group.disputed) hints.push("hint:disputed");
 	const change = target.change !== null ? changeById(ctx.db, target.change) : null;
