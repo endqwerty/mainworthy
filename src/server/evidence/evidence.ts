@@ -395,16 +395,12 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 		// named one (the name stays free for whoever really reports it). A commit only an agent has reported is on
 		// its own, like a commit reported by its hash alone; one that is placed already is where it is.
 		if (first === undefined) {
-			const key = changeKey(ctx.db, project, `commit:${input.commit.slice(0, 12)}`, input.repo ?? null);
+			const key = changeKey(ctx.db, project, ownKey(input.commit), input.repo ?? null);
 			change = upsertChange(ctx, key, input);
 		}
 	} else if (!trunk) {
 		const key =
-			input.pr !== undefined
-				? `pr:${input.pr}`
-				: input.branch
-					? `branch:${input.branch}`
-					: `commit:${input.commit.slice(0, 12)}`;
+			input.pr !== undefined ? `pr:${input.pr}` : input.branch ? `branch:${input.branch}` : ownKey(input.commit);
 		// A report that names neither a branch nor a pull request says nothing about where the commit is: for a
 		// commit whose place is known, no change of its own is made up for it.
 		const known = input.pr === undefined && input.branch === undefined && settled;
@@ -442,8 +438,14 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
  * scope is where the agent's findings were asked about until a pipeline or a person said where the commit is.
  */
 export function ownChangeOf(db: Db, project: number, repo: string | null, commit: string): ChangeRow | null {
-	return db.get(Q.change, { project, key: changeKey(db, project, `commit:${commit.slice(0, 12)}`, repo) });
+	return db.get(Q.change, { project, key: changeKey(db, project, ownKey(commit), repo) });
 }
+
+/**
+ * The key of the change a commit is given for itself. The whole hash: two commits that begin alike are two
+ * commits, each on its own, and a key cut short would put them in one place.
+ */
+const ownKey = (commit: string): string => `commit:${commit}`;
 
 /** The key of a change in a repository: the plain key, unless another repository holds it in this project. */
 function changeKey(db: Db, project: number, key: string, repo: string | null): string {

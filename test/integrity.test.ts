@@ -1332,6 +1332,43 @@ describe("what a run and a change may count", () => {
 		expect(gate({ run: planned.run }).verdict).toBe("passed");
 	});
 
+	test("two commits that begin alike are each on their own, and placing one leaves the other's question alone", () => {
+		seed(1, ["human", "agent"]);
+		const ci = pipeline();
+		const one = "abcdef123456aaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+		const two = "abcdef123456bbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+		const fail = { test: { case: "C-1" }, outcome: "fail", failure: { message: "found by the agent" } };
+		const runs = [one, two].map((commit) =>
+			plan({
+				name: commit.slice(-4),
+				select: {},
+				accepts: { repo: "app", commit },
+				require: exercise(["human", "agent"]),
+			}),
+		);
+		report({ target: { repo: "app", commit: one }, results: [fail] }, explorer());
+		report({ target: { repo: "app", commit: two }, results: [fail] }, explorer());
+		// Two commits, two places, two questions.
+		expect(rows("SELECT count(DISTINCT change) AS n FROM targets")).toEqual([{ n: 2 }]);
+		expect(h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items).toHaveLength(2);
+		// The pipeline places the first. The second is where it was, asked about as before, by a question that
+		// is still there to answer.
+		report(
+			{
+				target: { repo: "app", commit: one, pr: 7, branch: "feature" },
+				results: [{ test: { key: "t" }, outcome: "pass" }],
+			},
+			ci,
+		);
+		const second = gate({ run: (runs[1] as PlanReply).run });
+		expect(second.verdict).toBe("blocked");
+		const asked = h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items;
+		expect(asked.map((item) => item.q)).toEqual(expect.arrayContaining(second.open));
+		expect(second.open).toHaveLength(1);
+		expect(asked).toHaveLength(2);
+		expect(gate({ run: (runs[0] as PlanReply).run }).verdict).toBe("blocked");
+	});
+
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {
 		const ci = pipeline();
 		const head = "c2c2c2c200000000000000000000000000000002";

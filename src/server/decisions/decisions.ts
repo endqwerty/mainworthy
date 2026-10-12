@@ -1036,6 +1036,8 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 		});
 		for (const id of seen.targets ?? []) {
 			const where = mustTarget(ctx.db, id);
+			// Only what moved: a target that is still where the question is about stays its to ask about.
+			if (scopeOf(where, null) === before) continue;
 			const raised = raiseFailure(ctx, {
 				group: {
 					signature,
@@ -1056,7 +1058,8 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 			if (raised.s === "open" || raised.s === "attached") alsoAbout(ctx, raised.question, refs);
 		}
 		for (const id of named) ctx.recompute.add(id);
-		if (question.state === "open") setQuestionState(ctx, question, "dissolved", null);
+		const left = (seen.targets ?? []).some((id) => scopeOf(mustTarget(ctx.db, id), null) === before);
+		if (question.state === "open" && !left) setQuestionState(ctx, question, "dissolved", null);
 	}
 }
 
