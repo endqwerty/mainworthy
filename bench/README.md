@@ -51,6 +51,35 @@ so does each report (under 2 s); a save under load is reported without a budget,
 because with one writer it waits behind the report in front of it (issue #60).
 SQL/CPU/I/O diagnostics identify the limiter and EXPLAIN plans. A miss needs a
 product fix and a repeat under comparable load; changing a budget hides the problem.
+## The last full run
+
+`bun bench/run.ts` on 2026-10-12 (snapshot `3cd05f8` on the branch `mvp/history`; a 16-thread desktop shared with
+other work, load 2.9 at the start): exit 0, no miss in the first run or in any repeat. The whole output is `bench/results-full.log`; `bench/results-quick.log` is the
+`--quick` run of the same commit.
+
+| Workload | p50 ms | p95 ms | max ms | Budget |
+| --- | ---: | ---: | ---: | --- |
+| Case read | 2.29 | 17.01 | 23.34 | p95 < 20 |
+| Folder page (50) | 1.62 | 1.86 | 2.84 | p95 < 50 |
+| Search, four kinds | 11.90 to 21.15 | 14.02 to 25.44 | 27.55 | p95 < 100 |
+| Test history (20) | 0.13 | 0.16 | 0.17 | p95 < 20 |
+| Gate read | 0.03 | 0.05 | 0.07 | p95 < 20 |
+| Queue (50 of 50,000) | 6.10 | 7.29 | 9.30 | p95 < 50 |
+| Case save | 2.01 | 15.42 | 30.94 | p95 < 50 |
+| Bulk move (1,000) | 258 | 502 | 502 | max < 1,000 |
+| Ingest (10,000) | 711 | 803 | 803 | max < 2,000 |
+| Gate visible after a report starts | 711 | 803 | 803 | max < 5,000 |
+| Record one result in a run | 2.27 | 3.53 | 44.32 | p95 < 50 |
+| Reads under load | 17.69 | 47.40 | 581.57 | p95 < 50 |
+| One report under load | 765 | 1,428 | 1,441 | max < 2,000 |
+| Save under load | 569 | 1,361 | 1,376 | none (#60) |
+
+Reads under load sit just under their budget, as before (#60). Two things this run's first attempt caught, both
+from the last engine fixes and both fixed before it: the queue read had tripled, because the question of whether
+a failure is disputed was asked of every open run for each row (it now starts from the disputed slots, of which
+there are few); and a report that closed thousands of questions recomputed the run that waited for them once per
+question (now once per run; `test/budgets.test.ts` counts it).
+
 ## Under load, from another process
 
 `bun bench/external.ts <dataset directory> [seconds] [reader threads]` starts the server as its own process and
