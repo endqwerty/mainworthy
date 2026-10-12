@@ -16,10 +16,7 @@ export type Profile = {
 /** An unreported diagnostic run attributes the actual operation to SQL calls and CPU; it never supplies benchmark latency samples. */
 export async function profile(app: App, workload: Workload): Promise<Profile> {
 	const queries = new Map<string, Query>();
-	const get = app.db.get.bind(app.db);
-	const all = app.db.all.bind(app.db);
-	const run = app.db.run.bind(app.db);
-	const dynamic = app.db.allDynamic.bind(app.db);
+	const restore: (() => void)[] = [];
 	const timed = <T>(text: string, params: Params, work: () => T): T => {
 		const start = performance.now();
 		try {
@@ -33,24 +30,33 @@ export async function profile(app: App, workload: Workload): Promise<Profile> {
 			queries.set(text, query);
 		}
 	};
-	app.db.get = <P extends Params, R>(statement: Statement<P, R>, ...args: P extends readonly [] ? [] : [P]): R | null =>
-		timed(statement.text, args[0] ?? [], () => get(statement, ...args));
-	app.db.all = <P extends Params, R>(statement: Statement<P, R>, ...args: P extends readonly [] ? [] : [P]): R[] =>
-		timed(statement.text, args[0] ?? [], () => all(statement, ...args));
-	app.db.run = <P extends Params>(statement: Statement<P, unknown>, ...args: P extends readonly [] ? [] : [P]) =>
-		timed(statement.text, args[0] ?? [], () => run(statement, ...args));
-	app.db.allDynamic = <R>(text: string, params: Parameters<App["db"]["allDynamic"]>[1]): R[] =>
-		timed(text, params, () => dynamic<R>(text, params));
+	for (const db of app.reader === app.db ? [app.db] : [app.db, app.reader]) {
+		const get = db.get.bind(db);
+		const all = db.all.bind(db);
+		const run = db.run.bind(db);
+		const dynamic = db.allDynamic.bind(db);
+		db.get = <P extends Params, R>(statement: Statement<P, R>, ...args: P extends readonly [] ? [] : [P]): R | null =>
+			timed(statement.text, args[0] ?? [], () => get(statement, ...args));
+		db.all = <P extends Params, R>(statement: Statement<P, R>, ...args: P extends readonly [] ? [] : [P]): R[] =>
+			timed(statement.text, args[0] ?? [], () => all(statement, ...args));
+		db.run = <P extends Params>(statement: Statement<P, unknown>, ...args: P extends readonly [] ? [] : [P]) =>
+			timed(statement.text, args[0] ?? [], () => run(statement, ...args));
+		db.allDynamic = <R>(text: string, params: Parameters<App["db"]["allDynamic"]>[1]): R[] =>
+			timed(text, params, () => dynamic<R>(text, params));
+		restore.push(() => {
+			db.get = get;
+			db.all = all;
+			db.run = run;
+			db.allDynamic = dynamic;
+		});
+	}
 	const work = workload.prepare(0);
 	const started = performance.now();
 	const usage = process.cpuUsage();
 	try {
 		await work();
 	} finally {
-		app.db.get = get;
-		app.db.all = all;
-		app.db.run = run;
-		app.db.allDynamic = dynamic;
+		for (const undo of restore) undo();
 	}
 	const cpu = process.cpuUsage(usage);
 	return {

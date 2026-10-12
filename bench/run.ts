@@ -151,7 +151,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 			budget: BUDGETS.visible,
 			criterion: "max",
 			pass: visible.max < BUDGETS.visible && rows.every((row) => row.name !== "ingest (10000)" || row.errors === 0),
-			correctness: "Gate read after the same synchronous acceptance-and-apply transaction, timed from report start.",
+			correctness: "Gate read after synchronous invoke completes acceptance and apply, timed from report start.",
 			checked: visible.n,
 			samples: visibleSamples,
 			warmupErrors: [],
@@ -171,10 +171,10 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		`Mixed: ${mixed.readsPerSecond.toFixed(1)} reads/s; longest read during a 10,000-result ingest ${mixed.longestReadDuringIngest.toFixed(2)} ms (${mixed.longestReadOp}).`,
 	);
 	console.log(
-		`Synchronous ingest transactions: p50 ${mixed.ingestTransactions.p50.toFixed(2)} ms, p95 ${mixed.ingestTransactions.p95.toFixed(2)} ms, max ${mixed.ingestTransactions.max.toFixed(2)} ms. They block this process's one JS thread; read latency also includes queued read work.`,
+		`Report apply transactions: p50 ${mixed.ingestTransactions.p50.toFixed(2)} ms, p95 ${mixed.ingestTransactions.p95.toFixed(2)} ms, max ${mixed.ingestTransactions.max.toFixed(2)} ms, including reads between apply slices. Acceptance transaction p95 ${mixed.acceptTransactions.p95.toFixed(2)} ms.`,
 	);
 	console.log(
-		"Gate visibility is completion of the same report transaction, followed by an actual gate operation; there is no separate background acceptance phase on this path.",
+		"Direct invoke drains acceptance and apply commits synchronously, then reads the gate. HTTP uses the product's invokeAsync and serves reads between apply slices; all SQL still runs on one JS thread.",
 	);
 	const profiling = openDataset(dataset, join(cli.dir, `profile-${randomUUID()}`));
 	try {
@@ -220,7 +220,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		limits: [
 			"SQLite pragmas are unchanged production values; baseline is closed before cloning.",
 			"All correctness and persisted-count assertions are outside isolated operation timers.",
-			"HTTP load generator shares the server process and thread; synchronous writes delay both server work and client callbacks.",
+			"HTTP load generator shares the server process and thread; synchronous SQL and read work delay server work and client callbacks. The current product yields between report apply slices.",
 			...(cli.quick
 				? ["Quick HTTP mix is one 15-second window; use the default run for five independent windows."]
 				: []),

@@ -13,15 +13,16 @@ import {
 	ToolSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { noteTokenUse } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
-import { sql } from "../server/kernel/db.ts";
+import { listProjects } from "../server/ops/admin.ts";
 import { MCP_OPS, OPS } from "../server/ops/index.ts";
-import { invoke, type Reply } from "../server/ops/registry.ts";
+import { invokeAsync, type Reply } from "../server/ops/registry.ts";
 import { type Session, VERSION } from "./http.ts";
 
 // SDK 1.32.1 implements MCP 2025-11-25. Structured tool results start at revision 2025-06-18.
 /** The measured tools/list ceiling in o200k_base tokens. B7's draft target of 1,500 remains unmet. */
-export const TOOL_TOKEN_BUDGET = 3850;
+export const TOOL_TOKEN_BUDGET = 3900;
 
 const INSTRUCTIONS =
 	"Start with impact for a change, or inbox for questions. Pass hashes back with unless and onEvidence, and reuse cursors with since. Your answers may be advice; check the reply status.";
@@ -86,7 +87,6 @@ const DESCRIPTIONS = new Map([
 	],
 ]);
 const Arguments = z.looseObject({ project: z.string().min(1).optional() });
-const Q = { projects: sql<readonly [], { key: string }>("SELECT key FROM projects ORDER BY id") };
 
 type Schema = z.core.JSONSchema.JSONSchema;
 type SchemaNode = z.core.JSONSchema._JSONSchema;
@@ -224,7 +224,10 @@ export function mcpTools(): ToolDefinition[] {
 		const schema = {
 			...deduped,
 			type: "object",
-			properties: { ...deduped.properties, project: { type: "string", description: PROJECT_DESCRIPTION } },
+			properties: {
+				...deduped.properties,
+				project: { type: "string", minLength: 1, description: PROJECT_DESCRIPTION },
+			},
 		};
 		tools.push({
 			name: op.name,
@@ -257,7 +260,7 @@ class AgentServer extends McpServer {
 				tool.name,
 				{ description: tool.description, annotations: tool.annotations, inputSchema: Arguments },
 				async (args) => {
-					const { project, cmd: _cmd, ...input } = args;
+					const { project, ...input } = args;
 					let selected = project;
 					if (selected === undefined) {
 						const projects = await listProjects();
@@ -277,6 +280,7 @@ class AgentServer extends McpServer {
 		}
 		// McpServer owns tools/call. Its custom-handler API lets tools/list use the measured schemas.
 		this.server.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));
+		this.server.registerCapabilities({ tools: { listChanged: false } });
 	}
 
 	override async connect(transport: Transport): Promise<void> {
@@ -308,8 +312,15 @@ export function mcpRoute(app: App): (req: Request, session: Session) => Promise<
 			return new Response(null, { status: 405, headers: { allow: "POST" } });
 		}
 		const server = mcpServer(
-			async (op, project, input) => invoke(app, OPS, { op, project, input, actor: session.actor }),
-			async () => app.db.all(Q.projects).map((row) => row.key),
+			async (op, project, input) => {
+				const reply = await invokeAsync(app, OPS, { op, project, input, actor: session.actor });
+				if (session.secret && reply.ok && OPS[op]?.effect === "write") {
+					const secret = session.secret;
+					void app.gate.run(() => noteTokenUse(app, secret));
+				}
+				return reply;
+			},
+			async () => app.reader.snapshot(() => listProjects(app.reader).map((row) => row.key)),
 			req.headers.get("mcp-protocol-version") ?? DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
 		);
 		const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });

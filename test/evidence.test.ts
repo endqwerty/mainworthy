@@ -355,3 +355,43 @@ describe("work the server does on its own", () => {
 		expect(count("excuses")).toBe(0);
 	});
 });
+
+describe("a question that gains occurrences while open", () => {
+	test("keeps its policy facts and its latest target, so the answer lands under the right clause and hold", () => {
+		const fail = { 0: "connect ECONNREFUSED 10.0.0.5:5432" };
+		h.call("report", ciReport({ commit: "8888888a", branch: "feature", pr: 9, n: 3, fail }));
+		h.call("report", ciReport({ commit: "8888888b", branch: "feature", pr: 9, n: 3, fail })); // attaches to the open question
+		const q = first(queue().items);
+		expect(q.seen.count).toBe(2);
+		expect(q.blocks).toHaveLength(2); // both pushes' runs wait on it
+		expect((q.evidence as { facts: string[] }).facts).toContain("scope:change");
+		decide(q, { is: "infra" });
+		expect(gate("8888888b").verdict).toBe("passed");
+		const signer = h.app.db.raw
+			.query<{ signers: string }, []>("SELECT signers FROM decisions WHERE kind = 'failure'")
+			.get();
+		expect(JSON.parse(signer?.signers ?? "[]")[0].clause).toBe("failure-change");
+		// infrastructure is excused for the build it was given on (the latest), so the next push asks again
+		const next = h.call<ReportReceipt>(
+			"report",
+			ciReport({ commit: "8888888c", branch: "feature", pr: 9, n: 3, fail }),
+		);
+		expect(next.questions[0]).toMatchObject({ how: "new" });
+	});
+});
+
+describe("which answers apply", () => {
+	test("a trunk failure cannot be called inherited or mistaken; a change's failure can be inherited", () => {
+		h.call("report", ciReport({ commit: "9999999a", n: 2, fail: { 0: "expected 1, got 2" } }));
+		const trunk = first(queue().items);
+		expect(trunk.answers).toEqual(["defect", "test", "expected", "flaky", "infra"]);
+		expect(decide(trunk, { is: "inherited" })).toMatchObject({ status: "invalid" });
+		expect(decide(trunk, { is: "mistaken" })?.needs).toContain("does not apply");
+		h.call(
+			"report",
+			ciReport({ commit: "9999999b", branch: "feature", pr: 12, n: 2, fail: { 1: "expected 3, got 4" } }),
+		);
+		const change = queue().items.find((item) => item.about.includes("pr:12"));
+		expect(change?.answers).toEqual(["defect", "test", "expected", "flaky", "infra", "inherited"]);
+	});
+});

@@ -75,11 +75,49 @@ export function sessionOf(app: App, req: Request, owner: Actor): Session | null 
 const unauthenticated = (): Response =>
 	jsonResponse({ ok: false, error: { code: "unauthenticated", message: "a token is required" } }, 401);
 
-async function readJson(req: Request): Promise<unknown> {
-	const text = await req.text();
+/** The largest body an operation accepts. A 100,000-result report is about 30 MB. */
+export const OP_BODY_LIMIT = 64 * 1024 * 1024;
+/**
+ * The server-wide ceiling. It is sized for the one route that streams (the archive import, which never holds the
+ * body in memory); every other route reads its body through `readJson`, which enforces its own much smaller limit.
+ */
+export const STREAM_BODY_LIMIT = 8 * 1024 ** 3;
+
+class BodyTooLarge extends Error {}
+
+/**
+ * Reads a JSON body of at most `limit` bytes. The length is checked while reading, not only from the header, so a
+ * client cannot make the server hold more than the limit by omitting or understating Content-Length.
+ */
+async function readJson(req: Request, limit = OP_BODY_LIMIT): Promise<unknown> {
+	if (Number(req.headers.get("content-length") ?? 0) > limit) throw new BodyTooLarge();
+	const reader = req.body?.getReader();
+	if (!reader) return {};
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	for (;;) {
+		const { value, done } = await reader.read();
+		if (done) break;
+		size += value.byteLength;
+		if (size > limit) {
+			await reader.cancel();
+			throw new BodyTooLarge();
+		}
+		chunks.push(value);
+	}
+	const text = new TextDecoder().decode(chunks.length === 1 ? chunks[0] : Buffer.concat(chunks));
 	if (!text.trim()) return {};
 	return JSON.parse(text) as unknown;
 }
+
+const tooLarge = (limit: number): Response =>
+	jsonResponse(
+		{
+			ok: false,
+			error: { code: "invalid", message: `the request body is larger than ${Math.round(limit / 1024 / 1024)} MB` },
+		},
+		413,
+	);
 
 /** One operation over HTTP: `POST /api/p/<project>/<op>` or `POST /api/<op>` with the input as the JSON body. */
 export async function handleOp(
@@ -94,7 +132,8 @@ export async function handleOp(
 	let input: unknown;
 	try {
 		input = await readJson(req);
-	} catch {
+	} catch (error) {
+		if (error instanceof BodyTooLarge) return tooLarge(OP_BODY_LIMIT);
 		return jsonResponse({ ok: false, error: { code: "invalid", message: "the request body is not JSON" } }, 400);
 	}
 	const reply = await invokeAsync(app, OPS, { op, project, input, actor: session.actor });
@@ -124,7 +163,8 @@ function sessionInfo(app: App, session: Session): Response {
 
 async function login(app: App, req: Request): Promise<Response> {
 	if (!sameOrigin(req)) return unauthenticated();
-	const body = z.object({ token: z.string().min(8) }).safeParse(await readJson(req).catch(() => null));
+	// A sign-in body is a token and nothing else: a few kilobytes at most, read before anyone is authenticated.
+	const body = z.object({ token: z.string().min(8) }).safeParse(await readJson(req, 4096).catch(() => null));
 	if (!body.success || !authenticate(app, body.data.token, 0)) return unauthenticated();
 	const secure = req.headers.get("x-forwarded-proto") === "https" || new URL(req.url).protocol === "https:";
 	const cookie = `${COOKIE}=${encodeURIComponent(body.data.token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000${secure ? "; Secure" : ""}`;
@@ -283,6 +323,7 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }) {
 		hostname: app.config.host,
 		port: app.config.port,
 		idleTimeout: 0,
+		maxRequestBodySize: STREAM_BODY_LIMIT,
 		// biome-ignore lint/suspicious/noExplicitAny: Bun's route table type is a mapped type over literal paths; these are built at run time.
 		routes: routes as any,
 		fetch: () => jsonResponse({ ok: false, error: { code: "not_found", message: "no such route" } }, 404),

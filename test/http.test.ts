@@ -259,3 +259,37 @@ describe("a large report on a live server", () => {
 		expect(new Set(seqs).size).toBe(6); // every command has its own place on the clock
 	});
 });
+
+describe("request size", () => {
+	test("an operation body over the limit is refused without being held in memory; sign-in takes a few kilobytes at most", async () => {
+		const instance = boot("server", "owner-secret-0123456789");
+		const headers = { "content-type": "application/json", authorization: "Bearer owner-secret-0123456789" };
+		// 65 MB with an honest Content-Length
+		const big = new Uint8Array(65 * 1024 * 1024).fill(32);
+		const declared = await fetch(`${instance.url}/api/p/scratch/find`, { method: "POST", headers, body: big });
+		expect(declared.status).toBe(413);
+		// the same size streamed with no Content-Length: counted while reading
+		let sent = 0;
+		const stream = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (sent >= 65) return controller.close();
+				sent++;
+				controller.enqueue(new Uint8Array(1024 * 1024).fill(32));
+			},
+		});
+		const streamed = await fetch(`${instance.url}/api/p/scratch/find`, { method: "POST", headers, body: stream }).then(
+			(response) => response.status,
+			() => 413, // the server may close the connection before the client finishes sending
+		);
+		expect(streamed).toBe(413);
+		const login = await fetch(`${instance.url}/api/login`, {
+			method: "POST",
+			body: JSON.stringify({ token: "x".repeat(10_000) }),
+		});
+		expect(login.status).toBe(401);
+		// an ordinary request still works afterwards
+		expect(
+			(await post(instance, "/api/p/scratch/find", {}, { authorization: "Bearer owner-secret-0123456789" })).status,
+		).toBe(200);
+	});
+});

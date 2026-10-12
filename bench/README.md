@@ -45,7 +45,8 @@ A MISS is evidence about this checkout on this machine, not an excuse to relax a
 promise. Check errors first, then load and repeat ranges. Untimed profiles report
 CPU/wall time, SQL calls and EXPLAIN plans. Writes are synchronous on one thread:
 the mixed report prints the longest read overlapping a 10k ingest and the ingest
-transaction durations. Moving apply to a worker with its own SQLite connection,
+transaction durations, including reads served between the current product's slices.
+Moving apply to a worker with its own SQLite connection,
 or slicing apply while retaining the pending gate horizon, is the smallest likely
 fix for write-induced read stalls. Product fixes belong outside this benchmark.
 

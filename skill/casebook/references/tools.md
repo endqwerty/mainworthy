@@ -6,6 +6,8 @@ Each call returns compact JSON with `result` and `seq`. Errors return an error c
 
 `project` is required unless the instance has exactly one project. Nested rows show the fields within an array or choice.
 
+Choice labels such as `[create]` or `[1]` show which input shape a field belongs to. Send the fields for one choice.
+
 ## propose
 
 Create or change test cases. Each edit of an existing case names the version it was made on (`base`). Reply: adopted (it is current), open (a person must accept it) or conflict.
@@ -163,18 +165,18 @@ Answer a question from `inbox`. Pass the `evidenceHash` you saw as `onEvidence`.
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `project` | `string` | no | Project key; omit only if there is one project. |
-| `q` | `string` | yes | The question, for example Q-12. |
-| `onEvidence` | `string` | yes | The evidence hash you saw. If the evidence changed since, the reply is a conflict with the new evidence. |
-| `answer` | `record<unknown>` | yes | The answer, for example {"is":"defect"}. The allowed answers depend on the question kind. |
-| `reason` | `string` | no |  |
-| `all` | `array<object>` | yes |  |
-| `all[].q` | `string` | yes | The question, for example Q-12. |
-| `all[].onEvidence` | `string` | yes | The evidence hash you saw. If the evidence changed since, the reply is a conflict with the new evidence. |
-| `all[].answer` | `record<unknown>` | yes | The answer, for example {"is":"defect"}. The allowed answers depend on the question kind. |
-| `all[].reason` | `string` | no |  |
-| `reason` | `string` | no |  |
-| `undo` | `string` | yes | The question whose decision to withdraw. |
-| `reason` | `string` | no |  |
+| `[1].q` | `string` | yes | The question, for example Q-12. |
+| `[1].onEvidence` | `string` | yes | The evidence hash you saw. If the evidence changed since, the reply is a conflict with the new evidence. |
+| `[1].answer` | `record<unknown>` | yes | The answer, for example {"is":"defect"}. The allowed answers depend on the question kind. |
+| `[1].reason` | `string` | no |  |
+| `[2].all` | `array<object>` | yes |  |
+| `[2].all[].q` | `string` | yes | The question, for example Q-12. |
+| `[2].all[].onEvidence` | `string` | yes | The evidence hash you saw. If the evidence changed since, the reply is a conflict with the new evidence. |
+| `[2].all[].answer` | `record<unknown>` | yes | The answer, for example {"is":"defect"}. The allowed answers depend on the question kind. |
+| `[2].all[].reason` | `string` | no |  |
+| `[2].reason` | `string` | no |  |
+| `[3].undo` | `string` | yes | The question whose decision to withdraw. |
+| `[3].reason` | `string` | no |  |
 
 ## inbox
 

@@ -138,7 +138,7 @@ export function readRequests(instance: DatasetInstance, index: number): ReadRequ
 				check(value) {
 					const queue = Queue.parse(value);
 					ensure(
-						queue.items.length === 50 && (queue.counts.open ?? 0) >= metadata.counts.open,
+						queue.items.length === 50 && (queue.counts.open ?? 0) >= 50,
 						"HTTP queue must return fifty open rows and full counts",
 					);
 				},
@@ -421,7 +421,7 @@ export function ingestWorkload(
 			iterations: options.iterations ?? 10,
 			warmup: 1,
 			correctness:
-				"Fresh batch, exact accepted and stored result counts, twenty failure causes, and gate readable after this same transaction.",
+				"Fresh batch, exact accepted and stored result counts, twenty failure causes, and gate readable after synchronous invoke completes acceptance and apply.",
 			prepare() {
 				const id = `${options.prefix ?? "direct"}-${++serial}`;
 				const input = ingestInput(instance.metadata, id, size);

@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { z } from "zod";
 import { withInstance } from "../cli/test-support.ts";
+import { authenticate } from "../server/identity/identity.ts";
 import { archiveRoutes } from "./archive.ts";
 import type { Session } from "./http.ts";
 
@@ -94,5 +95,48 @@ test("export pulls fixed chunks and cancels without leaving its spool on disk", 
 		reader.releaseLock();
 		const after = (await readdir(tmpdir())).filter((name) => name.startsWith("casebook-archive-") && !before.has(name));
 		expect(after).toEqual([]);
+	});
+});
+
+test("a token revoked while the body is uploading cannot complete the import", async () => {
+	await withInstance(async (source) => {
+		await source.client.call("propose", {
+			edits: [{ op: "create", outline: "Do not import this with a revoked token\nAn action > Expected" }],
+		});
+		const archive = await (await source.client.request("/api/export")).text();
+		await withInstance(
+			async ({ instance, client }) => {
+				const secret = instance.generatedToken;
+				if (!secret) throw new Error("the server did not create its owner token");
+				const token = z.array(z.object({ id: z.number() })).parse(await client.call("admin", { do: "token.list" }))[0];
+				if (!token) throw new Error("the server's token is missing");
+				const session: Session = {
+					via: "token",
+					secret,
+					actor: (project) => authenticate(instance.app, secret, project),
+				};
+				let input: ReadableStreamDefaultController<Uint8Array> | undefined;
+				const body = new ReadableStream<Uint8Array>({
+					start(controller) {
+						input = controller;
+						controller.enqueue(new TextEncoder().encode(archive.slice(0, 10)));
+					},
+				});
+				const route = archiveRoutes(instance.app)["/api/import"];
+				if (!route || !input) throw new Error("the import input is missing");
+				const pending = route(new Request(`${instance.url}/api/import`, { method: "POST", body }), session);
+				await client.call("admin", { do: "token.revoke", id: token.id });
+				input.enqueue(new TextEncoder().encode(archive.slice(10)));
+				input.close();
+				const response = await pending;
+				expect(response.status).toBe(403);
+				expect(await response.text()).toContain('"code":"forbidden"');
+				expect(instance.app.reader.raw.query<{ key: string }, []>("SELECT key FROM projects").get()?.key).toBe(
+					"scratch",
+				);
+				expect(instance.app.reader.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM cases").get()?.n).toBe(0);
+			},
+			{ mode: "server" },
+		);
 	});
 });

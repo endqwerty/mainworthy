@@ -11,6 +11,7 @@ import {
 	ANSWERS,
 	type AnyAnswer,
 	type Ask,
+	applicableAnswers,
 	type Blocks,
 	describeAsk,
 	type Kind,
@@ -86,6 +87,15 @@ export type Raised =
 	| { s: "carried"; question: QuestionRow; decision: DecisionRow }
 	| { s: "decided"; question: QuestionRow; decision: DecisionRow; effects: Record<string, unknown> };
 
+/**
+ * What is kept as a question's evidence: what the answerer sees, plus the policy facts and the target of the
+ * latest occurrence, which answering and holds read back. Built in one place so an occurrence attached to an open
+ * question carries them exactly as the first one did.
+ */
+function stored(r: Raise): Record<string, unknown> {
+	return { ...r.evidence, facts: r.facts, ...(r.target !== undefined ? { targetId: r.target } : {}) };
+}
+
 const PRIORITY: Record<Blocks, number> = { all: 3, change: 2, release: 2, nothing: 1 };
 
 function blockedRuns(blocks: Blocks, runs: Raise["runs"]): number[] {
@@ -115,7 +125,7 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 		const clause = clauseFor(currentPolicy(ctx.db, ctx.project.id), { kind: r.kind, facts: new Set(r.facts) });
 		const question = attachEvidence(ctx, latest, {
 			title: r.title,
-			evidence: r.evidence,
+			evidence: stored(r),
 			hash,
 			blocks: blockedRuns(clause.blocks, r.runs),
 			refs: r.refs,
@@ -157,7 +167,7 @@ function open(ctx: Ctx, r: Raise, fingerprint: string, hash: string, epoch: numb
 		prior,
 		title: r.title,
 		producer: r.producer,
-		evidence: { ...r.evidence, facts: r.facts, ...(r.target !== undefined ? { targetId: r.target } : {}) },
+		evidence: stored(r),
 		hash,
 		ask: clause.ask,
 		blocks: blockedRuns(clause.blocks, r.runs),
@@ -259,6 +269,11 @@ export function answer(
 
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	const facts = new Set(json<{ facts?: string[] }>(question.evidence).facts ?? []);
+	if (question.kind === "failure" && !applicableAnswers(question.kind, facts).includes(given.is)) {
+		return reply(question, "invalid", {
+			needs: `one of ${applicableAnswers(question.kind, facts).join(", ")}: \`${given.is}\` does not apply to this failure`,
+		});
+	}
 	const clause = clauseFor(policy, { kind: question.kind, facts, answer: given.is });
 	// The clause that would settle this answer. A rule clause still lets a person overrule it; then the general
 	// clause for the kind says who that person must be.
@@ -461,6 +476,7 @@ export function toItem(db: Db, row: QuestionRow): QuestionItem {
 		evidenceHash: row.evidence_hash,
 		seen: { count: row.seen_count, carried: row.carried },
 		needs: describeAsk(ask),
+		answers: applicableAnswers(row.kind, new Set(json<{ facts?: string[] }>(row.evidence).facts ?? [])),
 		blocks: json<number[]>(row.blocks).flatMap((id) => {
 			const run = runById(db, id);
 			return run ? [runRef(run)] : [];

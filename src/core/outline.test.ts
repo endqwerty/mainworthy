@@ -103,7 +103,19 @@ describe("capture grammar", () => {
 					...result.covers,
 				].join("");
 				// These are grammar tokens the brief explicitly requires discarding, not user content.
-				const content = input
+				const nonempty = input.split(/\r\n|\n|\r/).filter((line) => line.trim() !== "");
+				const withoutHeaders = nonempty
+					.filter(
+						(line, index) =>
+							!(
+								line.trim().startsWith("|") &&
+								/^\|(?:[ \t]*:?-{3,}:?[ \t]*\|){2,}$/.test(nonempty[index + 1]?.trim() ?? "")
+							),
+					)
+					.join("\n");
+				const content = withoutHeaders
+					.replace(/^(\s*\|)\s*\d+\s*\|/gm, "$1")
+					.replace(/^(\s*)\d+\t(?=[^\n]*\t)/gm, "$1")
 					.replace(
 						/(^|[\r\n])[ \t]*(?:(?:[-*+•]|\d+[.)]|\(\d+\)|[a-z]\.|\[[ x]\]|step[ \t]+\d+:)(?:[ \t]+|$))+/gi,
 						"$1",

@@ -1,0 +1,386 @@
+{
+  "schema_version": 2,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "The life of a question: decide once while the hold stands",
+    "locale": "en",
+    "output": "docs/diagrams/question-lifecycle.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:endqwerty/casebook.git",
+      "revision": "65b45293532ca49f69d20bb82652e5f8d7b2cbf9",
+      "link_mode": "local-only"
+    }
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "Question"
+    },
+    {
+      "id": "reopen",
+      "label": "Reopen"
+    },
+    {
+      "id": "terminal",
+      "label": "Newest evidence"
+    }
+  ],
+  "states": [
+    {
+      "id": "raised",
+      "type": "start",
+      "label": "open",
+      "sublabel": "raise opens the question",
+      "lane": "main",
+      "col": 0,
+      "width": 178,
+      "height": 72,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "label": "raise; open; attachEvidence"
+        },
+        {
+          "path": "src/server/decisions/questions.ts",
+          "label": "QuestionRow: state; epoch; prior"
+        }
+      ],
+      "tag": "epoch 0"
+    },
+    {
+      "id": "attached",
+      "type": "waiting",
+      "label": "open",
+      "sublabel": "attached; another occurrence",
+      "lane": "main",
+      "col": 1,
+      "width": 178,
+      "height": 72,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "label": "raise; open; attachEvidence"
+        },
+        {
+          "path": "src/server/decisions/questions.ts",
+          "label": "QuestionRow: state; epoch; prior"
+        }
+      ],
+      "tag": "Same question"
+    },
+    {
+      "id": "decided",
+      "type": "decision",
+      "label": "decided",
+      "sublabel": "Person answer or rule",
+      "lane": "main",
+      "col": 2,
+      "width": 178,
+      "height": 72,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "label": "answer; settle; settleByRule"
+        },
+        {
+          "path": "src/server/decisions/kinds.ts",
+          "label": "HANDLERS: effects and holds"
+        },
+        {
+          "path": "src/core/presets.ts",
+          "label": "PRESETS: person or rule"
+        }
+      ],
+      "tag": "Decision in the ledger"
+    },
+    {
+      "id": "carried",
+      "type": "success",
+      "label": "decided",
+      "sublabel": "carried; stillHolds is true",
+      "lane": "main",
+      "col": 3,
+      "width": 178,
+      "height": 72,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "label": "raise; stillHolds"
+        },
+        {
+          "path": "src/server/decisions/questions.ts",
+          "label": "noteCarried"
+        }
+      ],
+      "tag": "Same decision"
+    },
+    {
+      "id": "asked-again",
+      "type": "waiting",
+      "label": "open",
+      "sublabel": "epoch + 1; prior is linked",
+      "lane": "main",
+      "col": 4,
+      "width": 178,
+      "height": 72,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "label": "raise: revert then open next epoch"
+        },
+        {
+          "path": "src/server/decisions/questions.ts",
+          "label": "QuestionRow: epoch; prior"
+        }
+      ],
+      "tag": "Asked again"
+    },
+    {
+      "id": "undone",
+      "type": "waiting",
+      "label": "open",
+      "sublabel": "undo records withdrawn",
+      "lane": "reopen",
+      "col": 2,
+      "width": 178,
+      "height": 72,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "label": "undo; heldOpen"
+        },
+        {
+          "path": "src/server/decisions/questions.ts",
+          "label": "DecisionRow: supersedes"
+        }
+      ],
+      "tag": "Same question"
+    },
+    {
+      "id": "swept",
+      "type": "waiting",
+      "label": "open",
+      "sublabel": "sweepExpired after time",
+      "lane": "reopen",
+      "col": 3,
+      "width": 178,
+      "height": 72,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "label": "sweepExpired"
+        },
+        {
+          "path": "src/server/jobs.ts",
+          "label": "sweep"
+        },
+        {
+          "path": "src/server/start.ts",
+          "label": "start: sweep every 60 seconds"
+        }
+      ],
+      "tag": "Same question"
+    },
+    {
+      "id": "dissolved",
+      "type": "neutral",
+      "label": "dissolved",
+      "sublabel": "Newest evidence lost the cause",
+      "lane": "terminal",
+      "col": 0,
+      "width": 178,
+      "height": 72,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "label": "dissolveStale: open failure questions only"
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "label": "isLatestInScope"
+        },
+        {
+          "path": "test/evidence.test.ts",
+          "label": "Retry that passes dissolves failure"
+        }
+      ],
+      "tag": "History stays"
+    },
+    {
+      "id": "dissolved-again",
+      "type": "neutral",
+      "label": "dissolved",
+      "sublabel": "Newest evidence lost the cause",
+      "lane": "terminal",
+      "col": 4,
+      "width": 178,
+      "height": 72,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "label": "dissolveStale"
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "label": "isLatestInScope"
+        }
+      ],
+      "tag": "History stays"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "attach-occurrence",
+      "from": "raised",
+      "to": "attached",
+      "label": "raise: same cause",
+      "variant": "default"
+    },
+    {
+      "id": "answer-attached",
+      "from": "attached",
+      "to": "decided",
+      "label": "answer or rule",
+      "variant": "security"
+    },
+    {
+      "id": "answer-first",
+      "from": "raised",
+      "to": "decided",
+      "label": "answer or rule",
+      "variant": "security",
+      "route": "top-channel"
+    },
+    {
+      "id": "carry-forward",
+      "from": "decided",
+      "to": "carried",
+      "label": "raise; hold stands",
+      "variant": "default"
+    },
+    {
+      "id": "carry-again",
+      "from": "carried",
+      "to": "decided",
+      "label": "same answer",
+      "variant": "dashed",
+      "route": "top-channel"
+    },
+    {
+      "id": "hold-ends",
+      "from": "carried",
+      "to": "asked-again",
+      "label": "hold ends",
+      "variant": "security"
+    },
+    {
+      "id": "first-hold-ends",
+      "from": "decided",
+      "to": "asked-again",
+      "label": "hold ends",
+      "variant": "security",
+      "route": "top-channel"
+    },
+    {
+      "id": "answer-new-epoch",
+      "from": "asked-again",
+      "to": "decided",
+      "label": "answer again",
+      "variant": "security"
+    },
+    {
+      "id": "undo-decision",
+      "from": "decided",
+      "to": "undone",
+      "label": "undo",
+      "variant": "security"
+    },
+    {
+      "id": "answer-after-undo",
+      "from": "undone",
+      "to": "decided",
+      "label": "person answers",
+      "variant": "security",
+      "route": "left-channel"
+    },
+    {
+      "id": "time-sweep",
+      "from": "carried",
+      "to": "swept",
+      "label": "time; sweepExpired",
+      "variant": "security"
+    },
+    {
+      "id": "answer-after-sweep",
+      "from": "swept",
+      "to": "decided",
+      "label": "answer or rule",
+      "variant": "security"
+    },
+    {
+      "id": "new-evidence-removes-cause",
+      "from": "raised",
+      "to": "dissolved",
+      "label": "dissolveStale",
+      "variant": "dashed"
+    },
+    {
+      "id": "new-epoch-removes-cause",
+      "from": "asked-again",
+      "to": "dissolved-again",
+      "label": "dissolveStale",
+      "variant": "dashed"
+    },
+    {
+      "id": "cause-returns",
+      "from": "dissolved",
+      "to": "asked-again",
+      "label": "raise again",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "States and events",
+      "items": [
+        "QuestionRow stores only open, decided or dissolved. Repeated boxes show the same states at different moments.",
+        "raise fingerprints kind and key. An open question returns attached; a holding decision returns carried.",
+        "answer requires the current evidenceHash as onEvidence. Changed evidence returns conflict. Advice is recorded and shown without settling.",
+        "The built kinds are adopt, map, failure, finding and signoff. This diagram follows failure; the shared raise and settle machinery serves every kind.",
+        "An extra occurrence is optional. A new question can settle immediately when a person answers or a matching rule applies."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "The exact hold terms",
+      "items": [
+        "basis-changes: the material evidence hash must still match the decision basis.",
+        "this-target: the occurrence must still name the same target. infra uses this by default.",
+        "time: the current time must be before at. flaky combines this with basis-changes; flakyDays defaults to 14.",
+        "fact-gone: the occurrence must still contain fact. inherited combines basis-changes with hint:fails-on-base.",
+        "stillHolds requires every term. A later raise outside any term reverts the effect and opens a new epoch with prior linked."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Undo and expiry keep the ledger",
+      "items": [
+        "undo records an answer of withdrawn in a new decision that supersedes the old one. The same question reopens.",
+        "The old and withdrawal decisions remain. heldOpen stops a rule from undoing a person's withdrawal on unchanged evidence.",
+        "A time hold can also expire before another report. gateOf returns pending immediately; sweepExpired later reopens that same question and refolds the run.",
+        "adopt is restored through another proposal and a new version; its decision is not undoable."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "A cause can stop needing an answer",
+      "items": [
+        "dissolveStale applies to open failure questions when the newest run in the scope no longer shows that signature.",
+        "A passing retry may dissolve an unexplained failure. A late report for an older commit cannot dissolve a cause still shown on the current commit.",
+        "Dissolved questions and decisions remain in the record. If the same cause returns, raise opens the next epoch."
+      ]
+    }
+  ]
+}

@@ -13,7 +13,7 @@ import { json } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 import type { Witness } from "../kernel/witness.ts";
 import { closeRun, discountFailures, reopenRun, restoreFailures, runById } from "../runs/runs.ts";
-import { adopt, bodyOf, caseById, findCase, mustCase, proposalById, seal } from "../suite/suite.ts";
+import { adopt, bodyOf, caseById, findCase, mustCase, proposalById, resolvedOf, seal } from "../suite/suite.ts";
 import type { Raise, Raised } from "./decisions.ts";
 import type { DecisionRow, HoldTerm, QuestionRow } from "./questions.ts";
 
@@ -105,6 +105,11 @@ const adoptHandler: Handler<"adopt"> = {
 		const proposal = proposalById(ctx.db, id);
 		if (!proposal) throw notFound("proposal");
 		if (answer.is === "reject") return { rejected: true };
+		if (answer.is === "merge" && resolvedOf(proposal).filter((edit) => edit.op === "edit").length !== 1) {
+			throw invalid(
+				"a merge resolves one edited case; this proposal changes several, so reject it and propose each again",
+			);
+		}
 		const adopted = adopt(ctx, witness, proposal, answer.is === "merge" ? answer.body : undefined);
 		return { cases: adopted.cases, created: adopted.created, policyVersion: adopted.policyVersion };
 	},

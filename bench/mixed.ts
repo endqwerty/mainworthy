@@ -28,6 +28,7 @@ export type MixedReport = {
 	longestReadDuringIngest: number;
 	longestReadOp: string;
 	ingestTransactions: { rows: number; p50: number; p95: number; max: number; count: number };
+	acceptTransactions: { p50: number; p95: number; max: number; count: number };
 	readBytes: number;
 	requestBytes: number;
 	loadStart: number[];
@@ -79,14 +80,20 @@ export function post(agent: Agent, url: string, op: string, body: string, secret
 	});
 }
 
-function measured(name: string, budget: number, samples: Sample[], correctness: string): Measurement {
+function measured(
+	name: string,
+	budget: number,
+	samples: Sample[],
+	correctness: string,
+	criterion: "p95" | "max" = "p95",
+): Measurement {
 	const summary = summarise(samples);
 	return {
 		...summary,
 		name,
 		budget,
-		criterion: "p95",
-		pass: summary.errors === 0 && summary.p95 < budget,
+		criterion,
+		pass: summary.errors === 0 && summary[criterion] < budget,
 		checked: summary.n - summary.errors,
 		correctness,
 		samples,
@@ -105,6 +112,7 @@ export async function mixedLoad(
 	const ingests: Sample[] = [];
 	const saves: Sample[] = [];
 	const transactions: Sample[] = [];
+	const accepts: Sample[] = [];
 	const windows: MixedReport["windows"] = [];
 	const errors: string[] = [];
 	let seconds = 0;
@@ -132,19 +140,27 @@ export async function mixedLoad(
 		const saveAgent = itemAt(agents, 17);
 		const writeWindows: Interval[] = [];
 		const serverIngests: Interval[] = [];
+		const serverAccepts: Interval[] = [];
 		let lastTransaction: Interval = { start: 0, end: 0, ms: 0 };
-		const originalTransaction = server.app.db.transaction.bind(server.app.db);
-		server.app.db.transaction = <T>(work: () => T): T => {
-			const start = performance.now();
-			try {
-				return originalTransaction(work);
-			} finally {
-				const end = performance.now();
-				lastTransaction = { start, end, ms: end - start };
-			}
+		let transactionStart = 0;
+		const originalBegin = server.app.db.begin.bind(server.app.db);
+		const originalCommit = server.app.db.commit.bind(server.app.db);
+		server.app.db.begin = () => {
+			transactionStart = performance.now();
+			originalBegin();
+		};
+		server.app.db.commit = () => {
+			originalCommit();
+			const end = performance.now();
+			lastTransaction = { start: transactionStart, end, ms: end - transactionStart };
 		};
 		const unsubscribe = server.app.subscribe((event) => {
-			if (event.op === "report") serverIngests.push(lastTransaction);
+			if (event.op !== "report") return;
+			const batch = z
+				.object({ state: z.enum(["accepted", "processed"]) })
+				.parse(server.app.db.raw.query("SELECT state FROM batches ORDER BY id DESC LIMIT 1").get());
+			if (batch.state === "accepted") serverAccepts.push(lastTransaction);
+			else serverIngests.push(lastTransaction);
 		});
 		const stamp = itemAt(dataset.metadata.cases, dataset.metadata.cases.length - 1);
 		let version = stamp.version;
@@ -179,6 +195,7 @@ export async function mixedLoad(
 			);
 			await save();
 			serverIngests.length = 0;
+			serverAccepts.length = 0;
 			const start = performance.now();
 			const deadline = start + options.milliseconds;
 			const firstRead = reads.length;
@@ -242,6 +259,7 @@ export async function mixedLoad(
 			for (const read of reads.slice(firstRead))
 				read.duringIngest = writeWindows.some((write) => write.start < read.end && write.end > read.start);
 			transactions.push(...serverIngests.map((txn) => ({ ms: txn.ms, error: null, round })));
+			accepts.push(...serverAccepts.map((txn) => ({ ms: txn.ms, error: null, round })));
 			const roundReads = reads.slice(firstRead);
 			const summary = summarise(roundReads);
 			windows.push({
@@ -267,7 +285,8 @@ export async function mixedLoad(
 			);
 		} finally {
 			unsubscribe();
-			server.app.db.transaction = originalTransaction;
+			server.app.db.begin = originalBegin;
+			server.app.db.commit = originalCommit;
 			for (const agent of agents) agent.destroy();
 			await server.stop();
 			rmSync(dir, { recursive: true, force: true });
@@ -275,6 +294,7 @@ export async function mixedLoad(
 	}
 	const stalled = reads.filter((read) => read.duringIngest).sort((a, b) => b.ms - a.ms)[0];
 	const transactionSummary = summarise(transactions);
+	const acceptSummary = summarise(accepts);
 	return {
 		measurements: [
 			measured(
@@ -288,6 +308,7 @@ export async function mixedLoad(
 				BUDGETS.ingest,
 				ingests,
 				"Every HTTP report fresh, successful, and all 10,000 results persisted.",
+				"max",
 			),
 			measured(
 				"mixed HTTP save",
@@ -307,6 +328,12 @@ export async function mixedLoad(
 			p95: transactionSummary.p95,
 			max: transactionSummary.max,
 			count: transactionSummary.n,
+		},
+		acceptTransactions: {
+			p50: acceptSummary.p50,
+			p95: acceptSummary.p95,
+			max: acceptSummary.max,
+			count: acceptSummary.n,
 		},
 		readBytes,
 		requestBytes,

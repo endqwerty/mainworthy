@@ -255,6 +255,74 @@ describe("parseJUnit recovery and boundaries", () => {
 	});
 
 	test.each([
+		'<!<failure message="boom"/>',
+		'<!failure message="boom"/>',
+		'<!DOCTYPE x [ <failure message="boom"/> ]>',
+	])("a declaration inside a testcase cannot swallow a failure: %s", (declaration) => {
+		const parsed = parseJUnit(`<testsuite><testcase name="one">${declaration}</testcase></testsuite>`);
+		expect(parsed.results[0]?.outcome).toBe("error");
+		expect(parsed.warnings.length).toBeGreaterThan(0);
+	});
+
+	test("does not drop a failure after a prematurely closed testcase", () => {
+		const parsed = parseJUnit(
+			'<testsuite><testcase name="one"/><failure message="boom">stack</failure></testcase></testsuite>',
+		);
+		expect(parsed.results[0]?.outcome).toBe("fail");
+		expect(parsed.results[0]?.failure).toEqual({ message: "boom", detail: "stack" });
+		expect(parsed.warnings.length).toBeGreaterThan(0);
+	});
+
+	test("suite setup errors affect the cases the suite could not run", () => {
+		const parsed = parseJUnit(
+			'<testsuite name="s"><error message="beforeAll failed">setup stack</error><testcase name="one"/><testcase name="two"/></testsuite>',
+		);
+		expect(parsed.results.map((item) => item.outcome)).toEqual(["error", "error"]);
+		expect(parsed.results[0]?.failure).toEqual({ message: "beforeAll failed", detail: "setup stack" });
+		expect(parsed.warnings.length).toBeGreaterThan(0);
+	});
+
+	test("damage outside a testcase makes recovered evidence uncertain", () => {
+		const parsed = parseJUnit(
+			'<testsuite name="s" foo="bar><testcase name="a><failure/></testcase><testcase name=\'b\'/></testsuite>',
+		);
+		expect(parsed.results).toHaveLength(1);
+		expect(parsed.results[0]?.outcome).toBe("error");
+		expect(parsed.warnings.length).toBeGreaterThan(0);
+	});
+
+	test("retry parsing stays bounded inside malformed and repeated markers", () => {
+		const start = performance.now();
+		const parsed = parseJUnit(
+			`<testsuite><testcase name="t (retry${" ".repeat(80_000)}x"/><testcase name="works${" (retry 1)".repeat(10_000)}"/></testsuite>`,
+		);
+		expect(performance.now() - start).toBeLessThan(500);
+		expect(parsed.results[1]?.test).toEqual({
+			key: "works",
+			name: `works${" (retry 1)".repeat(10_000)}`.slice(0, 500),
+		});
+	});
+
+	test("unmatched closing tags do not repeatedly scan the element stack", () => {
+		const start = performance.now();
+		const parsed = parseJUnit("<a>".repeat(20_000) + "</b>".repeat(20_000));
+		expect(performance.now() - start).toBeLessThan(500);
+		expect(parsed.results).toEqual([]);
+		expect(parsed.warnings.length).toBeLessThanOrEqual(1001);
+	});
+
+	test("deep suite paths stay stable within the key limit", () => {
+		const parsed = parseJUnit(
+			'<testsuite name="s">'.repeat(4000) + '<testcase name="deep"/>' + "</testsuite>".repeat(4000),
+		);
+		expect(parsed.suites).toBe(4000);
+		expect(parsed.results).toHaveLength(1);
+		const item = ResultIn.parse(parsed.results[0]);
+		expect("key" in item.test && item.test.key.length === 1000).toBe(true);
+		expect(item.outcome).toBe("pass");
+	});
+
+	test.each([
 		'<testsuite><testcase name="one"></testsuite>',
 		'<testsuite><testcase name="one" time=nope/></testsuite>',
 		'<testsuite><testcase name="one"/><!----',

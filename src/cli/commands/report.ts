@@ -81,7 +81,7 @@ export const reportCommand: AdapterCommand = {
 		for (const file of args.positionals) {
 			const parsed = parseJUnit(await Bun.file(file).text(), { file });
 			results.push(...parsed.results);
-			for (const message of parsed.warnings) warning(`${file}: ${message}`);
+			for (const message of parsed.warnings) warning(message);
 		}
 		const job = args.value("job") ?? detected.job;
 		const attempt = args.number("attempt") ?? detected.attempt;

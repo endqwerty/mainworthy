@@ -52,8 +52,8 @@ function enabled(value: string | undefined): boolean {
 }
 
 function baseCommit(value: string | undefined): string | undefined {
-	const sha = text(value, 64);
-	return sha && !/^0+$/.test(sha) ? sha : undefined;
+	const sha = text(value);
+	return sha && sha.length <= 64 && !/^0+$/.test(sha) ? sha : undefined;
 }
 
 function branch(value: string | undefined): string | undefined {
@@ -286,6 +286,8 @@ function override(env: Environment, name: string, fallback: string | undefined):
  * Empty overrides count as unset; invalid non-empty overrides never fall back. PR/repo overrides that change
  * identity discard stale PR title/URL. Missing/invalid commits return null and ["commit"]. Unavailable counters
  * and job names return null.
+ * PR event payloads identify the change by its head SHA, including pull_request_target. A caller testing the base
+ * checkout must supply CASEBOOK_COMMIT for that checkout. Over-long base identifiers are omitted, never shortened.
  */
 export function detectTarget(
 	env: Environment,
@@ -309,7 +311,7 @@ export function detectTarget(
 		branch: text(override(env, "CASEBOOK_BRANCH", fields.branch), 200),
 		repo,
 		pr,
-		base: text(override(env, "CASEBOOK_BASE", fields.base), 64),
+		base: baseCommit(override(env, "CASEBOOK_BASE", fields.base)),
 		env: text(override(env, "CASEBOOK_ENV", fields.env), 60),
 		title: changedPrIdentity ? undefined : text(fields.title, 300),
 		url: changedPrIdentity ? undefined : text(fields.url, 500),

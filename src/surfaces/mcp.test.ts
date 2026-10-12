@@ -7,30 +7,31 @@ import {
 	InitializeResultSchema,
 	LATEST_PROTOCOL_VERSION,
 	ListToolsResultSchema,
+	ToolSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import Ajv2020 from "ajv/dist/2020.js";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { encode } from "gpt-tokenizer/encoding/o200k_base";
 import { z } from "zod";
 import { generateToolReference } from "../../scripts/gen-skill.ts";
 import { harness } from "../../test/helpers.ts";
-import { createToken } from "../server/identity/identity.ts";
+import { createToken, listTokens } from "../server/identity/identity.ts";
 import { MCP_OPS, OPS } from "../server/ops/index.ts";
-import { invoke } from "../server/ops/registry.ts";
+import { invoke, invokeAsync } from "../server/ops/registry.ts";
 import { serve, sessionOf } from "./http.ts";
 import { mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from "./mcp.ts";
 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
-	propose: 1222,
-	report: 708,
-	claim: 389,
-	decide: 309,
-	inbox: 185,
-	get: 277,
-	find: 274,
-	impact: 203,
-	since: 138,
-	gate: 138,
+	propose: 1227,
+	report: 713,
+	claim: 394,
+	decide: 314,
+	inbox: 190,
+	get: 282,
+	find: 279,
+	impact: 208,
+	since: 143,
+	gate: 143,
 };
 
 function resultOf<S extends z.ZodType>(reply: unknown, schema: S): z.output<S> {
@@ -65,14 +66,22 @@ test("tools come from the registry and stay within their measured token limits",
 		if (op.effect === "read") expect(tool.annotations.idempotentHint).toBe(true);
 		expect(JSON.stringify(tool.inputSchema)).not.toContain('"cmd"');
 		expect(JSON.stringify(tool.inputSchema)).not.toContain('"$schema"');
-		expect(tool.inputSchema.properties?.project).toMatchObject({ type: "string" });
+		expect(tool.inputSchema.properties?.project).toMatchObject({ type: "string", minLength: 1 });
 	}
 	console.log(`tool definitions: ${total} tokens; budget ${TOOL_TOKEN_BUDGET}; o200k_base`);
 	console.table(tools.map((tool) => ({ tool: tool.name, tokens: tokens(tool) })));
 });
 
 test("schema trims preserve the registry's constraints and union choices", () => {
-	const ajv = new Ajv2020({ strict: false });
+	const validator = new AjvJsonSchemaValidator();
+	const compile = (schema: ReturnType<typeof mcpTools>[number]["inputSchema"]) => {
+		const { properties, required, ...base } = schema;
+		return validator.getValidator({
+			...base,
+			...(properties ? { properties } : {}),
+			...(required ? { required } : {}),
+		});
+	};
 	const samples: Record<string, unknown[]> = {
 		propose: [
 			{},
@@ -99,14 +108,29 @@ test("schema trims preserve the registry's constraints and union choices", () =>
 			{ run: "R-1", results: [{ test: { key: "test" }, outcome: "wrong" }] },
 		],
 		get: [{ refs: [] }, { refs: ["C-1"], as: "md" }, { refs: [1] }, { refs: ["C-1"], unless: { "C-1": "hash" } }],
+		claim: [
+			{},
+			{ lens: "adversarial-review" },
+			{ lens: "", findings: [] },
+			{ lens: "review", findings: [{ on: "C-1", category: "cannot-fail", note: "Allows a wrong total" }] },
+			{ lens: "review", findings: [{ on: "C-1", category: "wrong", note: "A note" }] },
+		],
+		inbox: [{}, { kind: "failure" }, { kind: "defect" }, { state: "wrong" }, { limit: 0 }, { limit: 501 }],
+		find: [{}, { folder: 4, deep: true }, { in: "tests", unlinked: true }, { in: "wrong" }, { unlinked: "true" }],
+		impact: [{}, { files: ["checkout.ts"] }, { files: [4] }, { ledger: false }, { ledger: "false" }, { since: 2 }],
+		since: [{}, { cursor: "s:1" }, { cursor: 3 }, { cursor: "s:1", limit: 0 }, { cursor: "s:1", limit: 501 }],
+		gate: [{}, { commit: "9f3c2ab" }, { run: "R-1" }, { commit: 4 }, { env: false }],
 	};
 	for (const tool of mcpTools()) {
 		const op = MCP_OPS.find((entry) => entry.name === tool.name);
 		if (!op) throw new Error(`Missing operation ${tool.name}`);
-		const original = ajv.compile(z.toJSONSchema(op.input, { io: "input" }));
-		const compact = ajv.compile(tool.inputSchema);
-		for (const input of samples[tool.name] ?? [{}, { limit: 0 }, { limit: 1 }, { limit: 501 }]) {
-			expect(compact(input), `${tool.name}: ${JSON.stringify(input)}`).toBe(original(input));
+		const { $schema: _dialect, ...originalSchema } = z.toJSONSchema(op.input, { io: "input" });
+		const original = compile(ToolSchema.shape.inputSchema.parse({ ...originalSchema, type: "object" }));
+		const compact = compile(tool.inputSchema);
+		const inputs = samples[tool.name];
+		if (!inputs) throw new Error(`No schema samples for ${tool.name}`);
+		for (const input of inputs) {
+			expect(compact(input).valid, `${tool.name}: ${JSON.stringify(input)}`).toBe(original(input).valid);
 		}
 	}
 });
@@ -270,6 +294,25 @@ test("tool errors name bad fields and require a project when the choice is ambig
 			await client.callTool({ name: "admin", arguments: { do: "project.list" } }),
 		);
 		expect(hidden.isError).toBe(true);
+		const args = {
+			project: "scratch",
+			cmd: "programmatic-retry",
+			edits: [{ op: "create", outline: "One retry case" }],
+		};
+		const first = resultOf(
+			await client.callTool({ name: "propose", arguments: args }),
+			z.object({ cases: z.array(z.object({ ref: z.string() })) }),
+		);
+		const retry = resultOf(
+			await client.callTool({ name: "propose", arguments: args }),
+			z.object({ cases: z.array(z.object({ ref: z.string() })) }),
+		);
+		expect(retry).toEqual(first);
+		const found = resultOf(
+			await client.callTool({ name: "find", arguments: { project: "scratch" } }),
+			z.object({ count: z.literal(1) }),
+		);
+		expect(found.count).toBe(1);
 	} finally {
 		await client.close();
 		await server.close();
@@ -342,6 +385,63 @@ test("authenticated stateless HTTP answers initialize and tools/list and keeps t
 		expect(old.isError).not.toBe(true);
 		expect(old.structuredContent).toBeUndefined();
 	} finally {
+		h.close();
+	}
+});
+
+test("an HTTP tool write waits for an applying report and records token use", async () => {
+	const h = harness();
+	const { secret } = createToken(h.app, {
+		actor: "queue-writer",
+		kind: "agent",
+		can: ["read", "produce"],
+		project: 0,
+		label: "MCP queue test",
+	});
+	let onAccepted = (): void => {};
+	const accepted = new Promise<void>((resolve) => {
+		onAccepted = resolve;
+	});
+	const unsubscribe = h.app.subscribe((event) => {
+		if (event.op === "report") onAccepted();
+	});
+	const pendingReport = invokeAsync(h.app, OPS, {
+		op: "report",
+		project: "scratch",
+		actor: () => h.owner,
+		input: { target: { commit: "9f3c2ab" }, results: [{ test: { key: "queue::smoke" }, outcome: "pass" }] },
+	});
+	try {
+		await accepted;
+		expect(h.app.db.inTransaction).toBe(true);
+		const req = new Request("http://127.0.0.1/mcp", {
+			method: "POST",
+			headers: {
+				host: "127.0.0.1",
+				authorization: `Bearer ${secret}`,
+				"content-type": "application/json",
+				accept: "application/json, text/event-stream",
+				"mcp-protocol-version": LATEST_PROTOCOL_VERSION,
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: "propose", arguments: { edits: [{ op: "create", outline: "Queued case" }] } },
+			}),
+		});
+		const session = sessionOf(h.app, req, h.owner);
+		if (!session) throw new Error("The queued request did not authenticate");
+		const response = await mcpRoute(h.app)(req, session);
+		const tool = z.object({ result: CallToolResultSchema }).parse(await response.json()).result;
+		expect(tool.isError, JSON.stringify(tool.content)).not.toBe(true);
+		resultOf(tool, z.object({ status: z.literal("adopted") }));
+		expect((await pendingReport).ok).toBe(true);
+		await h.app.gate.run(() => undefined);
+		expect(listTokens(h.app.reader).find((token) => token.actor === "queue-writer")?.last_used_at).toBe(h.app.now());
+	} finally {
+		unsubscribe();
+		await pendingReport;
 		h.close();
 	}
 });

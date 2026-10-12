@@ -22,10 +22,10 @@ function schemaType(schema: SchemaNode): string {
 
 const cell = (text: string): string => text.replaceAll("|", "\\|").replaceAll("\n", " ");
 
-function rows(schema: Schema, prefix = ""): string[] {
+function rows(schema: Schema, prefix = "", envelope = true): string[] {
 	const lines: string[] = [];
 	for (const [name, property] of Object.entries(schema.properties ?? {})) {
-		if (prefix === "" && name === "cmd") continue;
+		if (envelope && name === "cmd") continue;
 		const path = prefix ? `${prefix}.${name}` : name;
 		const description = typeof property === "boolean" ? "" : (property.description ?? "");
 		const defaultValue =
@@ -36,15 +36,15 @@ function rows(schema: Schema, prefix = ""): string[] {
 			`| \`${cell(path)}\` | \`${cell(schemaType(property))}\` | ${schema.required?.includes(name) ? "yes" : "no"} | ${cell(description + defaultValue)} |`,
 		);
 		if (typeof property === "boolean") continue;
-		lines.push(...rows(property, path));
+		lines.push(...rows(property, path, false));
 		if (property.items && !Array.isArray(property.items) && typeof property.items !== "boolean") {
-			lines.push(...rows(property.items, `${path}[]`));
+			lines.push(...rows(property.items, `${path}[]`, false));
 		}
 	}
 	for (const [index, choice] of (schema.anyOf ?? schema.oneOf ?? []).entries()) {
 		const op = choice.properties?.op;
 		const label = typeof op === "object" && typeof op.const === "string" ? op.const : String(index + 1);
-		lines.push(...rows(choice, prefix ? `${prefix}[${label}]` : ""));
+		lines.push(...rows(choice, `${prefix}[${label}]`, envelope));
 	}
 	return lines;
 }
@@ -59,6 +59,8 @@ export function generateToolReference(): string {
 		"Each call returns compact JSON with `result` and `seq`. Errors return an error code and message with `isError: true`.",
 		"",
 		"`project` is required unless the instance has exactly one project. Nested rows show the fields within an array or choice.",
+		"",
+		"Choice labels such as `[create]` or `[1]` show which input shape a field belongs to. Send the fields for one choice.",
 	];
 	const tools = mcpTools();
 	for (const op of MCP_OPS) {

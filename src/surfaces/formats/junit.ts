@@ -18,7 +18,14 @@ type FailureElement = {
 	hasMessage: boolean;
 	previous: FailureElement | null;
 };
-type SuiteElement = { kind: "suite"; tag: string; path: string; file: string | undefined };
+type SuiteElement = {
+	kind: "suite";
+	tag: string;
+	path: string;
+	file: string | undefined;
+	firstResult: number;
+	problem: NonNullable<ResultIn["failure"]> | null;
+};
 type Element =
 	| CaseElement
 	| FailureElement
@@ -28,15 +35,25 @@ type Element =
 type Warn = (message: string, offset: number) => void;
 
 const attributePattern = /([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/y;
-const retrySuffix = /(?:\(\s*retry\s*#?\s*\d+\s*\)|\[\s*retry\s*#?\s*\d+\s*\])\s*$/i;
-
 function stableName(value: string): string {
-	let name = value;
-	for (;;) {
-		const match = retrySuffix.exec(name);
-		if (match === null) return name;
-		name = name.slice(0, match.index).trimEnd();
+	let end = value.length;
+	let changed = false;
+	while (end > 0) {
+		let tail = end;
+		while (tail > 0 && /\s/.test(value[tail - 1] ?? "")) tail--;
+		const closer = value[tail - 1];
+		if (closer !== ")" && closer !== "]") break;
+		const start = value.lastIndexOf(closer === ")" ? "(" : "[", tail - 1);
+		if (start < 0) break;
+		const marker = value.slice(start + 1, tail - 1).trim();
+		if (marker.slice(0, 5).toLowerCase() !== "retry") break;
+		let count = marker.slice(5).trim();
+		if (count.startsWith("#")) count = count.slice(1).trim();
+		if (!/^\d+$/.test(count)) break;
+		end = start;
+		changed = true;
 	}
+	return changed ? value.slice(0, end).trimEnd() : value;
 }
 
 function normalisePath(value: string): string {
@@ -163,7 +180,8 @@ function boundedKey(key: string, offset: number, warn: Warn): string {
 /**
  * Reads JUnit XML in document order without a DOM or dependencies. Malformed input yields recovered results
  * and warnings with UTF-8 byte offsets. Nested suite names use `::`; `options.file` labels warnings only.
- * Incomplete/damaged cases cannot pass. Errors take precedence over failures and skips. Casebook properties
+ * Incomplete/damaged cases cannot pass; damage outside a testcase invalidates recovered suite/report evidence.
+ * Orphan failures retain their diagnostics and suite setup errors mark affected cases as errors. Casebook properties
  * override name annotations. Warnings are capped at 1,000 plus a count of omitted warnings.
  */
 export function parseJUnit(
@@ -206,7 +224,20 @@ export function parseJUnit(
 		return { results, suites, warnings };
 	}
 	const stack: Element[] = [];
+	const elementPositions = new Map<string, number[]>();
+	const pushElement = (element: Element) => {
+		const positions = elementPositions.get(element.tag);
+		if (positions === undefined) elementPositions.set(element.tag, [stack.length]);
+		else positions.push(stack.length);
+		stack.push(element);
+	};
+	const popElement = () => {
+		const element = stack.pop();
+		if (element !== undefined) elementPositions.get(element.tag)?.pop();
+		return element;
+	};
 	const suiteStack: SuiteElement[] = [];
+	let reportProblem: NonNullable<ResultIn["failure"]> | null = null;
 	let currentCase: CaseElement | null = null;
 	let currentFailure: FailureElement | null = null;
 	let ignoredDepth = 0;
@@ -216,12 +247,28 @@ export function parseJUnit(
 	const warnMalformed: Warn = (message, offset) => {
 		syntaxWarnings++;
 		if (currentCase !== null) currentCase.integrity = "damaged";
+		else {
+			const suite = suiteStack.at(-1);
+			if (suite === undefined) reportProblem ??= { message: "Malformed JUnit report" };
+			else suite.problem ??= { message: "Malformed JUnit suite" };
+		}
 		warn(message, offset);
+	};
+	const invalidate = (from: number, problem: NonNullable<ResultIn["failure"]>) => {
+		for (let index = from; index < results.length; index++) {
+			const result = results[index];
+			if (result !== undefined && (result.outcome === "pass" || result.outcome === "skip")) {
+				result.outcome = "error";
+				result.failure = { ...problem };
+				delete result.note;
+			}
+		}
 	};
 
 	const finish = (element: Element, closed = true) => {
 		switch (element.kind) {
 			case "suite":
+				if (element.problem !== null) invalidate(element.firstResult, element.problem);
 				suiteStack.pop();
 				break;
 			case "case":
@@ -259,7 +306,7 @@ export function parseJUnit(
 			const value = xml.slice(from, to);
 			appendFailure(currentFailure, cdata ? value : decode(value, from, warnMalformed));
 		} else if (stack.length === 0 && xml.slice(from, to).trim().length > 0) {
-			warn("Content outside the JUnit root", from);
+			warnMalformed("Content outside the JUnit root", from);
 		}
 	};
 	const limited = (value: string, limit: number, label: string, offset: number) => {
@@ -309,7 +356,11 @@ export function parseJUnit(
 			continue;
 		}
 		position = end + 1;
-		if (declaration) continue;
+		if (declaration) {
+			if (rootSeen || !/^<!DOCTYPE\s/.test(xml.slice(start, start + 11)))
+				warnMalformed("Unexpected XML declaration", start);
+			continue;
+		}
 		const content = xml.slice(start + 1, end);
 		const closing = content.startsWith("/");
 		const match = /^([A-Za-z_][\w.:-]*)/.exec(closing ? content.slice(1) : content);
@@ -321,23 +372,23 @@ export function parseJUnit(
 		const name = tag.slice(tag.lastIndexOf(":") + 1);
 		if (closing) {
 			if (content.slice(tag.length + 1).trim() !== "") warnMalformed("Malformed XML closing element", start);
-			let found = stack.length - 1;
-			while (found >= 0 && stack[found]?.tag !== tag) found--;
-			if (found < 0) {
+			const found = elementPositions.get(tag)?.at(-1);
+			if (found === undefined) {
 				warnMalformed(`Unexpected closing element </${tag}>`, start);
 				continue;
 			}
 			if (found !== stack.length - 1) warnMalformed(`Mismatched closing element </${tag}>`, start);
 			while (stack.length > found) {
-				const element = stack.pop();
+				const element = popElement();
 				if (element !== undefined) finish(element, stack.length === found);
 			}
 			continue;
 		}
 		if (!rootSeen) {
 			rootSeen = true;
-			if (name !== "testsuites" && name !== "testsuite") warn("Expected <testsuites> or <testsuite> root", start);
-		} else if (stack.length === 0) warn("Multiple XML roots", start);
+			if (name !== "testsuites" && name !== "testsuite")
+				warnMalformed("Expected <testsuites> or <testsuite> root", start);
+		} else if (stack.length === 0) warnMalformed("Multiple XML roots", start);
 		const selfClosing = content.trimEnd().endsWith("/");
 		const parent = stack.at(-1);
 		const propertyCase = parent?.kind === "ignored" ? parent.propertyCase : parent?.kind === "case" ? parent : null;
@@ -365,11 +416,14 @@ export function parseJUnit(
 				ignoredDepth++;
 			} else if (name === "testsuite") {
 				const suite = suiteStack.at(-1);
+				const suiteName = normalisePath(attrs.name ?? "");
 				element = {
 					kind: "suite",
 					tag,
-					path: [suite?.path, normalisePath(attrs.name ?? "")].filter(Boolean).join("::"),
+					path: suiteName ? (suite?.path ? `${suite.path}::${suiteName}` : suiteName) : (suite?.path ?? ""),
 					file: attrs.file ? normalisePath(attrs.file) : suite?.file,
+					firstResult: results.length,
+					problem: null,
 				};
 				suiteStack.push(element);
 				suites++;
@@ -409,14 +463,24 @@ export function parseJUnit(
 				};
 				currentCase = element;
 				results.push(result);
-			} else if ((name === "failure" || name === "error") && currentCase !== null) {
-				const result = currentCase.result;
+			} else if (name === "failure" || name === "error") {
+				const suite = suiteStack.at(-1);
+				const orphan = currentCase === null;
+				if (orphan) warnMalformed(`${name} element outside a testcase`, start);
+				const result =
+					currentCase?.result ??
+					(suite === undefined || results.length > suite.firstResult ? results.at(-1) : undefined);
 				const outcome = name === "error" ? "error" : "fail";
-				const selected = result.outcome !== "error" && (outcome === "error" || result.outcome !== "fail");
+				const selected =
+					result === undefined || (result.outcome !== "error" && (outcome === "error" || result.outcome !== "fail"));
 				const report = selected ? { message: limited(attrs.message ?? "", 4000, "Failure message", start) } : null;
-				if (report !== null) {
+				if (report !== null && result !== undefined) {
 					result.outcome = outcome;
 					result.failure = report;
+				}
+				if (orphan && report !== null) {
+					if (suite === undefined) reportProblem = report;
+					else suite.problem = report;
 				}
 				element = {
 					kind: "failure",
@@ -433,14 +497,15 @@ export function parseJUnit(
 			}
 		}
 		if (selfClosing) finish(element);
-		else stack.push(element);
+		else pushElement(element);
 	}
 	if (stack.length > 0) warnMalformed("Unclosed XML elements at end of report", xml.length);
 	while (stack.length > 0) {
-		const element = stack.pop();
+		const element = popElement();
 		if (element !== undefined) finish(element, false);
 	}
 	if (!rootSeen && warnings.length === 0) warn("No JUnit root found", xml.length);
+	if (reportProblem !== null) invalidate(0, reportProblem);
 	if (omittedWarnings > 0)
 		warnings.push(
 			`${options?.file ? `${options.file}: ` : ""}${omittedWarnings} additional warnings omitted at byte offset ${byteOffset(xml.length)}`,

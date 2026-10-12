@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "command": "deliver",
+  "status": "pending",
+  "receiptId": "bc8ea090-5e40-413c-9f46-504351281708",
+  "input": "/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/docs/diagrams/src/question-lifecycle.json",
+  "output": "/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/docs/diagrams/question-lifecycle.html"
+}

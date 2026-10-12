@@ -293,7 +293,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 						</button>
 					</div>
 				</aside>
-				<ScreenComponent />
+				<ScreenComponent key={project} />
 				<footer id="bar">
 					<StatusLine>{status}</StatusLine>
 					<div id="hints">

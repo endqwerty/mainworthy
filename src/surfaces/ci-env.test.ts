@@ -425,4 +425,11 @@ describe("detectTarget overrides and fallbacks", () => {
 			}).success,
 		).toBe(true);
 	});
+
+	test("never invents a base commit by truncating an over-long identifier", () => {
+		expect(detectTarget({ CASEBOOK_COMMIT: head, CASEBOOK_BASE: "a".repeat(70) }).target).toEqual({ commit: head });
+		expect(
+			detectTarget({ GITLAB_CI: "true", CI_COMMIT_SHA: head, CI_COMMIT_BEFORE_SHA: "a".repeat(70) }).target,
+		).toEqual({ commit: head });
+	});
 });

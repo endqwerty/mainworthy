@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { CaseBody, Step } from "../../core/model.ts";
 
-const DraftBody = CaseBody.extend({ steps: z.array(Step.extend({ action: z.string(), expected: z.string().nullable() })) });
+const DraftBody = CaseBody.extend({
+	steps: z.array(Step.extend({ action: z.string(), expected: z.string().nullable() })),
+});
 const Draft = z.object({
 	id: z.string(),
 	ref: z.string().nullable(),
@@ -16,6 +18,12 @@ const Draft = z.object({
 	dirty: z.boolean(),
 	at: z.number(),
 	cmd: z.string(),
+	submission: z
+		.discriminatedUnion("kind", [
+			z.object({ kind: z.literal("none") }),
+			z.object({ kind: z.literal("waiting"), question: z.string(), fingerprint: z.string() }),
+		])
+		.default({ kind: "none" }),
 });
 export type Draft = z.infer<typeof Draft>;
 const prefix = "casebook:draft:";

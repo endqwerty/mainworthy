@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "sequence",
+  "quality": "showcase",
+  "specification": {
+    "path": "/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/docs/diagrams/src/red-build.json",
+    "sha256": "6f64918812820a39a50fce322bf83114dd85d4dfc2542e9326ef08316916b2f5",
+    "bytes": 12060
+  },
+  "artifact": {
+    "path": "/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/docs/diagrams/red-build.html",
+    "sha256": "646a670410948108cf88c533268d13ee6273baa2b0461339c6e7699a04fa1649",
+    "bytes": 778449
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/docs/diagrams/src/red-build/width-review/red-build.finalize.json",
+    "summaryReceipt": "/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/docs/diagrams/src/red-build/width-review/red-build.finalize-summary.json",
+    "browserCheckReceipt": "/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/docs/diagrams/src/red-build/width-review/red-build.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.0.1",
+    "availableVersion": "3.0.1",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-12T06:24:14.550Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 3141
+}

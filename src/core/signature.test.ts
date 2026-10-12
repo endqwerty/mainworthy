@@ -215,6 +215,33 @@ const examples: FailureExample[] = [
 ];
 
 describe("failure signatures", () => {
+	test("bounds normalization work on a very long unbroken failure line", () => {
+		const start = performance.now();
+		const result = normaliseFailure({ message: `expected <div>${"x".repeat(100_000)}</div>` });
+		expect(result.text.length).toBeLessThanOrEqual(300);
+		expect(performance.now() - start).toBeLessThan(100);
+	});
+	test.each(["expected 5 US dollars, got 7 US dollars", "expected 3 NS records", "expected 3 404s"])(
+		"preserves ordinary numeric assertions: %s",
+		(message) => {
+			expect(normaliseFailure({ message }).text).toBe(message);
+		},
+	);
+	test("preserves code identifiers and module paths while replacing labelled base64 ids", () => {
+		for (const message of [
+			"TypeError: getUserAccountSettingsV2Response is not a function",
+			"Cannot find module src/components/CheckoutForm/index",
+			"CheckoutServiceIntegrationTest2 > totals FAILED",
+		]) {
+			expect(normaliseFailure({ message }).text).toBe(message);
+		}
+		expect(normaliseFailure({ message: "request id abcDEFGHijkLMNOPqrstUVWXyzaBCDEF" }).text).toBe("request id <id>");
+	});
+	test("groups fractional compound Go durations", () => {
+		expect(normaliseFailure({ message: "operation timed out after 2m5.5s" }).text).toBe(
+			"operation timed out after <duration>",
+		);
+	});
 	test.each([
 		"AssertionError: expected ticket page to show status closed",
 		"AssertionError: expected config.timeout to equal 30",
@@ -401,4 +428,27 @@ describe("failure signatures", () => {
 			),
 		);
 	});
+});
+
+describe("untrusted failure text", () => {
+	// A report is untrusted input and may carry thousands of failures. None of them may cost more than a moment,
+	// whatever it contains: the server applies a report on the thread that also answers reads.
+	const hostile: [string, { message: string; detail?: string }][] = [
+		["a keyword then 20,000 spaces", { message: `status${" ".repeat(20_000)}x` }],
+		["server returned then 20,000 tabs", { message: `server returned${"\t".repeat(20_000)}ok` }],
+		["a frame with 20,000 spaces", { message: "boom", detail: `at a${" ".repeat(20_000)}b` }],
+		["a frame of repeated Windows paths", { message: "boom", detail: `at ${"c:\\".repeat(20_000)}` }],
+		["20,000 short stack lines", { message: "boom", detail: "    at node_modules/x.js:1:1\n".repeat(20_000) }],
+		["one unbroken megabyte", { message: "x".repeat(1_000_000), detail: "y".repeat(1_000_000) }],
+		["line then digits, repeated", { message: "boom", detail: `File "a.py", ${"line 1 ".repeat(8_000)}` }],
+	];
+	for (const [name, input] of hostile) {
+		test(`${name} is normalised in bounded time`, () => {
+			normaliseFailure(input); // warm
+			const started = performance.now();
+			for (let i = 0; i < 20; i++) normaliseFailure(input);
+			expect((performance.now() - started) / 20).toBeLessThan(5);
+			expect(normaliseFailure(input).text.length).toBeLessThanOrEqual(300);
+		});
+	}
 });

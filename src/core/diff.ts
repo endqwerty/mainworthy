@@ -57,7 +57,7 @@ export function movedStepIds({ before, after }: { before: readonly Step[]; after
 	return new Set(after.filter((step) => original.has(step.id) && !stable.has(step.id)).map((step) => step.id));
 }
 
-/** Returns lossless word segments. LCS uses at most 262,144 cells; larger unmatched middles become one replacement. */
+/** Returns lossless word segments. LCS uses at most 4,096 cells; larger unmatched middles become one replacement. */
 export function diffWords({ before, after }: { before: string; after: string }): WordSegment[] {
 	if (before === after) return before === "" ? [] : [{ op: "eq", text: before }];
 	const originalLeft = before.match(/\s+|\S+/g) ?? [];
@@ -87,7 +87,7 @@ export function diffWords({ before, after }: { before: string; after: string }):
 	append({ op: "eq", text: originalLeft.slice(0, prefix).join("") });
 	const stride = right.length + 1;
 	const cells = (left.length + 1) * stride;
-	if (cells > 262_144) {
+	if (cells > 4_096) {
 		append({ op: "del", text: left.join("") });
 		append({ op: "ins", text: right.join("") });
 		append({ op: "eq", text: originalLeft.slice(originalLeft.length - suffix).join("") });

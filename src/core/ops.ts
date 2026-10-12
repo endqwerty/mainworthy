@@ -340,6 +340,8 @@ export type QuestionItem = {
 	evidenceHash: string;
 	seen: { count: number; carried: number };
 	needs: string;
+	/** The answers that apply to this question, in key order. The keys and labels are in `ANSWER_KEYS`. */
+	answers: string[];
 	blocks: string[];
 	about: string[];
 	openedAt: number;

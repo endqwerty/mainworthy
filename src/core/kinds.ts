@@ -160,6 +160,38 @@ export const ANSWER_HELP = {
 	},
 } as const satisfies Record<Kind, Record<string, string>>;
 
+/**
+ * The answers that make sense for one question, in key order. A failure on trunk cannot be "already failing on
+ * base", and "the failure was a mistake" exists only where a pass and a fail disagree. The queue offers exactly
+ * these, and the server refuses a failure answer outside them.
+ */
+export function applicableAnswers(kind: Kind, facts: ReadonlySet<string>): string[] {
+	switch (kind) {
+		case "adopt":
+			return facts.has("conflict") ? ["merge", "reject"] : ["accept", "reject"];
+		case "map":
+			return ["link", "create", "track"];
+		case "failure":
+			return [
+				"defect",
+				"test",
+				"expected",
+				"flaky",
+				"infra",
+				...(facts.has("scope:change") ? ["inherited"] : []),
+				...(facts.has("hint:disputed") ? ["mistaken"] : []),
+			];
+		case "finding":
+			return ["accept", "reject", "duplicate", "defer"];
+		case "signoff":
+			return ["approve", "reject"];
+		default: {
+			const _exhaustive: never = kind;
+			return _exhaustive;
+		}
+	}
+}
+
 // ── Who is asked ───────────────────────────────────────────────────────────────────────────────────────────
 
 /**

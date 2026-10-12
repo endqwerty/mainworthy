@@ -1,4 +1,3 @@
-import { SQLiteError, type Statement } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Db } from "../kernel/db.ts";
@@ -40,6 +39,7 @@ const TableName = z.object({ name: z.string() });
 const TableKind = z.object({ schema: z.string(), name: z.string(), type: z.string() });
 const Column = z.object({ name: z.string(), pk: Count });
 const ForeignKey = z.object({ table: z.string() });
+const ConstraintError = z.object({ code: z.string().startsWith("SQLITE_CONSTRAINT"), message: z.string() });
 type Table = { name: string; columns: string[]; primary: string[]; parents: string[] };
 
 /** The row counts describe exported data, excluding migration metadata, credentials and the search index. */
@@ -257,7 +257,7 @@ export function importArchive(db: Db, lines: Iterable<string>): ArchiveCounts {
 		}
 		const metadata = discoverTables(db);
 		const iterator = lines[Symbol.iterator]();
-		const inserts = new Map<string, Statement<unknown, Value[]>>();
+		const inserts = new Map<string, ReturnType<typeof db.raw.prepare<unknown, Value[]>>>();
 		try {
 			const first = iterator.next();
 			if (first.done) throw invalid("empty archive: the header is missing");
@@ -314,8 +314,9 @@ export function importArchive(db: Db, lines: Iterable<string>): ArchiveCounts {
 				try {
 					insert.run(...table.columns.map((column) => entry.r.get(column) ?? null));
 				} catch (error) {
-					if (error instanceof SQLiteError && error.code?.startsWith("SQLITE_CONSTRAINT")) {
-						throw invalid(`invalid archive row in table ${entry.t} on line ${position}: ${error.message}`);
+					const constraint = ConstraintError.safeParse(error);
+					if (constraint.success) {
+						throw invalid(`invalid archive row in table ${entry.t} on line ${position}: ${constraint.data.message}`);
 					}
 					throw error;
 				}

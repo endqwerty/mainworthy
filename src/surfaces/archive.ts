@@ -160,12 +160,17 @@ export function archiveRoutes(
 			const file = scratch();
 			try {
 				await stageBody(req, file.path);
-				const result = await app.gate.run(() =>
-					app.db.savepoint(() => {
+				const result = await app.gate.run(() => {
+					if (!allowed(session))
+						throw new OpError(
+							"forbidden",
+							"import needs the admin capability; the token or grant changed while uploading",
+						);
+					return app.db.savepoint(() => {
 						removeBootstrapProject(app);
 						return importArchive(app.db, fileLines(file.path));
-					}),
-				);
+					});
+				});
 				return json({
 					ok: true,
 					result: {

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "67dbccbd-fa31-446e-83da-82f81db54ed6",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/docs/diagrams/src/architecture.json",
+  "output": "/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/docs/diagrams/architecture.html",
+  "specification": {
+    "sha256": "48a012bc94fbbc4cc3fb813d7499ce196cd9ca238ebaaa0366c720f235bb7e3e",
+    "bytes": 19873
+  },
+  "artifact": {
+    "sha256": "709aae531c1661063843dd1f50db32cff3716f102113e52f711f3096e14b207f",
+    "bytes": 811641
+  }
+}
