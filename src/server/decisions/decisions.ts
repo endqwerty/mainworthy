@@ -693,12 +693,15 @@ export function undo(ctx: Ctx, input: { q: string; reason: string | undefined })
 	// under an answer for one target): then nothing is left to ask, and the question is closed, not left open.
 	const closed = closeAnswered(ctx, question);
 	refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, prior.id), ...closed]);
-	const still = questionById(ctx.db, question.id);
+	const covered = questionById(ctx.db, question.id)?.state === "dissolved";
+	const gone = !covered && closeIfGone(ctx, question.id);
 	return reply(question, "reopened", {
 		decision: decision.id,
-		...(still?.state === "dissolved"
+		...(covered
 			? { needs: "withdrawn; another answer in force still covers this failure, so nobody is asked about it" }
-			: {}),
+			: gone
+				? { needs: "withdrawn; nothing shows this failure any more, so nobody is asked about it" }
+				: {}),
 	});
 }
 
@@ -721,7 +724,7 @@ export function raiseFailure(
 	const open = openFor(ctx.db, ctx.project.id, contentHash({ kind: "failure", key }), target.id);
 	const earlier = open
 		? json<{
-				tests?: { id: number; t: string; name: string; case: string | null }[];
+				tests?: { id: number; t: string; name: string; case: string | null; counted?: boolean }[];
 				producers?: number[];
 				targets?: number[];
 			}>(open.evidence)
@@ -729,7 +732,16 @@ export function raiseFailure(
 	const tests = new Map((earlier.tests ?? []).map((test) => [test.id, test]));
 	for (const test of group.tests) {
 		const row = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;
-		tests.set(test.id, { id: test.id, t: testRef(test), name: test.name, case: row ? caseRef(row) : null });
+		// `counted`: a commit's gate counted this test failing with the cause (now or in an earlier occurrence).
+		// Only such a test's later pass says the failure stopped; see `stoppedFailing`.
+		const counted = group.gateTests.includes(test.id) || tests.get(test.id)?.counted === true;
+		tests.set(test.id, {
+			id: test.id,
+			t: testRef(test),
+			name: test.name,
+			case: row ? caseRef(row) : null,
+			...(counted ? { counted: true } : {}),
+		});
 	}
 	// Two hints, neither part of what an answer stands on. `disputed` is a fact about the runs as they are now
 	// (a slot where a failure with this cause stands beside another producer's pass): it decides which answers
@@ -899,15 +911,31 @@ function dissolveStale(ctx: Ctx, run: RunRow): void {
 	const shown = new Map<number, Set<string>>();
 	for (const id of candidates) {
 		const question = questionById(ctx.db, id);
-		if (question?.state !== "open" || !stoppedFailing(ctx, question, shown)) continue;
-		setQuestionState(ctx, question, "dissolved", null);
-		// A run that listed this question among those it waits for is recomputed without it.
-		for (const about of runsAbout(ctx, question)) {
-			const named = runById(ctx.db, about);
-			if (named && json<string[]>(named.blocking).includes(questionRef(question)))
-				retally(ctx, named.id, blockersOf(ctx, named));
-		}
+		if (question?.state === "open" && stoppedFailing(ctx, question, shown)) dissolve(ctx, question);
 	}
+}
+
+/** Closes a question as dissolved, and recomputes each run that listed it among those it waits for. */
+function dissolve(ctx: Ctx, question: QuestionRow): void {
+	setQuestionState(ctx, question, "dissolved", null);
+	for (const about of runsAbout(ctx, question)) {
+		const named = runById(ctx.db, about);
+		if (named && json<string[]>(named.blocking).includes(questionRef(question)))
+			retally(ctx, named.id, blockersOf(ctx, named));
+	}
+}
+
+/**
+ * A question put back in front of people, because its answer was withdrawn or ran out, is closed again when the
+ * failure it asks about went away meanwhile: nobody is asked about a failure that nothing shows, and no commit's
+ * gate names a question for it until some later report happens to look. True when it was closed.
+ */
+function closeIfGone(ctx: Ctx, id: number): boolean {
+	const question = questionById(ctx.db, id);
+	if (question?.kind !== "failure" || question.state !== "open") return false;
+	if (!stoppedFailing(ctx, question, new Map())) return false;
+	dissolve(ctx, question);
+	return true;
 }
 
 /**
@@ -920,6 +948,8 @@ function dissolveStale(ctx: Ctx, run: RunRow): void {
  * And absence is not proof. Something must show the failure gone: one of the question's own tests passing in the
  * newest commit's run (a newer commit whose failing job has not reported yet says nothing), or a planned run
  * that showed the cause and no longer does, which only a newer attempt, a correction or a decision can bring about.
+ * The pass must be of a test a commit's gate counted as failing with the cause: a pipeline that always passed a
+ * test says nothing about the failure an agent found in it, which stays asked about until a person answers.
  */
 function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number, Set<string>>): boolean {
 	const subject = json<{ signature: number; scope: string }>(question.subject);
@@ -936,7 +966,10 @@ function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number, Set<
 	const newest = newestInScope(ctx.db, ctx.project.id, subject.scope);
 	if (newest) {
 		if (shows(newest)) return false;
-		const tests = (json<{ tests?: { id: number }[] }>(question.evidence).tests ?? []).map((test) => test.id);
+		// A commit's gate counts pipelines and people, so its pass speaks only for a test it counted as failing.
+		const tests = (json<{ tests?: { id: number; counted?: boolean }[] }>(question.evidence).tests ?? []).flatMap(
+			(test) => (test.counted ? [test.id] : []),
+		);
 		gone = passesAny(ctx.db, newest.id, tests);
 	}
 	for (const id of runsAbout(ctx, question)) {
@@ -977,6 +1010,7 @@ export function sweepExpired(ctx: Ctx, expired: readonly DecisionRow[]): number 
 		setQuestionState(ctx, question, "open", null);
 		const closed = closeAnswered(ctx, question);
 		refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, decision.id), ...closed]);
+		closeIfGone(ctx, question.id);
 		reopened++;
 	}
 	return reopened;

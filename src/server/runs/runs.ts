@@ -490,6 +490,11 @@ export type FailingGroup = {
 	disputed: boolean;
 	/** True when a result that counts in a commit's gate (a pipeline's or a person's) shows this cause. */
 	counted: boolean;
+	/**
+	 * The tests whose failure with this cause a commit's gate counts. Only for these does a later pass in a
+	 * commit's gate say the failure stopped: a pipeline's pass says nothing about a failure only an agent showed.
+	 */
+	gateTests: number[];
 	runs: RunRow[];
 };
 
@@ -507,7 +512,17 @@ export function* applyBatchSteps(
 	const group = (signature: SignatureRow): FailingGroup => {
 		let found = groups.get(signature.id);
 		if (!found) {
-			found = { signature, scope, tests: [], results: [], message: null, disputed: false, counted: false, runs: [] };
+			found = {
+				signature,
+				scope,
+				tests: [],
+				results: [],
+				message: null,
+				disputed: false,
+				counted: false,
+				gateTests: [],
+				runs: [],
+			};
 			groups.set(signature.id, found);
 		}
 		return found;
@@ -581,6 +596,7 @@ export function* applyBatchSteps(
 			g.results.push(result.id);
 			g.message ??= result.message;
 			g.counted ||= counted;
+			if (counted && !g.gateTests.includes(result.test.id)) g.gateTests.push(result.test.id);
 		}
 	}
 
@@ -645,6 +661,7 @@ export function failuresShown(ctx: Ctx, run: RunRow): { group: FailingGroup; tar
 						message: null,
 						disputed: false,
 						counted: true,
+						gateTests: [],
 						runs: [run],
 					},
 					target: fill.target,
@@ -652,6 +669,8 @@ export function failuresShown(ctx: Ctx, run: RunRow): { group: FailingGroup; tar
 				};
 				const test = testById(ctx.db, fill.test);
 				if (test && !entry.group.tests.some((t) => t.id === test.id)) entry.group.tests.push(test);
+				if (fill.method !== "agent" && !entry.group.gateTests.includes(fill.test))
+					entry.group.gateTests.push(fill.test);
 				entry.group.results.push(fill.id);
 				entry.group.message ??= fill.message;
 				entry.group.disputed ||= slot.state === "disputed";
@@ -748,12 +767,14 @@ export function shownFailure(ctx: Ctx, run: RunRow, cause: Unexplained): { group
 		message: null,
 		disputed: false,
 		counted: true,
+		gateTests: [],
 		runs: [run],
 	};
 	let by: number | null = null;
-	const add = (test: number, result: number, actor: number, message: string | null): void => {
+	const add = (test: number, result: number, actor: number, message: string | null, counted: boolean): void => {
 		const row = testById(ctx.db, test);
 		if (row && !group.tests.some((t) => t.id === row.id)) group.tests.push(row);
+		if (counted && !group.gateTests.includes(test)) group.gateTests.push(test);
 		group.results.push(result);
 		group.message ??= message;
 		by = actor;
@@ -761,14 +782,14 @@ export function shownFailure(ctx: Ctx, run: RunRow, cause: Unexplained): { group
 	if (run.origin === "change") {
 		for (const row of ctx.db.all(Q.failingOfCause, { run: run.id, signature: cause.signature, target: cause.target })) {
 			const result = resultById(ctx.db, row.result);
-			if (result) add(row.test, result.id, result.actor, result.message);
+			if (result) add(row.test, result.id, result.actor, result.message, true);
 		}
 	} else {
 		for (const slot of ctx.db.all(Q.slotsBySignature, { run: run.id, signature: cause.signature })) {
 			for (const fill of fillsOf(ctx.db, slot.id)) {
 				if (fill.signature !== cause.signature || fill.target !== cause.target) continue;
 				if (fill.outcome !== "fail" && fill.outcome !== "error") continue;
-				add(fill.test, fill.id, fill.actor, fill.message);
+				add(fill.test, fill.id, fill.actor, fill.message, fill.method !== "agent");
 				group.disputed ||= slot.state === "disputed";
 			}
 		}

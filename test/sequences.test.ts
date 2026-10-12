@@ -19,10 +19,25 @@
 //    excuse in force covers, unless it also lists a target that none covers.
 // 8. An answer that another decision supersedes is no longer in force. (The rows the ledger writes itself when
 //    an answer ends, `expired` and `outdated`, stay on their question and are what the next answer follows.)
+// 9. An open planned run has admitted every result it accepts and nothing else: every uncorrected result on a
+//    target the run accepts (any number of them), for a case it has a slot for, by a method the slot admits.
+// 10. An agent's report changes no commit's gate: every commit run reads after it exactly what it read before.
+// 11. Every question a run's gate names is open: a question that was answered, dissolved or replaced holds
+//     no run, whether or not the run is the newest of its scope.
 //
 // More seeds: CASEBOOK_SEQUENCE_SEEDS=500 bun test test/sequences.test.ts
 import { expect, test } from "bun:test";
-import { aggregateSlot, replacesInLane, type SlotFill, slotState, type Tally, verdict } from "../src/core/runs.ts";
+import {
+	aggregateSlot,
+	type ExerciseObligation,
+	type Obligation,
+	qualifies,
+	replacesInLane,
+	type SlotFill,
+	slotState,
+	type Tally,
+	verdict,
+} from "../src/core/runs.ts";
 import { sweep } from "../src/server/jobs.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
 import { harness } from "./helpers.ts";
@@ -178,6 +193,17 @@ function sequence(seed: number, preset: string): Problem | null {
 						return { what: "a run's stored tally is not what its results give", detail: { run, tally, stored } };
 			}
 
+			// 11. The questions the gate names are open ones.
+			for (const named of JSON.parse(String(run.blocking)) as string[]) {
+				const state = rows<{ state: string }>(
+					"SELECT state FROM questions WHERE project = ? AND no = ?",
+					Number(run.project),
+					Number(named.slice(2)),
+				)[0]?.state;
+				if (state !== "open")
+					return { what: "a run's gate names a question that is not open", detail: { run, named, state } };
+			}
+
 			// 5. The stored verdict against the stored facts.
 			const facts = {
 				tally: JSON.parse(String(run.tally)) as Tally,
@@ -257,6 +283,76 @@ function sequence(seed: number, preset: string): Problem | null {
 					return { what: "a planned run's stored tally is not what its slots give", detail: { run, tally, stored } };
 		}
 
+		// 9. What an open planned run has admitted against everything it accepts.
+		for (const run of runs) {
+			if (run.origin !== "planned" || run.state !== "open") continue;
+			const accepts = JSON.parse(String(run.accepts)) as { commit?: string; repo?: string; env?: string };
+			const commit = accepts.commit;
+			const accepted =
+				commit === undefined
+					? null
+					: new Set(
+							[...targets.values()]
+								.filter(
+									(target) =>
+										target.project === run.project &&
+										typeof target.commit_sha === "string" &&
+										(target.commit_sha === commit || target.commit_sha.startsWith(commit)) &&
+										(accepts.repo === undefined || accepts.repo === target.repo) &&
+										(accepts.env === undefined || accepts.env === target.env),
+								)
+								.map((target) => Number(target.id)),
+						);
+			const exercises = (JSON.parse(String(run.require)) as Obligation[]).filter(
+				(o): o is ExerciseObligation => o.kind === "exercise",
+			);
+			for (const slot of rows("SELECT * FROM slots WHERE run = ?", Number(run.id))) {
+				const obligation = exercises.find((o) => o.id === slot.obligation);
+				if (!obligation) continue;
+				const pinned = rows<{ body: string }>(
+					"SELECT body FROM versions WHERE case_id = ? AND no = ?",
+					Number(slot.case_id),
+					Number(slot.version),
+				)[0];
+				const declared = pinned ? (JSON.parse(pinned.body) as { methods: SlotFill["method"][] }).methods : [];
+				const have = new Set(
+					rows<{ result: number }>("SELECT result FROM slot_results WHERE slot = ?", Number(slot.id)).map((row) =>
+						Number(row.result),
+					),
+				);
+				const candidates = rows(
+					`SELECT r.*, b.run AS typed, EXISTS (SELECT 1 FROM results later WHERE later.corrects = r.id) AS withdrawn
+					 FROM results r JOIN batches b ON b.id = r.batch WHERE r.basis_case = ?`,
+					Number(slot.case_id),
+				).filter((result) =>
+					accepted ? accepted.has(Number(result.target)) : Number(result.typed) === Number(run.id),
+				);
+				const wanted = new Set<number>();
+				for (const result of candidates) {
+					const method = result.method as SlotFill["method"];
+					const admitted = qualifies({
+						result: {
+							method,
+							basis: result.basis as "exact" | "assumed" | "unresolved",
+							basisCase: Number(result.basis_case),
+							basisVersion: result.basis_version === null ? null : Number(result.basis_version),
+							basisClaim: result.basis_claim === null ? null : String(result.basis_claim),
+						},
+						slot: { caseId: Number(slot.case_id), version: Number(slot.version), claim: String(slot.claim) },
+						obligation,
+						caseMethods: method === "auto" ? [...declared, "auto"] : declared,
+					});
+					if (!admitted) continue;
+					wanted.add(Number(result.id));
+					if (!result.withdrawn && !have.has(Number(result.id)))
+						return { what: "an open run has not admitted a result it accepts", detail: { run, slot, result } };
+				}
+				for (const result of have)
+					if (!wanted.has(result))
+						return { what: "a run admitted a result it does not accept", detail: { run, slot, result } };
+			}
+		}
+
 		// 7. Nobody is asked about what already has an answer.
 		for (const question of open) {
 			const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string };
@@ -293,6 +389,15 @@ function sequence(seed: number, preset: string): Problem | null {
 		if (bare.length > 0) return { what: "an answer is in force with nothing to show for it", detail: bare };
 		return null;
 	};
+
+	const commitGates = (): Map<number, string> =>
+		new Map(
+			rows("SELECT id, tally, verdict, blocking, state FROM runs WHERE origin = 'change'").map((run) => [
+				Number(run.id),
+				`${run.verdict} ${run.state} ${run.tally} ${run.blocking}`,
+			]),
+		);
+	let gatesBefore: Map<number, string> | null = null;
 
 	try {
 		command("propose", {
@@ -383,6 +488,7 @@ function sequence(seed: number, preset: string): Problem | null {
 					{ commit: pick(commits), branch: "main", env: "prod" },
 					{ commit: pick(["change01", "change02"]), base: pick(commits), pr: 7, branch: "feature", env: "prod" },
 				]);
+				gatesBefore = commitGates();
 				command(
 					"report",
 					{
@@ -469,6 +575,20 @@ function sequence(seed: number, preset: string): Problem | null {
 			}
 			const problem = audit();
 			if (problem) return { seed, step, ...problem, last: trace.slice(-12) };
+			// 10. The commits that had a gate before an agent's report read the same after it.
+			if (gatesBefore) {
+				const after = commitGates();
+				for (const [run, gate] of gatesBefore)
+					if (after.get(run) !== gate)
+						return {
+							seed,
+							step,
+							what: "an agent's report changed a commit's gate",
+							detail: { run, before: gate, after: after.get(run) },
+							last: trace.slice(-12),
+						};
+				gatesBefore = null;
+			}
 		}
 		return null;
 	} finally {

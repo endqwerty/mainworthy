@@ -1113,6 +1113,80 @@ describe("what a decision may change", () => {
 		).toEqual(["flaky"]);
 	});
 
+	test("an agent's failure is asked about even where a pipeline passes the same test", () => {
+		const pipeline = h.actor("pipeline", "ci", ["read", "produce"]);
+		const explorer = h.actor("explorer", "agent", ["read", "produce"]);
+		const target = { commit: "found001", branch: "main" };
+		report({ target, results: [{ test: { key: "checkout" }, outcome: "pass" }] }, pipeline);
+		// The agent found a way to make it fail. The pipeline's pass, which came before, is no proof that it is gone.
+		report(
+			{ target, results: [{ test: { key: "checkout" }, outcome: "fail", failure: { message: "total is wrong" } }] },
+			explorer,
+		);
+		expect(open("failure").title).toBe("total is wrong");
+		// Nor is a pass that comes after: the pipeline never showed this failure, so it cannot show it gone.
+		report({ target, results: [{ test: { key: "checkout" }, outcome: "pass" }] }, pipeline);
+		expect(open("failure").title).toBe("total is wrong");
+		expect(gate({ commit: "found001" }).verdict).toBe("passed");
+	});
+
+	test("an agent's report does not close a person's question about an older commit", () => {
+		const pipeline = h.actor("pipeline", "ci", ["read", "produce"]);
+		const explorer = h.actor("explorer", "agent", ["read", "produce"]);
+		const fail = (key: string) => ({ test: { key }, outcome: "fail", failure: { message: "shared cause" } });
+		report(
+			{
+				target: { commit: "older001", branch: "main" },
+				results: [fail("slow"), { test: { key: "quick" }, outcome: "pass" }],
+			},
+			pipeline,
+		);
+		const asked = open("failure");
+		// The next commit has only run the quick test so far: nothing shows the slow one's failure gone.
+		report(
+			{ target: { commit: "newer001", branch: "main" }, results: [{ test: { key: "quick" }, outcome: "pass" }] },
+			pipeline,
+		);
+		expect(open("failure").q).toBe(asked.q);
+		const before = gate({ commit: "older001" });
+		// An agent reports the quick test failing with the same cause on the older commit. No gate counts that, and
+		// the quick test's pass on the newer commit says nothing about a failure the pipeline never showed.
+		report({ target: { commit: "older001", branch: "main" }, results: [fail("quick")] }, explorer);
+		expect(open("failure").q).toBe(asked.q);
+		expect(gate({ commit: "older001" })).toEqual(before);
+	});
+
+	test("an answer withdrawn after its failure went away leaves nobody asked", () => {
+		const pipeline = h.actor("pipeline", "ci", ["read", "produce"]);
+		report(
+			{
+				target: { commit: "gone0001", branch: "main" },
+				results: [{ test: { key: "one" }, outcome: "fail", failure: { message: "old bug" } }],
+			},
+			pipeline,
+		);
+		const asked = open("failure");
+		decide(asked, { is: "test" });
+		// The next commit passes the test: the failure is gone. The answer stays what it was.
+		report(
+			{ target: { commit: "gone0002", branch: "main" }, results: [{ test: { key: "one" }, outcome: "pass" }] },
+			pipeline,
+		);
+		// Withdrawing it does not put a question about a failure that no longer exists in front of anybody, and the
+		// older commit's gate does not name a question nobody can find.
+		h.call("decide", { undo: asked.q, reason: "wrong answer" });
+		expect(h.call<InboxReply>("inbox", { kind: "failure" }).items).toEqual([]);
+		const older = gate({ commit: "gone0001" });
+		expect(older.verdict).toBe("blocked");
+		expect(older.open).toEqual([]);
+		// And a report that touches the older commit afterwards changes nothing about it.
+		report(
+			{ target: { commit: "gone0001", branch: "main" }, results: [{ test: { key: "other" }, outcome: "pass" }] },
+			h.actor("explorer", "agent", ["read", "produce"]),
+		);
+		expect(gate({ commit: "gone0001" })).toEqual(older);
+	});
+
 	test("a question about a disputed result stays a dispute, whoever reports the cause next", () => {
 		usePolicy("standard");
 		h.call("propose", {
