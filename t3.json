@@ -1,4 +1,16 @@
 {
-  "$schema": "https://t3.codes/schema/t3.json",
-  "defaultThreadEnvMode": "worktree"
+	"$schema": "https://t3.codes/schema/t3.json",
+	"defaultThreadEnvMode": "worktree",
+	"scripts": [
+		{ "name": "install", "command": "bun install --frozen-lockfile", "icon": "configure", "runOnWorktreeCreate": true },
+		{ "name": "check", "command": "bun run check", "icon": "test" },
+		{ "name": "dev", "command": "bun run dev", "icon": "play", "previewUrl": "http://127.0.0.1:7357" },
+		{ "name": "bench (quick)", "command": "bun bench/run.ts --quick", "icon": "debug" },
+		{
+			"name": "release worktree",
+			"command": "rm -rf node_modules .casebook test-results",
+			"icon": "configure",
+			"runOnSettle": true
+		}
+	]
 }
