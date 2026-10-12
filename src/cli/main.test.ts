@@ -561,3 +561,18 @@ test("an early refusal of a large valid gzip reports authorization, not corrupt 
 		);
 	});
 });
+
+test("an empty CASEBOOK_URL, CASEBOOK_TOKEN or CASEBOOK_PROJECT is the same as none", async () => {
+	// A pipeline passes a setting that is not configured as an empty string, not as an absent variable.
+	await withInstance(async ({ cli, instance }) => {
+		const empty = { CASEBOOK_URL: "", CASEBOOK_TOKEN: "", CASEBOOK_PROJECT: "" };
+		// No address named: the server on this machine, at its port.
+		const health = await cli(["health", "--json"], { env: { ...empty, CASEBOOK_PORT: new URL(instance.url).port } });
+		expect(health.stderr).toBe("");
+		expect(JSON.parse(health.stdout)).toMatchObject({ healthy: true });
+		// No token and no project named: the local session and the only project.
+		const inbox = await cli(["inbox", "--json", "{}", "--url", instance.url], { env: empty });
+		expect(inbox.stderr).toBe("");
+		expect(inbox.code).toBe(0);
+	});
+});

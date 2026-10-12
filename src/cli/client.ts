@@ -36,12 +36,16 @@ const SessionSchema = z.object({
 
 export type ClientOptions = { url: string; token: string | undefined; project: string | undefined };
 
-/** Command-line flags override the environment. An absent token lets the server authenticate loopback local mode. */
+/**
+ * Command-line flags override the environment. An absent token lets the server authenticate loopback local mode.
+ * An environment variable that is set and empty counts as absent: that is how a pipeline passes a setting nobody
+ * configured (`CASEBOOK_URL: ${{ vars.CASEBOOK_URL }}`).
+ */
 export function clientOptions(args: Args, env: Record<string, string | undefined> = process.env): ClientOptions {
 	return {
-		url: args.value("url") ?? env.CASEBOOK_URL ?? "http://127.0.0.1:7357",
-		token: args.value("token") ?? env.CASEBOOK_TOKEN,
-		project: args.value("project") ?? env.CASEBOOK_PROJECT,
+		url: args.value("url") ?? (env.CASEBOOK_URL || "http://127.0.0.1:7357"),
+		token: args.value("token") ?? (env.CASEBOOK_TOKEN || undefined),
+		project: args.value("project") ?? (env.CASEBOOK_PROJECT || undefined),
 	};
 }
 
