@@ -844,6 +844,8 @@ export function raiseFailure(
 		producer: ActorKind;
 		/** How many tests the cause is known to have failed, when the group holds only a sample of them. */
 		count?: number;
+		/** Parties to a dispute about the cause that the caller already knows of (a question asked again elsewhere). */
+		parties?: readonly number[];
 	},
 ): Raised {
 	const { group, target } = input;
@@ -868,6 +870,7 @@ export function raiseFailure(
 	const before = open ?? latestByFingerprint(ctx.db, ctx.project.id, contentHash({ kind: "failure", key }));
 	const parties = new Set(before ? (json<{ parties?: number[] }>(before.evidence).parties ?? []) : []);
 	for (const actor of disputants(ctx.db, ctx.project.id, group.signature.id, group.scope)) parties.add(actor);
+	for (const actor of input.parties ?? []) parties.add(actor);
 	const tests = new Map((earlier.tests ?? []).map((test) => [test.id, test]));
 	for (const test of group.tests) {
 		const row = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;
@@ -1011,6 +1014,9 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 			standing !== null &&
 			!["expired", "outdated", "withdrawn"].includes(json<{ is?: string }>(standing.answer).is ?? "");
 		if (question.state !== "open" && !inForce) continue;
+		// Whether this is a dispute, read before anything is taken away: asked about again where the commit is,
+		// a dispute is still a dispute, kept from the same people, and no rule for plain failures answers it.
+		const disputed = factsNow(ctx.db, question).has("hint:disputed");
 		const named = new Set(runsAbout(ctx, question));
 		if (standing && inForce) {
 			for (const id of runsDependingOn(ctx.db, standing.id)) named.add(id);
@@ -1024,7 +1030,9 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 			sample?: number | null;
 			message?: string | null;
 			producers?: number[];
+			parties?: number[];
 		}>(question.evidence);
+		const parties = disputed ? [...new Set([...(seen.parties ?? []), ...disputeParties(ctx, question)])] : [];
 		const tests = (seen.tests ?? []).flatMap((test) => {
 			const row = testById(ctx.db, test.id);
 			return row ? [row] : [];
@@ -1045,7 +1053,7 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 					tests,
 					results: seen.sample != null ? [seen.sample] : [],
 					message: seen.message ?? null,
-					disputed: false,
+					disputed,
 					counted: false,
 					gateTests: (seen.tests ?? []).flatMap((test) => (test.counted ? [test.id] : [])),
 					runs: [],
@@ -1053,6 +1061,7 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 				target: where,
 				by,
 				producer: question.producer,
+				parties,
 				...(seen.count !== undefined ? { count: seen.count } : {}),
 			});
 			if (raised.s === "open" || raised.s === "attached") alsoAbout(ctx, raised.question, refs);

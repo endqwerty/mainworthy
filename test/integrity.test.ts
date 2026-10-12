@@ -1406,6 +1406,66 @@ describe("what a run and a change may count", () => {
 		).toBe(0);
 	});
 
+	test("a dispute that is asked about again where its commit now is, is still a dispute there", () => {
+		usePolicy("standard");
+		h.call("propose", { edits: [{ op: "create", body: { title: "Agent exercise", methods: ["agent"] } }] });
+		const agentA = h.actor("agent-a", "agent", ["read", "produce"]);
+		const agentB = h.actor("agent-b", "agent", ["read", "produce"]);
+		const ci = pipeline();
+		const target = { repo: "app", commit: "movingdispute", env: "agents" };
+		const planned = plan({
+			name: "Disputed exploration",
+			select: {},
+			accepts: { repo: "app", commit: target.commit, env: "agents" },
+			require: exercise(["agent"]),
+		});
+		const result = (outcome: string) => ({
+			test: { key: "one" },
+			annotation: { case: "C-1", version: 1 },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
+		});
+		// Two agents disagree before any pipeline has reported the commit. A person settles it; the run closes.
+		report({ target, results: [result("fail")] }, agentA);
+		report({ target, results: [result("pass")] }, agentB);
+		expect(decide(open("failure"), { is: "infra" }).status).toBe("decided");
+		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("closed");
+		// The project then lets a rule answer plain failures; disputes stay a person's who reported neither result.
+		const clauses = structuredClone(PRESETS.standard.clauses).map((clause) =>
+			clause.kind === "failure" && clause.id !== "failure-disputed"
+				? {
+						...clause,
+						ask: { who: "rule" as const, notProducer: false, agents: "none" as const, reason: "optional" as const },
+						answer: { is: "flaky" },
+					}
+				: clause,
+		);
+		h.call("propose", { edits: [{ op: "policy", clauses }] });
+		expect(decide(open("adopt"), { is: "accept" }, h.owner, { reason: "rules for plain failures" }).status).toBe(
+			"decided",
+		);
+		// The pipeline places the commit. The dispute is asked about there, as a dispute: the rule for plain
+		// failures does not answer it, and the run that rested on the old answer waits for a person.
+		report(
+			{
+				target: { repo: "app", commit: target.commit, env: "ci", pr: 7 },
+				results: [{ test: { key: "t" }, outcome: "pass" }],
+			},
+			ci,
+		);
+		const asked = open("failure");
+		expect(asked.evidence).toMatchObject({ scope: "pr:7" });
+		expect((asked.evidence as { hints: string[] }).hints).toContain("disputed");
+		expect(asked.needs).toContain("did not produce");
+		expect(first(slots(planned.run)).state).toBe("disputed");
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [asked.q] });
+		expect(
+			rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id").map(
+				(row) => JSON.parse(row.answer).is,
+			),
+		).toEqual(["infra", "outdated"]);
+	});
+
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {
 		const ci = pipeline();
 		const head = "c2c2c2c200000000000000000000000000000002";
