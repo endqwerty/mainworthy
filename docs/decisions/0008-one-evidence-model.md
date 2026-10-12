@@ -37,9 +37,10 @@ the decisions that the sketch depends on.
    (which lens, independent or not), required CI jobs, or sign-off. A result
    from any producer fills a slot only when the obligation admits its
    method, binding or charter, basis and target, and the case's declared
-   methods include that kind; a review fills only a review obligation. A
-   slot's state folds its complete effective result set, never a bounded
-   sample. A PR check, a regression
+   methods include that kind; a review fills only a review obligation. The
+   admission is recorded per slot (one row per slot a result qualifies for),
+   and a slot's state folds its complete effective result set per actor,
+   never a bounded sample, so disagreement between actors is never lost. A PR check, a regression
    pass and a release are one object. A session target never satisfies a
    change run.
 

@@ -546,7 +546,7 @@ type Result = { id: ResultId; project; test: TestId; seq: Seq; ord: number; batc
                 run: RunId | null; corrects: ResultId | null }   // a correction is a new result naming the old; both kept
 // KEY (project, test, seq desc) → last N results · KEY (project, batch, outcome) → a report's page
 // KEY (project, target, test) → base/head comparison for impact · KEY (project, signature, seq desc) → failures by cause
-// `run` is only where a result was typed; slot membership is `SlotResult` (6.4) · `corrects` KEY (replaced) → corrected rows leave the effective set
+// `run` is only where a result was typed; slot membership is `SlotResult` (6.4), one row per admitting slot · `corrects` KEY (replaced) → corrected rows leave the effective set
 // The producer kind is the actor's kind; the method is declared and validated; there is no free "type" column.
 
 type Signature   = { id; project; hash: Hash /* class + normalised message + first frame outside the test */; class: 'assertion' | 'infra' | 'timeout'; sample: Text }
@@ -598,15 +598,18 @@ type Obligation =                                               // what a run ne
   | { id: ObligationId; kind: 'signoff'; role: RoleId; stage: 'start' | 'close' }
 // KEY (project, repo, commit) unique where origin='change' → the gate read by CI is one lookup
 // KEY (project, state='open') → runs an ingest must consider
-type Slot = { run: RunId; case: CaseId; version: VersionNo; claim: Hash     // pinned when the run starts
+type Slot = { id: SlotId; run: RunId; case: CaseId; version: VersionNo; claim: Hash   // pinned when the run starts
               obligation: ObligationId                                      // the exercise or review obligation this slot serves
               assignee: ActorId | null; rank: Rank
-              agg: { passActors: number; failsUncorrected: number; counted: number; latest: Seq }   // lossless; WRITER: runs.fold
+              agg: Map<ActorId, { passes: number; failsUncorrected: number; latest: Seq }>   // per actor, lossless for state; WRITER: runs.fold
               recent: Fill[]                                                // bounded (<= 16), presentation only
               state: 'missing' | 'satisfied' | 'failing' | 'disputed' | 'waived'   // derived from agg and the obligation
               waiver: DecisionId | null }                                   // WRITER: effect of a 'gap' decision
+// agg is keyed by actor because the state rules are about actors: satisfied = at least minActors actors with a pass and
+// no actor with an uncorrected fail; failing = an uncorrected fail and no other actor's pass; disputed = an uncorrected
+// fail from one actor and a pass from another. Actors per slot are few, so the map is small; it is rebuilt from SlotResult.
 type Fill = { result: ResultId | ReviewId; by: ActorId; method: MethodKind; outcome; basis: Basis['b']; admitted: 'exact' | 'assumed' | 'same-claim' | null }
-// KEY (run, rank) · KEY (run, assignee, state='missing', rank) → "my next slot" · KEY (case, run) → open runs wanting this case
+// KEY (id) unique · KEY (run, rank) · KEY (run, assignee, state='missing', rank) → "my next slot" · KEY (case, run) → open runs wanting this case
 type DependsOn = { run: RunId; decision: DecisionId; expires: Instant | null }   // KEY both ways; KEY (project, expires)
 
 function verdict(t: Run['tally'], blocking: number, h: Run['horizon'], expired: boolean): Run['verdict'] {
@@ -645,16 +648,21 @@ slot, obligation, run)`:
    counted pass from another actor is **disputed** (a `failure` question with
    the `disputed` hint, answered by `resolve`), never averaged. The fold
    reads the slot's complete effective result set from `SlotResult` (below)
-   minus corrected rows; `agg` is its lossless summary and `recent` is
-   presentation only, so a seventeenth fill cannot hide a failure.
+   minus corrected rows; `agg` keeps per-actor counts, which is exactly the
+   information the three states need, and `recent` is presentation only, so a
+   seventeenth fill cannot hide a failure and one actor's fail beside
+   another's pass is always `disputed`.
 
 ```ts
 // The durable many-to-many between slots and the results that qualify for them. One immutable Result may
 // qualify for several runs (a CI result fills a change run and two planned runs on the same build).
-type SlotResult = { run: RunId; case: CaseId; result: ResultId; admitted: Fill['admitted']; corrected: boolean }
-// KEY (run, case, result) unique · KEY (result) → every slot a correction must revisit
-// WRITER: runs.fold, at ingest for every matching run (`Run (project, state='open')` ∩ `Slot (case, run)`), at
-// `plan` for prior results on matching targets (the "already: 171"), and on a late batch to a closed run.
+type SlotResult = { slot: SlotId; run: RunId; result: ResultId; admitted: Fill['admitted']; corrected: boolean }
+// One row per (slot, result) that `qualifies` admitted: a result that qualifies for two obligations on the same
+// case has two rows; a result that qualifies for only the permissive one has one.
+// KEY (slot, result) unique · KEY (result) → every slot a correction must revisit
+// WRITER: runs.fold, which calls `qualifies` per candidate slot (`Slot (case, run)` for every matching run in
+// `Run (project, state='open')`) at ingest, at `plan` for prior results on matching targets (the "already: 171"),
+// and on a late batch to a closed run. The slot's complete effective set is its SlotResult rows minus corrected.
 ```
 
 A review obligation is filled only by a `Review` row at the slot's basis
@@ -802,7 +810,7 @@ Every read ends in point reads or one bounded range read on a key named above.
 | Search | `SearchDoc` scoped by project with folder/tag filters in the same query, then the list reads | < 100 ms |
 | Save (seal) one case | one transaction: proposal sealed → `raise('adopt')` → rule clause → `adoptVersion`: Version, head, hashes, SearchDoc, fragment users | < 50 ms |
 | Bulk edit 1,000 | one proposal, one decision, set-based writes | < 1 s |
-| Execute a run | `Slot (run, assignee, state='missing', rank)` limit 1 → pinned `Version`; client prefetches five; `report` of one result: `acceptResult`, `qualifies` → a `Fill`, slot state, tally delta, `raise('failure')` on fail | no wait after a key |
+| Execute a run | `Slot (run, assignee, state='missing', rank)` limit 1 → pinned `Version`; client prefetches five; `report` of one result: `acceptResult`, `qualifies` per candidate slot → `SlotResult` rows, per-actor `agg`, slot state, tally delta, `raise('failure')` on fail | no wait after a key |
 | Ingest 10k | the adapter parses first; accept: batch key, stage the normalised results durably, job, matching runs (frozen excepted) → `outstanding++` (< 2 s); process in one transaction: `Test.resolve` batched → `acceptResult` per row (basis) → insert results → fold signals for failures and flips only → signatures → runs.fold (`outstanding--`, contiguous `applied`) → raise per cause (< 5 s) | |
 | Flaky on ingest | per failing result read last five of `(project, test, seq desc)`; same-commit pass = flip; `classify` pure; state change → `raise('flaky')` | within the ingest |
 | Impact for a change | refs → `Requirement` → `Covers`; files → `Test (project, file)` → case; files → `Area` globs → folders; ≤ 200 candidates → batched reads of hash, `Review`, signals, open/held questions, last result on base and head; rank pure; uncovered files listed | agent token budget |
