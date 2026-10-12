@@ -1515,6 +1515,44 @@ describe("what a run and a change may count", () => {
 		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", stale: false });
 	});
 
+	test("placing a commit reaches every question about it, however many there are, and keeps every test they named", () => {
+		const ci = pipeline();
+		const commit = "manyq00001";
+		const fail = (key: string, message: string) => ({ test: { key }, outcome: "fail", failure: { message } });
+		// One cause in one environment, asked about first. Then a second cause in 205 environments, each answered
+		// on its own: far more than two hundred questions about this commit, the first one the oldest.
+		report({ target: { repo: "app", commit, env: "first" }, results: [fail("a", "first cause")] }, explorer());
+		expect(decide(open("failure"), { is: "infra" }).status).toBe("decided");
+		const envs = Array.from({ length: 205 }, (_, i) => `env-${i}`);
+		for (const [i, env] of envs.entries())
+			report(
+				{ target: { repo: "app", commit, env }, results: [fail(i % 2 === 0 ? "b" : "c", "second cause")] },
+				explorer(),
+			);
+		for (const _ of envs) expect(decide(open("failure"), { is: "infra" }).status).toBe("decided");
+		report(
+			{ target: { repo: "app", commit, env: "ci", pr: 7 }, results: [{ test: { key: "t" }, outcome: "pass" }] },
+			ci,
+		);
+		// Every answer about the commit on its own has ended, the oldest included, and both causes are asked
+		// about where the commit is, the second with both of the tests it was seen on.
+		expect(
+			rows(
+				"SELECT count(*) AS n FROM questions q JOIN decisions d ON d.id = q.decision WHERE q.kind = 'failure' AND json_extract(d.answer, '$.is') = 'infra'",
+			),
+		).toEqual([{ n: 0 }]);
+		const asked = h.call<InboxReply>("inbox", { kind: "failure", limit: 500 }).items;
+		expect(asked.map((item) => item.title).sort()).toEqual(["first cause", "second cause"]);
+		const second = asked.find((item) => item.title === "second cause")?.evidence as {
+			count: number;
+			tests: { name: string }[];
+			targets: number[];
+		};
+		expect(second.targets).toHaveLength(envs.length);
+		expect(second.count).toBe(2);
+		expect(second.tests.map((test) => test.name).sort()).toEqual(["b", "c"]);
+	}, 60_000);
+
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {
 		const ci = pipeline();
 		const head = "c2c2c2c200000000000000000000000000000002";

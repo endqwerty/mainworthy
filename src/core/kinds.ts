@@ -315,8 +315,12 @@ export function standingOf(input: {
 	if (ask.who === "author") {
 		// Only the proposal's author, or an admin stepping in. An agent author counts only where the clause says an
 		// agent may answer (withdrawing its own proposal), so an agent cannot push its own conflict through.
-		if (input.isAuthor) return actor.kind === "agent" && ask.agents !== "answer" ? "forbidden" : "counts";
-		return actor.kind === "human" && actor.can.includes("admin") ? "counts" : "forbidden";
+		const stands = input.isAuthor
+			? !(actor.kind === "agent" && ask.agents !== "answer")
+			: actor.kind === "human" && actor.can.includes("admin");
+		if (!stands) return "forbidden";
+		// The clause's other condition holds for the author and for the administrator alike.
+		return ask.notProducer && input.isProducer ? "forbidden" : "counts";
 	}
 	if (ask.who === "rule") {
 		// A rule answered or will answer. A person with the right may still overrule it; nobody else may.

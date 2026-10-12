@@ -63,6 +63,17 @@ describe("who may answer", () => {
 			),
 		).toBe("advice");
 		expect(standing(agent(["read", "produce", "answer", "admin"]), ask({ who: "admin" }))).toBe("forbidden");
+		// An author clause too: "did not produce the evidence" is not skipped for the author, nor for the
+		// administrator who may stand in for one.
+		const authorNotProducer = ask({ who: "author", agents: "answer", notProducer: true });
+		const asAuthor = (actor: ReturnType<typeof person> | ReturnType<typeof agent>, isProducer: boolean) =>
+			standingOf({ actor, ask: authorNotProducer, isAuthor: true, isProducer });
+		expect(asAuthor(person(["read", "produce", "answer"]), true)).toBe("forbidden");
+		expect(asAuthor(person(["read", "produce", "answer"]), false)).toBe("counts");
+		expect(asAuthor(agent(["read", "produce", "answer"]), true)).toBe("forbidden");
+		expect(standing(person(["read", "answer", "admin"]), authorNotProducer, true)).toBe("forbidden");
+		expect(standing(person(["read", "answer", "admin"]), authorNotProducer, false)).toBe("counts");
+		expect(standing(person(["read", "answer", "admin"]), ask({ who: "author" }), true)).toBe("counts");
 		// What already held: a member clause.
 		expect(standing(person(["read", "answer"]), ask({ notProducer: true }), true)).toBe("forbidden");
 		expect(standing(agent(["read", "produce", "answer"]), ask({ agents: "answer" }))).toBe("counts");

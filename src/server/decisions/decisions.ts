@@ -65,6 +65,7 @@ import {
 	type DecisionRow,
 	decisionById,
 	decisionsOf,
+	everyQuestionOn,
 	type HoldTerm,
 	insertAnswer,
 	insertDecision,
@@ -77,7 +78,6 @@ import {
 	type QuestionRow,
 	questionById,
 	questionRef,
-	questionsOn,
 	refsOf,
 	type Signer,
 	setDecisionEffects,
@@ -1020,6 +1020,7 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 			question: QuestionRow;
 			seen: Seen;
 			targets: Set<number>;
+			tests: Map<number, boolean>;
 			disputed: boolean;
 			parties: Set<number>;
 			runs: Set<number>;
@@ -1027,7 +1028,7 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 		}
 	>();
 	const moved: QuestionRow[] = [];
-	for (const asked of questionsOn(ctx.db, ctx.project.id, `scope:${before}`)) {
+	for (const asked of everyQuestionOn(ctx.db, ctx.project.id, `scope:${before}`)) {
 		const question = questionById(ctx.db, asked.id);
 		if (question?.kind !== "failure") continue;
 		const subject = json<{ signature: number; scope: string }>(question.subject);
@@ -1046,6 +1047,7 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 			question,
 			seen,
 			targets: new Set<number>(),
+			tests: new Map<number, boolean>(),
 			disputed: false,
 			parties: new Set<number>(),
 			runs: new Set<number>(),
@@ -1053,7 +1055,10 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 		};
 		causes.set(subject.signature, cause);
 		cause.disputed ||= disputed;
-		cause.count = Math.max(cause.count, seen.count ?? 0);
+		// Every test any of the questions named: two environments can have shown the cause in different tests.
+		for (const test of seen.tests ?? [])
+			cause.tests.set(test.id, cause.tests.get(test.id) === true || test.counted === true);
+		cause.count = Math.max(cause.count, seen.count ?? 0, cause.tests.size);
 		if (disputed)
 			for (const actor of [...(seen.parties ?? []), ...disputeParties(ctx, question)]) cause.parties.add(actor);
 		for (const id of runsAbout(ctx, question)) cause.runs.add(id);
@@ -1067,8 +1072,8 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 	for (const [id, cause] of causes) {
 		const signature = signatureById(ctx.db, id);
 		if (!signature) continue;
-		const tests = (cause.seen.tests ?? []).flatMap((test) => {
-			const row = testById(ctx.db, test.id);
+		const tests = [...cause.tests.keys()].flatMap((test) => {
+			const row = testById(ctx.db, test);
 			return row ? [row] : [];
 		});
 		const refs = [...cause.runs].flatMap((run) => {
@@ -1088,7 +1093,7 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 					message: cause.seen.message ?? null,
 					disputed: cause.disputed,
 					counted: false,
-					gateTests: (cause.seen.tests ?? []).flatMap((test) => (test.counted ? [test.id] : [])),
+					gateTests: [...cause.tests].flatMap(([test, counted]) => (counted ? [test] : [])),
 					runs: [],
 				},
 				target: where,

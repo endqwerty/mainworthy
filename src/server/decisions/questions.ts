@@ -151,6 +151,12 @@ const Q = {
 		`SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question
 		 WHERE r.project = $project AND r.ref = $ref ORDER BY q.id DESC LIMIT 200`,
 	),
+	// Every question about a thing, with no cap: for a calculation that must reach each of them. (`onRef` is the
+	// capped list a page shows.)
+	allOnRef: sql<{ project: number; ref: string }, QuestionRow>(
+		`SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question
+		 WHERE r.project = $project AND r.ref = $ref ORDER BY q.id`,
+	),
 	openOnRef: sql<
 		{ project: number; ref: string },
 		{ id: number; no: number; kind: Kind; subject: string; blocks: string }
@@ -367,6 +373,9 @@ export const refsOf = (db: Db, question: number): string[] => db.all(Q.refsOf, {
 export const questionsOn = (db: Db, project: number, about: string): QuestionRow[] =>
 	db.all(Q.onRef, { project, ref: about });
 export const openQuestionsOn = (db: Db, project: number, about: string) => db.all(Q.openOnRef, { project, ref: about });
+/** Every question about a thing, oldest first, however many there are. */
+export const everyQuestionOn = (db: Db, project: number, about: string): QuestionRow[] =>
+	db.all(Q.allOnRef, { project, ref: about });
 export const openCountOn = (db: Db, project: number, about: string): number =>
 	db.get(Q.openCountOnRef, { project, ref: about })?.n ?? 0;
 
