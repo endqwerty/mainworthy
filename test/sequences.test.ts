@@ -13,10 +13,16 @@
 // 4. Every excuse belongs to a decision that is its question's current one; a decision in force that excused or
 //    attributed a failure still has its excuse.
 // 5. A run's stored verdict is the verdict of its stored tally and blocking questions.
+// 6. A slot's stored state is what the results admitted to it give by the same fold; a planned run's tally is
+//    what its slots give.
+// 7. Nobody is asked about a failure that has an answer: no question is open for a cause on a target that an
+//    excuse in force covers, unless it also lists a target that none covers.
+// 8. An answer that another decision supersedes is no longer in force. (The rows the ledger writes itself when
+//    an answer ends, `expired` and `outdated`, stay on their question and are what the next answer follows.)
 //
 // More seeds: CASEBOOK_SEQUENCE_SEEDS=500 bun test test/sequences.test.ts
 import { expect, test } from "bun:test";
-import { replacesInLane, type Tally, verdict } from "../src/core/runs.ts";
+import { aggregateSlot, replacesInLane, type SlotFill, slotState, type Tally, verdict } from "../src/core/runs.ts";
 import { sweep } from "../src/server/jobs.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
 import { harness } from "./helpers.ts";
@@ -176,6 +182,61 @@ function sequence(seed: number, preset: string): Problem | null {
 				return { what: "a run's stored verdict is not the verdict of its tally", detail: { run } };
 		}
 
+		// 6. Slots against the results admitted to them.
+		for (const slot of rows("SELECT s.*, r.require FROM slots s JOIN runs r ON r.id = s.run WHERE r.state = 'open'")) {
+			const fills = rows(
+				`SELECT r.id, r.actor, r.method, r.test, r.target, r.attempt, r.seq, r.ord, r.outcome, b.job
+				 FROM slot_results s JOIN results r ON r.id = s.result JOIN batches b ON b.id = r.batch
+				 WHERE s.slot = ? AND s.corrected = 0 AND s.discounted_by IS NULL`,
+				Number(slot.id),
+			).map(
+				(fill): SlotFill => ({
+					id: Number(fill.id),
+					actor: Number(fill.actor),
+					method: fill.method as SlotFill["method"],
+					test: Number(fill.test),
+					lane: `${fill.target}:${fill.job}`,
+					attempt: Number(fill.attempt),
+					seq: Number(fill.seq),
+					ord: Number(fill.ord),
+					outcome:
+						fill.outcome === "pass"
+							? "pass"
+							: fill.outcome === "fail" || fill.outcome === "error"
+								? "fail"
+								: fill.outcome === "skip"
+									? "skip"
+									: "blocked",
+				}),
+			);
+			const obligations = JSON.parse(String(slot.require)) as { id: string; minActors?: number }[];
+			const minActors = obligations.find((o) => o.id === slot.obligation)?.minActors ?? 1;
+			const expected = slotState(aggregateSlot(fills).agg, minActors);
+			if (expected !== slot.state)
+				return { what: "a slot's state is not what its admitted results give", detail: { slot, expected, fills } };
+		}
+
+		// 7. Nobody is asked about what already has an answer.
+		for (const question of open) {
+			const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string };
+			const evidence = JSON.parse(String(question.evidence)) as { targets?: number[] };
+			const listed = evidence.targets ?? [];
+			const project = Number(runs[0]?.project ?? 0);
+			if (listed.length > 0 && listed.every((target) => excuseOf(project, subject.signature, subject.scope, target)))
+				return {
+					what: "a question is open about a failure that has an answer everywhere it was seen",
+					detail: question,
+				};
+		}
+
+		// 8. A superseded decision is not in force.
+		const standing = rows(
+			`SELECT old.id, old.answer, newer.id AS by FROM decisions newer JOIN decisions old ON old.id = newer.supersedes
+			 JOIN questions q ON q.id = old.question WHERE q.state = 'decided' AND q.decision = old.id
+			   AND json_extract(old.answer, '$.is') NOT IN ('expired', 'outdated', 'withdrawn')`,
+		);
+		if (standing.length > 0) return { what: "a superseded decision is still its question's answer", detail: standing };
+
 		// 4. Excuses and the decisions they belong to.
 		const orphans = rows(
 			`SELECT e.signature, e.scope, e.target, e.decision FROM excuses e
@@ -200,6 +261,16 @@ function sequence(seed: number, preset: string): Problem | null {
 				{ op: "create", outline: "Spare" },
 			],
 		});
+		// Under a policy where a person adopts new cases, the owner does, with the reason it asks for.
+		for (const waiting of rows<{ no: number; evidence_hash: string }>(
+			"SELECT no, evidence_hash FROM questions WHERE kind = 'adopt' AND state = 'open'",
+		))
+			command("decide", {
+				q: `Q-${waiting.no}`,
+				onEvidence: waiting.evidence_hash,
+				answer: { is: "accept" },
+				reason: "seed",
+			});
 		const commits = ["random01", "random02", "random03"];
 		for (let step = 0; step < STEPS; step++) {
 			const action = rand(100);
@@ -208,7 +279,13 @@ function sequence(seed: number, preset: string): Problem | null {
 				// A pipeline or a person reports one automated test on trunk, sometimes correcting an earlier result.
 				const index = rand(2);
 				const as = pick([pipeline, ...people]);
-				const target = { commit: pick(commits), branch: "main", env: pick(["prod", "staging"]) };
+				// Now and then the same commit in a second repository (a fork): its own gate, its own answers.
+				const target = {
+					commit: pick(commits),
+					branch: "main",
+					env: pick(["prod", "staging"]),
+					...(rand(8) === 0 ? { repo: "fork" } : {}),
+				};
 				const outcome = pick(["fail", "fail", "pass", "skip", "blocked"]);
 				const result: Record<string, unknown> = {
 					test: { key: `test-${index}` },
@@ -347,7 +424,7 @@ function sequence(seed: number, preset: string): Problem | null {
 	}
 }
 
-for (const preset of ["loose", "standard"]) {
+for (const preset of ["loose", "standard", "strict"]) {
 	test(`${SEEDS} random sequences under the ${preset} policy keep every invariant`, () => {
 		const problems: Problem[] = [];
 		for (let seed = 1; seed <= SEEDS && problems.length < 3; seed++) {

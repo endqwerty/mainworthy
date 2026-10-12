@@ -19,7 +19,7 @@ import {
 } from "../../core/kinds.ts";
 import type { DecideReply, QuestionItem } from "../../core/ops.ts";
 import { clip } from "../../core/text.ts";
-import { changeById, mustTarget, signatureById, type TargetRow, testRef } from "../evidence/evidence.ts";
+import { changeById, excuseFor, mustTarget, signatureById, type TargetRow, testRef } from "../evidence/evidence.ts";
 import { actorLabel, ruleActor } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json } from "../kernel/db.ts";
@@ -488,7 +488,7 @@ function settle(
 	setDecisionEffects(ctx, decision.id, effects);
 	const about = runsAbout(ctx, question);
 	if (Array.isArray(effects.reask) && effects.reask.length > 0) askAgain(ctx, question, effects.reask as number[]);
-	about.push(...answeredElsewhere(ctx, question, decision), ...rested);
+	about.push(...closeAnswered(ctx, question), ...rested);
 	// A decision about a failure changes how every run that shows the cause counts it, an older commit's run and
 	// a run the question never named included. Each is recomputed now, so none is left with yesterday's tally.
 	if (question.kind === "failure") {
@@ -544,21 +544,25 @@ function endedBefore(ctx: Ctx, question: QuestionRow): number | null {
 }
 
 /**
- * Closes the other open questions about the same cause that this decision has just answered: every target they
- * had seen the cause on is now covered. Nobody is left asked about something that has a valid answer. Returns the
- * runs those questions named, to be recomputed.
+ * Closes the open questions about a cause that have nothing left to ask: every target they had seen the cause on
+ * has an answer in force. Called when an answer is given (it may answer a neighbouring question too) and when
+ * one is withdrawn or runs out (another answer may still cover what its question asked about). What counts is
+ * what the runs count, the excuses in force, whichever question's answer they came from. Nobody is left asked
+ * about something that is answered. Returns the runs those questions named, to be recomputed.
  */
-function answeredElsewhere(ctx: Ctx, question: QuestionRow, decision: DecisionRow): number[] {
+function closeAnswered(ctx: Ctx, question: QuestionRow): number[] {
+	if (question.kind !== "failure") return [];
+	const subject = json<{ signature?: number; scope?: string }>(question.subject);
+	const { signature, scope } = subject;
+	if (signature === undefined || scope === undefined) return [];
 	const runs: number[] = [];
 	for (const other of liveByFingerprint(ctx.db, ctx.project.id, question.fingerprint)) {
-		if (other.id === question.id || other.state !== "open") continue;
-		const seen = json<{ facts?: string[]; targets?: number[]; targetId?: number }>(other.evidence);
+		if (other.state !== "open") continue;
+		const seen = json<{ targets?: number[]; targetId?: number }>(other.evidence);
 		const targets = seen.targets ?? (seen.targetId !== undefined ? [seen.targetId] : []);
 		const covered =
 			targets.length > 0 &&
-			targets.every((target) =>
-				stillHolds(decision, { hash: other.basis, target, facts: seen.facts ?? [], now: ctx.now }),
-			);
+			targets.every((target) => excuseFor(ctx.db, ctx.project.id, signature, scope, target) !== null);
 		if (!covered) continue;
 		runs.push(...runsAbout(ctx, other));
 		setQuestionState(ctx, other, "dissolved", null);
@@ -669,8 +673,17 @@ export function undo(ctx: Ctx, input: { q: string; reason: string | undefined })
 	// rule does not answer again behind the back of whoever withdrew its answer.
 	const general = clauseFor(policy, { kind: question.kind, facts }).ask;
 	setQuestionAsk(ctx, question, general.who === "rule" ? { ...general, who: "member" } : general);
-	refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, prior.id)]);
-	return reply(question, "reopened", { decision: decision.id });
+	// Another answer may still cover everything this question asked about (an older answer for the whole cause
+	// under an answer for one target): then nothing is left to ask, and the question is closed, not left open.
+	const closed = closeAnswered(ctx, question);
+	refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, prior.id), ...closed]);
+	const still = questionById(ctx.db, question.id);
+	return reply(question, "reopened", {
+		decision: decision.id,
+		...(still?.state === "dissolved"
+			? { needs: "withdrawn; another answer in force still covers this failure, so nobody is asked about it" }
+			: {}),
+	});
 }
 
 // ── Failures ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -941,7 +954,8 @@ export function sweepExpired(ctx: Ctx, expired: readonly DecisionRow[]): number 
 			supersedes: decision.id,
 		});
 		setQuestionState(ctx, question, "open", null);
-		refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, decision.id)]);
+		const closed = closeAnswered(ctx, question);
+		refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, decision.id), ...closed]);
 		reopened++;
 	}
 	return reopened;
