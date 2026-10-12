@@ -23,6 +23,7 @@ import {
 import {
 	type Applied,
 	type BatchRow,
+	batchById,
 	changeById,
 	changeByKey,
 	codeWhat,
@@ -39,6 +40,7 @@ import {
 	targetByCommit,
 	targetsOfCommit,
 	targetsWithCommit,
+	testById,
 } from "../evidence/evidence.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
@@ -54,6 +56,8 @@ export type RunRow = {
 	origin: "change" | "planned";
 	accepts: string;
 	accepts_what: string | null;
+	/** For a change run: the scope its failures are answered in. Null for a planned run, whose scope is derived. */
+	scope: string | null;
 	require: string;
 	change: number | null;
 	state: "open" | "closed";
@@ -107,6 +111,7 @@ const Q = {
 		origin: string;
 		accepts: string;
 		what: string | null;
+		scope: string | null;
 		require: string;
 		change: number | null;
 		tally: string;
@@ -115,8 +120,8 @@ const Q = {
 		at: number;
 		rev: number;
 	}>(
-		`INSERT INTO runs (project, no, name, origin, accepts, accepts_what, require, change, tally, verdict, created_by, created_at, rev)
-		 VALUES ($project, $no, $name, $origin, $accepts, $what, $require, $change, $tally, $verdict, $actor, $at, $rev)`,
+		`INSERT INTO runs (project, no, name, origin, accepts, accepts_what, scope, require, change, tally, verdict, created_by, created_at, rev)
+		 VALUES ($project, $no, $name, $origin, $accepts, $what, $scope, $require, $change, $tally, $verdict, $actor, $at, $rev)`,
 	),
 	accepted: sql<{ id: number; seq: number }>(
 		"UPDATE runs SET outstanding = outstanding + 1, accepted_seq = $seq, rev = $seq WHERE id = $id",
@@ -218,8 +223,11 @@ const Q = {
 	admittedTo: sql<{ slot: number }, { result: number; admitted: string }>(
 		"SELECT result, admitted FROM slot_results WHERE slot = $slot AND corrected = 0",
 	),
-	newestChangeRun: sql<{ project: number; change: number | null }, { id: number | null }>(
-		"SELECT max(id) AS id FROM runs WHERE project = $project AND origin = 'change' AND change IS $change",
+	newestChangeRun: sql<{ project: number; scope: string }, { id: number | null }>(
+		"SELECT max(id) AS id FROM runs WHERE project = $project AND scope = $scope",
+	),
+	failingSlotRows: sql<{ run: number }, SlotRow>(
+		"SELECT * FROM slots WHERE run = $run AND state IN ('failing', 'disputed') ORDER BY rank",
 	),
 	slotsBySignature: sql<{ run: number; signature: number }, SlotRow>(
 		`SELECT * FROM slots WHERE run = $run AND state IN ('failing', 'disputed')
@@ -264,6 +272,8 @@ export type Fill = {
 	ord: number;
 	signature: number | null;
 	target: number;
+	/** The job that reported it. With the target it is the lane a result belongs to. */
+	job: string;
 	method: MethodKind;
 	admitted: string;
 	at: number;
@@ -274,6 +284,15 @@ export type Fill = {
 /** The uncorrected results admitted to a slot, oldest first. Results are read through their owner, evidence. */
 export function fillsOf(db: Db, slot: number): Fill[] {
 	const fills: Fill[] = [];
+	const jobs = new Map<number, string>();
+	const jobOf = (batch: number): string => {
+		let job = jobs.get(batch);
+		if (job === undefined) {
+			job = batchById(db, batch)?.job ?? "";
+			jobs.set(batch, job);
+		}
+		return job;
+	};
 	for (const row of db.all(Q.admittedTo, { slot })) {
 		const result = resultById(db, row.result);
 		if (!result) continue;
@@ -287,6 +306,7 @@ export function fillsOf(db: Db, slot: number): Fill[] {
 			ord: result.ord,
 			signature: result.signature,
 			target: result.target,
+			job: jobOf(result.batch),
 			method: result.method,
 			admitted: row.admitted,
 			at: result.at,
@@ -337,6 +357,7 @@ export function ensureChangeRun(ctx: Ctx, target: TargetRow): RunRow | null {
 		origin: "change",
 		accepts: JSON.stringify({ commit: target.commit_sha, ...(target.repo ? { repo: target.repo } : {}) }),
 		what: target.what,
+		scope: scopeOf(target, null),
 		require: "[]",
 		change: target.change,
 		tally: JSON.stringify(emptyTally()),
@@ -543,6 +564,50 @@ export function* applyBatchSteps(
 	return [...groups.values()].filter((g) => g.runs.length > 0 || g.results.length > 0);
 }
 
+/**
+ * The failures a run's slots show right now, grouped by cause, with the target and producer of the latest one.
+ * For a run planned over evidence that already fails: its failures are put to the queue through the same door
+ * as a report's, so an existing question takes the run on and a decision about the cause reaches it.
+ */
+export function failuresShown(ctx: Ctx, run: RunRow): { group: FailingGroup; target: number; by: number }[] {
+	const scope = scopeOfRun(ctx.db, run);
+	const out = new Map<number, { group: FailingGroup; target: number; by: number }>();
+	for (const slot of ctx.db.all(Q.failingSlotRows, { run: run.id })) {
+		const fills = fillsOf(ctx.db, slot.id);
+		for (const [cause] of json<Cause[]>(slot.causes)) {
+			const signature = signatureById(ctx.db, cause);
+			if (!signature) continue;
+			let entry = out.get(cause);
+			for (const fill of fills) {
+				if (fill.signature !== cause || (fill.outcome !== "fail" && fill.outcome !== "error")) continue;
+				entry ??= {
+					group: {
+						signature,
+						scope,
+						tests: [],
+						results: [],
+						message: null,
+						disputed: false,
+						counted: true,
+						runs: [run],
+					},
+					target: fill.target,
+					by: fill.actor,
+				};
+				const test = testById(ctx.db, fill.test);
+				if (test && !entry.group.tests.some((t) => t.id === test.id)) entry.group.tests.push(test);
+				entry.group.results.push(fill.id);
+				entry.group.message ??= fill.message;
+				entry.group.disputed ||= slot.state === "disputed";
+				entry.target = fill.target;
+				entry.by = fill.actor;
+			}
+			if (entry) out.set(cause, entry);
+		}
+	}
+	return [...out.values()];
+}
+
 /** `applyBatchSteps` run to the end without pausing. */
 export function applyBatch(
 	ctx: Ctx,
@@ -589,6 +654,7 @@ function refreshSlot(
 			actor: fill.actor,
 			method: fill.method,
 			test: fill.test,
+			lane: `${fill.target}:${fill.job}`,
 			attempt: fill.attempt,
 			seq: fill.seq,
 			ord: fill.ord,
@@ -631,16 +697,15 @@ type Cause = [signature: number, target: number];
 
 /** The scope in which this run's failures are answered. */
 export function scopeOfRun(db: Db, run: RunRow): string {
-	if (run.change !== null) return `change:${run.change}`;
-	if (run.origin === "change") return "line:trunk";
+	if (run.scope !== null) return run.scope;
 	const [target] = targetsOfRun(db, run);
 	return target ? scopeOf(target, run.id) : `run:${run.id}`;
 }
 
 /** Whether no newer run exists in this run's scope (the same change, or trunk). A planned run is its own scope. */
 export function isLatestInScope(db: Db, run: RunRow): boolean {
-	if (run.origin !== "change") return true;
-	const newest = db.get(Q.newestChangeRun, { project: run.project, change: run.change });
+	if (run.origin !== "change" || run.scope === null) return true;
+	const newest = db.get(Q.newestChangeRun, { project: run.project, scope: run.scope });
 	return (newest?.id ?? run.id) === run.id;
 }
 
@@ -806,6 +871,7 @@ export function plan(
 		origin: "planned",
 		accepts: JSON.stringify(input.accepts),
 		what,
+		scope: null,
 		require: JSON.stringify(input.require),
 		change: null,
 		tally: JSON.stringify(emptyTally()),

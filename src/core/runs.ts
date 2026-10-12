@@ -130,6 +130,8 @@ export type SlotFill = {
 	actor: number;
 	method: MethodKind;
 	test: number;
+	/** Where and by which job it was reported: the target and the job. Results in different lanes never replace each other. */
+	lane: string;
 	attempt: number;
 	seq: number;
 	ord: number;
@@ -138,9 +140,10 @@ export type SlotFill = {
 
 /**
  * Folds the results admitted to a slot into one entry per producer, and lists every failure that still counts.
- * A producer may have several tests on one case. For each test its latest decisive result counts: the highest
- * attempt, then the last recorded, so a re-run replaces the attempt before it and an old attempt arriving late
- * replaces nothing. A skip or a blocked result is not decisive: it never replaces a pass or a failure, and counts
+ * A producer may have several tests on one case, each reported by several jobs or in several environments. For
+ * each test in each lane its latest decisive result counts: the highest attempt, then the last recorded, so a
+ * re-run replaces the attempt before it, an old attempt arriving late replaces nothing, and a pass in one job
+ * or environment never replaces a failure in another. A skip or a blocked result is not decisive: it never replaces a pass or a failure, and counts
  * only when the test has neither. The producer's entry is then the worst of its tests: any failing test makes it
  * a fail, whatever else passed. `failing` holds the result of every test that fails, from every producer, because
  * each may have its own cause and each cause needs its own answer.
@@ -151,7 +154,7 @@ export function aggregateSlot(fills: readonly SlotFill[]): { agg: SlotAgg; faili
 		a.attempt > b.attempt || (a.attempt === b.attempt && (a.seq > b.seq || (a.seq === b.seq && a.ord > b.ord)));
 	const latest = new Map<string, SlotFill>();
 	for (const fill of fills) {
-		const key = `${fill.actor}:${fill.method}:${fill.test}`;
+		const key = `${fill.actor}:${fill.method}:${fill.test}:${fill.lane}`;
 		const held = latest.get(key);
 		const replaces = !held || (decisive(fill) === decisive(held) ? later(fill, held) : decisive(fill));
 		if (replaces) latest.set(key, fill);

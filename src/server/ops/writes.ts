@@ -45,6 +45,7 @@ import {
 	defaultObligations,
 	describeAccepts,
 	type FailingGroup,
+	failuresShown,
 	gateOf,
 	mustRun,
 	noteAccepted,
@@ -149,7 +150,7 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 
 	const questions: QuestionBrief[] = [];
 	for (const group of groups) {
-		const raised = raiseFailure(ctx, { group, target, batch, producer });
+		const raised = raiseFailure(ctx, { group, target, by: batch.actor, producer });
 		questions.push(brief(ctx, raised, group.tests.length));
 	}
 
@@ -212,11 +213,17 @@ function brief(ctx: Ctx, raised: Raised, tests: number): QuestionBrief {
 	};
 }
 
+/**
+ * Puts one cause of failure to the queue. `by` is the actor whose result shows it, `producer` that actor's kind.
+ * Called for the failures of a report as it is applied, and for the failures a run shows when it is planned
+ * over evidence that already fails: there is one door, so the question, its carried answer and the runs it
+ * reaches are the same either way.
+ */
 function raiseFailure(
 	ctx: Ctx,
-	input: { group: FailingGroup; target: TargetRow; batch: BatchRow; producer: ActorKind },
+	input: { group: FailingGroup; target: TargetRow; by: number; producer: ActorKind },
 ): Raised {
-	const { group, target, batch } = input;
+	const { group, target } = input;
 	const scopeKind = group.scope.startsWith("change:") ? "change" : group.scope.startsWith("line:") ? "trunk" : "run";
 	const key = `${group.signature.hash}|${group.scope}`;
 	// One question per cause: an occurrence adds its tests to the open question instead of opening another.
@@ -261,7 +268,7 @@ function raiseFailure(
 			target: target.commit_sha ? target.commit_sha.slice(0, 12) : target.what,
 			branch: target.branch,
 			hints: hints.map((hint) => hint.slice(5)),
-			producers: [...new Set([...(earlier.producers ?? []), batch.actor])],
+			producers: [...new Set([...(earlier.producers ?? []), input.by])],
 			// Every target this question has seen the cause on: an answer that holds "here only" covers these.
 			targets: [...new Set([...(earlier.targets ?? []), target.id])],
 			sample: group.results[0] ?? null,
@@ -439,6 +446,17 @@ export function planRun(ctx: Ctx, input: PlanInput): PlanReply {
 		require: input.require ?? defaultObligations(policy),
 		assignees,
 	});
+	// Evidence already recorded may fill the new run with failures. Each is asked about (or its standing answer
+	// carried) exactly as if a report had just shown it, so the run is never blocked by a failure nobody is asked
+	// about, and a later decision about the cause reaches this run too.
+	for (const shown of failuresShown(ctx, planned.run)) {
+		raiseFailure(ctx, {
+			group: shown.group,
+			target: mustTarget(ctx.db, shown.target),
+			by: shown.by,
+			producer: actorLabel(ctx.db, shown.by).kind,
+		});
+	}
 	refold(ctx, [planned.run.id]);
 	return { run: runRef(planned.run), slots: planned.slots, already: planned.already };
 }

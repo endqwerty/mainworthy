@@ -506,6 +506,8 @@ CREATE TABLE runs (
 	accepts TEXT NOT NULL,
 	-- for a change run: the target's `what`, so the gate read by CI is one lookup
 	accepts_what TEXT,
+	-- for a change run: where its failures are answered ("change:<id>", "line:trunk@<repository>")
+	scope TEXT,
 	require TEXT NOT NULL,
 	change INTEGER REFERENCES changes (id),
 	-- STANDING (signoff):
@@ -527,6 +529,7 @@ CREATE TABLE runs (
 ) STRICT;
 CREATE UNIQUE INDEX runs_change ON runs (project, accepts_what) WHERE origin = 'change';
 CREATE INDEX runs_open ON runs (project, state, id DESC);
+CREATE INDEX runs_scope ON runs (project, scope, id) WHERE scope IS NOT NULL;
 
 -- A change run counts tests: the effective (latest attempt) result of each test on the run's target.
 CREATE TABLE run_tests (

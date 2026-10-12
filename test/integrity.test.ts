@@ -316,6 +316,73 @@ describe("what a result may prove", () => {
 		expect(gate({ run: after.run }).verdict).toBe("passed");
 	});
 
+	test("in a slot, a pass in another job or environment does not replace a failure", () => {
+		seed();
+		const one = (outcome: string, target: Record<string, unknown>, job: string) => ({
+			target,
+			job,
+			results: [
+				{
+					test: { key: "a::t" },
+					annotation: { case: "C-1", version: 1 },
+					outcome,
+					...(outcome === "fail" ? { failure: { message: "only here" } } : {}),
+				},
+			],
+		});
+		const jobs = plan({ name: "Two jobs", select: {}, accepts: { commit: "slotjobs1" } });
+		report(one("fail", { commit: "slotjobs1" }, "e2e"));
+		report(one("pass", { commit: "slotjobs1" }, "unit"));
+		expect(first(slots(jobs.run)).state).toBe("failing");
+		expect(gate({ run: jobs.run }).verdict).toBe("blocked");
+		const environments = plan({ name: "Two environments", select: {}, accepts: { commit: "slotenvs1" } });
+		report(one("fail", { commit: "slotenvs1", env: "production" }, "e2e"));
+		report(one("pass", { commit: "slotenvs1", env: "staging" }, "e2e"));
+		expect(gate({ run: environments.run }).verdict).toBe("blocked");
+		// The same job reporting again is that job's own newer answer.
+		report({ ...one("pass", { commit: "slotjobs1" }, "e2e"), attempt: 2 });
+		expect(gate({ run: jobs.run }).verdict).toBe("passed");
+	});
+
+	test("a run planned over a failure joins its question, and the answer reaches the run", () => {
+		seed();
+		report({
+			target: { commit: "posthoc01" },
+			results: [
+				{
+					test: { key: "a::t" },
+					annotation: { case: "C-1", version: 1 },
+					outcome: "fail",
+					failure: { message: "broken" },
+				},
+			],
+		});
+		const asked = open("failure");
+		const planned = plan({ name: "Planned afterwards", select: {}, accepts: { commit: "posthoc01" } });
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [asked.q] });
+		expect(h.call<InboxReply>("inbox", { kind: "failure" }).items).toHaveLength(1);
+		decide(open("failure"), { is: "flaky" });
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+		// A run planned after the answer starts with it.
+		const later = plan({ name: "Planned after the answer", select: {}, accepts: { commit: "posthoc01" } });
+		expect(gate({ run: later.run }).verdict).toBe("passed");
+		h.call("decide", { undo: asked.q });
+		expect(gate({ run: later.run }).verdict).toBe("blocked");
+	});
+
+	test("what was decided about one repository's trunk says nothing about another's", () => {
+		const fail = (repo: string, commit: string) => ({
+			target: { repo, commit, branch: "main" },
+			results: [{ test: { key: "a::t" }, outcome: "fail", failure: { message: "same assertion" } }],
+		});
+		report(fail("a", "trunka001"));
+		decide(open("failure"), { is: "flaky" });
+		expect(gate({ commit: "trunka001" }).verdict).toBe("passed");
+		const other = report(fail("b", "trunkb001"));
+		expect(other.gate?.verdict).toBe("blocked");
+		expect(first(other.questions).how).toBe("new");
+	});
+
 	test("an excuse held for one target does not excuse another", () => {
 		const push = (commit: string) =>
 			ciReport({ commit, branch: "feature", pr: 91, n: 1, fail: { 0: "environment unavailable" } });

@@ -476,7 +476,8 @@ export const recentChanges = (db: Db, project: number, limit: number): ChangeRow
 export function scopeOf(target: TargetRow, run: number | null): string {
 	if (target.line === "session") return run !== null ? `run:${run}` : `session:${target.id}`;
 	if (target.change !== null) return `change:${target.change}`;
-	return `line:${target.line}`;
+	// A line belongs to a repository: what was decided about one repository's trunk says nothing about another's.
+	return target.repo ? `line:${target.line}@${target.repo}` : `line:${target.line}`;
 }
 
 // ── Accept ─────────────────────────────────────────────────────────────────────────────────────────────────
