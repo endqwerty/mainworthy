@@ -37,7 +37,7 @@ fifteen operations. The whole instance is one process and one SQLite file.
         └──────────────┴────────┬───────┴───────────────┴──────────────┘
                     src/server/kernel   db · migrations · ctx · witness · app
                                  │
-                          one SQLite file (WAL)          writer connection + read-only connection
+                          one SQLite file (WAL)          one writer connection, reader threads
 ```
 
 `src/core` is beside all of this: pure functions and schemas with no I/O (the case document, the outline
@@ -62,7 +62,9 @@ an operation named like a shortcut (`createCase`, `closeRun`) appears.
 
 `invoke` does the same things for every operation: parse the input at the boundary, check the capability, and
 for a write, open a transaction, give the command the project's next **sequence number**, run it, record the
-command id so a retry returns the same reply and writes nothing, commit, and publish what changed.
+command id so a retry returns the same reply and writes nothing, commit, and publish what changed. A read runs on
+a reader thread with its own read-only connection, so a long write does not hold it up; a write waits its turn at
+one gate, because the file has one writer.
 
 ## The record
 
@@ -70,9 +72,12 @@ command id so a retry returns the same reply and writes nothing, commit, and pub
   row that names the one it replaces.
 - **Standing** is everything that is "current": the head version of a case, which case a test belongs to, how a
   failure is counted, whether a run is closed, the policy in force. Each has exactly one writer, and that
-  writer takes a `Witness`, an object only the decision machinery can create. So there is no way in the code to
-  change what is current without a row in the ledger saying who decided, on what evidence, under which policy
-  clause. A rule's decision is recorded exactly like a person's.
+  writer takes a `Witness`, an object only the decision machinery can create: its class has a private field, the
+  one function that makes it is handed out once, and the database refuses a row that cites a decision the ledger
+  does not hold. So there is no way in the code to change what is current without a row in the ledger saying who
+  decided, on what evidence, under which policy clause. A rule's decision is recorded exactly like a person's.
+  Withdrawing a decision undoes only what that decision made. (The four writes that look like standing and are
+  not are listed in decision 0012.)
 - **One clock per project.** Every command gets the next sequence number, in commit order, and stamps its rows
   with it. "What changed since I last looked" is one range read; the cursor an agent passes back is that number.
 
@@ -83,30 +88,38 @@ command id so a retry returns the same reply and writes nothing, commit, and pub
 2. **Accept**, first transaction: the results are stored under a key made from their content, so the same
    report twice is a no-op. Every run this commit matters to is marked as waiting. From this commit on, the gate
    reads `pending`: nobody is served the verdict from before the upload.
-3. **Apply**, second transaction, in slices of 500 results. Between slices the server answers reads from its
-   read-only connection, so a ten-thousand-result report does not freeze anyone's screen. For each result: find
-   or create the test; work out the **basis** (exact if a run pinned the version or the test names it, assumed
-   at the case's current version if the test is linked to a case, unresolved if there is no case; never a silent
-   guess); normalise the failure message into a **signature**, so the same cause in 500 tests is one cause.
+3. **Apply**, second transaction, in slices of 500 results, so a ten-thousand-result report does not freeze
+   anyone's screen. For each result: find or create the test; work out the **basis** (exact if a run pinned the
+   version or the test names it, assumed at the case's current version if the test is linked to a case,
+   unresolved if there is no case; never a silent guess); normalise the failure message into a **signature**, so
+   the same cause in 500 tests is one cause. A claim about a case that cannot be accepted is refused, never
+   adjusted; an automated result is then kept with no case, so a failure is not dropped from the gate.
 4. **Fold**: the commit's run gets the effective result per test; planned runs that accept this commit get
    their slots filled where the acceptance rule admits the result.
 5. **Raise**: one `failure` question per cause, in the scope of the pull request, the trunk or the run. If that
    cause already has a decision that still holds, the answer is carried forward and nobody is asked. If the
    failure already fails where the change started, a loose project's rule excuses it, as a recorded decision.
 6. **Verdict**: `passed`, `failed` (a decision attributed a failure to this commit: it needs a fix), `blocked`
-   (a failure nobody has explained, or a dispute: it needs a decision) or `pending` (evidence is missing).
-7. A person presses one key in the queue. The decision changes how the run counts that cause, the verdict is
-   recomputed in the same transaction, and `casebook gate` now exits 0. The pipeline did not run again.
+   (a failure nobody has explained, or a dispute: it needs a decision) or `pending` (evidence is missing, or
+   nothing was proven at all).
+7. A person presses one key in the queue. The decision changes how the run counts that cause and the verdict is
+   recomputed in the same transaction. If the answer excuses the failure (flaky, infrastructure, already failing
+   on the base), `casebook gate` now exits 0 and the pipeline did not run again. If the answer is that the
+   failure is real (a defect, a wrong test, an expectation that changed), the verdict is `failed` and the exit
+   code is 1: the commit needs a fix, and the decision says why.
 
 ## Runs
 
 A run does not own results. It says which targets count (a commit, or only what is typed into it) and what it
 needs (obligations). A **change run** exists per commit and counts tests. A **planned run** pins each selected
-case at its current version in a **slot**; a result fills a slot when its basis names that case at that
-version, its method is one the run asked for, and the case admits that method. So a pipeline's pass on the same
-commit fills a manual regression run, a slot that asks for a person is not filled by a test, and an agent's
-result counts only where a run asked for agents and the case declares it. A fail from one producer beside a pass
-from another is `disputed` until a person decides; a later write never hides it.
+case at its current version in a **slot**. A result fills a slot when three things hold. Its basis names that
+case at that version (or, where the run allows it, another version whose steps and expected results are the
+same). Its method is one the run asked for. And the case, at the pinned version, admits that method: people and
+agents are declared on the case; an automated test is admitted by its link or annotation, and whether a test may
+fill the slot is then the run's choice. So a pipeline's pass on the same commit fills a manual regression run, a
+slot that asks for a person is not filled by a test, and an agent's result counts only where a run asked for
+agents and the case declares it. A fail from one producer beside a pass from another is `disputed` until a person
+decides; a later write, another test's pass or an older attempt never hides a failure.
 
 ## Policy
 
@@ -129,8 +142,10 @@ decisions); a module runs SQL on a table another module owns (every one of the 3
 read of someone else's data goes through their functions); anything but the kernel talks to SQLite; anything
 but the decision machinery mints a witness; a writer that undoes a withdrawn decision is called from anywhere
 but a kind handler; the core imports I/O; the web UI imports the server; a declared SQL statement does not
-prepare against the schema; or the agent surface grows past ten tools. `test/budgets.test.ts` fails it when a
-hot path gets slow.
+prepare against the schema; or the agent surface grows past ten tools. `test/integrity.test.ts` holds one test
+per thing that must never happen (a green gate with nothing proven, an agent's result counted as a pipeline's, a
+conflict used to skip a review), each found by an independent review. `test/budgets.test.ts` fails the check
+when a hot path gets slow.
 
 ## Where things are
 

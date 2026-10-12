@@ -344,6 +344,53 @@ describe("server mode", () => {
 	});
 });
 
+describe("what a session may see", () => {
+	test("a token for one project gets neither another project's change stream nor its name", async () => {
+		const instance = boot("server", "owner-secret-0123456789");
+		const owner = bearer("owner-secret-0123456789");
+		await post(instance, "/api/admin", { do: "project.create", key: "private-other" }, owner);
+		const made = await post<{ token: string }>(
+			instance,
+			"/api/admin",
+			{ do: "token.create", actor: "reader", kind: "human", can: ["read"], project: "scratch" },
+			owner,
+		);
+		const reader = bearer(made.body.ok ? made.body.result.token : "");
+		expect((await fetch(`${instance.url}/api/p/private-other/events`, { headers: reader })).status).toBe(403);
+		expect((await fetch(`${instance.url}/api/p/no-such-project/events`, { headers: reader })).status).toBe(404);
+		const own = await fetch(`${instance.url}/api/p/scratch/events`, { headers: reader });
+		expect(own.status).toBe(200);
+		await own.body?.cancel();
+		const session = (await (
+			await fetch(`${instance.url}/api/session`, { headers: reader })
+		).json()) as Envelope<SessionInfo>;
+		expect(session.ok && session.result.projects.map((project) => project.key)).toEqual(["scratch"]);
+		const all = (await (
+			await fetch(`${instance.url}/api/session`, { headers: owner })
+		).json()) as Envelope<SessionInfo>;
+		expect(all.ok && all.result.projects.map((project) => project.key).sort()).toEqual(["private-other", "scratch"]);
+	});
+
+	test("an Origin with this host and another scheme is another site", async () => {
+		const instance = boot("local");
+		const host = new URL(instance.url).host;
+		const body = { edits: [{ op: "create", outline: "Planted" }] };
+		expect((await post(instance, "/api/p/scratch/propose", body, { origin: `https://${host}` })).status).toBe(401);
+		expect((await post(instance, "/api/p/scratch/propose", body, { origin: `http://${host}` })).status).toBe(200);
+		// Behind a proxy that ends TLS, the proxy says which scheme the browser used.
+		const forwarded = { origin: `https://${host}`, "x-forwarded-proto": "https" };
+		expect((await post(instance, "/api/p/scratch/find", {}, forwarded)).status).toBe(200);
+	});
+
+	test("another site cannot sign a browser out", async () => {
+		const instance = boot("server", "owner-secret-0123456789");
+		const refused = await post(instance, "/api/logout", {}, { origin: "http://evil.example" });
+		expect(refused.status).toBe(401);
+		expect(refused.cookie).toBeNull();
+		expect((await post(instance, "/api/logout", {})).cookie).toContain("Max-Age=0");
+	});
+});
+
 describe("the surface", () => {
 	test("every operation in the registry is a route and is in the generated API description", async () => {
 		const instance = boot("local");

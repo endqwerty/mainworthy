@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { authenticate, noteTokenUse } from "../server/identity/identity.ts";
 import type { App, ChangeEvent } from "../server/kernel/app.ts";
-import type { Actor } from "../server/kernel/ctx.ts";
+import { type Actor, findProject } from "../server/kernel/ctx.ts";
 import { HTTP_STATUS } from "../server/kernel/errors.ts";
 import { listProjects } from "../server/ops/admin.ts";
 import { OP_LIST, OPS } from "../server/ops/index.ts";
@@ -28,12 +28,19 @@ function cookieOf(req: Request, name: string): string | null {
 	return null;
 }
 
-/** A browser's Origin must be this server. No Origin (a non-browser client) passes; an unparseable one does not. */
+/**
+ * A browser's Origin must be this server: the same scheme and the same host. No Origin (a non-browser client)
+ * passes; an unparseable one does not. Behind a proxy that ends TLS, the scheme is the one the proxy reports in
+ * `X-Forwarded-Proto`; a proxy that does not send it makes an https page look like another site, and is refused.
+ */
 function sameOrigin(req: Request): boolean {
 	const origin = req.headers.get("origin");
 	if (origin === null) return true;
 	try {
-		return new URL(origin).host === req.headers.get("host");
+		const from = new URL(origin);
+		const forwarded = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+		const scheme = forwarded ? `${forwarded}:` : new URL(req.url).protocol;
+		return from.protocol === scheme && from.host === req.headers.get("host");
 	} catch {
 		return false;
 	}
@@ -144,9 +151,13 @@ export async function handleOp(
 	return replyResponse(reply);
 }
 
+/** Who the caller is and which projects it may read. A project it holds no grant on is not named. */
 function sessionInfo(app: App, session: Session): Response {
 	const actor = session.actor(0);
 	if (!actor) return unauthenticated();
+	const projects = app.reader.snapshot(() =>
+		listProjects(app.reader).filter((project) => mayRead(app, session, project.key) === "yes"),
+	);
 	return jsonResponse({
 		ok: true,
 		result: {
@@ -156,9 +167,16 @@ function sessionInfo(app: App, session: Session): Response {
 			mode: app.config.mode,
 			via: session.via,
 			version: VERSION,
-			projects: app.reader.snapshot(() => listProjects(app.reader)),
+			projects,
 		},
 	});
+}
+
+/** Whether this session may read a project: the same rule an operation that needs `read` applies. */
+function mayRead(app: App, session: Session, key: string): "yes" | "no" | "missing" {
+	const project = findProject(app.reader, key);
+	if (!project) return "missing";
+	return session.actor(project.id)?.can.includes("read") ? "yes" : "no";
 }
 
 async function login(app: App, req: Request): Promise<Response> {
@@ -171,8 +189,20 @@ async function login(app: App, req: Request): Promise<Response> {
 	return jsonResponse({ ok: true, result: { signedIn: true } }, 200, { "set-cookie": cookie });
 }
 
-/** The change stream for one project. Correctness never depends on it: a client that misses an event refetches. */
-function events(app: App, req: Request, project: string): Response {
+/**
+ * The change stream for one project, for a session that may read it. Correctness never depends on it: a client
+ * that misses an event refetches.
+ */
+function events(app: App, req: Request, session: Session, project: string): Response {
+	const allowed = mayRead(app, session, project);
+	if (allowed === "missing")
+		return jsonResponse({ ok: false, error: { code: "not_found", message: `no project named ${project}` } }, 404);
+	if (allowed === "no") {
+		return jsonResponse(
+			{ ok: false, error: { code: "forbidden", message: `events need the read capability on ${project}` } },
+			403,
+		);
+	}
 	const encoder = new TextEncoder();
 	let unsubscribe = (): void => {};
 	let beat: ReturnType<typeof setInterval> | undefined;
@@ -292,6 +322,12 @@ export type Extra = {
 	routes?: Record<string, (req: Request, session: Session) => Response | Promise<Response>>;
 };
 
+/**
+ * The routes. Everything that reads or changes a project needs a session. Four routes answer without one, on
+ * purpose: `/healthz` (is the process up, and which version: the container's health check), `/api/openapi.json`
+ * (the description of the API, the same for every instance of a version), `/api/login` and `/api/logout` (which
+ * take or clear the cookie, same-origin only), and the web UI's static files. An unknown path is a 404.
+ */
 export function serve(app: App, owner: Actor, extra: Extra = { ui: null }) {
 	const guarded = (handler: (req: Request, session: Session) => Response | Promise<Response>) => (req: Request) => {
 		const session = sessionOf(app, req, owner);
@@ -303,13 +339,17 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }) {
 		"/api/session": { GET: guarded((_req, session) => sessionInfo(app, session)) },
 		"/api/login": { POST: (req: Request) => login(app, req) },
 		"/api/logout": {
-			POST: () =>
-				jsonResponse({ ok: true, result: {} }, 200, {
-					"set-cookie": `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
-				}),
+			POST: (req: Request) =>
+				sameOrigin(req)
+					? jsonResponse({ ok: true, result: {} }, 200, {
+							"set-cookie": `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
+						})
+					: unauthenticated(),
 		},
 		"/api/p/:project/events": {
-			GET: guarded((req) => events(app, req, (req as Request & { params: { project: string } }).params.project)),
+			GET: guarded((req, session) =>
+				events(app, req, session, (req as Request & { params: { project: string } }).params.project),
+			),
 		},
 		"/api/p/:project/:op": {
 			POST: (req: Request & { params: { project: string; op: string } }) =>

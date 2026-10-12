@@ -24,11 +24,34 @@ const layerOf = (file: string): string => {
 
 describe("the module map", () => {
 	test("only the decision machinery can mint a witness, so standing cannot change without a decision", () => {
-		const minters = files.filter(
+		// The mint is claimed once, by the module that settles decisions; a second claim throws when it loads
+		// (test/integrity.test.ts). This names the one place the claim is written.
+		const claimers = files.filter(
 			(file) =>
-				/\bmintWitness\b|Witness\.mint\b/.test(readFileSync(file, "utf8")) && !file.endsWith("kernel/witness.ts"),
+				/\bclaimMint\b|Witness\.claim\b/.test(readFileSync(file, "utf8")) && !file.endsWith("kernel/witness.ts"),
 		);
-		expect(minters).toEqual(["src/server/decisions/decisions.ts"]);
+		expect(claimers).toEqual(["src/server/decisions/decisions.ts"]);
+	});
+
+	test("every function that is handed a witness checks it", () => {
+		// A standing writer must read its decision through `decisionOf`, which refuses anything the mint did not make,
+		// or hand the witness on to a function that does. A parameter that is taken and ignored proves nothing.
+		// (A kind handler in `decisions` may ignore the witness it is offered: one that writes no standing has no use
+		// for it. The writers are in the modules below.)
+		const offenders: string[] = [];
+		for (const file of files.filter((file) => file.startsWith("src/server/") && !file.endsWith("kernel/witness.ts"))) {
+			const text = readFileSync(file, "utf8");
+			if (/\b_witness\b/.test(text) && !file.startsWith("src/server/decisions/"))
+				offenders.push(`${file} ignores a witness`);
+			for (const match of text.matchAll(
+				/^(?:export )?function\*? (\w+)\([^)]*\bwitness: Witness\b[^)]*\)[^{]*\{\n([\s\S]*?)^\}/gm,
+			)) {
+				const [, name, body] = match;
+				if (!/\bdecisionOf\(witness\)|\(ctx, witness\b/.test(body ?? ""))
+					offenders.push(`${file}: ${name} never checks its witness`);
+			}
+		}
+		expect(offenders).toEqual([]);
 	});
 
 	test("only the kernel talks to SQLite", () => {
