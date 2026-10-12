@@ -393,6 +393,22 @@ describe("parseJUnit recovery and boundaries", () => {
 	});
 
 	test.each([
+		'<testsuite><testcase name="one"/ ></testsuite>',
+		'<testsuite><testcase name="one"\u00a0time="0.2"/></testsuite>',
+		'<testsuite><testcase name\u00a0=\u00a0"one"/></testsuite>',
+		'<testsuite><testcase name="one">&#X41;</testcase></testsuite>',
+		'<testsuite><testcase name="one">x]]>y</testcase></testsuite>',
+		'<testsuite><testcase name="one"><!-- <failure/>---></testcase></testsuite>',
+		'<testsuite><testcase name="one"><?xml version="1.0"?></testcase></testsuite>',
+		'<testsuite><testcase name="one"><?<failure?></testcase></testsuite>',
+	])("invalid XML syntax yields a warning and uncertain evidence: %s", (xml) => {
+		const parsed = parseJUnit(xml);
+		expect(parsed.results).toHaveLength(1);
+		expect(parsed.results[0]?.outcome).toBe("error");
+		expect(parsed.warnings.length).toBeGreaterThan(0);
+	});
+
+	test.each([
 		'<testsuite><testcase name="one"></testsuite>',
 		'<testsuite><testcase name="one" time=nope/></testsuite>',
 		'<testsuite><testcase name="one"/><!----',

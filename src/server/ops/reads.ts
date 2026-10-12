@@ -837,7 +837,7 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 	let failing = 0;
 	for (const [caseId, reasons] of why) {
 		const row = caseById(ctx.db, caseId);
-		if (!row || row.state !== "active") continue;
+		if (row?.state !== "active") continue;
 		if (from !== null && row.rev <= from && !reasons.has("failing")) continue;
 		const reviewed = input.ledger
 			? reviewsAtVersion(ctx.db, row.id, row.head).some((review) => review.reviewer === ctx.actor.id)

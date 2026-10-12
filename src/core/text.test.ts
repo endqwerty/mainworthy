@@ -18,6 +18,6 @@ test("malformedText finds half a character anywhere in an input, and says where"
 	expect(malformedText({ title: "ok 😀", steps: [{ action: "é" }] })).toBeNull();
 	expect(malformedText({ title: "ok", steps: [{ action: "bad \ud83d" }] })).toBe("steps[0].action");
 	expect(malformedText("\udc00")).toBe("input");
-	expect(malformedText({ ["k\ud800"]: 1 })).toBe("input");
+	expect(malformedText({ "k\ud800": 1 })).toBe("input");
 	expect(malformedText([1, null, true])).toBeNull();
 });

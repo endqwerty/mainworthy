@@ -467,7 +467,7 @@ function dissolveStale(ctx: Ctx, run: RunRow, failing: ReadonlySet<number>): voi
 	const scope = scopeOfRun(ctx.db, run);
 	for (const open of openQuestionsOn(ctx.db, ctx.project.id, `scope:${scope}`)) {
 		const question = questionById(ctx.db, open.id);
-		if (!question || question.kind !== "failure") continue;
+		if (question?.kind !== "failure") continue;
 		const subject = json<{ signature: number; scope: string }>(question.subject);
 		if (subject.scope !== scope || failing.has(subject.signature)) continue;
 		setQuestionState(ctx, question, "dissolved", null);
@@ -484,7 +484,7 @@ export function sweepExpired(ctx: Ctx, expired: readonly DecisionRow[]): number 
 	let reopened = 0;
 	for (const decision of expired) {
 		const question = questionById(ctx.db, decision.question);
-		if (!question || question.state !== "decided" || question.decision !== decision.id) continue;
+		if (question?.state !== "decided" || question.decision !== decision.id) continue;
 		HANDLERS[question.kind].revert(ctx, question, decision);
 		insertDecision(ctx, {
 			question,
