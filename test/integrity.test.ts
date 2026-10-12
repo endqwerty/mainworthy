@@ -451,6 +451,25 @@ describe("what a result may prove", () => {
 		expect(gate({ commit: "abcdef0" }).verdict).toBe("passed");
 	});
 
+	test("an answer prepared before a newer build failed is a conflict, not a decision about that build", () => {
+		const fail = (commit: string) =>
+			ciReport({ commit, branch: "feature", pr: 77, n: 1, fail: { 0: "environment unavailable" } });
+		report(fail("staletarget1"));
+		const seen = open("failure");
+		report(fail("staletarget2"));
+		const stale = decide(seen, { is: "infra" });
+		expect(stale.status).toBe("conflict");
+		expect(rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 0 }]);
+		// Read again, the answer is for the build now shown; and an answer that carries (flaky) still carries.
+		expect(decide(open("failure"), { is: "infra" }).status).toBe("decided");
+		expect(gate({ commit: "staletarget2" }).verdict).toBe("passed");
+		expect(gate({ commit: "staletarget1" }).verdict).toBe("blocked");
+		const other = (commit: string) => ciReport({ commit, branch: "other", pr: 78, n: 1, fail: { 0: "sometimes" } });
+		report(other("carry0001"));
+		decide(open("failure"), { is: "flaky" });
+		expect(first(report(other("carry0002")).questions).how).toBe("already decided");
+	});
+
 	test("the same pull request number in two repositories is two changes", () => {
 		const push = (repo: string, commit: string) => ({
 			target: { repo, commit, branch: "feature", pr: 1 },

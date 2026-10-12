@@ -57,9 +57,7 @@ type Handler<K extends Kind> = {
 	undoHint: string;
 };
 
-const untilBasisChanges = (question: QuestionRow): HoldTerm[] => [
-	{ until: "basis-changes", basis: question.evidence_hash },
-];
+const untilBasisChanges = (question: QuestionRow): HoldTerm[] => [{ until: "basis-changes", basis: question.basis }];
 const DAY = 86_400_000;
 
 /** Raises the `adopt` question for a sealed proposal. Shared by every path that proposes: there is only this one. */

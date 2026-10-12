@@ -55,7 +55,7 @@ export function useSuiteBindings({
 			{ key: "#", label: "Archive selected", handler: archive },
 			{ key: "u", label: "Undo", handler: undo },
 			{ key: "space", label: "Peek timeline", handler: peek },
-			{ key: "[", label: "Previous folder", handler: () => folder(-1) },
+			{ key: "alt+[", label: "Previous folder", handler: () => folder(-1) },
 			{ key: "]", label: "Next folder", handler: () => folder(1) },
 			{ key: "n f", label: "New folder", handler: newFolder },
 			{ key: "z", label: "Widen case pane", handler: zoom },

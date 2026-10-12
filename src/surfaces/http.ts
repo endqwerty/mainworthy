@@ -224,10 +224,23 @@ function events(app: App, req: Request, session: Session, project: string): Resp
 				}
 			};
 			send("retry: 2000\n\n");
+			// Who may read is asked again before anything is sent, not only when the stream opens: a token that was
+			// revoked, or an actor that was forgotten, stops receiving at the next event or heartbeat.
+			const stillAllowed = (): boolean => {
+				if (mayRead(app, session, project) === "yes") return true;
+				unsubscribe();
+				clearInterval(beat);
+				try {
+					controller.close();
+				} catch {}
+				return false;
+			};
 			unsubscribe = app.subscribe((event: ChangeEvent) => {
-				if (event.project === project) send(`data: ${JSON.stringify(event)}\n\n`);
+				if (event.project === project && stillAllowed()) send(`data: ${JSON.stringify(event)}\n\n`);
 			});
-			beat = setInterval(() => send(": keep-alive\n\n"), 20_000);
+			beat = setInterval(() => {
+				if (stillAllowed()) send(": keep-alive\n\n");
+			}, 20_000);
 			req.signal.addEventListener("abort", () => {
 				unsubscribe();
 				clearInterval(beat);

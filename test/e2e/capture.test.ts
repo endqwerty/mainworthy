@@ -15,8 +15,9 @@ test.skipIf(!browserAvailable)(
 			};
 			await page.keyboard.press("c");
 			expect(
-				await page.getByRole("textbox", { name: "Capture title" }).evaluate((node) => document.activeElement === node),
+				await page.getByRole("textbox", { name: "Case title" }).evaluate((node) => document.activeElement === node),
 			).toBe(true);
+			expect(await page.locator('#detail [data-field="title"]').count()).toBe(1);
 			await type("Expired coupon is rejected #checkout");
 			await page.keyboard.press("Enter");
 			await type("Open the cart");
@@ -82,7 +83,7 @@ test.skipIf(!browserAvailable)(
 				"# Coupon stays applied #checkout\n1. Add coupon\tDiscount appears\n2. Reload\tDiscount remains",
 			);
 			await page.keyboard.press("Shift+Enter");
-			await page.getByRole("textbox", { name: "Capture title" }).fill("Second case");
+			await page.getByRole("textbox", { name: "Case title" }).fill("Second case");
 			await page.keyboard.press("Escape");
 			const cases = await eventually(
 				() => server.api("find", { in: "cases" }),

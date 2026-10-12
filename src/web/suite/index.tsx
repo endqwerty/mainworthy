@@ -7,7 +7,7 @@ import type { Api } from "../../core/api.ts";
 import { mergeBodies } from "../../core/merge3.ts";
 import { CaseBody, emptyBody, TAG } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
-import { cleanTitle, firstStep, pasteCapture } from "../case/editor.tsx";
+import { cleanTitle, firstStep } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, useQueryOp } from "../lib/data.ts";
@@ -189,7 +189,9 @@ export function SuiteScreen() {
 		}
 	}, [project, view]);
 	function focusDraft(next: Draft): void {
-		const target = document.querySelector(`[data-field="${next.caret.field}"]`);
+		const target = document.querySelector(
+			`#detail [data-field="${next.caret.field === "capture-title" ? "title" : next.caret.field}"]`,
+		);
 		if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
 			target.focus();
 			target.setSelectionRange(next.caret.start, next.caret.end);
@@ -520,7 +522,7 @@ export function SuiteScreen() {
 			covers: [],
 			folder,
 			after: retain && previous ? previous.id : (previous?.ref ?? selectedRow?.ref ?? previous?.after ?? null),
-			caret: { field: "capture-title", start: 0, end: 0 },
+			caret: { field: "title", start: 0, end: 0 },
 			dirty: false,
 			at: Date.now(),
 			cmd: crypto.randomUUID(),
@@ -888,60 +890,17 @@ export function SuiteScreen() {
 												<span>{row.count}</span>
 											</button>
 										) : row.kind === "draft" && draft ? (
-											<div className="capture-row">
+											<button
+												type="button"
+												className="capture-row"
+												role="option"
+												aria-selected={true}
+												onClick={() => focusDraft(draft)}
+											>
 												<span className="capture-ref">new</span>
-												<input
-													className="capture-title"
-													data-field="capture-title"
-													aria-label="Capture title"
-													onSelect={(event) => {
-														const latest = draftRef.current;
-														if (latest)
-															change({
-																...latest,
-																caret: {
-																	field: "capture-title",
-																	start: event.currentTarget.selectionStart ?? 0,
-																	end: event.currentTarget.selectionEnd ?? 0,
-																},
-															});
-													}}
-													onPaste={(event) => {
-														const text = event.clipboardData.getData("text/plain");
-														if (/[\n\t]/.test(text)) {
-															event.preventDefault();
-															pasteCapture({ draft, text, change });
-														}
-													}}
-													value={draft.body.title}
-													placeholder="Start typing a case…"
-													onChange={(event) =>
-														change({
-															...draft,
-															dirty: true,
-															body: { ...draft.body, title: event.target.value },
-															caret: {
-																field: "capture-title",
-																start: event.target.selectionStart ?? 0,
-																end: event.target.selectionEnd ?? 0,
-															},
-														})
-													}
-													onKeyDown={(event) => {
-														if (event.key === "Enter") {
-															event.preventDefault();
-															if (event.shiftKey) create();
-															else if (event.metaKey || event.ctrlKey) leaveEditor();
-															else firstStep({ draft, change });
-														}
-														if (event.key === "Escape") {
-															event.preventDefault();
-															leaveEditor();
-														}
-													}}
-												/>
+												<span className="capture-mirror">{draft.body.title || "New case"}</span>
 												<span className="dr">draft</span>
-											</div>
+											</button>
 										) : row.kind === "local" ? (
 											<button
 												type="button"

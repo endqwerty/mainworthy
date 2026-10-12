@@ -17,7 +17,10 @@ export type QuestionRow = {
 	title: string;
 	producer: ActorKind;
 	evidence: string;
+	/** What a person answering must have seen: an answer names it, and one on an older value is a conflict. */
 	evidence_hash: string;
+	/** What a decision stands on. It leaves out the build, so an answer carries from one commit to the next. */
+	basis: string;
 	seen_count: number;
 	seen_first: number;
 	seen_last: number;
@@ -90,6 +93,7 @@ const Q = {
 		producer: string;
 		evidence: string;
 		hash: string;
+		basis: string;
 		seq: number;
 		ask: string;
 		blocks: string;
@@ -97,12 +101,20 @@ const Q = {
 		at: number;
 	}>(
 		`INSERT INTO questions (project, no, kind, subject, fingerprint, epoch, prior, title, producer, evidence, evidence_hash,
-		                        seen_first, seen_last, ask, blocks, rank, state, opened_at, rev)
+		                        basis, seen_first, seen_last, ask, blocks, rank, state, opened_at, rev)
 		 VALUES ($project, $no, $kind, $subject, $fingerprint, $epoch, $prior, $title, $producer, $evidence, $hash,
-		         $seq, $seq, $ask, $blocks, $rank, 'open', $at, $seq)`,
+		         $basis, $seq, $seq, $ask, $blocks, $rank, 'open', $at, $seq)`,
 	),
-	attach: sql<{ id: number; title: string; evidence: string; hash: string; blocks: string; seq: number }>(
-		`UPDATE questions SET title = $title, evidence = $evidence, evidence_hash = $hash, blocks = $blocks,
+	attach: sql<{
+		id: number;
+		title: string;
+		evidence: string;
+		hash: string;
+		basis: string;
+		blocks: string;
+		seq: number;
+	}>(
+		`UPDATE questions SET title = $title, evidence = $evidence, evidence_hash = $hash, basis = $basis, blocks = $blocks,
 		                      seen_count = seen_count + 1, seen_last = $seq, rev = $seq WHERE id = $id`,
 	),
 	carry: sql<{ id: number; seq: number }>(
@@ -219,6 +231,7 @@ export function insertQuestion(
 		producer: ActorKind;
 		evidence: unknown;
 		hash: string;
+		basis: string;
 		ask: Ask;
 		blocks: number[];
 		rank: number;
@@ -238,6 +251,7 @@ export function insertQuestion(
 		producer: input.producer,
 		evidence: JSON.stringify(input.evidence),
 		hash: input.hash,
+		basis: input.basis,
 		seq: ctx.seq,
 		ask: JSON.stringify(input.ask),
 		blocks: JSON.stringify(input.blocks),
@@ -254,7 +268,7 @@ export function insertQuestion(
 export function attachEvidence(
 	ctx: Ctx,
 	question: QuestionRow,
-	input: { title: string; evidence: unknown; hash: string; blocks: number[]; refs: readonly string[] },
+	input: { title: string; evidence: unknown; hash: string; basis: string; blocks: number[]; refs: readonly string[] },
 ): QuestionRow {
 	const blocks = [...new Set([...json<number[]>(question.blocks), ...input.blocks])];
 	ctx.db.run(Q.attach, {
@@ -262,6 +276,7 @@ export function attachEvidence(
 		title: input.title,
 		evidence: JSON.stringify(input.evidence),
 		hash: input.hash,
+		basis: input.basis,
 		blocks: JSON.stringify(blocks),
 		seq: ctx.seq,
 	});
@@ -360,7 +375,7 @@ export function insertDecision(
 		kind: input.question.kind,
 		answer: JSON.stringify(input.answer),
 		signers: JSON.stringify(input.signers),
-		basis: input.question.evidence_hash,
+		basis: input.question.basis,
 		holds: JSON.stringify(input.holds),
 		expires: expires.length > 0 ? Math.min(...expires) : null,
 		supersedes: input.supersedes,

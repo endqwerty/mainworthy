@@ -391,6 +391,40 @@ describe("what a session may see", () => {
 		expect(all.ok && all.result.projects.map((project) => project.key).sort()).toEqual(["private-other", "scratch"]);
 	});
 
+	test("an open change stream stops when its actor is forgotten", async () => {
+		const instance = boot("server", "owner-secret-0123456789");
+		const owner = bearer("owner-secret-0123456789");
+		const made = await post<{ token: string }>(
+			instance,
+			"/api/admin",
+			{ do: "token.create", actor: "watcher", kind: "human", can: ["read"], project: "scratch" },
+			owner,
+		);
+		const watcher = bearer(made.body.ok ? made.body.result.token : "");
+		const stream = await fetch(`${instance.url}/api/p/scratch/events`, { headers: watcher });
+		expect(stream.status).toBe(200);
+		const reader = stream.body?.getReader();
+		if (!reader) throw new Error("no stream");
+		const decoder = new TextDecoder();
+		await post(instance, "/api/p/scratch/propose", { edits: [{ op: "create", outline: "Seen" }] }, owner);
+		let text = "";
+		while (!text.includes("data:")) text += decoder.decode((await reader.read()).value);
+		await post(instance, "/api/admin", { do: "actor.forget", name: "watcher" }, owner);
+		await post(
+			instance,
+			"/api/p/scratch/propose",
+			{ edits: [{ op: "create", outline: "Not for the forgotten" }] },
+			owner,
+		);
+		let after = "";
+		for (;;) {
+			const { value, done } = await reader.read();
+			if (done) break;
+			after += decoder.decode(value);
+		}
+		expect(after).not.toContain("data:");
+	});
+
 	test("an Origin with this host and another scheme is another site", async () => {
 		const instance = boot("local");
 		const host = new URL(instance.url).host;

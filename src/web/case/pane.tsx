@@ -200,6 +200,11 @@ export function CasePane({
 								`Version ${version}, current`
 							)}
 						</span>
+						{draft && (draft.dirty || draft.ref === null || draft.submission.kind === "waiting") && (
+							<span className="draft-public-state">
+								{draft.ref === null ? "Private, no version yet" : `Others see version ${view?.version ?? draft.base}`}
+							</span>
+						)}
 					</div>
 					{conflict && <ConflictCard state={conflict} resolved={onResolved} />}
 					{draft ? (

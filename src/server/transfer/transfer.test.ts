@@ -284,6 +284,7 @@ const fixtures: Record<string, Row[]> = {
 			producer: "agent",
 			evidence: "{}",
 			evidence_hash: "evidence-hash",
+			basis: "basis-hash",
 			seen_count: 1,
 			seen_first: time,
 			seen_last: time,

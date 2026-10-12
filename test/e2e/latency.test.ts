@@ -37,7 +37,7 @@ for (const cases of [2000, 10000]) {
 								return;
 							const start = performance.now();
 							requestAnimationFrame(() => {
-								const target = document.querySelector('[data-field="capture-title"]');
+								const target = document.querySelector('#detail [data-field="title"]');
 								if (document.activeElement !== target) errors.push("c did not focus the title on its next frame");
 								capture.push(performance.now() - start);
 							});
@@ -61,7 +61,7 @@ for (const cases of [2000, 10000]) {
 				});
 				for (let i = 0; i < 30; i++) {
 					await page.keyboard.press("c");
-					await page.getByRole("textbox", { name: "Capture title" }).waitFor();
+					await page.getByRole("textbox", { name: "Case title" }).waitFor();
 					await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 					await page.keyboard.press("Escape");
 				}

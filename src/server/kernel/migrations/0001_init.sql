@@ -416,7 +416,10 @@ CREATE TABLE questions (
 	title TEXT NOT NULL,
 	producer TEXT NOT NULL CHECK (producer IN ('human', 'agent', 'ci', 'rule')),
 	evidence TEXT NOT NULL,
+	-- what a person answering must have seen: the basis and the latest build the cause was seen on
 	evidence_hash TEXT NOT NULL,
+	-- what a decision stands on, and carries forward while it is unchanged: the cause, without the build
+	basis TEXT NOT NULL,
 	seen_count INTEGER NOT NULL DEFAULT 1,
 	seen_first INTEGER NOT NULL,
 	seen_last INTEGER NOT NULL,

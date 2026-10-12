@@ -75,7 +75,7 @@ export function pasteCapture({ draft, text, change }: { draft: Draft; text: stri
 			tags: [...new Set([...draft.tags, ...outline.tags])],
 			covers: [...new Set([...draft.covers, ...outline.covers])],
 			caret: {
-				field: last ? `${last.id}:action` : "capture-title",
+				field: last ? `${last.id}:action` : "title",
 				start: last?.action.length ?? title.length,
 				end: last?.action.length ?? title.length,
 			},
@@ -129,8 +129,7 @@ export function BodyEditor({
 		);
 	}
 	const editing = () =>
-		document.activeElement instanceof HTMLElement &&
-		document.activeElement.matches(".body-editor textarea,.capture-title");
+		document.activeElement instanceof HTMLElement && document.activeElement.matches(".body-editor textarea");
 	useBindings([
 		{ key: "shift+enter", label: "Next new case", handler: rapid, allowInInput: true, when: editing },
 		{
@@ -153,7 +152,9 @@ export function BodyEditor({
 	useLayoutEffect(() => {
 		if (mounted.current) return;
 		mounted.current = true;
-		const field = root.current?.querySelector(`[data-field="${draft.caret.field}"]`);
+		const field = root.current?.querySelector(
+			`[data-field="${draft.caret.field === "capture-title" ? "title" : draft.caret.field}"]`,
+		);
 		if (field instanceof HTMLTextAreaElement) {
 			field.focus();
 			field.setSelectionRange(draft.caret.start, draft.caret.end);

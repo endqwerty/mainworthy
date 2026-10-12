@@ -138,7 +138,7 @@ test.skipIf(!browserAvailable)(
 			});
 			await page.keyboard.press("c");
 			expect(
-				await page.getByRole("textbox", { name: "Capture title" }).evaluate((node) => node === document.activeElement),
+				await page.getByRole("textbox", { name: "Case title" }).evaluate((node) => node === document.activeElement),
 			).toBe(true);
 			await page.keyboard.type("Storage is full");
 			await page.keyboard.press("Enter");

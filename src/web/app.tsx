@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { z } from "zod";
 import type { SessionInfo } from "../core/api.ts";
 import { CaseScreen } from "./case/index.tsx";
 import { ChangesScreen } from "./changes/index.tsx";
@@ -78,7 +79,8 @@ export function App() {
 		return (
 			<div className="signin">
 				<span className="brand">
-					<span className="logo">C</span>Casebook
+					<span className="logo">C</span>
+					Casebook
 				</span>
 			</div>
 		);
@@ -129,6 +131,8 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 	const [palette, setPalette] = useState<PaletteOptions | null>(null);
 	const [help, setHelp] = useState(false);
 	const [inInput, setInInput] = useState(false);
+	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+	const suiteOpen = route.screen === "suite" || route.screen === "case";
 	useEffect(() => {
 		const change = () =>
 			queueMicrotask(() => {
@@ -146,10 +150,21 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 	useKeyboard();
 	useEvents(project);
 	const folders = useQueryOp({ project, op: "find", input: { in: "folders" } });
+	const tags = useQueryOp({ project, op: "find", input: { in: "tags" }, enabled: suiteOpen });
+	const tagRows = useMemo(
+		() => z.array(z.object({ tag: z.string(), n: z.number() })).parse(tags.data?.items ?? []),
+		[tags.data],
+	);
 	const inbox = useQueryOp({ project, op: "inbox", input: { state: "open", limit: 1 } });
 	const go = (screen: Screen) => navigate(routeUrl({ project, screen }));
 	const globalKeys = useMemo(
 		() => [
+			{
+				key: "[",
+				label: "Collapse / expand sidebar",
+				when: () => palette === null && !help,
+				handler: () => setSidebarCollapsed((value) => !value),
+			},
 			...navigation.map((item) => ({
 				key: item.key,
 				label: `Go to ${item.label}`,
@@ -225,10 +240,17 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				overlayOpen: palette !== null || help,
 			}}
 		>
-			<div id="app">
+			<div id="app" className={sidebarCollapsed ? "sidebar-collapsed" : ""}>
 				<aside id="side">
 					<div className="brand">
-						<span className="logo">C</span>
+						<button
+							type="button"
+							className="logo"
+							aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+							onClick={() => setSidebarCollapsed((value) => !value)}
+						>
+							C
+						</button>
 						<b>Casebook</b>
 						{info.projects.length > 1 ? (
 							<select
@@ -255,6 +277,8 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 						{navigation.map((item) => (
 							<a
 								key={item.screen}
+								aria-label={item.label}
+								title={item.label}
 								href={routeUrl({ project, screen: item.screen })}
 								className={
 									route.screen === item.screen || (item.screen === "suite" && route.screen === "case") ? "on" : ""
@@ -265,7 +289,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 								}}
 							>
 								<span className="ni">{item.icon}</span>
-								{item.label}
+								<span className="nav-label">{item.label}</span>
 								{item.screen === "suite" && <em>{folders.data?.count?.toLocaleString()}</em>}
 								{item.screen === "queue" && (
 									<em className={inbox.data?.counts.open ? "hot" : ""}>
@@ -276,82 +300,87 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 							</a>
 						))}
 					</nav>
-					<div className="sech side">Folders</div>
-					<div id="tree">
-						<button className={`fo ${route.folder === null ? "on" : ""}`} type="button" onClick={() => go("suite")}>
-							<span className="tw" />
-							<span className="fn">All cases</span>
-							<span className="n">{folders.data?.count ?? 0}</span>
-						</button>
-						{[...(folders.data?.items ?? [])]
-							.sort((a, b) => String(a.path).localeCompare(String(b.path)))
-							.map((folder) => {
-								const path = typeof folder.path === "string" ? folder.path : "";
-								const name = typeof folder.name === "string" ? folder.name : path;
-								const count = (folders.data?.items ?? [])
-									.filter(
-										(item) => item.path === path || (typeof item.path === "string" && item.path.startsWith(`${path}/`)),
-									)
-									.reduce((total, item) => total + (typeof item.cases === "number" ? item.cases : 0), 0);
-								return (
+					{suiteOpen && (
+						<div className="suite-tree">
+							<div className="sech side">Folders</div>
+							<div id="tree">
+								<button className={`fo ${route.folder === null ? "on" : ""}`} type="button" onClick={() => go("suite")}>
+									<span className="tw" />
+									<span className="fn">All cases</span>
+									<span className="n">{folders.data?.count ?? 0}</span>
+								</button>
+								{[...(folders.data?.items ?? [])]
+									.sort((a, b) => String(a.path).localeCompare(String(b.path)))
+									.map((folder) => {
+										const path = typeof folder.path === "string" ? folder.path : "";
+										const name = typeof folder.name === "string" ? folder.name : path;
+										const count = (folders.data?.items ?? [])
+											.filter(
+												(item) =>
+													item.path === path || (typeof item.path === "string" && item.path.startsWith(`${path}/`)),
+											)
+											.reduce((total, item) => total + (typeof item.cases === "number" ? item.cases : 0), 0);
+										return (
+											<button
+												key={path}
+												type="button"
+												className={`fo ${route.folder === path ? "on" : ""}`}
+												style={{ paddingLeft: `${path.split("/").length * 12}px` }}
+												onClick={() => navigate(routeUrl({ project, screen: "suite", folder: path }))}
+												onDragOver={(event) => event.preventDefault()}
+												onDrop={(event) => {
+													event.preventDefault();
+													window.dispatchEvent(
+														new CustomEvent("casebook:drop", {
+															detail: { folder: path, ref: event.dataTransfer.getData("text/plain") },
+														}),
+													);
+												}}
+											>
+												<span className="tw" />
+												<span className="fn">{name}</span>
+												<span className="n">{count}</span>
+											</button>
+										);
+									})}
+								<div id="folder-create" />
+							</div>
+							<div className="sidebar-tags">
+								<div className="sech side">Tags</div>
+								{new URLSearchParams(location.search).has("tag") && (
 									<button
-										key={path}
 										type="button"
-										className={`fo ${route.folder === path ? "on" : ""}`}
-										style={{ paddingLeft: `${path.split("/").length * 12}px` }}
-										onClick={() => navigate(routeUrl({ project, screen: "suite", folder: path }))}
-										onDragOver={(event) => event.preventDefault()}
-										onDrop={(event) => {
-											event.preventDefault();
-											window.dispatchEvent(
-												new CustomEvent("casebook:drop", {
-													detail: { folder: path, ref: event.dataTransfer.getData("text/plain") },
-												}),
-											);
+										className="fo"
+										onClick={() => navigate(routeUrl({ project, screen: "suite", folder: route.folder }))}
+									>
+										All tags
+									</button>
+								)}
+								{tagRows.map(({ tag, n }) => (
+									<button
+										key={tag}
+										type="button"
+										className={`fo ${new URLSearchParams(location.search).getAll("tag").includes(tag) ? "on" : ""}`}
+										onClick={() => {
+											const path = routeUrl({ project, screen: "suite", folder: route.folder });
+											navigate(`${path}${route.folder ? "&" : "?"}tag=${encodeURIComponent(tag)}`);
 										}}
 									>
-										<span className="tw" />
-										<span className="fn">{name}</span>
-										<span className="n">{count}</span>
+										<span className="fn">#{tag}</span>
+										<span className="n">{n}</span>
 									</button>
-								);
-							})}
-						<div id="folder-create" />
-					</div>
-					<div className="sidebar-tags">
-						<div className="sech side">Tags</div>
-						{new URLSearchParams(location.search).has("tag") && (
-							<button
-								type="button"
-								className="fo"
-								onClick={() => navigate(routeUrl({ project, screen: "suite", folder: route.folder }))}
-							>
-								All tags
-							</button>
-						)}
-						{folders.data?.tags?.map(({ tag, n }) => (
-							<button
-								key={tag}
-								type="button"
-								className={`fo ${new URLSearchParams(location.search).getAll("tag").includes(tag) ? "on" : ""}`}
-								onClick={() => {
-									const path = routeUrl({ project, screen: "suite", folder: route.folder });
-									navigate(`${path}${route.folder ? "&" : "?"}tag=${encodeURIComponent(tag)}`);
-								}}
-							>
-								<span className="fn">#{tag}</span>
-								<span className="n">{n}</span>
-							</button>
-						))}
-					</div>
+								))}
+							</div>
+						</div>
+					)}
 
 					<div className="sfoot">
 						<span className="me">
 							<ProducerGlyph kind={info.kind} />
 							{info.actor}
 						</span>
-						<button type="button" onClick={() => setHelp(true)}>
-							? Keys
+						<button type="button" aria-label="Keyboard shortcuts" onClick={() => setHelp(true)}>
+							? <span>Keys</span>
 						</button>
 						<button
 							type="button"
@@ -362,7 +391,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 								theme();
 							}}
 						>
-							◐ Theme
+							◐ <span>Theme</span>
 						</button>
 					</div>
 				</aside>

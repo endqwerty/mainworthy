@@ -1280,7 +1280,7 @@ pre.log .ok {
 #nav a {
 	text-decoration: none;
 }
-#tree .fo {
+:where(#tree) .fo {
 	width: 100%;
 	text-align: left;
 	font: inherit;
@@ -1538,4 +1538,56 @@ button:disabled {
 }
 .sidebar-tags .fn {
 	color: var(--dim);
+}
+.suite-tree {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+}
+.sfoot {
+	margin-top: auto;
+}
+#app.sidebar-collapsed {
+	grid-template-columns: 64px minmax(0, 1fr) minmax(420px, 38%);
+}
+#app.sidebar-collapsed.zoom {
+	grid-template-columns: 64px 340px minmax(0, 1fr);
+}
+.sidebar-collapsed .brand {
+	justify-content: center;
+	padding: 14px 0 10px;
+}
+#app.sidebar-collapsed .brand b,
+.sidebar-collapsed .proj,
+.sidebar-collapsed .project-select,
+.sidebar-collapsed .search span,
+.sidebar-collapsed kbd,
+.sidebar-collapsed .nav-label,
+.sidebar-collapsed #nav em,
+.sidebar-collapsed .suite-tree,
+.sidebar-collapsed .me,
+.sidebar-collapsed .sfoot span {
+	display: none;
+}
+.sidebar-collapsed .search {
+	justify-content: center;
+	padding: 0;
+}
+.sidebar-collapsed .search::before {
+	content: "⌕";
+	font-size: 18px;
+}
+.sidebar-collapsed #nav a {
+	justify-content: center;
+	padding: 0;
+}
+.sidebar-collapsed .sfoot {
+	flex-direction: column;
+	padding: 8px;
+}
+.draft-public-state {
+	color: var(--faint);
+	font-size: 11px;
+	margin-left: auto;
 }

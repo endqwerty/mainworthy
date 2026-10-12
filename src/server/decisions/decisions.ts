@@ -123,19 +123,25 @@ function blockedRuns(blocks: Blocks, runs: Raise["runs"]): number[] {
  */
 export function raise(ctx: Ctx, r: Raise): Raised {
 	const fingerprint = contentHash({ kind: r.kind, key: r.key });
-	const hash = contentHash(r.material);
+	// Two hashes. The basis is what a decision stands on: the cause, without the build, so an answer carries from
+	// one commit to the next. The evidence hash is what a person answering must have seen: the basis and the
+	// latest build, so an answer prepared before a newer build arrived is a conflict and not a decision about a
+	// build its author never saw.
+	const basis = contentHash(r.material);
+	const hash = seenHash(basis, r.target);
 	const latest = latestByFingerprint(ctx.db, ctx.project.id, fingerprint);
-	if (!latest) return open(ctx, r, fingerprint, hash, 0, null);
+	if (!latest) return open(ctx, r, fingerprint, hash, basis, 0, null);
 	if (latest.state === "open") {
 		const clause = clauseFor(currentPolicy(ctx.db, ctx.project.id), { kind: r.kind, facts: new Set(r.facts) });
 		const question = attachEvidence(ctx, latest, {
 			title: r.title,
 			evidence: stored(r),
 			hash,
+			basis,
 			blocks: blockedRuns(clause.blocks, r.runs),
 			refs: r.refs,
 		});
-		if (clause.ask.who === "rule" && !heldOpen(ctx, question, hash)) {
+		if (clause.ask.who === "rule" && !heldOpen(ctx, question, basis)) {
 			setQuestionAsk(ctx, question, clause.ask);
 			return settleByRule(ctx, question, clause.id, clause.answer);
 		}
@@ -143,7 +149,7 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 	}
 	if (latest.state === "decided" && latest.decision !== null) {
 		const decision = decisionById(ctx.db, latest.decision);
-		const occurrence = { hash, target: r.target, facts: r.facts, now: ctx.now };
+		const occurrence = { hash: basis, target: r.target, facts: r.facts, now: ctx.now };
 		if (decision && stillHolds(decision, occurrence)) {
 			noteCarried(ctx, latest, r.refs);
 			return { s: "carried", question: latest, decision };
@@ -156,8 +162,10 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 			lapse(ctx, latest, decision, occurrence.now);
 		}
 	}
-	return open(ctx, r, fingerprint, hash, latest.epoch + 1, latest.id);
+	return open(ctx, r, fingerprint, hash, basis, latest.epoch + 1, latest.id);
 }
+
+const seenHash = (basis: string, target: number | undefined): string => contentHash({ basis, target: target ?? null });
 
 /**
  * Records in the ledger that a decision stopped holding (its time ran out, or the evidence it stood on changed)
@@ -194,7 +202,15 @@ function heldOpen(ctx: Ctx, question: QuestionRow, hash: string): boolean {
 	return last !== undefined && json<{ is?: string }>(last.answer).is === "withdrawn" && last.basis === hash;
 }
 
-function open(ctx: Ctx, r: Raise, fingerprint: string, hash: string, epoch: number, prior: number | null): Raised {
+function open(
+	ctx: Ctx,
+	r: Raise,
+	fingerprint: string,
+	hash: string,
+	basis: string,
+	epoch: number,
+	prior: number | null,
+): Raised {
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	const clause = clauseFor(policy, { kind: r.kind, facts: new Set(r.facts) });
 	const question = insertQuestion(ctx, {
@@ -207,6 +223,7 @@ function open(ctx: Ctx, r: Raise, fingerprint: string, hash: string, epoch: numb
 		producer: r.producer,
 		evidence: stored(r),
 		hash,
+		basis,
 		ask: clause.ask,
 		blocks: blockedRuns(clause.blocks, r.runs),
 		// Most blocking first, then newest first: one ascending range read is the queue.
@@ -441,7 +458,8 @@ function askAgain(ctx: Ctx, question: QuestionRow, targets: readonly number[]): 
 			target: latest,
 		},
 		question.fingerprint,
-		question.evidence_hash,
+		seenHash(question.basis, latest),
+		question.basis,
 		question.epoch + 1,
 		question.id,
 	);
