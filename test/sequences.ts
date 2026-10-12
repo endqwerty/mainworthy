@@ -30,7 +30,8 @@
 //     never answered, re-answered or withdrawn by somebody with a result in that slot or who reported the
 //     failure; under `strict`, no failure is by somebody who reported it. Whatever came first.
 //
-// More seeds: CASEBOOK_SEQUENCE_SEEDS=500 bun test test/sequences.test.ts
+// The tests are in `sequences-loose.test.ts`, `sequences-standard.test.ts` and `sequences-strict.test.ts`.
+// More seeds: CASEBOOK_SEQUENCE_SEEDS=500 bun test test/sequences-
 import { expect, test } from "bun:test";
 import {
 	aggregateSlot,
@@ -703,7 +704,8 @@ function sequence(seed: number, preset: string): Problem | null {
 	}
 }
 
-for (const preset of ["loose", "standard", "strict"]) {
+/** The test of one policy preset. Each preset has a file of its own, so the three run side by side. */
+export function sequences(preset: "loose" | "standard" | "strict"): void {
 	test(`${SEEDS} random sequences under the ${preset} policy keep every invariant`, () => {
 		const problems: Problem[] = [];
 		for (let seed = 1; seed <= SEEDS && problems.length < 3; seed++) {
