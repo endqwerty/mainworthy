@@ -1553,6 +1553,33 @@ describe("what a run and a change may count", () => {
 		expect(second.tests.map((test) => test.name).sort()).toEqual(["b", "c"]);
 	}, 60_000);
 
+	test("a question asked again where its commit is placed names the tests of every question it replaces", () => {
+		const commit = "unionq0001";
+		// One cause, a different test in each environment, each answered before the next is reported: two
+		// questions that each name one test. (Reported together, the first would already name both.)
+		for (const [env, key] of [
+			["one", "a"],
+			["two", "b"],
+		]) {
+			report(
+				{
+					target: { repo: "app", commit, env },
+					results: [{ test: { key }, outcome: "fail", failure: { message: "same cause" } }],
+				},
+				explorer(),
+			);
+			expect(decide(open("failure"), { is: "infra" }).status).toBe("decided");
+		}
+		report(
+			{ target: { repo: "app", commit, env: "ci", pr: 7 }, results: [{ test: { key: "t" }, outcome: "pass" }] },
+			pipeline(),
+		);
+		const asked = open("failure").evidence as { count: number; tests: { name: string }[]; targets: number[] };
+		expect(asked.targets).toHaveLength(2);
+		expect(asked.tests.map((test) => test.name).sort()).toEqual(["a", "b"]);
+		expect(asked.count).toBe(2);
+	});
+
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {
 		const ci = pipeline();
 		const head = "c2c2c2c200000000000000000000000000000002";
