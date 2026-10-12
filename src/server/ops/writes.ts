@@ -56,10 +56,12 @@ import {
 	gateOf,
 	mustRun,
 	noteAccepted,
+	noteApplied,
 	nothingCounted,
 	pinnedVersions,
 	plan,
 	plannedCounting,
+	type RunRow,
 	runAccepts,
 	runById,
 	runRef,
@@ -139,8 +141,29 @@ export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; f
 	}
 
 	const accepted = accept(ctx, { target, run: run?.id ?? null, report: input, nonce: input.cmd ?? `${ctx.seq}` });
-	if (accepted.fresh) noteAccepted(ctx, runsFor(ctx, target, run?.id ?? null, ctx.actor.kind), accepted.batch.seq);
+	if (accepted.fresh) {
+		const runs = runsFor(ctx, target, run?.id ?? null, ctx.actor.kind);
+		noteAccepted(ctx, runs, accepted.batch.seq);
+		// The first report of a commit that a gate counts says where the commit is, and that is so from this
+		// moment (`ensureTarget`). Every other run that counts the commit waits for this report too: until it is
+		// applied and they are recomputed, none of them goes on showing a verdict from before the move.
+		noteAccepted(ctx, alsoWaiting(ctx, accepted.batch, target, runs), accepted.batch.seq);
+	}
 	return accepted;
+}
+
+/**
+ * The planned runs that count a batch's commit without counting its target (another environment, another
+ * repository of a run that names none), when the batch is the first report of the commit that a gate counts.
+ * They wait for it with the runs it folds into, from acceptance to application, and are recomputed with them.
+ */
+function alsoWaiting(ctx: Ctx, batch: BatchRow, target: TargetRow, runs: readonly RunRow[]): RunRow[] {
+	if (target.commit_sha === null || !firstCountedReport(ctx.db, batch, target)) return [];
+	const folded = new Set(runs.map((run) => run.id));
+	return plannedCounting(ctx.db, ctx.project.id, target.commit_sha).flatMap((id) => {
+		const run = folded.has(id) ? null : runById(ctx.db, id);
+		return run ? [run] : [];
+	});
 }
 
 /**
@@ -175,10 +198,16 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 	// The first report of a commit that a gate counts says where the commit is (only an agent may have said so
 	// before): every run that counts the commit is recomputed with the others, because its failures are
 	// answered there from now on.
+	const waiting = alsoWaiting(ctx, batch, target, runs);
 	if (target.commit_sha !== null && firstCountedReport(ctx.db, batch, target)) {
 		for (const id of plannedCounting(ctx.db, ctx.project.id, target.commit_sha)) ctx.recompute.add(id);
 		askWhereCommitIs(ctx, target);
 	}
+	noteApplied(
+		ctx,
+		waiting.map((run) => run.id),
+		batch.seq,
+	);
 	refold(
 		ctx,
 		runs.map((run) => run.id),

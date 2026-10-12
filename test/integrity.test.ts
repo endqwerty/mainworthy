@@ -5,11 +5,12 @@ import { emptyBody } from "../src/core/model.ts";
 import type { DecideReply, GateStatus, InboxReply, PlanReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
 import { HANDLERS } from "../src/server/decisions/kinds.ts";
 import { linkTest, setExcuse, testById } from "../src/server/evidence/evidence.ts";
-import { sweep } from "../src/server/jobs.ts";
-import { findProject, makeCtx } from "../src/server/kernel/ctx.ts";
+import { recoverAccepted, sweep } from "../src/server/jobs.ts";
+import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { claimMint, decisionOf, Witness } from "../src/server/kernel/witness.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
+import { acceptReport } from "../src/server/ops/writes.ts";
 import { closeRun, runById } from "../src/server/runs/runs.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
@@ -1234,6 +1235,49 @@ describe("what a run and a change may count", () => {
 		expect(gate({ change: "pr:482" }).verdict).toBe("passed");
 		const impact = h.call<{ cases: { id: string; why: string[] }[] }>("impact", { change: "pr:482" });
 		expect(impact.cases).toEqual([expect.objectContaining({ id: "C-1", why: ["question"] })]);
+	});
+
+	test("a run whose commit a report is about to put elsewhere reads pending while that report is being applied", () => {
+		seed(2, ["human", "agent"]);
+		const ci = pipeline();
+		const commit = "moving001";
+		const planned = plan({
+			name: "Exploration",
+			select: { cases: ["C-1"] },
+			accepts: { commit, env: "agent-env" },
+			require: exercise(["human", "agent"]),
+		});
+		report(
+			{
+				target: { commit, branch: "main", env: "agent-env" },
+				results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "found by the agent" } }],
+			},
+			explorer(),
+		);
+		expect(decide(open("failure"), { is: "flaky" }).status).toBe("decided");
+		// The run passes on that answer (under `loose` the rule signs it off; either way it reads passed).
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+		// The pipeline's first report of the commit, for another environment, is accepted and not yet applied:
+		// the commit is already where the pipeline says, so the run's failure is no longer covered. Until the
+		// report is applied and the run recomputed, the run must not go on saying passed.
+		const project = findProject(h.app.db, "scratch");
+		if (!project) throw new Error("no project");
+		h.app.db.transaction(() => {
+			const ctx = makeCtx(h.app, project, ci, true);
+			acceptReport(ctx, {
+				target: { commit, pr: 7, branch: "feature", env: "pipeline-env" },
+				results: [{ test: { key: "t" }, outcome: "pass" }],
+			});
+			stampSeq(ctx);
+		});
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "pending", stale: true });
+		recoverAccepted(h.app);
+		const after = gate({ run: planned.run });
+		expect(after).toMatchObject({ verdict: "blocked", stale: false });
+		expect(after.tally).toMatchObject({ unexplained: 1, excused: 0 });
+		expect(
+			first(rows<{ outstanding: number }>("SELECT outstanding FROM runs WHERE origin = 'planned'")).outstanding,
+		).toBe(0);
 	});
 
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {

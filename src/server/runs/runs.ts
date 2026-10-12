@@ -499,8 +499,16 @@ function targetsOfRun(db: Db, run: RunRow): TargetRow[] {
 export const plannedCounting = (db: Db, project: number, commit: string): number[] =>
 	db.all(Q.plannedForCommit, { project, commit }).map((row) => row.id);
 
+/**
+ * Marks a report applied for runs it did not fold into: the runs that waited for it only because it says where
+ * their commit is (see `noteAccepted`). The other half of the horizon for them.
+ */
+export function noteApplied(ctx: Ctx, runs: readonly number[], batchSeq: number): void {
+	for (const id of runs) ctx.db.run(Q.applied, { id, seq: batchSeq, rev: ctx.seq });
+}
+
 /** Acceptance: the report is durable but not applied, so each run it matters to reads `pending` until it is. */
-export function noteAccepted(ctx: Ctx, runs: readonly RunRow[], batchSeq: number): void {
+export function noteAccepted(ctx: Ctx, runs: readonly Pick<RunRow, "id" | "no">[], batchSeq: number): void {
 	for (const run of runs) {
 		ctx.db.run(Q.accepted, { id: run.id, seq: batchSeq });
 		ctx.touched.add(runRef(run));
