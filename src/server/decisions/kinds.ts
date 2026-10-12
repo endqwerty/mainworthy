@@ -384,7 +384,14 @@ const failureHandler: Handler<"failure"> = {
 					? [{ until: "this-target", targets }]
 					: basis;
 			case "inherited":
-				return [...basis, { until: "fact-gone", fact: "hint:fails-on-base" }];
+				// True of the build it was seen on: every test that fails there with this cause fails on the base
+				// too. It says nothing about another commit of the change, where the same cause may be failing in
+				// a test the base passes. The next commit is asked about on its own (and a rule may answer again).
+				return [
+					...basis,
+					{ until: "fact-gone", fact: "hint:fails-on-base" },
+					...(targets.length > 0 ? [{ until: "this-target" as const, targets }] : []),
+				];
 			case "defect":
 			case "test":
 			case "expected":

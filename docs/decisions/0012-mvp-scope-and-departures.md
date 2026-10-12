@@ -58,6 +58,9 @@ not the same things done worse.
    own gate counts (its effective results, after attempts and corrections), never an agent's result and never
    another repository's, and it must be true of every test that fails with the cause on the commit, not only
    of those in the report that is arriving: how a pipeline splits its results over reports changes nothing.
+   The answer covers the build it was given for, like an infrastructure answer: another commit of the change,
+   where the same cause may be failing in a test the base passes, is asked about on its own (and the loose rule
+   answers again when it is inherited there too).
    `mistaken` is a judgement on the results it named. They stop counting in the run and in their commit's gate;
    the same failure reported again later is a new result and is asked about again; and the decision is not
    withdrawn because the cause turns up again. Where a clause keeps a decision from the producers of the evidence, a producer is

@@ -852,6 +852,25 @@ describe("what a result may prove", () => {
 		expect(gate({ run: after.run }).verdict).toBe("blocked");
 	});
 
+	test("'already failing on the base' is about the commit it was seen on, not every commit of the change", () => {
+		const fail = (key: string) => ({ test: { key }, outcome: "fail", failure: { message: "same cause" } });
+		// On the base `old` fails and `new` passes.
+		report({
+			target: { repo: "app", commit: "base0003", branch: "main" },
+			results: [fail("old"), { test: { key: "new" }, outcome: "pass" }],
+		});
+		const head = (commit: string) => ({ repo: "app", commit, base: "base0003", branch: "feature", pr: 3 });
+		// The first commit of the change breaks `new`: that is not inherited, and its gate is blocked.
+		expect(report({ target: head("head0031"), results: [fail("new")] }).gate?.verdict).toBe("blocked");
+		// The second fails only `old`, which the base fails too: the rule excuses that commit.
+		expect(report({ target: head("head0032"), results: [fail("old")] }).gate?.verdict).toBe("passed");
+		// The first commit's failure never failed on the base. It is not excused by the answer for the second.
+		expect(gate({ commit: "head0031", repo: "app" })).toMatchObject({
+			verdict: "blocked",
+			tally: { unexplained: 1, excused: 0 },
+		});
+	});
+
 	test("an automated test cannot take the key of a case's manual test", () => {
 		seed(2);
 		const taken = h.raw("report", {
