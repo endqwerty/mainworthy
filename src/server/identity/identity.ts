@@ -162,14 +162,19 @@ export function ruleActor(db: Db): Actor {
 	return actor;
 }
 
-const labels = new WeakMap<Db, Map<number, { name: string; kind: ActorKind }>>();
-/** An actor's name and kind for display. Cached per database: an actor's name and kind never change. */
+// Names are kept per connection, and a server has more than one (it writes on one and reads on another). The
+// one thing that changes a name is forgetting a person: that raises `forgottenCount`, and every connection's names
+// read before it are thrown away, so no read on any connection shows a forgotten name again.
+let forgottenCount = 0;
+const labels = new WeakMap<Db, { since: number; names: Map<number, { name: string; kind: ActorKind }> }>();
+/** An actor's name and kind for display. Cached per connection until a person is forgotten. */
 export function actorLabel(db: Db, id: number): { name: string; kind: ActorKind } {
-	let names = labels.get(db);
-	if (!names) {
-		names = new Map();
-		labels.set(db, names);
+	let kept = labels.get(db);
+	if (!kept || kept.since !== forgottenCount) {
+		kept = { since: forgottenCount, names: new Map() };
+		labels.set(db, kept);
 	}
+	const names = kept.names;
 	const cached = names.get(id);
 	if (cached) return cached;
 	const row = db.get(Q.actorById, { id });
@@ -226,7 +231,7 @@ export function forgetActor(app: App, name: string): { forgotten: string; tokens
 	const at = app.now();
 	db.run(Q.forget, { id: row.id, name: pseudonym, at });
 	const revoked = db.run(Q.revokeTokensOf, { actor: row.id, at }).changes;
-	labels.get(db)?.delete(row.id);
+	forgottenCount++;
 	return { forgotten: pseudonym, tokensRevoked: revoked };
 }
 

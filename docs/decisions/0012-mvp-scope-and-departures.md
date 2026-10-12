@@ -101,8 +101,9 @@ not the same things done worse.
    When a hold runs out by the clock, the expiry is a row in the ledger that the next answer supersedes. When an
    answer stops holding, every run that rested on it is recomputed at once and the question asked in its place
    names them, a run that has since closed included. Two rules keep this whole: there is one answer in force per
-   cause and target (an answer that takes the place of another question's answer ends that one, with a row in the
-   ledger); and each time a run is recomputed, every failure it shows unexplained is checked to have an open
+   cause and target (an answer for the whole cause ends every other answer for it, an answer for certain targets
+   ends an answer naming one of them, each with a row in the ledger, and the runs that rested on the ended answer
+   are recomputed); and each time a run is recomputed, every failure it shows unexplained is checked to have an open
    question, and is asked about if it has none (for an open planned run and for the newest commit of a scope).
    So no path that removes a question, an answer or a closed state can leave a live run blocked with nobody asked.
 9. **The review basis is the case version plus the change key,** not the patch tree hash. A changed patch under

@@ -309,9 +309,13 @@ export function attachEvidence(
 	return questionById(ctx.db, question.id) ?? question;
 }
 
-/** Adds things a question is about, so each of them lists it. */
-export function alsoAbout(ctx: Ctx, question: QuestionRow, refs: readonly string[]): void {
-	for (const about of refs) ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id });
+/** Adds things a question is about, so each of them lists it. Returns how many it did not name before. */
+export function alsoAbout(ctx: Ctx, question: QuestionRow, refs: readonly string[]): number {
+	let added = 0;
+	for (const about of refs)
+		added += ctx.db.run(Q.addRef, { project: ctx.project.id, ref: about, question: question.id }).changes;
+	if (added > 0) ctx.touched.add(questionRef(question));
+	return added;
 }
 
 export function noteCarried(ctx: Ctx, question: QuestionRow, refs: readonly string[]): void {

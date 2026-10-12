@@ -224,34 +224,38 @@ describe("reads on other cores through HTTP", () => {
 		});
 	});
 
-	test("forgetting an actor clears names cached by the readers before the next read", async () => {
-		const instance = bootReaders(2);
-		const pool = readersOf(instance);
-		await pool.ready();
-		const created = await post<{ token: string }>(instance, "/api/admin", {
-			do: "token.create",
-			actor: "case-author",
-			kind: "human",
-			can: ["read", "produce"],
-		});
-		if (!created.body.ok) throw new Error("could not create the case author");
-		await post(
-			instance,
-			"/api/p/scratch/propose",
-			{
-				edits: [{ op: "create", outline: "Authored case" }],
-			},
-			bearer(created.body.result.token),
-		);
-		const history = async () => (await post(instance, "/api/p/scratch/history", { ref: "C-1" })).body;
-		for (let i = 0; i < 8; i++) expect(JSON.stringify(await history())).toContain("case-author");
-		expect((await post(instance, "/api/admin", { do: "actor.forget", name: "case-author" })).body.ok).toBe(true);
-		for (let i = 0; i < 8; i++) {
-			const reply = JSON.stringify(await history());
-			expect(reply).not.toContain("case-author");
-			expect(reply).toContain("forgotten-");
-		}
-	});
+	// With reader threads the workers answer; without them the main thread answers from its own read connection.
+	// Both keep the names they have shown, and both must drop a forgotten one at once.
+	test.each([2, 0])(
+		"forgetting an actor clears the name from every read at once (%d reader threads)",
+		async (count) => {
+			const instance = bootReaders(count);
+			if (count > 0) await readersOf(instance).ready();
+			const created = await post<{ token: string }>(instance, "/api/admin", {
+				do: "token.create",
+				actor: "case-author",
+				kind: "human",
+				can: ["read", "produce"],
+			});
+			if (!created.body.ok) throw new Error("could not create the case author");
+			await post(
+				instance,
+				"/api/p/scratch/propose",
+				{
+					edits: [{ op: "create", outline: "Authored case" }],
+				},
+				bearer(created.body.result.token),
+			);
+			const history = async () => (await post(instance, "/api/p/scratch/history", { ref: "C-1" })).body;
+			for (let i = 0; i < 8; i++) expect(JSON.stringify(await history())).toContain("case-author");
+			expect((await post(instance, "/api/admin", { do: "actor.forget", name: "case-author" })).body.ok).toBe(true);
+			for (let i = 0; i < 8; i++) {
+				const reply = JSON.stringify(await history());
+				expect(reply).not.toContain("case-author");
+				expect(reply).toContain("forgotten-");
+			}
+		},
+	);
 
 	test("CASEBOOK_READERS=0 uses the inline reader and stop awaits all worker exits", async () => {
 		const previous = process.env.CASEBOOK_READERS;

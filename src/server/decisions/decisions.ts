@@ -511,13 +511,14 @@ function endReplaced(ctx: Ctx, question: QuestionRow, holds: readonly HoldTerm[]
 	for (const { question: other, decision } of standingOn(ctx, question.fingerprint)) {
 		if (other.id === question.id) continue;
 		const theirs = covers(json<HoldTerm[]>(decision.holds));
-		// A decision about named results takes nobody's place and nobody takes its place.
+		// A decision about named results takes nobody's place and nobody takes its place. An answer for the whole
+		// cause takes the place of every other answer, narrower ones included: it is the newer judgement on each
+		// of their targets too. An answer for certain targets takes the place of an answer naming one of them, and
+		// leaves an older answer for the whole cause standing for every other target.
 		const same =
 			mine === "results" || theirs === "results"
 				? false
-				: mine === "all"
-					? theirs === "all"
-					: theirs !== "all" && theirs.some((target) => mine.includes(target));
+				: mine === "all" || (theirs !== "all" && theirs.some((target) => mine.includes(target)));
 		if (!same) continue;
 		HANDLERS[other.kind].revert(ctx, other, decision);
 		lapse(ctx, other, decision, ctx.now);
@@ -763,7 +764,8 @@ function askUnexplained(ctx: Ctx, run: RunRow): boolean {
 		const fingerprint = contentHash({ kind: "failure", key: `${signature.hash}|${cause.scope}` });
 		const open = openFor(ctx.db, ctx.project.id, fingerprint, cause.target);
 		if (open && (json<{ targets?: number[] }>(open.evidence).targets ?? []).includes(cause.target)) {
-			alsoAbout(ctx, open, [runRef(run)]);
+			// Already asked. If the question did not name this run yet, the run is recomputed to list it.
+			if (alsoAbout(ctx, open, [runRef(run)]) > 0) asked = true;
 			continue;
 		}
 		const shown = shownFailure(ctx, run, cause);

@@ -1283,18 +1283,24 @@ describe("what a decision may change", () => {
 		on("first001", "production");
 		const production = open("failure");
 		expect(decide(production, { is: "infra" }).status).toBe("decided");
-		expect(decide(open("failure"), { is: "flaky" }).status).toBe("decided");
+		// Staging is called flaky: an answer about the cause wherever it shows. It is the newer judgement on
+		// production too, so production's own answer is ended, and its question points at the one in force.
+		const staging = open("failure");
+		expect(decide(staging, { is: "flaky" }).status).toBe("decided");
+		const stale = decide(production, { is: "defect" });
+		expect(stale).toMatchObject({ status: "conflict" });
+		expect(stale.needs).toContain(staging.q);
 		// The next commit rests on the flaky answer.
 		expect(on("second01", "staging").gate?.verdict).toBe("passed");
-		// Production's answer is changed to one that covers the cause everywhere: a defect.
-		expect(decide(production, { is: "defect" }).status).toBe("decided");
+		// The answer in force is changed to a defect: both commits follow.
+		expect(decide(open("failure", "decided"), { is: "defect" }).status).toBe("decided");
 		expect(gate({ commit: "first001" }).verdict).toBe("failed");
 		expect(gate({ commit: "second01" }).verdict).toBe("failed");
-		// One answer in force for the cause, and the ledger says what became of the other.
-		const ledger = rows<{ answer: string; supersedes: number | null }>(
-			"SELECT answer, supersedes FROM decisions WHERE kind = 'failure' ORDER BY id",
-		).map((row) => JSON.parse(row.answer).is);
-		expect(ledger).toEqual(["infra", "flaky", "outdated", "defect"]);
+		// One answer in force for the cause, and the ledger says what became of the others.
+		const ledger = rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id").map(
+			(row) => JSON.parse(row.answer).is,
+		);
+		expect(ledger).toEqual(["infra", "outdated", "flaky", "defect"]);
 		const retried = on("second01", "staging", 2);
 		expect(retried.questions.map((q) => q.answer)).toEqual(["defect"]);
 		expect(retried.gate?.verdict).toBe("failed");
@@ -1354,6 +1360,58 @@ describe("what a decision may change", () => {
 		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [asked.q] });
 		// The first result stays discounted by the first decision.
 		expect(rows("SELECT count(*) AS n FROM slot_results WHERE discounted_by IS NOT NULL")).toEqual([{ n: 1 }]);
+	});
+
+	test("an answer for the whole cause takes the place of every narrower answer, and their runs follow", () => {
+		const failing = { test: { key: "one" }, outcome: "fail", failure: { message: "same cause" } };
+		const on = (commit: string, attempt = 1) =>
+			report({ target: { commit, branch: "main" }, attempt, results: [failing] });
+		on("first001");
+		const earlier = open("failure");
+		expect(decide(earlier, { is: "infra" }).status).toBe("decided");
+		on("second01");
+		expect(decide(open("failure"), { is: "infra" }).status).toBe("decided");
+		expect(gate({ commit: "second01" }).verdict).toBe("passed");
+		// The first answer is changed to a defect, which is about the cause wherever it shows.
+		expect(decide(earlier, { is: "defect" }).status).toBe("decided");
+		expect(gate({ commit: "first001" }).verdict).toBe("failed");
+		expect(gate({ commit: "second01" }).verdict).toBe("failed");
+		const ledger = rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id").map(
+			(row) => JSON.parse(row.answer).is,
+		);
+		expect(ledger).toEqual(["infra", "infra", "outdated", "defect"]);
+		const retried = on("second01", 2);
+		expect(retried.questions.map((q) => q.answer)).toEqual(["defect"]);
+		expect(retried.gate?.verdict).toBe("failed");
+	});
+
+	test("every live run that shows a failure lists the question about it, not only the first one recomputed", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "Case" },
+				{ op: "create", outline: "Spare" },
+			],
+		});
+		const on = (commit: string) =>
+			report({
+				target: { commit, branch: "main" },
+				results: [
+					{
+						test: { key: "one" },
+						annotation: { case: "C-1", version: 1 },
+						outcome: "fail",
+						failure: { message: "same cause" },
+					},
+				],
+			});
+		on("first001");
+		const plans = [1, 2].map((i) => plan({ name: `Plan ${i}`, select: {}, accepts: { commit: "first001" } }).run);
+		on("second01");
+		// Answered for the newer build only: both runs on the earlier build still show the failure.
+		expect(decide(open("failure"), { is: "infra" }).status).toBe("decided");
+		const asked = h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items;
+		expect(asked).toHaveLength(1);
+		for (const run of plans) expect(gate({ run })).toMatchObject({ verdict: "blocked", open: [first(asked).q] });
 	});
 
 	test("a run closed on an answer that later stops holding names the question asked in its place", () => {
