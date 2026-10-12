@@ -1,0 +1,180 @@
+{
+  "candidate": "ts",
+  "root": "/home/endqwerty/.cache/casebook-arena/judge/stack/frozen/ts-run3",
+  "checks": {
+    "read_sql_oracles": {
+      "pass": true,
+      "folder_rows": 50,
+      "glyphs_checked": 31,
+      "history_rows": 20,
+      "queue_rows": 50
+    },
+    "and_search_and_area": {
+      "pass": true,
+      "rows": 50,
+      "rank_order_checked": true
+    },
+    "stale_base": {
+      "pass": true,
+      "status": 400,
+      "error": {
+        "error": "Version conflict: expected 8, current 1"
+      },
+      "delta": {
+        "version": 0,
+        "command": 0,
+        "question": 0,
+        "decision": 0,
+        "result": 0,
+        "test": 0,
+        "signature": 0,
+        "batch": 0,
+        "target": 0,
+        "run": 0,
+        "seq": 0
+      }
+    },
+    "concurrent_command_replay": {
+      "pass": true,
+      "responses": [
+        [
+          200,
+          {
+            "caseId": 1,
+            "version": 2,
+            "seq": 219967,
+            "hash": "c83238a383fdec0dd477c3ec9b0bc2d058a59d304d5e3c33d91429a7002138bd"
+          }
+        ],
+        [
+          200,
+          {
+            "caseId": 1,
+            "version": 2,
+            "seq": 219967,
+            "hash": "c83238a383fdec0dd477c3ec9b0bc2d058a59d304d5e3c33d91429a7002138bd"
+          }
+        ]
+      ],
+      "delta": {
+        "version": 1,
+        "command": 1,
+        "question": 1,
+        "decision": 1,
+        "result": 0,
+        "test": 0,
+        "signature": 0,
+        "batch": 0,
+        "target": 0,
+        "run": 0,
+        "seq": 1
+      }
+    },
+    "missing_base": {
+      "protected": false,
+      "status": 200,
+      "response": {
+        "caseId": 1,
+        "version": 3,
+        "seq": 219968,
+        "hash": "333cef1801dc19bc9d0375d5809aca28f1e3a05f5b6858dfa1c2d8d235dd974b"
+      },
+      "delta": {
+        "version": 1,
+        "command": 1,
+        "question": 1,
+        "decision": 1,
+        "result": 0,
+        "test": 0,
+        "signature": 0,
+        "batch": 0,
+        "target": 0,
+        "run": 0,
+        "seq": 1
+      }
+    },
+    "concurrent_stale_edits": {
+      "pass": true,
+      "statuses": [
+        200,
+        400
+      ]
+    },
+    "report_and_replay": {
+      "pass": true,
+      "delta": {
+        "version": 0,
+        "command": 0,
+        "question": 20,
+        "decision": 0,
+        "result": 10000,
+        "test": 100,
+        "signature": 10,
+        "batch": 1,
+        "target": 1,
+        "run": 1,
+        "seq": 1
+      },
+      "sql": {
+        "n": 10000,
+        "failures": 200,
+        "signatures": 20,
+        "assumed": 9900,
+        "unresolved": 100,
+        "bad": 0
+      },
+      "replays": [
+        [
+          200,
+          {
+            "batch": 100000108,
+            "inserted": 0,
+            "newTests": 0,
+            "failures": 0,
+            "signatures": 0,
+            "seq": 219970
+          }
+        ],
+        [
+          200,
+          {
+            "batch": 100000108,
+            "inserted": 0,
+            "newTests": 0,
+            "failures": 0,
+            "signatures": 0,
+            "seq": 219970
+          }
+        ]
+      ]
+    },
+    "invalid_report_no_writes": {
+      "pass": true,
+      "status": 400
+    }
+  },
+  "source_hashes": {
+    "src/schemas.ts": "43b617b4200f1084308eb5120dd94311c0ef70d4194ae3ba979e4bbc6b14ad9c",
+    "src/db.ts": "fcf0ea3d98718c945e793b418b9df0ef50fd0e8189c5f5ff68db9b6b4b9306ca",
+    "src/sqlite-bun.ts": "8051e74a2b5d306177bfdf4227d02d41b976246ff6e1942e5b0e180cb1e79074",
+    "src/sqlite-node.ts": "77a2518a8f1a2f127477ee8061c2160180d4d9f3f2c20262f48490abe39ae64c",
+    "src/db-pg.ts": "8a4db266d2618ea43adf2e92392adb08b8f8904942733dd5574e4ad2d14bce4d",
+    "src/db-pglite.ts": "01667109533d47ba5f24b33fe4e083192d33a937cb19d39b85f32519231c3c85",
+    "src/workloads.ts": "af2f0aafa43d9687647454613496312e8861e663485a547b23e4ee5bbbfe1053",
+    "src/registry.ts": "040e19f026c4a982e45a7ee4a1391642bc9930447960c4cebb1f6324892f49e8",
+    "src/xml.ts": "188c4f00a2f244f2bbde7fe8e23c8f05bf2ff338dde0df6262ead4766253f2ca",
+    "src/main.ts": "3e27f062f7f67e1b336331839a7af2ad959624a212f2c4bc15292b6d91de8d7b",
+    "src/bench.ts": "6321afb4d6202cd21369894233b1277aa93ceac09abfd82f4b40cc598fe9937b",
+    "src/driver-choice.ts": "dc77bf427dd43ade037eda191069739b2273fadd75abde9dbc0539dc897ae064",
+    "src/registry-proof.ts": "c021836ec3befe06d85c2bed4f3f339fa6b10bbdb1b962c337b6dd68654b0af3",
+    "src/build-metrics.ts": "80c21eee1dbca790c81125846833f4e32c47b589a9e6edf6fe7bd3bb73a32d97",
+    "src/aggregate.ts": "08b49c4e5d1591ff2b3e3ec46bac40b98b1bbcc17e6f402402af9e89be691ebf",
+    "src/node-disabled.ts": "896e9b2943f83516b1664874445ec581c213674f37d07fbe189c43a242e913f1",
+    "src/invoke.ts": "a39161950f2ac9b7886d178202e29021f568d6ff6de62c34877d65f90cd0e96b",
+    "src/sqlite-worker.ts": "472e3a38e7a4b73cd2a0bde51246aee5233d5c007880c9c3036621fd2fa6a09b",
+    "src/sqlite-pool.ts": "a130798f81e69bd6a9d370fec592d6c2968e368dfef516a9781e0f3dd81bd768",
+    "src/profile-search.ts": "d1f6af860381287662f6dad63f6ef958f366ecba97a23befe7825258f9ecc07c",
+    "src/pglite-extra.ts": "4ecaf59b8e3ebabfacd01bacf4ef1c9765ded9b4e7ed6c6bbe836870dc50f92e"
+  },
+  "completed": true
+}

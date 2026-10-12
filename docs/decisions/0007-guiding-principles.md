@@ -1,8 +1,8 @@
 # 0007: Guiding principles, their order, and when they may bend
 
 - Date: 2026-10-11
-- Status: proposed (synthesised from the design arena; Daniel to confirm the
-  order and the floor)
+- Status: accepted with one amendment (Daniel, 2026-10-11: "probably"; F3
+  applies to 1.0, see decision 0009, answer 28)
 
 Casebook needs principles that decide architecture and product questions,
 with tie-breaks, so that a contributor (person or agent) who sees one file
@@ -170,7 +170,8 @@ works, do not ship.
   decide, open, search).
 - F3. It is not measurably better than the incumbents on the capture,
   execution and triage jobs of the phase 0 friction audit. Working is not
-  enough.
+  enough. *Amended 2026-10-11 (decision 0009, answer 28): F3 gates 1.0. A
+  preview may fall short of it when an issue records the gap and the plan.*
 - F4. It asks a person a question it already holds a valid answer to.
 - F5. A capability exists in the UI only, outside the operation layer, so it
   is not reachable by the API or an agent.

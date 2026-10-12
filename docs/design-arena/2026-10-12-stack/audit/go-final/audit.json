@@ -1,0 +1,177 @@
+{
+  "candidate": "go",
+  "root": "/home/endqwerty/.cache/casebook-arena/judge/stack/frozen/go-run2",
+  "checks": {
+    "read_sql_oracles": {
+      "pass": true,
+      "folder_rows": 50,
+      "glyphs_checked": 31,
+      "history_rows": 20,
+      "queue_rows": 50
+    },
+    "and_search_and_area": {
+      "pass": true,
+      "rows": 50,
+      "rank_order_checked": true
+    },
+    "stale_base": {
+      "pass": true,
+      "status": 409,
+      "error": {
+        "error": "conflict: expected version 8; current 1"
+      },
+      "delta": {
+        "version": 0,
+        "command": 0,
+        "question": 0,
+        "decision": 0,
+        "result": 0,
+        "test": 0,
+        "signature": 0,
+        "batch": 0,
+        "target": 0,
+        "run": 0,
+        "seq": 0
+      }
+    },
+    "concurrent_command_replay": {
+      "pass": true,
+      "responses": [
+        [
+          200,
+          {
+            "case": 1,
+            "version": 2,
+            "seq": 219967,
+            "question": 60001,
+            "decision": 10001,
+            "hash": "c83238a383fdec0dd477c3ec9b0bc2d058a59d304d5e3c33d91429a7002138bd"
+          }
+        ],
+        [
+          200,
+          {
+            "case": 1,
+            "version": 2,
+            "seq": 219967,
+            "question": 60001,
+            "decision": 10001,
+            "hash": "c83238a383fdec0dd477c3ec9b0bc2d058a59d304d5e3c33d91429a7002138bd"
+          }
+        ]
+      ],
+      "delta": {
+        "version": 1,
+        "command": 1,
+        "question": 1,
+        "decision": 1,
+        "result": 0,
+        "test": 0,
+        "signature": 0,
+        "batch": 0,
+        "target": 0,
+        "run": 0,
+        "seq": 1
+      }
+    },
+    "missing_base": {
+      "protected": true,
+      "status": 400,
+      "response": {
+        "error": "invalid input: validating root: required: missing properties: [\"base\"]"
+      },
+      "delta": {
+        "version": 0,
+        "command": 0,
+        "question": 0,
+        "decision": 0,
+        "result": 0,
+        "test": 0,
+        "signature": 0,
+        "batch": 0,
+        "target": 0,
+        "run": 0,
+        "seq": 0
+      }
+    },
+    "concurrent_stale_edits": {
+      "pass": true,
+      "statuses": [
+        200,
+        409
+      ]
+    },
+    "report_and_replay": {
+      "pass": true,
+      "delta": {
+        "version": 0,
+        "command": 0,
+        "question": 20,
+        "decision": 0,
+        "result": 10000,
+        "test": 100,
+        "signature": 10,
+        "batch": 1,
+        "target": 1,
+        "run": 1,
+        "seq": 1
+      },
+      "sql": {
+        "n": 10000,
+        "failures": 200,
+        "signatures": 20,
+        "assumed": 9900,
+        "unresolved": 100,
+        "bad": 0
+      },
+      "replays": [
+        [
+          200,
+          {
+            "batch": 201,
+            "seq": 219969,
+            "inserted": 0,
+            "newTests": 0,
+            "failures": 0,
+            "signatures": 0,
+            "newSignatures": 0,
+            "questions": 0,
+            "replay": true
+          }
+        ],
+        [
+          200,
+          {
+            "batch": 201,
+            "seq": 219969,
+            "inserted": 0,
+            "newTests": 0,
+            "failures": 0,
+            "signatures": 0,
+            "newSignatures": 0,
+            "questions": 0,
+            "replay": true
+          }
+        ]
+      ]
+    },
+    "invalid_report_no_writes": {
+      "pass": true,
+      "status": 400
+    }
+  },
+  "source_hashes": {
+    "sqlite_cgo.go": "76f03fa4a763a496f127300bbe66c614c31e96a766a578bef7d0854699b939cc",
+    "sqlite_pure.go": "c22db777787307cc703887de5aa9d5cd74c0c4e12b863e24c234fa750889c93f",
+    "store.go": "4cb33bb29f0d313913c7cc71b308822fc7c3dda8752a5abceb87cd7836ca1432",
+    "models.go": "5efc8f87e8d225034211139faf3f6f895c513a2ddb88b7f2328211f97e76d1c8",
+    "operations.go": "d5de94ca8735d30bddd5f3d2bcf6bdc48162ec2997878baa654b12505b41d86c",
+    "registry.go": "6f902df98ddb33cac9dd593b86e4f26493a4433f3c766c09ac67881d1f444372",
+    "main.go": "6ef59152f7140fb3ed06d38c7b50ba6cbda35d672e1c971211cd086b95ef1685",
+    "junit.go": "06f3578b9656d81de37545de76bd64e4a446982ae513c97698d84451443dc8b6",
+    "bench.go": "46f044f3ef91abdc0f7bb02495c48878175e0e10a8be680a9d63f38f209ee7a9",
+    "check.go": "3fa090f0e8fb253ddc5e0ba3b4762ad12d63731c02e8d0ffcc63a3b8103ed2fb",
+    "diagnose.go": "ff17a50813a4bf653d5383ef1325f4666985d6a9ab3a067a792a62c208f8ee73"
+  },
+  "completed": true
+}
