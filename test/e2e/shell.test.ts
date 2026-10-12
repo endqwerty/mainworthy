@@ -20,7 +20,13 @@ test.skipIf(!browserAvailable)(
 				await page.keyboard.type(keys);
 				await page.waitForURL(`**/p/scratch/${route}`);
 				expect(await page.locator("#list").count()).toBe(1);
+				expect(await page.locator("#tree").count()).toBe(route === "suite" ? 1 : 0);
 			}
+			await page.keyboard.press("[");
+			expect(await page.locator("#side").evaluate((node) => node.getBoundingClientRect().width)).toBe(64);
+			expect(await page.getByRole("link", { name: "Suite", exact: true }).isVisible()).toBe(true);
+			await page.keyboard.press("[");
+			expect(await page.locator("#side").evaluate((node) => node.getBoundingClientRect().width)).toBe(236);
 			await page.keyboard.press("Control+k");
 			await page.getByRole("textbox", { name: "Jump to or run" }).fill("C-1");
 			await page.keyboard.press("Enter");

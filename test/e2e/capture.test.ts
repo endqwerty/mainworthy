@@ -19,6 +19,7 @@ test.skipIf(!browserAvailable)(
 			).toBe(true);
 			expect(await page.locator('#detail [data-field="title"]').count()).toBe(1);
 			await type("Expired coupon is rejected #checkout");
+			expect(await page.locator(".capture-mirror").innerText()).toBe("Expired coupon is rejected #checkout");
 			await page.keyboard.press("Enter");
 			await type("Open the cart");
 			await page.keyboard.press("Tab");

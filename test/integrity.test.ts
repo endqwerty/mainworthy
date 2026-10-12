@@ -3,12 +3,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { emptyBody } from "../src/core/model.ts";
 import type { DecideReply, GateStatus, InboxReply, PlanReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
-import { setExcuse } from "../src/server/evidence/evidence.ts";
+import { HANDLERS } from "../src/server/decisions/kinds.ts";
+import { linkTest, setExcuse, testById } from "../src/server/evidence/evidence.ts";
 import { sweep } from "../src/server/jobs.ts";
 import { findProject, makeCtx } from "../src/server/kernel/ctx.ts";
 import { claimMint, decisionOf, Witness } from "../src/server/kernel/witness.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
+import { closeRun, runById } from "../src/server/runs/runs.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -704,19 +706,44 @@ describe("what a decision may change", () => {
 	});
 
 	test("a witness of one kind cannot change what another kind of decision owns", () => {
-		// A real decision's witness, captured as the suite writer receives it, cannot be used to link a test.
 		usePolicy("standard");
 		seed();
-		report({ target: { commit: "kinds0001" }, results: [{ test: { key: "a::t", file: "a" }, outcome: "pass" }] });
-		const map = open("map");
-		// The map decision links T-1; its witness is of kind `map`, so the link's decision is that one.
-		decide(map, { is: "link", pairs: [["T-1", "C-1"]] });
-		const linked = first(rows<{ linked_by: number }>("SELECT linked_by FROM tests WHERE no = 1")).linked_by;
-		expect(rows("SELECT kind FROM decisions WHERE id = ?", linked)).toEqual([{ kind: "map" }]);
-		// Every standing row cites a decision of the kind that owns it.
-		expect(
-			rows(`SELECT count(*) AS n FROM versions v JOIN decisions d ON d.id = v.decision WHERE d.kind <> 'adopt'`),
-		).toEqual([{ n: 0 }]);
+		report({
+			target: { commit: "kinds0001" },
+			results: [{ test: { key: "a::t", file: "a" }, outcome: "fail", failure: { message: "bug" } }],
+		});
+		// A genuine witness, captured as the adopt handler receives it from a real decision.
+		let adoptWitness: Witness | null = null;
+		const adopt = HANDLERS.adopt;
+		const original = adopt.effect;
+		adopt.effect = (ctx, witness, ...rest) => {
+			adoptWitness = witness;
+			return original(ctx, witness, ...rest);
+		};
+		try {
+			h.call("propose", { edits: [{ op: "create", outline: "Made by a real decision" }] });
+		} finally {
+			adopt.effect = original;
+		}
+		if (!adoptWitness) throw new Error("no adopt decision was made");
+		const genuine: Witness = adoptWitness;
+		expect(decisionOf(genuine, "adopt")).toBeGreaterThan(0);
+		const project = findProject(h.app.db, "scratch");
+		if (!project) throw new Error("no project");
+		const ctx = makeCtx(h.app, project, h.owner, true);
+		const test = testById(h.app.db, 1);
+		const run = runById(h.app.db, 1);
+		if (!test || !run) throw new Error("fixture missing");
+		const signature = first(rows<{ id: number }>("SELECT id FROM signatures")).id;
+		// The same witness is refused by every writer that another kind of decision owns, and nothing is written.
+		expect(() => linkTest(ctx, genuine, test, 1)).toThrow("only a map decision");
+		expect(() => setExcuse(ctx, genuine, { signature, scope: "line:trunk", class: "excused", targets: null })).toThrow(
+			"only a failure decision",
+		);
+		expect(() => closeRun(ctx, genuine, run)).toThrow("only a signoff decision");
+		expect(rows("SELECT case_id, linked_by FROM tests WHERE id = 1")).toEqual([{ case_id: null, linked_by: null }]);
+		expect(rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 0 }]);
+		expect(rows("SELECT state FROM runs WHERE id = 1")).toEqual([{ state: "open" }]);
 	});
 
 	test("only the decision machinery can make a witness", () => {
@@ -842,7 +869,9 @@ describe("what a caller is told", () => {
 		};
 		expect(h.raw("admin", token).ok).toBe(true);
 		expect(h.raw("admin", token)).toMatchObject({ ok: false, error: { code: "conflict" } });
-		expect(rows("SELECT count(*) AS n FROM tokens WHERE label <> 'test'").length).toBe(1);
+		expect(rows("SELECT count(*) AS n FROM tokens t JOIN actors a ON a.id = t.actor WHERE a.name = 'ci-bot'")).toEqual([
+			{ n: 1 },
+		]);
 		expect(JSON.stringify(rows("SELECT outcome FROM commands"))).not.toContain("cb_");
 	});
 
