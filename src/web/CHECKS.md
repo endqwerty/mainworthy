@@ -355,3 +355,123 @@ data. This worker made no commit, push, pull request or checkout cleanup.
 Only the worker's own `/tmp` logs and source backups were removed after their
 deciding lines were recorded here. The current diff remains for the lead's
 independent verification and commit.
+
+## Round 7 conflict fixes
+
+The author checked the four findings in `UI-R7-FIXES.md` against the real Bun
+server and Chromium. The lead owns independent verification and delivery of
+this shared checkout. This pass changes only `src/web/suite/index.tsx`, this
+check record, `test/e2e/round7.test.ts` and the round-6 expectations described
+below. No server or core change is needed.
+
+The stored draft's `conflict` is now the record of the conflict. The separate
+`conflicts` map and `conflict` React state are gone. The open draft, live drafts
+used by pending saves, and the draft list cache whole drafts. A storage event
+refreshes the list and any open conflicted draft. Opening an editor reads the
+stored draft; each editor change reads it again before writing. Caret changes
+keep its stored body, and a refused content change restores that body and
+reports the refusal in the footer. The pagehide rewrite was removed because
+each input already writes synchronously and a departing window could otherwise
+write its old copy over a conflict changed elsewhere.
+
+The checks were written before implementation in `test/e2e/round7.test.ts`:
+
+- R7-1 route A opens the second window before the conflict. Its editor shows
+  the card and is read-only; keys are refused visibly. Resolving in the first
+  window releases the second through storage. Both reload orders preserve the
+  recorded text and leave no draft. Another check has the second editor open
+  before the conflict arises and confirms that rejection releases it without
+  reloading.
+- R7-1 route B opens the page on another case while the question is rejected.
+  Returning clears the stored conflict even without a live draft in that
+  window. Later text is proposed, survives a reload, and reaches the server.
+- R7-2 rejects after either "Keep current version" or "Use current title" was
+  chosen but never confirmed. The draft keeps its original title and steps;
+  only the conflict and pending request are cleared.
+- R7-3 records the draft elsewhere, then opens the window left behind. The
+  draft is dropped, no redundant proposal is sent, and the pane shows version
+  3 rather than version 1.
+- R7-4 records a merge but aborts its reply. The second press reads the settled
+  question and head, clears the card without a reload, and permits a later
+  edit that becomes version 4. The uncertain-request map remembers the body
+  actually sent, so the comparison does not depend on later card choices.
+- The removal check holds a successful merge reply and changes the stored
+  body before releasing it. The later body stays on the device and in the
+  editor, without a conflict, on base version 3, also after reload. Removal
+  and settlement read the draft currently stored rather than a live copy.
+- The write-guard check stores a conflict without dispatching a storage event
+  while the editor is still writable. Text insertion is refused, the stored
+  body stays intact, the editor freezes, and the footer reports the refusal.
+  The read-only flag is asserted separately by the two-window checks.
+
+Before implementation, the first nine checks reported `0 pass`, `9 fail`,
+with `7 expect() calls`, in 34.49 seconds. They failed at the missing card,
+the conflict that stayed stored, the replacement title after rejection, the
+draft that stayed after recording elsewhere, the stuck retry card, the deleted
+later body, and accepted input before a storage event. The later open-editor
+check also failed on the original source in a scratch export, waiting for its
+missing card. The focused fixed run reported `10 pass`, `0 fail`, with
+`49 expect() calls`, in 20.84 seconds. A further footer assertion passed in a
+focused run with `1 pass`, `0 fail`, and `5 expect() calls`.
+
+Scratch exports prove both guards independently. Replacing the removal
+condition with `true` made the later-body check receive `undefined` instead
+of "Later text kept on the device". Removing just the read-only flags made
+both route-A tests fail with `Expected: true`, `Received: false`. Removing
+just the guard in `change()` left the footer without "Resolve the conflict
+first", so its focused check failed. The scratch exports were removed; no
+mutation touched the shared checkout.
+
+Two round-6 expectations were updated to follow this brief. Rejection or a
+different merge elsewhere keeps the draft's own body, rather than an
+unconfirmed card edit. When a submitted merge meets a new conflict, its body
+becomes the replacement draft's `mine` only if the stored body still equals
+the earlier `mine`; later text is never replaced. The earlier conflict checks
+reported `87 pass`, `1 skip`, `0 fail`, and `236 expect() calls` in 82.68
+seconds. The skip is the existing R5B-4 slot-fill `atStep` deferral, issue #72.
+
+Preflight on the fixed source passed: `bunx tsc --noEmit` exited 0;
+`bunx biome check src/web test/e2e` checked 62 files without fixes;
+`bun test test/architecture.test.ts` reported `12 pass`, `0 fail`, and
+`31 expect() calls`. `git diff --check` passed.
+
+Two more checks exercise the same removal step. A successful reply can arrive
+after another window has cleared the conflict and begun a fresh draft whose
+body happens to equal the earlier `mine`. Removal now also requires that the
+stored draft still carry that question. The new check failed before that
+condition, because the draft disappeared, and passed afterwards.
+
+After a lost merge reply, text typed subsequently in the card must survive the
+second press. Settlement compares the stored merged body with the body
+actually sent. If they differ and the draft body still equals `mine`, the later
+card body becomes an editable draft on the recorded head. A draft body that
+differs from `mine` is kept as it is. The new check failed before this guard,
+waiting for the missing "later text is kept" status, and passes with the later
+card text in the editor and storage, then recorded as version 4. A read failure
+during retry does not replace the remembered sent body with an unsent choice.
+
+The expanded focused round-7 run reported `12 pass`, `0 fail`, and
+`58 expect() calls` in 24.46 seconds. The final full runs below use this
+expanded suite. The earlier full pass reported `199 pass`, `1 skip`, `0 fail`,
+and `905 expect() calls` in 302.84 seconds, before these two additional checks.
+An overlapping intermediate run had one R3B-3 failure waiting for its second
+undo request. Its immediate focused rerun passed. No run or undo source was
+changed in this pass; the final consecutive runs are the delivery evidence.
+
+The two final consecutive `bun test test/e2e` runs passed:
+
+```text
+run 1: 201 pass, 1 skip, 0 fail, 913 expect() calls.
+       Ran 202 tests across 21 files. [298.26s]
+run 2: 201 pass, 1 skip, 0 fail, 912 expect() calls.
+       Ran 202 tests across 21 files. [298.37s]
+```
+
+No source or test changed between these runs. Both include all twelve round-7
+regressions and the real idle and latency checks. The skip remains R5B-4's
+previously deferred slot-fill field. TypeScript, Biome and the twelve
+architecture tests also passed on the final source. Independent verification
+of this uncommitted diff remains with the lead. This worker made no commit,
+push, pull request or checkout cleanup. Each test fixture closed its server
+and browser and removed its temporary data. Only this worker's own scratch
+exports and logs under `/tmp` were removed after recording their evidence.
