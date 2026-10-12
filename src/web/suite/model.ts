@@ -40,6 +40,7 @@ export const CaseView = z.object({
 	steps: z.array(Step),
 	methods: CaseBody.shape.methods,
 	automate: CaseBody.shape.automate,
+	fields: CaseBody.shape.fields.default({}),
 	tags: z.array(z.string()),
 	covers: z.array(z.string()),
 	folder: z.object({ id: z.number(), path: z.string() }),
@@ -56,7 +57,7 @@ export function bodyOf(view: CaseView): CaseBody {
 		steps: view.steps,
 		methods: view.methods,
 		automate: view.automate,
-		fields: {},
+		fields: view.fields,
 	};
 }
 export function editDraft(view: CaseView): Draft {

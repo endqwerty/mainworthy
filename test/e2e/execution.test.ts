@@ -457,3 +457,70 @@ async function cases(server: Server, count: number) {
 	},
 	20000,
 );
+
+(browserAvailable ? test : test.skip)(
+	"a failure note is kept on the device: through a reload, and one per slot when two requests fail",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			const created = await cases(server, 3);
+			const planned = await server.api("plan", {
+				name: "Notes survive",
+				select: { cases: created.cases.map((c) => c.ref) },
+			});
+			view = await openPage(server, { path: `/p/scratch/runs/${planned.run.slice(2)}` });
+			const page = view.page;
+			page.setDefaultTimeout(5000);
+			const note = page.getByRole("textbox", { name: "Result note" });
+			await page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
+
+			// Typed and not yet recorded: a reload brings it back for the same slot.
+			await page.keyboard.press("f");
+			await page.keyboard.type("Unsaved failure detail");
+			await page.reload();
+			await page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
+			expect(await note.inputValue()).toBe("Unsaved failure detail");
+
+			// Two results whose requests both fail: each slot keeps its own note.
+			await page.route("**/api/p/*/report", async (route) => {
+				await new Promise((resolve) => setTimeout(resolve, 600));
+				await route.abort();
+			});
+			await page.keyboard.press("f");
+			await note.fill("First failed note");
+			await page.keyboard.press("Enter");
+			await page.waitForSelector('[data-run-document="C-2"][data-active="true"]');
+			await page.keyboard.press("f");
+			await page.keyboard.type("Second failed note");
+			await page.keyboard.press("Enter");
+			// Both requests are aborted after 600 ms; give both rollbacks time to land.
+			await page.waitForTimeout(2500);
+			await page.unroute("**/api/p/*/report");
+			await page.locator('[data-slot="1"]').click();
+			expect(await note.inputValue()).toBe("First failed note");
+			await page.locator('[data-slot="2"]').click();
+			expect(await note.inputValue()).toBe("Second failed note");
+			expect(
+				Slot.array()
+					.parse((await server.api("find", { in: "slots", run: planned.run })).items)
+					.every((slot) => slot.state === "missing"),
+			).toBe(true);
+
+			// Recorded at last, the note leaves the device.
+			await page.locator('[data-slot="1"]').click();
+			await page.keyboard.press("f");
+			await page.keyboard.press("Enter");
+			await eventually(
+				async () => Slot.array().parse((await server.api("find", { in: "slots", run: planned.run })).items),
+				(slots) => slots[0]?.state === "failing",
+			);
+			await page.locator('[data-slot="1"]').click();
+			expect(await note.inputValue()).toBe("");
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
+);

@@ -10,6 +10,25 @@ import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, KeyCap, ListRow, ProducerGlyph } from "../ui/index.tsx";
 import { type Fill, outcomeName, Run, RunCase, type RunOutcome, Slot, tallyText } from "./models.ts";
 
+/** Notes typed for the slots of one run and not yet on the server, by slot id. Storage may be full or off. */
+function readNotes(key: string): Record<string, string> {
+	try {
+		const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? "{}");
+		if (typeof parsed !== "object" || parsed === null) return {};
+		return Object.fromEntries(
+			Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+		);
+	} catch {
+		return {};
+	}
+}
+function writeNotes(key: string, notes: Record<string, string>): void {
+	try {
+		if (Object.keys(notes).length === 0) localStorage.removeItem(key);
+		else localStorage.setItem(key, JSON.stringify(notes));
+	} catch {}
+}
+
 type LocalFill = { fill: Fill; questions: ReportReceipt["questions"]; pending: boolean };
 type LastResult = { slot: Slot; outcome: RunOutcome; previous: Fill | null; ready: Promise<ReportReceipt> };
 
@@ -39,7 +58,19 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const [cursor, setCursor] = useState<number | null>(null);
 	const [step, setStep] = useState("");
 	const [noting, setNoting] = useState<Slot | null>(null);
-	const [note, setNote] = useState("");
+	// A note belongs to its slot and is kept on this device from the first key until the server has the result:
+	// a reload, a failed request, or two failed requests in a row lose none of them.
+	const notesKey = `casebook:run-notes:${project}:${runRef}`;
+	const [notes, setNotes] = useState<Record<string, string>>(() => readNotes(notesKey));
+	const setNoteOf = (slotId: number, text: string): void => {
+		setNotes((previous) => {
+			const next = { ...previous };
+			if (text) next[slotId] = text;
+			else delete next[slotId];
+			writeNotes(notesKey, next);
+			return next;
+		});
+	};
 	const noteRef = useRef<HTMLInputElement>(null);
 	const [last, setLast] = useState<LastResult | null>(null);
 	const writes = useRef(new Map<number, Promise<ReportReceipt>>());
@@ -74,6 +105,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const external = (slot: Slot) =>
 		slot.fills.length > 0 && !slot.fills.some((fill) => fill.by === session.actor && fill.method === method);
 	const ownFill = current?.fills.find((fill) => fill.by === session.actor && fill.method === method);
+	const note = current ? (notes[current.id] ?? "") : "";
 	const currentRead = useQueryOp({
 		project,
 		op: "get",
@@ -108,12 +140,16 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				setCursor(candidate.id);
 				setStep("");
 				setNoting(null);
-				setNote("");
 				return;
 			}
 		}
 	}
-	function record(outcome: RunOutcome, slot = current, text = note, advance = true): Promise<ReportReceipt> | null {
+	function record(
+		outcome: RunOutcome,
+		slot = current,
+		text = slot ? (notes[slot.id] ?? "") : "",
+		advance = true,
+	): Promise<ReportReceipt> | null {
 		if (!slot || run?.state !== "open" || !session.can.includes("produce")) return null;
 		if (external(slot)) {
 			setStatus("This slot is already filled by another producer. j moves to the next slot for you.");
@@ -200,6 +236,8 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				throw new Error(receipt.rejected[0]?.reason ?? receipt.declined?.[0]?.reason ?? "The result was not recorded.");
 			const saved = { ...fill, result: receipt.results[0] };
 			latest.current.set(slot.id, saved);
+			// The server has it: the device's copy of the note has done its work.
+			setNoteOf(slot.id, "");
 			if (queued.current.get(slot.id) === fill.result)
 				setLocal((value) => new Map(value).set(slot.id, { fill: saved, questions: receipt.questions, pending: false }));
 			setStatus(
@@ -230,7 +268,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			});
 			setLast((value) => (value?.ready === request ? null : value));
 			setCursor(slot.id);
-			setNote(text);
+			setNoteOf(slot.id, text);
 			if (outcome === "fail") {
 				setNoting(slot);
 				noteRef.current?.focus();
@@ -241,7 +279,6 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		if (advance) {
 			setCursor(next[0]?.id ?? slot.id);
 			setNoting(null);
-			setNote("");
 			setStep("");
 			noteRef.current?.blur();
 		}
@@ -395,7 +432,6 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 							onClick={() => {
 								setCursor(slot.id);
 								setNoting(null);
-								setNote("");
 							}}
 						/>
 					))}
@@ -408,7 +444,6 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 								onClick={() => {
 									setCursor(slot.id);
 									setNoting(null);
-									setNote("");
 								}}
 							>
 								<span className="run-number">{String(index + 1).padStart(2, "0")}</span>
@@ -523,7 +558,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 								: "Optional note. f focuses it; Enter records a failure."
 						}
 						onChange={(event) => {
-							setNote(event.target.value);
+							if (current) setNoteOf(current.id, event.target.value);
 							if (!noting && current) setNoting(current);
 						}}
 						onKeyDown={(event) => {

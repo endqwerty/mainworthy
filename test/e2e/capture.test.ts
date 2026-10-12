@@ -1,5 +1,72 @@
 import { expect, test } from "bun:test";
+import { parseCase } from "../../src/core/markdown.ts";
 import { browserAvailable, eventually, keyCount, openPage, paste, startServer } from "./support.ts";
+
+test.skipIf(!browserAvailable)(
+	"an ordinary edit preserves custom fields omitted from JSON case reads",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [{ op: "create", body: { title: "Field-bearing case", fields: { priority: "P1" } } }],
+		});
+		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			await browser.page.getByRole("button", { name: "Field-bearing case", exact: true }).waitFor();
+			await browser.page.keyboard.press("e");
+			await browser.page.getByRole("textbox", { name: "Case title", exact: true }).fill("Revised field-bearing case");
+			await browser.page.keyboard.press("Escape");
+			const rows = await eventually(
+				() => server.api("get", { refs: ["C-1"], as: "md" }),
+				(rows) => rows[0]?.version === 2,
+			);
+			const md = rows[0]?.md;
+			if (typeof md !== "string") throw new Error("Canonical case body missing");
+			const parsed = parseCase(md);
+			if (!parsed.ok) throw new Error("Canonical case body did not parse");
+			expect(parsed.doc.body.fields).toEqual({ priority: "P1" });
+			expect(parsed.doc.body.title).toBe("Revised field-bearing case");
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"the sidebar tag filter uses server counts and capture keeps the selected tag",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", body: { title: "Checkout case" }, tags: ["checkout"] },
+				{ op: "create", body: { title: "Other case" }, tags: ["accounts"] },
+			],
+		});
+		const browser = await openPage(server);
+		try {
+			const { page } = browser;
+			await page.locator(".sidebar-tags").getByRole("button", { name: "#checkout 1" }).click();
+			await page.waitForFunction(() => document.querySelector("#lcount")?.textContent === "1 cases");
+			expect(await page.locator('[data-testid="case-list"]').innerText()).not.toContain("Other case");
+			await page.keyboard.press("c");
+			await page.keyboard.type("Second checkout case");
+			await page.keyboard.press("Escape");
+			const rows = await eventually(
+				() => server.api("find", { in: "cases", tags: ["checkout"] }),
+				(reply) => reply.count === 2,
+			);
+			expect(rows.items.map((row) => row.title)).toContain("Second checkout case");
+			expect(rows.items.every((row) => Array.isArray(row.tags) && row.tags.includes("checkout"))).toBe(true);
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
 
 test.skipIf(!browserAvailable)(
 	"J1 captures six steps with three expected results without a dialog or page load",

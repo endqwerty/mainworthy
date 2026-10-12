@@ -8,6 +8,7 @@ Before implementing the UI, these are the checks that decide this subtask.
 - L1: On 2,000 and 10,000 seeded cases, 30 trusted key samples measure capture focus and step paint on the next animation frame. p95 must be at most 100 ms. Scroll 5,000 rows and check populated frames. CASEBOOK_SKIP_10K skips only the large benchmark.
 - L2: Reload an unfinished draft. The text and selection return synchronously. The server may seal the same body on visibilitychange, as required by the brief.
 - Conflict: Change the same field through the page and API. Both bodies remain visible, the server retains the intervening version, and a merge decision creates the next version.
+- Custom fields: JSON reads currently omit them. Editing only the fields this pane owns must leave custom fields intact in the server's canonical Markdown; this regression failed before excluding custom fields from ordinary edit payloads.
 - Sign-in: Server mode rejects a wrong token and accepts the owner token; local mode needs no login.
 - Formatting and architecture: `bunx tsc --noEmit`, Biome on owned files, `bun test test/architecture.test.ts`, and `bun test test/e2e`.
 - Screenshots: inspect Suite and Case with a diff at 1440 by 900, light and dark. Builder 2 supplies its four screens.

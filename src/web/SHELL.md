@@ -8,7 +8,8 @@ router, palette, keys overlay, themes and sign-in have a Chromium check.
 `app.tsx` registers named exports `QueueScreen`, `RunsScreen`,
 `ChangesScreen`, `SettingsScreen` from each directory's `index.tsx`.
 A screen returns two sibling `section.pane` elements, `#list` and `#detail`.
-The frame owns the sidebar and footer. Put scrolling content in `.pane-scroll`.
+The frame owns the sidebar (`[` collapses), Suite-only folder tree and footer.
+Put scrolling content in `.pane-scroll`.
 Each screen imports its own CSS. Do not edit another screen or the shell.
 
 `useApp()` from `ui/context.tsx` supplies `project`, `route`, `session`,

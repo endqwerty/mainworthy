@@ -276,7 +276,18 @@ export function SuiteScreen() {
 								},
 							]
 						: [
-								{ op: "edit", case: snapshot.ref, base: snapshot.base, body },
+								{
+									op: "edit",
+									case: snapshot.ref,
+									base: snapshot.base,
+									body: {
+										title: body.title,
+										pre: body.pre,
+										steps: body.steps,
+										methods: body.methods,
+										automate: body.automate,
+									},
+								},
 								...(cleaned.tags.length
 									? [{ op: "place", cases: [snapshot.ref], tags: { add: cleaned.tags } } satisfies Edit]
 									: []),

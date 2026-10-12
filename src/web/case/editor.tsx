@@ -51,38 +51,6 @@ export function firstStep({ draft, change }: { draft: Draft; change: DraftChange
 			true,
 		);
 }
-export function pasteCapture({ draft, text, change }: { draft: Draft; text: string; change: DraftChange }): void {
-	const outline = parseOutline(text);
-	const taken = new Set(
-		knownStepIds({
-			project: readRoute().project,
-			id: draft.id,
-			ids: [...draft.body.steps, ...draft.original.steps].map((step) => step.id),
-		}),
-	);
-	const steps = outline.steps.map((step) => {
-		const id = newStepId(taken);
-		taken.add(id);
-		return { id, ...step };
-	});
-	const last = steps.at(-1);
-	const title = outline.title ?? draft.body.title;
-	change(
-		{
-			...draft,
-			dirty: true,
-			body: { ...draft.body, title, steps },
-			tags: [...new Set([...draft.tags, ...outline.tags])],
-			covers: [...new Set([...draft.covers, ...outline.covers])],
-			caret: {
-				field: last ? `${last.id}:action` : "title",
-				start: last?.action.length ?? title.length,
-				end: last?.action.length ?? title.length,
-			},
-		},
-		true,
-	);
-}
 export function BodyEditor({
 	draft,
 	change,
