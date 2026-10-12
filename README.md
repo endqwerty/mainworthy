@@ -1,43 +1,123 @@
 # Casebook
 
-A test case management system for software QA, built to fix what is annoying
-about TestRail, Qase, Jira (Xray/Zephyr and plain issues) and Azure DevOps
-Test Plans, for teams from loose and automation-heavy to regulated.
+One place where manual, automated and agent testing land, and one queue of the decisions they leave for you.
 
-**Status:** day zero. No language, framework, database or hosting is chosen
-yet (see [docs/decisions/0001-stack-open.md](docs/decisions/0001-stack-open.md)).
-Nothing here is built; this repo holds the intent so the first implementation
-thread starts from the same page.
+A test case management system for software QA, built to fix what is annoying about TestRail, Qase, Jira
+(Xray, Zephyr) and Azure DevOps Test Plans. **Status: MVP (2026-10-12).** It runs, it is tested, and it is a
+preview: what is missing is listed in [decision 0012](docs/decisions/0012-mvp-scope-and-departures.md) and
+tracked in the GitHub milestone *Backlog to 1.0* (one page of it: issue #64).
 
-## Goal
+![The suite: cases on the left with their proof by person, pipeline and agent; the case as a document on the right](docs/ui/screenshots/suite-light.png)
 
-Manage test cases, plans, runs and results for a software team, with:
+The other screens, in both themes, are in [docs/ui/screenshots](docs/ui/screenshots): the
+[queue](docs/ui/screenshots/queue-dark.png), a [run](docs/ui/screenshots/runs-light.png), a
+[change](docs/ui/screenshots/changes-light.png), a [case with its diff](docs/ui/screenshots/case-light.png) and
+[settings](docs/ui/screenshots/settings-light.png).
 
-- fast, keyboard-first authoring and execution, even with tens of thousands of cases;
-- a case model that has real history (versions, diffs, who changed what and why);
-- traceability to requirements, issues and code without forcing tests to be tickets;
-- results that are easy to get in from CI and easy to report out;
-- an honest, simple permission and pricing model (no per-seat tax for people who only read results);
-- self-hosting in layers: one process on a laptop, a container on a home server, or a cloud deployment with optional cache, from one build.
+## Start (no account, no configuration)
+
+```
+$ bun install
+$ bun run start
+Casebook 0.1.0 · local · data in ~/.casebook · http://127.0.0.1:7357
+project "scratch" · you are daniel@this-machine · policy: loose
+```
+
+Open the URL. On your own machine you are signed in as the owner with no step.
+
+## Write a case
+
+Press `c`. Type a title, Enter, then steps. ` > ` starts the expected result. Paste a list and it is split for
+you. There is no save button: your draft is kept as you type and becomes version 1 when you leave it.
+
+```
+Checkout applies a percentage coupon #checkout
+  Open the cart with one $100.00 item
+  Apply coupon SAVE10            > Total shows $90.00
+  Reload the page                > Coupon is still applied
+```
+
+## Send test results (any runner that writes JUnit XML)
+
+```
+$ casebook report results/*.xml
+$ casebook gate            # exit 0 passed · 1 failed · 2 blocked · 3 pending
+```
+
+In CI it is the same two lines; the commit, branch, pull request and attempt come from the environment. This
+repository does it to itself in [.github/workflows/check.yml](.github/workflows/check.yml). Outside CI the commit
+comes from the Git checkout; with neither, pass `--commit`. An error exits 4.
+
+`casebook` here is `bun src/cli/main.ts`, or the single executable from `bun run build`.
+
+## Decide
+
+`g q` opens the queue. Each row is a question with its evidence, and each answer is one key with its
+consequence written beside it: `d` defect, `f` flaky, `i` infrastructure, `e` expected. Your answer is recorded
+with your name. `d` and `e` apply to later occurrences of the same cause until they are withdrawn or replaced,
+`f` for 14 days, and `i` excuses that build only. `u` undoes; both decisions stay in the ledger.
+
+## Run things by hand
+
+`g r`, `n`, pick cases by folder, tag or search. Then `p` pass, `f` fail, `b` blocked, `s` skip. Results from CI
+on the same commit fill the same run where the run allows it, so you only run what nothing else has shown.
+
+## Let an agent in
+
+```
+$ casebook token new --agent reviewer --can read,produce
+$ casebook mcp                   # stdio; or point the client at http://127.0.0.1:7357/mcp
+```
+
+Ten tools; start with `impact`. The skill that teaches an agent the case model is in
+[skill/casebook](skill/casebook/SKILL.md). An agent's answers are advice unless the policy says otherwise, and
+what an agent reports is shown and asked about but never moves a commit's gate: it counts only in a run that
+asked for agents.
+
+## Get stricter when you need to
+
+```
+$ casebook policy use standard   # agent edits need a person; unlinked tests are a question
+$ casebook policy show           # the whole policy is one table
+```
+
+## Deploy (one container, one volume)
+
+```
+$ docker compose up -d           # then sign in with the owner token (see compose.yaml)
+```
+
+Coolify on a home server: [docs/deploy.md](docs/deploy.md).
+
+## Leave whenever you like
+
+```
+$ casebook export --out casebook.ndjson.gz     # every fact, decision and document, as text
+```
+
+## Develop
+
+| Command | What |
+| --- | --- |
+| `bun run check` | type-check, lint and every test, including the latency budgets and the browser tests (skipped, with a message, on a machine with no Chromium) |
+| `bun run dev` | the server on `127.0.0.1:7357`, restarting on change |
+| `bun bench/run.ts` | the benchmark on 100,000 cases and 1,000,000 results (`--quick` for a small one) |
+| `bun bench/external.ts <dataset>` | reads, reports and saves under load, with the load generator in its own process |
+| `bun run build` | one self-contained executable in `dist/` |
+
+Rules for contributors, people and agents: [AGENTS.md](AGENTS.md).
 
 ## Where to read next
 
 | File | What |
 | --- | --- |
-| [docs/product-vision.md](docs/product-vision.md) | the problem, priorities, core capabilities, scope, non-goals |
-| [docs/product-design.md](docs/product-design.md) | the synthesised product design: thesis, DX commitments, usage, domain model, operation layer, product surface, first slice |
-| [docs/decisions/0007-guiding-principles.md](docs/decisions/0007-guiding-principles.md) | the principles in tie-break order, the bend rule and the floor |
-| [docs/decisions/0008-one-evidence-model.md](docs/decisions/0008-one-evidence-model.md) | explicit evidence basis, runs as requests for evidence, decisions as the only writer of standing |
-| [docs/design-arena/2026-10-11/](docs/design-arena/2026-10-11/README.md) | the four candidate designs, the judge verdict and the verification rounds behind the product design |
-| [docs/competitive-analysis.md](docs/competitive-analysis.md) | researched comparison of 13 tools: pricing, gating, verified vs reported |
-| [docs/competitors.md](docs/competitors.md) | what each existing tool does, and hypotheses on where it falls short |
-| [docs/roadmap.md](docs/roadmap.md) | phased plan with exit criteria; phase 0 is UX research |
-| [docs/decisions/0003-scope-software-qa-and-process-spectrum.md](docs/decisions/0003-scope-software-qa-and-process-spectrum.md) | software QA only; one model, policy switches across loose to regulated teams |
-| [docs/decisions/0005-generic-audience-and-practitioner-evidence.md](docs/decisions/0005-generic-audience-and-practitioner-evidence.md) | for teams in general; Daniel's cross-team experience is practitioner evidence, not the customer |
-| [docs/decisions/0006-agent-token-efficiency.md](docs/decisions/0006-agent-token-efficiency.md) | agent token cost for adversarial review and testing is measured and budgeted like latency |
-| [docs/ux/flows.md](docs/ux/flows.md) | end-to-end user flows by actor, as hypotheses |
-| [docs/ux-research-plan.md](docs/ux-research-plan.md) | how friction is measured before code: desk research, hands-on audit, jobs, profiles, intent model, mocks |
-| [docs/open-questions.md](docs/open-questions.md) | decisions that need Daniel's input before design starts |
-| [docs/decisions/](docs/decisions/) | architecture decision records |
-| [AGENTS.md](AGENTS.md) | rules for coding agents |
+| [docs/architecture.md](docs/architecture.md) | how it fits together, with diagrams |
+| [docs/product-design.md](docs/product-design.md) | the product design: thesis, domain model, operation layer, product surface |
+| [docs/decisions/](docs/decisions/) | decision records: 0009 the owner's answers, 0010 the stack, 0011 the UI, 0012 what the MVP builds and where it departs |
+| [docs/compliance.md](docs/compliance.md) | what each legal regime needs, what is met, what is not |
+| [docs/deploy.md](docs/deploy.md) | running it on a server |
+| [docs/product-vision.md](docs/product-vision.md) | the problem and the priorities |
+| [docs/competitive-analysis.md](docs/competitive-analysis.md) | 13 existing tools compared |
+| [docs/roadmap.md](docs/roadmap.md) | phases and where the project stands |
+| [docs/design-arena/](docs/design-arena/) | the candidate designs, benchmarks and verdicts behind the decisions |
 | [CHANGELOG.md](CHANGELOG.md) | one line per user-visible change |
