@@ -1,0 +1,428 @@
+// Policy is data over one model (principle P5): the same operations and the same rows under loose, standard and
+// strict; only who answers changes. Also: what an agent may and may not do, and what agents read.
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { ANSWER_KEYS, ANSWERS, Clause, KINDS } from "../src/core/kinds.ts";
+import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
+import { missingCatchAll, PRESET_NAMES, PRESETS } from "../src/core/presets.ts";
+import { ciReport, type Harness, harness } from "./helpers.ts";
+
+let h: Harness;
+beforeEach(() => {
+	h = harness();
+});
+afterEach(() => h.close());
+/** Replaces the default loose project with one under another preset. */
+const use = (preset: string): void => {
+	h.close();
+	h = harness({ preset });
+};
+
+type Proposed = {
+	proposal: string | null;
+	status: string;
+	question: string | null;
+	needs: string | null;
+	cases: { ref: string; version: number }[];
+};
+const first = <T>(items: T[]): T => {
+	const item = items[0];
+	if (item === undefined) throw new Error("expected at least one item");
+	return item;
+};
+const queue = (input: Record<string, unknown> = {}) => h.call<InboxReply>("inbox", input);
+const title = (ref: string) => h.call<{ title: string }[]>("get", { refs: [ref] })[0]?.title;
+
+describe("the presets", () => {
+	test("every preset is valid and total: no kind of question is left without an owner", () => {
+		for (const name of PRESET_NAMES) {
+			const preset = PRESETS[name];
+			for (const clause of preset.clauses) expect(Clause.safeParse(clause).success).toBe(true);
+			expect(missingCatchAll(preset.clauses)).toEqual([]);
+			for (const clause of preset.clauses.filter((c) => c.ask.who === "rule")) {
+				expect(ANSWERS[clause.kind].safeParse(clause.answer).success).toBe(true);
+			}
+		}
+	});
+
+	test("every answer has one key, and no two answers of a kind share a key", () => {
+		for (const kind of KINDS) {
+			const keys = ANSWER_KEYS[kind] as Record<string, string>;
+			const answers = Object.values(keys);
+			expect(new Set(answers).size).toBe(answers.length);
+			for (const answer of answers)
+				expect(
+					ANSWERS[kind].safeParse({
+						is: answer,
+						pairs: [["T-1", "C-1"]],
+						body: { title: "", pre: "", steps: [], methods: ["human"], automate: "none", fields: {} },
+					}).success,
+				).toBe(true);
+		}
+	});
+});
+
+describe("agent edits", () => {
+	test("loose: an agent's edit is adopted by the rule and marked as the agent's", () => {
+		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		const reply = h.call<Proposed>(
+			"propose",
+			{ edits: [{ op: "create", outline: "Agent wrote this\n  Do it > Done" }] },
+			agent,
+		);
+		expect(reply.status).toBe("adopted");
+		const versions = h.call<{ versions: { by: string; kind: string }[] }>("history", { ref: "C-1" });
+		expect(first(versions.versions)).toMatchObject({ by: "writer", kind: "agent" });
+	});
+
+	test("standard: an agent's edit waits for a person; the agent cannot accept it; a person's own edit does not wait", () => {
+		use("standard");
+		const agent = h.actor("writer", "agent", ["read", "produce", "answer"]);
+		h.call("propose", { edits: [{ op: "create", outline: "Human wrote this\n  Do it > Done" }] });
+		const reply = h.call<Proposed>(
+			"propose",
+			{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Agent retitled this" } }] },
+			agent,
+		);
+		expect(reply).toMatchObject({ status: "open", needs: "a member who is not an agent" });
+		expect(title("C-1")).toBe("Human wrote this");
+
+		const q = first(queue().items);
+		expect(q).toMatchObject({ kind: "adopt", producer: "agent" });
+		const own = h.call<{ status: string }[]>(
+			"decide",
+			{ q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } },
+			agent,
+		);
+		expect(own[0]?.status).toBe("forbidden");
+		const accepted = h.call<{ status: string }[]>("decide", {
+			q: q.q,
+			onEvidence: q.evidenceHash,
+			answer: { is: "accept" },
+		});
+		expect(accepted[0]?.status).toBe("decided");
+		expect(title("C-1")).toBe("Agent retitled this");
+		const versions = h.call<{ versions: { by: string; kind: string }[] }>("history", { ref: "C-1" });
+		expect(first(versions.versions)).toMatchObject({ by: "writer", kind: "agent" });
+	});
+
+	test("standard: a rejected proposal changes nothing and stays in the ledger", () => {
+		use("standard");
+		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		h.call("propose", { edits: [{ op: "create", outline: "Keep me" }] });
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Clobbered" } }] }, agent);
+		const q = first(queue().items);
+		h.call("decide", {
+			q: q.q,
+			onEvidence: q.evidenceHash,
+			answer: { is: "reject" },
+			reason: "not what the spec says",
+		});
+		expect(title("C-1")).toBe("Keep me");
+		const ledger = queue({ state: "decided", kind: "adopt" });
+		expect(ledger.items.find((item) => item.decision?.answer.is === "reject")?.decision?.reason).toBe(
+			"not what the spec says",
+		);
+	});
+
+	test("a person's edit made meanwhile is never overwritten by an agent's older proposal", () => {
+		use("standard");
+		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		h.call("propose", { edits: [{ op: "create", outline: "Original" }] });
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Agent's title" } }] }, agent);
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Person's title" } }] });
+		const q = first(queue().items);
+		const reply = h.call<{ status: string; needs: string }[]>("decide", {
+			q: q.q,
+			onEvidence: q.evidenceHash,
+			answer: { is: "accept" },
+		});
+		expect(reply[0]?.status).toBe("conflict");
+		expect(title("C-1")).toBe("Person's title");
+	});
+});
+
+describe("changing the policy", () => {
+	test("D4: the same data works under loose, standard and strict; the switch is itself a recorded decision", () => {
+		h.call("propose", { edits: [{ op: "create", outline: "A case\n  Step > Result" }] });
+		h.call("report", ciReport({ commit: "aaaa0001", n: 3, fail: { 0: "expected 1, got 2" } }));
+		const before = h.call<GateStatus>("gate", { commit: "aaaa0001" });
+
+		for (const preset of ["standard", "strict", "loose"]) {
+			const proposed = h.call<Proposed>("propose", { edits: [{ op: "policy", preset }] });
+			expect(proposed.status).toBe("open"); // the policy is an admin's to change, under every preset
+			const q = first(queue({ kind: "adopt" }).items);
+			const decided = h.call<{ status: string; effects: { policyVersion: number } }[]>("decide", {
+				q: q.q,
+				onEvidence: q.evidenceHash,
+				answer: { is: "accept" },
+				reason: `try ${preset}`,
+			});
+			expect(decided[0]?.status).toBe("decided");
+			expect(h.call<{ preset: string }>("admin", { do: "policy.show", project: "scratch" }).preset).toBe(preset);
+			expect(h.call<GateStatus>("gate", { commit: "aaaa0001" })).toEqual(before);
+			expect(title("C-1")).toBe("A case");
+		}
+		expect(h.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM policies").get()?.n).toBe(4);
+	});
+
+	test("strict: a person's own edit waits for someone, with a reason", () => {
+		use("strict");
+		const reply = h.call<Proposed>("propose", { edits: [{ op: "create", outline: "Needs review" }] });
+		expect(reply.status).toBe("open");
+		const q = first(queue().items);
+		const noReason = h.call<{ status: string; needs: string }[]>("decide", {
+			q: q.q,
+			onEvidence: q.evidenceHash,
+			answer: { is: "accept" },
+		});
+		expect(noReason[0]).toMatchObject({ status: "invalid", needs: "a reason" });
+		const ok = h.call<{ status: string }[]>("decide", {
+			q: q.q,
+			onEvidence: q.evidenceHash,
+			answer: { is: "accept" },
+			reason: "reviewed against the spec",
+		});
+		expect(ok[0]?.status).toBe("decided");
+		expect(title("C-1")).toBe("Needs review");
+	});
+
+	test("a policy that leaves a kind of question unowned is refused", () => {
+		const clauses = PRESETS.loose.clauses.filter((clause) => clause.kind !== "finding");
+		const reply = h.raw("propose", { edits: [{ op: "policy", clauses }] });
+		expect(reply).toMatchObject({ ok: false, error: { code: "invalid" } });
+	});
+});
+
+describe("findings", () => {
+	test("an agent's review opens one question per finding, is not raised twice, and an accepted suggestion becomes the agent's proposal", () => {
+		use("standard");
+		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		h.call("propose", {
+			edits: [{ op: "create", outline: "Checkout applies a coupon\n  Apply SAVE10 > Total updates" }],
+		});
+		const view = h.call<{ hash: string; steps: { id: string }[] }[]>("get", { refs: ["C-1"] })[0];
+		const step = first(view?.steps ?? []).id;
+		const finding = {
+			on: `C-1#${step}`,
+			category: "cannot-fail",
+			note: "'Total updates' is true for any change, including the wrong one.",
+			suggest: { expected: "Total shows $90.00 (10% off $100.00)" },
+		};
+
+		const claimed = h.call<{ opened: string[]; known: unknown[]; reviewed: number }>(
+			"claim",
+			{ lens: "adversarial-review", reviewed: [`C-1@${view?.hash}`], findings: [finding] },
+			agent,
+		);
+		expect(claimed).toMatchObject({ opened: ["Q-2"], known: [], reviewed: 1 });
+		const again = h.call<{ opened: string[]; known: unknown[] }>(
+			"claim",
+			{ lens: "adversarial-review", findings: [finding] },
+			agent,
+		);
+		expect(again.opened).toEqual([]);
+		expect(again.known).toEqual([{ q: "Q-2", state: "open", answer: null, by: null }]);
+
+		const q = first(queue({ kind: "finding" }).items);
+		const accepted = h.call<{ status: string; effects: { proposal: string; status: string; adopt: string } }[]>(
+			"decide",
+			{ q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept", apply: true } },
+		);
+		expect(accepted[0]).toMatchObject({ status: "decided", effects: { status: "open" } }); // standard: the agent's proposal still needs a person
+		const adopt = first(queue({ kind: "adopt" }).items);
+		expect(adopt.evidence).toMatchObject({ author: "reviewer" });
+		h.call("decide", { q: adopt.q, onEvidence: adopt.evidenceHash, answer: { is: "accept" } });
+		const after = h.call<{ steps: { expected: string }[]; version: number }[]>("get", { refs: ["C-1"] })[0];
+		expect(after).toMatchObject({ version: 2 });
+		expect(first(after?.steps ?? []).expected).toBe("Total shows $90.00 (10% off $100.00)");
+	});
+});
+
+describe("unlinked tests", () => {
+	test("loose: tests with no case are tracked by the rule and still gate the build; nobody is asked", () => {
+		const receipt = h.call<ReportReceipt>("report", ciReport({ commit: "bbbb0001", n: 5 }));
+		expect(receipt.unlinked).toBe(5);
+		expect(queue().counts.open).toBe(0);
+		expect(first(queue({ state: "decided", kind: "map" }).items).decision).toMatchObject({
+			answer: { is: "track" },
+			rule: "map-track",
+		});
+		expect(receipt.gate?.verdict).toBe("passed");
+	});
+
+	test("standard: one question per file; `create` makes a case per test through the ordinary adopt path and links them", () => {
+		use("standard");
+		h.call("report", ciReport({ commit: "bbbb0002", n: 3, file: "tests/checkout/coupon.spec.ts" }));
+		const q = first(queue({ kind: "map" }).items);
+		expect(q.title).toBe("3 tests in tests/checkout/coupon.spec.ts have no case");
+		const decided = h.call<{ status: string; effects: { created: string[] } }[]>("decide", {
+			q: q.q,
+			onEvidence: q.evidenceHash,
+			answer: { is: "create" },
+		});
+		expect(decided[0]).toMatchObject({ status: "decided", effects: { created: ["C-1", "C-2", "C-3"] } });
+		const made = h.call<{ title: string; folder: { path: string }; methods: string[]; tests: { name: string }[] }[]>(
+			"get",
+			{ refs: ["C-1"] },
+		)[0];
+		expect(made).toMatchObject({ title: "test 0", folder: { path: "checkout" }, methods: ["auto"] });
+		expect(made?.tests).toEqual([{ t: "T-1", name: "test 0", file: "tests/checkout/coupon.spec.ts" }] as never);
+		const next = h.call<ReportReceipt>(
+			"report",
+			ciReport({ commit: "bbbb0003", n: 3, file: "tests/checkout/coupon.spec.ts" }),
+		);
+		expect(next.basis).toEqual({ exact: 0, assumed: 3, unresolved: 0 });
+		// undo unlinks, and keeps both decisions
+		h.call("decide", { undo: q.q });
+		expect(h.call<{ count: number }>("find", { in: "tests", unlinked: true }).count).toBe(3);
+	});
+});
+
+describe("what an agent reads", () => {
+	test("impact names the cases a change touches and why; since returns only what moved; get skips what the caller holds", () => {
+		use("standard");
+		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" },
+				{ op: "create", outline: "Unrelated\n  Open settings > Settings open" },
+			],
+		});
+		h.call("report", {
+			target: { commit: "cccc0001", branch: "main" },
+			results: [{ test: { key: "tests/coupon.spec.ts::applies", file: "tests/coupon.spec.ts" }, outcome: "pass" }],
+		});
+		const map = first(queue({ kind: "map" }).items);
+		h.call("decide", { q: map.q, onEvidence: map.evidenceHash, answer: { is: "link", pairs: [["T-1", "C-1"]] } });
+		h.call("report", {
+			target: {
+				commit: "cccc0002",
+				branch: "fix-coupon",
+				pr: 482,
+				base: "cccc0001",
+				files: ["tests/coupon.spec.ts", "src/checkout/tax.ts"],
+				title: "Fix coupon rounding",
+			},
+			results: [
+				{
+					test: { key: "tests/coupon.spec.ts::applies", file: "tests/coupon.spec.ts" },
+					outcome: "fail",
+					failure: { message: "expected 90.00, got 100.00" },
+				},
+			],
+		});
+
+		type Impact = {
+			counts: Record<string, number>;
+			cases: { id: string; hash: string; why: string[]; reviewed?: boolean; open?: { q: string }[] }[];
+			uncovered: string[];
+			cursor: string;
+			gate: { verdict: string };
+		};
+		const impact = h.call<Impact>("impact", { change: "pr:482" }, agent);
+		expect(impact.counts).toEqual({ cases: 1, unreviewed: 1, failing: 1, uncovered: 1 });
+		expect(first(impact.cases)).toMatchObject({ id: "C-1", why: ["test:tests/coupon.spec.ts", "failing"] });
+		expect(first(impact.cases).open).toHaveLength(1);
+		expect(impact.uncovered).toEqual(["src/checkout/tax.ts"]);
+		expect(impact.gate.verdict).toBe("blocked");
+
+		const held = first(impact.cases).hash;
+		expect(h.call<Record<string, unknown>[]>("get", { refs: ["C-1"], unless: { "C-1": held } }, agent)).toEqual([
+			{ ref: "C-1", unchanged: true, hash: held },
+		]);
+		h.call("claim", { lens: "adversarial-review", about: "pr:482", reviewed: [`C-1@${held}`], findings: [] }, agent);
+		expect(first(h.call<Impact>("impact", { change: "pr:482" }, agent).cases).reviewed).toBe(true);
+		expect(first(h.call<Impact>("impact", { change: "pr:482", ledger: false }, agent).cases).reviewed).toBeUndefined();
+
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon applies exactly" } }] });
+		const moved = h.call<{ changed: { ref: string; changed: string }[]; cursor: string }>(
+			"since",
+			{ cursor: impact.cursor },
+			agent,
+		);
+		expect(moved.changed).toEqual([
+			{
+				ref: "C-1",
+				version: 2,
+				hash: expect.any(String),
+				title: "Coupon applies exactly",
+				state: "active",
+				changed: "title",
+			},
+		] as never);
+		expect(h.call<{ changed: unknown[] }>("since", { cursor: moved.cursor }, agent).changed).toEqual([]);
+	});
+
+	test("check finds cases that cannot fail", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "Has no steps" },
+				{ op: "create", outline: "No expectation\n  Click the button" },
+				{ op: "create", outline: "Fine\n  Click > It opens" },
+			],
+		});
+		const result = h.call<{ problems: { rule: string; ref: string }[]; counts: Record<string, number> }>("check");
+		expect(result.problems.map((p) => [p.rule, p.ref])).toEqual([
+			["no-steps", "C-1"],
+			["no-expected", "C-2"],
+		]);
+	});
+});
+
+describe("forgetting a person", () => {
+	test("removes who they were and keeps what they did; their token stops working", () => {
+		const dana = h.actor("dana", "human", ["read", "produce", "answer"]);
+		h.call("propose", { edits: [{ op: "create", outline: "Written by Dana" }] }, dana);
+		const forgotten = h.call<{ forgotten: string; tokensRevoked: number }>("admin", {
+			do: "actor.forget",
+			name: "dana",
+		});
+		expect(forgotten).toEqual({ forgotten: expect.stringMatching(/^forgotten-\d+$/), tokensRevoked: 1 });
+		const versions = h.call<{ versions: { by: string }[] }>("history", { ref: "C-1" });
+		expect(first(versions.versions).by).toBe(forgotten.forgotten);
+		expect(title("C-1")).toBe("Written by Dana"); // the record itself is untouched
+		expect(
+			h.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM tokens WHERE revoked_at IS NULL").get()?.n,
+		).toBe(0);
+		expect(h.raw("admin", { do: "actor.forget", name: "daniel" })).toMatchObject({
+			ok: false,
+			error: { code: "invalid" },
+		});
+	});
+});
+
+describe("a conflicted proposal", () => {
+	test("its agent author may withdraw it and try again, but cannot push it through", () => {
+		const agent = h.actor("writer", "agent", ["read", "produce"]);
+		h.call("propose", { edits: [{ op: "create", outline: "Original" }] });
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "A person's title" } }] });
+		const stale = h.call<Proposed>(
+			"propose",
+			{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "The agent's title" } }] },
+			agent,
+		);
+		expect(stale.status).toBe("conflict");
+		expect(stale.needs).toContain("propose again on the current version");
+		const q = first(queue({ kind: "adopt" }).items);
+		const body = { title: "The agent's title", pre: "", steps: [], methods: ["human"], automate: "none", fields: {} };
+		const pushed = h.call<{ status: string }[]>(
+			"decide",
+			{ q: q.q, onEvidence: q.evidenceHash, answer: { is: "merge", body } },
+			agent,
+		);
+		expect(pushed[0]?.status).toBe("forbidden");
+		const withdrawn = h.call<{ status: string }[]>(
+			"decide",
+			{ q: q.q, onEvidence: q.evidenceHash, answer: { is: "reject" } },
+			agent,
+		);
+		expect(withdrawn[0]?.status).toBe("decided");
+		expect(title("C-1")).toBe("A person's title");
+		const retry = h.call<Proposed>(
+			"propose",
+			{ edits: [{ op: "edit", case: "C-1", base: 2, body: { title: "The agent's title" } }] },
+			agent,
+		);
+		expect(retry.status).toBe("adopted");
+	});
+});

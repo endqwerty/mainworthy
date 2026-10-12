@@ -8,6 +8,20 @@ no design.
 Status is kept in this file. Change the plan freely and record why in a
 decision record.
 
+**Status, 2026-10-12.** Daniel asked for the MVP and answered the open questions
+(decision 0009), so phases 0 to 2 were compressed into one night:
+
+- Phase 1 is done: the stack was chosen from a measured three-candidate arena on
+  100,000 cases and 1,000,000 results (decision 0010).
+- Phase 2 (Preview 1) is built as the MVP, with the departures and cuts listed in
+  decision 0012. Its exit fixtures that pass are tests in `test/`; the ones that do
+  not exist yet are issues in the milestone `Backlog to 1.0`.
+- Phase 0 was not done as planned: no hands-on audit (decision 0009, answer 13: no
+  trial accounts) and no measured baselines against the incumbents. That gap is the
+  reason the MVP is a preview and not a first usable version (#39).
+- The Server layer runs from the same build as a container on SQLite. The Cloud
+  layer and PostgreSQL are deferred (#57).
+
 Scope is software QA across the process spectrum, loose to regulated, with
 the full CI/CD flow in every profile (decision 0003).
 

@@ -1,0 +1,307 @@
+// The closed vocabulary of questions: each kind, its answers, and who may be asked.
+// This file is the one place a kind or an answer is declared (principle P10). The server's kind handlers, the
+// queue's keys and the policy presets are checked against it.
+import { z } from "zod";
+import { CaseBody } from "./model.ts";
+
+export const Kind = z.enum(["adopt", "map", "failure", "finding", "signoff"]);
+export type Kind = z.infer<typeof Kind>;
+export const KINDS = Kind.options;
+
+export const ActorKind = z.enum(["human", "agent", "ci", "rule"]);
+export type ActorKind = z.infer<typeof ActorKind>;
+
+export const Capability = z.enum(["read", "produce", "answer", "plan", "admin"]);
+export type Capability = z.infer<typeof Capability>;
+
+// ── Answers ────────────────────────────────────────────────────────────────────────────────────────────────
+
+export const AdoptAnswer = z.discriminatedUnion("is", [
+	z.object({ is: z.literal("accept") }),
+	z.object({ is: z.literal("reject") }),
+	/** Resolves a same-field conflict on one case: the author supplies the body to adopt. */
+	z.object({ is: z.literal("merge"), body: CaseBody }),
+]);
+
+export const MapAnswer = z.discriminatedUnion("is", [
+	/** Pairs of test ref and case ref: `[["T-12", "C-3"]]`. */
+	z.object({ is: z.literal("link"), pairs: z.array(z.tuple([z.string(), z.string()])).min(1) }),
+	/** One new case per unlinked test, titled after the test and linked to it. */
+	z.object({ is: z.literal("create"), folder: z.string().optional() }),
+	/** Keep the tests as tests without cases; they still have history and a place in the gate. */
+	z.object({ is: z.literal("track") }),
+	z.object({ is: z.literal("unlink") }),
+]);
+
+export const FailureAnswer = z.discriminatedUnion("is", [
+	// attributed: the target needs a fix, so its gate is `failed`
+	z.object({ is: z.literal("defect"), ref: z.string().max(200).optional() }),
+	z.object({ is: z.literal("test") }),
+	z.object({ is: z.literal("expected") }),
+	// excused: recorded, not blocking
+	z.object({ is: z.literal("flaky") }),
+	z.object({ is: z.literal("infra") }),
+	/** Already failing on the base of the change with the same cause; not this change's doing. */
+	z.object({ is: z.literal("inherited") }),
+	/** A disputed slot: the failing result was a mistake and the passing one stands. */
+	z.object({ is: z.literal("mistaken") }),
+]);
+export type FailureAnswer = z.infer<typeof FailureAnswer>;
+
+export const FindingAnswer = z.discriminatedUnion("is", [
+	/** `apply`: the finding's suggestion becomes a sealed proposal authored by the finder. */
+	z.object({ is: z.literal("accept"), apply: z.boolean().default(false) }),
+	z.object({ is: z.literal("reject") }),
+	z.object({ is: z.literal("duplicate"), of: z.string().optional() }),
+	z.object({ is: z.literal("defer") }),
+]);
+
+export const SignoffAnswer = z.discriminatedUnion("is", [
+	z.object({ is: z.literal("approve") }),
+	z.object({ is: z.literal("reject") }),
+]);
+
+export const ANSWERS = {
+	adopt: AdoptAnswer,
+	map: MapAnswer,
+	failure: FailureAnswer,
+	finding: FindingAnswer,
+	signoff: SignoffAnswer,
+} as const satisfies Record<Kind, z.ZodType>;
+
+export type AnswerOf<K extends Kind> = z.infer<(typeof ANSWERS)[K]>;
+export type AnyAnswer = { [K in Kind]: AnswerOf<K> }[Kind];
+
+/** How a failure answer counts in a run: `attributed` makes the gate `failed`; `excused` does not block. */
+export function failureClass(answer: FailureAnswer): "attributed" | "excused" {
+	switch (answer.is) {
+		case "defect":
+		case "test":
+		case "expected":
+			return "attributed";
+		case "flaky":
+		case "infra":
+		case "inherited":
+		case "mistaken":
+			return "excused";
+		default: {
+			const _exhaustive: never = answer;
+			return _exhaustive;
+		}
+	}
+}
+
+/**
+ * The single key that gives each answer in the queue (commitment L4). Checked for uniqueness per kind by a test,
+ * and read by the UI, so the keys are declared here and nowhere else.
+ */
+export const ANSWER_KEYS = {
+	adopt: { a: "accept", r: "reject" },
+	map: { l: "link", c: "create", t: "track" },
+	failure: { d: "defect", t: "test", e: "expected", f: "flaky", i: "infra", n: "inherited", m: "mistaken" },
+	finding: { a: "accept", r: "reject", d: "duplicate", z: "defer" },
+	signoff: { a: "approve", r: "reject" },
+} as const satisfies Record<Kind, Record<string, string>>;
+
+export const ANSWER_LABELS: Record<string, string> = {
+	accept: "Accept",
+	reject: "Reject",
+	merge: "Merge",
+	link: "Link to a case",
+	create: "Create cases",
+	track: "Track without a case",
+	unlink: "Unlink",
+	defect: "Defect in the product",
+	test: "The test is wrong",
+	expected: "Expected: behaviour changed",
+	flaky: "Flaky",
+	infra: "Infrastructure",
+	inherited: "Already failing on base",
+	mistaken: "The failure was a mistake",
+	duplicate: "Duplicate",
+	defer: "Defer",
+	approve: "Approve",
+};
+
+/**
+ * What each answer does, in one sentence, shown beside its key so nobody has to stop and work out what a key
+ * will do before pressing it. Declared here once; the queue and the CLI both print it.
+ */
+export const ANSWER_HELP = {
+	adopt: {
+		accept: "Makes this the current version.",
+		reject: "Leaves the case as it is. The proposal stays in the history.",
+		merge: "Adopts the version you put together from both sides.",
+	},
+	map: {
+		link: "Results of this test count for the case from now on.",
+		create: "Makes one case per test and links them.",
+		track: "Keeps them as tests without cases. They still gate the build.",
+		unlink: "The test stops counting for its case.",
+	},
+	failure: {
+		defect: "A product bug. The gate fails until a build passes.",
+		test: "The test is wrong. The gate fails until the test is fixed.",
+		expected: "The behaviour changed on purpose. The gate fails until the case and the test say so.",
+		flaky: "Unreliable. Not blocking; asked again when the hold runs out or the evidence changes.",
+		infra: "The environment, not the product. Excused for this build only.",
+		inherited: "Already failing where this change started. Not this change's doing.",
+		mistaken: "The failing result was a mistake. The passing result stands.",
+	},
+	finding: {
+		accept: "Agree. A suggestion it carries becomes a proposed edit by its author.",
+		reject: "Disagree. It is not raised again for this version.",
+		duplicate: "Already covered by another finding.",
+		defer: "Not now. It stays on record.",
+	},
+	signoff: {
+		approve: "Closes the run with the verdict it has now.",
+		reject: "Leaves the run open.",
+	},
+} as const satisfies Record<Kind, Record<string, string>>;
+
+// ── Who is asked ───────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Who must answer a question.
+ * - `rule`: the policy answers at once with the clause's `answer`, and the decision is recorded like any other.
+ * - `member`: an actor with the `answer` capability.
+ * - `admin`: an actor with the `admin` capability.
+ * - `author`: the author of the proposal the question is about (a conflict only its author can resolve).
+ */
+export const Ask = z.object({
+	who: z.enum(["rule", "member", "admin", "author"]),
+	/** What an agent's answer is worth: counted, shown as advice, or refused. */
+	agents: z.enum(["answer", "advise", "none"]),
+	/** When true, an actor who produced the evidence in question may not settle it. */
+	notProducer: z.boolean(),
+	reason: z.enum(["optional", "required"]),
+});
+export type Ask = z.infer<typeof Ask>;
+
+/**
+ * The conditions a clause can test. A closed list: a clause is data, never code.
+ * `answer:<is>` matches only once an answer is on the table, so a clause can treat one answer differently.
+ */
+export const Predicate = z.union([
+	z.enum([
+		"always",
+		"author:human",
+		"author:agent",
+		"author:ci",
+		"conflict",
+		"policy",
+		"scope:change",
+		"scope:trunk",
+		"scope:run",
+		"hint:fails-on-base",
+		"hint:disputed",
+		"category:defect",
+		"verdict:passed",
+	]),
+	z.templateLiteral(["answer:", z.string().regex(/^[a-z]+$/)]),
+]);
+export type Predicate = z.infer<typeof Predicate>;
+
+/** What an open question holds back: nothing, the gate of its change, a release (planned run), or both. */
+export const Blocks = z.enum(["nothing", "change", "release", "all"]);
+export type Blocks = z.infer<typeof Blocks>;
+
+export const Clause = z.object({
+	id: z.string().regex(/^[a-z0-9-]+$/),
+	kind: Kind,
+	/** Every predicate must hold. The first matching clause of a kind wins. */
+	when: z.array(Predicate).min(1),
+	ask: Ask,
+	/** For `who: rule`: the answer the rule gives. */
+	answer: z.unknown().optional(),
+	blocks: Blocks,
+});
+export type Clause = z.infer<typeof Clause>;
+
+/** Numbers a project may change without touching a clause (open questions 12 and 25). */
+export const PolicySettings = z.object({
+	/** Which bases a planned run's slots accept by default. */
+	basis: z.enum(["exact", "exact-or-assumed"]),
+	holds: z.object({
+		/** A `flaky` answer stops carrying forward after this many days. */
+		flakyDays: z.number().int().min(1).max(365),
+		/** An `inherited` or `infra` excuse covers this target only when true. */
+		infraThisTargetOnly: z.boolean(),
+	}),
+});
+export type PolicySettings = z.infer<typeof PolicySettings>;
+
+export const Policy = z.object({
+	preset: z.string(),
+	clauses: z.array(Clause),
+	settings: PolicySettings,
+});
+export type Policy = z.infer<typeof Policy>;
+
+/** What a clause is matched against: the facts of a question, plus the answer once one is proposed. */
+export type Facts = { kind: Kind; facts: ReadonlySet<string>; answer?: string };
+
+/** The first clause of the question's kind whose predicates all hold, or null if the policy is not total. */
+export function firstMatch(clauses: readonly Clause[], q: Facts): Clause | null {
+	for (const clause of clauses) {
+		if (clause.kind !== q.kind) continue;
+		if (clause.when.every((p) => holds(p, q))) return clause;
+	}
+	return null;
+}
+
+function holds(predicate: Predicate, q: Facts): boolean {
+	if (predicate === "always") return true;
+	if (predicate.startsWith("answer:")) return q.answer !== undefined && predicate === `answer:${q.answer}`;
+	return q.facts.has(predicate);
+}
+
+/**
+ * Whether an actor's answer counts, is advice, or is refused. Pure: policy and identity in, standing out.
+ * `isAuthor` and `isProducer` are facts about this actor and this question that the caller looks up.
+ */
+export function standingOf(input: {
+	actor: { kind: ActorKind; can: readonly Capability[] };
+	ask: Ask;
+	isAuthor: boolean;
+	isProducer: boolean;
+}): "counts" | "advice" | "forbidden" {
+	const { actor, ask } = input;
+	if (actor.kind === "ci") return "forbidden";
+	if (ask.who === "author") {
+		// Only the proposal's author, or an admin stepping in. An agent author counts only where the clause says an
+		// agent may answer (withdrawing its own proposal), so an agent cannot push its own conflict through.
+		if (input.isAuthor) return actor.kind === "agent" && ask.agents !== "answer" ? "forbidden" : "counts";
+		return actor.kind === "human" && actor.can.includes("admin") ? "counts" : "forbidden";
+	}
+	if (ask.who === "rule") {
+		// A rule answered or will answer. A person with the right may still overrule it; nobody else may.
+		return actor.kind === "human" && actor.can.includes("answer") ? "counts" : "forbidden";
+	}
+	if (actor.kind === "agent") {
+		if (ask.agents === "none") return "forbidden";
+		if (!actor.can.includes("produce") && !actor.can.includes("answer")) return "forbidden";
+		if (ask.agents === "advise" || !actor.can.includes("answer")) return "advice";
+		return ask.notProducer && input.isProducer ? "advice" : "counts";
+	}
+	if (ask.who === "admin") return actor.can.includes("admin") ? "counts" : "forbidden";
+	if (!actor.can.includes("answer")) return "forbidden";
+	if (ask.notProducer && input.isProducer) return "forbidden";
+	return "counts";
+}
+
+/** One sentence saying who a question is waiting for, shown in the queue and returned to an agent. */
+export function describeAsk(ask: Ask): string {
+	const who: Record<Ask["who"], string> = {
+		rule: "a rule",
+		member: "one member",
+		admin: "an admin",
+		author: "the author of the proposal",
+	};
+	const parts = [who[ask.who]];
+	if (ask.notProducer) parts.push("who did not produce the evidence");
+	if (ask.agents === "none") parts.push("who is not an agent");
+	if (ask.reason === "required") parts.push("with a reason");
+	return parts.join(" ");
+}

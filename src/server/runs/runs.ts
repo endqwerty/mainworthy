@@ -1,0 +1,865 @@
+// Runs: requests for evidence. Owns runs, run_tests, slots, slot_results and depends_on.
+//
+// A run does not own results. It says which targets count and what it needs; results from any producer fill it
+// when the acceptance rule admits them (core/runs.ts). This module keeps each run's projections (slot states, tally,
+// verdict) in step with the facts, in the transaction that changes them.
+import type { Policy } from "../../core/kinds.ts";
+import type { MethodKind } from "../../core/model.ts";
+import type { GateStatus } from "../../core/ops.ts";
+import {
+	type ExerciseObligation,
+	emptyTally,
+	explainVerdict,
+	type Obligation,
+	qualifies,
+	type SlotAgg,
+	type SlotState,
+	slotState,
+	type Tally,
+	type TargetMatch,
+	type Verdict,
+	verdict,
+} from "../../core/runs.ts";
+import {
+	type Applied,
+	type BatchRow,
+	changeById,
+	changeByKey,
+	codeWhat,
+	excuseFor,
+	processedJobs,
+	type ResultRow,
+	type SignatureRow,
+	SLICE,
+	scopeOf,
+	signatureById,
+	type TargetRow,
+	type TestRow,
+	targetsOfCommit,
+} from "../evidence/evidence.ts";
+import { type Ctx, ref } from "../kernel/ctx.ts";
+import { type Db, json, placeholders, sql } from "../kernel/db.ts";
+import { invalid, notFound } from "../kernel/errors.ts";
+import type { Witness } from "../kernel/witness.ts";
+import { type CaseRow, caseById } from "../suite/suite.ts";
+
+export type RunRow = {
+	id: number;
+	project: number;
+	no: number;
+	name: string;
+	origin: "change" | "planned";
+	accepts: string;
+	accepts_what: string | null;
+	require: string;
+	change: number | null;
+	state: "open" | "closed";
+	signoff: number | null;
+	accepted_seq: number;
+	applied_seq: number;
+	outstanding: number;
+	next_expiry: number | null;
+	tally: string;
+	blocking: string;
+	verdict: Verdict;
+	created_by: number;
+	created_at: number;
+	rev: number;
+};
+export type SlotRow = {
+	id: number;
+	run: number;
+	case_id: number;
+	version: number;
+	claim: string;
+	obligation: string;
+	assignee: number | null;
+	rank: number;
+	agg: string;
+	state: SlotState;
+	signature: number | null;
+	waiver: number | null;
+	rev: number;
+};
+
+const Q = {
+	byNo: sql<{ project: number; no: number }, RunRow>("SELECT * FROM runs WHERE project = $project AND no = $no"),
+	byId: sql<{ id: number }, RunRow>("SELECT * FROM runs WHERE id = $id"),
+	changeRun: sql<{ project: number; what: string }, RunRow>(
+		"SELECT * FROM runs WHERE project = $project AND origin = 'change' AND accepts_what = $what",
+	),
+	openPlanned: sql<{ project: number }, RunRow>(
+		"SELECT * FROM runs WHERE project = $project AND state = 'open' AND origin = 'planned'",
+	),
+	recent: sql<{ project: number; origin: string; before: number; limit: number }, RunRow>(
+		"SELECT * FROM runs WHERE project = $project AND origin = $origin AND id < $before ORDER BY id DESC LIMIT $limit",
+	),
+	insert: sql<{
+		project: number;
+		no: number;
+		name: string;
+		origin: string;
+		accepts: string;
+		what: string | null;
+		require: string;
+		change: number | null;
+		tally: string;
+		verdict: string;
+		actor: number;
+		at: number;
+		rev: number;
+	}>(
+		`INSERT INTO runs (project, no, name, origin, accepts, accepts_what, require, change, tally, verdict, created_by, created_at, rev)
+		 VALUES ($project, $no, $name, $origin, $accepts, $what, $require, $change, $tally, $verdict, $actor, $at, $rev)`,
+	),
+	accepted: sql<{ id: number; seq: number }>(
+		"UPDATE runs SET outstanding = outstanding + 1, accepted_seq = $seq, rev = $seq WHERE id = $id",
+	),
+	applied: sql<{ id: number; seq: number; rev: number }>(
+		"UPDATE runs SET outstanding = max(outstanding - 1, 0), applied_seq = max(applied_seq, $seq), rev = $rev WHERE id = $id",
+	),
+	project: sql<{ id: number; tally: string; blocking: string; verdict: string; expiry: number | null; rev: number }>(
+		"UPDATE runs SET tally = $tally, blocking = $blocking, verdict = $verdict, next_expiry = $expiry, rev = $rev WHERE id = $id",
+	),
+	setState: sql<{ id: number; state: string; signoff: number | null; rev: number }>(
+		"UPDATE runs SET state = $state, signoff = $signoff, rev = $rev WHERE id = $id",
+	),
+	upsertRunTest: sql<{
+		run: number;
+		test: number;
+		result: number;
+		outcome: string;
+		signature: number | null;
+		attempt: number;
+		flipped: number;
+	}>(
+		`INSERT INTO run_tests (run, test, result, outcome, signature, attempt, flipped)
+		 VALUES ($run, $test, $result, $outcome, $signature, $attempt, $flipped)
+		 ON CONFLICT (run, test) DO UPDATE SET result = excluded.result, outcome = excluded.outcome, signature = excluded.signature,
+		   attempt = excluded.attempt, flipped = max(run_tests.flipped, excluded.flipped)
+		 WHERE excluded.attempt >= run_tests.attempt`,
+	),
+	runTestGroups: sql<{ run: number }, { outcome: string; signature: number | null; n: number }>(
+		"SELECT outcome, signature, count(*) AS n FROM run_tests WHERE run = $run GROUP BY outcome, signature",
+	),
+	runTests: sql<
+		{ run: number; outcome: string; limit: number },
+		{ test: number; result: number; outcome: string; signature: number | null; flipped: number }
+	>(
+		"SELECT test, result, outcome, signature, flipped FROM run_tests WHERE run = $run AND outcome = $outcome LIMIT $limit",
+	),
+	failingRunTests: sql<
+		{ run: number; limit: number },
+		{ test: number; result: number; outcome: string; signature: number | null; flipped: number }
+	>(
+		"SELECT test, result, outcome, signature, flipped FROM run_tests WHERE run = $run AND outcome IN ('fail', 'error') LIMIT $limit",
+	),
+	flippedCount: sql<{ run: number }, { n: number }>(
+		"SELECT count(*) AS n FROM run_tests WHERE run = $run AND flipped = 1",
+	),
+	insertSlot: sql<{
+		run: number;
+		caseId: number;
+		version: number;
+		claim: string;
+		obligation: string;
+		assignee: number | null;
+		rank: number;
+		rev: number;
+	}>(
+		`INSERT INTO slots (run, case_id, version, claim, obligation, assignee, rank, rev)
+		 VALUES ($run, $caseId, $version, $claim, $obligation, $assignee, $rank, $rev)`,
+	),
+	slotsOfCase: sql<{ caseId: number }, SlotRow>("SELECT * FROM slots WHERE case_id = $caseId"),
+	slotsOfRun: sql<{ run: number; after: number; limit: number }, SlotRow>(
+		"SELECT * FROM slots WHERE run = $run AND rank > $after ORDER BY rank LIMIT $limit",
+	),
+	slotById: sql<{ id: number }, SlotRow>("SELECT * FROM slots WHERE id = $id"),
+	slotGroups: sql<{ run: number }, { state: SlotState; signature: number | null; n: number }>(
+		"SELECT state, signature, count(*) AS n FROM slots WHERE run = $run GROUP BY state, signature",
+	),
+	slotCount: sql<{ run: number }, { n: number }>("SELECT count(*) AS n FROM slots WHERE run = $run"),
+	pinned: sql<{ run: number }, { case_id: number; version: number }>(
+		"SELECT case_id, version FROM slots WHERE run = $run",
+	),
+	updateSlot: sql<{ id: number; agg: string; state: string; signature: number | null; rev: number }>(
+		"UPDATE slots SET agg = $agg, state = $state, signature = $signature, rev = $rev WHERE id = $id",
+	),
+	admit: sql<{ slot: number; result: number; run: number; admitted: string }>(
+		"INSERT OR IGNORE INTO slot_results (slot, result, run, admitted) VALUES ($slot, $result, $run, $admitted)",
+	),
+	correct: sql<{ result: number }>("UPDATE slot_results SET corrected = 1 WHERE result = $result"),
+	correctInSlot: sql<{ slot: number; result: number }>(
+		"UPDATE slot_results SET corrected = 1 WHERE slot = $slot AND result = $result",
+	),
+	uncorrectInSlot: sql<{ slot: number; result: number }>(
+		"UPDATE slot_results SET corrected = 0 WHERE slot = $slot AND result = $result",
+	),
+	slotsOfResult: sql<{ result: number }, { slot: number }>("SELECT slot FROM slot_results WHERE result = $result"),
+	fills: sql<
+		{ slot: number },
+		{
+			id: number;
+			actor: number;
+			outcome: string;
+			seq: number;
+			ord: number;
+			signature: number | null;
+			method: MethodKind;
+			admitted: string;
+			at: number;
+			note: string | null;
+			message: string | null;
+		}
+	>(
+		`SELECT r.id, r.actor, r.outcome, r.seq, r.ord, r.signature, r.method, s.admitted, r.at, r.note, r.message
+		 FROM slot_results s JOIN results r ON r.id = s.result
+		 WHERE s.slot = $slot AND s.corrected = 0 ORDER BY r.seq, r.ord`,
+	),
+	slotsBySignature: sql<{ run: number; signature: number }, SlotRow>(
+		"SELECT * FROM slots WHERE run = $run AND signature = $signature",
+	),
+	clearDepends: sql<{ run: number }>("DELETE FROM depends_on WHERE run = $run"),
+	depend: sql<{ run: number; decision: number; expires: number | null }>(
+		"INSERT OR IGNORE INTO depends_on (run, decision, expires_at) VALUES ($run, $decision, $expires)",
+	),
+	dependents: sql<{ decision: number }, { run: number }>("SELECT run FROM depends_on WHERE decision = $decision"),
+	decisionExpiry: sql<{ id: number }, { expires_at: number | null }>("SELECT expires_at FROM decisions WHERE id = $id"),
+	openBlocking: sql<{ project: number; ref: string }, { id: number; kind: string; subject: string; blocks: string }>(
+		`SELECT q.id, q.kind, q.subject, q.blocks FROM question_refs r JOIN questions q ON q.id = r.question
+		 WHERE r.project = $project AND r.ref = $ref AND q.state = 'open'`,
+	),
+	targetByCommit: sql<{ project: number; commit: string }, TargetRow>(
+		"SELECT * FROM targets WHERE project = $project AND commit_sha = $commit ORDER BY id LIMIT 1",
+	),
+	targetByCommitPrefix: sql<{ project: number; low: string; high: string }, TargetRow>(
+		"SELECT * FROM targets WHERE project = $project AND commit_sha >= $low AND commit_sha < $high ORDER BY id LIMIT 2",
+	),
+};
+
+export const runRef = (row: { no: number }): string => ref("run", row.no);
+export const runById = (db: Db, id: number): RunRow | null => db.get(Q.byId, { id });
+export function findRun(db: Db, project: number, text: string): RunRow | null {
+	const match = /^(?:R-)?(\d+)$/i.exec(text.trim());
+	return match ? db.get(Q.byNo, { project, no: Number(match[1]) }) : null;
+}
+export function mustRun(db: Db, project: number, text: string): RunRow {
+	const row = findRun(db, project, text);
+	if (!row) throw notFound(`run ${text}`);
+	return row;
+}
+export const recentRuns = (
+	db: Db,
+	project: number,
+	origin: "change" | "planned",
+	before: number,
+	limit: number,
+): RunRow[] => db.all(Q.recent, { project, origin, before, limit });
+export const slotById = (db: Db, id: number): SlotRow | null => db.get(Q.slotById, { id });
+export const slotsPage = (db: Db, run: number, after: number, limit: number): SlotRow[] =>
+	db.all(Q.slotsOfRun, { run, after, limit });
+export const slotCount = (db: Db, run: number): number => db.get(Q.slotCount, { run })?.n ?? 0;
+export const fillsOf = (db: Db, slot: number) => db.all(Q.fills, { slot });
+export const failingTestsOf = (db: Db, run: number, limit: number) => db.all(Q.failingRunTests, { run, limit });
+export const runTestsWith = (db: Db, run: number, outcome: string, limit: number) =>
+	db.all(Q.runTests, { run, outcome, limit });
+export const flippedIn = (db: Db, run: number): number => db.get(Q.flippedCount, { run })?.n ?? 0;
+export const runsDependingOn = (db: Db, decision: number): number[] =>
+	db.all(Q.dependents, { decision }).map((r) => r.run);
+
+/** The version each case is pinned to in a run. A result typed into the run is exact at that version. */
+export function pinnedVersions(db: Db, run: number): Map<number, number> {
+	return new Map(db.all(Q.pinned, { run }).map((row) => [row.case_id, row.version]));
+}
+
+const obligationsOf = (run: RunRow): Obligation[] => json<Obligation[]>(run.require);
+const acceptsOf = (run: RunRow): TargetMatch => json<TargetMatch>(run.accepts);
+
+// ── Which runs a target matters to ─────────────────────────────────────────────────────────────────────────
+
+/** The run that gates a commit, created the first time anything is reported for it. */
+export function ensureChangeRun(ctx: Ctx, target: TargetRow): RunRow | null {
+	if (target.line === "session" || target.commit_sha === null) return null;
+	const found = ctx.db.get(Q.changeRun, { project: ctx.project.id, what: target.what });
+	if (found) return found;
+	const change = target.change !== null ? changeById(ctx.db, target.change) : null;
+	const where = change ? change.key : (target.branch ?? target.line);
+	const no = ctx.nextNo("run");
+	const { lastId } = ctx.db.run(Q.insert, {
+		project: ctx.project.id,
+		no,
+		name: `${target.commit_sha.slice(0, 7)} on ${where}`,
+		origin: "change",
+		accepts: JSON.stringify({ commit: target.commit_sha, ...(target.repo ? { repo: target.repo } : {}) }),
+		what: target.what,
+		require: "[]",
+		change: target.change,
+		tally: JSON.stringify(emptyTally()),
+		verdict: "pending",
+		actor: ctx.actor.id,
+		at: ctx.now,
+		rev: ctx.seq,
+	});
+	ctx.touched.add(ref("run", no));
+	return runById(ctx.db, lastId);
+}
+
+function matches(run: RunRow, target: TargetRow, typedInto: number | null): boolean {
+	const accepts = acceptsOf(run);
+	if ("self" in accepts) return typedInto === run.id;
+	if (typedInto === run.id) return true;
+	if (target.commit_sha === null) return false;
+	const sameCommit = target.commit_sha === accepts.commit || target.commit_sha.startsWith(accepts.commit);
+	return (
+		sameCommit &&
+		(accepts.repo === undefined || accepts.repo === target.repo) &&
+		(accepts.env === undefined || accepts.env === target.env)
+	);
+}
+
+/** Every run a batch on this target counts toward: the commit's change run, and each planned run that accepts it. */
+export function runsFor(ctx: Ctx, target: TargetRow, typedInto: number | null): RunRow[] {
+	const out: RunRow[] = [];
+	const change = ensureChangeRun(ctx, target);
+	if (change) out.push(change);
+	for (const run of ctx.db.all(Q.openPlanned, { project: ctx.project.id })) {
+		if (matches(run, target, typedInto)) out.push(run);
+	}
+	if (typedInto !== null && !out.some((run) => run.id === typedInto)) {
+		const run = runById(ctx.db, typedInto);
+		if (run) out.push(run);
+	}
+	return out;
+}
+
+/** Acceptance: the report is durable but not applied, so each run it matters to reads `pending` until it is. */
+export function noteAccepted(ctx: Ctx, runs: readonly RunRow[], batchSeq: number): void {
+	for (const run of runs) {
+		ctx.db.run(Q.accepted, { id: run.id, seq: batchSeq });
+		ctx.touched.add(runRef(run));
+	}
+}
+
+// ── Applying a batch ───────────────────────────────────────────────────────────────────────────────────────
+
+/** Failures with one cause in one scope: what a `failure` question is about. */
+export type FailingGroup = {
+	signature: SignatureRow;
+	scope: string;
+	tests: TestRow[];
+	results: number[];
+	message: string | null;
+	disputed: boolean;
+	runs: RunRow[];
+};
+
+/**
+ * Folds an applied batch into every run it counts toward: the effective result per test of a change run, and the
+ * slots of planned runs. Returns the failures grouped by cause, for the caller to raise as questions.
+ */
+export function* applyBatchSteps(
+	ctx: Ctx,
+	input: { batch: BatchRow; target: TargetRow; applied: readonly Applied[]; runs: readonly RunRow[] },
+): Generator<undefined, FailingGroup[], void> {
+	const { batch, target, applied, runs } = input;
+	const scope = scopeOf(target, batch.run);
+	const groups = new Map<number, FailingGroup>();
+	const group = (signature: SignatureRow): FailingGroup => {
+		let found = groups.get(signature.id);
+		if (!found) {
+			found = { signature, scope, tests: [], results: [], message: null, disputed: false, runs: [] };
+			groups.set(signature.id, found);
+		}
+		return found;
+	};
+
+	const changeRun = runs.find((run) => run.origin === "change") ?? null;
+	const planned = runs.filter((run) => run.origin === "planned");
+	const plannedIds = new Set(planned.map((run) => run.id));
+	const touchedSlots = new Map<number, SlotRow>();
+
+	let folded = 0;
+	for (const result of applied) {
+		if (folded++ > 0 && folded % SLICE === 0) yield;
+		if (changeRun) {
+			ctx.db.run(Q.upsertRunTest, {
+				run: changeRun.id,
+				test: result.test.id,
+				result: result.id,
+				outcome: result.outcome,
+				signature: result.signature?.id ?? null,
+				attempt: result.attempt,
+				flipped: result.flipped ? 1 : 0,
+			});
+		}
+		if (result.corrects !== null) {
+			for (const { slot } of ctx.db.all(Q.slotsOfResult, { result: result.corrects })) {
+				const row = slotById(ctx.db, slot);
+				if (row) touchedSlots.set(slot, row);
+			}
+			ctx.db.run(Q.correct, { result: result.corrects });
+		}
+		if (result.basisCase !== null && planned.length > 0) {
+			for (const slot of ctx.db.all(Q.slotsOfCase, { caseId: result.basisCase })) {
+				if (!plannedIds.has(slot.run)) continue;
+				const run = planned.find((r) => r.id === slot.run);
+				const obligation = run ? obligationsOf(run).find((o) => o.id === slot.obligation) : undefined;
+				if (!run || obligation?.kind !== "exercise") continue;
+				const admitted = qualifies({
+					result: {
+						method: result.method,
+						basis: result.basis,
+						basisCase: result.basisCase,
+						basisVersion: result.basisVersion,
+						basisClaim: result.basisClaim,
+					},
+					slot: { caseId: slot.case_id, version: slot.version, claim: slot.claim },
+					obligation,
+					caseMethods: methodsOf(ctx.db, slot.case_id, result),
+				});
+				if (!admitted) continue;
+				ctx.db.run(Q.admit, { slot: slot.id, result: result.id, run: run.id, admitted });
+				touchedSlots.set(slot.id, slot);
+			}
+		}
+		if (result.signature && (result.outcome === "fail" || result.outcome === "error")) {
+			const g = group(result.signature);
+			if (!g.tests.some((t) => t.id === result.test.id)) g.tests.push(result.test);
+			g.results.push(result.id);
+			g.message ??= result.message;
+		}
+	}
+
+	// Rebuild every slot the batch touched from its complete admitted set, and note the ones now in dispute.
+	const slotStates = new Map<number, { run: number; state: SlotState; signature: number | null }>();
+	for (const slot of touchedSlots.values()) {
+		const run = planned.find((r) => r.id === slot.run) ?? runById(ctx.db, slot.run);
+		if (!run) continue;
+		const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
+		const next = refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
+		slotStates.set(slot.id, { run: run.id, ...next });
+		if ((next.state === "disputed" || next.state === "failing") && next.signature !== null) {
+			const signature = signatureById(ctx.db, next.signature);
+			if (signature) {
+				const g = group(signature);
+				g.disputed ||= next.state === "disputed";
+				if (!g.runs.some((r) => r.id === run.id)) g.runs.push(run);
+			}
+		}
+	}
+
+	if (changeRun) {
+		for (const g of groups.values()) {
+			if (g.results.length > 0 && !g.runs.some((r) => r.id === changeRun.id)) g.runs.push(changeRun);
+		}
+	}
+	for (const run of runs) {
+		ctx.db.run(Q.applied, { id: run.id, seq: batch.seq, rev: ctx.seq });
+		ctx.touched.add(runRef(run));
+	}
+	return [...groups.values()].filter((g) => g.runs.length > 0 || g.results.length > 0);
+}
+
+/** `applyBatchSteps` run to the end without pausing. */
+export function applyBatch(
+	ctx: Ctx,
+	input: { batch: BatchRow; target: TargetRow; applied: readonly Applied[]; runs: readonly RunRow[] },
+): FailingGroup[] {
+	const steps = applyBatchSteps(ctx, input);
+	for (let step = steps.next(); ; step = steps.next()) if (step.done) return step.value;
+}
+
+/**
+ * The methods a case admits for this result. A person's and an agent's eligibility are declared on the case. A
+ * linked or annotated test is eligible because a decision or the test itself tied it to the case; whether a test
+ * may fill a given slot is then the obligation's choice (it lists `auto` or it does not).
+ */
+function methodsOf(db: Db, caseId: number, result: Pick<Applied, "method">): MethodKind[] {
+	const row = caseById(db, caseId);
+	const declared = row ? json<MethodKind[]>(row.methods) : [];
+	return result.method === "auto" ? [...declared, "auto"] : declared;
+}
+
+/** Recomputes a slot from every uncorrected result admitted to it: per actor, that actor's latest result. */
+function refreshSlot(
+	ctx: Ctx,
+	slot: SlotRow,
+	obligation: ExerciseObligation | null,
+): { state: SlotState; signature: number | null } {
+	const agg: SlotAgg = {};
+	let signature: number | null = null;
+	for (const fill of ctx.db.all(Q.fills, { slot: slot.id })) {
+		const outcome =
+			fill.outcome === "pass"
+				? "pass"
+				: fill.outcome === "fail" || fill.outcome === "error"
+					? "fail"
+					: fill.outcome === "skip"
+						? "skip"
+						: "blocked";
+		agg[`${fill.actor}:${fill.method}`] = { actor: fill.actor, outcome, result: fill.id, seq: fill.seq };
+	}
+	for (const entry of Object.values(agg)) {
+		if (entry.outcome !== "fail") continue;
+		const failing = ctx.db.raw
+			.query<{ signature: number | null }, [number]>("SELECT signature FROM results WHERE id = ?")
+			.get(entry.result);
+		signature = failing?.signature ?? signature;
+	}
+	const state = slotState(agg, obligation?.minActors ?? 1);
+	ctx.db.run(Q.updateSlot, { id: slot.id, agg: JSON.stringify(agg), state, signature, rev: ctx.seq });
+	return { state, signature };
+}
+
+// ── Tally and verdict ──────────────────────────────────────────────────────────────────────────────────────
+
+/** The scope in which this run's failures are answered. */
+export function scopeOfRun(db: Db, run: RunRow): string {
+	if (run.change !== null) return `change:${run.change}`;
+	if (run.origin === "change") return "line:trunk";
+	const accepts = acceptsOf(run);
+	if ("commit" in accepts) {
+		const target = targetFor(db, run.project, accepts.commit);
+		if (target) return scopeOf(target, run.id);
+	}
+	return `run:${run.id}`;
+}
+
+function targetFor(db: Db, project: number, commit: string): TargetRow | null {
+	const exact = db.get(Q.targetByCommit, { project, commit });
+	if (exact) return exact;
+	if (commit.length < 7 || !/^[0-9a-f]+$/i.test(commit)) return null;
+	const rows = db.all(Q.targetByCommitPrefix, { project, low: commit, high: `${commit}￿` });
+	return rows.length === 1 ? (rows[0] ?? null) : null;
+}
+
+/** Whether no newer run exists in this run's scope (the same change, or trunk). A planned run is its own scope. */
+export function isLatestInScope(db: Db, run: RunRow): boolean {
+	if (run.origin !== "change") return true;
+	const newest = db.raw
+		.query<{ id: number }, [number, number | null]>(
+			"SELECT max(id) AS id FROM runs WHERE project = ? AND origin = 'change' AND change IS ?",
+		)
+		.get(run.project, run.change);
+	return (newest?.id ?? run.id) === run.id;
+}
+
+export type Retallied = {
+	run: RunRow;
+	/** A planned run that just reached `passed` and is still open: the caller raises its sign-off. */
+	wantsSignoff: boolean;
+	/** Signature ids currently failing in this run. Open failure questions about other causes no longer block it. */
+	failing: Set<number>;
+};
+
+/**
+ * Recomputes a run's tally, the questions blocking it and its verdict from the facts, and stores them. Called in
+ * the transaction of every event that can change them: an applied batch, a decision, a withdrawn decision.
+ */
+export function retally(ctx: Ctx, runId: number): Retallied {
+	const run = runById(ctx.db, runId);
+	if (!run) throw new Error(`run ${runId} is missing`);
+	const scope = scopeOfRun(ctx.db, run);
+	const tally: Tally = emptyTally();
+	const failing = new Set<number>();
+	const depends = new Map<number, number | null>();
+
+	const classify = (signature: number | null, n: number, disputed: boolean): void => {
+		if (signature === null) {
+			tally.unexplained += n;
+			return;
+		}
+		const excuse = excuseFor(ctx.db, run.project, signature, scope);
+		if (!excuse) {
+			failing.add(signature);
+			if (disputed) tally.disputed += n;
+			else tally.unexplained += n;
+			return;
+		}
+		depends.set(excuse.decision, ctx.db.get(Q.decisionExpiry, { id: excuse.decision })?.expires_at ?? null);
+		if (excuse.class === "attributed") tally.attributed += n;
+		else if (disputed) tally.pass += n;
+		else tally.excused += n;
+	};
+
+	if (run.origin === "change") {
+		for (const row of ctx.db.all(Q.runTestGroups, { run: run.id })) {
+			if (row.outcome === "pass") tally.pass += row.n;
+			else if (row.outcome === "skip") tally.skipped += row.n;
+			else if (row.outcome === "blocked") tally.missing += row.n;
+			else classify(row.signature, row.n, false);
+		}
+	} else {
+		for (const row of ctx.db.all(Q.slotGroups, { run: run.id })) {
+			if (row.state === "satisfied" || row.state === "waived") tally.pass += row.n;
+			else if (row.state === "missing") tally.missing += row.n;
+			else if (row.state === "skipped") {
+				tally.skipped += row.n;
+				tally.missing += row.n;
+			} else classify(row.signature, row.n, row.state === "disputed");
+		}
+	}
+
+	const jobs = obligationsOf(run).flatMap((o) => (o.kind === "jobs" ? o.jobs : []));
+	if (jobs.length > 0) {
+		const reported = new Set<string>();
+		const accepts = acceptsOf(run);
+		if ("commit" in accepts) {
+			for (const target of targetsOfCommit(
+				ctx.db,
+				run.project,
+				run.accepts_what ?? codeWhat(accepts.repo, accepts.commit),
+			)) {
+				for (const job of processedJobs(ctx.db, target.id)) reported.add(job);
+			}
+		}
+		tally.missing += jobs.filter((job) => !reported.has(job)).length;
+	}
+
+	const blocking: number[] = [];
+	for (const question of ctx.db.all(Q.openBlocking, { project: run.project, ref: runRef(run) })) {
+		if (!json<number[]>(question.blocks).includes(run.id)) continue;
+		if (question.kind === "failure") {
+			const signature = json<{ signature?: number }>(question.subject).signature;
+			if (signature === undefined || !failing.has(signature)) continue;
+		}
+		blocking.push(question.id);
+	}
+
+	ctx.db.run(Q.clearDepends, { run: run.id });
+	let expiry: number | null = null;
+	for (const [decision, expires] of depends) {
+		ctx.db.run(Q.depend, { run: run.id, decision, expires });
+		if (expires !== null && (expiry === null || expires < expiry)) expiry = expires;
+	}
+	const next = verdict({ tally, blocking: blocking.length, outstanding: run.outstanding, expired: false });
+	ctx.db.run(Q.project, {
+		id: run.id,
+		tally: JSON.stringify(tally),
+		blocking: JSON.stringify(blocking),
+		verdict: next,
+		expiry,
+		rev: ctx.seq,
+	});
+	ctx.touched.add(runRef(run));
+	const updated = runById(ctx.db, run.id) ?? run;
+	return { run: updated, wantsSignoff: run.origin === "planned" && run.state === "open" && next === "passed", failing };
+}
+
+// ── Planning ───────────────────────────────────────────────────────────────────────────────────────────────
+
+/** What a planned run requires when the plan does not say: a person or a pipeline, on a basis the policy accepts. */
+export function defaultObligations(policy: Policy): Obligation[] {
+	return [{ id: "exercise", kind: "exercise", methods: ["human", "auto"], minActors: 1, basis: policy.settings.basis }];
+}
+
+/**
+ * Creates a planned run with one slot per selected case and exercise obligation, pinned to the case's current
+ * version. Evidence already recorded on a target the run accepts fills its slots at once, so nobody repeats by hand
+ * what a pipeline has shown.
+ */
+export function plan(
+	ctx: Ctx,
+	input: {
+		name: string;
+		cases: readonly CaseRow[];
+		accepts: TargetMatch;
+		require: Obligation[];
+		assignees: readonly number[];
+	},
+): { run: RunRow; slots: number; already: number } {
+	if (input.cases.length === 0) throw invalid("the selection matches no active case");
+	const ids = new Set(input.require.map((o) => o.id));
+	if (ids.size !== input.require.length) throw invalid("obligation ids must be unique within a run");
+	const exercises = input.require.filter((o): o is ExerciseObligation => o.kind === "exercise");
+	if (exercises.length === 0) throw invalid("a planned run needs at least one exercise obligation");
+
+	const no = ctx.nextNo("run");
+	const what =
+		"commit" in input.accepts ? (targetFor(ctx.db, ctx.project.id, input.accepts.commit)?.what ?? null) : null;
+	const { lastId } = ctx.db.run(Q.insert, {
+		project: ctx.project.id,
+		no,
+		name: input.name,
+		origin: "planned",
+		accepts: JSON.stringify(input.accepts),
+		what,
+		require: JSON.stringify(input.require),
+		change: null,
+		tally: JSON.stringify(emptyTally()),
+		verdict: "pending",
+		actor: ctx.actor.id,
+		at: ctx.now,
+		rev: ctx.seq,
+	});
+	let rank = 0;
+	for (const row of input.cases) {
+		for (const obligation of exercises) {
+			ctx.db.run(Q.insertSlot, {
+				run: lastId,
+				caseId: row.id,
+				version: row.head,
+				claim: row.claim_hash,
+				obligation: obligation.id,
+				assignee: input.assignees.length > 0 ? (input.assignees[rank % input.assignees.length] ?? null) : null,
+				rank: rank++,
+				rev: ctx.seq,
+			});
+		}
+	}
+	const run = runById(ctx.db, lastId);
+	if (!run) throw new Error("run was not stored");
+	ctx.touched.add(ref("run", no));
+
+	let already = 0;
+	if ("commit" in input.accepts && what !== null) {
+		const targets = targetsOfCommit(ctx.db, ctx.project.id, what).filter((target) => matches(run, target, null));
+		if (targets.length > 0)
+			already = fillFromPrior(
+				ctx,
+				run,
+				exercises,
+				targets.map((t) => t.id),
+			);
+	}
+	return { run: retally(ctx, run.id).run, slots: rank, already };
+}
+
+function fillFromPrior(
+	ctx: Ctx,
+	run: RunRow,
+	exercises: readonly ExerciseObligation[],
+	targets: readonly number[],
+): number {
+	let satisfied = 0;
+	for (const slot of ctx.db.all(Q.slotsOfRun, { run: run.id, after: -1, limit: 1_000_000 })) {
+		const obligation = exercises.find((o) => o.id === slot.obligation);
+		if (!obligation) continue;
+		const prior = ctx.db.allDynamic<ResultRow>(
+			`SELECT * FROM results WHERE basis_case = ? AND target IN (${placeholders(targets.length)}) ORDER BY seq, ord`,
+			[slot.case_id, ...targets],
+		);
+		let any = false;
+		for (const result of prior) {
+			const admitted = qualifies({
+				result: {
+					method: result.method,
+					basis: result.basis,
+					basisCase: result.basis_case,
+					basisVersion: result.basis_version,
+					basisClaim: result.basis_claim,
+				},
+				slot: { caseId: slot.case_id, version: slot.version, claim: slot.claim },
+				obligation,
+				caseMethods: methodsOf(ctx.db, slot.case_id, result),
+			});
+			if (!admitted) continue;
+			ctx.db.run(Q.admit, { slot: slot.id, result: result.id, run: run.id, admitted });
+			any = true;
+		}
+		if (any && refreshSlot(ctx, slot, obligation).state === "satisfied") satisfied++;
+	}
+	return satisfied;
+}
+
+// ── Standing ───────────────────────────────────────────────────────────────────────────────────────────────
+
+/** Closes a run. Standing: only by a `signoff` decision, which a rule may make. */
+export function closeRun(ctx: Ctx, witness: Witness, run: RunRow): void {
+	ctx.db.run(Q.setState, { id: run.id, state: "closed", signoff: witness.decision, rev: ctx.seq });
+	ctx.touched.add(runRef(run));
+}
+
+/** Reopens a run when its sign-off is withdrawn or stops holding. */
+export function reopenRun(ctx: Ctx, run: RunRow): void {
+	ctx.db.run(Q.setState, { id: run.id, state: "open", signoff: null, rev: ctx.seq });
+	ctx.touched.add(runRef(run));
+}
+
+/**
+ * A `mistaken` answer on a disputed slot: the failing results stop counting there. Standing: only by a decision.
+ * Returns the slot and result pairs it corrected, so withdrawing the decision can put them back.
+ */
+export function discountFailures(ctx: Ctx, _witness: Witness, run: RunRow, signature: number): [number, number][] {
+	const corrected: [number, number][] = [];
+	for (const slot of ctx.db.all(Q.slotsBySignature, { run: run.id, signature })) {
+		for (const fill of ctx.db.all(Q.fills, { slot: slot.id })) {
+			if (fill.signature !== signature) continue;
+			ctx.db.run(Q.correctInSlot, { slot: slot.id, result: fill.id });
+			corrected.push([slot.id, fill.id]);
+		}
+		const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
+		refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
+	}
+	return corrected;
+}
+
+export function restoreFailures(ctx: Ctx, pairs: readonly [number, number][]): void {
+	for (const [slotId, result] of pairs) {
+		ctx.db.run(Q.uncorrectInSlot, { slot: slotId, result });
+		const slot = slotById(ctx.db, slotId);
+		const run = slot ? runById(ctx.db, slot.run) : null;
+		if (!slot || !run) continue;
+		const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
+		refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
+	}
+}
+
+// ── The gate ───────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The gate of a commit, a run or a change. One row read and two comparisons: an unapplied upload or an expired
+ * hold makes the answer `pending` whatever the stored verdict says, so a stale green is never served.
+ */
+export function gate(
+	ctx: Ctx,
+	input: {
+		commit?: string | undefined;
+		run?: string | undefined;
+		change?: string | undefined;
+		repo?: string | undefined;
+	},
+): GateStatus {
+	let run: RunRow | null = null;
+	if (input.run) run = mustRun(ctx.db, ctx.project.id, input.run);
+	else {
+		let commit = input.commit;
+		if (!commit && input.change) commit = changeByKey(ctx.db, ctx.project.id, input.change)?.head_sha ?? undefined;
+		if (!commit) throw invalid("gate needs a commit, a run or a change");
+		const target = targetFor(ctx.db, ctx.project.id, commit);
+		run = target ? ctx.db.get(Q.changeRun, { project: ctx.project.id, what: target.what }) : null;
+	}
+	if (!run) {
+		return {
+			run: null,
+			verdict: "pending",
+			reason: "pending: nothing has been reported for this commit",
+			tally: { ...emptyTally() },
+			open: [],
+			url: null,
+			stale: false,
+		};
+	}
+	return gateOf(ctx, run);
+}
+
+export function gateOf(ctx: Ctx, run: RunRow): GateStatus {
+	const tally = json<Tally>(run.tally);
+	const blocking = json<number[]>(run.blocking);
+	const expired = run.next_expiry !== null && run.next_expiry <= ctx.now;
+	const facts = { tally, blocking: blocking.length, outstanding: run.outstanding, expired };
+	const now = verdict(facts);
+	const open = blocking.flatMap((id) => {
+		const row = ctx.db.raw.query<{ no: number }, [number]>("SELECT no FROM questions WHERE id = ?").get(id);
+		return row ? [ref("question", row.no)] : [];
+	});
+	return {
+		run: runRef(run),
+		verdict: now,
+		reason: explainVerdict(facts),
+		tally: { ...tally },
+		open,
+		url: null,
+		stale: now !== run.verdict,
+	};
+}

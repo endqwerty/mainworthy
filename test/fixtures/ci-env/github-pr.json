@@ -1,0 +1,14 @@
+{
+	"GITHUB_ACTIONS": "true",
+	"GITHUB_EVENT_NAME": "pull_request",
+	"GITHUB_SHA": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	"GITHUB_REF": "refs/pull/482/merge",
+	"GITHUB_HEAD_REF": "feature/coupon",
+	"GITHUB_BASE_REF": "main",
+	"GITHUB_REPOSITORY": "acme/web",
+	"GITHUB_SERVER_URL": "https://github.com",
+	"GITHUB_RUN_ID": "813",
+	"GITHUB_RUN_ATTEMPT": "1",
+	"GITHUB_JOB": "e2e",
+	"GITHUB_EVENT_PATH": "/runner/event.json"
+}

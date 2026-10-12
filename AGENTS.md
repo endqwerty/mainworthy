@@ -9,12 +9,34 @@ Read [README.md](README.md) first, then `docs/product-vision.md`,
 
 ## State
 
-Day zero: **the stack is undecided** (`docs/decisions/0001-stack-open.md`).
-Do not add a language, framework or build tool until a decision record is
-written. When you do, in the same change: add the decision record, a
-`t3.json` with install/check/dev scripts, the check command and stack rules in
-this file, and a worktree-release step if dependencies are large (the Mac mini
-is short on disk).
+The MVP is built (2026-10-12): TypeScript on Bun, one SQLite file, a React web UI
+(`docs/decisions/0010-stack.md`). What it contains and where it departs from the
+design: `docs/decisions/0012-mvp-scope-and-departures.md`. What is deferred: the
+GitHub milestone `Backlog to 1.0`. How it fits together: `docs/architecture.md`.
+
+## Stack rules
+
+- **Commands.** `bun install`; `bun run check` (type-check, lint, every test
+  including the budgets and the browser tests); `bun run dev` (the server on
+  `127.0.0.1:7357`, restarting on change). Bun 1.4; no other runtime or build tool.
+- **One registry.** A capability is an operation in `src/server/ops/index.ts`. HTTP,
+  the OpenAPI document, the CLI, the MCP tools and the web client come from it. Never
+  add a route, a command or a tool beside it.
+- **The module map is a test.** `test/architecture.test.ts` fails on an import that
+  goes up the map, on SQL outside its owning module, and on any second way to mint a
+  decision witness. Fix the design, not the test.
+- **Standing changes only through a decision.** Anything that is "current" (a case's
+  head, a link, an excuse, a closed run, the policy) is written by a function that
+  takes a `Witness`. Do not add a writer without one.
+- **`src/core` is pure** and runs in the browser and the server. No I/O, no Node or
+  Bun APIs. `src/web` imports only `src/core`.
+- **SQL** is declared with `sql()` in the module that owns the table, so the check
+  can prepare every statement against the schema. A schema change is a new file in
+  `src/server/kernel/migrations/`; a shipped migration is never edited.
+- **Budgets are tests** (`test/budgets.test.ts`, `bench/`). A change that misses a
+  hot-path budget does not merge; do not raise the number.
+- **Worktree release:** `rm -rf node_modules .casebook test-results` (also the
+  `release worktree` script in `t3.json`, which runs when a thread settles).
 
 ## Working rules
 

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="playwright" tests="2">
+  <testsuite name="chromium" file="./tests/checkout.spec.ts">
+    <testcase name="applies coupon @C-311@v7" classname="checkout" time="0.1234"/>
+    <testcase name="rejects expired coupon" classname="checkout" time="1.25">
+      <failure message="Expected &lt;90&gt;, got 100"><![CDATA[Error: total mismatch
+    at tests/checkout.spec.ts:42:3]]></failure>
+      <system-out><![CDATA[console output <testcase name="fake"/>]]></system-out>
+    </testcase>
+  </testsuite>
+</testsuites>

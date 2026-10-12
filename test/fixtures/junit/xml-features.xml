@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!-- <testsuite name="ignored"><testcase name="ignored"/></testsuite> -->
+<testsuites>
+  <testsuite name="outer" file=".\tests\xml.spec.ts">
+    <testsuite name="inner">
+      <testcase name="A&#65; &#x1F680; &quot;x&quot; &lt;x&gt; &amp; &apos;x&apos;" time="0.0004"/>
+      <testcase name="CDATA"><failure><![CDATA[
+first <literal> &amp; line
+second line]]></failure></testcase>
+    </testsuite>
+  </testsuite>
+</testsuites>

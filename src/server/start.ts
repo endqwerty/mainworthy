@@ -1,0 +1,67 @@
+// Starting an instance: open the data, make sure an owner and a first project exist, finish interrupted work,
+// then listen. The same function is the Local layer on a laptop and the Server layer in a container; only the
+// configuration differs (decision 0002).
+import { type Extra, serve, VERSION } from "../surfaces/http.ts";
+import { bootstrap, ruleActor } from "./identity/identity.ts";
+import { recoverAccepted, sweep } from "./jobs.ts";
+import { type App, type Config, openApp } from "./kernel/app.ts";
+import type { Actor } from "./kernel/ctx.ts";
+import { sql } from "./kernel/db.ts";
+import { createProject } from "./ops/admin.ts";
+
+const Q = { anyProject: sql<readonly [], { key: string }>("SELECT key FROM projects ORDER BY id LIMIT 1") };
+
+export type Instance = {
+	app: App;
+	owner: Actor;
+	url: string;
+	project: string;
+	generatedToken: string | null;
+	stop: () => Promise<void>;
+};
+
+/** Opens the instance without listening: for the CLI commands that work on the data directly, and for tests. */
+export function open(
+	config: Config,
+	options: { memory?: boolean; firstProject?: string } = {},
+): { app: App; owner: Actor; project: string; generatedToken: string | null } {
+	const app = openApp(config, options.memory ? { memory: true } : {});
+	const { owner, generatedToken } = bootstrap(app);
+	let project = app.db.get(Q.anyProject)?.key;
+	if (!project) {
+		// Zero configuration to first value: a project exists before the first case is typed.
+		project = options.firstProject ?? "scratch";
+		app.db.transaction(() =>
+			createProject({ app, actor: owner, now: app.now() }, { key: project ?? "scratch", preset: "loose" }),
+		);
+	}
+	return { app, owner, project, generatedToken };
+}
+
+export function start(
+	config: Config,
+	extra: (app: App, owner: Actor) => Extra,
+	options: { firstProject?: string } = {},
+): Instance {
+	const opened = open(config, options);
+	const { app, owner } = opened;
+	recoverAccepted(app);
+	const rule = ruleActor(app.db).id;
+	// Through the gate, like every other writer, so it never lands inside another command's open transaction.
+	const timer = setInterval(() => {
+		app.gate.run(() => sweep(app, rule)).catch((error) => console.error("[casebook] sweep failed:", error));
+	}, 60_000);
+	const server = serve(app, owner, extra(app, owner));
+	const url = `http://${config.host === "0.0.0.0" || config.host === "::" ? "localhost" : config.host}:${server.port}`;
+	return {
+		...opened,
+		url,
+		async stop() {
+			clearInterval(timer);
+			await server.stop(true);
+			app.close();
+		},
+	};
+}
+
+export { VERSION };

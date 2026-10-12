@@ -1,0 +1,83 @@
+Machine: Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz; 16 logical cores; 31.2 GiB; Bun 1.4.3
+Filesystem: Filesystem       Type  1024-blocks     Used Available Capacity Mounted on
+/dev/mapper/root btrfs   486270976 73356272 410939360      16% /home
+Load at start: 7.67 / 9.12 / 10.18
+Building folders…
+folders: 500 rows in 0.18 s, 2747 rows/s
+Building cases…
+  cases 1000/5000
+cases: 5,000 rows in 1.25 s, 3989 rows/s
+Building history edits…
+history edits: 3,028 rows in 1.28 s, 2368 rows/s
+Building test registration…
+test registration: 2,000 rows in 0.20 s, 9960 rows/s
+Building test linking…
+test linking: 1,500 rows in 0.18 s, 8534 rows/s
+Building results…
+  results 7000/50000
+results: 48,000 rows in 2.17 s, 22074 rows/s
+Building PR scopes and open queue…
+PR scopes and open queue: 1,890 rows in 0.72 s, 2619 rows/s
+Building planned run…
+planned run: 500 rows in 0.07 s, 7013 rows/s
+Verified dataset: {"cases":5000,"versions":8028,"tests":2000,"linked":1500,"results":52140,"open":2000,"decided":321,"carried":90}; queue target reached
+Measuring case read: 25 iterations in five blocks…
+Measuring folder page (50): 25 iterations in five blocks…
+Measuring search/common: 25 iterations in five blocks…
+Measuring search/two words: 25 iterations in five blocks…
+Measuring search/rare: 25 iterations in five blocks…
+Measuring search/prefix: 25 iterations in five blocks…
+Measuring test history (20): 25 iterations in five blocks…
+Measuring gate read: 25 iterations in five blocks…
+Measuring queue (50/2000): 25 iterations in five blocks…
+Measuring changed since: 25 iterations in five blocks…
+Measuring impact (20 files): 25 iterations in five blocks…
+Measuring case save: 25 iterations in five blocks…
+Measuring bulk move (1000): 5 iterations in five blocks…
+Measuring ingest (10000): 10 iterations in five blocks…
+Measuring JUnit parse (10000): 10 iterations in five blocks…
+Measuring execute run: 50 iterations in five blocks…
+Mixed HTTP window 1/1: 16 readers + ingest + save, 15 s
+  1152 reads, 74.9 reads/s, read p95 303.84 ms, 4 ingests
+| workload            | p50 ms  | p95 ms  | p99 ms  | max ms  | budget ms | pass/MISS | errors |
+| ------------------- | ------- | ------- | ------- | ------- | --------- | --------- | ------ |
+| case read           | 0.71    | 5.00    | 5.72    | 5.72    | p95<20    | pass      | 0      |
+| folder page (50)    | 1.41    | 2.09    | 3.46    | 3.46    | p95<50    | pass      | 0      |
+| search/common       | 4.85    | 6.16    | 6.91    | 6.91    | p95<100   | pass      | 0      |
+| search/two words    | 6.06    | 8.14    | 10.07   | 10.07   | p95<100   | pass      | 0      |
+| search/rare         | 0.25    | 0.44    | 0.54    | 0.54    | p95<100   | pass      | 0      |
+| search/prefix       | 4.08    | 5.16    | 5.21    | 5.21    | p95<100   | pass      | 0      |
+| test history (20)   | 0.18    | 0.28    | 0.28    | 0.28    | p95<20    | pass      | 0      |
+| gate read           | 0.02    | 0.03    | 0.03    | 0.03    | p95<20    | pass      | 0      |
+| queue (50/2000)     | 21.90   | 24.18   | 25.41   | 25.41   | p95<50    | pass      | 0      |
+| changed since       | 44.72   | 57.17   | 61.90   | 61.90   | report    | pass      | 0      |
+| impact (20 files)   | 5.89    | 7.68    | 8.60    | 8.60    | report    | pass      | 0      |
+| case save           | 2.09    | 2.42    | 2.57    | 2.57    | p95<50    | pass      | 0      |
+| bulk move (1000)    | 213.56  | 321.53  | 321.53  | 321.53  | max<1000  | pass      | 0      |
+| ingest (10000)      | 421.76  | 476.83  | 476.83  | 476.83  | max<2000  | pass      | 0      |
+| ingest gate visible | 421.96  | 477.08  | 477.08  | 477.08  | max<5000  | pass      | 0      |
+| JUnit parse (10000) | 37.49   | 45.60   | 45.60   | 45.60   | report    | pass      | 0      |
+| execute run         | 1.62    | 2.24    | 37.87   | 37.87   | p95<50    | pass      | 0      |
+| mixed HTTP reads    | 200.91  | 303.84  | 381.17  | 383.23  | p95<50    | MISS      | 0      |
+| mixed HTTP ingest   | 4202.81 | 4439.19 | 4439.19 | 4439.19 | p95<2000  | MISS      | 0      |
+| mixed HTTP save     | 4206.24 | 4444.93 | 4444.93 | 4444.93 | p95<50    | MISS      | 0      |
+Mixed: 74.9 reads/s; longest read during a 10,000-result ingest 383.23 ms (find).
+Synchronous ingest transactions: p50 0.00 ms, p95 0.00 ms, max 0.00 ms. They block this process's one JS thread; read latency also includes queued read work.
+Gate visibility is completion of the same report transaction, followed by an actual gate operation; there is no separate background acceptance phase on this path.
+Diagnostic case read: 8.3 CPU ms / 49.8 wall ms; top SQL 0 ms in 0 calls; no SELECT plan
+Diagnostic folder page (50): 17.0 CPU ms / 77.1 wall ms; top SQL 0 ms in 0 calls; no SELECT plan
+Diagnostic search/common: 6.1 CPU ms / 8.6 wall ms; top SQL 0 ms in 0 calls; no SELECT plan
+Diagnostic search/two words: 6.1 CPU ms / 6.1 wall ms; top SQL 0 ms in 0 calls; no SELECT plan
+Diagnostic search/rare: 0.3 CPU ms / 0.3 wall ms; top SQL 0 ms in 0 calls; no SELECT plan
+Diagnostic search/prefix: 4.1 CPU ms / 4.1 wall ms; top SQL 0 ms in 0 calls; no SELECT plan
+Diagnostic test history (20): 0.4 CPU ms / 0.4 wall ms; top SQL 0 ms in 0 calls; no SELECT plan
+Diagnostic gate read: 0.2 CPU ms / 0.2 wall ms; top SQL 0 ms in 0 calls; no SELECT plan
+Diagnostic queue (50/2000): 26.0 CPU ms / 28.5 wall ms; top SQL 0 ms in 0 calls; no SELECT plan
+Diagnostic changed since: 49.5 CPU ms / 55.7 wall ms; top SQL 0 ms in 0 calls; no SELECT plan
+Diagnostic impact (20 files): 5.7 CPU ms / 5.7 wall ms; top SQL 0 ms in 0 calls; no SELECT plan
+Diagnostic case save: 2.9 CPU ms / 2.9 wall ms; top SQL 0.5 ms in 1 calls; SCAN question_refs; USE TEMP B-TREE FOR ORDER BY
+Diagnostic bulk move (1000): 246.8 CPU ms / 237.7 wall ms; top SQL 108.5 ms in 1000 calls; 
+Diagnostic ingest (10000): 435.5 CPU ms / 406.2 wall ms; top SQL 118.6 ms in 10000 calls; 
+Diagnostic execute run: 2.3 CPU ms / 1.9 wall ms; top SQL 0.2 ms in 1 calls; SEARCH slots USING INDEX slots_next (run=?); USE TEMP B-TREE FOR GROUP BY
+Report: /home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/bench/results-quick.json
+Elapsed: 37.17 s; load at end 7.37 / 8.86 / 10.04; 3 misses; 3 workloads at or above half their budget.

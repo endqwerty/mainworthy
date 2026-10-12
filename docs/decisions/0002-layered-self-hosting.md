@@ -1,7 +1,9 @@
 # 0002: Self-hostable in layers
 
 - Date: 2026-10-10
-- Status: accepted (requirement set by Daniel)
+- Status: accepted (requirement set by Daniel). Amended 2026-10-12: a container is
+  acceptable for every layer (decision 0009, answer 14), and the Server layer runs
+  on SQLite; a server database is added for the Cloud layer (decision 0010).
 
 ## Decision
 

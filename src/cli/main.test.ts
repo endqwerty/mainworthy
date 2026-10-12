@@ -1,0 +1,377 @@
+import { expect, test } from "bun:test";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { z } from "zod";
+import { OP_LIST } from "../server/ops/index.ts";
+import { COMMAND_NAMES } from "./dispatch.ts";
+import { GENERATED_COMMANDS } from "./generated.ts";
+import { COMMIT, outputWith, RED_XML, withInstance } from "./test-support.ts";
+
+const Ref = z.object({ ref: z.string() });
+const Found = z.object({ items: z.array(Ref) });
+const Question = z.object({ q: z.string(), evidenceHash: z.string(), kind: z.string() });
+const Inbox = z.object({ items: z.array(Question) });
+const Token = z.object({ token: z.string() });
+const Created = z.object({ cases: z.array(Ref) });
+const Receipt = z.object({ batch: z.number(), fresh: z.boolean(), counts: z.object({ total: z.number() }) });
+
+test("red report, blocked gate, generated decision, passed gate without another report", async () => {
+	await withInstance(async ({ cli, instance }) => {
+		const report = await cli([
+			"report",
+			RED_XML,
+			"--commit",
+			COMMIT,
+			"--branch",
+			"main",
+			"--job",
+			"e2e",
+			"--attempt",
+			"2",
+		]);
+		expect(report.code).toBe(0);
+		expect(report.stderr).toBe("");
+		expect(report.stdout).toContain("casebook report  scratch @ 9f3c2ab  (main)  attempt 2  job e2e");
+		expect(report.stdout).toContain("2 results   1 pass   1 fail   0 skip");
+		expect(report.stdout).toMatch(/1 new\s+Q-\d+/);
+		expect(report.stdout).toContain("expected 90.00, got 100.00");
+		const blocked = await cli(["gate", "--commit", COMMIT]);
+		expect(blocked.code).toBe(2);
+		expect(blocked.stdout).toContain("blocked:");
+		expect(blocked.stdout).toContain("needs an answer");
+		const inbox = outputWith(Inbox, await cli(["inbox", "--kind", "failure"]));
+		const question = inbox.items[0];
+		expect(question).toBeDefined();
+		if (!question) throw new Error("the failed upload did not open its failure question");
+		const decision = await cli([
+			"decide",
+			"--json",
+			JSON.stringify({
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "infra" },
+				reason: "Test environment was unavailable",
+			}),
+		]);
+		expect(decision.code).toBe(0);
+		expect(decision.stdout).toContain('"status": "decided"');
+		const passed = await cli(["gate", "--commit", COMMIT]);
+		expect(passed.code).toBe(0);
+		expect(passed.stdout).toContain("passed:");
+		expect(passed.stdout).not.toContain("needs an answer");
+		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(1);
+	});
+});
+
+test("repeated report returns the same receipt, writes one batch, and names the duplicate", async () => {
+	await withInstance(async ({ cli, instance }) => {
+		const argv = ["report", RED_XML, "--commit", COMMIT, "--branch", "main"];
+		const first = await cli(argv);
+		const again = await cli(argv);
+		expect(first.code).toBe(0);
+		expect(again.code).toBe(0);
+		expect(again.stdout).toBe(`${first.stdout}  already received; nothing was written\n`);
+		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(1);
+		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM results").get()?.n).toBe(2);
+		const machine = outputWith(Receipt, await cli([...argv, "--json", "--compact"]));
+		expect(machine.fresh).toBe(false);
+		expect(machine.counts.total).toBe(2);
+	});
+});
+
+test("missing commit names both ways out and an explicit session uploads", async () => {
+	await withInstance(async ({ cli }) => {
+		const missing = await cli(["report", RED_XML]);
+		expect(missing.code).toBe(4);
+		expect(missing.stdout).toBe("");
+		expect(missing.stderr).toContain("missing commit");
+		expect(missing.stderr).toContain("--commit");
+		expect(missing.stderr).toContain("--session");
+		const session = await cli(["report", RED_XML, "--session", "exploration"]);
+		expect(session.code).toBe(0);
+		expect(session.stdout).toContain('session "exploration" (no build identity)');
+	});
+});
+
+test("CI environment supplies report identity and the default gate target", async () => {
+	await withInstance(async ({ cli }) => {
+		const env = {
+			GITHUB_ACTIONS: "true",
+			GITHUB_SHA: COMMIT,
+			GITHUB_REF: "refs/heads/main",
+			GITHUB_REF_NAME: "main",
+			GITHUB_REPOSITORY: "acme/web",
+			GITHUB_RUN_ID: "123",
+			GITHUB_RUN_ATTEMPT: "2",
+			GITHUB_JOB: "e2e",
+		};
+		const report = await cli(["report", RED_XML], { env });
+		expect(report.code).toBe(0);
+		expect(report.stdout).toContain("9f3c2ab  (main)  attempt 2  job e2e");
+		expect((await cli(["gate"], { env })).code).toBe(2);
+	});
+});
+
+test("CI token reports but is refused a decision, and its secret is absent from token list", async () => {
+	await withInstance(async ({ cli }) => {
+		const issued = await cli(["token", "new", "--ci", "pipeline", "--can", "read,produce", "--json"]);
+		expect(issued.code).toBe(0);
+		expect(issued.stdout).toContain("will not be shown again");
+		const { token } = outputWith(Token, issued);
+		const env = { CASEBOOK_TOKEN: token };
+		const report = await cli(["report", RED_XML, "--commit", COMMIT], { env });
+		expect(report.code).toBe(0);
+		const inbox = outputWith(Inbox, await cli(["inbox", "--kind", "failure"]));
+		const question = inbox.items[0];
+		if (!question) throw new Error("no failure question");
+		const refused = await cli(
+			[
+				"decide",
+				"--json",
+				JSON.stringify({ q: question.q, onEvidence: question.evidenceHash, answer: { is: "infra" } }),
+			],
+			{ env },
+		);
+		expect(refused.code).toBe(4);
+		expect(refused.stderr).toContain("forbidden:");
+		const list = await cli(["token", "list"]);
+		expect(list.stdout).toContain("pipeline");
+		expect(list.stdout).not.toContain(token);
+		const tokens = outputWith(z.array(z.object({ id: z.number() })), await cli(["token", "list", "--json"]));
+		const id = tokens[0]?.id;
+		if (id === undefined) throw new Error("issued token is absent from list");
+		expect((await cli(["token", "revoke", String(id)])).code).toBe(0);
+		expect((await cli(["report", RED_XML, "--commit", COMMIT], { env })).stderr).toContain("unauthenticated:");
+	});
+});
+
+test("standard policy records both a proposal and a decision and prints its clause table", async () => {
+	await withInstance(async ({ cli, instance }) => {
+		const changed = await cli(["policy", "use", "standard"]);
+		expect(changed.code).toBe(0);
+		expect(changed.stdout).toContain("proposal P-");
+		expect(changed.stdout).toContain("decision");
+		expect(changed.stdout).toContain("both recorded");
+		const shown = await cli(["policy", "show"]);
+		expect(shown.code).toBe(0);
+		expect(shown.stdout).toContain("policy: standard");
+		expect(shown.stdout).toContain("who answers");
+		expect(shown.stdout).toContain("agent's answer");
+		expect(shown.stdout).toContain("author:agent");
+		expect(shown.stdout).toContain("hint:disputed");
+		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM decisions").get()?.n).toBe(1);
+	});
+});
+
+test("outline stdin, get --md, and fmt round trip the canonical case", async () => {
+	await withInstance(async ({ cli, directory }) => {
+		const created = await cli(["new", "-"], {
+			input: "Coupon applies\n  Open the cart > One item\n  Apply SAVE10 > Total is 90.00\n",
+		});
+		expect(created.code).toBe(0);
+		expect(created.stdout).toBe("C-1\n");
+		const got = await cli(["get", "C-1", "--md"]);
+		expect(got.code).toBe(0);
+		expect(got.stdout).toContain("title: Coupon applies");
+		expect(got.stdout).toContain("id: C-1");
+		const file = join(directory, "case.md");
+		await writeFile(file, got.stdout);
+		const fmt = await cli(["fmt", file]);
+		expect(fmt.code).toBe(0);
+		expect(fmt.stdout).toBe(got.stdout);
+		expect((await cli(["get", "--refs", "C-1", "--fields", "title", "--compact"])).stdout.trim()).not.toContain("\n");
+	});
+});
+
+test("Markdown parse errors include source lines and exit 4", async () => {
+	await withInstance(async ({ cli, directory }) => {
+		const file = join(directory, "invalid.md");
+		await writeFile(file, "---\ntitle: Broken\n");
+		const result = await cli(["fmt", file]);
+		expect(result.code).toBe(4);
+		expect(result.stdout).toBe("");
+		expect(result.stderr).toContain(`${file}:`);
+		expect(result.stderr).toContain("Missing closing ---");
+	});
+});
+
+test("check groups real suite problems by rule and exits 1", async () => {
+	await withInstance(async ({ cli }) => {
+		expect((await cli(["check"])).code).toBe(0);
+		await cli(["new"], { input: "An incomplete case\n  Do something\n" });
+		const result = await cli(["check"]);
+		expect(result.code).toBe(1);
+		expect(result.stdout).toContain("no-expected (1)");
+		expect(result.stdout).toContain("C-1");
+	});
+});
+
+for (const suffix of [".casebook", ".casebook.gz"]) {
+	test(`export/import${suffix} preserves the case list in a fresh running instance`, async () => {
+		await withInstance(async (source) => {
+			const created = await source.cli(["new", "--json"], {
+				input: "Coupon applies\n  Apply SAVE10 > Total is 90.00\n",
+			});
+			expect(outputWith(Created, created).cases[0]?.ref).toBe("C-1");
+			const archive = join(source.directory, `export${suffix}`);
+			expect((await source.cli(["export", "--out", archive])).code).toBe(0);
+			await withInstance(async (target) => {
+				const imported = await target.cli(["import", archive]);
+				expect(imported.stderr).toBe("");
+				expect(imported.code).toBe(0);
+				expect(imported.stdout).toContain("previous session may no longer exist");
+				expect(outputWith(Found, await target.cli(["find"]))).toEqual(outputWith(Found, await source.cli(["find"])));
+				const md = await target.cli(["get", "C-1", "--md"]);
+				expect(md.stdout).toBe((await source.cli(["get", "C-1", "--md"])).stdout);
+			});
+		});
+	});
+}
+
+test("all registry operations have generated commands, global help and --help", async () => {
+	await withInstance(async ({ cli }) => {
+		const help = await cli(["help"]);
+		expect(help.code).toBe(0);
+		for (const op of OP_LIST) {
+			expect(COMMAND_NAMES.has(op.name)).toBe(true);
+			expect(GENERATED_COMMANDS.has(op.name)).toBe(true);
+			expect(help.stdout).toContain(op.summary);
+			const result = await cli([op.name, "--help"]);
+			expect(result.code).toBe(0);
+			expect(result.stdout).toContain(op.summary);
+			expect(result.stdout).toContain("--json");
+		}
+	});
+});
+
+test("generated flags handle booleans, numbers, repeated arrays and union fields", async () => {
+	await withInstance(async ({ cli }) => {
+		await cli(["new"], { input: "Coupon applies\n  Apply SAVE10 > Total is 90.00\n" });
+		const result = await cli([
+			"find",
+			"--in",
+			"cases",
+			"--deep",
+			"false",
+			"--limit",
+			"5",
+			"--tags",
+			"a,b",
+			"--tags",
+			"c",
+			"--compact",
+		]);
+		expect(result.code).toBe(0);
+		expect(outputWith(Found, result).items).toEqual([]);
+		expect(result.stdout.trim()).not.toContain("\n");
+		const admin = await cli(["admin", "--do", "project.list"]);
+		expect(admin.code).toBe(0);
+		expect(admin.stdout).toContain('"key": "scratch"');
+		const bad = await cli(["find", "--limit", "oops"]);
+		expect(bad.code).toBe(4);
+		expect(bad.stderr).toContain("--limit needs a number");
+	});
+});
+
+test("project ambiguity names the projects; command-line project overrides environment", async () => {
+	await withInstance(async ({ cli, client }) => {
+		await client.call("admin", { do: "project.create", key: "other" });
+		const ambiguous = await cli(["find"]);
+		expect(ambiguous.code).toBe(4);
+		expect(ambiguous.stderr).toContain("scratch, other");
+		const chosen = await cli(["--project", "scratch", "find"], { env: { CASEBOOK_PROJECT: "absent" } });
+		expect(chosen.code).toBe(0);
+	});
+});
+
+test("connection and operation errors are single-line diagnostics with exit 4", async () => {
+	await withInstance(async ({ cli }) => {
+		const unreachable = await cli(["find", "--url", "http://127.0.0.1:1"]);
+		expect(unreachable.code).toBe(4);
+		expect(unreachable.stderr).toContain("start the server with casebook serve");
+		expect(unreachable.stderr.trim().split("\n")).toHaveLength(1);
+		const missing = await cli(["get", "C-999"]);
+		expect(missing.code).toBe(4);
+		expect(missing.stderr).toContain("not_found:");
+		expect(missing.stderr.trim().split("\n")).toHaveLength(1);
+	});
+});
+
+test("passed/failed/blocked/pending gate exit codes stay distinct", async () => {
+	await withInstance(async ({ cli }) => {
+		const pending = await cli(["gate", "--commit", COMMIT, "--wait", "0.02", "--json"]);
+		expect(pending.code).toBe(3);
+		expect(pending.stdout).toContain('"verdict": "pending"');
+		await cli(["report", RED_XML, "--commit", COMMIT]);
+		const question = outputWith(Inbox, await cli(["inbox", "--kind", "failure"])).items[0];
+		if (!question) throw new Error("no failure question");
+		await cli([
+			"decide",
+			"--json",
+			JSON.stringify({ q: question.q, onEvidence: question.evidenceHash, answer: { is: "defect" } }),
+		]);
+		const failed = await cli(["gate", "--commit", COMMIT]);
+		expect(failed.code).toBe(1);
+		expect(failed.stdout).toContain("failed:");
+	});
+});
+
+test("open prints the running web UI URL", async () => {
+	await withInstance(async ({ cli, instance }) => {
+		const result = await cli(["open"]);
+		expect(result.code).toBe(0);
+		expect(result.stdout).toBe(`${instance.url}\n`);
+	});
+});
+
+test("gate --wait observes evidence that arrives while it is polling", async () => {
+	await withInstance(async ({ cli, client }) => {
+		const waiting = cli(["gate", "--commit", COMMIT, "--wait", "1.5"]);
+		await Bun.sleep(300);
+		await client.call("report", {
+			target: { commit: COMMIT, branch: "main" },
+			results: [{ test: { key: "passing-test" }, outcome: "pass" }],
+		});
+		const result = await waiting;
+		expect(result.code).toBe(0);
+		expect(result.stdout).toContain("passed:");
+	});
+});
+
+test("the generated gate JSON input uses the same reserved verdict exit codes", async () => {
+	await withInstance(async ({ cli }) => {
+		const result = await cli(["gate", "--json", JSON.stringify({ commit: COMMIT }), "--compact"]);
+		expect(result.code).toBe(3);
+		expect(result.stdout).toContain('"verdict":"pending"');
+	});
+});
+
+test("policy use checks the caller's project permission, including a scoped admin token", async () => {
+	await withInstance(async ({ cli, client }) => {
+		const token = Token.parse(
+			await client.call("admin", {
+				do: "token.create",
+				actor: "maintainer",
+				kind: "human",
+				can: ["read", "produce", "answer", "admin"],
+				project: "scratch",
+			}),
+		).token;
+		const changed = await cli(["policy", "use", "standard"], { env: { CASEBOOK_TOKEN: token } });
+		expect(changed.code).toBe(0);
+		expect(changed.stdout).toContain("both recorded");
+		expect((await cli(["policy", "show"])).stdout).toContain("policy: standard");
+	});
+});
+
+test("JUnit parser warnings go only to stderr", async () => {
+	await withInstance(async ({ cli, directory }) => {
+		const file = join(directory, "warning.xml");
+		await writeFile(file, '<testsuite name="warnings"><testcase name="missing duration" time="invalid"/></testsuite>');
+		const result = await cli(["report", file, "--commit", COMMIT, "--json"]);
+		expect(result.code).toBe(0);
+		expect(result.stderr).toContain("Invalid testcase duration");
+		expect(outputWith(Receipt, result).counts.total).toBe(1);
+		expect(result.stdout).not.toContain("Invalid testcase duration");
+	});
+});
