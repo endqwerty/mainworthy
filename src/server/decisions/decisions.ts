@@ -631,12 +631,21 @@ export function undo(ctx: Ctx, input: { q: string; reason: string | undefined })
 	if (!prior) return reply(question, "invalid", { needs: "a decided question" });
 	const handler = HANDLERS[question.kind];
 	if (!handler.undoable) return reply(question, "invalid", { needs: handler.undoHint });
+	// Taking an answer away is held to what giving it was: the clause for that answer says who may (not a producer
+	// of the evidence, where it says so) and whether a reason is owed.
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	const facts = new Set(json<{ facts?: string[] }>(question.evidence).facts ?? []);
-	const clause = clauseFor(policy, { kind: question.kind, facts });
+	const given = json<{ is?: string }>(prior.answer).is;
+	const clause = clauseFor(policy, { kind: question.kind, facts, ...(given ? { answer: given } : {}) });
 	const ask: Ask = clause.ask.who === "rule" ? { ...clause.ask, who: "member" } : clause.ask;
-	const standing = standingOf({ actor: ctx.actor, ask, isAuthor: handler.isAuthor(ctx, question), isProducer: false });
+	const standing = standingOf({
+		actor: ctx.actor,
+		ask,
+		isAuthor: handler.isAuthor(ctx, question),
+		isProducer: ask.notProducer && handler.isProducer(ctx, question),
+	});
 	if (standing !== "counts") return reply(question, "forbidden", { needs: describeAsk(ask) });
+	if (ask.reason === "required" && !input.reason?.trim()) return reply(question, "invalid", { needs: "a reason" });
 	handler.revert(ctx, question, prior);
 	const signer: Signer = { by: ctx.actor.id, clause: clause.id, policy: policy.version, reason: input.reason ?? null };
 	const decision = insertDecision(ctx, {
@@ -647,7 +656,10 @@ export function undo(ctx: Ctx, input: { q: string; reason: string | undefined })
 		supersedes: prior.id,
 	});
 	setQuestionState(ctx, question, "open", null);
-	setQuestionAsk(ctx, question, clause.ask.who === "rule" ? ask : clause.ask);
+	// Open again, it asks what any question of its kind asks. Where that is a rule, a person now decides: the
+	// rule does not answer again behind the back of whoever withdrew its answer.
+	const general = clauseFor(policy, { kind: question.kind, facts }).ask;
+	setQuestionAsk(ctx, question, general.who === "rule" ? { ...general, who: "member" } : general);
 	refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, prior.id)]);
 	return reply(question, "reopened", { decision: decision.id });
 }

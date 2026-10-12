@@ -1129,6 +1129,25 @@ describe("what a decision may change", () => {
 		expect(decide(dispute, { is: "mistaken" }, third).status).toBe("decided");
 	});
 
+	test("withdrawing an answer needs what giving it needs: not the producer, and a reason where one is required", () => {
+		usePolicy("strict");
+		const producer = h.actor("producer", "human", ["read", "produce", "answer"]);
+		const other = h.actor("other", "human", ["read", "produce", "answer"]);
+		const results = [{ test: { key: "one" }, outcome: "fail", failure: { message: "same failure" } }];
+		report({ target: { commit: "undo0001", branch: "main" }, results }, producer);
+		const question = open("failure");
+		expect(decide(question, { is: "defect" }, other, { reason: "confirmed in the product" }).status).toBe("decided");
+		const undo = (as: typeof producer, reason?: string) =>
+			first(h.call<DecideReply[]>("decide", { undo: question.q, ...(reason ? { reason } : {}) }, as));
+		// The producer may not replace the answer, and may not take it away either.
+		expect(undo(producer, "it is mine").status).toBe("forbidden");
+		// Somebody who may answer still owes the reason the clause asks for.
+		expect(undo(other).status).toBe("invalid");
+		expect(gate({ commit: "undo0001" }).verdict).toBe("failed");
+		expect(undo(other, "classified too early").status).toBe("reopened");
+		expect(gate({ commit: "undo0001" }).verdict).toBe("blocked");
+	});
+
 	test("a producer whose failure took on an existing answer cannot replace that answer", () => {
 		usePolicy("strict");
 		const one = h.actor("one", "human", ["read", "produce", "answer"]);

@@ -63,7 +63,8 @@ not the same things done worse.
    withdrawn because the cause turns up again. Where a clause keeps a decision from the producers of the evidence, a producer is
    anyone who reported a failure with that cause in that scope, and anyone with a result in a slot that disputes
    it. That is read from the results when the answer is given, so it does not depend on how the question came
-   to be asked (carried from an earlier answer, or asked again).
+   to be asked (carried from an earlier answer, or asked again). Withdrawing an answer is held to the clause
+   that answer was given under: who may, and whether a reason is owed.
 5. **Drafts live in the browser.** The design autosaves into a server-side open proposal that others see as
    "draft by Dana". With one user that buys nothing; the draft is kept on the device and survives reload and
    crash (commitment L2), and a sealed proposal goes through the same path as designed. So do the notes typed
