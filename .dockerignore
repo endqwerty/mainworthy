@@ -1,0 +1,9 @@
+.git
+node_modules
+.casebook
+docs
+test
+bench
+*.db
+*.db-wal
+*.db-shm
