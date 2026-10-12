@@ -57,6 +57,11 @@ GitHub milestone `Backlog to 1.0`. How it fits together: `docs/architecture.md`.
 - A delegated worker that ends with "Selected model is at capacity" has stopped for
   good: read what it left in the tree, finish or re-delegate the rest, and do not
   wait for it.
+- A delegated child shares this checkout, and its own rules tell it to release the
+  worktree when it finishes. Say in every task that it must not: on 2026-10-12 two
+  children did, and removed `node_modules` under the lead and a builder that were
+  still running. Reviewers work in an export (`git archive <rev> | tar -x -C <dir>`)
+  and clean only that. If modules vanish mid-task: `bun install --frozen-lockfile`.
 
 ## Model profile
 

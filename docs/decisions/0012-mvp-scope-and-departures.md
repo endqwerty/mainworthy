@@ -15,14 +15,14 @@ not the same things done worse.
 
 | Area | What works | Proof |
 | --- | --- | --- |
-| Kernel | One SQLite file. Every write is one command: one transaction, one sequence number, idempotent on a client command id, attributed to an actor. | `test/suite.test.ts`, `test/http.test.ts` |
+| Kernel | One SQLite file. Every write is one command, idempotent on a client command id and attributed to an actor: one transaction and one sequence number, except a report, which is two of each (departure 6). A command id names one request: sent again unchanged it gets the first reply, sent again with other content it is refused. | `test/suite.test.ts`, `test/http.test.ts`, `test/integrity.test.ts` |
 | Suite | `propose` creates, edits, moves, retags, archives, restores, links requirements and changes the policy. An edit names its base; different fields merge, the same field is a conflict that keeps both sides. Versions are immutable; a move is history, not a version. Search, canonical Markdown. | `test/suite.test.ts` |
 | Evidence | `report` takes a parsed JUnit file, one manual result or an agent's batch in one shape. Explicit basis on every result. One signature per cause. Same-code flips recorded. | `test/evidence.test.ts` |
 | Decisions | Kinds `adopt`, `map`, `failure`, `finding`, `signoff`. One question per cause; an answer carries forward under a hold and is asked again, with the old answer linked, when the hold ends. A rule's answer is a recorded decision. Undo supersedes. | `test/evidence.test.ts`, `test/policy.test.ts` |
 | Policy | Presets `loose`, `standard` and the fixture `strict`, switched on live data. | `test/policy.test.ts` |
 | Runs | A change run per commit with the four-verdict gate. Planned runs with pinned slots that a person, a pipeline or (when asked) an agent fills. Disputes. Sign-off by rule. | `test/runs.test.ts` |
 | Surfaces | One registry behind HTTP and OpenAPI, the CLI, MCP (stdio and HTTP) and the web UI. | `test/http.test.ts`, `test/architecture.test.ts` |
-| Operate | One container, one volume. Lossless export and import. Start-up recovery of interrupted reports. | the transfer and CLI tests |
+| Operate | One container, one volume. Lossless export and import. Start-up recovery of interrupted reports. | `src/server/transfer/transfer.test.ts`, `test/restart.test.ts`, the CLI tests |
 
 ## Departures from the design, and why
 
@@ -36,11 +36,18 @@ not the same things done worse.
    the one before it, and nothing from another lane can, so one job's pass never hides another job's failure of
    the same test, and somebody else's upload never clears a pipeline's. The same attempt reported twice keeps the
    worse outcome: only a higher attempt number or an explicit correction clears a failure. Slots follow the same
-   rule, from the same function (`replacesInLane`), so a commit's gate and a slot cannot disagree about which
+   rule (`replacesInLane`; the commit's gate applies it as the condition of one SQL statement, and
+   `test/sequences.test.ts` checks that the two agree), so a commit's gate and a slot do not disagree about which
    result of a lane counts; they keep every cause failing in them, and are excused only when each cause is. Each cause is answered in the scope of the target it was seen
    on, so a run that counts the same commit in two repositories keeps their failures and their answers apart. A
    run planned over evidence that already fails joins the questions already asked about those failures, so an
    answer reaches it and it is never blocked by a failure nobody is asked about.
+   **A planned run counts one commit.** An abbreviated hash is settled when the run is planned: the one reported
+   commit that starts with it, a refusal when two do, and the text itself when none does (so a run planned for a
+   commit nobody has reported yet must name it by the hash that will be reported). **A required job** is met by
+   a pipeline's report that ran something: not by an agent's report under the job's name, and not by a report in
+   which every result was skipped or could not run. A run that counts only what is typed into it cannot require
+   a job.
 3. **A test's eligibility for a case comes from the link, not from the case body.** The design had the case
    declare `auto` in `methods`. A link exists only through a `map` decision or the test's own annotation, so
    declaring it again is a second place to maintain (principle P6). Whether a test may fill a given slot is the
@@ -53,7 +60,11 @@ not the same things done worse.
    that admits them (decision 0009, "agent evidence in gates"). Nor can it end a person's answer: what an answer
    about a failure stands on is the cause in its scope, and nothing about who else has reported it since.
    Whether a slot disputes the cause (which decides who may answer and whether `mistaken` applies) is read from
-   the runs as they are, not from the report that is arriving.
+   the runs as they are, not from the report that is arriving. Nor does it make a commit current: a commit only
+   an agent has reported has no run and no gate to read (`pending`, nothing counted), is not the newest commit
+   of its line or change, and an agent's report never moves a change's head or rewrites its base, title or
+   files. And a pipeline's pass says nothing about a failure only an agent showed: such a question stays open
+   until a person answers it.
 4. **Two failure answers were added, one replaced.** `inherited` (already failing where the change started,
    which the design left unnamed) and `mistaken` (a disputed slot: the failing result was wrong). `mistaken`
    replaces the design's `resolve { trust: [...] }`; any other failure answer on a disputed slot also resolves
@@ -72,7 +83,12 @@ not the same things done worse.
    withdrawn because the cause turns up again. Where a clause keeps a decision from the producers of the evidence, a producer is
    anyone who reported a failure with that cause in that scope, and anyone with a result in a slot that disputes
    it. That is read from the results when the answer is given, so it does not depend on how the question came
-   to be asked (carried from an earlier answer, or asked again). Withdrawing an answer is held to the clause
+   to be asked (carried from an earlier answer, or asked again). It is judged when the answer is given, like the
+   policy version the answer is signed under: an answer a person gave to their own failure, where the policy let
+   them, stands when somebody else's pass later makes the slot a dispute, although that policy would keep the
+   dispute itself from them. The order of the answer and the second result therefore matters; ending such an
+   answer when the dispute arises needs a question per slot rather than per cause, and without it would let an
+   agent's result end a person's answer (#70). Withdrawing an answer is held to the clause
    the policy in force now has for that answer: who may, and whether a reason is owed. (The policy in force,
    not the one the answer was given under: an administrator who relaxes the policy relaxes withdrawals too.)
 5. **Drafts live in the browser.** The design autosaves into a server-side open proposal that others see as
@@ -83,17 +99,22 @@ not the same things done worse.
    deferred with presence (#35).
 6. **A report is two transactions, applied in slices.** Acceptance commits first, so every reader sees the gate
    turn pending before anything is applied (commitment C5); then the batch is applied in slices of 200 results,
-   and the server answers reads between slices from a second, read-only connection. Measured before this
+   and reads are answered meanwhile by reader threads, each with its own read-only connection. Measured before this
    change: a 10,000-result report held the one thread for 0.3 to 0.65 s. Writes queue at a gate; they never
    block the thread. This is the design's horizon made real rather than a departure, but the mechanism
    (generator steps driven by one of two drivers) is new and is the part to review.
-7. **A closed run refuses results.** The design re-raises the sign-off when a late upload arrives. Here the
-   report is refused with a message saying how to reopen the run (withdraw the sign-off). A correction withdraws
+7. **A closed run takes no more results.** The design re-raises the sign-off when a late upload arrives. Here a
+   report that names the run is refused with a message saying how to reopen it (withdraw the sign-off); a late
+   upload for its commit is recorded for the commit and does not reach it. A correction withdraws
    the result it names wherever that counted (the commit's gate, open runs, runs planned later) and stands where
    that result stood: it is never an older attempt than the one it corrects, whatever number its report carries,
    and the lane is folded again from its whole history, so if the correction decides nothing (a skip) the attempt
-   before it stands again. A closed run keeps what it was closed on; reopened, it is asked about every failure
-   it still shows. Deferred (#48).
+   before it stands again. A closed run keeps what it was closed on. Reopened, it is live again and counts the
+   evidence as it is now: a result its producer corrected meanwhile is withdrawn there too, one a decision
+   called a mistake is discounted there too, the results reported for its targets while it was closed are
+   admitted, and it is asked about every failure it then shows. A rule that signs off a passing run does not
+   sign it off again after a person refused to: once a person has answered against the rule, a person is asked
+   each time the run's evidence moves, until a person approves. Re-raising on a late upload is deferred (#48).
 8. **Holds:** `basis-changes`, `this-target`, a date and `results-named` (a `mistaken` answer: the results it
    named and nothing later) are built. "N clean runs" and
    "until the linked defect closes" are not (#38, #32). A decision held for one target (an infrastructure failure)
@@ -105,21 +126,27 @@ not the same things done worse.
    latest build: one prepared before a newer build failed is a conflict. So one cause can have several answers
    in force, one per environment. Each stands until it is withdrawn where it was given; a new failure is first
    checked against all of them, and only what none covers is asked about. A question
-   about a failure is closed without an answer only when nothing that speaks for it still shows the failure (the
-   newest commit's run, and every open planned run the question names) and something shows it gone: one of its
-   tests passing on the newest commit, or a planned run that showed it and no longer does. Silence (a job that
-   has not reported, a run over other cases, a pipeline's pass where the run asked for an agent) closes nothing.
+   about a failure is closed without an answer in two cases. One: another answer in force already covers every
+   build it had seen the cause on. Two: nothing that speaks for it still shows the failure (the newest commit's
+   run, and every open planned run the question names) and something shows it gone: one of its tests that a
+   commit's gate counted as failing now passing on the newest commit, or a planned run that showed it and no
+   longer does. Silence (a job that has not reported, a run over other cases, a pipeline's pass of a test only
+   an agent showed failing) closes nothing. The same holds for a question put back in front of people because
+   its answer was withdrawn or ran out: if the failure has gone meanwhile, it is closed at once and not left
+   open until some later report happens to look.
    When a hold runs out by the clock, the expiry is a row in the ledger that the next answer supersedes. When an
    answer stops holding, every run that rested on it is recomputed at once and the question asked in its place
    names them, a run that has since closed included. Two rules keep this whole: there is one answer in force per
    cause and target (an answer for the whole cause ends every other answer for it, an answer for certain targets
    ends an answer naming one of them, each with a row in the ledger, and the runs that rested on the ended answer
-   are recomputed); and each time a run is recomputed, every failure it shows unexplained is checked to have an open
+   are recomputed; a `mistaken` answer, which is about named results, is outside this rule, and an answer for one
+   target sits over an older answer for the whole cause, which covers that target again if the newer one is
+   withdrawn); and each time a run is recomputed, every failure it shows unexplained is checked to have an open
    question, and is asked about if it has none (for an open planned run and for the newest commit of a scope).
    So no path that removes a question, an answer or a closed state can leave a live run blocked with nobody asked.
    A decision about a cause recomputes every run that shows it, an older commit's included, so the gate of any
-   commit is exact. `test/sequences.test.ts` checks these rules after every step of random sequences of reports,
-   corrections, plans, answers, withdrawals and expiries.
+   commit is exact. `test/sequences.test.ts` and `test/sequences-extended.test.ts` check these rules after every
+   step of random sequences of reports, corrections, plans, answers, withdrawals, reopened runs and expiries.
 9. **The review basis is the case version plus the change key,** not the patch tree hash. A changed patch under
    the same pull request does not yet invalidate a review. Deferred (#49).
 10. **The export is the whole instance,** as newline-delimited JSON, imported into an empty instance. Per-project
@@ -143,8 +170,9 @@ not the same things done worse.
     refused, or one that holds only an agent's results leaves the gate where it was. A skip never replaces a pass
     or a failure of the same test, in a commit's gate or in a slot. The cost: a commit whose pipeline runs no test
     at all (a change to the docs only) stays `pending` until a project can say what that means (#63).
-16. **A change's head only moves forward.** A report for a commit first seen before the current head (a retried
-    job, a slow job of the previous push) does not move the change back. A branch reset to an older commit
+16. **A change's head only moves forward, and only on a report a gate counts.** A report for a commit first seen
+    before the current head (a retried job, a slow job of the previous push) does not move the change back, and
+    an agent's report does not move it at all. A branch reset to an older commit
     therefore keeps its newer head in the change's gate; the gate of a commit is always exact.
 17. **A change belongs to one repository.** The first repository to report `pr:12` in a project has that key;
     the same number from another repository is its own change, keyed `<repository>#pr:12`. The same commit can
@@ -165,7 +193,7 @@ Principle P0 says standing changes only through a decision. The code enforces it
 `Witness` has a private field, so nothing else type-checks as one), the value (every standing writer reads the
 decision through a check that refuses anything the mint did not make and any witness of another kind of decision;
 the constructor needs a key that never leaves its module; the mint can be claimed once), and the database (every
-column that cites a decision is a foreign key into the ledger). Four writes look like standing
+column in which standing cites a decision is a foreign key into the ledger). Four writes look like standing
 and are not, and take no witness:
 
 - **The first policy of a new project.** There is no earlier policy under which to decide it. A second seed is
@@ -176,6 +204,10 @@ and are not, and take no witness:
   test, the same target and run. It changes which of that producer's results counts in open runs, never whether
   a failure is excused.
 - **Opening a run.** A run is a request for evidence; only closing it is a decision.
+
+Four more functions put back what a withdrawn or ended decision did (`restoreLink`, `dropExcuse`, `reopenRun`,
+`restoreFailures`). They take no witness either: the withdrawal is the recorded event, and a test allows only
+the kind handlers to call them.
 
 Withdrawing a decision undoes only what that decision made: a link, an excuse or a sign-off that a newer
 decision has since made stays.
