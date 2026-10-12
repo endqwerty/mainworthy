@@ -83,8 +83,9 @@ the decisions that the sketch depends on.
    restore). The claim hash covers the claim class only (preconditions,
    steps, expected results, the pinned fragments' content) and is stable
    under retitling, retagging, moving and linking. It is a reuse signal for
-   people and agents ("proven on this claim", "reviewed at this basis") and a
-   policy option for gates; it never transfers proof by itself.
+   people and agents ("proven on this claim", "reviewed at this basis") and
+   an explicit requirement option (`basis: 'same-claim'`) a project may
+   choose for its gates; it never transfers proof by itself.
 
 9. **Autosave into a private open proposal; a version exists when a sealed
    proposal is adopted.** Others see the draft as a draft. Sealing happens on

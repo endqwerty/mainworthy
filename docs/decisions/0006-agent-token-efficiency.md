@@ -2,7 +2,10 @@
 
 - Date: 2026-10-10
 - Status: requirement accepted (Daniel); mechanisms proposed, to be measured
-  in the phase 1 prototype and the phase 0 competitor MCP audit
+  in the phase 1 prototype and the phase 0 competitor MCP audit. Refined
+  2026-10-11: mechanism 5's findings ledger becomes the ledger of all
+  decisions, and review reuse is keyed by a basis that includes the relevant
+  patch ([0008](0008-one-evidence-model.md)).
 
 Daniel's position: with agents doing review and testing, a test management
 system should help reduce the tokens agents spend on adversarial review and

@@ -28,7 +28,7 @@ the evidence they were made on, carried forward until that evidence changes).
 Manual QA, automated testing and agentic testing are not three features. They
 are three **producers** of the same evidence through the same operations, and
 they meet in two places: one evidence stream keyed by *(test, target)*, where a
-run is a request for evidence that any producer may satisfy, and one decision
+run is a request for evidence that any admitted producer may satisfy, and one decision
 queue, where a project's strictness is a table saying who must answer each
 kind of question. The same rows serve a loose team (a rule answers most
 questions, and the answer is still recorded) and a regulated one (a named
@@ -101,7 +101,7 @@ a human answer is one queue.
 | L3. **Every operation has a palette entry and a default key.** | Build test over the operation registry: an operation with no palette entry fails unless marked `uiExempt` with a reason. |
 | L4. **One queue.** Failures, agent findings, proposals, unlinked tests, flaky edges, gaps and sign-offs are one list, `j`/`k` to move, one key to answer, no navigation needed. | Browser test: for each question kind, focus a row, press the key, the row leaves; no navigation event. Twenty mixed questions in ≤ 60 s (draft). |
 | L5. **Short IDs and URLs on everything** (`C-311`, `Q-2291`, `R-41`, `T-1904`), reachable from the palette in three keystrokes after typing. | Browser test over 20 fixed targets. |
-| L6. **Undo works on everything**, including a decision (supersedes, never erases) and a bulk move (the inverse proposal). | Job test (J4, L5 in candidate D). |
+| L6. **Undo works on everything**, including a decision (supersedes, never erases) and a bulk move (the inverse proposal). | Job test: decide, undo, the standing and the gate return to the prior value and both decisions are in the ledger; J4 for the bulk move. |
 | L7. **Zero modal dialogs and zero full page loads on J1 to J8.** | Counted by the job tests. |
 
 ### 4.2 The CircleCI move: one line in the pipeline, and the check tells the truth
@@ -182,7 +182,8 @@ occurrences of the same cause until the evidence changes.
 
 `g r`, `n`, pick cases by folder, tag or search, Enter. Then `p` pass, `f`
 fail, `b` blocked, `s` skip. Results from CI and from agents on the same
-build fill the same run, so you only run what nothing else has shown.
+build fill the same run where its requirements allow, so you only run what
+nothing else has shown.
 
 ## Let an agent in
 
@@ -281,7 +282,7 @@ Under the `standard` preset it may record findings and proposals and may
     "cases": [
       { "id": "C-311", "title": "Checkout applies a percentage coupon", "hash": "a91f",
         "why": ["req:WEB-290", "test:checkout.spec.ts"], "last": "fail@9f3c2ab", "open": [{ "q": "Q-2291", "evidence": "e7c1" }] },
-      { "id": "C-314", "hash": "0c2e", "why": ["req:WEB-290"], "last": "fail@9f3c2ab", "open": ["Q-2291"] },
+      { "id": "C-314", "hash": "0c2e", "why": ["req:WEB-290"], "last": "fail@9f3c2ab", "open": [{ "q": "Q-2291", "evidence": "e7c1" }] },
       { "id": "C-318", "hash": "77b1", "why": ["area:src/checkout/**"], "last": "pass@41d07e1" }
       // 6 more: "reviewed": "by reviewer at this basis, 2 findings settled" → skip
     ],
@@ -552,7 +553,7 @@ type TestSignals = { test: TestId; trunk: {...}; flips: Ring<{commit; batch}, 16
 type JobManifest = { job; line; batchNo; tests: TestId[] }   // stale = absent from the latest manifest of its job
 
 type Finding = { id; project; stamp; lens: string; on: Locus; category: FindingCategory; note; repro; suggest: Edit | null; basis: Hash }
-type Review  = { reviewer: ActorId; lens; case: CaseId; basis: Hash; seq: Seq }
+type Review  = { id: ReviewId; reviewer: ActorId; lens; case: CaseId; basis: Hash; seq: Seq }
 // basis = H(version hash [fragments are pinned, so it covers the expansion], patch tree hash of the change if any,
 //           charter hash if any). `claim` computes it from `reviewed: ["C-311@<version hash>"]` plus `patch`; the
 //           server, not the caller, decides the basis.
@@ -583,7 +584,8 @@ type TargetMatch =
   | { self: true }                                              // only results typed into this run; proves nothing about a build
 type Requirement =
   | { id; kind: 'exercise'; methods: NonEmpty<MethodKind>; bindings: 'any' | TestId[]   // which linked tests may fill the slot
-      minActors: 1 | 2; basis: 'exact' | 'exact-or-assumed'; target: 'exact' | 'code-in-artifact' }
+      minActors: 1 | 2; basis: 'exact' | 'exact-or-assumed' | 'same-claim'; target: 'exact' | 'code-in-artifact' }
+      // same-claim: a result on another version whose claim hash equals the slot's counts (an explicit policy choice, C's idea)
   | { id; kind: 'review';   lens: string; independent: boolean }                         // an agent or human review of the pinned version
   | { id; kind: 'jobs';     jobs: string[] }                                              // required CI jobs must have a processed batch
   | { id; kind: 'signoff';  role: RoleId; stage: 'start' | 'close' }
@@ -613,7 +615,9 @@ slot when all of these hold, checked by one pure function `qualifies(result,
 slot, requirement, run)`:
 
 1. its `basis` names the slot's case at the pinned version (`exact`), or is
-   `assumed` at that version and the requirement allows `exact-or-assumed`;
+   `assumed` at that version and the requirement allows `exact-or-assumed`,
+   or names another version with the slot's claim hash and the requirement
+   allows `same-claim` (the fill records which rule admitted it);
 2. `matches(run.accepts, result.target)`: same repository and commit (and
    environment if named), or the bound build label, or the line window; for
    an artifact target, a code result counts only when the requirement says
@@ -761,7 +765,7 @@ Every read ends in point reads or one bounded range read on a key named above.
 | Save (seal) one case | one transaction: proposal sealed → `raise('adopt')` → rule clause → `adoptVersion`: Version, head, hashes, SearchDoc, fragment users | < 50 ms |
 | Bulk edit 1,000 | one proposal, one decision, set-based writes | < 1 s |
 | Execute a run | `Slot (run, assignee, state='missing', rank)` limit 1 → pinned `Version`; client prefetches five; `report` of one result: `acceptResult`, `qualifies` → a `Fill`, slot state, tally delta, `raise('failure')` on fail | no wait after a key |
-| Ingest 10k | accept: batch key, raw blob, job, matching open runs → `pending` (< 2 s); process in one transaction: parse → `Test.resolve` batched → basis per test → insert results → fold signals for failures and flips only → signatures → runs.fold → raise per cause (< 5 s) |
+| Ingest 10k | accept: batch key, staged results, job, matching runs (open or closed, not frozen) → `accepted` horizon, `pending` (< 2 s); process in one transaction: parse → `Test.resolve` batched → basis per test → insert results → fold signals for failures and flips only → signatures → runs.fold → raise per cause (< 5 s) |
 | Flaky on ingest | per failing result read last five of `(project, test, seq desc)`; same-commit pass = flip; `classify` pure; state change → `raise('flaky')` | within the ingest |
 | Impact for a change | refs → `Requirement` → `Covers`; files → `Test (project, file)` → case; files → `Area` globs → folders; ≤ 200 candidates → batched reads of hash, `Review`, signals, open/held questions, last result on base and head; rank pure; uncovered files listed | agent token budget |
 | Changed since | range `Case (project, rev > S)` filtered by scope; `versionAt` backwards walk; step-level diffs; `Question (project, rev > S)` for settled | tokens |
@@ -987,7 +991,7 @@ drafts, sealed proposals, versions with step-level diff and restore,
 placement history, search, bulk move/retag with undo; `report` for JUnit XML
 and manual results with explicit basis; targets, changes, batches, signatures,
 same-code flips; change runs with the four-verdict gate and acceptance-time
-pending; planned runs with pinned slots filled by any producer; the decision machinery in full with five kinds (`adopt`, `failure`, `map`,
+pending; planned runs with pinned slots filled by any admitted producer; the decision machinery in full with five kinds (`adopt`, `failure`, `map`,
 `finding`, and `signoff` with rule clauses only, so every run closes by a
 recorded decision), presets `loose` and `standard`, and a `strict` fixture
 preset proving P5;
@@ -1053,8 +1057,9 @@ Decisions 0002, 0004 and 0005 are used as written.
 
 ## Synthesis decision
 
-Four candidates were produced independently from one brief
-(`/tmp/casebook-arena/brief.md`, not kept), each from a different seed lens:
+Four candidates were produced independently from one brief, each from a
+different seed lens (brief, seeds, rubric, candidates, the judge's verdict
+and the verification reports are kept in `docs/design-arena/2026-10-11/`):
 **A** evidence-stream (GPT 6.1 Sol), **B** change-centric (GPT 6.1 Sol),
 **C** repository and tooling centric (Claude Sonnet 5.5), **D** decision-queue
 centric (Claude Opus 5.5). D disclosed that it read the judge-only rubric
@@ -1103,9 +1108,12 @@ recorded basis under policy:
 - **Convergence noted:** all four reached one evidence shape with the
   producer as an attribute, history as the storage model, one operation
   registry, no seats, pending-not-green gates, review ≠ execution, one-line
-  CI and a thin cross-producer first slice.
-- **Verification:** see the pull request for the independent review of this
-  synthesis.
+  CI and a thin cross-producer first slice. No candidate dropped out.
+- **Verification:** independent review rounds by GPT 6.1 Sol are in
+  `docs/design-arena/2026-10-11/` (`verify-r1.md` found the slot acceptance
+  rule, gate horizon, fragment pinning, decide basis and release boundary
+  underspecified; the fixes are in sections 6.3 to 6.5, 7.1, 7.2 and 9;
+  later rounds are filed beside it) and quoted in the pull request.
 
 ## Rationale
 
@@ -1196,5 +1204,5 @@ existing; the regulated preset is designed, not exercised, until `gap` and
 In the phase 1 operation-layer prototype, implement `raise`, `answer`,
 `settle`, `basisFor` and the `adopt` and `failure` kinds behind `propose`,
 `report`, `decide`, `inbox` and `gate` from one registry on each candidate
-stack, and run fixtures D1, D3, E1, E2 and E3 with the ingest and capture
+stack, and run fixtures D1, D3 and E1 to E8 with the ingest and capture
 budgets in embedded and server mode.
