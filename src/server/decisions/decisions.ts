@@ -1078,16 +1078,15 @@ export function factsNow(db: Db, question: QuestionRow): Set<string> {
 }
 
 /**
- * Who is asked, as things are now: what the question stored when it was asked, unless a dispute has arisen or
- * ended since, and then what the policy's clause for the facts as they are says (a rule's place taken by a
- * member, as wherever a person answers in a rule's stead).
+ * Who is asked, as things are now: what the policy in force says for the facts as they are. The question keeps
+ * what it was asked under, and that goes stale two ways: a dispute arises or ends, and the policy is changed.
+ * Where the clause is a rule and a person is asked in its stead (its answer was withdrawn or overruled), a
+ * member is.
  */
 function askNow(db: Db, question: QuestionRow, facts: ReadonlySet<string>): Ask {
 	const stored = json<Ask>(question.ask);
-	const before = new Set(json<{ facts?: string[] }>(question.evidence).facts ?? []);
-	if (before.has("hint:disputed") === facts.has("hint:disputed")) return stored;
 	const ask = clauseFor(currentPolicy(db, question.project), { kind: question.kind, facts: new Set(facts) }).ask;
-	return ask.who === "rule" ? { ...ask, who: "member" } : ask;
+	return ask.who === "rule" && stored.who !== "rule" ? { ...ask, who: "member" } : ask;
 }
 
 /** A question as the queue, a case page and an agent see it. */

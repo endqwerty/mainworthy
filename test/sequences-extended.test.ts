@@ -18,6 +18,13 @@
 //     has met on a target the run accepts.
 // 14. No run depends on a decision that is not in force, and after a sweep none depends on an expired one.
 // 15. No result of an agent is ever counted in a commit's gate.
+// Added by the second hunt (Claude Fable 5.1):
+// 13'. A required job is met only by a batch holding a decisive result whose own method is `auto` (a pipeline's,
+//      or a results file a person passed on): a person's typed pass sent under the job's name is not the job.
+// 16. A commit's line, branch and change are those of the first report a gate counts (a pipeline's or a person's),
+//     not of an earlier report by an agent. Checked against what the generator sent.
+// New actions: a person's typed result into a run sometimes carries a job name and a skipped automated key; an
+// agent sometimes reports a commit nobody has reported yet, as trunk or as the change, before the pipeline does.
 //
 // More seeds: CASEBOOK_SEQUENCE_SEEDS=500 bun test test/sequences-extended.test.ts
 import { expect, test } from "bun:test";
@@ -65,12 +72,45 @@ export function sequence(seed: number, preset: string): Problem | null {
 	let lastReport: { input: unknown; as: Actor } | null = null;
 	const sentLast = (): { input: unknown; as: Actor } | null => lastReport;
 	let forgotten = false;
+	// 16. Where each commit was first placed by a report a gate counts: `trunk`, `pr:N`, or `typed` (a result typed
+	// into a run, which says nothing about where the commit is). Keyed by repository and commit.
+	type Placement = { kind: "trunk" | "pr" | "typed"; pr?: number | undefined; branch?: string | undefined };
+	const placed = new Map<string, Placement>();
+	const placeOf = (as: Actor, input: unknown): void => {
+		const sent = input as { target?: { commit?: string; repo?: string; branch?: string; pr?: number }; run?: string };
+		// What an agent says about where a commit is holds only until a pipeline or a person reports it.
+		if (as.kind === "agent") return;
+		if (sent.target?.commit) {
+			const key = `${sent.target.repo ?? ""}@${sent.target.commit}`;
+			if (placed.has(key)) return;
+			const trunk = sent.target.pr === undefined && ["main", "master", "trunk"].includes(sent.target.branch ?? "");
+			placed.set(
+				key,
+				trunk
+					? { kind: "trunk", branch: sent.target.branch }
+					: sent.target.pr !== undefined
+						? { kind: "pr", pr: sent.target.pr, branch: sent.target.branch }
+						: { kind: "typed" },
+			);
+		} else if (sent.run) {
+			const run = rows<{ accepts: string }>(
+				"SELECT accepts FROM runs WHERE no = ?",
+				Number(sent.run.replace(/^R-/, "")),
+			)[0];
+			const accepts = run ? (JSON.parse(run.accepts) as { commit?: string; repo?: string }) : {};
+			if (accepts.commit) {
+				const key = `${accepts.repo ?? ""}@${accepts.commit}`;
+				if (!placed.has(key)) placed.set(key, { kind: "typed" });
+			}
+		}
+	};
 	const command = (op: string, input: unknown, as: Actor = h.owner): unknown => {
 		const reply = h.raw(op, input, as);
 		trace.push({ op, input, as: as.name, reply: reply.ok ? "ok" : reply.error });
 		const key = `${op}: ${reply.ok ? "ok" : `${reply.error.code} ${reply.error.message.slice(0, 70)}`}`;
 		stats.set(key, (stats.get(key) ?? 0) + 1);
 		if (op === "report" && reply.ok) lastReport = { input, as };
+		if (op === "report" && reply.ok) placeOf(as, input);
 		return reply.ok ? reply.result : null;
 	};
 	const answerOpen = (kind: string, as: Actor = h.owner, answer: Record<string, unknown> = { is: "accept" }) => {
@@ -406,7 +446,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 					else tally.excused++;
 				}
 			}
-			// 13. Jobs.
+			// 13'. Jobs: a batch meets a job only by a decisive result that is itself automated.
 			const jobs = obligations.flatMap((o) => (o.kind === "jobs" ? (o.jobs ?? []) : []));
 			if (jobs.length > 0) {
 				const reported = new Set<string>();
@@ -475,6 +515,24 @@ export function sequence(seed: number, preset: string): Problem | null {
 			Number(h.app.now()),
 		);
 		if (expired.length > 0) return { what: "14: a run rests on an expired decision after the sweep", detail: expired };
+
+		// 16. A commit's place is the first counted report's.
+		const changes = new Map(rows("SELECT * FROM changes").map((change) => [Number(change.id), change]));
+		for (const target of targets.values()) {
+			if (target.commit_sha === null) continue;
+			const expected = placed.get(`${target.repo ?? ""}@${target.commit_sha}`);
+			if (!expected || expected.kind === "typed") continue;
+			const change = target.change !== null ? changes.get(Number(target.change)) : null;
+			const wrong =
+				expected.kind === "trunk"
+					? target.line !== "trunk" || target.change !== null
+					: target.line !== "change" || !change || !String(change.key).endsWith(`pr:${expected.pr}`);
+			if (wrong)
+				return {
+					what: "16: a commit is placed where something other than the first counted report put it",
+					detail: { target, expected, change },
+				};
+		}
 		return null;
 	};
 
@@ -552,10 +610,13 @@ export function sequence(seed: number, preset: string): Problem | null {
 					pipeline,
 				);
 			} else if (action < 41 && agents.length > 0) {
-				// An agent reports on trunk or on the change, by key or by case.
+				// An agent reports on trunk or on the change, by key or by case; sometimes it names a trunk commit as the
+				// change or a change commit as trunk, before or after the pipeline has reported it.
 				const target = pick([
 					{ commit: pick(commits), branch: "main", env: "prod" },
 					{ commit: pick(changeCommits), base: pick(commits), pr: 7, branch: "feature", env: "prod" },
+					{ commit: pick(changeCommits), branch: "main", env: pick(["prod", "staging"]) },
+					{ commit: pick(commits), base: pick(commits), pr: 7, branch: "feature", env: pick(["prod", "staging"]) },
 				]);
 				const outcome = pick(["fail", "fail", "pass", "skip"]);
 				const result =
@@ -614,7 +675,14 @@ export function sequence(seed: number, preset: string): Problem | null {
 						);
 						if (earlier.length > 0) result.corrects = pick(earlier).id;
 					}
-					command("report", { run: `R-${run.no}`, attempt: 1 + rand(2), results: [result] }, as);
+					// Sometimes under a job's name, and sometimes with a skipped automated key alongside.
+					const results: Record<string, unknown>[] = [result];
+					if (rand(4) === 0) results.push({ test: { key: `test-${rand(4)}` }, outcome: "skip" });
+					command(
+						"report",
+						{ run: `R-${run.no}`, attempt: 1 + rand(2), ...(rand(3) === 0 ? { job: pick(["a", "b"]) } : {}), results },
+						as,
+					);
 				}
 			} else if (action < 80) {
 				// Answer or withdraw: failures, sign-offs, findings, adopts, maps.
@@ -711,6 +779,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 						error = e instanceof Error ? e.message : String(e);
 					}
 					trace.push({ op: "acceptReport", input, as: as.name, error });
+					if (error === null) placeOf(as, input);
 					const applied = recoverAccepted(app);
 					trace.push({ op: "recoverAccepted", applied });
 				}

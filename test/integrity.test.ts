@@ -2139,6 +2139,15 @@ describe("what a caller is told", () => {
 		expect(seen.tests).toHaveLength(50);
 	});
 
+	test("a question says who is asked under the policy in force, not the one it was asked under", () => {
+		report(ciReport({ commit: "policy001", n: 1, fail: { 0: "bug" } }), h.actor("pipeline", "ci", ["read", "produce"]));
+		const before = open("failure").needs;
+		usePolicy("strict");
+		const after = open("failure").needs;
+		expect(after).not.toBe(before);
+		expect(after).toContain("did not produce");
+	});
+
 	test("an instance command sent twice returns its first reply", () => {
 		const input = { do: "project.create", key: "idempotent-admin", cmd: "admin-command-01" };
 		const made = h.raw("admin", input);
