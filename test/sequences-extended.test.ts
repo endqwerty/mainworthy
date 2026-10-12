@@ -411,8 +411,9 @@ export function sequence(seed: number, preset: string): Problem | null {
 			if (jobs.length > 0) {
 				const reported = new Set<string>();
 				for (const batch of rows<{ job: string; target: number }>(
-					`SELECT job, target FROM batches b WHERE state = 'processed' AND method = 'auto'
-					 AND EXISTS (SELECT 1 FROM results r WHERE r.batch = b.id AND r.outcome IN ('pass', 'fail', 'error'))`,
+					`SELECT job, target FROM batches b WHERE state = 'processed'
+					 AND EXISTS (SELECT 1 FROM results r WHERE r.batch = b.id AND r.method = 'auto'
+					             AND r.outcome IN ('pass', 'fail', 'error'))`,
 				)) {
 					const target = targets.get(batch.target);
 					if (target && accepted(target, null)) reported.add(batch.job);

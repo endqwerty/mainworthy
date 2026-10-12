@@ -195,8 +195,9 @@ const Q = {
 	setReceipt: sql<{ id: number; receipt: string }>("UPDATE batches SET receipt = $receipt WHERE id = $id"),
 	accepted: sql<readonly [], BatchRow>("SELECT * FROM batches WHERE state = 'accepted' ORDER BY id"),
 	processedJobs: sql<{ target: number }, { job: string }>(
-		`SELECT DISTINCT job FROM batches WHERE target = $target AND state = 'processed' AND method = 'auto'
-		 AND EXISTS (SELECT 1 FROM results r WHERE r.batch = batches.id AND r.outcome IN ('pass', 'fail', 'error'))`,
+		`SELECT DISTINCT job FROM batches WHERE target = $target AND state = 'processed'
+		 AND EXISTS (SELECT 1 FROM results r WHERE r.batch = batches.id AND r.method = 'auto'
+		             AND r.outcome IN ('pass', 'fail', 'error'))`,
 	),
 	correctionOf: sql<{ result: number }, { id: number }>("SELECT id FROM results WHERE corrects = $result LIMIT 1"),
 	testByKey: sql<{ project: number; key: string }, TestRow>(
@@ -625,8 +626,10 @@ export const batchById = (db: Db, id: number): BatchRow | null => db.get(Q.batch
 export const acceptedBatches = (db: Db): BatchRow[] => db.all(Q.accepted);
 /**
  * The jobs that have reported for a target, for a run that requires a job: a pipeline's report (or a person
- * passing one on) that ran something. An agent's report under the job's name is not the job, and a report in
- * which everything was skipped or could not run says the job ran nothing.
+ * passing one on) that ran something. What counts is a decisive automated result in the batch, each result by
+ * its own method: an agent's report under the job's name is not the job, a report in which every automated
+ * result was skipped or could not run says the job ran nothing, and a person's own pass of a case sent along
+ * with it is theirs, not the job's.
  */
 export const processedJobs = (db: Db, target: number): Set<string> =>
 	new Set(db.all(Q.processedJobs, { target }).map((r) => r.job));

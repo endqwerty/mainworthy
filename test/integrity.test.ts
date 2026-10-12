@@ -959,6 +959,18 @@ describe("what a run and a change may count", () => {
 		const ci = pipeline();
 		report({ target, job: "e2e", results: [{ test: { key: "spec::a" }, outcome: "skip" }] }, ci);
 		expect(waiting()).toEqual({ verdict: "pending", missing: 1 });
+		// A person sends their own pass of the case together with one skipped key, under the job's name. The
+		// automated part of that proved nothing; what is decisive in it is the person's own doing, not the job's.
+		report({
+			run: planned.run,
+			job: "e2e",
+			attempt: 3,
+			results: [
+				{ test: { case: "C-1" }, outcome: "pass" },
+				{ test: { key: "spec::a" }, outcome: "skip" },
+			],
+		});
+		expect(waiting()).toEqual({ verdict: "pending", missing: 1 });
 		// It runs: the requirement is met.
 		report({ target, job: "e2e", attempt: 2, results: [{ test: { key: "spec::a" }, outcome: "pass" }] }, ci);
 		expect(waiting()).toEqual({ verdict: "passed", missing: 0 });
@@ -1679,10 +1691,10 @@ describe("what a decision may change", () => {
 		// Two shapes of "no longer shows": the run stays open and the judged result is set aside (`mistaken`), or
 		// the run passes on the answer and is closed.
 		const shapes = [
-			{ name: "open", select: {}, first: "mistaken", then: "flaky" },
-			{ name: "open", select: {}, first: "flaky", then: "infra" },
-			{ name: "closed", select: { cases: ["C-1"] }, first: "mistaken", then: "flaky" },
-			{ name: "closed", select: { cases: ["C-1"] }, first: "flaky", then: "infra" },
+			{ name: "open", select: {}, first: "mistaken", other: "flaky" },
+			{ name: "open", select: {}, first: "flaky", other: "infra" },
+			{ name: "closed", select: { cases: ["C-1"] }, first: "mistaken", other: "flaky" },
+			{ name: "closed", select: { cases: ["C-1"] }, first: "flaky", other: "infra" },
 		];
 		shapes.forEach((shape, index) => {
 			const commit = `dispute${String(index).padStart(3, "0")}`;
@@ -1705,8 +1717,8 @@ describe("what a decision may change", () => {
 					.items.filter((item) => item.q === dispute.q),
 			);
 			expect(first(h.call<DecideReply[]>("decide", { undo: judged.q, reason: "no" }, alice)).status).toBe("forbidden");
-			expect(decide(judged, { is: shape.then }, alice).status).toBe("forbidden");
-			expect(decide(judged, { is: shape.then }, bob).status).toBe("forbidden");
+			expect(decide(judged, { is: shape.other }, alice).status).toBe("forbidden");
+			expect(decide(judged, { is: shape.other }, bob).status).toBe("forbidden");
 			// Carol, or anyone who reported neither result, still may.
 			expect(first(h.call<DecideReply[]>("decide", { undo: judged.q, reason: "again" }, carol)).status).toBe(
 				"reopened",
