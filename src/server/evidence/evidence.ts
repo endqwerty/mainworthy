@@ -324,11 +324,13 @@ const Q = {
 	firstSeen: sql<{ project: number; what: string }, { seq: number | null }>(
 		"SELECT min(first_seq) AS seq FROM targets WHERE project = $project AND what = $what",
 	),
+	// Every target of a commit, with no cap: which results a run counts and which repository a commit belongs
+	// to are decided from this list, and a list cut short would decide them wrongly without saying so.
 	targetsByCommit: sql<{ project: number; commit: string }, TargetRow>(
-		"SELECT * FROM targets WHERE project = $project AND commit_sha = $commit ORDER BY id LIMIT 200",
+		"SELECT * FROM targets WHERE project = $project AND commit_sha = $commit ORDER BY id",
 	),
 	targetsByCommitPrefix: sql<{ project: number; low: string; high: string }, TargetRow>(
-		"SELECT * FROM targets WHERE project = $project AND commit_sha >= $low AND commit_sha < $high ORDER BY id LIMIT 200",
+		"SELECT * FROM targets WHERE project = $project AND commit_sha >= $low AND commit_sha < $high ORDER BY id",
 	),
 	caseIdsOfFile: sql<{ project: number; file: string }, { case_id: number | null }>(
 		"SELECT case_id FROM tests WHERE project = $project AND file = $file LIMIT 500",

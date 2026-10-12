@@ -5,7 +5,7 @@ import type { CaseBody } from "../../core/model.ts";
 import type { Selection } from "../../core/ops.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
-import { notFound } from "../kernel/errors.ts";
+import { invalid, notFound } from "../kernel/errors.ts";
 import { type CaseRow, type FolderIndex, type FolderRow, folderIndex, mustCase, type VersionRow } from "./suite.ts";
 
 const Q = {
@@ -279,11 +279,21 @@ export function selectCases(ctx: Ctx, selection: Selection): CaseRow[] {
 		where.push(`c.id IN (${placeholders(named.length)})`);
 		params.push(...named.map((row) => row.id));
 	}
-	return ctx.db.allDynamic<CaseRow>(
-		`SELECT c.* FROM cases c WHERE ${where.join(" AND ")} ORDER BY c.folder, c.rank LIMIT 20000`,
+	// A selection is used whole or not at all: a run planned over part of what was asked for could be signed
+	// off without the rest. More than a run can sensibly hold is refused, with what to do about it.
+	const rows = ctx.db.allDynamic<CaseRow>(
+		`SELECT c.* FROM cases c WHERE ${where.join(" AND ")} ORDER BY c.folder, c.rank LIMIT ${MAX_SELECTION + 1}`,
 		params,
 	);
+	if (rows.length > MAX_SELECTION)
+		throw invalid(
+			`the selection matches more than ${MAX_SELECTION.toLocaleString("en-US")} cases; narrow it by folder, tag or text`,
+		);
+	return rows;
 }
+
+/** The most cases one selection may name. */
+const MAX_SELECTION = 20_000;
 
 export type FolderNode = {
 	id: number;

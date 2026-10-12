@@ -824,6 +824,36 @@ describe("what a result may prove", () => {
 		expect(gate({ commit, repo: "app" })).toMatchObject({ verdict: "failed", tally: { attributed: 2, excused: 0 } });
 	});
 
+	test("a run planned over a commit counts every environment it was reported in, however many", () => {
+		seed();
+		const one = (outcome: string) => ({
+			test: { key: "one" },
+			annotation: { case: "C-1", version: 1 },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "last environment" } } : {}),
+		});
+		const environments = 230;
+		// It passes everywhere except in the last environment reported.
+		for (let i = 0; i < environments; i++)
+			report({
+				target: { commit: "matrix001", branch: "main", env: `env-${String(i).padStart(3, "0")}` },
+				results: [one(i === environments - 1 ? "fail" : "pass")],
+			});
+		expect(gate({ commit: "matrix001" }).verdict).toBe("blocked");
+		// A run over the commit, every environment: it sees the failure too, and is not signed off.
+		const planned = plan({ name: "Whole matrix", select: {}, accepts: { commit: "matrix001" } });
+		expect(rows<{ n: number }>("SELECT count(*) AS n FROM slot_results")).toEqual([{ n: environments }]);
+		expect(gate({ run: planned.run }).verdict).toBe("blocked");
+		expect(rows("SELECT state FROM runs WHERE origin = 'planned'")).toEqual([{ state: "open" }]);
+		// A run over the last environment alone finds its result.
+		const last = plan({
+			name: "Last environment",
+			select: {},
+			accepts: { commit: "matrix001", env: `env-${environments - 1}` },
+		});
+		expect(first(slots(last.run)).state).toBe("failing");
+	}, 60_000);
+
 	test("an automated test cannot take the key of a case's manual test", () => {
 		seed(2);
 		const taken = h.raw("report", {
