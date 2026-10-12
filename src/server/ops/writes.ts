@@ -16,7 +16,7 @@ import {
 	type ReportReceipt,
 } from "../../core/ops.ts";
 import { clip } from "../../core/text.ts";
-import { answer, openFor, type Raise, type Raised, raise, refold, undo } from "../decisions/decisions.ts";
+import { answer, type Raise, type Raised, raise, raiseFailure, refold, undo } from "../decisions/decisions.ts";
 import { raiseAdopt } from "../decisions/kinds.ts";
 import { decisionById, type QuestionRow, questionRef } from "../decisions/questions.ts";
 import {
@@ -24,7 +24,6 @@ import {
 	applySteps,
 	type BatchRow,
 	batchById,
-	changeById,
 	ensureTarget,
 	keepReceipt,
 	markProcessed,
@@ -43,8 +42,6 @@ import {
 	applyBatchSteps,
 	defaultObligations,
 	describeAccepts,
-	type FailingGroup,
-	failsOnBase,
 	failuresShown,
 	gateOf,
 	mustRun,
@@ -57,7 +54,7 @@ import {
 	runsFor,
 } from "../runs/runs.ts";
 import { selectCases } from "../suite/read.ts";
-import { type CaseRow, caseById, caseRef, mustCase, seal } from "../suite/suite.ts";
+import { type CaseRow, caseRef, mustCase, seal } from "../suite/suite.ts";
 import { COMMIT, defineOp, type Pause } from "./registry.ts";
 
 // ── propose ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -211,79 +208,6 @@ function brief(ctx: Ctx, raised: Raised, tests: number): QuestionBrief {
 		by: signer ? actorLabel(ctx.db, signer.by).name : null,
 		tests,
 	};
-}
-
-/**
- * Puts one cause of failure to the queue. `by` is the actor whose result shows it, `producer` that actor's kind.
- * Called for the failures of a report as it is applied, and for the failures a run shows when it is planned
- * over evidence that already fails: there is one door, so the question, its carried answer and the runs it
- * reaches are the same either way.
- */
-function raiseFailure(
-	ctx: Ctx,
-	input: { group: FailingGroup; target: TargetRow; by: number; producer: ActorKind },
-): Raised {
-	const { group, target } = input;
-	const scopeKind = group.scope.startsWith("change:") ? "change" : group.scope.startsWith("line:") ? "trunk" : "run";
-	const key = `${group.signature.hash}|${group.scope}`;
-	// One question per cause: an occurrence adds its tests to the open question instead of opening another.
-	const open = openFor(ctx.db, ctx.project.id, contentHash({ kind: "failure", key }), target.id);
-	const earlier = open
-		? json<{
-				tests?: { id: number; t: string; name: string; case: string | null }[];
-				producers?: number[];
-				targets?: number[];
-			}>(open.evidence)
-		: {};
-	const tests = new Map((earlier.tests ?? []).map((test) => [test.id, test]));
-	for (const test of group.tests) {
-		const row = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;
-		tests.set(test.id, { id: test.id, t: testRef(test), name: test.name, case: row ? caseRef(row) : null });
-	}
-	const hints: string[] = [];
-	if (
-		scopeKind === "change" &&
-		group.tests.length > 0 &&
-		group.tests.every((test) => failsOnBase(ctx.db, target, test.id, group.signature.id))
-	) {
-		hints.push("hint:fails-on-base");
-	}
-	if (group.disputed) hints.push("hint:disputed");
-	const change = target.change !== null ? changeById(ctx.db, target.change) : null;
-	const listed = [...tests.values()];
-	const cases = [...new Set(listed.flatMap((test) => (test.case ? [test.case] : [])))];
-	return raise(ctx, {
-		kind: "failure",
-		key,
-		subject: { signature: group.signature.id, scope: group.scope },
-		title: clip(group.signature.text, 160),
-		producer: input.producer,
-		evidence: {
-			signature: { class: group.signature.class, text: group.signature.text },
-			scope: change ? change.key : group.scope,
-			message: group.message,
-			tests: listed.slice(0, 50),
-			count: listed.length,
-			target: target.commit_sha ? target.commit_sha.slice(0, 12) : target.what,
-			branch: target.branch,
-			hints: hints.map((hint) => hint.slice(5)),
-			producers: [...new Set([...(earlier.producers ?? []), input.by])],
-			// Every target this question has seen the cause on: an answer that holds "here only" covers these.
-			targets: [...new Set([...(earlier.targets ?? []), target.id])],
-			sample: group.results[0] ?? null,
-		},
-		material: { signature: group.signature.id, scope: group.scope, hints },
-		facts: [`scope:${scopeKind}`, ...hints],
-		refs: [
-			`scope:${group.scope}`,
-			...group.runs.map(runRef),
-			...(change ? [change.key] : []),
-			...listed.slice(0, 20).map((test) => test.t),
-			...cases.slice(0, 20),
-		],
-		runs: group.runs,
-		target: target.id,
-	});
 }
 
 /** Tests that arrived with no case, by file: one `map` question per file, which a loose project's rule answers. */

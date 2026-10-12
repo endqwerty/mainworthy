@@ -263,6 +263,7 @@ const Q = {
 		 VALUES ($project, $test, $seq, $ord, $batch, $target, $method, $actor, $basis, $basisCase, $basisVersion, $basisClaim,
 		         $outcome, $attempt, $duration, $signature, $message, $detail, $atStep, $steps, $note, $run, $corrects, $at)`,
 	),
+	correctedBy: sql<{ id: number }, { id: number }>("SELECT id FROM results WHERE corrects = $id LIMIT 1"),
 	producedOn: sql<{ project: number; signature: number; actor: number }, { target: number; run: number | null }>(
 		"SELECT DISTINCT target, run FROM results WHERE project = $project AND signature = $signature AND actor = $actor",
 	),
@@ -917,6 +918,9 @@ export const unlinkedInFile = (db: Db, project: number, file: string): TestRow[]
 export const unlinkedCount = (db: Db, project: number): number => db.get(Q.unlinkedCount, { project })?.n ?? 0;
 export const signatureById = (db: Db, id: number): SignatureRow | null => db.get(Q.signatureById, { id });
 export const resultById = (db: Db, id: number): ResultRow | null => db.get(Q.resultById, { id });
+
+/** Whether the producer of a result has since corrected it: it then counts nowhere, whatever else is undone. */
+export const isCorrected = (db: Db, id: number): boolean => db.get(Q.correctedBy, { id }) !== null;
 
 /**
  * Where an actor has reported a failure with this cause: each target, and the run it was typed into if any. Read

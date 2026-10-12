@@ -1066,6 +1066,109 @@ describe("what a decision may change", () => {
 		expect(gate({ commit: "headfail1", repo: "app" }).verdict).toBe("blocked");
 	});
 
+	test("replacing an answer that covered every environment asks again about the one it leaves uncovered", () => {
+		const target = (env: string) => ({ commit: "twoenv02", branch: "main", env });
+		const failing = { test: { key: "one" }, outcome: "fail", failure: { message: "same cause" } };
+		for (const env of ["staging", "production"]) report({ target: target(env), results: [failing] });
+		const production = open("failure");
+		expect(decide(production, { is: "infra" }).status).toBe("decided");
+		const staging = open("failure");
+		h.call("decide", { undo: production.q });
+		// Flaky covers the cause everywhere, so production's question has its answer and is closed.
+		expect(decide(staging, { is: "flaky" }).status).toBe("decided");
+		expect(h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items).toEqual([]);
+		expect(gate({ commit: "twoenv02" }).verdict).toBe("passed");
+		// Changed to an answer for staging only: production is unexplained again, and somebody is asked.
+		expect(decide(open("failure", "decided"), { is: "infra" }).status).toBe("decided");
+		const asked = h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items;
+		expect(asked).toHaveLength(1);
+		expect(gate({ commit: "twoenv02" })).toMatchObject({ verdict: "blocked", open: [first(asked).q] });
+		expect(decide(first(asked), { is: "infra" }).status).toBe("decided");
+		expect(gate({ commit: "twoenv02" }).verdict).toBe("passed");
+	});
+
+	test("a run reopened after its failure's question was closed is asked about that failure again", () => {
+		seed();
+		const result = (outcome: string, attempt: number) =>
+			report({
+				target: { commit: "reopen01", branch: "main" },
+				attempt,
+				results: [
+					{
+						test: { key: "one" },
+						annotation: { case: "C-1", version: 1 },
+						outcome,
+						...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
+					},
+				],
+			});
+		result("fail", 1);
+		const planned = plan({ name: "Reopen later", select: {}, accepts: { commit: "reopen01" } });
+		const question = open("failure");
+		decide(question, { is: "flaky" });
+		const signoff = h
+			.call<InboxReply>("inbox", { state: "decided", limit: 50 })
+			.items.find((item) => item.kind === "signoff");
+		if (!signoff) throw new Error("the run was not signed off");
+		h.call("decide", { undo: question.q });
+		// The commit passes on a newer attempt; the closed run keeps the failure it was closed on.
+		result("pass", 2);
+		expect(first(h.call<DecideReply[]>("decide", { undo: signoff.q })).status).toBe("reopened");
+		const asked = h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items;
+		expect(asked).toHaveLength(1);
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [first(asked).q] });
+		expect(decide(first(asked), { is: "flaky" }).status).toBe("decided");
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
+	test("an answer that takes the place of another question's answer ends it, and every run that rested on it follows", () => {
+		const failing = { test: { key: "one" }, outcome: "fail", failure: { message: "same cause" } };
+		const on = (commit: string, env: string, attempt = 1) =>
+			report({ target: { commit, branch: "main", env }, attempt, results: [failing] });
+		on("first001", "staging");
+		on("first001", "production");
+		const production = open("failure");
+		expect(decide(production, { is: "infra" }).status).toBe("decided");
+		expect(decide(open("failure"), { is: "flaky" }).status).toBe("decided");
+		// The next commit rests on the flaky answer.
+		expect(on("second01", "staging").gate?.verdict).toBe("passed");
+		// Production's answer is changed to one that covers the cause everywhere: a defect.
+		expect(decide(production, { is: "defect" }).status).toBe("decided");
+		expect(gate({ commit: "first001" }).verdict).toBe("failed");
+		expect(gate({ commit: "second01" }).verdict).toBe("failed");
+		// One answer in force for the cause, and the ledger says what became of the other.
+		const ledger = rows<{ answer: string; supersedes: number | null }>(
+			"SELECT answer, supersedes FROM decisions WHERE kind = 'failure' ORDER BY id",
+		).map((row) => JSON.parse(row.answer).is);
+		expect(ledger).toEqual(["infra", "flaky", "outdated", "defect"]);
+		const retried = on("second01", "staging", 2);
+		expect(retried.questions.map((q) => q.answer)).toEqual(["defect"]);
+		expect(retried.gate?.verdict).toBe("failed");
+	});
+
+	test("a failure decided to be a mistake does not hold the commit's gate, and withdrawing the decision puts it back", () => {
+		usePolicy("standard");
+		h.call("propose", { edits: [{ op: "create", outline: "Case one" }] });
+		const target = { commit: "rc300005", branch: "main" };
+		report({ target, results: [{ test: { key: "a.spec.ts::one" }, annotation: { case: "C-1" }, outcome: "pass" }] });
+		const planned = plan({ name: "rc3", select: { cases: ["C-1"] }, accepts: { commit: "rc300005" } });
+		// The run closed by rule on the pipeline's pass; it is reopened to test by hand.
+		h.call("decide", { undo: open("signoff", "decided").q });
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "fail", note: "Total is wrong" }] });
+		expect(gate({ commit: "rc300005" }).verdict).toBe("blocked");
+		const lead = h.actor("mira", "human", ["read", "produce", "answer"]);
+		const dispute = open("failure");
+		expect(decide(dispute, { is: "mistaken" }, lead).status).toBe("decided");
+		expect(first(slots(planned.run)).state).toBe("satisfied");
+		// The commit's own gate no longer counts the result either, and nobody is asked about it again.
+		expect(gate({ commit: "rc300005" })).toMatchObject({ verdict: "passed", open: [] });
+		expect(h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items).toEqual([]);
+		// Withdrawn: the failure counts again in the run and in the commit's gate, with its question open.
+		expect(first(h.call<DecideReply[]>("decide", { undo: dispute.q }, lead)).status).toBe("reopened");
+		expect(first(slots(planned.run)).state).toBe("disputed");
+		expect(gate({ commit: "rc300005" })).toMatchObject({ verdict: "blocked", open: [dispute.q] });
+	});
+
 	test("a run closed on an answer that later stops holding names the question asked in its place", () => {
 		seed();
 		const failing = {

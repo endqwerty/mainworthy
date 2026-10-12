@@ -18,6 +18,8 @@ import {
 	standingOf,
 } from "../../core/kinds.ts";
 import type { DecideReply, QuestionItem } from "../../core/ops.ts";
+import { clip } from "../../core/text.ts";
+import { changeById, mustTarget, signatureById, type TargetRow, testRef } from "../evidence/evidence.ts";
 import { actorLabel, ruleActor } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json } from "../kernel/db.ts";
@@ -27,6 +29,8 @@ import { clauseFor, currentPolicy } from "../policy/policy.ts";
 import {
 	type Blocker,
 	causeKey,
+	type FailingGroup,
+	failsOnBase,
 	newestInScope,
 	passesAny,
 	type RunRow,
@@ -34,8 +38,11 @@ import {
 	runById,
 	runRef,
 	runsDependingOn,
+	shownFailure,
 	unexplainedIn,
+	unexplainedShown,
 } from "../runs/runs.ts";
+import { caseById, caseRef } from "../suite/suite.ts";
 import { HANDLERS, runsAbout } from "./kinds.ts";
 import {
 	alsoAbout,
@@ -462,6 +469,7 @@ function settle(
 	}
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	const holds = handler.holds({ question, answer: given, now: ctx.now, policy });
+	const rested = endReplaced(ctx, question, holds);
 	const decision = insertDecision(ctx, { question, answer: given, signers, holds, supersedes });
 	setQuestionState(ctx, question, "decided", decision.id);
 	const witness = mintWitness(
@@ -474,9 +482,36 @@ function settle(
 	setDecisionEffects(ctx, decision.id, effects);
 	const about = runsAbout(ctx, question);
 	if (Array.isArray(effects.reask) && effects.reask.length > 0) askAgain(ctx, question, effects.reask as number[]);
-	about.push(...answeredElsewhere(ctx, question, decision));
+	about.push(...answeredElsewhere(ctx, question, decision), ...rested);
 	refold(ctx, [...about, ...(supersedes !== null ? runsDependingOn(ctx.db, supersedes) : [])]);
 	return { decision: { ...decision, effects: JSON.stringify(effects) }, effects };
+}
+
+/** What a decision covers: the targets it names, or every target of the cause's scope. */
+const covers = (holds: readonly HoldTerm[]): readonly number[] | "all" => {
+	const here = holds.find((term) => term.until === "this-target");
+	return here?.until === "this-target" ? here.targets : "all";
+};
+
+/**
+ * One answer in force per cause and target. A decision about to be made on this question takes the place of
+ * another question's answer when both cover the whole cause, or both name the same target. That other answer is
+ * ended here, with a row in the ledger that says so, before the new one is recorded: it is not left listed as
+ * standing with its effect overwritten. Returns the runs that rested on it or were about it, to be recomputed.
+ */
+function endReplaced(ctx: Ctx, question: QuestionRow, holds: readonly HoldTerm[]): number[] {
+	const mine = covers(holds);
+	const runs: number[] = [];
+	for (const { question: other, decision } of standingOn(ctx, question.fingerprint)) {
+		if (other.id === question.id) continue;
+		const theirs = covers(json<HoldTerm[]>(decision.holds));
+		const same = mine === "all" ? theirs === "all" : theirs !== "all" && theirs.some((target) => mine.includes(target));
+		if (!same) continue;
+		HANDLERS[other.kind].revert(ctx, other, decision);
+		lapse(ctx, other, decision, ctx.now);
+		runs.push(...runsDependingOn(ctx.db, decision.id), ...runsAbout(ctx, other));
+	}
+	return runs;
 }
 
 /** The row that ended the answer of the question this one was asked after, if it was asked for that reason. */
@@ -605,6 +640,117 @@ export function undo(ctx: Ctx, input: { q: string; reason: string | undefined })
 	return reply(question, "reopened", { decision: decision.id });
 }
 
+// ── Failures ───────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Puts one cause of failure to the queue. `by` is the actor whose result shows it, `producer` that actor's kind.
+ * Called for the failures of a report as it is applied, and for the failures a run shows when it is planned
+ * over evidence that already fails: there is one door, so the question, its carried answer and the runs it
+ * reaches are the same either way.
+ */
+export function raiseFailure(
+	ctx: Ctx,
+	input: { group: FailingGroup; target: TargetRow; by: number; producer: ActorKind },
+): Raised {
+	const { group, target } = input;
+	const scopeKind = group.scope.startsWith("change:") ? "change" : group.scope.startsWith("line:") ? "trunk" : "run";
+	const key = `${group.signature.hash}|${group.scope}`;
+	// One question per cause: an occurrence adds its tests to the open question instead of opening another.
+	const open = openFor(ctx.db, ctx.project.id, contentHash({ kind: "failure", key }), target.id);
+	const earlier = open
+		? json<{
+				tests?: { id: number; t: string; name: string; case: string | null }[];
+				producers?: number[];
+				targets?: number[];
+			}>(open.evidence)
+		: {};
+	const tests = new Map((earlier.tests ?? []).map((test) => [test.id, test]));
+	for (const test of group.tests) {
+		const row = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;
+		tests.set(test.id, { id: test.id, t: testRef(test), name: test.name, case: row ? caseRef(row) : null });
+	}
+	const hints: string[] = [];
+	if (
+		scopeKind === "change" &&
+		group.tests.length > 0 &&
+		group.tests.every((test) => failsOnBase(ctx.db, target, test.id, group.signature.id))
+	) {
+		hints.push("hint:fails-on-base");
+	}
+	if (group.disputed) hints.push("hint:disputed");
+	const change = target.change !== null ? changeById(ctx.db, target.change) : null;
+	const listed = [...tests.values()];
+	const cases = [...new Set(listed.flatMap((test) => (test.case ? [test.case] : [])))];
+	return raise(ctx, {
+		kind: "failure",
+		key,
+		subject: { signature: group.signature.id, scope: group.scope },
+		title: clip(group.signature.text, 160),
+		producer: input.producer,
+		evidence: {
+			signature: { class: group.signature.class, text: group.signature.text },
+			scope: change ? change.key : group.scope,
+			message: group.message,
+			tests: listed.slice(0, 50),
+			count: listed.length,
+			target: target.commit_sha ? target.commit_sha.slice(0, 12) : target.what,
+			branch: target.branch,
+			hints: hints.map((hint) => hint.slice(5)),
+			producers: [...new Set([...(earlier.producers ?? []), input.by])],
+			// Every target this question has seen the cause on: an answer that holds "here only" covers these.
+			targets: [...new Set([...(earlier.targets ?? []), target.id])],
+			sample: group.results[0] ?? null,
+		},
+		material: { signature: group.signature.id, scope: group.scope, hints },
+		facts: [`scope:${scopeKind}`, ...hints],
+		refs: [
+			`scope:${group.scope}`,
+			...group.runs.map(runRef),
+			...(change ? [change.key] : []),
+			...listed.slice(0, 20).map((test) => test.t),
+			...cases.slice(0, 20),
+		],
+		runs: group.runs,
+		target: target.id,
+	});
+}
+
+/**
+ * Every failure a run shows unexplained has a question somebody can answer. That is checked here, each time a run
+ * is recomputed, and not left to each path that can take a question away: an answer changed to one that covers
+ * less, an answer withdrawn after another closed its neighbour's question, a closed run opened again. A run that
+ * speaks (an open planned run, or the run of the newest commit in its scope) is never blocked with nobody asked.
+ * An older commit of a change is not asked about again: a newer commit has replaced it.
+ */
+function askUnexplained(ctx: Ctx, run: RunRow): boolean {
+	const speaks =
+		run.origin === "planned"
+			? run.state === "open"
+			: run.scope !== null && newestInScope(ctx.db, run.project, run.scope)?.id === run.id;
+	if (!speaks) return false;
+	let asked = false;
+	for (const cause of unexplainedShown(ctx.db, run)) {
+		const signature = signatureById(ctx.db, cause.signature);
+		if (!signature) continue;
+		const fingerprint = contentHash({ kind: "failure", key: `${signature.hash}|${cause.scope}` });
+		const open = openFor(ctx.db, ctx.project.id, fingerprint, cause.target);
+		if (open && (json<{ targets?: number[] }>(open.evidence).targets ?? []).includes(cause.target)) {
+			alsoAbout(ctx, open, [runRef(run)]);
+			continue;
+		}
+		const shown = shownFailure(ctx, run, cause);
+		if (!shown) continue;
+		const raised = raiseFailure(ctx, {
+			group: shown.group,
+			target: mustTarget(ctx.db, cause.target),
+			by: shown.by,
+			producer: actorLabel(ctx.db, shown.by).kind,
+		});
+		asked ||= raised.s !== "carried";
+	}
+	return asked;
+}
+
 // ── Keeping runs in step ───────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -615,7 +761,9 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 	for (const id of new Set(runIds)) {
 		const existing = runById(ctx.db, id);
 		if (!existing) continue;
-		const result = retally(ctx, id, blockersOf(ctx, existing));
+		let result = retally(ctx, id, blockersOf(ctx, existing));
+		if (result.failing.size > 0 && askUnexplained(ctx, result.run))
+			result = retally(ctx, id, blockersOf(ctx, result.run));
 		if (options.dissolveStale) dissolveStale(ctx, result.run);
 		if (!result.wantsSignoff) continue;
 		const run = result.run;

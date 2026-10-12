@@ -28,6 +28,7 @@ import {
 	changeByKey,
 	codeWhat,
 	excuseFor,
+	isCorrected,
 	mustTarget,
 	processedJobs,
 	resultById,
@@ -171,6 +172,14 @@ const Q = {
 		{ test: number; result: number; outcome: string; signature: number | null; flipped: number }
 	>(
 		"SELECT test, result, outcome, signature, flipped FROM run_tests WHERE run = $run AND outcome IN ('fail', 'error') LIMIT $limit",
+	),
+	failingCauses: sql<{ run: number }, { signature: number; target: number }>(
+		`SELECT DISTINCT signature, target FROM run_tests
+		 WHERE run = $run AND outcome IN ('fail', 'error') AND signature IS NOT NULL`,
+	),
+	failingOfCause: sql<{ run: number; signature: number; target: number }, { test: number; result: number }>(
+		`SELECT test, result FROM run_tests
+		 WHERE run = $run AND signature = $signature AND target = $target AND outcome IN ('fail', 'error') LIMIT 200`,
 	),
 	flippedCount: sql<{ run: number }, { n: number }>(
 		"SELECT count(*) AS n FROM run_tests WHERE run = $run AND flipped = 1",
@@ -628,6 +637,73 @@ export function failuresShown(ctx: Ctx, run: RunRow): { group: FailingGroup; tar
 	return [...out.values()];
 }
 
+/** A failure a run shows with no excuse in force: the cause, the target it was seen on, the scope it is answered in. */
+export type Unexplained = { signature: number; target: number; scope: string };
+
+/**
+ * The failures a run shows that no decision explains, one per cause and target. Read when a run is recomputed, to
+ * make sure each of them has a question somebody can answer.
+ */
+export function unexplainedShown(db: Db, run: RunRow): Unexplained[] {
+	const shown = new Map<string, Unexplained>();
+	const note = (signature: number, target: number): void => {
+		const scope = scopeIn(db, run, target);
+		if (!excuseFor(db, run.project, signature, scope, target))
+			shown.set(`${signature}:${target}`, { signature, target, scope });
+	};
+	if (run.origin === "change") {
+		for (const row of db.all(Q.failingCauses, { run: run.id })) note(row.signature, row.target);
+	} else {
+		for (const slot of db.all(Q.failingSlots, { run: run.id })) {
+			for (const [signature, target] of json<Cause[]>(slot.causes)) note(signature, target);
+		}
+	}
+	return [...shown.values()];
+}
+
+/**
+ * One cause on one target as a run shows it now, in the shape a question is raised from: its tests, its results
+ * and who reported the latest of them. Null when the run no longer shows it.
+ */
+export function shownFailure(ctx: Ctx, run: RunRow, cause: Unexplained): { group: FailingGroup; by: number } | null {
+	const signature = signatureById(ctx.db, cause.signature);
+	if (!signature) return null;
+	const group: FailingGroup = {
+		signature,
+		scope: cause.scope,
+		tests: [],
+		results: [],
+		message: null,
+		disputed: false,
+		counted: true,
+		runs: [run],
+	};
+	let by: number | null = null;
+	const add = (test: number, result: number, actor: number, message: string | null): void => {
+		const row = testById(ctx.db, test);
+		if (row && !group.tests.some((t) => t.id === row.id)) group.tests.push(row);
+		group.results.push(result);
+		group.message ??= message;
+		by = actor;
+	};
+	if (run.origin === "change") {
+		for (const row of ctx.db.all(Q.failingOfCause, { run: run.id, signature: cause.signature, target: cause.target })) {
+			const result = resultById(ctx.db, row.result);
+			if (result) add(row.test, result.id, result.actor, result.message);
+		}
+	} else {
+		for (const slot of ctx.db.all(Q.slotsBySignature, { run: run.id, signature: cause.signature })) {
+			for (const fill of fillsOf(ctx.db, slot.id)) {
+				if (fill.signature !== cause.signature || fill.target !== cause.target) continue;
+				if (fill.outcome !== "fail" && fill.outcome !== "error") continue;
+				add(fill.test, fill.id, fill.actor, fill.message);
+				group.disputed ||= slot.state === "disputed";
+			}
+		}
+	}
+	return by === null ? null : { group, by };
+}
+
 /** `applyBatchSteps` run to the end without pausing. */
 export function applyBatch(
 	ctx: Ctx,
@@ -1081,6 +1157,9 @@ export function discountFailures(
 			if (fill.signature !== signature || scopeIn(ctx.db, run, fill.target) !== scope) continue;
 			ctx.db.run(Q.discount, { slot: slot.id, result: fill.id, decision });
 			corrected.push([slot.id, fill.id]);
+			// A result decided to be a mistake does not hold its commit's gate either.
+			const commit = commitRunOf(ctx.db, run.project, fill.target);
+			if (commit) ctx.db.run(Q.dropCorrected, { run: commit.id, result: fill.id });
 		}
 		const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
 		refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
@@ -1094,13 +1173,41 @@ export function discountFailures(
  */
 export function restoreFailures(ctx: Ctx, pairs: readonly [number, number][], decision: number): void {
 	for (const [slotId, result] of pairs) {
-		ctx.db.run(Q.undiscount, { slot: slotId, result, decision });
+		const { changes } = ctx.db.run(Q.undiscount, { slot: slotId, result, decision });
+		if (changes > 0) recount(ctx, result);
 		const slot = slotById(ctx.db, slotId);
 		const run = slot ? runById(ctx.db, slot.run) : null;
 		if (!slot || !run) continue;
 		const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
 		refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
 	}
+}
+
+const commitRunOf = (db: Db, project: number, target: number): RunRow | null =>
+	db.get(Q.changeRun, { project, what: mustTarget(db, target).what });
+
+/**
+ * Counts a result in its commit's gate again, after the decision that called it a mistake is withdrawn. Through
+ * the same rule as a report: a newer attempt in its lane that arrived meanwhile keeps its place. A result its
+ * producer has corrected since, or an agent's, is not counted.
+ */
+function recount(ctx: Ctx, id: number): void {
+	const result = resultById(ctx.db, id);
+	if (!result || result.method === "agent" || isCorrected(ctx.db, id)) return;
+	const commit = commitRunOf(ctx.db, result.project, result.target);
+	if (!commit) return;
+	ctx.db.run(Q.upsertRunTest, {
+		run: commit.id,
+		test: result.test,
+		result: result.id,
+		outcome: result.outcome,
+		signature: result.signature,
+		attempt: result.attempt,
+		flipped: 0,
+		lane: `${result.target}:${batchById(ctx.db, result.batch)?.job ?? ""}:${result.actor}`,
+		target: result.target,
+	});
+	ctx.touched.add(runRef(commit));
 }
 
 // ── The gate ───────────────────────────────────────────────────────────────────────────────────────────────
