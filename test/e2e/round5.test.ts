@@ -38,7 +38,7 @@ async function conflict(server: Server, page: Awaited<ReturnType<typeof openPage
 }
 for (const choice of ["current", "typed", "mine", "all"])
 	check(
-		`N-1 conflict preserves ${choice} choice and later editor text`,
+		`N-1 conflict preserves ${choice} choice while later editor input is refused`,
 		async () => {
 			const server = await startServer();
 			await cases(server, 1);
@@ -56,20 +56,25 @@ for (const choice of ["current", "typed", "mine", "all"])
 							exact: true,
 						})
 						.click();
-				await page.getByRole("textbox", { name: "Step 2", exact: true }).fill("Apply the coupon SAVE10");
-				await title(page).fill("My title with later words");
+				const step = page.getByRole("textbox", { name: "Step 2", exact: true });
+				await step.click();
+				await step.press("End");
+				await page.keyboard.type(" SAVE10");
+				expect(await step.inputValue()).toBe("Apply the coupon");
+				await title(page).click();
+				await title(page).press("End");
+				await page.keyboard.type(" with later words");
+				expect(await title(page).inputValue()).toBe("My title");
+				await page.getByText("Resolve the conflict first", { exact: false }).first().waitFor();
 				expect(await page.getByRole("textbox", { name: "Merged title", exact: true }).inputValue()).toBe(expected);
 				await page.getByRole("button", { name: "Resolve conflict", exact: true }).click();
 				const saved = await eventually(
 					() => server.api("get", { refs: ["C-1"] }),
-					(rows) => rows[0]?.version === (choice === "all" ? 2 : 3),
+					(rows) => rows[0]?.version === (choice === "all" || choice === "current" ? 2 : 3),
 				);
 				await page.locator(".conflict-card").waitFor({ state: "detached" });
 				expect(saved[0]?.title).toBe(expected);
-				// A whole-body choice deliberately fixes all fields; per-field choices leave the other editor fields live.
-				expect(z.array(z.object({ action: z.string() })).parse(saved[0]?.steps)[1]?.action).toBe(
-					choice === "all" ? "Apply the coupon" : "Apply the coupon SAVE10",
-				);
+				expect(z.array(z.object({ action: z.string() })).parse(saved[0]?.steps)[1]?.action).toBe("Apply the coupon");
 			} finally {
 				await h.close();
 				await server.stop();
@@ -94,7 +99,9 @@ check(
 				await route.continue();
 			});
 			for (const text of ["Apply the coupon SAVE10", "Apply the coupon SAVE10 and check the total"]) {
-				await page.getByRole("textbox", { name: "Step 2", exact: true }).fill(text);
+				await page.getByRole("textbox", { name: "Step 2", exact: true }).click();
+				await page.keyboard.type(text);
+				expect(await page.getByRole("textbox", { name: "Step 2", exact: true }).inputValue()).toBe("Apply the coupon");
 				await page.keyboard.press("Escape");
 				await page.waitForTimeout(150);
 			}
@@ -385,9 +392,9 @@ check(
 			b.setDefaultTimeout(5000);
 			await b.goto(`${server.url}/p/scratch/suite/c/1`);
 			await title(b).waitFor();
-			let secondCommand: string | null = null;
+			const secondCommands: string[] = [];
 			await b.route("**/propose", async (route) => {
-				secondCommand = z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd;
+				secondCommands.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
 				await route.continue();
 			});
 			await b.getByRole("textbox", { name: "Step 2", exact: true }).fill("From the second live window");
@@ -397,8 +404,8 @@ check(
 				(rows) => rows[0]?.version === 3,
 			);
 			expect(firstCommand).not.toBeNull();
-			expect(secondCommand).not.toBeNull();
-			expect(secondCommand).not.toBe(firstCommand);
+			expect(secondCommands.length).toBeGreaterThan(0);
+			for (const command of secondCommands) expect(command).not.toBe(firstCommand);
 			expect(saved[0]?.title).toBe("From the first live window");
 			expect(z.array(z.object({ action: z.string() })).parse(saved[0]?.steps)[1]?.action).toBe(
 				"From the second live window",

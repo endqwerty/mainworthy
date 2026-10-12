@@ -6,7 +6,7 @@ import type { QuestionItem } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { deviceSession, sessionCurrent } from "../lib/device.ts";
-import type { Draft } from "../lib/drafts.ts";
+import type { Draft, DraftConflict } from "../lib/drafts.ts";
 import { proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { bodyOf, CaseView, editDraft } from "../suite/model.ts";
@@ -15,15 +15,7 @@ import { age, DiffView, EmptyState, KeyCap, ProducerGlyph, SectionHeading } from
 import { useCaseBindings } from "./bindings.ts";
 import { BodyEditor, type DraftChange } from "./editor.tsx";
 
-export type ConflictState = {
-	q: string;
-	ref: string;
-	mine: CaseBody;
-	current: CaseBody;
-	merged: CaseBody;
-	paths: string[];
-	draftId: string;
-};
+export type ConflictState = DraftConflict;
 const EntryBase = z.object({ seq: z.number(), at: z.number(), by: z.string() });
 const Entry = z.discriminatedUnion("t", [
 	EntryBase.extend({
@@ -90,6 +82,7 @@ export function CasePane({
 	rapid,
 	conflict,
 	onResolved,
+	onConflictChange,
 	hasDraft = false,
 }: {
 	view: CaseView | null;
@@ -100,7 +93,8 @@ export function CasePane({
 	seal: () => void;
 	rapid: () => void;
 	conflict: ConflictState | null;
-	onResolved: (state: ConflictState, body: CaseBody) => void;
+	onResolved: (state: ConflictState, body: CaseBody) => Promise<void>;
+	onConflictChange: (state: ConflictState) => void;
 	hasDraft?: boolean;
 }) {
 	const { project, session, setStatus, overlayOpen } = useApp();
@@ -243,14 +237,17 @@ export function CasePane({
 							<span className="draft-public-state">Draft kept on this device. Press e to continue.</span>
 						)}
 					</div>
-					{conflict && <ConflictCard key={conflict.q} state={conflict} resolved={onResolved} />}
+					{conflict && (
+						<ConflictCard key={conflict.q} state={conflict} resolved={onResolved} changed={onConflictChange} />
+					)}
 					{draft ? (
-						<BodyEditor draft={draft} change={change} seal={seal} rapid={rapid} />
+						<BodyEditor draft={draft} change={change} seal={seal} rapid={rapid} readOnly={Boolean(conflict)} />
 					) : (
 						<ReadBody body={body} tags={view?.tags ?? []} begin={begin} />
 					)}
 					<CaseProperties
 						body={body}
+						readOnly={Boolean(conflict)}
 						change={(next) => {
 							const base = draft ?? (view ? editDraft(view) : null);
 							if (base)
@@ -626,16 +623,22 @@ function pageProposal(q: string): boolean {
 function ConflictCard({
 	state,
 	resolved,
+	changed,
 }: {
 	state: ConflictState;
-	resolved: (state: ConflictState, body: CaseBody) => void;
+	resolved: (state: ConflictState, body: CaseBody) => Promise<void>;
+	changed: (state: ConflictState) => void;
 }) {
-	const { project, setStatus } = useApp();
-	const owner = useRef(deviceSession()).current;
-	const [choices, setChoices] = useState(new Map<string, (body: CaseBody) => CaseBody>());
-	const body = [...choices.values()].reduce((merged, choice) => choice(merged), state.merged);
-	function choose(path: string, update: (body: CaseBody) => CaseBody): void {
-		setChoices((previous) => new Map(previous).set(path, update));
+	const { setStatus } = useApp();
+	const pendingStatus = "Wait for the merge reply before editing the card. Your merge is kept.";
+	const [resolving, setResolving] = useState(false);
+	const body = state.merged;
+	function choose(_path: string, update: (body: CaseBody) => CaseBody): void {
+		if (resolving) {
+			setStatus(pendingStatus);
+			return;
+		}
+		changed({ ...state, merged: update(body) });
 	}
 	const fields: { key: string; mine: string; current: string; set: (text: string) => void }[] = [
 		{
@@ -692,24 +695,12 @@ function ConflictCard({
 	}
 
 	async function resolve(): Promise<void> {
+		if (resolving) return;
+		setResolving(true);
 		try {
-			const questions = await call("inbox", { on: state.ref, kind: "adopt" }, { project, owner });
-			const question = questions.items.find((item) => item.q === state.q);
-			if (!question) {
-				setStatus("This conflict was answered elsewhere. Your draft is still kept.");
-				return;
-			}
-			const reply = await call(
-				"decide",
-				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "merge", body } },
-				{ project, owner },
-			);
-			if (reply[0]?.status === "decided") {
-				setStatus("Conflict resolved. Both earlier versions remain in the timeline.");
-				resolved(state, body);
-			} else setStatus(reply[0]?.needs ?? "The evidence changed. Read both edits again.");
-		} catch (error) {
-			setStatus(error instanceof Error ? error.message : "Conflict could not be resolved");
+			await resolved(state, body);
+		} finally {
+			setResolving(false);
 		}
 	}
 	return (
@@ -718,6 +709,7 @@ function ConflictCard({
 			<div className="dim">
 				{state.ref} changed while you were writing. Choose or edit each field, then record the merge.
 			</div>
+			{resolving && <p role="status">{pendingStatus}</p>}
 			<DiffView before={state.current} after={state.mine} />
 			{fields.map((field) => (
 				<div className="conflict-field" key={field.key}>
@@ -726,14 +718,14 @@ function ConflictCard({
 						<div className="conflict-side">
 							<h4>Your draft</h4>
 							<div>{field.mine}</div>
-							<button type="button" className="out" onClick={() => field.set(field.mine)}>
+							<button type="button" className="out" disabled={resolving} onClick={() => field.set(field.mine)}>
 								Use my {field.key}
 							</button>
 						</div>
 						<div className="conflict-side">
 							<h4>Current version</h4>
 							<div>{field.current}</div>
-							<button type="button" className="out" onClick={() => field.set(field.current)}>
+							<button type="button" className="out" disabled={resolving} onClick={() => field.set(field.current)}>
 								Use current {field.key}
 							</button>
 						</div>
@@ -742,6 +734,31 @@ function ConflictCard({
 						Edit merged {field.key}
 						<textarea
 							aria-label={`Merged ${field.key}`}
+							readOnly={resolving}
+							onKeyDown={(event) => {
+								if (resolving && (event.key.length === 1 || ["Enter", "Backspace", "Delete"].includes(event.key))) {
+									event.preventDefault();
+									setStatus(pendingStatus);
+								}
+							}}
+							onBeforeInput={(event) => {
+								if (resolving) {
+									event.preventDefault();
+									setStatus(pendingStatus);
+								}
+							}}
+							onPaste={(event) => {
+								if (resolving) {
+									event.preventDefault();
+									setStatus(pendingStatus);
+								}
+							}}
+							onCut={(event) => {
+								if (resolving) {
+									event.preventDefault();
+									setStatus(pendingStatus);
+								}
+							}}
 							value={
 								field.key === "title"
 									? body.title
@@ -769,7 +786,7 @@ function ConflictCard({
 							<div className="conflict-side" key={label}>
 								<h4>{label}</h4>
 								<p>{side.steps.find((step) => `steps.${step.id}` === path)?.action ?? "Step removed"}</p>
-								<button type="button" className="out" onClick={() => chooseStep(path, side)}>
+								<button type="button" className="out" disabled={resolving} onClick={() => chooseStep(path, side)}>
 									Use {label.toLowerCase()} step
 								</button>
 							</div>
@@ -779,14 +796,15 @@ function ConflictCard({
 			))}
 
 			<div className="conflict-actions">
-				<button type="button" onClick={() => setChoices(new Map([["all", () => state.mine]]))}>
+				<button type="button" disabled={resolving} onClick={() => changed({ ...state, merged: state.mine })}>
 					Use all my changes
 				</button>
-				<button type="button" onClick={() => setChoices(new Map([["all", () => state.current]]))}>
+				<button type="button" disabled={resolving} onClick={() => changed({ ...state, merged: state.current })}>
 					Keep current version
 				</button>
 				<button
 					type="button"
+					disabled={resolving}
 					onClick={() => {
 						void resolve();
 					}}
@@ -798,7 +816,15 @@ function ConflictCard({
 	);
 }
 
-function CaseProperties({ body, change }: { body: CaseBody; change: (body: CaseBody) => void }) {
+function CaseProperties({
+	body,
+	change,
+	readOnly = false,
+}: {
+	body: CaseBody;
+	change: (body: CaseBody) => void;
+	readOnly?: boolean;
+}) {
 	return (
 		<details className="case-properties">
 			<summary>
@@ -813,7 +839,7 @@ function CaseProperties({ body, change }: { body: CaseBody; change: (body: CaseB
 						<input
 							type="checkbox"
 							checked={body.methods.includes(kind)}
-							disabled={body.methods.length === 1 && body.methods.includes(kind)}
+							disabled={readOnly || (body.methods.length === 1 && body.methods.includes(kind))}
 							onChange={(event) =>
 								change({
 									...body,
@@ -832,6 +858,7 @@ function CaseProperties({ body, change }: { body: CaseBody; change: (body: CaseB
 				Automation{" "}
 				<select
 					value={body.automate}
+					disabled={readOnly}
 					onChange={(event) => {
 						event.currentTarget.blur();
 						change({ ...body, automate: Automate.parse(event.target.value) });

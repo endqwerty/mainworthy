@@ -200,6 +200,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		slot = current,
 		text = slot && consumedNotes.current.get(slot.id) !== notes[slot.id] ? (notes[slot.id] ?? "") : "",
 		advance = true,
+		visibleStep = false,
 	): Promise<ReportReceipt> | null {
 		if (!slot || !sessionCurrent(owner) || !session.can.includes("produce")) return null;
 		if (run?.state !== "open") {
@@ -247,7 +248,8 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		);
 		const pinnedInput = { refs: [slot.case], version: slot.version };
 		const marked = steps[slot.id] ?? "";
-		const failedStep = outcome === "fail" && consumedSteps.current.get(slot.id) !== marked ? Number(marked) : 0;
+		const failedStep =
+			outcome === "fail" && (visibleStep || consumedSteps.current.get(slot.id) !== marked) ? Number(marked) : 0;
 		if (text && text === notes[slot.id]) consumedNotes.current.set(slot.id, text);
 		consumedSteps.current.set(slot.id, marked);
 		const priorWrite = writes.current.get(slot.id);
@@ -392,7 +394,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			hidden: !noting,
 			when: () => !overlayOpen && Boolean(noting),
 			handler: () => {
-				if (noting) record("fail", noting, notes[noting.id] ?? "");
+				if (noting) record("fail", noting, notes[noting.id] ?? "", true, true);
 			},
 		},
 		{
@@ -646,7 +648,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 							}
 							if (event.key === "Enter" && noting) {
 								event.preventDefault();
-								record("fail", noting, event.currentTarget.value);
+								record("fail", noting, event.currentTarget.value, true, true);
 							}
 							if (event.key === "Escape") {
 								event.preventDefault();

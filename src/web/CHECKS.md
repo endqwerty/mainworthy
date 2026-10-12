@@ -268,3 +268,90 @@ No source or test change occurred between the final two passes. Independent
 cross-provider verification of the combined revision remains with the lead.
 This worker made no commit, push, pull request or checkout cleanup. Each test
 fixture closed its own browser and server and removed only its temporary data.
+
+## Round 6 implementation checks, 2026-10-12
+
+The brief is `UI-R6-FIXES.md` from the lead's verification directory. This
+worker owns only `src/web/**` and `test/e2e/**`. The lead owns the independent
+cross-provider verdict, changelog, commit and delivery. This implementation
+has author-run checks below and is not independently verified yet.
+
+The invariant is that each character typed on a case reaches a recorded
+version, remains in a visible device draft, or is visibly refused when typed.
+The round-6 browser checks were written and run before the corresponding
+behaviour changes. The first run of `round6.test.ts` reported 2 pass and
+8 fail. Its failures showed accepted editor input after both a field choice
+and a whole-body choice, false resolution after a newer head, missing cards
+after reload and in a new tab, and a missing `steps` field in the marked
+failure request. The held-reply test already passed: the existing reply
+handler builds the card from the latest draft, rather than the sent body.
+
+| Finding | Cause and changed files | Regression in `test/e2e/round6.test.ts` |
+| --- | --- | --- |
+| R6-1 | The editor and card both accepted text, but choices captured older text. `case/editor.tsx` refuses editor input visibly while a card exists. `case/pane.tsx` makes properties unavailable and stores the card's merged body through `suite/index.tsx`. | `Use my title` followed by title input, and `Use all my changes` followed by step input, leave the draft unchanged and focus where the user put it. Editing the card records its text. A held proposal reply includes later title and step text in the card's draft side, diff and recorded merge. |
+| R6-2 | The UI treated outer `status: decided` as adoption and ignored `effects.status: conflict`. `suite/index.tsx` owns resolution and checks the effects before removing a draft. `case/pane.tsx` waits for that operation. | A second edit to the same title creates a replacement card for the new question. The raw draft stays, the manually written merge stays in storage, and the new card records that merge. Failed requests and lost replies keep the card and its editable merged text. |
+| R6-3 | Conflicts lived only in memory. `lib/drafts.ts` stores their question, proposal, base, both sides, merged body and paths with the per-person draft. `suite/index.tsx` restores them and releases closed questions while retaining the merged text as a draft. | Reload and a new tab restore the same question and merged text, refuse editor keys and send no extra proposal. Resolution leaves no open adoption question. A replacement tab that never touches the editor removes the matching stored draft. A rejected or resolved stored question drops its card on return, says why, and keeps typed card text editable. |
+| R6-4 | The consumption guard suppressed a step mark still shown at Enter. `runs/cockpit.tsx` sends the displayed mark through both Enter handlers, as it already sends the displayed note. | Press `2 p` with its reply held, then `k`, `f`, note, Enter. The hint shows step 2, the correction request carries `s2` and the note, and the recorded failure has `atStep: s2`. |
+
+For point 6 of the brief, the card keeps its displayed current version while
+open. A merge that meets a newer version replaces it with a card against the
+current head. It does not announce success or discard the draft. The merge
+text submitted on the first card becomes the draft side of the replacement.
+
+The card also refuses input visibly while its merge reply is pending. Its
+fields remain mounted and read-only, and its choice buttons are unavailable.
+This closes the same loss between a card field and an in-flight request. The
+new pending-card check first failed with `My title typed during merge` where
+it expected `My title`. A lost-reply check then found that changing the card
+could clear it when the question read was already decided. The implementation
+keeps uncertain merges open until a retry or reload establishes the outcome.
+Reload uses the closed-question rule and keeps the saved merged text.
+
+The round-4 conflict tests and all four round-5 choice tests now use real key
+input and assert visible refusal and unchanged editor fields. Choosing the
+entire current body can be a no-op at version 2. The tests no longer require
+a new version from that no-op. The known-conflict seal test still checks zero
+extra proposals.
+
+Two checks now prove the guards the round-6 reviewer found untested:
+
+- `N-3 two live windows never share a pending existing-case request` checks
+  every command sent by the second window. Removing the liveness guard made
+  it fail on an ID equal to the first window's command.
+- `R5B-1 a failed note request behind a later write releases the note for the
+  next shortcut` holds the first failure, queues a pass, aborts the failure,
+  and presses the next pass shortcut while the second request is held.
+  Moving note release after the later-write guard made the third request's
+  note `undefined` instead of `wrong total`. The second pass still carries
+  no note.
+
+Both temporary guard removals were restored before validation. No server or
+core change is needed for R6-1 through R6-4. The earlier R5B-4 limitation is
+unchanged: restoring a prior failure's step still needs the server's slot
+fill to expose `atStep`, tracked as issue #72. Its reproduction remains the
+suite's single explicit skip.
+
+
+Final preflight passed on this implementation: `bunx tsc --noEmit` exited 0,
+`bunx biome check src/web test/e2e` reported `Checked 61 files` with no fixes,
+and `bun test test/architecture.test.ts` reported `12 pass`, `0 fail` and
+31 assertions. The final focused round-6 run reported `14 pass`, `0 fail`
+and 58 assertions in 15.83 seconds.
+
+The final two consecutive full `bun test test/e2e` runs reported:
+
+```text
+run 1: 189 pass, 1 skip, 0 fail, 855 expect() calls.
+       Ran 190 tests across 20 files. [288.59s]
+run 2: 189 pass, 1 skip, 0 fail, 855 expect() calls.
+       Ran 190 tests across 20 files. [287.00s]
+```
+
+No source or test changed between those two runs. The skip is R5B-4's
+previously deferred slot-fill field, not a round-6 finding. Both runs include
+the existing real idle seal and latency checks with their unchanged limits.
+Each test fixture closed its own server and browser and removed its temporary
+data. This worker made no commit, push, pull request or checkout cleanup.
+Only the worker's own `/tmp` logs and source backups were removed after their
+deciding lines were recorded here. The current diff remains for the lead's
+independent verification and commit.

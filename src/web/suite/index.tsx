@@ -7,7 +7,7 @@ import type { Api } from "../../core/api.ts";
 import { mergeBodies } from "../../core/merge3.ts";
 import { CaseBody, emptyBody, TAG } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
-import { cleanTitle, firstStep } from "../case/editor.tsx";
+import { cleanTitle, conflictEditorStatus, firstStep } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
 import { ApiError, call } from "../lib/api.ts";
 import { invalidateProject, queryClient, useQueryOp } from "../lib/data.ts";
@@ -78,8 +78,41 @@ export function SuiteScreen() {
 	const [captures, setCaptures] = useState(() => new Map(readDrafts(project).map((draft) => [draft.id, draft])));
 	const adoptedRefs = useRef(new Map<string, string>());
 	const pending = useRef(new Map<string, Promise<void>>());
-	const [conflict, setConflict] = useState<ConflictState | null>(null);
-	const conflicts = useRef(new Map<string, ConflictState>());
+	const [conflict, setConflict] = useState<ConflictState | null>(draft?.conflict ?? null);
+	const [initialConflicts] = useState(
+		() =>
+			new Map(
+				readDrafts(project).flatMap((draft) =>
+					draft.conflict ? [[draft.conflict.ref, draft.conflict] satisfies [string, ConflictState]] : [],
+				),
+			),
+	);
+	const conflicts = useRef(initialConflicts);
+	const resolving = useRef(new Set<string>());
+	const uncertainMerges = useRef(new Set<string>());
+	const storeConflict = useCallback(
+		(state: ConflictState): void => {
+			conflicts.current.set(state.ref, state);
+			const latest = liveDrafts.current.get(state.draftId) ?? readDraft({ project, id: state.draftId });
+			if (!latest) return;
+			const next = { ...latest, conflict: state, sent: null };
+			liveDrafts.current.set(next.id, next);
+			try {
+				writeDraft({ project, draft: next });
+				setDraftStored(true);
+			} catch {
+				setDraftStored(false);
+				setStatus("Device storage is full. Keep this tab open until the version is recorded.");
+			}
+			setCaptures((previous) => new Map(previous).set(next.id, next));
+			if (draftRef.current?.id === next.id) {
+				draftRef.current = next;
+				setDraftState(next);
+				setConflict(state);
+			}
+		},
+		[project, setStatus],
+	);
 	const conflictQuestion = useQueryOp({
 		project,
 		op: "get",
@@ -221,9 +254,14 @@ export function SuiteScreen() {
 			prior &&
 			JSON.stringify([prior.body, prior.tags, prior.covers, prior.folder]) !==
 				JSON.stringify([next.body, next.tags, next.covers, next.folder]);
+		if (contentChanged && conflicts.current.has(next.ref ?? "")) {
+			setStatus(conflictEditorStatus);
+			return;
+		}
 		const changed = {
 			...next,
 			sent: prior?.id === next.id ? prior.sent : next.sent,
+			conflict: conflicts.current.get(next.ref ?? "") ?? next.conflict,
 			owner: windowId,
 			cmd:
 				contentChanged && prior?.id === next.id && prior.sent?.input.cmd === prior.cmd
@@ -235,19 +273,6 @@ export function SuiteScreen() {
 		};
 		draftRef.current = changed;
 		liveDrafts.current.set(changed.id, changed);
-		const previousConflict = conflicts.current.get(changed.ref ?? "");
-		if (contentChanged && previousConflict) {
-			const normalized = cleanTitle(changed);
-			const merged = mergeBodies({ base: changed.original, mine: normalized.body, theirs: previousConflict.current });
-			const updated = {
-				...previousConflict,
-				mine: normalized.body,
-				merged: merged.merged,
-				paths: merged.conflicts.map((conflict) => conflict.path),
-			};
-			conflicts.current.set(previousConflict.ref, updated);
-			setConflict(updated);
-		}
 		try {
 			writeDraft({ project, draft: changed });
 			setDraftStored(true);
@@ -282,10 +307,16 @@ export function SuiteScreen() {
 		return false;
 	}
 	const forgetRequest = useCallback(
-		(id: string): void => {
+		(id: string, keepMerge = false): void => {
 			const latest = liveDrafts.current.get(id);
 			if (!latest) return;
-			const next = { ...latest, sent: null, cmd: randomId() };
+			const next = {
+				...latest,
+				body: keepMerge && latest.conflict ? latest.conflict.merged : latest.body,
+				sent: null,
+				conflict: undefined,
+				cmd: randomId(),
+			};
 			liveDrafts.current.set(id, next);
 			if (draftRef.current?.id === id) {
 				draftRef.current = next;
@@ -297,20 +328,114 @@ export function SuiteScreen() {
 	);
 	useEffect(() => {
 		const read = z
-			.object({ q: z.string(), decision: z.object({ answer: z.object({ is: z.string() }) }).nullable() })
+			.object({
+				q: z.string(),
+				state: z.string(),
+				decision: z.object({ answer: z.object({ is: z.string() }) }).nullable(),
+			})
 			.safeParse(conflictQuestion.data?.[0]);
-		if (!conflict || !read.success || read.data.q !== conflict.q || read.data.decision?.answer.is !== "reject") return;
+		if (
+			!conflict ||
+			!read.success ||
+			read.data.q !== conflict.q ||
+			read.data.state === "open" ||
+			resolving.current.has(conflict.q) ||
+			uncertainMerges.current.has(conflict.q)
+		)
+			return;
 		conflicts.current.delete(conflict.ref);
-		forgetRequest(conflict.draftId);
+		forgetRequest(conflict.draftId, true);
 		setConflict(null);
-		setStatus("The conflict proposal was rejected. Your current draft is kept; leave the editor to propose it afresh.");
+		setStatus(
+			`The conflict proposal was ${read.data.decision?.answer.is === "reject" ? "rejected" : "answered elsewhere"}. Your current draft is kept; leave the editor to propose it afresh.`,
+		);
 	}, [conflict, conflictQuestion.data, setStatus, forgetRequest]);
+
+	async function resolveConflict(state: ConflictState, merged: CaseBody): Promise<void> {
+		if (resolving.current.has(state.q)) return;
+		resolving.current.add(state.q);
+		try {
+			const questions = await call("inbox", { on: state.ref, kind: "adopt" }, { project, owner });
+			const question = questions.items.find((item) => item.q === state.q);
+			if (!question) {
+				setStatus("This conflict was answered elsewhere. Your draft is still kept. Reload to continue from it.");
+				return;
+			}
+			const reply = await call(
+				"decide",
+				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "merge", body: merged } },
+				{ project, owner },
+			);
+			if (!sessionCurrent(owner)) return;
+			const outcome = reply[0];
+			const moved = z
+				.object({ status: z.literal("conflict"), proposal: z.string(), adopt: z.string() })
+				.safeParse(outcome?.effects);
+			if (moved.success) {
+				const rows = await call("get", { refs: [state.ref] }, { project, owner });
+				if (!sessionCurrent(owner)) return;
+				const current = bodyOf(CaseView.parse(rows[0]));
+				const nextMerge = mergeBodies({ base: state.current, mine: merged, theirs: current });
+				storeConflict({
+					...state,
+					q: moved.data.adopt,
+					proposal: moved.data.proposal,
+					base: state.current,
+					mine: merged,
+					current,
+					merged: nextMerge.merged,
+					paths: nextMerge.conflicts.map((conflict) => conflict.path),
+				});
+				setStatus(
+					"Nothing was adopted: the case changed again. Your draft is kept. Resolve the new conflict in the card.",
+				);
+				void invalidateProject(project);
+				return;
+			}
+			if (outcome?.status !== "decided") {
+				setStatus(outcome?.needs ?? "The evidence changed. Your draft and conflict card are kept.");
+				return;
+			}
+			const rows = await call("get", { refs: [state.ref] }, { project, owner });
+			if (!sessionCurrent(owner)) return;
+			CaseView.parse(rows[0]);
+			conflicts.current.delete(state.ref);
+			const stored = readDraft({ project, id: state.draftId });
+			if (
+				!stored ||
+				(stored.conflict?.q === state.q &&
+					JSON.stringify(stored.conflict.merged) === JSON.stringify(CaseBody.parse(merged)))
+			)
+				removeDraft({ project, id: state.draftId });
+			liveDrafts.current.delete(state.draftId);
+			setCaptures((previous) => {
+				const next = new Map(previous);
+				next.delete(state.draftId);
+				return next;
+			});
+			if (draftRef.current?.id === state.draftId) {
+				draftRef.current = null;
+				setDraftState(null);
+				setConflict(null);
+			}
+			setStatus("Conflict resolved. Both earlier versions remain in the timeline.");
+			void invalidateProject(project);
+		} catch (error) {
+			uncertainMerges.current.add(state.q);
+			if (sessionCurrent(owner))
+				setStatus(
+					`${error instanceof Error ? error.message : "Conflict could not be resolved"}. Your draft and conflict card are kept.`,
+				);
+		} finally {
+			resolving.current.delete(state.q);
+		}
+	}
 
 	async function sealDraft({ keepalive = false, saved }: { keepalive?: boolean; saved?: Draft } = {}): Promise<void> {
 		const snapshot = saved ?? draftRef.current;
 		if (!sessionCurrent(owner)) return;
 		if (!snapshot || dropEmpty(snapshot)) return;
-		if (snapshot.ref && conflicts.current.has(snapshot.ref)) return;
+		if (snapshot.ref && (snapshot.conflict || conflicts.current.has(snapshot.ref))) return;
 		if (!snapshot.dirty) {
 			removeDraft({ project, id: snapshot.id, owner: windowId });
 			return;
@@ -435,6 +560,8 @@ export function SuiteScreen() {
 					const merged = mergeBodies({ base: latest.original, mine, theirs: currentBody });
 					const conflict: ConflictState = {
 						q: reply.question,
+						proposal: reply.proposal,
+						base: latest.original,
 						ref: snapshot.ref,
 						mine,
 						current: currentBody,
@@ -442,7 +569,7 @@ export function SuiteScreen() {
 						paths: merged.conflicts.map((conflict) => conflict.path),
 						draftId: snapshot.id,
 					};
-					conflicts.current.set(snapshot.ref, conflict);
+					storeConflict(conflict);
 					if (draftRef.current?.id === snapshot.id) {
 						setConflict(conflict);
 						setStatus("Both edits are kept. Choose each field to resolve the conflict.");
@@ -1249,50 +1376,8 @@ export function SuiteScreen() {
 				rapid={create}
 				hasDraft={Boolean(selected && captures.get(selected)?.dirty)}
 				conflict={draft && conflict?.ref === draft.ref ? conflict : null}
-				onResolved={(resolved, merged) => {
-					void (async () => {
-						const rows = await call("get", { refs: [resolved.ref] }, { project, owner });
-						if (!sessionCurrent(owner)) return;
-						const recorded = CaseView.parse(rows[0]);
-						const latest = liveDrafts.current.get(resolved.draftId);
-						conflicts.current.delete(resolved.ref);
-						const more = latest && JSON.stringify(cleanTitle(latest).body) !== JSON.stringify(resolved.mine);
-						if (latest && more) {
-							const next: Draft = {
-								...latest,
-								base: recorded.version,
-								original: bodyOf(recorded),
-								body: mergeBodies({ base: resolved.mine, mine: cleanTitle(latest).body, theirs: merged }).merged,
-								sent: null,
-								cmd: randomId(),
-								dirty: true,
-								submission: { kind: "none" },
-							};
-							liveDrafts.current.set(next.id, next);
-							writeDraft({ project, draft: next });
-							if (draftRef.current?.id === next.id) {
-								draftRef.current = next;
-								setDraftState(next);
-								setConflict(null);
-							}
-							setStatus("Conflict resolved. Your later text is kept as a draft.");
-						} else {
-							removeDraft({ project, id: resolved.draftId, owner: windowId });
-							liveDrafts.current.delete(resolved.draftId);
-							setCaptures((previous) => {
-								const next = new Map(previous);
-								next.delete(resolved.draftId);
-								return next;
-							});
-							if (draftRef.current?.id === resolved.draftId) {
-								draftRef.current = null;
-								setDraftState(null);
-								setConflict(null);
-							}
-						}
-						void invalidateProject(project);
-					})().catch((error: unknown) => setStatus(error instanceof Error ? error.message : "Your draft is kept."));
-				}}
+				onConflictChange={storeConflict}
+				onResolved={resolveConflict}
 			/>
 			{creatingFolder &&
 				folderMount &&

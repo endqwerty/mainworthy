@@ -4,7 +4,11 @@ import { parseOutline, splitExpected } from "../../core/outline.ts";
 import { type Draft, knownStepIds } from "../lib/drafts.ts";
 import { useBindings } from "../lib/keys.ts";
 import { readRoute } from "../lib/router.ts";
+import { useApp } from "../ui/context.tsx";
 import { KeyCap } from "../ui/index.tsx";
+
+export const conflictEditorStatus =
+	"Resolve the conflict first. Edit the merged fields in the conflict card; other fields can be edited after it is resolved.";
 
 export type DraftChange = (draft: Draft, focus?: boolean) => void;
 function freshStep(draft: Draft) {
@@ -56,12 +60,15 @@ export function BodyEditor({
 	change,
 	seal,
 	rapid,
+	readOnly = false,
 }: {
 	draft: Draft;
 	change: DraftChange;
 	seal: () => void;
 	rapid: () => void;
+	readOnly?: boolean;
 }) {
+	const { setStatus } = useApp();
 	function nextStep(): void {
 		if (draft.caret.field === "title" || draft.caret.field === "capture-title") {
 			firstStep({ draft, change });
@@ -97,7 +104,9 @@ export function BodyEditor({
 		);
 	}
 	const editing = () =>
-		document.activeElement instanceof HTMLElement && document.activeElement.matches(".body-editor textarea");
+		!readOnly &&
+		document.activeElement instanceof HTMLElement &&
+		document.activeElement.matches(".body-editor textarea");
 	useBindings([
 		{ key: "shift+enter", label: "Next new case", handler: rapid, allowInInput: true, when: editing },
 		{
@@ -135,6 +144,10 @@ export function BodyEditor({
 		change({ ...draft, caret: { field, start: target.selectionStart, end: target.selectionEnd } });
 	}
 	function update(field: string, text: string, target: HTMLTextAreaElement): void {
+		if (readOnly) {
+			setStatus(conflictEditorStatus);
+			return;
+		}
 		let body = draft.body;
 		if (field === "title") body = { ...body, title: text };
 		else if (field === "pre") body = { ...body, pre: text };
@@ -192,6 +205,18 @@ export function BodyEditor({
 		change({ ...draft, body, dirty: true, caret: { field, start: target.selectionStart, end: target.selectionEnd } });
 	}
 	function keys(event: KeyboardEvent<HTMLTextAreaElement>, field: string): void {
+		if (readOnly && event.key !== "Escape") {
+			if (
+				event.key === "Enter" ||
+				event.key === "Backspace" ||
+				event.key === "Delete" ||
+				(event.key.length === 1 && ((!event.ctrlKey && !event.metaKey) || /[vx]/i.test(event.key)))
+			) {
+				event.preventDefault();
+				setStatus(conflictEditorStatus);
+			}
+			return;
+		}
 		if (event.nativeEvent.isComposing) return;
 		if (event.repeat && (event.key === "Enter" || event.key === "Escape")) {
 			event.preventDefault();
@@ -288,6 +313,11 @@ export function BodyEditor({
 		}
 	}
 	function paste(event: React.ClipboardEvent<HTMLTextAreaElement>, field: string): void {
+		if (readOnly) {
+			event.preventDefault();
+			setStatus(conflictEditorStatus);
+			return;
+		}
 		const text = event.clipboardData.getData("text/plain");
 		if (!/[\n\t]/.test(text)) return;
 		if (field !== "title" && !field.endsWith(":action")) return;
@@ -344,6 +374,19 @@ export function BodyEditor({
 			className={className}
 			placeholder={placeholder}
 			value={value}
+			readOnly={readOnly}
+			onBeforeInput={(event) => {
+				if (readOnly) {
+					event.preventDefault();
+					setStatus(conflictEditorStatus);
+				}
+			}}
+			onCut={(event) => {
+				if (readOnly) {
+					event.preventDefault();
+					setStatus(conflictEditorStatus);
+				}
+			}}
 			onChange={(event) => update(field, event.target.value, event.target)}
 			onSelect={(event) => remember(field, event.currentTarget)}
 			onKeyDown={(event) => keys(event, field)}
@@ -352,6 +395,7 @@ export function BodyEditor({
 	);
 	return (
 		<div className="body-editor" ref={root}>
+			{readOnly && <p role="status">{conflictEditorStatus}</p>}
 			{input("title", draft.body.title, "Case title", "ctitle editor-input", "Untitled case")}
 			<div className="ctags">
 				{draft.tags.map((tag) => (
@@ -366,7 +410,11 @@ export function BodyEditor({
 			)}
 			<div className="sech">Steps</div>
 			{draft.body.steps.length === 0 ? (
-				<button className="nosteps" type="button" onClick={() => firstStep({ draft, change })}>
+				<button
+					className="nosteps"
+					type="button"
+					onClick={() => (readOnly ? setStatus(conflictEditorStatus) : firstStep({ draft, change }))}
+				>
 					No steps yet. Enter from the title starts the first one.
 				</button>
 			) : (

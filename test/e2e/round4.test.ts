@@ -125,7 +125,7 @@ for (const kind of ["edit", "new"])
 for (const same of [false, true])
 	for (const seal of [false, true])
 		check(
-			`R4A-1 conflict keeps later ${same ? "title" : "step"} text with seal ${seal}`,
+			`R4A-1 conflict visibly refuses later ${same ? "title" : "step"} input with seal ${seal}`,
 			async () => {
 				const server = await startServer();
 				await cases(server, 1);
@@ -141,9 +141,12 @@ for (const same of [false, true])
 					});
 					await page.keyboard.press("Escape");
 					await page.locator(".conflict-card").waitFor();
-					await (same ? title(page) : page.getByRole("textbox", { name: "Step 2", exact: true })).fill(
-						same ? "My newer title" : "Step 2 with more words",
-					);
+					const field = same ? title(page) : page.getByRole("textbox", { name: "Step 2", exact: true });
+					await field.click();
+					await field.press("End");
+					await page.keyboard.type(" with more words");
+					expect(await field.inputValue()).toBe(same ? "My title" : "Step 2");
+					await page.getByText("Resolve the conflict first", { exact: false }).first().waitFor();
 					if (seal) {
 						await page.keyboard.press("Escape");
 						await page.waitForTimeout(200);
@@ -154,7 +157,7 @@ for (const same of [false, true])
 						() => server.api("get", { refs: ["C-1"] }),
 						(rows) => rows[0]?.version === 3,
 					);
-					const expected = same ? "My newer title" : "Step 2 with more words";
+					const expected = same ? "My title" : "Step 2";
 					const held = await page.evaluate(() =>
 						Object.entries(localStorage)
 							.filter(([k]) => k.includes(":draft:"))

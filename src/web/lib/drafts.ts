@@ -6,6 +6,19 @@ import { deviceKey } from "./device.ts";
 const DraftBody = CaseBody.extend({
 	steps: z.array(Step.extend({ action: z.string(), expected: z.string().nullable() })),
 });
+export const DraftConflict = z.object({
+	q: z.string(),
+	proposal: z.string(),
+	ref: z.string(),
+	base: CaseBody,
+	mine: CaseBody,
+	current: CaseBody,
+	merged: CaseBody,
+	paths: z.array(z.string()),
+	draftId: z.string(),
+});
+export type DraftConflict = z.infer<typeof DraftConflict>;
+
 const Draft = z
 	.object({
 		id: z.string(),
@@ -13,6 +26,7 @@ const Draft = z
 		base: z.number(),
 		body: DraftBody,
 		original: CaseBody,
+		conflict: DraftConflict.optional(),
 		tags: z.array(z.string()),
 		covers: z.array(z.string()),
 		originalTags: z.array(z.string()).optional(),
