@@ -106,6 +106,10 @@ const Q = {
 	openPlanned: sql<{ project: number }, RunRow>(
 		"SELECT * FROM runs WHERE project = $project AND state = 'open' AND origin = 'planned'",
 	),
+	plannedForCommit: sql<{ project: number; commit: string }, { id: number }>(
+		`SELECT id FROM runs WHERE project = $project AND origin = 'planned'
+		 AND json_extract(accepts, '$.commit') = $commit`,
+	),
 	recent: sql<{ project: number; origin: string; before: number; limit: number }, RunRow>(
 		"SELECT * FROM runs WHERE project = $project AND origin = $origin AND id < $before ORDER BY id DESC LIMIT $limit",
 	),
@@ -480,6 +484,13 @@ function targetsOfRun(db: Db, run: RunRow): TargetRow[] {
 	if (run.origin === "change") return run.accepts_what ? targetsOfCommit(db, run.project, run.accepts_what) : [];
 	return targetsWithCommit(db, run.project, accepts.commit).filter((target) => matches(run, target, null));
 }
+
+/**
+ * Every planned run that counts a commit, open or closed, whatever environment or repository it narrows to: the
+ * runs to recompute when the commit's failures come to be answered somewhere else.
+ */
+export const plannedCounting = (db: Db, project: number, commit: string): number[] =>
+	db.all(Q.plannedForCommit, { project, commit }).map((row) => row.id);
 
 /** Acceptance: the report is durable but not applied, so each run it matters to reads `pending` until it is. */
 export function noteAccepted(ctx: Ctx, runs: readonly RunRow[], batchSeq: number): void {

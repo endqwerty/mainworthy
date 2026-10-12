@@ -1136,6 +1136,42 @@ describe("what a run and a change may count", () => {
 		).toEqual([{ key: "commit:bare00001" }]);
 	});
 
+	test("a run that counted an agent's result is recomputed when the commit is put in its real place", () => {
+		seed(2, ["human", "agent"]);
+		const ci = pipeline();
+		const commit = "moved0001";
+		const planned = plan({
+			name: "Exploration",
+			select: {},
+			accepts: { commit, env: "staging" },
+			require: exercise(["human", "agent"]),
+		});
+		// An agent, admitted by this run, fails a case on what it calls a commit of main.
+		report(
+			{
+				target: { commit, branch: "main", env: "staging" },
+				results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "found by the agent" } }],
+			},
+			explorer(),
+		);
+		const first = open("failure");
+		expect(decide(first, { is: "flaky" }).status).toBe("decided");
+		expect(gate({ run: planned.run }).tally).toMatchObject({ excused: 1, unexplained: 0 });
+		// The pipeline reports another environment of that commit as the head of a pull request: that is where
+		// the commit is. What was answered about trunk does not excuse a pull request's failure, so the run shows
+		// it unexplained again, at once, and somebody is asked about it there.
+		report(
+			{ target: { commit, pr: 7, branch: "feature", env: "prod" }, results: [{ test: { key: "t" }, outcome: "pass" }] },
+			ci,
+		);
+		expect(rows("SELECT DISTINCT line FROM targets WHERE commit_sha = ?", commit)).toEqual([{ line: "change" }]);
+		const now = gate({ run: planned.run });
+		expect(now.tally).toMatchObject({ excused: 0, unexplained: 1 });
+		const asked = open("failure");
+		expect(asked.q).not.toBe(first.q);
+		expect(now.open).toEqual([asked.q]);
+	});
+
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {
 		const ci = pipeline();
 		const head = "c2c2c2c200000000000000000000000000000002";

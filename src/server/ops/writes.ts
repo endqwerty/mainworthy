@@ -25,6 +25,7 @@ import {
 	type BatchRow,
 	batchById,
 	ensureTarget,
+	firstCountedReport,
 	keepReceipt,
 	markProcessed,
 	mustTarget,
@@ -49,6 +50,7 @@ import {
 	nothingCounted,
 	pinnedVersions,
 	plan,
+	plannedCounting,
 	runAccepts,
 	runById,
 	runRef,
@@ -161,6 +163,12 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 
 	// The batch is applied before the runs are folded: a run that requires this job must count it.
 	markProcessed(ctx, batch, applied.counts);
+	// The first report of a commit that a gate counts says where the commit is (only an agent may have said so
+	// before): every run that counts the commit is recomputed with the others, because its failures are
+	// answered there from now on.
+	if (target.commit_sha !== null && firstCountedReport(ctx.db, batch, target)) {
+		for (const id of plannedCounting(ctx.db, ctx.project.id, target.commit_sha)) ctx.recompute.add(id);
+	}
 	refold(
 		ctx,
 		runs.map((run) => run.id),

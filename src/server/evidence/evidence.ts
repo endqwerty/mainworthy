@@ -410,6 +410,7 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 		? { line: first.line, branch: first.branch, change: first.change }
 		: { line: trunk ? "trunk" : "change", branch: input.branch ?? null, change: change?.id ?? null };
 	// The first report a gate counts, for a commit only an agent had reported: every target of it moves there.
+	// (Applying that report recomputes every run that counts the commit: see `firstCountedReport`.)
 	if (first !== undefined && !settled) ctx.db.run(Q.placeCommit, { project, what, ...place });
 	if (found) return settled ? found : mustTarget(ctx.db, found.id);
 	const { lastId } = ctx.db.run(Q.insertTarget, {
@@ -438,6 +439,17 @@ function changeKey(db: Db, project: number, key: string, repo: string | null): s
  */
 const firstSeen = (db: Db, project: number, repo: string | null, commit: string): number | null =>
 	db.get(Q.firstCounted, { project, what: codeWhat(repo, commit) })?.seq ?? null;
+
+/**
+ * Whether this batch is the first report of its commit that a gate counts. That report is the one that says
+ * where the commit is, so the caller recomputes every run that counts the commit: a run that already held an
+ * agent's results on it has its failures answered there from now on. Read from the batches, so it is the same
+ * answer when the report is applied after a restart.
+ */
+export function firstCountedReport(db: Db, batch: BatchRow, target: TargetRow): boolean {
+	if (target.commit_sha === null || batch.method === "agent") return false;
+	return db.get(Q.firstCounted, { project: batch.project, what: target.what })?.seq === batch.seq;
+}
 
 /**
  * Records a change, or moves it to a new head. The head only moves forward: to a commit first reported after the
