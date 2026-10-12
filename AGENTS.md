@@ -13,6 +13,9 @@ The MVP is built (2026-10-12): TypeScript on Bun, one SQLite file, a React web U
 (`docs/decisions/0010-stack.md`). What it contains and where it departs from the
 design: `docs/decisions/0012-mvp-scope-and-departures.md`. What is deferred: the
 GitHub milestone `Backlog to 1.0`. How it fits together: `docs/architecture.md`.
+It runs on Daniel's Coolify for his own use since 2026-10-12 (`docs/deploy.md`; the
+home lab's notes say where and how to redeploy). The one known blocking defect is
+issue #81, in the web UI's conflict card.
 
 ## Stack rules
 
