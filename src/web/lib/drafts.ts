@@ -51,10 +51,23 @@ export function writeDraft({ project, draft }: { project: string; draft: Draft }
 export function activeDraft(project: string): Draft | null {
 	try {
 		const id = localStorage.getItem(activeKey(project));
-		return id ? readDraft({ project, id }) : null;
+		return (id ? readDraft({ project, id }) : null) ?? readDrafts(project).at(-1) ?? null;
 	} catch {
 		return null;
 	}
+}
+export function readDrafts(project: string): Draft[] {
+	const drafts: Draft[] = [];
+	const prefix = deviceKey("draft", `${project}:`);
+	try {
+		for (let i = 0; i < localStorage.length; i++) {
+			const key = localStorage.key(i);
+			if (!key?.startsWith(prefix)) continue;
+			const draft = readDraft({ project, id: key.slice(prefix.length) });
+			if (draft) drafts.push(draft);
+		}
+	} catch {}
+	return drafts.sort((a, b) => a.at - b.at);
 }
 export function removeDraft({ project, id }: { project: string; id: string }): void {
 	localStorage.removeItem(draftKey({ project, id }));

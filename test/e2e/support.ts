@@ -115,12 +115,12 @@ export async function startServer({
 		throw error;
 	}
 }
-export async function launchBrowser(): Promise<Browser> {
+export async function launchBrowser({ args = [] }: { args?: string[] } = {}): Promise<Browser> {
 	if (!chromiumPath) throw new Error("System Chromium is missing");
 	return chromium.launch({
 		executablePath: chromiumPath,
 		headless: true,
-		args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+		args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", ...args],
 	});
 }
 export type PageHarness = {

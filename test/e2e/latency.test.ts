@@ -24,17 +24,46 @@ for (const cases of [2000, 10000]) {
 				await page.evaluate(() => {
 					const capture: number[] = [];
 					const typing: number[] = [];
+					const next: number[] = [];
+					const previous: number[] = [];
 					const errors: string[] = [];
-					Reflect.set(window, "casebookLatency", { capture, typing, errors });
+					Reflect.set(window, "casebookLatency", { capture, typing, next, previous, errors });
 					window.addEventListener(
 						"keydown",
 						(event) => {
-							if (
-								event.key !== "c" ||
-								event.target instanceof HTMLInputElement ||
-								event.target instanceof HTMLTextAreaElement
-							)
+							if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+							if (event.key === "j" || event.key === "k") {
+								const current = document.querySelector('#list [role="option"][aria-selected="true"]');
+								const neighbor =
+									event.key === "j"
+										? current?.parentElement?.nextElementSibling
+										: current?.parentElement?.previousElementSibling;
+								const expected = neighbor?.querySelector(".id")?.textContent;
+								const start = performance.now();
+								Reflect.set(
+									window,
+									"navigationPaint",
+									new Promise<void>((resolve) => {
+										const painted = () => {
+											const selected = document.querySelector(
+												'#list [role="option"][aria-selected="true"] .id',
+											)?.textContent;
+											const elapsed = performance.now() - start;
+											if (expected && selected !== expected && elapsed < 1000) {
+												requestAnimationFrame(painted);
+												return;
+											}
+											if (!expected || selected !== expected)
+												errors.push(`${event.key}: expected ${expected}, selected ${selected}`);
+											(event.key === "j" ? next : previous).push(elapsed);
+											resolve();
+										};
+										requestAnimationFrame(painted);
+									}),
+								);
 								return;
+							}
+							if (event.key !== "c") return;
 							const start = performance.now();
 							requestAnimationFrame(() => {
 								const target = document.querySelector('#detail [data-field="title"]');
@@ -59,7 +88,26 @@ for (const cases of [2000, 10000]) {
 						true,
 					);
 				});
-				for (let i = 0; i < 30; i++) {
+				await page.locator('#list [role="option"][aria-selected="true"]').waitFor();
+				for (let i = 0; i < 200; i++) {
+					for (const key of ["j", "k"]) {
+						await page.keyboard.press(key);
+						await page.waitForFunction(
+							({ key, count }) => {
+								const samples: unknown = Reflect.get(window, "casebookLatency");
+								if (!samples || typeof samples !== "object") return false;
+								const values =
+									key === "j" && "next" in samples ? samples.next : "previous" in samples ? samples.previous : null;
+								return Array.isArray(values) && values.length >= count;
+							},
+							{ key, count: i + 1 },
+						);
+						await page.evaluate(
+							() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+						);
+					}
+				}
+				for (let i = 0; i < 200; i++) {
 					await page.keyboard.press("c");
 					await page.getByRole("textbox", { name: "Case title" }).waitFor();
 					await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
@@ -68,28 +116,40 @@ for (const cases of [2000, 10000]) {
 				await page.keyboard.press("c");
 				await page.keyboard.type("Latency sample");
 				await page.keyboard.press("Enter");
-				for (let i = 0; i < 30; i++) {
+				for (let i = 0; i < 200; i++) {
 					await page.keyboard.press("a");
 					await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 				}
 				const samples = z
-					.object({ capture: z.array(z.number()), typing: z.array(z.number()), errors: z.array(z.string()) })
+					.object({
+						capture: z.array(z.number()),
+						typing: z.array(z.number()),
+						next: z.array(z.number()),
+						previous: z.array(z.number()),
+						errors: z.array(z.string()),
+					})
 					.parse(await page.evaluate(() => Reflect.get(window, "casebookLatency")));
-				const capture = samples.capture.slice(0, 30);
-				const typing = samples.typing.slice(0, 30);
-				expect(capture).toHaveLength(30);
-				expect(typing).toHaveLength(30);
+				const capture = samples.capture.slice(0, 200);
+				const typing = samples.typing.slice(0, 200);
+				expect(capture).toHaveLength(200);
+				expect(typing).toHaveLength(200);
+				expect(samples.next).toHaveLength(200);
+				expect(samples.previous).toHaveLength(200);
 				expect(samples.errors).toEqual([]);
 				const result = {
 					cases,
 					capture: { p50: percentile(capture, 0.5), p95: percentile(capture, 0.95) },
 					typing: { p50: percentile(typing, 0.5), p95: percentile(typing, 0.95) },
+					next: { p50: percentile(samples.next, 0.5), p95: percentile(samples.next, 0.95) },
+					previous: { p50: percentile(samples.previous, 0.5), p95: percentile(samples.previous, 0.95) },
 				};
 				console.info(
-					`L1 ${cases}: capture p50=${result.capture.p50.toFixed(1)}ms p95=${result.capture.p95.toFixed(1)}ms; typing p50=${result.typing.p50.toFixed(1)}ms p95=${result.typing.p95.toFixed(1)}ms; 30 samples each.`,
+					`L1 ${cases}: capture p95=${result.capture.p95.toFixed(1)}ms; typing p95=${result.typing.p95.toFixed(1)}ms; j p95=${result.next.p95.toFixed(1)}ms; k p95=${result.previous.p95.toFixed(1)}ms; 200 samples each.`,
 				);
 				expect(result.capture.p95).toBeLessThanOrEqual(100);
 				expect(result.typing.p95).toBeLessThanOrEqual(100);
+				expect(result.next.p95).toBeLessThanOrEqual(100);
+				expect(result.previous.p95).toBeLessThanOrEqual(100);
 				await page.keyboard.press("Escape");
 				const scrolling = await page.evaluate(async (expected) => {
 					const list = document.querySelector('[data-testid="case-list"]');
@@ -131,7 +191,7 @@ for (const cases of [2000, 10000]) {
 				const ref = rows.items[0]?.ref;
 				if (typeof ref !== "string") throw new Error("Latency case was never recorded");
 				const stored = (await server.api("get", { refs: [ref] }))[0];
-				expect(stored?.steps).toMatchObject([{ action: "a".repeat(30) }]);
+				expect(stored?.steps).toMatchObject([{ action: "a".repeat(200) }]);
 			} finally {
 				await browser.close();
 				await server.stop();

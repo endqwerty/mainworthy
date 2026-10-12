@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Capability, Policy } from "../../core/kinds.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
+import { randomId } from "../lib/ids.ts";
 import { useBindings } from "../lib/keys.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
@@ -68,7 +69,7 @@ function SettingsWorkbench() {
 				{
 					edits: [{ op: "policy", preset: next }],
 					reason: `Use the ${next} preset, selected in Settings.`,
-					cmd: crypto.randomUUID(),
+					cmd: randomId(),
 				},
 				{ project },
 			);
@@ -83,7 +84,7 @@ function SettingsWorkbench() {
 					onEvidence: question.evidenceHash,
 					answer: { is: "accept" },
 					reason: `Use the ${next} preset, selected in Settings.`,
-					cmd: crypto.randomUUID(),
+					cmd: randomId(),
 				},
 				{ project },
 			);
@@ -247,6 +248,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 	const [kind, setKind] = useState<"human" | "agent" | "ci">("agent");
 	const [capabilities, setCapabilities] = useState<z.infer<typeof Capability>[]>(["read", "produce"]);
 	const [created, setCreated] = useState<z.infer<typeof CreatedToken> | null>(null);
+	const secretRef = useRef<HTMLInputElement>(null);
 	const [busy, setBusy] = useState(false);
 	const [revoking, setRevoking] = useState<Set<number>>(new Set());
 	return (
@@ -331,17 +333,41 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 					<p>
 						{created.actor} · {created.can.join(", ")}
 					</p>
-					<input className="form-input" type="password" aria-label="New token" readOnly value={created.token} />
+					<input
+						className="form-input"
+						type="password"
+						aria-label="New token"
+						readOnly
+						value={created.token}
+						ref={secretRef}
+					/>
 					<div>
 						<button
 							className="out"
 							type="button"
-							onClick={() =>
-								void navigator.clipboard
-									.writeText(created.token)
-									.then(() => setStatus("Token copied."))
-									.catch(() => setStatus("Copy failed. Select and copy the token field."))
-							}
+							onClick={() => {
+								if (navigator.clipboard) {
+									void navigator.clipboard
+										.writeText(created.token)
+										.then(() => setStatus("Token copied."))
+										.catch(() => setStatus("Copy failed. Try again."));
+									return;
+								}
+								const field = secretRef.current;
+								if (!field) return;
+								const focused = document.activeElement;
+								try {
+									// Plain HTTP has no async clipboard. Unmask only during this synchronous copy, before paint.
+									field.type = "text";
+									field.select();
+									setStatus(document.execCommand("copy") ? "Token copied." : "Copy failed. Try again.");
+								} catch {
+									setStatus("Copy failed. Try again.");
+								} finally {
+									field.type = "password";
+									if (focused instanceof HTMLElement) focused.focus();
+								}
+							}}
 						>
 							Copy token
 						</button>
@@ -436,7 +462,7 @@ function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElem
 									key,
 									...(name.trim() ? { name: name.trim() } : {}),
 									preset,
-									cmd: crypto.randomUUID(),
+									cmd: randomId(),
 								},
 								{ project },
 							)

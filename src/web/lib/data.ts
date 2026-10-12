@@ -37,7 +37,7 @@ export function useQueryOp<O extends OpName>({
 export function invalidateProject(project: string): Promise<void> {
 	return queryClient.invalidateQueries({ queryKey: [project] });
 }
-const Change = z.object({ touched: z.array(z.string()) });
+const Change = z.object({ op: z.string().optional(), touched: z.array(z.string()) });
 /** One stream per active project. Focus/reconnect refetches repair every missed event. */
 export function useEvents(project: string): void {
 	useEffect(() => {
@@ -57,6 +57,8 @@ export function useEvents(project: string): void {
 					if (query.queryKey[0] !== project) return false;
 					const op = query.queryKey[1];
 					if (op === "find" || op === "inbox" || op === "gate" || op === "impact" || op === "admin") return true;
+					// A proposal's event names its proposal and question, so an open case's timeline must be read again.
+					if (op === "timeline" && parsed.data.op === "propose") return true;
 					const input = JSON.stringify(query.queryKey[2]) ?? "";
 					return (
 						refs.length === 0 || refs.some((ref) => input.includes(ref)) || refs.some((ref) => !/^[CQRPT]-/.test(ref))

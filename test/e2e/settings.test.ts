@@ -86,6 +86,17 @@ import { Policy } from "../../src/core/kinds.ts";
 		const server = await fixture({ preset: "loose", mode: "server" });
 		let view: Awaited<ReturnType<typeof openPage>> | null = null;
 		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Visible in scratch" }] });
+			await server.api("admin", { do: "project.create", key: "restricted", name: "Restricted" });
+			await call(
+				"propose",
+				{ edits: [{ op: "create", outline: "Only in restricted" }] },
+				{
+					url: server.url,
+					project: "restricted",
+					token: server.token,
+				},
+			);
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
 			page.setDefaultTimeout(8000);
@@ -116,7 +127,18 @@ import { Policy } from "../../src/core/kinds.ts";
 			await page.getByLabel("New token").waitFor();
 			const secret = await page.getByLabel("New token").inputValue();
 			expect(secret.length).toBeGreaterThan(10);
-			expect((await server.api("find", { in: "cases" }, { token: secret })).items).toEqual([]);
+			expect((await server.api("find", { in: "cases" }, { token: secret })).items.map((row) => row.title)).toEqual([
+				"Visible in scratch",
+			]);
+			const denied = await fetch(`${server.url}/api/p/restricted/find`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json", authorization: `Bearer ${secret}` },
+				body: JSON.stringify({ in: "cases" }),
+			});
+			expect(denied.status).toBe(403);
+			expect(
+				z.object({ ok: z.literal(false), error: z.object({ code: z.string() }) }).parse(await denied.json()).error.code,
+			).toBe("forbidden");
 			const tokens = z
 				.array(z.object({ id: z.number(), actor: z.string(), revoked: z.boolean() }))
 				.parse(await server.api("admin", { do: "token.list" }));

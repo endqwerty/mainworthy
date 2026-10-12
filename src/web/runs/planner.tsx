@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Api } from "../../core/api.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
+import { randomId } from "../lib/ids.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { KeyCap } from "../ui/index.tsx";
@@ -62,7 +63,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 						name: name.trim(),
 						select,
 						...(target === "commit" ? { accepts: { commit: commit.trim() } } : {}),
-						cmd: crypto.randomUUID(),
+						cmd: randomId(),
 					},
 					{ project },
 				)

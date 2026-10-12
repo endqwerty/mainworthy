@@ -105,6 +105,10 @@ async function cases(server: Server, count: number) {
 	async () => {
 		const server = await fixture();
 		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		let release = () => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
 		try {
 			const created = await cases(server, 10);
 			const planned = await server.api("plan", {
@@ -131,6 +135,10 @@ async function cases(server: Server, count: number) {
 			page.on("request", (request) => {
 				if (request.url().endsWith("/report")) reports.push(request.postDataJSON());
 			});
+			await view.context.route("**/api/p/scratch/report", async (route) => {
+				await held;
+				await route.continue();
+			});
 			for (let i = 0; i < 8; i++) {
 				await page.keyboard.press("p");
 				if (i === 0)
@@ -139,32 +147,6 @@ async function cases(server: Server, count: number) {
 							document.querySelector('[data-run-document="C-2"][data-active="true"] [data-step]') ===
 							Reflect.get(window, "nextStep"),
 					);
-				try {
-					await eventually(
-						() => server.api("find", { in: "slots", run: planned.run }),
-						(rows) =>
-							Slot.array()
-								.parse(rows.items)
-								.filter((slot) => slot.fills.some((fill) => fill.by === "daniel" && fill.outcome === "pass")).length ===
-							i + 1,
-					);
-				} catch (error) {
-					console.info(
-						"J5 failed pass",
-						i + 1,
-						"reports",
-						JSON.stringify(reports),
-						"page",
-						await page.evaluate(() => ({
-							current: document.querySelector("[data-active=true]")?.getAttribute("data-run-document"),
-							status: document.querySelector("#stat")?.textContent,
-							controls: document.querySelector(".run-controls")?.textContent,
-						})),
-						"slots",
-						JSON.stringify((await server.api("find", { in: "slots", run: planned.run })).items),
-					);
-					throw error;
-				}
 			}
 			await page.keyboard.press("f");
 			expect(
@@ -176,6 +158,12 @@ async function cases(server: Server, count: number) {
 			await page.keyboard.press("Enter");
 			await page.waitForSelector('[data-run-document="C-10"][data-active="true"]');
 			await page.keyboard.press("b");
+			expect(
+				Slot.array()
+					.parse((await server.api("find", { in: "slots", run: planned.run })).items)
+					.every((slot) => slot.fills.length === 0),
+			).toBe(true);
+			release();
 			const reply = await eventually(
 				() => server.api("find", { in: "slots", run: planned.run }),
 				(rows) =>
@@ -218,6 +206,7 @@ async function cases(server: Server, count: number) {
 			expect(view.errors).toEqual([]);
 			expect(view.dialogs).toEqual([]);
 		} finally {
+			release();
 			await view?.close();
 			await server.stop();
 		}

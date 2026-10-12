@@ -5,6 +5,7 @@ import type { ReportReceipt } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { deviceKey } from "../lib/device.ts";
+import { randomId } from "../lib/ids.ts";
 import { type Binding, useBindings } from "../lib/keys.ts";
 import { navigate, refUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
@@ -241,7 +242,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				"report",
 				{
 					run: runRef,
-					cmd: crypto.randomUUID(),
+					cmd: randomId(),
 					results: [
 						{
 							...resultInput,
@@ -288,13 +289,10 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				return next;
 			});
 			setLast((value) => (value?.ready === request ? null : value));
-			setCursor(slot.id);
-			setNoteOf(slot.id, text);
-			if (outcome === "fail") {
-				setNoting(slot);
-				noteRef.current?.focus();
-			}
-			setStatus(error instanceof Error ? error.message : "The result could not be recorded. Your note is kept.");
+			// The person may already be typing another note. Restore the slot without changing their selection or input.
+			setStatus(
+				`${slot.case} was not recorded: ${error instanceof Error ? error.message : "The request failed"}. Its note is kept. Return to the slot to retry.`,
+			);
 			void invalidateProject(project);
 		});
 		if (advance) {

@@ -6,6 +6,8 @@ import { ANSWER_HELP, ANSWER_KEYS, ANSWER_LABELS, ANSWERS, KINDS, type Kind } fr
 import type { InboxReply, QuestionItem } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
+import { deviceKey } from "../lib/device.ts";
+import { randomId } from "../lib/ids.ts";
 import { type Binding, useBindings } from "../lib/keys.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
@@ -50,6 +52,7 @@ function QueueWorkbench() {
 	const [lastMessage, setLastMessage] = useState("One key answers. Every decision stays in the ledger.");
 	const [inline, setInline] = useState<InlineAnswer | null>(null);
 	const inlineRef = useRef<HTMLInputElement>(null);
+	const extraInputs = useRef(new Map<string, string>());
 	const actionNo = useRef(0);
 	const undoing = useRef(new Set<string>());
 	const pendingAnswers = useRef(new Set<string>());
@@ -149,16 +152,54 @@ function QueueWorkbench() {
 			},
 		);
 	}
-	function bringBack(questions: QuestionItem[]): void {
+	function bringBack(questions: QuestionItem[], select = true): void {
 		setHidden((previous) => {
 			const next = new Set(previous);
 			for (const q of questions) next.delete(q.q);
 			return next;
 		});
 		setRestored((previous) => [...questions, ...previous.filter((item) => !questions.some((q) => q.q === item.q))]);
-		setCursor(questions[0]?.q ?? null);
+		if (select) setCursor(questions[0]?.q ?? null);
 	}
-	function submit(entries: DecisionEntry[], reason?: string): void {
+	function extraKey(entry: DecisionEntry, field: InlineAnswer["field"]): string {
+		return deviceKey("queue-input", `${project}:${entry.question.q}:${String(entry.answer.is)}:${field}`);
+	}
+	function readExtra(entry: DecisionEntry, field: InlineAnswer["field"]): string {
+		const key = extraKey(entry, field);
+		const value = extraInputs.current.get(key);
+		if (value !== undefined) return value;
+		try {
+			return localStorage.getItem(key) ?? "";
+		} catch {
+			return "";
+		}
+	}
+	function startInline(entries: DecisionEntry[], field: InlineAnswer["field"]): void {
+		const first = entries[0];
+		setInline({ entries, field, value: first ? readExtra(first, field) : "" });
+		if (current) navigate(routeUrl({ project, screen: "queue", ref: current.q }), { replace: true });
+	}
+	function rememberInline(next: InlineAnswer): void {
+		setInline(next);
+		for (const entry of next.entries) {
+			const key = extraKey(entry, next.field);
+			extraInputs.current.set(key, next.value);
+			try {
+				localStorage.setItem(key, next.value);
+			} catch {
+				setStatus("Device storage is full. Your answer text is kept in this tab.");
+			}
+		}
+	}
+	function clearExtra(entry: DecisionEntry, sent: InlineAnswer): void {
+		const key = extraKey(entry, sent.field);
+		if (readExtra(entry, sent.field) !== sent.value) return;
+		extraInputs.current.delete(key);
+		try {
+			if (localStorage.getItem(key) === sent.value) localStorage.removeItem(key);
+		} catch {}
+	}
+	function submit(entries: DecisionEntry[], reason?: string, extra?: InlineAnswer): void {
 		if (!entries.length) return;
 		const action = ++actionNo.current;
 		const refs = new Set(entries.map((entry) => entry.question.q));
@@ -185,13 +226,19 @@ function QueueWorkbench() {
 		}));
 		const one = all[0];
 		if (!one) return;
-		const confirmed = call(
-			"decide",
-			all.length === 1 ? { ...one, cmd: crypto.randomUUID() } : { all, cmd: crypto.randomUUID() },
-			{ project },
-		)
+		const confirmed = call("decide", all.length === 1 ? { ...one, cmd: randomId() } : { all, cmd: randomId() }, {
+			project,
+		})
 			.then(async (replies) => {
 				for (const ref of refs) pendingAnswers.current.delete(ref);
+				if (extra)
+					for (const entry of entries)
+						if (
+							replies.some(
+								(reply) => reply.q === entry.question.q && (reply.status === "decided" || reply.status === "already"),
+							)
+						)
+							clearExtra(entry, extra);
 				const rejected = entries.filter(
 					(entry) =>
 						!replies.some(
@@ -199,7 +246,10 @@ function QueueWorkbench() {
 						),
 				);
 				if (rejected.length) {
-					bringBack(rejected.map((entry) => entry.question));
+					bringBack(
+						rejected.map((entry) => entry.question),
+						false,
+					);
 					const reply = replies.find((reply) => rejected.some((entry) => entry.question.q === reply.q));
 					const message =
 						reply?.status === "conflict"
@@ -228,7 +278,10 @@ function QueueWorkbench() {
 			})
 			.catch((error: unknown) => {
 				for (const ref of refs) pendingAnswers.current.delete(ref);
-				bringBack(entries.map((entry) => entry.question));
+				bringBack(
+					entries.map((entry) => entry.question),
+					false,
+				);
 				const message = error instanceof Error ? error.message : "The answer could not be recorded. Try again.";
 				if (action === actionNo.current) {
 					setLastMessage(message);
@@ -303,11 +356,11 @@ function QueueWorkbench() {
 			};
 		});
 		if (questions.some((q) => q.needs.includes("with a reason"))) {
-			setInline({ entries, field: "reason", value: "" });
+			startInline(entries, "reason");
 			return;
 		}
 		if (is === "defect") {
-			setInline({ entries, field: "ref", value: "" });
+			startInline(entries, "ref");
 			return;
 		}
 		submit(entries);
@@ -333,7 +386,7 @@ function QueueWorkbench() {
 		void (async () => {
 			if (prior && !(await prior.confirmed)) return;
 			for (const question of questions) {
-				const replies = await call("decide", { undo: question.q, cmd: crypto.randomUUID() }, { project });
+				const replies = await call("decide", { undo: question.q, cmd: randomId() }, { project });
 				const reply = replies[0];
 				if (reply?.status !== "reopened") {
 					const current = z
@@ -670,6 +723,7 @@ function QueueWorkbench() {
 											: entry.answer,
 								})),
 								inline.field === "reason" ? inline.value.trim() : undefined,
+								inline,
 							);
 						}}
 					>
@@ -681,11 +735,11 @@ function QueueWorkbench() {
 							id="answer-extra"
 							ref={inlineRef}
 							value={inline.value}
-							onChange={(event) => setInline({ ...inline, value: event.target.value })}
+							onChange={(event) => rememberInline({ ...inline, value: event.target.value })}
 							onKeyDown={(event) => {
 								if (event.key === "Escape") {
 									event.preventDefault();
-									if (inline.field === "ref") submit(inline.entries);
+									if (inline.field === "ref") submit(inline.entries, undefined, inline);
 									else setInline(null);
 								}
 							}}

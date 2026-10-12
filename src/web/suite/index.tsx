@@ -9,7 +9,7 @@ import { CaseBody, emptyBody, TAG } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
 import { cleanTitle, firstStep } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
-import { call } from "../lib/api.ts";
+import { ApiError, call } from "../lib/api.ts";
 import { invalidateProject, queryClient, useQueryOp } from "../lib/data.ts";
 import {
 	activeDraft,
@@ -17,9 +17,11 @@ import {
 	knownStepIds,
 	promoteStepIds,
 	readDraft,
+	readDrafts,
 	removeDraft,
 	writeDraft,
 } from "../lib/drafts.ts";
+import { randomId } from "../lib/ids.ts";
 import { navigate, readRoute, refUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, ProofStrip } from "../ui/index.tsx";
@@ -56,10 +58,11 @@ export function SuiteScreen() {
 		return saved?.dirty || saved?.ref === null ? saved : null;
 	});
 	const draftRef = useRef(draft);
-	const [captures, setCaptures] = useState(new Map<string, Draft>());
+	const [captures, setCaptures] = useState(() => new Map(readDrafts(project).map((draft) => [draft.id, draft])));
 	const adoptedRefs = useRef(new Map<string, string>());
 	const pending = useRef(new Map<string, Promise<void>>());
 	const [conflict, setConflict] = useState<ConflictState | null>(null);
+	const conflicts = useRef(new Map<string, ConflictState>());
 	const [selected, setSelected] = useState<string | null>(route.ref);
 	const [picked, setPicked] = useState(new Set<string>());
 	const [hidden, setHidden] = useState(new Set<string>());
@@ -158,40 +161,25 @@ export function SuiteScreen() {
 	useEffect(() => {
 		if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage();
 	}, [list.hasNextPage, list.isFetchingNextPage, list.fetchNextPage]);
-	const previousFolder = useRef(route.folder);
+	const previousRoute = useRef({ ref: route.ref, folder: route.folder });
 	useEffect(() => {
-		if (previousFolder.current !== route.folder) {
-			previousFolder.current = route.folder;
-			draftRef.current = null;
-			setDraftState(null);
-			setConflict(null);
-			setSelected(route.ref);
-		}
-	}, [route.folder, route.ref]);
-	const previousRef = useRef(route.ref);
-	useEffect(() => {
-		if (previousRef.current === route.ref) return;
-		previousRef.current = route.ref;
-		if (route.ref !== null) {
-			setSelected(route.ref);
-			const saved = readDraft({ project, id: route.ref });
-			draftRef.current = saved;
-			setDraftState(saved);
-			setConflict(null);
-		}
-	}, [project, route.ref]);
+		const previous = previousRoute.current;
+		if (previous.ref === route.ref && previous.folder === route.folder) return;
+		previousRoute.current = { ref: route.ref, folder: route.folder };
+		const latest = draftRef.current;
+		// Sealing gives the live editor its case URL. Its draft is already current, even after storage was cleared.
+		if (previous.folder === route.folder && latest && latest.ref === route.ref) return;
+		if (latest?.ref === null) setCaptures((prior) => new Map(prior).set(latest.id, latest));
+		const saved = route.ref ? null : activeDraft(project);
+		const restored = saved?.ref === null ? saved : null;
+		draftRef.current = restored;
+		setDraftState(restored);
+		setSelected(route.ref ?? restored?.ref ?? null);
+		setConflict(route.ref ? (conflicts.current.get(route.ref) ?? null) : null);
+	}, [project, route.folder, route.ref]);
 	useEffect(() => {
 		if (selected === null && cases[0] && !draftRef.current) setSelected(cases[0].ref);
 	}, [cases, selected]);
-	useEffect(() => {
-		if (view && !draftRef.current) {
-			const saved = readDraft({ project, id: view.ref });
-			if (saved?.dirty) {
-				draftRef.current = saved;
-				setDraftState(saved);
-			}
-		}
-	}, [project, view]);
 	function focusDraft(next: Draft): void {
 		const target = document.querySelector(
 			`#detail [data-field="${next.caret.field === "capture-title" ? "title" : next.caret.field}"]`,
@@ -240,7 +228,7 @@ export function SuiteScreen() {
 	async function sealDraft({ keepalive = false }: { keepalive?: boolean } = {}): Promise<void> {
 		const snapshot = draftRef.current;
 		if (!snapshot || dropEmpty(snapshot) || !snapshot.dirty) return;
-		if (snapshot.ref === null) setCaptures((previous) => new Map(previous).set(snapshot.id, snapshot));
+		setCaptures((previous) => new Map(previous).set(snapshot.id, snapshot));
 		const existing = pending.current.get(snapshot.id);
 		if (existing) {
 			await existing;
@@ -307,7 +295,7 @@ export function SuiteScreen() {
 						.map((item: unknown) => ResolvedEdit.safeParse(item))
 						.find((item) => item.success && item.data.case === snapshot.ref);
 					const currentBody = edit?.success ? CaseBody.parse(edit.data.current) : body;
-					setConflict({
+					const conflict: ConflictState = {
 						q: reply.question,
 						ref: snapshot.ref,
 						mine: body,
@@ -315,8 +303,12 @@ export function SuiteScreen() {
 						merged: edit?.success ? edit.data.body : body,
 						paths: reply.conflicts.find((item) => item.case === snapshot.ref)?.paths ?? [],
 						draftId: snapshot.id,
-					});
-					setStatus("Both edits are kept. Choose each field to resolve the conflict.");
+					};
+					conflicts.current.set(snapshot.ref, conflict);
+					if (draftRef.current?.id === snapshot.id) {
+						setConflict(conflict);
+						setStatus("Both edits are kept. Choose each field to resolve the conflict.");
+					} else setStatus(`${snapshot.ref} has a conflict. Its draft is kept; return to the case to resolve it.`);
 					return;
 				}
 				if (reply.status === "open") {
@@ -324,7 +316,7 @@ export function SuiteScreen() {
 						const latest = draftRef.current;
 						const next: Draft = {
 							...latest,
-							cmd: crypto.randomUUID(),
+							cmd: randomId(),
 							submission: { kind: "waiting", question: reply.question, fingerprint },
 						};
 						draftRef.current = next;
@@ -398,8 +390,10 @@ export function SuiteScreen() {
 					});
 				}
 				removeDraft({ project, id: snapshot.id });
+				conflicts.current.delete(snapshot.id);
 				const latest = draftRef.current;
 				if (latest?.id === snapshot.id && ref) {
+					setConflict(null);
 					const normalized = cleanTitle(latest);
 					const normalizedBody = {
 						...normalized.body,
@@ -423,7 +417,7 @@ export function SuiteScreen() {
 						tags: [...new Set([...adoptedTags, ...normalized.tags])],
 						covers: [...new Set([...adoptedCovers, ...normalized.covers])],
 						dirty: more,
-						cmd: crypto.randomUUID(),
+						cmd: randomId(),
 						caret: latest.caret.field === "capture-title" ? { ...latest.caret, field: "title" } : latest.caret,
 					};
 					draftRef.current = next;
@@ -438,7 +432,7 @@ export function SuiteScreen() {
 						(readRoute().screen === "case" || readRoute().screen === "suite") &&
 						(route.screen === "case" || snapshot.ref === null)
 					)
-						navigate(refUrl({ project, ref }), { replace: true, seal: false });
+						navigate(`${refUrl({ project, ref })}${location.search}`, { replace: true, seal: false });
 				}
 				setStatus(`Version ${version}, by you, just now`);
 				void invalidateProject(project);
@@ -471,7 +465,7 @@ export function SuiteScreen() {
 				tags: view.tags,
 				covers: view.covers,
 				folder: view.folder.path,
-				cmd: crypto.randomUUID(),
+				cmd: randomId(),
 			};
 			draftRef.current = next;
 			setDraftState(next);
@@ -528,7 +522,7 @@ export function SuiteScreen() {
 			route.folder ?? previous?.folder ?? folders.find((item) => item.id === selectedRow?.folder)?.path ?? "";
 		const body = emptyBody();
 		const next: Draft = {
-			id: `draft:${crypto.randomUUID()}`,
+			id: `draft:${randomId()}`,
 			ref: null,
 			base: 0,
 			body,
@@ -540,7 +534,7 @@ export function SuiteScreen() {
 			caret: { field: "title", start: 0, end: 0 },
 			dirty: false,
 			at: Date.now(),
-			cmd: crypto.randomUUID(),
+			cmd: randomId(),
 			submission: { kind: "none" },
 		};
 		setConflict(null);
@@ -566,18 +560,34 @@ export function SuiteScreen() {
 			return;
 		}
 		if (!view) return;
-		const next = draftRef.current?.ref === view.ref ? draftRef.current : editDraft(view);
-		change({ ...next, caret: { field: "title", start: next.body.title.length, end: next.body.title.length } }, true);
+		const saved = readDraft({ project, id: view.ref });
+		const next = draftRef.current?.ref === view.ref ? draftRef.current : (saved ?? editDraft(view));
+		setConflict(conflicts.current.get(view.ref) ?? null);
+		change(
+			saved ? next : { ...next, caret: { field: "title", start: next.body.title.length, end: next.body.title.length } },
+			true,
+		);
 	}
 	function choose(ref: string): void {
 		if (selected === ref && draftRef.current?.ref !== null) return;
 		void sealDraft();
-		const saved = readDraft({ project, id: ref });
-		draftRef.current = saved;
-		setDraftState(saved);
+		draftRef.current = null;
+		setDraftState(null);
 		setSelected(ref);
-		setConflict(null);
-		navigate(refUrl({ project, ref }), { seal: false });
+		setConflict(conflicts.current.get(ref) ?? null);
+		navigate(`${refUrl({ project, ref })}${location.search}`, { seal: false });
+	}
+	function resumeCapture(saved: Draft): void {
+		const previous = draftRef.current;
+		if (previous?.dirty) setCaptures((prior) => new Map(prior).set(previous.id, previous));
+		const next = readDraft({ project, id: saved.id }) ?? saved;
+		flushSync(() => {
+			setSelected(null);
+			setConflict(null);
+			change(next);
+			navigate(`/p/${encodeURIComponent(project)}/suite${location.search}`, { seal: false });
+		});
+		focusDraft(draftRef.current ?? next);
 	}
 	function stepCursor(direction: number): void {
 		const items = rows.filter((item) => item.kind === "case");
@@ -829,7 +839,11 @@ export function SuiteScreen() {
 			<section className="pane" id="list">
 				<div className="phead">
 					<b id="ltitle">{route.folder ?? "All cases"}</b>
-					<span id="lcount">{(list.data?.pages[0]?.count ?? cases.length).toLocaleString()} cases</span>
+					<span id="lcount">
+						{list.error
+							? "Cases unavailable"
+							: `${(list.data?.pages[0]?.count ?? cases.length).toLocaleString()} cases`}
+					</span>
 					{picked.size > 0 && <span className="bulk-indicator">{picked.size} selected</span>}
 					<label className="fwrap">
 						<span>/</span>
@@ -895,17 +909,31 @@ export function SuiteScreen() {
 					role="listbox"
 					aria-label="Cases"
 				>
+					{list.error && (
+						<p role="status">
+							{list.error instanceof ApiError && list.error.code === "forbidden"
+								? "Your session may not read this project."
+								: "Could not read cases."}{" "}
+							{list.error.message}{" "}
+							<button type="button" onClick={() => void list.refetch()}>
+								Retry
+							</button>
+						</p>
+					)}
 					{rows.length === 0 ? (
-						<EmptyState>
-							{search
-								? "No matching cases. Change the filter, or press c to capture one."
-								: "No cases yet. Press c and start typing."}
-						</EmptyState>
+						list.error ? null : (
+							<EmptyState>
+								{search
+									? "No matching cases. Change the filter, or press c to capture one."
+									: "No cases yet. Press c and start typing."}
+							</EmptyState>
+						)
 					) : (
 						<div style={{ height: `${virtual.getTotalSize()}px`, position: "relative" }}>
 							{visibleItems.map((item) => {
 								const row = rows[item.index];
 								if (!row) return null;
+								const saved = row.kind === "case" ? captures.get(row.row.ref) : null;
 								return (
 									<div
 										key={row.kind === "case" ? row.row.ref : row.kind === "folder" ? `folder:${row.folder.id}` : row.id}
@@ -951,12 +979,12 @@ export function SuiteScreen() {
 										) : row.kind === "local" ? (
 											<button
 												type="button"
-												className={`row ${row.draft.ref === selected ? "sel" : ""}`}
+												className={`row ${row.draft.ref !== null && row.draft.ref === selected ? "sel" : ""}`}
 												role="option"
-												aria-selected={row.draft.ref === selected}
+												aria-selected={row.draft.ref !== null && row.draft.ref === selected}
 												onClick={() => {
 													if (row.draft.ref) choose(row.draft.ref);
-													else change(row.draft, true);
+													else resumeCapture(row.draft);
 												}}
 											>
 												<span className="id">{row.draft.ref ?? "new"}</span>
@@ -976,9 +1004,15 @@ export function SuiteScreen() {
 											>
 												<span className="id">{row.row.ref}</span>
 												{picked.has(row.row.ref) && <span className="selected-check">✓</span>}
-												<span className="ti">{draft?.ref === row.row.ref ? draft.body.title : row.row.title}</span>
+												<span className="ti">
+													{draft?.ref === row.row.ref
+														? draft.body.title
+														: saved?.dirty
+															? saved.body.title
+															: row.row.title}
+												</span>
 												{row.row.tags.length > 0 && <span className="tg">#{row.row.tags[0]}</span>}
-												{draft?.ref === row.row.ref && draft.dirty && <span className="dr">draft</span>}
+												{(draft?.ref === row.row.ref ? draft.dirty : saved?.dirty) && <span className="dr">draft</span>}
 												{row.row.open > 0 && (
 													<span className="qdot" title={`${row.row.open} open questions`}>
 														●
@@ -1001,7 +1035,8 @@ export function SuiteScreen() {
 				change={change}
 				begin={(field = "title") => {
 					if (view) {
-						const next = editDraft(view);
+						const next = readDraft({ project, id: view.ref }) ?? editDraft(view);
+						setConflict(conflicts.current.get(view.ref) ?? null);
 						const parts = field.split(":");
 						const step = next.body.steps.find((item) => item.id === parts[0]);
 						const value =
@@ -1017,9 +1052,22 @@ export function SuiteScreen() {
 				}}
 				seal={leaveEditor}
 				rapid={create}
-				conflict={conflict}
+				hasDraft={Boolean(selected && captures.get(selected)?.dirty)}
+				conflict={draft && conflict?.ref === draft.ref ? conflict : null}
 				onResolved={() => {
-					if (conflict) removeDraft({ project, id: conflict.draftId });
+					if (conflict) {
+						removeDraft({ project, id: conflict.draftId });
+						conflicts.current.delete(conflict.ref);
+						setCaptures((previous) => {
+							const next = new Map(previous);
+							next.delete(conflict.draftId);
+							return next;
+						});
+						if (draftRef.current?.id !== conflict.draftId) {
+							void invalidateProject(project);
+							return;
+						}
+					}
 					draftRef.current = null;
 					setDraftState(null);
 					setConflict(null);

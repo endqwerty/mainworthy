@@ -140,7 +140,8 @@ export function BodyEditor({
 		else if (field === "pre") body = { ...body, pre: text };
 		else {
 			const [id, part] = field.split(":");
-			const split = part === "action" ? splitExpected(text) : null;
+			const step = body.steps.find((step) => step.id === id);
+			const split = part === "action" && step?.expected === null ? splitExpected(text) : null;
 			body = {
 				...body,
 				steps: body.steps.map((step) =>

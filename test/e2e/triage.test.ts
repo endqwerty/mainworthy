@@ -149,11 +149,48 @@ async function twentyQuestions(server: Server) {
 	);
 }
 
+async function recordedDecisions(server: Server, ref: string) {
+	const response = await fetch(`${server.url}/api/export`, { headers: { authorization: `Bearer ${server.token}` } });
+	expect(response.status).toBe(200);
+	const rows: unknown[] = (await response.text())
+		.trim()
+		.split("\n")
+		.map((line) => JSON.parse(line));
+	const project = rows
+		.map((row) =>
+			z.object({ t: z.literal("projects"), r: z.object({ id: z.number(), key: z.string() }) }).safeParse(row),
+		)
+		.find((row) => row.success && row.data.r.key === server.project);
+	if (!project?.success) throw new Error("The exported project is missing");
+	const question = rows
+		.map((row) =>
+			z
+				.object({ t: z.literal("questions"), r: z.object({ id: z.number(), no: z.number(), project: z.number() }) })
+				.safeParse(row),
+		)
+		.find((row) => row.success && row.data.r.project === project.data.r.id && row.data.r.no === Number(ref.slice(2)));
+	if (!question?.success) throw new Error("The exported question is missing");
+	const decision = z.object({
+		t: z.literal("decisions"),
+		r: z
+			.object({ id: z.number(), question: z.number(), answer: z.string(), supersedes: z.number().nullable() })
+			.passthrough(),
+	});
+	return rows
+		.map((row) => decision.safeParse(row))
+		.flatMap((row) => (row.success && row.data.r.question === question.data.r.id ? [row.data.r] : []))
+		.sort((a, b) => a.id - b.id);
+}
+
 (browserAvailable ? test : test.skip)(
 	"D2: twenty mixed one-key answers, real decisions and undo",
 	async () => {
 		const server = await fixture();
 		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		let release = () => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
 		try {
 			const inbox = await twentyQuestions(server);
 			expect(
@@ -183,6 +220,10 @@ async function twentyQuestions(server: Server) {
 			const loads = view.loads();
 			await page.keyboard.press("g");
 			await page.keyboard.press("q");
+			await view.context.route("**/api/p/scratch/decide", async (route) => {
+				await held;
+				await route.continue();
+			});
 			let lastRef = "";
 			const reserved = inbox.items.find((q) => q.kind === "map")?.q;
 			let navigation = 2;
@@ -200,11 +241,25 @@ async function twentyQuestions(server: Server) {
 					question.kind === "failure" ? "i" : question.kind === "adopt" ? "a" : question.kind === "finding" ? "z" : "t";
 				await page.keyboard.press(key);
 				await page.waitForFunction((ref) => document.querySelector(`[data-question="${ref}"]`) === null, question.q);
-				const settled = await eventually(
-					() => server.api("inbox", { state: "decided", limit: 100 }),
-					(reply) => reply.items.some((q) => q.q === question.q),
+			}
+			expect((await server.api("inbox", {})).counts.open).toBe(20);
+			release();
+			const settled = await eventually(
+				() => server.api("inbox", { state: "decided", limit: 100 }),
+				(reply) => inbox.items.every((question) => reply.items.some((q) => q.q === question.q)),
+			);
+			for (const question of inbox.items) {
+				const decision = settled.items.find((q) => q.q === question.q)?.decision;
+				expect(decision?.by).toEqual(["daniel"]);
+				expect(decision?.answer.is).toBe(
+					question.kind === "failure"
+						? "infra"
+						: question.kind === "adopt"
+							? "accept"
+							: question.kind === "finding"
+								? "defer"
+								: "track",
 				);
-				expect(settled.items.find((q) => q.q === question.q)?.decision?.by).toEqual(["daniel"]);
 			}
 			expect((await server.api("inbox", {})).counts.open).toBe(0);
 			expect(
@@ -215,6 +270,10 @@ async function twentyQuestions(server: Server) {
 			const keys = await view.keys();
 			expect(keys).toBe(20 + navigation);
 			console.info(`D2: ${keys} keys, 20 answers + ${navigation} navigation; undo adds 1 key`);
+			const beforeUndo = await recordedDecisions(server, lastRef);
+			expect(beforeUndo).toHaveLength(1);
+			const original = beforeUndo[0];
+			if (!original) throw new Error("Recorded answer missing from the ledger");
 			await page.keyboard.press("u");
 			await page.locator(`[data-question="${lastRef}"]`).waitFor();
 			const reopened = await eventually(
@@ -222,10 +281,16 @@ async function twentyQuestions(server: Server) {
 				(reply) => reply.items.some((q) => q.q === lastRef),
 			);
 			expect(reopened.items.find((q) => q.q === lastRef)?.decision).toBeNull();
+			const afterUndo = await recordedDecisions(server, lastRef);
+			expect(afterUndo).toHaveLength(2);
+			expect(afterUndo[0]).toEqual(original);
+			expect(afterUndo[1]?.supersedes).toBe(original.id);
+			expect(z.object({ is: z.string() }).parse(JSON.parse(afterUndo[1]?.answer ?? "{}")).is).toBe("withdrawn");
 			expect(view.loads()).toBe(loads);
 			expect(view.dialogs).toEqual([]);
 			expect(view.errors).toEqual([]);
 		} finally {
+			release();
 			await view?.close();
 			await server.stop();
 		}
@@ -294,7 +359,26 @@ async function twentyQuestions(server: Server) {
 			const buttons = view.page.locator(".queue-answers .ans");
 			expect(await buttons.count()).toBe(2);
 			for (const button of await buttons.all()) expect(await button.isDisabled()).toBe(true);
+			await view.page.evaluate(() => {
+				let writes = 0;
+				const fetch = window.fetch.bind(window);
+				window.fetch = Object.assign((input: Parameters<typeof fetch>[0], options?: Parameters<typeof fetch>[1]) => {
+					const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.href;
+					if (url.endsWith("/decide")) writes++;
+					return fetch(input, options);
+				}, window.fetch);
+				Reflect.set(window, "forbiddenWrites", () => writes);
+			});
 			await view.page.keyboard.press("a");
+			await view.page.evaluate(
+				() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+			);
+			expect(
+				await view.page.evaluate(() => {
+					const read: unknown = Reflect.get(window, "forbiddenWrites");
+					return typeof read === "function" ? read() : -1;
+				}),
+			).toBe(0);
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
 			expect((await server.api("inbox", { kind: "adopt" })).items[0]?.state).toBe("open");
 			expect(view.errors).toEqual([]);
@@ -386,6 +470,25 @@ async function twentyQuestions(server: Server) {
 			await view.page.keyboard.press("a");
 			await view.page.locator(".queue-last").getByText("The evidence changed.", { exact: false }).waitFor();
 			await view.page.locator(`[data-question="${proposed.question}"]`).waitFor();
+			await view.page
+				.locator(".queue-evidence .prop")
+				.getByText("version 2 → proposed version 3", { exact: false })
+				.waitFor();
+			expect(
+				await view.page
+					.locator(".queue-evidence .prop .diff .chg > div")
+					.first()
+					.evaluate((row) => ({
+						before: [...row.children]
+							.filter((part) => !part.matches("ins"))
+							.map((part) => part.textContent)
+							.join(""),
+						after: [...row.children]
+							.filter((part) => !part.matches("del"))
+							.map((part) => part.textContent)
+							.join(""),
+					})),
+			).toEqual({ before: "Person's newer title", after: "Agent title" });
 			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
 				title: "Person's newer title",
 				version: 2,

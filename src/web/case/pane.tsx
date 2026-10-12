@@ -88,6 +88,7 @@ export function CasePane({
 	rapid,
 	conflict,
 	onResolved,
+	hasDraft = false,
 }: {
 	view: CaseView | null;
 	draft: Draft | null;
@@ -98,6 +99,7 @@ export function CasePane({
 	rapid: () => void;
 	conflict: ConflictState | null;
 	onResolved: () => void;
+	hasDraft?: boolean;
 }) {
 	const { project, session, setStatus, overlayOpen } = useApp();
 	const ref = draft?.ref ?? view?.ref ?? null;
@@ -221,6 +223,9 @@ export function CasePane({
 							<span className="draft-public-state">
 								{draft.ref === null ? "Private, no version yet" : `Others see version ${view?.version ?? draft.base}`}
 							</span>
+						)}
+						{!draft && hasDraft && (
+							<span className="draft-public-state">Draft kept on this device. Press e to continue.</span>
 						)}
 					</div>
 					{conflict && <ConflictCard state={conflict} resolved={onResolved} />}

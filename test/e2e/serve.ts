@@ -1,4 +1,5 @@
 import { start } from "../../src/server/start.ts";
+import { archiveRoutes } from "../../src/surfaces/archive.ts";
 import ui from "../../src/web/index.html";
 
 const instance = start(
@@ -10,7 +11,7 @@ const instance = start(
 		owner: "daniel",
 		ownerToken: process.env.CASEBOOK_OWNER_TOKEN ?? null,
 	},
-	() => ({ ui }),
+	(app, owner) => ({ ui, routes: archiveRoutes(app, owner) }),
 );
 console.info(instance.url);
 for (const signal of ["SIGTERM", "SIGINT"] satisfies NodeJS.Signals[])

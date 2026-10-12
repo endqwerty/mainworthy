@@ -221,7 +221,7 @@ test.skipIf(!browserAvailable)(
 	async () => {
 		const server = await startServer();
 		await server.api("propose", { edits: [{ op: "create", folder: "Checkout", body: { title: "Anchor case" } }] });
-		const browser = await openPage(server, { path: "/p/scratch/suite" });
+		const browser = await openPage(server, { path: "/p/scratch/suite?folder=Checkout" });
 		try {
 			const { page } = browser;
 			await page.getByRole("option").filter({ hasText: "Anchor case" }).waitFor();
@@ -239,6 +239,17 @@ test.skipIf(!browserAvailable)(
 				(value) => value.items.length === 3,
 			);
 			expect(rows.items.map((row) => row.title)).toEqual([
+				"Anchor case",
+				"First captured case",
+				"Second captured case",
+			]);
+			await page.waitForFunction(() => document.querySelector(".cstate .chip")?.textContent === "v1");
+			expect(new URL(page.url()).searchParams.get("folder")).toBe("Checkout");
+			expect(await page.locator("#ltitle").innerText()).toBe("Checkout");
+			await page.waitForFunction(
+				() => document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded") === "3",
+			);
+			expect(await page.locator('#list [role="option"] .ti').allTextContents()).toEqual([
 				"Anchor case",
 				"First captured case",
 				"Second captured case",
@@ -277,6 +288,7 @@ test.skipIf(!browserAvailable)(
 				(value) => value[0]?.version === 2,
 			);
 			expect(rows[0]?.methods).toEqual(["human", "auto"]);
+			await page.waitForFunction(() => document.querySelector(".cstate .chip")?.textContent === "v2");
 			await page.keyboard.press("v");
 			await page.getByRole("region", { name: "Case diff" }).first().waitFor();
 			expect(await page.getByRole("region", { name: "Case diff" }).first().textContent()).toContain("pipeline");

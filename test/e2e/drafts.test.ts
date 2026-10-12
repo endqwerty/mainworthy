@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { z } from "zod";
 import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
@@ -47,24 +48,31 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server);
 		try {
 			const { page } = browser;
+			let refused = true;
+			const commands: string[] = [];
+			await browser.context.route("**/api/p/scratch/propose", async (route) => {
+				commands.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
+				if (refused)
+					await route.fulfill({
+						status: 200,
+						contentType: "application/json",
+						body: JSON.stringify({ ok: false, error: { code: "internal", message: "Temporarily unavailable" } }),
+					});
+				else await route.continue();
+			});
 			await page.keyboard.press("c");
 			await page.keyboard.type("Network recovery");
 			await page.keyboard.press("Enter");
 			await page.keyboard.type("The draft is kept");
-			await page.route("**/api/p/scratch/propose", (route) =>
-				route.fulfill({
-					status: 200,
-					contentType: "application/json",
-					body: JSON.stringify({ ok: false, error: { code: "internal", message: "Temporarily unavailable" } }),
-				}),
-			);
 			await page.keyboard.press("Escape");
 			await page.waitForFunction(() => document.getElementById("stat")?.textContent?.includes("kept on this device"));
 			expect(await page.getByRole("textbox", { name: "Step 1", exact: true }).inputValue()).toBe("The draft is kept");
-			await page.unroute("**/api/p/scratch/propose");
+			refused = false;
 			await page.keyboard.press("Control+Enter");
 			await page.waitForURL("**/suite/c/1");
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
+			expect(commands.length).toBeGreaterThanOrEqual(2);
+			expect(new Set(commands).size).toBe(1);
 		} finally {
 			await browser.close();
 			await server.stop();

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CaseBody, Step } from "../../core/model.ts";
 import type { Draft } from "../lib/drafts.ts";
+import { randomId } from "../lib/ids.ts";
 import { Proofs } from "../ui/index.tsx";
 export const CaseRow = z.object({
 	ref: z.string(),
@@ -75,7 +76,7 @@ export function editDraft(view: CaseView): Draft {
 		caret: { field: "title", start: body.title.length, end: body.title.length },
 		dirty: false,
 		at: Date.now(),
-		cmd: crypto.randomUUID(),
+		cmd: randomId(),
 		submission: { kind: "none" },
 	};
 }

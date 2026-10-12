@@ -101,6 +101,7 @@ for (const surface of ["case draft", "run note"]) {
 						by: "writer",
 					});
 				} else {
+					await page.locator('.run-document[data-active="true"][data-ready="true"] .rsteps').waitFor();
 					const note = page.getByRole("textbox", { name: "Result note" });
 					expect(await note.inputValue()).toBe("Keep this failure note");
 					await page.keyboard.press("f");
