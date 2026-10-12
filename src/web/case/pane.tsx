@@ -700,7 +700,7 @@ function CaseProperties({ body, change }: { body: CaseBody; change: (body: CaseB
 	return (
 		<details className="case-properties">
 			<summary>
-				Evidence from{" "}
+				Can be exercised by{" "}
 				{body.methods
 					.map((kind) => (kind === "human" ? "people" : kind === "auto" ? "the pipeline" : "agents"))
 					.join(", ")}

@@ -186,7 +186,7 @@ test.skipIf(!browserAvailable)(
 			edits: [
 				{
 					op: "create",
-					body: { title: "Stable step identity", steps: [{ id: "aa", action: "Original step", expected: null }] },
+					body: { title: "Stable step identity", steps: [{ id: "a0", action: "Original step", expected: null }] },
 				},
 			],
 		});
@@ -194,8 +194,8 @@ test.skipIf(!browserAvailable)(
 		try {
 			const { page } = h;
 			for (const [version, id] of [
-				[2, "ab"],
-				[3, "ac"],
+				[2, "a1"],
+				[3, "a2"],
 			]) {
 				await page.getByRole("button", { name: "Stable step identity", exact: true }).waitFor();
 				await page.evaluate(() => {

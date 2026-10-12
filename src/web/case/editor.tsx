@@ -132,6 +132,7 @@ export function BodyEditor({
 		document.activeElement instanceof HTMLElement &&
 		document.activeElement.matches(".body-editor textarea,.capture-title");
 	useBindings([
+		{ key: "shift+enter", label: "Next new case", handler: rapid, allowInInput: true, when: editing },
 		{
 			key: "enter",
 			label: draft.caret.field === "title" || draft.caret.field === "capture-title" ? "First step" : "Next step",
