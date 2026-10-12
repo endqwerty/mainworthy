@@ -1280,6 +1280,57 @@ describe("what a run and a change may count", () => {
 		).toBe(0);
 	});
 
+	test("an answer given before a commit had its place ends when the commit is placed, and the runs that rested on it are asked about again", () => {
+		seed(1, ["human", "agent"]);
+		const ci = pipeline();
+		const commit = "closed0001";
+		const planned = plan({
+			name: "Exploration",
+			select: {},
+			accepts: { commit },
+			require: exercise(["human", "agent"]),
+		});
+		// An agent, admitted by the run, fails the case before any pipeline has reported the commit. A person
+		// explains it; the run passes on that answer and the rule closes it.
+		report(
+			{
+				target: { commit, branch: "main" },
+				results: [
+					{ test: { case: "C-1" }, outcome: "fail", failure: { message: "found by the agent" } },
+					...Array.from({ length: 60 }, (_, i) => ({
+						test: { key: `agent::t${i}` },
+						outcome: "fail",
+						failure: { message: "found by the agent" },
+					})),
+				],
+			},
+			explorer(),
+		);
+		const early = open("failure");
+		expect(early.evidence).toMatchObject({ count: 61 });
+		expect(decide(early, { is: "flaky" }).status).toBe("decided");
+		const stored = () =>
+			first(rows<{ state: string; verdict: string }>("SELECT state, verdict FROM runs WHERE origin = 'planned'"));
+		expect(stored()).toEqual({ state: "closed", verdict: "passed" });
+		// The pipeline reports the commit as the head of a pull request. The answer was given about the commit on
+		// its own; the failure is the pull request's now. The answer ends, in the ledger, and the failure is asked
+		// about where the commit is, naming the run that rested on the answer although it has closed.
+		report({ target: { commit, pr: 7, branch: "feature" }, results: [{ test: { key: "t" }, outcome: "pass" }] }, ci);
+		expect(
+			rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id").map(
+				(row) => JSON.parse(row.answer).is,
+			),
+		).toEqual(["flaky", "outdated"]);
+		const asked = open("failure");
+		expect(asked.q).not.toBe(early.q);
+		expect(asked.about).toEqual(expect.arrayContaining(["pr:7", planned.run]));
+		expect(asked.evidence).toMatchObject({ scope: "pr:7", count: 61 });
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [asked.q] });
+		// Answered there, the run reads passed again.
+		expect(decide(asked, { is: "flaky" }).status).toBe("decided");
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {
 		const ci = pipeline();
 		const head = "c2c2c2c200000000000000000000000000000002";

@@ -65,8 +65,11 @@ not the same things done worse.
    of its line or change, and an agent's report never moves a change's head or rewrites its base, title or
    files. Nor does it say where a commit is: a branch or a pull request an agent names is not taken, and no
    change exists because an agent named one. Until a pipeline or a person reports a commit, what an agent found
-   on it is asked about under the commit itself. The first such report says where the commit is; the agent's
-   open questions about it are then asked there instead, and every run that counts the commit is recomputed.
+   on it is asked about under the commit itself. The first such report says where the commit is, from the
+   moment it is accepted: every run that counts the commit waits for it (`pending`) and is recomputed when it
+   is applied; the questions about the commit are asked there instead; and an answer already given about the
+   commit on its own ends in the ledger like any answer whose ground has moved, with the question asked in its
+   place naming the runs that rested on it, a closed one included.
    The cost: `impact` for a pull request does not show an agent's finding on a commit until the pull request's
    pipeline has reported that commit. And a pipeline's pass says nothing about a failure only an agent showed: such a question stays open
    until a person answers it.

@@ -77,6 +77,7 @@ import {
 	type QuestionRow,
 	questionById,
 	questionRef,
+	questionsOn,
 	refsOf,
 	type Signer,
 	setDecisionEffects,
@@ -836,7 +837,14 @@ export function undo(ctx: Ctx, input: { q: string; reason: string | undefined })
  */
 export function raiseFailure(
 	ctx: Ctx,
-	input: { group: FailingGroup; target: TargetRow; by: number; producer: ActorKind },
+	input: {
+		group: FailingGroup;
+		target: TargetRow;
+		by: number;
+		producer: ActorKind;
+		/** How many tests the cause is known to have failed, when the group holds only a sample of them. */
+		count?: number;
+	},
 ): Raised {
 	const { group, target } = input;
 	const scopeKind = group.scope.startsWith("change:") ? "change" : group.scope.startsWith("line:") ? "trunk" : "run";
@@ -907,7 +915,7 @@ export function raiseFailure(
 			tests: listed.slice(0, 50),
 			// The list is cut to fifty; the count is not taken from the cut list, so it never falls when a later
 			// occurrence adds a test to a question that has seen hundreds.
-			count: Math.max(listed.length, earlier.count ?? 0),
+			count: Math.max(listed.length, earlier.count ?? 0, input.count ?? 0),
 			target: target.commit_sha ? target.commit_sha.slice(0, 12) : target.what,
 			branch: target.branch,
 			hints: shown.map((hint) => hint.slice(5)),
@@ -975,26 +983,43 @@ function askUnexplained(ctx: Ctx, run: RunRow): boolean {
 // ── Keeping runs in step ───────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Asks, where a commit now is, the open questions an agent's reports raised about it. Until a pipeline or a
- * person reports a commit, what an agent found on it is asked about under the commit itself: nobody a gate
- * listens to has said which line or pull request it belongs to. The first such report says so, and each of those
- * questions is then asked there instead, through the one door every failure goes through (so it joins a
- * question already open there, or meets an answer in force there), and is closed where it was. Its answers, if
- * it had any, stay in its history; an answer given under the commit itself excused nothing a gate counts.
+ * Asks, where a commit now is, what was asked about it before it had a place. Until a pipeline or a person
+ * reports a commit, what an agent found on it is asked about under the commit itself: nobody a gate listens to
+ * has said which line or pull request it belongs to. The first such report says so. Each question about the
+ * commit is then asked there instead, through the one door every failure goes through (so it joins a question
+ * already open there, or meets an answer in force there), naming the runs it named, and is closed where it was.
+ *
+ * An answer already given there ends, like any answer whose ground has moved: it was a judgement about the
+ * commit on its own, and it is not carried into a line or a pull request where it would cover other builds.
+ * The ledger says so (`outdated`), the runs that rested on it are recomputed (the caller has them), and the
+ * question asked in its place names them, a run that has since closed included.
  */
 export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 	if (target.commit_sha === null) return;
 	const own = ownChangeOf(ctx.db, ctx.project.id, target.repo, target.commit_sha);
 	if (!own || own.id === target.change) return;
 	const before = `change:${own.id}`;
-	for (const asked of openQuestionsOn(ctx.db, ctx.project.id, `scope:${before}`)) {
+	for (const asked of questionsOn(ctx.db, ctx.project.id, `scope:${before}`)) {
 		const question = questionById(ctx.db, asked.id);
-		if (question?.kind !== "failure" || question.state !== "open") continue;
+		if (question?.kind !== "failure") continue;
 		const subject = json<{ signature: number; scope: string }>(question.subject);
 		const signature = subject.scope === before ? signatureById(ctx.db, subject.signature) : null;
 		if (!signature) continue;
+		const standing =
+			question.state === "decided" && question.decision !== null ? decisionById(ctx.db, question.decision) : null;
+		const inForce =
+			standing !== null &&
+			!["expired", "outdated", "withdrawn"].includes(json<{ is?: string }>(standing.answer).is ?? "");
+		if (question.state !== "open" && !inForce) continue;
+		const named = new Set(runsAbout(ctx, question));
+		if (standing && inForce) {
+			for (const id of runsDependingOn(ctx.db, standing.id)) named.add(id);
+			HANDLERS[question.kind].revert(ctx, question, standing);
+			lapse(ctx, question, standing, ctx.now);
+		}
 		const seen = json<{
 			tests?: { id: number; counted?: boolean }[];
+			count?: number;
 			targets?: number[];
 			sample?: number | null;
 			message?: string | null;
@@ -1005,9 +1030,13 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 			return row ? [row] : [];
 		});
 		const by = seen.producers?.at(-1) ?? ctx.actor.id;
+		const refs = [...named].flatMap((id) => {
+			const run = runById(ctx.db, id);
+			return run ? [runRef(run)] : [];
+		});
 		for (const id of seen.targets ?? []) {
 			const where = mustTarget(ctx.db, id);
-			raiseFailure(ctx, {
+			const raised = raiseFailure(ctx, {
 				group: {
 					signature,
 					scope: scopeOf(where, null),
@@ -1022,9 +1051,12 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 				target: where,
 				by,
 				producer: question.producer,
+				...(seen.count !== undefined ? { count: seen.count } : {}),
 			});
+			if (raised.s === "open" || raised.s === "attached") alsoAbout(ctx, raised.question, refs);
 		}
-		setQuestionState(ctx, question, "dissolved", null);
+		for (const id of named) ctx.recompute.add(id);
+		if (question.state === "open") setQuestionState(ctx, question, "dissolved", null);
 	}
 }
 
