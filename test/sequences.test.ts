@@ -26,6 +26,9 @@
 //     no run, whether or not the run is the newest of its scope.
 // 12. A change's head is a commit that a pipeline or a person reported: never one only an agent has, and a
 //     commit only an agent reported has no run.
+// 13. Nobody settles what the policy keeps from them: under `standard`, a failure that a slot disputes is
+//     never answered, re-answered or withdrawn by somebody with a result in that slot or who reported the
+//     failure; under `strict`, no failure is by somebody who reported it. Whatever came first.
 //
 // More seeds: CASEBOOK_SEQUENCE_SEEDS=500 bun test test/sequences.test.ts
 import { expect, test } from "bun:test";
@@ -66,9 +69,10 @@ function sequence(seed: number, preset: string): Problem | null {
 	const pipeline = h.actor("pipeline", "ci", ["read", "produce"]);
 	const agent = h.actor("explorer", "agent", ["read", "produce"]);
 	const rule = Number(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")[0]?.id ?? 0);
-	const command = (op: string, input: unknown, as: Actor = h.owner): void => {
+	const command = (op: string, input: unknown, as: Actor = h.owner): unknown => {
 		const reply = h.raw(op, input, as);
 		trace.push({ op, input, as: as.name, reply: reply.ok ? "ok" : reply.error });
+		return reply.ok ? reply.result : null;
 	};
 
 	const scopeOf = (target: Row, run: number): string =>
@@ -416,6 +420,46 @@ function sequence(seed: number, preset: string): Problem | null {
 			]),
 		);
 	let gatesBefore: Map<number, string> | null = null;
+	let keptFrom: string | null = null;
+	let settled: unknown = null;
+	// Whether this policy keeps this failure question from this person, read from the rows as they are before the
+	// command: who reported a failure with its cause in its scope, and who has a result in a slot that disputes it.
+	const keptFromAnswering = (no: number, as: Actor): boolean => {
+		if (preset === "loose") return false;
+		const question = rows<{ subject: string }>("SELECT subject FROM questions WHERE no = ?", no)[0];
+		if (!question) return false;
+		const subject = JSON.parse(question.subject) as { signature: number; scope: string };
+		const targets = new Map(rows("SELECT * FROM targets").map((target) => [Number(target.id), target]));
+		const reported = rows<{ target: number; run: number | null }>(
+			`SELECT r.target, b.run FROM results r JOIN batches b ON b.id = r.batch
+			 WHERE r.signature = ? AND r.actor = ? AND r.outcome IN ('fail', 'error')`,
+			subject.signature,
+			as.id,
+		).some((row) => {
+			const target = targets.get(Number(row.target));
+			return target !== undefined && scopeOf(target, Number(row.run ?? 0)) === subject.scope;
+		});
+		const disputing = rows<{ id: number; run: number; causes: string }>(
+			"SELECT s.id, s.run, s.causes FROM slots s JOIN runs r ON r.id = s.run WHERE s.state = 'disputed' AND r.origin = 'planned'",
+		).filter((slot) =>
+			(JSON.parse(slot.causes) as [number, number][]).some(([signature, on]) => {
+				const target = targets.get(on);
+				return (
+					signature === subject.signature && target !== undefined && scopeOf(target, Number(slot.run)) === subject.scope
+				);
+			}),
+		);
+		const party = disputing.some(
+			(slot) =>
+				rows(
+					"SELECT 1 AS n FROM slot_results s JOIN results r ON r.id = s.result WHERE s.slot = ? AND r.actor = ? LIMIT 1",
+					Number(slot.id),
+					as.id,
+				).length > 0,
+		);
+		// `strict` keeps every failure from whoever reported it; `standard` keeps a disputed one from its parties.
+		return preset === "strict" ? reported : disputing.length > 0 && (reported || party);
+	};
 
 	try {
 		command("propose", {
@@ -567,10 +611,11 @@ function sequence(seed: number, preset: string): Problem | null {
 				if (questions.length > 0) {
 					const question = pick(questions);
 					const as = pick(people);
+					keptFrom = question.kind === "failure" && keptFromAnswering(question.no, as) ? `Q-${question.no}` : null;
 					if (question.state === "decided" && rand(3) === 0)
-						command("decide", { undo: `Q-${question.no}`, reason: "changed my mind" }, as);
+						settled = command("decide", { undo: `Q-${question.no}`, reason: "changed my mind" }, as);
 					else
-						command(
+						settled = command(
 							"decide",
 							{
 								q: `Q-${question.no}`,
@@ -591,6 +636,20 @@ function sequence(seed: number, preset: string): Problem | null {
 				trace.push({ advance: "15 days" });
 				sweep(h.app, rule);
 			}
+			// 13. An answer or a withdrawal by somebody the policy keeps it from did not go through.
+			if (keptFrom !== null) {
+				const status = (settled as { status?: string }[] | null)?.[0]?.status;
+				if (status === "decided" || status === "reopened")
+					return {
+						seed,
+						step,
+						what: "somebody settled a failure the policy keeps from them",
+						detail: { question: keptFrom, status },
+						last: trace.slice(-12),
+					};
+			}
+			keptFrom = null;
+			settled = null;
 			const problem = audit();
 			if (problem) return { seed, step, ...problem, last: trace.slice(-12) };
 			// 10. The commits that had a gate before an agent's report read the same after it.

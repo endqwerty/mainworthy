@@ -190,8 +190,8 @@ const Q = {
 		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
 	),
 	// Starts from the disputed slots (a partial index): there are few, however many runs there are.
-	disputedSlots: sql<{ project: number; signature: number }, { run: number; causes: string }>(
-		`SELECT s.run AS run, s.causes AS causes FROM slots s JOIN runs r ON r.id = s.run
+	disputedSlots: sql<{ project: number; signature: number }, { id: number; run: number; causes: string }>(
+		`SELECT s.id AS id, s.run AS run, s.causes AS causes FROM slots s JOIN runs r ON r.id = s.run
 		 WHERE s.state = 'disputed' AND r.project = $project AND r.origin = 'planned'
 		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
 	),
@@ -724,15 +724,35 @@ export function runsShowing(db: Db, project: number, signature: number): number[
  * make a dispute go away.
  */
 export function inDispute(db: Db, project: number, signature: number, scope: string): boolean {
+	return disputingSlots(db, project, signature, scope).length > 0;
+}
+
+/** The slots that dispute a cause in its scope, in any planned run of the project. */
+function disputingSlots(db: Db, project: number, signature: number, scope: string): number[] {
+	const slots: number[] = [];
 	for (const slot of db.all(Q.disputedSlots, { project, signature })) {
 		const run = runById(db, slot.run);
 		if (!run) continue;
 		const here = json<Cause[]>(slot.causes).some(
 			([cause, target]) => cause === signature && scopeIn(db, run, target) === scope,
 		);
-		if (here) return true;
+		if (here) slots.push(slot.id);
 	}
-	return false;
+	return slots;
+}
+
+/**
+ * The parties to a dispute about a cause: everybody with a result in a slot that disputes it, whoever reported
+ * the failure and whoever reported otherwise, in any planned run of the project. Read from the same slots that
+ * say there is a dispute, so the rule that keeps a dispute from its parties knows all of them, whichever run
+ * the question happens to name.
+ */
+export function disputants(db: Db, project: number, signature: number, scope: string): Set<number> {
+	const parties = new Set<number>();
+	for (const slot of disputingSlots(db, project, signature, scope)) {
+		for (const fill of fillsOf(db, slot)) parties.add(fill.actor);
+	}
+	return parties;
 }
 
 /**
@@ -920,20 +940,6 @@ export function newestInScope(db: Db, project: number, scope: string): RunRow | 
  * reported in; a planned run that counts one commit in two repositories has one scope for each.
  */
 const scopeIn = (db: Db, run: RunRow, target: number): string => scopeOf(mustTarget(db, target), run.id);
-
-/**
- * Everyone with a result in a slot of this run that shows the cause in this scope: whoever reported the failure
- * and whoever reported otherwise. They are the parties to a dispute about it.
- */
-export function partiesTo(db: Db, run: RunRow, signature: number, scope: string): Set<number> {
-	const parties = new Set<number>();
-	for (const slot of db.all(Q.slotsBySignature, { run: run.id, signature })) {
-		const fills = fillsOf(db, slot.id);
-		if (!fills.some((fill) => fill.signature === signature && scopeIn(db, run, fill.target) === scope)) continue;
-		for (const fill of fills) parties.add(fill.actor);
-	}
-	return parties;
-}
 
 export type Retallied = {
 	run: RunRow;

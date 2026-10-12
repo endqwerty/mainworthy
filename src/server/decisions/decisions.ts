@@ -39,11 +39,11 @@ import { clauseFor, currentPolicy } from "../policy/policy.ts";
 import {
 	type Blocker,
 	causeKey,
+	disputants,
 	type FailingGroup,
 	failsOnBase,
 	inDispute,
 	newestInScope,
-	partiesTo,
 	passesAny,
 	type RunRow,
 	retally,
@@ -794,12 +794,7 @@ export function raiseFailure(
 	// disputes it now. (The runs stop showing them once the dispute is settled; see `disputeParties`.)
 	const before = open ?? latestByFingerprint(ctx.db, ctx.project.id, contentHash({ kind: "failure", key }));
 	const parties = new Set(before ? (json<{ parties?: number[] }>(before.evidence).parties ?? []) : []);
-	if (group.disputed) {
-		for (const run of group.runs) {
-			if (run.origin !== "planned") continue;
-			for (const actor of partiesTo(ctx.db, run, group.signature.id, group.scope)) parties.add(actor);
-		}
-	}
+	for (const actor of disputants(ctx.db, ctx.project.id, group.signature.id, group.scope)) parties.add(actor);
 	const tests = new Map((earlier.tests ?? []).map((test) => [test.id, test]));
 	for (const test of group.tests) {
 		const row = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;
