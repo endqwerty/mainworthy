@@ -1,0 +1,8 @@
+<testsuite name="com.acme.CartTest">
+  <testcase classname="com.acme.CartTest" name="eventuallyPasses" time="0.01">
+    <flakyFailure message="attempt one"><stackTrace>at CartTest.java:12</stackTrace></flakyFailure>
+    <flakyFailure message="attempt two"><stackTrace>at CartTest.java:12</stackTrace></flakyFailure>
+  </testcase>
+  <testcase classname="com.acme.CartTest" name="rerunsThenPasses"><rerunFailure message="temporary">stack</rerunFailure></testcase>
+  <testcase classname="com.acme.CartTest" name="stillFails"><failure message="final failure">stack</failure><rerunFailure message="retry failed">retry stack</rerunFailure></testcase>
+</testsuite>

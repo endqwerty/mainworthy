@@ -1,0 +1,3 @@
+<testsuite name="example.com/acme/tax" tests="1">
+  <testcase classname="example.com/acme/tax" name="TestTax/US/CA" time="0.004"><failure message="">tax_test.go:20: wrong rate</failure></testcase>
+</testsuite>

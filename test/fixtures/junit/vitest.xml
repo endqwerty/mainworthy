@@ -1,0 +1,9 @@
+<testsuites>
+  <testsuite name="math.test.ts">
+    <properties><property name="casebook" value="C-999@v9"/></properties>
+    <testcase name="adds @C-310" classname="math.test.ts" time="0.0005">
+      <properties><property name="casebook" value="C-311@v7"/><property name="runner" value="vitest"/></properties>
+    </testcase>
+    <testcase name="todo" classname="math.test.ts" time="0" status="skipped"/>
+  </testsuite>
+</testsuites>

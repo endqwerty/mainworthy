@@ -1,0 +1,14 @@
+{
+	"JENKINS_URL": "https://jenkins.example/",
+	"GIT_COMMIT": "9f3c2ab111111111111111111111111111111111",
+	"BRANCH_NAME": "PR-482",
+	"CHANGE_ID": "482",
+	"CHANGE_BRANCH": "feature/coupon",
+	"CHANGE_TARGET": "main",
+	"CHANGE_TITLE": "Apply checkout coupon",
+	"CHANGE_URL": "https://github.com/acme/web/pull/482",
+	"GIT_URL": "https://github.com/acme/web.git",
+	"JOB_NAME": "web/PR-482",
+	"BUILD_NUMBER": "3",
+	"BUILD_URL": "https://jenkins.example/job/web/job/PR-482/3/"
+}
