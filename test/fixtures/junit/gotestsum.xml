@@ -1,0 +1,6 @@
+<testsuites>
+  <testsuite name="example.com/acme/cart" package="example.com/acme/cart">
+    <testcase classname="example.com/acme/cart" name="TestCart/adds_item" time="0.002"/>
+    <testcase classname="example.com/acme/cart" name="TestNetwork" time="0"><skipped/></testcase>
+  </testsuite>
+</testsuites>

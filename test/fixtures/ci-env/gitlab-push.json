@@ -1,0 +1,14 @@
+{
+	"GITLAB_CI": "true",
+	"CI_PIPELINE_SOURCE": "push",
+	"CI_COMMIT_SHA": "9f3c2ab111111111111111111111111111111111",
+	"CI_COMMIT_BRANCH": "feature/coupon",
+	"CI_COMMIT_REF_NAME": "feature/coupon",
+	"CI_PROJECT_PATH": "acme/web",
+	"CI_PROJECT_URL": "https://gitlab.example/acme/web",
+	"CI_JOB_NAME": "e2e",
+	"CI_JOB_ID": "1458",
+	"CI_JOB_URL": "https://gitlab.example/acme/web/-/jobs/1458",
+	"CI_PIPELINE_ID": "500",
+	"CI_ENVIRONMENT_NAME": "staging"
+}

@@ -1,0 +1,15 @@
+{
+	"TF_BUILD": "True",
+	"BUILD_REASON": "PullRequest",
+	"BUILD_SOURCEVERSION": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	"BUILD_SOURCEBRANCH": "refs/pull/482/merge",
+	"SYSTEM_PULLREQUEST_SOURCECOMMITID": "9f3c2ab111111111111111111111111111111111",
+	"SYSTEM_PULLREQUEST_SOURCEBRANCH": "refs/heads/feature/coupon",
+	"SYSTEM_PULLREQUEST_PULLREQUESTID": "482",
+	"BUILD_REPOSITORY_NAME": "web",
+	"SYSTEM_JOBNAME": "unit",
+	"SYSTEM_JOBATTEMPT": "1",
+	"SYSTEM_COLLECTIONURI": "https://dev.azure.com/acme/",
+	"SYSTEM_TEAMPROJECT": "Web",
+	"BUILD_BUILDID": "846"
+}

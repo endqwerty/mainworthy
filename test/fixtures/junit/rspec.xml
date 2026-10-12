@@ -1,0 +1,5 @@
+<?xml version='1.0'?>
+<testsuite name='spec.cart' file='.\spec\cart_spec.rb'>
+  <testcase classname='spec.cart' name='handles &apos;quotes&apos; &amp; tax' time='0.007'/>
+  <testcase classname='spec.cart' name='pending example'><skipped>Not implemented</skipped></testcase>
+</testsuite>

@@ -1,0 +1,9 @@
+{
+	"JENKINS_URL": "https://jenkins.example/",
+	"GIT_COMMIT": "9f3c2ab111111111111111111111111111111111",
+	"BRANCH_NAME": "feature/coupon",
+	"GIT_URL": "https://github.com/acme/web.git",
+	"JOB_NAME": "web/feature%2Fcoupon",
+	"BUILD_NUMBER": "2",
+	"BUILD_URL": "https://jenkins.example/job/web/job/feature%252Fcoupon/2/"
+}

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="checkout" file="coupon.ts" tests="2" failures="1">
+  <testcase classname="Checkout" name="coupon applies" time="0.012">
+    <failure message="expected 90.00, got 100.00" type="AssertionError">coupon.ts:41</failure>
+  </testcase>
+  <testcase classname="Checkout" name="cart opens" time="0.004" />
+</testsuite>

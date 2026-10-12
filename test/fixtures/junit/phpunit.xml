@@ -1,0 +1,10 @@
+<testsuites>
+  <testsuite name="All">
+    <testsuite name="Feature" file="./tests/Feature/CartTest.php">
+      <testsuite name="CartTest">
+        <testcase name="testCoupon with data set #0" class="CartTest" classname="CartTest" time="0.02"/>
+        <testcase name="testPayments" file="tests/Feature/PaymentsTest.php" time="0.1"><error message="Database unavailable">PDOException: refused</error></testcase>
+      </testsuite>
+    </testsuite>
+  </testsuite>
+</testsuites>
