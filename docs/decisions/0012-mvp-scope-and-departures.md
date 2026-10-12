@@ -52,7 +52,7 @@ not the same things done worse.
    a person as a question that holds nothing, and it counts only in a planned run that asked for agents on a case
    that admits them (decision 0009, "agent evidence in gates").
 4. **Two failure answers were added, one replaced.** `inherited` (already failing on the base: the answer the
-   loose preset's rule gives, which the design left unnamed) and `mistaken` (a disputed slot: the failing result
+   loose preset's rule gives, which the design left unnamed; offered only where Casebook's own results show it) and `mistaken` (a disputed slot: the failing result
    was wrong). `mistaken` replaces the design's `resolve { trust: [...] }`; any other failure answer on a disputed
    slot also resolves it, by saying what the failure was. "Already failing on the base" reads what the base's
    own gate counts (its effective results, after attempts and corrections), never an agent's result and never
@@ -60,14 +60,17 @@ not the same things done worse.
    of those in the report that is arriving: how a pipeline splits its results over reports changes nothing.
    The answer covers the build it was given for, like an infrastructure answer: another commit of the change,
    where the same cause may be failing in a test the base passes, is asked about on its own (and the loose rule
-   answers again when it is inherited there too).
+   answers again when it is inherited there too). The answer records which tests it found failing on the base;
+   a report, a correction or a newer attempt that touches one of them there has the answer checked again, and
+   one that is no longer true is ended at once, with the failure asked about again.
    `mistaken` is a judgement on the results it named. They stop counting in the run and in their commit's gate;
    the same failure reported again later is a new result and is asked about again; and the decision is not
    withdrawn because the cause turns up again. Where a clause keeps a decision from the producers of the evidence, a producer is
    anyone who reported a failure with that cause in that scope, and anyone with a result in a slot that disputes
    it. That is read from the results when the answer is given, so it does not depend on how the question came
    to be asked (carried from an earlier answer, or asked again). Withdrawing an answer is held to the clause
-   that answer was given under: who may, and whether a reason is owed.
+   the policy in force now has for that answer: who may, and whether a reason is owed. (The policy in force,
+   not the one the answer was given under: an administrator who relaxes the policy relaxes withdrawals too.)
 5. **Drafts live in the browser.** The design autosaves into a server-side open proposal that others see as
    "draft by Dana". With one user that buys nothing; the draft is kept on the device and survives reload and
    crash (commitment L2), and a sealed proposal goes through the same path as designed. So do the notes typed
@@ -144,7 +147,9 @@ not the same things done worse.
     and a commit reported for more than one repository must be named with `repo` (it is refused, never guessed).
     A line belongs to a repository too: what was decided about one repository's trunk does not cover another's.
     The "already failing on the base" hint reads only the change's own repository, and only results a gate would
-    count (never an agent's).
+    count (never an agent's). A commit keeps the line it was first reported on: a report that names only the commit takes that
+    line, and a commit reported on two lines (a pull request's head fast-forwarded to trunk) is answered in two
+    places until that is designed (#68).
 18. **Test keys of the form `case:<n>` are reserved** for the manual test of a case. A report that uses one for an
     automated test is refused.
 

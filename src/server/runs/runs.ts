@@ -904,6 +904,8 @@ export function failsOnBase(db: Db, target: TargetRow, test: number, signature: 
 	if (target.line !== "change" || target.change === null) return false;
 	const change = changeById(db, target.change);
 	if (!change) return false;
+	// A commit reported with no branch and no pull request is not a change with a base: nothing is inherited.
+	if (change.base_sha === null && change.key.startsWith("commit:")) return false;
 	const failsIn = (run: number | null | undefined): boolean | null => {
 		if (run === null || run === undefined) return null;
 		const rows = db.all(Q.effectiveOfTest, { run, test });
@@ -915,7 +917,26 @@ export function failsOnBase(db: Db, target: TargetRow, test: number, signature: 
 		: null;
 	if (onBase !== null) return onBase;
 	const trunk = change.repo ? `line:trunk@${change.repo}` : "line:trunk";
-	return failsIn(db.get(Q.newestRunWithTest, { project: target.project, scope: trunk, test })?.run) ?? false;
+	const newest = db.get(Q.newestRunWithTest, { project: target.project, scope: trunk, test })?.run;
+	// Never the commit's own run: a failure is not its own base.
+	const own = db.get(Q.changeRun, { project: target.project, what: target.what })?.id;
+	return newest !== undefined && newest !== null && newest !== own ? (failsIn(newest) ?? false) : false;
+}
+
+/**
+ * The scopes whose results `failsOnBase` may read for a target of a change: the scope the base commit was
+ * reported in, and the trunk of the change's repository. A report in either can change the answer.
+ */
+export function baseScopesOf(db: Db, target: TargetRow): string[] {
+	if (target.line !== "change" || target.change === null) return [];
+	const change = changeById(db, target.change);
+	if (!change) return [];
+	const scopes = new Set([change.repo ? `line:trunk@${change.repo}` : "line:trunk"]);
+	const base = change.base_sha
+		? db.get(Q.changeRun, { project: target.project, what: codeWhat(change.repo, change.base_sha) })
+		: null;
+	if (base?.scope) scopes.add(base.scope);
+	return [...scopes];
 }
 
 /**

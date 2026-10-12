@@ -66,6 +66,7 @@ import {
 	questionById,
 	questionRef,
 	refsOf,
+	restingOn,
 	type Signer,
 	setDecisionEffects,
 	setQuestionAsk,
@@ -802,6 +803,40 @@ function askUnexplained(ctx: Ctx, run: RunRow): boolean {
 	return asked;
 }
 
+/**
+ * The base of a change moved: a report, a correction or a newer attempt changed what some tests show in `scope`.
+ * Every "already failing on the base" answer that rests on one of those tests there is checked again against
+ * what the base shows now. One that is no longer true is ended, with a row in the ledger, and the runs that
+ * rested on it are recomputed, which asks about the failure again. So the answer never outlives its reason, and
+ * nobody has to report the change again to find out. `tests` null means any test of the scope.
+ */
+export function recheckInherited(ctx: Ctx, scope: string, tests: readonly number[] | null): void {
+	for (const id of restingOn(ctx.db, ctx.project.id, scope, tests)) {
+		const decision = decisionById(ctx.db, id);
+		const question = decision ? questionById(ctx.db, decision.question) : null;
+		if (!decision || !question || question.state !== "decided" || question.decision !== decision.id) continue;
+		const subject = json<{ signature?: number }>(question.subject);
+		const here = json<HoldTerm[]>(decision.holds).find((term) => term.until === "this-target");
+		const [seenOn] = here?.until === "this-target" ? here.targets : [];
+		if (subject.signature === undefined || seenOn === undefined) continue;
+		const signature = subject.signature;
+		const target = mustTarget(ctx.db, seenOn);
+		const failing = failingWithCause(ctx.db, target, signature);
+		if (failing.every((test) => failsOnBase(ctx.db, target, test, signature))) continue;
+		HANDLERS[question.kind].revert(ctx, question, decision);
+		lapse(ctx, question, decision, ctx.now);
+		const runs = [...runsDependingOn(ctx.db, decision.id), ...runsAbout(ctx, question)];
+		refold(ctx, runs);
+		// The question asked in its place names every run that rested on the ended answer, a closed one too.
+		const asked = openFor(ctx.db, ctx.project.id, question.fingerprint, seenOn);
+		const named = runs.flatMap((id) => {
+			const run = runById(ctx.db, id);
+			return run ? [runRef(run)] : [];
+		});
+		if (asked && alsoAbout(ctx, asked, named) > 0) refold(ctx, runs);
+	}
+}
+
 // ── Keeping runs in step ───────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -810,7 +845,8 @@ function askUnexplained(ctx: Ctx, run: RunRow): boolean {
  */
 export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveStale?: boolean } = {}): void {
 	// Runs whose counted results a decision changed on the way here (`ctx.recompute`) come along.
-	const ids = new Set([...runIds, ...ctx.recompute]);
+	const changed = [...ctx.recompute];
+	const ids = new Set([...runIds, ...changed]);
 	ctx.recompute.clear();
 	for (const id of ids) {
 		const existing = runById(ctx.db, id);
@@ -847,6 +883,11 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 			refs: [runRef(run)],
 			runs: [],
 		});
+	}
+	// A commit whose counted results a decision changed may be the base of a change.
+	for (const id of changed) {
+		const scope = runById(ctx.db, id)?.scope;
+		if (scope) recheckInherited(ctx, scope, null);
 	}
 	// Anything a step above changed in turn.
 	if (ctx.recompute.size > 0) refold(ctx, [], options);

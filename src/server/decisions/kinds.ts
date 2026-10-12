@@ -22,11 +22,14 @@ import { actorById } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
-import type { Witness } from "../kernel/witness.ts";
+import { decisionOf, type Witness } from "../kernel/witness.ts";
 import { clauseFor, currentPolicy } from "../policy/policy.ts";
 import {
+	baseScopesOf,
 	closeRun,
 	discountFailures,
+	failingWithCause,
+	failsOnBase,
 	findRun,
 	gateOf,
 	partiesTo,
@@ -48,7 +51,16 @@ import {
 	seal,
 } from "../suite/suite.ts";
 import type { Raise, Raised } from "./decisions.ts";
-import { type DecisionRow, decisionById, type HoldTerm, type QuestionRow, questionById, refsOf } from "./questions.ts";
+import {
+	type DecisionRow,
+	decisionById,
+	dropRests,
+	type HoldTerm,
+	type QuestionRow,
+	questionById,
+	refsOf,
+	restOn,
+} from "./questions.ts";
 
 type Tools = { raise: (ctx: Ctx, r: Raise) => Raised };
 
@@ -335,6 +347,15 @@ const failureHandler: Handler<"failure"> = {
 			return { corrected };
 		}
 		const klass = failureClass(answer);
+		if (answer.is === "inherited") {
+			// The question may have been asked while the base failed and answered after it stopped. The answer is
+			// held to the base as it is now: every test failing with this cause on the build must fail there too.
+			const seenOn = json<{ targetId?: number }>(question.evidence).targetId;
+			const target = seenOn !== undefined ? mustTarget(ctx.db, seenOn) : null;
+			const failing = target ? failingWithCause(ctx.db, target, subject.signature) : [];
+			if (!target || !failing.every((test) => failsOnBase(ctx.db, target, test, subject.signature)))
+				throw conflict("the base does not show this failure now, so it is not inherited; choose another answer");
+		}
 		// A decision that holds on certain targets excuses those and no other.
 		const policy = currentPolicy(ctx.db, ctx.project.id);
 		const here = failureHandler
@@ -351,6 +372,18 @@ const failureHandler: Handler<"failure"> = {
 		// gate is never left blocked by a failure nobody is being asked about.
 		const covered = here?.until === "this-target" ? here.targets : null;
 		const [decidedOn] = covered ?? [];
+		// "Already failing on the base" stands on the base's results for the tests that fail here. They are
+		// written down, so a report or a correction on the base has this answer checked again.
+		if (answer.is === "inherited" && decidedOn !== undefined) {
+			const target = mustTarget(ctx.db, decidedOn);
+			// It also rests on the change itself: a later report can move the change onto another base.
+			restOn(
+				ctx,
+				decisionOf(witness, "failure"),
+				[...baseScopesOf(ctx.db, target), subject.scope],
+				failingWithCause(ctx.db, target, subject.signature),
+			);
+		}
 		const reask =
 			decidedOn === undefined
 				? []
@@ -370,6 +403,7 @@ const failureHandler: Handler<"failure"> = {
 		const effects = json<{ corrected?: [number, number][]; class?: string }>(decision.effects);
 		if (effects.corrected) restoreFailures(ctx, decision.id);
 		if (effects.class) dropExcuse(ctx, subject.signature, subject.scope, decision.id);
+		dropRests(ctx, decision.id);
 	},
 	holds({ question, answer, now, policy }) {
 		const basis = untilBasisChanges(question);

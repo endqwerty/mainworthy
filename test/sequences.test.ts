@@ -17,14 +17,18 @@
 //    what its slots give.
 // 7. Nobody is asked about a failure that has an answer: no question is open for a cause on a target that an
 //    excuse in force covers, unless it also lists a target that none covers.
+// 9. An "already failing on the base" answer in force is true now: every test that fails with the cause on the
+//    build it covers fails on the base too, by what the base's gate counts at this moment.
 // 8. An answer that another decision supersedes is no longer in force. (The rows the ledger writes itself when
 //    an answer ends, `expired` and `outdated`, stay on their question and are what the next answer follows.)
 //
 // More seeds: CASEBOOK_SEQUENCE_SEEDS=500 bun test test/sequences.test.ts
 import { expect, test } from "bun:test";
 import { aggregateSlot, replacesInLane, type SlotFill, slotState, type Tally, verdict } from "../src/core/runs.ts";
+import { mustTarget } from "../src/server/evidence/evidence.ts";
 import { sweep } from "../src/server/jobs.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
+import { failingWithCause, failsOnBase } from "../src/server/runs/runs.ts";
 import { harness } from "./helpers.ts";
 
 const SEEDS = Number(process.env.CASEBOOK_SEQUENCE_SEEDS ?? 40);
@@ -236,6 +240,21 @@ function sequence(seed: number, preset: string): Problem | null {
 			   AND json_extract(old.answer, '$.is') NOT IN ('expired', 'outdated', 'withdrawn')`,
 		);
 		if (standing.length > 0) return { what: "a superseded decision is still its question's answer", detail: standing };
+
+		// 9. Inherited answers against the base as it is now.
+		for (const held of rows<{ signature: number; target: number; decision: number }>(
+			`SELECT e.signature, e.target, e.decision FROM excuses e JOIN decisions d ON d.id = e.decision
+			 WHERE e.target != 0 AND json_extract(d.answer, '$.is') = 'inherited'`,
+		)) {
+			const target = mustTarget(h.app.db, held.target);
+			const failing = failingWithCause(h.app.db, target, held.signature);
+			const untrue = failing.filter((test) => !failsOnBase(h.app.db, target, test, held.signature));
+			if (untrue.length > 0)
+				return {
+					what: "an 'already failing on the base' answer stands though the base no longer fails",
+					detail: { held, untrue },
+				};
+		}
 
 		// 4. Excuses and the decisions they belong to.
 		const orphans = rows(

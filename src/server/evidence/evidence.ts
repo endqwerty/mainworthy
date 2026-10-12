@@ -371,6 +371,29 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 	}
 	const what = codeWhat(input.repo, input.commit);
 	const env = input.env ?? "";
+	const found = ctx.db.get(Q.target, { project, what, env });
+	// A report that names a commit and neither a branch nor a pull request (a result typed into a run that counts
+	// that commit, a pipeline that sends only the hash) says nothing about where the commit is. Where the commit
+	// is already known, it is that commit: it takes the line and the change it was first reported on, and its
+	// failures are answered there, not in a scope of their own.
+	const known =
+		!found && input.pr === undefined && input.branch === undefined
+			? (ctx.db.all(Q.targetsOfCommit, { project, what })[0] ?? null)
+			: null;
+	if (known) {
+		const { lastId } = ctx.db.run(Q.insertTarget, {
+			project,
+			what,
+			env,
+			repo: known.repo,
+			commit: input.commit,
+			branch: known.branch,
+			line: known.line,
+			change: known.change,
+			seq: ctx.seq,
+		});
+		return mustTarget(ctx.db, lastId);
+	}
 	const trunk = input.pr === undefined && input.branch !== undefined && TRUNK_BRANCHES.has(input.branch);
 	let change: ChangeRow | null = null;
 	if (!trunk) {
@@ -382,7 +405,6 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 					: `commit:${input.commit.slice(0, 12)}`;
 		change = upsertChange(ctx, changeKey(ctx.db, project, key, input.repo ?? null), input);
 	}
-	const found = ctx.db.get(Q.target, { project, what, env });
 	if (found) return found;
 	const { lastId } = ctx.db.run(Q.insertTarget, {
 		project,

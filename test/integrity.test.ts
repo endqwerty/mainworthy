@@ -871,6 +871,43 @@ describe("what a result may prove", () => {
 		});
 	});
 
+	test("when the base stops failing, an 'already failing on the base' answer for a change ends at once", () => {
+		const one = (outcome: string) => ({
+			test: { key: "one" },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
+		});
+		const variant = (how: "corrected" | "passes on a newer attempt") => {
+			const local = harness();
+			try {
+				const send = (target: unknown, more: Record<string, unknown>) =>
+					local.call<ReportReceipt>("report", { target, ...more });
+				const base = { repo: "app", commit: "base0004", branch: "main" };
+				const head = { repo: "app", commit: "head0004", branch: "feature", pr: 4, base: "base0004" };
+				const original = send(base, { results: [one("fail")] });
+				expect(send(head, { results: [one("fail")] }).gate?.verdict).toBe("passed");
+				// The base's failure goes away. Nothing new is reported for the change.
+				if (how === "corrected") send(base, { results: [{ ...one("pass"), corrects: first(original.results) }] });
+				else send(base, { attempt: 2, results: [one("pass")] });
+				const status = local.call<GateStatus>("gate", { commit: "head0004", repo: "app" });
+				const asked = local.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items.map((item) => item.q);
+				const ledger = local.app.db.raw
+					.query<{ answer: string }, []>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id")
+					.all()
+					.map((row) => JSON.parse(row.answer).is);
+				return { verdict: status.verdict, unexplained: status.tally.unexplained, named: status.open, asked, ledger };
+			} finally {
+				local.close();
+			}
+		};
+		for (const how of ["corrected", "passes on a newer attempt"] as const) {
+			const after = variant(how);
+			expect(after).toMatchObject({ verdict: "blocked", unexplained: 1, ledger: ["inherited", "outdated"] });
+			expect(after.asked).toHaveLength(1);
+			expect(after.named).toEqual(after.asked);
+		}
+	});
+
 	test("an automated test cannot take the key of a case's manual test", () => {
 		seed(2);
 		const taken = h.raw("report", {

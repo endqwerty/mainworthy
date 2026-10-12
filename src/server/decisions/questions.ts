@@ -1,4 +1,4 @@
-// Storage for the queue and the ledger. Owns questions, question_refs, answers and decisions.
+// Storage for the queue and the ledger. Owns questions, question_refs, answers, decisions and decision_rests.
 // The rules (who may answer, when a decision holds) are in decisions.ts; this file only reads and writes rows.
 import type { ActorKind, Ask, Kind } from "../../core/kinds.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
@@ -87,6 +87,17 @@ const Q = {
 		   AND (q.state = 'open' OR (q.state = 'decided' AND d.id IS NOT NULL
 		        AND json_extract(d.answer, '$.is') NOT IN ('expired', 'outdated', 'withdrawn')))
 		 ORDER BY q.epoch DESC, q.id DESC`,
+	),
+	addRest: sql<{ project: number; scope: string; test: number; decision: number }>(
+		"INSERT OR IGNORE INTO decision_rests (project, scope, test, decision) VALUES ($project, $scope, $test, $decision)",
+	),
+	dropRests: sql<{ decision: number }>("DELETE FROM decision_rests WHERE decision = $decision"),
+	restingOnTests: sql<{ project: number; scope: string; tests: string }, { decision: number }>(
+		`SELECT DISTINCT decision FROM decision_rests
+		 WHERE project = $project AND scope = $scope AND test IN (SELECT value FROM json_each($tests))`,
+	),
+	restingOnScope: sql<{ project: number; scope: string }, { decision: number }>(
+		"SELECT DISTINCT decision FROM decision_rests WHERE project = $project AND scope = $scope",
 	),
 	byNo: sql<{ project: number; no: number }, QuestionRow>(
 		"SELECT * FROM questions WHERE project = $project AND no = $no",
@@ -308,6 +319,23 @@ export function attachEvidence(
 	ctx.touched.add(questionRef(question));
 	return questionById(ctx.db, question.id) ?? question;
 }
+
+/** Records that a decision rests on what these tests show in a scope (the base of a change). */
+export function restOn(ctx: Ctx, decision: number, scopes: readonly string[], tests: readonly number[]): void {
+	for (const scope of scopes)
+		for (const test of tests) ctx.db.run(Q.addRest, { project: ctx.project.id, scope, test, decision });
+}
+
+export const dropRests = (ctx: Ctx, decision: number): void => {
+	ctx.db.run(Q.dropRests, { decision });
+};
+
+/** The decisions that rest on what any of these tests shows in a scope; every test of the scope when `tests` is null. */
+export const restingOn = (db: Db, project: number, scope: string, tests: readonly number[] | null): number[] =>
+	(tests === null
+		? db.all(Q.restingOnScope, { project, scope })
+		: db.all(Q.restingOnTests, { project, scope, tests: JSON.stringify(tests) })
+	).map((row) => row.decision);
 
 /** Adds things a question is about, so each of them lists it. Returns how many it did not name before. */
 export function alsoAbout(ctx: Ctx, question: QuestionRow, refs: readonly string[]): number {

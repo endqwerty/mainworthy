@@ -387,17 +387,40 @@ describe("a question that gains occurrences while open", () => {
 });
 
 describe("which answers apply", () => {
-	test("a trunk failure cannot be called inherited or mistaken; a change's failure can be inherited", () => {
+	test("'inherited' is offered only where the base shows the failure; 'mistaken' only where results disagree", () => {
 		h.call("report", ciReport({ commit: "9999999a", n: 2, fail: { 0: "expected 1, got 2" } }));
 		const trunk = first(queue().items);
 		expect(trunk.answers).toEqual(["defect", "test", "expected", "flaky", "infra"]);
 		expect(decide(trunk, { is: "inherited" })).toMatchObject({ status: "invalid" });
 		expect(decide(trunk, { is: "mistaken" })?.needs).toContain("does not apply");
+		// A change that fails a test its base passes: nothing in the evidence says it was already failing.
 		h.call(
 			"report",
 			ciReport({ commit: "9999999b", branch: "feature", pr: 12, n: 2, fail: { 1: "expected 3, got 4" } }),
 		);
 		const change = queue().items.find((item) => item.about.includes("pr:12"));
-		expect(change?.answers).toEqual(["defect", "test", "expected", "flaky", "infra", "inherited"]);
+		expect(change?.answers).toEqual(["defect", "test", "expected", "flaky", "infra"]);
+		// Under a policy that leaves it to a person, a change that fails what its base fails is offered `inherited`.
+		const standard = harness({ preset: "standard" });
+		try {
+			standard.call("report", ciReport({ commit: "9999999a", n: 2, fail: { 0: "expected 1, got 2" } }));
+			standard.call(
+				"report",
+				ciReport({
+					commit: "9999999c",
+					branch: "feature",
+					pr: 13,
+					base: "9999999a",
+					n: 2,
+					fail: { 0: "expected 1, got 2" },
+				}),
+			);
+			const inherited = standard
+				.call<InboxReply>("inbox", { kind: "failure" })
+				.items.find((item) => item.about.includes("pr:13"));
+			expect(inherited?.answers).toEqual(["defect", "test", "expected", "flaky", "infra", "inherited"]);
+		} finally {
+			standard.close();
+		}
 	});
 });

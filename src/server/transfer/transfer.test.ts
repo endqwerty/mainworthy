@@ -400,6 +400,7 @@ const fixtures: Record<string, Row[]> = {
 	],
 	slot_results: [{ slot: 602, result: 201, run: 601, admitted: "exact", corrected: 1 }],
 	depends_on: [{ run: 601, decision: 401, expires_at: null }],
+	decision_rests: [{ project: 23, scope: "line:trunk", test: 101, decision: 401 }],
 };
 
 function database(): Db {
