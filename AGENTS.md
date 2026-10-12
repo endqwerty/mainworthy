@@ -9,12 +9,38 @@ Read [README.md](README.md) first, then `docs/product-vision.md`,
 
 ## State
 
-Day zero: **the stack is undecided** (`docs/decisions/0001-stack-open.md`).
-Do not add a language, framework or build tool until a decision record is
-written. When you do, in the same change: add the decision record, a
-`t3.json` with install/check/dev scripts, the check command and stack rules in
-this file, and a worktree-release step if dependencies are large (the Mac mini
-is short on disk).
+The stack is chosen (2026-10-12): TypeScript on Bun, one SQLite file, a React web UI
+(`docs/decisions/0010-stack.md`, `docs/decisions/0011-ui-direction.md`). The MVP lands
+in three stacked changes: the decisions, the skeleton and the pure core (`src/core`);
+then the engine and its surfaces; then the web UI and the container. The rules below
+describe the repository once all three are in. What is deferred: the GitHub milestone
+`Backlog to 1.0`.
+
+## Stack rules
+
+- **Commands.** `bun install`; `bun run check` (type-check, lint, every test
+  including the budgets and the browser tests); `bun run dev` (the server on
+  `127.0.0.1:7357`, restarting on change). Bun 1.4; no other runtime or build tool.
+- **One registry.** A capability is an operation in `src/server/ops/index.ts`. HTTP,
+  the OpenAPI document, the CLI, the MCP tools and the web client come from it. Never
+  add a route, a command or a tool beside it.
+- **The module map is a test.** `test/architecture.test.ts` fails on an import that
+  goes up the map, on SQL outside its owning module, and on any second way to mint a
+  decision witness. Fix the design, not the test.
+- **Standing changes only through a decision.** Anything that is "current" (a case's
+  head, a link, an excuse, a closed run, the policy) is written by a function that
+  takes a `Witness`. Do not add a writer without one.
+- **`src/core` is pure** and runs in the browser and the server. No I/O, no Node or
+  Bun APIs. `src/web` imports only `src/core`.
+- **SQL** is declared with `sql()` in the module that owns the table (the owner of
+  each table is listed in `test/architecture.test.ts`), so the check can prepare every
+  statement against the schema. To read another module's data, call its functions; do
+  not join its tables. A schema change is a new file in
+  `src/server/kernel/migrations/`; a shipped migration is never edited.
+- **Budgets are tests** (`test/budgets.test.ts`, `bench/`). A change that misses a
+  hot-path budget does not merge; do not raise the number.
+- **Worktree release:** `rm -rf node_modules .casebook test-results` (also the
+  `release worktree` script in `t3.json`, which runs when a thread settles).
 
 ## Working rules
 
@@ -24,6 +50,15 @@ is short on disk).
 - Secrets never enter the repo, logs or chat.
 - Competitor claims in `docs/competitors.md` are hypotheses until verified;
   do not build on one without checking it.
+- Briefing a verifier: write the brief as a QA review of application logic and say
+  that everything runs locally. On 2026-10-12 a Codex verifier was stopped by its
+  provider's content filter in the middle of a run whose brief used the vocabulary
+  of security testing ("forge", "escalate", "hostile"); the same checks in plain
+  words ran to the end. Have it write each finding to its report as it confirms it,
+  so a run that is cut off still leaves its findings.
+- A delegated worker that ends with "Selected model is at capacity" has stopped for
+  good: read what it left in the tree, finish or re-delegate the rest, and do not
+  wait for it.
 
 ## Model profile
 

@@ -2,3 +2,12 @@
 .env
 .env.*
 !.env.example
+node_modules
+dist
+*.db
+*.db-wal
+*.db-shm
+.casebook
+test-results
+playwright-report
+bench/results-*.json
