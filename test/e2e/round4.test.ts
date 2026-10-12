@@ -182,7 +182,7 @@ for (const same of [false, true])
 		);
 
 check(
-	"R4A-2 duplicated tabs have distinct owners and both edits can record",
+	"R4A-2 duplicated tabs have distinct owners and transfer the complete draft deliberately",
 	async () => {
 		const server = await startServer();
 		await cases(server, 1);
@@ -202,16 +202,18 @@ check(
 			expect(await a.evaluate(() => sessionStorage.getItem("casebook:draft-window"))).not.toBe(
 				await b.evaluate(() => sessionStorage.getItem("casebook:draft-window")),
 			);
+			expect(await title(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(true);
+			await title(b).press("X");
+			await b.locator("#bar").filter({ hasText: "This case is being edited in another window" }).waitFor();
+			await b.getByRole("button", { name: "Take over here", exact: true }).click();
+			await eventually(() => title(a).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly), Boolean);
 			await b.getByRole("textbox", { name: "Step 1", exact: true }).fill("From B");
 			await a.keyboard.press("Escape");
-			await eventually(
-				() => server.api("get", { refs: ["C-1"] }),
-				(rows) => rows[0]?.version === 2,
-			);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
 			await b.keyboard.press("Escape");
 			const saved = await eventually(
 				() => server.api("get", { refs: ["C-1"] }),
-				(rows) => rows[0]?.version === 3,
+				(rows) => rows[0]?.version === 2,
 			);
 			expect(saved[0]?.title).toBe("From A");
 			expect(z.array(z.object({ action: z.string() })).parse(saved[0]?.steps)[0]?.action).toBe("From B");
@@ -861,7 +863,7 @@ for (const surface of ["capture", "edit", "run", "planner", "queue", "settings"]
 	);
 
 check(
-	"R4A-5 a live window's unfinished capture is not opened by another window",
+	"R4A-5 a live window's unfinished capture is read-only in another window",
 	async () => {
 		const server = await startServer();
 		await cases(server, 1);
@@ -875,7 +877,10 @@ check(
 			b.setDefaultTimeout(5000);
 			await b.goto(`${server.url}/p/scratch/suite`);
 			await b.locator("#app").waitFor();
-			expect(await title(b).count()).toBe(0);
+			await title(b).waitFor();
+			expect(await title(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(true);
+			await title(b).press("X");
+			await b.locator("#bar").filter({ hasText: "This case is being edited in another window" }).waitFor();
 			await b.keyboard.press("Escape");
 			await title(a).click();
 			await a.keyboard.press("End");

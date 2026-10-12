@@ -104,7 +104,7 @@ for (const order of ["resolve then reload", "reload then resolve"])
 				await step(b).click();
 				await b.keyboard.type(" REFUSED IN B");
 				expect(await step(b).inputValue()).toBe("Apply the coupon SAVE10");
-				await b.getByText("Resolve the conflict first", { exact: false }).first().waitFor();
+				await b.getByText("This case is being edited in another window", { exact: false }).first().waitFor();
 				if (order === "reload then resolve") {
 					await b.reload();
 					await card(b).waitFor();
@@ -193,13 +193,15 @@ check(
 			await conflict(server, a);
 			await card(b).waitFor();
 			expect(await title(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(true);
-			await b.getByText("Resolve the conflict first", { exact: false }).first().waitFor();
+			await b.getByText("This case is being edited in another window", { exact: false }).first().waitFor();
 			const q = await question(server);
 			await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "reject" } });
 			await card(a).waitFor({ state: "detached" });
 			await card(b).waitFor({ state: "detached" });
-			expect(await title(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(false);
+			expect(await title(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(true);
 			expect(await title(b).inputValue()).toBe("My title");
+			await b.getByRole("button", { name: "Take over here", exact: true }).click();
+			expect(await title(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(false);
 			await title(b).fill("My title editable after rejection");
 			expect((await drafts(b))[0]?.body.title).toBe("My title editable after rejection");
 		} finally {
@@ -435,16 +437,14 @@ check(
 			});
 			await resolve(a);
 			await eventually(async () => received, Boolean);
+			await b.getByRole("button", { name: "Take over here", exact: true }).click();
 			await card(b).waitFor({ state: "detached" });
 			await b.getByRole("button", { name: "Recorded choice", exact: true }).waitFor();
 			await b.keyboard.press("e");
 			await title(b).fill("My title");
 			expect((await drafts(b))[0]?.conflict).toBeUndefined();
 			gate.release();
-			await a
-				.locator("#bar")
-				.filter({ hasText: /Conflict resolved\. (Version 3|Your later text)/ })
-				.waitFor();
+			await a.locator("#bar").filter({ hasText: "This case is being edited in another window" }).waitFor();
 			await eventually(
 				() => drafts(b),
 				(rows) => rows[0]?.base === 3,

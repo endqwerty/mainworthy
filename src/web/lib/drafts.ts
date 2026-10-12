@@ -2,8 +2,9 @@ import { z } from "zod";
 import { CaseBody, Step } from "../../core/model.ts";
 import { ProposeInput } from "../../core/ops.ts";
 import { deviceKey } from "./device.ts";
+import { draftOwnedElsewhere, draftOwner, randomId } from "./ids.ts";
 
-const DraftBody = CaseBody.extend({
+export const DraftBody = CaseBody.extend({
 	steps: z.array(Step.extend({ action: z.string(), expected: z.string().nullable() })),
 });
 export const DraftConflict = z.object({
@@ -13,11 +14,27 @@ export const DraftConflict = z.object({
 	base: CaseBody,
 	mine: CaseBody,
 	current: CaseBody,
-	merged: CaseBody,
+	merged: DraftBody,
+	sentMerge: CaseBody.optional(),
 	paths: z.array(z.string()),
 	draftId: z.string(),
 });
 export type DraftConflict = z.infer<typeof DraftConflict>;
+
+export function hasTypedMerge(state: DraftConflict): boolean {
+	return state.paths.some((path) => {
+		const text = (body: CaseBody): string | null => {
+			if (path === "title") return body.title;
+			if (path === "pre") return body.pre;
+			const [kind, id, part] = path.split(".");
+			if (kind !== "steps") return null;
+			const step = body.steps.find((step) => step.id === id);
+			return part === "action" ? (step?.action ?? null) : part === "expected" ? (step?.expected ?? "") : null;
+		};
+		const merged = text(state.merged);
+		return merged !== null && merged !== text(state.mine) && merged !== text(state.current);
+	});
+}
 
 const Draft = z
 	.object({
@@ -70,8 +87,29 @@ export function readDraft({ project, id }: { project: string; id: string }): Dra
 		return null;
 	}
 }
+export function claimDraft({
+	project,
+	draft,
+	takeOver = false,
+}: {
+	project: string;
+	draft: Draft;
+	takeOver?: boolean;
+}): Draft {
+	const stored = readDraft({ project, id: draft.id }) ?? draft;
+	if (stored.owner === draftOwner() || (!takeOver && draftOwnedElsewhere(stored))) return stored;
+	const claimed = { ...stored, owner: draftOwner(), cmd: randomId(), sent: takeOver ? null : stored.sent };
+	storeDraft({ project, draft: claimed });
+	return claimed;
+}
 /** Each input writes synchronously, so even closing before the next frame preserves text and caret. */
-export function writeDraft({ project, draft }: { project: string; draft: Draft }): void {
+export function writeDraft({ project, draft }: { project: string; draft: Draft }): boolean {
+	const stored = readDraft({ project, id: draft.id });
+	if (draft.owner !== draftOwner() || (stored && stored.owner !== draftOwner())) return false;
+	storeDraft({ project, draft });
+	return true;
+}
+function storeDraft({ project, draft }: { project: string; draft: Draft }): void {
 	knownStepIds({ project, id: draft.id, ids: [...draft.body.steps, ...draft.original.steps].map((step) => step.id) });
 	if (!draft.dirty) return;
 	localStorage.setItem(draftKey({ project, id: draft.id }), JSON.stringify(draft));
@@ -98,11 +136,9 @@ export function readDrafts(project: string): Draft[] {
 	} catch {}
 	return drafts.sort((a, b) => a.at - b.at);
 }
-export function removeDraft({ project, id, owner }: { project: string; id: string; owner?: string }): void {
-	if (owner) {
-		const stored = readDraft({ project, id });
-		if (stored && stored.owner !== owner) return;
-	}
+export function removeDraft({ project, id }: { project: string; id: string }): void {
+	const stored = readDraft({ project, id });
+	if (stored && stored.owner !== draftOwner()) return;
 	localStorage.removeItem(draftKey({ project, id }));
 	if (localStorage.getItem(activeKey(project)) === id) localStorage.removeItem(activeKey(project));
 }
