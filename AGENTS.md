@@ -9,17 +9,16 @@ Read [README.md](README.md) first, then `docs/product-vision.md`,
 
 ## State
 
-The stack is chosen (2026-10-12): TypeScript on Bun, one SQLite file, a React web UI
-(`docs/decisions/0010-stack.md`, `docs/decisions/0011-ui-direction.md`). The MVP lands
-in three stacked changes: the decisions, the skeleton and the pure core (`src/core`);
-then the engine and its surfaces; then the web UI and the container. The rules below
-describe the repository once all three are in. What is deferred: the GitHub milestone
-`Backlog to 1.0`.
+The MVP is built (2026-10-12): TypeScript on Bun, one SQLite file, a React web UI
+(`docs/decisions/0010-stack.md`). What it contains and where it departs from the
+design: `docs/decisions/0012-mvp-scope-and-departures.md`. What is deferred: the
+GitHub milestone `Backlog to 1.0`. How it fits together: `docs/architecture.md`.
 
 ## Stack rules
 
 - **Commands.** `bun install`; `bun run check` (type-check, lint, every test
-  including the budgets and the browser tests); `bun run dev` (the server on
+  including the budgets and the browser tests, which are skipped, with a
+  message, on a machine with no Chromium); `bun run dev` (the server on
   `127.0.0.1:7357`, restarting on change). Bun 1.4; no other runtime or build tool.
 - **One registry.** A capability is an operation in `src/server/ops/index.ts`. HTTP,
   the OpenAPI document, the CLI, the MCP tools and the web client come from it. Never
@@ -29,7 +28,10 @@ describe the repository once all three are in. What is deferred: the GitHub mile
   decision witness. Fix the design, not the test.
 - **Standing changes only through a decision.** Anything that is "current" (a case's
   head, a link, an excuse, a closed run, the policy) is written by a function that
-  takes a `Witness`. Do not add a writer without one.
+  takes a `Witness`. Do not add a writer without one. Four functions put back what
+  a withdrawn or ended decision did (`restoreLink`, `dropExcuse`, `reopenRun`,
+  `restoreFailures`) and take no witness: the withdrawal is the recorded event,
+  and a test allows only the kind handlers to call them.
 - **`src/core` is pure** and runs in the browser and the server. No I/O, no Node or
   Bun APIs. `src/web` imports only `src/core`.
 - **SQL** is declared with `sql()` in the module that owns the table (the owner of
@@ -59,6 +61,11 @@ describe the repository once all three are in. What is deferred: the GitHub mile
 - A delegated worker that ends with "Selected model is at capacity" has stopped for
   good: read what it left in the tree, finish or re-delegate the rest, and do not
   wait for it.
+- A delegated child shares this checkout, and its own rules tell it to release the
+  worktree when it finishes. Say in every task that it must not: on 2026-10-12 two
+  children did, and removed `node_modules` under the lead and a builder that were
+  still running. Reviewers work in an export (`git archive <rev> | tar -x -C <dir>`)
+  and clean only that. If modules vanish mid-task: `bun install --frozen-lockfile`.
 
 ## Model profile
 
