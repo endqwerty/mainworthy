@@ -1,12 +1,12 @@
 // Extended random sequences for the Casebook engine, written by an independent defect hunt (Claude Fable 5.1) and
-// kept as a test. Everything `test/sequences.test.ts` does, plus:
+// kept as a test. Everything `test/sequences.ts` does, plus:
 // several tests per case and several causes; planned runs with `jobs` obligations and `minActors: 2`; runs closed by
 // sign-off and reopened by withdrawing it; the policy switched mid-way; corrections of corrections; the same report
 // sent twice; reports accepted and applied later by recovery; an actor forgotten; cases edited so slots pin older
 // versions; findings and adopt questions interleaved; and now and then a large report.
 //
 // Audits (after every command), written against the rows and not the engine's helpers:
-// 1-8 as in `test/sequences.test.ts`.
+// 1-8 as in `test/sequences.ts`.
 // 9.  A closed run's sign-off is a decision in force on a signoff question about that run; an open run has none.
 // 10. No run is left `outstanding` once every accepted batch is applied.
 // 11. Every row of `slot_results` is a result the slot's run may count: on a target the run accepts (or typed into a
@@ -26,7 +26,9 @@
 // New actions: a person's typed result into a run sometimes carries a job name and a skipped automated key; an
 // agent sometimes reports a commit nobody has reported yet, as trunk or as the change, before the pipeline does.
 //
-// More seeds: CASEBOOK_SEQUENCE_SEEDS=500 bun test test/sequences-extended.test.ts
+// The tests are in `sequences-extended-loose.test.ts`, `-standard` and `-strict`. This file registers none, so a
+// defect hunt can import `sequence` and `stats` from it.
+// More seeds: CASEBOOK_SEQUENCE_SEEDS=500 bun test test/sequences-extended-
 import { expect, test } from "bun:test";
 import { recoverAccepted, sweep } from "../src/server/jobs.ts";
 import { type Actor, findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
@@ -816,15 +818,14 @@ export function sequence(seed: number, preset: string): Problem | null {
 	}
 }
 
-if (process.env.CASEBOOK_SEQUENCE_LIB === undefined) {
-	for (const preset of ["loose", "standard", "strict"]) {
-		test(`${SEEDS} extended random sequences under the ${preset} policy keep every invariant`, () => {
-			const problems: Problem[] = [];
-			for (let seed = FIRST; seed < FIRST + SEEDS && problems.length < 3; seed++) {
-				const problem = sequence(seed, preset);
-				if (problem) problems.push(problem);
-			}
-			expect(problems).toEqual([]);
-		}, 600_000);
-	}
+/** The test of one policy preset. Each preset has a file of its own, so the three run side by side. */
+export function extendedSequences(preset: "loose" | "standard" | "strict"): void {
+	test(`${SEEDS} extended random sequences under the ${preset} policy keep every invariant`, () => {
+		const problems: Problem[] = [];
+		for (let seed = FIRST; seed < FIRST + SEEDS && problems.length < 3; seed++) {
+			const problem = sequence(seed, preset);
+			if (problem) problems.push(problem);
+		}
+		expect(problems).toEqual([]);
+	}, 600_000);
 }
