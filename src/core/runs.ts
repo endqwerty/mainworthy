@@ -151,7 +151,7 @@ const decides = (outcome: string): boolean => outcome === "pass" || outcome === 
 /**
  * The one rule for which result of a lane counts (a lane is one producer's results for one test from one job on
  * one target), read in the order they arrived. A slot is folded by this function; a commit's gate applies the
- * same rule as the condition of one SQL statement on a report, and `test/sequences.test.ts` checks the two agree.
+ * same rule as the condition of one SQL statement on a report, and `test/sequences.ts` checks the two agree.
  * A newer attempt is the producer running it again: it takes the place of the attempt before it, unless it
  * decided nothing (a skip, a blocked result) and the earlier one did. The same attempt reported twice is not a
  * re-run: the worse outcome stands, and a producer that was wrong says so with a correction. An older attempt
