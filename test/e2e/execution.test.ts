@@ -407,7 +407,7 @@ async function cases(server: Server, count: number) {
 );
 
 (browserAvailable ? test : test.skip)(
-	"a rejected result restores the slot and note even when every read also fails",
+	"a refused session keeps the slot unrecorded and restores its note after sign-in",
 	async () => {
 		const server = await fixture({ mode: "server" });
 		let view: Awaited<ReturnType<typeof openPage>> | null = null;
@@ -438,10 +438,25 @@ async function cases(server: Server, count: number) {
 			if (!grant) throw new Error("Executor token missing");
 			await server.api("admin", { do: "token.revoke", id: grant.id });
 			await view.page.keyboard.press("Enter");
-			await view.page.waitForFunction(() =>
-				document.querySelector(".run-last")?.textContent?.includes("Each result records"),
+			await view.page.locator("#token").waitFor();
+			expect(await view.page.locator("#app").count()).toBe(0);
+			const unrecorded = Slot.array().parse((await server.api("find", { in: "slots", run: planned.run })).items);
+			expect(unrecorded.every((slot) => slot.state === "missing" && slot.fills.length === 0)).toBe(true);
+			const first = unrecorded.find((slot) => slot.case === "C-1");
+			if (!first) throw new Error("First pinned slot missing");
+			const key = `casebook:run-notes:scratch:${planned.run}`;
+			const stored = z
+				.record(z.string(), z.string())
+				.parse(JSON.parse(await view.page.evaluate((key) => localStorage.getItem(key) ?? "{}", key)));
+			expect(stored[first.id]).toBe("Keep this failure note");
+			await view.page.getByRole("textbox", { name: "Sign in with your token" }).fill(server.token);
+			await view.page.keyboard.press("Enter");
+			await view.page.locator("#app").waitFor();
+			await view.page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
+			await view.page.waitForFunction(
+				(id) => document.querySelector(`[data-slot="${id}"]`)?.textContent?.includes("yours"),
+				first.id,
 			);
-			await view.page.waitForFunction(() => document.querySelector('[data-slot="1"]')?.textContent?.includes("yours"));
 			expect(await view.page.getByRole("textbox", { name: "Result note" }).inputValue()).toBe("Keep this failure note");
 			expect(
 				Slot.array()
@@ -449,6 +464,7 @@ async function cases(server: Server, count: number) {
 					.every((slot) => slot.state === "missing" && slot.fills.length === 0),
 			).toBe(true);
 			expect(await view.page.locator(".run-last").innerText()).not.toContain("C-1 · Fail");
+			expect(view.loads()).toBe(1);
 			expect(view.errors).toEqual([]);
 		} finally {
 			await view?.close();

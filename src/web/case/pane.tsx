@@ -143,13 +143,24 @@ export function CasePane({
 			const version = draft?.base ?? view?.version ?? 1;
 			if (version > 1) setDiffVersion(version);
 		},
-		accept: () => {
-			void answerProposal("accept");
-		},
-		reject: () => {
-			void answerProposal("reject");
-		},
+		accept: () => answerByKey("accept"),
+		reject: () => answerByKey("reject"),
 	});
+	/**
+	 * A key answers only what is on the screen (decision 0011: nothing a key acts on is clipped). When the first
+	 * proposal, its diff or its buttons are outside the pane, the first press brings it into view and says so; the
+	 * next press answers it.
+	 */
+	function answerByKey(answer: "accept" | "reject"): void {
+		const question = proposals[0];
+		if (!question) return;
+		if (proposalInView(question.q)) {
+			void answerProposal(answer, question);
+			return;
+		}
+		revealProposal(question.q);
+		setStatus(`${question.q} is now in view. Read it, then press ${answer === "accept" ? "a" : "r"} again.`);
+	}
 	if (!view && !draft)
 		return (
 			<section className="pane" id="detail">
@@ -513,7 +524,7 @@ function ProposalCard({
 		: null;
 
 	return (
-		<div className={`ev ${question.producer === "agent" ? "prop" : ""}`}>
+		<div className={`ev ${question.producer === "agent" ? "prop" : ""}`} data-proposal={question.q}>
 			<ProducerGlyph kind={question.producer} />
 			<div>
 				<b className={question.producer === "agent" ? "agentv" : ""}>
@@ -537,6 +548,37 @@ function ProposalCard({
 		</div>
 	);
 }
+const proposalCard = (q: string): HTMLElement | null =>
+	document.querySelector<HTMLElement>(`[data-proposal="${CSS.escape(q)}"]`);
+
+/**
+ * Whether a proposal is on the screen: all of it inside the visible part of the pane, or, when it is taller than
+ * the pane, scrolled to its end, where the answer buttons are.
+ */
+function proposalInView(q: string): boolean {
+	const card = proposalCard(q);
+	const pane = card?.closest<HTMLElement>(".pane-scroll");
+	if (!card || !pane) return false;
+	const box = card.getBoundingClientRect();
+	const frame = pane.getBoundingClientRect();
+	const top = Math.max(frame.top, 0);
+	const bottom = Math.min(frame.bottom, window.innerHeight);
+	if (box.height <= bottom - top) return box.top >= top - 1 && box.bottom <= bottom + 1;
+	return box.bottom <= bottom + 1 && box.bottom > top;
+}
+
+function revealProposal(q: string): void {
+	const card = proposalCard(q);
+	const pane = card?.closest<HTMLElement>(".pane-scroll");
+	if (!card || !pane) return;
+	const box = card.getBoundingClientRect();
+	const frame = pane.getBoundingClientRect();
+	// The start of a proposal taller than the pane, so it is read from the top; otherwise the whole of it.
+	const fits = box.height <= frame.height;
+	pane.scrollTop += fits ? box.bottom - frame.bottom + 8 : box.top - frame.top - 8;
+	if (fits && box.top < frame.top) pane.scrollTop += box.top - frame.top - 8 - (box.bottom - frame.bottom + 8);
+}
+
 function ConflictCard({ state, resolved }: { state: ConflictState; resolved: () => void }) {
 	const { project, setStatus } = useApp();
 	const [body, setBody] = useState(state.merged);

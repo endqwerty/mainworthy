@@ -146,3 +146,64 @@ import { z } from "zod";
 	},
 	30000,
 );
+
+(browserAvailable ? test : test.skip)(
+	"on a case page, a proposal below the edge of the pane is brought into view before a key answers it",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			const steps = Array.from({ length: 6 }, (_, i) => `  Step ${i + 1} of the checkout > Result ${i + 1} is shown`);
+			await server.api("propose", {
+				edits: [{ op: "create", outline: ["Checkout with a coupon", ...steps].join("\n") }],
+			});
+			const writer = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "writer",
+					kind: "agent",
+					can: ["read", "produce"],
+					project: "scratch",
+				}),
+			).token;
+			const proposed = await server.api(
+				"propose",
+				{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Checkout with a percentage coupon" } }] },
+				{ token: writer },
+			);
+			expect(proposed.status).toBe("open");
+			view = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			await view.page.setViewportSize({ width: 1280, height: 800 });
+			const card = view.page.locator(`[data-proposal="${proposed.question}"]`);
+			await card.waitFor({ state: "attached" });
+			await view.page.locator(".pane-scroll").evaluate((pane) => {
+				pane.scrollTop = 0;
+			});
+			const inView = () =>
+				card.evaluate((element) => {
+					const box = element.getBoundingClientRect();
+					const frame = element.closest(".pane-scroll")?.getBoundingClientRect();
+					return frame !== undefined && box.top >= frame.top - 1 && box.bottom <= frame.bottom + 1;
+				});
+			// The whole of the proposal does not fit under six steps at 1280 by 800: the first press only shows it.
+			expect(await inView()).toBe(false);
+			await view.page.keyboard.press("a");
+			await view.page.getByText("is now in view", { exact: false }).waitFor();
+			expect(await inView()).toBe(true);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
+			expect((await server.api("inbox", { kind: "adopt" })).items.map((q) => q.q)).toEqual([proposed.question ?? ""]);
+			// Now it is on the screen, and the same key answers it.
+			await view.page.keyboard.press("a");
+			const adopted = await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.version === 2,
+			);
+			expect(adopted[0]?.title).toBe("Checkout with a percentage coupon");
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
+);

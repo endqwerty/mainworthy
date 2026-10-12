@@ -34,7 +34,7 @@ test.skipIf(!browserAvailable)(
 			);
 			expect(rows[0]?.version).toBe(1);
 			const timeline = await server.api("timeline", { ref: "C-1" });
-			expect(timeline.entries.filter((entry) => entry.t === "placement")).toHaveLength(3);
+			expect(timeline.entries.filter((entry) => entry.t === "placement")).toHaveLength(2);
 			expect(h.errors).toEqual([]);
 		} finally {
 			await h.close();
@@ -67,7 +67,7 @@ for (const action of ["move", "archive"]) {
 				});
 				if (action === "move") {
 					await page.keyboard.press("m");
-					await page.getByRole("textbox", { name: "Jump to or run" }).fill("Destination");
+					await page.getByRole("textbox", { name: "Move selected cases to a folder" }).fill("Destination");
 					await page.keyboard.press("Enter");
 					expect(await page.locator(".cmeta .path").textContent()).toBe("Destination");
 				} else {
@@ -90,7 +90,7 @@ for (const action of ["move", "archive"]) {
 				);
 				expect(rows[0]?.version).toBe(1);
 				const timeline = await server.api("timeline", { ref: "C-1" });
-				expect(timeline.entries.filter((entry) => entry.t === "placement")).toHaveLength(3);
+				expect(timeline.entries.filter((entry) => entry.t === "placement")).toHaveLength(2);
 				expect(h.errors).toEqual([]);
 			} finally {
 				await h.close();

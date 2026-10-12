@@ -401,7 +401,7 @@ async function twentyQuestions(server: Server) {
 );
 
 (browserAvailable ? test : test.skip)(
-	"a real rejected request rolls the optimistic answer back",
+	"a refused session rolls back an optimistic answer and restores the question after sign-in",
 	async () => {
 		const server = await fixture({ mode: "server" });
 		let view: Awaited<ReturnType<typeof openPage>> | null = null;
@@ -432,11 +432,21 @@ async function twentyQuestions(server: Server) {
 			if (!grant) throw new Error("Grant missing");
 			await server.api("admin", { do: "token.revoke", id: grant.id });
 			await view.page.keyboard.press("i");
+			await view.page.locator("#token").waitFor();
+			expect(await view.page.locator("#app").count()).toBe(0);
+			expect(
+				(await server.api("inbox", { state: "open" })).items.some((item) => item.q === q.q && item.decision === null),
+			).toBe(true);
+			expect((await server.api("inbox", { state: "decided" })).items.some((item) => item.q === q.q)).toBe(false);
+			await view.page.getByRole("textbox", { name: "Sign in with your token" }).fill(server.token);
+			await view.page.keyboard.press("Enter");
+			await view.page.locator("#app").waitFor();
 			await view.page.locator(`[data-question="${q.q}"]`).waitFor();
-			await view.page.waitForFunction(() =>
-				Boolean(document.querySelector(".queue-last")?.textContent?.match(/authenticat|sign in|token/i)),
-			);
-			expect((await server.api("inbox", {})).items.some((item) => item.q === q.q && item.decision === null)).toBe(true);
+			expect(
+				(await server.api("inbox", { state: "open" })).items.some((item) => item.q === q.q && item.decision === null),
+			).toBe(true);
+			expect((await server.api("inbox", { state: "decided" })).items.some((item) => item.q === q.q)).toBe(false);
+			expect(view.loads()).toBe(1);
 			expect(view.errors).toEqual([]);
 		} finally {
 			await view?.close();
