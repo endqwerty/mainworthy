@@ -754,6 +754,7 @@ export function raiseFailure(
 	const earlier = open
 		? json<{
 				tests?: { id: number; t: string; name: string; case: string | null; counted?: boolean }[];
+				count?: number;
 				producers?: number[];
 				targets?: number[];
 			}>(open.evidence)
@@ -801,7 +802,9 @@ export function raiseFailure(
 			scope: change ? change.key : group.scope,
 			message: group.message,
 			tests: listed.slice(0, 50),
-			count: listed.length,
+			// The list is cut to fifty; the count is not taken from the cut list, so it never falls when a later
+			// occurrence adds a test to a question that has seen hundreds.
+			count: Math.max(listed.length, earlier.count ?? 0),
 			target: target.commit_sha ? target.commit_sha.slice(0, 12) : target.what,
 			branch: target.branch,
 			hints: shown.map((hint) => hint.slice(5)),

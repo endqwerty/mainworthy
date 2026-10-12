@@ -253,6 +253,7 @@ function splitCursor(cursor: string): [number, string] {
 /** The active cases a plan selects, in outline order. Criteria narrow each other; `cases` names them outright. */
 export function selectCases(ctx: Ctx, selection: Selection): CaseRow[] {
 	const project = ctx.project.id;
+	if ((selection.cases?.length ?? 0) > MAX_SELECTION) throw tooMany();
 	const named = selection.cases?.map((text) => mustCase(ctx.db, project, text)) ?? null;
 	const narrowing = selection.folders?.length || selection.tags?.length || selection.text;
 	if (named && !narrowing) return named.filter((row) => row.state === "active");
@@ -285,15 +286,16 @@ export function selectCases(ctx: Ctx, selection: Selection): CaseRow[] {
 		`SELECT c.* FROM cases c WHERE ${where.join(" AND ")} ORDER BY c.folder, c.rank LIMIT ${MAX_SELECTION + 1}`,
 		params,
 	);
-	if (rows.length > MAX_SELECTION)
-		throw invalid(
-			`the selection matches more than ${MAX_SELECTION.toLocaleString("en-US")} cases; narrow it by folder, tag or text`,
-		);
+	if (rows.length > MAX_SELECTION) throw tooMany();
 	return rows;
 }
 
-/** The most cases one selection may name. */
+/** The most cases one selection may name, by criteria or outright. */
 const MAX_SELECTION = 20_000;
+const tooMany = () =>
+	invalid(
+		`the selection is more than ${MAX_SELECTION.toLocaleString("en-US")} cases; narrow it by folder, tag or text, or plan two runs`,
+	);
 
 export type FolderNode = {
 	id: number;

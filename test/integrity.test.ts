@@ -2023,6 +2023,25 @@ describe("what a caller is told", () => {
 		expect(h.raw("propose", two(["Second", "First"]))).toMatchObject({ ok: false, error: { code: "conflict" } });
 	});
 
+	test("a selection that names more cases than a run may hold is refused whole", () => {
+		seed(1);
+		const cases = Array.from({ length: 20_001 }, () => "C-1");
+		expect(() => plan({ name: "Too many", select: { cases } })).toThrow("20,000");
+		expect(rows("SELECT count(*) AS n FROM runs")).toEqual([{ n: 0 }]);
+	});
+
+	test("the number of tests a question has seen does not fall when a later report adds one", () => {
+		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const failing = (key: string) => ({ test: { key }, outcome: "fail", failure: { message: "one cause" } });
+		const target = { commit: "many0001", branch: "main" };
+		report({ target, results: Array.from({ length: 60 }, (_, i) => failing(`t${i}`)) }, ci);
+		expect(open("failure").evidence).toMatchObject({ count: 60 });
+		report({ target, job: "second", results: [failing("one-more")] }, ci);
+		const seen = open("failure").evidence as { count: number; tests: unknown[] };
+		expect(seen.count).toBeGreaterThanOrEqual(60);
+		expect(seen.tests).toHaveLength(50);
+	});
+
 	test("an instance command sent twice returns its first reply", () => {
 		const input = { do: "project.create", key: "idempotent-admin", cmd: "admin-command-01" };
 		const made = h.raw("admin", input);
