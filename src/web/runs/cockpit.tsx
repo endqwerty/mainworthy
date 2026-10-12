@@ -316,9 +316,10 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		})();
 		writes.current.set(slot.id, request);
 		void request.catch((error: unknown) => {
-			if (!sessionCurrent(owner) || writes.current.get(slot.id) !== request) return;
+			if (!sessionCurrent(owner)) return;
 			if (consumedNotes.current.get(slot.id) === text) consumedNotes.current.delete(slot.id);
 			if (consumedSteps.current.get(slot.id) === marked) consumedSteps.current.delete(slot.id);
+			if (writes.current.get(slot.id) !== request) return;
 			const restored = confirmedSlots.current.get(slot.id) ?? rollback;
 			queryClient.setQueryData<InfiniteData<Api["find"]["reply"]>>(
 				cacheKey,
@@ -358,11 +359,10 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	}
 	function undo(): void {
 		if (!last || withdrawn.current.has(last.ready)) return;
-		withdrawn.current.add(last.ready);
 		setCursor(last.slot.id);
 		setNoting(null);
 		noteRef.current?.blur();
-		record(
+		const correction = record(
 			last.previous?.outcome === "pass"
 				? "pass"
 				: last.previous?.outcome === "fail"
@@ -374,6 +374,8 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			last.previous?.note ?? "Withdrawn by the author",
 			false,
 		);
+		if (!correction) return;
+		withdrawn.current.add(last.ready);
 		setLast(null);
 		setStatus(
 			last.previous
@@ -390,7 +392,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			hidden: !noting,
 			when: () => !overlayOpen && Boolean(noting),
 			handler: () => {
-				if (noting) record("fail", noting);
+				if (noting) record("fail", noting, notes[noting.id] ?? "");
 			},
 		},
 		{
@@ -644,7 +646,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 							}
 							if (event.key === "Enter" && noting) {
 								event.preventDefault();
-								record("fail", noting);
+								record("fail", noting, event.currentTarget.value);
 							}
 							if (event.key === "Escape") {
 								event.preventDefault();

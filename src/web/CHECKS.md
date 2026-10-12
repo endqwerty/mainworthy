@@ -199,3 +199,72 @@ with no fixes; `bun test test/architecture.test.ts` passes 12 tests with 31
 expectations. No independent verdict on this new implementation is claimed;
 the lead must obtain one for the combined current revision. No commit, push,
 pull request or worktree release was performed by this worker.
+
+## Round 5 implementation checks
+
+This bounded pass follows ui-r5a and ui-r5b's reviews of `9611d61`. Only
+`src/web/**` and `test/e2e/**` were edited. The lead owns the combined revision's
+independent verification, commits and delivery.
+
+The real-browser checks were written before each behaviour fix. N-1's four
+choice variants, N-2, N-3 and R5B-1 through R5B-3 each failed twice for the
+reported cause before the change. Tests run Chromium against the real Bun
+server and SQLite database on the existing 7400..7449 fixture ports.
+
+| Finding | Cause and files | Browser regression in `test/e2e/round5.test.ts` |
+| --- | --- | --- |
+| N-1 | The draft text keyed the card, so typing remounted it and reset its choices. `case/pane.tsx` keys by question and applies explicit field choices to the latest merged draft body. Whole-body choices remain explicit choices of every field. | Current title, typed merged title, my title and whole-body current choice survive edits to a step and the title; the recorded body keeps untouched editor fields. Existing R4A-1 tests must also pass. |
+| N-2 | Sealing a known conflict sent another proposal under a fresh id. `suite/index.tsx` returns before proposing when that case has a conflict card. | Two edit/leave cycles send zero additional proposals; resolution leaves no open adoption questions. |
+| N-3 | Changing windows discarded an existing case's unknown-outcome request even when its owner had closed. `lib/ids.ts` exposes existing window liveness and `suite/index.tsx` preserves that request only when the old owner is gone. | Close mid-sentence, open in a different tab and continue: the full title is version 3 with no conflict. A held request in a still-live window is not shared; both windows' fields reach the server under distinct commands. |
+| R5B-1 | Enter reused the same note-consumption guard as automatic result shortcuts. `runs/cockpit.tsx` explicitly sends the visible field text on Enter and releases consumed text/marks after failure even when another write is queued. | Hold the first failure, return and mark step 2, then Enter without retyping. The final correction has the visible note. Also abort the first request while an undo is queued and retry that visible note. |
+| R5B-2 | Undo overwrote a refusal from `record` with a success message. `runs/cockpit.tsx` changes undo state and announces a correction only when `record` starts a request. | Another producer closes the run; u sends no report, says the run is closed and no result was recorded, and leaves the original pass intact. |
+| R5B-3 | The bulk selection dropped an answered question but its inline field retained it. `queue/index.tsx` prunes those field entries with the selection. | With two selected and the reference field open, settle the other selected question externally; Enter records the remaining defect with BUG-7, and Escape records it without a reference. Both close the field by keyboard. |
+
+R5B-4 is left for a server change. Its browser reproduction failed twice:
+`2 f`, note, Enter, `k p`, u restores the failure and note but `atStep` is null.
+`src/server/ops/reads.ts`'s `slotView` omits the result's `at_step` from each
+fill; the web `Fill` therefore cannot restore it. The smallest complete fix is
+to expose `atStep: fill.at_step` in that server response, parse it in
+`src/web/runs/models.ts`, and include that prior step in the correction sent by
+`runs/cockpit.tsx`. A timeline lookup would add an asynchronous read and depend
+on bounded history containing that result. No server or core edits were made.
+The reproduction is explicitly skipped, with the needed server field named in
+its test title, so the passing suite does not claim this defect is fixed.
+
+Preflight checks passed: `bunx tsc --noEmit` exited 0;
+`bunx biome check src/web test/e2e` checked 60 files without changes;
+`bun test test/architecture.test.ts` reported 12 pass, 0 fail, 31 assertions.
+The combined round-4/round-5 browser run reported 73 pass, 1 explicit skip,
+0 fail and 164 assertions across two files in 71.10 seconds.
+
+The first full-suite pair was interrupted by the existing R3B-3 check waiting
+for two report requests. Run 1 had 175 pass, 1 skip, 0 fail, 783 assertions
+in 291.36 seconds; run 2 had 174 pass, 1 skip, 1 fail, 780 assertions in
+281.18 seconds. R3B-3 passed the immediate isolated rerun in 981.09 ms,
+with no source or test changes. No cause for that intermittent timeout is
+claimed. All round-5 checks passed in both runs. The consecutive pair was
+restarted on the same implementation after that failed run.
+
+The second attempted pair also had an existing check time out. Its first run
+reported 175 pass, 1 skip, 0 fail, 783 assertions in 273.41 seconds. The next
+run reported 174 pass, 1 skip, 1 fail, 778 assertions in 281.59 seconds,
+with only UI-5's pending-archive undo timing out while waiting for two
+placement entries. That test passed its immediate isolated rerun in
+914.55 ms with no change. All round-5 checks passed in both runs, and R3B-3
+passed in both. The pair was restarted again without changing source or tests.
+
+The final two consecutive complete `bun test test/e2e` runs each reported
+**175 pass, 1 explicit skip, 0 fail, 783 assertions across 19 files**. Their
+elapsed times were **279.83 seconds** and **276.83 seconds**. The one skip is
+R5B-4's deferred server-field reproduction. Both runs include all 61 round-4
+checks, the 12 passing round-5 checks, the real 30-second idle save, and both
+200-sample latency datasets with their unchanged 100 ms limits. The largest
+printed p95 in this pair was 16.2 ms. These measure the next animation-frame
+opportunity and check the changed input, focus, selection and stored results;
+no speedup or physical-paint claim is made. The machine is shared, with 16
+cores and a load average of 8.60 when read during the earlier runs.
+
+No source or test change occurred between the final two passes. Independent
+cross-provider verification of the combined revision remains with the lead.
+This worker made no commit, push, pull request or checkout cleanup. Each test
+fixture closed its own browser and server and removed only its temporary data.

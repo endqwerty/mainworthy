@@ -22,7 +22,7 @@ import {
 	removeDraft,
 	writeDraft,
 } from "../lib/drafts.ts";
-import { draftOwnedElsewhere, draftOwner, randomId } from "../lib/ids.ts";
+import { draftOwnedElsewhere, draftOwner, draftOwnerIsLive, randomId } from "../lib/ids.ts";
 import { navigate, readRoute, refUrl, routeEntry, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, ProofStrip } from "../ui/index.tsx";
@@ -53,7 +53,12 @@ export function SuiteScreen() {
 		(saved: Draft): Draft =>
 			saved.owner === windowId
 				? saved
-				: { ...saved, owner: windowId, cmd: randomId(), sent: saved.ref === null ? saved.sent : null },
+				: {
+						...saved,
+						owner: windowId,
+						cmd: randomId(),
+						sent: saved.ref === null || !draftOwnerIsLive(saved.owner) ? saved.sent : null,
+					},
 		[windowId],
 	);
 	const tagFilter = new URLSearchParams(location.search)
@@ -305,6 +310,7 @@ export function SuiteScreen() {
 		const snapshot = saved ?? draftRef.current;
 		if (!sessionCurrent(owner)) return;
 		if (!snapshot || dropEmpty(snapshot)) return;
+		if (snapshot.ref && conflicts.current.has(snapshot.ref)) return;
 		if (!snapshot.dirty) {
 			removeDraft({ project, id: snapshot.id, owner: windowId });
 			return;

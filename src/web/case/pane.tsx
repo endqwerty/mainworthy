@@ -243,7 +243,7 @@ export function CasePane({
 							<span className="draft-public-state">Draft kept on this device. Press e to continue.</span>
 						)}
 					</div>
-					{conflict && <ConflictCard key={JSON.stringify(conflict.mine)} state={conflict} resolved={onResolved} />}
+					{conflict && <ConflictCard key={conflict.q} state={conflict} resolved={onResolved} />}
 					{draft ? (
 						<BodyEditor draft={draft} change={change} seal={seal} rapid={rapid} />
 					) : (
@@ -632,19 +632,23 @@ function ConflictCard({
 }) {
 	const { project, setStatus } = useApp();
 	const owner = useRef(deviceSession()).current;
-	const [body, setBody] = useState(state.merged);
+	const [choices, setChoices] = useState(new Map<string, (body: CaseBody) => CaseBody>());
+	const body = [...choices.values()].reduce((merged, choice) => choice(merged), state.merged);
+	function choose(path: string, update: (body: CaseBody) => CaseBody): void {
+		setChoices((previous) => new Map(previous).set(path, update));
+	}
 	const fields: { key: string; mine: string; current: string; set: (text: string) => void }[] = [
 		{
 			key: "title",
 			mine: state.mine.title,
 			current: state.current.title,
-			set: (title: string) => setBody((previous) => ({ ...previous, title })),
+			set: (title: string) => choose("title", (previous) => ({ ...previous, title })),
 		},
 		{
 			key: "pre",
 			mine: state.mine.pre,
 			current: state.current.pre,
-			set: (pre: string) => setBody((previous) => ({ ...previous, pre })),
+			set: (pre: string) => choose("pre", (previous) => ({ ...previous, pre })),
 		},
 	].filter((field) => state.paths.includes(field.key));
 	for (const mine of state.mine.steps) {
@@ -658,7 +662,7 @@ function ConflictCard({
 					mine: a,
 					current: b,
 					set: (text) =>
-						setBody((previous) => ({
+						choose(`steps.${mine.id}.${part}`, (previous) => ({
 							...previous,
 							steps: current
 								? previous.steps.map((step) =>
@@ -677,7 +681,7 @@ function ConflictCard({
 	function chooseStep(path: string, side: CaseBody): void {
 		const id = path.split(".")[1];
 		const step = side.steps.find((item) => item.id === id);
-		setBody((previous) => ({
+		choose(path, (previous) => ({
 			...previous,
 			steps: step
 				? previous.steps.some((item) => item.id === id)
@@ -775,10 +779,10 @@ function ConflictCard({
 			))}
 
 			<div className="conflict-actions">
-				<button type="button" onClick={() => setBody(state.mine)}>
+				<button type="button" onClick={() => setChoices(new Map([["all", () => state.mine]]))}>
 					Use all my changes
 				</button>
-				<button type="button" onClick={() => setBody(state.current)}>
+				<button type="button" onClick={() => setChoices(new Map([["all", () => state.current]]))}>
 					Keep current version
 				</button>
 				<button

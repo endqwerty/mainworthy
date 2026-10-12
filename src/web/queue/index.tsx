@@ -169,6 +169,11 @@ function QueueWorkbench() {
 		const removed = [...selected].filter((ref) => !listedRefs.has(ref));
 		if (!removed.length) return;
 		setSelected((previous) => new Set([...previous].filter((ref) => listedRefs.has(ref))));
+		setInline((previous) => {
+			if (previous?.kind !== "answer") return previous;
+			const entries = previous.entries.filter((entry) => listedRefs.has(entry.question.q));
+			return entries.length ? { ...previous, entries } : null;
+		});
 		setStatus(`${removed.join(", ")} removed from the selection because it is no longer listed.`);
 	}, [listed, selected, setStatus]);
 	useEffect(() => {
