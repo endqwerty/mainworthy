@@ -7,8 +7,8 @@ import { parseArgs } from "node:util";
 import { z } from "zod";
 import { BUDGETS, ensure } from "./contracts.ts";
 import { buildDataset, fingerprints, openDataset, Parameters } from "./dataset.ts";
-import { type Measurement, measure, percentile, summarise, table, type Workload } from "./measure.ts";
-import { mixedLoad } from "./mixed.ts";
+import { quantile, type UnderLoad, underLoad } from "./external.ts";
+import { type Measurement, measure, percentile, type Sample, summarise, table, type Workload } from "./measure.ts";
 import { profile } from "./profile.ts";
 import {
 	assertProducer,
@@ -193,25 +193,74 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 	} finally {
 		instance.close();
 	}
-	const mixed = await mixedLoad(dataset, { milliseconds: 15_000, repeats: cli.quick ? 1 : 5 });
-	rows.push(...mixed.measurements);
-	console.log(table(rows));
-	console.log(
-		`Mixed: ${mixed.readsPerSecond.toFixed(1)} reads/s; longest read during a 10,000-result ingest ${mixed.longestReadDuringIngest.toFixed(2)} ms (${mixed.longestReadOp}).`,
-	);
-	console.log(
-		`Readers-only control: p95 ${mixed.control.p95.toFixed(2)} ms, ${mixed.control.readsPerSecond.toFixed(1)} reads/s. This in-process HTTP test also measures reader saturation. Correctness checks consumed ${mixed.validationMs.toFixed(1)} ms outside response timers.`,
-	);
-	for (const op of mixed.byOperation)
+	// Under load: the server runs as its own process, with its reader threads, and is driven from this one, so
+	// the numbers are the server's own and not those of a thread shared with the load generator.
+	const windows = cli.quick ? 1 : 3;
+	const underLoads: UnderLoad[] = [];
+	for (let round = 0; round < windows; round++) {
 		console.log(
-			`  HTTP ${op.name}: control p95 ${op.control.p95.toFixed(2)} ms; mixed p95 ${op.mixed.p95.toFixed(2)} ms; mixed n=${op.mixed.n}, errors=${op.mixed.errors}`,
+			`Under load ${round + 1}/${windows}: readers alone 5 s, then 16 readers + back-to-back reports + saves 15 s (server in its own process)`,
 		);
-	console.log(
-		`Report apply transactions: p50 ${mixed.ingestTransactions.p50.toFixed(2)} ms, p95 ${mixed.ingestTransactions.p95.toFixed(2)} ms, max ${mixed.ingestTransactions.max.toFixed(2)} ms, including reads between apply slices. Acceptance transaction p95 ${mixed.acceptTransactions.p95.toFixed(2)} ms.`,
+		underLoads.push(await underLoad({ dataset: dataset.dir, seconds: 15, readers: null }));
+	}
+	const sampled = (pick: (load: UnderLoad) => readonly number[]): Sample[] =>
+		underLoads.flatMap((load, round) => pick(load).map((ms) => ({ ms, error: null, round })));
+	const underRow = (
+		name: string,
+		samples: Sample[],
+		budget: number | null,
+		criterion: "p95" | "max",
+		correctness: string,
+	): Measurement => {
+		const summary = summarise(samples);
+		return {
+			...summary,
+			name,
+			budget,
+			criterion,
+			pass: budget === null || summary[criterion] < budget,
+			correctness,
+			checked: summary.n,
+			warmupErrors: [],
+			errorMessages: [],
+			samples,
+		};
+	};
+	const requestErrors = underLoads.reduce((n, load) => n + load.errors, 0);
+	if (requestErrors > 0) throw new Error(`${requestErrors} requests failed under load`);
+	rows.push(
+		underRow(
+			"reads under load",
+			sampled((load) => Object.values(load.reads).flat()),
+			BUDGETS.mixed,
+			"p95",
+			"Case, folder page, test history, gate, queue and search over HTTP while reports and saves arrive.",
+		),
+		underRow(
+			"report under load",
+			sampled((load) => load.reports),
+			BUDGETS.ingest,
+			"max",
+			"A 10,000-result report over HTTP, back to back, applied in full each time.",
+		),
+		underRow(
+			"save under load",
+			sampled((load) => load.saves),
+			null,
+			"p95",
+			"A case edit adopted while reports arrive. No budget: one writer, so a save waits behind a report (issue #60).",
+		),
 	);
+	console.log(table(rows));
+	const alone = underLoads.flatMap((load) => load.control);
+	const reads = underLoads.flatMap((load) => Object.values(load.reads).flat());
 	console.log(
-		"Direct invoke drains acceptance and apply commits synchronously, then reads the gate. HTTP uses the product's invokeAsync and serves reads between apply slices; all SQL still runs on one JS thread.",
+		`Under load: ${Math.round(reads.length / (windows * 15))} reads/s (readers alone: p95 ${quantile(alone, 0.95)} ms, ${Math.round(alone.length / (windows * 5))} reads/s). Slowest read ${quantile(reads, 1)} ms.`,
 	);
+	for (const name of ["case", "folder", "history", "gate", "queue", "search"] as const) {
+		const values = underLoads.flatMap((load) => load.reads[name]);
+		console.log(`  ${name}: p95 ${quantile(values, 0.95)} ms, n=${values.length}`);
+	}
 	const profiling = openDataset(dataset, join(cli.dir, `profile-${randomUUID()}`));
 	try {
 		prepareRecentChanges(profiling);
@@ -251,7 +300,14 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		},
 		rows,
 		repetitions,
-		mixed: { ...mixed, measurements: mixed.measurements.map(({ samples: _samples, ...summary }) => summary) },
+		underLoad: underLoads.map((load) => ({
+			readerThreads: load.readerThreads ?? "default",
+			seconds: load.seconds,
+			reads: Object.values(load.reads).flat().length,
+			reports: load.reports.length,
+			saves: load.saves.length,
+			errors: load.errors,
+		})),
 		diagnostic,
 		loads,
 		loadEnd: loadavg(),

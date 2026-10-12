@@ -33,6 +33,7 @@ type VisibleRow =
 	| { kind: "draft"; id: string }
 	| { kind: "local"; id: string; draft: Draft }
 	| { kind: "folder"; folder: FolderRow; count: number };
+type PlacementUndo = { edits: Edit[]; ready: Promise<Api["propose"]["reply"]>; queued: boolean };
 const ResolvedEdit = z.object({
 	op: z.literal("edit"),
 	case: z.string(),
@@ -67,7 +68,7 @@ export function SuiteScreen() {
 	const [tagText, setTagText] = useState("");
 	const [creatingFolder, setCreatingFolder] = useState(false);
 	const [folderText, setFolderText] = useState("");
-	const undo = useRef<Edit[] | null>(null);
+	const undo = useRef<PlacementUndo | null>(null);
 	const viewport = useRef<HTMLDivElement>(null);
 	const filter = useRef<HTMLInputElement>(null);
 	const foldersQuery = useQueryOp({ project, op: "find", input: { in: "folders" } });
@@ -643,21 +644,28 @@ export function SuiteScreen() {
 	}
 	async function placement(edits: Edit[], inverse: Edit[]): Promise<void> {
 		const rollback = optimisticPlacement(edits);
+		const previous = undo.current?.queued ? null : undo.current;
+		const count = selection().length;
+		const ready = call("propose", { edits }, { project });
+		const action: PlacementUndo = { edits: inverse, ready, queued: false };
+		undo.current = action;
+		setStatus(`${count} case${count === 1 ? "" : "s"} changing. Press u to undo.`);
 		try {
-			const reply = await call("propose", { edits }, { project });
+			const reply = await ready;
 			if (reply.status !== "adopted") {
 				rollback();
 				setHidden(new Set());
+				if (undo.current === action) undo.current = previous;
 				setStatus(`Proposed, waiting for a person · ${reply.question ?? ""}`);
-			} else {
-				undo.current = inverse;
-				setStatus(`${selection().length} case${selection().length === 1 ? "" : "s"} changed. Press u to undo.`);
+			} else if (!action.queued && undo.current === action) {
+				setStatus(`${count} case${count === 1 ? "" : "s"} changed. Press u to undo.`);
 			}
 			setPicked(new Set());
-			await invalidateProject(project);
+			if (!action.queued || reply.status !== "adopted") await invalidateProject(project);
 		} catch (error) {
 			rollback();
 			setHidden(new Set());
+			if (undo.current === action) undo.current = previous;
 			setStatus(error instanceof Error ? error.message : "The change failed");
 		}
 	}
@@ -718,11 +726,35 @@ export function SuiteScreen() {
 	}
 	async function undoLast(): Promise<void> {
 		if (undo.current) {
-			const edits = undo.current;
-			undo.current = null;
+			const action = undo.current;
+			if (action.queued) return;
+			action.queued = true;
+			const rollback = optimisticPlacement(action.edits);
 			setHidden(new Set());
-			if (edits.length) await call("propose", { edits }, { project });
-			setStatus("Undone. The inverse change is recorded.");
+			setStatus("Undo queued. It will follow the pending change.");
+			let original: Api["propose"]["reply"];
+			try {
+				original = await action.ready;
+			} catch {
+				return;
+			}
+			if (original.status !== "adopted") return;
+			optimisticPlacement(action.edits);
+			try {
+				const reply = action.edits.length ? await call("propose", { edits: action.edits }, { project }) : original;
+				if (reply.status === "adopted") {
+					if (undo.current === action) undo.current = null;
+					setStatus("Undone. The inverse change is recorded.");
+				} else {
+					rollback();
+					action.queued = false;
+					setStatus(`Undo proposed, waiting for a person · ${reply.question ?? ""}`);
+				}
+			} catch (error) {
+				rollback();
+				action.queued = false;
+				setStatus(error instanceof Error ? error.message : "Undo failed. Press u to retry.");
+			}
 			void invalidateProject(project);
 		} else if (view && view.version > 1) {
 			const focused = document.activeElement;

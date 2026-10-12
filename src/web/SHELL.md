@@ -25,7 +25,7 @@ Use anchors with `href`, preventDefault and navigate for accessible links.
 
 `call(op, input, {project, keepalive?, token?, url?, signal?})` from `lib/api.ts`
 is typed from core `Api`. `admin` uses `/api/admin`; others use the project.
-A failure throws `ApiError` with `code` and `message`. Never display tokens in logs.
+A failure throws `ApiError`; `unauthenticated` returns to sign-in. Keep input on device.
 `useQueryOp({project, op, input, enabled?})` from `lib/data.ts` returns the
 TanStack query, including `data`, `error`, `refetch`, `isPending`.
 Parse generic row data with Zod at the screen boundary. Core schemas are shared.

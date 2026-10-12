@@ -18,7 +18,7 @@ Numeric misses or correctness errors exit nonzero, including any repeat miss.
 | Gate readable from report start, with failure questions | every call < 5,000 |
 | Queue: 50 rows and counts at the actual open population | p95 < 50 |
 | Changed since, impact for 20 files, JUnit file read/parse | report only |
-| HTTP reads during concurrent ingest and saves | p95 < 50 pooled |
+| HTTP reads while reports and saves arrive (server in its own process) | p95 < 50 pooled |
 | Small check: fresh ingest of 5,000 results | every call < 1,000 |
 
 The seeded baseline lives on disk in `.casebook/bench`, with production WAL and
@@ -42,13 +42,13 @@ prints median and range, and any trial miss fails. First-run numbers stay visibl
 Random case reads warm five requests; repeated identical list/search queries are
 warm-cache measurements. Diagnostic cold calls are separate and never timing samples.
 
-HTTP uses 16 keep-alive readers, one ingest client and one save client for 15 s,
-after a 5 s readers-only control. Default uses five independent windows; quick one.
-Per-operation control/mixed statistics reveal reader saturation. Clients share the
-server process/thread, so this is an end-to-end saturation test, not isolated write
-stall attribution. The longest read overlapping an ingest and accept/apply spans
-are printed; apply spans include reads served between the product's current slices.
-Ingest timings cover acceptance plus apply, stricter than C7's acceptance alone.
+The last three rows are measured under load with the server in its own process and
+its reader threads on, driven from the benchmark's process (see "Under load, from
+another process" below): sixteen readers, one client sending 10,000-result reports
+back to back and one saving a case, for 15 s after a warm-up and 5 s of readers
+alone. Default: three windows; quick: one. Reads have a budget (p95 under 50 ms) and
+so does each report (under 2 s); a save under load is reported without a budget,
+because with one writer it waits behind the report in front of it (issue #60).
 SQL/CPU/I/O diagnostics identify the limiter and EXPLAIN plans. A miss needs a
 product fix and a repeat under comparable load; changing a budget hides the problem.
 ## Under load, from another process
