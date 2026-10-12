@@ -20,6 +20,7 @@ import {
 	draftKey,
 	hasTypedMerge,
 	knownStepIds,
+	mergeRecorded,
 	promoteStepIds,
 	readDraft,
 	readDrafts,
@@ -408,12 +409,18 @@ export function SuiteScreen() {
 			// only a card that differs from it does: the head can differ from what was sent because the server
 			// combined it with a colleague's newer change, and that is not the person's later text. Without it (the
 			// question was answered elsewhere, or the page was reloaded), a field typed by hand is.
-			const laterMerge =
+			const later =
 				stored?.conflict &&
 				sameBody(stored.body, state.mine) &&
 				!sameBody(stored.conflict.merged, recorded) &&
-				(sent ? !sameBody(stored.conflict.merged, sent) : hasTypedMerge(stored.conflict))
-					? stored.conflict.merged
+				(sent ? !sameBody(stored.conflict.merged, sent) : hasTypedMerge(stored.conflict));
+			// Later text is kept as a draft on the recorded head: what the card holds beyond the merge that was
+			// sent, applied to the head, so the draft does not carry the other fields as they were before.
+			const laterMerge =
+				later && stored?.conflict
+					? sent
+						? mergeBodies({ base: sent, mine: stored.conflict.merged, theirs: recorded }).merged
+						: stored.conflict.merged
 					: null;
 			const remove =
 				!stored ||
@@ -468,8 +475,11 @@ export function SuiteScreen() {
 			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
 			const head = CaseView.parse(rows[0]);
 			if (answer === "merge") {
-				const sent = readDraft({ project, id: state.draftId })?.conflict?.sentMerge;
-				finishConflict(state, head, sameBody(bodyOf(head), sent ?? state.merged), sent);
+				const conflict = readDraft({ project, id: state.draftId })?.conflict;
+				const sent = conflict?.sentMerge;
+				const recorded =
+					conflict && sent ? mergeRecorded(conflict, sent, bodyOf(head)) : sameBody(bodyOf(head), state.merged);
+				finishConflict(state, head, recorded, sent);
 			} else {
 				const stored = readDraft({ project, id: state.draftId });
 				if (stored?.conflict?.q !== state.q) return;

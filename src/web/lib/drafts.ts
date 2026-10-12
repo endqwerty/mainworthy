@@ -21,18 +21,34 @@ export const DraftConflict = z.object({
 });
 export type DraftConflict = z.infer<typeof DraftConflict>;
 
+/** The text a conflict path names in a body, or null where the path names no text (a step's membership). */
+function textAt(body: CaseBody, path: string): string | null {
+	if (path === "title") return body.title;
+	if (path === "pre") return body.pre;
+	const [kind, id, part] = path.split(".");
+	if (kind !== "steps") return null;
+	const step = body.steps.find((step) => step.id === id);
+	return part === "action" ? (step?.action ?? null) : part === "expected" ? (step?.expected ?? "") : null;
+}
+
 export function hasTypedMerge(state: DraftConflict): boolean {
 	return state.paths.some((path) => {
-		const text = (body: CaseBody): string | null => {
-			if (path === "title") return body.title;
-			if (path === "pre") return body.pre;
-			const [kind, id, part] = path.split(".");
-			if (kind !== "steps") return null;
-			const step = body.steps.find((step) => step.id === id);
-			return part === "action" ? (step?.action ?? null) : part === "expected" ? (step?.expected ?? "") : null;
-		};
-		const merged = text(state.merged);
-		return merged !== null && merged !== text(state.mine) && merged !== text(state.current);
+		const merged = textAt(state.merged, path);
+		return merged !== null && merged !== textAt(state.mine, path) && merged !== textAt(state.current, path);
+	});
+}
+
+/**
+ * Is the merge that was sent the one the head records? Judged on the fields that were in conflict, because
+ * the server combines a merge with a colleague's newer change to another field: the head then differs from
+ * what was sent, and the merge was recorded all the same.
+ */
+export function mergeRecorded(state: DraftConflict, sent: CaseBody, head: CaseBody): boolean {
+	return state.paths.every((path) => {
+		const [kind, id, part] = path.split(".");
+		if (kind === "steps" && part === undefined)
+			return sent.steps.some((step) => step.id === id) === head.steps.some((step) => step.id === id);
+		return textAt(sent, path) === textAt(head, path);
 	});
 }
 
