@@ -1414,6 +1414,24 @@ describe("what a decision may change", () => {
 		for (const run of plans) expect(gate({ run })).toMatchObject({ verdict: "blocked", open: [first(asked).q] });
 	});
 
+	test("a sign-off asked while a run passed cannot close it once it no longer passes", () => {
+		usePolicy("strict");
+		h.call("propose", { edits: [{ op: "create", outline: "Case" }] });
+		decide(open("adopt"), { is: "accept" }, h.owner, { reason: "first version" });
+		const planned = plan({ name: "Sign-off", select: {} });
+		const other = h.actor("other", "human", ["read", "produce"]);
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		const signoff = open("signoff");
+		expect((signoff.evidence as { verdict: string }).verdict).toBe("passed");
+		// Somebody else fails the same case before the sign-off is answered.
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "fail", note: "broken" }] }, other);
+		expect(gate({ run: planned.run }).verdict).toBe("blocked");
+		const late = decide(signoff, { is: "approve" }, h.owner, { reason: "looked fine" });
+		expect(late.status).toBe("conflict");
+		expect(rows("SELECT state FROM runs WHERE origin = 'planned'")).toEqual([{ state: "open" }]);
+		expect(h.call<InboxReply>("inbox", { kind: "signoff", limit: 50 }).items).toEqual([]);
+	});
+
 	test("a run closed on an answer that later stops holding names the question asked in its place", () => {
 		seed();
 		const failing = {

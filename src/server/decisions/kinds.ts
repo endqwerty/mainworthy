@@ -21,18 +21,20 @@ import {
 import { actorById } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
-import { invalid, notFound } from "../kernel/errors.ts";
+import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import type { Witness } from "../kernel/witness.ts";
 import { clauseFor, currentPolicy } from "../policy/policy.ts";
 import {
 	closeRun,
 	discountFailures,
 	findRun,
+	gateOf,
 	partiesTo,
 	type RunRow,
 	reopenRun,
 	restoreFailures,
 	runById,
+	runRef,
 } from "../runs/runs.ts";
 import {
 	adopt,
@@ -480,6 +482,10 @@ const signoffHandler: Handler<"signoff"> = {
 		if (answer.is === "reject") return {};
 		const run = runById(ctx.db, json<{ run: number }>(question.subject).run);
 		if (!run) throw notFound("run");
+		// A run is closed on what it shows now, never on what it showed when the sign-off was asked.
+		const now = gateOf(ctx, run);
+		if (now.verdict !== "passed")
+			throw conflict(`${runRef(run)} no longer passes (${now.reason}); it cannot be closed`);
 		closeRun(ctx, witness, run);
 		return { closed: `R-${run.no}` };
 	},

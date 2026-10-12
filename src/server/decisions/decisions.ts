@@ -795,7 +795,21 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 		if (result.failing.size > 0 && askUnexplained(ctx, result.run))
 			result = retally(ctx, id, blockersOf(ctx, result.run));
 		if (options.dissolveStale) dissolveStale(ctx, result.run);
-		if (!result.wantsSignoff) continue;
+		if (!result.wantsSignoff) {
+			// A sign-off was asked while this run passed. It no longer does, so that question is closed: nobody
+			// can close the run on what it showed then. When it passes again, it is asked again on what it shows.
+			const run = result.run;
+			if (run.origin === "planned" && run.state === "open" && run.verdict !== "passed" && run.outstanding === 0) {
+				const asked = openFor(
+					ctx.db,
+					ctx.project.id,
+					contentHash({ kind: "signoff", key: `run:${run.id}` }),
+					undefined,
+				);
+				if (asked) setQuestionState(ctx, asked, "dissolved", null);
+			}
+			continue;
+		}
 		const run = result.run;
 		raise(ctx, {
 			kind: "signoff",
