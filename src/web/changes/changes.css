@@ -1,0 +1,108 @@
+#app:has(.changes-pane) {
+	grid-template-columns: 236px minmax(0, 1fr) minmax(480px, 46%);
+}
+.changes-pane .row {
+	height: 64px;
+	gap: 12px;
+}
+.change-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.change-title > span {
+	display: block;
+	font-size: 12px;
+	font-weight: 400;
+}
+.change-verdict {
+	font-size: 12px;
+	font-weight: 600;
+}
+.changes-pane .v-passed {
+	color: var(--pass);
+}
+.changes-pane .v-failed {
+	color: var(--fail);
+}
+.changes-pane .v-blocked {
+	color: var(--warn);
+}
+.changes-pane .v-pending {
+	color: var(--dim);
+}
+.change-gate h2 {
+	font-size: 25px;
+	margin: 5px 0;
+	text-transform: capitalize;
+}
+.change-gate p {
+	margin: 7px 0 12px;
+}
+.change-tally {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	color: var(--dim);
+	padding-bottom: 10px;
+	border-bottom: 1px solid var(--line);
+}
+.change-question {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 9px 0;
+	color: var(--ink);
+	text-decoration: none;
+	border-bottom: 1px solid var(--line2);
+}
+.change-question > span:nth-child(3) {
+	flex: 1;
+	min-width: 0;
+}
+.change-decision {
+	display: grid;
+	grid-template-columns: 48px minmax(0, 1fr);
+	gap: 4px 8px;
+	padding: 8px 0;
+	border-bottom: 1px solid var(--line2);
+}
+.change-decision > span,
+.change-decision > small {
+	grid-column: 2;
+}
+.change-impact {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	text-decoration: none;
+	color: var(--ink);
+	padding: 8px 0;
+	border-bottom: 1px solid var(--line2);
+}
+.change-impact > span:nth-child(2) {
+	flex: 1;
+}
+.change-impact small {
+	display: block;
+	color: var(--dim);
+	margin-top: 3px;
+}
+.change-files {
+	padding-left: 18px;
+	font-family: var(--mono);
+	font-size: 12px;
+	overflow-wrap: anywhere;
+}
+@media (max-width: 1100px) {
+	#app:has(.changes-pane) {
+		grid-template-columns: 190px minmax(220px, 1fr) minmax(420px, 46%);
+	}
+}
+@media (max-width: 760px) {
+	#app:has(.changes-pane) {
+		grid-template-columns: 120px minmax(220px, 1fr);
+	}
+}
