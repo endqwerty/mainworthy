@@ -98,21 +98,27 @@ tokens per project.
 
 Exit: J5, J6, J9, J10, J13 and J14 pass; A3 passes; A4 to A6 pass within their token budgets; ingest budgets hold;
 flaky state updates incrementally on ingest; each of the three profiles can
-run its workflow end to end with policy switches only.
+run its workflow end to end with policy switches only. Added 2026-10-11, the
+first-usable prerequisites from decision 0002: the same artifact runs the
+Server layer against a server database and passes the same job suite; jobs
+are persisted and crash-safe; backup and restore are checked in the check
+command; the Cloud layer's multi-instance correctness is proven with the
+cache disabled. Only when these pass is the result called the first usable
+version.
 
-## Phase 4: Server and Cloud layers, migration import, reports
+## Phase 4: Scaling, storage, migration import, reports
 
-Same artifact against a server database in a container on the home server;
-object storage for attachments; cache layer only if the benchmark shows a
-budget miss without it, with invalidation across instances tested;
-background workers split out if needed; persisted jobs, migrations, backup
-and restore in the check command. Import from TestRail, Qase and CSV. Basic
-reports over the result stream.
+(Revised 2026-10-11: the layer proofs, persisted jobs and backup/restore
+moved to phase 3 as first-usable prerequisites.) Deployment on the home
+server in a container; object storage for attachments; cache layer only if
+the benchmark shows a budget miss without it, with invalidation across
+instances tested; background workers split out if needed; migrations in the
+check command. Import from TestRail, Qase and CSV. Basic reports over the
+result stream.
 
-Exit: the three layers run from one build and pass the same job suite;
-Local to Server migration preserves identities, history, links and
-attachments; import of a real TestRail or Qase export round-trips; a backup
-restores and is checked.
+Exit: Local to Server migration preserves identities, history, links and
+attachments; import of a real TestRail or Qase export round-trips; object
+storage and any cache pass the same job suite.
 
 ## Standing rules across phases
 

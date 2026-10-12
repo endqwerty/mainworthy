@@ -31,13 +31,15 @@ the decisions that the sketch depends on.
 3. **A run is a request for evidence, not an owner of results.** Results
    belong to a target (code, artifact, or a named session with no build
    identity). A run is a predicate over targets plus slots pinned to case
-   versions, each slot serving one explicit requirement: exercise (which
-   methods, which linked tests, how many independent actors, which basis,
-   exact target or attested code-in-artifact), review (which lens,
-   independent or not), required CI jobs, or sign-off. A result from any
-   producer fills a slot only when the requirement admits its method,
-   binding, basis and target, and the case's declared methods include that
-   kind; a review fills only a review requirement. A PR check, a regression
+   versions, each slot serving one explicit obligation: exercise (which
+   methods, which linked tests, which agent charters, how many independent
+   actors, which basis, exact target or attested code-in-artifact), review
+   (which lens, independent or not), required CI jobs, or sign-off. A result
+   from any producer fills a slot only when the obligation admits its
+   method, binding or charter, basis and target, and the case's declared
+   methods include that kind; a review fills only a review obligation. A
+   slot's state folds its complete effective result set, never a bounded
+   sample. A PR check, a regression
    pass and a release are one object. A session target never satisfies a
    change run.
 
@@ -45,13 +47,16 @@ the decisions that the sketch depends on.
    comparisons: `passed`, `failed` (needs a fix), `blocked` (needs a
    decision: an open or disputed question), `pending` (needs evidence:
    unfilled slots, missing required jobs, accepted but unapplied uploads, or
-   an expired hold). A run carries a horizon (`accepted`, `applied`
-   sequence): durable acceptance of an upload (staging its normalised
-   results under the batch key, before any processing) advances `accepted`
-   on every matching run, open or closed-but-not-frozen; processing advances
-   `applied`. A frozen run never changes. The gate is `pending` while they
-   differ, so a stale green is never served and a late upload after closure
-   is never ignored.
+   an expired hold). A run carries a horizon (`accepted`, a contiguous
+   `applied` watermark and an `outstanding` count): durable acceptance of an
+   upload (staging its normalised results under the batch key, before any
+   processing) counts it outstanding on every matching run, open or closed;
+   processing, in any order, applies it and advances the watermark only past
+   batches that are all applied. A frozen run never changes. The gate is
+   `pending` while anything is outstanding, so a stale green is never
+   served. A late upload never rewrites a closed run's standing: the closing
+   sign-off decision holds until its basis changes, so the late batch
+   re-raises the sign-off question and the new decision supersedes the old.
 
 5. **A review is never a runtime pass.** Findings and reviewed-basis rows
    are evidence of review; only a run requirement of kind review accepts
@@ -65,8 +70,10 @@ the decisions that the sketch depends on.
    ledger with its clause either way.
 
 7. **Answers are basis-checked and holds expire visibly.** An answer names
-   the evidence hash it was given on; every form of `decide` carries it; the
-   answer history is append-only; a quorum counts only answers on the current
+   the evidence hash it was given on; every form of `decide` carries it (the
+   form that opens a new question supplies the evidence itself and is
+   refused if the question already exists); the answer history is
+   append-only; a quorum counts only answers on the current
    evidence. A decision carries forward under a hold (terms: until the basis
    changes, this target only, a date, N clean runs of a test, or a linked
    defect closes; the hold ends when any term ends and each term stores what
