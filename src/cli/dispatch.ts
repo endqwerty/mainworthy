@@ -5,6 +5,7 @@ import { exportCommand } from "./commands/export.ts";
 import { fmtCommand } from "./commands/fmt.ts";
 import { gateCommand } from "./commands/gate.ts";
 import { getCommand } from "./commands/get.ts";
+import { healthCommand } from "./commands/health.ts";
 import { importCommand } from "./commands/import.ts";
 import { mcpCommand } from "./commands/mcp.ts";
 import { newCommand } from "./commands/new.ts";
@@ -32,6 +33,7 @@ export const ADAPTER_COMMANDS: ReadonlyMap<string, AdapterCommand> = new Map(
 		importCommand,
 		mcpCommand,
 		openCommand,
+		healthCommand,
 	].map((command) => [command.name, command]),
 );
 

@@ -99,6 +99,8 @@ export function promoteStepIds({ project, from, to }: { project: string; from: s
 	knownStepIds({ project, id: to, ids: [...ids] });
 	if (from !== to) {
 		seenSteps.delete(`casebook:steps:${project}:${from}`);
-		localStorage.removeItem(`casebook:steps:${project}:${from}`);
+		try {
+			localStorage.removeItem(`casebook:steps:${project}:${from}`);
+		} catch {}
 	}
 }

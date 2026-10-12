@@ -21,7 +21,7 @@ export const gateCommand: AdapterCommand = {
 		{ name: "commit", kind: "string", description: "Commit to check. Defaults to CI/Git detection." },
 		{ name: "run", kind: "string", description: "Run to check." },
 		{ name: "change", kind: "string", description: "Change to check, for example pr:482." },
-		{ name: "env", kind: "string", description: "Test environment." },
+		{ name: "repo", kind: "string", description: "Repository, when the commit was reported for more than one." },
 		{ name: "wait", kind: "number", description: "Poll pending evidence for at most this many seconds." },
 	],
 	async run(args, client) {
@@ -31,9 +31,13 @@ export const gateCommand: AdapterCommand = {
 		const wait = args.number("wait") ?? 0;
 		if (wait < 0) throw new CliError("invalid", "--wait must be zero or a positive number of seconds");
 		let commit = args.value("commit");
+		// The same commit can exist in two repositories (a fork). When the commit is the one detected here, so is
+		// the repository it was reported for; `--repo` names it otherwise.
+		let repo = args.value("repo");
 		if (!commit && !args.has("run") && !args.has("change")) {
 			const detected = detectedTarget();
 			commit = detected.target && "commit" in detected.target ? detected.target.commit : undefined;
+			repo ??= detected.target && "commit" in detected.target ? detected.target.repo : undefined;
 			if (!commit)
 				throw new CliError(
 					"invalid",
@@ -44,7 +48,7 @@ export const gateCommand: AdapterCommand = {
 			...(commit ? { commit } : {}),
 			...(args.has("run") ? { run: args.value("run") } : {}),
 			...(args.has("change") ? { change: args.value("change") } : {}),
-			...(args.has("env") ? { env: args.value("env") } : {}),
+			...(repo ? { repo } : {}),
 		});
 		const deadline = Date.now() + wait * 1000;
 		let gate = await client.call("gate", input);

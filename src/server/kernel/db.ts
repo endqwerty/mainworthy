@@ -50,6 +50,23 @@ export class Db {
 		if (options.reader) this.raw.exec("PRAGMA query_only = ON");
 	}
 
+	/**
+	 * Leaves checkpoints to another connection (see `checkpoint`). By default SQLite checkpoints inside the commit
+	 * that fills the log, which copies pages and syncs the file on the thread that committed: tens of milliseconds
+	 * in which a server answers nobody. A high limit stays as a guard should the other connection stop.
+	 */
+	deferCheckpoints(): void {
+		this.raw.exec("PRAGMA wal_autocheckpoint = 20000");
+	}
+
+	/**
+	 * Copies committed pages from the log into the database file, as far as readers allow, without making anyone
+	 * wait. Called from a thread of its own while the writer defers its checkpoints.
+	 */
+	checkpoint(): void {
+		this.raw.exec("PRAGMA wal_checkpoint(PASSIVE)");
+	}
+
 	/** True while a write transaction is open on this connection. */
 	get inTransaction(): boolean {
 		return this.depth > 0;

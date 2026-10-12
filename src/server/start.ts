@@ -55,7 +55,11 @@ export function start(
 		app.close();
 		throw error;
 	}
-	if (count > 0) app.readers = new Readers({ dataDir: config.dataDir, count });
+	if (count > 0) {
+		app.readers = new Readers({ dataDir: config.dataDir, count });
+		// The pool brings a thread that checkpoints, so commits on this thread no longer do.
+		app.db.deferCheckpoints();
+	}
 	// Through the gate, like every other writer, so it never lands inside another command's open transaction.
 	const timer = setInterval(() => {
 		app.gate.run(() => sweep(app, rule)).catch((error) => console.error("[casebook] sweep failed:", error));

@@ -409,8 +409,11 @@ describe("parseJUnit recovery and boundaries", () => {
 		expect(parsed.results.every((item) => item.outcome !== "pass")).toBe(true);
 	});
 
-	test("valid Unicode element and attribute names do not damage testcase evidence", () => {
-		const parsed = parseJUnit('<testsuite><testcase name="one" 属性="value"><étiquette/>text</testcase></testsuite>');
+	test.each([
+		'<testsuite><testcase name="one" 属性="value"><étiquette/>text</testcase></testsuite>',
+		'<testsuite><testcase name="one" x属性="value"><xétiquette/>text</testcase></testsuite>',
+	])("valid Unicode element and attribute names do not damage testcase evidence: %s", (xml) => {
+		const parsed = parseJUnit(xml);
 		expect(parsed.results).toEqual([result("one", "one")]);
 		expect(parsed.warnings).toEqual([]);
 	});

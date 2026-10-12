@@ -140,3 +140,89 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"case producer settings are private until sealing and appear in the version diff",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{
+					op: "create",
+					body: { title: "Producer settings", steps: [{ id: "aa", action: "Open cart", expected: null }] },
+				},
+			],
+		});
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Producer settings", exact: true }).waitFor();
+			await page.locator(".case-properties summary").click();
+			await page.getByRole("checkbox", { name: "Pipeline" }).check();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.methods).toEqual(["human"]);
+			await page.keyboard.press("Control+Enter");
+			const rows = await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(value) => value[0]?.version === 2,
+			);
+			expect(rows[0]?.methods).toEqual(["human", "auto"]);
+			await page.keyboard.press("v");
+			await page.getByRole("region", { name: "Case diff" }).first().waitFor();
+			expect(await page.getByRole("region", { name: "Case diff" }).first().textContent()).toContain("pipeline");
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"deleted step ids remain reserved after sealing and reloading",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{
+					op: "create",
+					body: { title: "Stable step identity", steps: [{ id: "aa", action: "Original step", expected: null }] },
+				},
+			],
+		});
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			for (const [version, id] of [
+				[2, "ab"],
+				[3, "ac"],
+			]) {
+				await page.getByRole("button", { name: "Stable step identity", exact: true }).waitFor();
+				await page.evaluate(() => {
+					Math.random = () => 0;
+				});
+				await page.keyboard.press("e");
+				await page.getByRole("textbox", { name: "Step 1", exact: true }).fill("");
+				await page.getByRole("textbox", { name: "Step 1", exact: true }).focus();
+				await page.keyboard.press("Backspace");
+				await page.keyboard.press("Enter");
+				await page.keyboard.type(`Replacement ${version}`);
+				await page.keyboard.press("Escape");
+				const rows = await eventually(
+					() => server.api("get", { refs: ["C-1"] }),
+					(value) => value[0]?.version === version,
+				);
+				expect(rows[0]?.steps).toMatchObject([{ id, action: `Replacement ${version}` }]);
+				if (version === 2) {
+					await page.reload();
+					await page.getByRole("button", { name: "Stable step identity", exact: true }).waitFor();
+				}
+			}
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

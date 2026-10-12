@@ -11,7 +11,15 @@ import { cleanTitle, firstStep, pasteCapture } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, useQueryOp } from "../lib/data.ts";
-import { activeDraft, type Draft, promoteStepIds, readDraft, removeDraft, writeDraft } from "../lib/drafts.ts";
+import {
+	activeDraft,
+	type Draft,
+	knownStepIds,
+	promoteStepIds,
+	readDraft,
+	removeDraft,
+	writeDraft,
+} from "../lib/drafts.ts";
 import { navigate, readRoute, refUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, ProofStrip } from "../ui/index.tsx";
@@ -37,6 +45,7 @@ export function SuiteScreen() {
 	const { project, route, setStatus, openPalette, overlayOpen } = useApp();
 	const [text, setText] = useState("");
 	const [search, setSearch] = useState("");
+	const [draftStored, setDraftStored] = useState(true);
 	const [draft, setDraftState] = useState<Draft | null>(() => {
 		const saved = route.ref ? readDraft({ project, id: route.ref }) : activeDraft(project);
 		return saved?.dirty || saved?.ref === null ? saved : null;
@@ -91,6 +100,9 @@ export function SuiteScreen() {
 		const parsed = CaseView.safeParse(current.data?.find((item) => item.ref === selected));
 		return parsed.success ? parsed.data : null;
 	}, [current.data, selected]);
+	useEffect(() => {
+		if (view) knownStepIds({ project, id: view.ref, ids: [...view.usedStepIds, ...view.steps.map((step) => step.id)] });
+	}, [view, project]);
 	const newId = draft?.ref === null ? draft.id : null;
 	const rows = useMemo(() => {
 		const result: VisibleRow[] = [];
@@ -183,7 +195,9 @@ export function SuiteScreen() {
 		draftRef.current = changed;
 		try {
 			writeDraft({ project, draft: changed });
+			setDraftStored(true);
 		} catch {
+			setDraftStored(false);
 			setStatus("Device storage is full. Keep this tab open until the version is recorded.");
 		}
 		if (focus) {
@@ -416,6 +430,31 @@ export function SuiteScreen() {
 		await task;
 		pending.current.delete(snapshot.id);
 	}
+	useEffect(() => {
+		const current = draftRef.current;
+		if (
+			view &&
+			current?.ref === view.ref &&
+			!current.dirty &&
+			current.submission.kind === "none" &&
+			current.base !== view.version &&
+			!pending.current.has(current.id)
+		) {
+			const original = bodyOf(view);
+			const next: Draft = {
+				...current,
+				base: view.version,
+				body: mergeBodies({ base: current.original, mine: current.body, theirs: original }).merged,
+				original,
+				tags: view.tags,
+				covers: view.covers,
+				folder: view.folder.path,
+				cmd: crypto.randomUUID(),
+			};
+			draftRef.current = next;
+			setDraftState(next);
+		}
+	}, [view]);
 	const sealRef = useRef(sealDraft);
 	sealRef.current = sealDraft;
 	useEffect(() => {
@@ -490,7 +529,9 @@ export function SuiteScreen() {
 		});
 		try {
 			writeDraft({ project, draft: next });
+			setDraftStored(true);
 		} catch {
+			setDraftStored(false);
 			setStatus("Device storage is full. Keep this tab open until the version is recorded.");
 		}
 
@@ -945,6 +986,7 @@ export function SuiteScreen() {
 			<CasePane
 				view={view}
 				draft={draft}
+				stored={draftStored}
 				change={change}
 				begin={(field = "title") => {
 					if (view) {

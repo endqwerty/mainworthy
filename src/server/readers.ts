@@ -4,9 +4,14 @@ import { z } from "zod";
 import type { Envelope } from "../core/api.ts";
 import type { ReadCall, ReadPool } from "./kernel/app.ts";
 
+/**
+ * How many reader threads to start. By default: the cores, less one for the thread that writes and answers
+ * requests and one for the thread that checkpoints, at least one and at most eight. Eight is where reads under a
+ * continuous stream of large reports met their latency budget on the benchmark machine (`bench/README.md`).
+ */
 export function readerCount(env: Record<string, string | undefined>, cores = availableParallelism()): number {
 	const value = env.CASEBOOK_READERS;
-	if (value === undefined) return Math.min(4, Math.max(1, cores - 1));
+	if (value === undefined) return Math.min(8, Math.max(1, cores - 2));
 	const count = Number(value);
 	if (!/^\d+$/.test(value) || !Number.isSafeInteger(count))
 		throw new Error("CASEBOOK_READERS must be a non-negative integer");
@@ -33,6 +38,10 @@ type Pending = { fallback: () => Envelope<unknown>; resolve: (reply: Envelope<un
 type Slot = { worker: Worker; pending: Map<number, Pending>; ready: boolean; failed: boolean };
 type Options = { dataDir: string; count: number; spawn?: (url: URL, dataDir: string) => Worker };
 
+/** The worker file: beside this one from source, and under `server/` in the compiled executable. */
+const workerUrl = (): URL =>
+	new URL(Bun.isStandaloneExecutable ? "./server/read-worker.js" : "./read-worker.ts", import.meta.url);
+
 export class Readers implements ReadPool {
 	private readonly slots = new Set<Slot>();
 	private readonly retiring = new Set<Promise<number>>();
@@ -44,8 +53,26 @@ export class Readers implements ReadPool {
 	completed = 0;
 	fallbacks = 0;
 
+	/** The thread that checkpoints the write-ahead log, so no commit on the main thread has to. */
+	private checkpointer: Worker | null = null;
+
 	constructor(private readonly options: Options) {
 		for (let i = 0; i < options.count; i++) this.spawn();
+		if (!options.spawn) this.checkpoints();
+	}
+
+	private checkpoints(): void {
+		try {
+			const worker = new Worker(workerUrl(), {
+				workerData: { dataDir: this.options.dataDir, role: "checkpoint" },
+				name: "casebook-checkpoint",
+			});
+			// If it stops, the writer's own high checkpoint limit takes over: slower commits, nothing lost.
+			worker.on("error", (error) => console.error("[casebook] the checkpoint thread failed:", error));
+			this.checkpointer = worker;
+		} catch (error) {
+			console.error("[casebook] the checkpoint thread did not start:", error);
+		}
 	}
 
 	get threads(): readonly Worker[] {
@@ -96,6 +123,8 @@ export class Readers implements ReadPool {
 			this.retire(slot.worker);
 		}
 		this.slots.clear();
+		if (this.checkpointer) this.retire(this.checkpointer);
+		this.checkpointer = null;
 		this.wakeReady();
 		this.stopping = Promise.all([...this.retiring]).then(() => undefined);
 		return this.stopping;
@@ -104,7 +133,7 @@ export class Readers implements ReadPool {
 	private spawn(): void {
 		if (this.stopped) return;
 		try {
-			const url = new URL(Bun.isStandaloneExecutable ? "./server/read-worker.js" : "./read-worker.ts", import.meta.url);
+			const url = workerUrl();
 			const worker = this.options.spawn
 				? this.options.spawn(url, this.options.dataDir)
 				: new Worker(url, { workerData: { dataDir: this.options.dataDir }, name: "casebook-reader" });

@@ -376,6 +376,34 @@ function rebuildSearch(db: Db): void {
 	}
 }
 
+/**
+ * Empties an instance that holds nothing but what first start put there, so an archive can take its place.
+ * `start()` creates the project `scratch` before it listens; only that untouched project may be replaced. Anything
+ * else (another project, a command that ran, another actor, a changed policy) is refused: an import never
+ * overwrites work.
+ */
+export function removeBootstrap(db: Db): void {
+	const projects = z
+		.array(z.object({ key: z.string(), name: z.string(), seq: z.number() }))
+		.parse(db.raw.query("SELECT key, name, seq FROM projects").all());
+	if (projects.length === 0) return;
+	const first = projects[0];
+	const count = (query: string): number => z.object({ n: z.number() }).parse(db.raw.query(query).get()).n;
+	if (
+		projects.length !== 1 ||
+		!first ||
+		first.key !== "scratch" ||
+		first.name !== "scratch" ||
+		first.seq !== 1 ||
+		count("SELECT count(*) AS n FROM commands") !== 0 ||
+		count("SELECT count(*) AS n FROM actors") !== 2 ||
+		count("SELECT count(*) AS n FROM policies WHERE version <> 1 OR preset <> 'loose'") !== 0
+	) {
+		throw new OpError("conflict", "import needs a fresh instance; existing projects or user data will not be replaced");
+	}
+	db.raw.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
+}
+
 /** Splits LF-delimited text lazily, retaining blank lines and CR bytes. A final LF creates no extra line. */
 export function* linesOf(text: string): Iterable<string> {
 	let start = 0;

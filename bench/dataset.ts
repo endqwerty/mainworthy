@@ -592,7 +592,13 @@ export function buildDataset(options: {
 			stored.decided > 0 && (parameters.results < parameters.tests + 10_000 || stored.carried > 0),
 			"the dataset must contain decided and carried questions",
 		);
-		const current = call(app, owner, "since", { cursor: "s:0", limit: 1 }, z.object({ cursor: z.string() })).cursor;
+		const current = call(
+			app,
+			owner,
+			"since",
+			{ cursor: `s:${Number.MAX_SAFE_INTEGER}`, limit: 1 },
+			z.object({ cursor: z.string() }),
+		).cursor;
 		const metadata: Metadata = {
 			generator: GENERATOR,
 			fingerprints: revision,

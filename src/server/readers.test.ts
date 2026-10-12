@@ -33,11 +33,12 @@ function workerUrl(source: string): string {
 }
 
 describe("reader threads", () => {
-	test("the default leaves a core for writes, is capped at four, and zero disables readers", () => {
+	test("the default leaves cores for writing and checkpoints, is capped at eight, and zero disables readers", () => {
 		expect(readerCount({}, 1)).toBe(1);
 		expect(readerCount({}, 2)).toBe(1);
-		expect(readerCount({}, 4)).toBe(3);
-		expect(readerCount({}, 16)).toBe(4);
+		expect(readerCount({}, 4)).toBe(2);
+		expect(readerCount({}, 8)).toBe(6);
+		expect(readerCount({}, 16)).toBe(8);
 		expect(readerCount({ CASEBOOK_READERS: "0" }, 16)).toBe(0);
 		expect(readerCount({ CASEBOOK_READERS: "2" }, 16)).toBe(2);
 		for (const value of ["", "-1", "1.5", "2x", "Infinity", "9007199254740992"])

@@ -135,6 +135,41 @@ export function DiffView({ before, after }: { before: CaseBody; after: CaseBody 
 					</div>
 				</div>
 			)}
+			{diff.methods.kind === "changed" && (
+				<div className="dl chg">
+					<i>~</i>
+					<div>
+						Evidence from:{" "}
+						<WordDiff
+							before={before.methods
+								.map((method) => (method === "human" ? "person" : method === "auto" ? "pipeline" : "agent"))
+								.join(", ")}
+							after={after.methods
+								.map((method) => (method === "human" ? "person" : method === "auto" ? "pipeline" : "agent"))
+								.join(", ")}
+						/>
+					</div>
+				</div>
+			)}
+			{diff.automate.kind === "changed" && (
+				<div className="dl chg">
+					<i>~</i>
+					<div>
+						Automation: <WordDiff before={before.automate} after={after.automate} />
+					</div>
+				</div>
+			)}
+			{diff.fields.kind === "changed" &&
+				[...new Set([...Object.keys(before.fields), ...Object.keys(after.fields)])]
+					.filter((key) => before.fields[key] !== after.fields[key])
+					.map((key) => (
+						<div className="dl chg" key={key}>
+							<i>~</i>
+							<div>
+								{key}: <WordDiff before={before.fields[key] ?? ""} after={after.fields[key] ?? ""} />
+							</div>
+						</div>
+					))}
 			{diff.steps.map((step) => {
 				switch (step.kind) {
 					case "same":

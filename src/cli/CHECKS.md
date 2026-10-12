@@ -77,6 +77,10 @@ Implementation notes for integration:
   `head -0` closes its pipe. The regression first returned 0 for a pending gate
   and now checks every verdict with a closed stdout. Declined warnings appear
   once, and per-project session capabilities are validated and preserved.
+- Cancellation of a valid gzip upload by an early 401/403 response is not a
+  decompression failure. Cancellation is tracked, and a non-OK server envelope
+  takes precedence. The multi-megabyte valid-backup test failed before with
+  "invalid gzip archive" and now checks unauthenticated/forbidden messages.
 - The updated report contract's `declined` case/version claims stay visible in
   the receipt; their results remain recorded and failing outcomes still block.
   Older cached receipts default that new field to an empty list. JSON payloads
@@ -95,14 +99,14 @@ Implementation notes for integration:
   worker. The coordinating agent owns those files and final worktree release
   while other workers are using the shared dependency installation.
 
-The full CLI/archive suite contains 47 independent checks. A startup check can
+The full CLI/archive suite contains 48 independent checks. A startup check can
 fail while a web module is still being authored in this shared checkout. Do not
 replace or weaken the UI check to hide that integration failure.
 
 Verification rerun after the first independent review:
 
 ```text
-bun test src/cli src/surfaces/archive.test.ts: 47 pass, 0 fail
+bun test src/cli src/surfaces/archive.test.ts: 48 pass, 0 fail
 bunx tsc --noEmit: exit 0
 bunx biome check src/cli src/surfaces/archive.ts src/surfaces/archive.test.ts: clean
 ```
@@ -114,7 +118,34 @@ regressions and fixes. The second round passed the 40-check snapshot and proved
 a valid 720 MB plain/gzip HTTP import and identical re-exported rows. Its three
 new nonblocking findings have fixes and additional regression checks.
 The third round caught the gate-pipe exit race and a duplicated declined
-warning. Both have failing-before regressions and fixes; one final focused
-verdict is pending.
+warning. The fourth confirmed both fixes and caught the early gzip refusal
+race. Those findings have failing-before regressions and fixes. The fifth
+round passed the current 48-check snapshot, with 330 assertions, clean global
+TypeScript, and clean Biome checks on all 31 owned TypeScript files.
+
+Final independent verdict: **pass**, Anthropic Claude Opus 5.5
+(`claude-opus-5-5`), 2026-10-12. The reviewed scoped manifest was
+`f36d39afc01aca80965a1308df5e28222cb99b1b7d49159569ef3674e1fd96a1`,
+unchanged throughout the review, on shared HEAD
+`f44108ad663481986064f6fdf6b2c69b303a4466`. This verification record was
+added afterwards; all source, test and fixture bytes remain unchanged, with
+their Markdown-excluding manifest at
+`44bc3a9a89901d2ce03238c997e8d006d6f92da0ed526aab60e93cd15ad68f7a`.
+
+The last round independently exercised 144 authentication refusals of valid
+gzip archives, including 147 MB of uncompressed data, without mislabeling them
+as corruption. It exercised 66 owner uploads of damaged gzip archives, verified
+unchanged databases and no leftover spool files, and successfully imported
+the valid 147 MB archive. All 240 gate runs through closed pipes retained their
+verdict's exit code. Reviewers stopped their servers and removed their scratch.
+
+Known limits: export validates the response content type but does not validate
+the NDJSON footer before saving; import validates the archive. Streaming
+memory is bounded by the largest individual row rather than the whole file.
+Existing owner tokens alone do not make an untouched bootstrap target nonfresh;
+successful import discards credentials as the reply warns. The last round
+reused the earlier 720 MB, identical-row round trip and mid-upload revocation
+results; those paths were unchanged.
+
 Use `LC_ALL=C sort` when hashing the file list; different provider locales
 sort CHECKS.md differently and otherwise produce different manifest digests.

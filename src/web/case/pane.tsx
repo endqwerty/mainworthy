@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
 import { z } from "zod";
 import { mergeBodies } from "../../core/merge3.ts";
-import { CaseBody } from "../../core/model.ts";
+import { Automate, CaseBody } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import type { Draft } from "../lib/drafts.ts";
 import { navigate, refUrl } from "../lib/router.ts";
-import { bodyOf, CaseView } from "../suite/model.ts";
+import { bodyOf, CaseView, editDraft } from "../suite/model.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DiffView, EmptyState, KeyCap, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
 import { useCaseBindings } from "./bindings.ts";
@@ -81,6 +81,7 @@ function grouped(entries: Entry[]): TimelineGroup[] {
 export function CasePane({
 	view,
 	draft,
+	stored,
 	change,
 	begin,
 	seal,
@@ -90,6 +91,7 @@ export function CasePane({
 }: {
 	view: CaseView | null;
 	draft: Draft | null;
+	stored: boolean;
 	change: DraftChange;
 	begin: (field?: string) => void;
 	seal: () => void;
@@ -187,7 +189,11 @@ export function CasePane({
 									</a>
 								</>
 							) : draft?.dirty || draft?.ref === null ? (
-								"Draft, saved on this device"
+								stored ? (
+									"Draft, saved on this device"
+								) : (
+									"Draft, kept in this tab"
+								)
 							) : versionEntry ? (
 								`Version ${version}, by ${versionEntry.by === session.actor ? "you" : versionEntry.by}, ${age(versionEntry.at)}`
 							) : (
@@ -201,6 +207,19 @@ export function CasePane({
 					) : (
 						<ReadBody body={body} tags={view?.tags ?? []} begin={begin} />
 					)}
+					<CaseProperties
+						body={body}
+						change={(next) => {
+							const base = draft ?? (view ? editDraft(view) : null);
+							if (base)
+								change({
+									...base,
+									body: next,
+									dirty: true,
+									caret: draft?.caret ?? { field: "properties", start: 0, end: 0 },
+								});
+						}}
+					/>
 					<section className="proof-block">
 						<SectionHeading>Proof</SectionHeading>
 						{(["human", "auto", "agent"] satisfies (keyof CaseView["proof"])[]).map((method) => {
@@ -271,7 +290,11 @@ export function CasePane({
 										<summary>
 											<ProducerGlyph kind={group.entries[0]?.kind ?? "human"} />
 											<span className={group.entries[0]?.kind === "agent" ? "agentv" : ""}>
-												{group.entries.length} versions by {group.entries[0]?.by}
+												<ProducerGlyph kind={group.entries[0]?.kind ?? "human"} />{" "}
+												<span className={group.entries[0]?.kind === "agent" ? "agentv" : ""}>
+													{group.entries.length} versions by {group.entries[0]?.by}
+													{group.entries[0]?.kind === "agent" ? " · agent" : ""}
+												</span>
 												{group.entries[0]?.kind === "agent" ? " · agent" : ""} ·{" "}
 												{age(group.entries[0]?.at ?? Date.now())}
 											</span>
@@ -335,7 +358,9 @@ function ReadBody({ body, tags, begin }: { body: CaseBody; tags: string[]; begin
 			{body.pre && (
 				<>
 					<SectionHeading>Preconditions</SectionHeading>
-					<div className="pre-input">{body.pre}</div>
+					<button type="button" className="pre-input" onClick={() => begin("pre")}>
+						{body.pre}
+					</button>
 				</>
 			)}
 			<SectionHeading>Steps</SectionHeading>
@@ -668,5 +693,51 @@ function ConflictCard({ state, resolved }: { state: ConflictState; resolved: () 
 				</button>
 			</div>
 		</section>
+	);
+}
+
+function CaseProperties({ body, change }: { body: CaseBody; change: (body: CaseBody) => void }) {
+	return (
+		<details className="case-properties">
+			<summary>
+				Evidence from{" "}
+				{body.methods
+					.map((kind) => (kind === "human" ? "people" : kind === "auto" ? "the pipeline" : "agents"))
+					.join(", ")}
+			</summary>
+			<div className="case-methods">
+				{(["human", "auto", "agent"] satisfies CaseBody["methods"]).map((kind) => (
+					<label key={kind}>
+						<input
+							type="checkbox"
+							checked={body.methods.includes(kind)}
+							disabled={body.methods.length === 1 && body.methods.includes(kind)}
+							onChange={(event) =>
+								change({
+									...body,
+									methods: event.target.checked
+										? [...body.methods, kind]
+										: body.methods.filter((item) => item !== kind),
+								})
+							}
+						/>
+						<ProducerGlyph kind={kind} />
+						{kind === "human" ? "Person" : kind === "auto" ? "Pipeline" : "Agent"}
+					</label>
+				))}
+			</div>
+			<label className="automation-intent">
+				Automation{" "}
+				<select
+					value={body.automate}
+					onChange={(event) => change({ ...body, automate: Automate.parse(event.target.value) })}
+				>
+					<option value="none">Not requested</option>
+					<option value="wanted">Wanted</option>
+					<option value="not-applicable">Not applicable</option>
+				</select>
+			</label>
+			<div className="hintl">An agent's evidence counts only when the run admits it too.</div>
+		</details>
 	);
 }

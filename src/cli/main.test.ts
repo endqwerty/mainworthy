@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { randomBytes } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
@@ -316,6 +317,17 @@ test("passed/failed/blocked/pending gate exit codes stay distinct", async () => 
 	});
 });
 
+test("health exits 0 when the server answers and 1 when nothing does, with no token", async () => {
+	await withInstance(async ({ cli, instance }) => {
+		const up = await cli(["health"]);
+		expect(up.code).toBe(0);
+		expect(up.stdout).toBe(`healthy: Casebook 0.1.0 at ${instance.url}\n`);
+		const down = await cli(["health", "--url", "http://127.0.0.1:9"]);
+		expect(down.code).toBe(1);
+		expect(down.stdout).toBe("not answering: http://127.0.0.1:9\n");
+	});
+}, 20_000);
+
 test("open prints the running web UI URL", async () => {
 	await withInstance(async ({ cli, instance }) => {
 		const result = await cli(["open"]);
@@ -509,5 +521,43 @@ test("JSON input accepts leading whitespace and newlines", async () => {
 		const result = await cli(["find", "--json", '\n  {"in":"cases","limit":1}\n']);
 		expect(result.code).toBe(0);
 		expect(outputWith(Found, result).items).toEqual([]);
+	});
+});
+
+test("an early refusal of a large valid gzip reports authorization, not corrupt data", async () => {
+	await withInstance(async (source) => {
+		await source.client.call("propose", {
+			edits: [
+				{
+					op: "create",
+					body: {
+						title: "Large archive",
+						pre: randomBytes(1_500_000).toString("base64"),
+						methods: ["human"],
+						steps: [],
+					},
+				},
+			],
+		});
+		const file = join(source.directory, "valid.casebook.gz");
+		expect((await source.cli(["export", "--out", file])).code).toBe(0);
+		await withInstance(
+			async ({ cli, client }) => {
+				for (const token of ["", "unknown-token"]) {
+					const result = await cli(["import", file], { env: { CASEBOOK_TOKEN: token } });
+					expect(result.code).toBe(4);
+					expect(result.stderr).toContain("unauthenticated:");
+					expect(result.stderr).not.toContain("invalid gzip");
+				}
+				const token = Token.parse(
+					await client.call("admin", { do: "token.create", actor: "pipeline", kind: "ci", can: ["read", "produce"] }),
+				).token;
+				const denied = await cli(["import", file], { env: { CASEBOOK_TOKEN: token } });
+				expect(denied.code).toBe(4);
+				expect(denied.stderr).toContain("forbidden:");
+				expect(denied.stderr).not.toContain("invalid gzip");
+			},
+			{ mode: "server" },
+		);
 	});
 });

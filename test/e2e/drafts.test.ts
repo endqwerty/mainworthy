@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { browserAvailable, openPage, startServer } from "./support.ts";
+import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
 	"L2 reload restores an unsealed sentence and its caret",
@@ -114,4 +114,46 @@ test.skipIf(!browserAvailable)(
 		}
 	},
 	45_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"full device storage still accepts capture and reports the draft honestly",
+	async () => {
+		const server = await startServer();
+		const h = await openPage(server);
+		try {
+			const { page } = h;
+			await page.evaluate(() => {
+				let index = 0;
+				for (const size of [128 * 1024, 1024, 64, 1]) {
+					const chunk = "x".repeat(size);
+					for (let attempt = 0; attempt < 10_000; attempt++) {
+						try {
+							localStorage.setItem(`quota-${index++}`, chunk);
+						} catch {
+							break;
+						}
+					}
+				}
+			});
+			await page.keyboard.press("c");
+			expect(
+				await page.getByRole("textbox", { name: "Capture title" }).evaluate((node) => node === document.activeElement),
+			).toBe(true);
+			await page.keyboard.type("Storage is full");
+			await page.keyboard.press("Enter");
+			await page.keyboard.type("This text is kept");
+			expect(await page.locator(".cstate").textContent()).toContain("kept in this tab");
+			await page.keyboard.press("Escape");
+			await eventually(
+				() => server.api("find", { in: "cases" }),
+				(rows) => rows.items.length === 1,
+			);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
 );

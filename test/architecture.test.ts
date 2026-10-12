@@ -54,6 +54,19 @@ describe("the module map", () => {
 		expect(offenders).toEqual([]);
 	});
 
+	test("the raw database handle is used only by the kernel and by the archive, which reads every table by design", () => {
+		// `db.raw` runs SQL that is neither declared nor prepared against the schema. Everything else goes through
+		// `sql()` in the module that owns the table.
+		const offenders = files.filter(
+			(file) =>
+				/\.raw\b/.test(readFileSync(file, "utf8")) &&
+				!file.startsWith("src/server/kernel/") &&
+				!file.startsWith("src/server/transfer/") &&
+				!file.startsWith("src/web/"),
+		);
+		expect(offenders).toEqual([]);
+	});
+
 	test("only the kernel talks to SQLite", () => {
 		const offenders = files.filter(
 			(file) => imports(file).includes("bun:sqlite") && !file.startsWith("src/server/kernel/"),

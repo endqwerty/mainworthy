@@ -38,7 +38,10 @@ export function operation(instance: DatasetInstance, op: string, input: unknown,
 
 /** Adds twenty real recent edits to each clone without mutating the reusable baseline. */
 export function prepareRecentChanges(instance: DatasetInstance): void {
-	const current = Delta.parse(operation(instance, "since", { cursor: "s:0", limit: 1 })).cursor;
+	// A cursor past everything returns no changes and the cursor of where the project is now.
+	const current = Delta.parse(
+		operation(instance, "since", { cursor: `s:${Number.MAX_SAFE_INTEGER}`, limit: 1 }),
+	).cursor;
 	const seq = Number(current.slice(2));
 	const recent = instance.metadata.cases.filter((stamp) => stamp.version > 1 && stamp.version < 6).slice(0, 20);
 	ensure(recent.length === 20, "the history fixture must supply twenty cases for recent diffs");
@@ -180,7 +183,7 @@ export function readRequests(instance: DatasetInstance, index: number): ReadRequ
 						delta.changed.length <= 200 &&
 							delta.changed.length > 0 &&
 							delta.settled.length <= 200 &&
-							Number(delta.cursor.slice(2)) >= Number(metadata.since.slice(2)),
+							Number(delta.cursor.split(":")[1]) >= Number(metadata.since.slice(2)),
 						"HTTP changed-since must advance a valid cursor",
 					);
 				},
@@ -329,7 +332,8 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 					delta.changed.length <= 200 &&
 						delta.settled.length <= 200 &&
 						delta.changed.length + delta.settled.length > 0 &&
-						Number(delta.cursor.slice(2)) > Number(metadata.since.slice(2)),
+						// A full page keeps its base and carries a position; the last page moves to the present.
+						Number(delta.cursor.split(":")[1]) >= Number(metadata.since.slice(2)),
 					"changed-since must prove changes occurred after the cursor",
 				);
 			},

@@ -6,7 +6,7 @@ import { bootstrap } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
 import type { Actor } from "../server/kernel/ctx.ts";
 import { HTTP_STATUS, OpError } from "../server/kernel/errors.ts";
-import { exportArchive, importArchive, linesOf } from "../server/transfer/transfer.ts";
+import { exportArchive, importArchive, linesOf, removeBootstrap } from "../server/transfer/transfer.ts";
 import type { Session } from "./http.ts";
 
 const CHUNK_BYTES = 64 * 1024;
@@ -106,29 +106,6 @@ async function stageBody(req: Request, path: string): Promise<void> {
 	}
 }
 
-/** start() creates scratch before listening. Only that untouched project may be replaced by the archive. */
-function removeBootstrapProject(app: App): void {
-	const projects = z
-		.array(z.object({ key: z.string(), name: z.string(), seq: z.number() }))
-		.parse(app.db.raw.query("SELECT key, name, seq FROM projects").all());
-	if (projects.length === 0) return;
-	const first = projects[0];
-	const count = (query: string): number => z.object({ n: z.number() }).parse(app.db.raw.query(query).get()).n;
-	if (
-		projects.length !== 1 ||
-		!first ||
-		first.key !== "scratch" ||
-		first.name !== "scratch" ||
-		first.seq !== 1 ||
-		count("SELECT count(*) AS n FROM commands") !== 0 ||
-		count("SELECT count(*) AS n FROM actors") !== 2 ||
-		count("SELECT count(*) AS n FROM policies WHERE version <> 1 OR preset <> 'loose'") !== 0
-	) {
-		throw new OpError("conflict", "import needs a fresh instance; existing projects or user data will not be replaced");
-	}
-	app.db.raw.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
-}
-
 /** Admin-only transfer. The optional owner is Local's captured identity, refreshed after replacing bootstrap rows. */
 export function archiveRoutes(
 	app: App,
@@ -171,7 +148,7 @@ export function archiveRoutes(
 							"import needs the admin capability; the token or grant changed while uploading",
 						);
 					const restored = app.db.savepoint(() => {
-						removeBootstrapProject(app);
+						removeBootstrap(app.db);
 						const counts = importArchive(app.db, fileLines(file.path));
 						return { counts, owner: app.config.mode === "local" ? bootstrap(app).owner : null };
 					});

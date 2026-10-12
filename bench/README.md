@@ -51,5 +51,27 @@ are printed; apply spans include reads served between the product's current slic
 Ingest timings cover acceptance plus apply, stricter than C7's acceptance alone.
 SQL/CPU/I/O diagnostics identify the limiter and EXPLAIN plans. A miss needs a
 product fix and a repeat under comparable load; changing a budget hides the problem.
+## Under load, from another process
+
+`bun bench/external.ts <dataset directory> [seconds] [reader threads]` starts the server as its own process and
+drives it from this one: sixteen readers (a case, a folder page, a test's history, a gate, the queue, a search),
+one client sending 10,000-result reports back to back and one saving a case. This is the measurement to trust for
+reads under load: `run.ts` keeps its clients on the server's thread.
+
+On the full dataset (100,000 cases, 1,050,120 results, 50,000 open questions), 20 s windows, 2026-10-12, a
+16-thread desktop shared with other work:
+
+| Reader threads | Reads alone p95 | Reads under load p50 / p95 / p99 | Reads/s under load | One report p50 / slowest | Save p50 / p95 |
+| --- | --- | --- | --- | --- | --- |
+| 0 (inline) | 106 ms | 49 / 78 / 115 ms | 309 | 5,237 / 5,415 ms | 4,992 / 5,156 ms |
+| 4 | 33 ms | 18 / 54 / 77 ms | 690 | 476 / 1,185 ms | 280 / 393 ms |
+| 8 (the default on this machine) | 37 ms | 15 / 48 / 75 ms | 831 | 653 / 1,321 ms | 457 / 570 ms |
+
+The read budget (p95 under 50 ms) is met with eight reader threads and narrowly missed with four. Before
+checkpoints moved to their own thread and the apply slice went from 500 to 200 results, four threads gave a p95
+of 108 ms. **A save waits behind a report** at every setting: there is one writer, and the save's acknowledgement
+comes after the report in front of it (issue #60). Search is the slowest read in the mix (p95 about 63 ms under
+load).
+
 JUnit loads dynamically and skips explicitly if absent. The small check catches large
 regressions, not the full-scale promise. CLI/binary wiring for B6 belongs to the CLI.

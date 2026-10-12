@@ -46,6 +46,7 @@ export const CaseView = z.object({
 	updated: z.object({ at: z.number(), by: z.string(), kind: z.string() }),
 	proof: Proofs,
 	open: z.number(),
+	usedStepIds: z.array(Step.shape.id).default([]),
 });
 export type CaseView = z.infer<typeof CaseView>;
 export function bodyOf(view: CaseView): CaseBody {

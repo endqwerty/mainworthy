@@ -37,6 +37,7 @@ export function guardedInput(
 ): { body: ReadableStream<Uint8Array>; failure: () => CliError | null } {
 	const reader = stream.getReader();
 	let failure: CliError | null = null;
+	let cancelled = false;
 	let released = false;
 	const release = (): void => {
 		if (!released) {
@@ -48,17 +49,20 @@ export function guardedInput(
 		async pull(controller) {
 			try {
 				const next = await reader.read();
+				if (cancelled) return;
 				if (next.done) {
 					release();
 					controller.close();
 				} else controller.enqueue(next.value);
 			} catch {
-				failure = new CliError("invalid", message);
 				release();
+				if (cancelled) return;
+				failure = new CliError("invalid", message);
 				controller.error(failure);
 			}
 		},
 		async cancel(reason) {
+			cancelled = true;
 			try {
 				await reader.cancel(reason);
 			} finally {

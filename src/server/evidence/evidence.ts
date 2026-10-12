@@ -3,7 +3,7 @@
 // A report is taken in two steps. `accept` stores the normalised results durably under the batch key, so the same
 // report twice is a no-op and a crash loses nothing. `apply` turns the staged results into result rows, each with an
 // explicit basis. Between the two, every run the report matters to reads `pending` (see runs.ts).
-import { contentHash } from "../../core/hash.ts";
+import { createHash } from "node:crypto";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { MethodKind } from "../../core/model.ts";
 import type { Outcome, ReportInput, ResultIn, TargetIn } from "../../core/ops.ts";
@@ -550,7 +550,7 @@ export function accept(
 	const attempt = report.attempt ?? 1;
 	// A file of automated results sent twice is one batch. Anything typed against a case is a new fact each time.
 	const files = report.results.every((result) => "key" in result.test);
-	const key = contentHash({
+	const key = batchKey({
 		target: input.target.id,
 		run: input.run,
 		job,
@@ -619,8 +619,12 @@ export type ApplyResult = {
 };
 
 const ANNOTATION = /@(C-\d+)(?:@v(\d+))?/i;
-/** Results applied between two pauses. About 15 ms of work: the longest a read can wait behind a large report. */
-export const SLICE = 500;
+/**
+ * Results applied between two pauses. About 7 ms of work: the longest the server's main thread is held by one
+ * step of a large report, and so the longest a finished read waits to be sent. Smaller slices do not make a report
+ * measurably slower; larger ones showed in the read latency under load (see `bench/README.md`).
+ */
+export const SLICE = 200;
 
 /**
  * Turns a batch's staged results into result rows. `producer` is the kind of the actor that sent the batch;
@@ -963,6 +967,14 @@ export function targetByCommit(db: Db, project: number, commit: string, repo?: s
 	}
 	return rows[0] ?? null;
 }
+
+/**
+ * The identity of a batch: a digest of what was sent. A 10,000-result report is megabytes, and this runs on the
+ * thread that answers requests, so it is the platform's SHA-256 over one serialisation and not the canonical
+ * hash the rest of the record uses (which sorts every key in JavaScript and takes five times as long). The same
+ * report sent twice is serialised the same way, which is all a batch key has to guarantee.
+ */
+const batchKey = (parts: unknown): string => createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 
 /** Keys of this shape name the manual test of a case. An automated test cannot take one. */
 const RESERVED_KEY = /^case:\d+$/i;

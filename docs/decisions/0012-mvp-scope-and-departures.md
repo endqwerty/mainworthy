@@ -31,7 +31,11 @@ not the same things done worse.
    map; import into an empty instance keeps ids as they are.
 2. **A change run counts tests; a planned run counts slots.** The design gave every run slots. A commit's gate
    must include tests that have no case (decision 0008, item 10), and a slot needs a case. So a change run keeps
-   the effective result per test (`run_tests`), and the same tally and verdict function read both.
+   the effective result per test (`run_tests`), and the same tally and verdict function read both. A test has one
+   row per **lane** (the target, the job and the producer that reported it): a newer attempt in a lane replaces
+   the one before it, and nothing from another lane can, so one job's pass never hides another job's failure of
+   the same test, and somebody else's upload never clears a pipeline's. A slot keeps every cause failing in it,
+   and is excused only when each of them is.
 3. **A test's eligibility for a case comes from the link, not from the case body.** The design had the case
    declare `auto` in `methods`. A link exists only through a `map` decision or the test's own annotation, so
    declaring it again is a second place to maintain (principle P6). Whether a test may fill a given slot is the
@@ -39,6 +43,9 @@ not the same things done worse.
    version a slot pinned, not from the newest. The method of a result is decided per result: a pipeline's are
    `auto`; an agent's are `agent` whether it names a case or a test key, so an agent cannot count as a pipeline
    by its choice of words; a person's is `human` when it names a case and `auto` when they pass on a results file.
+   **What an agent reports never moves a commit's gate.** It is recorded and shown, a failure it reports is put to
+   a person as a question that holds nothing, and it counts only in a planned run that asked for agents on a case
+   that admits them (decision 0009, "agent evidence in gates").
 4. **Two failure answers were added, one replaced.** `inherited` (already failing on the base: the answer the
    loose preset's rule gives, which the design left unnamed) and `mistaken` (a disputed slot: the failing result
    was wrong). `mistaken` replaces the design's `resolve { trust: [...] }`; any other failure answer on a disputed
@@ -57,9 +64,13 @@ not the same things done worse.
    report is refused with a message saying how to reopen the run (withdraw the sign-off). A correction reaches
    only open runs; a closed run keeps what it was closed on. Deferred (#48).
 8. **Holds:** `basis-changes`, `this-target`, a date, and "while a fact holds" are built. "N clean runs" and
-   "until the linked defect closes" are not (#38, #32). A decision held for one target excuses that target only;
-   the same cause on another commit of the pull request stays unexplained. When a hold runs out by the clock, the
-   expiry is a row in the ledger that the next answer supersedes.
+   "until the linked defect closes" are not (#38, #32). A decision held for one target (an infrastructure failure)
+   excuses the build it was given for and no other: not the next commit, and not another environment of the same
+   commit. Where the question had already seen the cause in another environment of that commit, that one is asked
+   about again at once, so a gate is never left blocked by a failure nobody is being asked about. A question
+   about a failure is closed without an answer only when the newest commit shows one of its tests passing;
+   silence (a job that has not reported, a run over other cases) closes nothing. When a hold runs out by the
+   clock, the expiry is a row in the ledger that the next answer supersedes.
 9. **The review basis is the case version plus the change key,** not the patch tree hash. A changed patch under
    the same pull request does not yet invalidate a review. Deferred (#49).
 10. **The export is the whole instance,** as newline-delimited JSON, imported into an empty instance. Per-project
@@ -79,20 +90,27 @@ not the same things done worse.
     result recorded against a case that is what happens. For an automated test the outcome is still a fact about
     the commit, and dropping it could hide a failure from the gate, so it is kept with no case and the reason is
     returned (`declined` in the reply).
-15. **A run with nothing proven is `pending`, not `passed`.** A report of skips only, or one whose every result
-    was refused, leaves the gate where it was. A skip never replaces a pass or a failure of the same test.
+15. **A run with nothing proven is `pending`, not `passed`.** A report of skips only, one whose every result was
+    refused, or one that holds only an agent's results leaves the gate where it was. A skip never replaces a pass
+    or a failure of the same test, in a commit's gate or in a slot. The cost: a commit whose pipeline runs no test
+    at all (a change to the docs only) stays `pending` until a project can say what that means (#63).
 16. **A change's head only moves forward.** A report for a commit first seen before the current head (a retried
     job, a slow job of the previous push) does not move the change back. A branch reset to an older commit
     therefore keeps its newer head in the change's gate; the gate of a commit is always exact.
 17. **A change belongs to one repository.** The first repository to report `pr:12` in a project has that key;
-    the same number from another repository is its own change, keyed `<repository>#pr:12`.
+    the same number from another repository is its own change, keyed `<repository>#pr:12`. The same commit can
+    exist in two repositories (a fork): each has its own gate, a change's gate is always its own repository's,
+    and a commit reported for more than one repository must be named with `repo` (it is refused, never guessed).
+18. **Test keys of the form `case:<n>` are reserved** for the manual test of a case. A report that uses one for an
+    automated test is refused.
 
 ## What is not standing
 
 Principle P0 says standing changes only through a decision. The code enforces it three ways: the type (a
 `Witness` has a private field, so nothing else type-checks as one), the value (every standing writer reads the
-decision through a check that refuses anything the mint did not make, and the mint can be claimed once), and the
-database (every column that cites a decision is a foreign key into the ledger). Four writes look like standing
+decision through a check that refuses anything the mint did not make and any witness of another kind of decision;
+the constructor needs a key that never leaves its module; the mint can be claimed once), and the database (every
+column that cites a decision is a foreign key into the ledger). Four writes look like standing
 and are not, and take no witness:
 
 - **The first policy of a new project.** There is no earlier policy under which to decide it. A second seed is

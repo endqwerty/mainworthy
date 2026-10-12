@@ -136,3 +136,41 @@
 	font-size: 12px;
 	color: var(--dim);
 }
+
+.case-properties {
+	margin-top: 14px;
+	color: var(--dim);
+	font-size: 12px;
+}
+.case-properties summary {
+	cursor: pointer;
+}
+.case-methods {
+	display: flex;
+	gap: 16px;
+	padding: 12px 0;
+}
+.case-methods label {
+	display: flex;
+	gap: 5px;
+	align-items: center;
+}
+.automation-intent {
+	display: flex;
+	gap: 12px;
+	align-items: center;
+}
+.automation-intent select {
+	background: var(--panel);
+	color: var(--ink);
+	border: 1px solid var(--line);
+	border-radius: 5px;
+	padding: 4px;
+}
+
+.ev.prop .pbtn {
+	position: sticky;
+	bottom: 0;
+	background: var(--agent-soft);
+	padding: 6px 0;
+}

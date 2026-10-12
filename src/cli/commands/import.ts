@@ -33,6 +33,7 @@ export const importCommand: AdapterCommand = {
 		} catch (error) {
 			throw upload.failure() ?? error;
 		}
+		if (!response.ok) unwrap(await readEnvelope(response));
 		const failure = upload.failure();
 		if (failure) throw failure;
 		const result = ImportResult.parse(unwrap(await readEnvelope(response)));
