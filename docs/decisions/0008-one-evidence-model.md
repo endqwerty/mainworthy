@@ -51,15 +51,15 @@ the decisions that the sketch depends on.
    `applied` watermark and an `outstanding` count): durable acceptance of an
    upload (staging its normalised results under the batch key, before any
    processing) counts it outstanding on every matching run, open or closed;
-   processing, in any order, applies it and advances the watermark only past
-   batches that are all applied. A frozen run never changes. The gate is
+   processing, in any order, applies it and advances the watermark to the
+   highest batch below which every matching batch is applied. A frozen run never changes. The gate is
    `pending` while anything is outstanding, so a stale green is never
    served. A late upload never rewrites a closed run's standing: the closing
    sign-off decision holds until its basis changes, so the late batch
    re-raises the sign-off question and the new decision supersedes the old.
 
 5. **A review is never a runtime pass.** Findings and reviewed-basis rows
-   are evidence of review; only a run requirement of kind review accepts
+   are evidence of review; only a run obligation of kind review accepts
    them, and policy may require an independent human. A review with zero
    findings is still recorded.
 
@@ -91,7 +91,7 @@ the decisions that the sketch depends on.
    steps, expected results, the pinned fragments' content) and is stable
    under retitling, retagging, moving and linking. It is a reuse signal for
    people and agents ("proven on this claim", "reviewed at this basis") and
-   an explicit requirement option (`basis: 'same-claim'`) a project may
+   an explicit obligation option (`basis: 'same-claim'`) a project may
    choose for its gates; it never transfers proof by itself.
 
 9. **Autosave into a private open proposal; a version exists when a sealed

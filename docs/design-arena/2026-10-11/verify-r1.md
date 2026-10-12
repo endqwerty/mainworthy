@@ -435,4 +435,3 @@ The release boundary is also unresolved: D's Local experiment is described besid
 **Disposition:** keep the synthesis as a proposed design, but do not mark all checks passing or treat its evidence/gate contracts as ready for implementation. Resolve the acceptance constructor, binding/target rules, fragment pins, processing/expiry horizon, basis-bearing decide forms and staged release boundary. The editorial count/reference fixes are smaller but should accompany that revision.
 
 Only `/tmp/casebook-arena/verify-r1.md` was written. No repository files were changed.
-

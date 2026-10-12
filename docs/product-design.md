@@ -112,7 +112,7 @@ a human answer is one queue.
 | C2. **Four verdicts, four exit codes:** `passed` 0, `failed` 1 (needs a fix), `blocked` 2 (needs a decision), `pending` 3 (needs evidence). | Unit test of the pure verdict function; CLI test. |
 | C3. **A decision changes the check without re-running the pipeline.** | Job test: ingest a red report, decide `infra` under a policy that lets a member excuse it, read the gate within seconds. |
 | C4. **One cause is one question.** A report with 500 failures sharing a signature opens at most 3 questions (draft); a failure already failing on the base of the change is shown as such and *suggested* as excused, never excused without a decision (which may be a rule's). | Fixture D1; the base-failure hint is visible and the excuse is a decision row. |
-| C5. **Accepting an upload turns a green gate pending before parsing starts**, so a stale green cannot be read while new evidence is being processed. | Job test: green gate, accept a report, read gate during processing → `pending`. |
+| C5. **Accepting an upload turns a green gate pending before any processing**: the adapter parses, the operation stages the normalised results durably and marks matching runs outstanding in that acceptance transaction, so a stale green cannot be read while the evidence is being applied. | Job test: green gate, accept a report, read gate before processing completes → `pending`. |
 | C6. **Policy, gates and charters are text** (`casebook policy show`, `policy apply` is a proposal like any edit), diffable and reviewable. | Round-trip: export, apply, no diff. |
 | C7. **Ingest of 10,000 results accepted in < 2 s, visible with questions raised in < 5 s** (draft). | Benchmark in the check. |
 
@@ -182,7 +182,7 @@ occurrences of the same cause until the evidence changes.
 
 `g r`, `n`, pick cases by folder, tag or search, Enter. Then `p` pass, `f`
 fail, `b` blocked, `s` skip. Results from CI and from agents on the same
-build fill the same run where its requirements allow, so you only run what
+build fill the same run where its obligations allow, so you only run what
 nothing else has shown.
 
 ## Let an agent in
@@ -324,10 +324,11 @@ Under the `standard` preset it may record findings and proposals and may
 Fresh eyes is explicit and pays the full cost on purpose:
 `impact({ change, ledger: false })`.
 
-For adversarial testing (F14) the same `impact` digest is the charter; the
-agent works outside Casebook with its own tools and posts results in one
-`report({ run, results })` batch and findings in one `claim` batch, under its
-own identity. Whether an agent's result may satisfy a gate slot is a policy
+For adversarial testing (F14) the same `impact` digest is the brief; the
+agent runs under a charter document (`h_checkout`, a `charter` edit in the
+suite), works outside Casebook with its own tools and posts results in one
+`report({ run, method: 'agent', charter: 'h_checkout', results })` batch and
+findings in one `claim` batch, under its own identity. Whether an agent's result may satisfy a gate slot is a policy
 clause, not a code path.
 
 ### 5.4 Call site (c): an author captures; a lead plans; an executor runs
@@ -396,8 +397,8 @@ disagreement; it resolves through a decision, never by the later write.
 1. One `report` shape for a 10,000-result file and a single keypress; the
    producer is the token's actor, never a parameter.
 2. Results attach to *what was tested* (a target); a run is a predicate over
-   targets plus pinned slots with explicit requirements, so CI results fill a
-   manual run only where the requirement admits that method and binding.
+   targets plus pinned slots with explicit obligations, so CI results fill a
+   manual run only where the obligation admits that method and binding.
 3. Every result carries an explicit basis: exact, assumed or unresolved.
 4. A question exists once per cause and remembers its answer; `decide` has one
    signature at every strictness and says whether the caller settled,
@@ -512,7 +513,7 @@ type Target = { id: TargetId; project; env: string; line: LineId; change: Change
 // KEY (project, what, env) unique · KEY (project, build) unique where build != null
 type Attestation = { by: ActorId /* ci or admin */; at: Instant; digest: Hash; code: { repo; commit }[] }   // "this artifact was built from this code"
 // Acceptance of code evidence for an artifact target (B's CodeInArtifact) requires an attestation and a run
-// requirement that opts in (`target: 'code-in-artifact'`); the default is exact.
+// obligation that opts in (`target: 'code-in-artifact'`); the default is exact.
 type Line   = { id; name; class: 'trunk' | 'release' | 'change' }
 type Change = { id; project; key: string /* "pr:482" | "commit:9f3c…" */; base: Sha; head: Sha; files: Path[]; refs: ExternalRef[]; rev: Seq }
 type Deploy = { target: TargetId; env: string; stamp: Stamp }
@@ -545,7 +546,7 @@ type Result = { id: ResultId; project; test: TestId; seq: Seq; ord: number; batc
                 run: RunId | null; corrects: ResultId | null }   // a correction is a new result naming the old; both kept
 // KEY (project, test, seq desc) → last N results · KEY (project, batch, outcome) → a report's page
 // KEY (project, target, test) → base/head comparison for impact · KEY (project, signature, seq desc) → failures by cause
-// KEY (project, run, case) → a slot's fills · `corrects` KEY (replaced) → the effective set excludes corrected rows
+// `run` is only where a result was typed; slot membership is `SlotResult` (6.4) · `corrects` KEY (replaced) → corrected rows leave the effective set
 // The producer kind is the actor's kind; the method is declared and validated; there is no free "type" column.
 
 type Signature   = { id; project; hash: Hash /* class + normalised message + first frame outside the test */; class: 'assertion' | 'infra' | 'timeout'; sample: Text }
@@ -553,7 +554,8 @@ type TestSignals = { test: TestId; trunk: {...}; flips: Ring<{commit; batch}, 16
 type JobManifest = { job; line; batchNo; tests: TestId[] }   // stale = absent from the latest manifest of its job
 
 type Finding = { id; project; stamp; lens: string; on: Locus; category: FindingCategory; note; repro; suggest: Suggestion | null; basis: Hash }
-type Suggestion = { step: StepId; action?: Text; expected?: Text } | { case: { title; folder: FolderId; steps: string[] } }
+type Suggestion = { step?: StepId; action?: Text; expected?: Text } | { case: { title; folder: FolderId; steps: string[] } }
+// step defaults to the step named by the finding's locus (`on: "C-311#s2"`); a step suggestion with no step anywhere is rejected
 // a shorthand an agent can write; the finding kind's `accept {apply: true}` effect normalises it into an `Edit` on a sealed
 // proposal authored by the finder (outline grammar as in 5.1), which then goes through `adopt` like any edit
 type Review  = { id: ReviewId; reviewer: ActorId; lens; case: CaseId; basis: Hash; seq: Seq }
@@ -621,7 +623,7 @@ slot when all of these hold, checked by one pure function `qualifies(result,
 slot, obligation, run)`:
 
 1. its `basis` names the slot's case at the pinned version (`exact`), or is
-   `assumed` at that version and the requirement allows `exact-or-assumed`,
+   `assumed` at that version and the obligation allows `exact-or-assumed`,
    or names another version with the slot's claim hash and the obligation
    allows `same-claim` (the fill records which rule admitted it);
 2. `matches(run.accepts, result.target)`: same repository and commit (and
@@ -642,9 +644,18 @@ slot, obligation, run)`:
    **failing** (a `failure` question is raised); a counted fail beside a
    counted pass from another actor is **disputed** (a `failure` question with
    the `disputed` hint, answered by `resolve`), never averaged. The fold
-   reads the slot's complete effective result set (`Result (project, run,
-   case)` minus corrected rows); `agg` is its lossless summary and `recent`
-   is presentation only, so a seventeenth fill cannot hide a failure.
+   reads the slot's complete effective result set from `SlotResult` (below)
+   minus corrected rows; `agg` is its lossless summary and `recent` is
+   presentation only, so a seventeenth fill cannot hide a failure.
+
+```ts
+// The durable many-to-many between slots and the results that qualify for them. One immutable Result may
+// qualify for several runs (a CI result fills a change run and two planned runs on the same build).
+type SlotResult = { run: RunId; case: CaseId; result: ResultId; admitted: Fill['admitted']; corrected: boolean }
+// KEY (run, case, result) unique · KEY (result) → every slot a correction must revisit
+// WRITER: runs.fold, at ingest for every matching run (`Run (project, state='open')` ∩ `Slot (case, run)`), at
+// `plan` for prior results on matching targets (the "already: 171"), and on a late batch to a closed run.
+```
 
 A review obligation is filled only by a `Review` row at the slot's basis
 (and, if `independent`, by an actor other than the version's author). It is
@@ -656,10 +667,12 @@ before any processing) increments `horizon.outstanding` and sets
 open or closed; a frozen run instead records the batch as "after freeze" and
 changes nothing. `runs.fold`, after applying a batch's results, signals and
 questions in one transaction, decrements `outstanding` and sets `applied` to
-the batch's Seq only if no older matching batch is still outstanding
-(`applied` is a contiguous watermark; processing order is not assumed). The
-gate read returns `pending` while `outstanding > 0`, so a stale green is
-never served whatever order batches are processed in.
+the highest Seq such that every matching batch at or below it is processed,
+advancing past already-processed higher batches when a hole closes
+(`applied` is a contiguous watermark; processing order is not assumed; when
+`outstanding` is 0, `applied` equals `accepted`). The gate read returns
+`pending` while `outstanding > 0`, so a stale green is never served whatever
+order batches are processed in.
 
 A late batch does not reopen a closed run: `state` is standing and only a
 `signoff` decision writes it. The closing decision holds `until:
@@ -795,7 +808,7 @@ Every read ends in point reads or one bounded range read on a key named above.
 | Impact for a change | refs → `Requirement` → `Covers`; files → `Test (project, file)` → case; files → `Area` globs → folders; ≤ 200 candidates → batched reads of hash, `Review`, signals, open/held questions, last result on base and head; rank pure; uncovered files listed | agent token budget |
 | Changed since | range `Case (project, rev > S)` filtered by scope; `versionAt` backwards walk; step-level diffs; `Question (project, rev > S)` for settled | tokens |
 | Traceability | Requirement → Covers → Case → Version → Test → Result → Target → Deploy; failure → Signature → Excuse → Decision → defect ref; every hop keyed both ways | one click per hop |
-| Gate read by CI | `Run (project, repo, commit)`: one row; the read compares `horizon.applied` to `accepted` and `nextExpiry` to now (two comparisons, no scan) and otherwise returns the stored verdict | < 20 ms |
+| Gate read by CI | `Run (project, repo, commit)`: one row; the read applies the rules of 6.4 (`outstanding > 0` or `nextExpiry` passed → `pending`, frozen → the frozen verdict plus flags) and otherwise returns the stored verdict; two comparisons, no scan | < 20 ms |
 | The queue | range `Question (project, open, owner, rank)` 50 rows with digests; counts index-only | < 50 ms at 50k open |
 
 ## 7. Operation layer and module map
@@ -817,12 +830,15 @@ omitted below).
 ```ts
 // produce evidence (capability: produce)
 op propose  ({ id; edits; reason?; seal }): adopted | open{question, needs} | conflict{fields}              // mcp
-op report   ({ target? | run?; job?; attempt?; method?; manifest?; raw?: BlobRef; results: ResultIn[] }): ReportReceipt   // mcp
+op report   ({ target? | run?; job?; attempt?; method?; charter?: CharterId; manifest?; raw?: BlobRef; results: ResultIn[] }): ReportReceipt   // mcp
+            // method defaults from the actor kind; an agent reporting method 'agent' must name the charter document it ran under
 op claim    ({ lens; about?; patch?: Sha; reviewed?: `${Ref}@${Hash}`[]; findings }): { opened; known; reviewed }   // mcp
 op announce ({ change } | { deploy }): Ref
 op attach   ({ name; bytes }): BlobRef
 // request evidence (capability: plan)
-op plan     ({ name; select: Selection | SetId; accepts?; require?: Obligation[] | GateId; assign? }): { run; slots; already }
+op plan     ({ name; select: Selection | SetId; accepts?; require?: ObligationIn[] | GateId; assign? }): { run; slots; already }
+            // ObligationIn = Obligation with `id` server-assigned and these defaults from the project policy when omitted:
+            // bindings 'any', charters 'any', target 'exact', minActors 1, basis the policy's default ('exact-or-assumed' in loose and standard, 'exact' in regulated)
 // decide (produce = advise; answer = counted; then policy)
 op decide   ({ q; onEvidence: Hash; answer; reason?; supersede? }
              | { kind; subject; evidence: Digest; answer; reason? }     // a genuinely new question: the caller supplies the evidence it acted on;
@@ -903,8 +919,11 @@ function answer<K>(tx, actor, q, a, reason, onEvidence, supersede): DecideReply 
   return settle(tx, q, t.signers, a)
 }
 function settle<K>(tx, q, signers, a): DecideReply {
-  const prior = q.state.s === 'decided' ? tx.decisions.get(q.state.decision) : null
-  if (prior) KINDS[q.kind].revert(tx, witness(prior), q)
+  // the decision this one replaces: a re-decide of the same question, or the effective decision of the
+  // predecessor epoch when this question was re-asked (hold ended, late batch, evidence changed)
+  const prior = q.state.s === 'decided' ? tx.decisions.get(q.state.decision)
+              : q.prior                 ? effectiveDecision(tx, q.prior) : null
+  if (prior) KINDS[q.kind].revert(tx, witness(prior), q)   // reverses the prior's standing effects; the prior row itself is never edited
   const d = tx.decisions.insert({ question: q.id, kind: q.kind, answer: a, signers, basis: q.evidenceHash,
                                   holds: KINDS[q.kind].holds(a, q), supersedes: prior?.id ?? null })
   q.state = { s: 'decided', decision: d.id }
@@ -1046,12 +1065,13 @@ until that job's batch is processed, whatever else passed); E5 (two batches
 accepted for one job, processed in either order, a question settled between:
 the gate stays `pending` until both are applied; a late upload to a closed
 run makes its gate `pending` and re-raises `signoff(close)`, whose new
-decision supersedes the old; a frozen run never changes); E6 (a fragment edit publishes new
-versions for its users as one attributable batch; an old run's slot still
-expands to what was executed); E7 (a case moved out of a selection after a
+decision supersedes the old; a frozen run never changes); E6 (a fragment edit through the
+operation layer, no UI in this slice, publishes new versions for its users as
+one attributable batch; an old run's slot still expands to what was
+executed); E7 (a case moved out of a selection after a
 run started keeps its slot; a review alone never fills an exercise slot; a
 manual accessibility slot is not filled by a linked DOM test when the
-requirement names `human`); E8 (an excuse with a date hold expires with no
+obligation names `human`); E8 (an excuse with a date hold expires with no
 new ingest: the gate read returns `pending` and the next occurrence is asked
 again with the old answer shown). Latency budgets hold on the benchmark data
 with concurrent ingest.
@@ -1125,7 +1145,7 @@ recorded basis under policy:
   results naming the old, required-producer completeness, and the floor
   wording of "a bad product".
 - **From B:** the target union (code / artifact / session) with attestation,
-  exercise/review/sign-off as distinct requirements on a run, review basis
+  exercise/review/sign-off as distinct obligations on a run, review basis
   that includes the relevant patch, and acceptance-time gate invalidation.
 - **From C:** the claim hash beside the version hash (as a reuse signal and
   a policy option, not automatic proof), canonical Markdown documents with
@@ -1236,6 +1256,7 @@ the role and freeze paths of `signoff` ship.
 In the phase 1 operation-layer prototype, implement `raise`, `answer`,
 `settle`, `basisFor` and the `adopt` and `failure` kinds behind `propose`,
 `report`, `decide`, `inbox` and `gate` from one registry on each candidate
-stack, and run fixtures D1, D3 and E1 to E8 (including the inverse-order
-horizon, agreeing provenance and late-reopening cases) with the ingest and
-capture budgets in embedded and server mode.
+stack (with a rule-only `signoff` stub so E5's supersession can run), and
+run fixtures D1, D3 and E1 to E8 (including the inverse-order horizon,
+agreeing provenance and late-upload signoff supersession cases) with the
+ingest and capture budgets in embedded and server mode.
