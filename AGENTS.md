@@ -25,6 +25,15 @@ is short on disk).
 - Competitor claims in `docs/competitors.md` are hypotheses until verified;
   do not build on one without checking it.
 
+## Model profile
+
+**deep**, Daniel's standing choice for this project (named 2026-10-11). Every
+agent that delegates here takes models and effort from `homelab route models
+--profile deep` instead of the default `balanced`: higher effort for all
+classes, Opus on Claude verifiers and reviewers, Astra or Fable for `hard` and
+`lead`. It is not `max`; Daniel names that for a single thread or task. A model
+Daniel names in a thread still wins.
+
 ## Delivery
 
 Delivery: **review-first**. Daniel merges; you do not.
