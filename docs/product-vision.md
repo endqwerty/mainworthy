@@ -268,6 +268,7 @@ original draft, kept for history:
 - Regulatory certification or compliance claims; the model records what a
   regulated team needs, the claims come later if a real team needs them.
 - Test code generation or execution infrastructure.
-- Multi-tenant SaaS billing.
+- Multi-tenant SaaS billing in the MVP. A hosted tier run by Daniel must stay possible (decision 0009, answer 2);
+  it is planned, not built (#31).
 
 Everything above is a starting position. Change it freely; record why.

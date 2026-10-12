@@ -1,7 +1,9 @@
 # 0002: Self-hostable in layers
 
 - Date: 2026-10-10
-- Status: accepted (requirement set by Daniel)
+- Status: accepted (requirement set by Daniel). Amended 2026-10-12: a container is
+  acceptable for every layer (decision 0009, answer 14), and the Server layer runs
+  on SQLite; a server database is added for the Cloud layer (decision 0010).
 
 ## Decision
 
@@ -11,7 +13,7 @@ layer that fits them; the product behaves the same in every layer.
 | Layer | Who | Shape | Storage |
 | --- | --- | --- | --- |
 | **Local** | one person, a laptop | one process, zero configuration, starts in seconds, needs no network for its own features | embedded database and local files |
-| **Server** | a team, a home server or small VPS | one container or binary plus a database | server database, local or object storage for attachments |
+| **Server** | a team, a home server or small VPS | one container or binary | the same embedded database on a volume (amended by decision 0010; was "a server database") |
 | **Cloud** | one organisation with many teams or heavy CI load | several API instances behind a load balancer, optional cache, background workers | server database, object storage, optional cache (for example Redis-compatible) |
 
 Cloud means one organisation scaled out, not isolated tenants. Multi-tenant
@@ -41,6 +43,11 @@ its own decision.
    the UX research prototypes and for benchmarks, and because it forces the
    zero-configuration start. Server and Cloud are proven by running the same
    artifact against the server database before the first usable version.
+   *Amended 2026-10-12 (decision 0010): the Server layer is the same artifact
+   with its embedded database on a volume, which the MVP's container proves.
+   The server-database proof now belongs to the Cloud layer only, and is due
+   when one organisation needs several instances (#57), not before the first
+   usable version.*
 5. **Attachments are behind a storage interface** from day one (local disk
    first, object storage later), so the Cloud layer does not need a rewrite.
 6. **Background work** (flaky detection, report aggregation, ingest parsing)
@@ -64,7 +71,8 @@ its own decision.
 These are requirements for the benchmark to test, not a stack choice.
 
 - The data store must work embedded for Local and as a server database for
-  Server and Cloud. The working hypothesis is one schema and one query layer:
+  Server and Cloud. *(Amended by decision 0010: embedded for Local and Server;
+  a server database for Cloud, measured in the arena and deferred.)* The working hypothesis is one schema and one query layer:
   either one engine that does both, or two engines behind an abstraction.
   The benchmark judges this on transactional semantics, concurrent writes,
   search and portability as well as latency, and runs in both modes.

@@ -1,0 +1,1670 @@
+{
+  "stack": "rust",
+  "mode": {
+    "embedded": {
+      "W1": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "Requested case ref and structured head body/title returned",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 2000,
+        "p50": 0.6805,
+        "p95": 2.8312,
+        "p99": 4.6175,
+        "max": 7.2236,
+        "samples": 2000,
+        "store_ms": {
+          "p50": 0.5025,
+          "p95": 2.599,
+          "p99": 4.372,
+          "max": 6.9734,
+          "samples": 2000
+        },
+        "server_cpu_seconds": 0.37,
+        "wall_seconds": 2.357
+      },
+      "W2": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "50 ordered folder rows after cursor with test glyphs and queue count; sampled glyphs match seed",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 1000,
+        "p50": 2.42,
+        "p95": 6.483,
+        "p99": 11.6911,
+        "max": 18.8334,
+        "samples": 1000,
+        "store_ms": {
+          "p50": 1.9824,
+          "p95": 5.9903,
+          "p99": 11.2686,
+          "max": 18.4426,
+          "samples": 1000
+        },
+        "server_cpu_seconds": 2.44,
+        "wall_seconds": 3.8978
+      },
+      "W3": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "At most 50 relevance-ranked hits; all AND terms and optional 24-folder scope match",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 500,
+        "p50": 28.8391,
+        "p95": 55.8464,
+        "p99": 73.8954,
+        "max": 79.7116,
+        "samples": 500,
+        "store_ms": {
+          "p50": 28.4551,
+          "p95": 55.4417,
+          "p99": 73.4204,
+          "max": 79.2746,
+          "samples": 500
+        },
+        "server_cpu_seconds": 17.69,
+        "wall_seconds": 18.9746
+      },
+      "W4": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "One command/version/decided question/decision, head and full-text updated; 20 replays write nothing",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 1000,
+        "p50": 0.5849,
+        "p95": 6.949,
+        "p99": 23.4813,
+        "max": 26.9034,
+        "samples": 1000,
+        "store_ms": {
+          "p50": 0.4437,
+          "p95": 6.6827,
+          "p99": 23.2008,
+          "max": 26.6614,
+          "samples": 1000
+        },
+        "server_cpu_seconds": 0.82,
+        "wall_seconds": 1.7617,
+        "durable_write_delta": {
+          "seq": 1100,
+          "command_count": 1100,
+          "version_count": 1100,
+          "question_count": 1100,
+          "decision_count": 1100,
+          "result_count": 0,
+          "test_count": 0,
+          "signature_count": 0,
+          "batch_count": 0,
+          "target_count": 0
+        }
+      },
+      "W5": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "10,000 results, 100 new tests, 200 failures, 20 signatures (10 new), basis and tally audited; replay writes nothing",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 20,
+        "p50": 346.7565,
+        "p95": 441.9418,
+        "p99": 466.5678,
+        "max": 466.5678,
+        "samples": 20,
+        "store_ms": {
+          "p50": 341.6292,
+          "p95": 436.4329,
+          "p99": 460.8857,
+          "max": 460.8857,
+          "samples": 20
+        },
+        "server_cpu_seconds": 25.18,
+        "wall_seconds": 32.798,
+        "durable_write_delta": {
+          "seq": 120,
+          "command_count": 0,
+          "version_count": 0,
+          "question_count": 1210,
+          "decision_count": 0,
+          "result_count": 1200000,
+          "test_count": 12000,
+          "signature_count": 1200,
+          "batch_count": 120,
+          "target_count": 120
+        }
+      },
+      "W5a": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "10,000 parsed testcases, 200 failures with 400-byte messages",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 20,
+        "p50": 5.3757,
+        "p95": 7.069,
+        "p99": 7.8914,
+        "max": 7.8914,
+        "samples": 20,
+        "store_ms": {
+          "p50": 4.3207,
+          "p95": 5.8927,
+          "p99": 6.7522,
+          "max": 6.7522,
+          "samples": 20
+        },
+        "server_cpu_seconds": 0.65,
+        "wall_seconds": 0.6666
+      },
+      "W6": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "At most 20 results for requested test, descending sequence and ordinal",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 2000,
+        "p50": 0.3448,
+        "p95": 0.5,
+        "p99": 1.3964,
+        "max": 6.7863,
+        "samples": 2000,
+        "store_ms": {
+          "p50": 0.1271,
+          "p95": 0.2145,
+          "p99": 1.0626,
+          "max": 6.4948,
+          "samples": 2000
+        },
+        "server_cpu_seconds": 0.45,
+        "wall_seconds": 0.9904
+      },
+      "W7": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "Requested commit run returned with parsed tally",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 2000,
+        "p50": 0.1655,
+        "p95": 0.2246,
+        "p99": 0.3174,
+        "max": 1.695,
+        "samples": 2000,
+        "store_ms": {
+          "p50": 0.0295,
+          "p95": 0.0446,
+          "p99": 0.117,
+          "max": 1.4044,
+          "samples": 2000
+        },
+        "server_cpu_seconds": 0.15,
+        "wall_seconds": 0.412
+      },
+      "W8": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "50 open ordered questions, parsed evidence and consistent open count",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 1000,
+        "p50": 2.414,
+        "p95": 3.5039,
+        "p99": 3.809,
+        "max": 4.0564,
+        "samples": 1000,
+        "store_ms": {
+          "p50": 1.8966,
+          "p95": 2.9393,
+          "p99": 3.1724,
+          "max": 3.3343,
+          "samples": 1000
+        },
+        "server_cpu_seconds": 2.43,
+        "wall_seconds": 3.0256
+      },
+      "W9": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "16 read clients cycle equally through W1/W2/W6/W7/W8 while one ingest and one save client validate receipts for 20 seconds",
+        "duration_requested_seconds": 20,
+        "driver_cpu_seconds": 20.4859,
+        "wal_peak_mb": 271.999,
+        "p50": 4.8758,
+        "p95": 11.2963,
+        "p99": 16.1786,
+        "max": 43.6686,
+        "samples": 57852,
+        "store_ms": {
+          "p50": 0.5066,
+          "p95": 4.8549,
+          "p99": 8.7532,
+          "max": 26.2455,
+          "samples": 57852
+        },
+        "read_mix": {
+          "W1": 11570,
+          "W2": 11571,
+          "W6": 11570,
+          "W7": 11569,
+          "W8": 11572
+        },
+        "reads_per_s": 2857.336,
+        "elapsed_seconds": 20.2468,
+        "server_cpu_seconds": 87.07,
+        "error_examples": [],
+        "ingest_ms": {
+          "p50": 615.0589,
+          "p95": 798.4803,
+          "p99": 817.919,
+          "max": 817.919,
+          "samples": 34
+        },
+        "ingest_store_ms": {
+          "p50": 602.7256,
+          "p95": 790.2098,
+          "p99": 806.6053,
+          "max": 806.6053,
+          "samples": 34
+        },
+        "ingest_errors": 0,
+        "save_ms": {
+          "p50": 19.4985,
+          "p95": 703.2745,
+          "p99": 793.956,
+          "max": 793.956,
+          "samples": 77
+        },
+        "save_store_ms": {
+          "p50": 14.3337,
+          "p95": 695.4155,
+          "p99": 789.6575,
+          "max": 789.6575,
+          "samples": 77
+        },
+        "save_errors": 0,
+        "check_passed": true
+      }
+    },
+    "server": {
+      "W1": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "Requested case ref and structured head body/title returned",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 2000,
+        "p50": 0.2909,
+        "p95": 0.401,
+        "p99": 0.4727,
+        "max": 1.2998,
+        "samples": 2000,
+        "store_ms": {
+          "p50": 0.1175,
+          "p95": 0.1675,
+          "p99": 0.2196,
+          "max": 0.7888,
+          "samples": 2000
+        },
+        "server_cpu_seconds": 0.21,
+        "wall_seconds": 0.7135
+      },
+      "W2": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "50 ordered folder rows after cursor with test glyphs and queue count; sampled glyphs match seed",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 1000,
+        "p50": 6.1362,
+        "p95": 8.5028,
+        "p99": 8.9329,
+        "max": 10.5646,
+        "samples": 1000,
+        "store_ms": {
+          "p50": 5.6386,
+          "p95": 7.9358,
+          "p99": 8.4367,
+          "max": 9.959,
+          "samples": 1000
+        },
+        "server_cpu_seconds": 0.54,
+        "wall_seconds": 7.307
+      },
+      "W3": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "At most 50 relevance-ranked hits; all AND terms and optional 24-folder scope match",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 500,
+        "p50": 20.7815,
+        "p95": 52.939,
+        "p99": 78.0314,
+        "max": 89.2877,
+        "samples": 500,
+        "store_ms": {
+          "p50": 20.3864,
+          "p95": 52.3766,
+          "p99": 77.6529,
+          "max": 88.6979,
+          "samples": 500
+        },
+        "server_cpu_seconds": 0.17,
+        "wall_seconds": 16.0386
+      },
+      "W4": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "One command/version/decided question/decision, head and full-text updated; 20 replays write nothing",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 1000,
+        "p50": 6.7069,
+        "p95": 9.5816,
+        "p99": 13.1142,
+        "max": 42.248,
+        "samples": 1000,
+        "store_ms": {
+          "p50": 6.4612,
+          "p95": 9.3401,
+          "p99": 12.756,
+          "max": 42.0106,
+          "samples": 1000
+        },
+        "server_cpu_seconds": 0.38,
+        "wall_seconds": 8.0099,
+        "durable_write_delta": {
+          "seq": 1100,
+          "command_count": 1100,
+          "version_count": 1100,
+          "question_count": 1100,
+          "decision_count": 1100,
+          "result_count": 0,
+          "test_count": 0,
+          "signature_count": 0,
+          "batch_count": 0,
+          "target_count": 0
+        }
+      },
+      "W5": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "10,000 results, 100 new tests, 200 failures, 20 signatures (10 new), basis and tally audited; replay writes nothing",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 20,
+        "p50": 363.6858,
+        "p95": 380.6485,
+        "p99": 388.5605,
+        "max": 388.5605,
+        "samples": 20,
+        "store_ms": {
+          "p50": 357.4815,
+          "p95": 375.3587,
+          "p99": 382.2537,
+          "max": 382.2537,
+          "samples": 20
+        },
+        "server_cpu_seconds": 2.5,
+        "wall_seconds": 33.8603,
+        "durable_write_delta": {
+          "seq": 120,
+          "command_count": 0,
+          "version_count": 0,
+          "question_count": 1210,
+          "decision_count": 0,
+          "result_count": 1200000,
+          "test_count": 12000,
+          "signature_count": 1200,
+          "batch_count": 120,
+          "target_count": 120
+        }
+      },
+      "W5a": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "10,000 parsed testcases, 200 failures with 400-byte messages",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 20,
+        "p50": 5.1412,
+        "p95": 6.6691,
+        "p99": 8.4889,
+        "max": 8.4889,
+        "samples": 20,
+        "store_ms": {
+          "p50": 4.1603,
+          "p95": 5.7923,
+          "p99": 7.4072,
+          "max": 7.4072,
+          "samples": 20
+        },
+        "server_cpu_seconds": 0.65,
+        "wall_seconds": 0.6818
+      },
+      "W6": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "At most 20 results for requested test, descending sequence and ordinal",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 2000,
+        "p50": 0.3862,
+        "p95": 0.4899,
+        "p99": 0.5415,
+        "max": 1.2685,
+        "samples": 2000,
+        "store_ms": {
+          "p50": 0.1723,
+          "p95": 0.2398,
+          "p99": 0.2679,
+          "max": 1.058,
+          "samples": 2000
+        },
+        "server_cpu_seconds": 0.36,
+        "wall_seconds": 0.9733
+      },
+      "W7": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "Requested commit run returned with parsed tally",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 2000,
+        "p50": 0.1985,
+        "p95": 0.2566,
+        "p99": 0.299,
+        "max": 1.0516,
+        "samples": 2000,
+        "store_ms": {
+          "p50": 0.0623,
+          "p95": 0.0866,
+          "p99": 0.0987,
+          "max": 0.913,
+          "samples": 2000
+        },
+        "server_cpu_seconds": 0.15,
+        "wall_seconds": 0.4746
+      },
+      "W8": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "50 open ordered questions, parsed evidence and consistent open count",
+        "check_passed": true,
+        "warmup_iterations": 100,
+        "iterations": 1000,
+        "p50": 5.907,
+        "p95": 8.1518,
+        "p99": 8.7612,
+        "max": 9.3725,
+        "samples": 1000,
+        "store_ms": {
+          "p50": 5.3662,
+          "p95": 7.6115,
+          "p99": 8.1976,
+          "max": 8.7828,
+          "samples": 1000
+        },
+        "server_cpu_seconds": 0.65,
+        "wall_seconds": 7.0915
+      },
+      "W9": {
+        "errors": 0,
+        "warmup_errors": 0,
+        "check": "16 read clients cycle equally through W1/W2/W6/W7/W8 while one ingest and one save client validate receipts for 20 seconds",
+        "duration_requested_seconds": 20,
+        "driver_cpu_seconds": 15.6718,
+        "p50": 6.2657,
+        "p95": 19.195,
+        "p99": 26.2519,
+        "max": 55.6135,
+        "samples": 38101,
+        "store_ms": {
+          "p50": 1.0729,
+          "p95": 14.0023,
+          "p99": 19.7176,
+          "max": 45.4956,
+          "samples": 38101
+        },
+        "read_mix": {
+          "W1": 7621,
+          "W2": 7621,
+          "W6": 7620,
+          "W7": 7618,
+          "W8": 7621
+        },
+        "reads_per_s": 1896.255,
+        "elapsed_seconds": 20.0928,
+        "server_cpu_seconds": 13.93,
+        "error_examples": [],
+        "ingest_ms": {
+          "p50": 341.0515,
+          "p95": 682.094,
+          "p99": 757.0999,
+          "max": 757.0999,
+          "samples": 49
+        },
+        "ingest_store_ms": {
+          "p50": 331.8303,
+          "p95": 654.6357,
+          "p99": 749.8323,
+          "max": 749.8323,
+          "samples": 49
+        },
+        "ingest_errors": 0,
+        "save_ms": {
+          "p50": 31.2534,
+          "p95": 602.8823,
+          "p99": 704.9824,
+          "max": 756.5513,
+          "samples": 100
+        },
+        "save_store_ms": {
+          "p50": 22.2286,
+          "p95": 599.7562,
+          "p99": 698.9688,
+          "max": 743.0805,
+          "samples": 100
+        },
+        "save_errors": 0,
+        "check_passed": true
+      }
+    }
+  },
+  "extras": {
+    "measurement": "Real loopback HTTP, persistent connections, Python stdlib driver; payload construction excluded, response decode included",
+    "warmup_iterations": 100,
+    "concurrent_candidates": "Run externally serially for final comparison",
+    "junit_fixture_bytes": 842821,
+    "artifact_mb": 7.8677215576171875,
+    "cold_start": {
+      "embedded": {
+        "p50": 5.6866,
+        "p95": 6.8413,
+        "p99": 6.8413,
+        "max": 6.8413,
+        "samples": 5
+      },
+      "server": {
+        "p50": 37.4799,
+        "p95": 39.3842,
+        "p99": 39.3842,
+        "max": 39.3842,
+        "samples": 5
+      }
+    },
+    "rss_mb": {
+      "embedded": 421.453,
+      "server": 135.836
+    },
+    "registry": {
+      "errors": [],
+      "check_passed": true,
+      "openapi_bytes": 5210,
+      "invalid_input_status": 400,
+      "version_conflict_status": 400,
+      "protocol_revision": "2025-11-25",
+      "tools_list_bytes": 4460,
+      "tools_list_result_bytes": 4426
+    },
+    "total_driver_seconds": 186.314,
+    "report_generation_cpu_seconds": 0.7426,
+    "driver_cpu_seconds": 44.1646,
+    "overall_errors": 0,
+    "build": {
+      "last_build_seconds": 0.06475159598630853,
+      "last_build_exit": 0,
+      "binary_existed_before_build": true,
+      "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+      "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+      "direct_dependencies": 11,
+      "versions": {
+        "android_system_properties": "0.1.6",
+        "anyhow": "1.0.104",
+        "async-trait": "0.1.92",
+        "atomic-waker": "1.1.2",
+        "autocfg": "1.5.1",
+        "axum": "0.8.9",
+        "axum-core": "0.5.6",
+        "base64": "0.22.1",
+        "bitflags": "2.13.2",
+        "block-buffer": "0.12.1",
+        "bumpalo": "3.20.3",
+        "byteorder": "1.5.0",
+        "bytes": "1.12.1",
+        "casebook-rust-spike": "0.1.0",
+        "cc": "1.8.0",
+        "cfg-if": "1.0.5",
+        "chacha20": "0.10.2",
+        "chrono": "0.4.45",
+        "cmov": "0.5.4",
+        "const-oid": "0.10.2",
+        "core-foundation-sys": "0.8.7",
+        "cpufeatures": "0.3.1",
+        "crypto-common": "0.2.2",
+        "ctutils": "0.4.3",
+        "digest": "0.11.3",
+        "dyn-clone": "1.0.20",
+        "equivalent": "1.0.2",
+        "fallible-iterator": "0.3.0",
+        "fallible-streaming-iterator": "0.1.9",
+        "find-msvc-tools": "0.1.14",
+        "foldhash": "0.2.0",
+        "futures": "0.3.34",
+        "futures-channel": "0.3.34",
+        "futures-core": "0.3.34",
+        "futures-executor": "0.3.34",
+        "futures-io": "0.3.34",
+        "futures-macro": "0.3.34",
+        "futures-sink": "0.3.34",
+        "futures-task": "0.3.34",
+        "futures-util": "0.3.34",
+        "generic-array": "0.14.7",
+        "getrandom": "0.4.3",
+        "hashbrown": "0.17.1",
+        "hashlink": "0.12.2",
+        "hmac": "0.13.0",
+        "http": "1.5.0",
+        "http-body": "1.1.0",
+        "http-body-util": "0.1.5",
+        "httparse": "1.10.1",
+        "httpdate": "1.0.3",
+        "hybrid-array": "0.4.15",
+        "hyper": "1.12.0",
+        "hyper-util": "0.1.21",
+        "iana-time-zone": "0.1.65",
+        "iana-time-zone-haiku": "0.1.2",
+        "indexmap": "2.14.2",
+        "itoa": "1.0.18",
+        "js-sys": "0.3.106",
+        "libc": "0.2.190",
+        "libredox": "0.1.25",
+        "libsqlite3-sys": "0.38.2",
+        "lock_api": "0.4.14",
+        "log": "0.4.34",
+        "matchit": "0.8.4",
+        "md-5": "0.11.0",
+        "memchr": "2.8.3",
+        "mime": "0.3.17",
+        "mio": "1.2.4",
+        "num-traits": "0.2.19",
+        "objc2-core-foundation": "0.3.2",
+        "objc2-system-configuration": "0.3.2",
+        "once_cell": "1.21.4",
+        "parking_lot": "0.12.5",
+        "parking_lot_core": "0.9.12",
+        "pastey": "0.2.3",
+        "percent-encoding": "2.3.2",
+        "phf": "0.13.1",
+        "phf_shared": "0.13.1",
+        "pin-project-lite": "0.2.17",
+        "pkg-config": "0.3.34",
+        "postgres-protocol": "0.6.12",
+        "postgres-types": "0.2.14",
+        "proc-macro2": "1.0.107",
+        "quick-xml": "0.38.4",
+        "quote": "1.0.47",
+        "r-efi": "6.0.0",
+        "rand": "0.10.3",
+        "rand_core": "0.10.1",
+        "redox_syscall": "0.5.18",
+        "ref-cast": "1.0.27",
+        "ref-cast-impl": "1.0.27",
+        "rmcp": "3.5.1",
+        "rsqlite-vfs": "0.1.1",
+        "rusqlite": "0.40.2",
+        "rustversion": "1.0.23",
+        "schemars": "1.2.2",
+        "schemars_derive": "1.2.2",
+        "scopeguard": "1.2.0",
+        "serde": "1.0.229",
+        "serde_core": "1.0.229",
+        "serde_derive": "1.0.229",
+        "serde_derive_internals": "0.30.0",
+        "serde_json": "1.0.154",
+        "serde_path_to_error": "0.1.20",
+        "sha2": "0.11.0",
+        "shlex": "2.0.1",
+        "siphasher": "1.0.4",
+        "slab": "0.4.12",
+        "smallvec": "1.16.3",
+        "socket2": "0.6.5",
+        "sqlite-wasm-rs": "0.5.5",
+        "stringprep": "0.1.5",
+        "syn": "3.0.8",
+        "sync_wrapper": "1.0.2",
+        "thiserror": "2.0.21",
+        "thiserror-impl": "2.0.21",
+        "tinyvec": "1.13.3",
+        "tokio": "1.53.2",
+        "tokio-macros": "2.7.2",
+        "tokio-postgres": "0.7.18",
+        "tokio-util": "0.7.20",
+        "tower": "0.5.3",
+        "tower-layer": "0.3.3",
+        "tower-service": "0.3.3",
+        "tracing": "0.1.44",
+        "tracing-attributes": "0.1.31",
+        "tracing-core": "0.1.36",
+        "typenum": "1.20.1",
+        "unicode-bidi": "0.3.18",
+        "unicode-ident": "1.0.27",
+        "unicode-normalization": "0.1.25",
+        "unicode-properties": "0.1.4",
+        "uuid": "1.28.0",
+        "vcpkg": "0.2.15",
+        "version_check": "0.9.5",
+        "wasi": "0.14.7+wasi-0.2.4",
+        "wasip2": "1.0.4+wasi-0.2.12",
+        "wasite": "1.0.2",
+        "wasm-bindgen": "0.2.129",
+        "wasm-bindgen-macro": "0.2.129",
+        "wasm-bindgen-macro-support": "0.2.129",
+        "wasm-bindgen-shared": "0.2.129",
+        "web-sys": "0.3.106",
+        "whoami": "2.1.3",
+        "windows-core": "0.62.2",
+        "windows-implement": "0.60.2",
+        "windows-interface": "0.59.3",
+        "windows-link": "0.2.1",
+        "windows-result": "0.4.1",
+        "windows-strings": "0.5.1",
+        "windows-sys": "0.61.2",
+        "wit-bindgen": "0.57.1",
+        "zmij": "1.0.23"
+      },
+      "lines_written": 1998,
+      "source_sha256": {
+        "src/db.rs": "2c9c7331f1108032633ffb2f595240b94b43169ee5acdada167eafc4c9a1dfe8",
+        "src/ops.rs": "c659d159a5ec289bdb8eb983b10684be6b2621a5f6f3eb0aaa6006c275321831",
+        "src/registry.rs": "83c98ac4bc44e3ae6ee09c40516a71ed037b5564739f798325750d40cd562bed",
+        "src/main.rs": "26d6137c00ae3c0d7605fadfe1601f7dbd3b0c616951b600fe2e8c4fe77edf92",
+        "benchmark.py": "81a6f1e6b71801f29c3cb857de40de038226d0774ccf84345dce8a81748a38bc",
+        "build.py": "5830eb7dc099084cd9d9c741835035fb874ffbf4270e40292a1ddfe1c9b6e0b1",
+        "run.sh": "08d3905a5ad621d654efb1404170b9c55cd8d14ee54c8e8ccce1ffa6c6598da5",
+        "Cargo.toml": "57aa466993a804f61ddc4b895c008fd36ade632e099f2a3cefad868ea6cdf11e",
+        "Cargo.lock": "b4e61889e9297260f25c54db68bb987abc46b3736541b5b26604a238eb6d6868"
+      },
+      "clean-build-time": {
+        "kind": "successful_fresh_target_release_build_final_source",
+        "seconds": 71.19784078199882,
+        "exit": 0,
+        "jobs": 6,
+        "registry_downloads_excluded": true
+      },
+      "incremental-build-time": {
+        "kind": "final_application_recompile_with_cached_dependencies",
+        "seconds": 10.280671587010147,
+        "exit": 0,
+        "jobs": 6
+      },
+      "initial-build-time": {
+        "kind": "initial_clean_build",
+        "seconds": 55.967016929993406,
+        "exit": 101
+      }
+    },
+    "repetitions": {
+      "runs": 5,
+      "order": "embedded, server, repeated five times",
+      "timings_provisional": true,
+      "mode": {
+        "embedded": {
+          "W1": {
+            "p50": {
+              "median": 0.6222,
+              "min": 0.4153,
+              "max": 0.6805
+            },
+            "p95": {
+              "median": 2.7182,
+              "min": 1.2764,
+              "max": 3.0325
+            },
+            "p99": {
+              "median": 4.6082,
+              "min": 1.938,
+              "max": 4.9293
+            },
+            "max": {
+              "median": 7.2236,
+              "min": 4.2845,
+              "max": 10.4842
+            },
+            "store_p95": {
+              "median": 2.486,
+              "min": 1.1274,
+              "max": 2.8126
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 6.9734,
+              "min": 4.1329,
+              "max": 10.1584
+            }
+          },
+          "W2": {
+            "p50": {
+              "median": 2.192,
+              "min": 1.8333,
+              "max": 2.42
+            },
+            "p95": {
+              "median": 6.0584,
+              "min": 4.4302,
+              "max": 6.483
+            },
+            "p99": {
+              "median": 11.6911,
+              "min": 7.8016,
+              "max": 12.3718
+            },
+            "max": {
+              "median": 18.8334,
+              "min": 16.4785,
+              "max": 25.9978
+            },
+            "store_p95": {
+              "median": 5.6921,
+              "min": 3.9823,
+              "max": 5.9903
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 18.4426,
+              "min": 16.0856,
+              "max": 25.6265
+            }
+          },
+          "W3": {
+            "p50": {
+              "median": 28.8391,
+              "min": 24.424,
+              "max": 29.6926
+            },
+            "p95": {
+              "median": 55.8464,
+              "min": 46.6367,
+              "max": 61.6124
+            },
+            "p99": {
+              "median": 73.8954,
+              "min": 63.3851,
+              "max": 79.3184
+            },
+            "max": {
+              "median": 79.7116,
+              "min": 67.7013,
+              "max": 108.703
+            },
+            "store_p95": {
+              "median": 55.4417,
+              "min": 46.2276,
+              "max": 61.2713
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 79.2746,
+              "min": 67.3044,
+              "max": 108.2867
+            }
+          },
+          "W4": {
+            "p50": {
+              "median": 0.5849,
+              "min": 0.4929,
+              "max": 0.6682
+            },
+            "p95": {
+              "median": 6.8514,
+              "min": 3.9888,
+              "max": 6.949
+            },
+            "p99": {
+              "median": 23.0204,
+              "min": 19.1121,
+              "max": 24.1563
+            },
+            "max": {
+              "median": 27.9946,
+              "min": 23.1937,
+              "max": 164.5285
+            },
+            "store_p95": {
+              "median": 6.618,
+              "min": 3.7932,
+              "max": 6.6827
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 27.7636,
+              "min": 22.9877,
+              "max": 164.3124
+            }
+          },
+          "W5": {
+            "p50": {
+              "median": 346.7565,
+              "min": 291.2253,
+              "max": 631.0875
+            },
+            "p95": {
+              "median": 433.371,
+              "min": 308.539,
+              "max": 722.6155
+            },
+            "p99": {
+              "median": 466.5678,
+              "min": 313.8169,
+              "max": 773.9423
+            },
+            "max": {
+              "median": 466.5678,
+              "min": 313.8169,
+              "max": 773.9423
+            },
+            "store_p95": {
+              "median": 426.6235,
+              "min": 303.4494,
+              "max": 708.6822
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 460.8857,
+              "min": 308.4435,
+              "max": 764.4245
+            }
+          },
+          "W5a": {
+            "p50": {
+              "median": 4.9566,
+              "min": 4.4744,
+              "max": 5.3757
+            },
+            "p95": {
+              "median": 5.9278,
+              "min": 5.0222,
+              "max": 7.069
+            },
+            "p99": {
+              "median": 6.681,
+              "min": 5.1619,
+              "max": 7.8914
+            },
+            "max": {
+              "median": 6.681,
+              "min": 5.1619,
+              "max": 7.8914
+            },
+            "store_p95": {
+              "median": 4.9864,
+              "min": 4.2414,
+              "max": 5.8927
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 5.7418,
+              "min": 4.3377,
+              "max": 6.7522
+            }
+          },
+          "W6": {
+            "p50": {
+              "median": 0.3212,
+              "min": 0.2798,
+              "max": 0.3448
+            },
+            "p95": {
+              "median": 0.4393,
+              "min": 0.3252,
+              "max": 0.5
+            },
+            "p99": {
+              "median": 1.1511,
+              "min": 0.6853,
+              "max": 1.3964
+            },
+            "max": {
+              "median": 2.8036,
+              "min": 1.5292,
+              "max": 6.7863
+            },
+            "store_p95": {
+              "median": 0.1898,
+              "min": 0.1477,
+              "max": 0.2145
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 2.5102,
+              "min": 1.3542,
+              "max": 6.4948
+            }
+          },
+          "W7": {
+            "p50": {
+              "median": 0.1421,
+              "min": 0.112,
+              "max": 0.1655
+            },
+            "p95": {
+              "median": 0.1917,
+              "min": 0.1322,
+              "max": 0.2246
+            },
+            "p99": {
+              "median": 0.2196,
+              "min": 0.1576,
+              "max": 0.3174
+            },
+            "max": {
+              "median": 0.9562,
+              "min": 0.2183,
+              "max": 1.695
+            },
+            "store_p95": {
+              "median": 0.037,
+              "min": 0.0263,
+              "max": 0.0446
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 0.4706,
+              "min": 0.0892,
+              "max": 1.4044
+            }
+          },
+          "W8": {
+            "p50": {
+              "median": 2.3545,
+              "min": 1.9625,
+              "max": 2.414
+            },
+            "p95": {
+              "median": 3.4835,
+              "min": 2.4598,
+              "max": 3.5088
+            },
+            "p99": {
+              "median": 3.7613,
+              "min": 3.0456,
+              "max": 4.0555
+            },
+            "max": {
+              "median": 4.2835,
+              "min": 3.9506,
+              "max": 6.1756
+            },
+            "store_p95": {
+              "median": 2.917,
+              "min": 1.9807,
+              "max": 2.955
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 3.3882,
+              "min": 3.0914,
+              "max": 5.1572
+            }
+          },
+          "W9": {
+            "p50": {
+              "median": 4.8758,
+              "min": 4.3818,
+              "max": 5.0785
+            },
+            "p95": {
+              "median": 11.2963,
+              "min": 9.6069,
+              "max": 11.893
+            },
+            "p99": {
+              "median": 16.1802,
+              "min": 13.2098,
+              "max": 17.1697
+            },
+            "max": {
+              "median": 43.6686,
+              "min": 39.5658,
+              "max": 111.5729
+            },
+            "store_p95": {
+              "median": 4.8549,
+              "min": 3.6362,
+              "max": 5.2932
+            },
+            "errors": 0,
+            "reads_per_s": {
+              "median": 2857.336,
+              "min": 2725.954,
+              "max": 3260.134
+            },
+            "driver_cpu_seconds": {
+              "median": 20.4859,
+              "min": 20.2936,
+              "max": 21.813
+            },
+            "server_cpu_seconds": {
+              "median": 87.07,
+              "min": 85.74,
+              "max": 92.67
+            },
+            "ingest_p95": {
+              "median": 768.7234,
+              "min": 503.6208,
+              "max": 798.4803
+            },
+            "ingest_max": 1008.7824,
+            "save_p95": {
+              "median": 672.5371,
+              "min": 480.6644,
+              "max": 703.2745
+            },
+            "save_max": 872.9915,
+            "wal_peak_mb": 669.513,
+            "store_max": {
+              "median": 28.7321,
+              "min": 26.2455,
+              "max": 108.9548
+            }
+          },
+          "rss_mb": {
+            "median": 422.426,
+            "min": 394.012,
+            "max": 439.73
+          }
+        },
+        "server": {
+          "W1": {
+            "p50": {
+              "median": 0.2549,
+              "min": 0.1975,
+              "max": 0.2909
+            },
+            "p95": {
+              "median": 0.335,
+              "min": 0.2459,
+              "max": 0.401
+            },
+            "p99": {
+              "median": 0.3894,
+              "min": 0.2668,
+              "max": 0.4727
+            },
+            "max": {
+              "median": 1.2911,
+              "min": 0.34,
+              "max": 1.4128
+            },
+            "store_p95": {
+              "median": 0.1418,
+              "min": 0.0903,
+              "max": 0.1675
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 0.7888,
+              "min": 0.1217,
+              "max": 1.1962
+            }
+          },
+          "W2": {
+            "p50": {
+              "median": 5.5774,
+              "min": 4.8924,
+              "max": 6.1362
+            },
+            "p95": {
+              "median": 8.2555,
+              "min": 5.3914,
+              "max": 8.5028
+            },
+            "p99": {
+              "median": 8.5744,
+              "min": 7.3312,
+              "max": 8.9384
+            },
+            "max": {
+              "median": 9.4094,
+              "min": 8.3533,
+              "max": 10.5646
+            },
+            "store_p95": {
+              "median": 7.7609,
+              "min": 5.0188,
+              "max": 7.9358
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 8.9902,
+              "min": 7.8735,
+              "max": 9.959
+            }
+          },
+          "W3": {
+            "p50": {
+              "median": 20.7815,
+              "min": 17.717,
+              "max": 22.6337
+            },
+            "p95": {
+              "median": 52.939,
+              "min": 45.8127,
+              "max": 59.0808
+            },
+            "p99": {
+              "median": 77.8139,
+              "min": 67.6546,
+              "max": 86.5446
+            },
+            "max": {
+              "median": 89.2877,
+              "min": 70.8122,
+              "max": 103.882
+            },
+            "store_p95": {
+              "median": 52.3766,
+              "min": 45.4616,
+              "max": 58.6679
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 88.6979,
+              "min": 70.3801,
+              "max": 103.4478
+            }
+          },
+          "W4": {
+            "p50": {
+              "median": 6.7626,
+              "min": 4.6244,
+              "max": 6.936
+            },
+            "p95": {
+              "median": 9.6638,
+              "min": 7.3933,
+              "max": 22.9155
+            },
+            "p99": {
+              "median": 13.4241,
+              "min": 9.4894,
+              "max": 41.867
+            },
+            "max": {
+              "median": 42.248,
+              "min": 12.5213,
+              "max": 142.8448
+            },
+            "store_p95": {
+              "median": 9.4197,
+              "min": 7.1678,
+              "max": 22.5923
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 42.0106,
+              "min": 12.2294,
+              "max": 142.5251
+            }
+          },
+          "W5": {
+            "p50": {
+              "median": 363.6858,
+              "min": 298.9189,
+              "max": 526.0538
+            },
+            "p95": {
+              "median": 397.1275,
+              "min": 317.0962,
+              "max": 713.1423
+            },
+            "p99": {
+              "median": 409.5568,
+              "min": 388.5605,
+              "max": 812.5028
+            },
+            "max": {
+              "median": 409.5568,
+              "min": 388.5605,
+              "max": 812.5028
+            },
+            "store_p95": {
+              "median": 390.4278,
+              "min": 308.4314,
+              "max": 702.5145
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 402.1983,
+              "min": 382.2537,
+              "max": 799.4292
+            }
+          },
+          "W5a": {
+            "p50": {
+              "median": 5.1412,
+              "min": 4.4589,
+              "max": 5.3488
+            },
+            "p95": {
+              "median": 7.4396,
+              "min": 4.5362,
+              "max": 8.3934
+            },
+            "p99": {
+              "median": 8.4889,
+              "min": 4.5372,
+              "max": 9.6815
+            },
+            "max": {
+              "median": 8.4889,
+              "min": 4.5372,
+              "max": 9.6815
+            },
+            "store_p95": {
+              "median": 6.3089,
+              "min": 3.7798,
+              "max": 7.0862
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 7.3959,
+              "min": 3.781,
+              "max": 8.3204
+            }
+          },
+          "W6": {
+            "p50": {
+              "median": 0.3862,
+              "min": 0.3047,
+              "max": 0.4052
+            },
+            "p95": {
+              "median": 0.4899,
+              "min": 0.348,
+              "max": 0.5426
+            },
+            "p99": {
+              "median": 0.5415,
+              "min": 0.3935,
+              "max": 0.685
+            },
+            "max": {
+              "median": 1.2685,
+              "min": 0.4553,
+              "max": 1.5055
+            },
+            "store_p95": {
+              "median": 0.2398,
+              "min": 0.1594,
+              "max": 0.2606
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 0.7568,
+              "min": 0.2277,
+              "max": 1.058
+            }
+          },
+          "W7": {
+            "p50": {
+              "median": 0.2059,
+              "min": 0.1596,
+              "max": 0.2198
+            },
+            "p95": {
+              "median": 0.2796,
+              "min": 0.1751,
+              "max": 0.3352
+            },
+            "p99": {
+              "median": 0.3674,
+              "min": 0.1993,
+              "max": 0.9875
+            },
+            "max": {
+              "median": 1.3061,
+              "min": 0.2603,
+              "max": 3.7658
+            },
+            "store_p95": {
+              "median": 0.0922,
+              "min": 0.058,
+              "max": 0.1135
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 0.913,
+              "min": 0.1055,
+              "max": 3.4774
+            }
+          },
+          "W8": {
+            "p50": {
+              "median": 5.907,
+              "min": 4.9805,
+              "max": 6.0081
+            },
+            "p95": {
+              "median": 8.1518,
+              "min": 5.2519,
+              "max": 8.7931
+            },
+            "p99": {
+              "median": 8.7612,
+              "min": 5.5417,
+              "max": 9.4834
+            },
+            "max": {
+              "median": 9.4713,
+              "min": 6.2415,
+              "max": 16.07
+            },
+            "store_p95": {
+              "median": 7.6115,
+              "min": 4.8202,
+              "max": 8.1453
+            },
+            "errors": 0,
+            "store_max": {
+              "median": 8.9189,
+              "min": 5.7709,
+              "max": 14.9976
+            }
+          },
+          "W9": {
+            "p50": {
+              "median": 5.8635,
+              "min": 4.0025,
+              "max": 6.542
+            },
+            "p95": {
+              "median": 17.5986,
+              "min": 12.9113,
+              "max": 21.1361
+            },
+            "p99": {
+              "median": 22.2739,
+              "min": 16.6079,
+              "max": 32.9143
+            },
+            "max": {
+              "median": 55.6135,
+              "min": 44.9998,
+              "max": 68.7117
+            },
+            "store_p95": {
+              "median": 12.7873,
+              "min": 8.8673,
+              "max": 16.2938
+            },
+            "errors": 0,
+            "reads_per_s": {
+              "median": 1993.954,
+              "min": 1758.685,
+              "max": 2714.645
+            },
+            "driver_cpu_seconds": {
+              "median": 16.3338,
+              "min": 14.8118,
+              "max": 19.4832
+            },
+            "server_cpu_seconds": {
+              "median": 14.45,
+              "min": 12.94,
+              "max": 18.3
+            },
+            "ingest_p95": {
+              "median": 617.7805,
+              "min": 537.0486,
+              "max": 884.7235
+            },
+            "ingest_max": 971.0191,
+            "save_p95": {
+              "median": 588.6367,
+              "min": 514.8606,
+              "max": 809.1837
+            },
+            "save_max": 959.4683,
+            "store_max": {
+              "median": 45.4956,
+              "min": 36.6846,
+              "max": 61.1587
+            }
+          },
+          "rss_mb": {
+            "median": 143.746,
+            "min": 132.129,
+            "max": 151.934
+          }
+        }
+      },
+      "driver_seconds": [
+        160.97,
+        196.134,
+        198.516,
+        186.923,
+        186.314
+      ]
+    },
+    "verification": {
+      "verdict": "PASS",
+      "provider": "Anthropic",
+      "model": "Claude Opus 5.5",
+      "file": "verification-r2.md",
+      "source_sha256": {
+        "src/db.rs": "2c9c7331f1108032633ffb2f595240b94b43169ee5acdada167eafc4c9a1dfe8",
+        "src/main.rs": "26d6137c00ae3c0d7605fadfe1601f7dbd3b0c616951b600fe2e8c4fe77edf92",
+        "src/ops.rs": "c659d159a5ec289bdb8eb983b10684be6b2621a5f6f3eb0aaa6006c275321831",
+        "src/registry.rs": "83c98ac4bc44e3ae6ee09c40516a71ed037b5564739f798325750d40cd562bed",
+        "benchmark.py": "81a6f1e6b71801f29c3cb857de40de038226d0774ccf84345dce8a81748a38bc",
+        "build.py": "5830eb7dc099084cd9d9c741835035fb874ffbf4270e40292a1ddfe1c9b6e0b1",
+        "run.sh": "08d3905a5ad621d654efb1404170b9c55cd8d14ee54c8e8ccce1ffa6c6598da5",
+        "Cargo.toml": "57aa466993a804f61ddc4b895c008fd36ade632e099f2a3cefad868ea6cdf11e",
+        "Cargo.lock": "b4e61889e9297260f25c54db68bb987abc46b3736541b5b26604a238eb6d6868",
+        "CHECKS.md": "57522770b1e4dc18d9c1e5a0ebbcbf593c3b80ae9afc03134bfcec4674ae7022"
+      },
+      "binary_sha256": "4a94d16bf92a6e5ed0a8d6df17cbe3485c3fa5e25b5a22a43b63b76896ddee9f"
+    },
+    "driver_choice": {
+      "sqlx": [
+        {
+          "check_bytes": 1573416,
+          "errors": 0,
+          "max": 0.14763400000000002,
+          "p50": 0.046632,
+          "p95": 0.059391,
+          "p99": 0.072248,
+          "round": 0
+        },
+        {
+          "check_bytes": 1573416,
+          "errors": 0,
+          "max": 0.090988,
+          "p50": 0.045922,
+          "p95": 0.054718,
+          "p99": 0.061405,
+          "round": 1
+        },
+        {
+          "check_bytes": 1573416,
+          "errors": 0,
+          "max": 0.093747,
+          "p50": 0.050989,
+          "p95": 0.057367999999999995,
+          "p99": 0.064662,
+          "round": 2
+        },
+        {
+          "check_bytes": 1573416,
+          "errors": 0,
+          "max": 0.143815,
+          "p50": 0.043694,
+          "p95": 0.052289,
+          "p99": 0.062994,
+          "round": 3
+        },
+        {
+          "check_bytes": 1573416,
+          "errors": 0,
+          "max": 0.087612,
+          "p50": 0.042364000000000006,
+          "p95": 0.050518,
+          "p99": 0.063415,
+          "round": 4
+        }
+      ],
+      "tokio-postgres": [
+        {
+          "check_bytes": 1573416,
+          "errors": 0,
+          "max": 0.102395,
+          "p50": 0.056585,
+          "p95": 0.066531,
+          "p99": 0.072839,
+          "round": 0
+        },
+        {
+          "check_bytes": 1573416,
+          "errors": 0,
+          "max": 0.275676,
+          "p50": 0.053198,
+          "p95": 0.065063,
+          "p99": 0.072957,
+          "round": 1
+        },
+        {
+          "check_bytes": 1573416,
+          "errors": 0,
+          "max": 0.10670099999999999,
+          "p50": 0.052865999999999996,
+          "p95": 0.060507000000000005,
+          "p99": 0.068606,
+          "round": 2
+        },
+        {
+          "check_bytes": 1573416,
+          "errors": 0,
+          "max": 0.090793,
+          "p50": 0.049394999999999994,
+          "p95": 0.055403,
+          "p99": 0.058794,
+          "round": 3
+        },
+        {
+          "check_bytes": 1573416,
+          "errors": 0,
+          "max": 0.067392,
+          "p50": 0.049346,
+          "p95": 0.055186000000000006,
+          "p99": 0.059114,
+          "round": 4
+        }
+      ]
+    },
+    "frontend_note": "FRONTEND.md: concrete design only; no WASM or UI implementation",
+    "cleanup": "Temporary measurement databases and duplicate clean build targets removed. Release binary and dependency cache retained; run.sh recreates its fixtures."
+  }
+}

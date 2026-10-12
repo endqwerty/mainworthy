@@ -1,7 +1,8 @@
 # 0001: Stack is deliberately undecided
 
 - Date: 2026-10-09
-- Status: open
+- Status: superseded by [0010](0010-stack.md) on 2026-10-12. The criteria below are what
+  the stack arena measured against.
 
 Daniel asked that no language or framework be committed to at project
 creation. The repository therefore contains no manifests, lockfiles or source
