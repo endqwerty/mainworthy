@@ -24,6 +24,8 @@
 // 10. An agent's report changes no commit's gate: every commit run reads after it exactly what it read before.
 // 11. Every question a run's gate names is open: a question that was answered, dissolved or replaced holds
 //     no run, whether or not the run is the newest of its scope.
+// 12. A change's head is a commit that a pipeline or a person reported: never one only an agent has, and a
+//     commit only an agent reported has no run.
 //
 // More seeds: CASEBOOK_SEQUENCE_SEEDS=500 bun test test/sequences.test.ts
 import { expect, test } from "bun:test";
@@ -364,6 +366,22 @@ function sequence(seed: number, preset: string): Problem | null {
 					what: "a question is open about a failure that has an answer everywhere it was seen",
 					detail: question,
 				};
+		}
+
+		// 12. Heads and runs come from reports a gate counts.
+		const counted = new Set(
+			rows<{ what: string }>(
+				"SELECT DISTINCT t.what FROM batches b JOIN targets t ON t.id = b.target WHERE b.method != 'agent'",
+			).map((row) => row.what),
+		);
+		for (const change of rows("SELECT key, repo, head_sha FROM changes WHERE head_sha IS NOT NULL")) {
+			const what = `code:${change.repo ?? ""}@${change.head_sha}`;
+			if (!counted.has(what))
+				return { what: "a change's head is a commit no pipeline or person reported", detail: change };
+		}
+		for (const run of runs) {
+			if (run.origin === "change" && !counted.has(String(run.accepts_what)))
+				return { what: "a commit only an agent reported has a run", detail: run };
 		}
 
 		// 8. A superseded decision is not in force.
