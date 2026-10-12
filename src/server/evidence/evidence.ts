@@ -979,11 +979,17 @@ const batchKey = (parts: unknown): string => createHash("sha256").update(JSON.st
 /** Keys of this shape name the manual test of a case. An automated test cannot take one. */
 const RESERVED_KEY = /^case:\d+$/i;
 
-/** Every result recorded for a case on any of the given targets, oldest first: what a new run can count at once. */
+/**
+ * Every result recorded for a case on any of the given targets that its producer has not since corrected, oldest
+ * first: what a new run can count at once. A corrected result is withdrawn by the one that corrects it, wherever
+ * it would otherwise count.
+ */
 export function resultsOfCaseOnTargets(db: Db, caseId: number, targets: readonly number[]): ResultRow[] {
 	if (targets.length === 0) return [];
 	return db.allDynamic<ResultRow>(
-		`SELECT * FROM results WHERE basis_case = ? AND target IN (${placeholders(targets.length)}) ORDER BY seq, ord`,
+		`SELECT * FROM results WHERE basis_case = ? AND target IN (${placeholders(targets.length)})
+		 AND NOT EXISTS (SELECT 1 FROM results later WHERE later.corrects = results.id)
+		 ORDER BY seq, ord`,
 		[caseId, ...targets],
 	);
 }

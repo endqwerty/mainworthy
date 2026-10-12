@@ -8,7 +8,7 @@
     "quality_profile": "showcase",
     "repository": {
       "url": "git@github.com:endqwerty/casebook.git",
-      "revision": "65b45293532ca49f69d20bb82652e5f8d7b2cbf9",
+      "revision": "25d5571300b6853774a320cc7a03ccd34367feca",
       "link_mode": "local-only"
     },
     "views": [
@@ -54,7 +54,7 @@
           "reader",
           "store"
         ],
-        "note": "Acceptance commits before application; reads use their own connection."
+        "note": "Acceptance commits before application; reads run on their own threads."
       }
     ]
   },
@@ -198,8 +198,8 @@
     {
       "id": "formats",
       "type": "frontend",
-      "label": "formats/junit \u00b7 ci-env",
-      "sublabel": "parseJUnit \u00b7 detectTarget",
+      "label": "formats/junit · ci-env",
+      "sublabel": "parseJUnit · detectTarget",
       "pos": [
         445,
         385
@@ -293,7 +293,7 @@
       "id": "identity",
       "type": "security",
       "label": "identity",
-      "sublabel": "actors \u00b7 grants \u00b7 tokens",
+      "sublabel": "actors · grants · tokens",
       "pos": [
         70,
         925
@@ -312,7 +312,7 @@
     {
       "id": "invoke",
       "type": "backend",
-      "label": "invoke \u00b7 invokeAsync",
+      "label": "invoke · invokeAsync",
       "sublabel": "Parse, authorize, execute",
       "pos": [
         445,
@@ -334,7 +334,7 @@
       "id": "suite",
       "type": "backend",
       "label": "suite",
-      "sublabel": "cases \u00b7 versions \u00b7 proposals",
+      "sublabel": "cases · versions · proposals",
       "pos": [
         70,
         1140
@@ -355,7 +355,7 @@
       "id": "evidence",
       "type": "backend",
       "label": "evidence",
-      "sublabel": "tests \u00b7 results \u00b7 signatures",
+      "sublabel": "tests · results · signatures",
       "pos": [
         445,
         1140
@@ -380,7 +380,7 @@
       "id": "runs",
       "type": "backend",
       "label": "runs",
-      "sublabel": "runs \u00b7 run_tests \u00b7 slots",
+      "sublabel": "runs · run_tests · slots",
       "pos": [
         870,
         1140
@@ -405,7 +405,7 @@
       "id": "decisions",
       "type": "backend",
       "label": "decisions",
-      "sublabel": "questions \u00b7 answers \u00b7 decisions",
+      "sublabel": "questions · answers · decisions",
       "pos": [
         445,
         1370
@@ -449,7 +449,7 @@
           "label": "SLICE; applySteps"
         }
       ],
-      "tag": "COMMIT; then slices of 500"
+      "tag": "COMMIT; then slices of 200"
     },
     {
       "id": "witness",
@@ -503,13 +503,13 @@
           "label": "PRESETS: strict is a fixture"
         }
       ],
-      "tag": "loose \u00b7 standard \u00b7 strict"
+      "tag": "loose · standard · strict"
     },
     {
       "id": "kernel",
       "type": "backend",
       "label": "src/server/kernel",
-      "sublabel": "Db \u00b7 Ctx \u00b7 migrations \u00b7 app",
+      "sublabel": "Db · Ctx · migrations · app",
       "pos": [
         70,
         1840
@@ -590,8 +590,8 @@
     {
       "id": "reader",
       "type": "database",
-      "label": "app.reader",
-      "sublabel": "Read-only connection",
+      "label": "Reader threads",
+      "sublabel": "A read-only connection each",
       "pos": [
         445,
         2060
@@ -602,19 +602,19 @@
       ],
       "sources": [
         {
-          "path": "src/server/kernel/app.ts",
-          "label": "openApp: second connection"
+          "path": "src/server/readers.ts",
+          "label": "Readers: the pool; readerCount"
+        },
+        {
+          "path": "src/server/read-worker.ts",
+          "label": "read and checkpoint roles"
         },
         {
           "path": "src/server/kernel/db.ts",
-          "label": "query_only; snapshot"
-        },
-        {
-          "path": "src/server/ops/registry.ts",
-          "label": "invokeAsync: nextTick between slices"
+          "label": "query_only; snapshot; checkpoint"
         }
       ],
-      "tag": "Reads continue between slices"
+      "tag": "A read never waits for a write"
     },
     {
       "id": "store",
@@ -649,7 +649,7 @@
   "boundaries": [
     {
       "kind": "region",
-      "label": "casebook container \u00b7 one Bun server process",
+      "label": "casebook container · one Bun server process",
       "wraps": [
         "http",
         "ops",
@@ -671,7 +671,7 @@
     },
     {
       "kind": "region",
-      "label": "casebook-data \u00b7 one volume",
+      "label": "casebook-data · one volume",
       "wraps": [
         "store"
       ],

@@ -166,6 +166,7 @@ const Q = {
 	flippedCount: sql<{ run: number }, { n: number }>(
 		"SELECT count(*) AS n FROM run_tests WHERE run = $run AND flipped = 1",
 	),
+	dropCorrected: sql<{ run: number; result: number }>("DELETE FROM run_tests WHERE run = $run AND result = $result"),
 	insertSlot: sql<{
 		run: number;
 		caseId: number;
@@ -457,6 +458,8 @@ export function* applyBatchSteps(
 		// counts only in a planned run that asked for agents (decision 0009): never in a change run.
 		const counted = result.method !== "agent";
 		if (changeRun && counted) {
+			// A correction withdraws the result it names, whatever attempt either carries: the producer said so.
+			if (result.corrects !== null) ctx.db.run(Q.dropCorrected, { run: changeRun.id, result: result.corrects });
 			ctx.db.run(Q.upsertRunTest, {
 				run: changeRun.id,
 				test: result.test.id,

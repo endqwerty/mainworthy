@@ -292,6 +292,30 @@ describe("what a result may prove", () => {
 		expect(rows("SELECT corrected FROM slot_results")).toEqual([{ corrected: 0 }]);
 	});
 
+	test("a correction counts wherever the corrected result did: the commit's gate, and a run planned afterwards", () => {
+		seed();
+		const before = plan({ name: "Before the correction", select: {}, accepts: { commit: "correct2" } });
+		const keyed = (outcome: string, extra: Record<string, unknown> = {}) => ({
+			test: { key: "corrected" },
+			annotation: { case: "C-1", version: 1 },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "failure of corrected" } } : {}),
+			...extra,
+		});
+		const failed = report({ target: { commit: "correct2" }, attempt: 2, results: [keyed("fail")] });
+		expect(gate({ commit: "correct2" }).verdict).toBe("blocked");
+		// The correction carries the default attempt, lower than the result it corrects.
+		const corrected = report({
+			target: { commit: "correct2" },
+			results: [keyed("pass", { corrects: first(failed.results) })],
+		});
+		expect(corrected.rejected).toEqual([]);
+		expect(gate({ run: before.run }).verdict).toBe("passed");
+		expect(gate({ commit: "correct2" }).verdict).toBe("passed");
+		const after = plan({ name: "After the correction", select: {}, accepts: { commit: "correct2" } });
+		expect(gate({ run: after.run }).verdict).toBe("passed");
+	});
+
 	test("an excuse held for one target does not excuse another", () => {
 		const push = (commit: string) =>
 			ciReport({ commit, branch: "feature", pr: 91, n: 1, fail: { 0: "environment unavailable" } });
