@@ -335,6 +335,37 @@ function openPlannedAbout(ctx: Ctx, question: QuestionRow): RunRow[] {
 	});
 }
 
+/**
+ * What an "already failing on the base" answer is about and whether it is true now: the tests that fail with the
+ * cause on the build the answer is for (those its commit's gate counts, and those an agent reports, which are
+ * asked about without being counted). True means there is at least one and each of them fails on the base with
+ * this cause, by what the base's gate counts at this moment.
+ */
+export function inheritedNow(
+	ctx: Ctx,
+	question: QuestionRow,
+	seenOn: number,
+): { target: ReturnType<typeof mustTarget>; tests: number[]; holds: boolean } {
+	const subject = json<{ signature: number }>(question.subject);
+	const target = mustTarget(ctx.db, seenOn);
+	const tests = failingWithCause(ctx.db, target, subject.signature);
+	const holds = tests.length > 0 && tests.every((test) => failsOnBase(ctx.db, target, test, subject.signature));
+	return { target, tests, holds };
+}
+
+/**
+ * Writes down what an inherited answer rests on, replacing what was written before: the tests above, in the
+ * scope the base's results are in and in the change's own scope (a later report can move the change onto another
+ * base, or show the cause failing in a test the base passes). Called when the answer is given, each time it is
+ * carried to a new result, and each time it is checked again and still true: so the list follows the evidence.
+ */
+export function restInherited(ctx: Ctx, question: QuestionRow, decision: number, seenOn: number): void {
+	const subject = json<{ scope: string }>(question.subject);
+	const { target, tests } = inheritedNow(ctx, question, seenOn);
+	dropRests(ctx, decision);
+	restOn(ctx, decision, [...baseScopesOf(ctx.db, target), subject.scope], tests);
+}
+
 const failureHandler: Handler<"failure"> = {
 	effect(ctx, witness, question, answer) {
 		const subject = json<{ signature: number; scope: string }>(question.subject);
@@ -349,11 +380,9 @@ const failureHandler: Handler<"failure"> = {
 		const klass = failureClass(answer);
 		if (answer.is === "inherited") {
 			// The question may have been asked while the base failed and answered after it stopped. The answer is
-			// held to the base as it is now: every test failing with this cause on the build must fail there too.
+			// held to the base as it is now, for every failure the question is about.
 			const seenOn = json<{ targetId?: number }>(question.evidence).targetId;
-			const target = seenOn !== undefined ? mustTarget(ctx.db, seenOn) : null;
-			const failing = target ? failingWithCause(ctx.db, target, subject.signature) : [];
-			if (!target || !failing.every((test) => failsOnBase(ctx.db, target, test, subject.signature)))
+			if (seenOn === undefined || !inheritedNow(ctx, question, seenOn).holds)
 				throw conflict("the base does not show this failure now, so it is not inherited; choose another answer");
 		}
 		// A decision that holds on certain targets excuses those and no other.
@@ -372,18 +401,10 @@ const failureHandler: Handler<"failure"> = {
 		// gate is never left blocked by a failure nobody is being asked about.
 		const covered = here?.until === "this-target" ? here.targets : null;
 		const [decidedOn] = covered ?? [];
-		// "Already failing on the base" stands on the base's results for the tests that fail here. They are
-		// written down, so a report or a correction on the base has this answer checked again.
-		if (answer.is === "inherited" && decidedOn !== undefined) {
-			const target = mustTarget(ctx.db, decidedOn);
-			// It also rests on the change itself: a later report can move the change onto another base.
-			restOn(
-				ctx,
-				decisionOf(witness, "failure"),
-				[...baseScopesOf(ctx.db, target), subject.scope],
-				failingWithCause(ctx.db, target, subject.signature),
-			);
-		}
+		// "Already failing on the base" stands on the base's results: what it rests on is written down, so a
+		// report or a correction there has this answer checked again.
+		if (answer.is === "inherited" && decidedOn !== undefined)
+			restInherited(ctx, question, decisionOf(witness, "failure"), decidedOn);
 		const reask =
 			decidedOn === undefined
 				? []

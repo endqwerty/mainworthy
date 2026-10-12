@@ -31,6 +31,17 @@ export type Ctx = {
 	 * put back). Whatever recomputes runs next takes them along, so none is left with the tally from before.
 	 */
 	recompute: Set<number>;
+	/**
+	 * Changes that a report in this command moved onto another base. Answers that a failure of such a change was
+	 * already failing on its base are checked against the new base before the command ends.
+	 */
+	rebased: Set<number>;
+	/**
+	 * How often this command has raised each question (by fingerprint). No command has a reason to raise one
+	 * question more than a handful of times; one that does is going round in circles, and is stopped with an
+	 * error instead of holding the server's one writer for ever.
+	 */
+	raised: Map<string, number>;
 	/** The next number for a kind of ref. */
 	nextNo: (name: CounterName) => number;
 	/** A counter that grows within the command, to order rows that share a seq. */
@@ -128,6 +139,8 @@ export function makeCtx(app: App, project: ProjectRow, actor: Actor, write: bool
 		write,
 		touched: new Set(),
 		recompute: new Set(),
+		rebased: new Set(),
+		raised: new Map(),
 		nextNo(name) {
 			const row = app.db.get(Q.bumpCounter, { project: project.id, name });
 			if (!row) throw new Error(`counter ${name} did not advance`);

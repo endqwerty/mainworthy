@@ -23,6 +23,7 @@ import {
 } from "../../core/runs.ts";
 import {
 	type Applied,
+	agentFailuresWithCause,
 	type BatchRow,
 	batchById,
 	changeById,
@@ -174,9 +175,9 @@ const Q = {
 	>(
 		"SELECT test, result, outcome, signature, flipped FROM run_tests WHERE run = $run AND outcome IN ('fail', 'error') LIMIT $limit",
 	),
-	commitsShowing: sql<{ project: number; signature: number; scope: string }, { run: number }>(
+	commitsShowing: sql<{ project: number; signature: number }, { run: number }>(
 		`SELECT DISTINCT rt.run AS run FROM run_tests rt JOIN runs r ON r.id = rt.run
-		 WHERE rt.signature = $signature AND rt.outcome IN ('fail', 'error') AND r.project = $project AND r.scope = $scope`,
+		 WHERE rt.signature = $signature AND rt.outcome IN ('fail', 'error') AND r.project = $project`,
 	),
 	plannedShowing: sql<{ project: number; signature: number }, { run: number }>(
 		`SELECT DISTINCT s.run AS run FROM runs r JOIN slots s ON s.run = r.id AND s.state IN ('failing', 'disputed')
@@ -668,21 +669,25 @@ export function failuresShown(ctx: Ctx, run: RunRow): { group: FailingGroup; tar
 }
 
 /**
- * Every run that shows a cause: the runs of the commits in the scope that fail with it, the newest and the older
- * ones, and the planned runs with a slot that shows it. A decision about the cause changes how each of them counts
+ * Every run that shows a cause: the runs of the commits that fail with it, the newest and the older ones, and
+ * the planned runs with a slot that shows it. (Not narrowed to a scope: a commit's run can hold results of two.) A decision about the cause changes how each of them counts
  * it, so each is recomputed when the decision is made: the gate of any commit is exact, not only the newest's.
  */
-export function runsShowing(db: Db, project: number, signature: number, scope: string): number[] {
-	return [
-		...db.all(Q.commitsShowing, { project, signature, scope }),
-		...db.all(Q.plannedShowing, { project, signature }),
-	].map((row) => row.run);
+export function runsShowing(db: Db, project: number, signature: number): number[] {
+	return [...db.all(Q.commitsShowing, { project, signature }), ...db.all(Q.plannedShowing, { project, signature })].map(
+		(row) => row.run,
+	);
 }
 
-/** The tests that fail with this cause in the gate of this target's commit, as it counts them now. */
+/**
+ * The tests that fail with this cause on this target's commit now: those its gate counts, and those an agent
+ * reports (which no gate counts, but which are asked about). What a statement about the cause on this commit,
+ * such as "already failing on the base", has to be true of.
+ */
 export function failingWithCause(db: Db, target: TargetRow, signature: number): number[] {
 	const commit = db.get(Q.changeRun, { project: target.project, what: target.what });
-	return commit ? db.all(Q.failingWithCause, { run: commit.id, signature }).map((row) => row.test) : [];
+	const counted = commit ? db.all(Q.failingWithCause, { run: commit.id, signature }).map((row) => row.test) : [];
+	return [...new Set([...counted, ...agentFailuresWithCause(db, target.project, target.what, signature)])];
 }
 
 /** A failure a run shows with no excuse in force: the cause, the target it was seen on, the scope it is answered in. */
@@ -852,8 +857,13 @@ export function newestInScope(db: Db, project: number, scope: string): RunRow | 
 	return newest ? runById(db, newest) : null;
 }
 
-/** The scope in which a failure seen on this target is answered, for this run. */
-const scopeIn = (db: Db, run: RunRow, target: number): string => run.scope ?? scopeOf(mustTarget(db, target), run.id);
+/**
+ * The scope in which a failure seen on this target is answered, for this run: the target's own (its pull request,
+ * its line, or the run it was typed into). A commit has one run but can be reported on two lines (a pull
+ * request's head that reaches trunk): each result is then answered where it was reported, never by the other
+ * line's answer.
+ */
+const scopeIn = (db: Db, run: RunRow, target: number): string => scopeOf(mustTarget(db, target), run.id);
 
 /**
  * Everyone with a result in a slot of this run that shows the cause in this scope: whoever reported the failure
@@ -894,49 +904,33 @@ export type Blocker = {
 export const causeKey = (signature: number, scope: string): string => `${signature}|${scope}`;
 
 /**
- * Does this test already fail, with this cause, where the change started? The base commit if Casebook has results
- * for it, otherwise the newest commit on the trunk of the change's own repository that ran the test. A hint for
- * the person or the rule that answers; it never excuses anything by itself. Because a rule may act on it, it reads
- * what the base's gate counts: the effective result per lane, after attempts and corrections, never an agent's
- * result and never another repository's.
+ * Does this test already fail, with this cause, where the change started? That is the base commit the change
+ * names, and only that: where the change names none, or Casebook has no result of this test on it, the answer
+ * is no. A hint for the person or the rule that answers; it never excuses anything by itself. Because a rule may
+ * act on it, it reads what the base's gate counts: the effective result per lane, after attempts and
+ * corrections, never an agent's result and never another repository's.
  */
 export function failsOnBase(db: Db, target: TargetRow, test: number, signature: number): boolean {
-	if (target.line !== "change" || target.change === null) return false;
-	const change = changeById(db, target.change);
-	if (!change) return false;
-	// A commit reported with no branch and no pull request is not a change with a base: nothing is inherited.
-	if (change.base_sha === null && change.key.startsWith("commit:")) return false;
-	const failsIn = (run: number | null | undefined): boolean | null => {
-		if (run === null || run === undefined) return null;
-		const rows = db.all(Q.effectiveOfTest, { run, test });
-		if (rows.length === 0) return null;
-		return rows.some((row) => (row.outcome === "fail" || row.outcome === "error") && row.signature === signature);
-	};
-	const onBase = change.base_sha
-		? failsIn(db.get(Q.changeRun, { project: target.project, what: codeWhat(change.repo, change.base_sha) })?.id)
-		: null;
-	if (onBase !== null) return onBase;
-	const trunk = change.repo ? `line:trunk@${change.repo}` : "line:trunk";
-	const newest = db.get(Q.newestRunWithTest, { project: target.project, scope: trunk, test })?.run;
-	// Never the commit's own run: a failure is not its own base.
-	const own = db.get(Q.changeRun, { project: target.project, what: target.what })?.id;
-	return newest !== undefined && newest !== null && newest !== own ? (failsIn(newest) ?? false) : false;
+	const base = baseRunOf(db, target);
+	if (!base) return false;
+	return db
+		.all(Q.effectiveOfTest, { run: base.id, test })
+		.some((row) => (row.outcome === "fail" || row.outcome === "error") && row.signature === signature);
 }
 
-/**
- * The scopes whose results `failsOnBase` may read for a target of a change: the scope the base commit was
- * reported in, and the trunk of the change's repository. A report in either can change the answer.
- */
-export function baseScopesOf(db: Db, target: TargetRow): string[] {
-	if (target.line !== "change" || target.change === null) return [];
+/** The run of the commit a change started from, when the change names one and it is not this commit itself. */
+function baseRunOf(db: Db, target: TargetRow): RunRow | null {
+	if (target.line !== "change" || target.change === null) return null;
 	const change = changeById(db, target.change);
-	if (!change) return [];
-	const scopes = new Set([change.repo ? `line:trunk@${change.repo}` : "line:trunk"]);
-	const base = change.base_sha
-		? db.get(Q.changeRun, { project: target.project, what: codeWhat(change.repo, change.base_sha) })
-		: null;
-	if (base?.scope) scopes.add(base.scope);
-	return [...scopes];
+	if (!change?.base_sha) return null;
+	const what = codeWhat(change.repo, change.base_sha);
+	return what === target.what ? null : db.get(Q.changeRun, { project: target.project, what });
+}
+
+/** The scope the base's results are in, for a target of a change that names a base: a report there can change `failsOnBase`. */
+export function baseScopesOf(db: Db, target: TargetRow): string[] {
+	const scope = baseRunOf(db, target)?.scope;
+	return scope ? [scope] : [];
 }
 
 /**
@@ -952,7 +946,6 @@ function count(db: Db, run: RunRow): { tally: Tally; failing: Set<string>; depen
 	// is then classified in its own repository's scope, so one repository's answer never covers the other's failure.
 	const scopes = new Map<number, string>();
 	const scopeFor = (target: number): string => {
-		if (run.scope !== null) return run.scope;
 		let found = scopes.get(target);
 		if (found === undefined) {
 			found = scopeOf(mustTarget(db, target), run.id);

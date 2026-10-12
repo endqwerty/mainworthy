@@ -45,7 +45,7 @@ import {
 	unexplainedShown,
 } from "../runs/runs.ts";
 import { caseById, caseRef } from "../suite/suite.ts";
-import { HANDLERS, runsAbout } from "./kinds.ts";
+import { HANDLERS, inheritedNow, restInherited, runsAbout } from "./kinds.ts";
 import {
 	alsoAbout,
 	answersOf,
@@ -110,6 +110,9 @@ function stored(r: Raise): Record<string, unknown> {
 	return { ...r.evidence, facts: r.facts, ...(r.target !== undefined ? { targetId: r.target } : {}) };
 }
 
+/** More raises of one question in one command than any real sequence needs: beyond it, something is looping. */
+const RAISE_LIMIT = 200;
+
 /** The one mint of decision witnesses. Claimed here when the module loads; nothing else can claim it. */
 const mintWitness = claimMint();
 
@@ -139,6 +142,10 @@ function blockedRuns(blocks: Blocks, runs: Raise["runs"]): number[] {
  */
 export function raise(ctx: Ctx, r: Raise): Raised {
 	const fingerprint = contentHash({ kind: r.kind, key: r.key });
+	const times = (ctx.raised.get(fingerprint) ?? 0) + 1;
+	ctx.raised.set(fingerprint, times);
+	if (times > RAISE_LIMIT)
+		throw new Error(`one command raised the question "${r.title}" ${times} times: stopped instead of going round`);
 	// Two hashes. The basis is what a decision stands on: the cause, without the build, so an answer carries from
 	// one commit to the next. The evidence hash is what a person answering must have seen: the basis and the
 	// latest build, so an answer prepared before a newer build arrived is a conflict and not a decision about a
@@ -152,6 +159,9 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 	for (const { question, decision } of standing) {
 		if (!stillHolds(decision, occurrence)) continue;
 		noteCarried(ctx, question, r.refs);
+		// An inherited answer carried to another result of the build rests on that result's test too.
+		if (r.target !== undefined && json<{ is?: string }>(decision.answer).is === "inherited")
+			restInherited(ctx, question, decision.id, r.target);
 		return { s: "carried", question, decision };
 	}
 	// A decision that covers certain targets still stands on those when the cause turns up on another one: the
@@ -160,6 +170,11 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 	const rested: number[] = [];
 	let ended: QuestionRow | null = null;
 	for (const { question, decision } of standing) {
+		// An answer given for certain targets is judged only by what is reported about those targets. The same
+		// cause on another commit, with other facts (not inherited there, not disputed there), says nothing about
+		// it: without this, a rule's answer for one commit and a failure on another would undo each other for ever.
+		const here = json<HoldTerm[]>(decision.holds).find((term) => term.until === "this-target");
+		if (here?.until === "this-target" && (r.target === undefined || !here.targets.includes(r.target))) continue;
 		if (stillHolds(decision, occurrence, { anyTarget: true })) continue;
 		HANDLERS[question.kind].revert(ctx, question, decision);
 		lapse(ctx, question, decision, occurrence.now);
@@ -495,7 +510,7 @@ function settle(
 	if (question.kind === "failure") {
 		const subject = json<{ signature?: number; scope?: string }>(question.subject);
 		if (subject.signature !== undefined && subject.scope !== undefined)
-			about.push(...runsShowing(ctx.db, ctx.project.id, subject.signature, subject.scope));
+			about.push(...runsShowing(ctx.db, ctx.project.id, subject.signature));
 	}
 	refold(ctx, [...about, ...(supersedes !== null ? runsDependingOn(ctx.db, supersedes) : [])]);
 	return { decision: { ...decision, effects: JSON.stringify(effects) }, effects };
@@ -721,6 +736,8 @@ export function raiseFailure(
 	// with it on this commit now, not only of those in the report that happens to be arriving: how a pipeline
 	// splits its results over reports must not change what a rule may excuse.
 	if (scopeKind === "change") {
+		// Every test that fails with the cause on this commit now: those of this report, those its gate counts,
+		// and those an agent reports.
 		const failingNow = new Set([
 			...group.tests.map((test) => test.id),
 			...failingWithCause(ctx.db, target, group.signature.id),
@@ -819,10 +836,11 @@ export function recheckInherited(ctx: Ctx, scope: string, tests: readonly number
 		const here = json<HoldTerm[]>(decision.holds).find((term) => term.until === "this-target");
 		const [seenOn] = here?.until === "this-target" ? here.targets : [];
 		if (subject.signature === undefined || seenOn === undefined) continue;
-		const signature = subject.signature;
-		const target = mustTarget(ctx.db, seenOn);
-		const failing = failingWithCause(ctx.db, target, signature);
-		if (failing.every((test) => failsOnBase(ctx.db, target, test, signature))) continue;
+		if (inheritedNow(ctx, question, seenOn).holds) {
+			// Still true. What it rests on may have moved (another base, another failing test): written down anew.
+			restInherited(ctx, question, decision.id, seenOn);
+			continue;
+		}
 		HANDLERS[question.kind].revert(ctx, question, decision);
 		lapse(ctx, question, decision, ctx.now);
 		const runs = [...runsDependingOn(ctx.db, decision.id), ...runsAbout(ctx, question)];

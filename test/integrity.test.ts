@@ -908,6 +908,150 @@ describe("what a result may prove", () => {
 		}
 	});
 
+	test("an inherited answer for one commit and an open run on another commit do not undo each other", () => {
+		seed();
+		const fail = (key: string) => ({ test: { key }, outcome: "fail", failure: { message: "same cause" } });
+		report({
+			target: { repo: "app", commit: "base0005", branch: "main" },
+			results: [fail("old"), { test: { key: "new" }, outcome: "pass" }],
+		});
+		const head = (commit: string) => ({ repo: "app", commit, base: "base0005", branch: "feature", pr: 5 });
+		// The first commit breaks `new`, which the base passes. A run is planned on that commit and stays open.
+		report({ target: head("head0051"), results: [{ ...fail("new"), annotation: { case: "C-1", version: 1 } }] });
+		const planned = plan({ name: "On the first commit", select: {}, accepts: { commit: "head0051", repo: "app" } });
+		expect(gate({ run: planned.run }).verdict).toBe("blocked");
+		// The second commit fails only `old`, as the base does: the rule calls that inherited, for that commit.
+		const second = report({ target: head("head0052"), results: [fail("old")] });
+		expect(second.gate?.verdict).toBe("passed");
+		// The run on the first commit still shows its own failure, with a question a person can answer. (The
+		// base's own failure is a question too, on trunk; it is not about the change.)
+		const still = h
+			.call<InboxReply>("inbox", { kind: "failure", limit: 50 })
+			.items.filter((item) => item.about.includes("pr:5"));
+		expect(still).toHaveLength(1);
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [first(still).q] });
+		expect(gate({ commit: "head0052", repo: "app" }).verdict).toBe("passed");
+		expect(decide(first(still), { is: "defect" }).status).toBe("decided");
+		expect(gate({ run: planned.run }).verdict).toBe("failed");
+	});
+
+	test("an inherited answer follows its evidence: a moved base, a second failing test, an agent's failure", () => {
+		const result = (key: string, outcome = "fail") => ({
+			test: { key },
+			annotation: { case: "C-1", version: 1 },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
+		});
+		const fresh = (preset = "loose") => {
+			const local = harness({ preset });
+			local.call("propose", { edits: [{ op: "create", body: { title: "One", methods: ["human", "agent"] } }] });
+			return local;
+		};
+		const gateOf = (local: Harness, input: Record<string, unknown>) => local.call<GateStatus>("gate", input);
+
+		// The pull request is pointed at another base (the same commit, reported again), and that base is corrected.
+		let local = fresh();
+		try {
+			const trunk = { repo: "app", commit: "trunk001", branch: "main" };
+			const stack = { repo: "app", commit: "stack001", branch: "stack", pr: 2 };
+			const head = (base: string) => ({ repo: "app", commit: "head0001", branch: "feature", pr: 1, base });
+			local.call("report", { target: trunk, results: [result("one")] });
+			const onStack = local.call<ReportReceipt>("report", { target: stack, results: [result("one")] });
+			local.call("report", { target: head("trunk001"), results: [result("one")] });
+			expect(gateOf(local, { commit: "head0001", repo: "app" }).verdict).toBe("passed");
+			local.call("report", { target: head("stack001"), results: [result("one")] });
+			local.call("report", {
+				target: stack,
+				results: [{ ...result("one", "pass"), corrects: first(onStack.results) }],
+			});
+			expect(gateOf(local, { commit: "head0001", repo: "app" })).toMatchObject({
+				verdict: "blocked",
+				tally: { unexplained: 1, excused: 0 },
+			});
+		} finally {
+			local.close();
+		}
+
+		// The change's failures arrive in two reports; the base then passes the second test on a newer attempt.
+		local = fresh();
+		try {
+			const base = { repo: "app", commit: "base0006", branch: "main" };
+			const head = { repo: "app", commit: "head0006", branch: "feature", pr: 6, base: "base0006" };
+			local.call("report", { target: base, results: [result("one"), result("two")] });
+			local.call("report", { target: head, results: [result("one")] });
+			local.call("report", { target: head, job: "second", results: [result("two")] });
+			expect(gateOf(local, { commit: "head0006", repo: "app" }).tally).toMatchObject({ excused: 2 });
+			local.call("report", { target: base, attempt: 2, results: [result("two", "pass")] });
+			expect(gateOf(local, { commit: "head0006", repo: "app" })).toMatchObject({
+				verdict: "blocked",
+				tally: { unexplained: 2, excused: 0 },
+			});
+		} finally {
+			local.close();
+		}
+
+		// An agent's failure in a run that asked for agents: the question is answered `inherited` by a person
+		// after the base was corrected. The answer is held to the base as it is.
+		local = fresh("standard");
+		try {
+			const agent = local.actor("explorer", "agent", ["read", "produce"]);
+			const base = { repo: "app", commit: "base0007", branch: "main" };
+			const head = { repo: "app", commit: "head0007", branch: "feature", pr: 7, base: "base0007" };
+			const original = local.call<ReportReceipt>("report", { target: base, results: [result("one")] });
+			local.call("report", { target: head, results: [result("one")] }, agent);
+			const planned = local.call<PlanReply>("plan", {
+				name: "Agent run",
+				select: {},
+				accepts: { repo: "app", commit: "head0007" },
+				require: [{ id: "agent", kind: "exercise", methods: ["agent"], minActors: 1, basis: "exact" }],
+			});
+			const asked = local.call<InboxReply>("inbox", { kind: "failure" }).items.find((q) => q.about.includes("pr:7"));
+			if (!asked) throw new Error("the agent's failure was not asked about");
+			expect(asked.answers).toContain("inherited");
+			local.call("report", {
+				target: base,
+				results: [{ ...result("one", "pass"), corrects: first(original.results) }],
+			});
+			const late = first(
+				local.call<DecideReply[]>("decide", {
+					q: asked.q,
+					onEvidence: asked.evidenceHash,
+					answer: { is: "inherited" },
+				}),
+			);
+			expect(late.status).toBe("conflict");
+			expect(gateOf(local, { run: planned.run }).verdict).toBe("blocked");
+		} finally {
+			local.close();
+		}
+	});
+
+	test("a commit is answered on the line it was first reported on, whatever line reports it later", () => {
+		const fail = (key: string) => ({ test: { key }, outcome: "fail", failure: { message: "same cause" } });
+		const commit = "same0001";
+		// First as the head of a pull request, where its failure is called flaky.
+		report({ target: { commit, repo: "app", branch: "feature", pr: 1, env: "ci" }, results: [fail("one")] });
+		expect(decide(open("failure"), { is: "flaky" }).status).toBe("decided");
+		// The same commit reaches trunk and is reported from there. It is the same commit with the same gate: its
+		// failures are answered where the first one was, so there is one answer and one scope for the gate to count.
+		const later = report({
+			target: { commit, repo: "app", branch: "main", env: "production" },
+			results: [fail("two")],
+		});
+		expect(later.questions.map((q) => q.how)).toEqual(["already decided"]);
+		expect(rows("SELECT DISTINCT line, change FROM targets")).toHaveLength(1);
+		expect(
+			new Set(
+				rows<{ subject: string }>("SELECT subject FROM questions WHERE kind = 'failure'").map(
+					(q) => JSON.parse(q.subject).scope,
+				),
+			).size,
+		).toBe(1);
+		// Changing that one answer to a defect fails the commit's gate: no second scope keeps it green.
+		expect(decide(open("failure", "decided"), { is: "defect" }).status).toBe("decided");
+		expect(gate({ commit, repo: "app" })).toMatchObject({ verdict: "failed", tally: { attributed: 2, excused: 0 } });
+	});
+
 	test("an automated test cannot take the key of a case's manual test", () => {
 		seed(2);
 		const taken = h.raw("report", {

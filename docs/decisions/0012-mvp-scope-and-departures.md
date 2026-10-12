@@ -56,7 +56,9 @@ not the same things done worse.
    was wrong). `mistaken` replaces the design's `resolve { trust: [...] }`; any other failure answer on a disputed
    slot also resolves it, by saying what the failure was. "Already failing on the base" reads what the base's
    own gate counts (its effective results, after attempts and corrections), never an agent's result and never
-   another repository's, and it must be true of every test that fails with the cause on the commit, not only
+   another repository's. The base is the commit the change names and only that: where a change names none, or
+   Casebook has no result of the test on it, nothing is inherited (an earlier fallback to "the newest commit on
+   trunk" made the base a moving thing and was removed), and it must be true of every test that fails with the cause on the commit, not only
    of those in the report that is arriving: how a pipeline splits its results over reports changes nothing.
    The answer covers the build it was given for, like an infrastructure answer: another commit of the change,
    where the same cause may be failing in a test the base passes, is asked about on its own (and the loose rule
@@ -147,9 +149,10 @@ not the same things done worse.
     and a commit reported for more than one repository must be named with `repo` (it is refused, never guessed).
     A line belongs to a repository too: what was decided about one repository's trunk does not cover another's.
     The "already failing on the base" hint reads only the change's own repository, and only results a gate would
-    count (never an agent's). A commit keeps the line it was first reported on: a report that names only the commit takes that
-    line, and a commit reported on two lines (a pull request's head fast-forwarded to trunk) is answered in two
-    places until that is designed (#68).
+    count (never an agent's). One commit, one place where its failures are answered: the line or the change it was first reported
+    on. A later report of the same commit from somewhere else (a pull request's head that reached trunk, a result
+    typed into a run that counts the commit, a pipeline that sends only the hash) is that commit and is answered
+    there. The cost: trunk does not see a fast-forwarded head as its own until the next commit (#68).
 18. **Test keys of the form `case:<n>` are reserved** for the manual test of a case. A report that uses one for an
     automated test is refused.
 

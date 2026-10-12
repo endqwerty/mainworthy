@@ -104,7 +104,7 @@ function sequence(seed: number, preset: string): Problem | null {
 				for (const cause of causes) {
 					const target = targets.get(cause.target);
 					if (!target) return { what: "a cause on an unknown target", detail: cause };
-					const scope = typeof run.scope === "string" ? run.scope : scopeOf(target, id);
+					const scope = scopeOf(target, id);
 					if (excuseOf(Number(run.project), cause.signature, scope, cause.target)) continue;
 					const asked = open.filter((question) => {
 						const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string };
@@ -165,7 +165,14 @@ function sequence(seed: number, preset: string): Problem | null {
 					else if (row.outcome === "skip") tally.skipped++;
 					else if (row.outcome === "blocked") tally.missing++;
 					else {
-						const excuse = excuseOf(Number(run.project), Number(row.signature), String(run.scope), Number(row.target));
+						const seenOn = targets.get(Number(row.target));
+						if (!seenOn) return { what: "a result on an unknown target", detail: row };
+						const excuse = excuseOf(
+							Number(run.project),
+							Number(row.signature),
+							scopeOf(seenOn, id),
+							Number(row.target),
+						);
 						tally[excuse ? (excuse.class === "attributed" ? "attributed" : "excused") : "unexplained"]++;
 					}
 				}
@@ -304,6 +311,8 @@ function sequence(seed: number, preset: string): Problem | null {
 					branch: "main",
 					env: pick(["prod", "staging"]),
 					...(rand(8) === 0 ? { repo: "fork" } : {}),
+					// And now and then the same commit as the head of a pull request: one commit, two lines.
+					...(rand(12) === 0 ? { branch: "release", pr: 9 } : {}),
 				};
 				const outcome = pick(["fail", "fail", "pass", "skip", "blocked"]);
 				const result: Record<string, unknown> = {
@@ -370,9 +379,11 @@ function sequence(seed: number, preset: string): Problem | null {
 					agent,
 				);
 			} else if (action < 64) {
+				// By a commit on trunk, by a commit of the change (where inherited answers live), or by hand.
 				const accepts = pick([
 					{ commit: pick(commits) },
 					{ commit: pick(commits), env: pick(["prod", "staging"]) },
+					{ commit: pick(["change01", "change02"]) },
 					{ self: true },
 				]);
 				const methods = pick([["human", "auto"], ["human", "auto"], ["agent"], ["human", "auto", "agent"]]);

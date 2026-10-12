@@ -263,6 +263,14 @@ const Q = {
 		 VALUES ($project, $test, $seq, $ord, $batch, $target, $method, $actor, $basis, $basisCase, $basisVersion, $basisClaim,
 		         $outcome, $attempt, $duration, $signature, $message, $detail, $atStep, $steps, $note, $run, $corrects, $at)`,
 	),
+	agentFailures: sql<{ project: number; what: string; signature: number }, { test: number }>(
+		`SELECT DISTINCT r.test AS test FROM targets t JOIN results r ON r.target = t.id
+		 WHERE t.project = $project AND t.what = $what AND r.method = 'agent' AND r.signature = $signature
+		   AND r.outcome IN ('fail', 'error')
+		   AND NOT EXISTS (SELECT 1 FROM results later WHERE later.corrects = r.id)
+		   AND NOT EXISTS (SELECT 1 FROM results newer WHERE newer.target = r.target AND newer.test = r.test
+		                   AND newer.actor = r.actor AND newer.method = 'agent' AND newer.attempt > r.attempt)`,
+	),
 	laneHistory: sql<{ target: number; test: number; actor: number; job: string }, ResultRow>(
 		`SELECT r.* FROM results r JOIN batches b ON b.id = r.batch
 		 WHERE r.target = $target AND r.test = $test AND r.actor = $actor AND b.job = $job
@@ -372,28 +380,6 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 	const what = codeWhat(input.repo, input.commit);
 	const env = input.env ?? "";
 	const found = ctx.db.get(Q.target, { project, what, env });
-	// A report that names a commit and neither a branch nor a pull request (a result typed into a run that counts
-	// that commit, a pipeline that sends only the hash) says nothing about where the commit is. Where the commit
-	// is already known, it is that commit: it takes the line and the change it was first reported on, and its
-	// failures are answered there, not in a scope of their own.
-	const known =
-		!found && input.pr === undefined && input.branch === undefined
-			? (ctx.db.all(Q.targetsOfCommit, { project, what })[0] ?? null)
-			: null;
-	if (known) {
-		const { lastId } = ctx.db.run(Q.insertTarget, {
-			project,
-			what,
-			env,
-			repo: known.repo,
-			commit: input.commit,
-			branch: known.branch,
-			line: known.line,
-			change: known.change,
-			seq: ctx.seq,
-		});
-		return mustTarget(ctx.db, lastId);
-	}
 	const trunk = input.pr === undefined && input.branch !== undefined && TRUNK_BRANCHES.has(input.branch);
 	let change: ChangeRow | null = null;
 	if (!trunk) {
@@ -403,18 +389,27 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 				: input.branch
 					? `branch:${input.branch}`
 					: `commit:${input.commit.slice(0, 12)}`;
-		change = upsertChange(ctx, changeKey(ctx.db, project, key, input.repo ?? null), input);
+		// A report that names neither a branch nor a pull request says nothing about where the commit is: for a
+		// commit already known, no change of its own is made up for it.
+		const known =
+			input.pr === undefined && input.branch === undefined && ctx.db.all(Q.targetsOfCommit, { project, what })[0];
+		if (!known) change = upsertChange(ctx, changeKey(ctx.db, project, key, input.repo ?? null), input);
 	}
 	if (found) return found;
+	// One commit, one place where its failures are answered: the line or the change it was first reported on.
+	// A later report of the same commit from somewhere else (a pull request's head that reached trunk, a result
+	// typed into a run that counts the commit) is that commit, and is answered there. A commit's gate has one
+	// run; two scopes inside it would let one line's answer classify the other line's failure.
+	const first = ctx.db.all(Q.targetsOfCommit, { project, what })[0];
 	const { lastId } = ctx.db.run(Q.insertTarget, {
 		project,
 		what,
 		env,
 		repo: input.repo ?? null,
 		commit: input.commit,
-		branch: input.branch ?? null,
-		line: trunk ? "trunk" : "change",
-		change: change?.id ?? null,
+		branch: first ? first.branch : (input.branch ?? null),
+		line: first ? first.line : trunk ? "trunk" : "change",
+		change: first ? first.change : (change?.id ?? null),
 		seq: ctx.seq,
 	});
 	return mustTarget(ctx.db, lastId);
@@ -479,6 +474,7 @@ function upsertChange(ctx: Ctx, key: string, input: Extract<TargetIn, { commit: 
 	) {
 		ctx.db.run(Q.updateChange, next);
 		ctx.touched.add(key);
+		if (next.base !== existing.base_sha) ctx.rebased.add(existing.id);
 	}
 	return ctx.db.get(Q.changeById, { id: existing.id }) ?? existing;
 }
@@ -950,6 +946,13 @@ export const unlinkedInFile = (db: Db, project: number, file: string): TestRow[]
 export const unlinkedCount = (db: Db, project: number): number => db.get(Q.unlinkedCount, { project })?.n ?? 0;
 export const signatureById = (db: Db, id: number): SignatureRow | null => db.get(Q.signatureById, { id });
 export const resultById = (db: Db, id: number): ResultRow | null => db.get(Q.resultById, { id });
+
+/**
+ * The tests an agent reports failing with this cause on a commit, by its newest uncorrected attempt. An agent's
+ * result is not in a commit's gate, but it is asked about and can fill a run that asked for agents.
+ */
+export const agentFailuresWithCause = (db: Db, project: number, what: string, signature: number): number[] =>
+	db.all(Q.agentFailures, { project, what, signature }).map((row) => row.test);
 
 /**
  * Every result one producer reported for one test from one job on one target that it has not since corrected,
