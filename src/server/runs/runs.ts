@@ -213,10 +213,6 @@ const Q = {
 	effectiveOfTest: sql<{ run: number; test: number }, { outcome: string; signature: number | null }>(
 		"SELECT outcome, signature FROM run_tests WHERE run = $run AND test = $test",
 	),
-	newestRunWithTest: sql<{ project: number; scope: string; test: number }, { run: number | null }>(
-		`SELECT max(rt.run) AS run FROM run_tests rt JOIN runs r ON r.id = rt.run
-		 WHERE rt.test = $test AND r.project = $project AND r.scope = $scope`,
-	),
 	insertSlot: sql<{
 		run: number;
 		caseId: number;
@@ -844,13 +840,6 @@ function refreshSlot(
 type Cause = [signature: number, target: number];
 
 // ── Tally and verdict ──────────────────────────────────────────────────────────────────────────────────────
-
-/** The scope in which this run's failures are answered. */
-export function scopeOfRun(db: Db, run: RunRow): string {
-	if (run.scope !== null) return run.scope;
-	const [target] = targetsOfRun(db, run);
-	return target ? scopeOf(target, run.id) : `run:${run.id}`;
-}
 
 /** The run of the newest commit in a change's or a line's scope: the one that speaks for the scope. */
 export function newestInScope(db: Db, project: number, scope: string): RunRow | null {
