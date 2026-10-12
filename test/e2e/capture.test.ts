@@ -6,7 +6,14 @@ test.skipIf(!browserAvailable)(
 	"UI-3 capture from a case URL creates a new case without editing the selected case",
 	async () => {
 		const server = await startServer();
-		await server.api("propose", { edits: [{ op: "create", body: { title: "Original case", steps: [{ id: "aa", action: "Original step", expected: null }] } }] });
+		await server.api("propose", {
+			edits: [
+				{
+					op: "create",
+					body: { title: "Original case", steps: [{ id: "aa", action: "Original step", expected: null }] },
+				},
+			],
+		});
 		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = browser;
@@ -16,10 +23,17 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.press("Enter");
 			await page.keyboard.type("New step");
 			await page.keyboard.press("Escape");
-			const rows = await eventually(() => server.api("find", { in: "cases" }), (reply) => reply.count === 2);
+			const rows = await eventually(
+				() => server.api("find", { in: "cases" }),
+				(reply) => reply.count === 2,
+			);
 			expect(rows.items.map((row) => row.title)).toContain("New case");
 			const cases = await server.api("get", { refs: ["C-1", "C-2"] });
-			expect(cases[0]).toMatchObject({ title: "Original case", version: 1, steps: [{ id: "aa", action: "Original step" }] });
+			expect(cases[0]).toMatchObject({
+				title: "Original case",
+				version: 1,
+				steps: [{ id: "aa", action: "Original step" }],
+			});
 			expect(cases[1]).toMatchObject({ title: "New case", version: 1, steps: [{ action: "New step" }] });
 			expect(browser.errors).toEqual([]);
 		} finally {
@@ -290,6 +304,11 @@ test.skipIf(!browserAvailable)(
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
+			await page.route("**/api/p/scratch/propose", async (route) => {
+				const response = await route.fetch();
+				await Bun.sleep(500);
+				await route.fulfill({ response });
+			});
 			for (const [version, id] of [
 				[2, "a1"],
 				[3, "a2"],
@@ -310,8 +329,11 @@ test.skipIf(!browserAvailable)(
 					(value) => value[0]?.version === version,
 				);
 				expect(rows[0]?.steps).toMatchObject([{ id, action: `Replacement ${version}` }]);
+				expect(await page.locator(".cstate").textContent()).toContain("Draft");
 				await page.waitForFunction(
-					(value) => document.querySelector(".cstate")?.textContent?.includes(`v${value}`),
+					(value) =>
+						document.querySelector(".cstate .chip")?.textContent === `v${value}` &&
+						localStorage.getItem("casebook:draft:scratch:C-1") === null,
 					version,
 				);
 				if (version === 2) {

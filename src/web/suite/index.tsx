@@ -167,15 +167,18 @@ export function SuiteScreen() {
 			setSelected(route.ref);
 		}
 	}, [route.folder, route.ref]);
+	const previousRef = useRef(route.ref);
 	useEffect(() => {
-		if (route.ref !== selected && route.ref !== null) {
+		if (previousRef.current === route.ref) return;
+		previousRef.current = route.ref;
+		if (route.ref !== null) {
 			setSelected(route.ref);
 			const saved = readDraft({ project, id: route.ref });
 			draftRef.current = saved;
 			setDraftState(saved);
 			setConflict(null);
 		}
-	}, [project, route.ref, selected]);
+	}, [project, route.ref]);
 	useEffect(() => {
 		if (selected === null && cases[0] && !draftRef.current) setSelected(cases[0].ref);
 	}, [cases, selected]);
@@ -541,6 +544,7 @@ export function SuiteScreen() {
 		};
 		setConflict(null);
 		flushSync(() => {
+			navigate(`/p/${encodeURIComponent(project)}/suite${location.search}`, { seal: false });
 			draftRef.current = next;
 			setDraftState(next);
 			setSelected(null);

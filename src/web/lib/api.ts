@@ -39,6 +39,12 @@ export class ApiError extends Error {
 		this.name = "ApiError";
 	}
 }
+export const unauthenticatedEvent = "casebook:unauthenticated";
+function refuse(error: Extract<Envelope<unknown>, { ok: false }>["error"], message = error.message): never {
+	if (error.code === "unauthenticated" && typeof window !== "undefined")
+		window.dispatchEvent(new Event(unauthenticatedEvent));
+	throw new ApiError(error.code, message);
+}
 export type CallOptions = { project?: string; url?: string; token?: string; signal?: AbortSignal; keepalive?: boolean };
 
 /** The operation map owns input and reply types; wire envelopes are validated at this boundary. */
@@ -62,12 +68,12 @@ export async function call<O extends OpName>(
 		keepalive: options.keepalive ?? false,
 	});
 	const envelope = Wire.parse(await response.json());
-	if (!envelope.ok) throw new ApiError(envelope.error.code, envelope.error.message);
+	if (!envelope.ok) refuse(envelope.error);
 	return envelope.result as Api[O]["reply"];
 }
 export async function session(): Promise<SessionInfo> {
 	const envelope = Wire.parse(await (await fetch("/api/session")).json());
-	if (!envelope.ok) throw new ApiError(envelope.error.code, envelope.error.message);
+	if (!envelope.ok) refuse(envelope.error);
 	return Session.parse(envelope.result);
 }
 export async function login(token: string): Promise<void> {
@@ -80,5 +86,5 @@ export async function login(token: string): Promise<void> {
 			})
 		).json(),
 	);
-	if (!envelope.ok) throw new ApiError(envelope.error.code, "That token was not accepted. Try again.");
+	if (!envelope.ok) refuse(envelope.error, "That token was not accepted. Try again.");
 }

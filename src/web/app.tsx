@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { SessionInfo } from "../core/api.ts";
 import { CaseScreen } from "./case/index.tsx";
 import { ChangesScreen } from "./changes/index.tsx";
-import { ApiError, login, session } from "./lib/api.ts";
+import { ApiError, login, session, unauthenticatedEvent } from "./lib/api.ts";
 import { useEvents, useQueryOp } from "./lib/data.ts";
 import { useBindings, useKeyboard, useKeyRegistry } from "./lib/keys.ts";
 import { navigate, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
@@ -55,7 +55,10 @@ export function App() {
 		}
 	}, []);
 	useEffect(() => {
+		const refused = () => setAuth({ kind: "signin" });
+		window.addEventListener(unauthenticatedEvent, refused);
 		void refreshSession();
+		return () => window.removeEventListener(unauthenticatedEvent, refused);
 	}, [refreshSession]);
 	useEffect(() => {
 		const media = matchMedia("(prefers-color-scheme: dark)");
