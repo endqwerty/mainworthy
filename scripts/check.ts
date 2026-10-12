@@ -143,9 +143,13 @@ const parts = [...staticParts, ...testParts];
 const failed = parts.filter((part) => part.exit !== 0);
 
 // What failed, whole and one part after another, at the end of the run where it is read.
+const notices = new Set<string>();
 for (const part of parts) {
 	if (part.log === null) continue;
 	const text = readFileSync(part.log, "utf8").trimEnd();
+	// A passing part's output is not shown, and a machine with no browser passes with every browser test
+	// skipped: say so where it is read.
+	for (const line of text.split("\n")) if (line.startsWith("Skipping Casebook e2e")) notices.add(line.trim());
 	if (part.exit !== 0) console.log(`\n──── ${part.name}: FAILED (exit ${part.exit}) ────\n${text}`);
 	else if (part.name.startsWith("tests")) console.log(`${part.name}: ${text.split("\n").at(-1)?.trim() ?? ""}`);
 }
@@ -169,6 +173,7 @@ if (record) {
 }
 
 console.log("");
+for (const notice of notices) console.log(`NOTE: the browser tests did not run. ${notice}\n`);
 if (testParts.length > 1) console.log(`${"tests".padEnd(16)} ${seconds(testSeconds).padStart(8)}`);
 console.log(`${"total".padEnd(16)} ${seconds(total).padStart(8)}`);
 if (whole) console.log(`other work kept ${busyBefore.toFixed(1)} cores of this machine busy when the run began`);
