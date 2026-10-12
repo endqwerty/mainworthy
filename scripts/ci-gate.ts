@@ -48,14 +48,26 @@ for (const shard of shards) {
 	// A skipped test proves nothing, and one skipped test beside others that ran is somebody's decision. A file
 	// in which nothing ran is a file that was not tested.
 	const ran = new Map<string, { tests: number; skipped: number }>();
-	for (const test of text.matchAll(/<testcase\b[^>]*\bfile="([^"]+)"[^>]*?(\/>|>([\s\S]*?)<\/testcase>)/g)) {
-		const count = ran.get(test[1] ?? "") ?? { tests: 0, skipped: 0 };
-		count.tests++;
-		if (/<skipped\b/.test(test[3] ?? "")) count.skipped++;
-		ran.set(test[1] ?? "", count);
+	// A test belongs to the file it names, or else to the file of the suite it is in.
+	const suites: string[] = [];
+	const fileOf = (attributes: string | undefined) => /\bfile="([^"]+)"/.exec(attributes ?? "")?.[1];
+	for (const tag of text.matchAll(
+		/<testsuite\b([^>]*)>|<\/testsuite>|<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g,
+	)) {
+		if (tag[0].startsWith("</testsuite")) suites.pop();
+		else if (tag[0].startsWith("<testsuite")) {
+			if (!tag[0].endsWith("/>")) suites.push(fileOf(tag[1]) ?? suites.at(-1) ?? "");
+		} else {
+			const name = fileOf(tag[2]) ?? suites.at(-1) ?? "";
+			const count = ran.get(name) ?? { tests: 0, skipped: 0 };
+			count.tests++;
+			if (/<skipped\b/.test(tag[4] ?? "")) count.skipped++;
+			ran.set(name, count);
+		}
 	}
 	for (const [name, count] of ran)
-		if (count.skipped === count.tests) problems.push(`${shard}: every test of ${name} was skipped (${count.tests})`);
+		if (count.skipped === count.tests)
+			problems.push(`${shard}: every test of ${name || "a suite that names no file"} was skipped (${count.tests})`);
 	if (results.length === 0) problems.push(`${shard}: its report holds no test`);
 	if (outcome.exit !== 0 && failed === 0)
 		problems.push(`${shard}: the tests exited ${outcome.exit} and the report shows no failure`);

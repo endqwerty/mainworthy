@@ -24,15 +24,15 @@ issue #81, in the web UI's conflict card.
   measure time with the machine to themselves; the browser tests are skipped, with
   a message, on a machine with no Chromium); `bun run dev` (the server on
   `127.0.0.1:7357`, restarting on change). Bun 1.4; no other runtime or build tool.
-  The check takes 107 s on the 16-thread desktop (2026-10-12, five runs of 107 to
-  108 s; it was 403 s with the files one after another). `bun run test` is the
+  The check takes 116 to 117 s on the 16-thread desktop (2026-10-12, four runs;
+  it was 403 s with the files one after another). `bun run test` is the
   tests alone, printed as they run. One file: `bun test test/suite.test.ts`. One
   shard, as CI runs it: `bun run test --only=parallel --shard=2/5`; the quiet
   tests: `bun run test --only=quiet`. CI (`.github/workflows/check.yml`) runs five shards and the quiet
   tests on a runner each, then one `gate` job reports every shard to Casebook and
   its gate is the result; a shard with no report fails it, and so does a test
-  file in which every test was skipped. Not yet run on GitHub:
-  about three and a half minutes is expected (it was 716 s in one job).
+  file in which every test was skipped. On GitHub the workflow takes about four
+  minutes (2026-10-12, two runs: 4 min 24 s and 3 min 49 s; it was about 12 in one job).
 - **One registry.** A capability is an operation in `src/server/ops/index.ts`. HTTP,
   the OpenAPI document, the CLI, the MCP tools and the web client come from it. Never
   add a route, a command or a tool beside it.
