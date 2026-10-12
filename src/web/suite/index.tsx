@@ -404,11 +404,15 @@ export function SuiteScreen() {
 			const stored = readDraft({ project, id: state.draftId });
 			if (stored?.conflict && stored.conflict.q !== state.q) return;
 			const recorded = bodyOf(head);
+			// Is there text in the card that the recorded merge does not hold? With the merge that was sent in hand,
+			// only a card that differs from it does: the head can differ from what was sent because the server
+			// combined it with a colleague's newer change, and that is not the person's later text. Without it (the
+			// question was answered elsewhere, or the page was reloaded), a field typed by hand is.
 			const laterMerge =
 				stored?.conflict &&
 				sameBody(stored.body, state.mine) &&
 				!sameBody(stored.conflict.merged, recorded) &&
-				(hasTypedMerge(stored.conflict) || (sent && !sameBody(stored.conflict.merged, sent)))
+				(sent ? !sameBody(stored.conflict.merged, sent) : hasTypedMerge(stored.conflict))
 					? stored.conflict.merged
 					: null;
 			const remove =
