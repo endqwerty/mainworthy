@@ -219,7 +219,15 @@ users mean at each step, and reviews measured mocks that test the
 interaction and the architecture together. No user interviews. The phased
 plan is in [roadmap.md](roadmap.md).
 
-## Principles (draft, to be challenged)
+## Principles
+
+**Superseded 2026-10-11 by [decisions/0007-guiding-principles.md](decisions/0007-guiding-principles.md)**,
+which absorbs the seven below into eleven principles (P0 to P10) in tie-break order, with a
+bend rule and a floor. The ranking above is refined there: the record is true
+is a floor above speed, and speed is measured where thought happens (capture,
+record, decide), with budgets in milliseconds, tokens and keystrokes. The
+overall product shape is in [product-design.md](product-design.md). The
+original draft, kept for history:
 
 1. **A test case is a versioned document, not a row.** Every edit is a version;
    a run records the exact version it executed (see "Versioning of test cases").

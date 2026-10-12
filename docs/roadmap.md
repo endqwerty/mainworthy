@@ -56,6 +56,23 @@ skeleton builds and runs its check command.
 
 ## Phase 2: Core vertical slice (Local layer)
 
+**Revised 2026-10-11 (decisions 0007, 0008; `docs/product-design.md` section 9).**
+Phase 2 is **Preview 1**, the thin slice "one red build, three producers":
+capture and versioning, `report` for CI and manual results with explicit
+basis, change runs with the four-verdict gate, planned runs with slots any
+admitted producer fills, the decision machinery with the `adopt`, `failure`,
+`map`, `finding` and rule-only `signoff` kinds, Suite, Queue, Case, Run and
+Change screens, CLI, MCP, `impact`, `since`, `check`, export and import,
+Local layer only. Fragments, custom fields, the flaky detector, requirements
+coverage, release gate rules, the role and freeze paths of sign-off, and the
+Server layer proof move to phase 3, which is the **first usable version**
+(decision 0002's rule: Server proven with the same job suite, persisted jobs,
+backup and restore checked, before that name is used). The exit criteria for
+phase 2 are the jobs and fixtures listed in the design (J11 and J12 below no
+longer apply to phase 2; they move to phase 3 with the features they need).
+The text below is the earlier plan, kept for its remaining exit criteria.
+
+
 One project, folders, cases with steps, shared steps, custom fields,
 versioning with diff and restore, proposed edits with review (the policy
 switch from decision 0003, so J8 is possible), search, bulk move and retag
@@ -81,21 +98,27 @@ tokens per project.
 
 Exit: J5, J6, J9, J10, J13 and J14 pass; A3 passes; A4 to A6 pass within their token budgets; ingest budgets hold;
 flaky state updates incrementally on ingest; each of the three profiles can
-run its workflow end to end with policy switches only.
+run its workflow end to end with policy switches only. Added 2026-10-11, the
+first-usable prerequisites from decision 0002: the same artifact runs the
+Server layer against a server database and passes the same job suite; jobs
+are persisted and crash-safe; backup and restore are checked in the check
+command; the Cloud layer's multi-instance correctness is proven with the
+cache disabled. Only when these pass is the result called the first usable
+version.
 
-## Phase 4: Server and Cloud layers, migration import, reports
+## Phase 4: Scaling, storage, migration import, reports
 
-Same artifact against a server database in a container on the home server;
-object storage for attachments; cache layer only if the benchmark shows a
-budget miss without it, with invalidation across instances tested;
-background workers split out if needed; persisted jobs, migrations, backup
-and restore in the check command. Import from TestRail, Qase and CSV. Basic
-reports over the result stream.
+(Revised 2026-10-11: the layer proofs, persisted jobs and backup/restore
+moved to phase 3 as first-usable prerequisites.) Deployment on the home
+server in a container; object storage for attachments; cache layer only if
+the benchmark shows a budget miss without it, with invalidation across
+instances tested; background workers split out if needed; migrations in the
+check command. Import from TestRail, Qase and CSV. Basic reports over the
+result stream.
 
-Exit: the three layers run from one build and pass the same job suite;
-Local to Server migration preserves identities, history, links and
-attachments; import of a real TestRail or Qase export round-trips; a backup
-restores and is checked.
+Exit: Local to Server migration preserves identities, history, links and
+attachments; import of a real TestRail or Qase export round-trips; object
+storage and any cache pass the same job suite.
 
 ## Standing rules across phases
 

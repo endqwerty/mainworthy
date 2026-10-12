@@ -77,3 +77,16 @@ preference:
   (the cases and results a change touches) without scanning the suite.
 - **Field selection and stable cursors** in the query layer, so a response
   carries only the fields asked for.
+
+### Added with the one evidence model decision (0008)
+
+- **A per-project sequence assigned in commit order**, so changed-since,
+  export and audit are one ordered range read (a throughput ceiling the
+  benchmark must measure).
+- **Batched point reads and writes of 10,000 keys inside one transaction**
+  (ingest resolves every test and writes every result in one commit).
+- **An index-only count** on the open-queue key, and keyed range reads with
+  a limit of one for "my next slot" and "last N results".
+- **Full-text document replacement inside the writing transaction.**
+- **A canonical text round trip** (`print ∘ parse = id`) for cases, policy,
+  gates and charters, as a check.

@@ -24,7 +24,11 @@ Manage test cases, plans, runs and results for a software team, with:
 
 | File | What |
 | --- | --- |
-| [docs/product-vision.md](docs/product-vision.md) | the problem, principles, scope, non-goals |
+| [docs/product-vision.md](docs/product-vision.md) | the problem, priorities, core capabilities, scope, non-goals |
+| [docs/product-design.md](docs/product-design.md) | the synthesised product design: thesis, DX commitments, usage, domain model, operation layer, product surface, first slice |
+| [docs/decisions/0007-guiding-principles.md](docs/decisions/0007-guiding-principles.md) | the principles in tie-break order, the bend rule and the floor |
+| [docs/decisions/0008-one-evidence-model.md](docs/decisions/0008-one-evidence-model.md) | explicit evidence basis, runs as requests for evidence, decisions as the only writer of standing |
+| [docs/design-arena/2026-10-11/](docs/design-arena/2026-10-11/README.md) | the four candidate designs, the judge verdict and the verification rounds behind the product design |
 | [docs/competitive-analysis.md](docs/competitive-analysis.md) | researched comparison of 13 tools: pricing, gating, verified vs reported |
 | [docs/competitors.md](docs/competitors.md) | what each existing tool does, and hypotheses on where it falls short |
 | [docs/roadmap.md](docs/roadmap.md) | phased plan with exit criteria; phase 0 is UX research |
