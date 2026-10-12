@@ -1,8 +1,10 @@
+import { afterAll } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Browser, type BrowserContext, chromium, type Page } from "playwright-core";
+import { testReaders } from "../../scripts/check-plan.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
 import { type SeedResult, seed } from "../../src/web/dev/seed.ts";
 import { call } from "../../src/web/lib/api.ts";
@@ -27,17 +29,68 @@ const ownedDirectories = new Set<string>();
 process.once("exit", () => {
 	for (const path of ownedDirectories) rmSync(path, { recursive: true, force: true });
 });
-let nextPort = 7400 + (process.pid % 50);
-async function freePort(): Promise<{ port: number; release: () => Promise<void> }> {
-	for (let i = 0; i < 50; i++) {
-		const port = 7400 + ((nextPort++ - 7400) % 50);
-		const lock = join(tmpdir(), `casebook-e2e-port-${port}`);
-		try {
-			await mkdir(lock);
-		} catch {
-			continue;
-		}
+/**
+ * The ports of the servers the browser tests start. Any number of test processes share them (parallel workers,
+ * a second checkout on the same machine): a port is held by the directory `casebook-e2e-port-<port>` in the
+ * temporary directory, made with mkdir, which only one process can do. 7400 to 7449 is the range the protocol
+ * began with and 7500 to 7599 was added for parallel workers; a process that knows only the first fifty takes
+ * and frees the same directories. 7450 to 7499 stays out: four test files (agent, execution, settings and
+ * triage) pick their own ports there, with no lock.
+ */
+const PORTS = [...Array.from({ length: 50 }, (_, i) => 7400 + i), ...Array.from({ length: 100 }, (_, i) => 7500 + i)];
+/** No test keeps a server for ten minutes: a lock that old was left by a process that was killed. */
+const ABANDONED_MS = 10 * 60_000;
+let nextPort = process.pid % PORTS.length;
+const made = (lock: string): Promise<boolean> =>
+	mkdir(lock).then(
+		() => true,
+		() => false,
+	);
+const alive = (pid: number): boolean => {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return error instanceof Error && "code" in error && error.code === "EPERM";
+	}
+};
+/**
+ * Frees a lock nobody holds. A killed process cannot release its ports, and a lock was never given up otherwise:
+ * on 2026-10-12 thirteen of the fifty were held by processes that had ended hours before. A lock names its
+ * owner in `pid`; one without the file (the first protocol's) is abandoned when it is old.
+ */
+async function reclaimed(lock: string): Promise<boolean> {
+	const held = await stat(lock).catch(() => null);
+	if (!held) return true;
+	const owner = Number(await readFile(join(lock, "pid"), "utf8").catch(() => ""));
+	const ownerGone = Number.isInteger(owner) && owner > 0 && !alive(owner);
+	if (!ownerGone && Date.now() - held.mtimeMs < ABANDONED_MS) return false;
+	// Several processes can find the same abandoned lock. A rename moves it for exactly one of them.
+	const grave = `${lock}-abandoned-${process.pid}`;
+	try {
+		await rename(lock, grave);
+	} catch {
+		return false;
+	}
+	// If the lock was freed and taken again in between, this moved a live one: put it back.
+	if ((await stat(grave)).ino !== held.ino) {
+		await rename(grave, lock).catch(() => {});
+		return false;
+	}
+	await rm(grave, { recursive: true, force: true });
+	return true;
+}
+/** Takes a port nobody holds, here or in another process. `ports` and `directory` are for the test of this. */
+export async function reservePort(
+	ports: readonly number[] = PORTS,
+	directory = tmpdir(),
+): Promise<{ port: number; release: () => Promise<void> }> {
+	for (let i = 0; i < ports.length; i++) {
+		const port = ports[nextPort++ % ports.length] ?? 0;
+		const lock = join(directory, `casebook-e2e-port-${port}`);
+		if (!(await made(lock)) && !((await reclaimed(lock)) && (await made(lock)))) continue;
 		ownedDirectories.add(lock);
+		await writeFile(join(lock, "pid"), String(process.pid));
 		const release = async () => {
 			await rm(lock, { recursive: true, force: true });
 			ownedDirectories.delete(lock);
@@ -50,7 +103,7 @@ async function freePort(): Promise<{ port: number; release: () => Promise<void> 
 			await release();
 		}
 	}
-	throw new Error("No free Casebook e2e port in 7400..7449");
+	throw new Error("No free Casebook e2e port in 7400..7449 or 7500..7599");
 }
 export async function startServer({
 	cases = 0,
@@ -65,7 +118,7 @@ export async function startServer({
 } = {}): Promise<Server> {
 	const dataDir = await mkdtemp(join(tmpdir(), `casebook-e2e-${process.pid}-`));
 	ownedDirectories.add(dataDir);
-	const reservation = await freePort();
+	const reservation = await reservePort();
 	const port = reservation.port;
 	const token = crypto.randomUUID();
 	const url = `http://127.0.0.1:${port}`;
@@ -78,6 +131,7 @@ export async function startServer({
 			CASEBOOK_PORT: String(port),
 			CASEBOOK_MODE: mode,
 			CASEBOOK_OWNER_TOKEN: token,
+			CASEBOOK_READERS: process.env.CASEBOOK_READERS ?? testReaders(),
 		},
 		stdout: "ignore",
 		stderr: "pipe",
@@ -123,6 +177,30 @@ export async function launchBrowser({ args = [] }: { args?: string[] } = {}): Pr
 		args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", ...args],
 	});
 }
+/**
+ * One Chromium for a test file, and for every page a test opens a context of its own: its own storage, cache
+ * and permissions, as a browser of its own had. A launch for each page was a quarter of the longest file's time.
+ * Bun runs this hook after the file's last test. Where nothing would close a shared browser, each page has its
+ * own, as before: outside `bun test` (`screenshots.ts`, `profile-latency.ts`), and in the later files of a run
+ * with no `--isolate` or `--parallel`, which load this module once.
+ */
+let shared: Promise<Browser> | null = null;
+let closesShared = false;
+try {
+	afterAll(async () => {
+		closesShared = false;
+		await (await shared?.catch(() => null))?.close();
+		shared = null;
+	});
+	closesShared = true;
+} catch {}
+async function fileBrowser(): Promise<Browser | null> {
+	if (!closesShared) return null;
+	// Bun ends the processes a test started when the test runs out of time, this browser among them. The tests
+	// after it get a new one: one test's failure is not the failure of the rest of its file.
+	if (!(await shared?.catch(() => null))?.isConnected()) shared = launchBrowser();
+	return shared;
+}
 export type PageHarness = {
 	page: Page;
 	context: BrowserContext;
@@ -141,8 +219,10 @@ export async function openPage(
 		browser,
 	}: { path?: string; signedIn?: boolean; browser?: Browser } = {},
 ): Promise<PageHarness> {
-	const ownedBrowser = browser ?? (await launchBrowser());
+	const lent = browser ?? (await fileBrowser());
+	const ownedBrowser = lent ?? (await launchBrowser());
 	const context = await ownedBrowser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
+	routesWaitForInterception(context);
 	if (signedIn) await context.request.post(`${server.url}/api/login`, { data: { token: server.token } });
 	const page = await context.newPage();
 	const errors: string[] = [];
@@ -179,7 +259,7 @@ export async function openPage(
 		keys: () => keyCount(page),
 		close: async () => {
 			await context.close();
-			if (!browser) await ownedBrowser.close();
+			if (!lent) await ownedBrowser.close();
 		},
 	};
 }
@@ -193,6 +273,68 @@ export async function paste(page: Page, text: string): Promise<void> {
 	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
 	await page.evaluate((value) => navigator.clipboard.writeText(value), text);
 	await page.keyboard.press("Control+V");
+}
+/**
+ * `page.route` and `context.route` return when the browser has accepted the interception. A page that is already
+ * open starts sending its requests through it a moment later, and it handles a key pressed in between first:
+ * the request that key sends goes to the server unseen, the handler never runs and there is no `request` event.
+ * On a quiet machine the moment is too short to hit; beside other tests it failed 13 of 18 runs of one file
+ * (2026-10-12). This returns once a request from the page has been intercepted. Every route installed on a
+ * context or page from `openPage` waits for it (`routesWaitForInterception`), so a test does not call it.
+ */
+export async function interceptionLive(page: Page): Promise<void> {
+	// A page with no document sends nothing yet: a route installed before `goto` is in place for all it loads.
+	if (page.isClosed() || !/^https?:/.test(page.url())) return;
+	const id = crypto.randomUUID();
+	const probe = (url: URL) => url.searchParams.get("interception") === id;
+	const route = unwrappedRoute.get(page) ?? page.route.bind(page);
+	const end = Date.now() + 10_000;
+	try {
+		await route(probe, (route) => route.fulfill({ status: 204, headers: { "x-casebook-e2e": "intercepted" } }));
+		while (Date.now() < end) {
+			const intercepted = await Promise.race([
+				page.evaluate(
+					(url) =>
+						fetch(url).then(
+							(reply) => reply.headers.get("x-casebook-e2e") === "intercepted",
+							() => false,
+						),
+					`/healthz?interception=${id}`,
+				),
+				Bun.sleep(Math.max(0, end - Date.now())).then(() => false),
+			]);
+			if (intercepted) return;
+		}
+	} catch {
+		// The page closed or went to another document meanwhile. Neither has a key waiting ahead of the switch.
+		return;
+	} finally {
+		await page.unroute(probe).catch(() => {});
+	}
+	throw new Error(`Interception did not start on ${page.url()} within 10 s of installing a route`);
+}
+const unwrappedRoute = new WeakMap<Page, Page["route"]>();
+/** Makes installing a route on the context, or on any page it has or opens, wait until the route is in force. */
+function routesWaitForInterception(context: BrowserContext): void {
+	const live = () => Promise.all(context.pages().map(interceptionLive));
+	const contextRoute = context.route.bind(context);
+	context.route = async (...args) => {
+		const installed = await contextRoute(...args);
+		await live();
+		return installed;
+	};
+	const wrap = (page: Page) => {
+		if (unwrappedRoute.has(page)) return;
+		const pageRoute = page.route.bind(page);
+		unwrappedRoute.set(page, pageRoute);
+		page.route = async (...args) => {
+			const installed = await pageRoute(...args);
+			await live();
+			return installed;
+		};
+	};
+	for (const page of context.pages()) wrap(page);
+	context.on("page", wrap);
 }
 export async function eventually<T>(read: () => Promise<T>, accepts: (value: T) => boolean): Promise<T> {
 	const end = Date.now() + 10_000;
