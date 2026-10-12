@@ -1,0 +1,151 @@
+// What the check runs and how long it may take. One place, read by `scripts/check.ts`, `scripts/ci-gate.ts`,
+// the browser tests' set-up and `test/check.test.ts`.
+import { existsSync, readFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
+
+/** Per-file durations in milliseconds, written by Bun. Shards are balanced by it; the slowest files start first. */
+export const TIMINGS = "scripts/test-timings.json";
+
+/**
+ * The tests that compare a measured time with a limit. They run after the parallel phase, on a machine that
+ * runs nothing else, so that what they measure is the product. Beside sixteen workers on 2026-10-12 the capture
+ * latency was 143 ms at the 95th percentile against a budget of 100 (13 ms alone), the 5,000-result ingest
+ * 1,178 ms against 1,000 (182 alone) and the JUnit parse 623 ms against 500.
+ * A test belongs here only if it measures time: one that fails beside other tests for another reason shares
+ * something it should not, and that is what to fix.
+ */
+export const QUIET = [
+	"test/e2e/latency-10000.test.ts",
+	"test/e2e/latency-2000.test.ts",
+	"test/budgets.test.ts",
+	"src/surfaces/formats/junit.test.ts",
+	"src/core/signature.test.ts",
+];
+
+/**
+ * How many of the quiet files run at once. On the 16-thread desktop the two latency files side by side measured
+ * what each measures alone (95th percentiles of 11.7, 15.3, 16.2 and 16.2 ms for both sizes; alone 13.1, 15.4,
+ * 16.2 and 16.2; the budget is 100), and one after the other they are 69 s of the check. Two there, one
+ * anywhere smaller.
+ */
+export const quietWorkers = (cores = availableParallelism()): number => (cores >= 16 ? 2 : 1);
+
+/**
+ * How many workers the parallel phase has: half the threads. A browser test is a test process, a server and a
+ * browser, so more workers than cores only wait for each other. The parallel phase on the 16-thread desktop,
+ * 2026-10-12: 6 workers 79 s, 8 workers 70 s, 10 workers 75 s, 12 workers 81 s, 16 workers 81 s with tests
+ * running out of their time.
+ */
+export const parallelWorkers = (cores = availableParallelism()): number => Math.max(1, Math.floor(cores / 2));
+
+/**
+ * The reader threads of a server a test starts, where CASEBOOK_READERS does not say. A server takes the cores
+ * less two, up to eight (`src/server/readers.ts`), and the browser tests start several hundred servers: on the
+ * 16-thread desktop the eight threads were 38% of the CPU time of the longest browser file (121 CPU-seconds;
+ * 76 with two). Two is still a pool, so a read still leaves the server's thread. A 2-core CI runner keeps the
+ * one reader it always had. The tests about the pool itself name their own count.
+ */
+export const testReaders = (cores = availableParallelism()): string => String(Math.max(1, Math.min(2, cores - 2)));
+
+export type Limits = { warn: number; fail: number };
+
+/**
+ * Seconds the tests of one whole `bun run check` may take (the parallel phase plus the quiet one), on the
+ * 16-thread desktop. Measured there on 2026-10-12 with nothing else running: 107 s (70 s and 37 s). Over `warn` the
+ * check says so; over `fail`, the two minutes the check was promised to stay under (issue #77), it fails.
+ * Do not raise them: make the check faster (AGENTS.md).
+ */
+export const LIMITS: Limits = { warn: 115, fail: 120 };
+
+/** The machine the limits were measured on. On a smaller one, a run over the limit is reported and does not fail. */
+export const REFERENCE_THREADS = 16;
+
+/**
+ * The limits are for a machine that runs nothing else. When other work keeps more than this many cores busy
+ * (another agent's tests: on 2026-10-12 a load generator beside the check made it take 283 s), a run over the
+ * limit is reported and does not fail. The desktop's own background is under one core.
+ */
+export const SHARED_CORES = 2;
+
+/** The shards the workflow splits the parallel phase into; `.github/workflows/check.yml` lists as many. */
+export const CI_SHARDS = 5;
+
+/**
+ * Seconds the tests of one CI shard may take. Not measured on GitHub's runner yet: the suite took 716 s there in
+ * one job, which is about 125 s for each of five shards and 100 s for the quiet one. Set from the first pushed
+ * runs; until then these only catch a shard that takes twice what is expected. A shard has ten minutes in all.
+ */
+export const CI_SHARD_LIMITS: Limits = { warn: 180, fail: 240 };
+
+export function over(seconds: number, limits: Limits): "ok" | "warn" | "fail" {
+	return seconds > limits.fail ? "fail" : seconds > limits.warn ? "warn" : "ok";
+}
+
+export const seconds = (value: number): string => `${value.toFixed(1)} s`;
+
+export type Phase = "parallel" | "quiet";
+export type TestOptions = {
+	/** `i/n`: the parallel phase runs only that share of its files. */
+	shard?: string | undefined;
+	/** Workers, where the phase's own number is not wanted. */
+	workers?: number | undefined;
+	junit?: string | undefined;
+	/** The timings file Bun reads, and writes this run's durations to. */
+	timings: string;
+	/** Print the tests that failed and not the hundreds that passed. */
+	failuresOnly?: boolean | undefined;
+};
+
+/** The `bun test` arguments of one phase. Every test file is in exactly one of the two. */
+export function testArgs(phase: Phase, options: TestOptions): string[] {
+	const workers = options.workers ?? (phase === "quiet" ? quietWorkers() : parallelWorkers());
+	return [
+		"test",
+		// Workers also when there is one: each file then has its own globals and modules, as beside the others.
+		`--parallel=${workers}`,
+		// When the run is stopped, the servers and browsers its tests started stop with it.
+		"--no-orphans",
+		`--timings=${options.timings}`,
+		"--update-timings",
+		...(options.junit ? ["--reporter=junit", `--reporter-outfile=${options.junit}`] : []),
+		...(options.failuresOnly ? ["--only-failures"] : []),
+		...(phase === "quiet"
+			? QUIET.map((file) => `./${file}`)
+			: [
+					...QUIET.map((file) => `--path-ignore-patterns=${file}`),
+					...(options.shard ? [`--shard=${options.shard}`] : []),
+					"src",
+					"test",
+				]),
+	];
+}
+
+/** What a run that wrote a JUnit file leaves beside it, for `scripts/ci-gate.ts`. */
+export type Outcome = { exit: number; seconds: number };
+
+export const outcomePath = (junit: string): string => `${junit.replace(/\.xml$/, "")}.json`;
+
+export function readOutcome(path: string): Outcome | null {
+	if (!existsSync(path)) return null;
+	try {
+		const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+		if (typeof value !== "object" || value === null || !("exit" in value) || !("seconds" in value)) return null;
+		return typeof value.exit === "number" && typeof value.seconds === "number"
+			? { exit: value.exit, seconds: value.seconds }
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+/** The slowest files of a run, from the timings Bun wrote. */
+export function slowest(timings: unknown, count: number): { file: string; seconds: number }[] {
+	if (typeof timings !== "object" || timings === null || !("files" in timings)) return [];
+	const files = timings.files;
+	if (typeof files !== "object" || files === null) return [];
+	return Object.entries(files)
+		.filter((entry): entry is [string, number] => typeof entry[1] === "number")
+		.sort((a, b) => b[1] - a[1])
+		.slice(0, count)
+		.map(([file, ms]) => ({ file, seconds: ms / 1000 }));
+}
