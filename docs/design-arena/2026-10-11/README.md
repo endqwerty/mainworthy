@@ -12,7 +12,7 @@ traced; nothing here is normative. The brief every candidate received is
 | [d](candidates/d/design.md) | decision-queue centric (disclosed reading the rubric) | Claude Opus 5.5 | 14/30 |
 
 - `judge.md`: the independent cross-judge's verdict (GPT 6.1 Sol).
-- `verify-r1.md` to `verify-r4.md`, ...: independent verification rounds of
+- `verify-r1.md` to `verify-r5.md`, ...: independent verification rounds of
   the synthesis (GPT 6.1 Sol), each naming the revision it judged.
 
 The orchestrator was Claude Fable 5.1. The synthesis decision, including how

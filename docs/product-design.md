@@ -525,7 +525,7 @@ type Batch = { id; project; key: Hash /* H(target, job, attempt, payload digest)
 // KEY (project, key) unique         → the same report twice is a no-op with the same receipt
 // KEY (project, state='accepted')   → the gate horizon (6.4)
 type VersionManifest = { test: TestKey; case: CaseId; version: VersionNo }[]   // written by `casebook prepare` before the tests run
-type ResultIn = { test: TestKey | { case: CaseId; slot?: RunId }; outcome; attempt?; durationMs?; failure?: { message; at? }
+type ResultIn = { test: TestKey | { case: CaseId; run?: RunId /* the run whose pinned slot this manual result is for; never a SlotId */ }; outcome; attempt?; durationMs?; failure?: { message; at? }
                   steps?; note?; attachments?: BlobRef[]; annotation?: { case: CaseId; version: VersionNo }; corrects?: ResultId }
 // One canonical constructor, used for every result from every entry (manual keypress, agent batch, parsed CI file):
 //   evidence.acceptResult(ctx, batch, slot: Slot | null, in: ResultIn): Result | Rejected
@@ -607,8 +607,10 @@ type Slot = { id: SlotId; run: RunId; case: CaseId; version: VersionNo; claim: H
               waiver: DecisionId | null }                                   // WRITER: effect of a 'gap' decision
 // agg is keyed by actor because the state rules are about actors: satisfied = at least minActors actors with a pass and
 // no actor with an uncorrected fail; failing = an uncorrected fail and no other actor's pass; disputed = an uncorrected
-// fail from one actor and a pass from another. Actors per slot are few, so the map is small; it is rebuilt from SlotResult.
-type Fill = { result: ResultId | ReviewId; by: ActorId; method: MethodKind; outcome; basis: Basis['b']; admitted: 'exact' | 'assumed' | 'same-claim' | null }
+// fail from one actor and a pass from another. Actors per slot are few (unmeasured; never capped, never read from
+// `recent`). agg is rebuilt from the slot's SlotResult rows: for an exercise slot from the admitted results' actors and
+// outcomes; for a review slot each admitted Review row counts as that reviewer's pass, so one row satisfies it.
+type Fill = { evidence: SlotResult['evidence']; by: ActorId; method: MethodKind | 'review'; outcome; basis: Basis['b'] | 'review'; admitted: 'exact' | 'assumed' | 'same-claim' | 'review' | null }
 // KEY (id) unique · KEY (run, rank) · KEY (run, assignee, state='missing', rank) → "my next slot" · KEY (case, run) → open runs wanting this case
 type DependsOn = { run: RunId; decision: DecisionId; expires: Instant | null }   // KEY both ways; KEY (project, expires)
 
@@ -656,18 +658,25 @@ slot, obligation, run)`:
 ```ts
 // The durable many-to-many between slots and the results that qualify for them. One immutable Result may
 // qualify for several runs (a CI result fills a change run and two planned runs on the same build).
-type SlotResult = { slot: SlotId; run: RunId; result: ResultId; admitted: Fill['admitted']; corrected: boolean }
-// One row per (slot, result) that `qualifies` admitted: a result that qualifies for two obligations on the same
-// case has two rows; a result that qualifies for only the permissive one has one.
-// KEY (slot, result) unique · KEY (result) → every slot a correction must revisit
-// WRITER: runs.fold, which calls `qualifies` per candidate slot (`Slot (case, run)` for every matching run in
-// `Run (project, state='open')`) at ingest, at `plan` for prior results on matching targets (the "already: 171"),
-// and on a late batch to a closed run. The slot's complete effective set is its SlotResult rows minus corrected.
+type SlotResult = { slot: SlotId; run: RunId; evidence: { t: 'result'; id: ResultId } | { t: 'review'; id: ReviewId }
+                    admitted: Fill['admitted']; corrected: boolean }
+// One row per (slot, evidence) that qualification admitted. Two branches, never mixed: an exercise slot admits results
+// through `qualifies` (a result that qualifies for two obligations on the same case has two rows; one that qualifies
+// for only the permissive one has one); a review slot admits a Review row whose case, basis and lens match the slot's
+// pinned version and obligation and whose reviewer is not the version's author when `independent` is set. A result
+// never produces a review-slot row and a review never produces an exercise-slot row.
+// KEY (slot, evidence) unique · KEY (evidence) → every slot a correction must revisit
+// WRITER: runs.fold, which qualifies each candidate slot (`Slot (case, run)` for every matching run in
+// `Run (project, state='open')`) at ingest and at `claim`, at `plan` for prior results and reviews on matching
+// targets and bases (the "already: 171"), and on a late batch to a closed run. The slot's complete effective set is
+// its SlotResult rows minus corrected.
 ```
 
 A review obligation is filled only by a `Review` row at the slot's basis
-(and, if `independent`, by an actor other than the version's author). It is
-never filled by a result, and a result never fills a review obligation.
+(and, if `independent`, by an actor other than the version's author),
+recorded as a review-branch `SlotResult` row when `claim` writes the review
+or when `plan` finds one. It is never filled by a result, and a result never
+fills a review obligation.
 
 **Horizon.** Accepting a batch (durable staging of its normalised results,
 before any processing) increments `horizon.outstanding` and sets
