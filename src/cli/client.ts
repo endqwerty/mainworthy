@@ -4,6 +4,7 @@ import { OPS } from "../server/ops/index.ts";
 import type { Reply } from "../server/ops/registry.ts";
 import type { Args } from "./args.ts";
 import { CliError } from "./errors.ts";
+import { REPLY_SCHEMAS } from "./replies.ts";
 
 const ErrorSchema = z.object({
 	code: z.enum(["invalid", "unauthenticated", "forbidden", "not_found", "conflict", "internal"]),
@@ -120,7 +121,8 @@ export class Client {
 
 	async call<N extends OpName>(op: N, input: Api[N]["input"]): Promise<Api[N]["reply"]> {
 		const result = await this.operation(op, input);
-		// The envelope has been validated. Result types are owned by the same Api contract as the server.
-		return result as Api[N]["reply"];
+		const parsed = REPLY_SCHEMAS[op].safeParse(result);
+		if (!parsed.success) throw new CliError("internal", `the server returned invalid ${op} data`);
+		return parsed.data;
 	}
 }

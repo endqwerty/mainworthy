@@ -1,0 +1,1715 @@
+{
+  "stack": "Go",
+  "mode": {
+    "embedded": {
+      "W1": {
+        "p50": 0.165791,
+        "p95": 0.277943,
+        "p99": 1.760047,
+        "max": 9.173135,
+        "errors": 0,
+        "check": "Requested ref, head and body agree; steps present",
+        "iterations": 2000,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 0.048796,
+          "p95": 0.084614,
+          "p99": 1.596602,
+          "max": 9.028721
+        }
+      },
+      "W2": {
+        "p50": 2.25027,
+        "p95": 3.657841,
+        "p99": 7.92525,
+        "max": 52.221036,
+        "errors": 0,
+        "check": "50 ordered rows after cursor; glyph cardinality; >=50000 open; <=3 reads",
+        "iterations": 1000,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 1.90154,
+          "p95": 3.232155,
+          "p99": 7.58835,
+          "max": 51.902141
+        }
+      },
+      "W3": {
+        "p50": 19.235035,
+        "p95": 41.993861,
+        "p99": 52.625341,
+        "max": 69.99565,
+        "errors": 0,
+        "check": "20559 returned rows across 499 nonempty measured queries; <=50 relevance-ordered rows; 20% area filters checked",
+        "iterations": 500,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 18.986334,
+          "p95": 41.714484,
+          "p99": 52.365184,
+          "max": 69.609811
+        }
+      },
+      "W4": {
+        "p50": 0.658475,
+        "p95": 12.548293,
+        "p99": 33.892546,
+        "max": 83.630586,
+        "errors": 0,
+        "check": "1100 versions/commands/decisions; 20 identical replay receipts and no writes",
+        "iterations": 1000,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 0.496863,
+          "p95": 12.328021,
+          "p99": 33.657041,
+          "max": 83.413365
+        }
+      },
+      "W5": {
+        "p50": 387.09055,
+        "p95": 536.466,
+        "p99": 560.236412,
+        "max": 560.236412,
+        "errors": 0,
+        "check": "1200000 results,12000 new tests,1200 new signatures; basis/tally/replay verified",
+        "iterations": 20,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 342.084693,
+          "p95": 488.859261,
+          "p99": 514.35568,
+          "max": 514.35568
+        }
+      },
+      "W5a": {
+        "p50": 23.563411,
+        "p95": 26.74649,
+        "p99": 28.179716,
+        "max": 28.179716,
+        "errors": 0,
+        "check": "10000 parsed tests,200 failures,>=390-byte failure bodies",
+        "iterations": 20,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 23.563411,
+          "p95": 26.74649,
+          "p99": 28.179716,
+          "max": 28.179716
+        }
+      },
+      "W6": {
+        "p50": 0.223386,
+        "p95": 0.325382,
+        "p99": 0.767518,
+        "max": 5.835723,
+        "errors": 0,
+        "check": "20 rows for requested test; descending sequence",
+        "iterations": 2000,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 0.074384,
+          "p95": 0.128178,
+          "p99": 0.563344,
+          "max": 5.635488
+        }
+      },
+      "W7": {
+        "p50": 0.097438,
+        "p95": 0.130409,
+        "p99": 0.194335,
+        "max": 0.654415,
+        "errors": 0,
+        "check": "Requested commit; valid tally JSON",
+        "iterations": 2000,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 0.016009,
+          "p95": 0.022888,
+          "p99": 0.026203,
+          "max": 0.197813
+        }
+      },
+      "W8": {
+        "p50": 1.814821,
+        "p95": 2.541029,
+        "p99": 2.7056,
+        "max": 2.859268,
+        "errors": 0,
+        "check": "50 open questions with valid evidence; indexed total",
+        "iterations": 1000,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 1.528171,
+          "p95": 2.223757,
+          "p99": 2.337278,
+          "max": 2.547334
+        }
+      },
+      "W9": {
+        "p50": 2.270838,
+        "p95": 7.891515,
+        "p99": 12.943761,
+        "max": 61.689245,
+        "errors": 0,
+        "check": "16 clients, equal rotating mix; row invariants checked; separate writers",
+        "iterations": 107750,
+        "warmup": 0,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 0.330571,
+          "p95": 5.476888,
+          "p99": 9.450726,
+          "max": 53.625494
+        },
+        "readsPerSecond": 5284.372815968714,
+        "readCount": 107750,
+        "seconds": 20.390310024,
+        "ingest": {
+          "p50": 622.620677,
+          "p95": 1026.735063,
+          "p99": 1054.00104,
+          "max": 1054.00104,
+          "errors": 0,
+          "check": "10000 results per successful ingest",
+          "iterations": 31,
+          "warmup": 0,
+          "warmupErrors": 0,
+          "inProcess": {
+            "p50": 475.139137,
+            "p95": 834.029796,
+            "p99": 877.697565,
+            "max": 877.697565
+          }
+        },
+        "save": {
+          "p50": 17.825526,
+          "p95": 494.437032,
+          "p99": 791.376067,
+          "max": 851.219924,
+          "errors": 0,
+          "check": "Expected base advances per successful save",
+          "iterations": 201,
+          "warmup": 0,
+          "warmupErrors": 0,
+          "inProcess": {
+            "p50": 16.706409,
+            "p95": 493.62909,
+            "p99": 791.083361,
+            "max": 850.548236
+          }
+        }
+      }
+    },
+    "server": {
+      "W1": {
+        "p50": 0.18827,
+        "p95": 0.24223,
+        "p99": 0.32381,
+        "max": 0.843134,
+        "errors": 0,
+        "check": "Requested ref, head and body agree; steps present",
+        "iterations": 2000,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 0.086149,
+          "p95": 0.114896,
+          "p99": 0.141648,
+          "max": 0.724361
+        }
+      },
+      "W2": {
+        "p50": 4.911503,
+        "p95": 7.533827,
+        "p99": 8.182582,
+        "max": 8.752115,
+        "errors": 0,
+        "check": "50 ordered rows after cursor; glyph cardinality; >=50000 open; <=3 reads",
+        "iterations": 1000,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 4.593632,
+          "p95": 7.20275,
+          "p99": 7.806347,
+          "max": 8.237958
+        }
+      },
+      "W3": {
+        "p50": 11.233653,
+        "p95": 31.081908,
+        "p99": 41.82904,
+        "max": 43.772863,
+        "errors": 0,
+        "check": "20559 returned rows across 499 nonempty measured queries; <=50 relevance-ordered rows; 20% area filters checked",
+        "iterations": 500,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 10.951887,
+          "p95": 30.765546,
+          "p99": 41.598362,
+          "max": 43.508251
+        }
+      },
+      "W4": {
+        "p50": 15.254157,
+        "p95": 18.919161,
+        "p99": 24.525912,
+        "max": 80.328055,
+        "errors": 0,
+        "check": "1100 versions/commands/decisions; 20 identical replay receipts and no writes",
+        "iterations": 1000,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 15.043173,
+          "p95": 18.714949,
+          "p99": 24.295551,
+          "max": 80.13045
+        }
+      },
+      "W5": {
+        "p50": 253.00267,
+        "p95": 286.670973,
+        "p99": 297.236171,
+        "max": 297.236171,
+        "errors": 0,
+        "check": "1200000 results,12000 new tests,1200 new signatures; basis/tally/replay verified",
+        "iterations": 20,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 205.607303,
+          "p95": 237.167651,
+          "p99": 244.812603,
+          "max": 244.812603
+        }
+      },
+      "W5a": {
+        "p50": 23.133367,
+        "p95": 27.297972,
+        "p99": 27.550409,
+        "max": 27.550409,
+        "errors": 0,
+        "check": "10000 parsed tests,200 failures,>=390-byte failure bodies",
+        "iterations": 20,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 23.133367,
+          "p95": 27.297972,
+          "p99": 27.550409,
+          "max": 27.550409
+        }
+      },
+      "W6": {
+        "p50": 0.247829,
+        "p95": 0.313718,
+        "p99": 0.427315,
+        "max": 0.58237,
+        "errors": 0,
+        "check": "20 rows for requested test; descending sequence",
+        "iterations": 2000,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 0.105017,
+          "p95": 0.138406,
+          "p99": 0.165215,
+          "max": 0.29095
+        }
+      },
+      "W7": {
+        "p50": 0.139702,
+        "p95": 0.179976,
+        "p99": 0.220421,
+        "max": 0.541767,
+        "errors": 0,
+        "check": "Requested commit; valid tally JSON",
+        "iterations": 2000,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 0.05575,
+          "p95": 0.076504,
+          "p99": 0.091275,
+          "max": 0.442761
+        }
+      },
+      "W8": {
+        "p50": 5.115308,
+        "p95": 6.876867,
+        "p99": 8.00849,
+        "max": 8.599666,
+        "errors": 0,
+        "check": "50 open questions with valid evidence; indexed total",
+        "iterations": 1000,
+        "warmup": 100,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 4.768658,
+          "p95": 6.496042,
+          "p99": 7.628778,
+          "max": 8.252932
+        }
+      },
+      "W9": {
+        "p50": 2.471701,
+        "p95": 15.326035,
+        "p99": 19.536784,
+        "max": 34.954924,
+        "errors": 0,
+        "check": "16 clients, equal rotating mix; row invariants checked; separate writers",
+        "iterations": 56600,
+        "warmup": 0,
+        "warmupErrors": 0,
+        "inProcess": {
+          "p50": 0.939809,
+          "p95": 13.588468,
+          "p99": 17.55072,
+          "max": 33.607462
+        },
+        "readsPerSecond": 2806.8548639736905,
+        "readCount": 56600,
+        "seconds": 20.164918652,
+        "ingest": {
+          "p50": 474.285297,
+          "p95": 630.851259,
+          "p99": 653.814982,
+          "max": 653.814982,
+          "errors": 0,
+          "check": "10000 results per successful ingest",
+          "iterations": 41,
+          "warmup": 0,
+          "warmupErrors": 0,
+          "inProcess": {
+            "p50": 325.030238,
+            "p95": 455.421788,
+            "p99": 489.33236,
+            "max": 489.33236
+          }
+        },
+        "save": {
+          "p50": 19.540444,
+          "p95": 341.466087,
+          "p99": 452.765951,
+          "max": 500.56735,
+          "errors": 0,
+          "check": "Expected base advances per successful save",
+          "iterations": 320,
+          "warmup": 0,
+          "warmupErrors": 0,
+          "inProcess": {
+            "p50": 18.456413,
+            "p95": 340.69044,
+            "p99": 452.255873,
+            "max": 499.576918
+          }
+        }
+      }
+    }
+  },
+  "extras": {
+    "driver": "mattn/go-sqlite3",
+    "coldStart": {
+      "embedded": {
+        "p50": 4.122528,
+        "p95": 4.297207,
+        "p99": 4.297207,
+        "max": 4.297207
+      },
+      "server": {
+        "p50": 4.253168,
+        "p95": 4.376678,
+        "p99": 4.376678,
+        "max": 4.376678
+      }
+    },
+    "coldStartSamples": {
+      "embedded": [
+        4.297207,
+        4.122528,
+        3.621351,
+        4.251291,
+        3.739547
+      ],
+      "server": [
+        4.376678,
+        4.370419,
+        4.166942,
+        4.198086,
+        4.253168
+      ]
+    },
+    "residentMB": {
+      "embedded": 328.50390625,
+      "server": 42.66796875
+    },
+    "registry": {
+      "protocolVersion": "2025-11-25",
+      "toolsListResultBytes": 4309,
+      "toolsListWireBytes": 4344,
+      "checks": "Three schemas identical across HTTP/OpenAPI/MCP; stdio get and generated CLI get returned ref 1"
+    },
+    "runSeconds": 208,
+    "driverComparison": {
+      "selection": "cgo",
+      "criterion": "Repeated HTTP search p95 median and budget headroom; report ingest medians and overlapping run ranges separately",
+      "summary": {
+        "cgo": {
+          "artifactBytes": 16917256,
+          "static": true,
+          "runs": 5,
+          "residentMB": 90.25390625,
+          "workloads": {
+            "W1": {
+              "p50Median": 1.402472,
+              "p50Min": 1.277745,
+              "p50Max": 1.79842,
+              "p95Median": 6.385059,
+              "p95Min": 5.448215,
+              "p95Max": 7.282173
+            },
+            "W2": {
+              "p50Median": 1.97513,
+              "p50Min": 1.92292,
+              "p50Max": 2.025468,
+              "p95Median": 15.773788,
+              "p95Min": 13.690202,
+              "p95Max": 16.592697
+            },
+            "W3": {
+              "p50Median": 18.428678,
+              "p50Min": 18.00649,
+              "p50Max": 23.548079,
+              "p95Median": 39.802552,
+              "p95Min": 36.611265,
+              "p95Max": 46.109474
+            },
+            "W4": {
+              "p50Median": 0.575313,
+              "p50Min": 0.556914,
+              "p50Max": 0.704003,
+              "p95Median": 15.11873,
+              "p95Min": 14.555975,
+              "p95Max": 15.4732
+            },
+            "W5": {
+              "p50Median": 284.718212,
+              "p50Min": 259.77224,
+              "p50Max": 306.175257,
+              "p95Median": 286.88704,
+              "p95Min": 276.578813,
+              "p95Max": 328.623082
+            }
+          }
+        },
+        "pure": {
+          "artifactBytes": 17977504,
+          "static": true,
+          "runs": 5,
+          "residentMB": 79.84375,
+          "workloads": {
+            "W1": {
+              "p50Median": 1.653305,
+              "p50Min": 1.3035,
+              "p50Max": 1.876219,
+              "p95Median": 7.003741,
+              "p95Min": 6.248659,
+              "p95Max": 7.317305
+            },
+            "W2": {
+              "p50Median": 5.631932,
+              "p50Min": 3.975911,
+              "p50Max": 5.807728,
+              "p95Median": 19.135534,
+              "p95Min": 17.146101,
+              "p95Max": 21.859329
+            },
+            "W3": {
+              "p50Median": 45.898314,
+              "p50Min": 43.13602,
+              "p50Max": 55.036265,
+              "p95Median": 107.799994,
+              "p95Min": 99.704571,
+              "p95Max": 125.133754
+            },
+            "W4": {
+              "p50Median": 0.677817,
+              "p50Min": 0.628125,
+              "p50Max": 0.793635,
+              "p95Median": 15.142176,
+              "p95Min": 14.859685,
+              "p95Max": 15.416121
+            },
+            "W5": {
+              "p50Median": 317.388774,
+              "p50Min": 305.309042,
+              "p50Max": 420.310053,
+              "p95Median": 344.467204,
+              "p95Min": 326.791741,
+              "p95Max": 483.678496
+            }
+          }
+        }
+      },
+      "runs": {
+        "cgo": [
+          {
+            "driver": "mattn/go-sqlite3",
+            "residentMB": 93.37109375,
+            "results": {
+              "W1": {
+                "p50": 1.277745,
+                "p95": 5.657666,
+                "p99": 8.028181,
+                "max": 8.168977,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.117746,
+                  "p95": 5.466933,
+                  "p99": 7.832903,
+                  "max": 7.999497
+                }
+              },
+              "W2": {
+                "p50": 2.025468,
+                "p95": 15.748156,
+                "p99": 22.831605,
+                "max": 26.508574,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.683162,
+                  "p95": 15.401832,
+                  "p99": 22.446495,
+                  "max": 26.141117
+                }
+              },
+              "W3": {
+                "p50": 18.00649,
+                "p95": 38.494603,
+                "p99": 46.198133,
+                "max": 52.797939,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 100,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 17.713795,
+                  "p95": 38.180926,
+                  "p99": 45.929861,
+                  "max": 52.541029
+                }
+              },
+              "W4": {
+                "p50": 0.576102,
+                "p95": 15.4732,
+                "p99": 36.678119,
+                "max": 38.503982,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 0.434154,
+                  "p95": 15.261811,
+                  "p99": 36.498687,
+                  "max": 38.298379
+                }
+              },
+              "W5": {
+                "p50": 267.169175,
+                "p95": 276.578813,
+                "p99": 276.578813,
+                "max": 276.578813,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 3,
+                "warmup": 1,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 221.272396,
+                  "p95": 231.617406,
+                  "p99": 231.617406,
+                  "max": 231.617406
+                }
+              }
+            },
+            "wallSeconds": 10.535400765977101
+          },
+          {
+            "driver": "mattn/go-sqlite3",
+            "residentMB": 87.30078125,
+            "results": {
+              "W1": {
+                "p50": 1.422407,
+                "p95": 6.596412,
+                "p99": 7.901333,
+                "max": 8.428215,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.272868,
+                  "p95": 6.412192,
+                  "p99": 7.72099,
+                  "max": 8.256904
+                }
+              },
+              "W2": {
+                "p50": 2.008357,
+                "p95": 13.690202,
+                "p99": 19.038848,
+                "max": 25.415526,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.721589,
+                  "p95": 13.367442,
+                  "p99": 18.728932,
+                  "max": 25.076632
+                }
+              },
+              "W3": {
+                "p50": 19.780921,
+                "p95": 36.611265,
+                "p99": 39.175754,
+                "max": 39.750921,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 100,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 19.458118,
+                  "p95": 36.360155,
+                  "p99": 38.908457,
+                  "max": 39.499292
+                }
+              },
+              "W4": {
+                "p50": 0.556914,
+                "p95": 15.213216,
+                "p99": 38.042482,
+                "max": 38.886179,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 0.419274,
+                  "p95": 15.000307,
+                  "p99": 37.81445,
+                  "max": 38.677985
+                }
+              },
+              "W5": {
+                "p50": 259.77224,
+                "p95": 281.303099,
+                "p99": 281.303099,
+                "max": 281.303099,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 3,
+                "warmup": 1,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 210.081228,
+                  "p95": 228.326612,
+                  "p99": 228.326612,
+                  "max": 228.326612
+                }
+              }
+            },
+            "wallSeconds": 10.796570723992772
+          },
+          {
+            "driver": "mattn/go-sqlite3",
+            "residentMB": 90.47265625,
+            "results": {
+              "W1": {
+                "p50": 1.402472,
+                "p95": 6.385059,
+                "p99": 7.787365,
+                "max": 10.558351,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.235444,
+                  "p95": 6.190146,
+                  "p99": 7.582379,
+                  "max": 10.293856
+                }
+              },
+              "W2": {
+                "p50": 1.92292,
+                "p95": 15.773788,
+                "p99": 20.208429,
+                "max": 24.434318,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.632925,
+                  "p95": 15.379243,
+                  "p99": 19.893166,
+                  "max": 24.142196
+                }
+              },
+              "W3": {
+                "p50": 18.113076,
+                "p95": 39.802552,
+                "p99": 43.409794,
+                "max": 67.736378,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 100,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 17.853028,
+                  "p95": 39.548023,
+                  "p99": 43.135202,
+                  "max": 67.489115
+                }
+              },
+              "W4": {
+                "p50": 0.575313,
+                "p95": 14.845366,
+                "p99": 37.864328,
+                "max": 44.408655,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 0.434022,
+                  "p95": 14.650221,
+                  "p99": 37.672893,
+                  "max": 44.216334
+                }
+              },
+              "W5": {
+                "p50": 301.96969,
+                "p95": 304.249044,
+                "p99": 304.249044,
+                "max": 304.249044,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 3,
+                "warmup": 1,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 243.887201,
+                  "p95": 254.307601,
+                  "p99": 254.307601,
+                  "max": 254.307601
+                }
+              }
+            },
+            "wallSeconds": 10.891664769005729
+          },
+          {
+            "driver": "mattn/go-sqlite3",
+            "residentMB": 90.25390625,
+            "results": {
+              "W1": {
+                "p50": 1.79842,
+                "p95": 7.282173,
+                "p99": 10.98647,
+                "max": 13.969502,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.629058,
+                  "p95": 7.097905,
+                  "p99": 10.772292,
+                  "max": 13.352483
+                }
+              },
+              "W2": {
+                "p50": 1.942678,
+                "p95": 16.592697,
+                "p99": 20.375403,
+                "max": 21.699339,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.655736,
+                  "p95": 16.277214,
+                  "p99": 20.055013,
+                  "max": 21.389043
+                }
+              },
+              "W3": {
+                "p50": 23.548079,
+                "p95": 46.109474,
+                "p99": 50.438777,
+                "max": 118.145115,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 100,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 23.233906,
+                  "p95": 45.859692,
+                  "p99": 50.146454,
+                  "max": 117.886285
+                }
+              },
+              "W4": {
+                "p50": 0.704003,
+                "p95": 15.11873,
+                "p99": 40.868018,
+                "max": 44.255162,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 0.528164,
+                  "p95": 14.886308,
+                  "p99": 40.595476,
+                  "max": 44.030897
+                }
+              },
+              "W5": {
+                "p50": 306.175257,
+                "p95": 328.623082,
+                "p99": 328.623082,
+                "max": 328.623082,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 3,
+                "warmup": 1,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 247.857644,
+                  "p95": 275.034612,
+                  "p99": 275.034612,
+                  "max": 275.034612
+                }
+              }
+            },
+            "wallSeconds": 11.480566415004432
+          },
+          {
+            "driver": "mattn/go-sqlite3",
+            "residentMB": 88.90234375,
+            "results": {
+              "W1": {
+                "p50": 1.300946,
+                "p95": 5.448215,
+                "p99": 7.471315,
+                "max": 9.46686,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.164846,
+                  "p95": 5.301487,
+                  "p99": 7.286442,
+                  "max": 9.29969
+                }
+              },
+              "W2": {
+                "p50": 1.97513,
+                "p95": 15.931994,
+                "p99": 23.249645,
+                "max": 26.130003,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.667432,
+                  "p95": 15.598126,
+                  "p99": 22.908594,
+                  "max": 25.658512
+                }
+              },
+              "W3": {
+                "p50": 18.428678,
+                "p95": 40.067838,
+                "p99": 44.282213,
+                "max": 102.804239,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 100,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 18.097702,
+                  "p95": 39.743674,
+                  "p99": 44.003269,
+                  "max": 102.524198
+                }
+              },
+              "W4": {
+                "p50": 0.56202,
+                "p95": 14.555975,
+                "p99": 37.040889,
+                "max": 38.409478,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 0.426854,
+                  "p95": 14.364853,
+                  "p99": 36.852223,
+                  "max": 38.21944
+                }
+              },
+              "W5": {
+                "p50": 284.718212,
+                "p95": 286.88704,
+                "p99": 286.88704,
+                "max": 286.88704,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 3,
+                "warmup": 1,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 239.140781,
+                  "p95": 239.672,
+                  "p99": 239.672,
+                  "max": 239.672
+                }
+              }
+            },
+            "wallSeconds": 10.901125259988476
+          }
+        ],
+        "pure": [
+          {
+            "driver": "modernc.org/sqlite",
+            "residentMB": 79.66796875,
+            "results": {
+              "W1": {
+                "p50": 1.653305,
+                "p95": 7.317305,
+                "p99": 8.83594,
+                "max": 8.88807,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.520205,
+                  "p95": 7.152237,
+                  "p99": 8.659222,
+                  "max": 8.725763
+                }
+              },
+              "W2": {
+                "p50": 3.975911,
+                "p95": 19.135534,
+                "p99": 26.813254,
+                "max": 36.865312,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 3.622816,
+                  "p95": 18.794297,
+                  "p99": 26.485666,
+                  "max": 36.565097
+                }
+              },
+              "W3": {
+                "p50": 43.13602,
+                "p95": 99.704571,
+                "p99": 106.367665,
+                "max": 106.834116,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 100,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 42.885785,
+                  "p95": 99.465601,
+                  "p99": 106.125906,
+                  "max": 106.573216
+                }
+              },
+              "W4": {
+                "p50": 0.628125,
+                "p95": 15.416121,
+                "p99": 36.284119,
+                "max": 45.395942,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 0.497692,
+                  "p95": 15.219944,
+                  "p99": 36.078694,
+                  "max": 45.201934
+                }
+              },
+              "W5": {
+                "p50": 317.388774,
+                "p95": 326.791741,
+                "p99": 326.791741,
+                "max": 326.791741,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 3,
+                "warmup": 1,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 267.001624,
+                  "p95": 278.940589,
+                  "p99": 278.940589,
+                  "max": 278.940589
+                }
+              }
+            },
+            "wallSeconds": 16.72276497699204
+          },
+          {
+            "driver": "modernc.org/sqlite",
+            "residentMB": 82.1796875,
+            "results": {
+              "W1": {
+                "p50": 1.3035,
+                "p95": 6.374658,
+                "p99": 7.758666,
+                "max": 9.637699,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.186989,
+                  "p95": 6.171427,
+                  "p99": 7.53769,
+                  "max": 9.441922
+                }
+              },
+              "W2": {
+                "p50": 3.993481,
+                "p95": 17.146101,
+                "p99": 29.879021,
+                "max": 89.208994,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 3.643012,
+                  "p95": 16.856761,
+                  "p99": 29.576809,
+                  "max": 88.88639
+                }
+              },
+              "W3": {
+                "p50": 45.898314,
+                "p95": 104.559816,
+                "p99": 117.578519,
+                "max": 118.559649,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 100,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 45.593517,
+                  "p95": 104.245264,
+                  "p99": 117.243744,
+                  "max": 118.305894
+                }
+              },
+              "W4": {
+                "p50": 0.677817,
+                "p95": 14.859685,
+                "p99": 34.173707,
+                "max": 39.061997,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 0.531466,
+                  "p95": 14.671971,
+                  "p99": 33.982292,
+                  "max": 38.818283
+                }
+              },
+              "W5": {
+                "p50": 327.60993,
+                "p95": 346.199223,
+                "p99": 346.199223,
+                "max": 346.199223,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 3,
+                "warmup": 1,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 272.695405,
+                  "p95": 296.348353,
+                  "p99": 296.348353,
+                  "max": 296.348353
+                }
+              }
+            },
+            "wallSeconds": 16.858807038981467
+          },
+          {
+            "driver": "modernc.org/sqlite",
+            "residentMB": 79.84375,
+            "results": {
+              "W1": {
+                "p50": 1.876219,
+                "p95": 7.275818,
+                "p99": 8.242127,
+                "max": 8.900968,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.683389,
+                  "p95": 7.109249,
+                  "p99": 8.045892,
+                  "max": 8.69921
+                }
+              },
+              "W2": {
+                "p50": 5.631932,
+                "p95": 20.158746,
+                "p99": 28.938069,
+                "max": 31.224652,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 5.223145,
+                  "p95": 19.742657,
+                  "p99": 28.605006,
+                  "max": 30.873351
+                }
+              },
+              "W3": {
+                "p50": 55.036265,
+                "p95": 125.133754,
+                "p99": 143.615367,
+                "max": 144.70667,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 100,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 54.660168,
+                  "p95": 124.873712,
+                  "p99": 143.300304,
+                  "max": 144.3769
+                }
+              },
+              "W4": {
+                "p50": 0.793635,
+                "p95": 15.014228,
+                "p99": 37.605465,
+                "max": 40.104089,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 0.623733,
+                  "p95": 14.76489,
+                  "p99": 37.338255,
+                  "max": 39.854727
+                }
+              },
+              "W5": {
+                "p50": 305.309042,
+                "p95": 344.467204,
+                "p99": 344.467204,
+                "max": 344.467204,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 3,
+                "warmup": 1,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 254.263407,
+                  "p95": 277.825098,
+                  "p99": 277.825098,
+                  "max": 277.825098
+                }
+              }
+            },
+            "wallSeconds": 19.278786198003218
+          },
+          {
+            "driver": "modernc.org/sqlite",
+            "residentMB": 79.390625,
+            "results": {
+              "W1": {
+                "p50": 1.512357,
+                "p95": 6.248659,
+                "p99": 8.541675,
+                "max": 9.026063,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.339441,
+                  "p95": 6.039684,
+                  "p99": 8.354601,
+                  "max": 8.790229
+                }
+              },
+              "W2": {
+                "p50": 5.781333,
+                "p95": 17.445566,
+                "p99": 28.846576,
+                "max": 32.041296,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 5.421978,
+                  "p95": 17.101644,
+                  "p99": 28.444542,
+                  "max": 31.571552
+                }
+              },
+              "W3": {
+                "p50": 44.996234,
+                "p95": 107.799994,
+                "p99": 140.445742,
+                "max": 149.403028,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 100,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 44.722329,
+                  "p95": 107.531856,
+                  "p99": 140.109537,
+                  "max": 149.139931
+                }
+              },
+              "W4": {
+                "p50": 0.668779,
+                "p95": 15.329409,
+                "p99": 39.634944,
+                "max": 42.695385,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 0.521581,
+                  "p95": 15.112899,
+                  "p99": 39.441023,
+                  "max": 42.428827
+                }
+              },
+              "W5": {
+                "p50": 316.573373,
+                "p95": 327.27228,
+                "p99": 327.27228,
+                "max": 327.27228,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 3,
+                "warmup": 1,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 264.188264,
+                  "p95": 279.863477,
+                  "p99": 279.863477,
+                  "max": 279.863477
+                }
+              }
+            },
+            "wallSeconds": 18.892657180986134
+          },
+          {
+            "driver": "modernc.org/sqlite",
+            "residentMB": 82.375,
+            "results": {
+              "W1": {
+                "p50": 1.747531,
+                "p95": 7.003741,
+                "p99": 8.146371,
+                "max": 16.661889,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 1.493323,
+                  "p95": 6.805346,
+                  "p99": 7.953054,
+                  "max": 16.429142
+                }
+              },
+              "W2": {
+                "p50": 5.807728,
+                "p95": 21.859329,
+                "p99": 40.115012,
+                "max": 44.315185,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 5.37501,
+                  "p95": 21.414893,
+                  "p99": 39.788555,
+                  "max": 43.876757
+                }
+              },
+              "W3": {
+                "p50": 48.817043,
+                "p95": 111.522231,
+                "p99": 127.741965,
+                "max": 179.440437,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 100,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 48.516657,
+                  "p95": 111.233012,
+                  "p99": 127.377529,
+                  "max": 179.167942
+                }
+              },
+              "W4": {
+                "p50": 0.684069,
+                "p95": 15.142176,
+                "p99": 45.024705,
+                "max": 91.666674,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 200,
+                "warmup": 100,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 0.535932,
+                  "p95": 14.951279,
+                  "p99": 44.822898,
+                  "max": 91.432302
+                }
+              },
+              "W5": {
+                "p50": 420.310053,
+                "p95": 483.678496,
+                "p99": 483.678496,
+                "max": 483.678496,
+                "errors": 0,
+                "check": "FTS5 active; decoded reads; persisted saves and reports",
+                "iterations": 3,
+                "warmup": 1,
+                "warmupErrors": 0,
+                "inProcess": {
+                  "p50": 374.239996,
+                  "p95": 437.736546,
+                  "p99": 437.736546,
+                  "max": 437.736546
+                }
+              }
+            },
+            "wallSeconds": 19.814194297010545
+          }
+        ]
+      }
+    },
+    "build": {
+      "cgo": {
+        "cleanBuildSeconds": 62.88125971698901,
+        "artifactBytes": 16917256,
+        "artifactMiB": 16.13355255126953,
+        "linkage": "casebook-cgo: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, BuildID[sha1]=c7f35ce11959982f84baae29ae32055c87defea8, for GNU/Linux 4.4.0, stripped",
+        "cache": "/home/endqwerty/.cache/casebook-arena/toolchains/go-clean-cgo-1791784762642667198",
+        "definition": "Empty compiler cache; dependencies already downloaded; optimized stripped static binary"
+      },
+      "pure": {
+        "cleanBuildSeconds": 17.10430144300335,
+        "artifactBytes": 17977504,
+        "artifactMiB": 17.144683837890625,
+        "linkage": "casebook-pure: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, Go BuildID=UdTvEJ2KvZ4LIxmsHl8L/851u0qqyHaD8pwEuKMtN/n0_KSZzp4UnnfI9PF8ML/mpm0PkywGXw6198UM6mO, BuildID[sha1]=0e10198b8ea6f1a60230cd890a89c194c7bd111e, stripped",
+        "cache": "/home/endqwerty/.cache/casebook-arena/toolchains/go-clean-pure-1791784825531019277",
+        "definition": "Empty compiler cache; dependencies already downloaded; optimized stripped static binary"
+      }
+    },
+    "diagnostics": {
+      "embedded": {
+        "durability": "wal synchronous=1",
+        "folderPage": {
+          "milliseconds": {
+            "p50": 0.036987,
+            "p95": 0.044882,
+            "p99": 0.055423,
+            "max": 0.057316
+          },
+          "query": "SELECT id,ref_no,title FROM kase WHERE project=1 AND folder=21 AND rank>50000 ORDER BY rank LIMIT 50",
+          "rows": 50
+        },
+        "folderPagePlan": [
+          "SEARCH kase USING INDEX kase_folder (project=? AND folder=? AND rank>?)"
+        ],
+        "openCount": {
+          "milliseconds": {
+            "p50": 1.223603,
+            "p95": 1.717274,
+            "p99": 2.016769,
+            "max": 2.036015
+          },
+          "query": "SELECT count(*) FROM question WHERE project=1 AND state='open'",
+          "rows": 1
+        },
+        "openCountPlan": [
+          "SEARCH question USING COVERING INDEX question_open (project=? AND state=?)"
+        ],
+        "queueRows": {
+          "milliseconds": {
+            "p50": 0.025222,
+            "p95": 0.028208,
+            "p99": 0.044027,
+            "max": 0.046966
+          },
+          "query": "SELECT id,evidence FROM question WHERE project=1 AND state='open' AND owner=0 ORDER BY rank LIMIT 50",
+          "rows": 50
+        },
+        "queueRowsPlan": [
+          "SEARCH question USING INDEX question_open (project=? AND state=? AND owner=?)"
+        ],
+        "searchRank": {
+          "milliseconds": {
+            "p50": 14.797746,
+            "p95": 16.047941,
+            "p99": 16.449711,
+            "max": 16.635109
+          },
+          "query": "SELECT rowid,rank FROM search_doc WHERE search_doc MATCH 'token' AND project=1 ORDER BY rank LIMIT 50",
+          "rows": 50
+        },
+        "searchRankPlan": [
+          "SCAN search_doc VIRTUAL TABLE INDEX 32:M3"
+        ],
+        "searchSort": {
+          "milliseconds": {
+            "p50": 18.684232,
+            "p95": 19.528695,
+            "p99": 21.966844,
+            "max": 24.510901
+          },
+          "query": "SELECT rowid,bm25(search_doc) FROM search_doc WHERE search_doc MATCH 'token' AND project=1 ORDER BY bm25(search_doc),rowid LIMIT 50",
+          "rows": 50
+        },
+        "searchSortPlan": [
+          "SCAN search_doc VIRTUAL TABLE INDEX 0:M3",
+          "USE TEMP B-TREE FOR ORDER BY"
+        ],
+        "version": "3.53.4"
+      },
+      "server": {
+        "durability": "on",
+        "folderPage": {
+          "milliseconds": {
+            "p50": 0.097961,
+            "p95": 0.106683,
+            "p99": 0.115743,
+            "max": 0.16741
+          },
+          "query": "SELECT id,ref_no,title FROM kase WHERE project=1 AND folder=21 AND rank>50000 ORDER BY rank LIMIT 50",
+          "rows": 50
+        },
+        "folderPagePlan": [
+          "Limit  (cost=0.42..88.05 rows=50 width=60) (actual time=0.018..0.048 rows=50.00 loops=1)",
+          "  Buffers: shared hit=53",
+          "  ->  Index Scan using kase_folder on kase  (cost=0.42..277.35 rows=158 width=60) (actual time=0.017..0.044 rows=50.00 loops=1)",
+          "        Index Cond: ((project = 1) AND (folder = 21) AND (rank > 50000))",
+          "        Index Searches: 1",
+          "        Buffers: shared hit=53",
+          "Planning Time: 0.092 ms",
+          "Execution Time: 0.064 ms"
+        ],
+        "openCount": {
+          "milliseconds": {
+            "p50": 4.562439,
+            "p95": 4.87763,
+            "p99": 5.110267,
+            "max": 5.616445
+          },
+          "query": "SELECT count(*) FROM question WHERE project=1 AND state='open'",
+          "rows": 1
+        },
+        "openCountPlan": [
+          "Aggregate  (cost=3051.19..3051.20 rows=1 width=8) (actual time=6.451..6.452 rows=1.00 loops=1)",
+          "  Buffers: shared hit=495",
+          "  ->  Index Only Scan using question_open on question  (cost=0.42..2912.34 rows=55540 width=0) (actual time=0.011..4.949 rows=51750.00 loops=1)",
+          "        Index Cond: ((project = 1) AND (state = 'open'::text))",
+          "        Heap Fetches: 1750",
+          "        Index Searches: 1",
+          "        Buffers: shared hit=495",
+          "Planning Time: 0.060 ms",
+          "Execution Time: 6.464 ms"
+        ],
+        "queueRows": {
+          "milliseconds": {
+            "p50": 0.084038,
+            "p95": 0.095815,
+            "p99": 0.153038,
+            "max": 0.161409
+          },
+          "query": "SELECT id,evidence FROM question WHERE project=1 AND state='open' AND owner=0 ORDER BY rank LIMIT 50",
+          "rows": 50
+        },
+        "queueRowsPlan": [
+          "Limit  (cost=0.42..7.16 rows=50 width=139) (actual time=0.019..0.037 rows=50.00 loops=1)",
+          "  Buffers: shared hit=6",
+          "  ->  Index Scan using question_open on question  (cost=0.42..7493.44 rows=55540 width=139) (actual time=0.018..0.033 rows=50.00 loops=1)",
+          "        Index Cond: ((project = 1) AND (state = 'open'::text) AND (owner = 0))",
+          "        Index Searches: 1",
+          "        Buffers: shared hit=6",
+          "Planning Time: 0.086 ms",
+          "Execution Time: 0.050 ms"
+        ],
+        "searchRank": {
+          "milliseconds": {
+            "p50": 19.420069,
+            "p95": 20.57628,
+            "p99": 21.114078,
+            "max": 21.317023
+          },
+          "query": "SELECT case_id,ts_rank(tsv,plainto_tsquery('simple','token')) score FROM search_doc WHERE project=1 AND tsv @@ plainto_tsquery('simple','token') ORDER BY score DESC LIMIT 50",
+          "rows": 50
+        },
+        "searchRankPlan": [
+          "Limit  (cost=16691.00..16696.82 rows=50 width=12) (actual time=16.367..18.658 rows=50.00 loops=1)",
+          "  Buffers: shared hit=14828",
+          "  ->  Gather Merge  (cost=16691.00..19147.97 rows=21096 width=12) (actual time=16.366..18.655 rows=50.00 loops=1)",
+          "        Workers Planned: 2",
+          "        Workers Launched: 2",
+          "        Buffers: shared hit=14828",
+          "        ->  Sort  (cost=15690.97..15712.95 rows=8790 width=12) (actual time=15.104..15.107 rows=34.67 loops=3)",
+          "              Sort Key: (ts_rank(tsv, '''token'''::tsquery)) DESC",
+          "              Sort Method: top-N heapsort  Memory: 27kB",
+          "              Buffers: shared hit=14828",
+          "              Worker 0:  Sort Method: top-N heapsort  Memory: 27kB",
+          "              Worker 1:  Sort Method: top-N heapsort  Memory: 27kB",
+          "              ->  Parallel Seq Scan on search_doc  (cost=0.00..15398.98 rows=8790 width=12) (actual time=0.009..14.423 rows=6865.67 loops=3)",
+          "                    Filter: ((tsv @@ '''token'''::tsquery) AND (project = 1))",
+          "                    Rows Removed by Filter: 26468",
+          "                    Buffers: shared hit=14752",
+          "Planning:",
+          "  Buffers: shared hit=1",
+          "Planning Time: 0.069 ms",
+          "Execution Time: 18.676 ms"
+        ],
+        "version": "PostgreSQL 18.4 on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 7.5.0-3ubuntu1~18.04) 7.5.0, 64-bit"
+      }
+    },
+    "directDependencies": 4,
+    "declaredDependenciesIncludingAlternativeDriver": 5,
+    "sourceLines": 2810,
+    "measurement": "HTTP includes client JSON encoding, loopback keep-alive, server decoding, operation, response encoding and client decoding. In-process is the shared typed operation, with no HTTP/schema validation/JSON wire encoding. Cold process starts use an already-cached data file. All performance is provisional under concurrent arena load.",
+    "durability": {
+      "embedded": "WAL, synchronous=NORMAL",
+      "server": "synchronous_commit=on"
+    },
+    "verification": {
+      "status": "pass",
+      "provider": "Anthropic",
+      "model": "claude-opus-5-5",
+      "revision": "4cac9a7f468cac9b25a346731539e7aa4261707e2c5803712d470e3600a37813",
+      "verdict": "Current application safety and full workloads passed R2; runtime durability and five alternating driver runs passed R3.",
+      "performanceLimits": {
+        "embeddedMixedIngestContendedMaxMs": 2119.6,
+        "embeddedMixedIngestRerunMaxMs": 1354.9
+      },
+      "limits": [
+        "R3 did not reread prior specs or reviews; its verdict covers the two supplemental probes only.",
+        "Clean build times were measured under contention.",
+        "SQLite write statements are cached per transaction.",
+        "Full UI and canonical parser are design-only extras."
+      ]
+    },
+    "sourceRevision": "4cac9a7f468cac9b25a346731539e7aa4261707e2c5803712d470e3600a37813",
+    "generatedAtUTC": "2026-10-12T06:10:51.740148+00:00",
+    "units": {
+      "latency": "milliseconds",
+      "residentMB": "MiB",
+      "artifactMiB": "MiB"
+    },
+    "budgetMisses": []
+  }
+}

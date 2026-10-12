@@ -5,11 +5,8 @@ import { type Extra, serve, VERSION } from "../surfaces/http.ts";
 import { bootstrap, ruleActor } from "./identity/identity.ts";
 import { recoverAccepted, sweep } from "./jobs.ts";
 import { type App, type Config, openApp } from "./kernel/app.ts";
-import type { Actor } from "./kernel/ctx.ts";
-import { sql } from "./kernel/db.ts";
+import { type Actor, allProjects } from "./kernel/ctx.ts";
 import { createProject } from "./ops/admin.ts";
-
-const Q = { anyProject: sql<readonly [], { key: string }>("SELECT key FROM projects ORDER BY id LIMIT 1") };
 
 export type Instance = {
 	app: App;
@@ -27,7 +24,7 @@ export function open(
 ): { app: App; owner: Actor; project: string; generatedToken: string | null } {
 	const app = openApp(config, options.memory ? { memory: true } : {});
 	const { owner, generatedToken } = bootstrap(app);
-	let project = app.db.get(Q.anyProject)?.key;
+	let project = allProjects(app.db)[0]?.key;
 	if (!project) {
 		// Zero configuration to first value: a project exists before the first case is typed.
 		project = options.firstProject ?? "scratch";

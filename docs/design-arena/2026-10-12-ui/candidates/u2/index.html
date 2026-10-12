@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Casebook</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{
+  --bg:#f6f5f2;--panel:#fff;--side:#efeeea;--line:#e2e0da;--line2:#efede8;
+  --ink:#1b1b19;--dim:#5f5e59;--faint:#99978f;
+  --acc:#2f55d4;--sel:#e9eefc;--selq:#f0efec;
+  --pass:#177a47;--fail:#c2352b;--warn:#9a5a00;--warn-soft:#fcefd2;
+  --ci:#0b6f8c;--agent:#7a44d6;--agent-soft:#f1eafd;--fail-soft:#fdebe9;--pass-soft:#e4f4ea;
+  --sans:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"JetBrains Mono","SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+:root[data-theme=dark]{
+  --bg:#0f100f;--panel:#151615;--side:#0b0c0b;--line:#282927;--line2:#1e1f1d;
+  --ink:#eae9e5;--dim:#a5a49d;--faint:#6f6e68;
+  --acc:#8ea3ff;--sel:#1b2140;--selq:#1d1e1c;
+  --pass:#4fc48b;--fail:#ff7669;--warn:#e6a63c;--warn-soft:#2f2510;
+  --ci:#58bad2;--agent:#b196ff;--agent-soft:#241c3b;--fail-soft:#341816;--pass-soft:#11271c;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font:13px/1.45 var(--sans);color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line);border-radius:6px;border:2px solid transparent;background-clip:content-box}::-webkit-scrollbar-track{background:transparent}
+kbd{font:500 11px/16px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;background:var(--bg);color:var(--ink);display:inline-block;min-width:20px;text-align:center;white-space:nowrap}
+#app{display:grid;grid-template-columns:236px minmax(0,1fr) minmax(420px,38%);grid-template-rows:minmax(0,1fr) 28px;height:100vh}
+#app.zoom{grid-template-columns:236px 340px minmax(0,1fr)}
+/* sidebar */
+#side{grid-row:1/3;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.brand{display:flex;align-items:center;gap:8px;padding:14px 16px 10px;font-size:14px}
+.brand .logo{width:20px;height:20px;border-radius:5px;background:var(--ink);color:var(--side);display:grid;place-items:center;font:700 12px var(--mono)}
+.brand .proj{margin-left:auto;color:var(--faint);font-size:12px}
+.search{margin:0 10px 10px;height:30px;border:1px solid var(--line);border-radius:7px;background:var(--panel);display:flex;align-items:center;justify-content:space-between;padding:0 6px 0 10px;color:var(--faint);font-size:12px}
+#nav a{display:flex;align-items:center;gap:8px;height:30px;padding:0 6px 0 8px;margin:1px 8px;border-radius:6px;color:var(--dim);cursor:pointer;font-weight:500}
+#nav a:hover{background:var(--line2)}
+#nav a.on{background:var(--panel);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+#nav .ni{width:16px;text-align:center;color:var(--faint)}
+#nav em{margin-left:auto;font:normal 11px var(--mono);color:var(--faint)}
+#nav em.hot{background:var(--fail);color:#fff;border-radius:9px;padding:1px 7px;font-weight:600}
+#nav kbd{border:0;background:none;color:var(--faint);min-width:26px;padding:0}
+.sech{font:600 11px/1 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:18px 0 8px;display:flex;align-items:center;gap:8px}
+.sech .r{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:400}
+.sech.side{margin:16px 16px 6px}
+#tree{flex:1;overflow:auto;padding:0 8px 8px;min-height:0}
+.fo{display:flex;align-items:center;height:26px;border-radius:5px;padding-right:8px;color:var(--dim);cursor:pointer;white-space:nowrap}
+.fo:hover{background:var(--line2)}
+.fo.on{background:var(--panel);color:var(--ink);box-shadow:0 0 0 1px var(--line);font-weight:500}
+.fo .tw{width:16px;height:16px;flex:none;display:grid;place-items:center}
+.fo .tw.c::before,.fo .tw.o::before{content:'';border:4px solid transparent}
+.fo .tw.c::before{border-left-color:var(--faint);margin-left:4px}.fo .tw.o::before{border-top-color:var(--faint);margin-top:4px}
+.fo .fn{overflow:hidden;text-overflow:ellipsis}
+.fo .n{margin-left:auto;font:11px var(--mono);color:var(--faint);padding-left:8px}
+.sfoot{display:flex;align-items:center;gap:6px;padding:8px 10px;border-top:1px solid var(--line);color:var(--dim);font-size:12px}
+.sfoot .me{display:flex;align-items:center;gap:6px;margin-right:auto}
+.sfoot button{height:24px;min-width:26px;padding:0 8px;white-space:nowrap;border:1px solid var(--line);border-radius:6px;background:var(--panel);font-size:12px}
+/* panes */
+.pane{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--panel);position:relative}
+#list{border-right:1px solid var(--line);container-type:inline-size}
+.phead{height:46px;flex:none;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line2)}
+#ltitle{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#ltitle .sep{color:var(--faint);font-weight:400;margin:0 5px}
+#ltitle .cid{font:500 12px var(--mono);color:var(--dim);margin-right:6px}
+#lcount{color:var(--faint);font-size:12px;white-space:nowrap}
+.fwrap{margin-left:auto;display:flex;align-items:center;gap:6px;height:28px;width:190px;flex:none;border:1px solid var(--line);border-radius:7px;padding:0 8px;color:var(--faint);font:12px var(--mono)}
+.fwrap:focus-within{border-color:var(--acc);box-shadow:0 0 0 3px var(--sel)}
+#filter{border:0;outline:0;background:none;color:var(--ink);font:13px var(--sans);width:100%;min-width:0}
+.psub{height:28px;flex:none;display:flex;align-items:center;gap:10px;padding:0 24px 0 14px;border-bottom:1px solid var(--line);color:var(--faint);font-size:11px;white-space:nowrap;overflow:hidden}
+.psub .id{width:52px;flex:none}.psub .ti{flex:1}.psub b{color:var(--dim);font-weight:600}
+.cells{display:flex;gap:2px;flex:none}
+.cells i{width:8px;height:14px;border-radius:2px;background:var(--line);display:block}
+.cells i.C{background:var(--ci)}.cells i.A{background:var(--agent)}.cells i.H{background:var(--ink)}
+.cells i.bad{box-shadow:inset 0 -4px 0 var(--fail)}.cells i.at{outline:2px solid var(--acc);outline-offset:1px}
+#vp{flex:1;overflow-y:auto;position:relative;outline:none;overflow-anchor:none}
+#spacer{position:relative}
+#rows{position:absolute;left:0;right:0;top:0;will-change:transform}
+.row{display:flex;align-items:center;gap:10px;padding:0 14px 0 12px;border-left:2px solid transparent;white-space:nowrap;cursor:default;border-bottom:1px solid transparent}
+.row:hover{background:var(--line2)}
+.row.sel{background:var(--sel);border-left-color:var(--acc)}
+body[data-focus=detail] .row.sel{background:var(--selq);border-left-color:var(--faint)}
+.row .id{font:12px var(--mono);color:var(--faint);width:52px;flex:none}
+.row .id.n2{width:22px}
+.row .ti{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.row .ti .ph{color:var(--faint)}
+.row.done .ti{color:var(--dim)}
+.tg{color:var(--faint);font-size:12px;flex:none}
+@container (max-width:760px){.tg{display:none}}
+.dr{font:600 10px/1 var(--sans);color:var(--warn);background:var(--warn-soft);padding:3px 5px;border-radius:3px;flex:none}
+.dr.other{color:var(--dim);background:var(--line2)}
+.qdot{color:var(--fail);font-size:9px;flex:none}
+.pfs{display:flex;flex:none}
+.pf{display:inline-flex;align-items:center;gap:4px;width:60px;font:11px var(--mono);color:var(--faint)}
+.pf u{text-decoration:none}
+.psub .pf{font:10.5px var(--sans);gap:4px}
+@container (max-width:620px){.psub .lg{display:none}}
+@container (max-width:460px){.pf{width:15px}.pf .pg,.pf u{display:none}.psub .pfs{display:none}.fwrap{width:112px}#lcount{display:none}.row .dr.other,.row .tg{display:none}.fill{width:64px}.fill u{display:none}}
+.pf b{width:10px;text-align:center;font-weight:700;font-size:12px}
+.ps b,.ps.m,b.ps{color:var(--pass)}.fl b,b.fl{color:var(--fail)}.st2 b,b.st2{color:var(--warn)}.nv b{color:var(--faint)}
+.pg{display:inline-grid;place-items:center;width:15px;height:15px;font:700 9px/1 var(--mono);font-style:normal;flex:none;text-decoration:none}
+.pg-h{border-radius:50%;background:var(--ink);color:var(--panel)}
+.pg-c{border-radius:3px;border:1.5px solid var(--ci);color:var(--ci)}
+.pg-a{width:17px;height:17px;margin:0 -1px;background:var(--agent);color:#fff;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);font-size:8px}
+.kind{font:600 11px/1 var(--sans);width:92px;flex:none}
+.k-failure{color:var(--fail)}.k-finding,.k-proposal{color:var(--agent)}.k-unlinked{color:var(--ci)}
+.ref{font:12px var(--mono);color:var(--faint);flex:none}
+.blk{font:600 10px/1 var(--sans);color:var(--fail);background:var(--fail-soft);padding:3px 5px;border-radius:3px;flex:none}
+.ans1{font:600 11px/1 var(--sans);color:var(--dim);background:var(--line2);padding:3px 6px;border-radius:3px;flex:none}
+.ag{font:11px var(--mono);color:var(--faint);width:26px;text-align:right;flex:none}
+.fill{display:inline-flex;align-items:center;gap:5px;font:11px var(--mono);color:var(--dim);flex:none;width:136px;overflow:hidden}
+.fill u{text-decoration:none}
+.fill .yours{font:600 11px var(--sans);color:var(--acc);font-style:normal}
+#rowEdit{position:absolute;left:76px;right:240px;height:32px;border:0;outline:0;background:var(--sel);color:var(--ink);font:13px var(--sans);padding:0;box-shadow:inset 0 -2px 0 var(--acc)}
+#empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--faint);text-align:center}
+/* status bar */
+#bar{grid-column:2/4;display:flex;align-items:center;gap:16px;padding:0 12px;border-top:1px solid var(--line);background:var(--side);color:var(--dim);font-size:12px;white-space:nowrap;overflow:hidden}
+#stat{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+#stat.warn{color:var(--warn)}#stat b{color:var(--ink)}
+#hints{display:flex;gap:14px;flex:none}#hints kbd{margin-right:3px}
+/* detail */
+#detail{box-shadow:inset 0 2px 0 transparent}
+body[data-focus=detail] #detail{box-shadow:inset 0 2px 0 var(--acc)}
+#dscroll{flex:1;overflow:auto;min-height:0}
+#D{padding:16px 24px 40px;container-type:inline-size}
+.cmeta{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px;white-space:nowrap;min-height:20px}
+.cid{font:600 12px var(--mono);color:var(--ink)}
+.path{overflow:hidden;text-overflow:ellipsis}
+.cstate{display:flex;align-items:center;gap:8px;margin:10px -10px 0;padding:6px 10px;border-radius:6px;font-size:12px;color:var(--dim);min-height:30px;background:var(--line2);white-space:nowrap;overflow:hidden}
+.cstate.draft{background:var(--warn-soft);color:var(--ink)}
+.cstate .sv{color:var(--dim);overflow:hidden;text-overflow:ellipsis}
+.chip{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;border-radius:4px;font:600 11px/1 var(--sans);flex:none}
+.chip.draft{background:var(--warn);color:var(--panel)}
+.chip.ver{background:var(--panel);color:var(--ink);font-family:var(--mono);box-shadow:0 0 0 1px var(--line)}
+.chip.yours{background:var(--sel);color:var(--acc)}
+.ctitle,.qtitle{font-size:20px;font-weight:650;letter-spacing:-.012em;line-height:1.3;margin:14px 0 4px;outline:none;white-space:pre-wrap;word-break:break-word}
+[contenteditable]:empty::before{content:attr(data-ph);color:var(--faint);font-weight:400}
+.ctags{display:flex;gap:6px;flex-wrap:wrap;min-height:20px;color:var(--faint);font-size:12px}
+.ctags span{color:var(--dim);background:var(--line2);border-radius:4px;padding:1px 6px}
+@container (min-width:780px){.cols{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:32px}}
+.st{display:grid;grid-template-columns:24px minmax(0,1fr);padding:4px 0}
+.sn{font:12px/20px var(--mono);color:var(--faint)}
+.stx,.sex{outline:none;white-space:pre-wrap;word-break:break-word;min-height:20px;font-size:14px;line-height:20px}
+.sxw{display:none;gap:6px;margin-top:1px;color:var(--pass)}
+.st.hasx .sxw,.st.open .sxw{display:flex}
+.sxw .gt{font:700 13px/20px var(--mono);flex:none}.sex{flex:1;font-size:13.5px}
+.nosteps,.hintl{color:var(--faint);font-size:12px;padding:6px 0}
+.hintl{margin-top:10px;line-height:1.9}
+.prow{display:grid;grid-template-columns:18px 14px minmax(0,1fr) auto;gap:6px;align-items:center;padding:4px 0;font-size:12.5px}
+.prow .m{font:700 13px var(--mono);text-align:center}.prow.nv{color:var(--faint)}.prow.nv .m{color:var(--faint)}.prow.st2 .m{color:var(--warn)}.prow.fl .m{color:var(--fail)}.prow.ps .m{color:var(--pass)}
+.prow .pt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.age{font:11px var(--mono);color:var(--faint)}
+pre.log{font:12px/1.55 var(--mono);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin:6px 0 10px;white-space:pre-wrap;word-break:break-word;color:var(--ink)}
+pre.log .bad{color:var(--fail)}pre.log .ok{color:var(--pass)}pre.log .dim{color:var(--faint)}
+.ev{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:8px;padding:7px 0;border-top:1px solid var(--line2);font-size:12.5px;align-items:start}
+.ev.v{cursor:pointer}.ev .why{color:var(--dim)}.ev .dot{color:var(--warn);text-align:center}
+.ev.draft{background:var(--warn-soft);margin:0 -10px;padding:8px 10px;border-radius:6px;border-top:0}
+.ev .q{color:var(--fail);font:700 12px var(--mono);text-align:center}
+.agentv{color:var(--agent);font-weight:600}
+.ev.prop{background:var(--agent-soft);border:1px dashed var(--agent);border-radius:8px;padding:9px 10px;margin:8px -10px}
+.pbtn{display:flex;gap:8px;margin-top:8px}.pbtn .out{height:28px;background:var(--panel)}
+.diff{margin:6px 0 2px;border:1px solid var(--line);border-radius:6px;overflow:hidden;font-size:12.5px;background:var(--panel)}
+.dl{display:grid;grid-template-columns:22px minmax(0,1fr);padding:3px 8px 3px 4px}
+.dl>i{font:700 11px/18px var(--mono);text-align:center;color:var(--faint);font-style:normal}
+.dl.same{color:var(--dim)}.dl.add{background:var(--pass-soft)}.dl.add>i{color:var(--pass)}.dl.del{background:var(--fail-soft);color:var(--dim)}.dl.del>i{color:var(--fail)}
+.dl.chg>i{color:var(--warn)}
+.dl del{color:var(--fail);text-decoration:line-through;background:var(--fail-soft)}.dl ins{color:var(--pass);text-decoration:none;background:var(--pass-soft);border-radius:2px}
+.dl .x{color:var(--dim)}
+/* queue + run detail */
+.qsub{color:var(--dim);margin-bottom:12px}
+.hintbox{border-left:3px solid var(--acc);background:var(--sel);padding:8px 12px;border-radius:0 6px 6px 0;margin:10px 0;font-size:12.5px}
+.answers{display:grid;gap:6px;margin:14px 0 4px}
+.ans{display:grid;grid-template-columns:30px 118px minmax(0,1fr);align-items:center;gap:8px;text-align:left;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.ans:hover{border-color:var(--acc)}.ans span{color:var(--dim);font-size:12.5px}
+.rsteps{list-style:none;margin:12px 0;padding:0}
+.rsteps li{display:grid;grid-template-columns:28px minmax(0,1fr);padding:7px 8px;border-radius:6px;font-size:15px;line-height:22px;margin:0 -8px}
+.rsteps li.mark{background:var(--fail-soft);box-shadow:inset 3px 0 0 var(--fail)}
+.rsteps .rx{color:var(--pass);font-size:14px}
+.outs{display:flex;gap:8px;margin:16px 0 10px;flex-wrap:wrap}
+.out{display:flex;align-items:center;gap:8px;height:34px;padding:0 12px 0 8px;border:1px solid var(--line);border-radius:8px;font-weight:600}
+.out.on{border-color:var(--acc);background:var(--sel)}
+#note{width:100%;height:36px;border:1px solid var(--fail);border-radius:8px;background:var(--panel);color:var(--ink);font:14px var(--sans);padding:0 12px;outline:0;box-shadow:0 0 0 3px var(--fail-soft)}
+.filled{display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);margin:14px 0;color:var(--dim)}
+.lastrec{margin-top:16px;padding-top:12px;border-top:1px solid var(--line2);color:var(--dim);font-size:12.5px;display:flex;gap:8px;align-items:center}
+/* overlay */
+#ov{position:fixed;inset:0;background:rgba(10,10,10,.32);display:none;align-items:flex-start;justify-content:center;padding-top:11vh;z-index:10}
+#ov.on{display:flex}
+.pal{width:640px;max-width:92vw;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 24px 80px rgba(0,0,0,.35);overflow:hidden}
+#palq{width:100%;border:0;outline:0;background:transparent;font:15px var(--sans);padding:15px 16px;color:var(--ink);border-bottom:1px solid var(--line)}
+#pall{max-height:392px;overflow:auto;padding:6px}
+.pi{display:flex;gap:10px;align-items:center;padding:6px 10px;border-radius:6px;white-space:nowrap}
+.pi.on{background:var(--sel)}.pi .ic{width:20px;text-align:center;color:var(--faint);font:12px var(--mono);flex:none}
+.pi .t{flex:1;overflow:hidden;text-overflow:ellipsis}.pi .h{color:var(--faint);font-size:12px}
+.palf{padding:8px 14px;border-top:1px solid var(--line);color:var(--faint);font-size:12px;display:flex;gap:14px}
+.help{width:880px;max-width:94vw;max-height:80vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 24px 80px rgba(0,0,0,.35);padding:8px 24px 22px}
+.hg{columns:3;column-gap:28px}.hg section{break-inside:avoid}.hg .sech{margin:0;padding:16px 0 8px}
+.hk{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:3px 0;font-size:12.5px;color:var(--dim)}.hk kbd{flex:none}
+.hk span:first-child{color:var(--ink)}
+.legend{display:flex;gap:18px;flex-wrap:wrap;color:var(--dim);font-size:12.5px;align-items:center;margin-top:4px}
+.legend span{display:inline-flex;gap:5px;align-items:center}
+</style>
+</head>
+<body data-view="suite" data-focus="list">
+<div id="app">
+  <aside id="side">
+    <div class="brand"><span class="logo">C</span><b>Casebook</b><span class="proj">acme-shop</span></div>
+    <button class="search" id="palbtn"><span>Jump to or run…</span><kbd>⌘K</kbd></button>
+    <nav id="nav"></nav>
+    <div class="sech side">Folders</div>
+    <div id="tree"></div>
+    <div class="sfoot"><span class="me"><i class="pg pg-h">H</i> dana</span><button id="keysbtn" title="All keys (?)">? Keys</button><button id="theme" title="Toggle light / dark">◐ Theme</button></div>
+  </aside>
+  <section id="list" class="pane">
+    <header class="phead"><div id="ltitle"></div><span id="lcount"></span><label class="fwrap"><span>/</span><input id="filter" placeholder="Filter this list" spellcheck="false" autocomplete="off"></label></header>
+    <div class="psub" id="lsub"></div>
+    <div id="vp" tabindex="-1"><div id="spacer"><div id="rows"></div><input id="rowEdit" hidden spellcheck="false" autocomplete="off" placeholder="Title   ⏎ steps   ⇧⏎ another case   #tag"></div><div id="empty" hidden></div></div>
+  </section>
+  <section id="detail" class="pane"><div id="dscroll"><div id="D"></div></div></section>
+  <footer id="bar"><div id="stat"></div><div id="hints"></div></footer>
+</div>
+<div id="ov"></div>
+<script>
+'use strict';
+window.addEventListener('error',e=>{const d=document.documentElement.dataset;d.err=(d.err||'')+e.message+'@'+e.lineno+'; '});
+const $=(s,r=document)=>r.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function rng(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const R=rng(20261011);
+const ri=(n,r=R)=>Math.floor(r()*n),pick=(a,r=R)=>a[ri(a.length,r)];
+const hex=r=>Array.from({length:7},()=>'0123456789abcdef'[ri(16,r)]).join('');
+const age=m=>m<1?'now':m<60?Math.round(m)+'m':m<1440?Math.round(m/60)+'h':Math.round(m/1440)+'d';
+const ago=m=>m<1?'just now':age(m)+' ago';
+const ME='dana';
+const PG={H:'<i class="pg pg-h" title="person">H</i>',C:'<i class="pg pg-c" title="pipeline">C</i>',A:'<i class="pg pg-a" title="agent">A</i>'};
+const PN={H:'person',C:'pipeline',A:'agent'};
+
+/* ================= data (fixed seed) ================= */
+const TREE=[
+ ['Checkout','Checkout',[['Cart','Cart'],['Coupons','Coupon field'],['Shipping','Shipping step'],['Payment','Payment form',[['3-D Secure','3-D Secure challenge'],['Saved cards','Saved card picker']]],['Tax','Tax line']]],
+ ['Accounts','Account',[['Sign up','Sign-up form'],['Sign in','Sign-in'],['Password reset','Password reset'],['Profile','Profile page'],['Sessions','Session manager']]],
+ ['Catalog','Catalog',[['Search','Search box'],['Filters','Filter panel'],['Product page','Product page'],['Inventory','Stock badge']]],
+ ['Orders','Order page',[['History','Order history'],['Returns','Return flow'],['Refunds','Refund'],['Invoices','Invoice PDF']]],
+ ['Payments','Payments',[['Cards','Card form'],['Wallets','Wallet button'],['Fraud checks','Fraud check'],['Payouts','Payout job']]],
+ ['Admin','Admin',[['Roles','Role editor'],['Audit log','Audit log'],['Feature flags','Flag switch']]],
+ ['Notifications','Notifications',[['Email','Order email'],['Push','Push notice'],['Webhooks','Webhook']]],
+ ['Mobile','Mobile app',[['iOS','iOS app'],['Android','Android app'],['Offline','Offline queue']]]];
+const VERB=['rejects','accepts','shows','keeps','recalculates','blocks','allows','retries','hides','restores','rounds','validates','remembers','clears','warns about'];
+const OBJ=['an expired coupon','a percentage coupon','a second address','an empty cart','a declined card','the order total','a duplicate submit','the saved card','a guest session','an out-of-stock item','the tax line','a partial refund','a weak password','the reset link','a stale session','the retry banner','a 500 from the API','an emoji in the name','the default currency','a long product title','the audit entry','a disabled flag','the webhook retry','an unverified email','the quantity limit','a zero-price item'];
+const COND=['after reload','on a slow network','for a guest','with two tabs open','when the session expires','in a second currency','after the Back button','with a screen reader','at the quantity limit','on mobile width','after sign-out','during a deploy','for a returning customer','with VAT included','at midnight UTC','with autofill','after a failed payment','on first visit','with cookies blocked','under load'];
+const TAGS=['regression','smoke','a11y','mobile','edge','i18n','security','perf'];
+const STEPS=[['Open the cart with one $100.00 item','Cart shows one line and a $100.00 subtotal'],['Sign in as a returning customer','Saved address is preselected'],['Add a second item to the cart','Subtotal updates without a reload'],['Switch the currency to EUR','Prices convert and round half up'],['Submit the form with the field empty','Inline error names the field'],['Press Back in the browser','No duplicate order is created'],['Wait for the session to expire','User is asked to sign in again; the cart is kept'],['Pay with the test card 4242 4242 4242 4242','Confirmation shows the order id'],['Open the order in a second tab','Both tabs show the same total'],['Turn the network off and retry','A retry banner appears; nothing is lost'],['Check the audit log','One entry with actor and time'],['Resize the window to 375 px wide','No horizontal scroll'],['Tab through the form','Focus order matches the visual order'],['Reload the page','State is unchanged'],['Change the shipping country','Tax line recalculates'],['Open the confirmation email','Totals match the order page']];
+const WHY=['clarified the expected result','added the reload check','split a step that checked two things','matched the new copy','from WEB-290','after escaped bug WEB-311','review comments','tightened the wording'];
+const FMSG=['expected 90.00, got 100.00','timeout waiting for [data-test=pay] (30 s)','expected status 200, got 502','element not visible: "Coupon applied"','expected 1 order, got 2','locator resolved to 2 elements','expected "€9,00", got "€9.00"','snapshot mismatch: cart-summary (0.8% of pixels)','expected redirect to /signin, got /cart','net::ERR_CONNECTION_RESET on /api/tax','expected focus on #email, got body','expected toast "Saved", got none'];
+const FIND=['Coupon applies twice when two tabs submit together','Tax line ignores the shipping country after an address change','Reset link stays valid after the password is changed','Refund above the captured amount is accepted by the API','Order email shows the raw template for names with emoji','A viewer role can open the audit export'];
+const UTEST=['checkout/coupon.spec.ts › applies SAVE10 twice','auth/reset.spec.ts › link expires after use','orders/refund.spec.ts › partial refund rounds half up','catalog/search.spec.ts › suggestions survive Back','payments/3ds.spec.ts › challenge timeout','mobile/offline.spec.ts › queue drains on reconnect'];
+const PROP=[
+ ['Add a step: remove the coupon and check the total',c=>[{op:'add',t:'Remove the coupon',x:'Total returns to $100.00'}]],
+ ['Tighten an expected result: name the error text',c=>[{op:'chgx',i:1,x:'Inline error reads "This field is required"'}]],
+ ['Remove a duplicated last step',c=>[{op:'del',i:c.steps.length-1}]],
+ ['Add a step: repeat with VAT included',c=>[{op:'add',t:'Repeat with a VAT-inclusive price list',x:'Totals match the invoice to the cent'}]],
+ ['Add the missing expected result to step 1',c=>[{op:'chgx',i:0,x:'Page loads with no console error'}]],
+ ['Split a step that checks two things',c=>[{op:'chgx',i:1,x:'Subtotal updates'},{op:'add',t:'Look at the cart badge',x:'Badge count matches the cart'}]]];
+
+const folders=[];
+(function build(list,parent){for(const [name,subj,kids] of list){const f={id:folders.length,name,subj,parent,depth:parent?parent.depth+1:0,kids:[],own:0,total:0,open:folders.length===0,ord:folders.length,end:0};folders.push(f);if(parent)parent.kids.push(f);if(kids)build(kids,f);f.end=folders.length-1}})(TREE,null);
+const topOf=f=>{while(f.parent)f=f.parent;return f};
+const pathOf=f=>{const p=[];for(;f;f=f.parent)p.unshift(f.name);return p};
+const W=folders.map(f=>f.kids.length?.35:1),WS=W.reduce((a,b)=>a+b,0);
+function wfolder(){let x=R()*WS;for(let i=0;i<W.length;i++){x-=W[i];if(x<=0)return folders[i]}return folders[folders.length-1]}
+function mkProof(ver,pN,pF,pS,lo,hi){const x=R();if(x<pN)return null;const a=Math.round(lo+R()*R()*(hi-lo));if(x<pN+pF)return{o:'fail',v:ver,age:a};if(x<pN+pF+pS&&ver>1)return{o:'pass',v:ver-1,age:a};return{o:'pass',v:ver,age:a}}
+function fixAges(c){let lo=0;for(const k of 'HCA'){const p=c.proof[k];if(p&&p.v===c.ver)lo=Math.max(lo,p.age)}let hi=Infinity;for(const k of 'HCA'){const p=c.proof[k];if(p&&p.v<c.ver){if(p.age<lo*1.5+2000)p.age=Math.round(lo*1.5+2000+ri(20000));hi=Math.min(hi,p.age)}}c.vage=Math.round(hi===Infinity?lo+120+ri(36000):lo+(hi-lo)*.5)}
+const cases=[],byN=new Map();
+for(let n=1;n<=2000;n++){const f=wfolder(),ver=1+(R()<.45?0:R()<.6?1:R()<.7?2:3),tags=[];
+  if(R()<.6)tags.push(topOf(f).name.toLowerCase());if(R()<.45)tags.push(pick(TAGS));
+  const c={n,id:'C-'+n,title:`${f.subj} ${pick(VERB)} ${pick(OBJ)} ${pick(COND)}`,f,tags,ver,q:0,draft:null,draftBy:R()<.012?pick(['sam','priya','li']):null,steps:null,vage:0,
+    proof:{H:mkProof(ver,.22,.04,.16,60,64800),C:mkProof(ver,.38,.06,.06,5,4320),A:mkProof(ver,.72,.04,.08,60,20160)}};
+  fixAges(c);cases.push(c);byN.set(n,c)}
+let SID=0;const mkStep=(t='',x='')=>({id:'s'+(++SID),t,x});
+const F311=byN.get(311),COUP=folders.find(f=>f.name==='Coupons');
+(function(){const c=F311,a1=mkStep('Open the cart with one $100.00 item',''),b7=mkStep('Apply coupon SAVE10','Total shows $90.00'),c3=mkStep('Reload the page','Coupon is still applied'),d4=mkStep('Open the order summary','Discount line shows −$10.00');
+  const cp=a=>a.map(s=>({...s}));
+  Object.assign(c,{title:'Checkout applies a percentage coupon',f:COUP,tags:['checkout','regression'],ver:3,draftBy:null,vage:3000,proof:{H:{o:'pass',v:3,age:2880},C:{o:'fail',v:3,age:60},A:{o:'pass',v:2,age:8640}},steps:cp([a1,b7,c3,d4])});
+  c.versions=[{v:1,by:'dana',pk:'H',age:30240,seq:0,why:'created',title:'Checkout applies a coupon',tags:['checkout'],steps:[{...a1},{...b7,x:'Total is lower'}]},
+   {v:2,by:'sam',pk:'H',age:12960,seq:0,why:'reload check, from WEB-290',title:c.title,tags:['checkout','regression'],steps:cp([a1,b7,c3])},
+   {v:3,by:'reviewer',pk:'A',adopt:'dana',age:3000,seq:0,why:'pr:482 added a discount line',title:c.title,tags:['checkout','regression'],steps:cp([a1,b7,c3,d4])}];
+  c.results=[{k:'C',o:'fail',v:3,age:60,basis:'exact',src:'e2e #812 @ 9f3c2ab',msg:'expected 90.00, got 100.00',seq:0},{k:'C',o:'pass',v:3,age:1500,basis:'exact',src:'e2e #801 @ 41be07d',seq:0},{k:'H',o:'pass',v:3,age:2880,basis:'exact',src:'priya in R-3',seq:0},{k:'A',o:'pass',v:2,age:8640,basis:'assumed',src:'explorer on staging',seq:0},{k:'C',o:'pass',v:2,age:9000,basis:'exact',src:'e2e #744 @ 77aa1c0',seq:0},{k:'H',o:'pass',v:2,age:11520,basis:'exact',src:'sam in R-2',seq:0}]})();
+cases.sort((a,b)=>a.f.ord-b.f.ord||a.n-b.n);
+for(const c of cases){c.f.own++;for(let f=c.f;f;f=f.parent)f.total++}
+
+function body(c){if(c.steps)return c;const r=rng(c.n*9973+7),n=3+ri(4,r),pool=STEPS.slice();c.steps=[];
+  for(let i=0;i<n;i++){const [t,x]=pool.splice(ri(pool.length,r),1)[0];c.steps.push(mkStep(t,r()<.75?x:''))}
+  c.versions=[];let cur=c.steps.map(s=>({...s})),va=c.vage;
+  for(let v=c.ver;v>=1;v--){c.versions.unshift({v,by:pick(['dana','sam','priya','li'],r),pk:'H',age:va,seq:0,why:v===1?'created':pick(WHY,r),title:c.title,tags:c.tags.slice(),steps:cur});
+    const o=cur.map(s=>({...s})),k=ri(3,r);if(k!==1&&o.length>2)o.pop();if(k!==0){const s=o[ri(o.length,r)];s.x=s.x?'':'No error is shown'}cur=o;va+=1440*(2+ri(30,r))}
+  const first=c.versions[0].age,verAt=a=>{for(let i=c.versions.length-1;i>=0;i--)if(c.versions[i].age>=a)return c.versions[i].v;return 0};
+  const src={H:()=>`${pick(['sam','priya','li','dana'],r)} in R-${1+ri(3,r)}`,C:()=>`e2e #${700+ri(112,r)} @ ${hex(r)}`,A:()=>'explorer on staging'};
+  c.results=[];for(const k of 'HCA'){const p=c.proof[k];if(!p)continue;c.results.push({k,o:p.o,v:p.v,age:p.age,basis:k==='A'?'assumed':'exact',src:src[k](),msg:p.o==='fail'?pick(FMSG,r):'',seq:0});
+    let a=p.age;const m=k==='C'?2+ri(3,r):ri(2,r);for(let j=0;j<m;j++){a+=(k==='C'?300:2880)+ri(k==='C'?2880:20000,r);if(a>=first)break;const v=verAt(a);if(!v)break;c.results.push({k,o:r()<.9?'pass':'fail',v,age:a,basis:k==='A'?'assumed':'exact',src:src[k](),msg:'',seq:0})}}
+  return c}
+const applyOps=(steps,ops)=>{const o=steps.map(s=>({...s}));for(const p of ops){if(p.op==='add')o.push(p.step||(p.step=mkStep(p.t,p.x)));else if(p.op==='chgx'){const i=Math.min(p.i,o.length-1);o[i]={...o[i],x:p.x}}else if(p.op==='del'&&o.length>1)o.splice(Math.min(p.i,o.length-1),1)}return o};
+
+/* run R-4: 40 slots, 25 filled by CI, 2 by an agent, 13 left for people */
+const run={id:'R-4',name:'1.4.0 rc3 regression',build:'1.4.0-rc3',env:'staging',slots:[]};
+(function(){const CH=folders[0],pool=cases.filter(c=>c.f.ord>=CH.ord&&c.f.ord<=CH.end&&c!==F311),step=Math.floor(pool.length/39),ch=[];
+  for(let i=0;i<39;i++)ch.push(pool[i*step+ri(step)]);ch.splice(2,0,F311);
+  const UN=new Set([2,5,6,11,14,17,20,21,26,29,32,35,38]),AG=new Set([9,24]);
+  ch.forEach((c,i)=>{const sl={i,c,v:c.ver,by:null,o:null,who:'',age:0,note:'',step:0,q:null};
+    if(AG.has(i)){sl.by='A';sl.o='pass';sl.who='explorer';sl.age=200+ri(300);c.proof.A={o:'pass',v:c.ver,age:sl.age}}
+    else if(!UN.has(i)){sl.by='C';sl.o=i===30?'fail':'pass';sl.who='e2e #'+(806+ri(6));sl.age=40+ri(400);c.proof.C={o:sl.o,v:c.ver,age:sl.age}}
+    if(sl.by)c.vage=Math.max(c.vage,sl.age+600);run.slots.push(sl)})})();
+
+/* 30 open questions of four kinds */
+const KL={failure:'failure',finding:'agent finding',proposal:'proposal',unlinked:'unlinked test'};
+const questions=[];let maxQ=0;
+(function(){const kinds=[];[['failure',12],['finding',6],['proposal',6],['unlinked',6]].forEach(([k,n])=>{for(let i=0;i<n;i++)kinds.push(k)});
+  for(let i=kinds.length-1;i>0;i--){const j=ri(i+1);[kinds[i],kinds[j]]=[kinds[j],kinds[i]]}
+  const ids=new Set([12]);while(ids.size<30)ids.add(3+ri(62));const ns=[...ids].sort((a,b)=>a-b);maxQ=ns[ns.length-1];
+  const at12=ns.indexOf(12),j=kinds.indexOf('failure');[kinds[at12],kinds[j]]=[kinds[j],kinds[at12]];
+  let fi=1,gi=0,pi=0,ui=0;
+  kinds.forEach((kind,i)=>{const n=ns[i],c=pick(cases),q={n,id:'Q-'+n,kind,age:90+ri(5600),block:false,answer:null,seq:0,c:null,pk:'C',who:'',title:''};
+    if(kind==='failure'){const x=R();q.pk=x<.72?'C':x<.9?'H':'A';q.who=q.pk==='C'?'e2e #'+(800+ri(13)):q.pk==='H'?pick(['sam','priya'])+' in R-3':'explorer';q.c=c;q.msg=FMSG[fi++%FMSG.length];q.tests=1+ri(4);q.title=q.msg;q.block=R()<.4;q.build=hex(R);
+      if(R()<.35)q.hint={id:'Q-'+(1+ri(2)),w:pick(['defect','flaky','infrastructure']),by:pick(['sam','priya']),age:pick(['6d','9d','2w'])};
+      if(n===12)Object.assign(q,{pk:'C',who:'e2e #812',c:F311,msg:FMSG[0],title:FMSG[0],tests:3,block:true,age:60,build:'9f3c2ab',hint:{id:'Q-2',w:'defect',by:'sam',age:'6d'}})}
+    else if(kind==='finding'){q.pk='A';q.who=pick(['reviewer','explorer']);q.c=c;q.title=FIND[gi++];q.block=R()<.3;q.src='pr:'+(470+ri(20))}
+    else if(kind==='proposal'){const k=pi++;q.pk=k===4?'H':'A';q.who=k===4?'li':'reviewer';q.c=k===0?F311:c;q.title=PROP[k][0];body(q.c);q.ops=PROP[k][1](q.c)}
+    else{const k=ui++;q.pk='C';q.who='e2e #'+(800+ri(13));q.title=UTEST[k];q.sug=k===0?F311:c;q.score=k===0?'0.92':(.61+R()*.33).toFixed(2);q.runs=6+ri(40)}
+    if(q.c)q.c.q++;questions.push(q)});
+  questions.sort((a,b)=>(a.block?0:1)-(b.block?0:1)||a.age-b.age)})();
+
+/* ================= state ================= */
+const S={view:'suite',folder:null,q:{suite:'',queue:'',runs:''},selv:{suite:0,queue:0,runs:0},top:{suite:0,queue:0,runs:0},peek:{suite:false,queue:false,runs:true},zoom:false,editing:null,seq:0,maxN:2000,g:false,diff:null,diffFor:null,rstep:0,noting:null,last:null,ov:null,pi:0,status:'',cls:''};
+const ROWH={suite:32,queue:38,runs:34};
+let rows=[],sel=0,rowH=32,raf=0;const undo=[];
+const vp=$('#vp'),spacer=$('#spacer'),rowsEl=$('#rows'),rowEdit=$('#rowEdit'),D=$('#D'),ov=$('#ov'),filter=$('#filter');
+const curCase=()=>S.view==='suite'?rows[sel]:null;
+function status(h,cls){S.status=h;S.cls=cls||'';const el=$('#stat');el.innerHTML=h;el.className=S.cls}
+
+/* ================= list (windowed: only visible rows exist) ================= */
+function rebuild(){const v=S.view,q=S.q[v].trim().toLowerCase();
+  if(v==='suite'){const F=S.folder;rows=cases.filter(c=>(!F||(c.f.ord>=F.ord&&c.f.ord<=F.end))&&(!q||(c.id+' '+c.title+' #'+c.tags.join(' #')).toLowerCase().includes(q)))}
+  else if(v==='queue')rows=questions.filter(x=>!x.answer&&(!q||(x.id+' '+KL[x.kind]+' '+x.title+' '+(x.c?x.c.id:'')).toLowerCase().includes(q)));
+  else rows=run.slots.filter(s=>!q||(s.c.id+' '+s.c.title).toLowerCase().includes(q))}
+function layout(){spacer.style.height=rows.length*rowH+'px'}
+function proofStrip(c){let h='';for(const k of 'HCA'){const p=c.proof[k];let m='·',cls='nv',a='';if(p){a=age(p.age);if(p.o==='fail'){m='✗';cls='fl'}else if(p.v<c.ver){m='~';cls='st2'}else{m='✓';cls='ps'}}h+=`<span class="pf ${cls}">${PG[k]}<b>${m}</b><u>${a}</u></span>`}return h}
+const OM={pass:['✓','ps'],fail:['✗','fl'],blocked:['!','st2'],skip:['–','nv']};
+function rowHtml(x,i){const s=i===sel?' sel':'',st=`style="height:${rowH}px"`;
+  if(S.view==='suite'){const ed=S.editing===x;
+    return `<div class="row${s}" data-i="${i}" ${st}><span class="id">${x.id}</span><span class="ti"${ed?' style="visibility:hidden"':''}>${x.title?esc(x.title):'<span class="ph">Untitled</span>'}</span>${x.draft?'<span class="dr" title="Your draft. Others do not see it yet.">draft</span>':x.draftBy?`<span class="dr other" title="Private draft by ${x.draftBy}. You see the current version.">draft · ${x.draftBy}</span>`:''}${x.tags.length?`<span class="tg">#${x.tags.join(' #')}</span>`:''}${x.q>0?'<span class="qdot" title="open question">●</span>':''}<span class="pfs">${proofStrip(x)}</span></div>`}
+  if(S.view==='queue')return `<div class="row${s}" data-i="${i}" ${st}>${PG[x.pk]}<span class="id">${x.id}</span><span class="kind k-${x.kind}">${KL[x.kind]}</span><span class="ti">${esc(x.title)}</span>${x.c?`<span class="ref">${x.c.id}</span>`:''}${x.block?'<span class="blk">blocks gate</span>':''}<span class="ag">${age(x.age)}</span></div>`;
+  const o=x.by?OM[x.o]:null;
+  return `<div class="row${s}${x.by?' done':''}" data-i="${i}" ${st}><span class="id n2">${String(x.i+1).padStart(2,'0')}</span><span class="id">${x.c.id}</span><span class="ti">${esc(x.c.title)}</span><span class="fill">${x.by?`${PG[x.by]}<b class="${o[1]}">${o[0]}</b><u>${esc(x.by==='H'?x.o+' · you':x.who)}</u>`:'<em class="yours">yours</em>'}</span><span class="ag">${x.by?age(x.age):''}</span></div>`}
+function paintList(){const top=vp.scrollTop,h=vp.clientHeight||600,a=Math.max(0,Math.floor(top/rowH)-8),b=Math.min(rows.length,Math.ceil((top+h)/rowH)+8);let html='';
+  for(let i=a;i<b;i++)html+=rowHtml(rows[i],i);rowsEl.style.transform=`translateY(${a*rowH}px)`;rowsEl.innerHTML=html;
+  S.vis=sel*rowH>=top&&sel*rowH+rowH<=top+h;if(S.editing){rowEdit.style.top=sel*rowH+'px'}
+  const em=$('#empty');em.hidden=rows.length>0;if(!rows.length)em.innerHTML=S.view==='queue'&&!S.q.queue?'<div><b>Nothing needs you.</b><br>Every question is answered. <kbd>u</kbd> reopens the last one.</div>':'<div>Nothing matches. <kbd>esc</kbd> clears the filter.</div>'}
+vp.addEventListener('scroll',()=>{if(!raf)raf=requestAnimationFrame(()=>{raf=0;paintList()})},{passive:true});
+/* a resize must not lose the cursor: if the selected row was on screen, keep it on screen */
+window.addEventListener('resize',()=>{if(S.center&&vp.clientHeight){S.center=false;ensureVisible(true)}else if(S.vis)ensureVisible();paintList()});
+/* if the window has no size yet (a tab opened in the background), remember to place the cursor once it has */
+function ensureVisible(center){const top=sel*rowH,h=vp.clientHeight;if(!h){S.center=true;return}if(center)vp.scrollTop=Math.max(0,top-Math.floor(h/3/rowH)*rowH);else if(top<vp.scrollTop)vp.scrollTop=top;else if(top+rowH>vp.scrollTop+h)vp.scrollTop=top+rowH-h}
+function select(i){if(!rows.length){sel=0;paintAll();return}i=Math.max(0,Math.min(rows.length-1,i));const prev=rows[sel],target=rows[i];
+  if(S.view==='suite'&&prev&&prev!==target){endRowEdit();seal(prev,'leave');i=rows.indexOf(target);if(i<0)i=Math.min(sel,rows.length-1)}
+  sel=i;S.rstep=0;S.noting=null;layout();ensureVisible();paintAll()}
+const move=d=>select(sel+d);
+const dropSel=()=>{const s=getSelection();if(s&&s.rangeCount)s.removeAllRanges()};
+function focusList(){const a=document.activeElement;if(a&&a!==document.body&&a!==vp)a.blur();dropSel();vp.focus({preventScroll:true});syncFocus()}
+function syncFocus(){const f=$('#detail').contains(document.activeElement)?'detail':'list';if(document.body.dataset.focus!==f){document.body.dataset.focus=f;paintBar()}}
+document.addEventListener('focusin',syncFocus);document.addEventListener('focusout',()=>setTimeout(syncFocus,0));
+
+/* ================= chrome ================= */
+function renderSide(){const open=questions.filter(q=>!q.answer).length,left=run.slots.filter(s=>!s.by).length,v=S.view;
+  $('#nav').innerHTML=`<a data-go="suite" class="${v==='suite'?'on':''}"><span class="ni">▤</span>Suite<em>${cases.length.toLocaleString('en-US')}</em><kbd>g s</kbd></a><a data-go="queue" class="${v==='queue'?'on':''}"><span class="ni">◎</span>Queue<em class="${open?'hot':''}">${open}</em><kbd>g q</kbd></a><a data-go="runs" class="${v==='runs'?'on':''}"><span class="ni">▷</span>Run R-4<em>${left} left</em><kbd>g r</kbd></a>`;
+  let h=`<div class="fo${!S.folder?' on':''}" data-f="-1" style="padding-left:6px"><span class="tw"></span><span class="fn">All cases</span><span class="n">${cases.length}</span></div>`;
+  for(const f of folders){let vis=true;for(let p=f.parent;p;p=p.parent)if(!p.open)vis=false;if(!vis)continue;
+    h+=`<div class="fo${S.folder===f?' on':''}" data-f="${f.id}" style="padding-left:${6+f.depth*14}px"><span class="tw${f.kids.length?(f.open?' o':' c'):''}" data-tw="${f.id}"></span><span class="fn">${esc(f.name)}</span><span class="n">${f.total}</span></div>`}
+  $('#tree').innerHTML=h}
+function paintHead(){const v=S.view;let t,c,s;
+  if(v==='suite'){t=S.folder?pathOf(S.folder).map(esc).join('<span class="sep">/</span>'):'All cases';c=`${rows.length.toLocaleString('en-US')} case${rows.length===1?'':'s'}`;
+    s=`<span class="id">ID</span><span class="ti">Title</span><span class="lg">newest result per producer</span><span class="pfs"><span class="pf">${PG.H}person</span><span class="pf">${PG.C}CI</span><span class="pf">${PG.A}agent</span></span>`}
+  else if(v==='queue'){const n=k=>rows.filter(q=>q.kind===k).length;t='Queue';c=`${rows.length} need an answer · ${rows.filter(q=>q.block).length} block the gate`;
+    s=`<span><b>${n('failure')}</b> failures</span><span><b>${n('finding')}</b> agent findings</span><span><b>${n('proposal')}</b> proposals</span><span><b>${n('unlinked')}</b> unlinked tests</span><span style="margin-left:auto">most blocking first</span>`}
+  else{const sl=run.slots,left=sl.filter(x=>!x.by).length,n=k=>sl.filter(x=>x.by===k).length;t=`<span class="cid">${run.id}</span>${run.name}`;c=`${left} left for you`;
+    s=`<span class="cells">${sl.map(x=>`<i class="${x.by||''}${x.o==='fail'||x.o==='blocked'?' bad':''}${rows[sel]===x?' at':''}"></i>`).join('')}</span><span>${PG.C} <b>${n('C')}</b> CI</span><span>${PG.A} <b>${n('A')}</b> agent</span><span>${PG.H} <b>${n('H')}</b> you</span>`}
+  $('#ltitle').innerHTML=t;$('#lcount').textContent=c;$('#lsub').innerHTML=s}
+function paintBar(){const v=S.view,K=(k,t)=>`<span><kbd>${k}</kbd>${t}</span>`;let h;
+  if(document.body.dataset.focus==='detail'&&v==='suite')h=K('⏎','next step')+K('⇥','or “ > ” expected')+K('#','tag')+K('⌘V','list becomes steps')+K('⌃⏎','publish now')+K('esc','back to list');
+  else if(v==='suite'){const c=rows[sel],p=c&&c.q>0&&questions.some(q=>q.c===c&&q.kind==='proposal'&&!q.answer);h=K('c','new case')+K('⏎','edit')+(p?K('a','accept')+K('r','reject proposal'):K('␣','proof'))+K('/','filter')+K('⌘K','anything')+K('?','keys')}
+  else if(v==='queue'){const q=rows[sel];h=(q?ANS[q.kind].map(a=>K(a.k,a.t.toLowerCase())).join(''):'')+K('␣','evidence')+K('u','undo')+K('?','keys')}
+  else h=K('p','pass')+K('f','fail')+K('b','blocked')+K('s','skip')+K('1–9','failing step')+K('␣','evidence')+K('u','undo')+K('?','keys');
+  $('#hints').innerHTML=h;const el=$('#stat');el.innerHTML=S.status||(v==='suite'?'Drafts are private. A version is made when you leave the case, press ⌃⏎, or stop for 30 s.':v==='queue'?'One key answers. The answer is recorded with your name and carries to later occurrences.':`${run.id} accepts build ${run.build} on ${run.env}. Slots already filled by CI or an agent are skipped.`);el.className=S.cls}
+function paintAll(){renderSide();paintHead();paintList();renderDetail();paintBar()}
+
+/* ================= case pane ================= */
+function renderDetail(){const x=rows[sel];if(S.view==='suite')renderCase(x);else if(S.view==='queue')renderQuestion(x);else renderSlot(x)}
+function renderCase(c){if(!c){D.innerHTML='<div class="nosteps">No case here. <kbd>c</kbd> writes one.</div>';return}body(c);
+  if(S.diffFor!==c){S.diffFor=c;S.diff=c.ver>1?c.ver:null}
+  D.innerHTML=`<div class="cmeta"><span class="cid">${c.id}</span><span class="path">${pathOf(c.f).map(esc).join(' / ')}</span></div>
+  <div id="cstate" class="cstate"></div>
+  <div id="ctitle" class="ctitle" contenteditable="plaintext-only" spellcheck="false" data-f="title" data-ph="Title">${esc(c.title)}</div>
+  <div id="ctags" class="ctags"></div>
+  <div class="cols"><div><div class="sech">Steps</div><div id="steps"></div><div class="hintl"><kbd>⏎</kbd> next step &nbsp; <kbd>⇥</kbd> or typing “ &gt; ” starts the expected result &nbsp; <kbd>#</kbd>tag &nbsp; paste a list and it becomes steps</div></div>
+  <div><div class="sech">Proof <span class="r"><kbd>␣</kbd> ${S.peek.suite?'less':'evidence'}</span></div><div id="proof"></div><div class="sech">Timeline <span class="r"><kbd>v</kbd> diff another version</span></div><div id="tl"></div></div></div>`;
+  paintState(c);paintTags(c);paintSteps(c);paintProof(c);paintTimeline(c)}
+function paintState(c){const el=$('#cstate');if(!el||curCase()!==c)return;
+  if(c.draft){el.className='cstate draft';el.innerHTML=`<span class="chip draft">Draft</span><span class="sv">${c.draft.saved?'saved':'saving…'} · ${c.draft.isNew?'only you can see it':`everyone else still sees v${c.ver}`} · becomes v${c.ver+1} when you leave, on <kbd>⌃⏎</kbd>, or after 30 s idle</span>`}
+  else{const l=c.versions[c.versions.length-1];el.className='cstate';el.innerHTML=`<span class="chip ver">v${c.ver}</span><span class="sv">current, what everyone sees · ${l?byHtml(l)+' · '+ago(l.age):''}${c.draftBy?` · <b>${c.draftBy}</b> has a private draft`:''}</span>`}}
+const byHtml=v=>v.pk==='A'?`${PG.A} <span class="agentv">agent ${esc(v.by)}</span>, adopted by ${PG.H} ${esc(v.adopt||ME)}`:`${PG[v.pk]} ${esc(v.by)}`;
+function paintTags(c){const el=$('#ctags');if(el)el.innerHTML=c.tags.length?c.tags.map(t=>`<span>#${esc(t)}</span>`).join(''):'no tags · type #tag anywhere'}
+function paintSteps(c){const el=$('#steps');if(!el)return;el.innerHTML=c.steps.map((s,i)=>`<div class="st${s.x?' hasx':''}"><span class="sn">${i+1}</span><div><div class="stx" contenteditable="plaintext-only" spellcheck="false" data-f="t" data-i="${i}" data-ph="Step ${i+1}">${esc(s.t)}</div><div class="sxw"><span class="gt">&gt;</span><div class="sex" contenteditable="plaintext-only" spellcheck="false" data-f="x" data-i="${i}" data-ph="expected result">${esc(s.x)}</div></div></div></div>`).join('')||'<div class="nosteps">No steps yet. <kbd>⏎</kbd> from the title starts the first one.</div>'}
+function paintProof(c){const el=$('#proof');if(!el)return;let h='';for(const k of 'HCA'){const p=c.proof[k],r=p&&c.results.find(r=>r.k===k&&r.age===p.age);let m='·',cls='nv',txt='no result yet';
+    if(p){if(p.o==='fail'){m='✗';cls='fl';txt=`failing on v${p.v}`}else if(p.v<c.ver){m='~';cls='st2';txt=`passed v${p.v}, not yet run on v${c.ver}`}else{m='✓';cls='ps';txt=`pass on v${p.v}`}}
+    h+=`<div class="prow ${cls}">${PG[k]}<b class="m">${m}</b><span class="pt"><b>${PN[k]}</b> · ${txt}${r?` · basis ${r.basis} · ${esc(r.src)}`:''}</span><span class="age">${p?age(p.age):''}</span></div>`;
+    if(S.peek.suite&&r)h+=`<pre class="log">${r.o==='fail'?`<span class="bad">✗ ${esc(r.msg||'failed')}</span>\n`:'<span class="ok">✓ all steps passed</span>\n'}<span class="dim">${esc(r.src)} · case v${r.v} · basis ${r.basis}${r.basis==='assumed'?' (version inferred, not pinned)':''}</span></pre>`}
+  el.innerHTML=h}
+function diffSteps(A,B){const out=[],ia=new Map(A.map(s=>[s.id,s])),ib=new Set(B.map(s=>s.id));let ai=0;
+  for(const s of B){while(ai<A.length&&!ib.has(A[ai].id)){out.push({k:'del',a:A[ai]});ai++}const o=ia.get(s.id);if(!o)out.push({k:'add',b:s});else{if(A[ai]&&A[ai].id===s.id)ai++;out.push(o.t!==s.t||o.x!==s.x?{k:'chg',a:o,b:s}:{k:'same',b:s})}}
+  for(;ai<A.length;ai++)if(!ib.has(A[ai].id))out.push({k:'del',a:A[ai]});return out}
+function diffHtml(a,b){let h='',n=0,any=false;const X=s=>s.x?`<div class="x">&gt; ${esc(s.x)}</div>`:'';
+  if(a.title!==b.title){any=true;h+=`<div class="dl chg"><i>~</i><div>title <del>${esc(a.title)}</del> <ins>${esc(b.title)}</ins></div></div>`}
+  const ta=b.tags.filter(t=>!a.tags.includes(t)),tr=a.tags.filter(t=>!b.tags.includes(t));
+  if(ta.length||tr.length){any=true;h+=`<div class="dl chg"><i>~</i><div>tags ${tr.map(t=>`<del>#${esc(t)}</del>`).join(' ')} ${ta.map(t=>`<ins>#${esc(t)}</ins>`).join(' ')}</div></div>`}
+  for(const d of diffSteps(a.steps,b.steps)){if(d.k==='same'){n++;h+=`<div class="dl same"><i>${n}</i><div>${esc(d.b.t)}</div></div>`}
+    else if(d.k==='add'){n++;any=true;h+=`<div class="dl add"><i>+</i><div>${esc(d.b.t)}${X(d.b)}</div></div>`}
+    else if(d.k==='del'){any=true;h+=`<div class="dl del"><i>−</i><div>${esc(d.a.t)}${X(d.a)}</div></div>`}
+    else{n++;any=true;h+=`<div class="dl chg"><i>~</i><div>${d.a.t!==d.b.t?`<del>${esc(d.a.t)}</del> <ins>${esc(d.b.t)}</ins>`:esc(d.b.t)}${d.a.x!==d.b.x?`<div class="x">&gt; ${d.a.x?`<del>${esc(d.a.x)}</del> `:''}${d.b.x?`<ins>${esc(d.b.x)}</ins>`:''}</div>`:X(d.b)}</div></div>`}}
+  return any?`<div class="diff">${h}</div>`:'<div class="why">no changes against the current version yet</div>'}
+const work=c=>({title:c.title,tags:c.tags,steps:c.steps.filter(s=>s.t.trim()||s.x.trim())});
+function paintTimeline(c){const el=$('#tl');if(!el)return;let h='';
+  if(c.draft){const l=c.versions[c.versions.length-1],w=work(c);h+=`<div class="ev draft"><span class="dot">●</span><div><b>Your draft</b> <span class="why">· ${l?`changes against v${l.v}`:'not a version yet'}</span>${l?diffHtml(l,w):`<div class="why">${w.steps.length} step${w.steps.length===1?'':'s'} so far</div>`}</div><span class="age">now</span></div>`}
+  for(const q of questions)if(q.c===c&&q.kind==='proposal'&&!q.answer)h+=`<div class="ev prop">${PG[q.pk]}<div><b>${q.id}</b> <span class="${q.pk==='A'?'agentv':''}">${q.pk==='A'?'agent ':''}${esc(q.who)}</span> proposes: ${esc(q.title)} <span class="why">· not applied until a person answers</span>${diffHtml({title:c.title,tags:c.tags,steps:c.steps},{title:c.title,tags:c.tags,steps:applyOps(c.steps,q.ops)})}<div class="pbtn"><button class="out" data-qa="a" data-q="${q.n}"><kbd>a</kbd>Accept</button><button class="out" data-qa="r" data-q="${q.n}"><kbd>r</kbd>Reject</button></div></div><span class="age">${age(q.age)}</span></div>`;
+  const ev=[];c.versions.forEach(v=>ev.push({t:'v',age:v.age,seq:v.seq,v}));c.results.forEach(r=>ev.push({t:'r',age:r.age,seq:r.seq,r}));
+  questions.forEach(q=>{if(q.c===c&&(q.answer||q.kind!=='proposal'))ev.push({t:'q',age:q.age,seq:q.seq,q})});ev.sort((a,b)=>a.age-b.age||b.seq-a.seq);
+  for(const e of ev){if(e.t==='v'){const v=e.v,i=c.versions.indexOf(v),open=S.diff===v.v;
+      h+=`<div class="ev v" data-v="${v.v}">${PG[v.pk]}<div><b>v${v.v}</b> ${byHtml(v)} <span class="why">· ${esc(v.why==='leave'?'sealed on leaving the case':v.why==='key'?'published with ⌃⏎':v.why==='idle'?'sealed after 30 s idle':v.why)}</span>${open?(i>0?diffHtml(c.versions[i-1],v):`<div class="why">first version · ${v.steps.length} steps</div>`):''}</div><span class="age">${age(v.age)}</span></div>`}
+    else if(e.t==='r'){const r=e.r,o=OM[r.o];h+=`<div class="ev">${PG[r.k]}<div><b class="${o[1]}">${o[0]} ${r.o}</b> on v${r.v} · basis ${r.basis} <span class="why">· ${esc(r.src)}${r.msg?' · '+esc(r.msg):''}</span></div><span class="age">${age(r.age)}</span></div>`}
+    else{const q=e.q;h+=`<div class="ev"><span class="q">?</span><div><b>${q.id}</b> ${q.answer?`answered <b>${q.answer.w}</b> by ${PG.H} ${ME}`:'open'} · ${KL[q.kind]} from ${PG[q.pk]} ${esc(q.who)} <span class="why">· ${esc(q.title)}</span></div><span class="age">${age(q.age)}</span></div>`}}
+  el.innerHTML=h}
+
+/* ---------- drafts and versions ---------- */
+function touch(c){if(!c.draft)c.draft={isNew:false,saved:false};c.draft.saved=false;clearTimeout(c.saveT);c.saveT=setTimeout(()=>{if(c.draft){c.draft.saved=true;paintState(c);if(curCase()===c)paintTimeline(c)}},350);
+  if(curCase()===c&&!S.tlT)S.tlT=requestAnimationFrame(()=>{S.tlT=0;if(curCase()===c)paintTimeline(c)});
+  clearTimeout(c.idleT);c.idleT=setTimeout(()=>{if(c.draft){seal(c,'idle',true);paintList();paintState(c);if(curCase()===c)paintTimeline(c);paintBar()}},30000);paintState(c);paintList()}
+function discard(c){let i=cases.indexOf(c);if(i>=0)cases.splice(i,1);byN.delete(c.n);if(S.view==='suite'){i=rows.indexOf(c);if(i>=0){rows.splice(i,1);if(sel>i||sel>=rows.length)sel=Math.max(0,sel-1)}}c.f.own--;for(let f=c.f;f;f=f.parent)f.total--;c.draft=null;layout()}
+function seal(c,why,soft){if(!c||!c.draft)return;clearTimeout(c.idleT);clearTimeout(c.saveT);c.title=pullTags(c,c.title,true).trim();
+  if(!soft)c.steps=c.steps.filter(s=>s.t.trim()||s.x.trim());c.steps.forEach(s=>{s.t=pullTags(c,s.t,true)});
+  if(c.draft.isNew&&!c.title&&!work(c).steps.length){discard(c);status('Empty case dropped. Nothing was recorded.');return}
+  const l=c.versions[c.versions.length-1],w=work(c),snap={title:w.title,tags:w.tags.slice(),steps:w.steps.map(s=>({...s}))},key=o=>JSON.stringify([o.title,o.tags,o.steps]);
+  if(l&&key(l)===key(snap)){c.draft=null;status(`${c.id}: nothing changed, still v${c.ver}.`);return}
+  c.ver++;const v={v:c.ver,by:ME,pk:'H',age:0,seq:++S.seq,why,...snap};c.versions.push(v);c.draft=null;
+  status(`<b>${c.id}</b> is now <b>v${c.ver}</b> (${why==='leave'?'you left the case':why==='key'?'⌃⏎':'30 s idle'}). Everyone sees it.${l?' Earlier passes now show <b>~</b> until it is run again. <kbd>u</kbd> reverts.':''}`);
+  if(l)undo.push({label:`${c.id} v${c.ver}`,fn(){c.ver++;c.versions.push({...l,v:c.ver,by:ME,pk:'H',adopt:null,age:0,seq:++S.seq,why:`reverted v${v.v}`,steps:l.steps.map(s=>({...s})),tags:l.tags.slice()});c.title=l.title;c.tags=l.tags.slice();c.steps=l.steps.map(s=>({...s}));status(`<b>${c.id}</b> reverted: v${c.ver} restores v${l.v}. Both stay in the timeline.`)}})}
+function pullTags(c,text,fin){const re=fin?/(^|\s)#([A-Za-z0-9][\w-]*)(?=\s|$)/g:/(^|\s)#([A-Za-z0-9][\w-]*)\s/g;let hit=false;
+  const out=text.replace(re,(m,pre,tag)=>{hit=true;tag=tag.toLowerCase();if(!c.tags.includes(tag))c.tags.push(tag);return pre});return hit?(fin?out.replace(/\s+$/,''):out):text}
+
+/* ---------- capture: the hot path ---------- */
+function newCase(){if(S.view!=='suite')go('suite');endRowEdit();const p=rows[sel];if(p&&p.draft)seal(p,'leave');
+  const cur=rows[sel],f=cur?cur.f:(S.folder||folders[0]),n=++S.maxN,c={n,id:'C-'+n,title:'',f,tags:[],ver:0,q:0,draft:{isNew:true,saved:true},draftBy:null,steps:[],versions:[],results:[],vage:0,proof:{H:null,C:null,A:null}};
+  cases.splice(cur?cases.indexOf(cur)+1:cases.length,0,c);byN.set(n,c);f.own++;for(let x=f;x;x=x.parent)x.total++;
+  rows.splice(cur?sel+1:0,0,c);sel=cur?sel+1:0;layout();ensureVisible();S.editing=c;rowEdit.value='';rowEdit.hidden=false;paintAll();dropSel();rowEdit.focus({preventScroll:true});ensureVisible()}
+function rename(){const c=curCase();if(!c)return;S.editing=c;rowEdit.value=c.title;rowEdit.hidden=false;paintList();dropSel();rowEdit.focus({preventScroll:true})}
+function endRowEdit(){const c=S.editing;if(!c)return;S.editing=null;rowEdit.hidden=true;const t=pullTags(c,rowEdit.value,true);if(t!==c.title){c.title=t;const el=$('#ctitle');if(el&&curCase()===c)el.textContent=t}paintTags(c);paintList()}
+rowEdit.addEventListener('input',()=>{const c=S.editing;if(!c)return;let v=rowEdit.value;const m=pullTags(c,v,false);if(m!==v){const p=Math.max(0,rowEdit.selectionStart-(v.length-m.length));rowEdit.value=v=m;rowEdit.setSelectionRange(p,p);paintTags(c)}
+  c.title=v;const el=$('#ctitle');if(el)el.textContent=v;touch(c)});
+/* switching to another window (to copy from a spec) must not end the edit: only a blur inside the page does */
+rowEdit.addEventListener('blur',()=>{if(S.editing&&document.hasFocus())endRowEdit()});
+function caretEnd(el){if(!el)return;el.focus();const r=document.createRange();r.selectNodeContents(el);r.collapse(false);const s=getSelection();s.removeAllRanges();s.addRange(r)}
+const fieldEl=(i,f)=>$(`#steps [data-i="${i}"][data-f="${f}"]`);
+function focusStep(i,f='t'){const c=curCase();if(!c)return;if(i>=c.steps.length){c.steps.push(mkStep());paintSteps(c);i=c.steps.length-1}const el=fieldEl(i,f);if(f==='x')el.closest('.st').classList.add('open');caretEnd(el)}
+function parseLines(txt){const out=[];for(let l of txt.split(/\r?\n/)){l=l.replace(/^\s*(?:[-*•]\s+|\d+[.)]\s+)/,'').trim();if(!l)continue;
+    let m=l.match(/^(?:=>|>|(?:expected|expect)\s*:)\s*(.+)$/i);if(m&&out.length&&!out[out.length-1].x){out[out.length-1].x=m[1].trim();continue}
+    m=l.match(/^(.*?)(?:\s*=>\s*|\s+>\s+|\s*\bexpected:\s*)(.*)$/i);out.push(m&&m[1]?mkStep(m[1].trim(),m[2].trim()):mkStep(l,''))}return out}
+const txt=el=>el.textContent.replace(/\u00a0/g,' ').replace(/\n/g,'');
+const atEdge=(el,end)=>{const s=getSelection();if(!s.rangeCount||!s.isCollapsed)return false;const r=s.getRangeAt(0).cloneRange();r.selectNodeContents(el);end?r.setStart(s.focusNode,s.focusOffset):r.setEnd(s.focusNode,s.focusOffset);return r.toString().length===0};
+D.addEventListener('input',e=>{const t=e.target,f=t.dataset.f,c=curCase();if(!f||!c)return;if(t.innerHTML==='<br>'||t.textContent==='\n')t.innerHTML='';let v=txt(t);
+  if(f==='title'){const m=pullTags(c,v,false);if(m!==v){t.textContent=v=m;caretEnd(t);paintTags(c)}c.title=v;touch(c);return}
+  const i=+t.dataset.i,s=c.steps[i];if(!s)return;
+  if(f==='x'){s.x=v;t.closest('.st').classList.toggle('hasx',!!v);touch(c);return}
+  const sp=v.match(/^(.+?)(?:\s=>\s|\s>\s|\s+expected:\s)(.*)$/i);
+  if(sp){s.t=pullTags(c,sp[1],true);s.x=sp[2];t.textContent=s.t;const xe=fieldEl(i,'x');xe.textContent=s.x;t.closest('.st').classList.add('open');t.closest('.st').classList.toggle('hasx',!!s.x);caretEnd(xe);paintTags(c);touch(c);return}
+  const m=pullTags(c,v,false);if(m!==v){t.textContent=v=m;caretEnd(t);paintTags(c)}s.t=v;touch(c)});
+D.addEventListener('focusout',e=>{const t=e.target;if(t.dataset&&t.dataset.f==='x'&&!txt(t)){const r=t.closest('.st');r&&r.classList.remove('open')}});
+function onPaste(e){const t=e.target,isRow=t===rowEdit,f=t.dataset&&t.dataset.f;if(!isRow&&!f)return;const raw=(e.clipboardData||window.clipboardData).getData('text/plain');if(!/\n/.test(raw.trim()))return;
+  e.preventDefault();const c=isRow?S.editing:curCase();if(!c)return;const lines=parseLines(raw);if(!lines.length)return;let at;
+  if(isRow||f==='title'){if(isRow)c.title=rowEdit.value;if(!c.title.trim()){const h=lines.shift();c.title=h.t+(h.x?' > '+h.x:'')}if(isRow){rowEdit.value=c.title;endRowEdit()}c.steps=c.steps.filter(s=>s.t||s.x);at=c.steps.length}
+  else{const i=+t.dataset.i,s=c.steps[i];if(s&&!s.t.trim()&&!s.x.trim()){c.steps.splice(i,1);at=i}else at=i+1}
+  lines.forEach(s=>{s.t=pullTags(c,s.t,true)});c.steps.splice(at,0,...lines);touch(c);renderCase(c);paintList();
+  if(lines.length)focusStep(at+lines.length-1,lines[lines.length-1].x?'x':'t');else caretEnd($('#ctitle'))}
+document.addEventListener('paste',onPaste);
+function fieldKey(e,t){const k=e.key,mod=e.ctrlKey||e.metaKey;
+  if(t===filter){if(k==='Enter'||k==='ArrowDown'){e.preventDefault();focusList()}else if(k==='Escape'){e.preventDefault();filter.value='';onFilter();focusList()}return}
+  if(t.id==='note'){const sl=S.noting;if(k==='Enter'){e.preventDefault();if(sl){sl.note=t.value.trim();if(sl.q&&sl.note){sl.q.title=sl.note;sl.q.msg=sl.note}status(`<b>${sl.c.id}</b> failed${sl.note?': '+esc(sl.note):''} · <b>${sl.q.id}</b> opened in the queue · <kbd>u</kbd> undo`)}focusList();advance()}else if(k==='Escape'){e.preventDefault();S.noting=null;focusList();paintAll()}return}
+  if(t===rowEdit){const c=S.editing;if(!c)return;
+    if(k==='Enter'||k==='Tab'||k==='ArrowDown'){e.preventDefault();endRowEdit();if(k==='Enter'&&e.shiftKey)newCase();else if(mod){seal(c,'key');focusList();paintAll()}else focusStep(0)}
+    else if(k==='Escape'){e.preventDefault();endRowEdit();if(c.draft&&c.draft.isNew&&!c.title.trim()&&!c.steps.length)discard(c);focusList();paintAll()}return}
+  const f=t.dataset.f,c=curCase();if(!f||!c)return;const i=+t.dataset.i,empty=!txt(t);
+  if(k==='Escape'){e.preventDefault();focusList();return}
+  if(mod&&k==='Enter'){e.preventDefault();seal(c,'key');focusList();paintAll();return}
+  if(f==='title'){if(k==='Enter'||k==='Tab'||(k==='ArrowDown'&&atEdge(t,true))){e.preventDefault();const m=pullTags(c,c.title,true);if(m!==c.title){c.title=m;t.textContent=m;paintTags(c);paintList()}focusStep(0)}return}
+  const s=c.steps[i];if(!s)return;
+  if(k==='Enter'){e.preventDefault();const m=pullTags(c,s.t,true);if(m!==s.t){s.t=m;paintTags(c)}if(!s.t.trim()&&!s.x.trim())return;const nx=c.steps[i+1];if(!(nx&&!nx.t&&!nx.x))c.steps.splice(i+1,0,mkStep());paintSteps(c);focusStep(i+1);touch(c);return}
+  if(k==='Tab'){e.preventDefault();if(e.shiftKey){if(f==='x')focusStep(i,'t');else if(i>0)focusStep(i-1,c.steps[i-1].x?'x':'t');else caretEnd($('#ctitle'))}else if(f==='t')focusStep(i,'x');else focusStep(i+1);return}
+  if(k==='Backspace'&&empty){e.preventDefault();if(f==='x'){t.closest('.st').classList.remove('open');focusStep(i,'t')}else{c.steps.splice(i,1);touch(c);paintSteps(c);if(i>0)focusStep(i-1,c.steps[i-1].x?'x':'t');else caretEnd($('#ctitle'))}return}
+  if(mod&&(k==='ArrowUp'||k==='ArrowDown')){e.preventDefault();const j=i+(k==='ArrowUp'?-1:1);if(j<0||j>=c.steps.length)return;[c.steps[i],c.steps[j]]=[c.steps[j],c.steps[i]];touch(c);paintSteps(c);focusStep(j,f);return}
+  if(k==='ArrowUp'&&atEdge(t,false)){e.preventDefault();if(f==='x')focusStep(i,'t');else if(i>0)focusStep(i-1,c.steps[i-1].x?'x':'t');else caretEnd($('#ctitle'))}
+  else if(k==='ArrowDown'&&atEdge(t,true)){e.preventDefault();if(f==='t'&&s.x)focusStep(i,'x');else if(i+1<c.steps.length)focusStep(i+1)}}
+function openDetail(){if(S.view==='suite'){const c=curCase();if(!c)return;const n=c.steps.length;if(n)focusStep(n-1,c.steps[n-1].x?'x':'t');else caretEnd($('#ctitle'))}else if(S.view==='queue'){S.peek.queue=true;renderDetail()}}
+function cycleDiff(){const c=curCase();if(!c)return;S.diff=S.diff==null?c.ver:S.diff>1?S.diff-1:null;paintTimeline(c)}
+
+/* ================= queue ================= */
+const ANS={
+ failure:[{k:'d',t:'Defect',w:'defect',d:()=>'A product bug. Blocks the gate until a later build passes.'},{k:'f',t:'Flaky',w:'flaky',d:()=>'The test is unreliable. Not blocking; asked again if it fails 3 of the next 10.'},{k:'i',t:'Infrastructure',w:'infrastructure',d:()=>'The environment, not the product. Excused for this build only.'},{k:'e',t:'Expected',w:'expected',d:q=>`The product changed on purpose. ${q.c?q.c.id:'The case'} is marked to update.`}],
+ proposal:[{k:'a',t:'Accept',w:'accepted',d:q=>`Becomes v${q.c.ver+1} of ${q.c.id}, written by ${q.pk==='A'?'agent ':''}${q.who}, adopted by you.`},{k:'r',t:'Reject',w:'rejected',d:()=>'Nothing changes. The proposal and your answer stay in the ledger.'}],
+ finding:[{k:'a',t:'Accept',w:'accepted',d:()=>'A real problem. Recorded as a defect on the case; blocks like a failure.'},{k:'r',t:'Reject',w:'rejected',d:()=>'Not a problem. The agent is not asked about this cause again.'}],
+ unlinked:[{k:'l',t:'Link',w:'linked',d:q=>`To ${q.sug.id} (best match ${q.score}). Its results count for that case from now on.`},{k:'t',t:'Track',w:'tracked',d:()=>'Keep its results without a case, and stop asking.'}]};
+function answer(k,q0){const inQ=S.view==='queue'&&!q0,q=q0||(inQ?rows[sel]:null);if(!q||q.answer)return;const a=ANS[q.kind].find(x=>x.k===k);
+  if(!a){status(`<kbd>${k}</kbd> is not an answer to ${/^a/.test(KL[q.kind])?'an':'a'} ${KL[q.kind]}. Use ${ANS[q.kind].map(x=>`<kbd>${x.k}</kbd> ${x.t.toLowerCase()}`).join(' ')}.`,'warn');return}
+  q.answer={k,w:a.w,by:ME};q.seq=++S.seq;let back=null;
+  if(q.kind==='proposal'&&k==='a'){const c=q.c;if(c.draft)seal(c,'key');const before=c.steps,bt=c.ver;c.steps=applyOps(c.steps,q.ops);c.ver++;const v={v:c.ver,by:q.who,pk:q.pk,adopt:ME,age:0,seq:++S.seq,why:q.title,title:c.title,tags:c.tags.slice(),steps:c.steps.map(s=>({...s}))};c.versions.push(v);back=()=>{c.steps=before;c.ver=bt;c.versions.splice(c.versions.indexOf(v),1)}}
+  if(q.kind==='unlinked'&&k==='l'){const c=q.sug,old=c.proof.C;if(!old){c.proof.C={o:'pass',v:c.ver,age:30};back=()=>{c.proof.C=old}}}
+  if(q.c)q.c.q--;if(inQ){rows.splice(sel,1);if(sel>=rows.length)sel=Math.max(0,rows.length-1)}
+  undo.push({label:q.id,fn(){q.answer=null;if(back)back();if(q.c)q.c.q++;status(`<b>${q.id}</b> is open again. The withdrawn answer stays in the ledger.`);if(S.view==='queue'){rebuild();sel=Math.max(0,rows.indexOf(q));layout();ensureVisible()}}});
+  status(`<b>${q.id}</b> → <b>${a.w}</b>, recorded as ${ME}${q.kind==='failure'?`, carries to later occurrences of this cause`:q.kind==='proposal'&&k==='a'?`: ${q.c.id} is now v${q.c.ver}, written by ${q.pk==='A'?'agent ':''}${q.who}`:''} · <kbd>u</kbd> undo`);layout();ensureVisible();paintAll()}
+function answerHere(k){const c=curCase(),q=c&&questions.find(q=>q.c===c&&q.kind==='proposal'&&!q.answer);if(q)answer(k,q);else status('No open proposal on this case.','warn')}
+function evidence(q,full){const P=s=>`<pre class="log">${s}</pre>`;
+  if(q.kind==='failure'){const tname=q.c?q.c.title.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().split(' ').slice(0,5).join(' '):'test';
+    let h=P(`<span class="bad">✗ ${esc(tname)}</span>\n  <span class="bad">${esc(q.msg||q.title)}</span>\n<span class="dim">${q.pk==='C'?`build ${q.build} · main · ${esc(q.who)} · attempt 2 of 2`:q.pk==='H'?`recorded by hand · ${esc(q.who)} · build ${q.build}`:`agent run · ${esc(q.who)} · basis assumed`}</span>`);
+    if(full){h+=P(`    at ${esc(tname.split(' ').slice(0,2).join('-'))}.spec.ts:41:27\n    at step "${esc(body(q.c).steps[Math.min(1,q.c.steps.length-1)].t)}"\n    at Fixture.run (runner.ts:118:9)\n<span class="dim">trace.zip · screenshot.png · video.webm</span>`);
+      h+=`<div class="sech">Last 20 results of this test</div><div class="prow"><span></span><span></span><span style="font:13px var(--mono);letter-spacing:2px"><span class="ps"><b>${'✓'.repeat(17)}</b></span><span class="fl"><b>✗✓✗</b></span></span><span class="age">oldest → newest</span></div><div class="sech">Same signature</div><div class="why">${q.tests} test${q.tests===1?'':'s'} fail with this message on this build. One answer covers all of them.</div>`}
+    return h}
+  if(q.kind==='finding'){let h=P(`<span class="bad">${esc(q.title)}</span>\n<span class="dim">agent ${esc(q.who)} · review of ${q.src} · not a runtime result, so it fills no run slot</span>`);
+    if(full){const st=body(q.c).steps;h+=P(`Reproduce\n  1. ${esc(st[0].t)}\n  2. ${esc(st[Math.min(1,st.length-1)].t)}\n  3. Repeat the last action from a second tab within 200 ms\nObserved   the second request is accepted\nExpected   ${esc(st.find(s=>s.x)?st.find(s=>s.x).x:'the second request is rejected')}\n<span class="dim">confidence 0.8 · 2 tool calls · diff lines 118–141</span>`)}return h}
+  if(q.kind==='proposal'){const c=q.c,after=applyOps(c.steps,q.ops);let h=`<div class="why" style="margin-bottom:4px">${PG[q.pk]} ${q.pk==='A'?'agent ':''}${esc(q.who)} wants to change <b>${c.id}</b> v${c.ver}:</div>`+diffHtml({title:c.title,tags:c.tags,steps:c.steps},{title:c.title,tags:c.tags,steps:after});
+    if(full)h+=P(`<span class="dim">reason</span>  ${q.pk==='A'?'pr:482 changed the code this case covers; the case does not check the new behaviour':'follow-up from the 1.4.0 retro'}\n<span class="dim">base</span>    ${c.id} v${c.ver} (unchanged since the proposal was written)\n<span class="dim">after</span>   ${after.length} steps, ${after.filter(s=>s.x).length} with an expected result`);return h}
+  let h=P(`${esc(q.title)}\n<span class="dim">reported by ${esc(q.who)} · ${q.runs} results kept · matches no case</span>`)+`<div class="why">Best match <b>${q.sug.id}</b> ${esc(q.sug.title)} · similarity ${q.score}</div>`;
+  if(full){const o=[q.sug,cases[(cases.indexOf(q.sug)+1)%cases.length],cases[(cases.indexOf(q.sug)+2)%cases.length]];h+=`<div class="sech">Candidates</div>`+o.map((c,i)=>`<div class="prow"><span></span><span></span><span class="pt"><b>${c.id}</b> ${esc(c.title)}</span><span class="age">${i?(q.score*(.8-i*.15)).toFixed(2):q.score}</span></div>`).join('')}return h}
+function renderQuestion(q){if(!q){D.innerHTML='<div class="nosteps">The queue is clear.</div>';return}const full=S.peek.queue;
+  D.innerHTML=`<div class="cmeta"><span class="cid">${q.id}</span><span class="kind k-${q.kind}" style="width:auto">${KL[q.kind]}</span><span>from ${PG[q.pk]} ${PN[q.pk]} ${esc(q.who)} · ${ago(q.age)}</span>${q.block?`<span class="blk">blocks the gate of ${run.id}</span>`:''}</div>
+  <h2 class="qtitle">${esc(q.title)}</h2>
+  <div class="qsub">${q.c?`on <span class="cid">${q.c.id}</span> ${esc(q.c.title)}${q.tests>1?` · ${q.tests} tests share this cause`:''}`:`no case is linked to this test`}</div>
+  ${q.hint?`<div class="hintbox">Seen before: <b>${q.hint.id}</b> had this signature and ${q.hint.by} answered <b>${q.hint.w}</b> ${q.hint.age} ago. The build changed since, so the answer is suggested, not applied.</div>`:''}
+  <div class="answers">${ANS[q.kind].map(a=>`<button class="ans" data-a="${a.k}"><kbd>${a.k}</kbd><b>${a.t}</b><span>${a.d(q)}</span></button>`).join('')}</div>
+  <div class="sech">Evidence <span class="r"><kbd>␣</kbd> ${full?'less':'all of it'}</span></div>${evidence(q,full)}`}
+
+/* ================= run cockpit ================= */
+function renderSlot(sl){if(!sl){D.innerHTML='<div class="nosteps">No slot.</div>';return}const c=body(sl.c),ver=c.versions.find(v=>v.v===sl.v)||{steps:c.steps},o=sl.by?OM[sl.o]:null,L=S.last;
+  D.innerHTML=`<div class="cmeta"><span class="cid">${run.id}</span><span>slot ${sl.i+1} of ${run.slots.length}</span><span class="cid">${c.id}</span><span>v${sl.v}, pinned when the run started</span>${sl.by?'':'<span class="chip yours">yours</span>'}</div>
+  <h2 class="qtitle">${esc(c.title)}</h2>
+  <ol class="rsteps">${ver.steps.map((s,i)=>`<li class="${(S.rstep===i+1&&!sl.by)||(sl.step===i+1&&sl.o==='fail')?'mark':''}"><span class="sn">${i+1}</span><div>${esc(s.t)}${s.x?`<div class="rx">&gt; ${esc(s.x)}</div>`:''}</div></li>`).join('')}</ol>
+  ${sl.by&&sl.by!=='H'?`<div class="filled">${PG[sl.by]}<div><b class="${o[1]}">${o[0]} ${sl.o}</b> from ${PN[sl.by]} ${esc(sl.who)} on build ${run.build}, ${ago(sl.age)} · basis exact<br>Nothing for you to do here. <kbd>j</kbd> moves on; recording keys skip filled slots.</div></div>`:
+   `<div class="outs">${[['p','Pass','pass'],['f','Fail','fail'],['b','Blocked','blocked'],['s','Skip','skip']].map(([k,t,w])=>`<button class="out${sl.o===w?' on':''}" data-o="${w}"><kbd>${k}</kbd>${t}</button>`).join('')}</div>
+   ${S.noting===sl?`<input id="note" placeholder="What did you see?   ⏎ records the note and moves on" autocomplete="off" spellcheck="false">`:sl.by?`<div class="why">${PG.H} you recorded <b class="${o[1]}">${o[0]} ${sl.o}</b>${sl.step?` at step ${sl.step}`:''}${sl.note?': '+esc(sl.note):''}</div>`:`<div class="why">A digit marks the failing step first, for example <kbd>2</kbd> <kbd>f</kbd>.</div>`}`}
+  ${S.peek.runs?`<div class="sech">What else is known about ${c.id} <span class="r"><kbd>␣</kbd> hide</span></div><div id="proof"></div>`:`<div class="sech">What else is known about ${c.id} <span class="r"><kbd>␣</kbd> show</span></div>`}
+  ${L?`<div class="lastrec">Last recorded: <span class="cid">${L.sl.c.id}</span> <b class="${OM[L.o][1]}">${OM[L.o][0]} ${L.o}</b> <span style="margin-left:auto"><kbd>u</kbd> undo</span></div>`:''}`;
+  if(S.peek.runs){const k=S.peek.suite;S.peek.suite=true;paintProof(c);S.peek.suite=k}}
+function record(o){if(S.view!=='runs')return;const sl=rows[sel];if(!sl)return;
+  if(sl.by&&sl.by!=='H'){status(`Slot ${sl.i+1} is already filled by ${PN[sl.by]} ${esc(sl.who)}. Nothing to record.`,'warn');return}
+  const c=body(sl.c),prev={by:sl.by,o:sl.o,note:sl.note,age:sl.age,step:sl.step,who:sl.who,q:sl.q},pp=c.proof.H,pl=S.last;
+  if(sl.q){questions.splice(questions.indexOf(sl.q),1);c.q--;sl.q=null}
+  Object.assign(sl,{by:'H',o,who:ME,age:0,step:o==='fail'?S.rstep:0,note:''});const res={k:'H',o,v:sl.v,age:0,basis:'exact',src:`${ME} in ${run.id}`,msg:'',seq:++S.seq};c.results.push(res);
+  if(o==='pass'||o==='fail')c.proof.H={o,v:sl.v,age:0};let q=null;
+  if(o==='fail'){q={n:++maxQ,id:'Q-'+maxQ,kind:'failure',pk:'H',who:`${ME} in ${run.id}`,c,title:`${c.id} failed by hand${sl.step?' at step '+sl.step:''}`,msg:'',tests:1,block:true,age:0,answer:null,seq:++S.seq,build:run.build};questions.unshift(q);c.q++;sl.q=q}
+  S.last={sl,o};undo.push({label:c.id,fn(){Object.assign(sl,prev);c.results.splice(c.results.indexOf(res),1);c.proof.H=pp;if(q){const i=questions.indexOf(q);if(i>=0)questions.splice(i,1);c.q--}S.last=pl;S.noting=null;status(`<b>${c.id}</b> ${o} withdrawn. Slot ${sl.i+1} is open again.`);if(S.view==='runs'){const i=rows.indexOf(sl);if(i>=0)sel=i;ensureVisible()}}});
+  status(`<b>${c.id}</b> ${OM[o][0]} ${o}, recorded as ${ME} on v${sl.v} · <kbd>u</kbd> undo`);
+  if(o==='fail'){S.noting=sl;paintAll();const n=$('#note');n&&n.focus()}else advance()}
+function advance(){S.noting=null;S.rstep=0;let i=-1;for(let k=1;k<=rows.length;k++){const j=(sel+k)%rows.length;if(!rows[j].by){i=j;break}}
+  if(i<0){status(`<b>${run.id}</b>: nothing is left for people. ${run.slots.filter(s=>s.o==='fail').length} failed, ${run.slots.filter(s=>s.o==='blocked').length} blocked.`);paintAll();return}sel=i;ensureVisible();paintAll()}
+
+/* ================= navigation, operations, palette ================= */
+function go(v){if(S.view==='suite'){endRowEdit();const c=rows[sel];if(c&&c.draft&&S.view!==v)seal(c,'leave')}
+  S.selv[S.view]=sel;S.top[S.view]=vp.scrollTop;S.view=v;document.body.dataset.view=v;rowH=ROWH[v];filter.value=S.q[v];rebuild();
+  sel=Math.max(0,Math.min(S.selv[v],rows.length-1));if(v==='runs'){const i=rows.findIndex(s=>!s.by);if(i>=0)sel=i}
+  layout();vp.scrollTop=S.top[v];ensureVisible();S.noting=null;S.rstep=0;S.status='';S.cls='';paintAll();focusList()}
+function setFolder(f){const c=curCase();endRowEdit();if(c&&c.draft)seal(c,'leave');S.folder=f;for(let p=f&&f.parent;p;p=p.parent)p.open=true;if(S.view!=='suite'){go('suite')}rebuild();sel=0;layout();vp.scrollTop=0;paintAll()}
+function stepFolder(d){const vis=[null,...folders.filter(f=>{for(let p=f.parent;p;p=p.parent)if(!p.open)return false;return true})];const i=vis.indexOf(S.folder);setFolder(vis[Math.max(0,Math.min(vis.length-1,i+d))])}
+function onFilter(){const keep=rows[sel];if(S.view==='suite'&&keep&&keep.draft)seal(keep,'leave');S.q[S.view]=filter.value;rebuild();sel=Math.max(0,rows.indexOf(keep));layout();ensureVisible();paintAll()}
+filter.addEventListener('input',onFilter);
+function openCase(c){S.folder=null;S.q.suite='';if(S.view!=='suite')go('suite');else{filter.value='';rebuild()}sel=Math.max(0,rows.indexOf(c));layout();ensureVisible(true);paintAll();focusList()}
+function openQuestion(q){S.q.queue='';go('queue');const i=rows.indexOf(q);if(i>=0){sel=i;ensureVisible(true);paintAll()}}
+function peek(){const v=S.view;S.peek[v]=!S.peek[v];renderDetail();const p=$('#proof');if(v==='suite'&&p&&S.peek[v])p.scrollIntoView({block:'nearest'})}
+function zoom(){S.zoom=!S.zoom;$('#app').classList.toggle('zoom',S.zoom);paintList()}
+function doUndo(){const u=undo.pop();if(!u){status('Nothing to undo.','warn');return}u.fn();layout();paintAll()}
+const mq=matchMedia('(prefers-color-scheme: dark)');let userTheme=null;
+function applyTheme(){document.documentElement.dataset.theme=userTheme||(mq.matches?'dark':'light')}
+mq.addEventListener('change',applyTheme);
+function toggleTheme(){userTheme=document.documentElement.dataset.theme==='dark'?'light':'dark';applyTheme()}
+/* one registry: the key handler, the palette and the ? overlay are all read from it */
+const OPS=[
+ {g:'Go',k:'g s',t:'Go to suite',f:()=>go('suite')},{g:'Go',k:'g q',t:'Go to queue',f:()=>go('queue')},{g:'Go',k:'g r',t:'Go to run R-4, first unfilled slot',f:()=>go('runs')},
+ {g:'Go',k:'/',t:'Filter this list',f:()=>{filter.focus();filter.select()}},{g:'Go',k:'⌘K',t:'Command palette',f:()=>openPalette(),np:1},{g:'Go',k:'?',t:'Show all keys',f:()=>openHelp()},
+ {g:'Any list',k:'j',alt:['ArrowDown'],t:'Next row',f:()=>move(1)},{g:'Any list',k:'k',alt:['ArrowUp'],t:'Previous row',f:()=>move(-1)},
+ {g:'Any list',k:'G',alt:['End'],t:'Last row',f:()=>select(rows.length-1)},{g:'Any list',k:'Home',t:'First row',f:()=>select(0)},
+ {g:'Any list',k:'PageDown',t:'Page down',f:()=>move(Math.floor(vp.clientHeight/rowH)-1),nh:1},{g:'Any list',k:'PageUp',t:'Page up',f:()=>move(-Math.floor(vp.clientHeight/rowH)+1),nh:1},
+ {g:'Any list',k:'Space',t:'Peek the evidence, focus stays in the list',f:()=>peek()},{g:'Any list',k:'Enter',t:'Open: caret into the detail pane',f:()=>openDetail()},
+ {g:'Any list',k:'u',t:'Undo the last answer, result or version',f:()=>doUndo()},{g:'Any list',k:'z',t:'Widen or restore the detail pane',f:()=>zoom()},
+ {g:'Suite',v:'suite',k:'c',t:'New case under the cursor',f:()=>newCase()},{g:'Suite',v:'suite',k:'e',t:'Rename in the list',f:()=>rename()},
+ {g:'Suite',v:'suite',k:'v',t:'Diff the previous version',f:()=>cycleDiff()},{g:'Suite',v:'suite',k:'a',t:'Accept the proposal on this case',f:()=>answerHere('a')},{g:'Suite',v:'suite',k:'r',t:'Reject the proposal on this case',f:()=>answerHere('r')},{g:'Suite',v:'suite',k:']',t:'Next folder',f:()=>stepFolder(1)},{g:'Suite',v:'suite',k:'[',t:'Previous folder',f:()=>stepFolder(-1)},
+ {g:'Queue',v:'queue',k:'d',t:'Failure: defect',f:()=>answer('d')},{g:'Queue',v:'queue',k:'f',t:'Failure: flaky',f:()=>answer('f')},{g:'Queue',v:'queue',k:'i',t:'Failure: infrastructure',f:()=>answer('i')},{g:'Queue',v:'queue',k:'e',t:'Failure: expected',f:()=>answer('e')},
+ {g:'Queue',v:'queue',k:'a',t:'Proposal or finding: accept',f:()=>answer('a')},{g:'Queue',v:'queue',k:'r',t:'Proposal or finding: reject',f:()=>answer('r')},{g:'Queue',v:'queue',k:'l',t:'Unlinked test: link to the best match',f:()=>answer('l')},{g:'Queue',v:'queue',k:'t',t:'Unlinked test: track without a case',f:()=>answer('t')},
+ {g:'Run',v:'runs',k:'p',t:'Pass',f:()=>record('pass')},{g:'Run',v:'runs',k:'f',t:'Fail, caret in the note',f:()=>record('fail')},{g:'Run',v:'runs',k:'b',t:'Blocked',f:()=>record('blocked')},{g:'Run',v:'runs',k:'s',t:'Skip',f:()=>record('skip')},
+ {g:'App',k:'',t:'Toggle light and dark',f:()=>toggleTheme()},{g:'App',k:'',t:'Publish the draft now',v:'suite',f:()=>{const c=curCase();if(c){seal(c,'key');paintAll()}}}];
+const KEYMAP={all:{},suite:{},queue:{},runs:{}};
+for(const op of OPS){if(!op.k||op.k.includes(' ')||op.k==='⌘K')continue;for(const k of [op.k,...(op.alt||[])])KEYMAP[op.v||'all'][k]=op}
+document.addEventListener('keydown',e=>{const t=e.target,k=e.key,mod=e.ctrlKey||e.metaKey;
+  if(mod&&(k==='k'||k==='K')){e.preventDefault();S.ov==='pal'?closeOv():openPalette();return}
+  if(S.ov){ovKey(e);return}
+  if(t&&(t.isContentEditable||t.tagName==='INPUT')){fieldKey(e,t);return}
+  if(mod||e.altKey)return;
+  if(S.g){S.g=false;const m={s:'suite',q:'queue',r:'runs'}[k];if(m){e.preventDefault();go(m)}return}
+  if(k==='g'){S.g=true;clearTimeout(S.gT);S.gT=setTimeout(()=>{S.g=false},1500);e.preventDefault();return}
+  if(S.view==='runs'&&/^[1-9]$/.test(k)){const sl=rows[sel];if(sl&&!sl.by&&+k<=body(sl.c).steps.length){S.rstep=S.rstep===+k?0:+k;renderDetail()}e.preventDefault();return}
+  const name=k===' '?'Space':k,op=KEYMAP[S.view][name]||KEYMAP.all[name];if(op){e.preventDefault();op.f()}});
+function palItems(q){q=q.trim().toLowerCase();const out=[];let m;
+  if((m=q.match(/^c-?(\d+)$/))){const c=byN.get(+m[1]);if(c)out.push({ic:'C',t:`${c.id}  ${c.title}`,h:'case',f:()=>openCase(c)})}
+  if((m=q.match(/^q-?(\d+)$/))){const x=questions.find(x=>x.n===+m[1]);if(x)out.push({ic:'Q',t:`${x.id}  ${x.title}`,h:x.answer?'answered '+x.answer.w:KL[x.kind],f:()=>openQuestion(x)})}
+  if(/^r-?4?$/.test(q)&&q)out.push({ic:'R',t:`${run.id}  ${run.name}`,h:'run',f:()=>go('runs')});
+  /* every operation is reachable from every screen: one that belongs to another screen goes there first */
+  const VN={suite:'Suite',queue:'Queue',runs:'Run '+run.id},far=op=>op.v&&op.v!==S.view?1:0;
+  for(const op of OPS.filter(op=>!op.np&&(!q||((op.v?VN[op.v]+' ':'')+op.t).toLowerCase().includes(q))).sort((a,b)=>far(a)-far(b)))out.push({ic:'›',t:(far(op)?VN[op.v]+' · ':'')+op.t,h:op.k,f:far(op)?()=>{go(op.v);op.f()}:op.f});
+  if(q.length>=2){for(const f of folders)if(f.name.toLowerCase().includes(q))out.push({ic:'▸',t:pathOf(f).join(' / '),h:`folder · ${f.total}`,f:()=>setFolder(f)});
+    let n=0;for(const x of questions){if(n>=6)break;if(!x.answer&&x.title.toLowerCase().includes(q)){n++;out.push({ic:'Q',t:`${x.id}  ${x.title}`,h:KL[x.kind],f:()=>openQuestion(x)})}}
+    n=0;for(const c of cases){if(n>=12)break;if(c.title.toLowerCase().includes(q)||c.tags.includes(q.replace('#',''))){n++;out.push({ic:'C',t:`${c.id}  ${c.title}`,h:'case',f:()=>openCase(c)})}}}
+  return out}
+function openPalette(){S.ov='pal';S.pi=0;ov.innerHTML=`<div class="pal"><input id="palq" placeholder="A command, an id (C-311, Q-12, R-4), a title or a folder" spellcheck="false" autocomplete="off"><div id="pall"></div><div class="palf"><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>⏎</kbd> run</span><span><kbd>esc</kbd> close</span></div></div>`;ov.classList.add('on');const q=$('#palq');q.addEventListener('input',()=>{S.pi=0;paintPal()});q.focus();paintPal()}
+function paintPal(){const it=S.items=palItems($('#palq').value);$('#pall').innerHTML=it.map((x,i)=>`<div class="pi${i===S.pi?' on':''}" data-p="${i}"><span class="ic">${x.ic}</span><span class="t">${esc(x.t)}</span><span class="h">${x.h?(x.ic==='›'?`<kbd>${esc(x.h)}</kbd>`:esc(x.h)):''}</span></div>`).join('')||'<div class="pi"><span class="t" style="color:var(--faint)">Nothing matches.</span></div>';const on=$('#pall .on');on&&on.scrollIntoView({block:'nearest'})}
+function openHelp(){S.ov='help';const gs=[...new Set(OPS.map(o=>o.g))].filter(g=>g!=='App');const W=[['c','New case, caret in the title'],['⏎','Title → first step; step → next step'],['⇧⏎','In the title: seal and start another case'],['⇥ or “ > ”','Start the expected result'],['#tag','Tag, typed anywhere'],['⌘V','A pasted list becomes steps; =>, > and Expected: split'],['⌘↑ ⌘↓','Move the step'],['⌫','On an empty step: remove it'],['⌃⏎ / ⌘⏎','Publish the draft as a version now'],['esc','Back to the list (the draft stays)']];
+  ov.innerHTML=`<div class="help"><div class="sech">Who produced it</div><div class="legend"><span>${PG.H} person</span><span>${PG.C} pipeline (CI)</span><span>${PG.A} agent</span><span><b class="ps">✓</b> pass on the current version</span><span><b class="st2">~</b> pass on an older version</span><span><b class="fl">✗</b> failing</span><span>· never run</span></div>
+  <div class="hg"><section><div class="sech">Writing</div>${W.map(([k,t])=>`<div class="hk"><span>${t}</span><kbd>${k}</kbd></div>`).join('')}</section>${gs.map(g=>`<section><div class="sech">${g}</div>${OPS.filter(o=>o.g===g&&o.k&&!o.nh).map(o=>`<div class="hk"><span>${esc(o.t)}</span><kbd>${esc(o.k==='Space'?'␣':o.k==='Enter'?'⏎':o.k)}</kbd></div>`).join('')}</section>`).join('')}</div></div>`;ov.classList.add('on')}
+function closeOv(){S.ov=null;ov.classList.remove('on');ov.innerHTML='';focusList()}
+function ovKey(e){const k=e.key;if(k==='Escape'){e.preventDefault();closeOv();return}if(S.ov==='help'){if(k==='?'){e.preventDefault();closeOv()}return}
+  if(k==='ArrowDown'||k==='ArrowUp'){e.preventDefault();const n=S.items.length;if(n){S.pi=(S.pi+(k==='ArrowDown'?1:n-1))%n;paintPal()}}
+  else if(k==='Enter'){e.preventDefault();const it=S.items[S.pi];closeOv();it&&it.f()}}
+
+/* ================= mouse (everything also works by pointer) ================= */
+rowsEl.addEventListener('mousedown',e=>{const r=e.target.closest('.row');if(!r)return;e.preventDefault();const i=+r.dataset.i;if(S.editing&&i!==sel)endRowEdit();focusList();select(i)});
+rowsEl.addEventListener('dblclick',()=>openDetail());
+$('#side').addEventListener('click',e=>{const a=e.target.closest('[data-go]');if(a){go(a.dataset.go);return}const tw=e.target.closest('[data-tw]'),fo=e.target.closest('.fo');
+  if(tw&&folders[+tw.dataset.tw].kids.length){const f=folders[+tw.dataset.tw];f.open=!f.open;renderSide();return}if(fo){const id=+fo.dataset.f,f=id<0?null:folders[id];if(f&&f.kids.length)f.open=true;setFolder(f);focusList()}});
+$('#palbtn').onclick=()=>openPalette();$('#keysbtn').onclick=()=>openHelp();$('#theme').onclick=()=>{toggleTheme();focusList()};
+ov.addEventListener('mousedown',e=>{if(e.target===ov){closeOv();return}const p=e.target.closest('[data-p]');if(p){const it=S.items[+p.dataset.p];closeOv();it&&it.f()}});
+D.addEventListener('click',e=>{const qa=e.target.closest('[data-qa]');if(qa){answer(qa.dataset.qa,questions.find(q=>q.n===+qa.dataset.q));return}const a=e.target.closest('[data-a]');if(a){answer(a.dataset.a);return}const o=e.target.closest('[data-o]');if(o){record(o.dataset.o);return}
+  const v=e.target.closest('.ev.v');if(v&&S.view==='suite'){const n=+v.dataset.v;S.diff=S.diff===n?null:n;paintTimeline(curCase())}});
+
+/* ================= boot ================= */
+applyTheme();rebuild();sel=Math.max(0,rows.indexOf(F311));layout();ensureVisible(true);paintAll();focusList();
+(function boot(){const h=location.hash.slice(1).split(/[,&]/);if(h.includes('dark'))userTheme='dark';if(h.includes('light'))userTheme='light';applyTheme();
+  if(h.includes('queue'))go('queue');else if(h.includes('run')||h.includes('runs'))go('runs');
+  else if(h.includes('case')){zoom();const c=F311;c.steps[1].x='Total shows $90.00 and a “You saved $10.00” line';c.steps[2].t='Reload the page, then sign out and back in';c.tags.push('smoke');c.draft={isNew:false,saved:true};ensureVisible(true);paintAll()}
+  else if(h.includes('capture'))selftest(true);
+  if(h.includes('peek')){S.peek[S.view]=true;renderDetail()}if(h.includes('help'))openHelp();if(h.includes('palette')){openPalette();$('#palq').value='coupon';paintPal()}
+  if(h.includes('selftest'))selftest(false)})();
+
+/* Scripted run of J1, J5 and D2 through the real key handlers. Open index.html#selftest to see the counts. */
+function selftest(captureOnly){let n=0;const out=[];
+  const key=(k,o={})=>{n++;const a=document.activeElement,el=a&&a!==document.body?a:document.body;return el.dispatchEvent(new KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true,...o}))};
+  const type=s=>{for(const ch of s){if(!key(ch))continue;const el=document.activeElement;if(el.tagName==='INPUT'){const p=el.selectionStart;el.value=el.value.slice(0,p)+ch+el.value.slice(p);el.setSelectionRange(p+1,p+1)}else if(el.isContentEditable){el.textContent+=ch;caretEnd(el)}else continue;el.dispatchEvent(new InputEvent('input',{bubbles:true,data:ch,inputType:'insertText'}))}};
+  const T='Gift card covers part of the total',ST=[['Add a $60.00 item to the cart',''],['Apply gift card GC-25','Total shows $35.00'],['Reload the page','Gift card is still applied'],['Pay the rest by card',''],['Open the order summary','Gift card and card are listed separately'],['Refund the order to both methods','']];
+  n=0;key('c');type(T+' #checkout');key('Enter');ST.forEach(([t,x],i)=>{type(t);if(x){key('Tab');type(x)}if(i<ST.length-1)key('Enter')});
+  if(captureOnly)return;
+  key('Enter',{ctrlKey:true});const content=T.length+'checkout'.length+ST.reduce((a,[t,x])=>a+t.length+x.length,0);
+  let c=byN.get(2001);out.push(`J1 typed: ${n} keystrokes = ${content} characters of content + ${n-content} of overhead · ${c.id} v${c.ver} "${c.title}" · ${c.steps.length} steps, ${c.steps.filter(s=>s.x).length} with expected, tags [${c.tags}] · draft=${!!c.draft}`);
+  n=0;key('c');type(T+' 2 #checkout');key('Enter');const dt=new DataTransfer();dt.setData('text/plain',ST.map(([t,x],i)=>`${i+1}. ${t}${x?[' => ',' > ',' Expected: '][i%3]+x:''}`).join('\n'));n++;document.activeElement.dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}));key('Enter',{ctrlKey:true});
+  c=byN.get(2002);out.push(`J1 pasted: ${n} keystrokes (one of them the paste) = ${T.length+2+8} characters + ${n-T.length-10} of overhead · ${c.id} v${c.ver} · ${c.steps.length} steps, ${c.steps.filter(s=>s.x).length} with expected, tags [${c.tags}]`);
+  n=0;key('g');key('r');const left0=run.slots.filter(s=>!s.by).length,first=rows[sel].i+1;for(let i=0;i<8;i++)key('p');key('f');type('500 on pay');key('Enter');key('b');
+  const mine=run.slots.filter(s=>s.by==='H');out.push(`J5: ${n} keystrokes (2 to get there, 8 pass, f + 10-character note + Enter, b) · opened on slot ${first} · unfilled ${left0} → ${run.slots.filter(s=>!s.by).length} · mine: ${mine.map(s=>s.o[0]).join('')} · CI/agent slots untouched: ${run.slots.filter(s=>s.by==='C').length}+${run.slots.filter(s=>s.by==='A').length}`);
+  n=0;key('g');key('q');const q0=rows.length,kinds={};for(let i=0;i<20;i++){const q=rows[sel];kinds[q.kind]=(kinds[q.kind]||0)+1;key(ANS[q.kind][i%ANS[q.kind].length].k)}
+  const q1=rows.length;key('u');out.push(`D2: ${n-1} keystrokes (2 to get there + 20 answers) · open ${q0} → ${q1} · kinds ${JSON.stringify(kinds)} · after one more key (u): ${rows.length}`);
+  key(' ');out.push(`peek: full evidence ${S.peek.queue}, focus still in list: ${document.body.dataset.focus==='list'}`);
+  const ck=[],ok=(name,cond)=>ck.push((cond?'ok    ':'FAIL  ')+name);
+  key('g');key('s');key('c');type('Alpha');key('Enter',{shiftKey:true});type('Beta');key('Escape');
+  const A=byN.get(2003),B=byN.get(2004);ok('shift+enter seals the case and starts another',!!A&&A.ver===1&&A.title==='Alpha'&&!!B&&B.title==='Beta'&&!!B.draft);
+  key('Enter');key('Enter');type('one > two');ok('typing " > " starts the expected result',B.steps[0].t==='one'&&B.steps[0].x==='two');
+  key('Enter');type('three');key('ArrowUp',{ctrlKey:true});ok('ctrl+up moves the step',B.steps[0].t==='three');
+  key('Enter');key('Backspace');ok('backspace on an empty step removes it',B.steps.length===2);
+  key('Escape');ok('esc keeps the draft',!!B.draft&&B.ver===0);key('j');ok('leaving the case makes v1',!B.draft&&B.ver===1);
+  key('k');key('Enter');type(' more');key('Enter',{ctrlKey:true});ok('ctrl+enter publishes v2',B.ver===2&&B.steps[1].x==='two more');
+  key('u');ok('u reverts by appending v3 (v2 stays in the timeline)',B.ver===3&&B.steps[1].x==='two'&&B.versions.length===3);
+  const pq=questions.find(q=>q.kind==='proposal'&&!q.answer&&q.pk==='A');if(pq){openCase(pq.c);const v0=pq.c.ver;key('a');const lv=pq.c.versions[pq.c.versions.length-1];ok('a on the case accepts the agent proposal as a version marked agent, adopted by a person',pq.c.ver===v0+1&&lv.pk==='A'&&lv.adopt===ME);key('u');ok('u withdraws the acceptance',pq.c.ver===v0&&!pq.answer)}
+  const lf=run.slots.filter(s=>!s.by).length;key('k',{ctrlKey:true});type('skip');key('Enter');ok('palette runs an action that belongs to another screen',S.view==='runs'&&run.slots.filter(s=>!s.by).length===lf-1);key('u');ok('and u takes it back',run.slots.filter(s=>!s.by).length===lf);
+  key('k',{ctrlKey:true});type('C-1538');key('Enter');ok('palette reaches C-1538 by id',S.view==='suite'&&rows[sel].id==='C-1538'&&!S.ov);
+  key('/');type('gift card');key('Enter');ok('/ filters 2,000+ rows',rows.length>=2&&rows.every(c=>/gift card/i.test(c.title)));key('/');key('Escape');ok('esc clears the filter',rows.length>2000);
+  key('g');key('r');const sl=rows[sel];key('2');key('f');type('x');key('Enter');ok('2 f fails step 2, keeps the note, opens a question',sl.o==='fail'&&sl.step===2&&sl.note==='x'&&!!sl.q&&questions.includes(sl.q));
+  key('u');ok('u withdraws the result and its question',!sl.by&&!questions.some(q=>q.c===sl.c&&q.age===0&&q.pk==='H'&&!q.answer&&q.title.includes('step 2')));
+  key('Home');key('p');ok('p on a slot filled by CI records nothing',rows[0].by==='C'&&run.slots.filter(s=>s.by==='C').length===25);
+  const t0=document.documentElement.dataset.theme;toggleTheme();ok('theme toggles',document.documentElement.dataset.theme!==t0);toggleTheme();
+  key('?');ok('? opens the key overlay',S.ov==='help');key('Escape');
+  const p=document.createElement('pre');p.id='selftest';p.style.cssText='position:fixed;left:250px;bottom:40px;right:20px;z-index:20;margin:0;padding:14px;background:var(--panel);border:1px solid var(--acc);border-radius:8px;font:12px/1.6 var(--mono);white-space:pre-wrap;pointer-events:none';document.body.appendChild(p);
+  key('g');key('s');key('c');type('Idle case');const I=byN.get(S.maxN);
+  setTimeout(()=>{ok('30 s idle makes a version',I.ver===1&&!I.draft);p.textContent=out.concat(ck).join('\n')},30500);
+  p.textContent=out.concat(ck).join('\n')}
+</script>
+</body>
+</html>

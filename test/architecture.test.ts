@@ -82,6 +82,84 @@ describe("the module map", () => {
 		expect(offenders).toEqual([]);
 	});
 
+	test("a module runs SQL only on the tables it owns", () => {
+		// The owner of each table. A read of another module's data goes through that module's functions, so the
+		// rules about its rows live in one place and a join cannot quietly depend on another module's schema.
+		const owners: Record<string, string[]> = {
+			"server/kernel": ["meta", "projects", "counters", "commands"],
+			"server/identity": ["orgs", "actors", "grants", "tokens"],
+			"server/policy": ["policies"],
+			"server/suite": [
+				"folders",
+				"cases",
+				"case_tags",
+				"case_aliases",
+				"versions",
+				"placements",
+				"proposals",
+				"search_docs",
+				"requirements",
+				"covers",
+			],
+			"server/evidence": [
+				"tests",
+				"targets",
+				"changes",
+				"batches",
+				"signatures",
+				"results",
+				"flips",
+				"findings",
+				"reviews",
+				"excuses",
+			],
+			"server/runs": ["runs", "run_tests", "slots", "slot_results", "depends_on"],
+			"server/decisions": ["questions", "question_refs", "answers", "decisions"],
+		};
+		const ownerOf = new Map(
+			Object.entries(owners).flatMap(([layer, tables]) => tables.map((table) => [table, layer] as const)),
+		);
+		const offenders: string[] = [];
+		for (const file of files) {
+			// The archive reads every table by name from the database itself; it has no table of its own to confuse.
+			if (!file.startsWith("src/server/") || file.startsWith("src/server/transfer/") || file.includes("/migrations/"))
+				continue;
+			const layer = layerOf(file);
+			const source = readFileSync(file, "utf8");
+			// SQL keywords are upper case in this codebase; prose in comments is not.
+			for (const match of source.matchAll(/\b(?:FROM|JOIN|INTO|UPDATE)\s+([a-z_]+)\b/g)) {
+				const table = match[1] ?? "";
+				const owner = ownerOf.get(table);
+				if (owner && owner !== layer) offenders.push(`${file} runs SQL on ${table}, which ${owner} owns`);
+			}
+		}
+		expect(offenders).toEqual([]);
+		// Every table in the schema has an owner: a new table without one fails here.
+		const db = new Db(":memory:");
+		migrate(db, ":memory:");
+		const tables = db.raw
+			.query<{ name: string }, []>(
+				"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'search_docs_%'",
+			)
+			.all()
+			.map((row) => row.name);
+		db.close();
+		expect(tables.filter((table) => !ownerOf.has(table))).toEqual([]);
+		expect([...ownerOf.keys()].filter((table) => !tables.includes(table))).toEqual([]);
+	});
+
+	test("writers that undo a withdrawn decision are called only by the kind handlers", () => {
+		// These change standing without a witness on purpose: they put back what a decision did when that decision
+		// is withdrawn or stops holding, which is itself a recorded event. Nothing else may reach for them.
+		const undo = /\b(restoreLink|dropExcuse|reopenRun|restoreFailures)\(/;
+		const callers = files.filter((file) => undo.test(readFileSync(file, "utf8")));
+		expect(callers.sort()).toEqual([
+			"src/server/decisions/kinds.ts",
+			"src/server/evidence/evidence.ts",
+			"src/server/runs/runs.ts",
+		]);
+	});
+
 	test("the web UI imports only the pure core, never the server", () => {
 		const offenders = files
 			.filter((file) => file.startsWith("src/web/"))

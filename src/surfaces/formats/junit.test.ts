@@ -313,7 +313,7 @@ describe("parseJUnit recovery and boundaries", () => {
 
 	test("deep suite paths stay stable within the key limit", () => {
 		const parsed = parseJUnit(
-			'<testsuite name="s">'.repeat(4000) + '<testcase name="deep"/>' + "</testsuite>".repeat(4000),
+			`${'<testsuite name="s">'.repeat(4000)}<testcase name="deep"/>${"</testsuite>".repeat(4000)}`,
 		);
 		expect(parsed.suites).toBe(4000);
 		expect(parsed.results).toHaveLength(1);

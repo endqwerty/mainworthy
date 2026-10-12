@@ -2,6 +2,8 @@
 
 Use one `report` call for a batch. Give `target: {commit: "9f3c2ab"}` for a commit, or `run: "R-4"` for a planned run. For work without a commit, use `target: {session: "checkout-review"}`. Include the tested commit, branch, environment, job, and attempt when you know them.
 
+The HTTP MCP endpoint accepts request bodies up to 4 MiB. Use the HTTP API or CLI for larger reports.
+
 Each result names an automated test with `test: {key, name, file}` or a case with `test: {case: "C-1"}`. Set `outcome` to `pass`, `fail`, `skip`, `blocked`, or `error`. For a failure, give the observed and expected values in `failure.message`; put needed detail in `failure.detail`. Report only what you observed.
 
 Read the receipt's counts, `basis`, questions, rejected results, and gate. A refused result has a reason in `rejected`; fix the input before reporting it again. A recorded result does not by itself mean the gate passed.

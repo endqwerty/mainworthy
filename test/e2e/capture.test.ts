@@ -97,3 +97,39 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"rapid capture keeps the folder and the order before earlier seals finish",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", folder: "Checkout", body: { title: "Anchor case" } }] });
+		const browser = await openPage(server, { path: "/p/scratch/suite" });
+		try {
+			const { page } = browser;
+			await page.getByRole("option").filter({ hasText: "Anchor case" }).waitFor();
+			await page.route("**/api/p/scratch/propose", async (route) => {
+				await Bun.sleep(250);
+				await route.continue();
+			});
+			await page.keyboard.press("c");
+			await page.keyboard.type("First captured case");
+			await page.keyboard.press("Shift+Enter");
+			await page.keyboard.type("Second captured case");
+			await page.keyboard.press("Escape");
+			const rows = await eventually(
+				() => server.api("find", { in: "cases", folder: "Checkout" }),
+				(value) => value.items.length === 3,
+			);
+			expect(rows.items.map((row) => row.title)).toEqual([
+				"Anchor case",
+				"First captured case",
+				"Second captured case",
+			]);
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

@@ -40,10 +40,55 @@ const Q = {
 		 ON CONFLICT (project, name) DO UPDATE SET value = value + 1 RETURNING value`,
 	),
 	setSeq: sql<{ id: number; seq: number }>("UPDATE projects SET seq = $seq WHERE id = $id"),
+	projects: sql<readonly [], ProjectRow>("SELECT * FROM projects ORDER BY id"),
+	insertProject: sql<{ org: number; key: string; name: string; at: number }>(
+		"INSERT INTO projects (org, key, name, created_at) VALUES ($org, $key, $name, $at)",
+	),
+	command: sql<{ id: string }, { outcome: string; op: string; actor: number }>(
+		"SELECT outcome, op, actor FROM commands WHERE id = $id",
+	),
+	insertCommand: sql<{
+		id: string;
+		project: number;
+		op: string;
+		actor: number;
+		at: number;
+		seq: number;
+		touched: string;
+		outcome: string;
+	}>(
+		`INSERT INTO commands (id, project, op, actor, at, seq, touched, outcome)
+		 VALUES ($id, $project, $op, $actor, $at, $seq, $touched, $outcome)`,
+	),
 };
 
 export const findProject = (db: Db, key: string): ProjectRow | null => db.get(Q.project, { key });
 export const projectById = (db: Db, id: number): ProjectRow | null => db.get(Q.projectById, { id });
+export const allProjects = (db: Db): ProjectRow[] => db.all(Q.projects);
+
+export function insertProject(db: Db, input: { org: number; key: string; name: string; at: number }): ProjectRow {
+	db.run(Q.insertProject, input);
+	const row = db.get(Q.project, { key: input.key });
+	if (!row) throw new Error("project was not stored");
+	return row;
+}
+
+/** The stored reply of a command that already ran, or null. A retry returns it and writes nothing. */
+export const findCommand = (db: Db, id: string) => db.get(Q.command, { id });
+
+/** Records that a command ran, with its reply, so a retry of the same id is a no-op. */
+export function recordCommand(ctx: Ctx, input: { id: string; op: string; outcome: unknown }): void {
+	ctx.db.run(Q.insertCommand, {
+		id: input.id,
+		project: ctx.project.id,
+		op: input.op,
+		actor: ctx.actor.id,
+		at: ctx.now,
+		seq: ctx.seq,
+		touched: JSON.stringify([...ctx.touched]),
+		outcome: JSON.stringify(input.outcome ?? null),
+	});
+}
 
 export function makeCtx(app: App, project: ProjectRow, actor: Actor, write: boolean): Ctx {
 	let ord = 0;

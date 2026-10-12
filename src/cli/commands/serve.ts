@@ -13,7 +13,10 @@ import { line } from "../output.ts";
 export function serveCommand(args: Args, ui: unknown): void {
 	assertPositionals(args, 0, 0, "serve");
 	const config = defaultConfig(process.env);
-	const instance = start(config, (app) => ({ ui, routes: { "/mcp": mcpRoute(app), ...archiveRoutes(app) } }));
+	const instance = start(config, (app, owner) => ({
+		ui,
+		routes: { "/mcp": mcpRoute(app), ...archiveRoutes(app, owner) },
+	}));
 	const data = config.dataDir === join(process.env.HOME ?? ".", ".casebook") ? "~/.casebook" : config.dataDir;
 	const owner = instance.owner.name.includes("@") ? instance.owner.name : `${instance.owner.name}@this-machine`;
 	line(`Casebook ${VERSION} · ${config.mode} · data in ${data} · ${instance.url}`);

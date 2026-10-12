@@ -59,7 +59,10 @@ function ChangesWorkbench() {
 		enabled: Boolean(key),
 	});
 	const impact = useQueryOp({ project, op: "impact", input: { change: key ?? "" }, enabled: Boolean(key) });
-	const impactData = Impact.safeParse(impact.data);
+	const gateData = gate.isPlaceholderData ? undefined : gate.data;
+	const openData = open.isPlaceholderData ? undefined : open.data;
+	const settledData = settled.isPlaceholderData ? undefined : settled.data;
+	const impactData = Impact.safeParse(impact.isPlaceholderData ? undefined : impact.data);
 	const go = (ref: string) => navigate(refUrl({ project, ref }));
 	const choose = (change: string) => {
 		setCursor(change);
@@ -76,9 +79,9 @@ function ChangesWorkbench() {
 		{
 			key: "enter",
 			label: "Open blocking question",
-			when: () => !overlayOpen && Boolean(open.data?.items[0]),
+			when: () => !overlayOpen && Boolean(openData?.items[0]),
 			handler: () => {
-				const question = open.data?.items[0];
+				const question = openData?.items[0];
 				if (question) go(question.q);
 			},
 		},
@@ -119,15 +122,15 @@ function ChangesWorkbench() {
 							<b className="change-title">{current?.title ?? current?.branch ?? "Change"}</b>
 						</div>
 						<div className="pane-scroll detail-body">
-							<div className={`change-gate v-${gate.data?.verdict ?? "pending"}`}>
+							<div className={`change-gate v-${gateData?.verdict ?? "pending"}`}>
 								<span className="dim">Gate of {current?.head?.slice(0, 12) ?? "the latest commit"}</span>
-								<h2>{gate.data?.verdict ?? "Reading gate…"}</h2>
-								<p>{gate.data?.reason ?? gate.error?.message}</p>
-								{gate.data?.stale && <p>The verdict awaits new evidence or a fresh decision.</p>}
+								<h2>{gateData?.verdict ?? "Reading gate…"}</h2>
+								<p>{gateData?.reason ?? gate.error?.message}</p>
+								{gateData?.stale && <p>The verdict awaits new evidence or a fresh decision.</p>}
 							</div>
-							{gate.data && (
+							{gateData && (
 								<div className="change-tally">
-									{Object.entries(gate.data.tally)
+									{Object.entries(gateData.tally)
 										.filter(([, count]) => count > 0)
 										.map(([label, count]) => (
 											<span key={label}>
@@ -138,7 +141,7 @@ function ChangesWorkbench() {
 							)}
 							<SectionHeading>Open questions</SectionHeading>
 							{open.error && <p role="status">{open.error.message}</p>}
-							{open.data?.items.map((q) => (
+							{openData?.items.map((q) => (
 								<a
 									className="change-question"
 									key={q.q}
@@ -154,10 +157,10 @@ function ChangesWorkbench() {
 									{q.blocks.length > 0 && <span className="blk">blocks gate</span>}
 								</a>
 							))}
-							{open.data?.items.length === 0 && <p className="dim">No open questions about this change.</p>}
+							{openData?.items.length === 0 && <p className="dim">No open questions about this change.</p>}
 							<SectionHeading>Settled and excused</SectionHeading>
 							{settled.error && <p role="status">{settled.error.message}</p>}
-							{settled.data?.items.map((q) => (
+							{settledData?.items.map((q) => (
 								<div className="change-decision" key={q.q}>
 									<a
 										className="ref"
@@ -178,7 +181,7 @@ function ChangesWorkbench() {
 									</small>
 								</div>
 							))}
-							{settled.data?.items.length === 0 && <p className="dim">No decisions on this change yet.</p>}
+							{settledData?.items.length === 0 && <p className="dim">No decisions on this change yet.</p>}
 							<SectionHeading>Impact</SectionHeading>
 							{impact.error && <p role="status">{impact.error.message}</p>}
 							{impactData.success && (

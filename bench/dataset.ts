@@ -15,6 +15,7 @@ import type { Edit, ReportInput, ResultIn, TargetIn } from "../src/core/ops.ts";
 import { authenticate, createToken } from "../src/server/identity/identity.ts";
 import type { App, Config } from "../src/server/kernel/app.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
+import { MIGRATIONS } from "../src/server/kernel/migrate.ts";
 import { open } from "../src/server/start.ts";
 import { call, Decisions, ensure, itemAt, Plan, Proposal, Queue, Receipt, Slots, TestPage } from "./contracts.ts";
 
@@ -41,6 +42,7 @@ const Phase = z.object({
 const Test = z.object({ ref: z.string(), key: z.string(), file: z.string(), name: z.string() });
 export const Metadata = z.object({
 	generator: z.literal(GENERATOR),
+	fingerprints: z.object({ generator: z.string(), migrations: z.string() }),
 	parameters: Parameters,
 	project: z.literal("benchmark"),
 	createdAt: z.string(),
@@ -79,6 +81,27 @@ export type DatasetInstance = {
 	dir: string;
 	close: () => void;
 };
+
+/** Reuse requires the actual generator and migration contents, including embedded migrations in a compiled binary. */
+export function fingerprints(): Metadata["fingerprints"] {
+	const source = new URL("./dataset.ts", import.meta.url);
+	const generator = existsSync(source)
+		? readFileSync(source)
+		: Buffer.from(
+				[
+					String(GENERATOR),
+					buildDataset.toString(),
+					random.toString(),
+					testIdentity.toString(),
+					generatedResults.toString(),
+					JSON.stringify({ domains, actions, subjects, causes }),
+				].join("\n"),
+			);
+	return {
+		generator: new Bun.CryptoHasher("sha256").update(generator).digest("hex"),
+		migrations: new Bun.CryptoHasher("sha256").update(JSON.stringify(MIGRATIONS)).digest("hex"),
+	};
+}
 
 const domains = [
 	"checkout",
@@ -266,12 +289,17 @@ export function buildDataset(options: {
 }): Dataset {
 	const dir = resolve(options.dir);
 	const parameters = Parameters.parse(options.parameters);
+	const revision = fingerprints();
 	const log = options.log ?? console.log;
 	requireDisk(dir);
 	const metadataPath = join(dir, "dataset.json");
 	if (existsSync(metadataPath) && existsSync(join(dir, "casebook.db"))) {
 		const saved = Metadata.safeParse(JSON.parse(readFileSync(metadataPath, "utf8")));
-		if (saved.success && JSON.stringify(saved.data.parameters) === JSON.stringify(parameters)) {
+		if (
+			saved.success &&
+			JSON.stringify(saved.data.parameters) === JSON.stringify(parameters) &&
+			JSON.stringify(saved.data.fingerprints) === JSON.stringify(revision)
+		) {
 			log(
 				`Reusing dataset: ${dir} (${saved.data.counts.cases} cases, ${saved.data.counts.results} results, ${saved.data.counts.open} open questions)`,
 			);
@@ -567,6 +595,7 @@ export function buildDataset(options: {
 		const current = call(app, owner, "since", { cursor: "s:0", limit: 1 }, z.object({ cursor: z.string() })).cursor;
 		const metadata: Metadata = {
 			generator: GENERATOR,
+			fingerprints: revision,
 			parameters,
 			project: "benchmark",
 			createdAt: new Date().toISOString(),

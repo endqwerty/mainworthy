@@ -57,11 +57,9 @@ export function useEvents(project: string): void {
 					if (query.queryKey[0] !== project) return false;
 					const op = query.queryKey[1];
 					if (op === "find" || op === "inbox" || op === "gate" || op === "impact" || op === "admin") return true;
-					const input = query.queryKey[2];
+					const input = JSON.stringify(query.queryKey[2]) ?? "";
 					return (
-						refs.length === 0 ||
-						refs.some((ref) => JSON.stringify(input).includes(ref)) ||
-						refs.some((ref) => !/^[CQRPT]-/.test(ref))
+						refs.length === 0 || refs.some((ref) => input.includes(ref)) || refs.some((ref) => !/^[CQRPT]-/.test(ref))
 					);
 				},
 			});

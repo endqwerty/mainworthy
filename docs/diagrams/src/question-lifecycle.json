@@ -31,11 +31,11 @@
       "id": "raised",
       "type": "start",
       "label": "open",
-      "sublabel": "raise opens the question",
+      "sublabel": "raise opens a question",
       "lane": "main",
       "col": 0,
-      "width": 178,
-      "height": 72,
+      "width": 140,
+      "height": 64,
       "sources": [
         {
           "path": "src/server/decisions/decisions.ts",
@@ -52,11 +52,11 @@
       "id": "attached",
       "type": "waiting",
       "label": "open",
-      "sublabel": "attached; another occurrence",
+      "sublabel": "Another occurrence",
       "lane": "main",
       "col": 1,
-      "width": 178,
-      "height": 72,
+      "width": 140,
+      "height": 64,
       "sources": [
         {
           "path": "src/server/decisions/decisions.ts",
@@ -76,8 +76,8 @@
       "sublabel": "Person answer or rule",
       "lane": "main",
       "col": 2,
-      "width": 178,
-      "height": 72,
+      "width": 140,
+      "height": 64,
       "sources": [
         {
           "path": "src/server/decisions/decisions.ts",
@@ -98,11 +98,11 @@
       "id": "carried",
       "type": "success",
       "label": "decided",
-      "sublabel": "carried; stillHolds is true",
+      "sublabel": "carried; hold stands",
       "lane": "main",
       "col": 3,
-      "width": 178,
-      "height": 72,
+      "width": 140,
+      "height": 64,
       "sources": [
         {
           "path": "src/server/decisions/decisions.ts",
@@ -119,11 +119,11 @@
       "id": "asked-again",
       "type": "waiting",
       "label": "open",
-      "sublabel": "epoch + 1; prior is linked",
+      "sublabel": "New epoch; prior linked",
       "lane": "main",
       "col": 4,
-      "width": 178,
-      "height": 72,
+      "width": 140,
+      "height": 64,
       "sources": [
         {
           "path": "src/server/decisions/decisions.ts",
@@ -143,8 +143,8 @@
       "sublabel": "undo records withdrawn",
       "lane": "reopen",
       "col": 2,
-      "width": 178,
-      "height": 72,
+      "width": 140,
+      "height": 64,
       "sources": [
         {
           "path": "src/server/decisions/decisions.ts",
@@ -164,8 +164,8 @@
       "sublabel": "sweepExpired after time",
       "lane": "reopen",
       "col": 3,
-      "width": 178,
-      "height": 72,
+      "width": 140,
+      "height": 64,
       "sources": [
         {
           "path": "src/server/decisions/decisions.ts",
@@ -186,11 +186,11 @@
       "id": "dissolved",
       "type": "neutral",
       "label": "dissolved",
-      "sublabel": "Newest evidence lost the cause",
+      "sublabel": "Newest cause is gone",
       "lane": "terminal",
       "col": 0,
-      "width": 178,
-      "height": 72,
+      "width": 140,
+      "height": 64,
       "sources": [
         {
           "path": "src/server/decisions/decisions.ts",
@@ -211,11 +211,11 @@
       "id": "dissolved-again",
       "type": "neutral",
       "label": "dissolved",
-      "sublabel": "Newest evidence lost the cause",
+      "sublabel": "Newest cause is gone",
       "lane": "terminal",
       "col": 4,
-      "width": 178,
-      "height": 72,
+      "width": 140,
+      "height": 64,
       "sources": [
         {
           "path": "src/server/decisions/decisions.ts",
@@ -249,8 +249,7 @@
       "from": "raised",
       "to": "decided",
       "label": "answer or rule",
-      "variant": "security",
-      "route": "top-channel"
+      "variant": "security"
     },
     {
       "id": "carry-forward",
@@ -264,8 +263,7 @@
       "from": "carried",
       "to": "decided",
       "label": "same answer",
-      "variant": "dashed",
-      "route": "top-channel"
+      "variant": "dashed"
     },
     {
       "id": "hold-ends",
@@ -279,8 +277,7 @@
       "from": "decided",
       "to": "asked-again",
       "label": "hold ends",
-      "variant": "security",
-      "route": "top-channel"
+      "variant": "security"
     },
     {
       "id": "answer-new-epoch",
@@ -301,8 +298,7 @@
       "from": "undone",
       "to": "decided",
       "label": "person answers",
-      "variant": "security",
-      "route": "left-channel"
+      "variant": "security"
     },
     {
       "id": "time-sweep",

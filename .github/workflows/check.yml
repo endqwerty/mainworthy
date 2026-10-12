@@ -30,7 +30,7 @@ jobs:
       - name: Tests
         id: tests
         continue-on-error: true
-        run: bun test --reporter=junit --reporter-outfile=test-results/junit.xml
+        run: bun test src test --reporter=junit --reporter-outfile=test-results/junit.xml
       - name: Start a Casebook for this job
         if: env.CASEBOOK_URL == ''
         run: |

@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { existsSync, rmSync } from "node:fs";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Browser, type BrowserContext, chromium, type Page } from "playwright-core";
@@ -23,16 +23,31 @@ export type Server = {
 	api: <O extends OpName>(op: O, input: Api[O]["input"], options?: { token?: string }) => Promise<Api[O]["reply"]>;
 	stop: () => Promise<void>;
 };
-let nextPort = 7400;
-async function freePort(): Promise<number> {
+const ownedDirectories = new Set<string>();
+process.once("exit", () => {
+	for (const path of ownedDirectories) rmSync(path, { recursive: true, force: true });
+});
+let nextPort = 7400 + (process.pid % 50);
+async function freePort(): Promise<{ port: number; release: () => Promise<void> }> {
 	for (let i = 0; i < 50; i++) {
 		const port = 7400 + ((nextPort++ - 7400) % 50);
+		const lock = join(tmpdir(), `casebook-e2e-port-${port}`);
+		try {
+			await mkdir(lock);
+		} catch {
+			continue;
+		}
+		ownedDirectories.add(lock);
+		const release = async () => {
+			await rm(lock, { recursive: true, force: true });
+			ownedDirectories.delete(lock);
+		};
 		try {
 			const probe = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("probe") });
 			await probe.stop(true);
-			return port;
+			return { port, release };
 		} catch {
-			/* Another builder can own a port in this range. */
+			await release();
 		}
 	}
 	throw new Error("No free Casebook e2e port in 7400..7449");
@@ -48,14 +63,17 @@ export async function startServer({
 	preset?: string;
 	seed?: boolean;
 } = {}): Promise<Server> {
-	const dataDir = await mkdtemp(join(tmpdir(), "casebook-e2e-"));
-	const port = await freePort();
+	const dataDir = await mkdtemp(join(tmpdir(), `casebook-e2e-${process.pid}-`));
+	ownedDirectories.add(dataDir);
+	const reservation = await freePort();
+	const port = reservation.port;
 	const token = crypto.randomUUID();
 	const url = `http://127.0.0.1:${port}`;
 	const child = Bun.spawn([process.execPath, "test/e2e/serve.ts"], {
 		cwd: process.cwd(),
 		env: {
 			...process.env,
+			NODE_ENV: "production",
 			CASEBOOK_DATA: dataDir,
 			CASEBOOK_PORT: String(port),
 			CASEBOOK_MODE: mode,
@@ -68,6 +86,8 @@ export async function startServer({
 		child.kill("SIGTERM");
 		await child.exited;
 		await rm(dataDir, { recursive: true, force: true });
+		ownedDirectories.delete(dataDir);
+		await reservation.release();
 	};
 	try {
 		let ready = false;

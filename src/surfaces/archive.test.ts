@@ -140,3 +140,24 @@ test("a token revoked while the body is uploading cannot complete the import", a
 		);
 	});
 });
+
+test("a local import preserves the configured owner's identity for the next write", async () => {
+	await withInstance(
+		async (source) => {
+			const archive = await source.client.request("/api/export");
+			if (!archive.body) throw new Error("missing archive body");
+			await withInstance(async (target) => {
+				expect((await target.client.request("/api/import", { method: "POST", body: archive.body })).status).toBe(200);
+				expect((await target.client.session()).actor).toBe("daniel");
+				await target.client.call("propose", {
+					edits: [{ op: "create", outline: "After import\nAn action > Expected" }],
+				});
+				const actor = target.instance.app.reader.raw
+					.query<{ name: string }, []>("SELECT a.name FROM cases c JOIN actors a ON a.id = c.created_by")
+					.get();
+				expect(actor?.name).toBe("daniel");
+			});
+		},
+		{ owner: "alice" },
+	);
+});

@@ -114,6 +114,13 @@ export async function runCli(argv: readonly string[], ui: unknown): Promise<numb
 	const client = new Client(clientOptions(args));
 	if (generated && (!adapter || hasJsonInput(tokens) || machineOnly(adapter, args)))
 		return runGenerated(generated, args, client);
-	if (adapter) return adapter.run(args, client);
+	if (adapter) {
+		const allowed = new Set([...GLOBAL_FLAGS, { name: "json" }, ...adapter.flags].map((flag) => flag.name));
+		for (const flag of args.flags.keys()) {
+			if (!allowed.has(flag))
+				throw new CliError("invalid", `--${flag} is an operation flag; use casebook ${name} --json '<input JSON>'`);
+		}
+		return adapter.run(args, client);
+	}
 	throw new CliError("invalid", `unknown command ${name}`);
 }

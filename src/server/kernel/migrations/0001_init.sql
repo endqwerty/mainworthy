@@ -388,6 +388,7 @@ CREATE TABLE excuses (
 	scope TEXT NOT NULL,
 	decision INTEGER NOT NULL,
 	class TEXT NOT NULL CHECK (class IN ('attributed', 'excused')),
+	expires_at INTEGER,
 	PRIMARY KEY (project, signature, scope)
 ) STRICT, WITHOUT ROWID;
 

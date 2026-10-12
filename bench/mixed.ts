@@ -15,11 +15,11 @@ import {
 	openDataset,
 	verifyReport,
 } from "./dataset.ts";
-import { Envelope, type Measurement, type Sample, summarise } from "./measure.ts";
-import { readRequests } from "./workloads.ts";
+import { Envelope, type Measurement, type Sample, type Summary, summarise } from "./measure.ts";
+import { prepareRecentChanges, readRequests } from "./workloads.ts";
 
 type Interval = { start: number; end: number; ms: number };
-type ReadSample = Sample & Interval & { op: string; duringIngest: boolean };
+type ReadSample = Sample & Interval & { name: string; duringIngest: boolean };
 export type MixedReport = {
 	measurements: Measurement[];
 	readsPerSecond: number;
@@ -27,19 +27,29 @@ export type MixedReport = {
 	seconds: number;
 	longestReadDuringIngest: number;
 	longestReadOp: string;
-	ingestTransactions: { rows: number; p50: number; p95: number; max: number; count: number };
-	acceptTransactions: { p50: number; p95: number; max: number; count: number };
+	ingestTransactions: Summary & { rows: number };
+	acceptTransactions: Summary;
+	control: Summary & { readsPerSecond: number; seconds: number; longestRead: number };
+	byOperation: { name: string; control: Summary; mixed: Summary }[];
+	validationMs: number;
 	readBytes: number;
 	requestBytes: number;
 	loadStart: number[];
 	loadEnd: number[];
-	windows: { seconds: number; reads: number; readP95: number; ingestCount: number; load: number[] }[];
+	windows: {
+		seconds: number;
+		reads: number;
+		readP95: number;
+		ingestCount: number;
+		controlSeconds: number;
+		controlP95: number;
+		load: number[];
+	}[];
 	errors: string[];
 };
+type HttpResult = { result: unknown; bytes: number; finishedAt: number };
 
-type HttpResult = { result: unknown; bytes: number };
-
-/** Each client owns one persistent HTTP/1.1 connection; errors and unsuccessful replies are never fast successes. */
+/** One persistent HTTP/1.1 client; the timestamp is complete response bytes, before JSON and correctness checks. */
 export function post(agent: Agent, url: string, op: string, body: string, secret?: string): Promise<HttpResult> {
 	return new Promise((resolve, reject) => {
 		const req = request(
@@ -61,13 +71,14 @@ export function post(agent: Agent, url: string, op: string, body: string, secret
 				});
 				res.on("error", reject);
 				res.on("end", () => {
+					const finishedAt = performance.now();
 					try {
 						const text = parts.join("");
 						const envelope = Envelope.parse(JSON.parse(text));
 						if (!envelope.ok)
 							throw new Error(`HTTP ${res.statusCode}: ${envelope.error.code}: ${envelope.error.message}`);
 						ensure(res.statusCode === 200, `HTTP ${res.statusCode} was not successful`);
-						resolve({ result: envelope.result, bytes: Buffer.byteLength(text) });
+						resolve({ result: envelope.result, bytes: Buffer.byteLength(text), finishedAt });
 					} catch (error) {
 						reject(error);
 					}
@@ -82,7 +93,7 @@ export function post(agent: Agent, url: string, op: string, body: string, secret
 
 function measured(
 	name: string,
-	budget: number,
+	budget: number | null,
 	samples: Sample[],
 	correctness: string,
 	criterion: "p95" | "max" = "p95",
@@ -93,7 +104,7 @@ function measured(
 		name,
 		budget,
 		criterion,
-		pass: summary.errors === 0 && summary[criterion] < budget,
+		pass: summary.errors === 0 && (budget === null || summary[criterion] < budget),
 		checked: summary.n - summary.errors,
 		correctness,
 		samples,
@@ -102,149 +113,191 @@ function measured(
 	};
 }
 
-/** Measures sixteen real HTTP readers with an ingest client and a save client, using fresh clones for repeated windows. */
+/** Sixteen keep-alive HTTP readers with a readers-only control, then ingest and save writers on the real server. */
 export async function mixedLoad(
 	dataset: Dataset,
 	options: { milliseconds: number; repeats: number; log?: (message: string) => void },
 ): Promise<MixedReport> {
 	const log = options.log ?? console.log;
-	const reads: ReadSample[] = [];
-	const ingests: Sample[] = [];
-	const saves: Sample[] = [];
-	const transactions: Sample[] = [];
-	const accepts: Sample[] = [];
-	const windows: MixedReport["windows"] = [];
-	const errors: string[] = [];
-	let seconds = 0;
-	let readBytes = 0;
-	let requestBytes = 0;
+	const reads: ReadSample[] = [],
+		control: ReadSample[] = [],
+		ingests: Sample[] = [],
+		saves: Sample[] = [],
+		transactions: Sample[] = [],
+		accepts: Sample[] = [];
+	const windows: MixedReport["windows"] = [],
+		errors: string[] = [];
+	let seconds = 0,
+		controlSeconds = 0,
+		readBytes = 0,
+		requestBytes = 0,
+		validationMs = 0;
 	const loadStart = loadavg();
 	for (let round = 0; round < options.repeats; round++) {
 		log(
-			`Mixed HTTP window ${round + 1}/${options.repeats}: 16 readers + ingest + save, ${options.milliseconds / 1_000} s`,
+			`HTTP window ${round + 1}/${options.repeats}: readers-only control 5 s, then 16 readers + ingest + save ${options.milliseconds / 1_000} s`,
 		);
 		const dir = join(dataset.dir, `http-${randomUUID()}`);
 		const clone = openDataset(dataset, dir);
+		try {
+			prepareRecentChanges(clone);
+		} catch (error) {
+			clone.close();
+			throw error;
+		}
 		clone.app.close();
 		const server = start(config(dir), () => ({ ui: null }));
-		const ci = ciActor(server.app);
-		const instance: DatasetInstance = {
-			...clone,
-			app: server.app,
-			owner: server.owner,
-			ci: ci.actor,
-			ciSecret: ci.secret,
-		};
 		const agents = Array.from({ length: 18 }, () => new Agent({ keepAlive: true, maxSockets: 1 }));
-		const ingestAgent = itemAt(agents, 16);
-		const saveAgent = itemAt(agents, 17);
-		const writeWindows: Interval[] = [];
-		const serverIngests: Interval[] = [];
-		const serverAccepts: Interval[] = [];
-		let lastTransaction: Interval = { start: 0, end: 0, ms: 0 };
-		let transactionStart = 0;
-		const originalBegin = server.app.db.begin.bind(server.app.db);
-		const originalCommit = server.app.db.commit.bind(server.app.db);
-		server.app.db.begin = () => {
-			transactionStart = performance.now();
-			originalBegin();
-		};
-		server.app.db.commit = () => {
-			originalCommit();
-			const end = performance.now();
-			lastTransaction = { start: transactionStart, end, ms: end - transactionStart };
-		};
-		const unsubscribe = server.app.subscribe((event) => {
-			if (event.op !== "report") return;
-			const batch = z
-				.object({ state: z.enum(["accepted", "processed"]) })
-				.parse(server.app.db.raw.query("SELECT state FROM batches ORDER BY id DESC LIMIT 1").get());
-			if (batch.state === "accepted") serverAccepts.push(lastTransaction);
-			else serverIngests.push(lastTransaction);
-		});
-		const stamp = itemAt(dataset.metadata.cases, dataset.metadata.cases.length - 1);
-		let version = stamp.version;
-		let saveSerial = 0;
-		let ingestSerial = 0;
-		const save = async (): Promise<void> => {
-			const pre = `Customer setup during mixed authoring ${++saveSerial}.`;
-			const reply = await post(
-				saveAgent,
-				server.url,
-				"propose",
-				JSON.stringify({ edits: [{ op: "edit", case: stamp.ref, base: version, body: { pre } }] }),
-			);
-			const proposal = Proposal.parse(reply.result);
-			const adopted = itemAt(proposal.cases, 0);
-			ensure(
-				proposal.status === "adopted" && proposal.proposal !== null && adopted.version === version + 1,
-				"HTTP save must adopt a new version",
-			);
-			version = adopted.version;
-		};
+		const originalBegin = server.app.db.begin.bind(server.app.db),
+			originalCommit = server.app.db.commit.bind(server.app.db);
+		let unsubscribe = () => {};
 		try {
+			const ci = ciActor(server.app);
+			const instance: DatasetInstance = {
+				...clone,
+				app: server.app,
+				owner: server.owner,
+				ci: ci.actor,
+				ciSecret: ci.secret,
+			};
+			const ingestAgent = itemAt(agents, 16),
+				saveAgent = itemAt(agents, 17);
+			const writeWindows: Interval[] = [],
+				serverIngests: Interval[] = [],
+				serverAccepts: Interval[] = [];
+			let transactionStart = 0;
+			let lastTransaction: Interval = { start: 0, end: 0, ms: 0 };
+			server.app.db.begin = () => {
+				transactionStart = performance.now();
+				originalBegin();
+			};
+			server.app.db.commit = () => {
+				originalCommit();
+				const end = performance.now();
+				lastTransaction = { start: transactionStart, end, ms: end - transactionStart };
+			};
+			unsubscribe = server.app.subscribe((event) => {
+				if (event.op !== "report") return;
+				const batch = z
+					.object({ state: z.enum(["accepted", "processed"]) })
+					.parse(server.app.db.raw.query("SELECT state FROM batches ORDER BY id DESC LIMIT 1").get());
+				(batch.state === "accepted" ? serverAccepts : serverIngests).push(lastTransaction);
+			});
+			const stamp = itemAt(dataset.metadata.cases, dataset.metadata.cases.length - 1);
+			let version = stamp.version,
+				saveSerial = 0,
+				ingestSerial = 0;
+			const save = async (): Promise<number> => {
+				const pre = `Customer account setup during mixed authoring ${++saveSerial}.`;
+				const reply = await post(
+					saveAgent,
+					server.url,
+					"propose",
+					JSON.stringify({ edits: [{ op: "edit", case: stamp.ref, base: version, body: { pre } }] }),
+				);
+				const proposal = Proposal.parse(reply.result),
+					adopted = itemAt(proposal.cases, 0);
+				ensure(
+					proposal.status === "adopted" && proposal.proposal !== null && adopted.version === version + 1,
+					"HTTP save must adopt a new version",
+				);
+				version = adopted.version;
+				return reply.finishedAt;
+			};
 			for (let client = 0; client < 16; client++) {
 				const read = readRequests(instance, client);
 				read.check((await post(itemAt(agents, client), server.url, read.op, JSON.stringify(read.input))).result);
 			}
-			const warmInput = ingestInput(dataset.metadata, `mixed-warm-${round}`);
 			verifyReport(
 				server.app,
-				Receipt.parse((await post(ingestAgent, server.url, "report", JSON.stringify(warmInput), ci.secret)).result),
+				Receipt.parse(
+					(
+						await post(
+							ingestAgent,
+							server.url,
+							"report",
+							JSON.stringify(ingestInput(dataset.metadata, `mixed-warm-${round}`)),
+							ci.secret,
+						)
+					).result,
+				),
 				10_000,
 			);
 			await save();
+			const readFor = async (milliseconds: number, target: ReadSample[]): Promise<number> => {
+				const start = performance.now(),
+					deadline = start + milliseconds;
+				await Promise.all(
+					Array.from({ length: 16 }, (_, client) =>
+						(async () => {
+							let index = client;
+							do {
+								const read = readRequests(instance, index++),
+									body = JSON.stringify(read.input),
+									started = performance.now();
+								let error: string | null = null,
+									end = started;
+								try {
+									const reply = await post(itemAt(agents, client), server.url, read.op, body);
+									end = reply.finishedAt;
+									readBytes += reply.bytes;
+									requestBytes += Buffer.byteLength(body);
+									const checkStart = performance.now();
+									read.check(reply.result);
+									validationMs += performance.now() - checkStart;
+								} catch (cause) {
+									end = performance.now();
+									error = cause instanceof Error ? cause.message : String(cause);
+									errors.push(error);
+								}
+								target.push({
+									start: started,
+									end,
+									ms: end - started,
+									name: read.name,
+									duringIngest: false,
+									round,
+									error,
+								});
+							} while (performance.now() < deadline);
+						})(),
+					),
+				);
+				return (performance.now() - start) / 1_000;
+			};
+			const firstControl = control.length;
+			const controlElapsed = await readFor(5_000, control);
+			controlSeconds += controlElapsed;
 			serverIngests.length = 0;
 			serverAccepts.length = 0;
-			const start = performance.now();
-			const deadline = start + options.milliseconds;
-			const firstRead = reads.length;
-			const firstIngest = ingests.length;
-			const runAttempt = async (samples: Sample[], work: () => Promise<void>): Promise<void> => {
+			const start = performance.now(),
+				deadline = start + options.milliseconds;
+			const firstRead = reads.length,
+				firstIngest = ingests.length;
+			const runAttempt = async (samples: Sample[], work: () => Promise<number>): Promise<void> => {
 				const started = performance.now();
-				let error: string | null = null;
+				let error: string | null = null,
+					end = started;
 				try {
-					await work();
+					end = await work();
 				} catch (cause) {
+					end = performance.now();
 					error = cause instanceof Error ? cause.message : String(cause);
 					errors.push(error);
 				}
-				samples.push({ ms: performance.now() - started, round, error });
+				samples.push({ ms: end - started, round, error });
 			};
-			const reading = Array.from({ length: 16 }, (_, client) =>
-				(async () => {
-					let index = client;
-					const agent = itemAt(agents, client);
-					do {
-						const read = readRequests(instance, index++);
-						const body = JSON.stringify(read.input);
-						const started = performance.now();
-						let error: string | null = null;
-						try {
-							const reply = await post(agent, server.url, read.op, body);
-							readBytes += reply.bytes;
-							requestBytes += Buffer.byteLength(body);
-							read.check(reply.result);
-						} catch (cause) {
-							error = cause instanceof Error ? cause.message : String(cause);
-							errors.push(error);
-						}
-						const end = performance.now();
-						reads.push({ start: started, end, ms: end - started, op: read.op, duringIngest: false, round, error });
-					} while (performance.now() < deadline);
-				})(),
-			);
+			const reading = readFor(options.milliseconds, reads);
 			const ingesting = (async () => {
 				do {
-					const input = ingestInput(dataset.metadata, `mixed-${round}-${++ingestSerial}`);
-					const body = JSON.stringify(input);
+					const body = JSON.stringify(ingestInput(dataset.metadata, `mixed-${round}-${++ingestSerial}`));
 					await runAttempt(ingests, async () => {
-						const started = performance.now();
-						const reply = await post(ingestAgent, server.url, "report", body, ci.secret);
-						const end = performance.now();
-						writeWindows.push({ start: started, end, ms: end - started });
+						const started = performance.now(),
+							reply = await post(ingestAgent, server.url, "report", body, ci.secret);
+						writeWindows.push({ start: started, end: reply.finishedAt, ms: reply.finishedAt - started });
 						requestBytes += Buffer.byteLength(body);
 						verifyReport(server.app, Receipt.parse(reply.result), 10_000);
+						return reply.finishedAt;
 					});
 				} while (performance.now() < deadline);
 			})();
@@ -253,23 +306,24 @@ export async function mixedLoad(
 					await runAttempt(saves, save);
 				} while (performance.now() < deadline);
 			})();
-			await Promise.all([...reading, ingesting, saving]);
+			await Promise.all([reading, ingesting, saving]);
 			const elapsed = (performance.now() - start) / 1_000;
 			seconds += elapsed;
 			for (const read of reads.slice(firstRead))
 				read.duringIngest = writeWindows.some((write) => write.start < read.end && write.end > read.start);
 			transactions.push(...serverIngests.map((txn) => ({ ms: txn.ms, error: null, round })));
 			accepts.push(...serverAccepts.map((txn) => ({ ms: txn.ms, error: null, round })));
-			const roundReads = reads.slice(firstRead);
-			const summary = summarise(roundReads);
+			const summary = summarise(reads.slice(firstRead)),
+				controlSummary = summarise(control.slice(firstControl));
 			windows.push({
 				seconds: elapsed,
-				reads: roundReads.length,
+				reads: reads.length - firstRead,
 				readP95: summary.p95,
 				ingestCount: ingests.length - firstIngest,
+				controlSeconds: controlElapsed,
+				controlP95: controlSummary.p95,
 				load: loadavg(),
 			});
-			// The final save must be readable, not merely acknowledged over HTTP.
 			const saved = itemAt(
 				z
 					.array(CaseView)
@@ -277,64 +331,61 @@ export async function mixedLoad(
 				0,
 			);
 			ensure(
-				saved.version === version && saved.pre === `Customer setup during mixed authoring ${saveSerial}.`,
+				saved.version === version && saved.pre === `Customer account setup during mixed authoring ${saveSerial}.`,
 				"mixed saved content must persist",
 			);
 			log(
-				`  ${roundReads.length} reads, ${(roundReads.length / elapsed).toFixed(1)} reads/s, read p95 ${summary.p95.toFixed(2)} ms, ${ingests.length - firstIngest} ingests`,
+				`  control p95 ${controlSummary.p95.toFixed(2)} ms; mix p95 ${summary.p95.toFixed(2)} ms, ${((reads.length - firstRead) / elapsed).toFixed(1)} reads/s, ${ingests.length - firstIngest} ingests`,
 			);
 		} finally {
 			unsubscribe();
 			server.app.db.begin = originalBegin;
 			server.app.db.commit = originalCommit;
 			for (const agent of agents) agent.destroy();
+			await server.app.gate.run(() => undefined);
 			await server.stop();
 			rmSync(dir, { recursive: true, force: true });
 		}
 	}
-	const stalled = reads.filter((read) => read.duringIngest).sort((a, b) => b.ms - a.ms)[0];
-	const transactionSummary = summarise(transactions);
-	const acceptSummary = summarise(accepts);
+	const stalled = reads.filter((read) => read.duringIngest).sort((a, b) => b.ms - a.ms)[0],
+		controlSummary = summarise(control);
 	return {
 		measurements: [
+			measured("control HTTP reads", null, control, "Same sixteen clients and read mix, with no writers."),
 			measured(
 				"mixed HTTP reads",
 				BUDGETS.mixed,
 				reads,
-				"Every HTTP status/envelope and read result checked; 16 keep-alive clients completed real reads during two writers.",
+				"Every response and read checked; timings stop at complete bytes before assertions.",
 			),
 			measured(
 				"mixed HTTP ingest",
 				BUDGETS.ingest,
 				ingests,
-				"Every HTTP report fresh, successful, and all 10,000 results persisted.",
+				"Every report fresh and all 10k results persisted; acceptance plus apply is stricter than C7 acceptance alone.",
 				"max",
 			),
-			measured(
-				"mixed HTTP save",
-				BUDGETS.save,
-				saves,
-				"Every HTTP save adopted a new version; final saved document read back.",
-			),
+			measured("mixed HTTP save", BUDGETS.save, saves, "Every save adopts a new version; final content read back."),
 		],
 		readsPerSecond: reads.length / seconds,
 		completedReads: reads.length,
 		seconds,
 		longestReadDuringIngest: stalled?.ms ?? 0,
-		longestReadOp: stalled?.op ?? "none",
-		ingestTransactions: {
-			rows: 10_000,
-			p50: transactionSummary.p50,
-			p95: transactionSummary.p95,
-			max: transactionSummary.max,
-			count: transactionSummary.n,
+		longestReadOp: stalled?.name ?? "none",
+		ingestTransactions: { ...summarise(transactions), rows: 10_000 },
+		acceptTransactions: summarise(accepts),
+		control: {
+			...controlSummary,
+			readsPerSecond: control.length / controlSeconds,
+			seconds: controlSeconds,
+			longestRead: controlSummary.max,
 		},
-		acceptTransactions: {
-			p50: acceptSummary.p50,
-			p95: acceptSummary.p95,
-			max: acceptSummary.max,
-			count: acceptSummary.n,
-		},
+		byOperation: Array.from(new Set(reads.map((read) => read.name)), (name) => ({
+			name,
+			control: summarise(control.filter((read) => read.name === name)),
+			mixed: summarise(reads.filter((read) => read.name === name)),
+		})),
+		validationMs,
 		readBytes,
 		requestBytes,
 		loadStart,

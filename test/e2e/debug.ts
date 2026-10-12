@@ -1,4 +1,0 @@
-import { startServer, openPage, paste } from "./support.ts";
-const server = await startServer(); const h = await openPage(server); const page=h.page;
-page.on("response", (response) => { if(response.url().endsWith("/propose")) void response.text().then((body)=>console.info("propose",body)); });
-try { await page.keyboard.press("c"); await page.keyboard.type("Test #checkout"); await page.keyboard.press("Enter"); await page.keyboard.type("Step > expected"); await page.keyboard.press("Escape"); await page.waitForTimeout(1000); console.info("status",await page.locator("#stat").textContent());console.info("inputs",await page.locator("textarea,input").evaluateAll(nodes=>nodes.map(node=>node instanceof HTMLTextAreaElement||node instanceof HTMLInputElement?{value:node.value,field:node.dataset.field}:null)));console.info("errors",h.errors); console.info("server", await server.api("find",{in:"cases"})); }finally{await h.close();await server.stop();}

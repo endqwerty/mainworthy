@@ -10,6 +10,8 @@ export type Profile = {
 	name: string;
 	wallMs: number;
 	cpuMs: number;
+	fileInputs: number;
+	majorFaults: number;
 	queries: { sql: string; calls: number; ms: number; max: number; plan: string[] }[];
 };
 
@@ -53,16 +55,20 @@ export async function profile(app: App, workload: Workload): Promise<Profile> {
 	const work = workload.prepare(0);
 	const started = performance.now();
 	const usage = process.cpuUsage();
+	const io = process.resourceUsage();
 	try {
 		await work();
 	} finally {
 		for (const undo of restore) undo();
 	}
 	const cpu = process.cpuUsage(usage);
+	const after = process.resourceUsage();
 	return {
 		name: workload.name,
 		wallMs: performance.now() - started,
 		cpuMs: (cpu.user + cpu.system) / 1_000,
+		fileInputs: after.fsRead - io.fsRead,
+		majorFaults: after.majorPageFault - io.majorPageFault,
 		queries: [...queries.values()]
 			.sort((a, b) => b.ms - a.ms)
 			.slice(0, 8)

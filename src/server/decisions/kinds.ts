@@ -6,7 +6,15 @@
 import { type AnswerOf, type AnyAnswer, failureClass, type Kind, type Policy } from "../../core/kinds.ts";
 import type { CaseBody } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
-import { dropExcuse, findTest, linkTest, setExcuse, testById, unlinkedInFile } from "../evidence/evidence.ts";
+import {
+	dropExcuse,
+	findTest,
+	linkTest,
+	restoreLink,
+	setExcuse,
+	testById,
+	unlinkedInFile,
+} from "../evidence/evidence.ts";
 import { actorById } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
@@ -193,7 +201,7 @@ const mapHandler: Handler<"map"> = {
 		const { linked } = json<{ linked?: [number, number | null][] }>(decision.effects);
 		for (const [testId, previous] of linked ?? []) {
 			const test = testById(ctx.db, testId);
-			if (test) ctx.db.raw.query("UPDATE tests SET case_id = ? WHERE id = ?").run(previous, test.id);
+			if (test) restoreLink(ctx, test, previous);
 		}
 	},
 	holds: ({ question }) => untilBasisChanges(question),

@@ -1,10 +1,11 @@
 import { type InfiniteData, useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import type { Api } from "../../core/api.ts";
 import { ANSWER_HELP, ANSWER_KEYS, ANSWER_LABELS, ANSWERS, KINDS, type Kind } from "../../core/kinds.ts";
 import type { InboxReply, QuestionItem } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
-import { invalidateProject, queryClient, queryKey } from "../lib/data.ts";
+import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { type Binding, useBindings } from "../lib/keys.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
@@ -50,6 +51,27 @@ function QueueWorkbench() {
 	const [inline, setInline] = useState<InlineAnswer | null>(null);
 	const inlineRef = useRef<HTMLInputElement>(null);
 	const actionNo = useRef(0);
+	const seenRoute = useRef<string | null>(null);
+	useEffect(() => {
+		setStatus("One key answers. Every decision stays in the ledger; u withdraws an answer.");
+	}, [setStatus]);
+	const routeQuestion = useQueryOp({
+		project,
+		op: "get",
+		input: { refs: [route.ref ?? ""] },
+		enabled: Boolean(route.ref),
+	});
+	const routeState = z
+		.object({ q: z.string(), state: z.enum(["open", "decided", "dissolved"]) })
+		.safeParse(routeQuestion.data?.[0]);
+	const routeQuestionRef = routeState.success ? routeState.data.q : null;
+	const routeQuestionState = routeState.success ? routeState.data.state : null;
+	useEffect(() => {
+		if (route.ref && routeQuestionRef === route.ref && seenRoute.current !== route.ref) {
+			seenRoute.current = route.ref;
+			if (routeQuestionState === "decided") setState("decided");
+		}
+	}, [route.ref, routeQuestionRef, routeQuestionState]);
 	const input: Api["inbox"]["input"] = { state, ...(kind ? { kind } : {}), limit: 100 };
 	const cacheKey = [...queryKey({ project, op: "inbox", input }), "pages"];
 	const inbox = useInfiniteQuery({
@@ -133,7 +155,9 @@ function QueueWorkbench() {
 		patchRemoved(entries);
 		const text = `${entries.map((entry) => entry.question.q).join(", ")} · ${ANSWER_LABELS[String(entries[0]?.answer.is)] ?? entries[0]?.answer.is}`;
 		setLastMessage(`${text} · recording`);
-		setStatus(`${text}. u withdraws the decision.`);
+		setStatus(
+			`${text}. ${entries.some((entry) => entry.question.kind === "adopt") ? "The adopted version stays in history." : "u withdraws the decision."}`,
+		);
 		const all = entries.map(({ question, answer }) => ({
 			q: question.q,
 			onEvidence: question.evidenceHash,
@@ -174,7 +198,12 @@ function QueueWorkbench() {
 					return false;
 				}
 				if (action === actionNo.current) setLastMessage(`${text} · recorded`);
-				void invalidateProject(project);
+				await invalidateProject(project);
+				setHidden((previous) => {
+					const next = new Set(previous);
+					for (const ref of refs) next.delete(ref);
+					return next;
+				});
 				return true;
 			})
 			.catch((error: unknown) => {
@@ -192,12 +221,18 @@ function QueueWorkbench() {
 	}
 	function answer(is: string, suggested?: Record<string, unknown>): void {
 		if (!current || state !== "open" || current.you === "forbidden" || inline) return;
+		if (current.answers && !current.answers.includes(is)) {
+			setStatus("This answer does not apply to the current evidence.");
+			return;
+		}
 		const questions = selected.size ? items.filter((item) => selected.has(item.q)) : [current];
-		if (questions.some((q) => q.kind !== current.kind || q.you === "forbidden")) {
+		if (
+			questions.some((q) => q.kind !== current.kind || q.you === "forbidden" || (q.answers && !q.answers.includes(is)))
+		) {
 			setStatus("Select questions of one kind that you may answer.");
 			return;
 		}
-		if (is === "link") {
+		if (is === "link" && !suggested) {
 			if (questions.length !== 1) {
 				setStatus("Link one question at a time so each test can have its own case.");
 				return;
@@ -316,7 +351,11 @@ function QueueWorkbench() {
 			key,
 			label: ANSWER_LABELS[is] ?? is,
 			handler: () => answer(is),
-			when: () => active() && state === "open" && current?.you !== "forbidden",
+			when: () =>
+				active() &&
+				state === "open" &&
+				current?.you !== "forbidden" &&
+				(!current?.answers || current.answers.includes(is)),
 		})),
 		{
 			key: "enter",
@@ -512,7 +551,16 @@ function QueueWorkbench() {
 										className="ans"
 										type="button"
 										key={key}
-										disabled={current.you === "forbidden" || Boolean(inline)}
+										disabled={
+											current.you === "forbidden" ||
+											Boolean(inline) ||
+											(current.answers && !current.answers.includes(is))
+										}
+										title={
+											current.answers && !current.answers.includes(is)
+												? "This answer does not apply to the current evidence."
+												: undefined
+										}
 										onClick={() => answer(is)}
 									>
 										<KeyCap>{key}</KeyCap>

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { z } from "zod";
+import { mergeBodies } from "../../core/merge3.ts";
 import { CaseBody } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
@@ -278,11 +279,14 @@ export function CasePane({
 									))
 								)
 							) : (
-								<TimelineRow key={`${group.entry.t}:${group.entry.seq}:${group.entry.at}`} entry={group.entry} />
+								<TimelineRow
+									key={`${group.entry.t}:${group.entry.seq}:${group.entry.t === "result" ? group.entry.id : group.entry.t === "finding" ? `${group.entry.on}:${group.entry.note}` : group.entry.by}`}
+									entry={group.entry}
+								/>
 							),
 						)}
 						{timelineData?.questions
-							.filter((q) => q.kind !== "adopt")
+							.filter((q) => q.kind !== "adopt" || q.state !== "open")
 							.map((q) => (
 								<a
 									className="question-card"
@@ -295,7 +299,9 @@ export function CasePane({
 								>
 									<ProducerGlyph kind={q.producer} /> {q.q} · {q.title}{" "}
 									<span className="dim">
-										{q.decision ? `· ${String(q.decision.answer.is)} by ${q.decision.by.join(", ")}` : "· open"}
+										{q.decision
+											? `· ${String(q.decision.answer.is)} by ${q.decision.rule ? `rule ${q.decision.rule}` : q.decision.by.join(", ")}`
+											: "· open"}
 									</span>
 								</a>
 							))}
@@ -439,8 +445,31 @@ function ProposalCard({
 	const row = data.data?.[0];
 	const edits = row && Array.isArray(row.edits) ? row.edits : [];
 	const body = edits
-		.map((edit: unknown) => z.object({ body: CaseBody, mine: CaseBody.optional() }).safeParse(edit))
+		.map((edit: unknown) =>
+			z
+				.object({
+					body: CaseBody,
+					mine: CaseBody.optional(),
+					case: z.string().nullable().optional(),
+					base: z.number().optional(),
+				})
+				.safeParse(edit),
+		)
 		.find((edit) => edit.success);
+	const edit = body?.success ? body.data : null;
+	const baseQuery = useQueryOp({
+		project,
+		op: "get",
+		input: { refs: [edit?.case ?? "C-0"], ...(edit?.base ? { version: edit.base } : {}) },
+		enabled: Boolean(edit?.case && edit.base),
+	});
+	const base = CaseView.safeParse(baseQuery.data?.[0]);
+	const proposed = edit
+		? base.success
+			? mergeBodies({ base: bodyOf(base.data), mine: edit.mine ?? edit.body, theirs: current }).merged
+			: (edit.mine ?? edit.body)
+		: null;
+
 	return (
 		<div className={`ev ${question.producer === "agent" ? "prop" : ""}`}>
 			<ProducerGlyph kind={question.producer} />
@@ -452,7 +481,7 @@ function ProposalCard({
 				<p className="why">
 					Proposed, waiting for a person. {typeof row?.reason === "string" ? row.reason : question.title}
 				</p>
-				{body?.success && <DiffView before={current} after={body.data.mine ?? body.data.body} />}
+				{proposed && <DiffView before={current} after={proposed} />}
 				<div className="pbtn">
 					<button type="button" className="out" onClick={() => answer("accept")}>
 						<KeyCap>a</KeyCap> Accept

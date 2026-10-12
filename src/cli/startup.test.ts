@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { join } from "node:path";
 import { CLI_ENTRY, withInstance } from "./test-support.ts";
 
 for (const options of [
@@ -75,3 +76,32 @@ for (const options of [
 		});
 	});
 }
+
+test("an occupied port exits 4 without keeping the failed server alive", async () => {
+	await withInstance(async ({ directory, instance }) => {
+		const child = Bun.spawn([process.execPath, CLI_ENTRY, "serve"], {
+			cwd: directory,
+			env: {
+				PATH: process.env.PATH ?? "",
+				HOME: directory,
+				USER: "daniel",
+				CASEBOOK_PORT: new URL(instance.url).port,
+				CASEBOOK_DATA: join(directory, "failed-start"),
+			},
+			stdout: "pipe",
+			stderr: "pipe",
+			stdin: "ignore",
+		});
+		const timeout = setTimeout(() => child.kill("SIGKILL"), 1200);
+		try {
+			const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+			expect(code).toBe(4);
+			expect(stderr).toContain("port");
+			expect(stderr.trim().split("\n")).toHaveLength(1);
+		} finally {
+			clearTimeout(timeout);
+			child.kill("SIGKILL");
+			await child.exited;
+		}
+	});
+});

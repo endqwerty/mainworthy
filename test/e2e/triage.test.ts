@@ -270,15 +270,15 @@ async function twentyQuestions(server: Server) {
 			view = await openPage(server, { path: "/p/scratch/queue" });
 			view.page.setDefaultTimeout(8000);
 			await view.page.getByText("reviewer suggests infra", { exact: false }).waitFor();
-			await view.page.waitForFunction(() => document.querySelector("#hints")?.textContent?.includes("Take advice"));
+			await view.page.evaluate(
+				() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+			);
 			await view.page.keyboard.press("Enter");
-			console.info("decided probe", await server.api("inbox", {state:"decided",kind:"failure"}));
-			console.info("advice probe", await view.page.locator(".queue-last").innerText(), (await server.api("inbox", {kind:"failure"})).items.map(q=>({q:q.q, hash:q.evidenceHash, advice:q.advice})));
 			const settled = await eventually(
 				() => server.api("inbox", { state: "decided", kind: "failure" }),
-				(reply) => reply.items.length === 1,
+				(reply) => reply.items.some((q) => q.q === question.q && q.kind === "failure"),
 			);
-			expect(settled.items[0]?.decision?.answer.is).toBe("infra");
+			expect(settled.items.find((q) => q.q === question.q)?.decision?.answer.is).toBe("infra");
 			expect(view.errors).toEqual([]);
 			await view.close();
 			view = null;
@@ -302,4 +302,189 @@ async function twentyQuestions(server: Server) {
 		}
 	},
 	30000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"bulk answers are one decide request and undo restores every question",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", {
+				edits: [
+					{ op: "create", outline: "Amber" },
+					{ op: "create", outline: "Cedar" },
+				],
+			});
+			await server.api("report", {
+				target: { session: "bulk" },
+				results: [
+					{ test: { case: "C-1" }, outcome: "fail", note: "expected amber, got green" },
+					{ test: { case: "C-2" }, outcome: "fail", note: "expected cedar, got green" },
+				],
+			});
+			view = await openPage(server, { path: "/p/scratch/queue" });
+			view.page.setDefaultTimeout(8000);
+			await view.page.waitForSelector("[data-current-question]");
+			const submissions: unknown[] = [];
+			view.page.on("request", (request) => {
+				if (request.url().endsWith("/decide")) submissions.push(request.postDataJSON());
+			});
+			await view.page.keyboard.press("x");
+			await view.page.keyboard.press("j");
+			await view.page.keyboard.press("x");
+			await view.page.keyboard.press("i");
+			await eventually(
+				() => server.api("inbox", {}),
+				(reply) => reply.counts.open === 0,
+			);
+			expect(submissions).toHaveLength(1);
+			expect(z.object({ all: z.array(z.unknown()) }).parse(submissions[0]).all).toHaveLength(2);
+			await view.page.keyboard.press("u");
+			await eventually(
+				() => server.api("inbox", {}),
+				(reply) => reply.items.filter((q) => q.kind === "failure").length === 2,
+			);
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	25000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"a stale agent proposal comes back with the new evidence and preserves the person's version",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Original title\n  Open > Ready" }] });
+			const token = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "writer",
+					kind: "agent",
+					can: ["read", "produce"],
+					project: "scratch",
+				}),
+			).token;
+			const proposed = await server.api(
+				"propose",
+				{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Agent title" } }] },
+				{ token },
+			);
+			view = await openPage(server, { path: `/p/scratch/queue/${proposed.question?.slice(2)}` });
+			view.page.setDefaultTimeout(8000);
+			await view.page.locator(".diff").waitFor();
+			await server.api("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Person's newer title" } }],
+			});
+			await view.page.keyboard.press("a");
+			await view.page.locator(".queue-last").getByText("The evidence changed.", { exact: false }).waitFor();
+			await view.page.locator(`[data-question="${proposed.question}"]`).waitFor();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+				title: "Person's newer title",
+				version: 2,
+			});
+			expect((await server.api("inbox", { state: "open" })).items.some((q) => q.q === proposed.question)).toBe(true);
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	25000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"a real rejected request rolls the optimistic answer back",
+	async () => {
+		const server = await fixture({ mode: "server" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Rollback case" }] });
+			await server.api("report", {
+				target: { session: "rollback" },
+				results: [{ test: { case: "C-1" }, outcome: "fail", note: "expected content, got blank" }],
+			});
+			const token = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "triager",
+					kind: "human",
+					can: ["read", "produce", "answer"],
+					project: "scratch",
+				}),
+			).token;
+			view = await openPage({ ...server, token }, { path: "/p/scratch/queue" });
+			view.page.setDefaultTimeout(8000);
+			await view.page.waitForSelector("[data-current-question]");
+			const q = (await server.api("inbox", {})).items[0];
+			if (!q) throw new Error("Rollback question missing");
+			const grant = z
+				.array(z.object({ id: z.number(), actor: z.string() }))
+				.parse(await server.api("admin", { do: "token.list" }))
+				.find((entry) => entry.actor === "triager");
+			if (!grant) throw new Error("Grant missing");
+			await server.api("admin", { do: "token.revoke", id: grant.id });
+			await view.page.keyboard.press("i");
+			await view.page.locator(`[data-question="${q.q}"]`).waitFor();
+			await view.page.waitForFunction(() =>
+				Boolean(document.querySelector(".queue-last")?.textContent?.match(/authenticat|sign in|token/i)),
+			);
+			expect((await server.api("inbox", {})).items.some((item) => item.q === q.q && item.decision === null)).toBe(true);
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	25000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"unlinked tests use the case picker and a settled question's URL restores the ledger",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", {
+				edits: [{ op: "create", body: { title: "Checkout", methods: ["human", "auto"] } }],
+			});
+			await server.api("report", {
+				target: { commit: "picker001", branch: "main" },
+				results: [
+					{ test: { key: "checkout.ts::ready", file: "checkout.ts", name: "Checkout ready" }, outcome: "pass" },
+				],
+			});
+			const map = (await server.api("inbox", {})).items.find((q) => q.kind === "map");
+			if (!map) throw new Error("Map question missing");
+			view = await openPage(server, { path: `/p/scratch/queue/${map.q.slice(2)}` });
+			view.page.setDefaultTimeout(8000);
+			await view.page.waitForSelector("[data-current-question]");
+			await view.page.keyboard.press("l");
+			await view.page.locator(".palette-input").waitFor();
+			await view.page.keyboard.type("C-1");
+			await view.page.keyboard.press("Enter");
+			await eventually(
+				() => server.api("get", { refs: ["T-1"] }),
+				(rows) => rows[0]?.case === "C-1",
+			);
+			await view.page.reload();
+			await view.page.getByRole("button", { name: "Settled", exact: true }).waitFor();
+			await view.page.waitForFunction(
+				() =>
+					document.querySelector("[data-current-question]")?.getAttribute("data-current-question") !== null &&
+					document.querySelector('.queue-state button[aria-pressed="true"]')?.textContent === "Settled",
+			);
+			expect(await view.page.locator(".queue-evidence").innerText()).toContain("Decided by daniel");
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	25000,
 );

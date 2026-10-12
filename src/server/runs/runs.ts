@@ -28,17 +28,19 @@ import {
 	codeWhat,
 	excuseFor,
 	processedJobs,
-	type ResultRow,
+	resultById,
+	resultsOfCaseOnTargets,
 	type SignatureRow,
 	SLICE,
 	scopeOf,
 	signatureById,
 	type TargetRow,
 	type TestRow,
+	targetByCommit,
 	targetsOfCommit,
 } from "../evidence/evidence.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
-import { type Db, json, placeholders, sql } from "../kernel/db.ts";
+import { type Db, json, sql } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 import type { Witness } from "../kernel/witness.ts";
 import { type CaseRow, caseById } from "../suite/suite.ts";
@@ -196,25 +198,11 @@ const Q = {
 		"UPDATE slot_results SET corrected = 0 WHERE slot = $slot AND result = $result",
 	),
 	slotsOfResult: sql<{ result: number }, { slot: number }>("SELECT slot FROM slot_results WHERE result = $result"),
-	fills: sql<
-		{ slot: number },
-		{
-			id: number;
-			actor: number;
-			outcome: string;
-			seq: number;
-			ord: number;
-			signature: number | null;
-			method: MethodKind;
-			admitted: string;
-			at: number;
-			note: string | null;
-			message: string | null;
-		}
-	>(
-		`SELECT r.id, r.actor, r.outcome, r.seq, r.ord, r.signature, r.method, s.admitted, r.at, r.note, r.message
-		 FROM slot_results s JOIN results r ON r.id = s.result
-		 WHERE s.slot = $slot AND s.corrected = 0 ORDER BY r.seq, r.ord`,
+	admittedTo: sql<{ slot: number }, { result: number; admitted: string }>(
+		"SELECT result, admitted FROM slot_results WHERE slot = $slot AND corrected = 0",
+	),
+	newestChangeRun: sql<{ project: number; change: number | null }, { id: number | null }>(
+		"SELECT max(id) AS id FROM runs WHERE project = $project AND origin = 'change' AND change IS $change",
 	),
 	slotsBySignature: sql<{ run: number; signature: number }, SlotRow>(
 		"SELECT * FROM slots WHERE run = $run AND signature = $signature",
@@ -224,17 +212,6 @@ const Q = {
 		"INSERT OR IGNORE INTO depends_on (run, decision, expires_at) VALUES ($run, $decision, $expires)",
 	),
 	dependents: sql<{ decision: number }, { run: number }>("SELECT run FROM depends_on WHERE decision = $decision"),
-	decisionExpiry: sql<{ id: number }, { expires_at: number | null }>("SELECT expires_at FROM decisions WHERE id = $id"),
-	openBlocking: sql<{ project: number; ref: string }, { id: number; kind: string; subject: string; blocks: string }>(
-		`SELECT q.id, q.kind, q.subject, q.blocks FROM question_refs r JOIN questions q ON q.id = r.question
-		 WHERE r.project = $project AND r.ref = $ref AND q.state = 'open'`,
-	),
-	targetByCommit: sql<{ project: number; commit: string }, TargetRow>(
-		"SELECT * FROM targets WHERE project = $project AND commit_sha = $commit ORDER BY id LIMIT 1",
-	),
-	targetByCommitPrefix: sql<{ project: number; low: string; high: string }, TargetRow>(
-		"SELECT * FROM targets WHERE project = $project AND commit_sha >= $low AND commit_sha < $high ORDER BY id LIMIT 2",
-	),
 };
 
 export const runRef = (row: { no: number }): string => ref("run", row.no);
@@ -259,7 +236,42 @@ export const slotById = (db: Db, id: number): SlotRow | null => db.get(Q.slotByI
 export const slotsPage = (db: Db, run: number, after: number, limit: number): SlotRow[] =>
 	db.all(Q.slotsOfRun, { run, after, limit });
 export const slotCount = (db: Db, run: number): number => db.get(Q.slotCount, { run })?.n ?? 0;
-export const fillsOf = (db: Db, slot: number) => db.all(Q.fills, { slot });
+export type Fill = {
+	id: number;
+	actor: number;
+	outcome: string;
+	seq: number;
+	ord: number;
+	signature: number | null;
+	method: MethodKind;
+	admitted: string;
+	at: number;
+	note: string | null;
+	message: string | null;
+};
+
+/** The uncorrected results admitted to a slot, oldest first. Results are read through their owner, evidence. */
+export function fillsOf(db: Db, slot: number): Fill[] {
+	const fills: Fill[] = [];
+	for (const row of db.all(Q.admittedTo, { slot })) {
+		const result = resultById(db, row.result);
+		if (!result) continue;
+		fills.push({
+			id: result.id,
+			actor: result.actor,
+			outcome: result.outcome,
+			seq: result.seq,
+			ord: result.ord,
+			signature: result.signature,
+			method: result.method,
+			admitted: row.admitted,
+			at: result.at,
+			note: result.note,
+			message: result.message,
+		});
+	}
+	return fills.sort((a, b) => a.seq - b.seq || a.ord - b.ord);
+}
 export const failingTestsOf = (db: Db, run: number, limit: number) => db.all(Q.failingRunTests, { run, limit });
 export const runTestsWith = (db: Db, run: number, outcome: string, limit: number) =>
 	db.all(Q.runTests, { run, outcome, limit });
@@ -488,7 +500,9 @@ function refreshSlot(
 ): { state: SlotState; signature: number | null } {
 	const agg: SlotAgg = {};
 	let signature: number | null = null;
-	for (const fill of ctx.db.all(Q.fills, { slot: slot.id })) {
+	const signatures = new Map<number, number | null>();
+	for (const fill of fillsOf(ctx.db, slot.id)) {
+		signatures.set(fill.id, fill.signature);
 		const outcome =
 			fill.outcome === "pass"
 				? "pass"
@@ -501,10 +515,7 @@ function refreshSlot(
 	}
 	for (const entry of Object.values(agg)) {
 		if (entry.outcome !== "fail") continue;
-		const failing = ctx.db.raw
-			.query<{ signature: number | null }, [number]>("SELECT signature FROM results WHERE id = ?")
-			.get(entry.result);
-		signature = failing?.signature ?? signature;
+		signature = signatures.get(entry.result) ?? signature;
 	}
 	const state = slotState(agg, obligation?.minActors ?? 1);
 	ctx.db.run(Q.updateSlot, { id: slot.id, agg: JSON.stringify(agg), state, signature, rev: ctx.seq });
@@ -519,28 +530,16 @@ export function scopeOfRun(db: Db, run: RunRow): string {
 	if (run.origin === "change") return "line:trunk";
 	const accepts = acceptsOf(run);
 	if ("commit" in accepts) {
-		const target = targetFor(db, run.project, accepts.commit);
+		const target = targetByCommit(db, run.project, accepts.commit);
 		if (target) return scopeOf(target, run.id);
 	}
 	return `run:${run.id}`;
 }
 
-function targetFor(db: Db, project: number, commit: string): TargetRow | null {
-	const exact = db.get(Q.targetByCommit, { project, commit });
-	if (exact) return exact;
-	if (commit.length < 7 || !/^[0-9a-f]+$/i.test(commit)) return null;
-	const rows = db.all(Q.targetByCommitPrefix, { project, low: commit, high: `${commit}￿` });
-	return rows.length === 1 ? (rows[0] ?? null) : null;
-}
-
 /** Whether no newer run exists in this run's scope (the same change, or trunk). A planned run is its own scope. */
 export function isLatestInScope(db: Db, run: RunRow): boolean {
 	if (run.origin !== "change") return true;
-	const newest = db.raw
-		.query<{ id: number }, [number, number | null]>(
-			"SELECT max(id) AS id FROM runs WHERE project = ? AND origin = 'change' AND change IS ?",
-		)
-		.get(run.project, run.change);
+	const newest = db.get(Q.newestChangeRun, { project: run.project, change: run.change });
 	return (newest?.id ?? run.id) === run.id;
 }
 
@@ -553,10 +552,17 @@ export type Retallied = {
 };
 
 /**
+ * An open question that may hold a run back. Questions belong to the decision machinery, which passes them in;
+ * this module does not read them.
+ */
+export type Blocker = { ref: string; kind: string; signature: number | null; blocks: readonly number[] };
+
+/**
  * Recomputes a run's tally, the questions blocking it and its verdict from the facts, and stores them. Called in
  * the transaction of every event that can change them: an applied batch, a decision, a withdrawn decision.
+ * `blockers` are the open questions about this run.
  */
-export function retally(ctx: Ctx, runId: number): Retallied {
+export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): Retallied {
 	const run = runById(ctx.db, runId);
 	if (!run) throw new Error(`run ${runId} is missing`);
 	const scope = scopeOfRun(ctx.db, run);
@@ -576,7 +582,7 @@ export function retally(ctx: Ctx, runId: number): Retallied {
 			else tally.unexplained += n;
 			return;
 		}
-		depends.set(excuse.decision, ctx.db.get(Q.decisionExpiry, { id: excuse.decision })?.expires_at ?? null);
+		depends.set(excuse.decision, excuse.expires_at);
 		if (excuse.class === "attributed") tally.attributed += n;
 		else if (disputed) tally.pass += n;
 		else tally.excused += n;
@@ -616,15 +622,12 @@ export function retally(ctx: Ctx, runId: number): Retallied {
 		tally.missing += jobs.filter((job) => !reported.has(job)).length;
 	}
 
-	const blocking: number[] = [];
-	for (const question of ctx.db.all(Q.openBlocking, { project: run.project, ref: runRef(run) })) {
-		if (!json<number[]>(question.blocks).includes(run.id)) continue;
-		if (question.kind === "failure") {
-			const signature = json<{ signature?: number }>(question.subject).signature;
-			if (signature === undefined || !failing.has(signature)) continue;
-		}
-		blocking.push(question.id);
-	}
+	// A failure question about a cause this run no longer shows does not hold it back.
+	const blocking = blockers
+		.filter(
+			(q) => q.blocks.includes(run.id) && (q.kind !== "failure" || (q.signature !== null && failing.has(q.signature))),
+		)
+		.map((q) => q.ref);
 
 	ctx.db.run(Q.clearDepends, { run: run.id });
 	let expiry: number | null = null;
@@ -676,7 +679,7 @@ export function plan(
 
 	const no = ctx.nextNo("run");
 	const what =
-		"commit" in input.accepts ? (targetFor(ctx.db, ctx.project.id, input.accepts.commit)?.what ?? null) : null;
+		"commit" in input.accepts ? (targetByCommit(ctx.db, ctx.project.id, input.accepts.commit)?.what ?? null) : null;
 	const { lastId } = ctx.db.run(Q.insert, {
 		project: ctx.project.id,
 		no,
@@ -722,7 +725,7 @@ export function plan(
 				targets.map((t) => t.id),
 			);
 	}
-	return { run: retally(ctx, run.id).run, slots: rank, already };
+	return { run: retally(ctx, run.id, []).run, slots: rank, already };
 }
 
 function fillFromPrior(
@@ -735,10 +738,7 @@ function fillFromPrior(
 	for (const slot of ctx.db.all(Q.slotsOfRun, { run: run.id, after: -1, limit: 1_000_000 })) {
 		const obligation = exercises.find((o) => o.id === slot.obligation);
 		if (!obligation) continue;
-		const prior = ctx.db.allDynamic<ResultRow>(
-			`SELECT * FROM results WHERE basis_case = ? AND target IN (${placeholders(targets.length)}) ORDER BY seq, ord`,
-			[slot.case_id, ...targets],
-		);
+		const prior = resultsOfCaseOnTargets(ctx.db, slot.case_id, targets);
 		let any = false;
 		for (const result of prior) {
 			const admitted = qualifies({
@@ -783,7 +783,7 @@ export function reopenRun(ctx: Ctx, run: RunRow): void {
 export function discountFailures(ctx: Ctx, _witness: Witness, run: RunRow, signature: number): [number, number][] {
 	const corrected: [number, number][] = [];
 	for (const slot of ctx.db.all(Q.slotsBySignature, { run: run.id, signature })) {
-		for (const fill of ctx.db.all(Q.fills, { slot: slot.id })) {
+		for (const fill of fillsOf(ctx.db, slot.id)) {
 			if (fill.signature !== signature) continue;
 			ctx.db.run(Q.correctInSlot, { slot: slot.id, result: fill.id });
 			corrected.push([slot.id, fill.id]);
@@ -826,7 +826,7 @@ export function gate(
 		let commit = input.commit;
 		if (!commit && input.change) commit = changeByKey(ctx.db, ctx.project.id, input.change)?.head_sha ?? undefined;
 		if (!commit) throw invalid("gate needs a commit, a run or a change");
-		const target = targetFor(ctx.db, ctx.project.id, commit);
+		const target = targetByCommit(ctx.db, ctx.project.id, commit);
 		run = target ? ctx.db.get(Q.changeRun, { project: ctx.project.id, what: target.what }) : null;
 	}
 	if (!run) {
@@ -845,14 +845,10 @@ export function gate(
 
 export function gateOf(ctx: Ctx, run: RunRow): GateStatus {
 	const tally = json<Tally>(run.tally);
-	const blocking = json<number[]>(run.blocking);
+	const open = json<string[]>(run.blocking);
 	const expired = run.next_expiry !== null && run.next_expiry <= ctx.now;
-	const facts = { tally, blocking: blocking.length, outstanding: run.outstanding, expired };
+	const facts = { tally, blocking: open.length, outstanding: run.outstanding, expired };
 	const now = verdict(facts);
-	const open = blocking.flatMap((id) => {
-		const row = ctx.db.raw.query<{ no: number }, [number]>("SELECT no FROM questions WHERE id = ?").get(id);
-		return row ? [ref("question", row.no)] : [];
-	});
 	return {
 		run: runRef(run),
 		verdict: now,

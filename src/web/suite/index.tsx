@@ -22,6 +22,7 @@ import "../case/case.css";
 type VisibleRow =
 	| { kind: "case"; row: CaseRow }
 	| { kind: "draft"; id: string }
+	| { kind: "local"; id: string; draft: Draft }
 	| { kind: "folder"; folder: FolderRow; count: number };
 const ResolvedEdit = z.object({
 	op: z.literal("edit"),
@@ -40,6 +41,8 @@ export function SuiteScreen() {
 		return saved?.dirty || saved?.ref === null ? saved : null;
 	});
 	const draftRef = useRef(draft);
+	const [captures, setCaptures] = useState(new Map<string, Draft>());
+	const adoptedRefs = useRef(new Map<string, string>());
 	const pending = useRef(new Map<string, Promise<void>>());
 	const [conflict, setConflict] = useState<ConflictState | null>(null);
 	const [selected, setSelected] = useState<string | null>(route.ref);
@@ -101,13 +104,28 @@ export function SuiteScreen() {
 			}
 			if (!collapsed.has(row.folder)) result.push({ kind: "case", row });
 		}
+		for (const [id, local] of captures) {
+			if (
+				id === newId ||
+				(local.ref && cases.some((row) => row.ref === local.ref)) ||
+				(route.folder && local.folder !== route.folder && !local.folder.startsWith(`${route.folder}/`))
+			)
+				continue;
+			const at = result.findIndex((item) =>
+				item.kind === "case" ? item.row.ref === local.after : item.kind === "local" ? item.id === local.after : false,
+			);
+			result.splice(at >= 0 ? at + 1 : 0, 0, { kind: "local", id, draft: local });
+		}
+
 		if (newId) {
 			const after = draftRef.current?.after;
-			const at = result.findIndex((item) => item.kind === "case" && item.row.ref === after);
+			const at = result.findIndex((item) =>
+				item.kind === "case" ? item.row.ref === after : item.kind === "local" ? item.id === after : false,
+			);
 			result.splice(at >= 0 ? at + 1 : 0, 0, { kind: "draft", id: newId });
 		}
 		return result;
-	}, [cases, collapsed, folders, hidden, newId, route.folder]);
+	}, [cases, captures, collapsed, folders, hidden, newId, route.folder]);
 	const virtual = useVirtualizer({
 		count: rows.length,
 		getScrollElement: () => viewport.current,
@@ -209,6 +227,13 @@ export function SuiteScreen() {
 		const command = snapshot.cmd;
 		const task = (async () => {
 			try {
+				let after = snapshot.after;
+				if (after?.startsWith("draft:")) {
+					const predecessor = after;
+					const request = pending.current.get(predecessor);
+					if (request) await request;
+					after = adoptedRefs.current.get(predecessor) ?? null;
+				}
 				const edits: Edit[] =
 					snapshot.ref === null
 						? [
@@ -218,7 +243,7 @@ export function SuiteScreen() {
 									...(snapshot.folder ? { folder: snapshot.folder } : {}),
 									tags: cleaned.tags,
 									covers: cleaned.covers,
-									...(snapshot.after ? { after: snapshot.after } : {}),
+									...(after ? { after } : {}),
 								},
 							]
 						: [
@@ -310,6 +335,23 @@ export function SuiteScreen() {
 							: cached,
 					);
 				}
+				if (ref) {
+					adoptedRefs.current.set(snapshot.id, ref);
+					setCaptures((previous) => {
+						if (!previous.has(snapshot.id)) return previous;
+						const next = new Map(previous);
+						next.set(snapshot.id, {
+							...snapshot,
+							ref,
+							base: version,
+							body: adopted,
+							original: adopted,
+							dirty: false,
+							submission: { kind: "none" },
+						});
+						return next;
+					});
+				}
 				removeDraft({ project, id: snapshot.id });
 				const latest = draftRef.current;
 				if (latest?.id === snapshot.id && ref) {
@@ -391,9 +433,15 @@ export function SuiteScreen() {
 		viewport.current?.focus();
 	}
 	function create(): void {
+		const previous = draftRef.current;
+		const retain =
+			previous?.ref === null &&
+			(previous.body.title.trim().length > 0 || previous.body.steps.some((step) => step.action.trim().length > 0));
+		if (previous && retain) setCaptures((prior) => new Map([...prior, [previous.id, previous]]));
 		void sealDraft();
 		const selectedRow = cases.find((item) => item.ref === selected);
-		const folder = route.folder ?? folders.find((item) => item.id === selectedRow?.folder)?.path ?? "";
+		const folder =
+			route.folder ?? previous?.folder ?? folders.find((item) => item.id === selectedRow?.folder)?.path ?? "";
 		const body = emptyBody();
 		const next: Draft = {
 			id: `draft:${crypto.randomUUID()}`,
@@ -404,7 +452,7 @@ export function SuiteScreen() {
 			tags: [],
 			covers: [],
 			folder,
-			after: selectedRow?.ref ?? null,
+			after: retain && previous ? previous.id : (previous?.ref ?? selectedRow?.ref ?? previous?.after ?? null),
 			caret: { field: "capture-title", start: 0, end: 0 },
 			dirty: false,
 			at: Date.now(),
@@ -753,6 +801,22 @@ export function SuiteScreen() {
 												/>
 												<span className="dr">draft</span>
 											</div>
+										) : row.kind === "local" ? (
+											<button
+												type="button"
+												className="row"
+												role="option"
+												aria-selected={false}
+												onClick={() => {
+													if (row.draft.ref) choose(row.draft.ref);
+													else change(row.draft, true);
+												}}
+											>
+												<span className="id">{row.draft.ref ?? "new"}</span>
+												<span className="ti">{row.draft.body.title}</span>
+												<span className="dr">{row.draft.ref ? "" : "draft"}</span>
+												<ProofStrip />
+											</button>
 										) : row.kind === "case" ? (
 											<button
 												className={`row row-drag ${row.row.ref === selected ? "sel" : ""}`}

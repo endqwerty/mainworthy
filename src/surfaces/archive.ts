@@ -2,7 +2,9 @@ import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { bootstrap } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
+import type { Actor } from "../server/kernel/ctx.ts";
 import { HTTP_STATUS, OpError } from "../server/kernel/errors.ts";
 import { exportArchive, importArchive, linesOf } from "../server/transfer/transfer.ts";
 import type { Session } from "./http.ts";
@@ -127,9 +129,10 @@ function removeBootstrapProject(app: App): void {
 	app.db.raw.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
 }
 
-/** Admin-only instance transfer routes. Imports replace bootstrap identity rows and may invalidate the caller's session. */
+/** Admin-only transfer. The optional owner is Local's captured identity, refreshed after replacing bootstrap rows. */
 export function archiveRoutes(
 	app: App,
+	owner?: Actor,
 ): Record<string, (req: Request, session: Session) => Response | Promise<Response>> {
 	const allowed = (session: Session): boolean => session.actor(0)?.can.includes("admin") ?? false;
 	return {
@@ -158,6 +161,7 @@ export function archiveRoutes(
 			if (req.method !== "POST")
 				return json({ ok: false, error: { code: "invalid", message: "import requires POST" } }, 405);
 			const file = scratch();
+			const localOwner = owner ?? (session.via === "local" ? session.actor(0) : null);
 			try {
 				await stageBody(req, file.path);
 				const result = await app.gate.run(() => {
@@ -166,16 +170,19 @@ export function archiveRoutes(
 							"forbidden",
 							"import needs the admin capability; the token or grant changed while uploading",
 						);
-					return app.db.savepoint(() => {
+					const restored = app.db.savepoint(() => {
 						removeBootstrapProject(app);
-						return importArchive(app.db, fileLines(file.path));
+						const counts = importArchive(app.db, fileLines(file.path));
+						return { counts, owner: app.config.mode === "local" ? bootstrap(app).owner : null };
 					});
+					if (localOwner && restored.owner) Object.assign(localOwner, restored.owner);
+					return restored.counts;
 				});
 				return json({
 					ok: true,
 					result: {
 						...result,
-						note: "Import replaced the bootstrap rows. Your previous session may no longer exist; restart the instance to sign in again.",
+						note: `Import replaced the bootstrap rows. Your previous session may no longer exist. ${app.config.mode === "server" ? "Set CASEBOOK_OWNER_TOKEN and restart the server to reconnect." : "The configured local owner was refreshed."}`,
 						callerSessionMayHaveChanged: true,
 					},
 					seq: null,

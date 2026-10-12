@@ -21,7 +21,7 @@ import {
 import { type DatasetInstance, ingestInput, random, verifyReport } from "./dataset.ts";
 import type { Workload } from "./measure.ts";
 
-export type ReadRequest = { op: string; input: unknown; check: (result: unknown) => void };
+export type ReadRequest = { name: string; op: string; input: unknown; check: (result: unknown) => void };
 export const SEARCHES = [
 	{ name: "search/common", text: "customer" },
 	{ name: "search/two words", text: "customer account" },
@@ -34,6 +34,26 @@ export function operation(instance: DatasetInstance, op: string, input: unknown,
 	const reply = invoke(instance.app, OPS, { op, project: instance.metadata.project, input, actor: () => actor });
 	if (!reply.ok) throw new Error(`${op}: ${reply.error.code}: ${reply.error.message}`);
 	return reply.result;
+}
+
+/** Adds twenty real recent edits to each clone without mutating the reusable baseline. */
+export function prepareRecentChanges(instance: DatasetInstance): void {
+	const current = Delta.parse(operation(instance, "since", { cursor: "s:0", limit: 1 })).cursor;
+	const seq = Number(current.slice(2));
+	const recent = instance.metadata.cases.filter((stamp) => stamp.version > 1 && stamp.version < 6).slice(0, 20);
+	ensure(recent.length === 20, "the history fixture must supply twenty cases for recent diffs");
+	const reply = Proposal.parse(
+		operation(instance, "propose", {
+			edits: recent.map((stamp) => ({
+				op: "edit",
+				case: stamp.ref,
+				base: stamp.version,
+				body: { pre: "Customer account has verified checkout access for the recently reviewed pull request." },
+			})),
+		}),
+	);
+	ensure(reply.status === "adopted" && reply.cases.length === 20, "recent edits must create twenty real versions");
+	instance.metadata = { ...instance.metadata, since: `s:${seq >= 300 ? seq - 300 : seq}` };
 }
 
 /** Checks every returned search row against its persisted document and FTS word/prefix semantics. */
@@ -77,6 +97,7 @@ export function readRequests(instance: DatasetInstance, index: number): ReadRequ
 	switch (index % 8) {
 		case 0:
 			return {
+				name: "case",
 				op: "get",
 				input: { refs: [stamp.ref] },
 				check(value) {
@@ -86,6 +107,7 @@ export function readRequests(instance: DatasetInstance, index: number): ReadRequ
 			};
 		case 1:
 			return {
+				name: "folder",
 				op: "find",
 				input: { in: "cases", folder: metadata.hotFolder, limit: 50 },
 				check(value) {
@@ -99,6 +121,7 @@ export function readRequests(instance: DatasetInstance, index: number): ReadRequ
 		case 2: {
 			const text = itemAt(SEARCHES, Math.floor(index / 8) % SEARCHES.length).text;
 			return {
+				name: "search",
 				op: "find",
 				input: { in: "cases", text, limit: 50 },
 				check(value) {
@@ -109,6 +132,7 @@ export function readRequests(instance: DatasetInstance, index: number): ReadRequ
 		}
 		case 3:
 			return {
+				name: "test history",
 				op: "get",
 				input: { refs: [test.ref] },
 				check(value) {
@@ -125,6 +149,7 @@ export function readRequests(instance: DatasetInstance, index: number): ReadRequ
 			};
 		case 4:
 			return {
+				name: "gate",
 				op: "gate",
 				input: { commit: metadata.lastCommit },
 				check(value) {
@@ -133,6 +158,7 @@ export function readRequests(instance: DatasetInstance, index: number): ReadRequ
 			};
 		case 5:
 			return {
+				name: "queue",
 				op: "inbox",
 				input: { limit: 50 },
 				check(value) {
@@ -145,12 +171,14 @@ export function readRequests(instance: DatasetInstance, index: number): ReadRequ
 			};
 		case 6:
 			return {
+				name: "since",
 				op: "since",
 				input: { cursor: metadata.since, limit: 200 },
 				check(value) {
 					const delta = Delta.parse(value);
 					ensure(
 						delta.changed.length <= 200 &&
+							delta.changed.length > 0 &&
 							delta.settled.length <= 200 &&
 							Number(delta.cursor.slice(2)) >= Number(metadata.since.slice(2)),
 						"HTTP changed-since must advance a valid cursor",
@@ -159,6 +187,7 @@ export function readRequests(instance: DatasetInstance, index: number): ReadRequ
 			};
 		default:
 			return {
+				name: "impact",
 				op: "impact",
 				input: { change: metadata.change, files: metadata.files, ledger: false },
 				check(value) {
@@ -179,6 +208,7 @@ export function readRequests(instance: DatasetInstance, index: number): ReadRequ
 export function readWorkloads(instance: DatasetInstance, iterations: number): Workload[] {
 	const { metadata, app, owner } = instance;
 	const rng = random(metadata.parameters.seed + 1);
+	const expectedGate = Gate.parse(operation(instance, "gate", { commit: metadata.lastCommit }));
 	let expectedRef = "";
 	const reads: Workload[] = [
 		{
@@ -262,7 +292,11 @@ export function readWorkloads(instance: DatasetInstance, iterations: number): Wo
 			check(value) {
 				const gate = Gate.parse(value);
 				ensure(
-					gate.run !== null && !gate.stale && Object.values(gate.tally).reduce((a, b) => a + b, 0) > 0,
+					gate.run === expectedGate.run &&
+						gate.run !== null &&
+						gate.verdict === expectedGate.verdict &&
+						JSON.stringify(gate.tally) === JSON.stringify(expectedGate.tally) &&
+						!gate.stale,
 					"gate must be readable with applied results",
 				);
 			},
@@ -454,6 +488,7 @@ export function ingestWorkload(
 /** One manual result fills a previously missing slot in the pinned run, verified by its stored result id. */
 export function executeWorkload(instance: DatasetInstance, iterations: number): Workload {
 	let ref = "";
+	const filled = new Set(instance.metadata.runCases.slice(0, 250));
 	return {
 		name: "execute run",
 		budget: BUDGETS.execute,
@@ -462,6 +497,7 @@ export function executeWorkload(instance: DatasetInstance, iterations: number): 
 		correctness: "One fresh manual result, exact pinned basis, and a satisfied slot containing its result id.",
 		prepare(iteration) {
 			ref = itemAt(instance.metadata.runCases, 250 + iteration + 5);
+			ensure(!filled.has(ref), "each manual execution must address a previously missing slot");
 			const input = {
 				run: instance.metadata.run,
 				results: [{ test: { case: ref }, outcome: "pass", durationMs: 750 }],
@@ -471,6 +507,10 @@ export function executeWorkload(instance: DatasetInstance, iterations: number): 
 		check(value) {
 			const receipt = Receipt.parse(value);
 			verifyReport(instance.app, receipt, 1);
+			ensure(
+				receipt.basis.exact === 1 && receipt.basis.assumed === 0,
+				"manual results must have an exact pinned basis",
+			);
 			const result = itemAt(receipt.results, 0);
 			const slots = call(
 				instance.app,
@@ -484,6 +524,7 @@ export function executeWorkload(instance: DatasetInstance, iterations: number): 
 				slot !== undefined && slot.state === "satisfied" && slot.fills.some((fill) => fill.result === result),
 				"manual result must fill its exact pinned slot",
 			);
+			filled.add(ref);
 		},
 	};
 }

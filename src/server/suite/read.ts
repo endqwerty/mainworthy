@@ -39,6 +39,46 @@ const Q = {
 	),
 };
 
+export type SuiteProblem = { rule: string; total: number; rows: { ref: string; message: string }[] };
+
+/**
+ * Structural problems the suite's own data can show, each with a total and its first rows. Deterministic: the
+ * same rules a person would apply by reading, with no model involved.
+ */
+export function structuralProblems(db: Db, project: number): SuiteProblem[] {
+	const rules: { rule: string; where: string; message: (title: string) => string }[] = [
+		{ rule: "no-steps", where: "c.step_count = 0", message: (title) => `"${title}" has no steps` },
+		{ rule: "no-title", where: "c.title = ''", message: () => "has no title" },
+		{
+			rule: "no-expected",
+			where:
+				"c.step_count > 0 AND NOT EXISTS (SELECT 1 FROM versions v, json_each(v.body, '$.steps') s WHERE v.case_id = c.id AND v.no = c.head AND json_extract(s.value, '$.expected') IS NOT NULL)",
+			message: (title) => `"${title}" has steps but no expected result, so it cannot fail`,
+		},
+		{
+			rule: "duplicate-title",
+			where:
+				"EXISTS (SELECT 1 FROM cases d WHERE d.project = c.project AND d.folder = c.folder AND d.state = 'active' AND d.title = c.title AND d.id < c.id AND c.title <> '')",
+			message: (title) => `"${title}" has the same title as another case in its folder`,
+		},
+	];
+	return rules.map(({ rule, where, message }) => {
+		const scope = `FROM cases c WHERE c.project = ? AND c.state = 'active' AND ${where}`;
+		const total = db.allDynamic<{ n: number }>(`SELECT count(*) AS n ${scope}`, [project])[0]?.n ?? 0;
+		const rows = db.allDynamic<{ no: number; title: string }>(`SELECT no, title ${scope} ORDER BY no LIMIT 50`, [
+			project,
+		]);
+		return { rule, total, rows: rows.map((row) => ({ ref: `C-${row.no}`, message: message(row.title) })) };
+	});
+}
+
+/** Archived cases, newest first: a test still linked to one of these is linked to nothing a run can use. */
+export const archivedCases = (db: Db, project: number, limit: number): CaseRow[] =>
+	db.allDynamic<CaseRow>("SELECT * FROM cases WHERE project = ? AND state = 'archived' ORDER BY rev DESC LIMIT ?", [
+		project,
+		limit,
+	]);
+
 /** Turns what a person typed into an FTS5 query: every word must match, and the last one matches as a prefix. */
 export function ftsQuery(text: string): string | null {
 	const words = text.toLowerCase().match(/[\p{L}\p{N}_]+/gu);

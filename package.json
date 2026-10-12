@@ -13,8 +13,8 @@
 		"typecheck": "tsc --noEmit",
 		"lint": "biome check .",
 		"format": "biome check --write .",
-		"test": "bun test",
-		"check": "bun run typecheck && bun run lint && bun test",
+		"test": "bun test src test",
+		"check": "bun run typecheck && bun run lint && bun run test",
 		"build": "bun build --compile --minify --sourcemap src/cli/main.ts --outfile dist/casebook"
 	},
 	"dependencies": {

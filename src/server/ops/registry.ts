@@ -3,8 +3,8 @@
 import type { z } from "zod";
 import type { Capability } from "../../core/kinds.ts";
 import type { App } from "../kernel/app.ts";
-import { type Actor, type Ctx, findProject, makeCtx, stampSeq } from "../kernel/ctx.ts";
-import { json, sql } from "../kernel/db.ts";
+import { type Actor, type Ctx, findCommand, findProject, makeCtx, recordCommand, stampSeq } from "../kernel/ctx.ts";
+import { json } from "../kernel/db.ts";
 import { type ErrorCode, OpError } from "../kernel/errors.ts";
 
 type Base<I> = {
@@ -54,25 +54,6 @@ export const defineInstanceOp = <I, O>(op: InstanceOp<I, O>): InstanceOp<I, O> =
 export type Reply =
 	| { ok: true; result: unknown; seq: number | null }
 	| { ok: false; error: { code: ErrorCode; message: string; details?: Record<string, unknown> } };
-
-const Q = {
-	command: sql<{ id: string }, { outcome: string; op: string; actor: number }>(
-		"SELECT outcome, op, actor FROM commands WHERE id = $id",
-	),
-	insertCommand: sql<{
-		id: string;
-		project: number;
-		op: string;
-		actor: number;
-		at: number;
-		seq: number;
-		touched: string;
-		outcome: string;
-	}>(
-		`INSERT INTO commands (id, project, op, actor, at, seq, touched, outcome)
-		 VALUES ($id, $project, $op, $actor, $at, $seq, $touched, $outcome)`,
-	),
-};
 
 const fail = (code: ErrorCode, message: string, details?: Record<string, unknown>): Reply => ({
 	ok: false,
@@ -145,7 +126,7 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 		app.db.begin();
 		try {
 			if (cmd) {
-				const prior = app.db.get(Q.command, { id: cmd });
+				const prior = findCommand(app.db, cmd);
 				if (prior) {
 					if (prior.op !== op.name || prior.actor !== actor.id)
 						throw new OpError("conflict", "this command id was already used for something else");
@@ -178,18 +159,7 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 					yield;
 				}
 			} else result = op.run(ctx, input);
-			if (cmd) {
-				app.db.run(Q.insertCommand, {
-					id: cmd,
-					project: project.id,
-					op: op.name,
-					actor: actor.id,
-					at: ctx.now,
-					seq: ctx.seq,
-					touched: JSON.stringify([...ctx.touched]),
-					outcome: JSON.stringify(result ?? null),
-				});
-			}
+			if (cmd) recordCommand(ctx, { id: cmd, op: op.name, outcome: result });
 			stampSeq(ctx);
 			app.db.commit();
 			publish();

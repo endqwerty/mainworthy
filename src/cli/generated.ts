@@ -140,6 +140,7 @@ export async function runGenerated(command: GeneratedCommand, args: Args, client
 		);
 	const validated: unknown = parsed.data;
 	const result = await client.operation(command.name, validated);
+	printJson(result, args.bool("compact"));
 	const rows = z.array(z.unknown()).safeParse(result);
 	if (rows.success) {
 		for (const item of rows.data) {
@@ -150,7 +151,6 @@ export async function runGenerated(command: GeneratedCommand, args: Args, client
 				throw new CliError(refusal.data.status, refusal.data.needs ?? "the operation refused the requested change");
 		}
 	}
-	printJson(result, args.bool("compact"));
 	const gate = z
 		.object({ verdict: Verdict, tally: z.record(z.string(), z.number()), open: z.array(z.string()) })
 		.safeParse(result);

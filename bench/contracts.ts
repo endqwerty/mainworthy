@@ -5,7 +5,7 @@ import type { Actor } from "../src/server/kernel/ctx.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 
-/** The numeric promises in product-design §6.6 and C7, in milliseconds. */
+/** Design §6.6/C7 budgets, plus this task's execution, history, mixed-load and half-size ingest budgets. */
 export const BUDGETS = {
 	case: 20,
 	folder: 50,
@@ -70,6 +70,7 @@ export const Receipt = z.object({
 	batch: z.number().int(),
 	fresh: z.boolean(),
 	counts: z.object({ total: z.number().int(), pass: z.number().int(), fail: z.number().int(), skip: z.number().int() }),
+	basis: z.object({ exact: z.number().int(), assumed: z.number().int(), unresolved: z.number().int() }),
 	rejected: z.array(z.object({ index: z.number().int(), reason: z.string() })),
 	questions: z.array(z.object({ q: z.string(), kind: z.string(), how: z.string(), state: z.string() })),
 	gate: Gate.nullable(),

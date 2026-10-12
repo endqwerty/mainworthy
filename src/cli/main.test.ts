@@ -375,3 +375,90 @@ test("JUnit parser warnings go only to stderr", async () => {
 		expect(result.stdout).not.toContain("Invalid testcase duration");
 	});
 });
+
+test("an adapter rejects operation flags it cannot translate", async () => {
+	await withInstance(async ({ cli }) => {
+		await cli(["new"], { input: "Coupon applies\nApply SAVE10 > Total is 90.00" });
+		for (const argv of [
+			["get", "C-1", "--fields", "title"],
+			["report", RED_XML, "--commit", COMMIT, "--cmd", "explicit-key"],
+		]) {
+			const result = await cli(argv);
+			expect(result.code).toBe(4);
+			expect(result.stderr).toContain("operation flag");
+			expect(result.stderr).toContain("--json");
+		}
+	});
+});
+
+test("empty case input exits 4 and writes no case", async () => {
+	await withInstance(async ({ cli, client }) => {
+		const result = await cli(["new"], { input: "  \n" });
+		expect(result.code).toBe(4);
+		expect(result.stderr).toContain("outline");
+		expect((await client.call("find", {})).items).toEqual([]);
+	});
+});
+
+test("schema errors are readable single-line diagnostics", async () => {
+	await withInstance(async ({ cli }) => {
+		const result = await cli(["token", "revoke", "abc"]);
+		expect(result.code).toBe(4);
+		expect(result.stderr).toContain("id:");
+		expect(result.stderr).not.toContain("[;");
+		expect(result.stderr.trim().split("\n")).toHaveLength(1);
+	});
+});
+
+test("corrupt gzip is an archive error while the server remains reachable", async () => {
+	await withInstance(async ({ cli, directory }) => {
+		const file = join(directory, "invalid.casebook.gz");
+		await writeFile(file, "this is not gzip");
+		const result = await cli(["import", file]);
+		expect(result.code).toBe(4);
+		expect(result.stderr).toContain("invalid gzip archive");
+		expect(result.stderr).not.toContain("start the server");
+		expect((await cli(["open"])).code).toBe(0);
+	});
+});
+
+test("malformed server data is refused before an adapter reads it", async () => {
+	await withInstance(
+		async ({ cli }) => {
+			const result = await cli(["report", RED_XML, "--commit", COMMIT]);
+			expect(result.code).toBe(4);
+			expect(result.stdout).toBe("");
+			expect(result.stderr).toContain("internal: the server returned invalid report data");
+		},
+		{ routes: { "/api/p/scratch/report": () => new Response(JSON.stringify({ ok: true, result: {}, seq: 1 })) } },
+	);
+});
+
+test("a generated decision batch prints its successful and refused items before exiting 4", async () => {
+	await withInstance(async ({ cli, client }) => {
+		await client.call("report", {
+			target: { commit: COMMIT },
+			results: [
+				{ test: { key: "one" }, outcome: "fail", failure: { message: "one failed" } },
+				{ test: { key: "two" }, outcome: "fail", failure: { message: "two failed" } },
+			],
+		});
+		const questions = (await client.call("inbox", { kind: "failure" })).items;
+		const first = questions[0];
+		const second = questions[1];
+		if (!first || !second) throw new Error("two causes were not opened");
+		const result = await cli([
+			"decide",
+			"--json",
+			JSON.stringify({
+				all: [
+					{ q: first.q, onEvidence: first.evidenceHash, answer: { is: "infra" } },
+					{ q: second.q, onEvidence: second.evidenceHash, answer: { is: "not-an-answer" } },
+				],
+			}),
+		]);
+		expect(result.code).toBe(4);
+		expect(result.stdout).toContain('"status": "decided"');
+		expect(result.stdout).toContain('"status": "invalid"');
+	});
+});

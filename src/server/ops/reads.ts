@@ -31,12 +31,14 @@ import {
 	queuePage,
 } from "../decisions/questions.ts";
 import {
+	caseIdsOfFile,
 	changeById,
 	changeByKey,
 	findTest,
 	flipCount,
 	lastResultsOfCase,
 	lastResultsOfTest,
+	listTests,
 	proofOf,
 	type ResultRow,
 	recentChanges,
@@ -49,7 +51,7 @@ import {
 import { findingsOfCase, reviewsAtVersion, reviewsOfCase } from "../evidence/findings.ts";
 import { actorLabel } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { json, type SqlValue } from "../kernel/db.ts";
+import { json } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 import { currentPolicy } from "../policy/policy.ts";
 import {
@@ -68,12 +70,14 @@ import {
 	slotsPage,
 } from "../runs/runs.ts";
 import {
+	archivedCases,
 	casesChangedSince,
 	casesCovering,
 	folderTree,
 	listCases,
 	placementsOf,
 	requirementList,
+	structuralProblems,
 	tagCounts,
 	versionAt,
 	versionList,
@@ -472,29 +476,13 @@ export function find(ctx: Ctx, input: FindInput): Found {
 			};
 		}
 		case "tests": {
-			const where: string[] = ["project = ?"];
-			const params: SqlValue[] = [project];
-			if (input.unlinked) where.push("case_id IS NULL AND kind = 'auto'");
-			if (input.text) {
-				where.push("(key LIKE ? OR name LIKE ?)");
-				params.push(`%${input.text}%`, `%${input.text}%`);
-			}
-			if (input.cursor) {
-				where.push("id < ?");
-				params.push(Number(input.cursor));
-			}
-			const rows = ctx.db.allDynamic<{
-				id: number;
-				no: number;
-				key: string;
-				name: string;
-				file: string | null;
-				case_id: number | null;
-				kind: string;
-			}>(
-				`SELECT id, no, key, name, file, case_id, kind FROM tests WHERE ${where.join(" AND ")} ORDER BY id DESC LIMIT ?`,
-				[...params, limit + 1],
-			);
+			const rows = listTests(ctx.db, {
+				project,
+				unlinked: input.unlinked ?? false,
+				text: input.text,
+				before: input.cursor ? Number(input.cursor) : null,
+				limit: limit + 1,
+			});
 			const page = rows.slice(0, limit);
 			return {
 				count: input.unlinked ? unlinkedCount(ctx.db, project) : null,
@@ -748,58 +736,14 @@ export function check(
 		counts[rule] = total;
 		for (const row of rows) if (problems.length < limit) problems.push({ rule, ...row });
 	};
-	const cases = (where: string, params: SqlValue[] = []) =>
-		ctx.db.allDynamic<{ no: number; title: string }>(
-			`SELECT no, title FROM cases c WHERE c.project = ? AND c.state = 'active' AND ${where} ORDER BY no LIMIT 50`,
-			[project, ...params],
-		);
-	const count = (where: string) =>
-		ctx.db.allDynamic<{ n: number }>(
-			`SELECT count(*) AS n FROM cases c WHERE c.project = ? AND c.state = 'active' AND ${where}`,
-			[project],
-		)[0]?.n ?? 0;
-
-	const noSteps = "c.step_count = 0";
-	add(
-		"no-steps",
-		cases(noSteps).map((row) => ({ ref: `C-${row.no}`, message: `"${row.title}" has no steps` })),
-		count(noSteps),
-	);
-	const noTitle = "c.title = ''";
-	add(
-		"no-title",
-		cases(noTitle).map((row) => ({ ref: `C-${row.no}`, message: "has no title" })),
-		count(noTitle),
-	);
-	const noExpected =
-		"c.step_count > 0 AND NOT EXISTS (SELECT 1 FROM versions v, json_each(v.body, '$.steps') s WHERE v.case_id = c.id AND v.no = c.head AND json_extract(s.value, '$.expected') IS NOT NULL)";
-	add(
-		"no-expected",
-		cases(noExpected).map((row) => ({
-			ref: `C-${row.no}`,
-			message: `"${row.title}" has steps but no expected result, so it cannot fail`,
+	for (const problem of structuralProblems(ctx.db, project)) add(problem.rule, problem.rows, problem.total);
+	const dangling = archivedCases(ctx.db, project, 200).flatMap((row) =>
+		testsOfCase(ctx.db, project, row.id).map((test) => ({
+			ref: testRef(test),
+			message: `"${test.name}" is linked to ${caseRef(row)}, which is archived`,
 		})),
-		count(noExpected),
 	);
-	const duplicate =
-		"EXISTS (SELECT 1 FROM cases d WHERE d.project = c.project AND d.folder = c.folder AND d.state = 'active' AND d.title = c.title AND d.id < c.id AND c.title <> '')";
-	add(
-		"duplicate-title",
-		cases(duplicate).map((row) => ({
-			ref: `C-${row.no}`,
-			message: `"${row.title}" has the same title as another case in its folder`,
-		})),
-		count(duplicate),
-	);
-	const archivedLink = ctx.db.allDynamic<{ no: number; name: string }>(
-		"SELECT t.no, t.name FROM tests t JOIN cases c ON c.id = t.case_id WHERE t.project = ? AND c.state = 'archived' LIMIT 50",
-		[project],
-	);
-	add(
-		"linked-to-archived",
-		archivedLink.map((row) => ({ ref: `T-${row.no}`, message: `"${row.name}" is linked to an archived case` })),
-		archivedLink.length,
-	);
+	add("linked-to-archived", dangling, dangling.length);
 	counts["unlinked-tests"] = unlinkedCount(ctx.db, project);
 	return { problems, counts };
 }
@@ -837,14 +781,9 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 
 	const uncovered: string[] = [];
 	for (const file of files.slice(0, 2000)) {
-		const tests = ctx.db.allDynamic<{ case_id: number | null }>(
-			"SELECT case_id FROM tests WHERE project = ? AND file = ? LIMIT 200",
-			[project, file],
-		);
 		let hit = false;
-		for (const test of tests) {
-			if (test.case_id === null) continue;
-			note(test.case_id, `test:${file}`);
+		for (const caseId of caseIdsOfFile(ctx.db, project, file)) {
+			note(caseId, `test:${file}`);
 			hit = true;
 		}
 		if (!hit && !/\.(md|txt|json|ya?ml|lock)$/i.test(file)) uncovered.push(file);

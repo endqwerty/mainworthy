@@ -46,8 +46,12 @@ export function writeDraft({ project, draft }: { project: string; draft: Draft }
 	localStorage.setItem(`casebook:active:${project}`, draft.id);
 }
 export function activeDraft(project: string): Draft | null {
-	const id = localStorage.getItem(`casebook:active:${project}`);
-	return id ? readDraft({ project, id }) : null;
+	try {
+		const id = localStorage.getItem(`casebook:active:${project}`);
+		return id ? readDraft({ project, id }) : null;
+	} catch {
+		return null;
+	}
 }
 export function removeDraft({ project, id }: { project: string; id: string }): void {
 	localStorage.removeItem(draftKey({ project, id }));

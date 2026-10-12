@@ -121,8 +121,11 @@ const Q = {
 		`SELECT q.* FROM question_refs r JOIN questions q ON q.id = r.question
 		 WHERE r.project = $project AND r.ref = $ref ORDER BY q.id DESC LIMIT 200`,
 	),
-	openOnRef: sql<{ project: number; ref: string }, { id: number; blocks: string }>(
-		`SELECT q.id, q.blocks FROM question_refs r JOIN questions q ON q.id = r.question
+	openOnRef: sql<
+		{ project: number; ref: string },
+		{ id: number; no: number; kind: Kind; subject: string; blocks: string }
+	>(
+		`SELECT q.id, q.no, q.kind, q.subject, q.blocks FROM question_refs r JOIN questions q ON q.id = r.question
 		 WHERE r.project = $project AND r.ref = $ref AND q.state = 'open'`,
 	),
 	openCountOnRef: sql<{ project: number; ref: string }, { n: number }>(

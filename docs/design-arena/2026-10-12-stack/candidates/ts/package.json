@@ -1,0 +1,22 @@
+{
+  "name": "casebook-stack-ts-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "bun src/build-metrics.ts",
+    "compile": "bun src/build-metrics.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "zod": "4.6.6",
+    "postgres": "3.4.9",
+    "fast-xml-parser": "5.11.2"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@types/bun": "1.4.2",
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2"
+  }
+}

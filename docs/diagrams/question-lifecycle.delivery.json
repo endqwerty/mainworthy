@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "df4bd668-6702-4871-bc3b-2abc9d4c623c",
+  "status": "current",
+  "command": "deliver",
+  "type": "lifecycle",
+  "input": "/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/docs/diagrams/src/question-lifecycle.json",
+  "output": "/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/docs/diagrams/question-lifecycle.html",
+  "specification": {
+    "sha256": "f145860054b7cd1a08bae565065d528f0c5a8dcf52af19d92a3945757905108d",
+    "bytes": 10420
+  },
+  "artifact": {
+    "sha256": "479e2a9618a8f1603f60c91a6fe052227ea5f2f1d17517c64ff46fa46a410036",
+    "bytes": 774758
+  }
+}

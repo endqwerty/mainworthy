@@ -56,6 +56,19 @@ Implementation notes for integration:
   route removes only the untouched bootstrap project inside the same savepoint
   as import. Existing user data is refused. A failed import restores the
   project and tokens; success warns that the previous session may disappear.
+- `archiveRoutes` accepts an optional owner reference from `start`'s callback.
+  Local imports bootstrap the configured machine owner and refresh that live
+  reference before another write, preserving attribution when the archive came
+  from a different owner. Server imports say to set `CASEBOOK_OWNER_TOKEN` and
+  restart, since replay intentionally discards credentials.
+- Typed client calls validate replies against schemas checked against `Api`.
+  No casts remain. Generated commands print every batch outcome even when one
+  item is refused, then exit 4. Human adapters reject operation-only flags rather
+  than silently dropping them.
+- Downloads write a private temporary file beside the destination and rename
+  only after completion, preserving an existing backup when a stream fails.
+  Gzip source failures are archive errors, not connection failures. Startup
+  failures exit immediately with code 4, including an occupied port.
 - Local `fmt` needs no running server. The Markdown contract defines this as a
   parser/printer operation; it does not write stored data.
 - The server's updated session endpoint lists projects for producer tokens.
@@ -70,6 +83,21 @@ Implementation notes for integration:
   worker. The coordinating agent owns those files and final worktree release
   while other workers are using the shared dependency installation.
 
-The full CLI/archive suite contains 31 independent checks. A startup check can
+The full CLI/archive suite contains 40 independent checks. A startup check can
 fail while a web module is still being authored in this shared checkout. Do not
 replace or weaken the UI check to hide that integration failure.
+
+Verification rerun after the first independent review:
+
+```text
+bun test src/cli src/surfaces/archive.test.ts: 40 pass, 0 fail
+bunx tsc --noEmit: exit 0
+bunx biome check src/cli src/surfaces/archive.ts src/surfaces/archive.test.ts: clean
+```
+
+The first independent verifier was Anthropic Claude Opus 5.5. It proved the
+archive permission, rollback, nonfresh-target and cancellation checks, and
+found the occupied-port blocker and smaller CLI issues. Those findings have
+regressions and fixes. A fresh verdict on the revised snapshot is still needed.
+Use `LC_ALL=C sort` when hashing the file list; different provider locales
+sort CHECKS.md differently and otherwise produce different manifest digests.

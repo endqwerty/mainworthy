@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { BUDGETS } from "../bench/contracts.ts";
 import { buildDataset, openDataset, Parameters } from "../bench/dataset.ts";
 import { measure, table } from "../bench/measure.ts";
-import { ingestWorkload, readWorkloads, saveWorkload } from "../bench/workloads.ts";
+import { ingestWorkload, prepareRecentChanges, readWorkloads, saveWorkload } from "../bench/workloads.ts";
 
 test("on-disk hot paths stay inside the design budgets", async () => {
 	const root = resolve(".casebook", "bench");
@@ -29,6 +29,7 @@ test("on-disk hot paths stay inside the design budgets", async () => {
 		});
 		const instance = openDataset(dataset, join(dir, "measurement"));
 		try {
+			prepareRecentChanges(instance);
 			const workloads = readWorkloads(instance, 15).filter((workload) => workload.budget !== null);
 			workloads.push(
 				saveWorkload(instance, 15),

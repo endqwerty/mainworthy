@@ -8,10 +8,10 @@ import type { MethodKind } from "../../core/model.ts";
 import type { Outcome, ReportInput, ResultIn, TargetIn } from "../../core/ops.ts";
 import { normaliseFailure, signatureHash } from "../../core/signature.ts";
 import type { Ctx } from "../kernel/ctx.ts";
-import { type Db, json, sql } from "../kernel/db.ts";
+import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
 import type { Witness } from "../kernel/witness.ts";
-import { type CaseRow, caseById, findCase } from "../suite/suite.ts";
+import { type CaseRow, caseById, findCase, versionOf } from "../suite/suite.ts";
 
 export type TestRow = {
 	id: number;
@@ -292,11 +292,31 @@ const Q = {
 	),
 	excuse: sql<
 		{ project: number; signature: number; scope: string },
-		{ decision: number; class: "attributed" | "excused" }
-	>("SELECT decision, class FROM excuses WHERE project = $project AND signature = $signature AND scope = $scope"),
-	setExcuse: sql<{ project: number; signature: number; scope: string; decision: number; class: string }>(
-		`INSERT INTO excuses (project, signature, scope, decision, class) VALUES ($project, $signature, $scope, $decision, $class)
-		 ON CONFLICT (project, signature, scope) DO UPDATE SET decision = excluded.decision, class = excluded.class`,
+		{ decision: number; class: "attributed" | "excused"; expires_at: number | null }
+	>(
+		"SELECT decision, class, expires_at FROM excuses WHERE project = $project AND signature = $signature AND scope = $scope",
+	),
+	setExcuse: sql<{
+		project: number;
+		signature: number;
+		scope: string;
+		decision: number;
+		class: string;
+		expires: number | null;
+	}>(
+		`INSERT INTO excuses (project, signature, scope, decision, class, expires_at)
+		 VALUES ($project, $signature, $scope, $decision, $class, $expires)
+		 ON CONFLICT (project, signature, scope)
+		 DO UPDATE SET decision = excluded.decision, class = excluded.class, expires_at = excluded.expires_at`,
+	),
+	targetByCommit: sql<{ project: number; commit: string }, TargetRow>(
+		"SELECT * FROM targets WHERE project = $project AND commit_sha = $commit ORDER BY id LIMIT 1",
+	),
+	targetByCommitPrefix: sql<{ project: number; low: string; high: string }, TargetRow>(
+		"SELECT * FROM targets WHERE project = $project AND commit_sha >= $low AND commit_sha < $high ORDER BY id LIMIT 2",
+	),
+	caseIdsOfFile: sql<{ project: number; file: string }, { case_id: number | null }>(
+		"SELECT case_id FROM tests WHERE project = $project AND file = $file LIMIT 500",
 	),
 	dropExcuse: sql<{ project: number; signature: number; scope: string }>(
 		"DELETE FROM excuses WHERE project = $project AND signature = $signature AND scope = $scope",
@@ -582,10 +602,7 @@ export function* applySteps(
 	const claimOf = (caseId: number, version: number): string | null => {
 		const key = `${caseId}@${version}`;
 		if (!claimAt.has(key)) {
-			const row = ctx.db.raw
-				.query<{ claim_hash: string }, [number, number]>("SELECT claim_hash FROM versions WHERE case_id = ? AND no = ?")
-				.get(caseId, version);
-			claimAt.set(key, row?.claim_hash ?? null);
+			claimAt.set(key, versionOf(ctx.db, caseId, version)?.claim_hash ?? null);
 		}
 		return claimAt.get(key) ?? null;
 	};
@@ -818,6 +835,53 @@ export const resultsOfBatch = (db: Db, batch: number, limit: number): ResultRow[
 export const flipCount = (db: Db, project: number, test: number): number =>
 	db.get(Q.flipCount, { project, test })?.n ?? 0;
 
+/**
+ * The target for a commit, by its full hash or an unambiguous prefix of at least seven characters. Null when
+ * nothing was reported for it, or when the prefix matches more than one commit.
+ */
+export function targetByCommit(db: Db, project: number, commit: string): TargetRow | null {
+	const exact = db.get(Q.targetByCommit, { project, commit });
+	if (exact) return exact;
+	if (commit.length < 7 || !/^[0-9a-f]+$/i.test(commit)) return null;
+	const rows = db.all(Q.targetByCommitPrefix, { project, low: commit, high: `${commit}\uffff` });
+	return rows.length === 1 ? (rows[0] ?? null) : null;
+}
+
+/** Every result recorded for a case on any of the given targets, oldest first: what a new run can count at once. */
+export function resultsOfCaseOnTargets(db: Db, caseId: number, targets: readonly number[]): ResultRow[] {
+	if (targets.length === 0) return [];
+	return db.allDynamic<ResultRow>(
+		`SELECT * FROM results WHERE basis_case = ? AND target IN (${placeholders(targets.length)}) ORDER BY seq, ord`,
+		[caseId, ...targets],
+	);
+}
+
+/** The cases linked to the tests in a file, for impact: a changed test file touches these cases. */
+export const caseIdsOfFile = (db: Db, project: number, file: string): number[] =>
+	db.all(Q.caseIdsOfFile, { project, file }).flatMap((row) => (row.case_id === null ? [] : [row.case_id]));
+
+/** A page of tests, newest first, optionally only those with no case or matching a text. */
+export function listTests(
+	db: Db,
+	input: { project: number; unlinked: boolean; text: string | undefined; before: number | null; limit: number },
+): TestRow[] {
+	const where: string[] = ["project = ?"];
+	const params: SqlValue[] = [input.project];
+	if (input.unlinked) where.push("case_id IS NULL AND kind = 'auto'");
+	if (input.text) {
+		where.push("(key LIKE ? OR name LIKE ?)");
+		params.push(`%${input.text}%`, `%${input.text}%`);
+	}
+	if (input.before !== null) {
+		where.push("id < ?");
+		params.push(input.before);
+	}
+	return db.allDynamic<TestRow>(`SELECT * FROM tests WHERE ${where.join(" AND ")} ORDER BY id DESC LIMIT ?`, [
+		...params,
+		input.limit,
+	]);
+}
+
 export type Proof = { outcome: Outcome; at: number; current: boolean; basis: string } | null;
 
 /** The proof strip of a case: per producer, the latest result and whether it was on the current version. */
@@ -860,6 +924,15 @@ export function linkTest(ctx: Ctx, _witness: Witness, test: TestRow, caseId: num
 	ctx.touched.add(testRef(test));
 }
 
+/**
+ * Puts a test's link back to what it was before a `map` decision. Revert only: called when that decision is
+ * withdrawn, which is itself recorded in the ledger. A test fails if anything but the kind handlers calls it.
+ */
+export function restoreLink(ctx: Ctx, test: TestRow, caseId: number | null): void {
+	ctx.db.run(Q.linkTest, { id: test.id, caseId });
+	ctx.touched.add(testRef(test));
+}
+
 export const excuseFor = (db: Db, project: number, signature: number, scope: string) =>
 	db.get(Q.excuse, { project, signature, scope });
 
@@ -875,6 +948,7 @@ export function setExcuse(
 		scope: input.scope,
 		decision: witness.decision,
 		class: input.class,
+		expires: witness.expiresAt,
 	});
 }
 

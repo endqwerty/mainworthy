@@ -72,3 +72,46 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"30 seconds idle records one version, preserves the caret and updates current proof",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", body: { title: "Idle case", steps: [{ id: "a1", action: "Open cart", expected: null }] } },
+			],
+		});
+		const planned = await server.api("plan", { name: "Evidence", select: { cases: ["C-1"] } });
+		await server.api("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = browser;
+			await page.getByRole("button", { name: "Idle case", exact: true }).waitFor();
+			await page.keyboard.press("e");
+			const title = page.getByRole("textbox", { name: "Case title", exact: true });
+			await title.fill("Idle case revised");
+			await page.waitForFunction(() => document.querySelector(".cstate")?.textContent?.includes("v2"), null, {
+				timeout: 35_000,
+			});
+			expect(await title.inputValue()).toBe("Idle case revised");
+			expect(
+				await title.evaluate((node) =>
+					node instanceof HTMLTextAreaElement
+						? { focused: document.activeElement === node, caret: node.selectionStart }
+						: null,
+				),
+			).toEqual({ focused: true, caret: 17 });
+			expect(await page.getByRole("option").filter({ hasText: "C-1" }).locator(".pf").first().textContent()).toContain(
+				"~",
+			);
+			await page.keyboard.press("Control+Enter");
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	45_000,
+);

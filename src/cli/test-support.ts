@@ -22,16 +22,19 @@ export type Running = {
 /** Starts the production HTTP server on port 0 and always closes it and removes its own data directory. */
 export async function withInstance<T>(
 	run: (running: Running) => Promise<T>,
-	options: { mode?: "local" | "server" } = {},
+	options: { mode?: "local" | "server"; owner?: string; routes?: ReturnType<typeof archiveRoutes> } = {},
 ): Promise<T> {
 	const directory = await mkdtemp(join(tmpdir(), "casebook-cli-"));
 	const config = defaultConfig({
 		CASEBOOK_DATA: directory,
 		CASEBOOK_PORT: "0",
-		CASEBOOK_OWNER: "daniel",
+		CASEBOOK_OWNER: options.owner ?? "daniel",
 		CASEBOOK_MODE: options.mode ?? "local",
 	});
-	const instance = start(config, (app) => ({ ui: null, routes: archiveRoutes(app) }));
+	const instance = start(config, (app, owner) => ({
+		ui: null,
+		routes: { ...archiveRoutes(app, owner), ...options.routes },
+	}));
 	const client = new Client({ url: instance.url, token: instance.generatedToken ?? undefined, project: "scratch" });
 	try {
 		return await run({

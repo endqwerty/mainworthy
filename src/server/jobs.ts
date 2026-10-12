@@ -5,11 +5,8 @@ import { expiredDecisions } from "./decisions/questions.ts";
 import { acceptedBatches } from "./evidence/evidence.ts";
 import { actorById } from "./identity/identity.ts";
 import type { App } from "./kernel/app.ts";
-import { makeCtx, projectById, stampSeq } from "./kernel/ctx.ts";
-import { sql } from "./kernel/db.ts";
+import { allProjects, makeCtx, projectById, stampSeq } from "./kernel/ctx.ts";
 import { processBatch } from "./ops/writes.ts";
-
-const Q = { projects: sql<readonly [], { id: number }>("SELECT id FROM projects ORDER BY id") };
 
 /**
  * Applies every batch that was accepted but not applied. A report is stored durably before it is applied, so a
@@ -36,7 +33,7 @@ export function recoverAccepted(app: App): number {
 /** Reopens questions whose decisions have expired, in every project. Returns the number reopened. */
 export function sweep(app: App, as: number): number {
 	let reopened = 0;
-	for (const { id } of app.db.all(Q.projects)) {
+	for (const { id } of allProjects(app.db)) {
 		const expired = expiredDecisions(app.db, id, app.now());
 		if (expired.length === 0) continue;
 		const done = app.db.transaction(() => {

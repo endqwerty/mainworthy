@@ -1,0 +1,23 @@
+{
+  "mainPath": [
+    "pipeline-uses-cli",
+    "cli-normalises-report",
+    "normalised-report-over-http",
+    "http-one-registry",
+    "ops-invoke",
+    "invoke-report-generator",
+    "report-kernel",
+    "kernel-writer",
+    "writer-file"
+  ],
+  "sharedState": "casebook.db is shared by app.db and app.reader. Each module uses Db through Ctx.",
+  "standingFeedback": [
+    "invoke-decisions",
+    "decisions-mint-witness",
+    "witness-adopts-case",
+    "witness-links-and-excuses",
+    "witness-closes-run",
+    "witness-policy-change"
+  ],
+  "repair": "Move Witness below suite so it reaches suite from below while invoke reaches it from the right. Put decisions level with Witness, move evidence beside its ownership path, and place reportSteps on the other side of the main path. Only positions and sizes changed."
+}

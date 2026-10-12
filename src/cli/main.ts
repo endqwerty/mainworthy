@@ -7,5 +7,5 @@ try {
 	process.exitCode = await runCli(Bun.argv.slice(2), ui);
 } catch (error) {
 	printError(error);
-	process.exitCode = 4;
+	process.exit(4);
 }

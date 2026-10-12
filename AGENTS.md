@@ -30,8 +30,10 @@ GitHub milestone `Backlog to 1.0`. How it fits together: `docs/architecture.md`.
   takes a `Witness`. Do not add a writer without one.
 - **`src/core` is pure** and runs in the browser and the server. No I/O, no Node or
   Bun APIs. `src/web` imports only `src/core`.
-- **SQL** is declared with `sql()` in the module that owns the table, so the check
-  can prepare every statement against the schema. A schema change is a new file in
+- **SQL** is declared with `sql()` in the module that owns the table (the owner of
+  each table is listed in `test/architecture.test.ts`), so the check can prepare every
+  statement against the schema. To read another module's data, call its functions; do
+  not join its tables. A schema change is a new file in
   `src/server/kernel/migrations/`; a shipped migration is never edited.
 - **Budgets are tests** (`test/budgets.test.ts`, `bench/`). A change that misses a
   hot-path budget does not merge; do not raise the number.

@@ -176,3 +176,11 @@
 		flex-wrap: wrap;
 	}
 }
+
+#app:has(.queue-pane, .run-pane, .changes-pane, .settings-pane) #tree,
+#app:has(.queue-pane, .run-pane, .changes-pane, .settings-pane) #side > .sech.side {
+	display: none;
+}
+#app:has(.queue-pane, .run-pane, .changes-pane, .settings-pane) .sfoot {
+	margin-top: auto;
+}

@@ -17,7 +17,10 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const { project, session, overlayOpen, setStatus } = useApp();
 	const runRead = useQueryOp({ project, op: "get", input: { refs: [runRef] } });
 	const parsedRun = Run.safeParse(runRead.data?.[0]);
-	const run = parsedRun.success ? parsedRun.data : null;
+	const run = parsedRun.success && parsedRun.data.ref === runRef ? parsedRun.data : null;
+	useEffect(() => {
+		setStatus("Each result records its pinned version. p pass · f fail · b blocked · s skip.");
+	}, [setStatus]);
 	const slotInput: Api["find"]["input"] = { in: "slots", run: runRef, limit: 200 };
 	const cacheKey = [...queryKey({ project, op: "find", input: slotInput }), "pages"];
 	const slotsRead = useInfiniteQuery({
@@ -42,7 +45,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const method = session.kind === "agent" ? "agent" : "human";
 	const slots: Slot[] = storedSlots.map((slot) => {
 		const own = local.get(slot.id);
-		return own
+		return own?.pending
 			? {
 					...slot,
 					state: own.fill.outcome === "pass" ? "satisfied" : own.fill.outcome === "fail" ? "failing" : "skipped",
@@ -50,7 +53,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				}
 			: slot;
 	});
-	const missing = (slot: Slot) => slot.state === "missing" && !local.has(slot.id);
+	const missing = (slot: Slot) => slot.state === "missing" && !local.get(slot.id)?.pending;
 	const current = slots.find((slot) => slot.id === cursor) ?? slots.find(missing) ?? slots[0];
 	const next = current
 		? [
@@ -67,7 +70,23 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const external = (slot: Slot) =>
 		slot.fills.length > 0 && !slot.fills.some((fill) => fill.by === session.actor && fill.method === method);
 	const ownFill = current?.fills.find((fill) => fill.by === session.actor && fill.method === method);
-	const canRecord = Boolean(current && !external(current) && run?.state === "open" && session.can.includes("produce"));
+	const currentRead = useQueryOp({
+		project,
+		op: "get",
+		input: { refs: [current?.case ?? ""], ...(current ? { version: current.version } : {}) },
+		enabled: Boolean(current),
+	});
+	const currentBody = RunCase.safeParse(currentRead.data?.[0]);
+	const admittedMethod = Boolean(
+		run?.require.some((obligation) => obligation.kind === "exercise" && obligation.methods.includes(method)) &&
+			currentBody.success &&
+			currentBody.data.ref === current?.case &&
+			currentBody.data.version === current?.version &&
+			currentBody.data.methods.includes(method),
+	);
+	const canRecord = Boolean(
+		current && !external(current) && run?.state === "open" && session.can.includes("produce") && admittedMethod,
+	);
 	const allFilled = slots.length > 0 && !slots.some(missing) && !slotsRead.hasNextPage;
 	useEffect(() => {
 		if (current?.id) document.querySelector(`[data-slot="${current.id}"]`)?.scrollIntoView({ block: "nearest" });
@@ -144,7 +163,11 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		};
 		const request = (async () => {
 			if (priorWrite) await priorWrite.catch(() => undefined);
-			const corrects = latest.current.get(slot.id)?.result ?? previous?.result;
+			const recent = latest.current.get(slot.id);
+			const corrects =
+				previous && previous.result > 0 && (!recent || previous.at > recent.at)
+					? previous.result
+					: (recent?.result ?? previous?.result);
 			const receipt = await call(
 				"report",
 				{
@@ -226,6 +249,26 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	}
 	const active = () => !overlayOpen && !noting;
 	const bindings: Binding[] = [
+		{
+			key: "enter",
+			label: "Record failure",
+			allowInInput: true,
+			hidden: !noting,
+			when: () => !overlayOpen && Boolean(noting),
+			handler: () => {
+				if (noting) record("fail", noting);
+			},
+		},
+		{
+			key: "escape",
+			label: "Cancel note",
+			hidden: !noting,
+			when: () => !overlayOpen && Boolean(noting),
+			handler: () => {
+				setNoting(null);
+				noteRef.current?.blur();
+			},
+		},
 		{ key: "j", label: "Next slot", handler: () => move(1), when: active },
 		{ key: "k", label: "Previous slot", handler: () => move(-1), when: active },
 		{ key: "arrowdown", label: "Next slot", handler: () => move(1), when: active, hidden: true },
@@ -241,15 +284,23 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		{
 			key: "p",
 			label: "Pass",
+			hidden: !canRecord || Boolean(noting),
 			handler: () => {
 				record("pass");
 			},
 			when: () => active() && canRecord,
 		},
-		{ key: "f", label: "Fail and note", handler: startFail, when: () => active() && canRecord },
+		{
+			key: "f",
+			label: "Fail and note",
+			hidden: !canRecord || Boolean(noting),
+			handler: startFail,
+			when: () => active() && canRecord,
+		},
 		{
 			key: "b",
 			label: "Blocked",
+			hidden: !canRecord || Boolean(noting),
 			handler: () => {
 				record("blocked");
 			},
@@ -258,6 +309,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		{
 			key: "s",
 			label: "Skip",
+			hidden: !canRecord || Boolean(noting),
 			handler: () => {
 				record("skip");
 			},
@@ -398,6 +450,11 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 							<span>j skips to your next slot.</span>
 						</div>
 					)}
+					{current && currentBody.success && !admittedMethod && (
+						<p className="dim">
+							This slot does not admit results from your method. Pipeline or agent evidence must fill it.
+						</p>
+					)}
 					{allFilled && <p className="dim">Nothing left for you to run. The server verdict is shown above.</p>}
 					<div className="outs">
 						{(
@@ -471,7 +528,11 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 function RunDocument({ slot, active, step }: { slot: Slot; active: boolean; step: string }) {
 	const { project } = useApp();
 	const read = useQueryOp({ project, op: "get", input: { refs: [slot.case], version: slot.version } });
-	const parsed = RunCase.safeParse(read.data?.[0]);
+	const checked = RunCase.safeParse(read.data?.[0]);
+	const parsed =
+		checked.success && checked.data.ref === slot.case && checked.data.version === slot.version
+			? checked
+			: ({ success: false } satisfies { success: boolean });
 	return (
 		<article
 			hidden={!active}
@@ -519,7 +580,11 @@ function RunDocument({ slot, active, step }: { slot: Slot; active: boolean; step
 function UpNext({ slot }: { slot: Slot }) {
 	const { project } = useApp();
 	const read = useQueryOp({ project, op: "get", input: { refs: [slot.case], version: slot.version } });
-	const parsed = RunCase.safeParse(read.data?.[0]);
+	const checked = RunCase.safeParse(read.data?.[0]);
+	const parsed =
+		checked.success && checked.data.ref === slot.case && checked.data.version === slot.version
+			? checked
+			: ({ success: false } satisfies { success: boolean });
 	return (
 		<aside className="run-up-next" aria-label="Up next">
 			<div className="sech">

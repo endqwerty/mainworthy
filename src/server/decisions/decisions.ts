@@ -25,6 +25,7 @@ import { OpError } from "../kernel/errors.ts";
 import { mintWitness } from "../kernel/witness.ts";
 import { clauseFor, currentPolicy } from "../policy/policy.ts";
 import {
+	type Blocker,
 	findRun,
 	isLatestInScope,
 	type RunRow,
@@ -339,6 +340,7 @@ function settle(
 		decision.id,
 		question.kind,
 		signers.map((signer) => signer.by),
+		decision.expires_at,
 	);
 	const effects = handler.effect(ctx, witness, question, given, { raise });
 	setDecisionEffects(ctx, decision.id, effects);
@@ -401,8 +403,9 @@ function runsAbout(ctx: Ctx, question: QuestionRow): number[] {
  */
 export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveStale?: boolean } = {}): void {
 	for (const id of new Set(runIds)) {
-		if (!runById(ctx.db, id)) continue;
-		const result = retally(ctx, id);
+		const existing = runById(ctx.db, id);
+		if (!existing) continue;
+		const result = retally(ctx, id, blockersOf(ctx, existing));
 		if (options.dissolveStale) dissolveStale(ctx, result.run, result.failing);
 		if (!result.wantsSignoff) continue;
 		const run = result.run;
@@ -419,6 +422,16 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 			runs: [],
 		});
 	}
+}
+
+/** The open questions about a run, as the run fold needs them. */
+function blockersOf(ctx: Ctx, run: RunRow): Blocker[] {
+	return openQuestionsOn(ctx.db, ctx.project.id, runRef(run)).map((open) => ({
+		ref: questionRef(open),
+		kind: open.kind,
+		signature: open.kind === "failure" ? (json<{ signature?: number }>(open.subject).signature ?? null) : null,
+		blocks: json<number[]>(open.blocks),
+	}));
 }
 
 /**

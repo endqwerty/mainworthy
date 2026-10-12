@@ -248,6 +248,42 @@ function toolError(code: string, message: string): CallToolResult {
 	return { isError: true, content: [{ type: "text", text: `${code}: ${message}` }] };
 }
 
+const ValidationIssue = z.object({
+	path: z.array(z.union([z.string(), z.number()])),
+	message: z.string(),
+	errors: z.array(z.array(z.unknown())).optional(),
+});
+
+/** Names fields inside union errors. Other operation messages pass through unchanged. */
+function errorMessage(error: Extract<Reply, { ok: false }>["error"]): string {
+	if (error.code !== "invalid") return error.message;
+	const issues = z.array(z.unknown()).safeParse(error.details?.issues);
+	if (!issues.success) return error.message;
+	let remaining = 12;
+	const describe = (value: unknown): string | null => {
+		if (remaining === 0) return null;
+		const parsed = ValidationIssue.safeParse(value);
+		if (!parsed.success) return null;
+		const issue = parsed.data;
+		const path = issue.path.join(".") || "input";
+		if (issue.errors?.length) {
+			const choices = issue.errors
+				.map((choice) =>
+					choice
+						.map(describe)
+						.filter((entry) => entry !== null)
+						.join("; "),
+				)
+				.filter((choice) => choice !== "");
+			if (choices.length > 0) return `${path}: ${choices.map((choice) => `[${choice}]`).join(" or ")}`;
+		}
+		remaining--;
+		return `${path}: ${issue.message}`;
+	};
+	const messages = issues.data.map(describe).filter((entry) => entry !== null);
+	return messages.length > 0 ? [...new Set(messages)].join("; ") : error.message;
+}
+
 class AgentServer extends McpServer {
 	private protocolVersion: string;
 
@@ -269,7 +305,7 @@ class AgentServer extends McpServer {
 						selected = projects[0];
 					}
 					const reply = await call(tool.name, selected ?? null, input);
-					if (!reply.ok) return toolError(reply.error.code, reply.error.message);
+					if (!reply.ok) return toolError(reply.error.code, errorMessage(reply.error));
 					const result = { result: reply.result ?? null, seq: reply.seq };
 					return {
 						content: [{ type: "text", text: JSON.stringify(result) }],

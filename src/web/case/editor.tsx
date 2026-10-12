@@ -2,6 +2,7 @@ import { type KeyboardEvent, useLayoutEffect, useRef } from "react";
 import { newStepId } from "../../core/ids.ts";
 import { parseOutline, splitExpected } from "../../core/outline.ts";
 import type { Draft } from "../lib/drafts.ts";
+import { useBindings } from "../lib/keys.ts";
 import { KeyCap } from "../ui/index.tsx";
 
 export type DraftChange = (draft: Draft, focus?: boolean) => void;
@@ -76,6 +77,59 @@ export function BodyEditor({
 	seal: () => void;
 	rapid: () => void;
 }) {
+	function nextStep(): void {
+		if (draft.caret.field === "title" || draft.caret.field === "capture-title") {
+			firstStep({ draft, change });
+			return;
+		}
+		const id = draft.caret.field.split(":")[0];
+		const at = draft.body.steps.findIndex((step) => step.id === id);
+		if (at < 0) return;
+		const next = draft.body.steps[at + 1] ?? freshStep(draft);
+		change(
+			{
+				...draft,
+				body: { ...draft.body, steps: draft.body.steps[at + 1] ? draft.body.steps : [...draft.body.steps, next] },
+				caret: { field: `${next.id}:action`, start: 0, end: 0 },
+			},
+			true,
+		);
+	}
+	function expected(): void {
+		const id = draft.caret.field.split(":")[0];
+		const step = draft.body.steps.find((item) => item.id === id);
+		if (!step) return;
+		change(
+			{
+				...draft,
+				body: {
+					...draft.body,
+					steps: draft.body.steps.map((item) => (item.id === id ? { ...item, expected: item.expected ?? "" } : item)),
+				},
+				caret: { field: `${id}:expected`, start: step.expected?.length ?? 0, end: step.expected?.length ?? 0 },
+			},
+			true,
+		);
+	}
+	const editing = () =>
+		document.activeElement instanceof HTMLElement &&
+		document.activeElement.matches(".body-editor textarea,.capture-title");
+	useBindings([
+		{
+			key: "enter",
+			label: draft.caret.field === "title" || draft.caret.field === "capture-title" ? "First step" : "Next step",
+			handler: nextStep,
+			allowInInput: true,
+			when: editing,
+		},
+		{
+			key: "tab",
+			label: "Expected result",
+			handler: expected,
+			allowInInput: true,
+			when: () => editing() && draft.caret.field.endsWith(":action"),
+		},
+	]);
 	const root = useRef<HTMLDivElement>(null);
 	const mounted = useRef(false);
 	useLayoutEffect(() => {

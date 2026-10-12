@@ -283,6 +283,17 @@ test("tool errors name bad fields and require a project when the choice is ambig
 		);
 		expect(bad.isError).toBe(true);
 		expect(bad.content).toEqual([{ type: "text", text: expect.stringMatching(/invalid: refs\.0:/) }]);
+		for (const sample of [
+			{ input: { q: "Q-1", answer: { is: "defect" } }, field: "onEvidence" },
+			{ input: { all: [{ q: "Q-1" }] }, field: "all.0.onEvidence" },
+			{ input: { undo: 5 }, field: "undo" },
+		]) {
+			const invalid = CallToolResultSchema.parse(
+				await client.callTool({ name: "decide", arguments: { project: "scratch", ...sample.input } }),
+			);
+			expect(invalid.isError).toBe(true);
+			expect(invalid.content).toEqual([{ type: "text", text: expect.stringContaining(sample.field) }]);
+		}
 		const ambiguous = CallToolResultSchema.parse(await client.callTool({ name: "inbox", arguments: {} }));
 		expect(ambiguous.isError).toBe(true);
 		expect(ambiguous.content).toEqual([{ type: "text", text: expect.stringContaining("project:") }]);

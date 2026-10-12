@@ -24,7 +24,9 @@ export function useBindings(items: Binding[]): void {
 	const id = useId();
 	const latest = useRef(items);
 	latest.current = items;
-	const signature = JSON.stringify(items.map(({ key, label, hidden }) => ({ key, label, hidden })));
+	const signature = JSON.stringify(
+		items.map(({ key, label, hidden, when }) => ({ key, label, hidden, available: !when || when() })),
+	);
 	useEffect(() => {
 		groups.set(id, latest);
 		notify();

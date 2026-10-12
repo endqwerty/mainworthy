@@ -26,7 +26,7 @@ const navigation: { screen: Screen; label: string; icon: string; key: string }[]
 	{ screen: "queue", label: "Queue", icon: "◎", key: "g q" },
 	{ screen: "runs", label: "Runs", icon: "▷", key: "g r" },
 	{ screen: "changes", label: "Changes", icon: "↗", key: "g c" },
-	{ screen: "settings", label: "Settings", icon: "⚙", key: "g ," },
+	{ screen: "settings", label: "Settings", icon: "⚙︎", key: "g ," },
 ];
 function theme(): void {
 	const chosen = localStorage.getItem("casebook:theme");
@@ -56,6 +56,14 @@ export function App() {
 	useEffect(() => {
 		void refreshSession();
 	}, [refreshSession]);
+	useEffect(() => {
+		const media = matchMedia("(prefers-color-scheme: dark)");
+		const changed = () => {
+			if (!localStorage.getItem("casebook:theme")) theme();
+		};
+		media.addEventListener("change", changed);
+		return () => media.removeEventListener("change", changed);
+	}, []);
 	if (auth.kind === "signin") return <SignIn onLogin={refreshSession} />;
 	if (auth.kind === "error")
 		return (
@@ -120,6 +128,20 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 	);
 	const [palette, setPalette] = useState<PaletteOptions | null>(null);
 	const [help, setHelp] = useState(false);
+	const [inInput, setInInput] = useState(false);
+	useEffect(() => {
+		const change = () =>
+			queueMicrotask(() => {
+				const node = document.activeElement;
+				setInInput(node instanceof HTMLElement && (node.matches("input,textarea,select") || node.isContentEditable));
+			});
+		window.addEventListener("focusin", change);
+		window.addEventListener("focusout", change);
+		return () => {
+			window.removeEventListener("focusin", change);
+			window.removeEventListener("focusout", change);
+		};
+	}, []);
 	const registry = useKeyRegistry();
 	useKeyboard();
 	useEvents(project);
@@ -169,6 +191,23 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 			if (first) navigate(routeUrl({ project: first.key, screen: "suite" }), { replace: true });
 		}
 	}, [info]);
+	const priorities = inInput
+		? ["enter", "tab", "shift+enter", "mod+enter", "escape", "mod+k"]
+		: route.screen === "suite" || route.screen === "case"
+			? ["c", "e", "a", "r", "u", "/", "mod+k", "?"]
+			: route.screen === "runs"
+				? ["p", "f", "b", "s", "n", "u", "mod+k", "?"]
+				: ["d", "t", "e", "f", "i", "n", "m", "a", "r", "l", "c", "u", "mod+k", "?"];
+	const hints = registry
+		.filter(
+			(binding) =>
+				!binding.hidden &&
+				(!binding.when || binding.when()) &&
+				(!inInput || binding.allowInInput || binding.key.startsWith("mod+") || binding.key === "escape"),
+		)
+		.filter((binding) => priorities.includes(binding.key))
+		.sort((a, b) => priorities.indexOf(a.key) - priorities.indexOf(b.key))
+		.slice(0, 7);
 	const ScreenComponent = screens[route.screen];
 	return (
 		<AppContext.Provider
@@ -243,33 +282,39 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 							<span className="fn">All cases</span>
 							<span className="n">{folders.data?.count ?? 0}</span>
 						</button>
-						{folders.data?.items.map((folder) => {
-							const path = typeof folder.path === "string" ? folder.path : "";
-							const name = typeof folder.name === "string" ? folder.name : path;
-							const count = typeof folder.cases === "number" ? folder.cases : 0;
-							return (
-								<button
-									key={path}
-									type="button"
-									className={`fo ${route.folder === path ? "on" : ""}`}
-									style={{ paddingLeft: `${path.split("/").length * 12}px` }}
-									onClick={() => navigate(routeUrl({ project, screen: "suite", folder: path }))}
-									onDragOver={(event) => event.preventDefault()}
-									onDrop={(event) => {
-										event.preventDefault();
-										window.dispatchEvent(
-											new CustomEvent("casebook:drop", {
-												detail: { folder: path, ref: event.dataTransfer.getData("text/plain") },
-											}),
-										);
-									}}
-								>
-									<span className="tw" />
-									<span className="fn">{name}</span>
-									<span className="n">{count}</span>
-								</button>
-							);
-						})}
+						{[...(folders.data?.items ?? [])]
+							.sort((a, b) => String(a.path).localeCompare(String(b.path)))
+							.map((folder) => {
+								const path = typeof folder.path === "string" ? folder.path : "";
+								const name = typeof folder.name === "string" ? folder.name : path;
+								const count = (folders.data?.items ?? [])
+									.filter(
+										(item) => item.path === path || (typeof item.path === "string" && item.path.startsWith(`${path}/`)),
+									)
+									.reduce((total, item) => total + (typeof item.cases === "number" ? item.cases : 0), 0);
+								return (
+									<button
+										key={path}
+										type="button"
+										className={`fo ${route.folder === path ? "on" : ""}`}
+										style={{ paddingLeft: `${path.split("/").length * 12}px` }}
+										onClick={() => navigate(routeUrl({ project, screen: "suite", folder: path }))}
+										onDragOver={(event) => event.preventDefault()}
+										onDrop={(event) => {
+											event.preventDefault();
+											window.dispatchEvent(
+												new CustomEvent("casebook:drop", {
+													detail: { folder: path, ref: event.dataTransfer.getData("text/plain") },
+												}),
+											);
+										}}
+									>
+										<span className="tw" />
+										<span className="fn">{name}</span>
+										<span className="n">{count}</span>
+									</button>
+								);
+							})}
 						<div id="folder-create" />
 					</div>
 					<div className="sfoot">
@@ -297,16 +342,12 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				<footer id="bar">
 					<StatusLine>{status}</StatusLine>
 					<div id="hints">
-						{registry
-							.filter((binding) => !binding.hidden && (!binding.when || binding.when()))
-							.filter((binding) => !binding.key.startsWith("g "))
-							.slice(-6)
-							.map((binding) => (
-								<span key={binding.key}>
-									<KeyCap>{binding.key.replace("mod+", "⌘")}</KeyCap>
-									{binding.label}
-								</span>
-							))}
+						{hints.map((binding) => (
+							<span key={binding.key}>
+								<KeyCap>{binding.key.replace("mod+", "⌘")}</KeyCap>
+								{binding.label}
+							</span>
+						))}
 					</div>
 				</footer>
 			</div>
@@ -358,7 +399,7 @@ function Palette({ project, options, close }: { project: string; options: Palett
 	const actions =
 		options.items ??
 		registry
-			.filter((item) => !item.hidden && (!item.when || item.when()))
+			.filter((item) => !item.hidden)
 			.map((item) => ({ id: item.key, label: item.label, detail: item.key, handler: item.handler }));
 	const cases =
 		found.data?.items

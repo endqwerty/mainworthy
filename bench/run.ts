@@ -6,8 +6,8 @@ import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import { BUDGETS, ensure } from "./contracts.ts";
-import { buildDataset, openDataset, Parameters } from "./dataset.ts";
-import { type Measurement, measure, summarise, table, type Workload } from "./measure.ts";
+import { buildDataset, fingerprints, openDataset, Parameters } from "./dataset.ts";
+import { type Measurement, measure, percentile, summarise, table, type Workload } from "./measure.ts";
 import { mixedLoad } from "./mixed.ts";
 import { profile } from "./profile.ts";
 import {
@@ -15,6 +15,7 @@ import {
 	bulkWorkload,
 	executeWorkload,
 	ingestWorkload,
+	prepareRecentChanges,
 	readWorkloads,
 	saveWorkload,
 } from "./workloads.ts";
@@ -41,6 +42,7 @@ export function options(args: string[]) {
 		openQuestions: quick ? 2_000 : 50_000,
 		queueTimeMs: quick ? 5_000 : 180_000,
 	});
+	const revision = fingerprints();
 	return {
 		quick,
 		parameters,
@@ -48,7 +50,7 @@ export function options(args: string[]) {
 		dir: resolve(
 			".casebook",
 			"bench",
-			`dataset-${parameters.cases}-${parameters.tests}-${parameters.results}-${parameters.seed}-${parameters.openQuestions}`,
+			`dataset-${parameters.cases}-${parameters.tests}-${parameters.results}-${parameters.seed}-${parameters.openQuestions}-${revision.generator.slice(0, 12)}-${revision.migrations.slice(0, 12)}`,
 		),
 	};
 }
@@ -122,21 +124,48 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 	const repetitions: { name: string; results: Measurement[] }[] = [];
 	const loads: { after: string; load: number[] }[] = [];
 	const diagnostic: Awaited<ReturnType<typeof profile>>[] = [];
-	const iterations = cli.quick ? 25 : 100;
+	const iterations = cli.quick ? 25 : 50;
+	const repeatWorkload = (peer: typeof instance, name: string): Workload => {
+		const read = readWorkloads(peer, iterations).find((workload) => workload.name === name);
+		if (read) return read;
+		if (name === "case save") return saveWorkload(peer, iterations);
+		if (name === "bulk move (1000)") return bulkWorkload(peer);
+		if (name === "ingest (10000)") return ingestWorkload(peer).workload;
+		if (name === "execute run") return executeWorkload(peer, cli.quick ? 50 : 200);
+		throw new Error(`No fresh repeat factory for ${name}`);
+	};
 	const run = async (workload: Workload) => {
 		console.log(`Measuring ${workload.name}: ${workload.iterations} iterations in five blocks…`);
 		const row = await measure(workload);
 		rows.push(row);
 		loads.push({ after: row.name, load: loadavg() });
-		if (!cli.quick && row.budget !== null && row[row.criterion] >= row.budget / 2) {
-			console.log(`  ${row.name} is within 2× its budget or misses it; repeating five complete runs.`);
+		if (
+			!cli.quick &&
+			row.budget !== null &&
+			row[row.criterion] >= row.budget / 2 &&
+			row[row.criterion] <= row.budget * 2
+		) {
+			console.log(`  ${row.name} is within 2× its budget; repeating five complete runs on fresh clones.`);
 			const repeated: Measurement[] = [];
-			for (let round = 0; round < 5; round++) repeated.push(await measure(workload));
+			for (let round = 0; round < 5; round++) {
+				const peer = openDataset(dataset, join(cli.dir, `repeat-${randomUUID()}`));
+				try {
+					prepareRecentChanges(peer);
+					repeated.push(await measure(repeatWorkload(peer, row.name)));
+				} finally {
+					peer.close();
+				}
+			}
 			repetitions.push({ name: row.name, results: repeated });
+			const values = [row, ...repeated].map((result) => result[result.criterion]);
+			console.log(
+				`  ${row.criterion} median ${percentile(values, 0.5).toFixed(2)} ms, range ${Math.min(...values).toFixed(2)} to ${Math.max(...values).toFixed(2)} ms; any trial miss fails the command.`,
+			);
 		}
 		return row;
 	};
 	try {
+		prepareRecentChanges(instance);
 		assertProducer(instance.ci);
 		for (const workload of readWorkloads(instance, iterations)) await run(workload);
 		await run(saveWorkload(instance, iterations));
@@ -178,6 +207,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 	);
 	const profiling = openDataset(dataset, join(cli.dir, `profile-${randomUUID()}`));
 	try {
+		prepareRecentChanges(profiling);
 		const workloads = [
 			...readWorkloads(profiling, 5),
 			saveWorkload(profiling, 5),
@@ -197,6 +227,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		profiling.close();
 	}
 	const failed = rows.filter((row) => !row.pass);
+	const repeatFailures = repetitions.reduce((n, repeated) => n + repeated.results.filter((row) => !row.pass).length, 0);
 	const near = rows.filter((row) => row.budget !== null && row[row.criterion] >= row.budget / 2);
 	const durationSeconds = (performance.now() - started) / 1_000;
 	const report = {
@@ -204,6 +235,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		quick: cli.quick,
 		machine: hardware,
 		dataset: {
+			fingerprints: dataset.metadata.fingerprints,
 			parameters: dataset.metadata.parameters,
 			counts: dataset.metadata.counts,
 			reused: dataset.reused,
@@ -220,6 +252,7 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 		limits: [
 			"SQLite pragmas are unchanged production values; baseline is closed before cloning.",
 			"All correctness and persisted-count assertions are outside isolated operation timers.",
+			"Twenty untimed recent edits on each clone exercise real diffs; small/quick cursors precede those edits and full cursors are 300 commands back.",
 			"HTTP load generator shares the server process and thread; synchronous SQL and read work delay server work and client callbacks. The current product yields between report apply slices.",
 			...(cli.quick
 				? ["Quick HTTP mix is one 15-second window; use the default run for five independent windows."]
@@ -237,7 +270,9 @@ export async function runBenchmark(args = Bun.argv.slice(2)): Promise<number> {
 	console.log(
 		`Elapsed: ${durationSeconds.toFixed(2)} s; load at end ${loadavg()
 			.map((value) => value.toFixed(2))
-			.join(" / ")}; ${failed.length} misses; ${near.length} workloads at or above half their budget.`,
+			.join(
+				" / ",
+			)}; ${failed.length} primary misses and ${repeatFailures} repeat misses; ${near.length} workloads at or above half their budget.`,
 	);
 	for (const row of failed)
 		for (const error of [...row.warmupErrors, ...row.errorMessages].slice(0, 3)) console.error(`${row.name}: ${error}`);

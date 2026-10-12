@@ -125,9 +125,12 @@ sentence beside each come from one map in `src/core/kinds.ts`, which the CLI pri
 ## Rules the code enforces on itself
 
 `test/architecture.test.ts` fails the check when: a module imports up the map (the suite reaching into
-decisions); anything but the kernel talks to SQLite; anything but the decision machinery mints a witness; the
-core imports I/O; the web UI imports the server; a declared SQL statement does not prepare against the schema;
-or the agent surface grows past ten tools. `test/budgets.test.ts` fails it when a hot path gets slow.
+decisions); a module runs SQL on a table another module owns (every one of the 38 tables has one owner, and a
+read of someone else's data goes through their functions); anything but the kernel talks to SQLite; anything
+but the decision machinery mints a witness; a writer that undoes a withdrawn decision is called from anywhere
+but a kind handler; the core imports I/O; the web UI imports the server; a declared SQL statement does not
+prepare against the schema; or the agent surface grows past ten tools. `test/budgets.test.ts` fails it when a
+hot path gets slow.
 
 ## Where things are
 

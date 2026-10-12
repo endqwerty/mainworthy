@@ -9,33 +9,21 @@ import {
 	orgId,
 	revokeToken,
 } from "../identity/identity.ts";
-import { findProject, makeCtx, stampSeq } from "../kernel/ctx.ts";
-import { type Db, sql } from "../kernel/db.ts";
+import { allProjects, findProject, insertProject, makeCtx, stampSeq } from "../kernel/ctx.ts";
+import type { Db } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { currentPolicy, isPreset, seedPolicy } from "../policy/policy.ts";
 import { defineInstanceOp, type InstanceCtx } from "./registry.ts";
 
-const Q = {
-	insertProject: sql<{ org: number; key: string; name: string; at: number }>(
-		"INSERT INTO projects (org, key, name, created_at) VALUES ($org, $key, $name, $at)",
-	),
-	projects: sql<readonly [], { key: string; name: string; seq: number; created_at: number }>(
-		"SELECT key, name, seq, created_at FROM projects ORDER BY id",
-	),
-};
-
 /** Every project with the policy in force. A plain read, so the session endpoint can call it during a long write. */
 export function listProjects(db: Db): { key: string; name: string; seq: number; createdAt: number; policy: string }[] {
-	return db.all(Q.projects).map((row) => {
-		const project = findProject(db, row.key);
-		return {
-			key: row.key,
-			name: row.name,
-			seq: row.seq,
-			createdAt: row.created_at,
-			policy: project ? currentPolicy(db, project.id).preset : "",
-		};
-	});
+	return allProjects(db).map((row) => ({
+		key: row.key,
+		name: row.name,
+		seq: row.seq,
+		createdAt: row.created_at,
+		policy: currentPolicy(db, row.id).preset,
+	}));
 }
 
 /** Creates a project with its first policy. Used by the admin operation and by first start. */
@@ -46,14 +34,12 @@ export function createProject(
 	const preset = input.preset ?? "loose";
 	if (!isPreset(preset)) throw invalid(`unknown preset ${preset}`);
 	if (findProject(env.app.db, input.key)) throw conflict(`a project named ${input.key} exists`);
-	env.app.db.run(Q.insertProject, {
+	const project = insertProject(env.app.db, {
 		org: orgId(env.app.db),
 		key: input.key,
 		name: input.name ?? input.key,
 		at: env.now,
 	});
-	const project = findProject(env.app.db, input.key);
-	if (!project) throw new Error("project was not stored");
 	const ctx = makeCtx(env.app, project, env.actor, true);
 	seedPolicy(ctx, preset);
 	stampSeq(ctx);

@@ -186,6 +186,7 @@ kbd {
 	font-weight: 600;
 }
 :where(#nav) kbd {
+	margin-left: auto;
 	border: 0;
 	background: none;
 	color: var(--faint);
@@ -1514,4 +1515,10 @@ button:disabled {
 .overlay .help {
 	position: relative;
 	z-index: 1;
+}
+
+.read-body .ctitle,
+.read-body .stx,
+.read-body .sex {
+	text-align: left;
 }
