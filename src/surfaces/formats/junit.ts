@@ -37,7 +37,20 @@ type Element =
 	| { kind: "other"; tag: string };
 type Warn = (message: string, offset: number) => void;
 
-const attributePattern = /([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/y;
+const attributePattern = /([^ \t\r\n=/>]+)[ \t\r\n]*=[ \t\r\n]*(?:"([^"]*)"|'([^']*)')/y;
+const nameStart =
+	"[:A-Z_a-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF" +
+	"\\u200C-\\u200D\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD" +
+	"\\u{10000}-\\u{EFFFF}]";
+const namePattern = new RegExp(
+	"^(" + nameStart + "(?:" + nameStart + "|[-.0-9\\u00B7\\u0300-\\u036F\\u203F-\\u2040])*)",
+	"u",
+);
+const declarationPattern = new RegExp(
+	"^xml[ \\t\\r\\n]+version[ \\t\\r\\n]*=[ \\t\\r\\n]*([\"'])1\\.\\d+\\1" +
+		"(?:[ \\t\\r\\n]+encoding[ \\t\\r\\n]*=[ \\t\\r\\n]*([\"'])[A-Za-z][A-Za-z0-9._-]*\\2)?" +
+		"(?:[ \\t\\r\\n]+standalone[ \\t\\r\\n]*=[ \\t\\r\\n]*([\"'])(?:yes|no)\\3)?[ \\t\\r\\n]*$",
+);
 // biome-ignore lint/suspicious/noControlCharactersInRegex: XML 1.0 excludes these characters.
 const invalidCharacter = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uD800-\uDFFF\uFFFE\uFFFF]/u;
 
@@ -93,6 +106,10 @@ function normalisePath(value: string): string {
 	return value.replace(/\\/g, "/").replace(/^(?:\.\/)+/, "");
 }
 
+function keyPart(value: string): string {
+	return value.trim() ? value : "";
+}
+
 function annotation(value: string, property = false): ResultIn["annotation"] {
 	const match = (property ? /^@?(C-\d+)(?:@v(\d+))?$/ : /@(C-\d+)(?:@v(\d+))?(?![\w@-])/).exec(value.trim());
 	const caseRef = match?.[1];
@@ -121,8 +138,8 @@ function decode(value: string, offset: number, warn: Warn): string {
 				case "apos":
 					return "'";
 			}
-			if (/^#(?:\d+|x[\da-f]+)$/i.test(entity)) {
-				const point = entity[1]?.toLowerCase() === "x" ? Number.parseInt(entity.slice(2), 16) : Number(entity.slice(1));
+			if (/^#(?:\d+|x[\da-fA-F]+)$/.test(entity)) {
+				const point = entity[1] === "x" ? Number.parseInt(entity.slice(2), 16) : Number(entity.slice(1));
 				if (
 					point === 9 ||
 					point === 10 ||
@@ -146,7 +163,7 @@ function attributes(content: string, from: number, to: number, offset: number, w
 	let position = from;
 	while (position < to) {
 		const beforeWhitespace = position;
-		while (position < to && /\s/.test(content[position] ?? "")) position++;
+		while (position < to && /[ \t\r\n]/.test(content[position] ?? "")) position++;
 		if (position >= to) break;
 		if (position === beforeWhitespace) warn("Missing whitespace before XML attribute", offset + position);
 		attributePattern.lastIndex = position;
@@ -161,7 +178,7 @@ function attributes(content: string, from: number, to: number, offset: number, w
 			continue;
 		}
 		const valueStart = attributePattern.lastIndex - value.length - 1;
-		if (!/^[A-Za-z_][\w.:-]*$/.test(name)) warn("Malformed XML attribute name", offset + position);
+		if (namePattern.exec(name)?.[0] !== name) warn("Malformed XML attribute name", offset + position);
 		if (seen.has(name)) warn("Duplicate XML attribute", offset + position);
 		seen.add(name);
 		if (value.includes("<")) warn("Unescaped < in XML attribute", offset + valueStart + value.indexOf("<"));
@@ -215,7 +232,7 @@ function testKey(
 	const pathLength = suite?.pathDigest.length ?? 0;
 	const parts = Number(prefix.length > 0) + Number(pathLength > 0) + Number(name.length > 0);
 	const length = prefix.length + pathLength + name.length + Math.max(parts - 1, 0) * 2;
-	if (length <= 1000) return [prefix, suite?.path, name].filter(Boolean).join("::") || "unnamed testcase";
+	if (length <= 1000) return [prefix, suite?.path, name].filter(Boolean).join("::").trim() || "unnamed testcase";
 	warn("Test key truncated to 1,000 characters", offset);
 	let hash = emptyDigest;
 	if (prefix.length > 0) {
@@ -263,8 +280,9 @@ function applyDamage(results: ResultIn[], spans: DamageSpan[]): void {
  * Reads JUnit XML in document order without a DOM or dependencies. Malformed input yields recovered results
  * and warnings with UTF-8 byte offsets. Nested suite names use `::`; `options.file` labels warnings only.
  * Incomplete/damaged cases cannot pass; damage outside a testcase invalidates recovered suite/report evidence.
- * Orphan failures retain their diagnostics and suite setup errors mark affected cases as errors. Casebook properties
- * override name annotations. Warnings are capped at 1,000 plus a count of omitted warnings.
+ * Orphan failures are diagnosed; testcase failures retain their diagnostics. Suite setup errors mark affected cases
+ * as errors. Casebook properties override name annotations. Warnings are capped at 1,000 plus an omitted count.
+ * Suite failures without testcases remain warnings; the parser never invents an execution to carry them.
  */
 export function parseJUnit(
 	xml: string,
@@ -381,10 +399,14 @@ export function parseJUnit(
 		if (cdata) {
 			const invalid = invalidCharacter.exec(value);
 			if (invalid !== null) warnMalformed("Invalid XML character", from + invalid.index);
-		} else decoded = decode(value, from, warnMalformed);
+		} else {
+			const delimiter = value.indexOf("]]>");
+			if (delimiter >= 0) warnMalformed("Unexpected CDATA closing delimiter", from + delimiter);
+			decoded = decode(value, from, warnMalformed);
+		}
 		if (currentFailure?.report !== null && currentFailure !== null && ignoredDepth === 0) {
 			appendFailure(currentFailure, decoded);
-		} else if (stack.length === 0 && value.trim().length > 0) {
+		} else if (stack.length === 0 && /[^ \t\r\n]/.test(value)) {
 			warnMalformed("Content outside the JUnit root", from);
 		}
 	};
@@ -407,6 +429,19 @@ export function parseJUnit(
 			const suffix = cdata ? "]]>" : prefix === 4 ? "-->" : "?>";
 			const end = xml.indexOf(suffix, start + prefix);
 			if (cdata) text(start + prefix, end < 0 ? xml.length : end, true);
+			else if (prefix === 4 && end >= 0 && xml.indexOf("--", start + prefix) < end)
+				warnMalformed("Invalid XML comment", start);
+			else if (prefix === 2) {
+				const first = xml[start + 2] ?? "";
+				if (!/[A-Za-z_:]/.test(first) && (first.charCodeAt(0) < 0xc0 || first === ""))
+					warnMalformed("Malformed XML processing instruction", start);
+				if (/^<\?xml(?=[ \t\r\n?])/i.test(xml.slice(start, start + 7))) {
+					if (rootSeen || start !== (xml.charCodeAt(0) === 0xfeff ? 1 : 0))
+						warnMalformed("Unexpected XML declaration", start);
+					else if (end >= 0 && !declarationPattern.test(xml.slice(start + 2, end)))
+						warnMalformed("Malformed XML declaration", start);
+				}
+			}
 			if (end < 0) {
 				warnMalformed("Unterminated XML comment, declaration or CDATA", start);
 				position = xml.length;
@@ -418,11 +453,20 @@ export function parseJUnit(
 		let end = start + 1;
 		let quote = "";
 		let brackets = 0;
+		let unescapedLessThan = -1;
 		const declaration = xml.startsWith("<!", start);
 		for (; end < xml.length; end++) {
 			const char = xml[end];
 			if (quote !== "") {
 				if (char === quote) quote = "";
+				else if (char === "<" && !declaration && unescapedLessThan < 0) unescapedLessThan = end;
+			} else if (declaration && char === "<" && xml.startsWith("<!--", end)) {
+				const commentEnd = xml.indexOf("-->", end + 4);
+				if (commentEnd < 0) {
+					end = xml.length;
+					break;
+				}
+				end = commentEnd + 2;
 			} else if (char === '"' || char === "'") quote = char;
 			else if (declaration && char === "[") brackets++;
 			else if (declaration && char === "]") brackets--;
@@ -436,13 +480,13 @@ export function parseJUnit(
 		}
 		position = end + 1;
 		if (declaration) {
-			if (rootSeen || !/^<!DOCTYPE\s/.test(xml.slice(start, start + 11)))
+			if (rootSeen || !/^<!DOCTYPE[ \t\r\n]/.test(xml.slice(start, start + 11)))
 				warnMalformed("Unexpected XML declaration", start);
 			continue;
 		}
 		const content = xml.slice(start + 1, end);
 		const closing = content.startsWith("/");
-		const match = /^([A-Za-z_][\w.:-]*)/.exec(closing ? content.slice(1) : content);
+		const match = namePattern.exec(closing ? content.slice(1) : content);
 		const tag = match?.[1];
 		if (tag === undefined) {
 			warnMalformed("Malformed XML element name", start);
@@ -450,7 +494,7 @@ export function parseJUnit(
 		}
 		const name = tag.slice(tag.lastIndexOf(":") + 1);
 		if (closing) {
-			if (content.slice(tag.length + 1).trim() !== "") warnMalformed("Malformed XML closing element", start);
+			if (/[^ \t\r\n]/.test(content.slice(tag.length + 1))) warnMalformed("Malformed XML closing element", start);
 			const found = elementPositions.get(tag)?.at(-1);
 			if (found === undefined) {
 				warnMalformed(`Unexpected closing element </${tag}>`, start);
@@ -477,6 +521,9 @@ export function parseJUnit(
 			if (name === "testcase" || name === "testsuite") warn(message, offset);
 			else warnMalformed(message, offset);
 		};
+		if (unescapedLessThan >= 0) warnAttribute("Unescaped < in XML attribute", unescapedLessThan);
+		if (selfClosing && content.lastIndexOf("/") !== content.length - 1)
+			warnAttribute("Whitespace after XML self-closing slash", end - 1);
 		const attrs =
 			ignoredDepth === 0 || (name === "property" && propertyCase !== null)
 				? attributes(
@@ -500,7 +547,7 @@ export function parseJUnit(
 				ignoredDepth++;
 			} else if (name === "testsuite") {
 				const suite = suiteStack.at(-1);
-				const suiteName = normalisePath(attrs.name ?? "");
+				const suiteName = keyPart(normalisePath(attrs.name ?? ""));
 				const pathDigest = suiteName
 					? suite !== undefined && suite.pathDigest.length > 0
 						? appendDigest(appendDigest(suite.pathDigest, separatorDigest), digest(suiteName))
@@ -530,11 +577,11 @@ export function parseJUnit(
 				const nameText = attrs.name ?? "";
 				if (attrs.name === undefined) warn("Testcase has no name", start);
 				const file = attrs.file ? normalisePath(attrs.file) : suite?.file;
-				const prefix = file || normalisePath(attrs.classname ?? "");
+				const prefix = keyPart(file || normalisePath(attrs.classname ?? ""));
 				const status = attrs.status?.toLowerCase();
 				const result: ResultIn = {
 					test: {
-						key: testKey(prefix, suite, stableName(nameText), prefixDigests, start, warn),
+						key: testKey(prefix, suite, keyPart(stableName(nameText)), prefixDigests, start, warn),
 						name: limited(nameText, 500, "Test name", start),
 						...(file === undefined ? {} : { file: limited(file, 500, "Test file", start) }),
 					},

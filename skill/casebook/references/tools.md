@@ -253,5 +253,5 @@ Is this commit, change or run tested? Returns passed, failed, blocked or pending
 | `commit` | `string` | no |  |
 | `run` | `string` | no |  |
 | `change` | `string` | no | A change key, for example pr:482: the gate of its latest commit. |
-| `env` | `string` | no |  |
+| `repo` | `string` | no |  |
 | `project` | `string` | no | Project key; omit only if there is one project. |

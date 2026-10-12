@@ -223,9 +223,11 @@ function raiseFailure(
 	const open = latestByFingerprint(ctx.db, ctx.project.id, contentHash({ kind: "failure", key }));
 	const earlier =
 		open?.state === "open"
-			? json<{ tests?: { id: number; t: string; name: string; case: string | null }[]; producers?: number[] }>(
-					open.evidence,
-				)
+			? json<{
+					tests?: { id: number; t: string; name: string; case: string | null }[];
+					producers?: number[];
+					targets?: number[];
+				}>(open.evidence)
 			: {};
 	const tests = new Map((earlier.tests ?? []).map((test) => [test.id, test]));
 	for (const test of group.tests) {
@@ -260,6 +262,8 @@ function raiseFailure(
 			branch: target.branch,
 			hints: hints.map((hint) => hint.slice(5)),
 			producers: [...new Set([...(earlier.producers ?? []), batch.actor])],
+			// Every target this question has seen the cause on: an answer that holds "here only" covers these.
+			targets: [...new Set([...(earlier.targets ?? []), target.id])],
 			sample: group.results[0] ?? null,
 		},
 		material: { signature: group.signature.id, scope: group.scope, hints },

@@ -19,7 +19,14 @@ const Session = z.object({
 	via: z.enum(["token", "cookie", "local"]),
 	version: z.string(),
 	projects: z.array(
-		z.object({ key: z.string(), name: z.string(), seq: z.number(), createdAt: z.number(), policy: z.string() }),
+		z.object({
+			key: z.string(),
+			name: z.string(),
+			seq: z.number(),
+			createdAt: z.number(),
+			policy: z.string(),
+			can: z.array(z.string()),
+		}),
 	),
 });
 

@@ -367,7 +367,19 @@ const fixtures: Record<string, Row[]> = {
 			rev: 2,
 		},
 	],
-	run_tests: [{ run: 601, test: 501, result: 200, outcome: "pass", signature: null, attempt: 2, flipped: 1 }],
+	run_tests: [
+		{
+			run: 601,
+			test: 501,
+			result: 200,
+			outcome: "pass",
+			signature: null,
+			attempt: 2,
+			flipped: 1,
+			lane: "502:e2e:2",
+			target: 502,
+		},
+	],
 	slots: [
 		{
 			id: 602,

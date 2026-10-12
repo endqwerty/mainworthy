@@ -6,7 +6,7 @@ import type { DecideReply, GateStatus, InboxReply, PlanReply, ProposeReply, Repo
 import { setExcuse } from "../src/server/evidence/evidence.ts";
 import { sweep } from "../src/server/jobs.ts";
 import { findProject, makeCtx } from "../src/server/kernel/ctx.ts";
-import { claimMint, decisionOf, type Witness } from "../src/server/kernel/witness.ts";
+import { claimMint, decisionOf, Witness } from "../src/server/kernel/witness.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
@@ -302,6 +302,64 @@ describe("what a result may prove", () => {
 		expect(gate({ commit: "hold0001" }).verdict).toBe("blocked");
 	});
 
+	test("an excuse for one environment of a commit does not excuse another, and the other is asked about", () => {
+		const fail = (env: string) => ({
+			target: { commit: "envsame1", branch: "main", env },
+			results: [{ test: { key: `test-${env}` }, outcome: "fail", failure: { message: "environment unavailable" } }],
+		});
+		report(fail("staging"));
+		decide(open("failure"), { is: "infra" });
+		expect(gate({ commit: "envsame1" }).verdict).toBe("passed");
+		// The same cause in production is a new thing to answer for: the earlier answer covered staging.
+		report(fail("production"));
+		expect(gate({ commit: "envsame1" })).toMatchObject({ verdict: "blocked", tally: { excused: 1, unexplained: 1 } });
+		decide(open("failure"), { is: "infra" });
+		expect(gate({ commit: "envsame1" })).toMatchObject({ verdict: "passed", tally: { excused: 2 } });
+		// Seen in both before anyone answered: the answer covers the build it was given for, and the other
+		// environment is asked about at once, so the gate is never blocked by a failure nobody is asked about.
+		const both = (env: string) => ({ ...fail(env), target: { commit: "envsame2", branch: "main", env } });
+		report(both("staging"));
+		report(both("production"));
+		const asked = open("failure");
+		decide(asked, { is: "infra" });
+		const again = open("failure");
+		expect(again.q).not.toBe(asked.q);
+		expect(gate({ commit: "envsame2" })).toMatchObject({ verdict: "blocked", open: [again.q] });
+		decide(again, { is: "infra" });
+		expect(gate({ commit: "envsame2" })).toMatchObject({ verdict: "passed", tally: { excused: 2 } });
+	});
+
+	test("a planned run over some cases does not close a question about a failure it does not cover", () => {
+		seed(2);
+		const subset = plan({ name: "Subset", select: { cases: ["C-1"] }, accepts: { commit: "subset01" } });
+		const keyed = (key: string, outcome: string, ref: string) => ({
+			test: { key },
+			annotation: { case: ref, version: 1 },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: `failure of ${key}` } } : {}),
+		});
+		const receipt = report({
+			target: { commit: "subset01" },
+			results: [keyed("passing", "pass", "C-1"), keyed("failing", "fail", "C-2")],
+		});
+		expect(receipt.questions).toHaveLength(1);
+		expect(gate({ run: subset.run }).verdict).toBe("passed");
+		expect(gate({ commit: "subset01" }).verdict).toBe("blocked");
+		expect(h.call<InboxReply>("inbox", { kind: "failure" }).items.map((item) => item.q)).toEqual(
+			receipt.questions.map((question) => question.q),
+		);
+	});
+
+	test("a commit named by a prefix is found when it was reported in two environments", () => {
+		for (const env of ["staging", "production"]) {
+			report({
+				target: { commit: "abcdef0123456789", branch: "main", env },
+				results: [{ test: { key: env }, outcome: "pass" }],
+			});
+		}
+		expect(gate({ commit: "abcdef0" }).verdict).toBe("passed");
+	});
+
 	test("the same pull request number in two repositories is two changes", () => {
 		const push = (repo: string, commit: string) => ({
 			target: { repo, commit, branch: "feature", pr: 1 },
@@ -339,6 +397,121 @@ describe("what a result may prove", () => {
 		expect(slots(planned.run).map((slot) => slot.state)).toEqual(["missing", "missing"]);
 	});
 
+	test("an agent's results never count in a commit's gate, and cannot clear a pipeline's failure", () => {
+		const agent = h.actor("explorer", "agent", ["read", "produce"]);
+		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const keyed = (key: string, outcome: string) => ({
+			test: { key },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: `failure of ${key}` } } : {}),
+		});
+		const alone = report({ target: { commit: "agent001", branch: "main" }, results: [keyed("one", "pass")] }, agent);
+		expect(alone.gate?.verdict).toBe("pending");
+		report({ target: { commit: "agent002", branch: "main" }, results: [keyed("two", "fail")] }, ci);
+		expect(gate({ commit: "agent002" }).verdict).toBe("blocked");
+		report({ target: { commit: "agent002", branch: "main" }, results: [keyed("two", "pass")] }, agent);
+		expect(gate({ commit: "agent002" }).verdict).toBe("blocked");
+		// An agent's failure is put to a person as a question, and holds no gate. It does not close the pipeline's
+		// question either: a newer commit with nothing from a pipeline says nothing about that failure.
+		const found = report({ target: { commit: "agent003", branch: "main" }, results: [keyed("three", "fail")] }, agent);
+		expect(found.gate).toMatchObject({ verdict: "pending", open: [] });
+		const asked = h.call<InboxReply>("inbox", { kind: "failure" }).items;
+		expect(asked).toHaveLength(2);
+		expect(gate({ commit: "agent002" }).verdict).toBe("blocked");
+		expect(rows("SELECT count(*) AS n FROM results WHERE method = 'agent'")).toEqual([{ n: 3 }]);
+	});
+
+	test("one producer's pass does not replace another job's or another producer's failure of the same test", () => {
+		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const one = (outcome: string, job: string) => ({
+			target: { commit: "lanes0001", branch: "main" },
+			job,
+			results: [{ test: { key: "a::t" }, outcome, ...(outcome === "fail" ? { failure: { message: "bug" } } : {}) }],
+		});
+		report(one("fail", "linux"), ci);
+		report(one("pass", "macos"), ci);
+		expect(gate({ commit: "lanes0001" }).verdict).toBe("blocked");
+		report(one("pass", "linux"), h.owner);
+		expect(gate({ commit: "lanes0001" }).verdict).toBe("blocked");
+		// The same job reporting a newer attempt is that job changing its own answer.
+		report({ ...one("pass", "linux"), attempt: 2 }, ci);
+		expect(gate({ commit: "lanes0001" }).verdict).toBe("passed");
+	});
+
+	test("a slot with two failing causes stays blocked until both are answered", () => {
+		seed();
+		const planned = plan({ name: "Two causes", select: {}, accepts: { commit: "cause001" } });
+		const failing = (key: string) => ({
+			test: { key },
+			annotation: { case: "C-1", version: 1 },
+			outcome: "fail",
+			failure: { message: `failure of ${key}` },
+		});
+		report({ target: { commit: "cause001" }, results: [failing("alpha"), failing("beta")] });
+		const questions = h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items;
+		expect(questions).toHaveLength(2);
+		decide(first(questions), { is: "flaky" });
+		expect(gate({ run: planned.run }).verdict).toBe("blocked");
+		decide(questions[1] ?? first(questions), { is: "flaky" });
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
+	test("in a planned run, a skip recorded later does not hide that producer's failure", () => {
+		seed(2);
+		const planned = plan({ name: "Skip is no proof", select: {} });
+		const other = h.actor("second-person", "human", ["read", "produce"]);
+		report({
+			run: planned.run,
+			results: [
+				{ test: { case: "C-1" }, outcome: "fail", note: "real bug" },
+				{ test: { case: "C-2" }, outcome: "pass" },
+			],
+		});
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, other);
+		expect(gate({ run: planned.run }).verdict).toBe("blocked");
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "skip" }] });
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
+	});
+
+	test("the same commit in two repositories has two gates, and a lookup never answers with the other one", () => {
+		seed();
+		const push = (repo: string, outcome: string) => ({
+			target: { repo, commit: "samecommit", pr: 12, branch: "f" },
+			results: [
+				{
+					test: { key: "t" },
+					annotation: { case: "C-1", version: 1 },
+					outcome,
+					...(outcome === "fail" ? { failure: { message: "broken in the fork" } } : {}),
+				},
+			],
+		});
+		report(push("a", "pass"));
+		report(push("b", "fail"));
+		expect(gate({ change: "pr:12" }).verdict).toBe("passed");
+		expect(gate({ change: "b#pr:12" }).verdict).toBe("blocked");
+		expect(gate({ commit: "samecommit", repo: "b" }).verdict).toBe("blocked");
+		expect(h.raw("gate", { commit: "samecommit" })).toMatchObject({ ok: false, error: { code: "invalid" } });
+		const planned = plan({ name: "Repository b", select: {}, accepts: { repo: "b", commit: "samecommit" } });
+		expect(first(slots(planned.run)).state).toBe("failing");
+		expect(h.raw("plan", { name: "Either", select: {}, accepts: { commit: "samecommit" } }).ok).toBe(false);
+		type Impact = { gate: { verdict: string } | null };
+		expect(h.call<Impact>("impact", { change: "b#pr:12" }).gate?.verdict).toBe("blocked");
+	});
+
+	test("an automated test cannot take the key of a case's manual test", () => {
+		seed(2);
+		const taken = h.raw("report", {
+			target: { commit: "keycol01" },
+			results: [{ test: { key: "case:1" }, outcome: "pass" }],
+		});
+		expect(taken).toMatchObject({ ok: false, error: { code: "invalid" } });
+		const planned = plan({ name: "manual case", select: {} });
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		expect(first(slots(planned.run)).state).toBe("satisfied");
+		expect(rows("SELECT key, kind, case_id FROM tests")).toEqual([{ key: "case:1", kind: "manual", case_id: 1 }]);
+	});
+
 	test("a required job counts as soon as its own report is applied", () => {
 		seed();
 		const planned = plan({
@@ -373,7 +546,7 @@ describe("what a decision may change", () => {
 		const ctx = makeCtx(h.app, project, h.owner, true);
 		const signature = first(rows<{ id: number }>("SELECT id FROM signatures")).id;
 		const plain = { decision: 999_999, kind: "failure", signers: [h.owner.id], expiresAt: null } as unknown as Witness;
-		expect(() => setExcuse(ctx, plain, { signature, scope: "line:trunk", class: "excused", target: null })).toThrow();
+		expect(() => setExcuse(ctx, plain, { signature, scope: "line:trunk", class: "excused", targets: null })).toThrow();
 		expect(rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 0 }]);
 	});
 
@@ -420,13 +593,33 @@ describe("what a decision may change", () => {
 		expect(rows("SELECT count(*) AS n FROM excuses")).toEqual([{ n: 1 }]);
 	});
 
+	test("a witness of one kind cannot change what another kind of decision owns", () => {
+		// A real decision's witness, captured as the suite writer receives it, cannot be used to link a test.
+		usePolicy("standard");
+		seed();
+		report({ target: { commit: "kinds0001" }, results: [{ test: { key: "a::t", file: "a" }, outcome: "pass" }] });
+		const map = open("map");
+		// The map decision links T-1; its witness is of kind `map`, so the link's decision is that one.
+		decide(map, { is: "link", pairs: [["T-1", "C-1"]] });
+		const linked = first(rows<{ linked_by: number }>("SELECT linked_by FROM tests WHERE no = 1")).linked_by;
+		expect(rows("SELECT kind FROM decisions WHERE id = ?", linked)).toEqual([{ kind: "map" }]);
+		// Every standing row cites a decision of the kind that owns it.
+		expect(
+			rows(`SELECT count(*) AS n FROM versions v JOIN decisions d ON d.id = v.decision WHERE d.kind <> 'adopt'`),
+		).toEqual([{ n: 0 }]);
+	});
+
 	test("only the decision machinery can make a witness", () => {
 		// A plain object does not type-check as a witness: the class has a private field.
 		// @ts-expect-error
 		const forged: Witness = { kind: "adopt", signers: [1], expiresAt: null };
-		expect(() => decisionOf(forged)).toThrow("not a witness");
+		expect(() => decisionOf(forged, "adopt")).toThrow("not a witness");
 		// The mint is handed out once, to the decision machinery, when it loads.
 		expect(() => claimMint()).toThrow("already held");
+		// The constructor is private to TypeScript only; at run time it refuses a call without the module's key.
+		expect(() => Reflect.construct(Witness, [1, "failure", [h.owner.id], null])).toThrow("decision machinery");
+		const made = Object.create(Witness.prototype) as Witness;
+		expect(() => decisionOf(made, "adopt")).toThrow("not a witness");
 	});
 
 	test("an expired decision stays in the chain of the one that replaces it", () => {
@@ -500,6 +693,20 @@ describe("what a caller is told", () => {
 		// Half a character sent by a client is refused at the door, whatever field it is in.
 		const refused = h.raw("propose", { edits: [{ op: "create", body: { title: "broken \ud83d" } }] });
 		expect(refused).toMatchObject({ ok: false, error: { code: "invalid" } });
+	});
+
+	test("a search inside a folder finds a match however many other folders match too", () => {
+		h.call("propose", {
+			edits: [
+				...Array.from({ length: 300 }, () => ({ op: "create", body: { title: "Needle" }, folder: "Elsewhere" })),
+				{ op: "create", body: { title: "Needle" }, folder: "Wanted" },
+			],
+		});
+		type Found = { count: number | null; items: { ref: string }[] };
+		const found = h.call<Found>("find", { folder: "Wanted", text: "Needle", limit: 1 });
+		expect(found.items.map((item) => item.ref)).toEqual(["C-301"]);
+		expect(h.call<Found>("find", { folder: "Elsewhere", text: "Needle", limit: 5 }).items).toHaveLength(5);
+		expect(h.call<Found>("find", { folder: "Wanted", text: "Absent", limit: 5 }).items).toEqual([]);
 	});
 
 	test("a cursor never skips the rest of a large change", () => {

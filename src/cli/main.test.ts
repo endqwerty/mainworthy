@@ -499,6 +499,7 @@ test("a declined case annotation is visible and its failure stays in the gate", 
 		expect(report.code).toBe(0);
 		expect(report.stdout).toContain("1 case/version claims declined; results kept without a case");
 		expect(report.stderr).toContain("C-999");
+		expect(report.stderr.trim().split("\n")).toHaveLength(1);
 		expect((await cli(["gate", "--commit", COMMIT])).code).toBe(2);
 	});
 });

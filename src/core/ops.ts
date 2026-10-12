@@ -422,7 +422,7 @@ export const GateInput = z.object({
 	commit: z.string().optional(),
 	run: z.string().optional(),
 	change: z.string().optional().describe("A change key, for example pr:482: the gate of its latest commit."),
-	env: z.string().optional(),
+	repo: z.string().optional(),
 });
 export type GateInput = z.infer<typeof GateInput>;
 

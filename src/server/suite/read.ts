@@ -208,6 +208,20 @@ export function listCases(
 				rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 				for (const row of rows) if (!found.some((f) => f.id === row.id)) found.push(row);
 			}
+			// The cut above is of every match in the project. When a folder, a tag or the archive narrows the search,
+			// matches that qualify can lie beyond it. What the cut gave is the best-ranked of them; if that does not
+			// fill the page, the rest are read with the filter applied first, newest first, so a match that exists
+			// is never reported as absent.
+			if (filtered && found.length < query.limit && (broad || ranked.length >= cut)) {
+				const rest = ctx.db.allDynamic<CaseRow>(
+					`SELECT c.* FROM cases c WHERE ${where.join(" AND ")}
+					 AND c.id IN (SELECT rowid FROM search_docs WHERE search_docs MATCH ?)
+					 ORDER BY c.rev DESC, c.id DESC LIMIT ?`,
+					[...params, match, query.limit + found.length + 1],
+				);
+				for (const row of rest) if (!found.some((f) => f.id === row.id)) found.push(row);
+				if (found.length > query.limit) broad = true;
+			}
 		}
 		// For a broad search the true number of matches is unknown by design: null says "more than shown".
 		return { items: found.slice(0, query.limit), cursor: null, count: broad ? null : found.length };

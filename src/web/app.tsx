@@ -214,7 +214,8 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 			value={{
 				project,
 				route,
-				session: info,
+				// A screen asks what the caller may do in the project it shows, not on the instance.
+				session: { ...info, can: info.projects.find((entry) => entry.key === project)?.can ?? info.can },
 				setStatus,
 				openPalette: (options = {}) => {
 					setHelp(false);

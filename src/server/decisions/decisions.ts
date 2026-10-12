@@ -28,6 +28,7 @@ import {
 	type Blocker,
 	findRun,
 	isLatestInScope,
+	passesAny,
 	type RunRow,
 	retally,
 	runById,
@@ -142,11 +143,17 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 	}
 	if (latest.state === "decided" && latest.decision !== null) {
 		const decision = decisionById(ctx.db, latest.decision);
-		if (decision && stillHolds(decision, { hash, target: r.target, facts: r.facts, now: ctx.now })) {
+		const occurrence = { hash, target: r.target, facts: r.facts, now: ctx.now };
+		if (decision && stillHolds(decision, occurrence)) {
 			noteCarried(ctx, latest, r.refs);
 			return { s: "carried", question: latest, decision };
 		}
-		if (decision) HANDLERS[latest.kind].revert(ctx, latest, decision);
+		// A decision that covers certain targets still stands on those when the cause turns up on another one: the
+		// new occurrence is asked about, and what was decided where it was decided is left as it is. Any other way
+		// of no longer holding (the evidence changed, the time ran out, a fact is gone) withdraws its standing.
+		if (decision && !stillHolds(decision, occurrence, { anyTarget: true })) {
+			HANDLERS[latest.kind].revert(ctx, latest, decision);
+		}
 	}
 	return open(ctx, r, fingerprint, hash, latest.epoch + 1, latest.id);
 }
@@ -204,17 +211,21 @@ function settleByRule(ctx: Ctx, question: QuestionRow, clause: string, answer: u
 	}
 }
 
-/** Does a decision still cover a new occurrence? It stops as soon as any one of its hold terms ends. */
+/**
+ * Does a decision still cover a new occurrence? It stops as soon as any one of its hold terms ends. With
+ * `anyTarget` the target term is left out: the answer is whether it would hold on the targets it does cover.
+ */
 export function stillHolds(
 	decision: Pick<DecisionRow, "holds">,
 	occurrence: { hash: string; target: number | undefined; facts: readonly string[]; now: number },
+	options: { anyTarget?: boolean } = {},
 ): boolean {
 	return json<HoldTerm[]>(decision.holds).every((term) => {
 		switch (term.until) {
 			case "basis-changes":
 				return term.basis === occurrence.hash;
 			case "this-target":
-				return term.target === occurrence.target;
+				return options.anyTarget || (occurrence.target !== undefined && term.targets.includes(occurrence.target));
 			case "time":
 				return occurrence.now < term.at;
 			case "fact-gone":
@@ -364,8 +375,49 @@ function settle(
 	);
 	const effects = handler.effect(ctx, witness, question, given, { raise });
 	setDecisionEffects(ctx, decision.id, effects);
-	refold(ctx, [...runsAbout(ctx, question), ...(supersedes !== null ? runsDependingOn(ctx.db, supersedes) : [])]);
+	const about = runsAbout(ctx, question);
+	if (Array.isArray(effects.reask) && effects.reask.length > 0) askAgain(ctx, question, effects.reask as number[]);
+	refold(ctx, [...about, ...(supersedes !== null ? runsDependingOn(ctx.db, supersedes) : [])]);
 	return { decision: { ...decision, effects: JSON.stringify(effects) }, effects };
+}
+
+/**
+ * Opens the question again for targets its decision did not cover. The new question follows the decided one
+ * (`prior`), shows the same evidence and holds the same runs, so the person who answered for one environment is
+ * asked about the other with their first answer in view.
+ */
+function askAgain(ctx: Ctx, question: QuestionRow, targets: readonly number[]): void {
+	const latest = targets.at(-1);
+	if (latest === undefined) return;
+	const {
+		facts,
+		targetId: _decided,
+		...shown
+	} = json<Record<string, unknown> & { facts?: string[] }>(question.evidence);
+	const runs = json<number[]>(question.blocks).flatMap((id) => {
+		const run = runById(ctx.db, id);
+		return run ? [run] : [];
+	});
+	open(
+		ctx,
+		{
+			kind: question.kind,
+			key: "",
+			subject: json<Record<string, unknown>>(question.subject),
+			title: question.title,
+			producer: question.producer,
+			evidence: { ...shown, targets: [...targets] },
+			material: null,
+			facts: facts ?? [],
+			refs: refsOf(ctx.db, question.id),
+			runs,
+			target: latest,
+		},
+		question.fingerprint,
+		question.evidence_hash,
+		question.epoch + 1,
+		question.id,
+	);
 }
 
 /**
@@ -457,19 +509,29 @@ function blockersOf(ctx: Ctx, run: RunRow): Blocker[] {
 }
 
 /**
- * A failure question about a cause that the newest evidence in its scope no longer shows is closed as dissolved:
- * nobody should be asked why something failed after it stopped failing. The question and its history remain.
+ * A failure question about a cause that stopped failing is closed as dissolved: nobody should be asked why
+ * something failed after it passed. The question and its history remain.
+ *
+ * Absence is not proof. In a change's or trunk's scope the question is dissolved only when the newest commit's run
+ * shows one of the question's own tests passing: a newer commit whose failing job has not reported yet, or a
+ * report that holds only an agent's results, says nothing about it. A planned run that shares a change's scope
+ * never dissolves that scope's questions; a run that is its own scope does, when its slots no longer show the cause.
  */
 function dissolveStale(ctx: Ctx, run: RunRow, failing: ReadonlySet<number>): void {
+	const scope = scopeOfRun(ctx.db, run);
+	const own = run.origin === "change" || scope === `run:${run.id}`;
 	// Only the newest run of a scope speaks for it: a late report for an older commit must not close a question
 	// that the current commit still raises.
-	if (!isLatestInScope(ctx.db, run)) return;
-	const scope = scopeOfRun(ctx.db, run);
+	if (!own || !isLatestInScope(ctx.db, run)) return;
 	for (const open of openQuestionsOn(ctx.db, ctx.project.id, `scope:${scope}`)) {
 		const question = questionById(ctx.db, open.id);
 		if (question?.kind !== "failure") continue;
 		const subject = json<{ signature: number; scope: string }>(question.subject);
 		if (subject.scope !== scope || failing.has(subject.signature)) continue;
+		if (run.origin === "change") {
+			const tests = (json<{ tests?: { id: number }[] }>(question.evidence).tests ?? []).map((test) => test.id);
+			if (!passesAny(ctx.db, run.id, tests)) continue;
+		}
 		setQuestionState(ctx, question, "dissolved", null);
 	}
 }

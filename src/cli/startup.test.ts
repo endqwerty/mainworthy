@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { CLI_ENTRY, withInstance } from "./test-support.ts";
+import { CLI_ENTRY, COMMIT, withInstance } from "./test-support.ts";
 
 for (const options of [
 	{ argv: [], mode: "local", signal: "SIGTERM" },
@@ -155,5 +155,51 @@ test("the source entry runs directly through its shebang", async () => {
 		});
 		expect(await child.exited).toBe(0);
 		expect(await new Response(child.stdout).text()).toBe(`${instance.url}\n`);
+	});
+});
+
+test("closing a gate's stdout preserves pending, blocked, failed and passed exits", async () => {
+	await withInstance(async ({ directory, instance, client }) => {
+		const pipeGate = async (commit: string): Promise<number> => {
+			const child = Bun.spawn(
+				[
+					"bash",
+					"-o",
+					"pipefail",
+					"-c",
+					'"$1" "$2" gate --commit "$3" | head -0',
+					"pipe-test",
+					process.execPath,
+					CLI_ENTRY,
+					commit,
+				],
+				{
+					cwd: directory,
+					env: { PATH: process.env.PATH ?? "", HOME: directory, CASEBOOK_URL: instance.url },
+					stdout: "pipe",
+					stderr: "pipe",
+					stdin: "ignore",
+				},
+			);
+			const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+			expect(stderr).toBe("");
+			return code;
+		};
+		expect(await pipeGate(COMMIT)).toBe(3);
+		await client.call("report", {
+			target: { commit: COMMIT },
+			results: [{ test: { key: "failing" }, outcome: "fail", failure: { message: "failed" } }],
+		});
+		expect(await pipeGate(COMMIT)).toBe(2);
+		const question = (await client.call("inbox", { kind: "failure" })).items[0];
+		if (!question) throw new Error("no failure question");
+		await client.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "defect" } });
+		expect(await pipeGate(COMMIT)).toBe(1);
+		const passed = "abcdef0123456789012345678901234567890123456";
+		await client.call("report", {
+			target: { commit: passed },
+			results: [{ test: { key: "passing" }, outcome: "pass" }],
+		});
+		expect(await pipeGate(passed)).toBe(0);
 	});
 });

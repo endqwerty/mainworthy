@@ -151,13 +151,21 @@ export async function handleOp(
 	return replyResponse(reply);
 }
 
-/** Who the caller is and which projects it may read. A project it holds no grant on is not named. */
+/** The projects a session may read, each with what the caller may do there. One it holds no grant on is not named. */
+export function readableProjects(app: App, session: Session) {
+	return app.reader.snapshot(() =>
+		listProjects(app.reader).flatMap((project) => {
+			const id = findProject(app.reader, project.key)?.id;
+			const can = id === undefined ? [] : (session.actor(id)?.can ?? []);
+			return can.includes("read") ? [{ ...project, can }] : [];
+		}),
+	);
+}
+
+/** Who the caller is and which projects it may read. */
 function sessionInfo(app: App, session: Session): Response {
 	const actor = session.actor(0);
 	if (!actor) return unauthenticated();
-	const projects = app.reader.snapshot(() =>
-		listProjects(app.reader).filter((project) => mayRead(app, session, project.key) === "yes"),
-	);
 	return jsonResponse({
 		ok: true,
 		result: {
@@ -167,7 +175,7 @@ function sessionInfo(app: App, session: Session): Response {
 			mode: app.config.mode,
 			via: session.via,
 			version: VERSION,
-			projects,
+			projects: readableProjects(app, session),
 		},
 	});
 }

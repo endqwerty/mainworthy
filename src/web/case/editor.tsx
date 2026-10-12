@@ -1,13 +1,24 @@
 import { type KeyboardEvent, useLayoutEffect, useRef } from "react";
 import { newStepId } from "../../core/ids.ts";
 import { parseOutline, splitExpected } from "../../core/outline.ts";
-import type { Draft } from "../lib/drafts.ts";
+import { type Draft, knownStepIds } from "../lib/drafts.ts";
 import { useBindings } from "../lib/keys.ts";
+import { readRoute } from "../lib/router.ts";
 import { KeyCap } from "../ui/index.tsx";
 
 export type DraftChange = (draft: Draft, focus?: boolean) => void;
 function freshStep(draft: Draft) {
-	return { id: newStepId(new Set(draft.body.steps.map((step) => step.id))), action: "", expected: null };
+	return {
+		id: newStepId(
+			knownStepIds({
+				project: readRoute().project,
+				id: draft.id,
+				ids: [...draft.body.steps, ...draft.original.steps].map((step) => step.id),
+			}),
+		),
+		action: "",
+		expected: null,
+	};
 }
 export function cleanTitle(draft: Draft): Draft {
 	const tags = new Set(draft.tags);
@@ -42,7 +53,13 @@ export function firstStep({ draft, change }: { draft: Draft; change: DraftChange
 }
 export function pasteCapture({ draft, text, change }: { draft: Draft; text: string; change: DraftChange }): void {
 	const outline = parseOutline(text);
-	const taken = new Set(draft.body.steps.map((step) => step.id));
+	const taken = new Set(
+		knownStepIds({
+			project: readRoute().project,
+			id: draft.id,
+			ids: [...draft.body.steps, ...draft.original.steps].map((step) => step.id),
+		}),
+	);
 	const steps = outline.steps.map((step) => {
 		const id = newStepId(taken);
 		taken.add(id);
@@ -288,7 +305,13 @@ export function BodyEditor({
 		let parsed = outline.steps;
 		if (outline.title && (draft.ref !== null || draft.body.title.trim().length > 0))
 			parsed = [splitExpected(outline.title), ...parsed];
-		const taken = new Set(draft.body.steps.map((step) => step.id));
+		const taken = new Set(
+			knownStepIds({
+				project: readRoute().project,
+				id: draft.id,
+				ids: [...draft.body.steps, ...draft.original.steps].map((step) => step.id),
+			}),
+		);
 		const steps = parsed.map((step) => {
 			const id = newStepId(taken);
 			taken.add(id);

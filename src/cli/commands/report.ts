@@ -56,10 +56,6 @@ export function printReceipt(input: {
 		line(`  ${receipt.declined.length} case/version claims declined; results kept without a case`);
 		for (const declined of receipt.declined) warning(`result ${declined.index + 1}: ${declined.reason}`);
 	}
-	if (receipt.declined.length > 0) {
-		line(`  ${receipt.declined.length} results recorded with no case`);
-		for (const declined of receipt.declined) warning(`result ${declined.index + 1}: ${declined.reason}`);
-	}
 	const gate = receipt.gate;
 	const reason = gate?.reason.replace(new RegExp(`^${gate.verdict}:\\s*`), "");
 	line(

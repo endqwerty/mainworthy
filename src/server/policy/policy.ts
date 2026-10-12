@@ -94,7 +94,7 @@ export function writePolicy(ctx: Ctx, witness: Witness, policy: Policy): number 
 		clauses: JSON.stringify(policy.clauses),
 		settings: JSON.stringify(policy.settings),
 		actor: witness.signers[0] ?? ctx.actor.id,
-		decision: decisionOf(witness),
+		decision: decisionOf(witness, "adopt"),
 		at: ctx.now,
 		seq: ctx.seq,
 	});

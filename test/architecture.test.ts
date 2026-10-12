@@ -47,7 +47,7 @@ describe("the module map", () => {
 				/^(?:export )?function\*? (\w+)\([^)]*\bwitness: Witness\b[^)]*\)[^{]*\{\n([\s\S]*?)^\}/gm,
 			)) {
 				const [, name, body] = match;
-				if (!/\bdecisionOf\(witness\)|\(ctx, witness\b/.test(body ?? ""))
+				if (!/\bdecisionOf\(witness, "\w+"\)|\(ctx, witness\b/.test(body ?? ""))
 					offenders.push(`${file}: ${name} never checks its witness`);
 			}
 		}

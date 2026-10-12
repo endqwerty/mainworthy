@@ -388,16 +388,18 @@ CREATE TABLE reviews (
 ) STRICT;
 
 -- STANDING (failure): this cause is answered in this scope ("line:trunk", "change:<id>", "run:<id>").
+-- `target` is 0 for an answer that covers every target of the scope, or the id of the one target it covers (an
+-- infrastructure failure is excused where it was seen and nowhere else). The newest decision that covers a
+-- target is the one that counts there.
 CREATE TABLE excuses (
 	project INTEGER NOT NULL,
 	signature INTEGER NOT NULL REFERENCES signatures (id),
 	scope TEXT NOT NULL,
+	target INTEGER NOT NULL DEFAULT 0,
 	decision INTEGER NOT NULL REFERENCES decisions (id),
 	class TEXT NOT NULL CHECK (class IN ('attributed', 'excused')),
 	expires_at INTEGER,
-	-- set when the decision holds for one target only (an infrastructure failure): other targets stay unexplained
-	target INTEGER REFERENCES targets (id),
-	PRIMARY KEY (project, signature, scope)
+	PRIMARY KEY (project, signature, scope, target)
 ) STRICT, WITHOUT ROWID;
 
 -- ── Decisions: the queue, the ledger and the policy ─────────────────────────────────────────────────────────
@@ -535,7 +537,12 @@ CREATE TABLE run_tests (
 	signature INTEGER,
 	attempt INTEGER NOT NULL,
 	flipped INTEGER NOT NULL DEFAULT 0,
-	PRIMARY KEY (run, test)
+	-- who reported it and where: "<target>:<job>:<actor>". A test has one row per lane, so one job's pass (or
+	-- another producer's) never replaces a different job's failure; only a newer attempt in the same lane does.
+	lane TEXT NOT NULL,
+	-- the target of the lane (a commit in one environment): an excuse held for one target counts here only
+	target INTEGER NOT NULL REFERENCES targets (id),
+	PRIMARY KEY (run, test, lane)
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX run_tests_outcome ON run_tests (run, outcome, signature);
 
@@ -553,6 +560,8 @@ CREATE TABLE slots (
 	agg TEXT NOT NULL DEFAULT '{}',
 	state TEXT NOT NULL DEFAULT 'missing' CHECK (state IN ('missing', 'satisfied', 'failing', 'disputed', 'waived', 'skipped')),
 	signature INTEGER,
+	-- every cause currently failing in the slot, as [signature id, target id] pairs; `signature` is the first
+	causes TEXT NOT NULL DEFAULT '[]',
 	waiver INTEGER,
 	rev INTEGER NOT NULL,
 	UNIQUE (run, case_id, obligation)

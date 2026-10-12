@@ -63,7 +63,8 @@ export type AnswerRow = {
 /** When a decision stops carrying forward. It ends when any one term ends. */
 export type HoldTerm =
 	| { until: "basis-changes"; basis: string }
-	| { until: "this-target"; target: number }
+	/** Holds on the targets the question had seen when it was answered, and on no other. */
+	| { until: "this-target"; targets: number[] }
 	| { until: "time"; at: number }
 	| { until: "fact-gone"; fact: string };
 

@@ -17,7 +17,7 @@ export function warning(text: string): void {
 /** A pipe consumer may finish before us. Closing stdout is quiet; other output errors are command failures. */
 export function installOutputHandlers(): void {
 	process.stdout.on("error", (error: NodeJS.ErrnoException) => {
-		if (error.code === "EPIPE") process.exit(typeof process.exitCode === "number" ? process.exitCode : 0);
+		if (error.code === "EPIPE") return;
 		printError(error);
 		process.exit(4);
 	});

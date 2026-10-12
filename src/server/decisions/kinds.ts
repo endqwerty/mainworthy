@@ -10,6 +10,7 @@ import {
 	dropExcuse,
 	findTest,
 	linkTest,
+	mustTarget,
 	restoreLink,
 	setExcuse,
 	testById,
@@ -291,7 +292,7 @@ const failureHandler: Handler<"failure"> = {
 			return { corrected };
 		}
 		const klass = failureClass(answer);
-		// A decision that holds for one target excuses that target only.
+		// A decision that holds on certain targets excuses those and no other.
 		const policy = currentPolicy(ctx.db, ctx.project.id);
 		const here = failureHandler
 			.holds({ question, answer, now: ctx.now, policy })
@@ -300,13 +301,25 @@ const failureHandler: Handler<"failure"> = {
 			signature: subject.signature,
 			scope: subject.scope,
 			class: klass,
-			target: here?.until === "this-target" ? here.target : null,
+			targets: here?.until === "this-target" ? here.targets : null,
 		});
+		// The answer covers the build it was given for. Where the question had also seen this cause in another
+		// environment of the same commit, that one is not covered: it is asked about again at once, so the commit's
+		// gate is never left blocked by a failure nobody is being asked about.
+		const covered = here?.until === "this-target" ? here.targets : null;
+		const [decidedOn] = covered ?? [];
+		const reask =
+			decidedOn === undefined
+				? []
+				: (json<{ targets?: number[] }>(question.evidence).targets ?? []).filter(
+						(other) => other !== decidedOn && mustTarget(ctx.db, other).what === mustTarget(ctx.db, decidedOn).what,
+					);
 		return {
 			class: klass,
 			signature: subject.signature,
 			scope: subject.scope,
 			...(answer.is === "defect" && answer.ref ? { defect: answer.ref } : {}),
+			...(reask.length > 0 ? { reask } : {}),
 		};
 	},
 	revert(ctx, question, decision) {
@@ -317,13 +330,15 @@ const failureHandler: Handler<"failure"> = {
 	},
 	holds({ question, answer, now, policy }) {
 		const basis = untilBasisChanges(question);
-		const target = json<{ targetId?: number }>(question.evidence).targetId;
+		// The target of the question's latest evidence: the build the person answering was looking at.
+		const latest = json<{ targetId?: number }>(question.evidence).targetId;
+		const targets = latest !== undefined ? [latest] : [];
 		switch (answer.is) {
 			case "flaky":
 				return [...basis, { until: "time", at: now + policy.settings.holds.flakyDays * DAY }];
 			case "infra":
-				return policy.settings.holds.infraThisTargetOnly && target !== undefined
-					? [{ until: "this-target", target }]
+				return policy.settings.holds.infraThisTargetOnly && targets.length > 0
+					? [{ until: "this-target", targets }]
 					: basis;
 			case "inherited":
 				return [...basis, { until: "fact-gone", fact: "hint:fails-on-base" }];

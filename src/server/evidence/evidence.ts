@@ -298,10 +298,12 @@ const Q = {
 		"SELECT * FROM results WHERE batch = $batch ORDER BY ord LIMIT $limit",
 	),
 	excuse: sql<
-		{ project: number; signature: number; scope: string },
-		{ decision: number; class: "attributed" | "excused"; expires_at: number | null; target: number | null }
+		{ project: number; signature: number; scope: string; target: number },
+		{ decision: number; class: "attributed" | "excused"; expires_at: number | null }
 	>(
-		"SELECT decision, class, expires_at, target FROM excuses WHERE project = $project AND signature = $signature AND scope = $scope",
+		`SELECT decision, class, expires_at FROM excuses
+		 WHERE project = $project AND signature = $signature AND scope = $scope AND target IN ($target, 0)
+		 ORDER BY decision DESC LIMIT 1`,
 	),
 	setExcuse: sql<{
 		project: number;
@@ -310,22 +312,21 @@ const Q = {
 		decision: number;
 		class: string;
 		expires: number | null;
-		target: number | null;
+		target: number;
 	}>(
-		`INSERT INTO excuses (project, signature, scope, decision, class, expires_at, target)
-		 VALUES ($project, $signature, $scope, $decision, $class, $expires, $target)
-		 ON CONFLICT (project, signature, scope)
-		 DO UPDATE SET decision = excluded.decision, class = excluded.class, expires_at = excluded.expires_at,
-		   target = excluded.target`,
+		`INSERT INTO excuses (project, signature, scope, target, decision, class, expires_at)
+		 VALUES ($project, $signature, $scope, $target, $decision, $class, $expires)
+		 ON CONFLICT (project, signature, scope, target)
+		 DO UPDATE SET decision = excluded.decision, class = excluded.class, expires_at = excluded.expires_at`,
 	),
 	firstSeen: sql<{ project: number; what: string }, { seq: number | null }>(
 		"SELECT min(first_seq) AS seq FROM targets WHERE project = $project AND what = $what",
 	),
-	targetByCommit: sql<{ project: number; commit: string }, TargetRow>(
-		"SELECT * FROM targets WHERE project = $project AND commit_sha = $commit ORDER BY id LIMIT 1",
+	targetsByCommit: sql<{ project: number; commit: string }, TargetRow>(
+		"SELECT * FROM targets WHERE project = $project AND commit_sha = $commit ORDER BY id LIMIT 200",
 	),
-	targetByCommitPrefix: sql<{ project: number; low: string; high: string }, TargetRow>(
-		"SELECT * FROM targets WHERE project = $project AND commit_sha >= $low AND commit_sha < $high ORDER BY id LIMIT 2",
+	targetsByCommitPrefix: sql<{ project: number; low: string; high: string }, TargetRow>(
+		"SELECT * FROM targets WHERE project = $project AND commit_sha >= $low AND commit_sha < $high ORDER BY id LIMIT 200",
 	),
 	caseIdsOfFile: sql<{ project: number; file: string }, { case_id: number | null }>(
 		"SELECT case_id FROM tests WHERE project = $project AND file = $file LIMIT 500",
@@ -538,6 +539,12 @@ export function accept(
 	},
 ): { batch: BatchRow; fresh: boolean } {
 	const { report } = input;
+	const reserved = report.results.find((result) => "key" in result.test && RESERVED_KEY.test(result.test.key));
+	if (reserved && "key" in reserved.test) {
+		throw invalid(
+			`the test key "${reserved.test.key}" is reserved for the manual test of a case; name the case with {"case": "C-n"} or use another key`,
+		);
+	}
 	const method = batchMethod(ctx.actor.kind, report.results);
 	const job = report.job ?? "";
 	const attempt = report.attempt ?? 1;
@@ -928,16 +935,37 @@ export const flipCount = (db: Db, project: number, test: number): number =>
 	db.get(Q.flipCount, { project, test })?.n ?? 0;
 
 /**
- * The target for a commit, by its full hash or an unambiguous prefix of at least seven characters. Null when
- * nothing was reported for it, or when the prefix matches more than one commit.
+ * Every target reported for a commit, named by its full hash or by a prefix of at least seven characters that
+ * matches one commit only: one per repository and environment it was reported for. Empty when nothing was
+ * reported for it or the prefix is ambiguous.
  */
-export function targetByCommit(db: Db, project: number, commit: string): TargetRow | null {
-	const exact = db.get(Q.targetByCommit, { project, commit });
-	if (exact) return exact;
-	if (commit.length < 7 || !/^[0-9a-f]+$/i.test(commit)) return null;
-	const rows = db.all(Q.targetByCommitPrefix, { project, low: commit, high: `${commit}\uffff` });
-	return rows.length === 1 ? (rows[0] ?? null) : null;
+export function targetsWithCommit(db: Db, project: number, commit: string): TargetRow[] {
+	const exact = db.all(Q.targetsByCommit, { project, commit });
+	if (exact.length > 0) return exact;
+	if (commit.length < 7 || !/^[0-9a-f]+$/i.test(commit)) return [];
+	const rows = db.all(Q.targetsByCommitPrefix, { project, low: commit, high: `${commit}\uffff` });
+	return new Set(rows.map((row) => row.commit_sha)).size === 1 ? rows : [];
 }
+
+/**
+ * The target a caller means by a commit. The same commit can exist in two repositories (a fork): with `repo` the
+ * answer is that repository's; without it, a commit reported for more than one repository is refused, never
+ * guessed. Null when nothing was reported for it.
+ */
+export function targetByCommit(db: Db, project: number, commit: string, repo?: string | null): TargetRow | null {
+	const all = targetsWithCommit(db, project, commit);
+	const rows = repo === undefined ? all : all.filter((row) => row.repo === (repo ?? null));
+	const repos = [...new Set(rows.map((row) => row.repo ?? "(no repository)"))];
+	if (repos.length > 1) {
+		throw invalid(
+			`commit ${commit} was reported for ${repos.length} repositories (${repos.join(", ")}): say which with \`repo\``,
+		);
+	}
+	return rows[0] ?? null;
+}
+
+/** Keys of this shape name the manual test of a case. An automated test cannot take one. */
+const RESERVED_KEY = /^case:\d+$/i;
 
 /** Every result recorded for a case on any of the given targets, oldest first: what a new run can count at once. */
 export function resultsOfCaseOnTargets(db: Db, caseId: number, targets: readonly number[]): ResultRow[] {
@@ -1012,7 +1040,7 @@ export function failsOnBase(db: Db, target: TargetRow, test: number, signature: 
 
 /** Links a test to a case, or unlinks it with null. Standing: only by a `map` decision, which the link records. */
 export function linkTest(ctx: Ctx, witness: Witness, test: TestRow, caseId: number | null): void {
-	ctx.db.run(Q.linkTest, { id: test.id, caseId, by: decisionOf(witness) });
+	ctx.db.run(Q.linkTest, { id: test.id, caseId, by: decisionOf(witness, "map") });
 	ctx.touched.add(testRef(test));
 }
 
@@ -1034,32 +1062,40 @@ export function restoreLink(
 	return true;
 }
 
-export const excuseFor = (db: Db, project: number, signature: number, scope: string) =>
-	db.get(Q.excuse, { project, signature, scope });
+/**
+ * How a cause seen on a target is answered in a scope, if it is: the newest decision that covers that target,
+ * whether it covers every target of the scope or that one only.
+ */
+export const excuseFor = (db: Db, project: number, signature: number, scope: string, target: number) =>
+	db.get(Q.excuse, { project, signature, scope, target });
 
 /**
- * Records how a cause is answered in a scope. Standing: only by a `failure` decision. `target` limits it to one
- * target, for a decision that holds there only: the same cause on another commit of the scope stays unexplained.
+ * Records how a cause is answered in a scope. Standing: only by a `failure` decision. `targets` limits it to the
+ * targets named, for a decision that holds there only: the same cause on another commit of the scope, or in
+ * another environment of the same commit, stays unexplained. Null covers every target of the scope.
  */
 export function setExcuse(
 	ctx: Ctx,
 	witness: Witness,
-	input: { signature: number; scope: string; class: "attributed" | "excused"; target: number | null },
+	input: { signature: number; scope: string; class: "attributed" | "excused"; targets: readonly number[] | null },
 ): void {
-	ctx.db.run(Q.setExcuse, {
-		project: ctx.project.id,
-		signature: input.signature,
-		scope: input.scope,
-		decision: decisionOf(witness),
-		class: input.class,
-		expires: witness.expiresAt,
-		target: input.target,
-	});
+	const decision = decisionOf(witness, "failure");
+	for (const target of input.targets ?? [0]) {
+		ctx.db.run(Q.setExcuse, {
+			project: ctx.project.id,
+			signature: input.signature,
+			scope: input.scope,
+			decision,
+			class: input.class,
+			expires: witness.expiresAt,
+			target,
+		});
+	}
 }
 
 /**
- * Removes the excuse `decision` made, when that decision is withdrawn or stops holding. An excuse a newer decision
- * has since made for the same cause and scope is left alone.
+ * Removes the excuses `decision` made, when that decision is withdrawn or stops holding. An excuse another
+ * decision made for the same cause and scope is left alone.
  */
 export function dropExcuse(ctx: Ctx, signature: number, scope: string, decision: number): void {
 	ctx.db.run(Q.dropExcuse, { project: ctx.project.id, signature, scope, decision });

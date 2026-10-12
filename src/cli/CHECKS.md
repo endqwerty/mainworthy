@@ -73,6 +73,10 @@ Implementation notes for integration:
   login page cannot replace an existing backup. Flags beside a JSON payload are
   rejected instead of discarded. A closed stdout is quiet, and the source entry
   is executable through its shebang.
+- EPIPE is swallowed without exiting early. A gate still returns 0/1/2/3 after
+  `head -0` closes its pipe. The regression first returned 0 for a pending gate
+  and now checks every verdict with a closed stdout. Declined warnings appear
+  once, and per-project session capabilities are validated and preserved.
 - The updated report contract's `declined` case/version claims stay visible in
   the receipt; their results remain recorded and failing outcomes still block.
   Older cached receipts default that new field to an empty list. JSON payloads
@@ -91,14 +95,14 @@ Implementation notes for integration:
   worker. The coordinating agent owns those files and final worktree release
   while other workers are using the shared dependency installation.
 
-The full CLI/archive suite contains 46 independent checks. A startup check can
+The full CLI/archive suite contains 47 independent checks. A startup check can
 fail while a web module is still being authored in this shared checkout. Do not
 replace or weaken the UI check to hide that integration failure.
 
 Verification rerun after the first independent review:
 
 ```text
-bun test src/cli src/surfaces/archive.test.ts: 40 pass, 0 fail before the four final regressions
+bun test src/cli src/surfaces/archive.test.ts: 47 pass, 0 fail
 bunx tsc --noEmit: exit 0
 bunx biome check src/cli src/surfaces/archive.ts src/surfaces/archive.test.ts: clean
 ```
@@ -108,7 +112,9 @@ archive permission, rollback, nonfresh-target and cancellation checks, and
 found the occupied-port blocker and smaller CLI issues. Those findings have
 regressions and fixes. The second round passed the 40-check snapshot and proved
 a valid 720 MB plain/gzip HTTP import and identical re-exported rows. Its three
-new nonblocking findings have fixes and additional regression checks. A
-fresh verdict on those last changes is pending.
+new nonblocking findings have fixes and additional regression checks.
+The third round caught the gate-pipe exit race and a duplicated declined
+warning. Both have failing-before regressions and fixes; one final focused
+verdict is pending.
 Use `LC_ALL=C sort` when hashing the file list; different provider locales
 sort CHECKS.md differently and otherwise produce different manifest digests.

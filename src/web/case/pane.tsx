@@ -97,7 +97,7 @@ export function CasePane({
 	conflict: ConflictState | null;
 	onResolved: () => void;
 }) {
-	const { project, setStatus, overlayOpen } = useApp();
+	const { project, session, setStatus, overlayOpen } = useApp();
 	const ref = draft?.ref ?? view?.ref ?? null;
 	const timelineInput = { ref: ref ?? "C-0", limit: 100 };
 	const timeline = useQueryOp({ project, op: "timeline", input: timelineInput, enabled: ref !== null });
@@ -157,6 +157,7 @@ export function CasePane({
 	const body = draft?.body ?? (view ? bodyOf(view) : null);
 	if (!body) return null;
 	const version = draft?.base ?? view?.version ?? 0;
+	const versionEntry = entries.find((entry) => entry.t === "version" && entry.version === version);
 	return (
 		<section className="pane" id="detail">
 			<div className="pane-scroll">
@@ -187,8 +188,10 @@ export function CasePane({
 								</>
 							) : draft?.dirty || draft?.ref === null ? (
 								"Draft, saved on this device"
+							) : versionEntry ? (
+								`Version ${version}, by ${versionEntry.by === session.actor ? "you" : versionEntry.by}, ${age(versionEntry.at)}`
 							) : (
-								`Version ${version}, by ${view?.updated.by ?? "you"}, ${view ? age(view.updated.at) : "just now"}`
+								`Version ${version}, current`
 							)}
 						</span>
 					</div>

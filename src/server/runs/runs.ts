@@ -25,6 +25,7 @@ import {
 	type BatchRow,
 	changeById,
 	changeByKey,
+	codeWhat,
 	excuseFor,
 	processedJobs,
 	resultById,
@@ -37,6 +38,7 @@ import {
 	type TestRow,
 	targetByCommit,
 	targetsOfCommit,
+	targetsWithCommit,
 } from "../evidence/evidence.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
@@ -78,7 +80,10 @@ export type SlotRow = {
 	rank: number;
 	agg: string;
 	state: SlotState;
+	/** The first cause's signature, kept as a column for display. */
 	signature: number | null;
+	/** Every cause currently failing in the slot, as a JSON list of [signature id, target id] pairs. */
+	causes: string;
 	waiver: number | null;
 	rev: number;
 };
@@ -133,16 +138,18 @@ const Q = {
 		signature: number | null;
 		attempt: number;
 		flipped: number;
+		lane: string;
+		target: number;
 	}>(
-		`INSERT INTO run_tests (run, test, result, outcome, signature, attempt, flipped)
-		 VALUES ($run, $test, $result, $outcome, $signature, $attempt, $flipped)
-		 ON CONFLICT (run, test) DO UPDATE SET result = excluded.result, outcome = excluded.outcome, signature = excluded.signature,
+		`INSERT INTO run_tests (run, test, result, outcome, signature, attempt, flipped, lane, target)
+		 VALUES ($run, $test, $result, $outcome, $signature, $attempt, $flipped, $lane, $target)
+		 ON CONFLICT (run, test, lane) DO UPDATE SET result = excluded.result, outcome = excluded.outcome, signature = excluded.signature,
 		   attempt = excluded.attempt, flipped = max(run_tests.flipped, excluded.flipped)
 		 WHERE excluded.attempt >= run_tests.attempt
 		   AND NOT (excluded.outcome IN ('skip', 'blocked') AND run_tests.outcome IN ('pass', 'fail', 'error'))`,
 	),
-	runTestGroups: sql<{ run: number }, { outcome: string; signature: number | null; n: number }>(
-		"SELECT outcome, signature, count(*) AS n FROM run_tests WHERE run = $run GROUP BY outcome, signature",
+	runTestGroups: sql<{ run: number }, { outcome: string; signature: number | null; target: number; n: number }>(
+		"SELECT outcome, signature, target, count(*) AS n FROM run_tests WHERE run = $run GROUP BY outcome, signature, target",
 	),
 	runTests: sql<
 		{ run: number; outcome: string; limit: number },
@@ -177,15 +184,25 @@ const Q = {
 		"SELECT * FROM slots WHERE run = $run AND rank > $after ORDER BY rank LIMIT $limit",
 	),
 	slotById: sql<{ id: number }, SlotRow>("SELECT * FROM slots WHERE id = $id"),
-	slotGroups: sql<{ run: number }, { state: SlotState; signature: number | null; n: number }>(
-		"SELECT state, signature, count(*) AS n FROM slots WHERE run = $run GROUP BY state, signature",
+	slotGroups: sql<{ run: number }, { state: SlotState; n: number }>(
+		"SELECT state, count(*) AS n FROM slots WHERE run = $run AND state NOT IN ('failing', 'disputed') GROUP BY state",
+	),
+	failingSlots: sql<{ run: number }, { id: number; state: SlotState; causes: string }>(
+		"SELECT id, state, causes FROM slots WHERE run = $run AND state IN ('failing', 'disputed')",
 	),
 	slotCount: sql<{ run: number }, { n: number }>("SELECT count(*) AS n FROM slots WHERE run = $run"),
 	pinned: sql<{ run: number }, { case_id: number; version: number }>(
 		"SELECT case_id, version FROM slots WHERE run = $run",
 	),
-	updateSlot: sql<{ id: number; agg: string; state: string; signature: number | null; rev: number }>(
-		"UPDATE slots SET agg = $agg, state = $state, signature = $signature, rev = $rev WHERE id = $id",
+	updateSlot: sql<{
+		id: number;
+		agg: string;
+		state: string;
+		signature: number | null;
+		causes: string;
+		rev: number;
+	}>(
+		"UPDATE slots SET agg = $agg, state = $state, signature = $signature, causes = $causes, rev = $rev WHERE id = $id",
 	),
 	admit: sql<{ slot: number; result: number; run: number; admitted: string }>(
 		"INSERT OR IGNORE INTO slot_results (slot, result, run, admitted) VALUES ($slot, $result, $run, $admitted)",
@@ -204,7 +221,8 @@ const Q = {
 		"SELECT max(id) AS id FROM runs WHERE project = $project AND origin = 'change' AND change IS $change",
 	),
 	slotsBySignature: sql<{ run: number; signature: number }, SlotRow>(
-		"SELECT * FROM slots WHERE run = $run AND signature = $signature",
+		`SELECT * FROM slots WHERE run = $run AND state IN ('failing', 'disputed')
+		 AND EXISTS (SELECT 1 FROM json_each(slots.causes) WHERE json_extract(value, '$[0]') = $signature)`,
 	),
 	clearDepends: sql<{ run: number }>("DELETE FROM depends_on WHERE run = $run"),
 	depend: sql<{ run: number; decision: number; expires: number | null }>(
@@ -244,6 +262,7 @@ export type Fill = {
 	seq: number;
 	ord: number;
 	signature: number | null;
+	target: number;
 	method: MethodKind;
 	admitted: string;
 	at: number;
@@ -266,6 +285,7 @@ export function fillsOf(db: Db, slot: number): Fill[] {
 			seq: result.seq,
 			ord: result.ord,
 			signature: result.signature,
+			target: result.target,
 			method: result.method,
 			admitted: row.admitted,
 			at: result.at,
@@ -279,6 +299,15 @@ export const failingTestsOf = (db: Db, run: number, limit: number) => db.all(Q.f
 export const runTestsWith = (db: Db, run: number, outcome: string, limit: number) =>
 	db.all(Q.runTests, { run, outcome, limit });
 export const flippedIn = (db: Db, run: number): number => db.get(Q.flippedCount, { run })?.n ?? 0;
+/** Whether a change run holds a passing result for any of these tests: the evidence that a failure stopped. */
+export function passesAny(db: Db, run: number, tests: readonly number[]): boolean {
+	if (tests.length === 0) return false;
+	const rows = db.allDynamic<{ n: number }>(
+		`SELECT 1 AS n FROM run_tests WHERE run = ? AND outcome = 'pass' AND test IN (${tests.map(() => "?").join(", ")}) LIMIT 1`,
+		[run, ...tests],
+	);
+	return rows.length > 0;
+}
 export const runsDependingOn = (db: Db, decision: number): number[] =>
 	db.all(Q.dependents, { decision }).map((r) => r.run);
 
@@ -359,15 +388,15 @@ export function describeAccepts(run: RunRow): string {
 	return `commit ${accepts.commit}${more.length > 0 ? ` (${more.join(", ")})` : ""}`;
 }
 
-/** The targets a run that accepts a commit counts: one per environment reported for it. */
+/**
+ * The targets a run that accepts a commit counts: one per environment reported for it, and for a planned run that
+ * names no repository, one per repository that has that commit.
+ */
 function targetsOfRun(db: Db, run: RunRow): TargetRow[] {
 	const accepts = acceptsOf(run);
 	if (!("commit" in accepts)) return [];
-	const what = run.accepts_what ?? targetByCommit(db, run.project, accepts.commit)?.what;
-	if (!what) return [];
-	return targetsOfCommit(db, run.project, what).filter(
-		(target) => run.origin === "change" || matches(run, target, null),
-	);
+	if (run.origin === "change") return run.accepts_what ? targetsOfCommit(db, run.project, run.accepts_what) : [];
+	return targetsWithCommit(db, run.project, accepts.commit).filter((target) => matches(run, target, null));
 }
 
 /** Acceptance: the report is durable but not applied, so each run it matters to reads `pending` until it is. */
@@ -388,6 +417,8 @@ export type FailingGroup = {
 	results: number[];
 	message: string | null;
 	disputed: boolean;
+	/** True when a result that counts in a commit's gate (a pipeline's or a person's) shows this cause. */
+	counted: boolean;
 	runs: RunRow[];
 };
 
@@ -405,7 +436,7 @@ export function* applyBatchSteps(
 	const group = (signature: SignatureRow): FailingGroup => {
 		let found = groups.get(signature.id);
 		if (!found) {
-			found = { signature, scope, tests: [], results: [], message: null, disputed: false, runs: [] };
+			found = { signature, scope, tests: [], results: [], message: null, disputed: false, counted: false, runs: [] };
 			groups.set(signature.id, found);
 		}
 		return found;
@@ -416,11 +447,16 @@ export function* applyBatchSteps(
 	const plannedIds = new Set(planned.map((run) => run.id));
 	const touchedSlots = new Map<number, SlotRow>();
 	const declared = new Map<string, MethodKind[]>();
-
+	// One lane per target, job and producer: a newer attempt in a lane replaces the one before it, and nothing
+	// from another lane (another job, another environment, another producer) can.
+	const lane = `${batch.target}:${batch.job}:${batch.actor}`;
 	let folded = 0;
 	for (const result of applied) {
 		if (folded++ > 0 && folded % SLICE === 0) yield;
-		if (changeRun) {
+		// A commit's gate counts what pipelines and people report. An agent's result is recorded and shown, and
+		// counts only in a planned run that asked for agents (decision 0009): never in a change run.
+		const counted = result.method !== "agent";
+		if (changeRun && counted) {
 			ctx.db.run(Q.upsertRunTest, {
 				run: changeRun.id,
 				test: result.test.id,
@@ -429,6 +465,8 @@ export function* applyBatchSteps(
 				signature: result.signature?.id ?? null,
 				attempt: result.attempt,
 				flipped: result.flipped ? 1 : 0,
+				lane,
+				target: batch.target,
 			});
 		}
 		if (result.corrects !== null) {
@@ -468,30 +506,31 @@ export function* applyBatchSteps(
 			if (!g.tests.some((t) => t.id === result.test.id)) g.tests.push(result.test);
 			g.results.push(result.id);
 			g.message ??= result.message;
+			g.counted ||= counted;
 		}
 	}
 
 	// Rebuild every slot the batch touched from its complete admitted set, and note the ones now in dispute.
-	const slotStates = new Map<number, { run: number; state: SlotState; signature: number | null }>();
 	for (const slot of touchedSlots.values()) {
 		const run = planned.find((r) => r.id === slot.run) ?? runById(ctx.db, slot.run);
 		if (!run) continue;
 		const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
 		const next = refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
-		slotStates.set(slot.id, { run: run.id, ...next });
-		if ((next.state === "disputed" || next.state === "failing") && next.signature !== null) {
-			const signature = signatureById(ctx.db, next.signature);
-			if (signature) {
-				const g = group(signature);
-				g.disputed ||= next.state === "disputed";
-				if (!g.runs.some((r) => r.id === run.id)) g.runs.push(run);
-			}
+		if (next.state !== "disputed" && next.state !== "failing") continue;
+		// Every cause failing in the slot is its own question: answering one does not answer the others.
+		for (const id of new Set(next.causes.map(([cause]) => cause))) {
+			const signature = signatureById(ctx.db, id);
+			if (!signature) continue;
+			const g = group(signature);
+			g.disputed ||= next.state === "disputed";
+			if (!g.runs.some((r) => r.id === run.id)) g.runs.push(run);
 		}
 	}
 
 	if (changeRun) {
 		for (const g of groups.values()) {
-			if (g.results.length > 0 && !g.runs.some((r) => r.id === changeRun.id)) g.runs.push(changeRun);
+			// Only a failure the gate counts holds the commit's run. An agent's failure is asked about and holds nothing.
+			if (g.counted && !g.runs.some((r) => r.id === changeRun.id)) g.runs.push(changeRun);
 		}
 	}
 	for (const run of runs) {
@@ -538,12 +577,10 @@ function refreshSlot(
 	ctx: Ctx,
 	slot: SlotRow,
 	obligation: ExerciseObligation | null,
-): { state: SlotState; signature: number | null } {
-	let signature: number | null = null;
-	const signatures = new Map<number, number | null>();
+): { state: SlotState; causes: Cause[] } {
 	const fills = fillsOf(ctx.db, slot.id);
-	for (const fill of fills) signatures.set(fill.id, fill.signature);
-	const agg = aggregateSlot(
+	const byResult = new Map(fills.map((fill) => [fill.id, fill]));
+	const { agg, failing } = aggregateSlot(
 		fills.map((fill) => ({
 			id: fill.id,
 			actor: fill.actor,
@@ -562,14 +599,30 @@ function refreshSlot(
 							: "blocked",
 		})),
 	);
-	for (const entry of Object.values(agg)) {
-		if (entry.outcome !== "fail") continue;
-		signature = signatures.get(entry.result) ?? signature;
+	// A cause is a failure signature on a target: the same signature in two environments is two things to answer
+	// for, because an answer may hold for one of them only.
+	const seen = new Set<string>();
+	const causes: Cause[] = [];
+	for (const id of failing) {
+		const fill = byResult.get(id);
+		if (!fill || fill.signature === null || seen.has(`${fill.signature}:${fill.target}`)) continue;
+		seen.add(`${fill.signature}:${fill.target}`);
+		causes.push([fill.signature, fill.target]);
 	}
 	const state = slotState(agg, obligation?.minActors ?? 1);
-	ctx.db.run(Q.updateSlot, { id: slot.id, agg: JSON.stringify(agg), state, signature, rev: ctx.seq });
-	return { state, signature };
+	ctx.db.run(Q.updateSlot, {
+		id: slot.id,
+		agg: JSON.stringify(agg),
+		state,
+		signature: causes[0]?.[0] ?? null,
+		causes: JSON.stringify(causes),
+		rev: ctx.seq,
+	});
+	return { state, causes };
 }
+
+/** A failure signature and the target it was seen on. */
+type Cause = [signature: number, target: number];
 
 // ── Tally and verdict ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -577,12 +630,8 @@ function refreshSlot(
 export function scopeOfRun(db: Db, run: RunRow): string {
 	if (run.change !== null) return `change:${run.change}`;
 	if (run.origin === "change") return "line:trunk";
-	const accepts = acceptsOf(run);
-	if ("commit" in accepts) {
-		const target = targetByCommit(db, run.project, accepts.commit);
-		if (target) return scopeOf(target, run.id);
-	}
-	return `run:${run.id}`;
+	const [target] = targetsOfRun(db, run);
+	return target ? scopeOf(target, run.id) : `run:${run.id}`;
 }
 
 /** Whether no newer run exists in this run's scope (the same change, or trunk). A planned run is its own scope. */
@@ -618,30 +667,28 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 	const tally: Tally = emptyTally();
 	const failing = new Set<number>();
 	const depends = new Map<number, number | null>();
-	let own: number[] | null = null;
-	/** An excuse held for one target covers this run only when the run counts that target. */
-	const covers = (target: number | null): boolean => {
-		if (target === null || scope.startsWith("run:")) return true;
-		own ??= targetsOfRun(ctx.db, run).map((row) => row.id);
-		return own.includes(target);
+	/**
+	 * The excuse for a cause seen on a target, if one applies. An excuse held for certain targets (an
+	 * infrastructure failure) covers failures on those only: the same cause on another commit, or in another
+	 * environment of the same commit, stays unexplained until it is answered there.
+	 */
+	const excuseOf = (signature: number, target: number) => {
+		return excuseFor(ctx.db, run.project, signature, scope, target);
 	};
 
-	const classify = (signature: number | null, n: number, disputed: boolean): void => {
+	const classify = (signature: number | null, target: number, n: number): void => {
 		if (signature === null) {
 			tally.unexplained += n;
 			return;
 		}
-		const held = excuseFor(ctx.db, run.project, signature, scope);
-		const excuse = held && covers(held.target) ? held : null;
+		const excuse = excuseOf(signature, target);
 		if (!excuse) {
 			failing.add(signature);
-			if (disputed) tally.disputed += n;
-			else tally.unexplained += n;
+			tally.unexplained += n;
 			return;
 		}
 		depends.set(excuse.decision, excuse.expires_at);
 		if (excuse.class === "attributed") tally.attributed += n;
-		else if (disputed) tally.pass += n;
 		else tally.excused += n;
 	};
 
@@ -650,7 +697,7 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 			if (row.outcome === "pass") tally.pass += row.n;
 			else if (row.outcome === "skip") tally.skipped += row.n;
 			else if (row.outcome === "blocked") tally.missing += row.n;
-			else classify(row.signature, row.n, false);
+			else classify(row.signature, row.target, row.n);
 		}
 	} else {
 		for (const row of ctx.db.all(Q.slotGroups, { run: run.id })) {
@@ -659,7 +706,22 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 			else if (row.state === "skipped") {
 				tally.skipped += row.n;
 				tally.missing += row.n;
-			} else classify(row.signature, row.n, row.state === "disputed");
+			}
+		}
+		// A failing or disputed slot counts once, by all of its causes: it is excused only when every one is.
+		for (const slot of ctx.db.all(Q.failingSlots, { run: run.id })) {
+			const disputed = slot.state === "disputed";
+			const causes = json<Cause[]>(slot.causes);
+			const excuses = causes.map(([signature, target]) => excuseOf(signature, target));
+			const open = causes.filter((_, i) => !excuses[i]);
+			for (const [signature] of open) failing.add(signature);
+			for (const excuse of excuses) if (excuse) depends.set(excuse.decision, excuse.expires_at);
+			if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed += 1;
+			else if (open.length > 0 || causes.length === 0) {
+				if (disputed) tally.disputed += 1;
+				else tally.unexplained += 1;
+			} else if (disputed) tally.pass += 1;
+			else tally.excused += 1;
 		}
 	}
 
@@ -672,10 +734,12 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 		tally.missing += jobs.filter((job) => !reported.has(job)).length;
 	}
 
-	// A failure question about a cause this run no longer shows does not hold it back.
+	// The questions whose answers this run is waiting for. A failure question is one of them exactly when this run
+	// shows its cause unexplained: the run is blocked by that failure whatever the policy says a question may hold,
+	// so the gate must name the question that would unblock it. One about a cause the run no longer shows is not.
 	const blocking = blockers
-		.filter(
-			(q) => q.blocks.includes(run.id) && (q.kind !== "failure" || (q.signature !== null && failing.has(q.signature))),
+		.filter((q) =>
+			q.kind === "failure" ? q.signature !== null && failing.has(q.signature) : q.blocks.includes(run.id),
 		)
 		.map((q) => q.ref);
 
@@ -728,8 +792,10 @@ export function plan(
 	if (exercises.length === 0) throw invalid("a planned run needs at least one exercise obligation");
 
 	const no = ctx.nextNo("run");
-	const what =
-		"commit" in input.accepts ? (targetByCommit(ctx.db, ctx.project.id, input.accepts.commit)?.what ?? null) : null;
+	// A commit that exists in two repositories is refused here unless the run says which: the run would otherwise
+	// count evidence about either.
+	if ("commit" in input.accepts) targetByCommit(ctx.db, ctx.project.id, input.accepts.commit, input.accepts.repo);
+	const what = null;
 	const { lastId } = ctx.db.run(Q.insert, {
 		project: ctx.project.id,
 		no,
@@ -764,17 +830,16 @@ export function plan(
 	if (!run) throw new Error("run was not stored");
 	ctx.touched.add(ref("run", no));
 
-	let already = 0;
-	if ("commit" in input.accepts && what !== null) {
-		const targets = targetsOfCommit(ctx.db, ctx.project.id, what).filter((target) => matches(run, target, null));
-		if (targets.length > 0)
-			already = fillFromPrior(
-				ctx,
-				run,
-				exercises,
-				targets.map((t) => t.id),
-			);
-	}
+	const targets = targetsOfRun(ctx.db, run);
+	const already =
+		targets.length > 0
+			? fillFromPrior(
+					ctx,
+					run,
+					exercises,
+					targets.map((t) => t.id),
+				)
+			: 0;
 	return { run: retally(ctx, run.id, []).run, slots: rank, already };
 }
 
@@ -816,7 +881,7 @@ function fillFromPrior(
 
 /** Closes a run. Standing: only by a `signoff` decision, which a rule may make. */
 export function closeRun(ctx: Ctx, witness: Witness, run: RunRow): void {
-	ctx.db.run(Q.setState, { id: run.id, state: "closed", signoff: decisionOf(witness), rev: ctx.seq });
+	ctx.db.run(Q.setState, { id: run.id, state: "closed", signoff: decisionOf(witness, "signoff"), rev: ctx.seq });
 	ctx.touched.add(runRef(run));
 }
 
@@ -835,7 +900,7 @@ export function reopenRun(ctx: Ctx, run: RunRow, decision: number): void {
  * Returns the slot and result pairs it corrected, so withdrawing the decision can put them back.
  */
 export function discountFailures(ctx: Ctx, witness: Witness, run: RunRow, signature: number): [number, number][] {
-	decisionOf(witness);
+	decisionOf(witness, "failure");
 	const corrected: [number, number][] = [];
 	for (const slot of ctx.db.all(Q.slotsBySignature, { run: run.id, signature })) {
 		for (const fill of fillsOf(ctx.db, slot.id)) {
@@ -878,11 +943,14 @@ export function gate(
 	let run: RunRow | null = null;
 	if (input.run) run = mustRun(ctx.db, ctx.project.id, input.run);
 	else {
-		let commit = input.commit;
-		if (!commit && input.change) commit = changeByKey(ctx.db, ctx.project.id, input.change)?.head_sha ?? undefined;
-		if (!commit) throw invalid("gate needs a commit, a run or a change");
-		const target = targetByCommit(ctx.db, ctx.project.id, commit);
-		run = target ? ctx.db.get(Q.changeRun, { project: ctx.project.id, what: target.what }) : null;
+		let what: string | null = null;
+		if (input.commit) what = targetByCommit(ctx.db, ctx.project.id, input.commit, input.repo)?.what ?? null;
+		else if (input.change) {
+			// The head of this change in its own repository, never a commit of the same name in another.
+			const change = changeByKey(ctx.db, ctx.project.id, input.change);
+			if (change?.head_sha) what = codeWhat(change.repo, change.head_sha);
+		} else throw invalid("gate needs a commit, a run or a change");
+		run = what ? ctx.db.get(Q.changeRun, { project: ctx.project.id, what }) : null;
 	}
 	if (!run) {
 		return {

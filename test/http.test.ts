@@ -181,6 +181,26 @@ describe("reads on other cores through HTTP", () => {
 		expect(pool.completed).toBe(before + 1);
 	});
 
+	test("a read its caller may not make is refused before any worker sees it", async () => {
+		const instance = bootReaders(2);
+		const owner = bearer(instance.generatedToken ?? "");
+		const made = await post<{ token: string }>(
+			instance,
+			"/api/admin",
+			{ do: "token.create", actor: "writer-only", kind: "ci", can: ["produce"], project: "scratch" },
+			owner,
+		);
+		const readers = readersOf(instance);
+		await readers.ready();
+		const before = readers.completed;
+		const refused = await post(instance, "/api/p/scratch/find", {}, bearer(made.body.ok ? made.body.result.token : ""));
+		expect(refused.status).toBe(403);
+		expect((await post(instance, "/api/p/scratch/find", {}, bearer("no-such-token-0123456789"))).status).toBe(401);
+		expect(readers.completed).toBe(before);
+		expect((await post(instance, "/api/p/scratch/find", {}, owner)).status).toBe(200);
+		expect(readers.completed).toBe(before + 1);
+	});
+
 	test("a worker refuses write operations even when handed the owner's actor", async () => {
 		const instance = bootReaders(1);
 		const pool = readersOf(instance);

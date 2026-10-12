@@ -321,7 +321,7 @@ describe("what an agent reads", () => {
 		};
 		const impact = h.call<Impact>("impact", { change: "pr:482" }, agent);
 		expect(impact.counts).toEqual({ cases: 1, unreviewed: 1, failing: 1, uncovered: 1 });
-		expect(first(impact.cases)).toMatchObject({ id: "C-1", why: ["test:tests/coupon.spec.ts", "failing"] });
+		expect(first(impact.cases)).toMatchObject({ id: "C-1", why: ["test:tests/coupon.spec.ts", "failing", "question"] });
 		expect(first(impact.cases).open).toHaveLength(1);
 		expect(impact.uncovered).toEqual(["src/checkout/tax.ts"]);
 		expect(impact.gate.verdict).toBe("blocked");

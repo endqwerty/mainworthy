@@ -235,6 +235,9 @@ export function invokeAsync(app: App, ops: Readonly<Record<string, AnyOp>>, call
 		const project = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
 		if (op.scope === "project" && !project) return Promise.resolve(invoke(app, ops, call));
 		const actor = call.actor(project?.id ?? 0);
+		// Who may read is decided here, in the thread that knows the caller. A reader thread is only ever handed a
+		// call its caller is allowed to make; a refusal is answered inline and never reaches one.
+		if (!actor?.can.includes(op.needs)) return Promise.resolve(invoke(app, ops, call));
 		return app.readers
 			.run({ op: call.op, project: call.project, input: call.input, actor }, () =>
 				invoke(app, ops, { ...call, actor: () => actor }),

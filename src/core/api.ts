@@ -68,7 +68,11 @@ export type Envelope<T> =
 			};
 	  };
 
-/** What the session endpoint returns: who the caller is and which projects exist. */
+/**
+ * What the session endpoint returns: who the caller is and the projects it may read. `can` at the top is what the
+ * caller may do on the instance (create projects, issue tokens); each project carries what it may do there, which
+ * is what a screen must ask about. A token limited to one project has nothing at the top.
+ */
 export type SessionInfo = {
 	actor: string;
 	kind: "human" | "agent" | "ci" | "rule";
@@ -76,5 +80,5 @@ export type SessionInfo = {
 	mode: "local" | "server";
 	via: "token" | "cookie" | "local";
 	version: string;
-	projects: { key: string; name: string; seq: number; createdAt: number; policy: string }[];
+	projects: { key: string; name: string; seq: number; createdAt: number; policy: string; can?: string[] }[];
 };

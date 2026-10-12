@@ -392,6 +392,67 @@ describe("parseJUnit recovery and boundaries", () => {
 		]);
 	});
 
+	test.each([" ", "&#9;", "&#160;", ""])("blank identity parts remain schema-valid: %j", (name) => {
+		for (const suite of ["", "  "]) {
+			const parsed = parseJUnit(`<testsuite name="${suite}"><testcase name="${name}"/></testsuite>`);
+			expect(parsed.results).toHaveLength(1);
+			const item = ResultIn.parse(parsed.results[0]);
+			expect("key" in item.test && item.test.key).toBe("unnamed testcase");
+		}
+	});
+
+	test("a missing property quote cannot swallow failure evidence", () => {
+		const parsed = parseJUnit(
+			'<testsuites><testsuite name="one"><properties><property name="broken" value="missing/></properties><testcase name="x"><failure message="bad"/></testcase></testsuite><testsuite name="two"><properties><property name="valid" value="/>"/></properties><testcase name="y"/></testsuite></testsuites>',
+		);
+		expect(parsed.warnings.length).toBeGreaterThan(0);
+		expect(parsed.results.every((item) => item.outcome !== "pass")).toBe(true);
+	});
+
+	test("valid Unicode element and attribute names do not damage testcase evidence", () => {
+		const parsed = parseJUnit('<testsuite><testcase name="one" 属性="value"><étiquette/>text</testcase></testsuite>');
+		expect(parsed.results).toEqual([result("one", "one")]);
+		expect(parsed.warnings).toEqual([]);
+	});
+
+	test("quotes in doctype comments do not capture following testcase markup", () => {
+		const parsed = parseJUnit(
+			'<!DOCTYPE testsuite [<!-- the runner\'s schema --><!ELEMENT testsuite ANY>]><testsuite><testcase name="one"/></testsuite>',
+		);
+		expect(parsed.results).toEqual([result("one", "one")]);
+		expect(parsed.warnings).toEqual([]);
+	});
+
+	test.each([
+		'<?xml versio="1.0"?>',
+		'<?xml version="1.0?>',
+		'<?XML version="1.0"?>',
+		'<?xml version="1.0" encoding="?>',
+		'<?xml version="1.0" standalone="perhaps"?>',
+	])("malformed XML declarations are diagnosed: %s", (declaration) => {
+		const parsed = parseJUnit(`${declaration}<testsuite><testcase name="one"/></testsuite>`);
+		expect(parsed.results[0]?.outcome).toBe("error");
+		expect(parsed.warnings.length).toBeGreaterThan(0);
+	});
+
+	test.each([
+		"<?xml version='1.0' encoding='UTF-8' standalone='yes'?>",
+		'<?xml version="1.0" encoding="UTF-8" standalone="no"?>',
+	])("valid XML declarations keep testcase evidence intact: %s", (declaration) => {
+		const parsed = parseJUnit(`${declaration}<testsuite><testcase name="one"/></testsuite>`);
+		expect(parsed.results).toEqual([result("one", "one")]);
+		expect(parsed.warnings).toEqual([]);
+	});
+
+	test("suite errors without testcases stay warnings without fabricating executions", () => {
+		const parsed = parseJUnit(
+			'<testsuites><testsuite name="empty"><error message="beforeAll failed"/></testsuite><testsuite name="other"><testcase name="one"/></testsuite></testsuites>',
+		);
+		expect(parsed.results).toEqual([result("other::one", "one")]);
+		expect(parsed.warnings).toHaveLength(1);
+		expect(parsed.warnings[0]).toContain("error element outside a testcase");
+	});
+
 	test.each([
 		'<testsuite><testcase name="one"/ ></testsuite>',
 		'<testsuite><testcase name="one"\u00a0time="0.2"/></testsuite>',

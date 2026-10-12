@@ -615,7 +615,7 @@ export type Adopted = { cases: CaseStamp[]; created: string[]; policyVersion: nu
  * and the proposal must be redone. Tags and folders are applied to the suite as it is now, not as it was sealed.
  */
 export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopted {
-	decisionOf(witness);
+	decisionOf(witness, "adopt");
 	const out: Adopted = { cases: [], created: [], policyVersion: null };
 	const author = proposal.author;
 	const stamp = (row: CaseRow, version: number, hash: string) => {
@@ -790,7 +790,7 @@ function insertVersion(
 		hash,
 		claim: claimHash(body),
 		proposal: proposal.id,
-		decision: decisionOf(witness),
+		decision: decisionOf(witness, "adopt"),
 		author: proposal.author,
 		reason: proposal.reason,
 		at: ctx.now,
@@ -832,7 +832,7 @@ function place(ctx: Ctx, witness: Witness, proposal: ProposalRow, row: CaseRow, 
 		before: JSON.stringify(before),
 		after: JSON.stringify(to),
 		proposal: proposal.id,
-		decision: decisionOf(witness),
+		decision: decisionOf(witness, "adopt"),
 		actor: proposal.author,
 		at: ctx.now,
 		seq: ctx.seq,
@@ -866,7 +866,7 @@ export function ranksAtEnd(ctx: Ctx, folder: number, n: number): string[] {
 }
 
 function applyFolder(ctx: Ctx, witness: Witness, edit: Extract<Resolved, { op: "folder" }>): void {
-	decisionOf(witness);
+	decisionOf(witness, "adopt");
 	const parent = edit.parent === undefined ? undefined : edit.parent === null ? null : ensureFolder(ctx, edit.parent);
 	// The tree may have changed since the proposal was sealed: check again where it is applied. A refusal here
 	// undoes the whole adoption, including any folder the path above just created.
@@ -908,6 +908,7 @@ function setCover(ctx: Ctx, witness: Witness, caseId: number, key: string, title
 		});
 		requirement = { id: lastId, title: title ?? "" };
 	}
-	if (on) ctx.db.run(Q.insertCover, { requirement: requirement.id, id: caseId, decision: decisionOf(witness) });
+	if (on)
+		ctx.db.run(Q.insertCover, { requirement: requirement.id, id: caseId, decision: decisionOf(witness, "adopt") });
 	else ctx.db.run(Q.dropCover, { requirement: requirement.id, id: caseId });
 }

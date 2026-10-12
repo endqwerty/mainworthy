@@ -11,7 +11,7 @@ import { cleanTitle, firstStep, pasteCapture } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, useQueryOp } from "../lib/data.ts";
-import { activeDraft, type Draft, readDraft, removeDraft, writeDraft } from "../lib/drafts.ts";
+import { activeDraft, type Draft, promoteStepIds, readDraft, removeDraft, writeDraft } from "../lib/drafts.ts";
 import { navigate, readRoute, refUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, ProofStrip } from "../ui/index.tsx";
@@ -344,6 +344,7 @@ export function SuiteScreen() {
 					);
 				}
 				if (ref) {
+					promoteStepIds({ project, from: snapshot.id, to: ref });
 					adoptedRefs.current.set(snapshot.id, ref);
 					setCaptures((previous) => {
 						if (!previous.has(snapshot.id)) return previous;
@@ -487,7 +488,11 @@ export function SuiteScreen() {
 			setDraftState(next);
 			setSelected(null);
 		});
-		writeDraft({ project, draft: next });
+		try {
+			writeDraft({ project, draft: next });
+		} catch {
+			setStatus("Device storage is full. Keep this tab open until the version is recorded.");
+		}
 
 		focusDraft(next);
 	}

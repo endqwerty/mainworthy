@@ -29,6 +29,7 @@ import {
 	questionsChangedSince,
 	questionsOn,
 	queuePage,
+	refsOf,
 } from "../decisions/questions.ts";
 import {
 	caseIdsOfFile,
@@ -88,6 +89,7 @@ import {
 	caseById,
 	caseRef,
 	coversOf,
+	findCase,
 	folderIndex,
 	mustCase,
 	type ProposalRow,
@@ -823,12 +825,23 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 	for (const key of (change?.title ?? "").match(/[A-Z][A-Z0-9]+-\d+/g) ?? []) {
 		for (const row of casesCovering(ctx.db, project, key)) note(row.id, `req:${key}`);
 	}
-	const run = change?.head_sha ? gate(ctx, { commit: change.head_sha }) : null;
+	const run = change?.head_sha ? gate(ctx, { change: change.key }) : null;
 	const headRun = run?.run ? mustRun(ctx.db, project, run.run) : null;
 	if (headRun) {
 		for (const failing of failingTestsOf(ctx.db, headRun.id, 200)) {
 			const test = testById(ctx.db, failing.test);
 			if (test?.case_id != null) note(test.case_id, "failing");
+		}
+	}
+	// A case an open question about this change names is part of the change's picture, whoever raised it: an
+	// agent's failure does not count in the gate, and is still something a reviewer should see.
+	if (change) {
+		for (const asked of questionsOn(ctx.db, project, change.key)) {
+			if (asked.state !== "open") continue;
+			for (const about of refsOf(ctx.db, asked.id)) {
+				const row = /^C-\d+$/.test(about) ? findCase(ctx.db, project, about) : null;
+				if (row) note(row.id, "question");
+			}
 		}
 	}
 

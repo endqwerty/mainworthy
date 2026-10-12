@@ -254,8 +254,9 @@ test("an agent completes a real session, with hashes, advice, and compact reads"
 			await call("gate", { commit: "9f3c2ab" }),
 			z.object({ verdict: z.enum(["passed", "failed", "blocked", "pending"]), open: z.array(z.string()) }),
 		);
-		expect(gate.verdict).toBe("blocked");
-		expect(gate.open).toContain(question.q);
+		// What an agent reports is put to a person as a question, and never moves a commit's gate (decision 0009).
+		expect(gate.verdict).toBe("pending");
+		expect(gate.open).toEqual([]);
 		console.log(
 			`tokens served: ${wire.reduce((sum, message) => sum + encode(message).length, 0)}; ${wire.length} messages; definitions once; o200k_base`,
 		);
