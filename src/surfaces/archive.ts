@@ -2,6 +2,7 @@ import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bootstrap } from "../server/identity/identity.ts";
+import { recoverAccepted } from "../server/jobs.ts";
 import type { App } from "../server/kernel/app.ts";
 import type { Actor } from "../server/kernel/ctx.ts";
 import { HTTP_STATUS, OpError } from "../server/kernel/errors.ts";
@@ -152,6 +153,10 @@ export function archiveRoutes(
 						return { counts, owner: app.config.mode === "local" ? bootstrap(app).owner : null };
 					});
 					if (localOwner && restored.owner) Object.assign(localOwner, restored.owner);
+					// An export taken while a report was between its two transactions holds that report accepted and
+					// not applied. The original applied it a moment later; so does this instance, now, and not only
+					// at its next start.
+					recoverAccepted(app);
 					return restored.counts;
 				});
 				return json({

@@ -3,7 +3,10 @@ import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { z } from "zod";
 import { withInstance } from "../cli/test-support.ts";
-import { authenticate } from "../server/identity/identity.ts";
+import type { GateStatus } from "../core/ops.ts";
+import { actorByName, authenticate } from "../server/identity/identity.ts";
+import { findProject, makeCtx, stampSeq } from "../server/kernel/ctx.ts";
+import { acceptReport } from "../server/ops/writes.ts";
 import { archiveRoutes } from "./archive.ts";
 import type { Session } from "./http.ts";
 
@@ -160,4 +163,34 @@ test("a local import preserves the configured owner's identity for the next writ
 		},
 		{ owner: "alice" },
 	);
+});
+
+test("a report the original had accepted and not yet applied is applied by the instance that imports it", async () => {
+	await withInstance(async (source) => {
+		await source.client.call("propose", { edits: [{ op: "create", outline: "Imported mid-report" }] });
+		// The moment between a report's two transactions, as an export taken under load catches it.
+		const app = source.instance.app;
+		app.db.transaction(() => {
+			const project = findProject(app.db, "scratch");
+			const owner = project ? actorByName(app.db, "daniel", project.id) : null;
+			if (!project || !owner) throw new Error("the source has no project or owner");
+			const ctx = makeCtx(app, project, owner, true);
+			acceptReport(ctx, {
+				target: { commit: "midreport1", branch: "main" },
+				results: [
+					{ test: { key: "one" }, outcome: "pass" },
+					{ test: { key: "two" }, outcome: "fail", failure: { message: "expected 1 to equal 2" } },
+				],
+			});
+			stampSeq(ctx);
+		});
+		const archive = await source.client.request("/api/export");
+		if (!archive.body) throw new Error("missing archive body");
+		await withInstance(async (target) => {
+			expect((await target.client.request("/api/import", { method: "POST", body: archive.body })).status).toBe(200);
+			// No restart: the staged report is applied as part of the import, and its gate says what it showed.
+			const gate = (await target.client.call("gate", { commit: "midreport1" })) as GateStatus;
+			expect(gate).toMatchObject({ verdict: "blocked", tally: { pass: 1, unexplained: 1 } });
+		});
+	});
 });
