@@ -194,7 +194,7 @@
       "sources": [
         {
           "path": "src/server/decisions/decisions.ts",
-          "label": "dissolveStale: open failure questions only"
+          "label": "dissolveStale; stoppedFailing"
         },
         {
           "path": "src/server/runs/runs.ts",
@@ -353,10 +353,10 @@
       "title": "The exact hold terms",
       "items": [
         "basis-changes: the material evidence hash must still match the decision basis.",
-        "this-target: the occurrence must still name the same target. infra uses this by default.",
+        "this-target: the occurrence must name a target the answer covers. infra uses this by default, so one cause can hold several answers at once, one per environment. raise checks them all before asking.",
         "time: the current time must be before at. flaky combines this with basis-changes; flakyDays defaults to 14.",
         "fact-gone: the occurrence must still contain fact. inherited combines basis-changes with hint:fails-on-base.",
-        "stillHolds requires every term. A later raise outside any term reverts the effect and opens a new epoch with prior linked."
+        "stillHolds requires every term. An occurrence on another target is asked about and leaves the answer standing. Any other miss withdraws the effect, records expired or outdated, recomputes the runs that rested on it and opens a new epoch with prior linked."
       ]
     },
     {
@@ -373,8 +373,8 @@
       "dot": "emerald",
       "title": "A cause can stop needing an answer",
       "items": [
-        "dissolveStale applies to open failure questions when the newest run in the scope no longer shows that signature.",
-        "A passing retry may dissolve an unexplained failure. A late report for an older commit cannot dissolve a cause still shown on the current commit.",
+        "dissolveStale closes an open failure question only when nothing that speaks for it still shows the cause: the newest commit's run in its scope, and every open planned run the question names.",
+        "And something must show it gone: one of its tests passing on the newest commit, or a named planned run that has cleared. A late report for an older commit, or a pipeline's pass where a run asked for an agent, closes nothing.",
         "Dissolved questions and decisions remain in the record. If the same cause returns, raise opens the next epoch."
       ]
     }
