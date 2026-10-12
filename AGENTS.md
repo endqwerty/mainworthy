@@ -76,6 +76,18 @@ issue #81, in the web UI's conflict card.
 - Secrets never enter the repo, logs or chat.
 - Competitor claims in `docs/competitors.md` are hypotheses until verified;
   do not build on one without checking it.
+- A review is sized to the change. The independent verdict is a review of the
+  diff: the reviewer reads the change, runs `bun run check` (two minutes) and
+  probes what the change could break next to it. The brief names the diff and a
+  time, fifteen minutes for an ordinary change. A review of a whole area, with
+  every earlier probe run again, is for a release or for a change that rewrites
+  that area, and the brief says which. A finding becomes a test, so the suite
+  finds it from then on and the next review does not look for it again. Daniel's
+  goal (2026-10-12, issue #77): landing a feature costs minutes of waiting, not
+  most of an hour.
+- One agent at a time runs the whole browser suite on a machine. On 2026-10-12 an
+  agent's serial pass ran beside another agent's parallel check for an hour and
+  failed for reasons outside its code. A second agent runs single files, or waits.
 - Briefing a verifier: write the brief as a QA review of application logic and say
   that everything runs locally. On 2026-10-12 a Codex verifier was stopped by its
   provider's content filter in the middle of a run whose brief used the vocabulary

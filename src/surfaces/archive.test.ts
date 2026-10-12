@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
-import { readdir } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 import { withInstance } from "../cli/test-support.ts";
 import type { GateStatus } from "../core/ops.ts";
@@ -85,19 +86,30 @@ test("export pulls fixed chunks and cancels without leaving its spool on disk", 
 				},
 			],
 		});
-		const before = new Set(await readdir(tmpdir()));
-		const session: Session = { via: "local", secret: null, actor: () => instance.owner };
-		const route = archiveRoutes(instance.app)["/api/export"];
-		if (!route) throw new Error("export route is missing");
-		const response = await route(new Request(`${instance.url}/api/export`), session);
-		if (!response.body) throw new Error("export body is missing");
-		const reader = response.body.getReader();
-		const first = await reader.read();
-		expect(first.value?.byteLength).toBeLessThanOrEqual(64 * 1024);
-		await reader.cancel();
-		reader.releaseLock();
-		const after = (await readdir(tmpdir())).filter((name) => name.startsWith("casebook-archive-") && !before.has(name));
-		expect(after).toEqual([]);
+		// The spool goes to the temp directory. Other test files export at the same time in other workers, so this
+		// test gives the export a temp directory of its own and looks only there.
+		const shared = process.env.TMPDIR;
+		const own = await mkdtemp(join(tmpdir(), "casebook-spool-test-"));
+		process.env.TMPDIR = own;
+		try {
+			const session: Session = { via: "local", secret: null, actor: () => instance.owner };
+			const route = archiveRoutes(instance.app)["/api/export"];
+			if (!route) throw new Error("export route is missing");
+			const response = await route(new Request(`${instance.url}/api/export`), session);
+			if (!response.body) throw new Error("export body is missing");
+			const reader = response.body.getReader();
+			const first = await reader.read();
+			expect(first.value?.byteLength).toBeLessThanOrEqual(64 * 1024);
+			// The spool is in this directory while the export is read, so the check below looks in the right place.
+			expect((await readdir(own)).filter((name) => name.startsWith("casebook-archive-"))).toHaveLength(1);
+			await reader.cancel();
+			reader.releaseLock();
+			expect(await readdir(own)).toEqual([]);
+		} finally {
+			if (shared === undefined) delete process.env.TMPDIR;
+			else process.env.TMPDIR = shared;
+			await rm(own, { recursive: true, force: true });
+		}
 	});
 });
 

@@ -37,7 +37,7 @@ not the same things done worse.
    the same test, and somebody else's upload never clears a pipeline's. The same attempt reported twice keeps the
    worse outcome: only a higher attempt number or an explicit correction clears a failure. Slots follow the same
    rule (`replacesInLane`; the commit's gate applies it as the condition of one SQL statement, and
-   `test/sequences.test.ts` checks that the two agree), so a commit's gate and a slot do not disagree about which
+   `test/sequences.ts` checks that the two agree), so a commit's gate and a slot do not disagree about which
    result of a lane counts; they keep every cause failing in them, and are excused only when each cause is. Each cause is answered in the scope of the target it was seen
    on, so a run that counts the same commit in two repositories keeps their failures and their answers apart. A
    run planned over evidence that already fails joins the questions already asked about those failures, so an
@@ -168,7 +168,7 @@ not the same things done worse.
    question, and is asked about if it has none (for an open planned run and for the newest commit of a scope).
    So no path that removes a question, an answer or a closed state can leave a live run blocked with nobody asked.
    A decision about a cause recomputes every run that shows it, an older commit's included, so the gate of any
-   commit is exact. `test/sequences.test.ts` and `test/sequences-extended.test.ts` check these rules after every
+   commit is exact. `test/sequences.ts` and `test/sequences-extended.ts` check these rules after every
    step of random sequences of reports, corrections, plans, answers, withdrawals, reopened runs and expiries.
 9. **The review basis is the case version plus the change key,** not the patch tree hash. A changed patch under
    the same pull request does not yet invalidate a review. Deferred (#49).
