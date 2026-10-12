@@ -139,7 +139,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 		);
 		const excuseOf = (signature: number, scope: string, target: number) =>
 			rows(
-				"SELECT class, decision FROM excuses WHERE project = ? AND signature = ? AND scope = ? AND target IN (0, ?) ORDER BY decision DESC LIMIT 1",
+				"SELECT class, decision FROM excuses WHERE project = ? AND signature = ? AND scope = ? AND target IN (0, ?) ORDER BY (target != 0) DESC, decision DESC LIMIT 1",
 				project,
 				signature,
 				scope,

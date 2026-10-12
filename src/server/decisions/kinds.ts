@@ -323,6 +323,10 @@ function openPlannedAbout(ctx: Ctx, question: QuestionRow): RunRow[] {
 	});
 }
 
+/** The answer in force on a question, if it has one: the decision a closed run may be resting on. */
+export const inForce = (question: QuestionRow): number | null =>
+	question.state === "decided" ? question.decision : null;
+
 /**
  * Everybody with a result in a slot that disputes this question's cause: the parties to the dispute as the runs
  * show it now. Kept on the question when the dispute is raised and when it is answered (`parties` in its
@@ -331,7 +335,7 @@ function openPlannedAbout(ctx: Ctx, question: QuestionRow): RunRow[] {
  */
 export function disputeParties(ctx: Ctx, question: QuestionRow): number[] {
 	const subject = json<{ signature: number; scope: string }>(question.subject);
-	return [...disputants(ctx.db, ctx.project.id, subject.signature, subject.scope)];
+	return [...disputants(ctx.db, ctx.project.id, subject.signature, subject.scope, inForce(question))];
 }
 
 const failureHandler: Handler<"failure"> = {
@@ -430,7 +434,7 @@ const failureHandler: Handler<"failure"> = {
 			(seen) => scopeOf(mustTarget(ctx.db, seen.target), seen.run) === subject.scope,
 		);
 		if (reported) return true;
-		return disputants(ctx.db, ctx.project.id, subject.signature, subject.scope).has(actor);
+		return disputants(ctx.db, ctx.project.id, subject.signature, subject.scope, inForce(question)).has(actor);
 	},
 	undoable: true,
 	undoHint: "",

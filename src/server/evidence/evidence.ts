@@ -311,7 +311,7 @@ const Q = {
 	>(
 		`SELECT decision, class, expires_at FROM excuses
 		 WHERE project = $project AND signature = $signature AND scope = $scope AND target IN ($target, 0)
-		 ORDER BY decision DESC LIMIT 1`,
+		 ORDER BY (target != 0) DESC, decision DESC LIMIT 1`,
 	),
 	setExcuse: sql<{
 		project: number;
@@ -1184,8 +1184,9 @@ export function restoreLink(
 }
 
 /**
- * How a cause seen on a target is answered in a scope, if it is: the newest decision that covers that target,
- * whether it covers every target of the scope or that one only.
+ * How a cause seen on a target is answered in a scope, if it is: by the answer given for that target, and
+ * otherwise by the answer for every target of the scope. (The two coexist only where the narrower one is the
+ * later judgement, or is the answer to a dispute, which another question's answer does not end.)
  */
 export const excuseFor = (db: Db, project: number, signature: number, scope: string, target: number) =>
 	db.get(Q.excuse, { project, signature, scope, target });

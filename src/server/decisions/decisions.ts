@@ -33,7 +33,7 @@ import {
 import { actorLabel, ruleActor } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json } from "../kernel/db.ts";
-import { OpError } from "../kernel/errors.ts";
+import { conflict, OpError } from "../kernel/errors.ts";
 import { claimMint } from "../kernel/witness.ts";
 import { clauseFor, currentPolicy } from "../policy/policy.ts";
 import {
@@ -56,7 +56,7 @@ import {
 	unexplainedShown,
 } from "../runs/runs.ts";
 import { caseById, caseRef } from "../suite/suite.ts";
-import { disputeParties, HANDLERS, runsAbout } from "./kinds.ts";
+import { disputeParties, HANDLERS, inForce, runsAbout } from "./kinds.ts";
 import {
 	addQuestionParties,
 	alsoAbout,
@@ -471,6 +471,13 @@ export function answer(
 	});
 	if (standing === "forbidden") return reply(question, "forbidden", { needs: describeAsk(ask) });
 	if (ask.reason === "required" && !input.reason?.trim()) return reply(question, "invalid", { needs: "a reason" });
+	if (standing === "counts") {
+		const kept = wouldOverturn(ctx, question, given);
+		if (kept)
+			return reply(question, "forbidden", {
+				needs: `somebody who may settle the dispute ${questionRef(kept)} answers: this answer would take the place of that one. An answer for this build only does not`,
+			});
+	}
 
 	insertAnswer(ctx, {
 		question: question.id,
@@ -547,7 +554,8 @@ function settle(
 	}
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	const holds = handler.holds({ question, answer: given, now: ctx.now, policy });
-	const rested = endReplaced(ctx, question, holds);
+	const byRule = signers.every((signer) => signer.by === ruleActor(ctx.db).id);
+	const rested = endReplaced(ctx, question, holds, byRule);
 	const decision = insertDecision(ctx, { question, answer: given, signers, holds, supersedes });
 	setQuestionState(ctx, question, "decided", decision.id);
 	const witness = mintWitness(
@@ -585,7 +593,7 @@ const covers = (holds: readonly HoldTerm[]): readonly number[] | "all" | "result
  * ended here, with a row in the ledger that says so, before the new one is recorded: it is not left listed as
  * standing with its effect overwritten. Returns the runs that rested on it or were about it, to be recomputed.
  */
-function endReplaced(ctx: Ctx, question: QuestionRow, holds: readonly HoldTerm[]): number[] {
+function endReplaced(ctx: Ctx, question: QuestionRow, holds: readonly HoldTerm[], byRule: boolean): number[] {
 	const mine = covers(holds);
 	const runs: number[] = [];
 	for (const { question: other, decision } of standingOn(ctx, question.fingerprint)) {
@@ -600,11 +608,68 @@ function endReplaced(ctx: Ctx, question: QuestionRow, holds: readonly HoldTerm[]
 				? false
 				: mine === "all" || (theirs !== "all" && theirs.some((target) => mine.includes(target)));
 		if (!same) continue;
+		// The answer to a dispute, when whoever is answering now may not settle that dispute: it is not theirs
+		// to replace by answering another question about the cause. An answer for certain targets stays the
+		// answer for those targets under their answer for the whole cause; `answer` has refused the rest.
+		if (!maySettle(ctx, other, decision, byRule)) {
+			if (mine === "all" && theirs !== "all") continue;
+			throw conflict(`${questionRef(other)} answers a dispute that this answer may not replace`);
+		}
 		HANDLERS[other.kind].revert(ctx, other, decision);
 		lapse(ctx, other, decision, ctx.now);
 		runs.push(...runsDependingOn(ctx.db, decision.id), ...runsAbout(ctx, other));
 	}
 	return runs;
+}
+
+/**
+ * May whoever is acting now change the answer in force on this question? Always, unless it is the answer to a
+ * dispute and the policy's clause for disputes keeps it from them: a producer of the evidence, a party to the
+ * dispute, an agent where the clause wants a person, or a rule. The same test `answer` and `undo` apply to the
+ * question itself, asked here about a question whose answer another question's answer would end.
+ */
+function maySettle(ctx: Ctx, question: QuestionRow, decision: DecisionRow, byRule: boolean): boolean {
+	const facts = factsNow(ctx.db, question);
+	if (question.kind !== "failure" || !facts.has("hint:disputed")) return true;
+	const given = json<{ is?: string }>(decision.answer).is;
+	const clause = clauseFor(currentPolicy(ctx.db, ctx.project.id), {
+		kind: question.kind,
+		facts,
+		...(given ? { answer: given } : {}),
+	});
+	if (!clause.ask.notProducer) return true;
+	if (byRule) return false;
+	const handler = HANDLERS[question.kind];
+	const ask: Ask = clause.ask.who === "rule" ? { ...clause.ask, who: "member" } : clause.ask;
+	return (
+		standingOf({
+			actor: ctx.actor,
+			ask,
+			isAuthor: handler.isAuthor(ctx, question),
+			isProducer: handler.isProducer(ctx, question),
+		}) === "counts"
+	);
+}
+
+/**
+ * The answer to a dispute that this answer would end without its author having the right to settle that
+ * dispute, where the two cannot both stand (both for the whole cause, or both naming one target). Null when
+ * there is none: `endReplaced` then ends what may be ended and leaves a narrower dispute answer standing.
+ */
+function wouldOverturn(ctx: Ctx, question: QuestionRow, given: AnyAnswer): QuestionRow | null {
+	if (question.kind !== "failure") return null;
+	const policy = currentPolicy(ctx.db, ctx.project.id);
+	const mine = covers(HANDLERS[question.kind].holds({ question, answer: given, now: ctx.now, policy }));
+	if (mine === "results") return null;
+	for (const { question: other, decision } of standingOn(ctx, question.fingerprint)) {
+		if (other.id === question.id) continue;
+		const theirs = covers(json<HoldTerm[]>(decision.holds));
+		if (theirs === "results") continue;
+		const same = mine === "all" || (theirs !== "all" && theirs.some((target) => mine.includes(target)));
+		if (!same || (mine === "all" && theirs !== "all")) continue;
+		if (!maySettle(ctx, other, decision, false)) return other;
+	}
+	return null;
 }
 
 /** The row that ended the answer of the question this one was asked after, if it was asked for that reason. */
@@ -1158,7 +1223,8 @@ export function factsNow(db: Db, question: QuestionRow): Set<string> {
 	if (subject.signature === undefined || subject.scope === undefined) return facts;
 	// An answer in force that was given to a dispute keeps that fact (see `answer`); otherwise the runs say.
 	const settledDispute = question.state === "decided" && facts.has("hint:disputed");
-	if (settledDispute || inDispute(db, question.project, subject.signature, subject.scope)) facts.add("hint:disputed");
+	if (settledDispute || inDispute(db, question.project, subject.signature, subject.scope, inForce(question)))
+		facts.add("hint:disputed");
 	else facts.delete("hint:disputed");
 	return facts;
 }

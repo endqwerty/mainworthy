@@ -96,13 +96,17 @@ not the same things done worse.
    agent's result end a person's answer (#70). What is done about the failure from the moment it is disputed is
    another matter: a new answer, a changed answer and a withdrawal are each held to the clause for disputes,
    because whether a slot disputes the cause is read from the runs when the answer is given, changed or
-   withdrawn, and when the question is shown (from every planned run that holds the two results that disagree,
-   a closed one too: a run closing on an answer does not end the dispute). An answer given to a dispute stays an answer to a dispute while
+   withdrawn, and when the question is shown. Three kinds of run say there is a dispute: an open run; a closed
+   run that shows the dispute with nothing excusing it; and, for an answer in force, a closed run that rests on
+   that answer, so a run closing on an answer does not hand the dispute back. A dispute settled long ago does
+   not cling to a later failure with the same cause: that is asked about as a plain failure. An answer given to a dispute stays an answer to a dispute while
    it is in force, also after it has set the disputed result aside or the run has closed on it: the people the
    clause kept it from cannot take it back or put their own in its place. Who they are (whoever failed and
    whoever passed in the disputed slot) is kept on the question from the moment the dispute is raised or
    answered, and from one question about the cause to the next, because the runs stop showing it once the
-   dispute is settled. Withdrawing an answer is held to the clause
+   dispute is settled. Nor can they overturn it through another question: an answer for the whole cause, given
+   to a later failure by somebody a dispute's answer is kept from, leaves that answer standing for its build
+   (an answer for a build takes precedence there over an answer for the whole cause). Withdrawing an answer is held to the clause
    the policy in force now has for that answer: who may, and whether a reason is owed. (The policy in force,
    not the one the answer was given under: an administrator who relaxes the policy relaxes withdrawals too.)
 5. **Drafts live in the browser.** The design autosaves into a server-side open proposal that others see as

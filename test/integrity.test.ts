@@ -1910,6 +1910,51 @@ describe("what a decision may change", () => {
 		expect(decide(standing(), { is: "infra" }, carol).status).toBe("decided");
 	});
 
+	test("a dispute settled for one build does not make a later failure with the same cause a dispute", () => {
+		usePolicy("standard");
+		seed(1, ["human", "auto"]);
+		const alice = h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
+		const bob = h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
+		const carol = h.actor("carol", "human", ["read", "produce", "answer", "plan"]);
+		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const result = (outcome: string) => ({
+			test: { key: "one" },
+			annotation: { case: "C-1", version: 1 },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
+		});
+		// Alice fails and Bob passes one case in a run over the first build; Carol settles it for that build
+		// (an infrastructure failure there), and the run closes on her answer.
+		const old = { repo: "app", commit: "shadow001", branch: "main" };
+		h.call<PlanReply>("plan", { name: "Release", select: {}, accepts: { repo: "app", commit: old.commit } }, alice);
+		report({ target: old, results: [result("fail")] }, alice);
+		report({ target: old, results: [result("pass")] }, bob);
+		expect(decide(open("failure"), { is: "infra" }, carol).status).toBe("decided");
+		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("closed");
+		// The pipeline fails the next build with the same cause. Nothing disputes that failure: it is a plain
+		// failure, with a plain failure's answers, and anybody who may answer one may answer it, Bob included.
+		report({ target: { repo: "app", commit: "shadow002", branch: "main" }, results: [result("fail")] }, ci);
+		const next = open("failure");
+		expect((next.evidence as { hints: string[] }).hints).not.toContain("disputed");
+		expect(next.answers).not.toContain("mistaken");
+		expect(decide(next, { is: "flaky" }, bob).status).toBe("decided");
+		// Bob's answer is about the cause from here on. It does not take the place of Carol's judgement of the
+		// dispute he was a party to: hers is still the answer for the first build, and the run still rests on it.
+		expect(
+			rows<{ answer: string }>(
+				`SELECT d.answer FROM depends_on dep JOIN decisions d ON d.id = dep.decision
+				 JOIN runs r ON r.id = dep.run WHERE r.origin = 'planned'`,
+			).map((row) => JSON.parse(row.answer).is),
+		).toEqual(["infra"]);
+		// And Alice cannot take it back.
+		const settled = h
+			.call<InboxReply>("inbox", { kind: "failure", state: "decided", limit: 50 })
+			.items.filter((item) => (item.decision?.answer as { is?: string } | undefined)?.is === "infra");
+		expect(first(h.call<DecideReply[]>("decide", { undo: first(settled).q, reason: "no" }, alice)).status).toBe(
+			"forbidden",
+		);
+	});
+
 	test("withdrawing an answer needs what giving it needs: not the producer, and a reason where one is required", () => {
 		usePolicy("strict");
 		const producer = h.actor("producer", "human", ["read", "produce", "answer"]);

@@ -93,7 +93,7 @@ function sequence(seed: number, preset: string): Problem | null {
 		);
 		const excuseOf = (project: number, signature: number, scope: string, target: number) =>
 			rows(
-				"SELECT class FROM excuses WHERE project = ? AND signature = ? AND scope = ? AND target IN (0, ?) ORDER BY decision DESC LIMIT 1",
+				"SELECT class FROM excuses WHERE project = ? AND signature = ? AND scope = ? AND target IN (0, ?) ORDER BY (target != 0) DESC, decision DESC LIMIT 1",
 				project,
 				signature,
 				scope,
@@ -439,8 +439,15 @@ function sequence(seed: number, preset: string): Problem | null {
 			const target = targets.get(Number(row.target));
 			return target !== undefined && scopeOf(target, Number(row.run ?? 0)) === subject.scope;
 		});
+		// A slot disputes the question where its run is open, or closed and showing the dispute with nothing
+		// excusing it, or closed on the answer this question has in force.
 		const disputing = rows<{ id: number; run: number; causes: string }>(
-			"SELECT s.id, s.run, s.causes FROM slots s JOIN runs r ON r.id = s.run WHERE s.state = 'disputed' AND r.origin = 'planned'",
+			`SELECT s.id, s.run, s.causes FROM slots s JOIN runs r ON r.id = s.run
+			 WHERE s.state = 'disputed' AND r.origin = 'planned'
+			   AND (r.state = 'open' OR json_extract(r.tally, '$.disputed') > 0
+			        OR EXISTS (SELECT 1 FROM depends_on d JOIN questions q ON q.decision = d.decision
+			                   WHERE d.run = r.id AND q.no = ? AND q.state = 'decided'))`,
+			no,
 		).filter((slot) =>
 			(JSON.parse(slot.causes) as [number, number][]).some(([signature, on]) => {
 				const target = targets.get(on);

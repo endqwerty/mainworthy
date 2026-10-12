@@ -193,6 +193,14 @@ const Q = {
 	disputedSlots: sql<{ project: number; signature: number }, { id: number; run: number; causes: string }>(
 		`SELECT s.id AS id, s.run AS run, s.causes AS causes FROM slots s JOIN runs r ON r.id = s.run
 		 WHERE s.state = 'disputed' AND r.project = $project AND r.origin = 'planned'
+		   AND (r.state = 'open' OR json_extract(r.tally, '$.disputed') > 0)
+		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
+	),
+	// The disputed slots of the planned runs that count a failure as excused by one decision.
+	restingDisputes: sql<{ decision: number; signature: number }, { id: number; run: number; causes: string }>(
+		`SELECT s.id AS id, s.run AS run, s.causes AS causes FROM depends_on d
+		 JOIN runs r ON r.id = d.run AND r.origin = 'planned' JOIN slots s ON s.run = r.id AND s.state = 'disputed'
+		 WHERE d.decision = $decision
 		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
 	),
 	failingCauses: sql<{ run: number }, { signature: number; target: number }>(
@@ -717,39 +725,57 @@ export function runsShowing(db: Db, project: number, signature: number): number[
 }
 
 /**
- * Is this cause in dispute now: does a planned run have a slot where one producer's failure with it stands
- * beside another's pass? Any planned run, open or closed: a run that closed on an answer still holds the two
- * results that disagree, and what is done to that answer changes how the closed run counts them. Read from the
- * slots as they are, not from the report that happens to be arriving: a report that touches no slot does not
- * make a dispute go away.
+ * Is this cause in dispute: does a planned run have a slot where one producer's failure with it stands beside
+ * another's pass? Three kinds of run say so. An open run. A closed run that shows the dispute with nothing
+ * excusing it (the answer it was closed on was withdrawn or ran out). And, for an answer in force (`decision`),
+ * a closed run that rests on that answer: a run closing on an answer does not hand the dispute back to the
+ * people it is kept from. A closed run whose dispute rests on another answer says nothing about a failure that
+ * is asked about afresh: a dispute settled long ago does not cling to every later failure with the same cause.
+ * Read from the slots as they are, not from the report that happens to be arriving: a report that touches no
+ * slot does not make a dispute go away.
  */
-export function inDispute(db: Db, project: number, signature: number, scope: string): boolean {
-	return disputingSlots(db, project, signature, scope).length > 0;
+export function inDispute(
+	db: Db,
+	project: number,
+	signature: number,
+	scope: string,
+	decision: number | null = null,
+): boolean {
+	return disputingSlots(db, project, signature, scope, decision).length > 0;
 }
 
-/** The slots that dispute a cause in its scope, in any planned run of the project. */
-function disputingSlots(db: Db, project: number, signature: number, scope: string): number[] {
-	const slots: number[] = [];
-	for (const slot of db.all(Q.disputedSlots, { project, signature })) {
+function disputingSlots(db: Db, project: number, signature: number, scope: string, decision: number | null): number[] {
+	const slots = new Set<number>();
+	const rows = [
+		...db.all(Q.disputedSlots, { project, signature }),
+		...(decision !== null ? db.all(Q.restingDisputes, { decision, signature }) : []),
+	];
+	for (const slot of rows) {
 		const run = runById(db, slot.run);
-		if (!run) continue;
+		if (!run || run.project !== project) continue;
 		const here = json<Cause[]>(slot.causes).some(
 			([cause, target]) => cause === signature && scopeIn(db, run, target) === scope,
 		);
-		if (here) slots.push(slot.id);
+		if (here) slots.add(slot.id);
 	}
-	return slots;
+	return [...slots];
 }
 
 /**
  * The parties to a dispute about a cause: everybody with a result in a slot that disputes it, whoever reported
- * the failure and whoever reported otherwise, in any planned run of the project. Read from the same slots that
- * say there is a dispute, so the rule that keeps a dispute from its parties knows all of them, whichever run
- * the question happens to name.
+ * the failure and whoever reported otherwise. Read from the same slots that say there is a dispute (see
+ * `inDispute`), so the rule that keeps a dispute from its parties knows all of them, whichever run the question
+ * happens to name.
  */
-export function disputants(db: Db, project: number, signature: number, scope: string): Set<number> {
+export function disputants(
+	db: Db,
+	project: number,
+	signature: number,
+	scope: string,
+	decision: number | null = null,
+): Set<number> {
 	const parties = new Set<number>();
-	for (const slot of disputingSlots(db, project, signature, scope)) {
+	for (const slot of disputingSlots(db, project, signature, scope, decision)) {
 		for (const fill of fillsOf(db, slot)) parties.add(fill.actor);
 	}
 	return parties;
