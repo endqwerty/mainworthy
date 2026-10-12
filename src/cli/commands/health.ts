@@ -14,7 +14,7 @@ export const healthCommand: AdapterCommand = {
 	async run(args, client) {
 		assertPositionals(args, 0, 0, healthCommand.usage);
 		const named = args.value("url") ?? process.env.CASEBOOK_URL;
-		const url = named ? client.url : `http://127.0.0.1:${process.env.CASEBOOK_PORT ?? "7357"}`;
+		const url = named ? client.url : `http://127.0.0.1:${process.env.CASEBOOK_PORT || "7357"}`;
 		let version: string | null = null;
 		try {
 			const response = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(2500) });
