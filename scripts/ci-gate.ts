@@ -1,0 +1,79 @@
+// The last job of the check workflow: every shard's results go to one Casebook, and Casebook's gate is the
+// job's result. Casebook knows only what it was told, so this also refuses what a gate cannot see: a shard that
+// left no report, a shard whose tests exited with a failure its report does not show, and a test file that is in
+// no shard's report (it did not load, or no shard was given it).
+//
+//   bun scripts/ci-gate.ts <directory> <shard>...        from the repository's root
+//
+// For each shard the directory holds `<shard>.xml` (JUnit) and `<shard>.json` (what `scripts/check.ts test
+// --junit` wrote beside it). Each file is reported under the shard's name as its job, with the two commands a
+// pipeline would run: `casebook report` and `casebook gate`.
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { Glob } from "bun";
+import { parseJUnit } from "../src/surfaces/formats/junit.ts";
+import { CI_SHARD_LIMITS, type Outcome, over, readOutcome, seconds } from "./check-plan.ts";
+
+const [directory, ...shards] = process.argv.slice(2);
+if (!directory || shards.length === 0) {
+	console.error("usage: bun scripts/ci-gate.ts <directory> <shard>...");
+	process.exit(4);
+}
+
+const cli = (argv: string[]): number => {
+	console.log(`\n$ casebook ${argv.join(" ")}`);
+	return Bun.spawnSync([process.execPath, join(import.meta.dir, "../src/cli/main.ts"), ...argv], {
+		stdio: ["ignore", "inherit", "inherit"],
+	}).exitCode;
+};
+
+const problems: string[] = [];
+const rows: { shard: string; outcome: Outcome | null; tests: number; failed: number }[] = [];
+const reported = new Set<string>();
+for (const shard of shards) {
+	const file = join(directory, `${shard}.xml`);
+	const outcome = readOutcome(join(directory, `${shard}.json`));
+	const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+	if (text.trim() === "" || outcome === null) {
+		const what = text.trim() === "" ? `${file} is missing or empty` : "its outcome file is missing";
+		problems.push(`${shard}: no report (${what})`);
+		rows.push({ shard, outcome, tests: 0, failed: 0 });
+		continue;
+	}
+	const results = parseJUnit(text, { file }).results;
+	const failed = results.filter((result) => result.outcome === "fail" || result.outcome === "error").length;
+	rows.push({ shard, outcome, tests: results.length, failed });
+	for (const suite of text.matchAll(/<testsuite\b[^>]*\bfile="([^"]+)"/g)) reported.add(suite[1] ?? "");
+	if (results.length === 0) problems.push(`${shard}: its report holds no test`);
+	if (outcome.exit !== 0 && failed === 0)
+		problems.push(`${shard}: the tests exited ${outcome.exit} and the report shows no failure`);
+	const exit = cli(["report", file, "--job", shard]);
+	if (exit !== 0) problems.push(`${shard}: casebook report exited ${exit}`);
+}
+
+const gate = cli(["gate"]);
+
+const unreported = [...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")]
+	.filter((file) => !reported.has(file))
+	.sort();
+if (unreported.length > 0) problems.push(`in no shard's report: ${unreported.join(", ")}`);
+
+console.log("\nShard            tests  failed  exit      wall");
+for (const row of rows) {
+	const cells = [row.tests, row.failed, row.outcome?.exit ?? "-", row.outcome ? seconds(row.outcome.seconds) : "-"];
+	console.log(
+		`${row.shard.padEnd(16)} ${String(cells[0]).padStart(5)}  ${String(cells[1]).padStart(6)}  ${String(cells[2]).padStart(4)}  ${String(cells[3]).padStart(8)}`,
+	);
+}
+const longest = Math.max(0, ...rows.map((row) => row.outcome?.seconds ?? 0));
+const budget = over(longest, CI_SHARD_LIMITS);
+const slow = `the slowest shard's tests took ${seconds(longest)}`;
+if (budget === "fail") problems.push(`${slow}, over the limit of ${CI_SHARD_LIMITS.fail} s (scripts/check-plan.ts)`);
+// GitHub puts a line that starts with ::warning:: or ::error:: on the run's summary page.
+if (budget === "warn")
+	console.log(`::warning::${slow}, over the budget of ${CI_SHARD_LIMITS.warn} s (scripts/check-plan.ts)`);
+
+for (const problem of problems) console.log(`::error::${problem}`);
+if (gate !== 0) console.log(`\nThe gate did not pass (exit ${gate}).`);
+else if (problems.length > 0) console.log("\nThe gate passed on what it was told, and that was not everything.");
+process.exit(gate !== 0 ? gate : problems.length > 0 ? 1 : 0);

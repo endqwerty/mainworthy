@@ -1,5 +1,13 @@
 # The check, and Casebook testing itself: the test results of this repository are reported to Casebook with the
-# one pipeline line a user would add, and the job's result is Casebook's gate.
+# two pipeline lines a user would add (`casebook report`, `casebook gate`), and the result is Casebook's gate.
+#
+# The tests run in shards, each on its own runner, balanced by scripts/test-timings.json. The tests that measure
+# time (scripts/check-plan.ts, QUIET) have a runner to themselves. Every shard uploads its JUnit file; the `gate`
+# job reports them all to one Casebook, each under its shard's name, and runs the gate. A shard that left no
+# report fails the gate job: a missing report is not a pass (scripts/ci-gate.ts).
+#
+# `gate` is the job to require on the branch. It fails when the gate does not pass, when a report is missing,
+# and when the type-check or the lint failed.
 name: check
 
 on:
@@ -11,9 +19,62 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  static:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+
+  tests:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      # Every shard runs to its end: the gate reads all of them.
+      fail-fast: false
+      matrix:
+        # The shard count is CI_SHARDS in scripts/check-plan.ts; the names are the ones the gate job lists.
+        include:
+          - { name: tests-1, phase: "--only=parallel --shard=1/5" }
+          - { name: tests-2, phase: "--only=parallel --shard=2/5" }
+          - { name: tests-3, phase: "--only=parallel --shard=3/5" }
+          - { name: tests-4, phase: "--only=parallel --shard=4/5" }
+          - { name: tests-5, phase: "--only=parallel --shard=5/5" }
+          - { name: quiet, phase: "--only=quiet" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - name: Start the browser once
+        # A guess at why the first browser test of a job is slow (scripts/warm-browser.ts). Not a test.
+        continue-on-error: true
+        run: bun scripts/warm-browser.ts
+      - name: Tests
+        # A failing test does not end the job here: its report is uploaded and the gate decides.
+        continue-on-error: true
+        run: bun scripts/check.ts test ${{ matrix.phase }} --junit=test-results/${{ matrix.name }}.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-${{ matrix.name }}
+          path: test-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+  gate:
+    needs: [static, tests]
+    # Also when a shard or the lint failed: Casebook is told what ran, and this job is the one that fails.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     env:
       # Set these in the repository to report to a deployed Casebook. Without them the job starts its own.
       CASEBOOK_URL: ${{ vars.CASEBOOK_URL }}
@@ -25,21 +86,20 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-      - run: bun run lint
-      - name: Tests
-        id: tests
+      - uses: actions/download-artifact@v4
+        # A shard with nothing to download is named, and failed, by the next step but one.
         continue-on-error: true
-        # Bun does not create the report's directory.
-        run: |
-          mkdir -p test-results
-          bun test src test --reporter=junit --reporter-outfile=test-results/junit.xml
+        with:
+          pattern: results-*
+          path: test-results
+          merge-multiple: true
       - name: Start a Casebook for this job
         if: env.CASEBOOK_URL == ''
         run: |
           CASEBOOK_DATA="$RUNNER_TEMP/casebook" CASEBOOK_PORT=7357 bun src/cli/main.ts serve &
           for i in $(seq 1 50); do curl -fsS http://127.0.0.1:7357/healthz >/dev/null && break; sleep 0.2; done
-      - name: Report the results to Casebook
-        run: bun src/cli/main.ts report test-results/junit.xml
-      - name: Gate
-        run: bun src/cli/main.ts gate
+      - name: Report every shard to Casebook, then the gate
+        run: bun scripts/ci-gate.ts test-results tests-1 tests-2 tests-3 tests-4 tests-5 quiet
+      - name: The type-check and the lint passed
+        if: always()
+        run: test "${{ needs.static.result }}" = success
