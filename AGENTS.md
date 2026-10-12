@@ -30,7 +30,8 @@ issue #81, in the web UI's conflict card.
   shard, as CI runs it: `bun run test --only=parallel --shard=2/5`; the quiet
   tests: `bun run test --only=quiet`. CI (`.github/workflows/check.yml`) runs five shards and the quiet
   tests on a runner each, then one `gate` job reports every shard to Casebook and
-  its gate is the result; a shard with no report fails it. Not yet run on GitHub:
+  its gate is the result; a shard with no report fails it, and so does a test
+  file in which every test was skipped. Not yet run on GitHub:
   about three and a half minutes is expected (it was 716 s in one job).
 - **One registry.** A capability is an operation in `src/server/ops/index.ts`. HTTP,
   the OpenAPI document, the CLI, the MCP tools and the web client come from it. Never

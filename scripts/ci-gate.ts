@@ -1,7 +1,8 @@
 // The last job of the check workflow: every shard's results go to one Casebook, and Casebook's gate is the
 // job's result. Casebook knows only what it was told, so this also refuses what a gate cannot see: a shard that
-// left no report, a shard whose tests exited with a failure its report does not show, and a test file that is in
-// no shard's report (it did not load, or no shard was given it).
+// left no report, a shard whose tests exited with a failure its report does not show, a test file that is in no
+// shard's report (it did not load, or no shard was given it), and a test file whose tests were all skipped (a
+// runner with no browser skips every browser test, exits 0 and writes a complete report).
 //
 //   bun scripts/ci-gate.ts <directory> <shard>...        from the repository's root
 //
@@ -44,6 +45,17 @@ for (const shard of shards) {
 	const failed = results.filter((result) => result.outcome === "fail" || result.outcome === "error").length;
 	rows.push({ shard, outcome, tests: results.length, failed });
 	for (const suite of text.matchAll(/<testsuite\b[^>]*\bfile="([^"]+)"/g)) reported.add(suite[1] ?? "");
+	// A skipped test proves nothing, and one skipped test beside others that ran is somebody's decision. A file
+	// in which nothing ran is a file that was not tested.
+	const ran = new Map<string, { tests: number; skipped: number }>();
+	for (const test of text.matchAll(/<testcase\b[^>]*\bfile="([^"]+)"[^>]*?(\/>|>([\s\S]*?)<\/testcase>)/g)) {
+		const count = ran.get(test[1] ?? "") ?? { tests: 0, skipped: 0 };
+		count.tests++;
+		if (/<skipped\b/.test(test[3] ?? "")) count.skipped++;
+		ran.set(test[1] ?? "", count);
+	}
+	for (const [name, count] of ran)
+		if (count.skipped === count.tests) problems.push(`${shard}: every test of ${name} was skipped (${count.tests})`);
 	if (results.length === 0) problems.push(`${shard}: its report holds no test`);
 	if (outcome.exit !== 0 && failed === 0)
 		problems.push(`${shard}: the tests exited ${outcome.exit} and the report shows no failure`);

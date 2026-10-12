@@ -7,10 +7,12 @@ import { dirname, join, resolve } from "node:path";
 import { CI_SHARD_LIMITS } from "../scripts/check-plan.ts";
 import { withInstance } from "../src/cli/test-support.ts";
 
+/** A file whose tests did not run at all, as on a runner with no browser. */
+const SKIPPED = Symbol("every test skipped");
 type Shard = {
 	name: string;
 	/** The test files of the shard, and the failure message of the test in each that failed. */
-	files: Record<string, string | null>;
+	files: Record<string, string | null | typeof SKIPPED>;
 	exit?: number;
 	seconds?: number;
 };
@@ -18,6 +20,17 @@ type Shard = {
 /** A report as Bun writes it. */
 function junit(files: Shard["files"]): string {
 	const suites = Object.entries(files).map(([file, failure]) => {
+		if (failure === SKIPPED)
+			return `  <testsuite name="${file}" file="${file}" tests="2" assertions="0" failures="0" skipped="2" time="0" hostname="runner">
+    <testcase name="works" classname="" time="0" file="${file}" line="3" assertions="0">
+      <skipped />
+    </testcase>
+    <testsuite name="group" file="${file}" line="4" tests="1" assertions="0" failures="0" skipped="1" time="0" hostname="runner">
+      <testcase name="works again" classname="group" time="0" file="${file}" line="5" assertions="0">
+        <skipped />
+      </testcase>
+    </testsuite>
+  </testsuite>`;
 		const failed =
 			failure === null
 				? " />"
@@ -116,6 +129,18 @@ test("a shard that left no report fails the job, though the gate passes on the o
 	expect(result.output).toMatch(/casebook gate\s+passed/);
 	expect(result.output).toContain("::error::tests-2: no report (test-results/tests-2.xml is missing or empty)");
 	expect(result.output).toContain("::error::in no shard's report: test/c.test.ts");
+	expect(result.code).toBe(1);
+}, 20_000);
+
+test("a test file whose tests were all skipped fails the job, though the gate passes on the others", async () => {
+	// A runner with no browser skips every browser test, exits 0 and writes a complete report.
+	const result = await gate(
+		green.map((shard) =>
+			shard.name === "tests-2" ? { ...shard, files: { "test/c.test.ts": SKIPPED }, exit: 0 } : shard,
+		),
+	);
+	expect(result.output).toMatch(/casebook gate\s+passed/);
+	expect(result.output).toContain("::error::tests-2: every test of test/c.test.ts was skipped");
 	expect(result.code).toBe(1);
 }, 20_000);
 
