@@ -183,6 +183,11 @@ const Q = {
 		 WHERE r.project = $project AND r.origin = 'planned'
 		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
 	),
+	disputedSlots: sql<{ project: number; signature: number }, { run: number; causes: string }>(
+		`SELECT s.run AS run, s.causes AS causes FROM runs r JOIN slots s ON s.run = r.id AND s.state = 'disputed'
+		 WHERE r.project = $project AND r.origin = 'planned' AND r.state = 'open'
+		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
+	),
 	failingCauses: sql<{ run: number }, { signature: number; target: number }>(
 		`SELECT DISTINCT signature, target FROM run_tests
 		 WHERE run = $run AND outcome IN ('fail', 'error') AND signature IS NOT NULL`,
@@ -668,6 +673,23 @@ export function runsShowing(db: Db, project: number, signature: number): number[
 	return [...db.all(Q.commitsShowing, { project, signature }), ...db.all(Q.plannedShowing, { project, signature })].map(
 		(row) => row.run,
 	);
+}
+
+/**
+ * Is this cause in dispute now: does an open planned run have a slot where one producer's failure with it stands
+ * beside another's pass? Read from the slots as they are, not from the report that happens to be arriving: a
+ * report that touches no slot does not make a dispute go away.
+ */
+export function inDispute(db: Db, project: number, signature: number, scope: string): boolean {
+	for (const slot of db.all(Q.disputedSlots, { project, signature })) {
+		const run = runById(db, slot.run);
+		if (!run) continue;
+		const here = json<Cause[]>(slot.causes).some(
+			([cause, target]) => cause === signature && scopeIn(db, run, target) === scope,
+		);
+		if (here) return true;
+	}
+	return false;
 }
 
 /**

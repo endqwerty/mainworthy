@@ -31,6 +31,7 @@ import {
 	causeKey,
 	type FailingGroup,
 	failsOnBase,
+	inDispute,
 	newestInScope,
 	passesAny,
 	type RunRow,
@@ -730,12 +731,14 @@ export function raiseFailure(
 		const row = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;
 		tests.set(test.id, { id: test.id, t: testRef(test), name: test.name, case: row ? caseRef(row) : null });
 	}
-	// Two kinds of hint. `disputed` is a fact about the evidence: it decides which answers apply and who may
-	// give them, and an answer stands on it. `fails-on-base` is shown and nothing more: every failing test of
-	// this report also fails, with this cause, on the commit the change started from, as Casebook had it when
-	// the report arrived. No rule acts on it and no answer stands on it; a person reads it and decides.
+	// Two hints, neither part of what an answer stands on. `disputed` is a fact about the runs as they are now
+	// (a slot where a failure with this cause stands beside another producer's pass): it decides which answers
+	// apply and who may give them. It is read from the slots, not from the arriving report, so a report that
+	// touches no slot neither ends a dispute nor an answer. `fails-on-base` is shown and nothing more: every
+	// failing test of this report also fails, with this cause, on the commit the change started from, as
+	// Casebook had it when the report arrived. No rule acts on it; a person reads it and decides.
 	const hints: string[] = [];
-	if (group.disputed) hints.push("hint:disputed");
+	if (group.disputed || inDispute(ctx.db, ctx.project.id, group.signature.id, group.scope)) hints.push("hint:disputed");
 	const shown = [...hints];
 	if (
 		scopeKind === "change" &&
@@ -766,7 +769,10 @@ export function raiseFailure(
 			targets: [...new Set([...(earlier.targets ?? []), target.id])],
 			sample: group.results[0] ?? null,
 		},
-		material: { signature: group.signature.id, scope: group.scope, hints },
+		// What an answer about a cause stands on is the cause in its scope. Who else reports it, and whether a
+		// slot disputes it at the moment, changes who may answer and with what, never whether an answer stands:
+		// an agent's report, which no gate counts, must not be able to end a person's decision.
+		material: { signature: group.signature.id, scope: group.scope },
 		facts: [`scope:${scopeKind}`, ...hints],
 		refs: [
 			`scope:${group.scope}`,

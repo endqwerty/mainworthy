@@ -5,12 +5,11 @@ import { emptyBody } from "../src/core/model.ts";
 import type { DecideReply, GateStatus, InboxReply, PlanReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
 import { HANDLERS } from "../src/server/decisions/kinds.ts";
 import { linkTest, setExcuse, testById } from "../src/server/evidence/evidence.ts";
-import { recoverAccepted, sweep } from "../src/server/jobs.ts";
-import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
+import { sweep } from "../src/server/jobs.ts";
+import { findProject, makeCtx } from "../src/server/kernel/ctx.ts";
 import { claimMint, decisionOf, Witness } from "../src/server/kernel/witness.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
-import { acceptReport } from "../src/server/ops/writes.ts";
 import { closeRun, runById } from "../src/server/runs/runs.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
@@ -414,12 +413,12 @@ describe("what a result may prove", () => {
 				},
 			],
 		});
-		const hintOn = (pr: number) =>
-			(
-				h
-					.call<InboxReply>("inbox", { kind: "failure", limit: 50 })
-					.items.find((item) => item.about.includes(`pr:${pr}`))?.evidence as { hints: string[] }
-			).hints;
+		const hintOn = (pr: number): string[] => {
+			const asked = h
+				.call<InboxReply>("inbox", { kind: "failure", limit: 50 })
+				.items.find((item) => item.about.includes(`pr:${pr}`));
+			return (asked?.evidence as { hints?: string[] } | undefined)?.hints ?? [];
+		};
 		const base = { repo: "app", commit: "corrbase01", branch: "main" };
 		const failed = report({ ...one(base, "fail"), attempt: 2 }, ci);
 		// While the base fails, a change that fails the same way is shown the hint. Nothing is excused by it.
@@ -1051,6 +1050,68 @@ describe("what a decision may change", () => {
 		expect(ledger.map((row) => row.supersedes)).toEqual([null, ledger[0]?.id ?? -1, ledger[1]?.id ?? -1]);
 	});
 
+	test("an agent's report that no run admits ends nobody's answer and leaves the commit's gate where it was", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "One" },
+				{ op: "create", outline: "Spare" },
+			],
+		});
+		const target = { repo: "app", commit: "head0012", pr: 12 };
+		plan({ name: "Release", select: {}, accepts: { repo: "app", commit: "head0012" } });
+		const result = (outcome: string) => ({
+			test: { key: "one" },
+			annotation: { case: "C-1", version: 1 },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "shared cause" } } : {}),
+		});
+		// A pipeline fails the case and a person passes it: the slot is disputed, and a person calls it flaky.
+		report({ target, results: [result("fail")] }, h.actor("pipeline", "ci", ["read", "produce"]));
+		report({ target, results: [result("pass")] });
+		const dispute = open("failure");
+		expect((dispute.evidence as { hints: string[] }).hints).toContain("disputed");
+		expect(decide(dispute, { is: "flaky" }).status).toBe("decided");
+		expect(gate({ commit: "head0012", repo: "app" }).verdict).toBe("passed");
+		// An agent reports the same failure. No run asked for agents and the case does not admit them.
+		const later = report({ target, results: [result("fail")] }, h.actor("explorer", "agent", ["read", "produce"]));
+		expect(later.questions.map((q) => q.how)).toEqual(["already decided"]);
+		expect(gate({ commit: "head0012", repo: "app" }).verdict).toBe("passed");
+		expect(
+			rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure'").map(
+				(d) => JSON.parse(d.answer).is,
+			),
+		).toEqual(["flaky"]);
+	});
+
+	test("a question about a disputed result stays a dispute, whoever reports the cause next", () => {
+		usePolicy("standard");
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "One" },
+				{ op: "create", outline: "Spare" },
+			],
+		});
+		const target = { repo: "app", commit: "head0013", pr: 13 };
+		plan({ name: "Release", select: {}, accepts: { repo: "app", commit: "head0013" } });
+		const result = (outcome: string) => ({
+			test: { key: "one" },
+			annotation: { case: "C-1", version: 1 },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "shared cause" } } : {}),
+		});
+		report({ target, results: [result("fail")] }, h.actor("pipeline", "ci", ["read", "produce"]));
+		report({ target, results: [result("pass")] });
+		expect(open("failure").answers).toContain("mistaken");
+		// The same cause from an agent, in a report that touches no slot. The slot is still disputed, so the
+		// question is still about a dispute: with the answers a dispute has, and its rule about who may give them.
+		report({ target, results: [result("fail")] }, h.actor("explorer", "agent", ["read", "produce"]));
+		const still = open("failure");
+		expect((still.evidence as { hints: string[] }).hints).toContain("disputed");
+		expect(still.answers).toContain("mistaken");
+		// The owner reported the pass: under `standard` a party to the dispute may not settle it.
+		expect(decide(still, { is: "mistaken" }).status).toBe("forbidden");
+	});
+
 	test("a pipeline's pass does not close the question about a failure a planned run still shows", () => {
 		seed(1, ["human", "agent"]);
 		const agent = h.actor("agent", "agent", ["read", "produce"]);
@@ -1134,15 +1195,38 @@ describe("what a decision may change", () => {
 		const other = h.actor("other", "human", ["read", "produce", "answer"]);
 		const third = h.actor("third", "human", ["read", "produce", "answer"]);
 		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "fail", note: "same failure" }] });
-		decide(open("failure"), { is: "flaky" });
+		// The question exists before there is a dispute; the other member's pass, a later report, makes it one.
+		const before = open("failure");
+		expect((before.evidence as { hints: string[] }).hints).not.toContain("disputed");
 		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, other);
 		const dispute = open("failure");
+		expect(dispute.q).toBe(before.q);
 		expect((dispute.evidence as { hints: string[] }).hints).toContain("disputed");
 		// The owner reported the failure, the other member the pass: neither may say which of them was wrong.
 		expect(decide(dispute, { is: "mistaken" }).status).toBe("forbidden");
 		expect(decide(dispute, { is: "mistaken" }, other).status).toBe("forbidden");
 		expect(rows("SELECT count(*) AS n FROM slot_results WHERE discounted_by IS NOT NULL")).toEqual([{ n: 0 }]);
 		expect(decide(dispute, { is: "mistaken" }, third).status).toBe("decided");
+	});
+
+	test("a failure already explained is not asked about again because somebody else then passed", () => {
+		usePolicy("standard");
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "First" },
+				{ op: "create", outline: "Second" },
+			],
+		});
+		const planned = plan({ name: "Keep open", select: {} });
+		const other = h.actor("other", "human", ["read", "produce", "answer"]);
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "fail", note: "same failure" }] });
+		expect(decide(open("failure"), { is: "flaky" }).status).toBe("decided");
+		// The answer stands on the cause, not on who else has reported since: it is not ended by a later pass.
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, other);
+		expect(h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items).toEqual([]);
+		expect(rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure'")).toHaveLength(1);
+		expect(first(slots(planned.run)).state).toBe("disputed");
+		expect(gate({ run: planned.run }).tally).toMatchObject({ pass: 1, disputed: 0, unexplained: 0 });
 	});
 
 	test("withdrawing an answer needs what giving it needs: not the producer, and a reason where one is required", () => {

@@ -50,7 +50,10 @@ not the same things done worse.
    by its choice of words; a person's is `human` when it names a case and `auto` when they pass on a results file.
    **What an agent reports never moves a commit's gate.** It is recorded and shown, a failure it reports is put to
    a person as a question that holds nothing, and it counts only in a planned run that asked for agents on a case
-   that admits them (decision 0009, "agent evidence in gates").
+   that admits them (decision 0009, "agent evidence in gates"). Nor can it end a person's answer: what an answer
+   about a failure stands on is the cause in its scope, and nothing about who else has reported it since.
+   Whether a slot disputes the cause (which decides who may answer and whether `mistaken` applies) is read from
+   the runs as they are, not from the report that is arriving.
 4. **Two failure answers were added, one replaced.** `inherited` (already failing where the change started,
    which the design left unnamed) and `mistaken` (a disputed slot: the failing result was wrong). `mistaken`
    replaces the design's `resolve { trust: [...] }`; any other failure answer on a disputed slot also resolves
