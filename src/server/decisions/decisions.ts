@@ -638,18 +638,18 @@ function maySettle(ctx: Ctx, question: QuestionRow, decision: DecisionRow, byRul
 		facts,
 		...(given ? { answer: given } : {}),
 	});
-	if (!clause.ask.notProducer) return true;
-	if (byRule) return false;
+	// The whole of what the clause asks, not only whether it shuts out producers: the role it wants, whether an
+	// agent may, and who produced the evidence where it says so.
+	if (byRule) return clause.ask.who === "rule";
 	const handler = HANDLERS[question.kind];
 	const ask: Ask = clause.ask.who === "rule" ? { ...clause.ask, who: "member" } : clause.ask;
-	return (
-		standingOf({
-			actor: ctx.actor,
-			ask,
-			isAuthor: handler.isAuthor(ctx, question),
-			isProducer: handler.isProducer(ctx, question),
-		}) === "counts"
-	);
+	const standing = standingOf({
+		actor: ctx.actor,
+		ask,
+		isAuthor: handler.isAuthor(ctx, question),
+		isProducer: ask.notProducer && handler.isProducer(ctx, question),
+	});
+	return standing === "counts";
 }
 
 /**

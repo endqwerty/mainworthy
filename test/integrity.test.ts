@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { emptyBody } from "../src/core/model.ts";
 import type { DecideReply, GateStatus, InboxReply, PlanReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
+import { PRESETS } from "../src/core/presets.ts";
 import { HANDLERS } from "../src/server/decisions/kinds.ts";
 import { linkTest, setExcuse, testById } from "../src/server/evidence/evidence.ts";
 import { recoverAccepted, sweep } from "../src/server/jobs.ts";
@@ -2048,6 +2049,46 @@ describe("what a decision may change", () => {
 		expect(first(h.call<DecideReply[]>("decide", { undo: first(settled).q, reason: "no" }, alice)).status).toBe(
 			"forbidden",
 		);
+	});
+
+	test("an answer to a later failure does not replace a dispute's answer that its author may not settle, whatever the clause asks", () => {
+		// A policy of the project's own: disputes are an administrator's to settle. The people who reported the
+		// results are not shut out as producers; it is the role that is asked.
+		const clauses = structuredClone(PRESETS.standard.clauses).map((clause) =>
+			clause.id === "failure-disputed"
+				? { ...clause, ask: { ...clause.ask, who: "admin" as const, notProducer: false } }
+				: clause,
+		);
+		h.call("propose", { edits: [{ op: "policy", clauses }] });
+		expect(decide(open("adopt"), { is: "accept" }, h.owner, { reason: "our own rules" }).status).toBe("decided");
+		seed(1, ["human", "auto"]);
+		const alice = h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
+		const bob = h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
+		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const result = (outcome: string) => ({
+			test: { key: "one" },
+			annotation: { case: "C-1", version: 1 },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
+		});
+		const old = { repo: "app", commit: "overlap01", branch: "main" };
+		const planned = plan({ name: "Closed dispute", select: {}, accepts: { repo: "app", commit: old.commit } });
+		report({ target: old, results: [result("fail")] }, alice);
+		report({ target: old, results: [result("pass")] }, bob);
+		// Bob is a member, not an administrator: the dispute is not his. The owner settles it for that build.
+		expect(decide(open("failure"), { is: "infra" }, bob).status).toBe("forbidden");
+		expect(decide(open("failure"), { is: "infra" }).status).toBe("decided");
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+		// The next build fails with the same cause: a plain failure, which a member may answer. Bob does, for the
+		// whole cause. The administrator's judgement of the dispute stays the answer for the first build.
+		report({ target: { ...old, commit: "overlap02" }, results: [result("fail")] }, ci);
+		expect(decide(open("failure"), { is: "expected" }, bob).status).toBe("decided");
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+		expect(
+			rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure' ORDER BY id").map(
+				(row) => JSON.parse(row.answer).is,
+			),
+		).toEqual(["infra", "expected"]);
 	});
 
 	test("withdrawing an answer needs what giving it needs: not the producer, and a reason where one is required", () => {
