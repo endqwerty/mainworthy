@@ -69,7 +69,9 @@ export type HoldTerm =
 	/** Holds on the targets the question had seen when it was answered, and on no other. */
 	| { until: "this-target"; targets: number[] }
 	| { until: "time"; at: number }
-	| { until: "fact-gone"; fact: string };
+	| { until: "fact-gone"; fact: string }
+	/** Holds for the results the decision named and for nothing reported later: a new result is asked about. */
+	| { until: "results-named" };
 
 export type Signer = { by: number; clause: string; policy: number; reason: string | null };
 
@@ -162,9 +164,15 @@ const Q = {
 		`SELECT * FROM questions WHERE project = $project AND state = $state AND owner = 0 AND rank > $rank AND kind = $kind
 		 ORDER BY rank LIMIT $limit`,
 	),
-	ledger: sql<{ project: number; rev: number; limit: number }, QuestionRow>(
-		`SELECT * FROM questions WHERE project = $project AND state = 'decided' AND rev < $rev
-		 ORDER BY rev DESC LIMIT $limit`,
+	// Newest first. Several questions can be decided at one revision (one command), so the page is cut on the
+	// revision and the id together.
+	ledger: sql<{ project: number; rev: number; id: number; limit: number }, QuestionRow>(
+		`SELECT * FROM questions WHERE project = $project AND state = 'decided' AND (rev, id) < ($rev, $id)
+		 ORDER BY rev DESC, id DESC LIMIT $limit`,
+	),
+	ledgerOfKind: sql<{ project: number; kind: string; rev: number; id: number; limit: number }, QuestionRow>(
+		`SELECT * FROM questions WHERE project = $project AND state = 'decided' AND kind = $kind AND (rev, id) < ($rev, $id)
+		 ORDER BY rev DESC, id DESC LIMIT $limit`,
 	),
 	openCount: sql<{ project: number }, { n: number }>(
 		"SELECT count(*) AS n FROM questions WHERE project = $project AND state = 'open' AND owner = 0",
@@ -334,17 +342,20 @@ export const openCountOn = (db: Db, project: number, about: string): number =>
 
 export function queuePage(
 	db: Db,
-	input: { project: number; state: "open" | "decided"; kind: Kind | undefined; after: number; limit: number },
+	input: { project: number; state: "open"; kind: Kind | undefined; after: number; limit: number },
 ) {
-	if (input.state === "decided") {
-		return db.all(Q.ledger, {
-			project: input.project,
-			rev: input.after === Number.MIN_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : input.after,
-			limit: input.limit,
-		});
-	}
 	const base = { project: input.project, state: input.state, rank: input.after, limit: input.limit };
 	return input.kind ? db.all(Q.queueOfKind, { ...base, kind: input.kind }) : db.all(Q.queue, base);
+}
+
+/** A page of the ledger, newest first, after the position `before` (the revision and id of the last row seen). */
+export function ledgerPage(
+	db: Db,
+	input: { project: number; kind: Kind | undefined; before: { rev: number; id: number } | null; limit: number },
+) {
+	const at = input.before ?? { rev: Number.MAX_SAFE_INTEGER, id: Number.MAX_SAFE_INTEGER };
+	const base = { project: input.project, rev: at.rev, id: at.id, limit: input.limit };
+	return input.kind ? db.all(Q.ledgerOfKind, { ...base, kind: input.kind }) : db.all(Q.ledger, base);
 }
 
 export function openCounts(db: Db, project: number): Record<string, number> {

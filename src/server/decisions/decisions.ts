@@ -30,6 +30,7 @@ import {
 	type Blocker,
 	causeKey,
 	type FailingGroup,
+	failingWithCause,
 	failsOnBase,
 	newestInScope,
 	passesAny,
@@ -329,6 +330,10 @@ export function stillHolds(
 				return occurrence.now < term.at;
 			case "fact-gone":
 				return occurrence.facts.includes(term.fact);
+			case "results-named":
+				// It covers the results it named and no occurrence reported since. Like a target term, that is not a
+				// reason to withdraw it: what it decided about those results stands.
+				return options.anyTarget === true;
 			default: {
 				const _exhaustive: never = term;
 				return _exhaustive;
@@ -487,8 +492,9 @@ function settle(
 	return { decision: { ...decision, effects: JSON.stringify(effects) }, effects };
 }
 
-/** What a decision covers: the targets it names, or every target of the cause's scope. */
-const covers = (holds: readonly HoldTerm[]): readonly number[] | "all" => {
+/** What a decision covers: the targets it names, every target of the cause's scope, or only the results it named. */
+const covers = (holds: readonly HoldTerm[]): readonly number[] | "all" | "results" => {
+	if (holds.some((term) => term.until === "results-named")) return "results";
 	const here = holds.find((term) => term.until === "this-target");
 	return here?.until === "this-target" ? here.targets : "all";
 };
@@ -505,7 +511,13 @@ function endReplaced(ctx: Ctx, question: QuestionRow, holds: readonly HoldTerm[]
 	for (const { question: other, decision } of standingOn(ctx, question.fingerprint)) {
 		if (other.id === question.id) continue;
 		const theirs = covers(json<HoldTerm[]>(decision.holds));
-		const same = mine === "all" ? theirs === "all" : theirs !== "all" && theirs.some((target) => mine.includes(target));
+		// A decision about named results takes nobody's place and nobody takes its place.
+		const same =
+			mine === "results" || theirs === "results"
+				? false
+				: mine === "all"
+					? theirs === "all"
+					: theirs !== "all" && theirs.some((target) => mine.includes(target));
 		if (!same) continue;
 		HANDLERS[other.kind].revert(ctx, other, decision);
 		lapse(ctx, other, decision, ctx.now);
@@ -670,10 +682,17 @@ export function raiseFailure(
 		tests.set(test.id, { id: test.id, t: testRef(test), name: test.name, case: row ? caseRef(row) : null });
 	}
 	const hints: string[] = [];
+	// "Already failing on the base" is a statement about the cause, so it must be true of every test that fails
+	// with it on this commit now, not only of those in the report that happens to be arriving: how a pipeline
+	// splits its results over reports must not change what a rule may excuse.
+	const failingNow = new Set([
+		...group.tests.map((test) => test.id),
+		...failingWithCause(ctx.db, target, group.signature.id),
+	]);
 	if (
 		scopeKind === "change" &&
-		group.tests.length > 0 &&
-		group.tests.every((test) => failsOnBase(ctx.db, target, test.id, group.signature.id))
+		failingNow.size > 0 &&
+		[...failingNow].every((test) => failsOnBase(ctx.db, target, test, group.signature.id))
 	) {
 		hints.push("hint:fails-on-base");
 	}

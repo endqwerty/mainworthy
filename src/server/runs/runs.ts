@@ -13,6 +13,7 @@ import {
 	explainVerdict,
 	type Obligation,
 	qualifies,
+	replacesInLane,
 	type SlotState,
 	slotState,
 	type Tally,
@@ -28,7 +29,7 @@ import {
 	changeByKey,
 	codeWhat,
 	excuseFor,
-	isCorrected,
+	laneHistory,
 	mustTarget,
 	processedJobs,
 	resultById,
@@ -177,6 +178,10 @@ const Q = {
 		`SELECT DISTINCT signature, target FROM run_tests
 		 WHERE run = $run AND outcome IN ('fail', 'error') AND signature IS NOT NULL`,
 	),
+	failingWithCause: sql<{ run: number; signature: number }, { test: number }>(
+		`SELECT DISTINCT test FROM run_tests
+		 WHERE run = $run AND signature = $signature AND outcome IN ('fail', 'error') LIMIT 500`,
+	),
 	failingOfCause: sql<{ run: number; signature: number; target: number }, { test: number; result: number }>(
 		`SELECT test, result FROM run_tests
 		 WHERE run = $run AND signature = $signature AND target = $target AND outcome IN ('fail', 'error') LIMIT 200`,
@@ -184,7 +189,15 @@ const Q = {
 	flippedCount: sql<{ run: number }, { n: number }>(
 		"SELECT count(*) AS n FROM run_tests WHERE run = $run AND flipped = 1",
 	),
-	dropCorrected: sql<{ run: number; result: number }>("DELETE FROM run_tests WHERE run = $run AND result = $result"),
+	laneRow: sql<{ run: number; test: number; lane: string }, { result: number; flipped: number }>(
+		"SELECT result, flipped FROM run_tests WHERE run = $run AND test = $test AND lane = $lane",
+	),
+	dropLane: sql<{ run: number; test: number; lane: string }>(
+		"DELETE FROM run_tests WHERE run = $run AND test = $test AND lane = $lane",
+	),
+	discounted: sql<{ result: number }, { slot: number }>(
+		"SELECT slot FROM slot_results WHERE result = $result AND discounted_by IS NOT NULL LIMIT 1",
+	),
 	effectiveOfTest: sql<{ run: number; test: number }, { outcome: string; signature: number | null }>(
 		"SELECT outcome, signature FROM run_tests WHERE run = $run AND test = $test",
 	),
@@ -502,8 +515,9 @@ export function* applyBatchSteps(
 		// counts only in a planned run that asked for agents (decision 0009): never in a change run.
 		const counted = result.method !== "agent";
 		if (changeRun && counted) {
-			// A correction withdraws the result it names, whatever attempt either carries: the producer said so.
-			if (result.corrects !== null) ctx.db.run(Q.dropCorrected, { run: changeRun.id, result: result.corrects });
+			// A correction withdraws the result it names: the lane it was in is folded again without it, so the
+			// attempt before it stands again if the correction does not take its place.
+			if (result.corrects !== null) refoldLaneOf(ctx, changeRun, result.corrects);
 			ctx.db.run(Q.upsertRunTest, {
 				run: changeRun.id,
 				test: result.test.id,
@@ -635,6 +649,12 @@ export function failuresShown(ctx: Ctx, run: RunRow): { group: FailingGroup; tar
 		}
 	}
 	return [...out.values()];
+}
+
+/** The tests that fail with this cause in the gate of this target's commit, as it counts them now. */
+export function failingWithCause(db: Db, target: TargetRow, signature: number): number[] {
+	const commit = db.get(Q.changeRun, { project: target.project, what: target.what });
+	return commit ? db.all(Q.failingWithCause, { run: commit.id, signature }).map((row) => row.test) : [];
 }
 
 /** A failure a run shows with no excuse in force: the cause, the target it was seen on, the scope it is answered in. */
@@ -1159,7 +1179,7 @@ export function discountFailures(
 			corrected.push([slot.id, fill.id]);
 			// A result decided to be a mistake does not hold its commit's gate either.
 			const commit = commitRunOf(ctx.db, run.project, fill.target);
-			if (commit) ctx.db.run(Q.dropCorrected, { run: commit.id, result: fill.id });
+			if (commit) refoldLaneOf(ctx, commit, fill.id);
 		}
 		const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
 		refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
@@ -1186,27 +1206,45 @@ export function restoreFailures(ctx: Ctx, pairs: readonly [number, number][], de
 const commitRunOf = (db: Db, project: number, target: number): RunRow | null =>
 	db.get(Q.changeRun, { project, what: mustTarget(db, target).what });
 
-/**
- * Counts a result in its commit's gate again, after the decision that called it a mistake is withdrawn. Through
- * the same rule as a report: a newer attempt in its lane that arrived meanwhile keeps its place. A result its
- * producer has corrected since, or an agent's, is not counted.
- */
+/** Counts a result in its commit's gate again, after the decision that called it a mistake is withdrawn. */
 function recount(ctx: Ctx, id: number): void {
 	const result = resultById(ctx.db, id);
-	if (!result || result.method === "agent" || isCorrected(ctx.db, id)) return;
-	const commit = commitRunOf(ctx.db, result.project, result.target);
-	if (!commit) return;
-	ctx.db.run(Q.upsertRunTest, {
-		run: commit.id,
-		test: result.test,
-		result: result.id,
-		outcome: result.outcome,
-		signature: result.signature,
-		attempt: result.attempt,
-		flipped: 0,
-		lane: `${result.target}:${batchById(ctx.db, result.batch)?.job ?? ""}:${result.actor}`,
-		target: result.target,
-	});
+	const commit = result ? commitRunOf(ctx.db, result.project, result.target) : null;
+	if (commit) refoldLaneOf(ctx, commit, id);
+}
+
+/**
+ * Recomputes what a commit's gate counts for the lane a result is in, from that lane's whole history: every
+ * result its producer has not corrected and no decision has called a mistake, folded by the rule a report is
+ * folded by (`replacesInLane`). Called when a result leaves or returns for a reason other than a newer report: a
+ * correction, a `mistaken` decision, that decision withdrawn. The attempt before it then stands again, exactly
+ * as it does in a slot, which keeps every admitted result and folds them the same way.
+ */
+function refoldLaneOf(ctx: Ctx, commit: RunRow, id: number): void {
+	const result = resultById(ctx.db, id);
+	if (!result || result.method === "agent") return;
+	const job = batchById(ctx.db, result.batch)?.job ?? "";
+	const lane = `${result.target}:${job}:${result.actor}`;
+	const before = ctx.db.get(Q.laneRow, { run: commit.id, test: result.test, lane });
+	let held: ReturnType<typeof resultById> = null;
+	for (const next of laneHistory(ctx.db, { target: result.target, test: result.test, actor: result.actor, job })) {
+		if (next.method === "agent" || ctx.db.get(Q.discounted, { result: next.id })) continue;
+		if (!held || replacesInLane(held, next)) held = next;
+	}
+	ctx.db.run(Q.dropLane, { run: commit.id, test: result.test, lane });
+	if (held) {
+		ctx.db.run(Q.upsertRunTest, {
+			run: commit.id,
+			test: held.test,
+			result: held.id,
+			outcome: held.outcome,
+			signature: held.signature,
+			attempt: held.attempt,
+			flipped: before?.flipped ?? 0,
+			lane,
+			target: held.target,
+		});
+	}
 	ctx.touched.add(runRef(commit));
 }
 

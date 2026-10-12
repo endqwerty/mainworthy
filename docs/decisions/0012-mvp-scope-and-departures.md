@@ -36,8 +36,8 @@ not the same things done worse.
    the one before it, and nothing from another lane can, so one job's pass never hides another job's failure of
    the same test, and somebody else's upload never clears a pipeline's. The same attempt reported twice keeps the
    worse outcome: only a higher attempt number or an explicit correction clears a failure. Slots follow the same
-   rule (a pass in one job or environment never replaces a failure in another), keep every cause failing in
-   them, and are excused only when each cause is. Each cause is answered in the scope of the target it was seen
+   rule, from the same function (`replacesInLane`), so a commit's gate and a slot cannot disagree about which
+   result of a lane counts; they keep every cause failing in them, and are excused only when each cause is. Each cause is answered in the scope of the target it was seen
    on, so a run that counts the same commit in two repositories keeps their failures and their answers apart. A
    run planned over evidence that already fails joins the questions already asked about those failures, so an
    answer reaches it and it is never blocked by a failure nobody is asked about.
@@ -56,7 +56,11 @@ not the same things done worse.
    was wrong). `mistaken` replaces the design's `resolve { trust: [...] }`; any other failure answer on a disputed
    slot also resolves it, by saying what the failure was. "Already failing on the base" reads what the base's
    own gate counts (its effective results, after attempts and corrections), never an agent's result and never
-   another repository's. Where a clause keeps a decision from the producers of the evidence, a producer is
+   another repository's, and it must be true of every test that fails with the cause on the commit, not only
+   of those in the report that is arriving: how a pipeline splits its results over reports changes nothing.
+   `mistaken` is a judgement on the results it named. They stop counting in the run and in their commit's gate;
+   the same failure reported again later is a new result and is asked about again; and the decision is not
+   withdrawn because the cause turns up again. Where a clause keeps a decision from the producers of the evidence, a producer is
    anyone who reported a failure with that cause in that scope, and anyone with a result in a slot that disputes
    it. That is read from the results when the answer is given, so it does not depend on how the question came
    to be asked (carried from an earlier answer, or asked again).
@@ -72,8 +76,11 @@ not the same things done worse.
    (generator steps driven by one of two drivers) is new and is the part to review.
 7. **A closed run refuses results.** The design re-raises the sign-off when a late upload arrives. Here the
    report is refused with a message saying how to reopen the run (withdraw the sign-off). A correction withdraws
-   the result it names wherever that counted (the commit's gate, open runs, runs planned later), whatever attempt
-   number either carries; a closed run keeps what it was closed on. Deferred (#48).
+   the result it names wherever that counted (the commit's gate, open runs, runs planned later) and stands where
+   that result stood: it is never an older attempt than the one it corrects, whatever number its report carries,
+   and the lane is folded again from its whole history, so if the correction decides nothing (a skip) the attempt
+   before it stands again. A closed run keeps what it was closed on; reopened, it is asked about every failure
+   it still shows. Deferred (#48).
 8. **Holds:** `basis-changes`, `this-target`, a date, and "while a fact holds" are built. "N clean runs" and
    "until the linked defect closes" are not (#38, #32). A decision held for one target (an infrastructure failure)
    excuses the build it was given for and no other: not the next commit, and not another environment of the same
@@ -90,7 +97,11 @@ not the same things done worse.
    has not reported, a run over other cases, a pipeline's pass where the run asked for an agent) closes nothing.
    When a hold runs out by the clock, the expiry is a row in the ledger that the next answer supersedes. When an
    answer stops holding, every run that rested on it is recomputed at once and the question asked in its place
-   names them, a run that has since closed included.
+   names them, a run that has since closed included. Two rules keep this whole: there is one answer in force per
+   cause and target (an answer that takes the place of another question's answer ends that one, with a row in the
+   ledger); and each time a run is recomputed, every failure it shows unexplained is checked to have an open
+   question, and is asked about if it has none (for an open planned run and for the newest commit of a scope).
+   So no path that removes a question, an answer or a closed state can leave a live run blocked with nobody asked.
 9. **The review basis is the case version plus the change key,** not the patch tree hash. A changed patch under
    the same pull request does not yet invalidate a review. Deferred (#49).
 10. **The export is the whole instance,** as newline-delimited JSON, imported into an empty instance. Per-project

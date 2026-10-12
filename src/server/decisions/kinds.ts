@@ -386,8 +386,11 @@ const failureHandler: Handler<"failure"> = {
 			case "defect":
 			case "test":
 			case "expected":
-			case "mistaken":
 				return basis;
+			case "mistaken":
+				// A judgement on results already recorded. It does not carry to a result reported later, and it is
+				// not withdrawn because the cause turns up again.
+				return [{ until: "results-named" }];
 			default: {
 				const _exhaustive: never = answer;
 				return _exhaustive;

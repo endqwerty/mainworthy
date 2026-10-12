@@ -21,6 +21,7 @@ import {
 import type { Tally } from "../../core/runs.ts";
 import { mayAnswer, toItem } from "../decisions/decisions.ts";
 import {
+	ledgerPage,
 	mustQuestion,
 	openCountOn,
 	openCounts,
@@ -117,11 +118,21 @@ export function inbox(ctx: Ctx, input: InboxInput): InboxReply {
 			.slice(0, limit);
 		return { counts, items: rows.map((row) => ({ ...toItem(ctx.db, row), you: mayAnswer(ctx, row) })), cursor: null };
 	}
-	const after = input.cursor ? Number(input.cursor) : Number.MIN_SAFE_INTEGER;
-	rows = queuePage(ctx.db, { project: ctx.project.id, state: input.state, kind: input.kind, after, limit: limit + 1 });
+	if (input.state === "decided") {
+		// The ledger's cursor is the revision and the id of the last row: many questions are decided at one revision.
+		const at = /^(\d+)\.(\d+)$/.exec(input.cursor ?? "");
+		if (input.cursor && !at) throw invalid("that is not a cursor of the ledger");
+		const before = at ? { rev: Number(at[1]), id: Number(at[2]) } : null;
+		rows = ledgerPage(ctx.db, { project: ctx.project.id, kind: input.kind, before, limit: limit + 1 });
+	} else {
+		const after = input.cursor ? Number(input.cursor) : Number.MIN_SAFE_INTEGER;
+		if (Number.isNaN(after)) throw invalid("that is not a cursor of the queue");
+		rows = queuePage(ctx.db, { project: ctx.project.id, state: "open", kind: input.kind, after, limit: limit + 1 });
+	}
 	const page = rows.slice(0, limit);
 	const last = page.at(-1);
-	const cursor = rows.length > limit && last ? String(input.state === "open" ? last.rank : last.rev) : null;
+	const cursor =
+		rows.length > limit && last ? (input.state === "open" ? String(last.rank) : `${last.rev}.${last.id}`) : null;
 	return { counts, items: page.map((row) => ({ ...toItem(ctx.db, row), you: mayAnswer(ctx, row) })), cursor };
 }
 

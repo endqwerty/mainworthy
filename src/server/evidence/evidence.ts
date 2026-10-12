@@ -263,7 +263,12 @@ const Q = {
 		 VALUES ($project, $test, $seq, $ord, $batch, $target, $method, $actor, $basis, $basisCase, $basisVersion, $basisClaim,
 		         $outcome, $attempt, $duration, $signature, $message, $detail, $atStep, $steps, $note, $run, $corrects, $at)`,
 	),
-	correctedBy: sql<{ id: number }, { id: number }>("SELECT id FROM results WHERE corrects = $id LIMIT 1"),
+	laneHistory: sql<{ target: number; test: number; actor: number; job: string }, ResultRow>(
+		`SELECT r.* FROM results r JOIN batches b ON b.id = r.batch
+		 WHERE r.target = $target AND r.test = $test AND r.actor = $actor AND b.job = $job
+		   AND NOT EXISTS (SELECT 1 FROM results later WHERE later.corrects = r.id)
+		 ORDER BY r.seq, r.ord`,
+	),
 	producedOn: sql<{ project: number; signature: number; actor: number }, { target: number; run: number | null }>(
 		"SELECT DISTINCT target, run FROM results WHERE project = $project AND signature = $signature AND actor = $actor",
 	),
@@ -715,8 +720,12 @@ export function* applySteps(
 			}
 		}
 		let corrects = input.corrects ?? null;
+		// A correction stands where the result it corrects stood: it is never an older attempt than that one,
+		// whatever number the report that carries it has.
+		let attempt = batch.attempt;
 		if (refused === null && corrects !== null) {
 			const earlier = ctx.db.get(Q.resultById, { id: corrects });
+			if (earlier) attempt = Math.max(attempt, earlier.attempt);
 			if (
 				!earlier ||
 				earlier.project !== project ||
@@ -739,6 +748,7 @@ export function* applySteps(
 			basisVersion = null;
 			subject = null;
 			corrects = null;
+			attempt = batch.attempt;
 		}
 		const basisCase = basis === "unresolved" ? null : subject;
 		const basisClaim = basisCase !== null && basisVersion !== null ? claimOf(basisCase, basisVersion) : null;
@@ -766,7 +776,7 @@ export function* applySteps(
 			basisVersion,
 			basisClaim,
 			outcome: input.outcome,
-			attempt: batch.attempt,
+			attempt,
 			duration: input.durationMs ?? null,
 			signature: signature?.id ?? null,
 			message,
@@ -804,7 +814,7 @@ export function* applySteps(
 			test,
 			outcome: input.outcome,
 			method,
-			attempt: batch.attempt,
+			attempt,
 			basis,
 			basisCase,
 			basisVersion,
@@ -919,8 +929,12 @@ export const unlinkedCount = (db: Db, project: number): number => db.get(Q.unlin
 export const signatureById = (db: Db, id: number): SignatureRow | null => db.get(Q.signatureById, { id });
 export const resultById = (db: Db, id: number): ResultRow | null => db.get(Q.resultById, { id });
 
-/** Whether the producer of a result has since corrected it: it then counts nowhere, whatever else is undone. */
-export const isCorrected = (db: Db, id: number): boolean => db.get(Q.correctedBy, { id }) !== null;
+/**
+ * Every result one producer reported for one test from one job on one target that it has not since corrected,
+ * in the order they arrived: the history a commit's gate folds when a correction or a decision takes one out.
+ */
+export const laneHistory = (db: Db, lane: { target: number; test: number; actor: number; job: string }): ResultRow[] =>
+	db.all(Q.laneHistory, lane);
 
 /**
  * Where an actor has reported a failure with this cause: each target, and the run it was typed into if any. Read

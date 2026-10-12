@@ -717,6 +717,98 @@ describe("what a result may prove", () => {
 		expect(h.call<Impact>("impact", { change: "b#pr:12" }).gate?.verdict).toBe("blocked");
 	});
 
+	test("a correction stands where the result it corrects stood, in the commit's gate and in every run alike", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "One" },
+				{ op: "create", outline: "Keep open" },
+			],
+		});
+		const existing = plan({ name: "Before", select: {}, accepts: { commit: "history1" } });
+		const send = (attempt: number, outcome: string, corrects?: number) =>
+			report({
+				target: { commit: "history1", branch: "main" },
+				attempt,
+				results: [
+					{
+						test: { key: "one" },
+						annotation: { case: "C-1", version: 1 },
+						outcome,
+						...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
+						...(corrects ? { corrects } : {}),
+					},
+				],
+			});
+		send(2, "fail");
+		const newest = send(3, "fail");
+		// The newest attempt is corrected to a pass. The report carrying the correction is numbered 1.
+		send(1, "pass", first(newest.results));
+		const later = plan({ name: "After", select: { cases: ["C-1"] }, accepts: { commit: "history1" } });
+		const state = (run: string) => slots(run).find((slot) => slot.case === "C-1")?.state;
+		expect(gate({ commit: "history1" }).tally).toMatchObject({ pass: 1, unexplained: 0 });
+		expect([state(existing.run), state(later.run)]).toEqual(["satisfied", "satisfied"]);
+		expect(h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items).toEqual([]);
+	});
+
+	test("a corrected newest attempt that decides nothing leaves the attempt before it standing, everywhere", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "One" },
+				{ op: "create", outline: "Keep open" },
+			],
+		});
+		const existing = plan({ name: "Before", select: {}, accepts: { commit: "history2" } });
+		const send = (attempt: number, outcome: string, corrects?: number) =>
+			report({
+				target: { commit: "history2", branch: "main" },
+				attempt,
+				results: [
+					{
+						test: { key: "one" },
+						annotation: { case: "C-1", version: 1 },
+						outcome,
+						...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
+						...(corrects ? { corrects } : {}),
+					},
+				],
+			});
+		send(2, "fail");
+		const newest = send(3, "pass");
+		expect(gate({ commit: "history2" }).tally).toMatchObject({ pass: 1, unexplained: 0 });
+		// The pass of attempt 3 is withdrawn (corrected to a skip): attempt 2's failure is what the lane shows again.
+		send(3, "skip", first(newest.results));
+		const later = plan({ name: "After", select: { cases: ["C-1"] }, accepts: { commit: "history2" } });
+		const state = (run: string) => slots(run).find((slot) => slot.case === "C-1")?.state;
+		expect(gate({ commit: "history2" }).tally).toMatchObject({ pass: 0, unexplained: 1 });
+		expect([state(existing.run), state(later.run)]).toEqual(["failing", "failing"]);
+	});
+
+	test("how a pipeline splits its report does not change what 'already failing on the base' excuses", () => {
+		const fail = (key: string) => ({ test: { key }, outcome: "fail", failure: { message: "same cause" } });
+		const outcome = (split: "together" | "new first" | "old first") => {
+			const local = harness();
+			try {
+				const send = (target: unknown, results: unknown[]) => local.call<ReportReceipt>("report", { target, results });
+				// On the base `old` fails and `new` passes. On the change both fail with the same cause.
+				send({ repo: "app", commit: "base0001", branch: "main" }, [
+					fail("old"),
+					{ test: { key: "new" }, outcome: "pass" },
+				]);
+				const head = { repo: "app", commit: "head0001", base: "base0001", branch: "feature", pr: 1 };
+				if (split === "together") send(head, [fail("new"), fail("old")]);
+				else for (const key of split === "new first" ? ["new", "old"] : ["old", "new"]) send(head, [fail(key)]);
+				const status = local.call<GateStatus>("gate", { commit: "head0001", repo: "app" });
+				return { verdict: status.verdict, unexplained: status.tally.unexplained, excused: status.tally.excused };
+			} finally {
+				local.close();
+			}
+		};
+		const together = outcome("together");
+		expect(together).toEqual({ verdict: "blocked", unexplained: 2, excused: 0 });
+		expect(outcome("new first")).toEqual(together);
+		expect(outcome("old first")).toEqual(together);
+	});
+
 	test("an automated test cannot take the key of a case's manual test", () => {
 		seed(2);
 		const taken = h.raw("report", {
@@ -1169,6 +1261,39 @@ describe("what a decision may change", () => {
 		expect(gate({ commit: "rc300005" })).toMatchObject({ verdict: "blocked", open: [dispute.q] });
 	});
 
+	test("a 'mistaken' answer is about the results it named: the same failure reported again is asked about again", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "First" },
+				{ op: "create", outline: "Keep open" },
+			],
+		});
+		const planned = plan({ name: "Mistaken, then again", select: {} });
+		const other = h.actor("other", "human", ["read", "produce"]);
+		const record = (outcome: string, attempt: number, as = h.owner) =>
+			report(
+				{
+					run: planned.run,
+					attempt,
+					results: [{ test: { case: "C-1" }, outcome, ...(outcome === "fail" ? { note: "same cause" } : {}) }],
+				},
+				as,
+			);
+		record("fail", 1);
+		record("pass", 1, other);
+		const dispute = open("failure");
+		expect(decide(dispute, { is: "mistaken" }).status).toBe("decided");
+		expect(gate({ run: planned.run }).tally.disputed).toBe(0);
+		// The same person fails it again. That is a new result: the earlier decision said nothing about it.
+		const later = record("fail", 2);
+		expect(later.questions.map((q) => q.how)).toEqual(["new"]);
+		const asked = open("failure");
+		expect(asked.q).not.toBe(dispute.q);
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [asked.q] });
+		// The first result stays discounted by the first decision.
+		expect(rows("SELECT count(*) AS n FROM slot_results WHERE discounted_by IS NOT NULL")).toEqual([{ n: 1 }]);
+	});
+
 	test("a run closed on an answer that later stops holding names the question asked in its place", () => {
 		seed();
 		const failing = {
@@ -1265,6 +1390,26 @@ describe("what a caller is told", () => {
 		expect(found.items.map((item) => item.ref)).toEqual(["C-301"]);
 		expect(h.call<Found>("find", { folder: "Elsewhere", text: "Needle", limit: 5 }).items).toHaveLength(5);
 		expect(h.call<Found>("find", { folder: "Wanted", text: "Absent", limit: 5 }).items).toEqual([]);
+	});
+
+	test("the ledger honours its kind filter and pages through decisions made at the same moment", () => {
+		seed();
+		report({
+			target: { commit: "ledger01", branch: "main" },
+			results: ["a", "b", "c"].map((file) => ({ test: { key: `${file}::one`, file }, outcome: "pass" })),
+		});
+		const ledger = (input: Record<string, unknown>) => h.call<InboxReply>("inbox", { state: "decided", ...input });
+		const all = ledger({ limit: 500 }).items.map((item) => item.q);
+		expect(all).toHaveLength(4);
+		expect(ledger({ kind: "failure", limit: 500 }).items).toEqual([]);
+		expect(ledger({ kind: "map", limit: 500 }).items.map((item) => item.kind)).toEqual(["map", "map", "map"]);
+		const paged: string[] = [];
+		for (let cursor: string | null | undefined; cursor !== null; ) {
+			const page = ledger({ limit: 1, ...(cursor ? { cursor } : {}) });
+			paged.push(...page.items.map((item) => item.q));
+			cursor = page.cursor;
+		}
+		expect(paged).toEqual(all);
 	});
 
 	test("a cursor never skips the rest of a large change", () => {

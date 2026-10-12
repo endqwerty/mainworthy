@@ -138,6 +138,25 @@ export type SlotFill = {
 	outcome: "pass" | "fail" | "skip" | "blocked";
 };
 
+const LANE_WEIGHT: Record<string, number> = { fail: 3, error: 3, pass: 2, blocked: 1, skip: 0 };
+const decides = (outcome: string): boolean => outcome === "pass" || outcome === "fail" || outcome === "error";
+
+/**
+ * The one rule for which result of a lane counts (a lane is one producer's results for one test from one job on
+ * one target), read in the order they arrived. A commit's gate and a slot both use it, so they cannot disagree.
+ * A newer attempt is the producer running it again: it takes the place of the attempt before it, unless it
+ * decided nothing (a skip, a blocked result) and the earlier one did. The same attempt reported twice is not a
+ * re-run: the worse outcome stands, and a producer that was wrong says so with a correction. An older attempt
+ * arriving late replaces nothing.
+ */
+export function replacesInLane(
+	held: { attempt: number; outcome: string },
+	next: { attempt: number; outcome: string },
+): boolean {
+	if (next.attempt > held.attempt) return decides(next.outcome) || !decides(held.outcome);
+	return next.attempt === held.attempt && (LANE_WEIGHT[next.outcome] ?? 0) >= (LANE_WEIGHT[held.outcome] ?? 0);
+}
+
 /**
  * Folds the results admitted to a slot into one entry per producer, and lists every failure that still counts.
  * A producer may have several tests on one case, each reported by several jobs or in several environments. For
@@ -150,21 +169,12 @@ export type SlotFill = {
  */
 export function aggregateSlot(fills: readonly SlotFill[]): { agg: SlotAgg; failing: number[] } {
 	const weight = { fail: 3, pass: 2, blocked: 1, skip: 0 } as const;
-	const decisive = (fill: SlotFill): boolean => fill.outcome === "pass" || fill.outcome === "fail";
 	const ordered = [...fills].sort((a, b) => a.seq - b.seq || a.ord - b.ord);
 	const latest = new Map<string, SlotFill>();
 	for (const fill of ordered) {
 		const key = `${fill.actor}:${fill.method}:${fill.test}:${fill.lane}`;
 		const held = latest.get(key);
-		if (!held) latest.set(key, fill);
-		// A newer attempt is the producer running it again: it replaces the attempt before it, unless it decided
-		// nothing (a skip) and the earlier one did.
-		else if (fill.attempt > held.attempt) {
-			if (decisive(fill) || !decisive(held)) latest.set(key, fill);
-		}
-		// The same attempt reported twice is not a re-run. The worse outcome stands: a pass does not replace a
-		// failure of the same attempt (a producer that was wrong says so with a correction).
-		else if (fill.attempt === held.attempt && weight[fill.outcome] >= weight[held.outcome]) latest.set(key, fill);
+		if (!held || replacesInLane(held, fill)) latest.set(key, fill);
 	}
 	const agg: SlotAgg = {};
 	const failing: number[] = [];
