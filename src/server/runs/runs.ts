@@ -23,7 +23,7 @@ import {
 } from "../../core/runs.ts";
 import {
 	type Applied,
-	agentFailuresWithCause,
+	agentLanesWithCause,
 	type BatchRow,
 	batchById,
 	changeById,
@@ -686,8 +686,32 @@ export function runsShowing(db: Db, project: number, signature: number): number[
  */
 export function failingWithCause(db: Db, target: TargetRow, signature: number): number[] {
 	const commit = db.get(Q.changeRun, { project: target.project, what: target.what });
-	const counted = commit ? db.all(Q.failingWithCause, { run: commit.id, signature }).map((row) => row.test) : [];
-	return [...new Set([...counted, ...agentFailuresWithCause(db, target.project, target.what, signature)])];
+	const tests = new Set(commit ? db.all(Q.failingWithCause, { run: commit.id, signature }).map((row) => row.test) : []);
+	// An agent's lanes are folded by the same rule as everybody's: another job's pass or a later skip does not
+	// replace a failure, exactly as it does not in a slot.
+	for (const lane of agentLanesWithCause(db, target.project, target.what, signature)) {
+		const held = heldInLane(db, lane, (result) => result.method === "agent");
+		if (held && (held.outcome === "fail" || held.outcome === "error") && held.signature === signature)
+			tests.add(lane.test);
+	}
+	return [...tests];
+}
+
+/**
+ * The result that counts in a lane (one producer's results for one test from one job on one target): its
+ * uncorrected history, less what a decision has judged a mistake, folded by `replacesInLane`.
+ */
+function heldInLane(
+	db: Db,
+	lane: { target: number; test: number; actor: number; job: string },
+	counts: (result: NonNullable<ReturnType<typeof resultById>>) => boolean,
+): ReturnType<typeof resultById> {
+	let held: ReturnType<typeof resultById> = null;
+	for (const next of laneHistory(db, lane)) {
+		if (!counts(next) || db.get(Q.judgedBy, { result: next.id })) continue;
+		if (!held || replacesInLane(held, next)) held = next;
+	}
+	return held;
 }
 
 /** A failure a run shows with no excuse in force: the cause, the target it was seen on, the scope it is answered in. */
@@ -1291,11 +1315,11 @@ function refoldLaneOf(ctx: Ctx, commit: RunRow, id: number): void {
 	const job = batchById(ctx.db, result.batch)?.job ?? "";
 	const lane = `${result.target}:${job}:${result.actor}`;
 	const before = ctx.db.get(Q.laneRow, { run: commit.id, test: result.test, lane });
-	let held: ReturnType<typeof resultById> = null;
-	for (const next of laneHistory(ctx.db, { target: result.target, test: result.test, actor: result.actor, job })) {
-		if (next.method === "agent" || ctx.db.get(Q.judgedBy, { result: next.id })) continue;
-		if (!held || replacesInLane(held, next)) held = next;
-	}
+	const held = heldInLane(
+		ctx.db,
+		{ target: result.target, test: result.test, actor: result.actor, job },
+		(next) => next.method !== "agent",
+	);
 	ctx.db.run(Q.dropLane, { run: commit.id, test: result.test, lane });
 	if (held) {
 		ctx.db.run(Q.upsertRunTest, {

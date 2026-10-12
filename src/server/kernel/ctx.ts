@@ -32,14 +32,9 @@ export type Ctx = {
 	 */
 	recompute: Set<number>;
 	/**
-	 * Changes that a report in this command moved onto another base. Answers that a failure of such a change was
-	 * already failing on its base are checked against the new base before the command ends.
-	 */
-	rebased: Set<number>;
-	/**
-	 * How often this command has raised each question (by fingerprint). No command has a reason to raise one
-	 * question more than a handful of times; one that does is going round in circles, and is stopped with an
-	 * error instead of holding the server's one writer for ever.
+	 * How often this command has raised each question for each target. No command has a reason to raise one
+	 * question for one target more than a handful of times; one that does is going round in circles, and is
+	 * stopped with an error instead of holding the server's one writer for ever.
 	 */
 	raised: Map<string, number>;
 	/** The next number for a kind of ref. */
@@ -139,7 +134,6 @@ export function makeCtx(app: App, project: ProjectRow, actor: Actor, write: bool
 		write,
 		touched: new Set(),
 		recompute: new Set(),
-		rebased: new Set(),
 		raised: new Map(),
 		nextNo(name) {
 			const row = app.db.get(Q.bumpCounter, { project: project.id, name });

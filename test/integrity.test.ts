@@ -5,11 +5,12 @@ import { emptyBody } from "../src/core/model.ts";
 import type { DecideReply, GateStatus, InboxReply, PlanReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
 import { HANDLERS } from "../src/server/decisions/kinds.ts";
 import { linkTest, setExcuse, testById } from "../src/server/evidence/evidence.ts";
-import { sweep } from "../src/server/jobs.ts";
-import { findProject, makeCtx } from "../src/server/kernel/ctx.ts";
+import { recoverAccepted, sweep } from "../src/server/jobs.ts";
+import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { claimMint, decisionOf, Witness } from "../src/server/kernel/witness.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
+import { acceptReport } from "../src/server/ops/writes.ts";
 import { closeRun, runById } from "../src/server/runs/runs.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
@@ -1024,6 +1025,116 @@ describe("what a result may prove", () => {
 		} finally {
 			local.close();
 		}
+	});
+
+	test("an agent's failure that a run still counts is not dropped from 'inherited' by its other job or a later skip", () => {
+		for (const mode of ["another job passes", "a later skip"] as const) {
+			const local = harness();
+			try {
+				local.call("propose", {
+					edits: [
+						{ op: "create", body: { title: "One", methods: ["agent"] } },
+						{ op: "create", body: { title: "Two", methods: ["agent"] } },
+					],
+				});
+				const agent = local.actor("explorer", "agent", ["read", "produce"]);
+				const base = { repo: "app", commit: "base0008", branch: "main" };
+				const head = { repo: "app", commit: "head0008", branch: "feature", pr: 8, base: "base0008" };
+				const result = (key: string, outcome: string) => ({
+					test: { key },
+					annotation: { case: key === "one" ? "C-1" : "C-2", version: 1 },
+					outcome,
+					...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
+				});
+				// On the base `one` fails and `two` passes.
+				local.call("report", { target: base, results: [result("one", "fail"), result("two", "pass")] });
+				const planned = local.call<PlanReply>("plan", {
+					name: "Release",
+					select: {},
+					accepts: { repo: "app", commit: "head0008" },
+					require: [{ id: "exercise", kind: "exercise", methods: ["agent", "auto"], minActors: 1, basis: "exact" }],
+				});
+				// On the change the pipeline fails `one` and the agent fails `two`, with the same cause.
+				local.call("report", { target: head, results: [result("one", "fail")] });
+				local.call("report", { target: head, job: "first", results: [result("two", "fail")] }, agent);
+				expect(local.call<GateStatus>("gate", { run: planned.run }).verdict).toBe("blocked");
+				// The agent's other job passes it, or its first job skips it on a retry. Neither replaces the failure
+				// in the slot, so neither makes the cause "already failing on the base": `two` passes there.
+				local.call(
+					"report",
+					{
+						target: head,
+						job: mode === "another job passes" ? "second" : "first",
+						attempt: 2,
+						results: [result("two", mode === "another job passes" ? "pass" : "skip")],
+					},
+					agent,
+				);
+				const after = local.call<GateStatus>("gate", { run: planned.run });
+				expect(after).toMatchObject({ verdict: "blocked", tally: { excused: 0 } });
+				expect((after.tally.unexplained ?? 0) + (after.tally.disputed ?? 0)).toBeGreaterThan(0);
+			} finally {
+				local.close();
+			}
+		}
+	});
+
+	test("a failure in two hundred environments is asked about, answered and revoked without hitting any limit", () => {
+		const one = (outcome: string) => ({
+			test: { key: "one" },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "shared outage" } } : {}),
+		});
+		const base = { repo: "app", commit: "base0009", branch: "main" };
+		report({ target: base, results: [one("fail")] });
+		const environments = 210;
+		for (let i = 0; i < environments; i++)
+			report({
+				target: { repo: "app", commit: "head0009", branch: "feature", pr: 9, base: "base0009", env: `env-${i}` },
+				results: [one("fail")],
+			});
+		expect(gate({ commit: "head0009", repo: "app" })).toMatchObject({
+			verdict: "passed",
+			tally: { excused: environments },
+		});
+		// The base passes on a newer attempt: every one of those answers ends, in one command.
+		const fixed = report({ target: base, attempt: 2, results: [one("pass")] });
+		expect(fixed.gate?.verdict).toBe("passed");
+		expect(gate({ commit: "head0009", repo: "app" })).toMatchObject({
+			verdict: "blocked",
+			tally: { unexplained: environments, excused: 0 },
+		});
+		expect(rows("SELECT count(*) AS n FROM batches WHERE state = 'accepted'")).toEqual([{ n: 0 }]);
+	}, 60_000);
+
+	test("a report applied after a restart still moves a change onto its new base", () => {
+		const one = (outcome: string) => ({
+			test: { key: "one" },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
+		});
+		const head = { repo: "app", commit: "head0010", pr: 10, base: "base0010" };
+		report({ target: { repo: "app", commit: "base0010", branch: "main" }, results: [one("fail")] });
+		report({ target: { repo: "app", commit: "base0011", branch: "main" }, results: [one("pass")] });
+		expect(report({ target: head, results: [one("fail")] }).gate?.verdict).toBe("passed");
+		// A newer commit is first reported by its hash alone, then as the change's new head on another base.
+		report({ target: { repo: "app", commit: "head0011" }, results: [{ test: { key: "spare" }, outcome: "pass" }] });
+		const moved = {
+			target: { ...head, commit: "head0011", base: "base0011" },
+			job: "later",
+			results: [{ test: { key: "spare" }, outcome: "pass" }],
+		};
+		// Accepted, then the process stops; applied by the recovery a restart runs.
+		h.app.db.transaction(() => {
+			const project = findProject(h.app.db, "scratch");
+			if (!project) throw new Error("no project");
+			const ctx = makeCtx(h.app, project, h.owner, true);
+			acceptReport(ctx, moved as Parameters<typeof acceptReport>[1]);
+			stampSeq(ctx);
+		});
+		expect(recoverAccepted(h.app)).toBe(1);
+		// The old head's failure was inherited from the old base. On the new base the test passes.
+		expect(gate({ commit: "head0010", repo: "app" })).toMatchObject({ verdict: "blocked", tally: { excused: 0 } });
 	});
 
 	test("a commit is answered on the line it was first reported on, whatever line reports it later", () => {

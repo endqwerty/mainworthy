@@ -19,6 +19,7 @@
 //    excuse in force covers, unless it also lists a target that none covers.
 // 9. An "already failing on the base" answer in force is true now: every test that fails with the cause on the
 //    build it covers fails on the base too, by what the base's gate counts at this moment.
+// 10. A failure a slot counts that an inherited answer excuses fails on the base (read from the slot's results).
 // 8. An answer that another decision supersedes is no longer in force. (The rows the ledger writes itself when
 //    an answer ends, `expired` and `outdated`, stay on their question and are what the next answer follows.)
 //
@@ -195,12 +196,13 @@ function sequence(seed: number, preset: string): Problem | null {
 
 		// 6. Slots against the results admitted to them.
 		for (const slot of rows("SELECT s.*, r.require FROM slots s JOIN runs r ON r.id = s.run WHERE r.state = 'open'")) {
-			const fills = rows(
-				`SELECT r.id, r.actor, r.method, r.test, r.target, r.attempt, r.seq, r.ord, r.outcome, b.job
+			const admitted = rows(
+				`SELECT r.id, r.actor, r.method, r.test, r.target, r.attempt, r.seq, r.ord, r.outcome, r.signature, b.job
 				 FROM slot_results s JOIN results r ON r.id = s.result JOIN batches b ON b.id = r.batch
 				 WHERE s.slot = ? AND s.corrected = 0 AND s.discounted_by IS NULL`,
 				Number(slot.id),
-			).map(
+			);
+			const fills = admitted.map(
 				(fill): SlotFill => ({
 					id: Number(fill.id),
 					actor: Number(fill.actor),
@@ -222,9 +224,33 @@ function sequence(seed: number, preset: string): Problem | null {
 			);
 			const obligations = JSON.parse(String(slot.require)) as { id: string; minActors?: number }[];
 			const minActors = obligations.find((o) => o.id === slot.obligation)?.minActors ?? 1;
-			const expected = slotState(aggregateSlot(fills).agg, minActors);
+			const folded = aggregateSlot(fills);
+			const expected = slotState(folded.agg, minActors);
 			if (expected !== slot.state)
 				return { what: "a slot's state is not what its admitted results give", detail: { slot, expected, fills } };
+			// 10. A failure this slot counts and an inherited answer excuses fails on the base. Read from the slot's
+			// own results, not from the engine's list of what fails on the commit.
+			for (const id of folded.failing) {
+				const fill = admitted.find((row) => Number(row.id) === id);
+				const seenOn = fill ? targets.get(Number(fill.target)) : undefined;
+				if (!fill || !seenOn || fill.signature === null) continue;
+				const by = rows<{ answer: string }>(
+					`SELECT d.answer FROM excuses e JOIN decisions d ON d.id = e.decision
+					 WHERE e.project = ? AND e.signature = ? AND e.scope = ? AND e.target IN (0, ?) ORDER BY e.decision DESC LIMIT 1`,
+					Number(seenOn.project),
+					Number(fill.signature),
+					scopeOf(seenOn, Number(slot.run)),
+					Number(fill.target),
+				)[0];
+				if (by && JSON.parse(by.answer).is === "inherited") {
+					const target = mustTarget(h.app.db, Number(fill.target));
+					if (!failsOnBase(h.app.db, target, Number(fill.test), Number(fill.signature)))
+						return {
+							what: "a slot's failure is excused as inherited though its test does not fail on the base",
+							detail: { slot, fill },
+						};
+				}
+			}
 		}
 
 		// 7. Nobody is asked about what already has an answer.
@@ -360,17 +386,24 @@ function sequence(seed: number, preset: string): Problem | null {
 					pipeline,
 				);
 			} else if (action < 54) {
-				// An agent reports: it never moves a commit's gate, and fills a slot only where asked.
-				const outcome = pick(["fail", "pass"]);
+				// An agent reports, on trunk or on the change, from one of two jobs, sometimes a skip: it never moves a
+				// commit's gate, fills a slot only where asked, and its failures are asked about.
+				const index = rand(2);
+				const outcome = pick(["fail", "fail", "pass", "skip"]);
+				const target = pick([
+					{ commit: pick(commits), branch: "main", env: "prod" },
+					{ commit: pick(["change01", "change02"]), base: pick(commits), pr: 7, branch: "feature", env: "prod" },
+				]);
 				command(
 					"report",
 					{
-						target: { commit: pick(commits), branch: "main", env: "prod" },
-						attempt: 1 + rand(2),
+						target,
+						job: pick(["a", "b"]),
+						attempt: 1 + rand(3),
 						results: [
 							{
-								test: { key: "test-0" },
-								annotation: { case: "C-1", version: 1 },
+								test: { key: `test-${index}` },
+								annotation: { case: `C-${index + 1}`, version: 1 },
 								outcome,
 								...(outcome === "fail" ? cause() : {}),
 							},

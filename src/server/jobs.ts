@@ -11,18 +11,29 @@ import { processBatch } from "./ops/writes.ts";
 /**
  * Applies every batch that was accepted but not applied. A report is stored durably before it is applied, so a
  * crash between the two loses nothing: the gate reads `pending` until this runs. Returns the number applied.
+ *
+ * One report that cannot be applied does not stop the others, and does not stop the server from starting: it
+ * stays accepted, its gate keeps reading `pending`, and the reason is written to the log. An instance that
+ * will not start because of one stored report would be worse than one honest `pending`.
  */
 export function recoverAccepted(app: App): number {
 	let applied = 0;
 	for (const batch of acceptedBatches(app.db)) {
-		const done = app.db.transaction(() => {
-			const project = projectById(app.db, batch.project);
-			if (!project) return null;
-			const ctx = makeCtx(app, project, actorById(app.db, batch.actor, project.id), true);
-			processBatch(ctx, batch.id);
-			stampSeq(ctx);
-			return { key: project.key, seq: ctx.seq, touched: [...ctx.touched], actor: ctx.actor.name };
-		});
+		let done: { key: string; seq: number; touched: string[]; actor: string } | null = null;
+		try {
+			done = app.db.transaction(() => {
+				const project = projectById(app.db, batch.project);
+				if (!project) return null;
+				const ctx = makeCtx(app, project, actorById(app.db, batch.actor, project.id), true);
+				processBatch(ctx, batch.id);
+				stampSeq(ctx);
+				return { key: project.key, seq: ctx.seq, touched: [...ctx.touched], actor: ctx.actor.name };
+			});
+		} catch (error) {
+			console.error(
+				`casebook: report ${batch.id} could not be applied and stays pending: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
 		if (!done) continue;
 		applied++;
 		app.publish({ project: done.key, seq: done.seq, op: "report", actor: done.actor, touched: done.touched });

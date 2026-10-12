@@ -33,6 +33,7 @@ import {
 	applySteps,
 	type BatchRow,
 	batchById,
+	changesHeadedBy,
 	ensureTarget,
 	keepReceipt,
 	markProcessed,
@@ -186,7 +187,7 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 			scope,
 			target.change !== null ? null : [...new Set(applied.results.map((result) => result.test.id))],
 		);
-	recheckRebased(ctx);
+	recheckRebased(ctx, target);
 	const gated = runs.find((run) => run.origin === "change") ?? runs.find((run) => run.id === batch.run) ?? null;
 	const fresh = gated ? runById(ctx.db, gated.id) : null;
 	const receipt: ReportReceipt = {
@@ -233,13 +234,15 @@ function brief(ctx: Ctx, raised: Raised, tests: number): QuestionBrief {
 }
 
 /**
- * A report can say that a change now starts somewhere else (a pull request pointed at another base): every
- * answer that one of its failures was already failing on the old base is checked against the new one.
+ * A report can say that a change now starts somewhere else (a pull request pointed at another base). It says so
+ * as it names the change's head, so every change headed by this report's commit has its "already failing on the
+ * base" answers checked against the base it has now. Read from what is stored, not remembered from the moment
+ * the report was accepted: a report applied after a restart checks them just the same.
  */
-function recheckRebased(ctx: Ctx): void {
-	const changes = [...ctx.rebased];
-	ctx.rebased.clear();
-	for (const change of changes) recheckInherited(ctx, `change:${change}`, null);
+function recheckRebased(ctx: Ctx, target: TargetRow): void {
+	if (target.commit_sha === null) return;
+	for (const change of changesHeadedBy(ctx.db, ctx.project.id, target.commit_sha))
+		recheckInherited(ctx, `change:${change}`, null);
 }
 
 /** Tests that arrived with no case, by file: one `map` question per file, which a loose project's rule answers. */
@@ -281,7 +284,7 @@ export function* reportSteps(ctx: Ctx, input: ReportInput): Generator<Pause, Rep
 		// The same results again add nothing. But the report may say the change now starts somewhere else (a
 		// pull request pointed at another base, the same commit): answers that a failure was already on the old
 		// base are checked against the new one.
-		recheckRebased(ctx);
+		recheckRebased(ctx, mustTarget(ctx.db, batch.target));
 		return { ...json<ReportReceipt>(batch.receipt), fresh: false };
 	}
 	if (fresh) yield COMMIT;

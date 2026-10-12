@@ -110,8 +110,11 @@ function stored(r: Raise): Record<string, unknown> {
 	return { ...r.evidence, facts: r.facts, ...(r.target !== undefined ? { targetId: r.target } : {}) };
 }
 
-/** More raises of one question in one command than any real sequence needs: beyond it, something is looping. */
-const RAISE_LIMIT = 200;
+/**
+ * More raises of one question for one target in one command than any real sequence needs (a handful: the report,
+ * the check after each recompute, an answer ended and asked again). Beyond it something is going round.
+ */
+const RAISE_LIMIT = 50;
 
 /** The one mint of decision witnesses. Claimed here when the module loads; nothing else can claim it. */
 const mintWitness = claimMint();
@@ -142,10 +145,13 @@ function blockedRuns(blocks: Blocks, runs: Raise["runs"]): number[] {
  */
 export function raise(ctx: Ctx, r: Raise): Raised {
 	const fingerprint = contentHash({ kind: r.kind, key: r.key });
-	const times = (ctx.raised.get(fingerprint) ?? 0) + 1;
-	ctx.raised.set(fingerprint, times);
+	// A cause seen in two hundred environments is raised two hundred times in one command, once for each: that
+	// is work. The same cause on the same target over and over is a circle.
+	const seen = `${fingerprint}|${r.target ?? ""}`;
+	const times = (ctx.raised.get(seen) ?? 0) + 1;
+	ctx.raised.set(seen, times);
 	if (times > RAISE_LIMIT)
-		throw new Error(`one command raised the question "${r.title}" ${times} times: stopped instead of going round`);
+		throw new Error(`one command raised the question "${r.title}" ${times} times for one target: stopped`);
 	// Two hashes. The basis is what a decision stands on: the cause, without the build, so an answer carries from
 	// one commit to the next. The evidence hash is what a person answering must have seen: the basis and the
 	// latest build, so an answer prepared before a newer build arrived is a conflict and not a decision about a
