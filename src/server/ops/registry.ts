@@ -2,8 +2,18 @@
 // the CLI commands and the web client are all generated from OPS, so a capability exists on every surface or on none.
 import type { z } from "zod";
 import type { Capability } from "../../core/kinds.ts";
+import { malformedText } from "../../core/text.ts";
 import type { App } from "../kernel/app.ts";
-import { type Actor, type Ctx, findCommand, findProject, makeCtx, recordCommand, stampSeq } from "../kernel/ctx.ts";
+import {
+	type Actor,
+	type Ctx,
+	findCommand,
+	findProject,
+	makeCtx,
+	recordCommand,
+	recordInstanceCommand,
+	stampSeq,
+} from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
 import { type ErrorCode, OpError } from "../kernel/errors.ts";
 
@@ -42,6 +52,8 @@ export type InstanceOp<I, O> = Base<I> & {
 	scope: "instance";
 	effect: "read" | "write";
 	run: (env: InstanceCtx, input: I) => O;
+	/** True when the reply to this input holds a secret. It is then never stored, so the command cannot be replayed. */
+	secret?: (input: I) => boolean;
 };
 export type InstanceCtx = { app: App; actor: Actor; now: number };
 
@@ -54,6 +66,10 @@ export const defineInstanceOp = <I, O>(op: InstanceOp<I, O>): InstanceOp<I, O> =
 export type Reply =
 	| { ok: true; result: unknown; seq: number | null }
 	| { ok: false; error: { code: ErrorCode; message: string; details?: Record<string, unknown> } };
+
+const reused = () => new OpError("conflict", "this command id was already used for something else");
+/** Stored in place of a reply that held a secret. */
+const WITHHELD = "(reply not kept: it held a secret)";
 
 const fail = (code: ErrorCode, message: string, details?: Record<string, unknown>): Reply => ({
 	ok: false,
@@ -89,6 +105,8 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 		);
 	}
 	const input = parsed.data;
+	const broken = malformedText(input);
+	if (broken) return fail("invalid", `${broken}: the text holds half a character (an unpaired surrogate)`);
 	const cmd =
 		typeof input === "object" && input !== null && "cmd" in input && typeof input.cmd === "string" ? input.cmd : null;
 	const writing = op.effect === "write";
@@ -101,9 +119,27 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 			if (!actor) return fail("unauthenticated", "a token is required");
 			if (!actor.can.includes(op.needs)) return fail("forbidden", `${op.name} needs the ${op.needs} capability`);
 			const env: InstanceCtx = { app, actor, now: app.now() };
-			const result = writing
-				? app.db.transaction(() => op.run(env, input))
-				: app.reader.snapshot(() => op.run(env, input));
+			if (!writing) return { ok: true, result: app.reader.snapshot(() => op.run(env, input)), seq: null };
+			const result = app.db.transaction(() => {
+				const prior = cmd ? findCommand(app.db, cmd) : null;
+				if (prior) {
+					if (prior.op !== op.name || prior.actor !== actor.id || prior.project !== 0) throw reused();
+					const kept = json<unknown>(prior.outcome);
+					if (kept === WITHHELD) {
+						throw new OpError(
+							"conflict",
+							"this command already ran, and its reply held a secret that is not kept; it was not run again",
+						);
+					}
+					return kept;
+				}
+				const made = op.run(env, input);
+				if (cmd) {
+					const outcome = op.secret?.(input) ? WITHHELD : made;
+					recordInstanceCommand(app.db, { id: cmd, op: op.name, actor: actor.id, at: env.now, outcome });
+				}
+				return made;
+			});
 			return { ok: true, result, seq: null };
 		}
 
@@ -128,10 +164,11 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 			if (cmd) {
 				const prior = findCommand(app.db, cmd);
 				if (prior) {
-					if (prior.op !== op.name || prior.actor !== actor.id)
-						throw new OpError("conflict", "this command id was already used for something else");
+					// The same id from the same actor for the same operation in the same project, or it is a conflict:
+					// a reply recorded for one project is never returned for another.
+					if (prior.op !== op.name || prior.actor !== actor.id || prior.project !== found.id) throw reused();
 					app.db.commit();
-					return { ok: true, result: json<unknown>(prior.outcome), seq: null };
+					return { ok: true, result: json<unknown>(prior.outcome), seq: prior.seq };
 				}
 			}
 			// Read the project inside the transaction: its sequence number is what this command builds on.
@@ -193,11 +230,25 @@ const nextTick = (): Promise<void> => new Promise((resolve) => setImmediate(reso
  * the event loop serves whatever else has arrived. Every surface calls this and nothing else.
  */
 export function invokeAsync(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
+	const op = ops[call.op];
+	if (op?.effect === "read" && app.readers) {
+		const project = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
+		if (op.scope === "project" && !project) return Promise.resolve(invoke(app, ops, call));
+		const actor = call.actor(project?.id ?? 0);
+		return app.readers
+			.run({ op: call.op, project: call.project, input: call.input, actor }, () =>
+				invoke(app, ops, { ...call, actor: () => actor }),
+			)
+			.then((reply) => (reply.ok ? reply : fail(reply.error.code, reply.error.message, reply.error.details)));
+	}
 	if (ops[call.op]?.effect !== "write") return Promise.resolve(invoke(app, ops, call));
 	return app.gate.run(async () => {
 		const running = execute(app, ops, call);
 		for (let step = running.next(); ; step = running.next()) {
-			if (step.done) return step.value;
+			if (step.done) {
+				if (op?.scope === "instance" && step.value.ok) app.readers?.refresh();
+				return step.value;
+			}
 			await nextTick();
 		}
 	});

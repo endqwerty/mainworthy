@@ -4,14 +4,15 @@
 // report twice is a no-op and a crash loses nothing. `apply` turns the staged results into result rows, each with an
 // explicit basis. Between the two, every run the report matters to reads `pending` (see runs.ts).
 import { contentHash } from "../../core/hash.ts";
+import type { ActorKind } from "../../core/kinds.ts";
 import type { MethodKind } from "../../core/model.ts";
 import type { Outcome, ReportInput, ResultIn, TargetIn } from "../../core/ops.ts";
 import { normaliseFailure, signatureHash } from "../../core/signature.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
-import type { Witness } from "../kernel/witness.ts";
-import { type CaseRow, caseById, findCase, versionOf } from "../suite/suite.ts";
+import { decisionOf, type Witness } from "../kernel/witness.ts";
+import { type CaseRow, caseById, caseRef, findCase, versionOf } from "../suite/suite.ts";
 
 export type TestRow = {
 	id: number;
@@ -22,6 +23,8 @@ export type TestRow = {
 	name: string;
 	file: string | null;
 	case_id: number | null;
+	/** The `map` decision that made the link. Null for an unlinked test and for the manual test of a case. */
+	linked_by: number | null;
 	first_seq: number;
 	last_seq: number;
 };
@@ -183,9 +186,10 @@ const Q = {
 		`INSERT INTO batches (project, key, target, job, attempt, method, actor, run, build_url, state, counts, staged, at, seq)
 		 VALUES ($project, $key, $target, $job, $attempt, $method, $actor, $run, $url, 'accepted', $counts, $staged, $at, $seq)`,
 	),
-	markProcessed: sql<{ id: number; counts: string; receipt: string }>(
-		"UPDATE batches SET state = 'processed', counts = $counts, staged = NULL, receipt = $receipt WHERE id = $id",
+	markProcessed: sql<{ id: number; counts: string }>(
+		"UPDATE batches SET state = 'processed', counts = $counts, staged = NULL WHERE id = $id",
 	),
+	setReceipt: sql<{ id: number; receipt: string }>("UPDATE batches SET receipt = $receipt WHERE id = $id"),
 	accepted: sql<readonly [], BatchRow>("SELECT * FROM batches WHERE state = 'accepted' ORDER BY id"),
 	processedJobs: sql<{ target: number }, { job: string }>(
 		"SELECT DISTINCT job FROM batches WHERE target = $target AND state = 'processed'",
@@ -212,7 +216,9 @@ const Q = {
 		 VALUES ($project, $no, $kind, $key, $name, $file, $caseId, $seq, $seq)`,
 	),
 	touchTest: sql<{ id: number; seq: number }>("UPDATE tests SET last_seq = $seq WHERE id = $id"),
-	linkTest: sql<{ id: number; caseId: number | null }>("UPDATE tests SET case_id = $caseId WHERE id = $id"),
+	linkTest: sql<{ id: number; caseId: number | null; by: number | null }>(
+		"UPDATE tests SET case_id = $caseId, linked_by = $by WHERE id = $id",
+	),
 	unlinkedInFile: sql<{ project: number; file: string }, TestRow>(
 		"SELECT * FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' ORDER BY id LIMIT 500",
 	),
@@ -293,9 +299,9 @@ const Q = {
 	),
 	excuse: sql<
 		{ project: number; signature: number; scope: string },
-		{ decision: number; class: "attributed" | "excused"; expires_at: number | null }
+		{ decision: number; class: "attributed" | "excused"; expires_at: number | null; target: number | null }
 	>(
-		"SELECT decision, class, expires_at FROM excuses WHERE project = $project AND signature = $signature AND scope = $scope",
+		"SELECT decision, class, expires_at, target FROM excuses WHERE project = $project AND signature = $signature AND scope = $scope",
 	),
 	setExcuse: sql<{
 		project: number;
@@ -304,11 +310,16 @@ const Q = {
 		decision: number;
 		class: string;
 		expires: number | null;
+		target: number | null;
 	}>(
-		`INSERT INTO excuses (project, signature, scope, decision, class, expires_at)
-		 VALUES ($project, $signature, $scope, $decision, $class, $expires)
+		`INSERT INTO excuses (project, signature, scope, decision, class, expires_at, target)
+		 VALUES ($project, $signature, $scope, $decision, $class, $expires, $target)
 		 ON CONFLICT (project, signature, scope)
-		 DO UPDATE SET decision = excluded.decision, class = excluded.class, expires_at = excluded.expires_at`,
+		 DO UPDATE SET decision = excluded.decision, class = excluded.class, expires_at = excluded.expires_at,
+		   target = excluded.target`,
+	),
+	firstSeen: sql<{ project: number; what: string }, { seq: number | null }>(
+		"SELECT min(first_seq) AS seq FROM targets WHERE project = $project AND what = $what",
 	),
 	targetByCommit: sql<{ project: number; commit: string }, TargetRow>(
 		"SELECT * FROM targets WHERE project = $project AND commit_sha = $commit ORDER BY id LIMIT 1",
@@ -319,8 +330,8 @@ const Q = {
 	caseIdsOfFile: sql<{ project: number; file: string }, { case_id: number | null }>(
 		"SELECT case_id FROM tests WHERE project = $project AND file = $file LIMIT 500",
 	),
-	dropExcuse: sql<{ project: number; signature: number; scope: string }>(
-		"DELETE FROM excuses WHERE project = $project AND signature = $signature AND scope = $scope",
+	dropExcuse: sql<{ project: number; signature: number; scope: string; decision: number }>(
+		"DELETE FROM excuses WHERE project = $project AND signature = $signature AND scope = $scope AND decision = $decision",
 	),
 };
 
@@ -332,6 +343,9 @@ export const codeWhat = (repo: string | undefined | null, commit: string): strin
  * Finds or records what was tested. A commit on `main`, `master` or `trunk` with no pull request is the trunk
  * line; anything else with a commit is a change, keyed by its pull request, else its branch, else the commit, so
  * a decision made on one push of a pull request still stands on the next.
+ *
+ * A change belongs to one repository. The first repository to report `pr:12` in a project has that key; the same
+ * number from another repository is another change, keyed `<repo>#pr:12`, with its own decisions and gate.
  */
 export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 	const project = ctx.project.id;
@@ -363,7 +377,7 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 				: input.branch
 					? `branch:${input.branch}`
 					: `commit:${input.commit.slice(0, 12)}`;
-		change = upsertChange(ctx, key, input);
+		change = upsertChange(ctx, changeKey(ctx.db, project, key, input.repo ?? null), input);
 	}
 	const found = ctx.db.get(Q.target, { project, what, env });
 	if (found) return found;
@@ -381,6 +395,22 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 	return mustTarget(ctx.db, lastId);
 }
 
+/** The key of a change in a repository: the plain key, unless another repository holds it in this project. */
+function changeKey(db: Db, project: number, key: string, repo: string | null): string {
+	const holder = db.get(Q.change, { project, key });
+	return !holder || holder.repo === repo ? key : `${repo ?? "(no repository)"}#${key}`;
+}
+
+/** When a commit was first reported in this project, or null when it never was. */
+const firstSeen = (db: Db, project: number, repo: string | null, commit: string): number | null =>
+	db.get(Q.firstSeen, { project, what: codeWhat(repo, commit) })?.seq ?? null;
+
+/**
+ * Records a change, or moves it to a new head. The head only moves forward: to a commit first reported after the
+ * current head was. A late report for an older commit (a retried job, a second job finishing after the next push)
+ * leaves the head and the change's title, base and files alone, so it cannot turn the change's gate back.
+ * A branch reset to an older commit therefore keeps its newer head here; the gate of a commit is always exact.
+ */
 function upsertChange(ctx: Ctx, key: string, input: Extract<TargetIn, { commit: string }>): ChangeRow {
 	const existing = ctx.db.get(Q.change, { project: ctx.project.id, key });
 	if (!existing) {
@@ -400,6 +430,11 @@ function upsertChange(ctx: Ctx, key: string, input: Extract<TargetIn, { commit: 
 		const row = ctx.db.get(Q.changeById, { id: lastId });
 		if (!row) throw new Error("change was not stored");
 		return row;
+	}
+	if (input.commit !== existing.head_sha && existing.head_sha !== null) {
+		const head = firstSeen(ctx.db, ctx.project.id, existing.repo, existing.head_sha);
+		const mine = firstSeen(ctx.db, ctx.project.id, existing.repo, input.commit);
+		if (head !== null && mine !== null && mine <= head) return existing;
 	}
 	const files = input.files ?? json<string[]>(existing.files);
 	const next = {
@@ -454,27 +489,35 @@ const countOutcomes = (results: readonly { outcome: Outcome }[]): Counts => {
 };
 
 /**
- * How a batch of results was produced. A result that names an automated test by key is `auto` whoever sends it: a
- * person who runs `casebook report results.xml` with their own token is reporting a pipeline's work, not claiming
- * they did it by hand. A result that names a case is the actor's own doing: a person's is `human`, an agent's is
- * `agent`. A pipeline cannot claim a person ran something, so its results are always `auto`.
+ * How one result was produced, decided per result and never for a batch as a whole.
+ * - A pipeline's results are `auto`: it cannot claim a person ran something.
+ * - An agent's results are `agent`, whether it names a case or a test key: what an agent reports counts only where
+ *   a run asked for agents and the case admits them, and an agent cannot change that by its choice of words.
+ * - A person's result that names a case is their own doing, `human`. One that names an automated test by key is
+ *   `auto`: a person who runs `casebook report results.xml` with their own token is passing on a pipeline's work.
  */
-export function methodFor(ctx: Ctx, results: readonly ResultIn[]): MethodKind {
-	const manual = results.every((result) => "case" in result.test);
-	switch (ctx.actor.kind) {
+export function methodFor(actor: ActorKind, result: Pick<ResultIn, "test">): MethodKind {
+	switch (actor) {
 		case "human":
-			return manual ? "human" : "auto";
+			return "case" in result.test ? "human" : "auto";
 		case "agent":
-			return manual ? "agent" : "auto";
+			return "agent";
 		case "ci":
 			return "auto";
 		case "rule":
 			throw invalid("a rule does not report results");
 		default: {
-			const _exhaustive: never = ctx.actor.kind;
+			const _exhaustive: never = actor;
 			return _exhaustive;
 		}
 	}
+}
+
+/** The method shown for a batch: the one its results share, or `auto` when a person sent both kinds together. */
+function batchMethod(actor: ActorKind, results: readonly ResultIn[]): MethodKind {
+	const methods = new Set(results.map((result) => methodFor(actor, result)));
+	const [only] = methods;
+	return methods.size === 1 && only ? only : "auto";
 }
 
 /**
@@ -488,16 +531,18 @@ export function accept(
 		run: number | null;
 		report: Pick<ReportInput, "job" | "attempt" | "buildUrl" | "results">;
 		/**
-		 * For results a person or an agent records by hand: the command id, so recording the same outcome again later
-		 * is a new fact. A pipeline's report has no nonce: the same files sent twice are the same batch.
+		 * For results recorded against a case: the command id, so recording the same outcome again later is a new
+		 * fact. A report of automated tests only has no nonce: the same files sent twice are the same batch.
 		 */
 		nonce: string | null;
 	},
 ): { batch: BatchRow; fresh: boolean } {
 	const { report } = input;
-	const method = methodFor(ctx, report.results);
+	const method = batchMethod(ctx.actor.kind, report.results);
 	const job = report.job ?? "";
 	const attempt = report.attempt ?? 1;
+	// A file of automated results sent twice is one batch. Anything typed against a case is a new fact each time.
+	const files = report.results.every((result) => "key" in result.test);
 	const key = contentHash({
 		target: input.target.id,
 		run: input.run,
@@ -505,7 +550,7 @@ export function accept(
 		attempt,
 		method,
 		actor: ctx.actor.id,
-		nonce: method === "auto" ? null : input.nonce,
+		nonce: files ? null : input.nonce,
 		results: report.results,
 	});
 	const existing = ctx.db.get(Q.batchByKey, { project: ctx.project.id, key });
@@ -563,6 +608,7 @@ export type ApplyResult = {
 	basis: { exact: number; assumed: number; unresolved: number };
 	flips: number;
 	rejected: { index: number; reason: string }[];
+	declined: { index: number; reason: string }[];
 };
 
 const ANNOTATION = /@(C-\d+)(?:@v(\d+))?/i;
@@ -570,18 +616,22 @@ const ANNOTATION = /@(C-\d+)(?:@v(\d+))?/i;
 export const SLICE = 500;
 
 /**
- * Turns a batch's staged results into result rows. `pinned` gives the version a planned run pinned for a case,
- * when the batch was typed into one.
+ * Turns a batch's staged results into result rows. `producer` is the kind of the actor that sent the batch;
+ * `pinned` gives the version a planned run pinned for a case, when the batch was typed into one.
  *
  * The basis of each result is derived here and nowhere else:
  * - exact: a pinned slot, or an annotation that names a version (`@C-311@v7`);
  * - assumed: the case's current version, when the test is linked to a case or annotated with one;
  * - unresolved: no case.
- * A pinned slot and an annotation that disagree reject the result. Nothing is relabelled.
+ * A claim that cannot be accepted (a case or version that does not exist, a pin and an annotation that disagree, a
+ * link and an annotation that name different cases) is refused, never adjusted to fit. For a result recorded
+ * against a case that refuses the result (`rejected`). For an automated test the outcome is still a fact about
+ * the commit, and dropping it could hide a failure from the gate: it is kept with no case (`declined`).
  */
 export function* applySteps(
 	ctx: Ctx,
 	batch: BatchRow,
+	producer: ActorKind,
 	pinned: (caseId: number) => number | null,
 ): Generator<undefined, ApplyResult, void> {
 	if (batch.state !== "accepted" || batch.staged === null) throw new Error(`batch ${batch.id} was already applied`);
@@ -593,6 +643,7 @@ export function* applySteps(
 		basis: { exact: 0, assumed: 0, unresolved: 0 },
 		flips: 0,
 		rejected: [],
+		declined: [],
 	};
 	const heads = new Map<number, CaseRow | null>();
 	const head = (id: number): CaseRow | null => {
@@ -619,27 +670,29 @@ export function* applySteps(
 			continue;
 		}
 		const { test, fresh } = resolved;
+		const typed = "case" in input.test;
+		const method = methodFor(producer, input);
 
-		// The basis: every claim about the version, then the assumption, then nothing.
+		// The basis: every claim about the case and the version, then the assumption, then nothing.
+		let refused: string | null = null;
 		const annotation = input.annotation ?? annotationIn("key" in input.test ? (input.test.name ?? input.test.key) : "");
 		const annotated = annotation ? findCase(ctx.db, project, annotation.case) : null;
-		if (annotation && !annotated) {
-			out.rejected.push({ index, reason: `annotation names ${annotation.case}, which does not exist` });
-			continue;
+		const linked = test.case_id !== null ? head(test.case_id) : null;
+		if (annotation && !annotated) refused = `the annotation names ${annotation.case}, which does not exist`;
+		else if (annotated && linked && annotated.id !== linked.id) {
+			refused = typed
+				? `the result names ${caseRef(linked)} and its annotation names ${caseRef(annotated)}`
+				: `${testRef(test)} is linked to ${caseRef(linked)} and annotated with ${caseRef(annotated)}`;
 		}
-		const subject = annotated?.id ?? test.case_id;
+		let subject = annotated?.id ?? test.case_id;
 		const pin = subject !== null ? pinned(subject) : null;
 		const claims = [pin, annotation?.version ?? null].filter((v): v is number => v !== null);
-		if (claims.length === 2 && claims[0] !== claims[1]) {
-			out.rejected.push({
-				index,
-				reason: `basis conflict: the run pinned version ${claims[0]}, the annotation says ${claims[1]}`,
-			});
-			continue;
+		if (refused === null && claims.length === 2 && claims[0] !== claims[1]) {
+			refused = `basis conflict: the run pinned version ${claims[0]}, the annotation says ${claims[1]}`;
 		}
 		let basis: ResultRow["basis"] = "unresolved";
 		let basisVersion: number | null = null;
-		if (subject !== null) {
+		if (refused === null && subject !== null) {
 			const row = head(subject);
 			if (claims[0] !== undefined) {
 				basis = "exact";
@@ -649,9 +702,34 @@ export function* applySteps(
 				basisVersion = row.head;
 			}
 			if (basisVersion !== null && (basisVersion < 1 || (row && basisVersion > row.head))) {
-				out.rejected.push({ index, reason: `the case has no version ${basisVersion}` });
+				refused = `${row ? caseRef(row) : "the case"} has no version ${basisVersion}`;
+			}
+		}
+		let corrects = input.corrects ?? null;
+		if (refused === null && corrects !== null) {
+			const earlier = ctx.db.get(Q.resultById, { id: corrects });
+			if (
+				!earlier ||
+				earlier.project !== project ||
+				earlier.actor !== batch.actor ||
+				earlier.test !== test.id ||
+				earlier.target !== batch.target ||
+				earlier.run !== batch.run
+			) {
+				refused =
+					"a result can only correct an earlier result of the same producer for the same test, recorded on the same target and in the same run";
+			}
+		}
+		if (refused !== null) {
+			if (typed) {
+				out.rejected.push({ index, reason: refused });
 				continue;
 			}
+			out.declined.push({ index, reason: `${refused}: recorded with no case` });
+			basis = "unresolved";
+			basisVersion = null;
+			subject = null;
+			corrects = null;
 		}
 		const basisCase = basis === "unresolved" ? null : subject;
 		const basisClaim = basisCase !== null && basisVersion !== null ? claimOf(basisCase, basisVersion) : null;
@@ -663,17 +741,6 @@ export function* applySteps(
 			signature = ensureSignature(ctx, { message, ...(input.failure?.detail ? { detail: input.failure.detail } : {}) });
 		}
 
-		if (input.corrects !== undefined) {
-			const earlier = ctx.db.get(Q.resultById, { id: input.corrects });
-			if (!earlier || earlier.project !== project || earlier.actor !== ctx.actor.id || earlier.test !== test.id) {
-				out.rejected.push({
-					index,
-					reason: "a result can only correct an earlier result of the same producer for the same test",
-				});
-				continue;
-			}
-		}
-
 		const previous = ctx.db.get(Q.previousOnTarget, { target: batch.target, test: test.id });
 		const ord = ctx.ord();
 		const { lastId } = ctx.db.run(Q.insertResult, {
@@ -683,7 +750,7 @@ export function* applySteps(
 			ord,
 			batch: batch.id,
 			target: batch.target,
-			method: batch.method,
+			method,
 			actor: batch.actor,
 			basis,
 			basisCase,
@@ -699,13 +766,13 @@ export function* applySteps(
 			steps: input.steps ? JSON.stringify(input.steps) : null,
 			note: input.note ?? null,
 			run: batch.run,
-			corrects: input.corrects ?? null,
+			corrects,
 			at: ctx.now,
 		});
 		const decisive = (o: Outcome) => (o === "pass" ? "pass" : o === "fail" || o === "error" ? "fail" : null);
 		const flipped =
 			previous !== null &&
-			input.corrects === undefined &&
+			corrects === null &&
 			decisive(previous.outcome) !== null &&
 			decisive(input.outcome) !== null &&
 			decisive(previous.outcome) !== decisive(input.outcome);
@@ -727,7 +794,7 @@ export function* applySteps(
 			ord,
 			test,
 			outcome: input.outcome,
-			method: batch.method,
+			method,
 			attempt: batch.attempt,
 			basis,
 			basisCase,
@@ -735,7 +802,7 @@ export function* applySteps(
 			basisClaim,
 			signature,
 			message,
-			corrects: input.corrects ?? null,
+			corrects,
 			flipped,
 			fresh,
 		});
@@ -745,13 +812,27 @@ export function* applySteps(
 }
 
 /** `applySteps` run to the end without pausing. */
-export function apply(ctx: Ctx, batch: BatchRow, pinned: (caseId: number) => number | null): ApplyResult {
-	const steps = applySteps(ctx, batch, pinned);
+export function apply(
+	ctx: Ctx,
+	batch: BatchRow,
+	producer: ActorKind,
+	pinned: (caseId: number) => number | null,
+): ApplyResult {
+	const steps = applySteps(ctx, batch, producer, pinned);
 	for (let step = steps.next(); ; step = steps.next()) if (step.done) return step.value;
 }
 
-export function markProcessed(ctx: Ctx, batch: BatchRow, counts: Counts, receipt: unknown): void {
-	ctx.db.run(Q.markProcessed, { id: batch.id, counts: JSON.stringify(counts), receipt: JSON.stringify(receipt) });
+/**
+ * Marks a batch applied: its results are rows now and its job has reported. Called before the runs are folded, so
+ * a run that requires this job counts it.
+ */
+export function markProcessed(ctx: Ctx, batch: BatchRow, counts: Counts): void {
+	ctx.db.run(Q.markProcessed, { id: batch.id, counts: JSON.stringify(counts) });
+}
+
+/** Keeps the reply to a report, so the same report sent again gets the same answer. */
+export function keepReceipt(ctx: Ctx, batch: BatchRow, receipt: unknown): void {
+	ctx.db.run(Q.setReceipt, { id: batch.id, receipt: JSON.stringify(receipt) });
 }
 
 function annotationIn(name: string): { case: string; version?: number } | null {
@@ -790,6 +871,7 @@ function insertTest(
 		no,
 		...input,
 		case_id: input.caseId,
+		linked_by: null,
 		first_seq: ctx.seq,
 		last_seq: ctx.seq,
 	};
@@ -928,41 +1010,57 @@ export function failsOnBase(db: Db, target: TargetRow, test: number, signature: 
 
 // ── Standing ───────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Links a test to a case, or unlinks it with null. Standing: only by a `map` decision. */
-export function linkTest(ctx: Ctx, _witness: Witness, test: TestRow, caseId: number | null): void {
-	ctx.db.run(Q.linkTest, { id: test.id, caseId });
+/** Links a test to a case, or unlinks it with null. Standing: only by a `map` decision, which the link records. */
+export function linkTest(ctx: Ctx, witness: Witness, test: TestRow, caseId: number | null): void {
+	ctx.db.run(Q.linkTest, { id: test.id, caseId, by: decisionOf(witness) });
 	ctx.touched.add(testRef(test));
 }
 
 /**
- * Puts a test's link back to what it was before a `map` decision. Revert only: called when that decision is
- * withdrawn, which is itself recorded in the ledger. A test fails if anything but the kind handlers calls it.
+ * Puts a test's link back to what it was before the `map` decision `from`. Revert only: called when that decision
+ * is withdrawn, which is itself recorded in the ledger. It does nothing when the link is no longer that
+ * decision's: a newer decision made it, and withdrawing an older one must not undo it. `to` is the earlier link
+ * and the decision that made it, or nulls when there was none or its decision no longer stands.
  */
-export function restoreLink(ctx: Ctx, test: TestRow, caseId: number | null): void {
-	ctx.db.run(Q.linkTest, { id: test.id, caseId });
+export function restoreLink(
+	ctx: Ctx,
+	test: TestRow,
+	from: number,
+	to: { caseId: number | null; by: number | null },
+): boolean {
+	if (test.linked_by !== from) return false;
+	ctx.db.run(Q.linkTest, { id: test.id, caseId: to.caseId, by: to.by });
 	ctx.touched.add(testRef(test));
+	return true;
 }
 
 export const excuseFor = (db: Db, project: number, signature: number, scope: string) =>
 	db.get(Q.excuse, { project, signature, scope });
 
-/** Records how a cause is answered in a scope. Standing: only by a `failure` decision. */
+/**
+ * Records how a cause is answered in a scope. Standing: only by a `failure` decision. `target` limits it to one
+ * target, for a decision that holds there only: the same cause on another commit of the scope stays unexplained.
+ */
 export function setExcuse(
 	ctx: Ctx,
 	witness: Witness,
-	input: { signature: number; scope: string; class: "attributed" | "excused" },
+	input: { signature: number; scope: string; class: "attributed" | "excused"; target: number | null },
 ): void {
 	ctx.db.run(Q.setExcuse, {
 		project: ctx.project.id,
 		signature: input.signature,
 		scope: input.scope,
-		decision: witness.decision,
+		decision: decisionOf(witness),
 		class: input.class,
 		expires: witness.expiresAt,
+		target: input.target,
 	});
 }
 
-/** Removes an excuse when its decision is withdrawn or stops holding. */
-export function dropExcuse(ctx: Ctx, signature: number, scope: string): void {
-	ctx.db.run(Q.dropExcuse, { project: ctx.project.id, signature, scope });
+/**
+ * Removes the excuse `decision` made, when that decision is withdrawn or stops holding. An excuse a newer decision
+ * has since made for the same cause and scope is left alone.
+ */
+export function dropExcuse(ctx: Ctx, signature: number, scope: string, decision: number): void {
+	ctx.db.run(Q.dropExcuse, { project: ctx.project.id, signature, scope, decision });
 }

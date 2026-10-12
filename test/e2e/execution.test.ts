@@ -32,6 +32,7 @@ async function fixture({
 		cwd: process.cwd(),
 		env: {
 			...process.env,
+			NODE_ENV: "production",
 			CASEBOOK_PORT: String(port),
 			CASEBOOK_DATA: directory,
 			CASEBOOK_MODE: mode,
@@ -49,7 +50,8 @@ async function fixture({
 		call(op, input, { url, project: "scratch", token: options.token ?? token });
 	try {
 		await eventually(async () => {
-			if (child.exitCode !== null) throw new Error("Builder 2 server exited before readiness");
+			if (child.exitCode !== null)
+				throw new Error(`Builder 2 server exited before readiness: ${await new Response(child.stderr).text()}`);
 			try {
 				return (await fetch(`${url}/healthz`)).ok;
 			} catch {
@@ -126,7 +128,9 @@ async function cases(server: Server, count: number) {
 			await page.getByText("proves nothing about a build.", { exact: false }).waitFor();
 			const loads = view.loads();
 			const reports: unknown[] = [];
-			page.on("request", (request) => { if (request.url().endsWith("/report")) reports.push(request.postDataJSON()); });
+			page.on("request", (request) => {
+				if (request.url().endsWith("/report")) reports.push(request.postDataJSON());
+			});
 			for (let i = 0; i < 8; i++) {
 				await page.keyboard.press("p");
 				if (i === 0)
@@ -135,15 +139,30 @@ async function cases(server: Server, count: number) {
 							document.querySelector('[data-run-document="C-2"][data-active="true"] [data-step]') ===
 							Reflect.get(window, "nextStep"),
 					);
-				try { await eventually(
-					() => server.api("find", { in: "slots", run: planned.run }),
-					(rows) =>
-						Slot.array()
-							.parse(rows.items)
-							.filter((slot) => slot.fills.some((fill) => fill.by === "daniel" && fill.outcome === "pass")).length ===
+				try {
+					await eventually(
+						() => server.api("find", { in: "slots", run: planned.run }),
+						(rows) =>
+							Slot.array()
+								.parse(rows.items)
+								.filter((slot) => slot.fills.some((fill) => fill.by === "daniel" && fill.outcome === "pass")).length ===
+							i + 1,
+					);
+				} catch (error) {
+					console.info(
+						"J5 failed pass",
 						i + 1,
-				); } catch (error) {
-					console.info("J5 failed pass", i + 1, "reports", JSON.stringify(reports), "page", await page.evaluate(() => ({ current: document.querySelector("[data-active=true]")?.getAttribute("data-run-document"), status: document.querySelector("#stat")?.textContent, controls: document.querySelector(".run-controls")?.textContent })), "slots", JSON.stringify((await server.api("find", { in: "slots", run: planned.run })).items));
+						"reports",
+						JSON.stringify(reports),
+						"page",
+						await page.evaluate(() => ({
+							current: document.querySelector("[data-active=true]")?.getAttribute("data-run-document"),
+							status: document.querySelector("#stat")?.textContent,
+							controls: document.querySelector(".run-controls")?.textContent,
+						})),
+						"slots",
+						JSON.stringify((await server.api("find", { in: "slots", run: planned.run })).items),
+					);
 					throw error;
 				}
 			}
@@ -329,4 +348,110 @@ async function cases(server: Server, count: number) {
 		}
 	},
 	30000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"a pass pressed while the next pinned body is in flight is retained and checked before reporting",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		let release = () => {};
+		const waiting = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		try {
+			const created = await cases(server, 2);
+			const planned = await server.api("plan", {
+				name: "Delayed prefetch",
+				select: { cases: created.cases.map((c) => c.ref) },
+			});
+			view = await openPage(server, { path: "/p/scratch/runs" });
+			view.page.setDefaultTimeout(8000);
+			await view.page.route("**/get", async (route) => {
+				const input = z
+					.object({ refs: z.array(z.string()), version: z.number().optional() })
+					.parse(route.request().postDataJSON());
+				if (input.refs[0] === "C-2" && input.version === 1) await waiting;
+				await route.continue();
+			});
+			await view.page.getByRole("button", { name: "Enter Open cockpit", exact: true }).click();
+			await view.page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
+			await view.page.keyboard.press("p");
+			await view.page.waitForSelector('[data-run-document="C-2"][data-active="true"]');
+			expect(await view.page.locator('[data-run-document="C-2"]').getAttribute("data-ready")).toBe("false");
+			await view.page.keyboard.press("p");
+			expect(
+				Slot.array().parse((await server.api("find", { in: "slots", run: planned.run })).items)[1]?.fills,
+			).toHaveLength(0);
+			release();
+			const result = await eventually(
+				() => server.api("find", { in: "slots", run: planned.run }),
+				(rows) =>
+					Slot.array()
+						.parse(rows.items)
+						.every((slot) => slot.fills[0]?.outcome === "pass"),
+			);
+			expect(
+				Slot.array()
+					.parse(result.items)
+					.every((slot) => slot.fills[0]?.admitted === "exact"),
+			).toBe(true);
+			expect(view.errors).toEqual([]);
+		} finally {
+			release();
+			await view?.close();
+			await server.stop();
+		}
+	},
+	25000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"a rejected result restores the slot and note even when every read also fails",
+	async () => {
+		const server = await fixture({ mode: "server" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			const created = await cases(server, 4);
+			const planned = await server.api("plan", {
+				name: "Offline rollback",
+				select: { cases: created.cases.map((c) => c.ref) },
+			});
+			const token = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "executor",
+					kind: "human",
+					can: ["read", "produce", "plan"],
+					project: "scratch",
+				}),
+			).token;
+			view = await openPage({ ...server, token }, { path: `/p/scratch/runs/${planned.run.slice(2)}` });
+			view.page.setDefaultTimeout(3000);
+			await view.page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
+			await view.page.keyboard.press("f");
+			await view.page.keyboard.type("Keep this failure note");
+			const grant = z
+				.array(z.object({ id: z.number(), actor: z.string() }))
+				.parse(await server.api("admin", { do: "token.list" }))
+				.find((entry) => entry.actor === "executor");
+			if (!grant) throw new Error("Executor token missing");
+			await server.api("admin", { do: "token.revoke", id: grant.id });
+			await view.page.keyboard.press("Enter");
+			await view.page.waitForFunction(() => document.querySelector(".run-last")?.textContent?.includes("Each result records"));
+			await view.page.waitForFunction(() => document.querySelector('[data-slot="1"]')?.textContent?.includes("yours"));
+			expect(await view.page.getByRole("textbox", { name: "Result note" }).inputValue()).toBe("Keep this failure note");
+			expect(
+				Slot.array()
+					.parse((await server.api("find", { in: "slots", run: planned.run })).items)
+					.every((slot) => slot.state === "missing" && slot.fills.length === 0),
+			).toBe(true);
+			expect(await view.page.locator(".run-last").innerText()).not.toContain("C-1 · Fail");
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	20000,
 );

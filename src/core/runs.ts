@@ -68,14 +68,15 @@ export const emptyTally = (): Tally => ({
  * - `pending`: evidence is missing, an accepted upload is not yet applied, or a decision it rests on has expired.
  * - `failed`: something is attributed to the target and needs a fix.
  * - `blocked`: a failure nobody has explained, a dispute, or an open question that blocks this run.
- * - `passed`: none of the above. Missing evidence is never green.
+ * - `passed`: none of the above, and something was proven. Missing evidence is never green, and neither is a
+ *   run with nothing counted at all: a report of skips only, or one whose every result was refused.
  */
 export function verdict(input: { tally: Tally; blocking: number; outstanding: number; expired: boolean }): Verdict {
 	const { tally } = input;
 	if (input.outstanding > 0 || input.expired) return "pending";
 	if (tally.attributed > 0) return "failed";
 	if (tally.unexplained > 0 || tally.disputed > 0 || input.blocking > 0) return "blocked";
-	if (tally.missing > 0) return "pending";
+	if (tally.missing > 0 || tally.pass + tally.excused === 0) return "pending";
 	return "passed";
 }
 
@@ -99,7 +100,14 @@ export function explainVerdict(input: {
 		return `blocked: ${parts.join(", ")}`;
 	}
 	if (tally.missing > 0) return `pending: ${plural(tally.missing, "result")} missing`;
-	return tally.pass === 0 ? "passed: nothing was required" : `passed: ${plural(tally.pass, "result")} proven`;
+	if (tally.pass + tally.excused === 0) {
+		return tally.skipped > 0
+			? `pending: nothing was proven (${plural(tally.skipped, "result")} skipped)`
+			: "pending: nothing has been proven yet";
+	}
+	return tally.pass === 0
+		? `passed: ${plural(tally.excused, "failure")} excused by a decision, nothing else ran`
+		: `passed: ${plural(tally.pass, "result")} proven`;
 }
 
 // ── Slots ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -108,13 +116,53 @@ export const SlotState = z.enum(["missing", "satisfied", "failing", "disputed", 
 export type SlotState = z.infer<typeof SlotState>;
 
 /**
- * Per producer, the outcome of its latest uncorrected result in the slot. A producer is an actor using a method:
- * a person's own run of a case and the same person's upload of a pipeline's report are different evidence.
+ * Per producer, what its uncorrected results in the slot say. A producer is an actor using a method: a person's
+ * own run of a case and the same person's upload of a pipeline's report are different evidence.
  */
 export type SlotAgg = Record<
 	string,
 	{ actor: number; outcome: "pass" | "fail" | "skip" | "blocked"; result: number; seq: number }
 >;
+
+/** One uncorrected result admitted to a slot. */
+export type SlotFill = {
+	id: number;
+	actor: number;
+	method: MethodKind;
+	test: number;
+	attempt: number;
+	seq: number;
+	ord: number;
+	outcome: "pass" | "fail" | "skip" | "blocked";
+};
+
+/**
+ * Folds the results admitted to a slot into one entry per producer.
+ * A producer may have several tests on one case. For each test its latest result counts: the highest attempt, then
+ * the last recorded, so a re-run replaces the attempt before it and an old attempt arriving late replaces nothing.
+ * The producer's entry is then the worst of its tests: any failing test makes it a fail, whatever else passed.
+ */
+export function aggregateSlot(fills: readonly SlotFill[]): SlotAgg {
+	const latest = new Map<string, SlotFill>();
+	for (const fill of fills) {
+		const key = `${fill.actor}:${fill.method}:${fill.test}`;
+		const held = latest.get(key);
+		const newer =
+			!held ||
+			fill.attempt > held.attempt ||
+			(fill.attempt === held.attempt && (fill.seq > held.seq || (fill.seq === held.seq && fill.ord > held.ord)));
+		if (newer) latest.set(key, fill);
+	}
+	const weight = { fail: 3, pass: 2, blocked: 1, skip: 0 } as const;
+	const agg: SlotAgg = {};
+	for (const fill of latest.values()) {
+		const key = `${fill.actor}:${fill.method}`;
+		const held = agg[key];
+		if (held && weight[held.outcome] >= weight[fill.outcome]) continue;
+		agg[key] = { actor: fill.actor, outcome: fill.outcome, result: fill.id, seq: fill.seq };
+	}
+	return agg;
+}
 
 /**
  * A slot's state from every producer's latest uncorrected result. Disagreement between producers is `disputed`

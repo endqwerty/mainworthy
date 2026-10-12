@@ -15,7 +15,12 @@ const settings: PolicySettings = {
 	holds: { flakyDays: 14, infraThisTargetOnly: true },
 };
 
-/** Clauses every preset starts with: a conflict goes to its author, and the policy itself is an admin's to change. */
+/**
+ * Clauses every preset starts with: the policy itself is an admin's to change, and a conflict goes to its author.
+ * The policy clause comes before the conflict clause, so a proposal that touches the policy needs an admin whatever
+ * else it carries. Resolving a conflict adopts nothing by itself: the resolution is a new proposal, and the
+ * clauses below decide who adopts it.
+ */
 const common: Clause[] = [
 	// The author of a conflicted proposal, a person or an agent, may always withdraw it.
 	{
@@ -25,8 +30,8 @@ const common: Clause[] = [
 		ask: { ...author, agents: "answer" },
 		blocks: "nothing",
 	},
-	{ id: "adopt-conflict", kind: "adopt", when: ["conflict"], ask: author, blocks: "nothing" },
 	{ id: "adopt-policy", kind: "adopt", when: ["policy"], ask: admin, blocks: "nothing" },
+	{ id: "adopt-conflict", kind: "adopt", when: ["conflict"], ask: author, blocks: "nothing" },
 ];
 
 const loose: Clause[] = [

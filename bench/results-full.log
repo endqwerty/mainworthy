@@ -1,58 +1,92 @@
 Machine: Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz; 16 logical cores; 31.2 GiB; Bun 1.4.3
 Filesystem: Filesystem       Type  1024-blocks     Used Available Capacity Mounted on
-/dev/mapper/root btrfs   486270976 74535340 409844004      16% /home
-Load at start: 11.17 / 9.67 / 8.46
-Building folders…
-folders: 500 rows in 0.13 s, 3977 rows/s
-Building cases…
-  cases 1000/100000
-  cases 11000/100000
-  cases 21000/100000
-  cases 31000/100000
-  cases 41000/100000
-  cases 51000/100000
-  cases 61000/100000
-  cases 71000/100000
-  cases 81000/100000
-  cases 91000/100000
-cases: 100,000 rows in 35.38 s, 2826 rows/s
-Building history edits…
-history edits: 60,428 rows in 35.94 s, 1681 rows/s
-Building test registration…
-test registration: 20,000 rows in 4.02 s, 4975 rows/s
-Building test linking…
-test linking: 15,000 rows in 0.47 s, 32052 rows/s
-Building results…
-  results 105000/1000000
-  results 205000/1000000
-  results 305000/1000000
-  results 405000/1000000
-  results 505000/1000000
-  results 605000/1000000
-  results 705000/1000000
-  results 805000/1000000
-  results 905000/1000000
-results: 980,000 rows in 60.81 s, 16117 rows/s
-Building PR scopes and open queue…
-  open questions 4130/50000
-  open questions 8130/50000
-  open questions 12130/50000
-  open questions 16130/50000
-  open questions 20130/50000
-  open questions 24130/50000
-  open questions 28130/50000
-  open questions 32130/50000
-  open questions 36130/50000
-  open questions 40130/50000
-  open questions 44130/50000
-  open questions 48130/50000
-PR scopes and open queue: 49,870 rows in 31.20 s, 1599 rows/s
-Building planned run…
-planned run: 500 rows in 0.08 s, 6462 rows/s
-Verified dataset: {"cases":100000,"versions":160428,"tests":20000,"linked":15000,"results":1050120,"open":50000,"decided":475,"carried":1950}; queue target reached
+/dev/mapper/root btrfs   486270976 77218732 407241988      16% /home
+Load at start: 7.53 / 11.57 / 10.45
+Reusing dataset: /home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/.casebook/bench/dataset-100000-20000-1000000-639-50000-0339b336d58a-e66c2a937753 (100000 cases, 1050120 results, 50000 open questions)
 Measuring case read: 50 iterations in five blocks…
   case read is within 2× its budget; repeating five complete runs on fresh clones.
-  p95 median 20.34 ms, range 19.34 to 26.52 ms; any trial miss fails the command.
+  p95 median 23.41 ms, range 20.37 to 36.77 ms; any trial miss fails the command.
 Measuring folder page (50): 50 iterations in five blocks…
 Measuring search/common: 50 iterations in five blocks…
-  search/common is within 2× its budget; repeating five complete runs on fresh clones.
+Measuring search/two words: 50 iterations in five blocks…
+Measuring search/rare: 50 iterations in five blocks…
+Measuring search/prefix: 50 iterations in five blocks…
+Measuring test history (20): 50 iterations in five blocks…
+Measuring gate read: 50 iterations in five blocks…
+Measuring queue (50/50000): 50 iterations in five blocks…
+Measuring changed since: 50 iterations in five blocks…
+Measuring impact (20 files): 50 iterations in five blocks…
+Measuring case save: 50 iterations in five blocks…
+Measuring bulk move (1000): 5 iterations in five blocks…
+  bulk move (1000) is within 2× its budget; repeating five complete runs on fresh clones.
+  max median 714.23 ms, range 600.49 to 983.66 ms; any trial miss fails the command.
+Measuring ingest (10000): 10 iterations in five blocks…
+Measuring JUnit parse (10000): 25 iterations in five blocks…
+Measuring execute run: 200 iterations in five blocks…
+HTTP window 1/5: readers-only control 5 s, then 16 readers + ingest + save 15 s
+[casebook] reader threads: 4
+  control p95 988.05 ms; mix p95 1301.41 ms, 40.1 reads/s, 10 ingests
+HTTP window 2/5: readers-only control 5 s, then 16 readers + ingest + save 15 s
+[casebook] reader threads: 4
+  control p95 1012.45 ms; mix p95 920.84 ms, 46.8 reads/s, 13 ingests
+HTTP window 3/5: readers-only control 5 s, then 16 readers + ingest + save 15 s
+[casebook] reader threads: 4
+  control p95 1024.50 ms; mix p95 1072.81 ms, 45.1 reads/s, 12 ingests
+HTTP window 4/5: readers-only control 5 s, then 16 readers + ingest + save 15 s
+[casebook] reader threads: 4
+  control p95 1007.09 ms; mix p95 1022.86 ms, 45.1 reads/s, 12 ingests
+HTTP window 5/5: readers-only control 5 s, then 16 readers + ingest + save 15 s
+[casebook] reader threads: 4
+  control p95 1001.31 ms; mix p95 1075.12 ms, 42.9 reads/s, 12 ingests
+| workload            | p50 ms  | p95 ms  | p99 ms  | max ms  | budget ms | pass/MISS | errors |
+| ------------------- | ------- | ------- | ------- | ------- | --------- | --------- | ------ |
+| case read           | 7.20    | 26.93   | 34.95   | 34.95   | p95<20    | MISS      | 0      |
+| folder page (50)    | 1.95    | 2.93    | 3.54    | 3.54    | p95<50    | pass      | 0      |
+| search/common       | 19.42   | 23.87   | 25.83   | 25.83   | p95<100   | pass      | 0      |
+| search/two words    | 21.44   | 26.15   | 26.91   | 26.91   | p95<100   | pass      | 0      |
+| search/rare         | 11.91   | 15.79   | 18.26   | 18.26   | p95<100   | pass      | 0      |
+| search/prefix       | 18.44   | 30.79   | 33.23   | 33.23   | p95<100   | pass      | 0      |
+| test history (20)   | 0.14    | 0.18    | 0.20    | 0.20    | p95<20    | pass      | 0      |
+| gate read           | 0.02    | 0.04    | 0.05    | 0.05    | p95<20    | pass      | 0      |
+| queue (50/50000)    | 5.75    | 8.18    | 8.91    | 8.91    | p95<50    | pass      | 0      |
+| changed since       | 1.07    | 1.83    | 2.15    | 2.15    | report    | pass      | 0      |
+| impact (20 files)   | 86.06   | 102.80  | 104.63  | 104.63  | report    | pass      | 0      |
+| case save           | 1.91    | 15.37   | 36.98   | 36.98   | p95<50    | pass      | 0      |
+| bulk move (1000)    | 285.08  | 600.49  | 600.49  | 600.49  | max<1000  | pass      | 0      |
+| ingest (10000)      | 706.05  | 940.06  | 940.06  | 940.06  | max<2000  | pass      | 0      |
+| ingest gate visible | 706.33  | 940.37  | 940.37  | 940.37  | max<5000  | pass      | 0      |
+| JUnit parse (10000) | 37.49   | 47.91   | 50.59   | 50.59   | report    | pass      | 0      |
+| execute run         | 2.20    | 12.79   | 84.44   | 123.53  | p95<50    | pass      | 0      |
+| control HTTP reads  | 46.11   | 1007.49 | 1357.37 | 1587.35 | report    | pass      | 0      |
+| mixed HTTP reads    | 150.00  | 1109.33 | 1482.55 | 2135.18 | p95<50    | MISS      | 0      |
+| mixed HTTP ingest   | 1242.91 | 1811.35 | 2025.32 | 2025.32 | max<2000  | MISS      | 0      |
+| mixed HTTP save     | 1238.56 | 1723.74 | 2030.03 | 2030.03 | p95<50    | MISS      | 0      |
+Mixed: 44.0 reads/s; longest read during a 10,000-result ingest 2135.18 ms (impact).
+Readers-only control: p95 1007.49 ms, 56.6 reads/s. This in-process HTTP test also measures reader saturation. Correctness checks consumed 340.3 ms outside response timers.
+  HTTP test history: control p95 994.49 ms; mixed p95 991.59 ms; mixed n=425, errors=0
+  HTTP case: control p95 877.45 ms; mixed p95 824.68 ms; mixed n=422, errors=0
+  HTTP gate: control p95 988.25 ms; mixed p95 931.48 ms; mixed n=430, errors=0
+  HTTP folder: control p95 487.43 ms; mixed p95 901.91 ms; mixed n=423, errors=0
+  HTTP queue: control p95 659.83 ms; mixed p95 820.48 ms; mixed n=432, errors=0
+  HTTP search: control p95 927.38 ms; mixed p95 907.62 ms; mixed n=427, errors=0
+  HTTP since: control p95 540.56 ms; mixed p95 803.66 ms; mixed n=435, errors=0
+  HTTP impact: control p95 1369.06 ms; mixed p95 1485.31 ms; mixed n=439, errors=0
+Report apply transactions: p50 1149.91 ms, p95 1586.36 ms, max 1924.14 ms, including reads between apply slices. Acceptance transaction p95 93.75 ms.
+Direct invoke drains acceptance and apply commits synchronously, then reads the gate. HTTP uses the product's invokeAsync and serves reads between apply slices; all SQL still runs on one JS thread.
+Diagnostic case read: 2.7 CPU ms / 7.5 wall ms, 176 file inputs, 0 major faults; top SQL 3.1 ms in 3 calls; SEARCH results USING INDEX results_case (basis_case=? AND method=?); USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+Diagnostic folder page (50): 32.7 CPU ms / 110.8 wall ms, 59992 file inputs, 7 major faults; top SQL 50.9 ms in 1 calls; SEARCH c USING COVERING INDEX cases_state (project=? AND state=? AND folder=?)
+Diagnostic search/common: 158.6 CPU ms / 545.6 wall ms, 337472 file inputs, 48 major faults; top SQL 383.8 ms in 1 calls; SEARCH c USING INDEX cases_state (project=? AND state=?)
+Diagnostic search/two words: 43.2 CPU ms / 161.8 wall ms, 10696 file inputs, 1 major faults; top SQL 57.8 ms in 1 calls; SEARCH c USING INDEX cases_state (project=? AND state=?)
+Diagnostic search/rare: 28.9 CPU ms / 106.6 wall ms, 23808 file inputs, 6 major faults; top SQL 38.6 ms in 1 calls; SEARCH c USING INDEX cases_state (project=? AND state=?)
+Diagnostic search/prefix: 34.1 CPU ms / 115.2 wall ms, 8632 file inputs, 0 major faults; top SQL 56.9 ms in 1 calls; SCAN search_docs VIRTUAL TABLE INDEX 0:M4
+Diagnostic test history (20): 2.0 CPU ms / 8.7 wall ms, 320 file inputs, 0 major faults; top SQL 5.0 ms in 1 calls; SEARCH results USING INDEX results_test (project=? AND test=?)
+Diagnostic gate read: 0.1 CPU ms / 0.1 wall ms, 0 file inputs, 0 major faults; top SQL 0.0 ms in 1 calls; SEARCH runs USING INDEX runs_change (project=? AND accepts_what=?)
+Diagnostic queue (50/50000): 15.2 CPU ms / 71.6 wall ms, 2736 file inputs, 0 major faults; top SQL 61.5 ms in 1 calls; SEARCH questions USING COVERING INDEX questions_kinds (project=? AND state=? AND owner=?)
+Diagnostic changed since: 6.6 CPU ms / 6.4 wall ms, 600 file inputs, 0 major faults; top SQL 3.0 ms in 20 calls; SEARCH versions USING PRIMARY KEY (case_id=?)
+Diagnostic impact (20 files): 163.0 CPU ms / 488.2 wall ms, 22192 file inputs, 3 major faults; top SQL 219.7 ms in 2295 calls; SEARCH results USING INDEX results_case (basis_case=? AND method=?); USE TEMP B-TREE FOR LAST TERM OF ORDER BY
+Diagnostic case save: 3.5 CPU ms / 8.8 wall ms, 128 file inputs, 0 major faults; top SQL 5.2 ms in 1 calls; SEARCH versions USING PRIMARY KEY (case_id=? AND no=?)
+Diagnostic bulk move (1000): 518.2 CPU ms / 784.2 wall ms, 39680 file inputs, 3 major faults; top SQL 417.4 ms in 1000 calls; 
+Diagnostic ingest (10000): 971.1 CPU ms / 2422.6 wall ms, 153384 file inputs, 0 major faults; top SQL 1447.5 ms in 10000 calls; 
+Diagnostic execute run: 5.0 CPU ms / 8.1 wall ms, 200 file inputs, 0 major faults; top SQL 2.0 ms in 1 calls; SEARCH slots USING INDEX slots_rank (run=?)
+Report: /home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f/bench/results-full.json
+Elapsed: 234.17 s; load at end 9.39 / 10.65 / 10.35; 4 primary misses and 5 repeat misses; 5 workloads at or above half their budget.

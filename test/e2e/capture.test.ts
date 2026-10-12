@@ -48,6 +48,13 @@ test.skipIf(!browserAvailable)(
 				{ action: "Open orders", expected: null },
 				{ action: "Check stored total", expected: null },
 			]);
+			await page.waitForFunction(() => document.querySelector(".cstate")?.textContent?.includes("v1"));
+			expect(
+				await page.evaluate(
+					() =>
+						document.activeElement instanceof HTMLTextAreaElement || document.activeElement instanceof HTMLInputElement,
+				),
+			).toBe(false);
 			expect(browser.dialogs).toEqual([]);
 			expect(browser.loads()).toBe(1);
 			expect(browser.errors).toEqual([]);

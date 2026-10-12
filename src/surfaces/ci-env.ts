@@ -107,13 +107,14 @@ function github(env: Environment, options: Options): Source {
 	const pr =
 		integer(/^refs\/pull\/(\d+)\/(?:merge|head)$/.exec(env.GITHUB_REF ?? "")?.[1]) ?? pull?.number ?? event?.number;
 	const isPr = pr !== undefined || pull !== undefined || env.GITHUB_EVENT_NAME?.startsWith("pull_request") === true;
+	const missingTargetHead = env.GITHUB_EVENT_NAME === "pull_request_target" && pull?.head?.sha === undefined;
 	const repo = text(env.GITHUB_REPOSITORY) ?? event?.repository?.full_name;
 	const run = text(env.GITHUB_RUN_ID);
 	const server = (text(env.GITHUB_SERVER_URL) ?? "https://github.com").replace(/\/+$/, "");
 	return {
 		provider: "github",
 		fields: {
-			commit: isPr ? (pull?.head?.sha ?? text(env.GITHUB_SHA)) : text(env.GITHUB_SHA),
+			commit: missingTargetHead ? undefined : isPr ? (pull?.head?.sha ?? text(env.GITHUB_SHA)) : text(env.GITHUB_SHA),
 			branch:
 				text(env.GITHUB_HEAD_REF) ??
 				(isPr ? pull?.head?.ref : undefined) ??
@@ -288,6 +289,7 @@ function override(env: Environment, name: string, fallback: string | undefined):
  * and job names return null.
  * PR event payloads identify the change by its head SHA, including pull_request_target. A caller testing the base
  * checkout must supply CASEBOOK_COMMIT for that checkout. Over-long base identifiers are omitted, never shortened.
+ * A pull_request_target event without a readable head SHA needs CASEBOOK_COMMIT rather than using its base SHA.
  */
 export function detectTarget(
 	env: Environment,
@@ -307,7 +309,7 @@ export function detectTarget(
 	const repo = text(override(env, "CASEBOOK_REPO", fields.repo), 200);
 	const changedPrIdentity = pr !== fields.pr || repo !== text(fields.repo, 200);
 	const values = {
-		commit: override(env, "CASEBOOK_COMMIT", fields.commit),
+		commit: text(override(env, "CASEBOOK_COMMIT", fields.commit)),
 		branch: text(override(env, "CASEBOOK_BRANCH", fields.branch), 200),
 		repo,
 		pr,

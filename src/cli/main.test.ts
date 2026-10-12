@@ -462,3 +462,51 @@ test("a generated decision batch prints its successful and refused items before 
 		expect(result.stdout).toContain('"status": "invalid"');
 	});
 });
+
+test("a JSON payload refuses flags that would otherwise be ignored", async () => {
+	await withInstance(async ({ cli }) => {
+		const result = await cli(["gate", "--json", JSON.stringify({ commit: COMMIT }), "--wait", "1"]);
+		expect(result.code).toBe(4);
+		expect(result.stderr).toContain("cannot be combined");
+	});
+});
+
+test("an HTTP 200 proxy page cannot replace an existing export", async () => {
+	await withInstance(
+		async ({ cli, directory }) => {
+			const file = join(directory, "backup.casebook");
+			await writeFile(file, "previous backup");
+			const result = await cli(["export", "--out", file]);
+			expect(result.code).toBe(4);
+			expect(await Bun.file(file).text()).toBe("previous backup");
+		},
+		{
+			routes: {
+				"/api/export": () => new Response("<html>proxy login</html>", { headers: { "content-type": "text/html" } }),
+			},
+		},
+	);
+});
+
+test("a declined case annotation is visible and its failure stays in the gate", async () => {
+	await withInstance(async ({ cli, directory }) => {
+		const file = join(directory, "declined.xml");
+		await writeFile(
+			file,
+			'<testsuite name="unknown"><testcase name="test @C-999@v1"><failure message="failed"/></testcase></testsuite>',
+		);
+		const report = await cli(["report", file, "--commit", COMMIT]);
+		expect(report.code).toBe(0);
+		expect(report.stdout).toContain("1 case/version claims declined; results kept without a case");
+		expect(report.stderr).toContain("C-999");
+		expect((await cli(["gate", "--commit", COMMIT])).code).toBe(2);
+	});
+});
+
+test("JSON input accepts leading whitespace and newlines", async () => {
+	await withInstance(async ({ cli }) => {
+		const result = await cli(["find", "--json", '\n  {"in":"cases","limit":1}\n']);
+		expect(result.code).toBe(0);
+		expect(outputWith(Found, result).items).toEqual([]);
+	});
+});

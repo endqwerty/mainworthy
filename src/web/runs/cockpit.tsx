@@ -32,6 +32,9 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	});
 	const parsedSlots = Slot.array().safeParse(slotsRead.data?.pages.flatMap((page) => page.items));
 	const storedSlots = parsedSlots.success ? parsedSlots.data : [];
+	const confirmedSlots = useRef(new Map<number, Slot>());
+	for (const slot of storedSlots)
+		if (slot.fills.every((fill) => fill.result > 0)) confirmedSlots.current.set(slot.id, slot);
 	const [local, setLocal] = useState<Map<number, LocalFill>>(new Map());
 	const [cursor, setCursor] = useState<number | null>(null);
 	const [step, setStep] = useState("");
@@ -40,6 +43,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const noteRef = useRef<HTMLInputElement>(null);
 	const [last, setLast] = useState<LastResult | null>(null);
 	const writes = useRef(new Map<number, Promise<ReportReceipt>>());
+	const withdrawn = useRef(new Set<Promise<ReportReceipt>>());
 	const latest = useRef(new Map<number, Fill>());
 	const queued = useRef(new Map<number, number>());
 	const method = session.kind === "agent" ? "agent" : "human";
@@ -77,12 +81,11 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		enabled: Boolean(current),
 	});
 	const currentBody = RunCase.safeParse(currentRead.data?.[0]);
+	const bodyMatches =
+		currentBody.success && currentBody.data.ref === current?.case && currentBody.data.version === current?.version;
 	const admittedMethod = Boolean(
 		run?.require.some((obligation) => obligation.kind === "exercise" && obligation.methods.includes(method)) &&
-			currentBody.success &&
-			currentBody.data.ref === current?.case &&
-			currentBody.data.version === current?.version &&
-			currentBody.data.methods.includes(method),
+			(!bodyMatches || (currentBody.success && currentBody.data.methods.includes(method))),
 	);
 	const canRecord = Boolean(
 		current && !external(current) && run?.state === "open" && session.can.includes("produce") && admittedMethod,
@@ -148,21 +151,31 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 					})),
 				},
 		);
-		const caseRead = queryClient.getQueryData<Api["get"]["reply"]>(
-			queryKey({ project, op: "get", input: { refs: [slot.case], version: slot.version } }),
-		);
-		const body = RunCase.safeParse(caseRead?.[0]);
-		const atStep = outcome === "fail" && body.success ? body.data.steps[Number(step) - 1]?.id : undefined;
+		const pinnedInput = { refs: [slot.case], version: slot.version };
+		const failedStep = outcome === "fail" ? Number(step) : 0;
 		const priorWrite = writes.current.get(slot.id);
+		const rollback = confirmedSlots.current.get(slot.id) ?? slot;
 		queued.current.set(slot.id, fill.result);
 		const resultInput: Api["report"]["input"]["results"][number] = {
 			test: { case: slot.case },
 			outcome,
 			...(text ? { note: text } : {}),
-			...(atStep ? { steps: [{ step: atStep, outcome: "fail" }] } : {}),
 		};
 		const request = (async () => {
 			if (priorWrite) await priorWrite.catch(() => undefined);
+			const cached = RunCase.safeParse(
+				queryClient.getQueryData<Api["get"]["reply"]>(queryKey({ project, op: "get", input: pinnedInput }))?.[0],
+			);
+			const body =
+				cached.success && cached.data.ref === slot.case && cached.data.version === slot.version
+					? cached.data
+					: RunCase.parse((await call("get", pinnedInput, { project }))[0]);
+			if (body.ref !== slot.case || body.version !== slot.version)
+				throw new Error("The pinned case could not be read. Try again.");
+			if (!body.methods.includes(method))
+				throw new Error("This pinned case does not admit your method. Its slot needs another producer.");
+			const atStep = failedStep > 0 ? body.steps[failedStep - 1]?.id : undefined;
+			if (failedStep > 0 && !atStep) throw new Error(`The pinned case has no step ${failedStep}. Your note is kept.`);
 			const recent = latest.current.get(slot.id);
 			const corrects =
 				previous && previous.result > 0 && (!recent || previous.at > recent.at)
@@ -173,12 +186,18 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				{
 					run: runRef,
 					cmd: crypto.randomUUID(),
-					results: [{ ...resultInput, ...(corrects !== undefined && corrects > 0 ? { corrects } : {}) }],
+					results: [
+						{
+							...resultInput,
+							...(atStep ? { steps: [{ step: atStep, outcome: "fail" }] } : {}),
+							...(corrects !== undefined && corrects > 0 ? { corrects } : {}),
+						},
+					],
 				},
 				{ project },
 			);
-			if (receipt.rejected.length || !receipt.results[0])
-				throw new Error(receipt.rejected[0]?.reason ?? "The result was not recorded.");
+			if (receipt.rejected.length || receipt.declined?.length || !receipt.results[0])
+				throw new Error(receipt.rejected[0]?.reason ?? receipt.declined?.[0]?.reason ?? "The result was not recorded.");
 			const saved = { ...fill, result: receipt.results[0] };
 			latest.current.set(slot.id, saved);
 			if (queued.current.get(slot.id) === fill.result)
@@ -192,12 +211,24 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		writes.current.set(slot.id, request);
 		void request.catch((error: unknown) => {
 			if (writes.current.get(slot.id) !== request) return;
+			const restored = confirmedSlots.current.get(slot.id) ?? rollback;
+			queryClient.setQueryData<InfiniteData<Api["find"]["reply"]>>(
+				cacheKey,
+				(value) =>
+					value && {
+						...value,
+						pages: value.pages.map((page) => ({
+							...page,
+							items: page.items.map((row) => (row.id === slot.id ? restored : row)),
+						})),
+					},
+			);
 			setLocal((value) => {
 				const next = new Map(value);
-				if (previous) next.set(slot.id, { fill: previous, pending: false, questions: [] });
-				else next.delete(slot.id);
+				next.delete(slot.id);
 				return next;
 			});
+			setLast((value) => (value?.ready === request ? null : value));
 			setCursor(slot.id);
 			setNote(text);
 			if (outcome === "fail") {
@@ -223,7 +254,9 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		noteRef.current?.focus();
 	}
 	function undo(): void {
-		if (!last) return;
+		if (!last || withdrawn.current.has(last.ready)) return;
+		withdrawn.current.add(last.ready);
+		setLast(null);
 		void last.ready
 			.then(() => {
 				record(
@@ -238,6 +271,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 					last.previous?.note ?? "Withdrawn by the author",
 					false,
 				);
+				setLast(null);
 				setCursor(last.slot.id);
 				setStatus(
 					last.previous

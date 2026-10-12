@@ -27,33 +27,79 @@ The cross-judge was GPT 6 Astra, which re-ran every candidate itself, one at a t
 
 ### What was measured
 
-p95 in milliseconds through HTTP on loopback; W5 is the time for one report. These are the candidates' own
-final runs, taken while other work shared the machine, so read them as "inside the budget by how much", not as a
-ranking. The judge's serial re-runs are in the next section.
+The cross-judge froze each candidate's source and ran it itself, five complete runs per candidate, alternating
+Go, Rust, TypeScript, on a machine other work shared. Each cell is the **median of the five runs' p95, with the
+lowest and highest run in brackets**, in milliseconds through HTTP on loopback. E is embedded SQLite, S is
+PostgreSQL 18. W5 is the time for one report.
 
-| Workload | Budget | ts SQLite | ts Postgres | go SQLite | go Postgres | rust SQLite | rust Postgres |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| W1 read one case | 20 | 1.1 | 0.4 | 0.3 | 0.2 | 2.8 | 0.4 |
-| W2 folder page with proof strips | 50 | 4.2 | 9.0 | 3.7 | 7.5 | 6.5 | 8.5 |
-| W3 full-text search | 100 | 43.8 | 54.4 | 42.0 | 31.1 | 55.9 | 52.9 |
-| W4 save one case (one transaction) | 50 | 16.9 | 19.9 | 12.6 | 18.9 | 7.0 | 9.6 |
-| W5 ingest 10,000 results | 2,000 | 389 | 224 | 536 | 287 | 442 | 381 |
-| W5a parse a 10,000-test JUnit file | none | 46.5 | 44.4 | 26.8 | 27.3 | 7.1 | 6.7 |
-| W6 last 20 results of a test | 20 | 0.4 | 0.3 | 0.3 | 0.3 | 0.5 | 0.5 |
-| W7 gate read | 20 | 0.3 | 0.2 | 0.1 | 0.2 | 0.2 | 0.3 |
-| W8 queue page at 50,000 open | 50 | 5.1 | 9.2 | 2.5 | 6.9 | 3.5 | 8.2 |
-| W9 reads during ingest and saves | 50 | 18.2 | 28.7 | 7.9 | 15.3 | 11.3 | 19.2 |
+| Workload | Budget | TS E | TS S | Go E | Go S | Rust E | Rust S |
+| --- | ---: | --- | --- | --- | --- | --- | --- |
+| W1 read one case | 20 | 0.76 [0.64–1.28] | 0.59 [0.41–2.55] | 0.22 [0.19–0.25] | 0.22 [0.20–0.23] | 4.33 [2.58–4.40] | 0.27 [0.25–0.30] |
+| W2 folder page with proof strips | 50 | 3.70 [3.27–9.75] | 8.04 [6.45–8.58] | 3.18 [2.50–3.35] | 6.65 [5.25–7.84] | 7.11 [5.18–8.78] | 8.27 [6.66–8.72] |
+| W3 full-text search | 100 | 42.2 [29.8–51.2] | 61.6 [53.3–68.3] | 30.1 [26.5–39.8] | 29.5 [27.5–34.2] | 53.5 [49.9–57.4] | 51.1 [46.1–53.7] |
+| W4 save one case (one transaction) | 50 | 16.1 [16.0–16.4] | 19.1 [18.6–22.1] | 14.9 [8.7–15.3] | 19.1 [16.3–19.8] | 15.6 [15.5–15.9] | 19.1 [18.5–23.8] |
+| W5 ingest 10,000 results | 2,000 | 370 [332–487] | 234 [215–261] | 491 [388–650] | 300 [243–368] | 436 [391–474] | 357 [346–426] |
+| W5 slowest single report | 2,000 | 934 | 618 | 859 | 557 | 513 | 480 |
+| W5a parse a 10,000-test JUnit file | none | 38.7 | 48.5 | 30.5 | 25.3 | 6.2 | 4.8 |
+| W6 last 20 results of a test | 20 | 0.43 | 0.32 | 0.33 | 0.32 | 0.41 | 0.45 |
+| W7 gate read | 20 | 0.28 | 0.25 | 0.12 | 0.17 | 0.17 | 0.23 |
+| W8 queue page at 50,000 open | 50 | 4.67 [4.39–5.95] | 9.60 [7.63–10.7] | 2.71 [2.47–3.27] | 7.57 [5.93–7.68] | 2.98 [2.59–3.90] | 7.67 [6.76–8.46] |
+| W9 reads during ingest and saves | 50 | 17.8 [17.0–23.1] | 31.6 [29.3–32.3] | 6.2 [6.1–10.2] | 12.6 [12.1–16.1] | 10.4 [9.8–11.7] | 15.1 [14.7–17.4] |
 
-Zero errors on every workload for all three.
+"All 300 required budget checks across 15 runs pass; all measured, warmup and mixed-writer error counts are
+zero" (the verdict). An earlier TypeScript run, taken while the other candidates were still building, came close
+on two lines (PostgreSQL search p95 99 ms, mixed reads 40 ms); the judge traced the search to the ranking function
+in the SQL (`ts_rank_cd` against `ts_rank`: 51 ms against 32 ms), not to the language.
 
-**Every stack meets every budget in both store modes, by 2 to 100 times.** The database does the work; the
-language around it barely shows. Go is about twice as quick as TypeScript on reads under mixed load, and Rust
-parses XML six times faster, but each of those is already far inside its budget. On the budgets, no language
-is decidedly better.
+**Every stack meets every budget in both store modes.** The database does the work; the language around it
+barely shows. Go is about three times as quick as TypeScript on reads under mixed load, and Rust parses XML six
+times faster, and each of those is already far inside its budget. The judge's own caution applies to every
+difference in this table: the three candidates used different clients, pool sizes and ranking functions, so
+"do not interpret small differences as intrinsic language speed". On the budgets, no language is decidedly better.
 
-### The judge's re-runs and verdict
+### The judge's verdict
 
-JUDGE_SECTION
+**TypeScript on Bun, 26 of 30; Rust 23; Go 22.** The full text, with its evidence, is
+[`verdict.md`](../design-arena/2026-10-12-stack/verdict.md).
+
+| Criterion | TypeScript on Bun | Go | Rust |
+| --- | ---: | ---: | ---: |
+| Budgets, honestly measured | 4 | 4 | 4 |
+| One operation layer for every surface | 5 | 5 | 5 |
+| Logic shared with the browser | 5 | 2 | 3 |
+| Agents write the code correctly | 3 | 3 | 4 |
+| Deploy and operate | 4 | 5 | 4 |
+| Decidedly better for Casebook | 5 | 3 | 3 |
+
+In its words: "The decisive result is that backend budgets do not force a second language, while the specified
+keyboard UI requires identical algorithms on both sides." It would change the choice for a repeatable
+TypeScript-only budget failure, or for a Rust and WebAssembly editor slice that enforced the decision witness
+and met the browser's latency budget.
+
+What it asked of a TypeScript implementation, and where each stands in the code as built:
+
+- **Every edit names the version it was made on.** Two of the three spikes accepted an edit with no base. In the
+  product `base` is required by the schema of `propose`, and a test covers the stale and the missing case.
+- **Negative checks for the things TypeScript's structural types let through** (a forged witness, an import that
+  skips a layer, SQL in the wrong module). `test/architecture.test.ts` and `test/integrity.test.ts` do this, and
+  the witness is a class with a private field that a plain object does not satisfy.
+- **A worker failure soak.** Not done. The reader threads are covered by tests, not by a long run (#60).
+
+### Where the lead and the judge disagree: PostgreSQL now or later
+
+The judge recommends **both stores from the first usable version**: SQLite for Local and for a first
+single-process Server, with a tested PostgreSQL adapter beside it, as decision 0002 required. It says it would
+choose SQLite only "if Cloud proof is explicitly deferred beyond the first usable version and the dual-engine
+contract/migration cost becomes material".
+
+The lead built SQLite only, and that condition is the reason: the Cloud layer is deferred (decision 0009,
+answer 2: self-hosted first, a hosted tier "if this product works well"), and the cost is material. Two search
+dialects, two migration sets and an asynchronous transaction layer through every module, for a store nobody runs
+yet, is a week that the first user does not benefit from. The judge's own measurement removes the performance
+argument for it ("SQLite-only is sufficient for the measured single-process load"). What is lost is the proof,
+before 1.0, that the design survives a second store. That is a real loss, it is Daniel's call, and it is recorded
+as #57 with the triggers below. If he prefers the judge's position, the change is mechanical and the arena's
+TypeScript candidate is a working reference for it.
 
 ## Decision
 
@@ -63,7 +109,8 @@ JUDGE_SECTION
 3. **React 19**, bundled by Bun, for the web UI (decision 0011).
 4. **Zod 4** schemas are the single declaration of every operation's input; TypeScript types, the OpenAPI
    document, the MCP tool schemas and the CLI flags are derived from them.
-5. **The official MCP TypeScript SDK**, MCP_SDK_LINE.
+5. **The official MCP TypeScript SDK**, on its v1 line (1.32, protocol 2025-11-25), which is maintained but no
+   longer the current one. Moving to v2 and the 2026-07-28 protocol is one file (#61).
 6. **Biome** for format and lint, **`bun test`** for tests, **playwright-core** driving the system Chromium for
    browser tests.
 
@@ -128,23 +175,21 @@ isolates tenants completely and is the cheapest thing to operate. That is a deci
 ran, on a tenth of the dataset, but reports `fsync=off` and refused to turn it on. Rejected: a store whose
 durability cannot be shown does not carry a record that is supposed to be true.
 
-### One process, one writer, readers never wait
+### One process, one writer, readers on their own threads
 
-The engine is one process with two connections to the file: one writes, one reads (it sees only what is
-committed). A write waits its turn at a gate instead of blocking the thread. A large report is accepted in one
-short transaction, then applied in slices of 500 results; between slices the server answers reads. Before this
-was built, a 10,000-result report held the thread for 0.3 to 0.65 seconds.
-
-The TypeScript candidate went further and used worker threads (one writer, four readers). Not adopted: it is
-a second way for code to run, and the slices already keep a read from waiting longer than one slice. If read
-CPU ever becomes the limit, reader workers are the next step and the operation layer does not change (#60).
+The engine is one process. One connection writes; reads run on reader threads, each with its own read-only
+connection that sees only what is committed. A write waits its turn at a gate instead of blocking the thread. A
+large report is accepted in one short transaction, then applied in slices of 500 results. Before this was built,
+a 10,000-result report held every read for 0.3 to 0.65 seconds.
 
 ## Risks, and what would expose each early
 
 - **Bun is younger than Node.** The way back is small (see above). The check runs the whole suite on every
   change, so a Bun regression shows as a failing test, not as a surprise in production.
-- **A long synchronous operation blocks reads.** Reports are sliced; a bulk edit of thousands of cases is not
-  yet (about 0.2 s per thousand). The benchmark's mixed-load workload is the test (#60).
+- **A save waits behind a report.** This is the judge's biggest risk, and it is real here: there is one writer
+  per database, so a person's save queues behind a pipeline's 10,000-result report (the benchmark's mixed-load
+  workload measures it). Typing does not wait, because the editor keeps the draft on the device and saves in the
+  background, but the acknowledgement does. What to try next is in #60.
 - **The single writer is a ceiling.** The benchmark measures write throughput; the trigger for PostgreSQL is
   written above.
 - **The lead started building on this stack before the judge's verdict**, on the candidates' interim numbers,

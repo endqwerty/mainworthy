@@ -27,8 +27,8 @@ const Q = {
 		{ id: number; limit: number },
 		{ before: string; after: string; actor: number; at: number; seq: number }
 	>("SELECT before, after, actor, at, seq FROM placements WHERE case_id = $id ORDER BY seq DESC LIMIT $limit"),
-	changedSince: sql<{ project: number; rev: number; limit: number }, CaseRow>(
-		"SELECT * FROM cases WHERE project = $project AND rev > $rev ORDER BY rev LIMIT $limit",
+	changedSince: sql<{ project: number; rev: number; id: number; limit: number }, CaseRow>(
+		"SELECT * FROM cases WHERE project = $project AND (rev, id) >= ($rev, $id) ORDER BY rev, id LIMIT $limit",
 	),
 	tags: sql<{ project: number }, { tag: string; n: number }>(
 		"SELECT tag, count(*) AS n FROM case_tags WHERE project = $project GROUP BY tag ORDER BY n DESC, tag LIMIT 500",
@@ -332,8 +332,13 @@ export function versionList(db: Db, caseId: number): VersionEntry[] {
 export const versionAt = (db: Db, caseId: number, seq: number): VersionRow | null =>
 	db.get(Q.versionAt, { id: caseId, seq });
 export const placementsOf = (db: Db, caseId: number, limit: number) => db.all(Q.placements, { id: caseId, limit });
-export const casesChangedSince = (db: Db, project: number, rev: number, limit: number): CaseRow[] =>
-	db.all(Q.changedSince, { project, rev, limit });
+/** Cases changed at or after a position (a revision and a case id within it), in that order: one page of a cursor. */
+export const casesChangedSince = (
+	db: Db,
+	project: number,
+	from: { rev: number; id: number },
+	limit: number,
+): CaseRow[] => db.all(Q.changedSince, { project, rev: from.rev, id: from.id, limit });
 export const tagCounts = (db: Db, project: number) => db.all(Q.tags, { project });
 export const requirementList = (db: Db, project: number) => db.all(Q.requirements, { project });
 export const casesCovering = (db: Db, project: number, key: string): CaseRow[] =>

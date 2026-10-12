@@ -22,7 +22,7 @@ import { actorLabel, ruleActor } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
-import { mintWitness } from "../kernel/witness.ts";
+import { claimMint } from "../kernel/witness.ts";
 import { clauseFor, currentPolicy } from "../policy/policy.ts";
 import {
 	type Blocker,
@@ -96,6 +96,9 @@ export type Raised =
 function stored(r: Raise): Record<string, unknown> {
 	return { ...r.evidence, facts: r.facts, ...(r.target !== undefined ? { targetId: r.target } : {}) };
 }
+
+/** The one mint of decision witnesses. Claimed here when the module loads; nothing else can claim it. */
+const mintWitness = claimMint();
 
 const PRIORITY: Record<Blocks, number> = { all: 3, change: 2, release: 2, nothing: 1 };
 
@@ -262,6 +265,8 @@ export function answer(
 		});
 	}
 	if (question.state === "dissolved") return reply(question, "conflict", { needs: "this question no longer applies" });
+	const asked = askedAgain(ctx, question);
+	if (asked) return reply(question, "conflict", { needs: asked });
 	if (question.state === "decided" && question.decision !== null) {
 		const prior = decisionById(ctx.db, question.decision);
 		if (prior && JSON.stringify(json(prior.answer)) === JSON.stringify(given))
@@ -311,6 +316,17 @@ export function answer(
 }
 
 /**
+ * A question that was asked again after its decision stopped holding is history: the newer question is the one to
+ * answer or to undo. Answering the old one would decide the same cause twice.
+ */
+function askedAgain(ctx: Ctx, question: QuestionRow): string | null {
+	const latest = latestByFingerprint(ctx.db, ctx.project.id, question.fingerprint);
+	return latest && latest.id !== question.id
+		? `this question was asked again as ${questionRef(latest)}; answer that one`
+		: null;
+}
+
+/**
  * Records a decision and applies its effect. The only caller of any standing writer: it mints the witness.
  * A decision that replaces an earlier one on the same question first withdraws what the earlier one did; the
  * earlier row is never edited, and the new row names it in `supersedes`.
@@ -329,8 +345,12 @@ function settle(
 			handler.revert(ctx, question, prior);
 			supersedes = prior.id;
 		}
-	} else if (question.prior !== null) {
-		supersedes = questionById(ctx.db, question.prior)?.decision ?? null;
+	} else {
+		// A reopened question: the new decision follows the last row in its ledger (a withdrawal or an expiry), or
+		// for a question asked again after its hold ended, the decision of the question before it.
+		supersedes =
+			decisionsOf(ctx.db, question.id).at(-1)?.id ??
+			(question.prior !== null ? (questionById(ctx.db, question.prior)?.decision ?? null) : null);
 	}
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	const holds = handler.holds({ question, answer: given, now: ctx.now, policy });
@@ -356,6 +376,8 @@ export function undo(ctx: Ctx, input: { q: string; reason: string | undefined })
 	const question = mustQuestion(ctx.db, ctx.project.id, input.q);
 	if (question.state !== "decided" || question.decision === null)
 		return reply(question, "invalid", { needs: "a decided question" });
+	const asked = askedAgain(ctx, question);
+	if (asked) return reply(question, "conflict", { needs: asked });
 	const prior = decisionById(ctx.db, question.decision);
 	if (!prior) return reply(question, "invalid", { needs: "a decided question" });
 	const handler = HANDLERS[question.kind];
@@ -455,7 +477,8 @@ function dissolveStale(ctx: Ctx, run: RunRow, failing: ReadonlySet<number>): voi
 /**
  * Reopens every question whose decision has run out of time, and recomputes the runs that rested on it. The gate
  * already reads `pending` once a hold expires; this makes the question visible again without waiting for the next
- * report. Returns the number reopened.
+ * report. The expiry is a row in the ledger, signed by the rule actor and superseding the decision that ran out, so
+ * the next answer follows it and the chain is unbroken. Returns the number reopened.
  */
 export function sweepExpired(ctx: Ctx, expired: readonly DecisionRow[]): number {
 	let reopened = 0;
@@ -463,6 +486,20 @@ export function sweepExpired(ctx: Ctx, expired: readonly DecisionRow[]): number 
 		const question = questionById(ctx.db, decision.question);
 		if (!question || question.state !== "decided" || question.decision !== decision.id) continue;
 		HANDLERS[question.kind].revert(ctx, question, decision);
+		insertDecision(ctx, {
+			question,
+			answer: { is: "expired" },
+			signers: [
+				{
+					by: ruleActor(ctx.db).id,
+					clause: "hold-expired",
+					policy: currentPolicy(ctx.db, ctx.project.id).version,
+					reason: null,
+				},
+			],
+			holds: [],
+			supersedes: decision.id,
+		});
 		setQuestionState(ctx, question, "open", null);
 		refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, decision.id)]);
 		reopened++;

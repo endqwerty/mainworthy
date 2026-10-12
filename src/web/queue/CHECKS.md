@@ -25,3 +25,12 @@ servers on ports 7450 through 7499 and system Chromium.
   native dialogs, or full page loads during triage or execution.
 - Run TypeScript, scoped Biome, and the architecture check. The lead owns
   the final independent verdict, commit, PR and shared worktree cleanup.
+
+## Independent review findings to prove fixed
+
+Claude Opus 5.5 reproduced three failures on the first reviewed revision.
+Before changing those paths, add checks for answer → undo → answer again,
+double undo during an outstanding request, and a failed result whose read
+requests also fail. Assert that the open rows match the server after a retry,
+that undo sends one withdrawal, and that the cockpit cache returns to its
+last confirmed slot even without a successful refetch. Keep the typed note.

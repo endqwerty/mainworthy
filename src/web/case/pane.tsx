@@ -266,8 +266,12 @@ export function CasePane({
 								group.entries.length > 1 ? (
 									<details className="timeline-group" key={`versions:${group.entries[0]?.seq}`}>
 										<summary>
-											{group.entries.length} versions by {group.entries[0]?.by} ·{" "}
-											{age(group.entries[0]?.at ?? Date.now())}
+											<ProducerGlyph kind={group.entries[0]?.kind ?? "human"} />
+											<span className={group.entries[0]?.kind === "agent" ? "agentv" : ""}>
+												{group.entries.length} versions by {group.entries[0]?.by}
+												{group.entries[0]?.kind === "agent" ? " · agent" : ""} ·{" "}
+												{age(group.entries[0]?.at ?? Date.now())}
+											</span>
 										</summary>
 										{group.entries.map((entry) => (
 											<VersionRow key={entry.seq} entry={entry} diff={() => setDiffVersion(entry.version)} />
@@ -359,7 +363,12 @@ function ReadBody({ body, tags, begin }: { body: CaseBody; tags: string[]; begin
 }
 function VersionRow({ entry, diff }: { entry: VersionEntry; diff: () => void }) {
 	return (
-		<button type="button" className={`ev v ${entry.kind === "agent" ? "prop" : ""}`} onClick={diff}>
+		<button
+			type="button"
+			data-version={entry.version}
+			className={`ev v ${entry.kind === "agent" ? "prop" : ""}`}
+			onClick={diff}
+		>
 			<ProducerGlyph kind={entry.kind} />
 			<span>
 				<b className={entry.kind === "agent" ? "agentv" : ""}>

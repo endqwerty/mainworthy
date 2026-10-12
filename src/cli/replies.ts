@@ -86,6 +86,7 @@ export const REPLY_SCHEMAS: { [N in OpName]: z.ZodType<Api[N]["reply"]> } = {
 		unlinked: z.number(),
 		flips: z.number(),
 		rejected: z.array(z.object({ index: z.number(), reason: z.string() })),
+		declined: z.array(z.object({ index: z.number(), reason: z.string() })).default([]),
 		results: z.array(z.number()),
 		gate: Gate.nullable(),
 	}),

@@ -8,7 +8,7 @@ RUN bun install --frozen-lockfile
 COPY tsconfig.json biome.json ./
 COPY src ./src
 COPY skill ./skill
-RUN bun build --compile --minify --sourcemap src/cli/main.ts --outfile /out/casebook
+RUN bun build --compile --minify --sourcemap src/cli/main.ts src/server/read-worker.ts --outfile /out/casebook
 
 FROM debian:bookworm-slim
 RUN useradd --system --uid 10001 --home-dir /data casebook && mkdir -p /data && chown casebook:casebook /data

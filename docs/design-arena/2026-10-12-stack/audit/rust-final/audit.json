@@ -1,0 +1,171 @@
+{
+  "candidate": "rust",
+  "root": "/home/endqwerty/.cache/casebook-arena/judge/stack/frozen/rust-run1",
+  "checks": {
+    "read_sql_oracles": {
+      "pass": true,
+      "folder_rows": 50,
+      "glyphs_checked": 31,
+      "history_rows": 20,
+      "queue_rows": 50
+    },
+    "and_search_and_area": {
+      "pass": true,
+      "rows": 50,
+      "rank_order_checked": true
+    },
+    "stale_base": {
+      "pass": true,
+      "status": 400,
+      "error": {
+        "error": "conflict: base version 8, head 1"
+      },
+      "delta": {
+        "version": 0,
+        "command": 0,
+        "question": 0,
+        "decision": 0,
+        "result": 0,
+        "test": 0,
+        "signature": 0,
+        "batch": 0,
+        "target": 0,
+        "run": 0,
+        "seq": 0
+      }
+    },
+    "concurrent_command_replay": {
+      "pass": true,
+      "responses": [
+        [
+          200,
+          {
+            "case_id": 1,
+            "decision": 10001,
+            "hash": "c83238a383fdec0dd477c3ec9b0bc2d058a59d304d5e3c33d91429a7002138bd",
+            "no": 2,
+            "question": 60001,
+            "seq": 219967
+          }
+        ],
+        [
+          200,
+          {
+            "case_id": 1,
+            "decision": 10001,
+            "hash": "c83238a383fdec0dd477c3ec9b0bc2d058a59d304d5e3c33d91429a7002138bd",
+            "no": 2,
+            "question": 60001,
+            "seq": 219967
+          }
+        ]
+      ],
+      "delta": {
+        "version": 1,
+        "command": 1,
+        "question": 1,
+        "decision": 1,
+        "result": 0,
+        "test": 0,
+        "signature": 0,
+        "batch": 0,
+        "target": 0,
+        "run": 0,
+        "seq": 1
+      }
+    },
+    "missing_base": {
+      "protected": false,
+      "status": 200,
+      "response": {
+        "case_id": 1,
+        "decision": 10002,
+        "hash": "333cef1801dc19bc9d0375d5809aca28f1e3a05f5b6858dfa1c2d8d235dd974b",
+        "no": 3,
+        "question": 60002,
+        "seq": 219968
+      },
+      "delta": {
+        "version": 1,
+        "command": 1,
+        "question": 1,
+        "decision": 1,
+        "result": 0,
+        "test": 0,
+        "signature": 0,
+        "batch": 0,
+        "target": 0,
+        "run": 0,
+        "seq": 1
+      }
+    },
+    "concurrent_stale_edits": {
+      "pass": true,
+      "statuses": [
+        200,
+        400
+      ]
+    },
+    "report_and_replay": {
+      "pass": true,
+      "delta": {
+        "version": 0,
+        "command": 0,
+        "question": 20,
+        "decision": 0,
+        "result": 10000,
+        "test": 100,
+        "signature": 10,
+        "batch": 1,
+        "target": 1,
+        "run": 1,
+        "seq": 1
+      },
+      "sql": {
+        "n": 10000,
+        "failures": 200,
+        "signatures": 20,
+        "assumed": 9900,
+        "unresolved": 100,
+        "bad": 0
+      },
+      "replays": [
+        [
+          200,
+          {
+            "batch_id": 201,
+            "new_signatures": 0,
+            "new_tests": 0,
+            "questions": 0,
+            "replay": true,
+            "results": 0,
+            "seq": 219970
+          }
+        ],
+        [
+          200,
+          {
+            "batch_id": 201,
+            "new_signatures": 0,
+            "new_tests": 0,
+            "questions": 0,
+            "replay": true,
+            "results": 0,
+            "seq": 219970
+          }
+        ]
+      ]
+    },
+    "invalid_report_no_writes": {
+      "pass": true,
+      "status": 400
+    }
+  },
+  "source_hashes": {
+    "src/db.rs": "2c9c7331f1108032633ffb2f595240b94b43169ee5acdada167eafc4c9a1dfe8",
+    "src/ops.rs": "c659d159a5ec289bdb8eb983b10684be6b2621a5f6f3eb0aaa6006c275321831",
+    "src/registry.rs": "83c98ac4bc44e3ae6ee09c40516a71ed037b5564739f798325750d40cd562bed",
+    "src/main.rs": "26d6137c00ae3c0d7605fadfe1601f7dbd3b0c616951b600fe2e8c4fe77edf92"
+  },
+  "completed": true
+}

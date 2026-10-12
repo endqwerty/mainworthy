@@ -290,7 +290,11 @@ describe("basis", () => {
 			target: { commit: "4444444d", branch: "main" },
 			results: [{ test: { key: "tests/x.spec.ts::coupon @C-1@v9", name: "coupon @C-1@v9" }, outcome: "pass" }],
 		});
-		expect(wrong.rejected).toEqual([{ index: 0, reason: "the case has no version 9" }]);
+		// An automated result is a fact about the commit whatever it claims about a case: the claim is refused, the
+		// outcome is kept with no case, and the reason comes back.
+		expect(wrong.rejected).toEqual([]);
+		expect(wrong.declined).toEqual([{ index: 0, reason: "C-1 has no version 9: recorded with no case" }]);
+		expect(wrong.basis).toEqual({ exact: 0, assumed: 0, unresolved: 1 });
 		s.close();
 	});
 });
@@ -351,7 +355,8 @@ describe("work the server does on its own", () => {
 		expect(sweep(h.app, rule)).toBe(1);
 		expect(queue().counts.open).toBe(1);
 		expect(gate("7777777a")).toMatchObject({ verdict: "blocked", stale: false });
-		expect(count("decisions WHERE kind = 'failure'")).toBe(1); // the expired decision stays in the ledger
+		// The expired decision stays in the ledger, followed by the row that records that it ran out.
+		expect(count("decisions WHERE kind = 'failure'")).toBe(2);
 		expect(count("excuses")).toBe(0);
 	});
 });

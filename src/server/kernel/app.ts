@@ -1,5 +1,8 @@
 // The running instance: its database, its clock and its change channel. Created once per process (or per test).
+import { existsSync } from "node:fs";
 import { join } from "node:path";
+import type { Envelope } from "../../core/api.ts";
+import type { Actor } from "./ctx.ts";
 import { Db } from "./db.ts";
 import { migrate } from "./migrate.ts";
 
@@ -28,6 +31,13 @@ export type ChangeEvent = { project: string; seq: number; op: string; actor: str
  */
 export type WriteGate = { run: <T>(fn: () => T | Promise<T>) => Promise<T> };
 
+export type ReadCall = { op: string; project: string | null; input: unknown; actor: Actor | null };
+export type ReadPool = {
+	run: (call: ReadCall, fallback: () => Envelope<unknown>) => Promise<Envelope<unknown>>;
+	refresh: () => void;
+	stop: () => Promise<void>;
+};
+
 function writeGate(): WriteGate {
 	let tail: Promise<unknown> = Promise.resolve();
 	return {
@@ -47,6 +57,7 @@ export type App = {
 	 * consistent answer at once. With an in-memory database (tests) it is the same connection as `db`.
 	 */
 	reader: Db;
+	readers: ReadPool | null;
 	gate: WriteGate;
 	config: Config;
 	now: () => number;
@@ -56,15 +67,17 @@ export type App = {
 	close: () => void;
 };
 
-export function openApp(config: Config, options: { memory?: boolean; now?: () => number } = {}): App {
+export function openApp(config: Config, options: { memory?: boolean; now?: () => number; reader?: boolean } = {}): App {
 	const path = options.memory ? ":memory:" : join(config.dataDir, "casebook.db");
-	const db = new Db(path);
-	migrate(db, path);
-	const reader = options.memory ? db : new Db(path, { reader: true });
+	if (options.reader && !existsSync(path)) throw new Error("a reader needs an existing database");
+	const db = new Db(path, options.reader ? { reader: true } : {});
+	if (!options.reader) migrate(db, path);
+	const reader = options.memory || options.reader ? db : new Db(path, { reader: true });
 	const listeners = new Set<(event: ChangeEvent) => void>();
 	return {
 		db,
 		reader,
+		readers: null,
 		gate: writeGate(),
 		config,
 		now: options.now ?? Date.now,

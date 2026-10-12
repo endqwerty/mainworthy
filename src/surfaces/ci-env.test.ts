@@ -432,4 +432,31 @@ describe("detectTarget overrides and fallbacks", () => {
 			detectTarget({ GITLAB_CI: "true", CI_COMMIT_SHA: head, CI_COMMIT_BEFORE_SHA: "a".repeat(70) }).target,
 		).toEqual({ commit: head });
 	});
+
+	test("trims the git callback commit at the same boundary as environment commits", () => {
+		expect(detectTarget({}, { git: () => ({ commit: ` ${head}\n` }) }).target).toEqual({ commit: head });
+	});
+
+	test("an unreadable pull_request_target event needs an explicit tested commit", () => {
+		const env = {
+			GITHUB_ACTIONS: "true",
+			GITHUB_EVENT_NAME: "pull_request_target",
+			GITHUB_SHA: base,
+			GITHUB_HEAD_REF: "feature/coupon",
+			GITHUB_REF: "refs/heads/main",
+			GITHUB_EVENT_PATH: "/event.json",
+		};
+		expect(detectTarget(env, { readFile: () => null })).toEqual({
+			target: null,
+			job: null,
+			attempt: null,
+			buildUrl: null,
+			provider: "github",
+			missing: ["commit"],
+		});
+		expect(detectTarget({ ...env, CASEBOOK_COMMIT: base }, { readFile: () => null }).target).toEqual({
+			commit: base,
+			branch: "feature/coupon",
+		});
+	});
 });

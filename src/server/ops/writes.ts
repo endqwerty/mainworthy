@@ -15,6 +15,7 @@ import {
 	ReportInput,
 	type ReportReceipt,
 } from "../../core/ops.ts";
+import { clip } from "../../core/text.ts";
 import { answer, type Raise, type Raised, raise, refold, undo } from "../decisions/decisions.ts";
 import { raiseAdopt } from "../decisions/kinds.ts";
 import { decisionById, latestByFingerprint, type QuestionRow, questionRef } from "../decisions/questions.ts";
@@ -26,6 +27,7 @@ import {
 	changeById,
 	ensureTarget,
 	failsOnBase,
+	keepReceipt,
 	markProcessed,
 	mustTarget,
 	type TargetRow,
@@ -41,12 +43,14 @@ import { currentPolicy } from "../policy/policy.ts";
 import {
 	applyBatchSteps,
 	defaultObligations,
+	describeAccepts,
 	type FailingGroup,
 	gateOf,
 	mustRun,
 	noteAccepted,
 	pinnedVersions,
 	plan,
+	runAccepts,
 	runById,
 	runRef,
 	runsFor,
@@ -98,7 +102,11 @@ export const proposeOp = defineOp({
 
 // ── report ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Step one of a report: store it durably and mark every run it matters to as waiting for it. */
+/**
+ * Step one of a report: store it durably and mark every run it matters to as waiting for it. A report that names
+ * both a run and a target is refused when the run does not count that target: naming a run is not a way to make
+ * evidence about another build count for it.
+ */
 export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; fresh: boolean } {
 	const run = input.run ? mustRun(ctx.db, ctx.project.id, input.run) : null;
 	if (run?.state === "closed") throw conflict(`${runRef(run)} is closed; withdraw its sign-off to reopen it`);
@@ -114,6 +122,11 @@ export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; f
 				})
 			: ensureTarget(ctx, { session: runRef(run) });
 	} else throw invalid("a report needs a target (what was tested) or a run");
+	if (run && !runAccepts(run, target)) {
+		throw invalid(
+			`${runRef(run)} counts ${describeAccepts(run)}, and this report is for another target. Report it without \`run\` to record it for its own target.`,
+		);
+	}
 
 	const accepted = accept(ctx, { target, run: run?.id ?? null, report: input, nonce: input.cmd ?? `${ctx.seq}` });
 	if (accepted.fresh) noteAccepted(ctx, runsFor(ctx, target, run?.id ?? null), accepted.batch.seq);
@@ -130,9 +143,9 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 	const target = mustTarget(ctx.db, batch.target);
 	const runs = runsFor(ctx, target, batch.run);
 	const pinned = batch.run !== null ? pinnedVersions(ctx.db, batch.run) : new Map<number, number>();
-	const applied = yield* applySteps(ctx, batch, (caseId) => pinned.get(caseId) ?? null);
-	const groups = yield* applyBatchSteps(ctx, { batch, target, applied: applied.results, runs });
 	const producer = actorLabel(ctx.db, batch.actor).kind;
+	const applied = yield* applySteps(ctx, batch, producer, (caseId) => pinned.get(caseId) ?? null);
+	const groups = yield* applyBatchSteps(ctx, { batch, target, applied: applied.results, runs });
 
 	const questions: QuestionBrief[] = [];
 	for (const group of groups) {
@@ -147,6 +160,8 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 	}
 	for (const file of files) raiseMap(ctx, file, producer);
 
+	// The batch is applied before the runs are folded: a run that requires this job must count it.
+	markProcessed(ctx, batch, applied.counts);
 	refold(
 		ctx,
 		runs.map((run) => run.id),
@@ -166,10 +181,11 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 		unlinked: applied.results.filter((r) => r.basis === "unresolved").length,
 		flips: applied.flips,
 		rejected: applied.rejected,
+		declined: applied.declined,
 		results: applied.results.length <= 200 ? applied.results.map((r) => r.id) : [],
 		gate: fresh ? gateOf(ctx, fresh) : null,
 	};
-	markProcessed(ctx, batch, applied.counts, receipt);
+	keepReceipt(ctx, batch, receipt);
 	return receipt;
 }
 
@@ -232,7 +248,7 @@ function raiseFailure(
 		kind: "failure",
 		key,
 		subject: { signature: group.signature.id, scope: group.scope },
-		title: group.signature.text.slice(0, 160),
+		title: clip(group.signature.text, 160),
 		producer: input.producer,
 		evidence: {
 			signature: { class: group.signature.class, text: group.signature.text },
@@ -342,7 +358,7 @@ export function claim(ctx: Ctx, input: ClaimInput): ClaimReply {
 			kind: "finding",
 			key: `${locus}|${finding.category}`,
 			subject: { on: locus, category: finding.category },
-			title: `${finding.category}: ${finding.note.slice(0, 120)}`,
+			title: `${finding.category}: ${clip(finding.note, 120)}`,
 			producer: ctx.actor.kind,
 			evidence: {
 				on: locus,

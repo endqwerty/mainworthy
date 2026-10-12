@@ -1,6 +1,8 @@
 import type { ResultIn } from "../../core/ops.ts";
 
 type Attributes = Partial<Record<"name" | "file" | "classname" | "time" | "status" | "message" | "value", string>>;
+type KeyDigest = { first: number; second: number; firstPower: number; secondPower: number; length: number };
+type DamageSpan = { from: number; to: number; problem: NonNullable<ResultIn["failure"]> };
 type CaseElement = {
 	kind: "case";
 	tag: string;
@@ -22,6 +24,7 @@ type SuiteElement = {
 	kind: "suite";
 	tag: string;
 	path: string;
+	pathDigest: KeyDigest;
 	file: string | undefined;
 	firstResult: number;
 	problem: NonNullable<ResultIn["failure"]> | null;
@@ -35,6 +38,36 @@ type Element =
 type Warn = (message: string, offset: number) => void;
 
 const attributePattern = /([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/y;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: XML 1.0 excludes these characters.
+const invalidCharacter = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uD800-\uDFFF\uFFFE\uFFFF]/u;
+
+function digest(value: string): KeyDigest {
+	let first = 0;
+	let second = 0;
+	let firstPower = 1;
+	let secondPower = 1;
+	for (let index = 0; index < value.length; index++) {
+		first = (Math.imul(first, 33) + value.charCodeAt(index)) | 0;
+		second = (Math.imul(second, 65599) + value.charCodeAt(index)) | 0;
+		firstPower = Math.imul(firstPower, 33);
+		secondPower = Math.imul(secondPower, 65599);
+	}
+	return { first, second, firstPower, secondPower, length: value.length };
+}
+
+function appendDigest(prefix: KeyDigest, suffix: KeyDigest): KeyDigest {
+	return {
+		first: (Math.imul(prefix.first, suffix.firstPower) + suffix.first) | 0,
+		second: (Math.imul(prefix.second, suffix.secondPower) + suffix.second) | 0,
+		firstPower: Math.imul(prefix.firstPower, suffix.firstPower),
+		secondPower: Math.imul(prefix.secondPower, suffix.secondPower),
+		length: prefix.length + suffix.length,
+	};
+}
+
+const emptyDigest = digest("");
+const separatorDigest = digest("::");
+
 function stableName(value: string): string {
 	let end = value.length;
 	let changed = false;
@@ -71,6 +104,8 @@ function annotation(value: string, property = false): ResultIn["annotation"] {
 }
 
 function decode(value: string, offset: number, warn: Warn): string {
+	const invalid = invalidCharacter.exec(value);
+	if (invalid !== null) warn("Invalid XML character", offset + invalid.index);
 	if (!value.includes("&")) return value;
 	return value.replace(/&([^;\s<&]*);?/g, (whole: string, entity: string, index: number) => {
 		if (whole.endsWith(";")) {
@@ -169,12 +204,59 @@ function appendFailure(element: FailureElement, text: string): void {
 	}
 }
 
-function boundedKey(key: string, offset: number, warn: Warn): string {
-	if (key.length <= 1000) return key;
+function testKey(
+	prefix: string,
+	suite: SuiteElement | undefined,
+	name: string,
+	cache: Map<string, KeyDigest>,
+	offset: number,
+	warn: Warn,
+): string {
+	const pathLength = suite?.pathDigest.length ?? 0;
+	const parts = Number(prefix.length > 0) + Number(pathLength > 0) + Number(name.length > 0);
+	const length = prefix.length + pathLength + name.length + Math.max(parts - 1, 0) * 2;
+	if (length <= 1000) return [prefix, suite?.path, name].filter(Boolean).join("::") || "unnamed testcase";
 	warn("Test key truncated to 1,000 characters", offset);
-	let hash = 0x811c9dc5;
-	for (let index = 0; index < key.length; index++) hash = Math.imul(hash ^ key.charCodeAt(index), 0x01000193);
-	return `${key.slice(0, 991)}#${(hash >>> 0).toString(16).padStart(8, "0")}`;
+	let hash = emptyDigest;
+	if (prefix.length > 0) {
+		const saved = cache.get(prefix);
+		hash = saved ?? digest(prefix);
+		if (saved === undefined) cache.set(prefix, hash);
+	}
+	if (suite !== undefined && pathLength > 0)
+		hash = hash.length > 0 ? appendDigest(appendDigest(hash, separatorDigest), suite.pathDigest) : suite.pathDigest;
+	if (name.length > 0)
+		hash = hash.length > 0 ? appendDigest(appendDigest(hash, separatorDigest), digest(name)) : digest(name);
+	const shown = [prefix.slice(0, 983), suite?.path, name.slice(0, 983)].filter(Boolean).join("::").slice(0, 983);
+	return `${shown}#${(hash.first >>> 0).toString(16).padStart(8, "0")}${(hash.second >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+/** Applies nested damage scopes in closure order and visits each result at most once. */
+function applyDamage(results: ResultIn[], spans: DamageSpan[]): void {
+	if (spans.length === 0) return;
+	const next = Array.from({ length: results.length + 1 }, (_, index) => index);
+	const pending = (index: number) => {
+		let found = index;
+		while (found < results.length && next[found] !== found) found = next[found] ?? results.length;
+		let current = index;
+		while (current < found) {
+			const parent = next[current] ?? found;
+			next[current] = found;
+			current = parent;
+		}
+		return found;
+	};
+	for (const span of spans) {
+		for (let index = pending(span.from); index < span.to; index = pending(index + 1)) {
+			const result = results[index];
+			if (result !== undefined && (result.outcome === "pass" || result.outcome === "skip")) {
+				result.outcome = "error";
+				result.failure = { ...span.problem };
+				delete result.note;
+			}
+			next[index] = pending(index + 1);
+		}
+	}
 }
 
 /**
@@ -237,15 +319,15 @@ export function parseJUnit(
 		return element;
 	};
 	const suiteStack: SuiteElement[] = [];
+	const damagedSpans: DamageSpan[] = [];
+	const prefixDigests = new Map<string, KeyDigest>();
 	let reportProblem: NonNullable<ResultIn["failure"]> | null = null;
 	let currentCase: CaseElement | null = null;
 	let currentFailure: FailureElement | null = null;
 	let ignoredDepth = 0;
 	let rootSeen = false;
 	let position = xml.charCodeAt(0) === 0xfeff ? 1 : 0;
-	let syntaxWarnings = 0;
 	const warnMalformed: Warn = (message, offset) => {
-		syntaxWarnings++;
 		if (currentCase !== null) currentCase.integrity = "damaged";
 		else {
 			const suite = suiteStack.at(-1);
@@ -254,21 +336,12 @@ export function parseJUnit(
 		}
 		warn(message, offset);
 	};
-	const invalidate = (from: number, problem: NonNullable<ResultIn["failure"]>) => {
-		for (let index = from; index < results.length; index++) {
-			const result = results[index];
-			if (result !== undefined && (result.outcome === "pass" || result.outcome === "skip")) {
-				result.outcome = "error";
-				result.failure = { ...problem };
-				delete result.note;
-			}
-		}
-	};
 
 	const finish = (element: Element, closed = true) => {
 		switch (element.kind) {
 			case "suite":
-				if (element.problem !== null) invalidate(element.firstResult, element.problem);
+				if (element.problem !== null)
+					damagedSpans.push({ from: element.firstResult, to: results.length, problem: element.problem });
 				suiteStack.pop();
 				break;
 			case "case":
@@ -302,10 +375,16 @@ export function parseJUnit(
 		}
 	};
 	const text = (from: number, to: number, cdata = false) => {
+		if (from === to || ignoredDepth > 0) return;
+		const value = xml.slice(from, to);
+		let decoded = value;
+		if (cdata) {
+			const invalid = invalidCharacter.exec(value);
+			if (invalid !== null) warnMalformed("Invalid XML character", from + invalid.index);
+		} else decoded = decode(value, from, warnMalformed);
 		if (currentFailure?.report !== null && currentFailure !== null && ignoredDepth === 0) {
-			const value = xml.slice(from, to);
-			appendFailure(currentFailure, cdata ? value : decode(value, from, warnMalformed));
-		} else if (stack.length === 0 && xml.slice(from, to).trim().length > 0) {
+			appendFailure(currentFailure, decoded);
+		} else if (stack.length === 0 && value.trim().length > 0) {
 			warnMalformed("Content outside the JUnit root", from);
 		}
 	};
@@ -392,7 +471,12 @@ export function parseJUnit(
 		const selfClosing = content.trimEnd().endsWith("/");
 		const parent = stack.at(-1);
 		const propertyCase = parent?.kind === "ignored" ? parent.propertyCase : parent?.kind === "case" ? parent : null;
-		const warningsBeforeAttributes = syntaxWarnings;
+		let headerDamaged = false;
+		const warnAttribute: Warn = (message, offset) => {
+			headerDamaged = true;
+			if (name === "testcase" || name === "testsuite") warn(message, offset);
+			else warnMalformed(message, offset);
+		};
 		const attrs =
 			ignoredDepth === 0 || (name === "property" && propertyCase !== null)
 				? attributes(
@@ -400,7 +484,7 @@ export function parseJUnit(
 						tag.length,
 						selfClosing ? content.lastIndexOf("/") : content.length,
 						start + 1,
-						warnMalformed,
+						warnAttribute,
 					)
 				: {};
 		let element: Element = { kind: "other", tag };
@@ -417,13 +501,26 @@ export function parseJUnit(
 			} else if (name === "testsuite") {
 				const suite = suiteStack.at(-1);
 				const suiteName = normalisePath(attrs.name ?? "");
+				const pathDigest = suiteName
+					? suite !== undefined && suite.pathDigest.length > 0
+						? appendDigest(appendDigest(suite.pathDigest, separatorDigest), digest(suiteName))
+						: digest(suiteName)
+					: (suite?.pathDigest ?? emptyDigest);
+				const path = suiteName
+					? suite?.path
+						? suite.path.length === 1000
+							? suite.path
+							: `${suite.path}::${suiteName}`.slice(0, 1000)
+						: suiteName.slice(0, 1000)
+					: (suite?.path ?? "");
 				element = {
 					kind: "suite",
 					tag,
-					path: suiteName ? (suite?.path ? `${suite.path}::${suiteName}` : suiteName) : (suite?.path ?? ""),
+					path,
+					pathDigest,
 					file: attrs.file ? normalisePath(attrs.file) : suite?.file,
 					firstResult: results.length,
-					problem: null,
+					problem: headerDamaged ? { message: "Malformed JUnit suite" } : null,
 				};
 				suiteStack.push(element);
 				suites++;
@@ -434,11 +531,10 @@ export function parseJUnit(
 				if (attrs.name === undefined) warn("Testcase has no name", start);
 				const file = attrs.file ? normalisePath(attrs.file) : suite?.file;
 				const prefix = file || normalisePath(attrs.classname ?? "");
-				const key = [prefix, suite?.path, stableName(nameText)].filter(Boolean).join("::") || "unnamed testcase";
 				const status = attrs.status?.toLowerCase();
 				const result: ResultIn = {
 					test: {
-						key: boundedKey(key, start, warn),
+						key: testKey(prefix, suite, stableName(nameText), prefixDigests, start, warn),
 						name: limited(nameText, 500, "Test name", start),
 						...(file === undefined ? {} : { file: limited(file, 500, "Test file", start) }),
 					},
@@ -458,7 +554,7 @@ export function parseJUnit(
 					tag,
 					result,
 					retries: 0,
-					integrity: syntaxWarnings === warningsBeforeAttributes ? "intact" : "damaged",
+					integrity: headerDamaged || currentCase !== null ? "damaged" : "intact",
 					previous: currentCase,
 				};
 				currentCase = element;
@@ -467,9 +563,9 @@ export function parseJUnit(
 				const suite = suiteStack.at(-1);
 				const orphan = currentCase === null;
 				if (orphan) warnMalformed(`${name} element outside a testcase`, start);
+				const previous = suite === undefined || results.length > suite.firstResult ? results.at(-1) : undefined;
 				const result =
-					currentCase?.result ??
-					(suite === undefined || results.length > suite.firstResult ? results.at(-1) : undefined);
+					currentCase?.result ?? (previous?.outcome === "pass" || previous?.outcome === "skip" ? previous : undefined);
 				const outcome = name === "error" ? "error" : "fail";
 				const selected =
 					result === undefined || (result.outcome !== "error" && (outcome === "error" || result.outcome !== "fail"));
@@ -505,7 +601,8 @@ export function parseJUnit(
 		if (element !== undefined) finish(element, false);
 	}
 	if (!rootSeen && warnings.length === 0) warn("No JUnit root found", xml.length);
-	if (reportProblem !== null) invalidate(0, reportProblem);
+	if (reportProblem !== null) damagedSpans.push({ from: 0, to: results.length, problem: reportProblem });
+	applyDamage(results, damagedSpans);
 	if (omittedWarnings > 0)
 		warnings.push(
 			`${options?.file ? `${options.file}: ` : ""}${omittedWarnings} additional warnings omitted at byte offset ${byteOffset(xml.length)}`,

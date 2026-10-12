@@ -104,6 +104,13 @@ export async function runGenerated(command: GeneratedCommand, args: Args, client
 	const json = args.value("json");
 	if (json !== undefined) {
 		if (json === "true") throw new CliError("invalid", `${command.name} needs --json '<input JSON>'`);
+		for (const flag of args.flags.keys()) {
+			if (flag !== "json" && !GLOBAL_FLAGS.some((global) => global.name === flag))
+				throw new CliError(
+					"invalid",
+					`--${flag} cannot be combined with JSON input; use --help to choose one input form`,
+				);
+		}
 		input = jsonInput(json);
 	} else {
 		const fields: Record<string, unknown> = {};

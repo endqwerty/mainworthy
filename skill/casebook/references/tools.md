@@ -210,7 +210,7 @@ Search cases by text, folder or tag (rows carry ref, title, hash, proof), or lis
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `in` | `"cases" \| "tests" \| "runs" \| "folders" \| "requirements" \| "slots" \| "changes"` | no |  Default: `"cases"`. |
+| `in` | `"cases" \| "tests" \| "runs" \| "folders" \| "tags" \| "requirements" \| "slots" \| "changes"` | no |  Default: `"cases"`. |
 | `text` | `string` | no |  |
 | `folder` | `integer \| string` | no |  |
 | `deep` | `boolean` | no | With `folder`: include its subfolders. |
@@ -236,7 +236,7 @@ Start here for a review. Given a change (`pr:482`) or changed `files`, returns t
 
 ## since
 
-What changed since a `cursor` from an earlier call: changed cases (with a one-line diff, not bodies) and settled questions. Use it instead of re-reading.
+What changed since an earlier `cursor`: changed cases (one-line diff, no bodies) and settled questions. If `more`, call again with the new cursor.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |

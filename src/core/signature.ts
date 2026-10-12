@@ -1,4 +1,5 @@
 import { contentHash } from "./hash.ts";
+import { clip, clipEnd } from "./text.ts";
 
 export type NormalisedFailure = { class: "assertion" | "timeout" | "infra"; text: string };
 
@@ -91,10 +92,7 @@ const DETAIL_LINES = 200;
  * thousands of spaces) costs hundreds of milliseconds, and a report can carry thousands of them.
  */
 function bounded(line: string): string {
-	return line
-		.slice(0, LINE_LIMIT * 4)
-		.replace(/[ \t\f\v]{2,}/g, " ")
-		.slice(0, LINE_LIMIT);
+	return clip(clip(line, LINE_LIMIT * 4).replace(/[ \t\f\v]{2,}/g, " "), LINE_LIMIT);
 }
 
 function firstFrame(detail: string): string | null {
@@ -116,7 +114,7 @@ function firstFrame(detail: string): string | null {
  * pattern sees it.
  */
 export function normaliseFailure(input: { message: string; detail?: string }): NormalisedFailure {
-	const message = input.message.slice(0, 16_384).replace(ansi, "");
+	const message = clip(input.message, 16_384).replace(ansi, "");
 	const meaningful = bounded(
 		message
 			.split(/\r?\n/, 50)
@@ -126,14 +124,14 @@ export function normaliseFailure(input: { message: string; detail?: string }): N
 					!/^(?:Error|Traceback \(most recent call last\)|FAIL|FAILED):?\s*$/i.test(line.slice(0, LINE_LIMIT).trim()),
 			) ?? "",
 	);
-	const frame = input.detail === undefined ? null : firstFrame(input.detail.slice(0, 65_536));
+	const frame = input.detail === undefined ? null : firstFrame(clip(input.detail, 65_536));
 	const failureClass = classify(meaningful);
 	const preserveNumbers = failureClass === "assertion" && /\b(?:expected|assertion|assert)|expect\(/i.test(meaningful);
 	const stable = stableText({ text: meaningful, ids: true, preserveNumbers });
-	if (frame === null) return { class: failureClass, text: stable.slice(0, 300).trimEnd() };
+	if (frame === null) return { class: failureClass, text: clip(stable, 300).trimEnd() };
 	const frameText = stableText({ text: frame, ids: false, preserveNumbers: true });
-	const shortenedFrame = frameText.length <= 150 ? frameText : `...${frameText.slice(-147)}`;
-	const cause = stable.slice(0, 300 - shortenedFrame.length - 3).trimEnd();
+	const shortenedFrame = frameText.length <= 150 ? frameText : `...${clipEnd(frameText, 147)}`;
+	const cause = clip(stable, 300 - shortenedFrame.length - 3).trimEnd();
 	return { class: failureClass, text: cause === "" ? shortenedFrame : `${cause} | ${shortenedFrame}` };
 }
 

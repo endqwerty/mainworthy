@@ -24,6 +24,7 @@ Then open `http://localhost:7357` and paste the owner token.
 | `CASEBOOK_DATA` | `/data` | Where `casebook.db` lives. Mount a volume here. |
 | `CASEBOOK_PORT` | `7357` | The port to listen on. |
 | `CASEBOOK_HOST` | `0.0.0.0` | The address to bind. |
+| `CASEBOOK_READERS` | available cores minus one, minimum 1, maximum 4 | Reader worker threads, each with its own read-only connection. A non-negative integer; `0` runs reads inline on the server thread. |
 | `CASEBOOK_MODE` | `server` | `server`: every request needs a token. `local` (the default outside a container, on loopback): the browser on the same machine is the owner with no step. |
 
 The process runs as an unprivileged user (uid 10001). The health check is `casebook health`, which reads

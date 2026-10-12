@@ -4,15 +4,15 @@
 // when the acceptance rule admits them (core/runs.ts). This module keeps each run's projections (slot states, tally,
 // verdict) in step with the facts, in the transaction that changes them.
 import type { Policy } from "../../core/kinds.ts";
-import type { MethodKind } from "../../core/model.ts";
+import type { CaseBody, MethodKind } from "../../core/model.ts";
 import type { GateStatus } from "../../core/ops.ts";
 import {
+	aggregateSlot,
 	type ExerciseObligation,
 	emptyTally,
 	explainVerdict,
 	type Obligation,
 	qualifies,
-	type SlotAgg,
 	type SlotState,
 	slotState,
 	type Tally,
@@ -25,7 +25,6 @@ import {
 	type BatchRow,
 	changeById,
 	changeByKey,
-	codeWhat,
 	excuseFor,
 	processedJobs,
 	resultById,
@@ -42,8 +41,8 @@ import {
 import { type Ctx, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
-import type { Witness } from "../kernel/witness.ts";
-import { type CaseRow, caseById } from "../suite/suite.ts";
+import { decisionOf, type Witness } from "../kernel/witness.ts";
+import { type CaseRow, versionOf } from "../suite/suite.ts";
 
 export type RunRow = {
 	id: number;
@@ -139,7 +138,8 @@ const Q = {
 		 VALUES ($run, $test, $result, $outcome, $signature, $attempt, $flipped)
 		 ON CONFLICT (run, test) DO UPDATE SET result = excluded.result, outcome = excluded.outcome, signature = excluded.signature,
 		   attempt = excluded.attempt, flipped = max(run_tests.flipped, excluded.flipped)
-		 WHERE excluded.attempt >= run_tests.attempt`,
+		 WHERE excluded.attempt >= run_tests.attempt
+		   AND NOT (excluded.outcome IN ('skip', 'blocked') AND run_tests.outcome IN ('pass', 'fail', 'error'))`,
 	),
 	runTestGroups: sql<{ run: number }, { outcome: string; signature: number | null; n: number }>(
 		"SELECT outcome, signature, count(*) AS n FROM run_tests WHERE run = $run GROUP BY outcome, signature",
@@ -190,7 +190,6 @@ const Q = {
 	admit: sql<{ slot: number; result: number; run: number; admitted: string }>(
 		"INSERT OR IGNORE INTO slot_results (slot, result, run, admitted) VALUES ($slot, $result, $run, $admitted)",
 	),
-	correct: sql<{ result: number }>("UPDATE slot_results SET corrected = 1 WHERE result = $result"),
 	correctInSlot: sql<{ slot: number; result: number }>(
 		"UPDATE slot_results SET corrected = 1 WHERE slot = $slot AND result = $result",
 	),
@@ -239,6 +238,8 @@ export const slotCount = (db: Db, run: number): number => db.get(Q.slotCount, { 
 export type Fill = {
 	id: number;
 	actor: number;
+	test: number;
+	attempt: number;
 	outcome: string;
 	seq: number;
 	ord: number;
@@ -259,6 +260,8 @@ export function fillsOf(db: Db, slot: number): Fill[] {
 		fills.push({
 			id: result.id,
 			actor: result.actor,
+			test: result.test,
+			attempt: result.attempt,
 			outcome: result.outcome,
 			seq: result.seq,
 			ord: result.ord,
@@ -316,10 +319,14 @@ export function ensureChangeRun(ctx: Ctx, target: TargetRow): RunRow | null {
 	return runById(ctx.db, lastId);
 }
 
+/**
+ * Does this run count results on this target? A run that accepts a commit counts that commit (and repository and
+ * environment, where it names them) and nothing else, whether or not the result was typed into it: naming a run
+ * does not make evidence about another build count for it. A `self` run counts only what is typed into it.
+ */
 function matches(run: RunRow, target: TargetRow, typedInto: number | null): boolean {
 	const accepts = acceptsOf(run);
 	if ("self" in accepts) return typedInto === run.id;
-	if (typedInto === run.id) return true;
 	if (target.commit_sha === null) return false;
 	const sameCommit = target.commit_sha === accepts.commit || target.commit_sha.startsWith(accepts.commit);
 	return (
@@ -337,11 +344,30 @@ export function runsFor(ctx: Ctx, target: TargetRow, typedInto: number | null): 
 	for (const run of ctx.db.all(Q.openPlanned, { project: ctx.project.id })) {
 		if (matches(run, target, typedInto)) out.push(run);
 	}
-	if (typedInto !== null && !out.some((run) => run.id === typedInto)) {
-		const run = runById(ctx.db, typedInto);
-		if (run) out.push(run);
-	}
 	return out;
+}
+
+/** Whether a result typed into this run on this target would count for it. The report is refused when not. */
+export const runAccepts = (run: RunRow, target: TargetRow): boolean =>
+	run.origin === "change" ? run.accepts_what === target.what : matches(run, target, run.id);
+
+/** What a run counts, in words, for the refusal. */
+export function describeAccepts(run: RunRow): string {
+	const accepts = acceptsOf(run);
+	if ("self" in accepts) return "only results recorded in it";
+	const more = [accepts.repo, accepts.env].filter((part) => part !== undefined);
+	return `commit ${accepts.commit}${more.length > 0 ? ` (${more.join(", ")})` : ""}`;
+}
+
+/** The targets a run that accepts a commit counts: one per environment reported for it. */
+function targetsOfRun(db: Db, run: RunRow): TargetRow[] {
+	const accepts = acceptsOf(run);
+	if (!("commit" in accepts)) return [];
+	const what = run.accepts_what ?? targetByCommit(db, run.project, accepts.commit)?.what;
+	if (!what) return [];
+	return targetsOfCommit(db, run.project, what).filter(
+		(target) => run.origin === "change" || matches(run, target, null),
+	);
 }
 
 /** Acceptance: the report is durable but not applied, so each run it matters to reads `pending` until it is. */
@@ -389,6 +415,7 @@ export function* applyBatchSteps(
 	const planned = runs.filter((run) => run.origin === "planned");
 	const plannedIds = new Set(planned.map((run) => run.id));
 	const touchedSlots = new Map<number, SlotRow>();
+	const declared = new Map<string, MethodKind[]>();
 
 	let folded = 0;
 	for (const result of applied) {
@@ -405,11 +432,13 @@ export function* applyBatchSteps(
 			});
 		}
 		if (result.corrects !== null) {
+			// A correction reaches the open runs this batch counts toward. A closed run keeps what it was closed on.
 			for (const { slot } of ctx.db.all(Q.slotsOfResult, { result: result.corrects })) {
 				const row = slotById(ctx.db, slot);
-				if (row) touchedSlots.set(slot, row);
+				if (!row || !plannedIds.has(row.run)) continue;
+				ctx.db.run(Q.correctInSlot, { slot, result: result.corrects });
+				touchedSlots.set(slot, row);
 			}
-			ctx.db.run(Q.correct, { result: result.corrects });
 		}
 		if (result.basisCase !== null && planned.length > 0) {
 			for (const slot of ctx.db.all(Q.slotsOfCase, { caseId: result.basisCase })) {
@@ -427,7 +456,7 @@ export function* applyBatchSteps(
 					},
 					slot: { caseId: slot.case_id, version: slot.version, claim: slot.claim },
 					obligation,
-					caseMethods: methodsOf(ctx.db, slot.case_id, result),
+					caseMethods: methodsOf(ctx.db, slot, result, declared),
 				});
 				if (!admitted) continue;
 				ctx.db.run(Q.admit, { slot: slot.id, result: result.id, run: run.id, admitted });
@@ -482,37 +511,57 @@ export function applyBatch(
 }
 
 /**
- * The methods a case admits for this result. A person's and an agent's eligibility are declared on the case. A
- * linked or annotated test is eligible because a decision or the test itself tied it to the case; whether a test
- * may fill a given slot is then the obligation's choice (it lists `auto` or it does not).
+ * The methods a slot's case admits for this result, read from the version the slot pinned: a later edit that
+ * admits agents does not let one fill a run that pinned the version before it. A person's and an agent's
+ * eligibility are declared on the case. A linked or annotated test is eligible because a decision or the test
+ * itself tied it to the case; whether a test may fill a given slot is then the obligation's choice (it lists
+ * `auto` or it does not).
  */
-function methodsOf(db: Db, caseId: number, result: Pick<Applied, "method">): MethodKind[] {
-	const row = caseById(db, caseId);
-	const declared = row ? json<MethodKind[]>(row.methods) : [];
+function methodsOf(
+	db: Db,
+	slot: Pick<SlotRow, "case_id" | "version">,
+	result: { method: MethodKind },
+	cache: Map<string, MethodKind[]> = new Map(),
+): MethodKind[] {
+	const key = `${slot.case_id}@${slot.version}`;
+	let declared = cache.get(key);
+	if (!declared) {
+		const pinned = versionOf(db, slot.case_id, slot.version);
+		declared = pinned ? json<CaseBody>(pinned.body).methods : [];
+		cache.set(key, declared);
+	}
 	return result.method === "auto" ? [...declared, "auto"] : declared;
 }
 
-/** Recomputes a slot from every uncorrected result admitted to it: per actor, that actor's latest result. */
+/** Recomputes a slot from every uncorrected result admitted to it (see `aggregateSlot` for the rule). */
 function refreshSlot(
 	ctx: Ctx,
 	slot: SlotRow,
 	obligation: ExerciseObligation | null,
 ): { state: SlotState; signature: number | null } {
-	const agg: SlotAgg = {};
 	let signature: number | null = null;
 	const signatures = new Map<number, number | null>();
-	for (const fill of fillsOf(ctx.db, slot.id)) {
-		signatures.set(fill.id, fill.signature);
-		const outcome =
-			fill.outcome === "pass"
-				? "pass"
-				: fill.outcome === "fail" || fill.outcome === "error"
-					? "fail"
-					: fill.outcome === "skip"
-						? "skip"
-						: "blocked";
-		agg[`${fill.actor}:${fill.method}`] = { actor: fill.actor, outcome, result: fill.id, seq: fill.seq };
-	}
+	const fills = fillsOf(ctx.db, slot.id);
+	for (const fill of fills) signatures.set(fill.id, fill.signature);
+	const agg = aggregateSlot(
+		fills.map((fill) => ({
+			id: fill.id,
+			actor: fill.actor,
+			method: fill.method,
+			test: fill.test,
+			attempt: fill.attempt,
+			seq: fill.seq,
+			ord: fill.ord,
+			outcome:
+				fill.outcome === "pass"
+					? "pass"
+					: fill.outcome === "fail" || fill.outcome === "error"
+						? "fail"
+						: fill.outcome === "skip"
+							? "skip"
+							: "blocked",
+		})),
+	);
 	for (const entry of Object.values(agg)) {
 		if (entry.outcome !== "fail") continue;
 		signature = signatures.get(entry.result) ?? signature;
@@ -569,13 +618,21 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 	const tally: Tally = emptyTally();
 	const failing = new Set<number>();
 	const depends = new Map<number, number | null>();
+	let own: number[] | null = null;
+	/** An excuse held for one target covers this run only when the run counts that target. */
+	const covers = (target: number | null): boolean => {
+		if (target === null || scope.startsWith("run:")) return true;
+		own ??= targetsOfRun(ctx.db, run).map((row) => row.id);
+		return own.includes(target);
+	};
 
 	const classify = (signature: number | null, n: number, disputed: boolean): void => {
 		if (signature === null) {
 			tally.unexplained += n;
 			return;
 		}
-		const excuse = excuseFor(ctx.db, run.project, signature, scope);
+		const held = excuseFor(ctx.db, run.project, signature, scope);
+		const excuse = held && covers(held.target) ? held : null;
 		if (!excuse) {
 			failing.add(signature);
 			if (disputed) tally.disputed += n;
@@ -609,15 +666,8 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 	const jobs = obligationsOf(run).flatMap((o) => (o.kind === "jobs" ? o.jobs : []));
 	if (jobs.length > 0) {
 		const reported = new Set<string>();
-		const accepts = acceptsOf(run);
-		if ("commit" in accepts) {
-			for (const target of targetsOfCommit(
-				ctx.db,
-				run.project,
-				run.accepts_what ?? codeWhat(accepts.repo, accepts.commit),
-			)) {
-				for (const job of processedJobs(ctx.db, target.id)) reported.add(job);
-			}
+		for (const target of targetsOfRun(ctx.db, run)) {
+			for (const job of processedJobs(ctx.db, target.id)) reported.add(job);
 		}
 		tally.missing += jobs.filter((job) => !reported.has(job)).length;
 	}
@@ -751,7 +801,7 @@ function fillFromPrior(
 				},
 				slot: { caseId: slot.case_id, version: slot.version, claim: slot.claim },
 				obligation,
-				caseMethods: methodsOf(ctx.db, slot.case_id, result),
+				caseMethods: methodsOf(ctx.db, slot, result),
 			});
 			if (!admitted) continue;
 			ctx.db.run(Q.admit, { slot: slot.id, result: result.id, run: run.id, admitted });
@@ -766,12 +816,16 @@ function fillFromPrior(
 
 /** Closes a run. Standing: only by a `signoff` decision, which a rule may make. */
 export function closeRun(ctx: Ctx, witness: Witness, run: RunRow): void {
-	ctx.db.run(Q.setState, { id: run.id, state: "closed", signoff: witness.decision, rev: ctx.seq });
+	ctx.db.run(Q.setState, { id: run.id, state: "closed", signoff: decisionOf(witness), rev: ctx.seq });
 	ctx.touched.add(runRef(run));
 }
 
-/** Reopens a run when its sign-off is withdrawn or stops holding. */
-export function reopenRun(ctx: Ctx, run: RunRow): void {
+/**
+ * Reopens a run when the sign-off `decision` is withdrawn or stops holding. It does nothing when the run was
+ * closed by another decision: withdrawing an old sign-off must not undo a newer one.
+ */
+export function reopenRun(ctx: Ctx, run: RunRow, decision: number): void {
+	if (run.signoff !== decision) return;
 	ctx.db.run(Q.setState, { id: run.id, state: "open", signoff: null, rev: ctx.seq });
 	ctx.touched.add(runRef(run));
 }
@@ -780,7 +834,8 @@ export function reopenRun(ctx: Ctx, run: RunRow): void {
  * A `mistaken` answer on a disputed slot: the failing results stop counting there. Standing: only by a decision.
  * Returns the slot and result pairs it corrected, so withdrawing the decision can put them back.
  */
-export function discountFailures(ctx: Ctx, _witness: Witness, run: RunRow, signature: number): [number, number][] {
+export function discountFailures(ctx: Ctx, witness: Witness, run: RunRow, signature: number): [number, number][] {
+	decisionOf(witness);
 	const corrected: [number, number][] = [];
 	for (const slot of ctx.db.all(Q.slotsBySignature, { run: run.id, signature })) {
 		for (const fill of fillsOf(ctx.db, slot.id)) {

@@ -32,6 +32,7 @@ async function fixture({
 		cwd: process.cwd(),
 		env: {
 			...process.env,
+			NODE_ENV: "production",
 			CASEBOOK_PORT: String(port),
 			CASEBOOK_DATA: directory,
 			CASEBOOK_MODE: mode,
@@ -49,7 +50,8 @@ async function fixture({
 		call(op, input, { url, project: "scratch", token: options.token ?? token });
 	try {
 		await eventually(async () => {
-			if (child.exitCode !== null) throw new Error("Builder 2 server exited before readiness");
+			if (child.exitCode !== null)
+				throw new Error(`Builder 2 server exited before readiness: ${await new Response(child.stderr).text()}`);
 			try {
 				return (await fetch(`${url}/healthz`)).ok;
 			} catch {

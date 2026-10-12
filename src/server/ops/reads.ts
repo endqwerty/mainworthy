@@ -269,7 +269,7 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 						op: edit.op,
 						cases: edit.caseIds.map(refOf),
 						folder: edit.folder ? ("id" in edit.folder ? index.path(edit.folder.id) : edit.folder.path) : null,
-						tags: edit.tags?.[0] ?? null,
+						tags: edit.tags,
 					};
 				case "state":
 					return { op: edit.op, cases: edit.caseIds.map(refOf), to: edit.to };
@@ -666,17 +666,44 @@ export const gateOp = defineOp({
 
 // ── since ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-const cursorSeq = (cursor: string): number => {
-	const seq = Number(cursor.replace(/^s:/, ""));
-	if (!Number.isFinite(seq) || seq < 0) throw invalid(`"${cursor}" is not a cursor`);
-	return seq;
-};
+type Position = { rev: number; id: number };
+type Cursor = { base: number; cases: Position; questions: Position };
+
+/**
+ * A cursor is `s:<seq>`: everything up to that sequence number has been read. While a reply is paging through more
+ * changes than one page holds it is `s:<seq>:<rev>.<id>:<rev>.<id>`: the same base, and how far the pages have
+ * got through the changed cases and the changed questions. Many rows can share one revision (a bulk change is one
+ * command), so a position is a revision and an id within it, never a revision alone.
+ */
+function parseCursor(cursor: string): Cursor {
+	const match = /^(?:s:)?(\d+)(?::(\d+)\.(\d+):(\d+)\.(\d+))?$/.exec(cursor.trim());
+	if (!match) throw invalid(`"${cursor}" is not a cursor`);
+	const base = Number(match[1]);
+	const start: Position = { rev: base + 1, id: 0 };
+	if (match[2] === undefined) return { base, cases: start, questions: start };
+	return {
+		base,
+		cases: { rev: Number(match[2]), id: Number(match[3]) },
+		questions: { rev: Number(match[4]), id: Number(match[5]) },
+	};
+}
+
+const cursorSeq = (cursor: string): number => parseCursor(cursor).base;
 
 export function since(ctx: Ctx, input: SinceInput): Record<string, unknown> {
-	const from = cursorSeq(input.cursor);
+	const from = parseCursor(input.cursor);
 	const limit = input.limit ?? 200;
-	const changed = casesChangedSince(ctx.db, ctx.project.id, from, limit).map((row) => {
-		const before = versionAt(ctx.db, row.id, from);
+	/** One page and where the next starts: after the last row returned, or past everything when the page is whole. */
+	const page = <T extends { rev: number; id: number }>(rows: T[]): { rows: T[]; next: Position; more: boolean } => {
+		const more = rows.length > limit;
+		const kept = more ? rows.slice(0, limit) : rows;
+		const last = kept.at(-1);
+		return { rows: kept, more, next: more && last ? { rev: last.rev, id: last.id + 1 } : { rev: ctx.seq + 1, id: 0 } };
+	};
+	const cases = page(casesChangedSince(ctx.db, ctx.project.id, from.cases, limit + 1));
+	const questions = page(questionsChangedSince(ctx.db, ctx.project.id, from.questions, limit + 1));
+	const changed = cases.rows.map((row) => {
+		const before = versionAt(ctx.db, row.id, from.base);
 		const summary = !before
 			? "created"
 			: before.no === row.head
@@ -691,7 +718,7 @@ export function since(ctx: Ctx, input: SinceInput): Record<string, unknown> {
 			changed: summary,
 		};
 	});
-	const settled = questionsChangedSince(ctx.db, ctx.project.id, from, limit)
+	const settled = questions.rows
 		.filter((q) => q.state !== "open")
 		.map((q) => {
 			const item = toItem(ctx.db, q);
@@ -704,7 +731,15 @@ export function since(ctx: Ctx, input: SinceInput): Record<string, unknown> {
 				by: item.decision?.by ?? [],
 			};
 		});
-	return { changed, settled, cursor: `s:${ctx.seq}` };
+	// The cursor moves past a change only once the change has been returned. `more` says to call again with it.
+	const more = cases.more || questions.more;
+	const at = (position: Position) => `${position.rev}.${position.id}`;
+	return {
+		changed,
+		settled,
+		cursor: more ? `s:${from.base}:${at(cases.next)}:${at(questions.next)}` : `s:${ctx.seq}`,
+		more,
+	};
 }
 
 export const sinceOp = defineOp({
@@ -714,7 +749,7 @@ export const sinceOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "What changed since a `cursor` from an earlier call: changed cases (with a one-line diff, not bodies) and settled questions. Use it instead of re-reading.",
+	mcp: "What changed since an earlier `cursor`: changed cases (one-line diff, no bodies) and settled questions. If `more`, call again with the new cursor.",
 	run: since,
 });
 

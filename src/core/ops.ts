@@ -124,7 +124,7 @@ export type Outcome = z.infer<typeof Outcome>;
 export const ResultIn = z.object({
 	test: z.union([
 		z.object({
-			key: z.string().min(1).max(1000),
+			key: z.string().trim().min(1).max(1000),
 			name: z.string().max(500).optional(),
 			file: z.string().max(500).optional(),
 		}),
@@ -208,6 +208,11 @@ export type ReportReceipt = {
 	flips: number;
 	/** Results that were refused, by position in the report, with the reason. Nothing is relabelled to make it fit. */
 	rejected: { index: number; reason: string }[];
+	/**
+	 * Automated results kept with no case because their claim about a case or a version was refused, with the
+	 * reason. Their outcome still counts for the commit: a failure is not dropped from the gate.
+	 */
+	declined: { index: number; reason: string }[];
 	/** Ids of the results written, for a small report (a person's keypress), so a correction can name one. */
 	results: number[];
 	gate: GateStatus | null;
@@ -444,9 +449,10 @@ export const AdminInput = z.discriminatedUnion("do", [
 		can: z.array(Capability).default([]),
 		project: z.string().optional().describe("Limit the grant to one project. Absent: every project."),
 		label: z.string().max(120).optional(),
+		cmd,
 	}),
 	z.object({ do: z.literal("token.list") }),
-	z.object({ do: z.literal("token.revoke"), id: z.number().int() }),
+	z.object({ do: z.literal("token.revoke"), id: z.number().int(), cmd }),
 	z.object({ do: z.literal("actor.list") }),
 	z.object({
 		do: z.literal("actor.forget"),
@@ -455,6 +461,7 @@ export const AdminInput = z.discriminatedUnion("do", [
 			.describe(
 				"Removes who this actor was: a pseudonym replaces the name and its tokens stop working. History keeps what was done.",
 			),
+		cmd,
 	}),
 	z.object({ do: z.literal("policy.show"), project: z.string() }),
 ]);

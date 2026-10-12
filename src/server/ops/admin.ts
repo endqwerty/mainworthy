@@ -106,4 +106,5 @@ export const adminOp = defineInstanceOp({
 	effect: "write",
 	mcp: null,
 	run: admin,
+	secret: (input) => input.do === "token.create",
 });

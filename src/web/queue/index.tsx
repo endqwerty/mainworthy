@@ -51,6 +51,8 @@ function QueueWorkbench() {
 	const [inline, setInline] = useState<InlineAnswer | null>(null);
 	const inlineRef = useRef<HTMLInputElement>(null);
 	const actionNo = useRef(0);
+	const undoing = useRef(new Set<string>());
+	const pendingAnswers = useRef(new Set<string>());
 	const seenRoute = useRef<string | null>(null);
 	useEffect(() => {
 		setStatus("One key answers. Every decision stays in the ledger; u withdraws an answer.");
@@ -77,8 +79,23 @@ function QueueWorkbench() {
 	const inbox = useInfiniteQuery({
 		queryKey: cacheKey,
 		initialPageParam: "",
-		queryFn: ({ pageParam, signal }) =>
-			call("inbox", { ...input, ...(pageParam ? { cursor: pageParam } : {}) }, { project, signal }),
+		queryFn: async ({ pageParam, signal }) => {
+			const reply = await call("inbox", { ...input, ...(pageParam ? { cursor: pageParam } : {}) }, { project, signal });
+			setRestored((previous) => {
+				const next = previous.filter((question) => {
+					if (
+						pendingAnswers.current.has(question.q) ||
+						undoing.current.has(question.q) ||
+						question.state !== input.state ||
+						(input.kind && question.kind !== input.kind)
+					)
+						return true;
+					return !reply.items.some((item) => item.q === question.q) && Boolean(pageParam || reply.cursor);
+				});
+				return next.length === previous.length ? previous : next;
+			});
+			return reply;
+		},
 		getNextPageParam: (page) => page.cursor ?? undefined,
 	});
 	const fetched = inbox.data?.pages.flatMap((page) => page.items) ?? [];
@@ -145,9 +162,11 @@ function QueueWorkbench() {
 		if (!entries.length) return;
 		const action = ++actionNo.current;
 		const refs = new Set(entries.map((entry) => entry.question.q));
+		for (const ref of refs) pendingAnswers.current.add(ref);
 		const index = items.findIndex((item) => item.q === current?.q);
 		const next = items.slice(index + 1).find((item) => !refs.has(item.q)) ?? items.find((item) => !refs.has(item.q));
 		setHidden((previous) => new Set([...previous, ...refs]));
+		setRestored((previous) => previous.filter((question) => !refs.has(question.q)));
 		setCursor(next?.q ?? null);
 		setSelected(new Set());
 		setInline(null);
@@ -172,6 +191,7 @@ function QueueWorkbench() {
 			{ project },
 		)
 			.then(async (replies) => {
+				for (const ref of refs) pendingAnswers.current.delete(ref);
 				const rejected = entries.filter(
 					(entry) =>
 						!replies.some(
@@ -183,7 +203,7 @@ function QueueWorkbench() {
 					const reply = replies.find((reply) => rejected.some((entry) => entry.question.q === reply.q));
 					const message =
 						reply?.status === "conflict"
-							? "The evidence changed. Read the new evidence before answering."
+							? `The evidence changed. ${reply.needs ?? "Read the new evidence before answering."}`
 							: reply?.status === "advised"
 								? `Advice recorded. Needs ${reply.needs ?? rejected[0]?.question.needs}.`
 								: `Answer not recorded. Needs ${reply?.needs ?? rejected[0]?.question.needs}.`;
@@ -207,6 +227,7 @@ function QueueWorkbench() {
 				return true;
 			})
 			.catch((error: unknown) => {
+				for (const ref of refs) pendingAnswers.current.delete(ref);
 				bringBack(entries.map((entry) => entry.question));
 				const message = error instanceof Error ? error.message : "The answer could not be recorded. Try again.";
 				if (action === actionNo.current) {
@@ -271,7 +292,16 @@ function QueueWorkbench() {
 			setStatus("That suggestion needs more information. Choose an answer beside the evidence.");
 			return;
 		}
-		const entries = questions.map((question) => ({ question, answer: parsed.data }));
+		const entries = questions.map((question) => {
+			const suggestion = FindingEvidence.safeParse(question.evidence);
+			return {
+				question,
+				answer:
+					question.kind === "finding" && parsed.data.is === "accept"
+						? { ...parsed.data, apply: suggestion.success && suggestion.data.suggest !== null }
+						: parsed.data,
+			};
+		});
 		if (questions.some((q) => q.needs.includes("with a reason"))) {
 			setInline({ entries, field: "reason", value: "" });
 			return;
@@ -283,13 +313,19 @@ function QueueWorkbench() {
 		submit(entries);
 	}
 	function undo(questions = last?.entries.map((entry) => entry.question) ?? []): void {
+		questions = questions.filter((question) => !undoing.current.has(question.q));
 		if (!questions.length) return;
 		if (questions.some((question) => question.kind === "adopt")) {
 			setStatus("An adopted edit stays in history. Restore the earlier case version to undo it.");
-			setLastMessage("Adopted versions cannot be withdrawn. Restore an earlier version in the case pane.");
+			setLastMessage(
+				"Proposal decisions cannot be withdrawn. To reverse an adopted edit, restore an earlier version in the case pane.",
+			);
 			return;
 		}
 		const prior = state === "decided" ? null : last;
+		for (const question of questions) undoing.current.add(question.q);
+		setLast(null);
+		const reopened = new Set<string>();
 		const action = ++actionNo.current;
 		bringBack(questions.map((q) => ({ ...q, state: "open", decision: null })));
 		setState("open");
@@ -299,7 +335,13 @@ function QueueWorkbench() {
 			for (const question of questions) {
 				const replies = await call("decide", { undo: question.q, cmd: crypto.randomUUID() }, { project });
 				const reply = replies[0];
-				if (reply?.status !== "reopened") throw new Error(reply?.needs ?? "The decision could not be withdrawn.");
+				if (reply?.status !== "reopened") {
+					const current = z
+						.object({ q: z.string(), state: z.string() })
+						.parse((await call("get", { refs: [question.q] }, { project }))[0]);
+					if (current.state !== "open") throw new Error(reply?.needs ?? "The decision could not be withdrawn.");
+				}
+				reopened.add(question.q);
 			}
 			if (action === actionNo.current) {
 				setLast(null);
@@ -307,14 +349,53 @@ function QueueWorkbench() {
 				setStatus("Answer withdrawn. Both decisions stay in the ledger.");
 			}
 			await invalidateProject(project);
-		})().catch((error: unknown) => {
-			setRestored((previous) => previous.filter((q) => !questions.some((item) => item.q === q.q)));
-			setHidden((previous) => new Set([...previous, ...questions.map((q) => q.q)]));
-			const message = error instanceof Error ? error.message : "The decision could not be withdrawn.";
-			setLastMessage(message);
-			setStatus(message);
-			void invalidateProject(project);
-		});
+			const cached = queryClient.getQueryData<InfiniteData<InboxReply>>([
+				...queryKey({ project, op: "inbox", input: { state: "open", ...(kind ? { kind } : {}), limit: 100 } }),
+				"pages",
+			]);
+			setRestored((previous) =>
+				previous.filter(
+					(question) =>
+						!reopened.has(question.q) ||
+						!cached?.pages.some((page) => page.items.some((item) => item.q === question.q)),
+				),
+			);
+		})()
+			.catch((error: unknown) => {
+				const unconfirmed = new Set(
+					questions.filter((question) => !reopened.has(question.q)).map((question) => question.q),
+				);
+				setRestored((previous) => previous.filter((q) => !unconfirmed.has(q.q)));
+				setHidden((previous) => {
+					const next = new Set(previous);
+					for (const question of questions) next.delete(question.q);
+					return next;
+				});
+				queryClient.setQueriesData<InfiniteData<InboxReply>>(
+					{
+						predicate: (query) =>
+							query.queryKey[0] === project &&
+							query.queryKey[1] === "inbox" &&
+							query.queryKey[3] === "pages" &&
+							z.object({ state: z.string() }).safeParse(query.queryKey[2]).data?.state === "open",
+					},
+					(previous) =>
+						previous && {
+							...previous,
+							pages: previous.pages.map((page) => ({
+								...page,
+								items: page.items.filter((q) => !unconfirmed.has(q.q)),
+							})),
+						},
+				);
+				const message = error instanceof Error ? error.message : "The decision could not be withdrawn.";
+				setLastMessage(message);
+				setStatus(message);
+				void invalidateProject(project);
+			})
+			.finally(() => {
+				for (const question of questions) undoing.current.delete(question.q);
+			});
 	}
 	function move(delta: number): void {
 		const index = items.findIndex((item) => item.q === current?.q);

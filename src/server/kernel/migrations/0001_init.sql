@@ -148,7 +148,7 @@ CREATE TABLE versions (
 	hash TEXT NOT NULL,
 	claim_hash TEXT NOT NULL,
 	proposal INTEGER NOT NULL,
-	decision INTEGER NOT NULL,
+	decision INTEGER NOT NULL REFERENCES decisions (id),
 	author INTEGER NOT NULL REFERENCES actors (id),
 	reason TEXT,
 	at INTEGER NOT NULL,
@@ -163,7 +163,7 @@ CREATE TABLE placements (
 	before TEXT NOT NULL,
 	after TEXT NOT NULL,
 	proposal INTEGER NOT NULL,
-	decision INTEGER NOT NULL,
+	decision INTEGER NOT NULL REFERENCES decisions (id),
 	actor INTEGER NOT NULL REFERENCES actors (id),
 	at INTEGER NOT NULL,
 	seq INTEGER NOT NULL
@@ -210,7 +210,7 @@ CREATE TABLE requirements (
 CREATE TABLE covers (
 	requirement INTEGER NOT NULL REFERENCES requirements (id),
 	case_id INTEGER NOT NULL REFERENCES cases (id),
-	decision INTEGER NOT NULL,
+	decision INTEGER NOT NULL REFERENCES decisions (id),
 	PRIMARY KEY (requirement, case_id)
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX covers_case ON covers (case_id);
@@ -228,6 +228,8 @@ CREATE TABLE tests (
 	name TEXT NOT NULL,
 	file TEXT,
 	case_id INTEGER REFERENCES cases (id),   -- STANDING (map)
+	-- the `map` decision that made the link; null for the manual test of a case, which is that case by definition
+	linked_by INTEGER REFERENCES decisions (id),
 	first_seq INTEGER NOT NULL,
 	last_seq INTEGER NOT NULL,
 	UNIQUE (project, key),
@@ -390,9 +392,11 @@ CREATE TABLE excuses (
 	project INTEGER NOT NULL,
 	signature INTEGER NOT NULL REFERENCES signatures (id),
 	scope TEXT NOT NULL,
-	decision INTEGER NOT NULL,
+	decision INTEGER NOT NULL REFERENCES decisions (id),
 	class TEXT NOT NULL CHECK (class IN ('attributed', 'excused')),
 	expires_at INTEGER,
+	-- set when the decision holds for one target only (an infrastructure failure): other targets stay unexplained
+	target INTEGER REFERENCES targets (id),
 	PRIMARY KEY (project, signature, scope)
 ) STRICT, WITHOUT ROWID;
 
@@ -483,7 +487,7 @@ CREATE TABLE policies (
 	clauses TEXT NOT NULL,
 	settings TEXT NOT NULL,
 	actor INTEGER NOT NULL,
-	decision INTEGER,
+	decision INTEGER REFERENCES decisions (id),
 	at INTEGER NOT NULL,
 	seq INTEGER NOT NULL,
 	PRIMARY KEY (project, version)
@@ -504,7 +508,7 @@ CREATE TABLE runs (
 	change INTEGER REFERENCES changes (id),
 	-- STANDING (signoff):
 	state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'closed')),
-	signoff INTEGER,
+	signoff INTEGER REFERENCES decisions (id),
 	-- the horizon: an accepted upload is outstanding until it is applied, and the gate is pending meanwhile
 	accepted_seq INTEGER NOT NULL DEFAULT 0,
 	applied_seq INTEGER NOT NULL DEFAULT 0,

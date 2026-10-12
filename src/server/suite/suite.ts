@@ -13,10 +13,11 @@ import { type Conflict, mergeBodies } from "../../core/merge3.ts";
 import { CaseBody, emptyBody, REQUIREMENT_KEY, type Step, StepId, TAG } from "../../core/model.ts";
 import type { CaseStamp, Edit } from "../../core/ops.ts";
 import { parseOutline } from "../../core/outline.ts";
+import { clip } from "../../core/text.ts";
 import { type Ctx, parseRef, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
-import type { Witness } from "../kernel/witness.ts";
+import { decisionOf, type Witness } from "../kernel/witness.ts";
 import { currentPolicy, resolvePolicy, writePolicy } from "../policy/policy.ts";
 
 export type CaseRow = {
@@ -80,6 +81,7 @@ export type ProposalRow = {
 export type PartialBody = { [K in keyof CaseBody]?: CaseBody[K] | undefined };
 type FolderTarget = { id: number } | { path: string };
 type Placement = { folder: number; rank: string; tags: string[]; state: "active" | "archived" };
+type TagChange = { set: string[] | null; add: string[]; remove: string[] };
 
 /** An edit with every ref looked up and every body built: exactly what `adopt` will apply. */
 export type Resolved =
@@ -90,7 +92,8 @@ export type Resolved =
 			caseIds: number[];
 			folder: FolderTarget | null;
 			after: number | null | undefined;
-			tags: string[][] | null;
+			/** The change asked for, applied to each case's tags as they are when the proposal is adopted. */
+			tags: TagChange | null;
 	  }
 	| { op: "state"; caseIds: number[]; to: "active" | "archived" }
 	| { op: "restore"; caseId: number; to: number; body: CaseBody }
@@ -385,7 +388,7 @@ export function cleanBody(input: PartialBody, base: CaseBody): CaseBody {
 	}
 	const methods = [...new Set(input.methods ?? base.methods)];
 	const body: CaseBody = {
-		title: (input.title ?? base.title).trim().replace(/\s+/g, " ").slice(0, 300),
+		title: clip((input.title ?? base.title).trim().replace(/\s+/g, " "), 300),
 		pre: (input.pre ?? base.pre).trim(),
 		steps,
 		methods: methods.length > 0 ? methods : ["human"],
@@ -490,13 +493,12 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 			case "place": {
 				const rows = edit.cases.map(lookup);
 				const after = edit.after === undefined || edit.after === null ? edit.after : lookup(edit.after).id;
-				const tags = edit.tags
-					? rows.map((row) => {
-							const current = json<string[]>(row.tags);
-							const next = edit.tags?.set ?? [...current, ...(edit.tags?.add ?? [])];
-							const remove = new Set(cleanTags(edit.tags?.remove ?? []));
-							return cleanTags(next).filter((tag) => !remove.has(tag));
-						})
+				const tags: TagChange | null = edit.tags
+					? {
+							set: edit.tags.set ? cleanTags(edit.tags.set) : null,
+							add: cleanTags(edit.tags.add ?? []),
+							remove: cleanTags(edit.tags.remove ?? []),
+						}
 					: null;
 				resolved.push({
 					op: "place",
@@ -531,8 +533,8 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 				}
 				const parent =
 					edit.parent === undefined || edit.parent === null ? edit.parent : folderTarget(index, edit.parent);
-				if (id !== null && parent && "id" in parent && isInside(index, parent.id, id)) {
-					throw invalid("a folder cannot be moved into itself");
+				if (id !== null && parent && isInside(index, deepestExisting(index, parent), id)) {
+					throw invalid("a folder cannot be moved into itself or into a folder inside it");
 				}
 				resolved.push({ op: "folder", id, name: edit.name?.trim() ?? null, parent, archive: edit.archive ?? false });
 				break;
@@ -577,11 +579,24 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 	return { proposal, resolved, facts, conflicts, cases: [...cases] };
 }
 
-function isInside(index: FolderIndex, folder: number, ancestor: number): boolean {
-	for (let at: number | null = folder; at !== null; at = index.byId.get(at)?.parent ?? null) {
+function isInside(index: FolderIndex, folder: number | null, ancestor: number): boolean {
+	const seen = new Set<number>();
+	for (let at: number | null = folder; at !== null && !seen.has(at); at = index.byId.get(at)?.parent ?? null) {
 		if (at === ancestor) return true;
+		seen.add(at);
 	}
 	return false;
+}
+
+/** The folder a target names, or for a path that does not exist yet, the deepest part of it that does. */
+function deepestExisting(index: FolderIndex, target: FolderTarget): number | null {
+	if ("id" in target) return target.id;
+	const parts = cleanPath(target.path);
+	for (let length = parts.length; length > 0; length--) {
+		const found = index.byPath.get(parts.slice(0, length).join("/").toLowerCase());
+		if (found) return found.id;
+	}
+	return null;
 }
 
 export const proposalById = (db: Db, id: number): ProposalRow | null => db.get(Q.proposalById, { id });
@@ -595,10 +610,12 @@ export type Adopted = { cases: CaseStamp[]; created: string[]; policyVersion: nu
 
 /**
  * Makes a sealed proposal current. Standing: callable only with the witness of the decision that accepted it.
- * `override` is the author's resolution of a one-case conflict. If a case moved after the proposal was sealed, the
- * edit is merged again; a new conflict stops the adoption (nothing is written) and the proposal must be redone.
+ * A proposal that carries a conflict is never adopted: its author resolves it with a new proposal. If a case moved
+ * after the proposal was sealed, the edit is merged again; a new conflict stops the adoption (nothing is written)
+ * and the proposal must be redone. Tags and folders are applied to the suite as it is now, not as it was sealed.
  */
-export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow, override?: CaseBody): Adopted {
+export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopted {
+	decisionOf(witness);
 	const out: Adopted = { cases: [], created: [], policyVersion: null };
 	const author = proposal.author;
 	const stamp = (row: CaseRow, version: number, hash: string) => {
@@ -666,13 +683,13 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow, overrid
 			}
 			case "edit": {
 				const row = mustRow(edit.caseId);
-				let body = override ?? edit.body;
-				if (!override && edit.conflicts.length > 0) {
+				let body = edit.body;
+				if (edit.conflicts.length > 0) {
 					throw conflict(`${caseRef(row)} has an unresolved conflict; its author must resolve it`, {
 						paths: edit.conflicts.map((c) => c.path),
 					});
 				}
-				if (!override && row.head !== edit.head) {
+				if (row.head !== edit.head) {
 					const merge = mergeBodies({
 						base: bodyOf(ctx.db, row.id, edit.base),
 						mine: edit.mine,
@@ -703,7 +720,7 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow, overrid
 				// A move to another folder or an explicit position re-ranks; a retag alone leaves the order alone.
 				const rerank = folder !== null || edit.after !== undefined;
 				let cursor: string | null = null;
-				edit.caseIds.forEach((id, i) => {
+				edit.caseIds.forEach((id) => {
 					const row = mustRow(id);
 					const to = folder ?? row.folder;
 					let rank = row.rank;
@@ -711,7 +728,11 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow, overrid
 						rank = cursor === null ? rankAfter(ctx, to, edit.after ?? null, id) : rankBetween(ctx, to, cursor);
 						cursor = rank;
 					}
-					const tags = edit.tags?.[i] ?? json<string[]>(row.tags);
+					const current = json<string[]>(row.tags);
+					const remove = new Set(edit.tags?.remove ?? []);
+					const tags = edit.tags
+						? cleanTags(edit.tags.set ?? [...current, ...edit.tags.add]).filter((tag) => !remove.has(tag))
+						: current;
 					place(ctx, witness, proposal, row, { folder: to, rank, tags, state: row.state });
 				});
 				break;
@@ -729,7 +750,7 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow, overrid
 				break;
 			}
 			case "folder": {
-				applyFolder(ctx, edit);
+				applyFolder(ctx, witness, edit);
 				break;
 			}
 			case "cover": {
@@ -769,7 +790,7 @@ function insertVersion(
 		hash,
 		claim: claimHash(body),
 		proposal: proposal.id,
-		decision: witness.decision,
+		decision: decisionOf(witness),
 		author: proposal.author,
 		reason: proposal.reason,
 		at: ctx.now,
@@ -811,7 +832,7 @@ function place(ctx: Ctx, witness: Witness, proposal: ProposalRow, row: CaseRow, 
 		before: JSON.stringify(before),
 		after: JSON.stringify(to),
 		proposal: proposal.id,
-		decision: witness.decision,
+		decision: decisionOf(witness),
 		actor: proposal.author,
 		at: ctx.now,
 		seq: ctx.seq,
@@ -844,8 +865,14 @@ export function ranksAtEnd(ctx: Ctx, folder: number, n: number): string[] {
 	return generateNKeysBetween(last?.rank ?? null, null, n);
 }
 
-function applyFolder(ctx: Ctx, edit: Extract<Resolved, { op: "folder" }>): void {
+function applyFolder(ctx: Ctx, witness: Witness, edit: Extract<Resolved, { op: "folder" }>): void {
+	decisionOf(witness);
 	const parent = edit.parent === undefined ? undefined : edit.parent === null ? null : ensureFolder(ctx, edit.parent);
+	// The tree may have changed since the proposal was sealed: check again where it is applied. A refusal here
+	// undoes the whole adoption, including any folder the path above just created.
+	if (edit.id !== null && parent && isInside(folderIndex(ctx.db, ctx.project.id), parent, edit.id)) {
+		throw invalid("a folder cannot be moved into itself or into a folder inside it");
+	}
 	if (edit.id === null) {
 		const last = ctx.db.get(Q.lastFolderRank, { project: ctx.project.id, parent: parent ?? null });
 		ctx.db.run(Q.insertFolder, {
@@ -881,6 +908,6 @@ function setCover(ctx: Ctx, witness: Witness, caseId: number, key: string, title
 		});
 		requirement = { id: lastId, title: title ?? "" };
 	}
-	if (on) ctx.db.run(Q.insertCover, { requirement: requirement.id, id: caseId, decision: witness.decision });
+	if (on) ctx.db.run(Q.insertCover, { requirement: requirement.id, id: caseId, decision: decisionOf(witness) });
 	else ctx.db.run(Q.dropCover, { requirement: requirement.id, id: caseId });
 }

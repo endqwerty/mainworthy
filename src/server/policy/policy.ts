@@ -5,7 +5,7 @@ import { missingCatchAll, PRESETS, type PresetName } from "../../core/presets.ts
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
-import type { Witness } from "../kernel/witness.ts";
+import { decisionOf, type Witness } from "../kernel/witness.ts";
 
 type PolicyRow = { project: number; version: number; preset: string; clauses: string; settings: string };
 
@@ -94,7 +94,7 @@ export function writePolicy(ctx: Ctx, witness: Witness, policy: Policy): number 
 		clauses: JSON.stringify(policy.clauses),
 		settings: JSON.stringify(policy.settings),
 		actor: witness.signers[0] ?? ctx.actor.id,
-		decision: witness.decision,
+		decision: decisionOf(witness),
 		at: ctx.now,
 		seq: ctx.seq,
 	});

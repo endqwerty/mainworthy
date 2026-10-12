@@ -370,14 +370,12 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 						<div className="hg">
 							<section>
 								<div className="sech">Current screen and navigation</div>
-								{registry
-									.filter((item) => !item.hidden)
-									.map((item) => (
-										<div className="hk" key={`${item.label}:${item.key}`}>
-											<span>{item.label}</span>
-											<KeyCap>{item.key.replace("mod+", "⌘")}</KeyCap>
-										</div>
-									))}
+								{registry.map((item) => (
+									<div className="hk" key={`${item.label}:${item.key}`}>
+										<span>{item.label}</span>
+										<KeyCap>{item.key.replace("mod+", "⌘")}</KeyCap>
+									</div>
+								))}
 							</section>
 						</div>
 					</section>

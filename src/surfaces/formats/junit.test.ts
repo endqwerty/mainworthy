@@ -322,6 +322,76 @@ describe("parseJUnit recovery and boundaries", () => {
 		expect(item.outcome).toBe("pass");
 	});
 
+	test.each(["&failure message='x'/>", "\u0000failure message='x'/>"])(
+		"malformed text cannot turn a testcase green: %j",
+		(body) => {
+			const parsed = parseJUnit(`<testsuite><testcase name="one">${body}</testcase></testsuite>`);
+			expect(parsed.results[0]?.outcome).toBe("error");
+			expect(parsed.warnings.length).toBeGreaterThan(0);
+		},
+	);
+
+	test("invalid testcase attributes leave sibling evidence intact", () => {
+		const parsed = parseJUnit(
+			'<testsuite><testcase name="before"/><testcase name="bad &#x1b;[1mbold"/><testcase name="after"/></testsuite>',
+		);
+		expect(parsed.results.map((item) => item.outcome)).toEqual(["pass", "error", "pass"]);
+	});
+
+	test("invalid suite attributes leave other suites intact", () => {
+		const parsed = parseJUnit(
+			'<testsuites><testsuite name="good"><testcase name="before"/></testsuite><testsuite name="bad &unknown;"><testcase name="bad"/></testsuite><testsuite name="good"><testcase name="after"/></testsuite></testsuites>',
+		);
+		expect(parsed.results.map((item) => item.outcome)).toEqual(["pass", "error", "pass"]);
+	});
+
+	test("orphan teardown errors preserve an observed testcase failure", () => {
+		const parsed = parseJUnit(
+			'<testsuite><testcase name="one"><failure message="real">real stack</failure></testcase><error message="afterAll">teardown stack</error></testsuite>',
+		);
+		expect(parsed.results[0]?.outcome).toBe("fail");
+		expect(parsed.results[0]?.failure).toEqual({ message: "real", detail: "real stack" });
+		expect(parsed.warnings.length).toBeGreaterThan(0);
+	});
+
+	test("nested suite errors invalidate each recovered result once", () => {
+		const xml = `${"<testsuite><error/>".repeat(12_000)}${'<testcase name="one"/>'.repeat(12_000)}${"</testsuite>".repeat(12_000)}`;
+		const start = performance.now();
+		const parsed = parseJUnit(xml);
+		expect(performance.now() - start).toBeLessThan(500);
+		expect(parsed.results).toHaveLength(12_000);
+		expect(parsed.results.every((item) => item.outcome === "error")).toBe(true);
+	});
+
+	test("deep paths with large suite names do not repeatedly hash ancestors", () => {
+		const xml = `${Array.from({ length: 4000 }, (_, index) => `<testsuite name="${"s".repeat(500)}"><testcase name="case ${index}"/>`).join("")}${"</testsuite>".repeat(4000)}`;
+		const start = performance.now();
+		const parsed = parseJUnit(xml);
+		expect(performance.now() - start).toBeLessThan(500);
+		expect(parsed.results).toHaveLength(4000);
+		expect(parsed.results.every((item) => ResultIn.safeParse(item).success)).toBe(true);
+		expect(new Set(parsed.results.map((item) => ("key" in item.test ? item.test.key : ""))).size).toBe(4000);
+	});
+
+	test("bounded keys preserve identity across equivalent suite nesting", () => {
+		const outer = "a".repeat(600);
+		const inner = "b".repeat(600);
+		const nested = parseJUnit(
+			`<testsuite name="${outer}"><testsuite name="${inner}"><testcase name="one" file="tests/spec.ts"/></testsuite></testsuite>`,
+		);
+		const flat = parseJUnit(
+			`<testsuite name="${outer}::${inner}"><testcase name="one" file="tests/spec.ts"/></testsuite>`,
+		);
+		expect(nested.results).toEqual(flat.results);
+		expect(ResultIn.safeParse(nested.results[0]).success).toBe(true);
+	});
+
+	test("comma decimals remain supported independently of runner fixtures", () => {
+		expect(parseJUnit('<testsuite><testcase name="one" time="0,015"/></testsuite>').results).toEqual([
+			result("one", "one", "pass", { durationMs: 15 }),
+		]);
+	});
+
 	test.each([
 		'<testsuite><testcase name="one"></testsuite>',
 		'<testsuite><testcase name="one" time=nope/></testsuite>',

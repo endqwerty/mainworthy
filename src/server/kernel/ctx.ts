@@ -44,8 +44,8 @@ const Q = {
 	insertProject: sql<{ org: number; key: string; name: string; at: number }>(
 		"INSERT INTO projects (org, key, name, created_at) VALUES ($org, $key, $name, $at)",
 	),
-	command: sql<{ id: string }, { outcome: string; op: string; actor: number }>(
-		"SELECT outcome, op, actor FROM commands WHERE id = $id",
+	command: sql<{ id: string }, { outcome: string; op: string; actor: number; project: number; seq: number }>(
+		"SELECT outcome, op, actor, project, seq FROM commands WHERE id = $id",
 	),
 	insertCommand: sql<{
 		id: string;
@@ -75,6 +75,26 @@ export function insertProject(db: Db, input: { org: number; key: string; name: s
 
 /** The stored reply of a command that already ran, or null. A retry returns it and writes nothing. */
 export const findCommand = (db: Db, id: string) => db.get(Q.command, { id });
+
+/**
+ * Records that an instance command ran (project 0: projects, actors, tokens). `outcome` is null when the reply held
+ * a secret: a secret is shown once and never stored, so a repeat of that command is refused instead of replayed.
+ */
+export function recordInstanceCommand(
+	db: Db,
+	input: { id: string; op: string; actor: number; at: number; outcome: unknown },
+): void {
+	db.run(Q.insertCommand, {
+		id: input.id,
+		project: 0,
+		op: input.op,
+		actor: input.actor,
+		at: input.at,
+		seq: 0,
+		touched: "[]",
+		outcome: JSON.stringify(input.outcome ?? null),
+	});
+}
 
 /** Records that a command ran, with its reply, so a retry of the same id is a no-op. */
 export function recordCommand(ctx: Ctx, input: { id: string; op: string; outcome: unknown }): void {

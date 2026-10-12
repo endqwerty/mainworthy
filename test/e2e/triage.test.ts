@@ -32,6 +32,7 @@ async function fixture({
 		cwd: process.cwd(),
 		env: {
 			...process.env,
+			NODE_ENV: "production",
 			CASEBOOK_PORT: String(port),
 			CASEBOOK_DATA: directory,
 			CASEBOOK_MODE: mode,
@@ -49,7 +50,8 @@ async function fixture({
 		call(op, input, { url, project: "scratch", token: options.token ?? token });
 	try {
 		await eventually(async () => {
-			if (child.exitCode !== null) throw new Error("Builder 2 server exited before readiness");
+			if (child.exitCode !== null)
+				throw new Error(`Builder 2 server exited before readiness: ${await new Response(child.stderr).text()}`);
 			try {
 				return (await fetch(`${url}/healthz`)).ok;
 			} catch {
@@ -487,4 +489,65 @@ async function twentyQuestions(server: Server) {
 		}
 	},
 	25000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"an answer after undo leaves once, and repeated undo cannot hide the reopened question",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", {
+				edits: [
+					{ op: "create", outline: "Retry amber" },
+					{ op: "create", outline: "Retry cedar" },
+				],
+			});
+			await server.api("report", {
+				target: { session: "retry" },
+				results: [
+					{ test: { case: "C-1" }, outcome: "fail", note: "expected amber, got green" },
+					{ test: { case: "C-2" }, outcome: "fail", note: "expected cedar, got green" },
+				],
+			});
+			view = await openPage(server, { path: "/p/scratch/queue" });
+			view.page.setDefaultTimeout(3000);
+			await view.page.waitForSelector("[data-current-question]");
+			const q = await view.page.locator("[data-current-question]").getAttribute("data-current-question");
+			await view.page.keyboard.press("i");
+			await eventually(
+				() => server.api("inbox", {}),
+				(reply) => reply.counts.open === 1,
+			);
+			await view.page.keyboard.press("u");
+			await eventually(
+				() => server.api("inbox", {}),
+				(reply) => reply.counts.open === 2,
+			);
+			await view.page.keyboard.press("i");
+			await eventually(
+				() => server.api("inbox", {}),
+				(reply) => reply.counts.open === 1,
+			);
+			await view.page.waitForFunction((ref) => !document.querySelector(`[data-question="${ref}"]`), q);
+			const withdrawn: unknown[] = [];
+			view.page.on("request", (request) => {
+				if (request.url().endsWith("/decide") && "undo" in request.postDataJSON())
+					withdrawn.push(request.postDataJSON());
+			});
+			await view.page.keyboard.press("u");
+			await view.page.keyboard.press("u");
+			await eventually(
+				() => server.api("inbox", {}),
+				(reply) => reply.counts.open === 2,
+			);
+			await view.page.waitForFunction(() => document.querySelectorAll("[data-question]").length === 2);
+			expect(withdrawn).toHaveLength(1);
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	20000,
 );

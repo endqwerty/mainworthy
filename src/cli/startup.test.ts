@@ -105,3 +105,55 @@ test("an occupied port exits 4 without keeping the failed server alive", async (
 		}
 	});
 });
+
+test("a consumer closing stdout produces no stack trace or failed-gate exit", async () => {
+	await withInstance(async ({ directory, instance, client }) => {
+		await client.call("propose", {
+			edits: Array.from({ length: 180 }, (_, index) => ({
+				op: "create",
+				outline: `Case ${index}\nAn action > Expected`,
+			})),
+		});
+		const child = Bun.spawn(
+			[
+				"bash",
+				"-o",
+				"pipefail",
+				"-c",
+				'"$1" "$2" find --limit 500 | head -3',
+				"pipe-test",
+				process.execPath,
+				CLI_ENTRY,
+			],
+			{
+				cwd: directory,
+				env: { PATH: process.env.PATH ?? "", HOME: directory, CASEBOOK_URL: instance.url },
+				stdout: "pipe",
+				stderr: "pipe",
+				stdin: "ignore",
+			},
+		);
+		const [code, stdout, stderr] = await Promise.all([
+			child.exited,
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+		]);
+		expect(code).toBe(0);
+		expect(stdout.trim().split("\n")).toHaveLength(3);
+		expect(stderr).toBe("");
+	});
+});
+
+test("the source entry runs directly through its shebang", async () => {
+	await withInstance(async ({ directory, instance }) => {
+		const child = Bun.spawn([CLI_ENTRY, "open"], {
+			cwd: directory,
+			env: { PATH: process.env.PATH ?? "", HOME: directory, CASEBOOK_URL: instance.url },
+			stdout: "pipe",
+			stderr: "pipe",
+			stdin: "ignore",
+		});
+		expect(await child.exited).toBe(0);
+		expect(await new Response(child.stdout).text()).toBe(`${instance.url}\n`);
+	});
+});

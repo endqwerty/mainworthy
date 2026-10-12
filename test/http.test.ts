@@ -3,9 +3,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Worker } from "node:worker_threads";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import type { Config } from "../src/server/kernel/app.ts";
-import { OP_LIST } from "../src/server/ops/index.ts";
+import { OP_LIST, OPS } from "../src/server/ops/index.ts";
+import { invoke } from "../src/server/ops/registry.ts";
+import { Readers } from "../src/server/readers.ts";
 import { type Instance, start } from "../src/server/start.ts";
 
 const dirs: string[] = [];
@@ -43,6 +46,214 @@ async function post<T>(
 	};
 }
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+
+function bootReaders(count: number): Instance {
+	const dataDir = mkdtempSync(join(tmpdir(), "casebook-http-readers-"));
+	dirs.push(dataDir);
+	const instance = start(
+		{ dataDir, host: "127.0.0.1", port: 0, mode: "local", owner: "daniel", ownerToken: null },
+		() => ({ ui: null }),
+		{ readers: count },
+	);
+	running.push(instance);
+	return instance;
+}
+
+function readersOf(instance: Instance): Readers {
+	if (!(instance.app.readers instanceof Readers)) throw new Error("reader pool did not start");
+	return instance.app.readers;
+}
+
+describe("reads on other cores through HTTP", () => {
+	test("every registered read has the same reply as inline, including refusals", async () => {
+		const instance = bootReaders(2);
+		const pool = readersOf(instance);
+		await pool.ready();
+		await post(instance, "/api/p/scratch/propose", {
+			edits: [
+				{ op: "create", outline: "Checkout #checkout", folder: "checkout" },
+				{ op: "create", outline: "Payment #payments", folder: "checkout" },
+			],
+		});
+		await post(instance, "/api/p/scratch/propose", {
+			edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Checkout revised" } }],
+		});
+		await post(instance, "/api/p/scratch/report", {
+			target: { commit: "feedc0de1", branch: "main", files: ["checkout.spec.ts"] },
+			results: [
+				{ test: { key: "checkout.spec.ts::checkout", file: "checkout.spec.ts" }, outcome: "pass" },
+				{
+					test: { key: "checkout.spec.ts::payment", file: "checkout.spec.ts" },
+					outcome: "fail",
+					failure: { message: "payment failed" },
+				},
+			],
+		});
+		const inputs: Record<string, unknown[]> = {
+			get: [{ refs: ["C-1", "T-1", "R-1", "P-1"] }, { refs: ["C-1"], as: "md" }, { refs: [] }],
+			find: [{}, { in: "folders" }, { in: "tests" }, { folder: "checkout" }, { text: "revised" }],
+			inbox: [{}, { state: "decided" }],
+			impact: [{ files: ["checkout.spec.ts"] }],
+			since: [{ cursor: "s:0" }],
+			gate: [{ commit: "feedc0de1" }],
+			history: [{ ref: "C-1" }, { ref: "C-1", from: 1, to: 2 }],
+			timeline: [{ ref: "C-1" }],
+			check: [{}],
+		};
+		const reads = OP_LIST.filter((op) => op.effect === "read");
+		expect(Object.keys(inputs).sort()).toEqual(reads.map((op) => op.name).sort());
+		const before = pool.completed;
+		let checked = 0;
+		for (const op of reads) {
+			for (const input of inputs[op.name] ?? []) {
+				const expected = invoke(instance.app, OPS, {
+					op: op.name,
+					project: "scratch",
+					input,
+					actor: () => instance.owner,
+				});
+				const reply = await post(instance, `/api/p/scratch/${op.name}`, input);
+				expect(reply.body).toEqual(JSON.parse(JSON.stringify(expected)));
+				checked++;
+			}
+		}
+		expect(pool.completed - before).toBe(checked);
+		expect(pool.fallbacks).toBe(0);
+	});
+
+	test("sixteen clients see every committed case immediately after their write while a report is applied", async () => {
+		const instance = bootReaders(4);
+		const pool = readersOf(instance);
+		await pool.ready();
+		await post(instance, "/api/p/scratch/propose", {
+			edits: Array.from({ length: 16 }, (_, i) => ({ op: "create", outline: `Reader ${i}` })),
+		});
+		const upload = post(instance, "/api/p/scratch/report", {
+			target: { commit: "abcdef0123", branch: "main" },
+			results: Array.from({ length: 10_000 }, (_, i) => ({ test: { key: `tests::${i}` }, outcome: "pass" })),
+		});
+		await Promise.all(
+			Array.from({ length: 16 }, async (_, client) => {
+				const ref = `C-${client + 1}`;
+				for (let version = 2; version <= 9; version++) {
+					const title = `Client ${client} version ${version}`;
+					const written = await post(instance, "/api/p/scratch/propose", {
+						edits: [{ op: "edit", case: ref, base: version - 1, body: { title } }],
+					});
+					expect(written.body.ok).toBe(true);
+					const read = await post<{ ref: string; title: string; version: number }[]>(instance, "/api/p/scratch/get", {
+						refs: [ref],
+					});
+					expect(read.body.ok && read.body.result[0]).toMatchObject({ ref, title, version });
+					if (read.body.ok && written.body.ok) expect(read.body.seq).toBeGreaterThanOrEqual(written.body.seq ?? 0);
+				}
+			}),
+		);
+		expect((await upload).body.ok).toBe(true);
+		expect(pool.completed).toBeGreaterThanOrEqual(128);
+		expect(pool.fallbacks).toBe(0);
+	}, 15_000);
+
+	test("killing a worker with HTTP reads in flight loses no requests and the replacement serves reads", async () => {
+		const instance = bootReaders(1);
+		const pool = readersOf(instance);
+		await pool.ready();
+		const worker = pool.threads[0];
+		if (!worker) throw new Error("no reader thread");
+		await post(instance, "/api/p/scratch/propose", {
+			edits: Array.from({ length: 1000 }, (_, i) => ({ op: "create", outline: `Case ${i}` })),
+		});
+		const requests = Array.from({ length: 32 }, () => post(instance, "/api/p/scratch/find", { limit: 500 }));
+		const queued = new Promise<void>((resolve) => {
+			const send = worker.postMessage.bind(worker);
+			worker.postMessage = (...args: Parameters<Worker["postMessage"]>) => {
+				send(...args);
+				resolve();
+			};
+		});
+		await queued;
+		await worker.terminate();
+		expect((await Promise.all(requests)).every((reply) => reply.status === 200 && reply.body.ok)).toBe(true);
+		expect(pool.fallbacks).toBeGreaterThan(0);
+		await pool.ready();
+		const before = pool.completed;
+		expect((await post(instance, "/api/p/scratch/find", {})).status).toBe(200);
+		expect(pool.completed).toBe(before + 1);
+	});
+
+	test("a worker refuses write operations even when handed the owner's actor", async () => {
+		const instance = bootReaders(1);
+		const pool = readersOf(instance);
+		await pool.ready();
+		const refused = await pool.run(
+			{
+				op: "propose",
+				project: "scratch",
+				input: { edits: [{ op: "create", outline: "Must not be written" }] },
+				actor: instance.owner,
+			},
+			() => {
+				throw new Error("the worker must refuse the write itself");
+			},
+		);
+		expect(refused).toMatchObject({ ok: false, error: { code: "forbidden" } });
+		expect((await post<{ count: number }>(instance, "/api/p/scratch/find", {})).body).toMatchObject({
+			ok: true,
+			result: { count: 0 },
+		});
+	});
+
+	test("forgetting an actor clears names cached by the readers before the next read", async () => {
+		const instance = bootReaders(2);
+		const pool = readersOf(instance);
+		await pool.ready();
+		const created = await post<{ token: string }>(instance, "/api/admin", {
+			do: "token.create",
+			actor: "case-author",
+			kind: "human",
+			can: ["read", "produce"],
+		});
+		if (!created.body.ok) throw new Error("could not create the case author");
+		await post(
+			instance,
+			"/api/p/scratch/propose",
+			{
+				edits: [{ op: "create", outline: "Authored case" }],
+			},
+			bearer(created.body.result.token),
+		);
+		const history = async () => (await post(instance, "/api/p/scratch/history", { ref: "C-1" })).body;
+		for (let i = 0; i < 8; i++) expect(JSON.stringify(await history())).toContain("case-author");
+		expect((await post(instance, "/api/admin", { do: "actor.forget", name: "case-author" })).body.ok).toBe(true);
+		for (let i = 0; i < 8; i++) {
+			const reply = JSON.stringify(await history());
+			expect(reply).not.toContain("case-author");
+			expect(reply).toContain("forgotten-");
+		}
+	});
+
+	test("CASEBOOK_READERS=0 uses the inline reader and stop awaits all worker exits", async () => {
+		const previous = process.env.CASEBOOK_READERS;
+		let inline: Instance;
+		try {
+			process.env.CASEBOOK_READERS = "0";
+			inline = boot("local");
+		} finally {
+			if (previous === undefined) delete process.env.CASEBOOK_READERS;
+			else process.env.CASEBOOK_READERS = previous;
+		}
+		expect(inline.app.readers).toBeNull();
+		expect((await post(inline, "/api/p/scratch/find", {})).body).toMatchObject({ ok: true, result: { items: [] } });
+		const pooled = bootReaders(2);
+		const pool = readersOf(pooled);
+		await pool.ready();
+		const exits = pool.threads.map((worker) => new Promise<void>((resolve) => worker.once("exit", () => resolve())));
+		await pooled.stop();
+		await Promise.all(exits);
+		expect(pool.threads).toHaveLength(0);
+		await pooled.stop();
+	});
+});
 
 describe("local mode", () => {
 	test("the browser on this machine is the owner with no step, and a first project exists", async () => {

@@ -321,6 +321,12 @@ export function BodyEditor({
 			rows={Math.max(1, value.split("\n").length)}
 			data-field={field}
 			aria-label={label}
+			ref={(element) => {
+				if (element) {
+					element.style.height = "auto";
+					element.style.height = `${element.scrollHeight}px`;
+				}
+			}}
 			className={className}
 			placeholder={placeholder}
 			value={value}

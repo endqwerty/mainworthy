@@ -69,6 +69,14 @@ Implementation notes for integration:
   only after completion, preserving an existing backup when a stream fails.
   Gzip source failures are archive errors, not connection failures. Startup
   failures exit immediately with code 4, including an occupied port.
+- Export requires an NDJSON content type before opening a destination. A proxy
+  login page cannot replace an existing backup. Flags beside a JSON payload are
+  rejected instead of discarded. A closed stdout is quiet, and the source entry
+  is executable through its shebang.
+- The updated report contract's `declined` case/version claims stay visible in
+  the receipt; their results remain recorded and failing outcomes still block.
+  Older cached receipts default that new field to an empty list. JSON payloads
+  can start with whitespace or newlines.
 - Local `fmt` needs no running server. The Markdown contract defines this as a
   parser/printer operation; it does not write stored data.
 - The server's updated session endpoint lists projects for producer tokens.
@@ -83,21 +91,24 @@ Implementation notes for integration:
   worker. The coordinating agent owns those files and final worktree release
   while other workers are using the shared dependency installation.
 
-The full CLI/archive suite contains 40 independent checks. A startup check can
+The full CLI/archive suite contains 46 independent checks. A startup check can
 fail while a web module is still being authored in this shared checkout. Do not
 replace or weaken the UI check to hide that integration failure.
 
 Verification rerun after the first independent review:
 
 ```text
-bun test src/cli src/surfaces/archive.test.ts: 40 pass, 0 fail
+bun test src/cli src/surfaces/archive.test.ts: 40 pass, 0 fail before the four final regressions
 bunx tsc --noEmit: exit 0
 bunx biome check src/cli src/surfaces/archive.ts src/surfaces/archive.test.ts: clean
 ```
 
-The first independent verifier was Anthropic Claude Opus 5.5. It proved the
+The independent verifier was Anthropic Claude Opus 5.5. Its first round proved the
 archive permission, rollback, nonfresh-target and cancellation checks, and
 found the occupied-port blocker and smaller CLI issues. Those findings have
-regressions and fixes. A fresh verdict on the revised snapshot is still needed.
+regressions and fixes. The second round passed the 40-check snapshot and proved
+a valid 720 MB plain/gzip HTTP import and identical re-exported rows. Its three
+new nonblocking findings have fixes and additional regression checks. A
+fresh verdict on those last changes is pending.
 Use `LC_ALL=C sort` when hashing the file list; different provider locales
 sort CHECKS.md differently and otherwise produce different manifest digests.

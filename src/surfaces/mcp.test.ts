@@ -28,9 +28,9 @@ const TOKEN_COUNTS: Record<string, number> = {
 	decide: 314,
 	inbox: 190,
 	get: 282,
-	find: 279,
+	find: 281,
 	impact: 208,
-	since: 143,
+	since: 141,
 	gate: 143,
 };
 

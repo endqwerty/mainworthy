@@ -15,7 +15,7 @@
 		"format": "biome check --write .",
 		"test": "bun test src test",
 		"check": "bun run typecheck && bun run lint && bun run test",
-		"build": "bun build --compile --minify --sourcemap src/cli/main.ts --outfile dist/casebook"
+		"build": "bun build --compile --minify --sourcemap src/cli/main.ts src/server/read-worker.ts --outfile dist/casebook"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.32.1",

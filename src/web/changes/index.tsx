@@ -124,7 +124,7 @@ function ChangesWorkbench() {
 						<div className="pane-scroll detail-body">
 							<div className={`change-gate v-${gateData?.verdict ?? "pending"}`}>
 								<span className="dim">Gate of {current?.head?.slice(0, 12) ?? "the latest commit"}</span>
-								<h2>{gateData?.verdict ?? "Reading gate…"}</h2>
+								<h2>{gateData?.verdict ?? (gate.error ? "Gate unavailable" : "Reading gate…")}</h2>
 								<p>{gateData?.reason ?? gate.error?.message}</p>
 								{gateData?.stale && <p>The verdict awaits new evidence or a fresh decision.</p>}
 							</div>

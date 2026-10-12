@@ -150,8 +150,8 @@ const Q = {
 	openByKind: sql<{ project: number }, { kind: Kind; n: number }>(
 		"SELECT kind, count(*) AS n FROM questions WHERE project = $project AND state = 'open' AND owner = 0 GROUP BY kind",
 	),
-	changedSince: sql<{ project: number; rev: number; limit: number }, QuestionRow>(
-		"SELECT * FROM questions WHERE project = $project AND rev > $rev ORDER BY rev LIMIT $limit",
+	changedSince: sql<{ project: number; rev: number; id: number; limit: number }, QuestionRow>(
+		"SELECT * FROM questions WHERE project = $project AND (rev, id) >= ($rev, $id) ORDER BY rev, id LIMIT $limit",
 	),
 	insertAnswer: sql<{
 		question: number;
@@ -316,8 +316,13 @@ export function openCounts(db: Db, project: number): Record<string, number> {
 	return counts;
 }
 
-export const questionsChangedSince = (db: Db, project: number, rev: number, limit: number): QuestionRow[] =>
-	db.all(Q.changedSince, { project, rev, limit });
+/** Questions changed at or after a position (a revision and a question id within it), in that order. */
+export const questionsChangedSince = (
+	db: Db,
+	project: number,
+	from: { rev: number; id: number },
+	limit: number,
+): QuestionRow[] => db.all(Q.changedSince, { project, rev: from.rev, id: from.id, limit });
 
 export function insertAnswer(
 	ctx: Ctx,

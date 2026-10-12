@@ -1,4 +1,6 @@
-<testsuite name="pytest" file="./tests/test_cart.py" tests="2">
-  <testcase classname="tests.test_cart.TestCart" name="test_x[param] @C-42" time="0,015"/>
-  <testcase classname="tests.test_cart.TestCart" name="test_optional" time="0.001"><skipped message="optional dependency"/></testcase>
-</testsuite>
+<testsuites>
+  <testsuite name="pytest" tests="2" failures="0" errors="0" skipped="1">
+    <testcase classname="tests.test_cart.TestCart" name="test_x[param] @C-42" file="tests/test_cart.py" line="12" time="0.015"/>
+    <testcase classname="tests.test_cart.TestCart" name="test_optional" file="tests/test_cart.py" line="18" time="0.001"><skipped message="optional dependency"/></testcase>
+  </testsuite>
+</testsuites>

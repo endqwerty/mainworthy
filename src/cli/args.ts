@@ -76,7 +76,7 @@ export function parseArgs(tokens: readonly string[], flags: readonly Flag[] = []
 					index++;
 				} else value = "true";
 			} else if (definition.kind === "json") {
-				if (next !== undefined && /^[{[]/.test(next)) {
+				if (next !== undefined && /^[{[]/.test(next.trimStart())) {
 					value = next;
 					index++;
 				} else value = "true";
@@ -100,7 +100,8 @@ export function parseArgs(tokens: readonly string[], flags: readonly Flag[] = []
 /** Machine input is explicit so a bare adapter `--json` remains an output option. */
 export function hasJsonInput(tokens: readonly string[]): boolean {
 	return tokens.some(
-		(token, index) => token.startsWith("--json=") || (token === "--json" && /^[{[]/.test(tokens[index + 1] ?? "")),
+		(token, index) =>
+			token.startsWith("--json=") || (token === "--json" && /^[{[]/.test((tokens[index + 1] ?? "").trimStart())),
 	);
 }
 

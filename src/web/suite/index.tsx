@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { z } from "zod";
+import type { Api } from "../../core/api.ts";
 import { mergeBodies } from "../../core/merge3.ts";
 import { CaseBody, emptyBody } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
@@ -197,6 +198,12 @@ export function SuiteScreen() {
 			!snapshot.body.steps.some((step) => step.action.trim())
 		) {
 			removeDraft({ project, id: snapshot.id });
+			setCaptures((previous) => {
+				if (!previous.has(snapshot.id)) return previous;
+				const next = new Map(previous);
+				next.delete(snapshot.id);
+				return next;
+			});
 			if (draftRef.current?.id === snapshot.id) {
 				draftRef.current = null;
 				setDraftState(null);
@@ -208,6 +215,7 @@ export function SuiteScreen() {
 	async function sealDraft({ keepalive = false }: { keepalive?: boolean } = {}): Promise<void> {
 		const snapshot = draftRef.current;
 		if (!snapshot || dropEmpty(snapshot) || !snapshot.dirty) return;
+		if (snapshot.ref === null) setCaptures((previous) => new Map(previous).set(snapshot.id, snapshot));
 		const existing = pending.current.get(snapshot.id);
 		if (existing) {
 			await existing;
@@ -355,23 +363,37 @@ export function SuiteScreen() {
 				removeDraft({ project, id: snapshot.id });
 				const latest = draftRef.current;
 				if (latest?.id === snapshot.id && ref) {
-					const more = JSON.stringify(latest.body) !== JSON.stringify(snapshot.body);
+					const normalized = cleanTitle(latest);
+					const normalizedBody = {
+						...normalized.body,
+						steps: normalized.body.steps
+							.filter((step) => step.action.trim())
+							.map((step) => ({ ...step, expected: step.expected || null })),
+					};
+					const more =
+						JSON.stringify({ body: normalizedBody, tags: normalized.tags, covers: normalized.covers }) !==
+						JSON.stringify({ body, tags: cleaned.tags, covers: cleaned.covers });
+					const keepTitleFocus =
+						document.activeElement instanceof HTMLElement && document.activeElement.dataset.field === "capture-title";
 					const next: Draft = {
 						...latest,
 						id: ref,
 						ref,
 						base: version,
-						body: more ? mergeBodies({ base: body, mine: latest.body, theirs: adopted }).merged : adopted,
+						body: mergeBodies({ base: body, mine: normalized.body, theirs: adopted }).merged,
 						original: adopted,
 						submission: { kind: "none" },
-						tags: adoptedTags,
-						covers: adoptedCovers,
+						tags: [...new Set([...adoptedTags, ...normalized.tags])],
+						covers: [...new Set([...adoptedCovers, ...normalized.covers])],
 						dirty: more,
 						cmd: crypto.randomUUID(),
 						caret: latest.caret.field === "capture-title" ? { ...latest.caret, field: "title" } : latest.caret,
 					};
 					draftRef.current = next;
-					setDraftState(next);
+					if (keepTitleFocus) {
+						flushSync(() => setDraftState(next));
+						focusDraft(next);
+					} else setDraftState(next);
 					setSelected(ref);
 					if (more) writeDraft({ project, draft: next });
 					if (
@@ -499,17 +521,74 @@ export function SuiteScreen() {
 		}
 	}
 	const selection = () => (picked.size ? [...picked] : selected ? [selected] : []);
+	function optimisticPlacement(edits: Edit[]): () => void {
+		const listKey = [project, "find", input, "pages"];
+		const oldList = queryClient.getQueryData<typeof list.data>(listKey);
+		const detailKey = [project, "get", { refs: [selected ?? "C-0"] }];
+		const oldDetail = queryClient.getQueryData<Api["get"]["reply"]>(detailKey);
+		const oldDraft = draftRef.current;
+		function patch(row: Record<string, unknown>, full: boolean): Record<string, unknown> {
+			let next = row;
+			const ref = row.ref;
+			if (typeof ref !== "string") return row;
+			for (const edit of edits) {
+				if ((edit.op !== "place" && edit.op !== "state") || !edit.cases.includes(ref)) continue;
+				if (edit.op === "state") {
+					next = { ...next, state: edit.to };
+					continue;
+				}
+				if (edit.tags) {
+					const existing = z.array(z.string()).safeParse(next.tags);
+					const tags = new Set(edit.tags.set ?? (existing.success ? existing.data : []));
+					for (const tag of edit.tags.add ?? []) tags.add(tag);
+					for (const tag of edit.tags.remove ?? []) tags.delete(tag);
+					next = { ...next, tags: [...tags] };
+				}
+				if (edit.folder !== undefined) {
+					const folder = folders.find((item) =>
+						typeof edit.folder === "number" ? item.id === edit.folder : item.path === edit.folder,
+					);
+					if (folder) next = { ...next, folder: full ? { id: folder.id, path: folder.path } : folder.id };
+				}
+			}
+			return next;
+		}
+		queryClient.setQueryData<typeof list.data>(listKey, (cached) =>
+			cached
+				? {
+						...cached,
+						pages: cached.pages.map((page) => ({ ...page, items: page.items.map((row) => patch(row, false)) })),
+					}
+				: cached,
+		);
+		queryClient.setQueryData<Api["get"]["reply"]>(detailKey, (cached) => cached?.map((row) => patch(row, true)));
+		if (oldDraft?.ref) {
+			const changed = patch({ ref: oldDraft.ref, tags: oldDraft.tags }, true);
+			const tags = z.array(z.string()).parse(changed.tags);
+			change({ ...oldDraft, tags });
+		}
+		return () => {
+			queryClient.setQueryData(listKey, oldList);
+			queryClient.setQueryData(detailKey, oldDetail);
+			if (oldDraft && draftRef.current?.id === oldDraft.id) change({ ...draftRef.current, tags: oldDraft.tags });
+		};
+	}
 	async function placement(edits: Edit[], inverse: Edit[]): Promise<void> {
+		const rollback = optimisticPlacement(edits);
 		try {
 			const reply = await call("propose", { edits }, { project });
-			if (reply.status !== "adopted") setStatus(`Proposed, waiting for a person · ${reply.question ?? ""}`);
-			else {
+			if (reply.status !== "adopted") {
+				rollback();
+				setHidden(new Set());
+				setStatus(`Proposed, waiting for a person · ${reply.question ?? ""}`);
+			} else {
 				undo.current = inverse;
 				setStatus(`${selection().length} case${selection().length === 1 ? "" : "s"} changed. Press u to undo.`);
 			}
 			setPicked(new Set());
 			await invalidateProject(project);
 		} catch (error) {
+			rollback();
 			setHidden(new Set());
 			setStatus(error instanceof Error ? error.message : "The change failed");
 		}
@@ -520,7 +599,9 @@ export function SuiteScreen() {
 		openPalette({
 			title: "Move selected cases to a folder",
 			items: [
-				{ id: "root", label: "Unsorted", handler: () => moveTo("Unsorted") },
+				...(!folders.some((folder) => folder.path === "Unsorted")
+					? [{ id: "root", label: "Unsorted", handler: () => moveTo("Unsorted") }]
+					: []),
 				...folders.map((folder) => ({
 					id: folder.path,
 					label: folder.path,
@@ -542,8 +623,9 @@ export function SuiteScreen() {
 		const rootRefs = cases
 			.filter((row) => refs.includes(row.ref) && !folders.some((folder) => folder.id === row.folder))
 			.map((row) => row.ref);
-		if (rootRefs.length) inverse.push({ op: "place", cases: rootRefs, folder: "" });
-		if (route.folder && folder !== route.folder) setHidden((prior) => new Set([...prior, ...refs]));
+		if (rootRefs.length) inverse.push({ op: "place", cases: rootRefs, folder: "Unsorted" });
+		if (route.folder && folder !== route.folder && !folder.startsWith(`${route.folder}/`))
+			setHidden((prior) => new Set([...prior, ...refs]));
 		void placement([{ op: "place", cases: refs, folder: folder || "Unsorted" }], inverse);
 	}
 	function archive(): void {
@@ -575,7 +657,15 @@ export function SuiteScreen() {
 			setStatus("Undone. The inverse change is recorded.");
 			void invalidateProject(project);
 		} else if (view && view.version > 1) {
-			await call("propose", { edits: [{ op: "restore", case: view.ref, to: view.version - 1 }] }, { project });
+			const focused = document.activeElement;
+			const raw =
+				focused instanceof HTMLElement ? focused.closest("[data-version]")?.getAttribute("data-version") : null;
+			const previous = raw && /^\d+$/.test(raw) ? Number(raw) - 1 : view.version - 1;
+			if (previous < 1) {
+				setStatus("Version 1 is the first version.");
+				return;
+			}
+			await call("propose", { edits: [{ op: "restore", case: view.ref, to: previous }] }, { project });
 			draftRef.current = null;
 			setDraftState(null);
 			setStatus("Previous version restored as a new version.");
@@ -804,9 +894,9 @@ export function SuiteScreen() {
 										) : row.kind === "local" ? (
 											<button
 												type="button"
-												className="row"
+												className={`row ${row.draft.ref === selected ? "sel" : ""}`}
 												role="option"
-												aria-selected={false}
+												aria-selected={row.draft.ref === selected}
 												onClick={() => {
 													if (row.draft.ref) choose(row.draft.ref);
 													else change(row.draft, true);
