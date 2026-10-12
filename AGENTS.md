@@ -59,5 +59,4 @@ git fetch && git reset --hard origin/main && git push --force-with-lease origin 
 
 Only when the previous PR is merged and the branch holds nothing unmerged. Then
 check `git rev-list --count origin/main..HEAD` prints 0 (local `main` can be
-checked out in another worktree and stale). State the final `du -sh .` in your
-last message.
+checked out in another worktree and stale).
