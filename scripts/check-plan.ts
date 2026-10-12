@@ -51,9 +51,10 @@ export type Limits = { warn: number; fail: number };
 
 /**
  * Seconds the tests of one whole `bun run check` may take (the parallel phase plus the quiet one), on the
- * 16-thread desktop. Measured there on 2026-10-12 with nothing else running: 107 s (70 s and 37 s). Over `warn` the
- * check says so; over `fail`, the two minutes the check was promised to stay under (issue #77), it fails.
- * Do not raise them: make the check faster (AGENTS.md).
+ * 16-thread desktop. Measured there on 2026-10-12 with nothing else running, five checks in a row: 106.9, 107.1,
+ * 107.2, 108.0 and 107.9 s (about 71 s and 36 s). Over `warn` the check says so; over `fail`, the two minutes
+ * the check was promised to stay under (issue #77), it fails. Do not raise them: make the check faster
+ * (AGENTS.md).
  */
 export const LIMITS: Limits = { warn: 115, fail: 120 };
 

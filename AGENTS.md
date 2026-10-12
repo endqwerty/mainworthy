@@ -19,10 +19,19 @@ issue #81, in the web UI's conflict card.
 
 ## Stack rules
 
-- **Commands.** `bun install`; `bun run check` (type-check, lint, every test
-  including the budgets and the browser tests, which are skipped, with a
-  message, on a machine with no Chromium); `bun run dev` (the server on
+- **Commands.** `bun install`; `bun run check` (type-check, lint and every test,
+  side by side: the test files in eight parallel workers, then the tests that
+  measure time with the machine to themselves; the browser tests are skipped, with
+  a message, on a machine with no Chromium); `bun run dev` (the server on
   `127.0.0.1:7357`, restarting on change). Bun 1.4; no other runtime or build tool.
+  The check takes 107 s on the 16-thread desktop (2026-10-12, five runs of 107 to
+  108 s; it was 403 s with the files one after another). `bun run test` is the
+  tests alone, printed as they run. One file: `bun test test/suite.test.ts`. One
+  shard, as CI runs it: `bun run test --only=parallel --shard=2/5`; the quiet
+  tests: `bun run test --only=quiet`. CI (`.github/workflows/check.yml`) runs five shards and the quiet
+  tests on a runner each, then one `gate` job reports every shard to Casebook and
+  its gate is the result; a shard with no report fails it. Not yet run on GitHub:
+  about three and a half minutes is expected (it was 716 s in one job).
 - **One registry.** A capability is an operation in `src/server/ops/index.ts`. HTTP,
   the OpenAPI document, the CLI, the MCP tools and the web client come from it. Never
   add a route, a command or a tool beside it.
@@ -44,6 +53,18 @@ issue #81, in the web UI's conflict card.
   `src/server/kernel/migrations/`; a shipped migration is never edited.
 - **Budgets are tests** (`test/budgets.test.ts`, `bench/`). A change that misses a
   hot-path budget does not merge; do not raise the number.
+- **The check's wall time is a budget** (`scripts/check-plan.ts`). The check warns
+  when its tests take more than 115 s and fails above 120 s, unless other work
+  keeps the machine busy. A change that makes the check slower says so and fixes
+  it: split the file, share the set-up, do less in the browser. Do not raise the
+  limit. A file that takes a worker longer than half a minute is the next thing to
+  split; after adding or splitting one, `bun run test --update-timings` (six
+  minutes) and commit `scripts/test-timings.json`, which balances the CI shards.
+- **Tests run beside each other.** A test takes its ports, directories and browser
+  from the helpers (`test/helpers.ts`, `test/e2e/support.ts`), never a fixed port
+  or a shared path. One that fails only beside others shares something: fix that,
+  do not retry it. Only a test that compares a measured time with a limit goes in
+  `QUIET` (`scripts/check-plan.ts`), where it runs after the others.
 - **Worktree release:** `rm -rf node_modules .casebook test-results` (also the
   `release worktree` script in `t3.json`, which runs when a thread settles).
 
