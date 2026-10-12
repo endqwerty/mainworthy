@@ -318,6 +318,33 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 							})}
 						<div id="folder-create" />
 					</div>
+					<div className="sidebar-tags">
+						<div className="sech side">Tags</div>
+						{new URLSearchParams(location.search).has("tag") && (
+							<button
+								type="button"
+								className="fo"
+								onClick={() => navigate(routeUrl({ project, screen: "suite", folder: route.folder }))}
+							>
+								All tags
+							</button>
+						)}
+						{folders.data?.tags?.map(({ tag, n }) => (
+							<button
+								key={tag}
+								type="button"
+								className={`fo ${new URLSearchParams(location.search).getAll("tag").includes(tag) ? "on" : ""}`}
+								onClick={() => {
+									const path = routeUrl({ project, screen: "suite", folder: route.folder });
+									navigate(`${path}${route.folder ? "&" : "?"}tag=${encodeURIComponent(tag)}`);
+								}}
+							>
+								<span className="fn">#{tag}</span>
+								<span className="n">{n}</span>
+							</button>
+						))}
+					</div>
+
 					<div className="sfoot">
 						<span className="me">
 							<ProducerGlyph kind={info.kind} />

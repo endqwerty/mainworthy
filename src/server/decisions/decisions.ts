@@ -153,9 +153,36 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 		// of no longer holding (the evidence changed, the time ran out, a fact is gone) withdraws its standing.
 		if (decision && !stillHolds(decision, occurrence, { anyTarget: true })) {
 			HANDLERS[latest.kind].revert(ctx, latest, decision);
+			lapse(ctx, latest, decision, occurrence.now);
 		}
 	}
 	return open(ctx, r, fingerprint, hash, latest.epoch + 1, latest.id);
+}
+
+/**
+ * Records in the ledger that a decision stopped holding (its time ran out, or the evidence it stood on changed)
+ * and that its question was asked again. The row is signed by the rule actor and supersedes the decision; the
+ * question then points at it, so the timed sweep does not find the old decision and reopen a question that has
+ * already been asked again, and the next answer's chain runs through it.
+ */
+function lapse(ctx: Ctx, question: QuestionRow, decision: DecisionRow, now: number): DecisionRow {
+	const timedOut = json<HoldTerm[]>(decision.holds).some((term) => term.until === "time" && now >= term.at);
+	const row = insertDecision(ctx, {
+		question,
+		answer: { is: timedOut ? "expired" : "outdated" },
+		signers: [
+			{
+				by: ruleActor(ctx.db).id,
+				clause: timedOut ? "hold-expired" : "hold-ended",
+				policy: currentPolicy(ctx.db, ctx.project.id).version,
+				reason: null,
+			},
+		],
+		holds: [],
+		supersedes: decision.id,
+	});
+	setQuestionState(ctx, question, "decided", row.id);
+	return row;
 }
 
 /**

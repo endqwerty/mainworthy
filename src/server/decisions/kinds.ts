@@ -21,7 +21,7 @@ import type { Ctx } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 import type { Witness } from "../kernel/witness.ts";
-import { currentPolicy } from "../policy/policy.ts";
+import { clauseFor, currentPolicy } from "../policy/policy.ts";
 import { closeRun, discountFailures, reopenRun, restoreFailures, runById } from "../runs/runs.ts";
 import {
 	adopt,
@@ -214,6 +214,18 @@ const mapHandler: Handler<"map"> = {
 				// tests stay unlinked and this question is asked again when the proposal lands.
 				const tests = unlinkedInFile(ctx.db, ctx.project.id, file);
 				if (tests.length === 0) return { linked: [] };
+				// Creating and linking in one answer works only where the policy adopts this actor's new cases at
+				// once. Where a person must adopt them first, nothing is created here: saying so is better than
+				// pointing at a proposal that this answer's refusal would take away again.
+				const adoption = clauseFor(currentPolicy(ctx.db, ctx.project.id), {
+					kind: "adopt",
+					facts: new Set([`author:${ctx.actor.kind}`]),
+				});
+				if (adoption.ask.who !== "rule") {
+					throw invalid(
+						"this policy has a person adopt new cases, so they cannot be created and linked in one answer: propose the cases, have them adopted, then answer this question with `link`",
+					);
+				}
 				const folder = answer.folder ?? folderFor(file);
 				const edits: Edit[] = tests.map((test) => ({
 					op: "create",
@@ -325,7 +337,7 @@ const failureHandler: Handler<"failure"> = {
 	revert(ctx, question, decision) {
 		const subject = json<{ signature: number; scope: string }>(question.subject);
 		const effects = json<{ corrected?: [number, number][]; class?: string }>(decision.effects);
-		if (effects.corrected) restoreFailures(ctx, effects.corrected);
+		if (effects.corrected) restoreFailures(ctx, effects.corrected, decision.id);
 		if (effects.class) dropExcuse(ctx, subject.signature, subject.scope, decision.id);
 	},
 	holds({ question, answer, now, policy }) {

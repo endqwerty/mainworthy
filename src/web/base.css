@@ -1522,3 +1522,20 @@ button:disabled {
 .read-body .sex {
 	text-align: left;
 }
+
+.sidebar-tags {
+	padding: 0 8px 8px;
+	max-height: 134px;
+	overflow: auto;
+}
+.sidebar-tags .sech {
+	margin: 10px 8px 6px;
+}
+.sidebar-tags .fo {
+	width: 100%;
+	padding: 0 8px;
+	text-align: left;
+}
+.sidebar-tags .fn {
+	color: var(--dim);
+}

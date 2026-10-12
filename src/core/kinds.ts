@@ -121,6 +121,10 @@ export const ANSWER_LABELS: Record<string, string> = {
 	duplicate: "Duplicate",
 	defer: "Defer",
 	approve: "Approve",
+	// Rows the ledger writes itself: a decision was withdrawn, ran out of time, or was overtaken by new evidence.
+	withdrawn: "Withdrawn",
+	expired: "Expired",
+	outdated: "The evidence changed",
 };
 
 /**

@@ -713,6 +713,70 @@ describe("what a decision may change", () => {
 		expect(() => decisionOf(made, "adopt")).toThrow("not a witness");
 	});
 
+	test("a hold that runs out is recorded once, whether a report or the timer notices first", () => {
+		const fail = (commit: string) => ciReport({ commit, n: 1, fail: { 0: "stable failure" } });
+		report(fail("expiry01"));
+		const old = open("failure");
+		decide(old, { is: "flaky" });
+		h.advance(15 * 86_400_000);
+		report(fail("expiry02"));
+		const again = open("failure");
+		expect(again.q).not.toBe(old.q);
+		const ledger = () =>
+			rows<{ answer: string; supersedes: number | null }>(
+				"SELECT answer, supersedes FROM decisions WHERE kind = 'failure' ORDER BY id",
+			).map((row) => JSON.parse(row.answer).is);
+		expect(ledger()).toEqual(["flaky", "expired"]);
+		// The timer finds nothing left to do: the question was already asked again.
+		const rule = first(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")).id;
+		expect(sweep(h.app, rule)).toBe(0);
+		expect(h.call<InboxReply>("inbox", { kind: "failure" }).items.map((item) => item.q)).toEqual([again.q]);
+		decide(again, { is: "defect" });
+		expect(ledger()).toEqual(["flaky", "expired", "defect"]);
+		expect(rows("SELECT supersedes FROM decisions WHERE kind = 'failure' ORDER BY id")).toEqual([
+			{ supersedes: null },
+			{ supersedes: 2 },
+			{ supersedes: 3 },
+		]);
+	});
+
+	test("withdrawing a 'mistaken' answer does not undo a correction the producer made since", () => {
+		seed(2);
+		const planned = plan({ name: "Open until the second case", select: {} });
+		const other = h.actor("other", "human", ["read", "produce"]);
+		const failed = report({
+			run: planned.run,
+			attempt: 2,
+			results: [{ test: { case: "C-1" }, outcome: "fail", note: "wrong report" }],
+		});
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] }, other);
+		const dispute = open("failure");
+		decide(dispute, { is: "mistaken" });
+		report({
+			run: planned.run,
+			results: [{ test: { case: "C-1" }, outcome: "pass", corrects: first(failed.results) }],
+		});
+		expect(gate({ run: planned.run }).tally).toMatchObject({ pass: 1, missing: 1, disputed: 0 });
+		h.call("decide", { undo: dispute.q });
+		expect(gate({ run: planned.run }).tally).toMatchObject({ pass: 1, missing: 1, disputed: 0 });
+		expect(first(slots(planned.run)).state).toBe("satisfied");
+	});
+
+	test("under a policy where a person adopts new cases, 'create cases' says so and leaves nothing behind", () => {
+		usePolicy("strict");
+		report(ciReport({ commit: "mapstrict", n: 1, file: "tests/new.spec.ts" }));
+		const before = rows("SELECT count(*) AS n FROM proposals");
+		const reply = decide(open("map"), { is: "create" }, h.owner, { reason: "make cases for them" });
+		expect(reply.status).toBe("invalid");
+		expect(reply.needs).toContain("propose the cases");
+		expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
+		expect(h.call<InboxReply>("inbox", { kind: "map" }).items).toHaveLength(1);
+		// Where the policy adopts them at once, the same answer creates and links.
+		usePolicy("standard");
+		expect(decide(open("map"), { is: "create" }).status).toBe("decided");
+		expect(rows("SELECT count(*) AS n FROM tests WHERE case_id IS NOT NULL")).toEqual([{ n: 1 }]);
+	});
+
 	test("an expired decision stays in the chain of the one that replaces it", () => {
 		report(ciReport({ commit: "sweep001", n: 1, fail: { 0: "stable failure" } }));
 		decide(open("failure"), { is: "flaky" });

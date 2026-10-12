@@ -5,7 +5,7 @@ import { createPortal, flushSync } from "react-dom";
 import { z } from "zod";
 import type { Api } from "../../core/api.ts";
 import { mergeBodies } from "../../core/merge3.ts";
-import { CaseBody, emptyBody } from "../../core/model.ts";
+import { CaseBody, emptyBody, TAG } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
 import { cleanTitle, firstStep, pasteCapture } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
@@ -43,6 +43,10 @@ const ResolvedEdit = z.object({
 
 export function SuiteScreen() {
 	const { project, route, setStatus, openPalette, overlayOpen } = useApp();
+	const tagFilter = new URLSearchParams(location.search)
+		.getAll("tag")
+		.filter((tag) => TAG.test(tag))
+		.join(",");
 	const [text, setText] = useState("");
 	const [search, setSearch] = useState("");
 	const [draftStored, setDraftStored] = useState(true);
@@ -75,8 +79,9 @@ export function SuiteScreen() {
 				limit: 500,
 				...(route.folder ? { folder: route.folder, deep: true } : {}),
 				...(search ? { text: search } : {}),
+				...(tagFilter ? { tags: tagFilter.split(",") } : {}),
 			}) satisfies Parameters<typeof call<"find">>[1],
-		[route.folder, search],
+		[route.folder, search, tagFilter],
 	);
 	const list = useInfiniteQuery({
 		queryKey: [project, "find", input, "pages"],
@@ -511,7 +516,7 @@ export function SuiteScreen() {
 			base: 0,
 			body,
 			original: body,
-			tags: [],
+			tags: tagFilter ? tagFilter.split(",") : [],
 			covers: [],
 			folder,
 			after: retain && previous ? previous.id : (previous?.ref ?? selectedRow?.ref ?? previous?.after ?? null),

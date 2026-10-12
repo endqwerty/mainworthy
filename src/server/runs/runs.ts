@@ -216,12 +216,15 @@ const Q = {
 	correctInSlot: sql<{ slot: number; result: number }>(
 		"UPDATE slot_results SET corrected = 1 WHERE slot = $slot AND result = $result",
 	),
-	uncorrectInSlot: sql<{ slot: number; result: number }>(
-		"UPDATE slot_results SET corrected = 0 WHERE slot = $slot AND result = $result",
+	discount: sql<{ slot: number; result: number; decision: number }>(
+		"UPDATE slot_results SET discounted_by = $decision WHERE slot = $slot AND result = $result",
+	),
+	undiscount: sql<{ slot: number; result: number; decision: number }>(
+		"UPDATE slot_results SET discounted_by = NULL WHERE slot = $slot AND result = $result AND discounted_by = $decision",
 	),
 	slotsOfResult: sql<{ result: number }, { slot: number }>("SELECT slot FROM slot_results WHERE result = $result"),
 	admittedTo: sql<{ slot: number }, { result: number; admitted: string }>(
-		"SELECT result, admitted FROM slot_results WHERE slot = $slot AND corrected = 0",
+		"SELECT result, admitted FROM slot_results WHERE slot = $slot AND corrected = 0 AND discounted_by IS NULL",
 	),
 	newestChangeRun: sql<{ project: number; scope: string }, { id: number | null }>(
 		"SELECT max(id) AS id FROM runs WHERE project = $project AND scope = $scope",
@@ -965,16 +968,17 @@ export function reopenRun(ctx: Ctx, run: RunRow, decision: number): void {
 }
 
 /**
- * A `mistaken` answer on a disputed slot: the failing results stop counting there. Standing: only by a decision.
- * Returns the slot and result pairs it corrected, so withdrawing the decision can put them back.
+ * A `mistaken` answer on a disputed slot: the failing results stop counting there. Standing: only by a decision,
+ * which each discounted result records. Returns the slot and result pairs, so withdrawing the decision can put
+ * them back.
  */
 export function discountFailures(ctx: Ctx, witness: Witness, run: RunRow, signature: number): [number, number][] {
-	decisionOf(witness, "failure");
+	const decision = decisionOf(witness, "failure");
 	const corrected: [number, number][] = [];
 	for (const slot of ctx.db.all(Q.slotsBySignature, { run: run.id, signature })) {
 		for (const fill of fillsOf(ctx.db, slot.id)) {
 			if (fill.signature !== signature) continue;
-			ctx.db.run(Q.correctInSlot, { slot: slot.id, result: fill.id });
+			ctx.db.run(Q.discount, { slot: slot.id, result: fill.id, decision });
 			corrected.push([slot.id, fill.id]);
 		}
 		const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
@@ -983,9 +987,13 @@ export function discountFailures(ctx: Ctx, witness: Witness, run: RunRow, signat
 	return corrected;
 }
 
-export function restoreFailures(ctx: Ctx, pairs: readonly [number, number][]): void {
+/**
+ * Puts back the failing results the `mistaken` decision `decision` discounted, and only those: a result its
+ * producer has since corrected stays corrected, and one another decision discounted stays discounted.
+ */
+export function restoreFailures(ctx: Ctx, pairs: readonly [number, number][], decision: number): void {
 	for (const [slotId, result] of pairs) {
-		ctx.db.run(Q.uncorrectInSlot, { slot: slotId, result });
+		ctx.db.run(Q.undiscount, { slot: slotId, result, decision });
 		const slot = slotById(ctx.db, slotId);
 		const run = slot ? runById(ctx.db, slot.run) : null;
 		if (!slot || !run) continue;

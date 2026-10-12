@@ -579,7 +579,10 @@ CREATE TABLE slot_results (
 	result INTEGER NOT NULL REFERENCES results (id),
 	run INTEGER NOT NULL,
 	admitted TEXT NOT NULL CHECK (admitted IN ('exact', 'assumed', 'same-claim')),
+	-- set when the producer corrected this result with a later one (evidence about evidence: no decision)
 	corrected INTEGER NOT NULL DEFAULT 0,
+	-- STANDING (failure, answer `mistaken`): the decision that says this failing result does not count here
+	discounted_by INTEGER REFERENCES decisions (id),
 	PRIMARY KEY (slot, result)
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX slot_results_result ON slot_results (result);
