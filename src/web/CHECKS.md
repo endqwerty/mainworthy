@@ -126,7 +126,7 @@ ui-r4c reports. Only `src/web` and `test/e2e` are owned by this implementation
 worker. The lead retains commits, publishing and independent verification of
 the combined revision.
 
-Every reported cause has a browser regression in `test/e2e/round4.test.ts`.
+Every reported cause has a browser regression in `test/e2e/draft-conflicts.test.ts`, `queue-and-runs.test.ts` or `session-and-keys.test.ts`.
 The tests run the real Bun server and SQLite database, drive Chromium keys and
 clicks, hold or refuse requests at the browser, and inspect recorded values.
 The original regressions failed before their implementation changes. The
@@ -480,7 +480,7 @@ exports and logs under `/tmp` were removed after recording their evidence.
 
 R8-1 came from two live windows writing one existing-case device draft. Opening the editor changed its owner implicitly, and an older proposal reply could overwrite another window's text. Ownership now covers every draft. Opening claims only an absent owner's draft. "Take over here" is the only live handoff. Storage events synchronize the body, conflict and owner. Device writes, removals, proposal sends and conflict merges check the stored owner when they run.
 
-`test/e2e/round8.test.ts` checks both reported orders with real proposal replies held by Playwright routes, visible input refusal, complete text on takeover, a read-only former owner sending nothing, simultaneous keys, sequential takeovers, closed-tab recovery, and conflict-card ownership. It also checks a takeover before its storage event, a held conflict reply after takeover, two clean editors racing their first key, and a stored takeover before a conflict-card change. Before implementation, the original seven tests produced `1 pass`, `6 fail`. The failing assertions showed a writable second editor and card, absent refusal, and an unguarded stored ownership change. Closed-tab recovery already passed.
+`test/e2e/draft-ownership.test.ts` checks both reported orders with real proposal replies held by Playwright routes, visible input refusal, complete text on takeover, a read-only former owner sending nothing, simultaneous keys, sequential takeovers, closed-tab recovery, and conflict-card ownership. It also checks a takeover before its storage event, a held conflict reply after takeover, two clean editors racing their first key, and a stored takeover before a conflict-card change. Before implementation, the original seven tests produced `1 pass`, `6 fail`. The failing assertions showed a writable second editor and card, absent refusal, and an unguarded stored ownership change. Closed-tab recovery already passed.
 
 Earlier checks now assert the ownership contract:
 
