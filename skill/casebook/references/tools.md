@@ -160,7 +160,7 @@ Record a review: the cases you read (`reviewed`, as C-311@hash) and your finding
 
 ## decide
 
-Answer a question from `inbox`. Pass the `evidenceHash` you saw as `onEvidence`. Reply status: decided, advised (recorded; a person decides), conflict (evidence changed) or forbidden. Failure answers: {"is":"defect"|"test"|"expected"|"flaky"|"infra"}.
+Answer a question from `inbox`. Pass the `evidenceHash` you saw as `onEvidence`. Reply status: decided, advised (recorded; a person decides), conflict (evidence changed) or forbidden. Failure answers: defect, test, expected, flaky, infra, and where the question's `answers` lists them, inherited and mistaken.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -193,7 +193,7 @@ List open questions (failures, proposals, findings, unlinked tests) with their e
 
 ## get
 
-Read things by ref (C-, Q-, R-, T-). For cases use `as: "md"` and `fields` to read less, and `unless: {ref: hash}` to skip what you already hold.
+Read things by ref (C-, Q-, R-, T-, P-). For cases use `as: "md"` and `fields` to read less, and `unless: {ref: hash}` to skip what you already hold.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |

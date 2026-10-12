@@ -16,7 +16,10 @@ import {
 import { Automate, CaseBody, MethodKind } from "./model.ts";
 import { Obligation, TargetMatch, type Verdict } from "./runs.ts";
 
-/** A client-generated id. Sending the same command twice returns the first reply and writes nothing. */
+/**
+ * A client-generated id that names one request. Sent again unchanged, it returns the first reply and writes
+ * nothing; sent again with other content, it is refused with `conflict`.
+ */
 const cmd = z
 	.string()
 	.min(8)

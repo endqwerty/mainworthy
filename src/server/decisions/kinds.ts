@@ -302,8 +302,8 @@ function folderFor(file: string): string {
 }
 
 /**
- * The runs a question is about: every run it names, whether or not it holds them back. A decision on a failure
- * changes how those runs count the failure even where policy lets the run proceed.
+ * The runs a question is about: the runs it lists as waiting for it and every run it names. A decision on a
+ * failure changes how each of them counts the failure.
  */
 export function runsAbout(ctx: Ctx, question: QuestionRow): number[] {
 	const ids = new Set(json<number[]>(question.blocks));

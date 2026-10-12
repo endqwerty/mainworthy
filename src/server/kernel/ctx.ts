@@ -86,7 +86,10 @@ export function insertProject(db: Db, input: { org: number; key: string; name: s
 	return row;
 }
 
-/** The stored reply of a command that already ran, or null. A retry returns it and writes nothing. */
+/**
+ * The stored request and reply of a command that already ran, or null. A retry of the same request returns the
+ * reply and writes nothing; the same id with other content is refused.
+ */
 export const findCommand = (db: Db, id: string) => db.get(Q.command, { id });
 
 /**
@@ -110,7 +113,7 @@ export function recordInstanceCommand(
 	});
 }
 
-/** Records that a command ran, with its reply, so a retry of the same id is a no-op. */
+/** Records that a command ran, with its request and its reply, so a retry of the same request is a no-op. */
 export function recordCommand(ctx: Ctx, input: { id: string; op: string; outcome: unknown; request: string }): void {
 	ctx.db.run(Q.insertCommand, {
 		id: input.id,

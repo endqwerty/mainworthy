@@ -17,7 +17,8 @@ GitHub milestone `Backlog to 1.0`. How it fits together: `docs/architecture.md`.
 ## Stack rules
 
 - **Commands.** `bun install`; `bun run check` (type-check, lint, every test
-  including the budgets and the browser tests); `bun run dev` (the server on
+  including the budgets and the browser tests, which are skipped, with a
+  message, on a machine with no Chromium); `bun run dev` (the server on
   `127.0.0.1:7357`, restarting on change). Bun 1.4; no other runtime or build tool.
 - **One registry.** A capability is an operation in `src/server/ops/index.ts`. HTTP,
   the OpenAPI document, the CLI, the MCP tools and the web client come from it. Never
@@ -27,7 +28,10 @@ GitHub milestone `Backlog to 1.0`. How it fits together: `docs/architecture.md`.
   decision witness. Fix the design, not the test.
 - **Standing changes only through a decision.** Anything that is "current" (a case's
   head, a link, an excuse, a closed run, the policy) is written by a function that
-  takes a `Witness`. Do not add a writer without one.
+  takes a `Witness`. Do not add a writer without one. Four functions put back what
+  a withdrawn or ended decision did (`restoreLink`, `dropExcuse`, `reopenRun`,
+  `restoreFailures`) and take no witness: the withdrawal is the recorded event,
+  and a test allows only the kind handlers to call them.
 - **`src/core` is pure** and runs in the browser and the server. No I/O, no Node or
   Bun APIs. `src/web` imports only `src/core`.
 - **SQL** is declared with `sql()` in the module that owns the table (the owner of

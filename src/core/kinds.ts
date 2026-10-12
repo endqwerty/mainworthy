@@ -41,7 +41,10 @@ export const FailureAnswer = z.discriminatedUnion("is", [
 	// excused: recorded, not blocking
 	z.object({ is: z.literal("flaky") }),
 	z.object({ is: z.literal("infra") }),
-	/** Already failing on the base of the change with the same cause; not this change's doing. */
+	/**
+	 * Already failing on the base of the change with the same cause; not this change's doing. A person's answer
+	 * for the build they were looking at: no rule gives it, and the next commit is asked about again.
+	 */
 	z.object({ is: z.literal("inherited") }),
 	/** A disputed slot: the failing result was a mistake and the passing one stands. */
 	z.object({ is: z.literal("mistaken") }),
@@ -129,7 +132,7 @@ export const ANSWER_LABELS: Record<string, string> = {
 
 /**
  * What each answer does, in one sentence, shown beside its key so nobody has to stop and work out what a key
- * will do before pressing it. Declared here once; the queue and the CLI both print it.
+ * will do before pressing it. Declared here once; the queue prints it.
  */
 export const ANSWER_HELP = {
 	adopt: {
@@ -201,6 +204,8 @@ export function applicableAnswers(kind: Kind, facts: ReadonlySet<string>): strin
 /**
  * Who must answer a question.
  * - `rule`: the policy answers at once with the clause's `answer`, and the decision is recorded like any other.
+ *   Once a person has answered the question otherwise, the rule does not answer it again when that answer ends:
+ *   a person is asked until a person gives the rule's answer.
  * - `member`: an actor with the `answer` capability.
  * - `admin`: an actor with the `admin` capability.
  * - `author`: the author of the proposal the question is about (a conflict only its author can resolve).
@@ -238,7 +243,10 @@ export const Predicate = z.union([
 ]);
 export type Predicate = z.infer<typeof Predicate>;
 
-/** What an open question holds back: nothing, the gate of its change, a release (planned run), or both. */
+/**
+ * How urgent an open question is and which runs it lists: nothing, the gate of its change, a release (planned
+ * run), or both. It does not decide a verdict (see `retally`).
+ */
 export const Blocks = z.enum(["nothing", "change", "release", "all"]);
 export type Blocks = z.infer<typeof Blocks>;
 

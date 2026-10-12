@@ -88,7 +88,7 @@ export type Raise = {
 	facts: readonly string[];
 	/** Things the question is about: `C-311`, `R-4`, `T-12`, `pr:482`. */
 	refs: readonly string[];
-	/** Runs an open question of this kind may hold back, subject to the clause. */
+	/** Runs the question may list as waiting for it, as far as the clause's `blocks` allows. It decides no verdict. */
 	runs: readonly Pick<RunRow, "id" | "origin">[];
 	/** The target this occurrence was seen on, for decisions that hold for one target only. */
 	target?: number;
@@ -136,7 +136,8 @@ function blockedRuns(blocks: Blocks, runs: Raise["runs"]): number[] {
  * nothing: opens a question; a decision that still holds for this occurrence: carries the answer forward (no new
  * question); an open question: attaches the occurrence; otherwise asks again, with the old answer linked. A
  * decision that no longer holds is withdrawn on the way, and every run that rested on it is recomputed. If the
- * policy's clause for the question is a rule, the rule answers at once and the decision is recorded like any other.
+ * policy's clause for the question is a rule, the rule answers at once and the decision is recorded like any
+ * other, unless a person withdrew its answer on this evidence or answered against it (`heldOpen`, `overruled`).
  *
  * A cause can have more than one answer in force. One that holds for certain targets (an infrastructure failure
  * in one environment) leaves the cause open elsewhere, where it is asked and answered on its own. So every
@@ -168,13 +169,13 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 	}
 	// A decision that covers certain targets still stands on those when the cause turns up on another one: the
 	// new occurrence is asked about, and what was decided where it was decided is left as it is. Any other way
-	// of no longer holding (the evidence changed, the time ran out, a fact is gone) withdraws its standing.
+	// of no longer holding (the evidence changed, the time ran out) withdraws its standing.
 	const rested: number[] = [];
 	let ended: QuestionRow | null = null;
 	for (const { question, decision } of standing) {
 		// An answer given for certain targets is judged only by what is reported about those targets. The same
-		// cause on another commit, with other facts (not disputed there), says nothing about it: without this, an
-		// answer for one commit and a failure on another could undo each other for ever.
+		// cause on another commit says nothing about it: without this, an answer for one commit and a failure on
+		// another could undo each other for ever.
 		const here = json<HoldTerm[]>(decision.holds).find((term) => term.until === "this-target");
 		if (here?.until === "this-target" && (r.target === undefined || !here.targets.includes(r.target))) continue;
 		if (stillHolds(decision, occurrence, { anyTarget: true })) continue;
@@ -243,8 +244,8 @@ export function openFor(db: Db, project: number, fingerprint: string, target: nu
 const seenHash = (basis: string, target: number | undefined): string => contentHash({ basis, target: target ?? null });
 
 /**
- * Records in the ledger that a decision stopped holding (its time ran out, or the evidence it stood on changed)
- * and that its question was asked again. The row is signed by the rule actor and supersedes the decision; the
+ * Records in the ledger that a decision stopped holding (its time ran out, the evidence it stood on changed, or
+ * another answer took its place) and that its question was asked again. The row is signed by the rule actor and supersedes the decision; the
  * question then points at it, so the timed sweep does not find the old decision and reopen a question that has
  * already been asked again, and the next answer's chain runs through it.
  */
@@ -805,7 +806,8 @@ export function raiseFailure(
 			branch: target.branch,
 			hints: shown.map((hint) => hint.slice(5)),
 			producers: [...new Set([...(earlier.producers ?? []), input.by])],
-			// Every target this question has seen the cause on: an answer that holds "here only" covers these.
+			// Every target this question has seen the cause on. An answer that holds "here only" covers the
+			// latest of them; the others of that commit are asked about again.
 			targets: [...new Set([...(earlier.targets ?? []), target.id])],
 			sample: group.results[0] ?? null,
 		},

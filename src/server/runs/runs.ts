@@ -691,8 +691,9 @@ export function failuresShown(ctx: Ctx, run: RunRow): { group: FailingGroup; tar
 
 /**
  * Every run that shows a cause: the runs of the commits that fail with it, the newest and the older ones, and
- * the planned runs with a slot that shows it. (Not narrowed to a scope: a commit's run can hold results of two.) A decision about the cause changes how each of them counts
- * it, so each is recomputed when the decision is made: the gate of any commit is exact, not only the newest's.
+ * the planned runs with a slot that shows it. (Not narrowed to a scope: a planned run can hold results of two.)
+ * A decision about the cause changes how each of them counts it, so each is recomputed when the decision is made:
+ * the gate of any commit is exact, not only the newest's.
  */
 export function runsShowing(db: Db, project: number, signature: number): number[] {
 	return [...db.all(Q.commitsShowing, { project, signature }), ...db.all(Q.plannedShowing, { project, signature })].map(
@@ -898,9 +899,8 @@ export function newestInScope(db: Db, project: number, scope: string): RunRow | 
 
 /**
  * The scope in which a failure seen on this target is answered, for this run: the target's own (its pull request,
- * its line, or the run it was typed into). A commit has one run but can be reported on two lines (a pull
- * request's head that reaches trunk): each result is then answered where it was reported, never by the other
- * line's answer.
+ * its line, or the run it was typed into). Every target of a commit shares the scope the commit was first
+ * reported in; a planned run that counts one commit in two repositories has one scope for each.
  */
 const scopeIn = (db: Db, run: RunRow, target: number): string => scopeOf(mustTarget(db, target), run.id);
 

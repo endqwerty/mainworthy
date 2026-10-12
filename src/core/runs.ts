@@ -3,7 +3,11 @@
 import { z } from "zod";
 import { MethodKind } from "./model.ts";
 
-/** Which targets count toward a run. `self` counts only results typed into the run; it proves nothing about a build. */
+/**
+ * Which targets count toward a run: one commit, or `self`. `self` counts only results typed into the run; it
+ * proves nothing about a build. The server settles an abbreviated hash when the run is planned, so a stored
+ * `commit` is the whole hash.
+ */
 export const TargetMatch = z.union([
 	z.object({ commit: z.string().min(7), repo: z.string().optional(), env: z.string().optional() }),
 	z.object({ self: z.literal(true) }),
@@ -23,7 +27,10 @@ export const Obligation = z.discriminatedUnion("kind", [
 		minActors: z.union([z.literal(1), z.literal(2)]),
 		basis: BasisRule,
 	}),
-	/** Named CI jobs must each have an applied report on the run's target. */
+	/**
+	 * Named CI jobs must each have an applied report on the run's target: a pipeline's report that ran something,
+	 * not an agent's and not one of skips only. A `self` run cannot require a job.
+	 */
 	z.object({ id: z.string(), kind: z.literal("jobs"), jobs: z.array(z.string()).min(1) }),
 ]);
 export type Obligation = z.infer<typeof Obligation>;
@@ -143,7 +150,8 @@ const decides = (outcome: string): boolean => outcome === "pass" || outcome === 
 
 /**
  * The one rule for which result of a lane counts (a lane is one producer's results for one test from one job on
- * one target), read in the order they arrived. A commit's gate and a slot both use it, so they cannot disagree.
+ * one target), read in the order they arrived. A slot is folded by this function; a commit's gate applies the
+ * same rule as the condition of one SQL statement on a report, and `test/sequences.test.ts` checks the two agree.
  * A newer attempt is the producer running it again: it takes the place of the attempt before it, unless it
  * decided nothing (a skip, a blocked result) and the earlier one did. The same attempt reported twice is not a
  * re-run: the worse outcome stands, and a producer that was wrong says so with a correction. An older attempt
@@ -214,8 +222,10 @@ export type Admitted = "exact" | "assumed" | "same-claim";
  * The acceptance rule: does this result count toward this slot? Returns the rule that admitted it, or null.
  * 1. Basis: exact at the pinned version; or assumed at that version when the obligation allows it; or another
  *    version with the slot's claim hash when the obligation allows `same-claim`.
- * 2. Method: named by the obligation and declared by the case. A manual-only case is never filled by a test,
- *    and an agent's result counts only where a run asked for it.
+ * 2. Method: named by the obligation, and admitted by the case. A person and an agent are admitted when the
+ *    case declares them; an automated test is admitted by its link or annotation (the caller adds `auto`), so
+ *    whether a test fills the slot is the obligation's choice. An agent's result counts only where a run asked
+ *    for it.
  * The target match (the run accepts the result's target) is checked by the caller, which knows the targets.
  */
 export function qualifies(input: {

@@ -467,11 +467,11 @@
       "sources": [
         {
           "path": "src/server/decisions/decisions.ts",
-          "label": "settle: insertDecision; mintWitness"
+          "label": "claimMint; settle: insertDecision; mintWitness"
         },
         {
           "path": "src/server/kernel/witness.ts",
-          "label": "Witness; mintWitness"
+          "label": "Witness; claimMint"
         },
         {
           "path": "src/server/decisions/kinds.ts",
@@ -899,8 +899,8 @@
       "title": "An upload keeps reads responsive",
       "items": [
         "reportSteps commits acceptance first. outstanding makes each affected gate pending.",
-        "processBatchSteps applies the batch in one second transaction. SLICE is 500; a yield keeps that transaction open.",
-        "invokeAsync yields to the event loop. app.reader sees committed snapshots while app.gate queues other writes.",
+        "processBatchSteps applies the batch in one second transaction. SLICE is 200; a yield keeps that transaction open.",
+        "invokeAsync yields to the event loop. Reader threads see committed snapshots while app.gate queues other writes.",
         "The container stores casebook.db in casebook-data at /data. The React UI runs in the browser."
       ]
     }

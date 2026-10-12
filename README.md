@@ -13,7 +13,7 @@ tracked in the GitHub milestone *Backlog to 1.0* (one page of it: issue #64).
 $ bun install
 $ bun run start
 Casebook 0.1.0 · local · data in ~/.casebook · http://127.0.0.1:7357
-project "scratch" · you are daniel · policy: loose
+project "scratch" · you are daniel@this-machine · policy: loose
 ```
 
 Open the URL. On your own machine you are signed in as the owner with no step.
@@ -38,7 +38,8 @@ $ casebook gate            # exit 0 passed · 1 failed · 2 blocked · 3 pending
 ```
 
 In CI it is the same two lines; the commit, branch, pull request and attempt come from the environment. This
-repository does it to itself in [.github/workflows/check.yml](.github/workflows/check.yml).
+repository does it to itself in [.github/workflows/check.yml](.github/workflows/check.yml). Outside CI the commit
+comes from the Git checkout; with neither, pass `--commit`. An error exits 4.
 
 `casebook` here is `bun src/cli/main.ts`, or the single executable from `bun run build`.
 
@@ -46,8 +47,8 @@ repository does it to itself in [.github/workflows/check.yml](.github/workflows/
 
 `g q` opens the queue. Each row is a question with its evidence, and each answer is one key with its
 consequence written beside it: `d` defect, `f` flaky, `i` infrastructure, `e` expected. Your answer is recorded
-with your name and applies to later occurrences of the same cause until the evidence changes. `u` undoes; both
-decisions stay in the ledger.
+with your name. `d` and `e` apply to later occurrences of the same cause until they are withdrawn or replaced,
+`f` for 14 days, and `i` excuses that build only. `u` undoes; both decisions stay in the ledger.
 
 ## Run things by hand
 
@@ -91,7 +92,7 @@ $ casebook export --out casebook.ndjson.gz     # every fact, decision and docume
 
 | Command | What |
 | --- | --- |
-| `bun run check` | type-check, lint and every test, including the latency budgets and the browser tests |
+| `bun run check` | type-check, lint and every test, including the latency budgets and the browser tests (skipped, with a message, on a machine with no Chromium) |
 | `bun run dev` | the server on `127.0.0.1:7357`, restarting on change |
 | `bun bench/run.ts` | the benchmark on 100,000 cases and 1,000,000 results (`--quick` for a small one) |
 | `bun bench/external.ts <dataset>` | reads, reports and saves under load, with the load generator in its own process |

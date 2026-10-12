@@ -62,8 +62,10 @@ an operation named like a shortcut (`createCase`, `closeRun`) appears.
 
 `invoke` does the same things for every operation: parse the input at the boundary, check the capability, and
 for a write, open a transaction, give the command the project's next **sequence number**, run it, record the
-command id so a retry returns the same reply and writes nothing, commit, and publish what changed. A read runs on
-a reader thread with its own read-only connection, so a long write does not hold it up; a write waits its turn at
+command id, commit, and publish what changed. A command id names one request: sent again unchanged it gets the
+first reply and writes nothing; sent again with other content it is refused. A report is the one command that
+commits twice, and it takes a sequence number for each transaction (see the red build below). A read runs on a
+reader thread with its own read-only connection, so a long write does not hold it up; a write waits its turn at
 one gate, because the file has one writer.
 
 ## The record
@@ -79,7 +81,8 @@ one gate, because the file has one writer.
   Withdrawing a decision undoes only what that decision made. (The four writes that look like standing and are
   not are listed in decision 0012.)
 - **One clock per project.** Every command gets the next sequence number, in commit order, and stamps its rows
-  with it. "What changed since I last looked" is one range read; the cursor an agent passes back is that number.
+  with it (a report gets two, one for each of its transactions). "What changed since I last looked" is one range
+  read; the cursor an agent passes back is that number.
 
 ## What happens when a pipeline reports (the red build)
 
@@ -99,7 +102,7 @@ one gate, because the file has one writer.
 5. **Raise**: one `failure` question per cause, in the scope of the pull request, the trunk or the run. If that
    cause already has a decision that still holds, the answer is carried forward and nobody is asked. If the
    failure already fails on the commit the change started from, the question says so, as a hint for the person
-   who answers.
+   who answers; nothing is excused by the hint and no answer stands on it.
 6. **Verdict**: `passed`, `failed` (a decision attributed a failure to this commit: it needs a fix), `blocked`
    (a failure nobody has explained, or a dispute: it needs a decision) or `pending` (evidence is missing, or
    nothing was proven at all).
@@ -111,9 +114,13 @@ one gate, because the file has one writer.
 
 ## Runs
 
-A run does not own results. It says which targets count (a commit, or only what is typed into it) and what it
-needs (obligations). A **change run** exists per commit and counts tests. A **planned run** pins each selected
-case at its current version in a **slot**. A result fills a slot when three things hold. Its basis names that
+A run does not own results. It says which targets count (one commit, or only what is typed into it) and what it
+needs (obligations). A **change run** exists per commit that a pipeline or a person has reported, and counts
+tests. A commit only an agent has reported has no run and no gate to read (`pending`, nothing counted), and an
+agent's report never moves a change's head. A **planned run** pins each selected case at its current version in
+a **slot**, and counts its commit by the whole hash: an abbreviated hash is settled when the run is planned (the
+one reported commit that starts with it, a refusal when two do, the text itself when none does). A result fills
+a slot when three things hold. Its basis names that
 case at that version (or, where the run allows it, another version whose steps and expected results are the
 same). Its method is one the run asked for. And the case, at the pinned version, admits that method: people and
 agents are declared on the case; an automated test is admitted by its link or annotation, and whether a test may
@@ -122,19 +129,29 @@ slot that asks for a person is not filled by a test, and an agent's result count
 agents and the case declares it. A fail from one producer beside a pass from another is `disputed` until a person
 decides; a later write, another test's pass or an older attempt never hides a failure.
 
+A run can also require named jobs. A job is met by a pipeline's report that ran something: not by an agent's
+report under the job's name, and not by a report of skips only. A run that counts only what is typed into it
+cannot require a job. A closed run keeps what it was closed on; reopened, it counts the evidence as it is now,
+so corrections, `mistaken` decisions and results that arrived while it was closed reach it.
+
 ## Policy
 
 A project's strictness is a table of clauses: for a kind of question under some conditions, who must answer
-(a rule, a member, an admin, the author), what an agent's answer is worth (counted, advice, refused), and what
-an open question holds back. `loose`, `standard` and `strict` are three such tables over the same data; a
-project switches between them without a migration, and the switch is itself a proposal and a decision.
+(a rule, a member, an admin, the author) and what an agent's answer is worth (counted, advice, refused). A
+clause also carries `blocks`, which orders the queue and says which runs a failure question lists. It does not
+decide a gate: a failure nobody has explained blocks every run that shows it under every policy, and no other
+kind of question blocks a run. Once a person has answered a question against what a rule's clause answers, the
+rule does not answer it again when that answer ends: a person is asked until a person gives the rule's answer.
+`loose`, `standard` and `strict` are three such tables over the same data; a project switches between them
+without a migration, and the switch is itself a proposal and a decision.
 
 ## The web UI
 
 `src/web` is a React app that imports only `src/core`. It keeps a draft of what you type on your device as you
 type it, shows every change on the frame of the keypress and reconciles with the server in the background, and
 refetches what the server's change stream says was touched. The answer keys in the queue, their labels and the
-sentence beside each come from one map in `src/core/kinds.ts`, which the CLI prints too.
+sentence beside each come from three maps in `src/core/kinds.ts` (`ANSWER_KEYS`, `ANSWER_LABELS`,
+`ANSWER_HELP`).
 
 ## Rules the code enforces on itself
 

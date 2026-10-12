@@ -78,7 +78,7 @@
       "sources": [
         {
           "path": "src/server/kernel/app.ts",
-          "label": "app.db; app.reader; app.gate"
+          "label": "app.db; app.readers; app.gate"
         },
         {
           "path": "src/server/kernel/db.ts",
@@ -213,7 +213,7 @@
       "from": "ops",
       "to": "db",
       "y": 513,
-      "label": "app.reader.snapshot",
+      "label": "reader thread: snapshot",
       "variant": "default"
     },
     {
@@ -466,7 +466,7 @@
       "items": [
         "The commit run counts the effective result per test in run_tests, including tests without cases.",
         "An open planned run accepts the commit before a result can fill one of its pinned slots. qualifies checks the case, version or claim, basis and method.",
-        "A slot that requires human is not filled by auto. Agent results count only when both the obligation and the case name agent."
+        "A slot that requires human is not filled by auto. Agent results count only when both the obligation and the case name agent, and never in a commit's gate."
       ]
     },
     {
@@ -474,8 +474,8 @@
       "title": "The open-question path shown here",
       "items": [
         "raise attaches to an open question instead of creating another. A decided question carries forward only while stillHolds is true.",
-        "When the same cause fails on the base commit the change names, the question shows that as a hint. No rule answers on it; a person may answer inherited for that build.",
-        "Carried or rule answers may remove the need for the human steps. The shown path has a new unexplained cause, so gate is blocked.",
+        "When the same cause fails on the base commit the change names, the question shows that as a hint. No rule answers on it and no answer stands on it; a person may answer inherited for that build.",
+        "A carried answer removes the need for the human steps; no preset answers a failure by rule. The shown path has a new unexplained cause, so gate is blocked.",
         "An agent answer returns advised. toItem exposes current-evidence advice; the question stays open and the gate stays blocked."
       ]
     },

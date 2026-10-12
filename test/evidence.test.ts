@@ -109,11 +109,11 @@ describe("a red report", () => {
 	test("an answer on evidence that has changed is a conflict, with the new evidence", () => {
 		h.call("report", ciReport({ commit: "eeeeeee1", pr: 7, branch: "fix", n: 3, fail: { 0: "boom" } }));
 		const seen = first(queue().items);
-		// the same cause now also disputes nothing but gains a hint: fails on base
+		// trunk fails the same way, then the change gets a newer build
 		h.call("report", ciReport({ commit: "0000000a", n: 3, fail: { 0: "boom" } })); // trunk now fails the same way
 		h.call("report", ciReport({ commit: "eeeeeee2", pr: 7, branch: "fix", n: 3, fail: { 0: "boom" } }));
 		const reply = h.raw("decide", { q: seen.q, onEvidence: seen.evidenceHash, answer: { is: "flaky" } });
-		// in a loose project the rule has already excused it as inherited, so the stale answer cannot land
+		// a newer build has arrived since the answer was prepared, so it is a conflict
 		expect(reply.ok && (reply.result as { status: string }[])[0]?.status).toBe("conflict");
 	});
 

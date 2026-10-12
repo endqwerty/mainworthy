@@ -97,8 +97,8 @@ export type Call = {
 
 /**
  * Runs one operation: validates the input at the boundary, checks the capability, and for a write wraps the work
- * in a transaction that is idempotent on the command id and stamped with one sequence number. After each commit
- * it publishes what changed. Written as a generator so one body serves both drivers below: it yields wherever the
+ * in a transaction that is idempotent on the command id and stamped with one sequence number (a report commits
+ * twice and takes a number for each transaction). After each commit it publishes what changed. Written as a generator so one body serves both drivers below: it yields wherever the
  * operation says other requests may be served.
  */
 function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Generator<void, Reply, void> {
@@ -238,7 +238,8 @@ export function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, call: Cal
 const nextTick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 /**
- * Runs one operation as a server does. A read runs at once on the reader connection. A write waits its turn at
+ * Runs one operation as a server does. A read goes to a reader thread, which has its own read-only connection
+ * (with no reader threads it runs at once on the one reader connection). A write waits its turn at
  * the gate (one writer at a time, and nobody blocks the thread to wait), then runs; where the operation pauses,
  * the event loop serves whatever else has arrived. Every surface calls this and nothing else.
  */

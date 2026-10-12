@@ -40,7 +40,7 @@ The process runs as an unprivileged user (uid 10001). The health check is `caseb
 4. **Network:** either give the service a domain (Coolify's proxy terminates TLS and forwards to port 7357), or
    keep it off the public internet and reach it over the tailnet with a Tailscale sidecar, the way the other
    tailnet-only app on that host is set up. Casebook holds test evidence and tokens: prefer the tailnet until
-   accounts and sign-in rate limiting exist (#30).
+   accounts exist (#30) and sign-in is rate limited (no issue yet).
 5. **Health check:** path `/healthz`, port 7357. The image also declares its own.
 6. Deploy. Read the log for the owner token if you did not set one.
 
@@ -56,8 +56,10 @@ The data is `/data/casebook.db` (with `-wal` and `-shm` beside it while running)
 
 - **Backup:** `casebook export --out /backup/casebook-$(date +%F).ndjson.gz` writes every fact, decision and
   document as text, from a consistent snapshot, while the server runs. Tokens are not exported.
-- **Restore:** start an empty instance and run `casebook import <file>`. A test does exactly this and compares
-  every table (`src/server/transfer/transfer.test.ts`).
+- **Restore:** start an empty instance, run `casebook import <file>` before creating any token, then restart the
+  server with `CASEBOOK_OWNER_TOKEN` set. The import replaces the instance's first rows, the owner's token among
+  them, so the token you imported with stops working until the restart. A test imports into an empty instance
+  and compares every table (`src/server/transfer/transfer.test.ts`).
 - **Upgrade:** a new image migrates the database on start. Before it changes a database that holds data, it
   writes a copy beside it (`casebook.db.v<N>.bak`); to go back, stop the container, put that copy in place of
   `casebook.db`, and start the previous image.
