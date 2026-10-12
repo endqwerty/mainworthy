@@ -1,0 +1,14 @@
+{
+	"GITHUB_ACTIONS": "true",
+	"GITHUB_EVENT_NAME": "pull_request_target",
+	"GITHUB_SHA": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	"GITHUB_REF": "refs/heads/main",
+	"GITHUB_HEAD_REF": "feature/coupon",
+	"GITHUB_BASE_REF": "main",
+	"GITHUB_REPOSITORY": "acme/web",
+	"GITHUB_SERVER_URL": "https://github.acme.example",
+	"GITHUB_RUN_ID": "814",
+	"GITHUB_RUN_ATTEMPT": "3",
+	"GITHUB_JOB": "unit",
+	"GITHUB_EVENT_PATH": "/runner/event.json"
+}

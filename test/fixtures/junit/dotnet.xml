@@ -1,0 +1,9 @@
+<testsuites>
+  <testsuite name="Acme.Tests">
+    <testcase classname="Acme.Tests.CartTests" name="AddsItems(1,2)" time="0.008"/>
+    <testcase classname="Acme.Tests.CartTests" name="Disabled" status="disabled"/>
+    <testcase classname="Acme.Tests.CartTests" name="NotRun" status="notrun"/>
+    <testcase classname="Acme.Tests.CartTests" name="Unavailable"><error><![CDATA[System.InvalidOperationException: host unavailable
+  at Acme.Tests.CartTests.Unavailable()]]></error></testcase>
+  </testsuite>
+</testsuites>

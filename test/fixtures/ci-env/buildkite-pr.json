@@ -1,0 +1,12 @@
+{
+	"BUILDKITE": "true",
+	"BUILDKITE_COMMIT": "9f3c2ab111111111111111111111111111111111",
+	"BUILDKITE_BRANCH": "feature/coupon",
+	"BUILDKITE_REPO": "https://github.com/acme/web.git",
+	"BUILDKITE_PULL_REQUEST": "482",
+	"BUILDKITE_PULL_REQUEST_BASE_BRANCH": "main",
+	"BUILDKITE_LABEL": "Browser tests",
+	"BUILDKITE_STEP_KEY": "e2e",
+	"BUILDKITE_RETRY_COUNT": "2",
+	"BUILDKITE_BUILD_URL": "https://buildkite.com/acme/web/51"
+}

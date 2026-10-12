@@ -1,0 +1,12 @@
+{
+	"GITHUB_ACTIONS": "true",
+	"GITHUB_EVENT_NAME": "push",
+	"GITHUB_SHA": "9f3c2ab111111111111111111111111111111111",
+	"GITHUB_REF": "refs/heads/feature/coupon",
+	"GITHUB_REF_NAME": "feature/coupon",
+	"GITHUB_REPOSITORY": "acme/web",
+	"GITHUB_SERVER_URL": "https://github.com",
+	"GITHUB_RUN_ID": "812",
+	"GITHUB_RUN_ATTEMPT": "2",
+	"GITHUB_JOB": "e2e"
+}

@@ -1,0 +1,7 @@
+<testsuite name="com.acme.CheckoutTest">
+  <properties><property name="java.version" value="25"/></properties>
+  <testcase classname="com.acme.CheckoutTest" name="checkoutWorks" time="0.1"><failure type="java.lang.AssertionError">
+Expected successful checkout
+at com.acme.CheckoutTest.checkoutWorks(CheckoutTest.java:19)</failure></testcase>
+  <system-err><![CDATA[<failure message="not a test failure"/>]]></system-err>
+</testsuite>
