@@ -570,6 +570,9 @@ test("an empty CASEBOOK_URL, CASEBOOK_TOKEN or CASEBOOK_PROJECT is the same as n
 		const health = await cli(["health", "--json"], { env: { ...empty, CASEBOOK_PORT: new URL(instance.url).port } });
 		expect(health.stderr).toBe("");
 		expect(JSON.parse(health.stdout)).toMatchObject({ healthy: true });
+		// An empty port is no port either: the built-in one, whether or not anything listens there.
+		const port = await cli(["health", "--json"], { env: { ...empty, CASEBOOK_PORT: "" } });
+		expect(JSON.parse(port.stdout)).toMatchObject({ url: "http://127.0.0.1:7357" });
 		// No token and no project named: the local session and the only project.
 		const inbox = await cli(["inbox", "--json", "{}", "--url", instance.url], { env: empty });
 		expect(inbox.stderr).toBe("");
