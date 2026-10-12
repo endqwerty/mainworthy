@@ -106,6 +106,9 @@ not the same things done worse.
    are recomputed); and each time a run is recomputed, every failure it shows unexplained is checked to have an open
    question, and is asked about if it has none (for an open planned run and for the newest commit of a scope).
    So no path that removes a question, an answer or a closed state can leave a live run blocked with nobody asked.
+   A decision about a cause recomputes every run that shows it, an older commit's included, so the gate of any
+   commit is exact. `test/sequences.test.ts` checks these rules after every step of random sequences of reports,
+   corrections, plans, answers, withdrawals and expiries.
 9. **The review basis is the case version plus the change key,** not the patch tree hash. A changed patch under
    the same pull request does not yet invalidate a review. Deferred (#49).
 10. **The export is the whole instance,** as newline-delimited JSON, imported into an empty instance. Per-project

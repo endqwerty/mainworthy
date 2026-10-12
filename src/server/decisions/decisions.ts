@@ -39,6 +39,7 @@ import {
 	runById,
 	runRef,
 	runsDependingOn,
+	runsShowing,
 	shownFailure,
 	unexplainedIn,
 	unexplainedShown,
@@ -187,7 +188,7 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 	// The runs that counted a failure as excused by a decision withdrawn above: an earlier commit of the change,
 	// a run planned on it, a run since closed. The question asked in its place names them, and they are recomputed
 	// now: none is left reading `passed` on an answer that no longer stands, or blocked with nobody asked.
-	if (rested.length > 0) {
+	if (rested.length > 0 || ctx.recompute.size > 0) {
 		const named = rested.flatMap((id) => {
 			const run = runById(ctx.db, id);
 			return run ? [runRef(run)] : [];
@@ -488,6 +489,13 @@ function settle(
 	const about = runsAbout(ctx, question);
 	if (Array.isArray(effects.reask) && effects.reask.length > 0) askAgain(ctx, question, effects.reask as number[]);
 	about.push(...answeredElsewhere(ctx, question, decision), ...rested);
+	// A decision about a failure changes how every run that shows the cause counts it, an older commit's run and
+	// a run the question never named included. Each is recomputed now, so none is left with yesterday's tally.
+	if (question.kind === "failure") {
+		const subject = json<{ signature?: number; scope?: string }>(question.subject);
+		if (subject.signature !== undefined && subject.scope !== undefined)
+			about.push(...runsShowing(ctx.db, ctx.project.id, subject.signature, subject.scope));
+	}
 	refold(ctx, [...about, ...(supersedes !== null ? runsDependingOn(ctx.db, supersedes) : [])]);
 	return { decision: { ...decision, effects: JSON.stringify(effects) }, effects };
 }
@@ -788,7 +796,10 @@ function askUnexplained(ctx: Ctx, run: RunRow): boolean {
  * question (which a rule may answer and so close the run).
  */
 export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveStale?: boolean } = {}): void {
-	for (const id of new Set(runIds)) {
+	// Runs whose counted results a decision changed on the way here (`ctx.recompute`) come along.
+	const ids = new Set([...runIds, ...ctx.recompute]);
+	ctx.recompute.clear();
+	for (const id of ids) {
 		const existing = runById(ctx.db, id);
 		if (!existing) continue;
 		let result = retally(ctx, id, blockersOf(ctx, existing));
@@ -824,6 +835,8 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 			runs: [],
 		});
 	}
+	// Anything a step above changed in turn.
+	if (ctx.recompute.size > 0) refold(ctx, [], options);
 }
 
 /** The open questions about a run, as the run fold needs them. */

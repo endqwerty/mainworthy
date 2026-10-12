@@ -1,0 +1,359 @@
+// Random sequences of the things people, pipelines and agents do, with the engine's invariants checked after
+// every step. The examples in `integrity.test.ts` each pin one path; this looks for the paths nobody thought of.
+// The idea and the first version are the independent reviewer's (round 6 of the engine review); this one adds
+// changes with a base, runs filled by hand, agents and a second policy.
+//
+// What must hold after every command, whatever came before:
+// 1. A failure a live run shows unexplained has an open question that lists its target and names the run, and the
+//    run's gate names that question. Live: an open planned run, or the run of the newest commit of a scope.
+// 2. What a commit's gate counts for a lane is the fold of that lane's history (uncorrected results, none judged
+//    a mistake) by the one lane rule.
+// 3. A run's stored tally is what its results and the excuses in force give now, for every commit, not only
+//    the newest.
+// 4. Every excuse belongs to a decision that is its question's current one; a decision in force that excused or
+//    attributed a failure still has its excuse.
+// 5. A run's stored verdict is the verdict of its stored tally and blocking questions.
+//
+// More seeds: CASEBOOK_SEQUENCE_SEEDS=500 bun test test/sequences.test.ts
+import { expect, test } from "bun:test";
+import { replacesInLane, type Tally, verdict } from "../src/core/runs.ts";
+import { sweep } from "../src/server/jobs.ts";
+import type { Actor } from "../src/server/kernel/ctx.ts";
+import { harness } from "./helpers.ts";
+
+const SEEDS = Number(process.env.CASEBOOK_SEQUENCE_SEEDS ?? 40);
+const STEPS = 80;
+
+type Row = Record<string, string | number | null>;
+type Problem = { seed: number; step: number; what: string; detail: unknown; last: unknown[] };
+
+function sequence(seed: number, preset: string): Problem | null {
+	let state = seed * 2654435761 + 1;
+	const rand = (n: number): number => {
+		state ^= state << 13;
+		state ^= state >>> 17;
+		state ^= state << 5;
+		return (state >>> 0) % n;
+	};
+	const pick = <T>(items: readonly T[]): T => items[rand(items.length)] as T;
+	const h = harness({ preset });
+	const rows = <T = Row>(sql: string, ...args: (string | number)[]): T[] => h.app.db.raw.query(sql).all(...args) as T[];
+	const trace: unknown[] = [];
+	const people: Actor[] = [h.owner, h.actor("second", "human", ["read", "produce", "answer", "plan"])];
+	const pipeline = h.actor("pipeline", "ci", ["read", "produce"]);
+	const agent = h.actor("explorer", "agent", ["read", "produce"]);
+	const rule = Number(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")[0]?.id ?? 0);
+	const command = (op: string, input: unknown, as: Actor = h.owner): void => {
+		const reply = h.raw(op, input, as);
+		trace.push({ op, input, as: as.name, reply: reply.ok ? "ok" : reply.error });
+	};
+
+	const scopeOf = (target: Row, run: number): string =>
+		target.line === "session"
+			? `run:${run}`
+			: target.change !== null
+				? `change:${target.change}`
+				: target.repo
+					? `line:${target.line}@${target.repo}`
+					: `line:${target.line}`;
+
+	const audit = (): { what: string; detail: unknown } | null => {
+		const runs = rows("SELECT * FROM runs");
+		const targets = new Map(rows("SELECT * FROM targets").map((target) => [Number(target.id), target]));
+		const open = rows(
+			`SELECT q.no, q.subject, q.evidence, group_concat(r.ref) AS refs FROM questions q
+			 LEFT JOIN question_refs r ON r.question = q.id WHERE q.state = 'open' AND q.kind = 'failure' GROUP BY q.id`,
+		);
+		const excuseOf = (project: number, signature: number, scope: string, target: number) =>
+			rows(
+				"SELECT class FROM excuses WHERE project = ? AND signature = ? AND scope = ? AND target IN (0, ?) ORDER BY decision DESC LIMIT 1",
+				project,
+				signature,
+				scope,
+				target,
+			)[0];
+
+		for (const run of runs) {
+			const id = Number(run.id);
+			// 1. Live runs and their unexplained failures.
+			const newest =
+				run.scope === null
+					? null
+					: Math.max(...runs.filter((other) => other.scope === run.scope).map((o) => Number(o.id)));
+			const live = run.origin === "planned" ? run.state === "open" : id === newest;
+			if (live) {
+				const causes =
+					run.origin === "change"
+						? rows<{ signature: number; target: number }>(
+								"SELECT DISTINCT signature, target FROM run_tests WHERE run = ? AND outcome IN ('fail', 'error')",
+								id,
+							)
+						: rows<{ causes: string }>("SELECT causes FROM slots WHERE run = ?", id).flatMap((slot) =>
+								(JSON.parse(slot.causes) as [number, number][]).map(([signature, target]) => ({ signature, target })),
+							);
+				for (const cause of causes) {
+					const target = targets.get(cause.target);
+					if (!target) return { what: "a cause on an unknown target", detail: cause };
+					const scope = typeof run.scope === "string" ? run.scope : scopeOf(target, id);
+					if (excuseOf(Number(run.project), cause.signature, scope, cause.target)) continue;
+					const asked = open.filter((question) => {
+						const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string };
+						const evidence = JSON.parse(String(question.evidence)) as { targets?: number[] };
+						return (
+							subject.signature === cause.signature &&
+							subject.scope === scope &&
+							(evidence.targets ?? []).includes(cause.target) &&
+							String(question.refs ?? "")
+								.split(",")
+								.includes(`R-${run.no}`)
+						);
+					});
+					if (asked.length === 0)
+						return { what: "a live run shows an unexplained failure nobody is asked about", detail: { run, cause } };
+					const blocking = JSON.parse(String(run.blocking)) as string[];
+					if (!asked.some((question) => blocking.includes(`Q-${question.no}`)))
+						return { what: "a run's gate does not name the question about its failure", detail: { run, cause } };
+				}
+			}
+
+			if (run.origin === "change") {
+				// 2. The commit's lanes against their history.
+				const current = rows("SELECT * FROM run_tests WHERE run = ?", id);
+				const history = rows<{ id: number; test: number; target: number; job: string; actor: number } & Row>(
+					`SELECT r.*, b.job FROM results r JOIN batches b ON b.id = r.batch JOIN targets t ON t.id = r.target
+					 WHERE t.what = ? AND t.project = ? AND r.method != 'agent'
+					   AND NOT EXISTS (SELECT 1 FROM results newer WHERE newer.corrects = r.id)
+					   AND NOT EXISTS (SELECT 1 FROM slot_results s WHERE s.result = r.id AND s.discounted_by IS NOT NULL)
+					 ORDER BY r.seq, r.ord`,
+					String(run.accepts_what),
+					Number(run.project),
+				);
+				const held = new Map<string, (typeof history)[number]>();
+				for (const next of history) {
+					const key = `${next.test}|${next.target}:${next.job}:${next.actor}`;
+					const before = held.get(key);
+					const fits =
+						!before ||
+						replacesInLane(
+							{ attempt: Number(before.attempt), outcome: String(before.outcome) },
+							{ attempt: Number(next.attempt), outcome: String(next.outcome) },
+						);
+					if (fits) held.set(key, next);
+				}
+				const actual = current.map((row) => `${row.test}|${row.lane}=${row.result}`).sort();
+				const expected = [...held].map(([key, row]) => `${key}=${row.id}`).sort();
+				if (JSON.stringify(actual) !== JSON.stringify(expected))
+					return {
+						what: "a commit's gate counts something other than its lanes' history",
+						detail: { run, actual, expected },
+					};
+
+				// 3. The stored tally against the results and the excuses in force.
+				const tally = { pass: 0, excused: 0, attributed: 0, unexplained: 0, missing: 0, disputed: 0, skipped: 0 };
+				for (const row of current) {
+					if (row.outcome === "pass") tally.pass++;
+					else if (row.outcome === "skip") tally.skipped++;
+					else if (row.outcome === "blocked") tally.missing++;
+					else {
+						const excuse = excuseOf(Number(run.project), Number(row.signature), String(run.scope), Number(row.target));
+						tally[excuse ? (excuse.class === "attributed" ? "attributed" : "excused") : "unexplained"]++;
+					}
+				}
+				const stored = JSON.parse(String(run.tally)) as Tally;
+				for (const key of Object.keys(tally) as (keyof typeof tally)[])
+					if (tally[key] !== stored[key])
+						return { what: "a run's stored tally is not what its results give", detail: { run, tally, stored } };
+			}
+
+			// 5. The stored verdict against the stored facts.
+			const facts = {
+				tally: JSON.parse(String(run.tally)) as Tally,
+				blocking: (JSON.parse(String(run.blocking)) as string[]).length,
+				outstanding: Number(run.outstanding),
+				expired: false,
+			};
+			if (verdict(facts) !== run.verdict)
+				return { what: "a run's stored verdict is not the verdict of its tally", detail: { run } };
+		}
+
+		// 4. Excuses and the decisions they belong to.
+		const orphans = rows(
+			`SELECT e.signature, e.scope, e.target, e.decision FROM excuses e
+			 JOIN decisions d ON d.id = e.decision JOIN questions q ON q.id = d.question
+			 WHERE q.state != 'decided' OR q.decision != d.id`,
+		);
+		if (orphans.length > 0) return { what: "an excuse outlived its decision", detail: orphans };
+		const bare = rows(
+			`SELECT q.no, d.id, d.answer FROM questions q JOIN decisions d ON d.id = q.decision
+			 WHERE q.kind = 'failure' AND q.state = 'decided' AND json_extract(d.effects, '$.class') IS NOT NULL
+			   AND NOT EXISTS (SELECT 1 FROM excuses e WHERE e.decision = d.id)`,
+		);
+		if (bare.length > 0) return { what: "an answer is in force with nothing to show for it", detail: bare };
+		return null;
+	};
+
+	try {
+		command("propose", {
+			edits: [
+				{ op: "create", body: { title: "One", methods: ["human", "agent"] } },
+				{ op: "create", body: { title: "Two", methods: ["human"] } },
+				{ op: "create", outline: "Spare" },
+			],
+		});
+		const commits = ["random01", "random02", "random03"];
+		for (let step = 0; step < STEPS; step++) {
+			const action = rand(100);
+			const cause = () => ({ failure: { message: pick(["cause a", "cause b"]) } });
+			if (action < 38) {
+				// A pipeline or a person reports one automated test on trunk, sometimes correcting an earlier result.
+				const index = rand(2);
+				const as = pick([pipeline, ...people]);
+				const target = { commit: pick(commits), branch: "main", env: pick(["prod", "staging"]) };
+				const outcome = pick(["fail", "fail", "pass", "skip", "blocked"]);
+				const result: Record<string, unknown> = {
+					test: { key: `test-${index}` },
+					annotation: { case: `C-${index + 1}`, version: 1 },
+					outcome,
+					...(outcome === "fail" ? cause() : {}),
+				};
+				if (rand(5) === 0) {
+					const earlier = rows<{ id: number }>(
+						`SELECT r.id FROM results r JOIN tests t ON t.id = r.test JOIN targets x ON x.id = r.target
+						 WHERE r.actor = ? AND t.key = ? AND x.commit_sha = ? AND x.env = ? AND r.run IS NULL`,
+						as.id,
+						`test-${index}`,
+						target.commit,
+						target.env,
+					);
+					if (earlier.length > 0) result.corrects = pick(earlier).id;
+				}
+				command("report", { target, job: pick(["a", "b"]), attempt: 1 + rand(4), results: [result] }, as);
+			} else if (action < 48) {
+				// A change with a base on trunk: failures can be inherited.
+				const index = rand(2);
+				const outcome = pick(["fail", "fail", "pass"]);
+				command(
+					"report",
+					{
+						target: {
+							commit: pick(["change01", "change02"]),
+							base: pick(commits),
+							pr: 7,
+							branch: "feature",
+							env: pick(["prod", "staging"]),
+						},
+						attempt: 1 + rand(3),
+						results: [
+							{
+								test: { key: `test-${index}` },
+								annotation: { case: `C-${index + 1}`, version: 1 },
+								outcome,
+								...(outcome === "fail" ? cause() : {}),
+							},
+						],
+					},
+					pipeline,
+				);
+			} else if (action < 54) {
+				// An agent reports: it never moves a commit's gate, and fills a slot only where asked.
+				const outcome = pick(["fail", "pass"]);
+				command(
+					"report",
+					{
+						target: { commit: pick(commits), branch: "main", env: "prod" },
+						attempt: 1 + rand(2),
+						results: [
+							{
+								test: { key: "test-0" },
+								annotation: { case: "C-1", version: 1 },
+								outcome,
+								...(outcome === "fail" ? cause() : {}),
+							},
+						],
+					},
+					agent,
+				);
+			} else if (action < 64) {
+				const accepts = pick([
+					{ commit: pick(commits) },
+					{ commit: pick(commits), env: pick(["prod", "staging"]) },
+					{ self: true },
+				]);
+				const methods = pick([["human", "auto"], ["human", "auto"], ["agent"], ["human", "auto", "agent"]]);
+				command("plan", {
+					name: `Plan ${step}`,
+					select: {},
+					accepts,
+					require: [{ id: "exercise", kind: "exercise", methods, basis: "exact-or-assumed", minActors: 1 }],
+				});
+			} else if (action < 72) {
+				// A person records a result by hand in an open run: two people on one case can dispute.
+				const planned = rows<{ no: number }>("SELECT no FROM runs WHERE origin = 'planned' AND state = 'open'");
+				if (planned.length > 0) {
+					const outcome = pick(["fail", "pass", "pass", "skip"]);
+					command(
+						"report",
+						{
+							run: `R-${pick(planned).no}`,
+							attempt: 1 + rand(2),
+							results: [
+								{
+									test: { case: `C-${1 + rand(2)}` },
+									outcome,
+									...(outcome === "fail" ? { note: pick(["cause a", "cause c"]) } : {}),
+								},
+							],
+						},
+						pick(people),
+					);
+				}
+			} else if (action < 94) {
+				const questions = rows<{ no: number; kind: string; state: string; evidence_hash: string }>(
+					"SELECT no, kind, state, evidence_hash FROM questions WHERE kind IN ('failure', 'signoff') AND state IN ('open', 'decided')",
+				);
+				if (questions.length > 0) {
+					const question = pick(questions);
+					const as = pick(people);
+					if (question.state === "decided" && rand(3) === 0)
+						command("decide", { undo: `Q-${question.no}`, reason: "changed my mind" }, as);
+					else
+						command(
+							"decide",
+							{
+								q: `Q-${question.no}`,
+								onEvidence: question.evidence_hash,
+								answer: {
+									is:
+										question.kind === "signoff"
+											? pick(["approve", "approve", "reject"])
+											: pick(["infra", "flaky", "defect", "expected", "test", "mistaken", "inherited"]),
+								},
+								reason: "because",
+							},
+							as,
+						);
+				}
+			} else {
+				h.advance(15 * 86_400_000);
+				trace.push({ advance: "15 days" });
+				sweep(h.app, rule);
+			}
+			const problem = audit();
+			if (problem) return { seed, step, ...problem, last: trace.slice(-12) };
+		}
+		return null;
+	} finally {
+		h.close();
+	}
+}
+
+for (const preset of ["loose", "standard"]) {
+	test(`${SEEDS} random sequences under the ${preset} policy keep every invariant`, () => {
+		const problems: Problem[] = [];
+		for (let seed = 1; seed <= SEEDS && problems.length < 3; seed++) {
+			const problem = sequence(seed, preset);
+			if (problem) problems.push(problem);
+		}
+		expect(problems).toEqual([]);
+	}, 120_000);
+}

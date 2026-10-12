@@ -26,6 +26,11 @@ export type Ctx = {
 	write: boolean;
 	/** Refs this command changed, for the change feed. */
 	touched: Set<string>;
+	/**
+	 * Runs whose counted results a step of this command changed outside a report (a result judged a mistake, or
+	 * put back). Whatever recomputes runs next takes them along, so none is left with the tally from before.
+	 */
+	recompute: Set<number>;
 	/** The next number for a kind of ref. */
 	nextNo: (name: CounterName) => number;
 	/** A counter that grows within the command, to order rows that share a seq. */
@@ -122,6 +127,7 @@ export function makeCtx(app: App, project: ProjectRow, actor: Actor, write: bool
 		seq: write ? project.seq + 1 : project.seq,
 		write,
 		touched: new Set(),
+		recompute: new Set(),
 		nextNo(name) {
 			const row = app.db.get(Q.bumpCounter, { project: project.id, name });
 			if (!row) throw new Error(`counter ${name} did not advance`);

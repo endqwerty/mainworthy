@@ -554,6 +554,8 @@ CREATE TABLE run_tests (
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX run_tests_outcome ON run_tests (run, outcome, signature);
 CREATE INDEX run_tests_test ON run_tests (test, run);
+-- Which commits show a cause: when a decision about it is made, each of their runs is recomputed.
+CREATE INDEX run_tests_cause ON run_tests (signature, run) WHERE signature IS NOT NULL;
 
 -- A planned run counts slots: one per case and obligation, pinned to a version when the run starts.
 CREATE TABLE slots (

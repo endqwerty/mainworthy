@@ -174,6 +174,15 @@ const Q = {
 	>(
 		"SELECT test, result, outcome, signature, flipped FROM run_tests WHERE run = $run AND outcome IN ('fail', 'error') LIMIT $limit",
 	),
+	commitsShowing: sql<{ project: number; signature: number; scope: string }, { run: number }>(
+		`SELECT DISTINCT rt.run AS run FROM run_tests rt JOIN runs r ON r.id = rt.run
+		 WHERE rt.signature = $signature AND rt.outcome IN ('fail', 'error') AND r.project = $project AND r.scope = $scope`,
+	),
+	plannedShowing: sql<{ project: number; signature: number }, { run: number }>(
+		`SELECT DISTINCT s.run AS run FROM runs r JOIN slots s ON s.run = r.id AND s.state IN ('failing', 'disputed')
+		 WHERE r.project = $project AND r.origin = 'planned'
+		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
+	),
 	failingCauses: sql<{ run: number }, { signature: number; target: number }>(
 		`SELECT DISTINCT signature, target FROM run_tests
 		 WHERE run = $run AND outcome IN ('fail', 'error') AND signature IS NOT NULL`,
@@ -656,6 +665,18 @@ export function failuresShown(ctx: Ctx, run: RunRow): { group: FailingGroup; tar
 		}
 	}
 	return [...out.values()];
+}
+
+/**
+ * Every run that shows a cause: the runs of the commits in the scope that fail with it, the newest and the older
+ * ones, and the planned runs with a slot that shows it. A decision about the cause changes how each of them counts
+ * it, so each is recomputed when the decision is made: the gate of any commit is exact, not only the newest's.
+ */
+export function runsShowing(db: Db, project: number, signature: number, scope: string): number[] {
+	return [
+		...db.all(Q.commitsShowing, { project, signature, scope }),
+		...db.all(Q.plannedShowing, { project, signature }),
+	].map((row) => row.run);
 }
 
 /** The tests that fail with this cause in the gate of this target's commit, as it counts them now. */
@@ -1275,6 +1296,7 @@ function refoldLaneOf(ctx: Ctx, commit: RunRow, id: number): void {
 			target: held.target,
 		});
 	}
+	ctx.recompute.add(commit.id);
 	ctx.touched.add(runRef(commit));
 }
 
