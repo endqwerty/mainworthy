@@ -1493,6 +1493,28 @@ describe("what a run and a change may count", () => {
 		]);
 	});
 
+	test("a run that only waited for a commit to be placed has its stored verdict back when the report is applied", () => {
+		seed(1);
+		const planned = plan({ name: "App only", select: {}, accepts: { commit: "waitstale1", repo: "app" } });
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "fail", note: "app failure" }] });
+		expect(gate({ run: planned.run }).verdict).toBe("blocked");
+		// The same commit in another repository: an agent's failure first, then a person passing on a results
+		// file with the same failure. That report places the fork's commit; the run over `app` only waits for it.
+		const fork = { commit: "waitstale1", repo: "fork" };
+		report(
+			{ target: fork, results: [{ test: { key: "agent" }, outcome: "fail", failure: { message: "fork failure" } }] },
+			explorer(),
+		);
+		report({
+			target: { ...fork, branch: "main" },
+			results: [{ test: { key: "pipeline" }, outcome: "fail", failure: { message: "fork failure" } }],
+		});
+		expect(rows("SELECT verdict, outstanding FROM runs WHERE no = ?", Number(planned.run.slice(2)))).toEqual([
+			{ verdict: "blocked", outstanding: 0 },
+		]);
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", stale: false });
+	});
+
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {
 		const ci = pipeline();
 		const head = "c2c2c2c200000000000000000000000000000002";

@@ -208,6 +208,9 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 		waiting.map((run) => run.id),
 		batch.seq,
 	);
+	// They are folded with the others below, after the report is marked applied for them: a question asked on
+	// the way here may already have recomputed them while they were still waiting.
+	for (const run of waiting) ctx.recompute.add(run.id);
 	refold(
 		ctx,
 		runs.map((run) => run.id),
