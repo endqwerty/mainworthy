@@ -595,33 +595,42 @@ describe("request size", () => {
 		// The same size streamed with no Content-Length: counted while reading. Sent over a plain socket, so the
 		// status is the one the server wrote and not a guess made when a client library gives up on the upload.
 		const { hostname, port } = new URL(instance.url);
-		const streamed = await new Promise<string>((resolve) => {
-			const socket = connect(Number(port), hostname);
-			let reply = "";
-			// One megabyte as one chunk of a chunked body, written whole so the framing survives backpressure.
-			const megabyte = Buffer.alloc(1024 * 1024, 32);
-			const chunk = Buffer.concat([Buffer.from(`${megabyte.length.toString(16)}\r\n`), megabyte, Buffer.from("\r\n")]);
-			let sent = 0;
-			const send = (): void => {
-				while (sent < 65 && !socket.destroyed) {
-					sent++;
-					if (!socket.write(chunk)) return void socket.once("drain", send);
-				}
-				if (!socket.destroyed) socket.write("0\r\n\r\n");
-			};
-			socket.on("error", () => {}); // the server may reset the connection once it has answered
-			socket.on("data", (chunk) => {
-				reply += chunk.toString("latin1");
+		const stream = (): Promise<string> =>
+			new Promise<string>((resolve) => {
+				const socket = connect(Number(port), hostname);
+				let reply = "";
+				// One megabyte as one chunk of a chunked body, written whole so the framing survives backpressure.
+				const megabyte = Buffer.alloc(1024 * 1024, 32);
+				const chunk = Buffer.concat([
+					Buffer.from(`${megabyte.length.toString(16)}\r\n`),
+					megabyte,
+					Buffer.from("\r\n"),
+				]);
+				let sent = 0;
+				const send = (): void => {
+					while (sent < 65 && !socket.destroyed) {
+						sent++;
+						if (!socket.write(chunk)) return void socket.once("drain", send);
+					}
+					if (!socket.destroyed) socket.write("0\r\n\r\n");
+				};
+				socket.on("error", () => {}); // the server may reset the connection once it has answered
+				socket.on("data", (chunk) => {
+					reply += chunk.toString("latin1");
+				});
+				socket.on("close", () => resolve(reply.split("\r\n")[0] ?? ""));
+				socket.on("connect", () => {
+					socket.write(
+						`POST /api/p/scratch/find HTTP/1.1\r\nHost: ${hostname}:${port}\r\nContent-Type: application/json\r\n` +
+							"Authorization: Bearer owner-secret-0123456789\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+					);
+					send();
+				});
 			});
-			socket.on("close", () => resolve(reply.split("\r\n")[0] ?? ""));
-			socket.on("connect", () => {
-				socket.write(
-					`POST /api/p/scratch/find HTTP/1.1\r\nHost: ${hostname}:${port}\r\nContent-Type: application/json\r\n` +
-						"Authorization: Bearer owner-secret-0123456789\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
-				);
-				send();
-			});
-		});
+		// The server answers and closes while the client is still sending, so on a busy machine the reset can
+		// reach the client before it has read the answer. An empty reply is that, not a status: ask again.
+		let streamed = await stream();
+		for (let tries = 1; streamed === "" && tries < 5; tries++) streamed = await stream();
 		expect(streamed).toBe("HTTP/1.1 413 Payload Too Large");
 		const login = await fetch(`${instance.url}/api/login`, {
 			method: "POST",
