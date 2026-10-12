@@ -1,7 +1,13 @@
 # Open questions
 
-Answer in this file (or tell the agent); the next agent records the decision
-in `docs/decisions/`.
+**All 28 were answered by Daniel on 2026-10-11.** The answers, what each one
+changes and the issue that tracks each deferral are in
+[decisions/0009-open-question-answers.md](decisions/0009-open-question-answers.md).
+Only question 3 (his pain points with the incumbents) is still to be written
+(issue #46). The questions are kept below as they were asked.
+
+New questions go at the end; answer in this file or tell the agent, and the
+next agent records the decision in `docs/decisions/`.
 
 1. Who uses it: you alone (personal tool), a small team, or a product others can adopt? Partly answered 2026-10-10: software QA teams across the process spectrum, loose to regulated (`decisions/0003-scope-software-qa-and-process-spectrum.md`). Answered 2026-10-10: teams in general, not any one team; Daniel's experience across enterprise, large, small and startup teams is practitioner evidence (`decisions/0005-generic-audience-and-practitioner-evidence.md`).
 2. Hosting: ~~self-hosted on the home server or hosted publicly?~~ Answered 2026-10-10: self-hostable in layers, local machine through cloud (`decisions/0002-layered-self-hosting.md`). Still open: is a hosted instance run by Daniel for others ever in scope?
