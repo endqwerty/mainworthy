@@ -218,6 +218,10 @@ for (const mode of ["reload", "new tab"])
 				await page.keyboard.press("Escape");
 				expect(sent).toBe(0);
 				expect((await server.api("inbox", { on: "C-1", kind: "adopt" })).items.map((q) => q.q)).toEqual([question.q]);
+				if (mode === "new tab") {
+					expect(await page.getByRole("button", { name: "Resolve conflict", exact: true }).isDisabled()).toBe(true);
+					await page.getByRole("button", { name: "Take over here", exact: true }).click();
+				}
 				await resolve(page);
 				await page.locator(".conflict-card").waitFor({ state: "detached" });
 				expect((await server.api("get", { refs: ["C-1"] }))[0]?.title).toBe("Merge kept across windows");
@@ -232,7 +236,7 @@ for (const mode of ["reload", "new tab"])
 
 for (const answer of ["reject", "merge"] satisfies ("reject" | "merge")[])
 	check(
-		`R6-3 a stored conflict ${answer === "reject" ? "rejected" : "resolved"} elsewhere releases only the card on return`,
+		`R6-3 a stored conflict ${answer === "reject" ? "rejected" : "resolved"} elsewhere preserves hand-typed card text on return`,
 		async () => {
 			const server = await startServer();
 			await cases(server);
@@ -257,13 +261,13 @@ for (const answer of ["reject", "merge"] satisfies ("reject" | "merge")[])
 				await title(returned).waitFor();
 				await returned.locator(".conflict-card").waitFor({ state: "detached" });
 				await returned
-					.getByText(answer === "reject" ? "draft is kept" : "later text is kept", { exact: false })
+					.getByText(answer === "reject" ? "typed merge is kept" : "later text is kept", { exact: false })
 					.first()
 					.waitFor();
-				expect(await title(returned).inputValue()).toBe("My title");
+				expect(await title(returned).inputValue()).toBe("Draft typed in the card");
 				await title(returned).press("End");
 				await returned.keyboard.type(" still editable");
-				expect(await title(returned).inputValue()).toBe("My title still editable");
+				expect(await title(returned).inputValue()).toBe("Draft typed in the card still editable");
 			} finally {
 				await h.close();
 				await server.stop();

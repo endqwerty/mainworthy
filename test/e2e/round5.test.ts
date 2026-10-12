@@ -397,6 +397,13 @@ check(
 				secondCommands.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
 				await route.continue();
 			});
+			expect(await title(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(true);
+			await b.keyboard.press("Escape");
+			expect(secondCommands).toHaveLength(0);
+			gate.release();
+			await a.getByText("Version 2, by you, just now", { exact: true }).waitFor();
+			await b.getByRole("button", { name: "From the first live window", exact: true }).waitFor();
+			await b.keyboard.press("e");
 			await b.getByRole("textbox", { name: "Step 2", exact: true }).fill("From the second live window");
 			await b.keyboard.press("Escape");
 			const saved = await eventually(

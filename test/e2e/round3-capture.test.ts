@@ -65,7 +65,7 @@ for (const kind of ["new", "edit"]) {
 
 for (const same of [false, true]) {
 	check(
-		`A-2 shared windows preserve ${same ? "conflicting" : "disjoint"} edits with separate command ids`,
+		`A-2 shared windows hand off ${same ? "the title" : "a step"} without sharing command ids`,
 		async () => {
 			const server = await startServer();
 			await server.api("propose", { edits: [{ op: "create", outline: "Shared case\n  Open cart" }] });
@@ -76,25 +76,39 @@ for (const same of [false, true]) {
 				for (const p of [a, b]) p.setDefaultTimeout(5000);
 				await b.goto(`${server.url}/p/scratch/suite/c/1`);
 				for (const p of [a, b]) await p.getByRole("button", { name: "Shared case", exact: true }).waitFor();
+				const ids: string[] = [];
+				for (const p of [a, b])
+					await p.route("**/propose", async (route) => {
+						ids.push(z.object({ cmd: z.string() }).parse(route.request().postDataJSON()).cmd);
+						await route.continue();
+					});
 				await a.keyboard.press("e");
 				await titleOf(a).fill("Shared case from A");
-				await b.keyboard.press("e");
-				if (same) await titleOf(b).fill("Shared case from B");
-				else await b.getByRole("textbox", { name: "Step 1", exact: true }).fill("Open cart from B");
 				await a.keyboard.press("Escape");
 				await a.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Version 2"));
+				await a.keyboard.press("e");
+				await titleOf(a).fill("Shared case from A continued");
+				await b.keyboard.press("e");
+				expect(await titleOf(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(true);
+				await titleOf(b).press("X");
+				await b.locator("#bar").filter({ hasText: "This case is being edited in another window" }).waitFor();
+				await b.getByRole("button", { name: "Take over here", exact: true }).click();
+				await eventually(() => titleOf(a).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly), Boolean);
+				if (same) await titleOf(b).fill("Shared case from A continued in B");
+				else await b.getByRole("textbox", { name: "Step 1", exact: true }).fill("Open cart from B");
+				await a.keyboard.press("Escape");
+				expect(ids).toHaveLength(1);
 				await b.keyboard.press("Escape");
-				if (same) {
-					await b.locator(".conflict-card").waitFor();
-					expect(await titleOf(b).inputValue()).toBe("Shared case from B");
-					expect((await server.api("get", { refs: ["C-1"] }))[0]?.title).toBe("Shared case from A");
-				} else {
-					await b.waitForFunction(() => document.querySelector("#stat")?.textContent?.includes("Version 3"));
-					expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
-						title: "Shared case from A",
-						steps: [{ action: "Open cart from B" }],
-					});
-				}
+				const saved = await eventually(
+					() => server.api("get", { refs: ["C-1"] }),
+					(rows) => rows[0]?.version === 3,
+				);
+				expect(ids).toHaveLength(2);
+				expect(new Set(ids).size).toBe(2);
+				expect(saved[0]).toMatchObject({
+					title: same ? "Shared case from A continued in B" : "Shared case from A continued",
+					steps: [{ action: same ? "Open cart" : "Open cart from B" }],
+				});
 			} finally {
 				await h.close();
 				await server.stop();
@@ -357,6 +371,10 @@ check(
 				(n) => n === 1,
 			);
 			await b.keyboard.press("e");
+			expect(await titleOf(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(true);
+			await b.keyboard.press("Escape");
+			expect(ids).toHaveLength(1);
+			await b.getByRole("button", { name: "Take over here", exact: true }).click();
 			await titleOf(b).fill("Title from B");
 			await b.keyboard.press("Escape");
 			await b.locator(".conflict-card").waitFor();
