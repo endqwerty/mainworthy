@@ -28,8 +28,8 @@ const liveOwners = new Set<string>();
 export function draftOwnerIsLive(owner: string): boolean {
 	return liveOwners.has(owner);
 }
-export function draftOwnedElsewhere(draft: { owner: string; ref: string | null }): boolean {
-	return draft.ref === null && draft.owner !== draftOwner() && draftOwnerIsLive(draft.owner);
+export function draftOwnedElsewhere(draft: { owner: string }): boolean {
+	return draft.owner !== draftOwner() && draftOwnerIsLive(draft.owner);
 }
 export async function initializeDraftOwners(): Promise<void> {
 	if (typeof BroadcastChannel === "undefined") return;

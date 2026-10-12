@@ -13,7 +13,7 @@ import { bodyOf, CaseView, editDraft } from "../suite/model.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DiffView, EmptyState, KeyCap, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
 import { useCaseBindings } from "./bindings.ts";
-import { BodyEditor, type DraftChange } from "./editor.tsx";
+import { BodyEditor, conflictEditorStatus, type DraftChange, draftOwnershipStatus } from "./editor.tsx";
 
 export type ConflictState = DraftConflict;
 const EntryBase = z.object({ seq: z.number(), at: z.number(), by: z.string() });
@@ -84,6 +84,8 @@ export function CasePane({
 	onResolved,
 	onConflictChange,
 	hasDraft = false,
+	ownedElsewhere = false,
+	onTakeOver,
 }: {
 	view: CaseView | null;
 	draft: Draft | null;
@@ -96,6 +98,8 @@ export function CasePane({
 	onResolved: (state: ConflictState, body: CaseBody) => Promise<void>;
 	onConflictChange: (state: ConflictState) => void;
 	hasDraft?: boolean;
+	ownedElsewhere?: boolean;
+	onTakeOver: () => void;
 }) {
 	const { project, session, setStatus, overlayOpen } = useApp();
 	const owner = useRef(deviceSession()).current;
@@ -237,17 +241,37 @@ export function CasePane({
 							<span className="draft-public-state">Draft kept on this device. Press e to continue.</span>
 						)}
 					</div>
+					{ownedElsewhere && (
+						<div role="status">
+							<p>{draftOwnershipStatus}</p>
+							<button type="button" onClick={onTakeOver}>
+								Take over here
+							</button>
+						</div>
+					)}
 					{conflict && (
-						<ConflictCard key={conflict.q} state={conflict} resolved={onResolved} changed={onConflictChange} />
+						<ConflictCard
+							key={conflict.q}
+							state={conflict}
+							resolved={onResolved}
+							changed={onConflictChange}
+							readOnlyStatus={ownedElsewhere ? draftOwnershipStatus : null}
+						/>
 					)}
 					{draft ? (
-						<BodyEditor draft={draft} change={change} seal={seal} rapid={rapid} readOnly={Boolean(conflict)} />
+						<BodyEditor
+							draft={draft}
+							change={change}
+							seal={seal}
+							rapid={rapid}
+							readOnlyStatus={ownedElsewhere ? draftOwnershipStatus : conflict ? conflictEditorStatus : null}
+						/>
 					) : (
 						<ReadBody body={body} tags={view?.tags ?? []} begin={begin} />
 					)}
 					<CaseProperties
 						body={body}
-						readOnly={Boolean(conflict)}
+						readOnly={ownedElsewhere || Boolean(conflict)}
 						change={(next) => {
 							const base = draft ?? (view ? editDraft(view) : null);
 							if (base)
@@ -624,18 +648,21 @@ function ConflictCard({
 	state,
 	resolved,
 	changed,
+	readOnlyStatus,
 }: {
 	state: ConflictState;
 	resolved: (state: ConflictState, body: CaseBody) => Promise<void>;
 	changed: (state: ConflictState) => void;
+	readOnlyStatus: string | null;
 }) {
 	const { setStatus } = useApp();
 	const pendingStatus = "Wait for the merge reply before editing the card. Your merge is kept.";
 	const [resolving, setResolving] = useState(false);
+	const refusal = readOnlyStatus ?? (resolving ? pendingStatus : null);
 	const body = state.merged;
 	function choose(_path: string, update: (body: CaseBody) => CaseBody): void {
-		if (resolving) {
-			setStatus(pendingStatus);
+		if (refusal) {
+			setStatus(refusal);
 			return;
 		}
 		changed({ ...state, merged: update(body) });
@@ -695,7 +722,10 @@ function ConflictCard({
 	}
 
 	async function resolve(): Promise<void> {
-		if (resolving) return;
+		if (refusal) {
+			setStatus(refusal);
+			return;
+		}
 		setResolving(true);
 		try {
 			await resolved(state, body);
@@ -718,14 +748,19 @@ function ConflictCard({
 						<div className="conflict-side">
 							<h4>Your draft</h4>
 							<div>{field.mine}</div>
-							<button type="button" className="out" disabled={resolving} onClick={() => field.set(field.mine)}>
+							<button type="button" className="out" disabled={Boolean(refusal)} onClick={() => field.set(field.mine)}>
 								Use my {field.key}
 							</button>
 						</div>
 						<div className="conflict-side">
 							<h4>Current version</h4>
 							<div>{field.current}</div>
-							<button type="button" className="out" disabled={resolving} onClick={() => field.set(field.current)}>
+							<button
+								type="button"
+								className="out"
+								disabled={Boolean(refusal)}
+								onClick={() => field.set(field.current)}
+							>
 								Use current {field.key}
 							</button>
 						</div>
@@ -734,29 +769,29 @@ function ConflictCard({
 						Edit merged {field.key}
 						<textarea
 							aria-label={`Merged ${field.key}`}
-							readOnly={resolving}
+							readOnly={Boolean(refusal)}
 							onKeyDown={(event) => {
-								if (resolving && (event.key.length === 1 || ["Enter", "Backspace", "Delete"].includes(event.key))) {
+								if (refusal && (event.key.length === 1 || ["Enter", "Backspace", "Delete"].includes(event.key))) {
 									event.preventDefault();
-									setStatus(pendingStatus);
+									setStatus(refusal);
 								}
 							}}
 							onBeforeInput={(event) => {
-								if (resolving) {
+								if (refusal) {
 									event.preventDefault();
-									setStatus(pendingStatus);
+									setStatus(refusal);
 								}
 							}}
 							onPaste={(event) => {
-								if (resolving) {
+								if (refusal) {
 									event.preventDefault();
-									setStatus(pendingStatus);
+									setStatus(refusal);
 								}
 							}}
 							onCut={(event) => {
-								if (resolving) {
+								if (refusal) {
 									event.preventDefault();
-									setStatus(pendingStatus);
+									setStatus(refusal);
 								}
 							}}
 							value={
@@ -786,7 +821,12 @@ function ConflictCard({
 							<div className="conflict-side" key={label}>
 								<h4>{label}</h4>
 								<p>{side.steps.find((step) => `steps.${step.id}` === path)?.action ?? "Step removed"}</p>
-								<button type="button" className="out" disabled={resolving} onClick={() => chooseStep(path, side)}>
+								<button
+									type="button"
+									className="out"
+									disabled={Boolean(refusal)}
+									onClick={() => chooseStep(path, side)}
+								>
 									Use {label.toLowerCase()} step
 								</button>
 							</div>
@@ -796,15 +836,15 @@ function ConflictCard({
 			))}
 
 			<div className="conflict-actions">
-				<button type="button" disabled={resolving} onClick={() => changed({ ...state, merged: state.mine })}>
+				<button type="button" disabled={Boolean(refusal)} onClick={() => changed({ ...state, merged: state.mine })}>
 					Use all my changes
 				</button>
-				<button type="button" disabled={resolving} onClick={() => changed({ ...state, merged: state.current })}>
+				<button type="button" disabled={Boolean(refusal)} onClick={() => changed({ ...state, merged: state.current })}>
 					Keep current version
 				</button>
 				<button
 					type="button"
-					disabled={resolving}
+					disabled={Boolean(refusal)}
 					onClick={() => {
 						void resolve();
 					}}

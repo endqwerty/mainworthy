@@ -10,6 +10,8 @@ import { KeyCap } from "../ui/index.tsx";
 export const conflictEditorStatus =
 	"Resolve the conflict first. Edit the merged fields in the conflict card; other fields can be edited after it is resolved.";
 
+export const draftOwnershipStatus = "This case is being edited in another window";
+
 export type DraftChange = (draft: Draft, focus?: boolean) => void;
 function freshStep(draft: Draft) {
 	return {
@@ -60,15 +62,16 @@ export function BodyEditor({
 	change,
 	seal,
 	rapid,
-	readOnly = false,
+	readOnlyStatus = null,
 }: {
 	draft: Draft;
 	change: DraftChange;
 	seal: () => void;
 	rapid: () => void;
-	readOnly?: boolean;
+	readOnlyStatus?: string | null;
 }) {
 	const { setStatus } = useApp();
+	const readOnly = readOnlyStatus !== null;
 	function nextStep(): void {
 		if (draft.caret.field === "title" || draft.caret.field === "capture-title") {
 			firstStep({ draft, change });
@@ -145,7 +148,7 @@ export function BodyEditor({
 	}
 	function update(field: string, text: string, target: HTMLTextAreaElement): void {
 		if (readOnly) {
-			setStatus(conflictEditorStatus);
+			setStatus(readOnlyStatus ?? conflictEditorStatus);
 			return;
 		}
 		let body = draft.body;
@@ -213,7 +216,7 @@ export function BodyEditor({
 				(event.key.length === 1 && ((!event.ctrlKey && !event.metaKey) || /[vx]/i.test(event.key)))
 			) {
 				event.preventDefault();
-				setStatus(conflictEditorStatus);
+				setStatus(readOnlyStatus ?? conflictEditorStatus);
 			}
 			return;
 		}
@@ -315,7 +318,7 @@ export function BodyEditor({
 	function paste(event: React.ClipboardEvent<HTMLTextAreaElement>, field: string): void {
 		if (readOnly) {
 			event.preventDefault();
-			setStatus(conflictEditorStatus);
+			setStatus(readOnlyStatus ?? conflictEditorStatus);
 			return;
 		}
 		const text = event.clipboardData.getData("text/plain");
@@ -378,13 +381,13 @@ export function BodyEditor({
 			onBeforeInput={(event) => {
 				if (readOnly) {
 					event.preventDefault();
-					setStatus(conflictEditorStatus);
+					setStatus(readOnlyStatus ?? conflictEditorStatus);
 				}
 			}}
 			onCut={(event) => {
 				if (readOnly) {
 					event.preventDefault();
-					setStatus(conflictEditorStatus);
+					setStatus(readOnlyStatus ?? conflictEditorStatus);
 				}
 			}}
 			onChange={(event) => update(field, event.target.value, event.target)}
@@ -395,7 +398,7 @@ export function BodyEditor({
 	);
 	return (
 		<div className="body-editor" ref={root}>
-			{readOnly && <p role="status">{conflictEditorStatus}</p>}
+			{readOnly && <p role="status">{readOnlyStatus}</p>}
 			{input("title", draft.body.title, "Case title", "ctitle editor-input", "Untitled case")}
 			<div className="ctags">
 				{draft.tags.map((tag) => (
@@ -413,7 +416,7 @@ export function BodyEditor({
 				<button
 					className="nosteps"
 					type="button"
-					onClick={() => (readOnly ? setStatus(conflictEditorStatus) : firstStep({ draft, change }))}
+					onClick={() => (readOnly ? setStatus(readOnlyStatus ?? conflictEditorStatus) : firstStep({ draft, change }))}
 				>
 					No steps yet. Enter from the title starts the first one.
 				</button>

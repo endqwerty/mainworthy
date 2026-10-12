@@ -41,6 +41,14 @@ restore the cache and call `setStatus(error.message)`, keeping the input.
 cancels queries, snapshots, patches, rolls back on errors, and invalidates.
 For multiple caches or same-frame keyboard effects, patch manually before call.
 
+## Device draft ownership
+
+One live window owns each draft, for both new and existing cases. Opening a draft claims it only when its owner is absent. Another live owner's editor and conflict card show the stored text read-only, with "This case is being edited in another window" and "Take over here". Taking over preserves the text, changes the stored owner and gives future requests a fresh command id. Pending requests stay with the window that sent them.
+
+Storage events update the open editor's text, conflict and owner. Each input, proposal, merge and removal checks the stored owner when it runs, including replies that arrive after a takeover. The editor uses the same visible input refusal for a conflict and another window's ownership. Leaving a read-only editor sends nothing. Only the owner reconciles a settled conflict.
+
+Editable merged fields use the draft-body schema, so a temporarily empty step keeps its owner and conflict. The stored conflict keeps the body last sent for a merge. A merged text field that differs from both sides contains hand-typed text; side choices leave each field equal to one side. Rejection preserves hand-typed merged fields as the editable draft. A lost reply followed by a reload preserves card text entered after that send, on the recorded version.
+
 ## Keyboard and palette
 
 `useBindings([{key, label, handler, when?, allowInInput?, hidden?}])` from

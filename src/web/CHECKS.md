@@ -475,3 +475,57 @@ of this uncommitted diff remains with the lead. This worker made no commit,
 push, pull request or checkout cleanup. Each test fixture closed its server
 and browser and removed its temporary data. Only this worker's own scratch
 exports and logs under `/tmp` were removed after recording their evidence.
+
+## Round 8: one live window owns each draft
+
+R8-1 came from two live windows writing one existing-case device draft. Opening the editor changed its owner implicitly, and an older proposal reply could overwrite another window's text. Ownership now covers every draft. Opening claims only an absent owner's draft. "Take over here" is the only live handoff. Storage events synchronize the body, conflict and owner. Device writes, removals, proposal sends and conflict merges check the stored owner when they run.
+
+`test/e2e/round8.test.ts` checks both reported orders with real proposal replies held by Playwright routes, visible input refusal, complete text on takeover, a read-only former owner sending nothing, simultaneous keys, sequential takeovers, closed-tab recovery, and conflict-card ownership. It also checks a takeover before its storage event, a held conflict reply after takeover, two clean editors racing their first key, and a stored takeover before a conflict-card change. Before implementation, the original seven tests produced `1 pass`, `6 fail`. The failing assertions showed a writable second editor and card, absent refusal, and an unguarded stored ownership change. Closed-tab recovery already passed.
+
+Earlier checks now assert the ownership contract:
+
+- Round 3's shared-window tests hand off title or step edits, refuse the second editor until takeover, make the first read-only, and record distinct command ids. The pending-request test requires takeover before the second window sends its own request.
+- Round 4's duplicated-tab test keeps distinct window ids, refuses input in the copy until takeover, preserves the first window's text and records both windows' accepted text together. The unfinished-capture test now shows another live window's draft read-only, using the same rule as existing cases.
+- Round 5's pending-request test makes the second window read-only and proves Escape sends nothing. After the first request is acknowledged, the second continues from the recorded head under a different command id. Closed-owner recovery remains covered without changing its assertions.
+- Round 6's new-tab conflict test requires takeover before resolving while the original owner is live. Its settled-card tests now keep the hand-typed title after rejection or a merge elsewhere and prove it remains editable after reopening.
+- Round 7's second-window tests show ownership refusal alongside the conflict freeze. Rejection ends the conflict without transferring ownership, so the second window deliberately takes over before continuing. Its late-merge test takes over before releasing a settled conflict and retains the new owner's fresh draft when the old reply arrives.
+
+The lead owns independent cross-provider review of this uncommitted fix pass. No server or core changes are required.
+
+The completed review added R8-2 and R8-3 before this pass finished. R8-2 discarded all card content on rejection and kept the sent merge only in memory. Each conflicted text field is compared with both sides to distinguish hand-typed content from the unconfirmed button choices covered by R7-2; `sentMerge` survives reloads. Four round-8 tests type a title or step, then reject the question or lose the merge reply and reload. All four failed before this change, and pass with the typed content on the device, on screen after another reload, and finally on the server. The older unconfirmed-choice checks still require the original draft.
+
+R8-3 allowed a second window to reconcile a settled question while the owning window was still processing its merge reply. The ownership rule prevents that second writer. Its round-8 test holds the first merge reply for 1.5 seconds with a second window open, resolves the resulting new conflict, and proves version 4 stays recorded with no draft after opening and leaving the editor. Run against a clean export of `5cc2b3a`, it failed with `Expected: "Coupon case merged by hand"`, `Received: "Coupon case mine"`. The full round-8 file now passes `15 pass`, `0 fail`.
+
+Reload checks wait for the settled-conflict status before reading the editor, so the assertion covers the reconciled UI rather than the initial frozen body. The revised round-6 file passes `14 pass`, `0 fail`.
+
+The final round-8 file covers R8-3 with the second window in read mode and in its editor: `16 pass`, `0 fail`. One held-proposal reply timed out during a loaded run; rerunning the complete file alone passed without an implementation change.
+
+A merged step is live input, so its stored schema must allow an empty action while the person replaces it. With the version-body schema, clearing that field made `readDraft` reject the entire record and the other window lose its read-only card and takeover action. `R8 an empty merged step remains owned until a deliberate takeover` failed at the missing takeover action before changing `DraftConflict.merged` to the existing draft-body schema. It checks empty-field ownership, deliberate takeover, continued typing, and the final server text.
+
+The hand-typed check compares each text field separately, because side choices can combine a title from one side with a step from the other. A new test types in the merged title, replaces it with a side choice, then rejects the question. A sticky hand-edit marker failed with `Expected: "Coupon case mine"`, `Received: "Coupon case theirs"`; comparing the surviving field values preserves the original draft. This also recovers older stored cards without requiring a new marker.
+
+### Round-8 final handoff evidence
+
+The final focused command, `bun test test/e2e/round8.test.ts`, passed all 18 tests: `18 pass`, `0 fail`, `67 expect() calls`, `[65.06s]`. This includes all three findings and the empty merged-step and replaced hand-typed-field regressions. Isolated file runs also passed: round 4, `61 pass`, `0 fail`; recovery, `12 pass`, `0 fail`; revised round 6, `14 pass`, `0 fail`. The second full attempt passed every test in round 3 capture, round 5 (apart from its existing skip), round 6 and round 7.
+
+`bunx tsc --noEmit` passed after the final source changes. `bunx biome check src/web test/e2e` passed earlier in this fix pass; after the last changes, `bunx biome check --write src/web/lib/drafts.ts src/web/case/pane.tsx src/web/suite/index.tsx test/e2e/round8.test.ts` passed. `bun test test/architecture.test.ts` passed all 12 tests earlier in the pass. No server or core changes were made.
+
+Both full attempts used `bun test test/e2e`:
+
+```text
+attempt 1: 212 pass, 1 skip, 4 fail, 979 expect() calls.
+           Ran 217 tests across 22 files. [410.14s]
+attempt 2: 216 pass, 1 skip, 2 fail, 983 expect() calls.
+           Ran 219 tests across 22 files. [847.55s]
+```
+
+| Full-attempt failure | Error | Isolated result |
+| --- | --- | --- |
+| R6-3 new tab restores the same conflict and its merged text without proposing again | `TimeoutError: click: Timeout 5000ms exceeded.` Resolve conflict was disabled. | Revised to require deliberate takeover; round 6 passed 14/14. |
+| R6-3 a stored conflict rejected elsewhere releases only the card on return | `TimeoutError: waitFor: Timeout 5000ms exceeded.` Waiting for the old draft-kept status. | Revised to assert the kept hand-typed merge and its status; round 6 passed 14/14. |
+| R6-3 a stored conflict resolved elsewhere releases only the card on return | `Expected: "My title"`, `Received: "Draft typed in the card"`. | Revised to require preserving hand-typed content; round 6 passed 14/14. |
+| R8-2 a hand-typed merged step survives lost reply then reload | `Expected: "HAND TYPED TEXT"`, `Received: "Apply coupon mine"`. | Assertion now waits for conflict settlement; final round 8 passed 18/18. |
+| a queue defect reference survives a failed answer and reload | `TimeoutError: waitForFunction: Timeout 5000ms exceeded.` Waiting for Answer unavailable. | Recovery passed 12/12 unchanged. |
+| R4C-1 server rejects run write after shared cookie changes without an extra session read | `TimeoutError: waitFor: Timeout 5000ms exceeded.` Waiting for #token. | Round 4 passed 61/61 unchanged. |
+
+Two consecutive full passes were not completed. The lead instructed this worker to stop full-suite runs because other agents were running parallel suites under load, and will perform the full check on a quiet machine. The separate race review confirmed that an action immediately after installing a Playwright route can precede Chrome's interception activation. Another agent owns the guard in `test/e2e/support.ts`; this worker did not edit that file or latency.test.ts, or add route workarounds. Independent verification of the final diff remains with the lead. The existing R5B-4 slot-fill `atStep` skip (issue #72) is unchanged. No commit, push, PR or checkout release was performed.
