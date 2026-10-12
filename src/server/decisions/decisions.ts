@@ -69,6 +69,7 @@ import {
 	type Signer,
 	setDecisionEffects,
 	setQuestionAsk,
+	setQuestionFacts,
 	setQuestionState,
 } from "./questions.ts";
 
@@ -468,7 +469,13 @@ export function answer(
 	}
 	const signer: Signer = { by: ctx.actor.id, clause: clause.id, policy: policy.version, reason: input.reason ?? null };
 	try {
-		const settled = ctx.db.savepoint(() => settle(ctx, question, [signer], given));
+		const settled = ctx.db.savepoint(() => {
+			// The facts this answer is given under stay with the question while the answer is in force: an answer
+			// given to a dispute is still an answer to a dispute after it has set the disputed result aside, or
+			// the run has closed on it, and changing or withdrawing it is held to the same clause.
+			if (question.kind === "failure") setQuestionFacts(ctx, question, [...facts]);
+			return settle(ctx, question, [signer], given);
+		});
 		return reply(question, "decided", { decision: settled.decision.id, effects: settled.effects });
 	} catch (error) {
 		if (error instanceof OpError)
@@ -1063,7 +1070,9 @@ export function factsNow(db: Db, question: QuestionRow): Set<string> {
 	if (question.kind !== "failure") return facts;
 	const subject = json<{ signature?: number; scope?: string }>(question.subject);
 	if (subject.signature === undefined || subject.scope === undefined) return facts;
-	if (inDispute(db, question.project, subject.signature, subject.scope)) facts.add("hint:disputed");
+	// An answer in force that was given to a dispute keeps that fact (see `answer`); otherwise the runs say.
+	const settledDispute = question.state === "decided" && facts.has("hint:disputed");
+	if (settledDispute || inDispute(db, question.project, subject.signature, subject.scope)) facts.add("hint:disputed");
 	else facts.delete("hint:disputed");
 	return facts;
 }

@@ -117,6 +117,9 @@ const Q = {
 	targetsOfCommit: sql<{ project: number; what: string }, TargetRow>(
 		"SELECT * FROM targets WHERE project = $project AND what = $what",
 	),
+	placeCommit: sql<{ project: number; what: string; line: string; branch: string | null; change: number | null }>(
+		"UPDATE targets SET line = $line, branch = $branch, change = $change WHERE project = $project AND what = $what",
+	),
 	insertTarget: sql<{
 		project: number;
 		what: string;
@@ -377,6 +380,13 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 	const what = codeWhat(input.repo, input.commit);
 	const env = input.env ?? "";
 	const found = ctx.db.get(Q.target, { project, what, env });
+	const first = ctx.db.all(Q.targetsOfCommit, { project, what })[0];
+	// Where a commit is (its line, or the change it belongs to) is said by the first pipeline or person to
+	// report it. An agent's report is counted by no gate, so it settles nothing: what it says holds only until
+	// such a report arrives, and that report is not answered in a place an agent chose.
+	const advisory = ctx.actor.kind === "agent";
+	const placed = first !== undefined && firstSeen(ctx.db, project, input.repo ?? null, input.commit) !== null;
+	const settled = first !== undefined && (placed || advisory);
 	const trunk = input.pr === undefined && input.branch !== undefined && TRUNK_BRANCHES.has(input.branch);
 	let change: ChangeRow | null = null;
 	if (!trunk) {
@@ -387,26 +397,29 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 					? `branch:${input.branch}`
 					: `commit:${input.commit.slice(0, 12)}`;
 		// A report that names neither a branch nor a pull request says nothing about where the commit is: for a
-		// commit already known, no change of its own is made up for it.
-		const known =
-			input.pr === undefined && input.branch === undefined && ctx.db.all(Q.targetsOfCommit, { project, what })[0];
+		// commit whose place is known, no change of its own is made up for it.
+		const known = input.pr === undefined && input.branch === undefined && settled;
 		if (!known) change = upsertChange(ctx, changeKey(ctx.db, project, key, input.repo ?? null), input);
 	}
-	if (found) return found;
 	// One commit, one place where its failures are answered: the line or the change it was first reported on.
 	// A later report of the same commit from somewhere else (a pull request's head that reached trunk, a result
 	// typed into a run that counts the commit) is that commit, and is answered there. A commit's gate has one
 	// run; two scopes inside it would let one line's answer classify the other line's failure.
-	const first = ctx.db.all(Q.targetsOfCommit, { project, what })[0];
+	const place = settled
+		? { line: first.line, branch: first.branch, change: first.change }
+		: { line: trunk ? "trunk" : "change", branch: input.branch ?? null, change: change?.id ?? null };
+	// The first report a gate counts, for a commit only an agent had reported: every target of it moves there.
+	if (first !== undefined && !settled) ctx.db.run(Q.placeCommit, { project, what, ...place });
+	if (found) return settled ? found : mustTarget(ctx.db, found.id);
 	const { lastId } = ctx.db.run(Q.insertTarget, {
 		project,
 		what,
 		env,
 		repo: input.repo ?? null,
 		commit: input.commit,
-		branch: first ? first.branch : (input.branch ?? null),
-		line: first ? first.line : trunk ? "trunk" : "change",
-		change: first ? first.change : (change?.id ?? null),
+		branch: place.branch,
+		line: place.line,
+		change: place.change,
 		seq: ctx.seq,
 	});
 	return mustTarget(ctx.db, lastId);

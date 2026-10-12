@@ -91,7 +91,9 @@ not the same things done worse.
    agent's result end a person's answer (#70). What is done about the failure from the moment it is disputed is
    another matter: a new answer, a changed answer and a withdrawal are each held to the clause for disputes,
    because whether a slot disputes the cause is read from the runs when the answer is given, changed or
-   withdrawn, and when the question is shown. Withdrawing an answer is held to the clause
+   withdrawn, and when the question is shown. An answer given to a dispute stays an answer to a dispute while
+   it is in force, also after it has set the disputed result aside or the run has closed on it: the people the
+   clause kept it from cannot take it back or put their own in its place. Withdrawing an answer is held to the clause
    the policy in force now has for that answer: who may, and whether a reason is owed. (The policy in force,
    not the one the answer was given under: an administrator who relaxes the policy relaxes withdrawals too.)
 5. **Drafts live in the browser.** The design autosaves into a server-side open proposal that others see as
@@ -184,7 +186,7 @@ not the same things done worse.
     A line belongs to a repository too: what was decided about one repository's trunk does not cover another's.
     The "already failing on the base" hint reads only the change's own repository, and only results a gate would
     count (never an agent's). One commit, one place where its failures are answered: the line or the change it was first reported
-    on. A later report of the same commit from somewhere else (a pull request's head that reached trunk, a result
+    on by a pipeline or a person (where an agent said a commit is holds only until one of them reports it). A later report of the same commit from somewhere else (a pull request's head that reached trunk, a result
     typed into a run that counts the commit, a pipeline that sends only the hash) is that commit and is answered
     there. The cost: trunk does not see a fast-forwarded head as its own until the next commit (#68).
 18. **Test keys of the form `case:<n>` are reserved** for the manual test of a case. A report that uses one for an

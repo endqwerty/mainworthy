@@ -583,6 +583,7 @@ CREATE TABLE slots (
 CREATE INDEX slots_rank ON slots (run, rank);
 CREATE INDEX slots_next ON slots (run, state, rank);
 CREATE INDEX slots_case ON slots (case_id, run);
+CREATE INDEX slots_disputed ON slots (run) WHERE state = 'disputed';
 
 -- Which results were admitted to which slots, and by which rule. One immutable result may fill several runs.
 CREATE TABLE slot_results (

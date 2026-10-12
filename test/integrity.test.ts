@@ -1083,6 +1083,47 @@ describe("what a run and a change may count", () => {
 		);
 	});
 
+	test("an agent's report does not choose where a commit's failures are answered", () => {
+		const ci = pipeline();
+		const fail = { test: { key: "t0" }, outcome: "fail", failure: { message: "X boom" } };
+		// Trunk fails with cause X and a person calls it flaky: that answer stands on the trunk line.
+		report({ target: { repo: "acme/web", commit: "trunk0001", branch: "main" }, results: [fail] }, ci);
+		expect(decide(open("failure"), { is: "flaky" }).status).toBe("decided");
+		// An agent mentions a pull request's head as a commit of main. Nothing counts that.
+		const probe = { test: { key: "agent::probe" }, outcome: "skip" };
+		report({ target: { repo: "acme/web", commit: "head00001", branch: "main" }, results: [probe] }, explorer());
+		// The pipeline reports that commit as the head of pr:7, failing with the same cause. It is the pull
+		// request's failure: asked about there, not excused by what was decided about trunk.
+		const reported = report(
+			{
+				target: { repo: "acme/web", commit: "head00001", pr: 7, branch: "feature", base: "trunk0001" },
+				results: [fail],
+			},
+			ci,
+		);
+		expect(reported.questions.map((q) => q.how)).toEqual(["new"]);
+		expect(gate({ change: "pr:7" }).verdict).toBe("blocked");
+		expect(rows("SELECT DISTINCT line, branch FROM targets WHERE commit_sha = 'head00001'")).toEqual([
+			{ line: "change", branch: "feature" },
+		]);
+		// The other way round: an agent calls a trunk commit a pull request's; the pipeline's report says trunk.
+		report({ target: { repo: "acme/web", commit: "trunk0002", pr: 9, branch: "other" }, results: [probe] }, explorer());
+		const onTrunk = report({ target: { repo: "acme/web", commit: "trunk0002", branch: "main" }, results: [fail] }, ci);
+		expect(onTrunk.questions.map((q) => q.how)).toEqual(["already decided"]);
+		expect(rows("SELECT DISTINCT line, change FROM targets WHERE commit_sha = 'trunk0002'")).toEqual([
+			{ line: "trunk", change: null },
+		]);
+		// And a pipeline that sends only the hash of a commit an agent placed gives it a place of its own.
+		report({ target: { repo: "acme/web", commit: "bare00001", pr: 9, branch: "other" }, results: [probe] }, explorer());
+		report(
+			{ target: { repo: "acme/web", commit: "bare00001" }, results: [{ test: { key: "t1" }, outcome: "pass" }] },
+			ci,
+		);
+		expect(
+			rows("SELECT c.key FROM targets t JOIN changes c ON c.id = t.change WHERE t.commit_sha = 'bare00001'"),
+		).toEqual([{ key: "commit:bare00001" }]);
+	});
+
 	test("an agent's report does not move a pull request's head or make a commit the newest of its scope", () => {
 		const ci = pipeline();
 		const head = "c2c2c2c200000000000000000000000000000002";
@@ -1627,6 +1668,50 @@ describe("what a decision may change", () => {
 		expect(rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure'")).toHaveLength(1);
 		// Someone who reported neither result may change it.
 		expect(decide(disputed, { is: "infra" }, carol).status).toBe("decided");
+	});
+
+	test("an answer given to a dispute is not undone by the people it was kept from, once the dispute no longer shows", () => {
+		usePolicy("standard");
+		const alice = h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
+		const bob = h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
+		const carol = h.actor("carol", "human", ["read", "produce", "answer", "plan"]);
+		seed(2);
+		// Two shapes of "no longer shows": the run stays open and the judged result is set aside (`mistaken`), or
+		// the run passes on the answer and is closed.
+		const shapes = [
+			{ name: "open", select: {}, first: "mistaken", then: "flaky" },
+			{ name: "open", select: {}, first: "flaky", then: "infra" },
+			{ name: "closed", select: { cases: ["C-1"] }, first: "mistaken", then: "flaky" },
+			{ name: "closed", select: { cases: ["C-1"] }, first: "flaky", then: "infra" },
+		];
+		shapes.forEach((shape, index) => {
+			const commit = `dispute${String(index).padStart(3, "0")}`;
+			const planned = h.call<PlanReply>("plan", { name: commit, select: shape.select, accepts: { commit } }, alice);
+			const typed = (outcome: string) => ({
+				run: planned.run,
+				results: [{ test: { case: "C-1" }, outcome, ...(outcome === "fail" ? { note: `cause ${index}` } : {}) }],
+			});
+			report(typed("fail"), alice);
+			report(typed("pass"), bob);
+			const dispute = open("failure");
+			expect(decide(dispute, { is: "flaky" }, alice).status).toBe("forbidden");
+			expect(decide(dispute, { is: shape.first }, carol).status).toBe("decided");
+			const state = first(rows<{ state: string }>("SELECT state FROM runs WHERE no = ?", Number(planned.run.slice(2))));
+			expect(state.state).toBe(shape.name);
+			// Alice reported the failure. She may neither take Carol's judgement back nor put her own in its place.
+			const judged = first(
+				h
+					.call<InboxReply>("inbox", { kind: "failure", state: "decided", limit: 500 })
+					.items.filter((item) => item.q === dispute.q),
+			);
+			expect(first(h.call<DecideReply[]>("decide", { undo: judged.q, reason: "no" }, alice)).status).toBe("forbidden");
+			expect(decide(judged, { is: shape.then }, alice).status).toBe("forbidden");
+			expect(decide(judged, { is: shape.then }, bob).status).toBe("forbidden");
+			// Carol, or anyone who reported neither result, still may.
+			expect(first(h.call<DecideReply[]>("decide", { undo: judged.q, reason: "again" }, carol)).status).toBe(
+				"reopened",
+			);
+		});
 	});
 
 	test("withdrawing an answer needs what giving it needs: not the producer, and a reason where one is required", () => {
