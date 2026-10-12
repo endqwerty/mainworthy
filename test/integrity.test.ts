@@ -1595,6 +1595,40 @@ describe("what a decision may change", () => {
 		expect(gate({ run: planned.run }).tally).toMatchObject({ pass: 1, disputed: 0, unexplained: 0 });
 	});
 
+	test("once a failure is disputed, changing or withdrawing its answer is held to the clause for disputes", () => {
+		usePolicy("standard");
+		seed(2);
+		const bob = h.actor("bob", "human", ["read", "produce", "answer"]);
+		const carol = h.actor("carol", "human", ["read", "produce", "answer"]);
+		const planned = plan({ name: "Keep open", select: {} });
+		const typed = (outcome: string) => ({
+			run: planned.run,
+			results: [{ test: { case: "C-1" }, outcome, ...(outcome === "fail" ? { note: "same cause" } : {}) }],
+		});
+		// The owner reports a failure and answers it: nothing disputes it yet. Then Bob passes the case.
+		report(typed("fail"));
+		expect(decide(open("failure"), { is: "flaky" }).status).toBe("decided");
+		report(typed("pass"), bob);
+		expect(first(slots(planned.run)).state).toBe("disputed");
+		// The answer given before stands (issue #70). But the failure is a dispute now, and what is done about it
+		// from here on is held to the clause for disputes, which keeps it from the two who reported the results.
+		const disputed = open("failure", "decided");
+		expect(disputed.answers).toContain("mistaken");
+		expect(disputed.needs).toContain("did not produce");
+		expect((disputed.evidence as { hints: string[] }).hints).toContain("disputed");
+		expect(decide(disputed, { is: "infra" }).status).toBe("forbidden");
+		expect(decide(disputed, { is: "infra" }, bob).status).toBe("forbidden");
+		expect(first(h.call<DecideReply[]>("decide", { undo: disputed.q, reason: "take it back" })).status).toBe(
+			"forbidden",
+		);
+		expect(first(h.call<DecideReply[]>("decide", { undo: disputed.q, reason: "take it back" }, bob)).status).toBe(
+			"forbidden",
+		);
+		expect(rows<{ answer: string }>("SELECT answer FROM decisions WHERE kind = 'failure'")).toHaveLength(1);
+		// Someone who reported neither result may change it.
+		expect(decide(disputed, { is: "infra" }, carol).status).toBe("decided");
+	});
+
 	test("withdrawing an answer needs what giving it needs: not the producer, and a reason where one is required", () => {
 		usePolicy("strict");
 		const producer = h.actor("producer", "human", ["read", "produce", "answer"]);

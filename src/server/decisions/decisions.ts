@@ -435,7 +435,7 @@ export function answer(
 	}
 
 	const policy = currentPolicy(ctx.db, ctx.project.id);
-	const facts = new Set(json<{ facts?: string[] }>(question.evidence).facts ?? []);
+	const facts = factsNow(ctx.db, question);
 	if (question.kind === "failure" && !applicableAnswers(question.kind, facts).includes(given.is)) {
 		return reply(question, "invalid", {
 			needs: `one of ${applicableAnswers(question.kind, facts).join(", ")}: \`${given.is}\` does not apply to this failure`,
@@ -692,7 +692,7 @@ export function undo(ctx: Ctx, input: { q: string; reason: string | undefined })
 	// Taking an answer away is held to what giving it was: the clause for that answer says who may (not a producer
 	// of the evidence, where it says so) and whether a reason is owed.
 	const policy = currentPolicy(ctx.db, ctx.project.id);
-	const facts = new Set(json<{ facts?: string[] }>(question.evidence).facts ?? []);
+	const facts = factsNow(ctx.db, question);
 	const given = json<{ is?: string }>(prior.answer).is;
 	const clause = clauseFor(policy, { kind: question.kind, facts, ...(given ? { answer: given } : {}) });
 	const ask: Ask = clause.ask.who === "rule" ? { ...clause.ask, who: "member" } : clause.ask;
@@ -1048,9 +1048,43 @@ export function sweepExpired(ctx: Ctx, expired: readonly DecisionRow[]): number 
 
 // ── Reading ────────────────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The facts a clause is chosen by, as they are now. A question keeps the facts of its latest occurrence. One of
+ * them can change with no occurrence at all: somebody else's pass makes a slot dispute a failure that was
+ * answered long ago, and a correction ends a dispute. So for a failure the dispute is read from the runs each
+ * time somebody answers, changes an answer or withdraws one, and each time the question is shown: what is done
+ * about a failure from the moment it is disputed is held to the clause for disputes.
+ */
+export function factsNow(db: Db, question: QuestionRow): Set<string> {
+	const facts = new Set(json<{ facts?: string[] }>(question.evidence).facts ?? []);
+	if (question.kind !== "failure") return facts;
+	const subject = json<{ signature?: number; scope?: string }>(question.subject);
+	if (subject.signature === undefined || subject.scope === undefined) return facts;
+	if (inDispute(db, question.project, subject.signature, subject.scope)) facts.add("hint:disputed");
+	else facts.delete("hint:disputed");
+	return facts;
+}
+
+/**
+ * Who is asked, as things are now: what the question stored when it was asked, unless a dispute has arisen or
+ * ended since, and then what the policy's clause for the facts as they are says (a rule's place taken by a
+ * member, as wherever a person answers in a rule's stead).
+ */
+function askNow(db: Db, question: QuestionRow, facts: ReadonlySet<string>): Ask {
+	const stored = json<Ask>(question.ask);
+	const before = new Set(json<{ facts?: string[] }>(question.evidence).facts ?? []);
+	if (before.has("hint:disputed") === facts.has("hint:disputed")) return stored;
+	const ask = clauseFor(currentPolicy(db, question.project), { kind: question.kind, facts: new Set(facts) }).ask;
+	return ask.who === "rule" ? { ...ask, who: "member" } : ask;
+}
+
 /** A question as the queue, a case page and an agent see it. */
 export function toItem(db: Db, row: QuestionRow): QuestionItem {
-	const ask = json<Ask>(row.ask);
+	const facts = factsNow(db, row);
+	const ask = askNow(db, row, facts);
+	const stored = json<Record<string, unknown> & { hints?: string[] }>(row.evidence);
+	const hints = (stored.hints ?? []).filter((hint) => hint !== "disputed");
+	if (facts.has("hint:disputed")) hints.unshift("disputed");
 	const answers = answersOf(db, row.id);
 	const decision = row.decision !== null ? decisionById(db, row.decision) : null;
 	const signers = decision ? json<Signer[]>(decision.signers) : [];
@@ -1061,11 +1095,11 @@ export function toItem(db: Db, row: QuestionRow): QuestionItem {
 		title: row.title,
 		producer: row.producer,
 		state: row.state,
-		evidence: json<Record<string, unknown>>(row.evidence),
+		evidence: row.kind === "failure" ? { ...stored, hints, facts: [...facts] } : stored,
 		evidenceHash: row.evidence_hash,
 		seen: { count: row.seen_count, carried: row.carried },
 		needs: describeAsk(ask),
-		answers: applicableAnswers(row.kind, new Set(json<{ facts?: string[] }>(row.evidence).facts ?? [])),
+		answers: applicableAnswers(row.kind, facts),
 		blocks: json<number[]>(row.blocks).flatMap((id) => {
 			const run = runById(db, id);
 			return run ? [runRef(run)] : [];
@@ -1095,7 +1129,7 @@ export function toItem(db: Db, row: QuestionRow): QuestionItem {
 
 /** Whether the acting actor may settle this question, so a surface can show the keys or say who is needed. */
 export function mayAnswer(ctx: Ctx, row: QuestionRow): "counts" | "advice" | "forbidden" {
-	const ask = json<Ask>(row.ask);
+	const ask = askNow(ctx.db, row, factsNow(ctx.db, row));
 	const handler = HANDLERS[row.kind];
 	return standingOf({
 		actor: ctx.actor,

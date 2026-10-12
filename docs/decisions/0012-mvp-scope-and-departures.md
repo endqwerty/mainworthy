@@ -88,7 +88,10 @@ not the same things done worse.
    them, stands when somebody else's pass later makes the slot a dispute, although that policy would keep the
    dispute itself from them. The order of the answer and the second result therefore matters; ending such an
    answer when the dispute arises needs a question per slot rather than per cause, and without it would let an
-   agent's result end a person's answer (#70). Withdrawing an answer is held to the clause
+   agent's result end a person's answer (#70). What is done about the failure from the moment it is disputed is
+   another matter: a new answer, a changed answer and a withdrawal are each held to the clause for disputes,
+   because whether a slot disputes the cause is read from the runs when the answer is given, changed or
+   withdrawn, and when the question is shown. Withdrawing an answer is held to the clause
    the policy in force now has for that answer: who may, and whether a reason is owed. (The policy in force,
    not the one the answer was given under: an administrator who relaxes the policy relaxes withdrawals too.)
 5. **Drafts live in the browser.** The design autosaves into a server-side open proposal that others see as
