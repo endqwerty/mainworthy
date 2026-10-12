@@ -57,16 +57,20 @@ skeleton builds and runs its check command.
 ## Phase 2: Core vertical slice (Local layer)
 
 **Revised 2026-10-11 (decisions 0007, 0008; `docs/product-design.md` section 9).**
-Phase 2 is the thin slice "one red build, three producers": capture and
-versioning, `report` for CI and manual results with explicit basis, change
-runs with the four-verdict gate, planned runs with slots any producer fills,
-the decision machinery with the `adopt`, `failure`, `map` and `finding`
-kinds, Suite, Queue, Case, Run and Change screens, CLI, MCP, `impact`,
-`since`, `check`, export and import. Fragments, custom fields, the flaky
-detector, requirements coverage, gates, sign-off and freeze move to phase 3.
-The exit criteria are the jobs and fixtures listed in the design. The text
-below is the earlier plan, kept for its exit criteria on the jobs it still
-covers.
+Phase 2 is **Preview 1**, the thin slice "one red build, three producers":
+capture and versioning, `report` for CI and manual results with explicit
+basis, change runs with the four-verdict gate, planned runs with slots any
+admitted producer fills, the decision machinery with the `adopt`, `failure`,
+`map`, `finding` and rule-only `signoff` kinds, Suite, Queue, Case, Run and
+Change screens, CLI, MCP, `impact`, `since`, `check`, export and import,
+Local layer only. Fragments, custom fields, the flaky detector, requirements
+coverage, release gate rules, the role and freeze paths of sign-off, and the
+Server layer proof move to phase 3, which is the **first usable version**
+(decision 0002's rule: Server proven with the same job suite, persisted jobs,
+backup and restore checked, before that name is used). The exit criteria for
+phase 2 are the jobs and fixtures listed in the design (J11 and J12 below no
+longer apply to phase 2; they move to phase 3 with the features they need).
+The text below is the earlier plan, kept for its remaining exit criteria.
 
 
 One project, folders, cases with steps, shared steps, custom fields,

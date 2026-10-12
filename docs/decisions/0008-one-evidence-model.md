@@ -31,16 +31,27 @@ the decisions that the sketch depends on.
 3. **A run is a request for evidence, not an owner of results.** Results
    belong to a target (code, artifact, or a named session with no build
    identity). A run is a predicate over targets plus slots pinned to case
-   versions and an explicit completeness requirement (methods, independent
-   actors, required CI jobs, qualifying basis). A result from any producer
-   fills a matching slot. A PR check, a regression pass and a release are one
-   object. A session target never satisfies a change run.
+   versions, each slot serving one explicit requirement: exercise (which
+   methods, which linked tests, how many independent actors, which basis,
+   exact target or attested code-in-artifact), review (which lens,
+   independent or not), required CI jobs, or sign-off. A result from any
+   producer fills a slot only when the requirement admits its method,
+   binding, basis and target, and the case's declared methods include that
+   kind; a review fills only a review requirement. A PR check, a regression
+   pass and a release are one object. A session target never satisfies a
+   change run.
 
-4. **The gate has four verdicts** and reading it computes nothing: `passed`,
-   `failed` (needs a fix), `blocked` (needs a decision: an open or disputed
-   question), `pending` (needs evidence: unfilled slots or missing required
-   jobs). Accepting an upload sets matching open runs to `pending` in the
-   acceptance transaction, before parsing, so a stale green is never served.
+4. **The gate has four verdicts** and reading it computes nothing beyond two
+   comparisons: `passed`, `failed` (needs a fix), `blocked` (needs a
+   decision: an open or disputed question), `pending` (needs evidence:
+   unfilled slots, missing required jobs, accepted but unapplied uploads, or
+   an expired hold). A run carries a horizon (`accepted`, `applied`
+   sequence): durable acceptance of an upload (staging its normalised
+   results under the batch key, before any processing) advances `accepted`
+   on every matching run, open or closed-but-not-frozen; processing advances
+   `applied`. A frozen run never changes. The gate is `pending` while they
+   differ, so a stale green is never served and a late upload after closure
+   is never ignored.
 
 5. **A review is never a runtime pass.** Findings and reviewed-basis rows
    are evidence of review; only a run requirement of kind review accepts
@@ -54,15 +65,23 @@ the decisions that the sketch depends on.
    ledger with its clause either way.
 
 7. **Answers are basis-checked and holds expire visibly.** An answer names
-   the evidence hash it was given on; a quorum counts only answers on the
-   current evidence. A decision carries forward under a hold (until the basis
-   changes, this target only, a date, N clean runs, or a linked defect
-   closes); an expired hold re-raises the question on the next occurrence
-   and re-folds the runs that depended on it.
+   the evidence hash it was given on; every form of `decide` carries it; the
+   answer history is append-only; a quorum counts only answers on the current
+   evidence. A decision carries forward under a hold (terms: until the basis
+   changes, this target only, a date, N clean runs of a test, or a linked
+   defect closes; the hold ends when any term ends and each term stores what
+   it needs). Each run records the decisions it depends on and its earliest
+   expiry; the gate read returns `pending` once that passes, and a persisted
+   sweep or the next event re-raises the question and re-folds the run.
+   Every run closes by a `signoff` decision, which a rule may make.
 
-8. **Two hashes per case version.** The version hash identifies the document
-   (history, diff, restore). The claim hash covers the claim class only
-   (preconditions, steps, expected results, expanded fragments) and is stable
+8. **Two hashes per case version, and fragments are pinned.** A step that
+   uses a shared fragment names the fragment's version, so a case version's
+   expansion never changes; adopting a new fragment version publishes new
+   versions for its users as one attributable batch through the same adopt
+   path (J12). The version hash identifies the document (history, diff,
+   restore). The claim hash covers the claim class only (preconditions,
+   steps, expected results, the pinned fragments' content) and is stable
    under retitling, retagging, moving and linking. It is a reuse signal for
    people and agents ("proven on this claim", "reviewed at this basis") and a
    policy option for gates; it never transfers proof by itself.
@@ -76,8 +95,10 @@ the decisions that the sketch depends on.
     with history, flakiness and a place in the gate whether or not it is ever
     mapped to a case; mapping is a `map` question raised when policy asks.
 
-11. **One operation registry, seventeen operations, ten agent tools.** Wire
-    formats are parsed in adapters before an operation is invoked. REST,
+11. **One operation registry, eighteen operations, ten agent tools.** Wire
+    formats (test reports, vendor exports, CSV) are parsed in adapters before
+    an operation is invoked; `report` takes normalised results and
+    `transfer.import` takes the canonical archive. REST,
     MCP, CLI, OpenAPI, the palette, the skill's reference pages and the
     budget tests are generated from the registry.
 

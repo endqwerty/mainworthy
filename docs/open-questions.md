@@ -35,4 +35,3 @@ decisions 0007 and 0008):
 26. Will manual testers name the build? Results filling a release run depends on manual results carrying a target. Do testers know which build is on the environment, or must Casebook learn it from a deploy announcement and offer it?
 27. Slice order: the design trades the roadmap's authoring-first phase 2 for a thin slice across all three producers and the queue, with fragments and custom fields moving later. Agreed?
 28. The principle order and the floor in decision 0007, in particular F3 ("not measurably better than the incumbents on the audit jobs" is a reason not to ship): confirm or adjust.
-

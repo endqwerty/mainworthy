@@ -28,6 +28,8 @@ unattributed.
 *Rules out:* in-place edits of history, last-write-wins, hard delete, an
 "admin fix" back door, an excuse or a link that appears without a decision
 row, a result stamped with a version nobody established.
+*Not a fact:* an author's open draft is uncommitted state, amendable by its
+author until sealed; it is shown as a draft and is not part of the record.
 *Tie-break:* a floor, not a rank. Never bent. It does not compete with speed:
 above the floor, speed decides.
 
@@ -50,7 +52,9 @@ projections of one operation registry.
 *Rules out:* an "automation" module, agent-only tables, a manual run type
 beside an automated one, UI-only capability, a bulk or import path that skips
 policy, per-surface validation.
-*Tie-break:* a missing surface is an allowed cut; a second path is never.
+*Tie-break:* a whole surface (for example the CLI) may be absent from a
+release; a capability that exists must be reachable through the operation
+layer, and so through the API and MCP. A second path is never allowed.
 
 **P3. Evidence says what it proves.** Every result carries an explicit basis
 (exact, assumed or unresolved) and a target; a review finding is never a
@@ -86,8 +90,9 @@ is never a field a person or a second module writes.
 *Rules out:* an "is automated" checkbox, a hand-set run status, a stored
 coverage number, a flaky tag, a cache with its own writer.
 *Tie-break against P1:* derive at read first; if the read misses its budget,
-materialise a projection written in the same transaction by the one module
-that owns the source facts, with a rebuild check.
+materialise a projection written in the same transaction by one named
+projection owner (the module whose rule derives it, reading other owners'
+facts), with a rebuild check. Never a cache with its own writer.
 
 **P7. Zero configuration to first value.** One artifact, one command, one
 pipeline line; drop-in inputs; every default is a policy clause you can read
@@ -142,7 +147,7 @@ bad product. So:
    formats, presets, screens. A missing thing is honest; the same thing done
    worse is not.
 2. **Then relax a number.** A non-hot-path budget may be relaxed by at most 2x
-   with the new number written down. Hot paths are never relaxed: capture,
+   (proposed limit) with the new number written down. Hot paths are never relaxed: capture,
    record a result, decide, open a case, search, read a gate, accept an
    ingest.
 3. **Then defer a principle from P4 to P10**, by a decision record that names
@@ -151,7 +156,8 @@ bad product. So:
    visible in every run), and the condition that ends it.
 4. **Never:** bend P0, P1 on a hot path, or P3; create a second path (P2);
    let a bend outlive its condition.
-5. **At most three bends open at once.** A fourth needs one closed first.
+5. **At most three bends open at once** (proposed limit). A fourth needs one
+   closed first.
 
 ### The floor: what "a bad product" means
 
@@ -166,10 +172,10 @@ works, do not ship.
   execution and triage jobs of the phase 0 friction audit. Working is not
   enough.
 - F4. It asks a person a question it already holds a valid answer to.
-- F5. A capability exists in one surface only (UI-only, or not reachable by
-  an agent).
+- F5. A capability exists in the UI only, outside the operation layer, so it
+  is not reachable by the API or an agent.
 - F6. First value needs an account, a configuration step or more than five
-  minutes.
+  minutes (the vision's J15 budget; draft until measured).
 - F7. A team cannot leave with all of its data and history.
 - F8. A strict team needs a different build, edition or data model than a
   loose one.

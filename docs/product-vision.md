@@ -222,7 +222,7 @@ plan is in [roadmap.md](roadmap.md).
 ## Principles
 
 **Superseded 2026-10-11 by [decisions/0007-guiding-principles.md](decisions/0007-guiding-principles.md)**,
-which absorbs the seven below into ten principles in tie-break order, with a
+which absorbs the seven below into eleven principles (P0 to P10) in tie-break order, with a
 bend rule and a floor. The ranking above is refined there: the record is true
 is a floor above speed, and speed is measured where thought happens (capture,
 record, decide), with budgets in milliseconds, tokens and keystrokes. The
