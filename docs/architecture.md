@@ -153,6 +153,11 @@ refetches what the server's change stream says was touched. The answer keys in t
 sentence beside each come from three maps in `src/core/kinds.ts` (`ANSWER_KEYS`, `ANSWER_LABELS`,
 `ANSWER_HELP`).
 
+What the device keeps (drafts, the notes typed for a run) is kept per person. Every request the page makes names
+the person it was loaded as (`X-Casebook-As`), and the server refuses it when the session has become somebody
+else's, in another tab for instance: text one person typed is never recorded under another's name. A caller that
+sends no name (a script, the CLI, an agent) is whoever its token says.
+
 ## Rules the code enforces on itself
 
 `test/architecture.test.ts` fails the check when: a module imports up the map (the suite reaching into
