@@ -323,6 +323,13 @@ describe("server mode", () => {
 		expect(found.body.ok && found.body.result.count).toBe(0);
 		// Reads are refused the same way: the page would otherwise show Bob's view as Alice's.
 		expect((await post(instance, "/api/p/scratch/find", {}, { ...bob, "x-casebook-as": "alice" })).status).toBe(401);
+		// So is every other route that takes a session (who am I, the change stream), and a name that cannot be read.
+		const as = (name: string) => ({ headers: { ...bob, "x-casebook-as": name } });
+		expect((await fetch(`${instance.url}/api/session`, as("alice"))).status).toBe(401);
+		expect((await fetch(`${instance.url}/api/p/scratch/events`, as("alice"))).status).toBe(401);
+		expect((await fetch(`${instance.url}/api/session`, as("%E0%A4%A"))).status).toBe(401);
+		expect((await post(instance, "/api/p/scratch/find", {}, { ...bob, "x-casebook-as": "%E0%A4%A" })).status).toBe(401);
+		expect((await fetch(`${instance.url}/api/session`, as("bob"))).status).toBe(200);
 		// The right name, and no name at all (a script, the CLI), go through. The name is percent-encoded, so one
 		// that a header could not carry as it is still matches.
 		expect((await post(instance, "/api/p/scratch/propose", create, { ...bob, "x-casebook-as": "bob" })).status).toBe(

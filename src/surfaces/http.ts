@@ -379,9 +379,12 @@ export type Extra = {
  * take or clear the cookie, same-origin only), and the web UI's static files. An unknown path is a 404.
  */
 export function serve(app: App, owner: Actor, extra: Extra = { ui: null }) {
+	// Every route that takes a session takes it here or in `handleOp`, and both hold a request to the person it
+	// names (`sameCaller`).
 	const guarded = (handler: (req: Request, session: Session) => Response | Promise<Response>) => (req: Request) => {
 		const session = sessionOf(app, req, owner);
-		return session ? handler(req, session) : unauthenticated();
+		if (!session) return unauthenticated();
+		return sameCaller(req, session) ? handler(req, session) : changedSession();
 	};
 	const routes: Record<string, unknown> = {
 		"/healthz": () => jsonResponse({ ok: true, version: VERSION }),
