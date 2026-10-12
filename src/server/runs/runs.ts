@@ -28,6 +28,7 @@ import {
 	changeByKey,
 	codeWhat,
 	excuseFor,
+	mustTarget,
 	processedJobs,
 	resultById,
 	resultsOfCaseOnTargets,
@@ -150,8 +151,11 @@ const Q = {
 		 VALUES ($run, $test, $result, $outcome, $signature, $attempt, $flipped, $lane, $target)
 		 ON CONFLICT (run, test, lane) DO UPDATE SET result = excluded.result, outcome = excluded.outcome, signature = excluded.signature,
 		   attempt = excluded.attempt, flipped = max(run_tests.flipped, excluded.flipped)
-		 WHERE excluded.attempt >= run_tests.attempt
-		   AND NOT (excluded.outcome IN ('skip', 'blocked') AND run_tests.outcome IN ('pass', 'fail', 'error'))`,
+		 WHERE (excluded.attempt > run_tests.attempt
+		        AND NOT (excluded.outcome IN ('skip', 'blocked') AND run_tests.outcome IN ('pass', 'fail', 'error')))
+		    OR (excluded.attempt = run_tests.attempt
+		        AND (CASE excluded.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END)
+		         >= (CASE run_tests.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END))`,
 	),
 	runTestGroups: sql<{ run: number }, { outcome: string; signature: number | null; target: number; n: number }>(
 		"SELECT outcome, signature, target, count(*) AS n FROM run_tests WHERE run = $run GROUP BY outcome, signature, target",
@@ -172,6 +176,13 @@ const Q = {
 		"SELECT count(*) AS n FROM run_tests WHERE run = $run AND flipped = 1",
 	),
 	dropCorrected: sql<{ run: number; result: number }>("DELETE FROM run_tests WHERE run = $run AND result = $result"),
+	effectiveOfTest: sql<{ run: number; test: number }, { outcome: string; signature: number | null }>(
+		"SELECT outcome, signature FROM run_tests WHERE run = $run AND test = $test",
+	),
+	newestRunWithTest: sql<{ project: number; scope: string; test: number }, { run: number | null }>(
+		`SELECT max(rt.run) AS run FROM run_tests rt JOIN runs r ON r.id = rt.run
+		 WHERE rt.test = $test AND r.project = $project AND r.scope = $scope`,
+	),
 	insertSlot: sql<{
 		run: number;
 		caseId: number;
@@ -544,8 +555,11 @@ export function* applyBatchSteps(
 		const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
 		const next = refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
 		if (next.state !== "disputed" && next.state !== "failing") continue;
-		// Every cause failing in the slot is its own question: answering one does not answer the others.
-		for (const id of new Set(next.causes.map(([cause]) => cause))) {
+		// Every cause failing in the slot is its own question: answering one does not answer the others. Only the
+		// causes seen in this batch's scope are this batch's to ask about; one seen in another repository has its
+		// own question there.
+		const here = next.causes.filter(([, seenOn]) => scopeOf(mustTarget(ctx.db, seenOn), batch.run) === scope);
+		for (const id of new Set(here.map(([cause]) => cause))) {
 			const signature = signatureById(ctx.db, id);
 			if (!signature) continue;
 			const g = group(signature);
@@ -573,16 +587,19 @@ export function* applyBatchSteps(
  * as a report's, so an existing question takes the run on and a decision about the cause reaches it.
  */
 export function failuresShown(ctx: Ctx, run: RunRow): { group: FailingGroup; target: number; by: number }[] {
-	const scope = scopeOfRun(ctx.db, run);
-	const out = new Map<number, { group: FailingGroup; target: number; by: number }>();
+	const out = new Map<string, { group: FailingGroup; target: number; by: number }>();
 	for (const slot of ctx.db.all(Q.failingSlotRows, { run: run.id })) {
 		const fills = fillsOf(ctx.db, slot.id);
-		for (const [cause] of json<Cause[]>(slot.causes)) {
+		for (const [cause, seenOn] of json<Cause[]>(slot.causes)) {
 			const signature = signatureById(ctx.db, cause);
 			if (!signature) continue;
-			let entry = out.get(cause);
+			// Each cause is asked about in the scope of the target it was seen on.
+			const scope = run.scope ?? scopeOf(mustTarget(ctx.db, seenOn), run.id);
+			const key = causeKey(cause, scope);
+			let entry = out.get(key);
 			for (const fill of fills) {
-				if (fill.signature !== cause || (fill.outcome !== "fail" && fill.outcome !== "error")) continue;
+				if (fill.signature !== cause || fill.target !== seenOn) continue;
+				if (fill.outcome !== "fail" && fill.outcome !== "error") continue;
 				entry ??= {
 					group: {
 						signature,
@@ -605,7 +622,7 @@ export function failuresShown(ctx: Ctx, run: RunRow): { group: FailingGroup; tar
 				entry.target = fill.target;
 				entry.by = fill.actor;
 			}
-			if (entry) out.set(cause, entry);
+			if (entry) out.set(key, entry);
 		}
 	}
 	return [...out.values()];
@@ -716,15 +733,50 @@ export type Retallied = {
 	run: RunRow;
 	/** A planned run that just reached `passed` and is still open: the caller raises its sign-off. */
 	wantsSignoff: boolean;
-	/** Signature ids currently failing in this run. Open failure questions about other causes no longer block it. */
-	failing: Set<number>;
+	/** The causes this run shows unexplained, by `causeKey`. Open failure questions about others do not block it. */
+	failing: Set<string>;
 };
 
 /**
  * An open question that may hold a run back. Questions belong to the decision machinery, which passes them in;
  * this module does not read them.
  */
-export type Blocker = { ref: string; kind: string; signature: number | null; blocks: readonly number[] };
+export type Blocker = {
+	ref: string;
+	kind: string;
+	signature: number | null;
+	/** For a failure question: the scope it is answered in. */
+	scope: string | null;
+	blocks: readonly number[];
+};
+
+/** A cause in the scope it is answered in: the identity of a failure question. */
+export const causeKey = (signature: number, scope: string): string => `${signature}|${scope}`;
+
+/**
+ * Does this test already fail, with this cause, where the change started? The base commit if Casebook has results
+ * for it, otherwise the newest commit on the trunk of the change's own repository that ran the test. A hint for
+ * the person or the rule that answers; it never excuses anything by itself. Because a rule may act on it, it reads
+ * what the base's gate counts: the effective result per lane, after attempts and corrections, never an agent's
+ * result and never another repository's.
+ */
+export function failsOnBase(db: Db, target: TargetRow, test: number, signature: number): boolean {
+	if (target.line !== "change" || target.change === null) return false;
+	const change = changeById(db, target.change);
+	if (!change) return false;
+	const failsIn = (run: number | null | undefined): boolean | null => {
+		if (run === null || run === undefined) return null;
+		const rows = db.all(Q.effectiveOfTest, { run, test });
+		if (rows.length === 0) return null;
+		return rows.some((row) => (row.outcome === "fail" || row.outcome === "error") && row.signature === signature);
+	};
+	const onBase = change.base_sha
+		? failsIn(db.get(Q.changeRun, { project: target.project, what: codeWhat(change.repo, change.base_sha) })?.id)
+		: null;
+	if (onBase !== null) return onBase;
+	const trunk = change.repo ? `line:trunk@${change.repo}` : "line:trunk";
+	return failsIn(db.get(Q.newestRunWithTest, { project: target.project, scope: trunk, test })?.run) ?? false;
+}
 
 /**
  * Recomputes a run's tally, the questions blocking it and its verdict from the facts, and stores them. Called in
@@ -734,17 +786,29 @@ export type Blocker = { ref: string; kind: string; signature: number | null; blo
 export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): Retallied {
 	const run = runById(ctx.db, runId);
 	if (!run) throw new Error(`run ${runId} is missing`);
-	const scope = scopeOfRun(ctx.db, run);
 	const tally: Tally = emptyTally();
-	const failing = new Set<number>();
+	const failing = new Set<string>();
 	const depends = new Map<number, number | null>();
+	// A failure is answered in the scope of the target it was seen on. For a change run that is the run's own
+	// scope. A planned run that names no repository can count the same commit in two of them: each of its causes
+	// is then classified in its own repository's scope, so one repository's answer never covers the other's failure.
+	const scopes = new Map<number, string>();
+	const scopeFor = (target: number): string => {
+		if (run.scope !== null) return run.scope;
+		let found = scopes.get(target);
+		if (found === undefined) {
+			found = scopeOf(mustTarget(ctx.db, target), run.id);
+			scopes.set(target, found);
+		}
+		return found;
+	};
 	/**
 	 * The excuse for a cause seen on a target, if one applies. An excuse held for certain targets (an
 	 * infrastructure failure) covers failures on those only: the same cause on another commit, or in another
 	 * environment of the same commit, stays unexplained until it is answered there.
 	 */
 	const excuseOf = (signature: number, target: number) => {
-		return excuseFor(ctx.db, run.project, signature, scope, target);
+		return excuseFor(ctx.db, run.project, signature, scopeFor(target), target);
 	};
 
 	const classify = (signature: number | null, target: number, n: number): void => {
@@ -754,7 +818,7 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 		}
 		const excuse = excuseOf(signature, target);
 		if (!excuse) {
-			failing.add(signature);
+			failing.add(causeKey(signature, scopeFor(target)));
 			tally.unexplained += n;
 			return;
 		}
@@ -785,7 +849,7 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 			const causes = json<Cause[]>(slot.causes);
 			const excuses = causes.map(([signature, target]) => excuseOf(signature, target));
 			const open = causes.filter((_, i) => !excuses[i]);
-			for (const [signature] of open) failing.add(signature);
+			for (const [signature, target] of open) failing.add(causeKey(signature, scopeFor(target)));
 			for (const excuse of excuses) if (excuse) depends.set(excuse.decision, excuse.expires_at);
 			if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed += 1;
 			else if (open.length > 0 || causes.length === 0) {
@@ -810,7 +874,9 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 	// so the gate must name the question that would unblock it. One about a cause the run no longer shows is not.
 	const blocking = blockers
 		.filter((q) =>
-			q.kind === "failure" ? q.signature !== null && failing.has(q.signature) : q.blocks.includes(run.id),
+			q.kind === "failure"
+				? q.signature !== null && q.scope !== null && failing.has(causeKey(q.signature, q.scope))
+				: q.blocks.includes(run.id),
 		)
 		.map((q) => q.ref);
 

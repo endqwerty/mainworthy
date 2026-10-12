@@ -394,6 +394,90 @@ describe("what a result may prove", () => {
 		expect(first(real.questions).answer).toBe("inherited");
 	});
 
+	test("the same attempt reported twice keeps the failure; a newer attempt or a correction replaces it", () => {
+		seed();
+		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const planned = plan({ name: "Same attempt", select: {}, accepts: { commit: "sameatt01" } });
+		const one = (outcome: string, extra: Record<string, unknown> = {}) => ({
+			target: { commit: "sameatt01", branch: "main" },
+			job: "e2e",
+			results: [
+				{
+					test: { key: "a::t" },
+					annotation: { case: "C-1", version: 1 },
+					outcome,
+					...(outcome === "fail" ? { failure: { message: "broken" } } : {}),
+				},
+			],
+			...extra,
+		});
+		report(one("fail"), ci);
+		report(one("pass"), ci);
+		expect(gate({ commit: "sameatt01" }).verdict).toBe("blocked");
+		expect(gate({ run: planned.run }).verdict).toBe("blocked");
+		expect(h.call<InboxReply>("inbox", { kind: "failure" }).items).toHaveLength(1);
+		report(one("pass", { attempt: 2 }), ci);
+		expect(gate({ commit: "sameatt01" }).verdict).toBe("passed");
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
+	test("'already failing on the base' reads what the base's gate counts, after corrections and attempts", () => {
+		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const one = (target: Record<string, unknown>, outcome: string, extra: Record<string, unknown> = {}) => ({
+			target,
+			job: "e2e",
+			results: [
+				{
+					test: { key: "base::t" },
+					outcome,
+					...(outcome === "fail" ? { failure: { message: "same failure" } } : {}),
+					...extra,
+				},
+			],
+		});
+		const base = { repo: "app", commit: "corrbase01", branch: "main" };
+		const failed = report({ ...one(base, "fail"), attempt: 2 }, ci);
+		// The producer withdraws the failure: the base passes.
+		report(one(base, "pass", { corrects: first(failed.results) }), ci);
+		expect(gate({ commit: "corrbase01", repo: "app" }).verdict).toBe("passed");
+		const head = report(
+			one({ repo: "app", commit: "corrhead01", branch: "feature", pr: 5, base: "corrbase01" }, "fail"),
+			ci,
+		);
+		expect(head.gate?.verdict).toBe("blocked");
+		expect(first(head.questions).how).toBe("new");
+	});
+
+	test("a run planned before two repositories report the same commit keeps their failures apart", () => {
+		seed();
+		const planned = plan({ name: "Before either reported", select: {}, accepts: { commit: "sameforkcommit" } });
+		const fail = (repo: string) => ({
+			target: { repo, commit: "sameforkcommit", branch: "main" },
+			results: [
+				{
+					test: { key: "a::t" },
+					annotation: { case: "C-1", version: 1 },
+					outcome: "fail",
+					failure: { message: "same cause" },
+				},
+			],
+		});
+		report(fail("a"));
+		report(fail("b"));
+		const asked = h.call<InboxReply>("inbox", { kind: "failure" }).items;
+		expect(asked).toHaveLength(2);
+		const ofA = asked.find((item) => JSON.stringify(item.evidence).includes("trunk@a"));
+		if (!ofA) throw new Error("no question for repository a");
+		decide(ofA, { is: "flaky" });
+		// The answer covers repository a's failure only: the run still shows b's, unexplained.
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked" });
+		expect(gate({ commit: "sameforkcommit", repo: "b" }).verdict).toBe("blocked");
+		const ofB = asked.find((item) => item.q !== ofA.q);
+		if (!ofB) throw new Error("no question for repository b");
+		decide(first(h.call<InboxReply>("inbox", { kind: "failure" }).items), { is: "flaky" });
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
 	test("what was decided about one repository's trunk says nothing about another's", () => {
 		const fail = (repo: string, commit: string) => ({
 			target: { repo, commit, branch: "main" },

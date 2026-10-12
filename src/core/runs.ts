@@ -141,25 +141,31 @@ export type SlotFill = {
 /**
  * Folds the results admitted to a slot into one entry per producer, and lists every failure that still counts.
  * A producer may have several tests on one case, each reported by several jobs or in several environments. For
- * each test in each lane its latest decisive result counts: the highest attempt, then the last recorded, so a
- * re-run replaces the attempt before it, an old attempt arriving late replaces nothing, and a pass in one job
- * or environment never replaces a failure in another. A skip or a blocked result is not decisive: it never replaces a pass or a failure, and counts
+ * each test in each lane its latest decisive result counts: a higher attempt replaces the one before it, an old
+ * attempt arriving late replaces nothing, the same attempt reported twice keeps the worse outcome, and a pass
+ * in one job or environment never replaces a failure in another. A skip or a blocked result is not decisive: it never replaces a pass or a failure, and counts
  * only when the test has neither. The producer's entry is then the worst of its tests: any failing test makes it
  * a fail, whatever else passed. `failing` holds the result of every test that fails, from every producer, because
  * each may have its own cause and each cause needs its own answer.
  */
 export function aggregateSlot(fills: readonly SlotFill[]): { agg: SlotAgg; failing: number[] } {
+	const weight = { fail: 3, pass: 2, blocked: 1, skip: 0 } as const;
 	const decisive = (fill: SlotFill): boolean => fill.outcome === "pass" || fill.outcome === "fail";
-	const later = (a: SlotFill, b: SlotFill): boolean =>
-		a.attempt > b.attempt || (a.attempt === b.attempt && (a.seq > b.seq || (a.seq === b.seq && a.ord > b.ord)));
+	const ordered = [...fills].sort((a, b) => a.seq - b.seq || a.ord - b.ord);
 	const latest = new Map<string, SlotFill>();
-	for (const fill of fills) {
+	for (const fill of ordered) {
 		const key = `${fill.actor}:${fill.method}:${fill.test}:${fill.lane}`;
 		const held = latest.get(key);
-		const replaces = !held || (decisive(fill) === decisive(held) ? later(fill, held) : decisive(fill));
-		if (replaces) latest.set(key, fill);
+		if (!held) latest.set(key, fill);
+		// A newer attempt is the producer running it again: it replaces the attempt before it, unless it decided
+		// nothing (a skip) and the earlier one did.
+		else if (fill.attempt > held.attempt) {
+			if (decisive(fill) || !decisive(held)) latest.set(key, fill);
+		}
+		// The same attempt reported twice is not a re-run. The worse outcome stands: a pass does not replace a
+		// failure of the same attempt (a producer that was wrong says so with a correction).
+		else if (fill.attempt === held.attempt && weight[fill.outcome] >= weight[held.outcome]) latest.set(key, fill);
 	}
-	const weight = { fail: 3, pass: 2, blocked: 1, skip: 0 } as const;
 	const agg: SlotAgg = {};
 	const failing: number[] = [];
 	for (const fill of latest.values()) {

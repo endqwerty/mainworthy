@@ -26,6 +26,7 @@ import { claimMint } from "../kernel/witness.ts";
 import { clauseFor, currentPolicy } from "../policy/policy.ts";
 import {
 	type Blocker,
+	causeKey,
 	findRun,
 	isLatestInScope,
 	passesAny,
@@ -549,6 +550,7 @@ function blockersOf(ctx: Ctx, run: RunRow): Blocker[] {
 		ref: questionRef(open),
 		kind: open.kind,
 		signature: open.kind === "failure" ? (json<{ signature?: number }>(open.subject).signature ?? null) : null,
+		scope: open.kind === "failure" ? (json<{ scope?: string }>(open.subject).scope ?? null) : null,
 		blocks: json<number[]>(open.blocks),
 	}));
 }
@@ -562,7 +564,7 @@ function blockersOf(ctx: Ctx, run: RunRow): Blocker[] {
  * report that holds only an agent's results, says nothing about it. A planned run that shares a change's scope
  * never dissolves that scope's questions; a run that is its own scope does, when its slots no longer show the cause.
  */
-function dissolveStale(ctx: Ctx, run: RunRow, failing: ReadonlySet<number>): void {
+function dissolveStale(ctx: Ctx, run: RunRow, failing: ReadonlySet<string>): void {
 	const scope = scopeOfRun(ctx.db, run);
 	const own = run.origin === "change" || scope === `run:${run.id}`;
 	// Only the newest run of a scope speaks for it: a late report for an older commit must not close a question
@@ -572,7 +574,7 @@ function dissolveStale(ctx: Ctx, run: RunRow, failing: ReadonlySet<number>): voi
 		const question = questionById(ctx.db, open.id);
 		if (question?.kind !== "failure") continue;
 		const subject = json<{ signature: number; scope: string }>(question.subject);
-		if (subject.scope !== scope || failing.has(subject.signature)) continue;
+		if (subject.scope !== scope || failing.has(causeKey(subject.signature, subject.scope))) continue;
 		if (run.origin === "change") {
 			const tests = (json<{ tests?: { id: number }[] }>(question.evidence).tests ?? []).map((test) => test.id);
 			if (!passesAny(ctx.db, run.id, tests)) continue;

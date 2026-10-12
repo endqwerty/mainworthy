@@ -551,6 +551,7 @@ CREATE TABLE run_tests (
 	PRIMARY KEY (run, test, lane)
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX run_tests_outcome ON run_tests (run, outcome, signature);
+CREATE INDEX run_tests_test ON run_tests (test, run);
 
 -- A planned run counts slots: one per case and obligation, pinned to a version when the run starts.
 CREATE TABLE slots (
