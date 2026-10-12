@@ -1217,7 +1217,8 @@ export function reopenRun(ctx: Ctx, run: RunRow, decision: number): void {
 }
 
 /**
- * A `mistaken` answer on a disputed slot: the failing results it names stop counting. Not only in that slot: a
+ * A `mistaken` answer on a disputed slot: the failing results it names (those with the cause, on the targets the
+ * question had seen) stop counting. Not only in that slot: a
  * result judged a mistake is discounted in every open run that admitted it and leaves its commit's gate, so the
  * same evidence never counts in one place and not in another. Standing: only by a decision, which each
  * discounted result records. Returns the slot and result pairs.
@@ -1228,14 +1229,17 @@ export function discountFailures(
 	run: RunRow,
 	signature: number,
 	scope: string,
+	targets: readonly number[],
 ): [number, number][] {
 	const decision = decisionOf(witness, "failure");
 	const corrected: [number, number][] = [];
 	const touched = new Set<number>();
 	for (const slot of ctx.db.all(Q.slotsBySignature, { run: run.id, signature })) {
 		for (const fill of fillsOf(ctx.db, slot.id)) {
-			// Only the failures the question is about: the same cause seen in another repository is another question.
+			// Only the failures the question is about: the same cause seen in another repository, or on a target
+			// the question never saw (another environment, asked about on its own), is another question.
 			if (fill.signature !== signature || scopeIn(ctx.db, run, fill.target) !== scope) continue;
+			if (!targets.includes(fill.target)) continue;
 			for (const held of ctx.db.all(Q.slotsOfResult, { result: fill.id })) {
 				const where = slotById(ctx.db, held.slot);
 				const of = where ? runById(ctx.db, where.run) : null;
@@ -1271,6 +1275,9 @@ function refreshSlotById(ctx: Ctx, id: number): void {
 	if (!slot || !run) return;
 	const obligation = obligationsOf(run).find((o) => o.id === slot.obligation);
 	refreshSlot(ctx, slot, obligation?.kind === "exercise" ? obligation : null);
+	// The run this slot belongs to is recomputed before the command ends, whether or not the question that
+	// caused this named it: a slot never changes under a run whose stored gate stays as it was.
+	ctx.recompute.add(run.id);
 	ctx.touched.add(runRef(run));
 }
 

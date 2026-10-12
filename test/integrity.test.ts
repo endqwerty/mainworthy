@@ -1490,6 +1490,54 @@ describe("what a decision may change", () => {
 		expect(h.call<InboxReply>("inbox", { kind: "signoff", limit: 50 }).items).toEqual([]);
 	});
 
+	test("'mistaken' reaches the results its question is about, and every run that holds one is recomputed", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "One" },
+				{ op: "create", outline: "Spare" },
+			],
+		});
+		const other = h.actor("second", "human", ["read", "produce"]);
+		const result = (outcome: string, key = "one", ref = "C-1") => ({
+			test: { key },
+			annotation: { case: ref, version: 1 },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "shared cause" } } : {}),
+		});
+		const on = (env: string, outcome: string, as = h.owner) =>
+			report({ target: { commit: "build001", branch: "main", env }, results: [result(outcome)] }, as);
+		const everywhere = plan({ name: "All environments", select: {}, accepts: { commit: "build001" } });
+		// A failure and another person's pass dispute the case in production. It is called infrastructure there.
+		on("prod", "fail");
+		on("prod", "pass", other);
+		const production = open("failure");
+		expect(decide(production, { is: "infra" }).status).toBe("decided");
+		// The same dispute in staging, which has its own question; and a second run over staging only.
+		on("staging", "fail");
+		on("staging", "pass", other);
+		report({
+			target: { commit: "build001", branch: "main", env: "staging" },
+			results: [result("pass", "spare", "C-2")],
+		});
+		const staging = plan({ name: "Staging only", select: {}, accepts: { commit: "build001", env: "staging" } });
+		expect(gate({ run: staging.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
+		// Production's answer is changed to `mistaken`. That is about production's failing result, not staging's.
+		expect(decide(production, { is: "mistaken" }).status).toBe("decided");
+		const discounted = rows<{ env: string }>(
+			`SELECT DISTINCT t.env FROM slot_results s JOIN results r ON r.id = s.result JOIN targets t ON t.id = r.target
+			 WHERE s.discounted_by IS NOT NULL`,
+		);
+		expect(discounted).toEqual([{ env: "prod" }]);
+		// Every run's stored gate is what its slots show now.
+		for (const run of [everywhere.run, staging.run]) {
+			const states = slots(run).map((slot) => slot.state);
+			const status = gate({ run });
+			expect(status.tally.disputed ?? 0).toBe(states.filter((state) => state === "disputed").length);
+			expect(status.verdict).toBe(states.includes("disputed") ? "blocked" : "passed");
+		}
+		expect(gate({ run: staging.run }).open).toHaveLength(1);
+	});
+
 	test("a run closed on an answer that later stops holding names the question asked in its place", () => {
 		seed();
 		const failing = {

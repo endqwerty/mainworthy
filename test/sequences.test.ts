@@ -225,6 +225,38 @@ function sequence(seed: number, preset: string): Problem | null {
 				return { what: "a slot's state is not what its admitted results give", detail: { slot, expected, fills } };
 		}
 
+		// 6b. A planned run's stored tally against its slots and the excuses in force.
+		for (const run of runs) {
+			if (run.origin !== "planned" || run.state !== "open") continue;
+			const tally = { pass: 0, excused: 0, attributed: 0, unexplained: 0, missing: 0, disputed: 0, skipped: 0 };
+			for (const slot of rows("SELECT * FROM slots WHERE run = ?", Number(run.id))) {
+				if (slot.state === "satisfied" || slot.state === "waived") tally.pass++;
+				else if (slot.state === "missing") tally.missing++;
+				else if (slot.state === "skipped") {
+					tally.skipped++;
+					tally.missing++;
+				} else {
+					const causes = JSON.parse(String(slot.causes)) as [number, number][];
+					const excuses = causes.map(([signature, target]) => {
+						const seenOn = targets.get(target);
+						return seenOn
+							? excuseOf(Number(run.project), signature, scopeOf(seenOn, Number(run.id)), target)
+							: undefined;
+					});
+					const unanswered = excuses.filter((excuse) => !excuse).length;
+					if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed++;
+					else if (unanswered > 0 || causes.length === 0)
+						tally[slot.state === "disputed" ? "disputed" : "unexplained"]++;
+					else if (slot.state === "disputed") tally.pass++;
+					else tally.excused++;
+				}
+			}
+			const stored = JSON.parse(String(run.tally)) as Tally;
+			for (const key of Object.keys(tally) as (keyof typeof tally)[])
+				if (tally[key] !== stored[key])
+					return { what: "a planned run's stored tally is not what its slots give", detail: { run, tally, stored } };
+		}
+
 		// 7. Nobody is asked about what already has an answer.
 		for (const question of open) {
 			const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string };

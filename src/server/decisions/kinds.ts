@@ -328,8 +328,10 @@ const failureHandler: Handler<"failure"> = {
 		const subject = json<{ signature: number; scope: string }>(question.subject);
 		if (answer.is === "mistaken") {
 			const corrected: [number, number][] = [];
+			const seen = json<{ targets?: number[]; targetId?: number }>(question.evidence);
+			const targets = seen.targets ?? (seen.targetId !== undefined ? [seen.targetId] : []);
 			for (const run of openPlannedAbout(ctx, question))
-				corrected.push(...discountFailures(ctx, witness, run, subject.signature, subject.scope));
+				corrected.push(...discountFailures(ctx, witness, run, subject.signature, subject.scope, targets));
 			if (corrected.length === 0)
 				throw invalid("`mistaken` is for a disputed result in a planned run; this failure has none");
 			return { corrected };
