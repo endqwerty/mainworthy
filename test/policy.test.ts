@@ -1,7 +1,7 @@
 // Policy is data over one model (principle P5): the same operations and the same rows under loose, standard and
 // strict; only who answers changes. Also: what an agent may and may not do, and what agents read.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { ANSWER_KEYS, ANSWERS, Clause, KINDS } from "../src/core/kinds.ts";
+import { ANSWER_KEYS, ANSWERS, type Ask, Clause, KINDS, standingOf } from "../src/core/kinds.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { missingCatchAll, PRESET_NAMES, PRESETS } from "../src/core/presets.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
@@ -31,6 +31,44 @@ const first = <T>(items: T[]): T => {
 };
 const queue = (input: Record<string, unknown> = {}) => h.call<InboxReply>("inbox", input);
 const title = (ref: string) => h.call<{ title: string }[]>("get", { refs: [ref] })[0]?.title;
+
+describe("who may answer", () => {
+	const ask = (more: Partial<Ask>): Ask => ({
+		who: "member",
+		agents: "none",
+		notProducer: false,
+		reason: "optional",
+		...more,
+	});
+	const person = (can: string[]) => ({ kind: "human" as const, can: can as never });
+	const agent = (can: string[]) => ({ kind: "agent" as const, can: can as never });
+	const standing = (actor: ReturnType<typeof person> | ReturnType<typeof agent>, clause: Ask, isProducer = false) =>
+		standingOf({ actor, ask: clause, isAuthor: false, isProducer });
+
+	test("a clause is held to everything it asks, whichever of its conditions comes first", () => {
+		// The role and "did not produce the evidence" together: an administrator who reported the failure is out.
+		const adminNotProducer = ask({ who: "admin", notProducer: true });
+		expect(standing(person(["read", "answer", "admin"]), adminNotProducer, true)).toBe("forbidden");
+		expect(standing(person(["read", "answer", "admin"]), adminNotProducer, false)).toBe("counts");
+		expect(standing(person(["read", "answer"]), adminNotProducer, false)).toBe("forbidden");
+		// The role and "an agent may answer" together: an agent that is not an administrator only advises.
+		const adminOrAgent = ask({ who: "admin", agents: "answer" });
+		expect(standing(agent(["read", "produce", "answer"]), adminOrAgent)).toBe("advice");
+		expect(standing(agent(["read", "produce", "answer", "admin"]), adminOrAgent)).toBe("counts");
+		expect(
+			standing(
+				agent(["read", "produce", "answer", "admin"]),
+				ask({ who: "admin", agents: "answer", notProducer: true }),
+				true,
+			),
+		).toBe("advice");
+		expect(standing(agent(["read", "produce", "answer", "admin"]), ask({ who: "admin" }))).toBe("forbidden");
+		// What already held: a member clause.
+		expect(standing(person(["read", "answer"]), ask({ notProducer: true }), true)).toBe("forbidden");
+		expect(standing(agent(["read", "produce", "answer"]), ask({ agents: "answer" }))).toBe("counts");
+		expect(standing(agent(["read", "produce", "answer"]), ask({ agents: "advise" }))).toBe("advice");
+	});
+});
 
 describe("the presets", () => {
 	test("every preset is valid and total: no kind of question is left without an owner", () => {

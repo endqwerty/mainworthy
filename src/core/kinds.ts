@@ -322,14 +322,18 @@ export function standingOf(input: {
 		// A rule answered or will answer. A person with the right may still overrule it; nobody else may.
 		return actor.kind === "human" && actor.can.includes("answer") ? "counts" : "forbidden";
 	}
+	// From here a clause is held to everything it asks at once: the role, whether an agent may answer, and who
+	// produced the evidence. None of the three is skipped because another was met first.
+	const role = ask.who === "admin" ? actor.can.includes("admin") : actor.can.includes("answer");
 	if (actor.kind === "agent") {
 		if (ask.agents === "none") return "forbidden";
 		if (!actor.can.includes("produce") && !actor.can.includes("answer")) return "forbidden";
-		if (ask.agents === "advise" || !actor.can.includes("answer")) return "advice";
+		// An agent that the clause lets speak, but whose answer does not count (the clause wants advice only, it
+		// lacks the right or the role, or it produced the evidence), advises: a person decides.
+		if (ask.agents === "advise" || !actor.can.includes("answer") || !role) return "advice";
 		return ask.notProducer && input.isProducer ? "advice" : "counts";
 	}
-	if (ask.who === "admin") return actor.can.includes("admin") ? "counts" : "forbidden";
-	if (!actor.can.includes("answer")) return "forbidden";
+	if (!role) return "forbidden";
 	if (ask.notProducer && input.isProducer) return "forbidden";
 	return "counts";
 }
