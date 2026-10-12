@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import type { SessionInfo } from "../core/api.ts";
 import { CaseScreen } from "./case/index.tsx";
 import { ChangesScreen } from "./changes/index.tsx";
 import { ApiError, login, session, unauthenticatedEvent } from "./lib/api.ts";
-import { useEvents, useQueryOp } from "./lib/data.ts";
+import { queryClient, useEvents, useQueryOp } from "./lib/data.ts";
+import { setDevicePerson } from "./lib/device.ts";
 import { useBindings, useKeyboard, useKeyRegistry } from "./lib/keys.ts";
 import { navigate, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
 import { QueueScreen } from "./queue/index.tsx";
@@ -43,9 +44,16 @@ export function App() {
 		| { kind: "ready"; session: SessionInfo }
 		| { kind: "error"; message: string }
 	>({ kind: "loading" });
+	const person = useRef<string | null>(null);
 	const refreshSession = useCallback(async (): Promise<void> => {
 		try {
-			setAuth({ kind: "ready", session: await session() });
+			const info = await session();
+			// What the device keeps is kept per person. A different person from the one before starts with nothing
+			// of theirs: not their drafts, not their notes, not what the app had read for them.
+			if (person.current !== null && person.current !== info.actor) queryClient.clear();
+			person.current = info.actor;
+			setDevicePerson(info.actor);
+			setAuth({ kind: "ready", session: info });
 		} catch (error) {
 			setAuth(
 				error instanceof ApiError && error.code === "unauthenticated"

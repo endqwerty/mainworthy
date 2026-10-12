@@ -66,7 +66,9 @@ not the same things done worse.
    to be asked (carried from an earlier answer, or asked again).
 5. **Drafts live in the browser.** The design autosaves into a server-side open proposal that others see as
    "draft by Dana". With one user that buys nothing; the draft is kept on the device and survives reload and
-   crash (commitment L2), and a sealed proposal goes through the same path as designed. Server-side drafts are
+   crash (commitment L2), and a sealed proposal goes through the same path as designed. So do the notes typed
+   for a run, one per slot, until the result is recorded. What the device keeps is kept per person: somebody
+   else who signs in on the same browser is not shown it and cannot record it as theirs. Server-side drafts are
    deferred with presence (#35).
 6. **A report is two transactions, applied in slices.** Acceptance commits first, so every reader sees the gate
    turn pending before anything is applied (commitment C5); then the batch is applied in slices of 200 results,

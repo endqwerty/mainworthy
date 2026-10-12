@@ -4,7 +4,7 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 
 for (const surface of ["case draft", "run note"]) {
 	test.skipIf(!browserAvailable)(
-		`UI-4 a revoked session returns to sign-in and restores the ${surface}`,
+		`UI-4 a revoked session returns to sign-in, and the ${surface} comes back for the person who typed it and nobody else`,
 		async () => {
 			const server = await startServer({ mode: "server" });
 			await server.api("propose", {
@@ -58,7 +58,33 @@ for (const surface of ["case draft", "run note"]) {
 				await page.locator("#token").waitFor({ timeout: 4000 });
 				expect(await page.locator("#app").count()).toBe(0);
 				expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
+				// Somebody else signs in on this browser. What the writer typed is not shown to them.
 				await page.getByRole("textbox", { name: "Sign in with your token" }).fill(server.token);
+				await page.keyboard.press("Enter");
+				await page.locator("#app").waitFor();
+				if (surface === "case draft") {
+					await page.getByRole("button", { name: "Existing case", exact: true }).waitFor();
+					expect(await page.getByRole("textbox", { name: "Step 1", exact: true }).count()).toBe(0);
+				} else {
+					await page.locator('.run-document[data-active="true"][data-ready="true"] .rsteps').waitFor();
+					await page.keyboard.press("f");
+					expect(await page.getByRole("textbox", { name: "Result note" }).inputValue()).toBe("");
+					await page.keyboard.press("Escape");
+				}
+				expect(await page.getByText("Keep this", { exact: false }).count()).toBe(0);
+				// The writer signs in again with a new token: it is all still there, and it is recorded as theirs.
+				const again = z.object({ token: z.string() }).parse(
+					await server.api("admin", {
+						do: "token.create",
+						actor: "writer",
+						kind: "human",
+						can: ["read", "produce"],
+						project: "scratch",
+					}),
+				);
+				await browser.context.clearCookies();
+				await page.reload();
+				await page.getByRole("textbox", { name: "Sign in with your token" }).fill(again.token);
 				await page.keyboard.press("Enter");
 				await page.locator("#app").waitFor();
 				if (surface === "case draft") {
@@ -70,6 +96,10 @@ for (const surface of ["case draft", "run note"]) {
 						(rows) => rows[0]?.version === 2,
 					);
 					expect(rows[0]?.steps).toMatchObject([{ action: "Keep this private sentence" }]);
+					const timeline = await server.api("timeline", { ref: "C-1" });
+					expect(timeline.entries.find((entry) => entry.t === "version" && entry.version === 2)).toMatchObject({
+						by: "writer",
+					});
 				} else {
 					const note = page.getByRole("textbox", { name: "Result note" });
 					expect(await note.inputValue()).toBe("Keep this failure note");
@@ -79,9 +109,10 @@ for (const surface of ["case draft", "run note"]) {
 						() => server.api("find", { in: "slots", run: run.run }),
 						(reply) => reply.items.some((slot) => Array.isArray(slot.fills) && slot.fills.length > 0),
 					);
-					expect(slots.items[0]?.fills).toMatchObject([{ outcome: "fail", note: "Keep this failure note" }]);
+					expect(slots.items[0]?.fills).toMatchObject([
+						{ outcome: "fail", note: "Keep this failure note", by: "writer" },
+					]);
 				}
-				expect(browser.loads()).toBe(1);
 				expect(browser.errors).toEqual([]);
 			} finally {
 				await browser.close();

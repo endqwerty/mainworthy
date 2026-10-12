@@ -444,12 +444,20 @@ async function cases(server: Server, count: number) {
 			expect(unrecorded.every((slot) => slot.state === "missing" && slot.fills.length === 0)).toBe(true);
 			const first = unrecorded.find((slot) => slot.case === "C-1");
 			if (!first) throw new Error("First pinned slot missing");
-			const key = `casebook:run-notes:scratch:${planned.run}`;
-			const stored = z
-				.record(z.string(), z.string())
-				.parse(JSON.parse(await view.page.evaluate((key) => localStorage.getItem(key) ?? "{}", key)));
-			expect(stored[first.id]).toBe("Keep this failure note");
-			await view.page.getByRole("textbox", { name: "Sign in with your token" }).fill(server.token);
+			// Kept on the device under the person's name and the slot, until the server has it.
+			const key = `casebook:executor:run-note:scratch:${planned.run}:${first.id}`;
+			expect(await view.page.evaluate((key) => localStorage.getItem(key), key)).toBe("Keep this failure note");
+			// The same person signs in again, with a new token.
+			const renewed = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "executor",
+					kind: "human",
+					can: ["read", "produce", "plan"],
+					project: "scratch",
+				}),
+			).token;
+			await view.page.getByRole("textbox", { name: "Sign in with your token" }).fill(renewed);
 			await view.page.keyboard.press("Enter");
 			await view.page.locator("#app").waitFor();
 			await view.page.waitForSelector('[data-run-document="C-1"][data-active="true"][data-ready="true"]');
@@ -539,4 +547,85 @@ async function cases(server: Server, count: number) {
 		}
 	},
 	30000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"two tabs on one run keep each other's notes, and a result that lands does not clear a newer note",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			const created = await cases(server, 2);
+			const planned = await server.api("plan", {
+				name: "Two tabs",
+				select: { cases: created.cases.map((c) => c.ref) },
+			});
+			const path = `/p/scratch/runs/${planned.run.slice(2)}`;
+			view = await openPage(server, { path });
+			const a = view.page;
+			a.setDefaultTimeout(5000);
+			const ready = (page: typeof a, ref: string) =>
+				page.waitForSelector(`[data-run-document="${ref}"][data-active="true"][data-ready="true"]`);
+			await ready(a, "C-1");
+			const b = await view.context.newPage();
+			b.setDefaultTimeout(5000);
+			await b.goto(`${server.url}${path}`);
+			await ready(b, "C-1");
+			const noteOf = (page: typeof a) => page.getByRole("textbox", { name: "Result note" });
+
+			// Tab A writes a note for the first slot, tab B one for the second. Neither wipes the other's.
+			await a.keyboard.press("f");
+			await a.keyboard.type("Tab A first-slot note");
+			await b.locator('[data-slot="2"]').click();
+			await ready(b, "C-2");
+			await b.keyboard.press("f");
+			await b.keyboard.type("Tab B second-slot note");
+			await a.reload();
+			await ready(a, "C-1");
+			expect(await noteOf(a).inputValue()).toBe("Tab A first-slot note");
+			await a.locator('[data-slot="2"]').click();
+			await ready(a, "C-2");
+			expect(await noteOf(a).inputValue()).toBe("Tab B second-slot note");
+			await b.close();
+
+			// A result is on its way with the first note; a newer note typed meanwhile is not cleared when it lands.
+			await a.locator('[data-slot="1"]').click();
+			await ready(a, "C-1");
+			let release = (): void => {};
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			await a.route("**/api/p/*/report", async (route) => {
+				await held;
+				await route.continue();
+			});
+			await a.keyboard.press("f");
+			await noteOf(a).fill("Submitted first note");
+			await a.keyboard.press("Enter");
+			await a.locator('[data-slot="1"]').click();
+			await ready(a, "C-1");
+			await a.keyboard.press("f");
+			await noteOf(a).fill("Newer note, not sent yet");
+			release();
+			await eventually(
+				async () => Slot.array().parse((await server.api("find", { in: "slots", run: planned.run })).items),
+				(slots) => slots[0]?.fills[0]?.note === "Submitted first note",
+			);
+			await a.unroute("**/api/p/*/report");
+			await a.waitForTimeout(300);
+			expect(await noteOf(a).inputValue()).toBe("Newer note, not sent yet");
+			// And it is still on the device after a reload (the cursor now rests on the next slot that needs a result).
+			await a.reload();
+			await a.waitForSelector('[data-run-document][data-active="true"][data-ready="true"]');
+			await a.locator('[data-slot="1"]').click();
+			await ready(a, "C-1");
+			await a.keyboard.press("f");
+			expect(await noteOf(a).inputValue()).toBe("Newer note, not sent yet");
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	40000,
 );

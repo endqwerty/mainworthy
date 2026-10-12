@@ -333,7 +333,7 @@ test.skipIf(!browserAvailable)(
 				await page.waitForFunction(
 					(value) =>
 						document.querySelector(".cstate .chip")?.textContent === `v${value}` &&
-						localStorage.getItem("casebook:draft:scratch:C-1") === null,
+						Object.keys(localStorage).every((key) => !key.endsWith(":draft:scratch:C-1")),
 					version,
 				);
 				if (version === 2) {

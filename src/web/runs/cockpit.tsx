@@ -4,29 +4,41 @@ import type { Api } from "../../core/api.ts";
 import type { ReportReceipt } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
+import { deviceKey } from "../lib/device.ts";
 import { type Binding, useBindings } from "../lib/keys.ts";
 import { navigate, refUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, KeyCap, ListRow, ProducerGlyph } from "../ui/index.tsx";
 import { type Fill, outcomeName, Run, RunCase, type RunOutcome, Slot, tallyText } from "./models.ts";
 
-/** Notes typed for the slots of one run and not yet on the server, by slot id. Storage may be full or off. */
-function readNotes(key: string): Record<string, string> {
+/**
+ * Notes typed for the slots of one run and not yet on the server, by slot id. Each note has its own key, so two
+ * tabs on one run never write over each other's notes. Storage may be full or off.
+ */
+function readNotes(prefix: string): Record<string, string> {
+	const notes: Record<string, string> = {};
 	try {
-		const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? "{}");
-		if (typeof parsed !== "object" || parsed === null) return {};
-		return Object.fromEntries(
-			Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-		);
-	} catch {
-		return {};
-	}
-}
-function writeNotes(key: string, notes: Record<string, string>): void {
-	try {
-		if (Object.keys(notes).length === 0) localStorage.removeItem(key);
-		else localStorage.setItem(key, JSON.stringify(notes));
+		for (let i = 0; i < localStorage.length; i++) {
+			const key = localStorage.key(i);
+			if (!key?.startsWith(prefix)) continue;
+			const text = localStorage.getItem(key);
+			if (text) notes[key.slice(prefix.length)] = text;
+		}
 	} catch {}
+	return notes;
+}
+function storeNote(key: string, text: string): void {
+	try {
+		if (text) localStorage.setItem(key, text);
+		else localStorage.removeItem(key);
+	} catch {}
+}
+function storedNote(key: string): string {
+	try {
+		return localStorage.getItem(key) ?? "";
+	} catch {
+		return "";
+	}
 }
 
 type LocalFill = { fill: Fill; questions: ReportReceipt["questions"]; pending: boolean };
@@ -60,17 +72,25 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const [noting, setNoting] = useState<Slot | null>(null);
 	// A note belongs to its slot and is kept on this device from the first key until the server has the result:
 	// a reload, a failed request, or two failed requests in a row lose none of them.
-	const notesKey = `casebook:run-notes:${project}:${runRef}`;
-	const [notes, setNotes] = useState<Record<string, string>>(() => readNotes(notesKey));
+	const notePrefix = deviceKey("run-note", `${project}:${runRef}:`);
+	const [notes, setNotes] = useState<Record<string, string>>(() => readNotes(notePrefix));
 	const setNoteOf = (slotId: number, text: string): void => {
+		storeNote(`${notePrefix}${slotId}`, text);
 		setNotes((previous) => {
 			const next = { ...previous };
 			if (text) next[slotId] = text;
 			else delete next[slotId];
-			writeNotes(notesKey, next);
 			return next;
 		});
 	};
+	// A note typed in another tab on this run shows here too.
+	useEffect(() => {
+		const changed = (event: StorageEvent): void => {
+			if (event.key === null || event.key.startsWith(notePrefix)) setNotes(readNotes(notePrefix));
+		};
+		window.addEventListener("storage", changed);
+		return () => window.removeEventListener("storage", changed);
+	}, [notePrefix]);
 	const noteRef = useRef<HTMLInputElement>(null);
 	const [last, setLast] = useState<LastResult | null>(null);
 	const writes = useRef(new Map<number, Promise<ReportReceipt>>());
@@ -236,8 +256,9 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				throw new Error(receipt.rejected[0]?.reason ?? receipt.declined?.[0]?.reason ?? "The result was not recorded.");
 			const saved = { ...fill, result: receipt.results[0] };
 			latest.current.set(slot.id, saved);
-			// The server has it: the device's copy of the note has done its work.
-			setNoteOf(slot.id, "");
+			// The server has it: the device's copy of the note has done its work. A note typed for this slot while
+			// the request was on its way is newer than what was recorded, and stays.
+			if (storedNote(`${notePrefix}${slot.id}`) === text) setNoteOf(slot.id, "");
 			if (queued.current.get(slot.id) === fill.result)
 				setLocal((value) => new Map(value).set(slot.id, { fill: saved, questions: receipt.questions, pending: false }));
 			setStatus(

@@ -207,3 +207,97 @@ import { z } from "zod";
 	},
 	30000,
 );
+
+(browserAvailable ? test : test.skip)(
+	"a long proposal fits in the pane, and a key answers it only after its last change has been shown",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			const steps = Array.from({ length: 6 }, (_, i) => `  Step ${i + 1} > Result ${i + 1}`);
+			await server.api("propose", { edits: [{ op: "create", outline: ["Long checkout", ...steps].join("\n") }] });
+			const writer = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "writer",
+					kind: "agent",
+					can: ["read", "produce"],
+					project: "scratch",
+				}),
+			).token;
+			const proposed = await server.api(
+				"propose",
+				{
+					edits: [
+						{
+							op: "edit",
+							case: "C-1",
+							base: 1,
+							body: {
+								steps: Array.from({ length: 35 }, (_, i) => ({
+									id: `n${i}`,
+									action: `Rewritten step ${i + 1} of the long checkout`,
+									expected: `Rewritten result ${i + 1}`,
+								})),
+							},
+						},
+					],
+				},
+				{ token: writer },
+			);
+			expect(proposed.status).toBe("open");
+			for (const size of [
+				{ width: 1280, height: 800 },
+				{ width: 1440, height: 900 },
+			]) {
+				view = await openPage(server, { path: "/p/scratch/suite/c/1" });
+				const page = view.page;
+				await page.setViewportSize(size);
+				const card = page.locator(`[data-proposal="${proposed.question}"]`);
+				await card.waitFor({ state: "attached" });
+				const state = () =>
+					card.evaluate((element) => {
+						const box = element.getBoundingClientRect();
+						const frame = element.closest(".pane-scroll")?.getBoundingClientRect();
+						const diff = element.querySelector(".diff");
+						return {
+							whole: frame !== undefined && box.top >= frame.top - 1 && box.bottom <= frame.bottom + 1,
+							fits: frame !== undefined && box.height <= frame.height,
+							atEnd: diff !== null && diff.scrollTop + diff.clientHeight >= diff.scrollHeight - 2,
+						};
+					});
+				const open = async () => (await server.api("inbox", { kind: "adopt" })).items.map((q) => q.q);
+				// Thirty-five changed steps: the card still fits in the pane, with the diff scrolling inside it.
+				expect((await state()).fits).toBe(true);
+				// Scrolled straight to the bottom of the pane, the key still does not answer: the end of the diff
+				// has not been shown.
+				await page.locator(".pane-scroll").evaluate((pane) => {
+					pane.scrollTop = pane.scrollHeight;
+				});
+				let presses = 0;
+				for (; presses < 40; presses++) {
+					const before = await state();
+					if (before.whole && before.atEnd) break;
+					await page.keyboard.press("r");
+					await page.waitForTimeout(60);
+					expect(await open()).toEqual([proposed.question ?? ""]);
+				}
+				expect(presses).toBeGreaterThan(1);
+				expect(await state()).toMatchObject({ whole: true, atEnd: true });
+				if (size.width === 1440) {
+					// Everything has been shown: now the key answers.
+					await page.keyboard.press("r");
+					await eventually(open, (items) => items.length === 0);
+					expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
+				}
+				expect(view.errors).toEqual([]);
+				await view.close();
+				view = null;
+			}
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	60000,
+);

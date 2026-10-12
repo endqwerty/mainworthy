@@ -147,19 +147,25 @@ export function CasePane({
 		reject: () => answerByKey("reject"),
 	});
 	/**
-	 * A key answers only what is on the screen (decision 0011: nothing a key acts on is clipped). When the first
-	 * proposal, its diff or its buttons are outside the pane, the first press brings it into view and says so; the
-	 * next press answers it.
+	 * A key answers only what is on the screen (decision 0011: nothing a key acts on is clipped). A proposal is
+	 * never taller than the pane: its diff scrolls inside it, between its heading and its answer buttons. A press
+	 * first brings the whole proposal into view, then pages through a long diff, and answers only once the end
+	 * of the diff is showing. Each press that does not answer says what it did.
 	 */
 	function answerByKey(answer: "accept" | "reject"): void {
 		const question = proposals[0];
 		if (!question) return;
-		if (proposalInView(question.q)) {
-			void answerProposal(answer, question);
+		const key = answer === "accept" ? "a" : "r";
+		if (!proposalInView(question.q)) {
+			revealProposal(question.q);
+			setStatus(`${question.q} is now in view. Read it, then press ${key} again.`);
 			return;
 		}
-		revealProposal(question.q);
-		setStatus(`${question.q} is now in view. Read it, then press ${answer === "accept" ? "a" : "r"} again.`);
+		if (pageProposal(question.q)) {
+			setStatus(`${question.q} has more below: the next part is now in view. Press ${key} again.`);
+			return;
+		}
+		void answerProposal(answer, question);
 	}
 	if (!view && !draft)
 		return (
@@ -551,10 +557,7 @@ function ProposalCard({
 const proposalCard = (q: string): HTMLElement | null =>
 	document.querySelector<HTMLElement>(`[data-proposal="${CSS.escape(q)}"]`);
 
-/**
- * Whether a proposal is on the screen: all of it inside the visible part of the pane, or, when it is taller than
- * the pane, scrolled to its end, where the answer buttons are.
- */
+/** Whether the whole of a proposal (heading, diff and answer buttons) is inside the visible part of the pane. */
 function proposalInView(q: string): boolean {
 	const card = proposalCard(q);
 	const pane = card?.closest<HTMLElement>(".pane-scroll");
@@ -563,8 +566,7 @@ function proposalInView(q: string): boolean {
 	const frame = pane.getBoundingClientRect();
 	const top = Math.max(frame.top, 0);
 	const bottom = Math.min(frame.bottom, window.innerHeight);
-	if (box.height <= bottom - top) return box.top >= top - 1 && box.bottom <= bottom + 1;
-	return box.bottom <= bottom + 1 && box.bottom > top;
+	return box.top >= top - 1 && box.bottom <= bottom + 1;
 }
 
 function revealProposal(q: string): void {
@@ -573,10 +575,17 @@ function revealProposal(q: string): void {
 	if (!card || !pane) return;
 	const box = card.getBoundingClientRect();
 	const frame = pane.getBoundingClientRect();
-	// The start of a proposal taller than the pane, so it is read from the top; otherwise the whole of it.
-	const fits = box.height <= frame.height;
-	pane.scrollTop += fits ? box.bottom - frame.bottom + 8 : box.top - frame.top - 8;
-	if (fits && box.top < frame.top) pane.scrollTop += box.top - frame.top - 8 - (box.bottom - frame.bottom + 8);
+	if (box.top < frame.top) pane.scrollTop += box.top - frame.top - 8;
+	else if (box.bottom > frame.bottom)
+		pane.scrollTop += Math.min(box.bottom - frame.bottom + 8, box.top - frame.top - 8);
+}
+
+/** Shows the next part of a proposal's diff when it has more below. False when its end is already showing. */
+function pageProposal(q: string): boolean {
+	const diff = proposalCard(q)?.querySelector<HTMLElement>(".diff");
+	if (!diff || diff.scrollTop + diff.clientHeight >= diff.scrollHeight - 2) return false;
+	diff.scrollTop += Math.max(40, diff.clientHeight - 32);
+	return true;
 }
 
 function ConflictCard({ state, resolved }: { state: ConflictState; resolved: () => void }) {

@@ -168,6 +168,12 @@
 	padding: 4px;
 }
 
+/* A proposal fits in the pane whatever its length: the diff scrolls between the heading and the answers. */
+[data-proposal] .diff {
+	max-height: min(46vh, 420px);
+	overflow: auto;
+}
+
 .ev.prop .pbtn {
 	position: sticky;
 	bottom: 0;

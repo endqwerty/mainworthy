@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CaseBody, Step } from "../../core/model.ts";
+import { deviceKey } from "./device.ts";
 
 const DraftBody = CaseBody.extend({
 	steps: z.array(Step.extend({ action: z.string(), expected: z.string().nullable() })),
@@ -26,10 +27,11 @@ const Draft = z.object({
 		.default({ kind: "none" }),
 });
 export type Draft = z.infer<typeof Draft>;
-const prefix = "casebook:draft:";
 export function draftKey({ project, id }: { project: string; id: string }): string {
-	return `${prefix}${project}:${id}`;
+	return deviceKey("draft", `${project}:${id}`);
 }
+const activeKey = (project: string): string => deviceKey("active", project);
+const stepsKey = (project: string, id: string): string => deviceKey("steps", `${project}:${id}`);
 export function readDraft({ project, id }: { project: string; id: string }): Draft | null {
 	try {
 		const text = localStorage.getItem(draftKey({ project, id }));
@@ -44,11 +46,11 @@ export function readDraft({ project, id }: { project: string; id: string }): Dra
 export function writeDraft({ project, draft }: { project: string; draft: Draft }): void {
 	knownStepIds({ project, id: draft.id, ids: [...draft.body.steps, ...draft.original.steps].map((step) => step.id) });
 	localStorage.setItem(draftKey({ project, id: draft.id }), JSON.stringify(draft));
-	localStorage.setItem(`casebook:active:${project}`, draft.id);
+	localStorage.setItem(activeKey(project), draft.id);
 }
 export function activeDraft(project: string): Draft | null {
 	try {
-		const id = localStorage.getItem(`casebook:active:${project}`);
+		const id = localStorage.getItem(activeKey(project));
 		return id ? readDraft({ project, id }) : null;
 	} catch {
 		return null;
@@ -56,7 +58,7 @@ export function activeDraft(project: string): Draft | null {
 }
 export function removeDraft({ project, id }: { project: string; id: string }): void {
 	localStorage.removeItem(draftKey({ project, id }));
-	if (localStorage.getItem(`casebook:active:${project}`) === id) localStorage.removeItem(`casebook:active:${project}`);
+	if (localStorage.getItem(activeKey(project)) === id) localStorage.removeItem(activeKey(project));
 }
 
 const seenSteps = new Map<string, Set<string>>();
@@ -70,7 +72,7 @@ export function knownStepIds({
 	id: string;
 	ids: readonly string[];
 }): ReadonlySet<string> {
-	const key = `casebook:steps:${project}:${id}`;
+	const key = stepsKey(project, id);
 	let taken = seenSteps.get(key);
 	if (!taken) {
 		let stored: string[] = [];
@@ -98,9 +100,9 @@ export function promoteStepIds({ project, from, to }: { project: string; from: s
 	const ids = knownStepIds({ project, id: from, ids: [] });
 	knownStepIds({ project, id: to, ids: [...ids] });
 	if (from !== to) {
-		seenSteps.delete(`casebook:steps:${project}:${from}`);
+		seenSteps.delete(stepsKey(project, from));
 		try {
-			localStorage.removeItem(`casebook:steps:${project}:${from}`);
+			localStorage.removeItem(stepsKey(project, from));
 		} catch {}
 	}
 }
