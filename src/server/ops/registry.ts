@@ -8,13 +8,16 @@ import { malformedText } from "../../core/text.ts";
 import type { App } from "../kernel/app.ts";
 import {
 	type Actor,
+	beginCommand,
 	type Ctx,
 	findCommand,
 	findProject,
+	finishCommand,
 	makeCtx,
 	recordCommand,
 	recordInstanceCommand,
 	stampSeq,
+	UNFINISHED,
 } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
 import { type ErrorCode, OpError } from "../kernel/errors.ts";
@@ -183,6 +186,9 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 
 		app.db.begin();
 		try {
+			// True once the command id is bound to this request: by an earlier attempt that committed its first
+			// transaction and never finished (the server stopped), or by this one when it commits its own.
+			let bound = false;
 			if (cmd) {
 				const prior = findCommand(app.db, cmd);
 				if (prior) {
@@ -190,8 +196,13 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 					// a reply recorded for one project is never returned for another.
 					if (prior.op !== op.name || prior.actor !== actor.id || prior.project !== found.id) throw reused();
 					if (prior.request !== request) throw changed();
-					app.db.commit();
-					return { ok: true, result: json<unknown>(prior.outcome), seq: prior.seq };
+					if (prior.outcome !== UNFINISHED) {
+						app.db.commit();
+						return { ok: true, result: json<unknown>(prior.outcome), seq: prior.seq };
+					}
+					// Begun and never answered: the operation runs again, finds what it already stored (a report finds
+					// its batch) and does the rest.
+					bound = true;
 				}
 			}
 			// Read the project inside the transaction: its sequence number is what this command builds on.
@@ -210,6 +221,10 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 						break;
 					}
 					if (step.value === COMMIT) {
+						if (cmd && !bound) {
+							beginCommand(ctx, { id: cmd, op: op.name, request });
+							bound = true;
+						}
 						stampSeq(ctx);
 						app.db.commit();
 						publish();
@@ -219,7 +234,8 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 					yield;
 				}
 			} else result = op.run(ctx, input);
-			if (cmd) recordCommand(ctx, { id: cmd, op: op.name, outcome: result, request });
+			if (cmd && bound) finishCommand(ctx, { id: cmd, outcome: result });
+			else if (cmd) recordCommand(ctx, { id: cmd, op: op.name, outcome: result, request });
 			stampSeq(ctx);
 			app.db.commit();
 			publish();

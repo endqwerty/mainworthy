@@ -67,6 +67,7 @@ test("a report accepted when the server is killed is applied in full when it sta
 	const total = 40_000;
 	const failing = total / 100;
 	const report = JSON.stringify({
+		cmd: "upload-0001",
 		target: { commit: "c0ffee1234", branch: "main" },
 		job: "unit",
 		results: Array.from({ length: total }, (_, i) => ({
@@ -99,6 +100,20 @@ test("a report accepted when the server is killed is applied in full when it sta
 	// Every result is there, none twice.
 	expect(gate.verdict).toBe("blocked");
 	expect(gate.tally).toMatchObject({ pass: total - failing, unexplained: failing, missing: 0 });
+	// The id it was sent under names that report, although the server died before it could answer: other content
+	// under the same id is refused, not recorded as a second report.
+	const other = await fetch(`${second.url}/api/p/scratch/report`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({
+			cmd: "upload-0001",
+			target: { commit: "c0ffee1234", branch: "main" },
+			job: "unit",
+			results: [{ test: { key: "another" }, outcome: "fail", failure: { message: "not the same request" } }],
+		}),
+	});
+	expect((await other.json()) as Envelope<unknown>).toMatchObject({ ok: false, error: { code: "conflict" } });
+	expect((await call<GateStatus>(second.url, "gate", { commit: "c0ffee1234" })).tally).toEqual(gate.tally);
 	// The pipeline's retry of the same report is recognised and adds nothing.
 	const retried = await call<ReportReceipt>(second.url, "report", report);
 	expect(retried).toMatchObject({ fresh: false, counts: { total, fail: failing } });

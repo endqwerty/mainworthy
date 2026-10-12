@@ -73,6 +73,9 @@ const Q = {
 		`INSERT INTO commands (id, project, op, actor, at, seq, touched, outcome, request)
 		 VALUES ($id, $project, $op, $actor, $at, $seq, $touched, $outcome, $request)`,
 	),
+	finishCommand: sql<{ id: string; seq: number; touched: string; outcome: string }>(
+		"UPDATE commands SET seq = $seq, touched = $touched, outcome = $outcome WHERE id = $id",
+	),
 };
 
 export const findProject = (db: Db, key: string): ProjectRow | null => db.get(Q.project, { key });
@@ -110,6 +113,38 @@ export function recordInstanceCommand(
 		touched: "[]",
 		outcome: JSON.stringify(input.outcome ?? null),
 		request: input.request,
+	});
+}
+
+/** The stored outcome of a command whose first transaction is committed and whose reply does not exist yet. */
+export const UNFINISHED = "";
+
+/**
+ * Binds a command id to its request when the operation's first transaction commits (a report: accepted, not yet
+ * applied). If the server stops before the operation ends, the id still names that request: other content under
+ * it is refused, and the same content runs the rest and gets the reply.
+ */
+export function beginCommand(ctx: Ctx, input: { id: string; op: string; request: string }): void {
+	ctx.db.run(Q.insertCommand, {
+		id: input.id,
+		project: ctx.project.id,
+		op: input.op,
+		actor: ctx.actor.id,
+		at: ctx.now,
+		seq: ctx.seq,
+		touched: "[]",
+		outcome: UNFINISHED,
+		request: input.request,
+	});
+}
+
+/** Gives a command bound by `beginCommand` its reply. */
+export function finishCommand(ctx: Ctx, input: { id: string; outcome: unknown }): void {
+	ctx.db.run(Q.finishCommand, {
+		id: input.id,
+		seq: ctx.seq,
+		touched: JSON.stringify([...ctx.touched]),
+		outcome: JSON.stringify(input.outcome ?? null),
 	});
 }
 
