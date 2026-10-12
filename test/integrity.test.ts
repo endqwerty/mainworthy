@@ -2127,6 +2127,27 @@ describe("what a caller is told", () => {
 		expect(rows("SELECT count(*) AS n FROM runs")).toEqual([{ n: 0 }]);
 	});
 
+	test("a pass that disputes a failure leaves the failure's message and sample on its question", () => {
+		seed(2, ["human", "auto"]);
+		const planned = plan({ name: "Release", select: {}, accepts: { commit: "message01" } });
+		report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "fail", note: "expected 10, got 12" }] });
+		const asked = open("failure").evidence as { message: string; sample: number };
+		expect(asked.message).toBe("expected 10, got 12");
+		// A pipeline then passes the same case on that commit: the slot is disputed. The question is still about
+		// the failure, and still shows it.
+		report(
+			{
+				target: { commit: "message01", branch: "main" },
+				results: [{ test: { key: "one" }, annotation: { case: "C-1", version: 1 }, outcome: "pass" }],
+			},
+			h.actor("pipeline", "ci", ["read", "produce"]),
+		);
+		const now = open("failure");
+		expect((now.evidence as { hints: string[] }).hints).toContain("disputed");
+		expect(now.evidence).toMatchObject({ message: asked.message, sample: asked.sample });
+		expect((now.evidence as { tests: unknown[] }).tests).toHaveLength(1);
+	});
+
 	test("the number of tests a question has seen does not fall when a later report adds one", () => {
 		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
 		const failing = (key: string) => ({ test: { key }, outcome: "fail", failure: { message: "one cause" } });

@@ -762,6 +762,8 @@ export function raiseFailure(
 		? json<{
 				tests?: { id: number; t: string; name: string; case: string | null; counted?: boolean }[];
 				count?: number;
+				message?: string | null;
+				sample?: number | null;
 				producers?: number[];
 				targets?: number[];
 			}>(open.evidence)
@@ -807,7 +809,9 @@ export function raiseFailure(
 		evidence: {
 			signature: { class: group.signature.class, text: group.signature.text },
 			scope: change ? change.key : group.scope,
-			message: group.message,
+			// An occurrence that brings no failing result of its own (a pass that makes the slot a dispute) leaves
+			// what the question already shows of the failure.
+			message: group.message ?? earlier.message ?? null,
 			tests: listed.slice(0, 50),
 			// The list is cut to fifty; the count is not taken from the cut list, so it never falls when a later
 			// occurrence adds a test to a question that has seen hundreds.
@@ -819,7 +823,7 @@ export function raiseFailure(
 			// Every target this question has seen the cause on. An answer that holds "here only" covers the
 			// latest of them; the others of that commit are asked about again.
 			targets: [...new Set([...(earlier.targets ?? []), target.id])],
-			sample: group.results[0] ?? null,
+			sample: group.results[0] ?? earlier.sample ?? null,
 		},
 		// What an answer about a cause stands on is the cause in its scope. Who else reports it, and whether a
 		// slot disputes it at the moment, changes who may answer and with what, never whether an answer stands:

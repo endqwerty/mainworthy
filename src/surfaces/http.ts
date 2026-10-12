@@ -82,6 +82,34 @@ export function sessionOf(app: App, req: Request, owner: Actor): Session | null 
 const unauthenticated = (): Response =>
 	jsonResponse({ ok: false, error: { code: "unauthenticated", message: "a token is required" } }, 401);
 
+/**
+ * A page may say who it believes it is signed in as (`X-Casebook-As`, the actor's name, percent-encoded). When
+ * the session has become somebody else's since the page was loaded (another tab signed in), the request is
+ * refused here, in the request that would have written: text one person typed is never recorded under another
+ * person's name, and a page never shows one person's view as another's. A caller that sends no name (a script,
+ * the CLI, an agent) is whoever its token says.
+ */
+export const AS_HEADER = "x-casebook-as";
+function sameCaller(req: Request, session: Session): boolean {
+	const named = req.headers.get(AS_HEADER);
+	if (named === null) return true;
+	let name: string;
+	try {
+		name = decodeURIComponent(named);
+	} catch {
+		return false;
+	}
+	return session.actor(0)?.name === name;
+}
+const changedSession = (): Response =>
+	jsonResponse(
+		{
+			ok: false,
+			error: { code: "unauthenticated", message: "the session now belongs to another person; sign in again" },
+		},
+		401,
+	);
+
 /** The largest body an operation accepts. A 100,000-result report is about 30 MB. */
 export const OP_BODY_LIMIT = 64 * 1024 * 1024;
 /**
@@ -136,6 +164,7 @@ export async function handleOp(
 ): Promise<Response> {
 	const session = sessionOf(app, req, owner);
 	if (!session) return unauthenticated();
+	if (!sameCaller(req, session)) return changedSession();
 	let input: unknown;
 	try {
 		input = await readJson(req);

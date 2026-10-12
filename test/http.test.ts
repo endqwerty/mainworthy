@@ -304,6 +304,45 @@ describe("local mode", () => {
 });
 
 describe("server mode", () => {
+	test("a request that names who it believes it is, is refused when the session is somebody else's", async () => {
+		const instance = boot("server", "owner-secret-0123456789");
+		const owner = bearer("owner-secret-0123456789");
+		const made = await post<{ token: string }>(
+			instance,
+			"/api/admin",
+			{ do: "token.create", actor: "bob", kind: "human", can: ["read", "produce"], project: "scratch" },
+			owner,
+		);
+		const bob = bearer(made.body.ok ? made.body.result.token : "");
+		const create = { edits: [{ op: "create", outline: "Typed by Alice" }] };
+		// A page that was opened as Alice sends her text; the browser's session has become Bob's since.
+		const wrong = await post(instance, "/api/p/scratch/propose", create, { ...bob, "x-casebook-as": "alice" });
+		expect(wrong.status).toBe(401);
+		expect(wrong.body).toMatchObject({ ok: false, error: { code: "unauthenticated" } });
+		const found = await post<{ count: number }>(instance, "/api/p/scratch/find", {}, bob);
+		expect(found.body.ok && found.body.result.count).toBe(0);
+		// Reads are refused the same way: the page would otherwise show Bob's view as Alice's.
+		expect((await post(instance, "/api/p/scratch/find", {}, { ...bob, "x-casebook-as": "alice" })).status).toBe(401);
+		// The right name, and no name at all (a script, the CLI), go through. The name is percent-encoded, so one
+		// that a header could not carry as it is still matches.
+		expect((await post(instance, "/api/p/scratch/propose", create, { ...bob, "x-casebook-as": "bob" })).status).toBe(
+			200,
+		);
+		expect((await post(instance, "/api/p/scratch/find", {}, bob)).status).toBe(200);
+		const zoe = await post<{ token: string }>(
+			instance,
+			"/api/admin",
+			{ do: "token.create", actor: "zoe@qa", kind: "human", can: ["read"], project: "scratch" },
+			owner,
+		);
+		expect(zoe.body).toMatchObject({ ok: true });
+		const named = {
+			...bearer(zoe.body.ok ? zoe.body.result.token : ""),
+			"x-casebook-as": encodeURIComponent("zoe@qa"),
+		};
+		expect((await post(instance, "/api/p/scratch/find", {}, named)).status).toBe(200);
+	});
+
 	test("nothing works without a token; the owner token signs in; a wrong one does not", async () => {
 		const instance = boot("server", "owner-secret-0123456789");
 		expect((await fetch(`${instance.url}/api/session`)).status).toBe(401);
