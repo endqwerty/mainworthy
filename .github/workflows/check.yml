@@ -95,8 +95,9 @@ jobs:
           # (newestAttempt in scripts/check-plan.ts).
           name: results-${{ matrix.name }}-attempt-${{ github.run_attempt }}
           path: test-results/
-          # A run that left no report fails this job: the Tests step may fail without failing it, and the gate's
-          # last step tells a shard that reported from one that did not by this job's result.
+          # A run that left nothing to upload fails this job: the Tests step may fail without failing it, and the
+          # gate's last step reads this job's result. An artifact that holds files and no whole report is the
+          # gate script's to refuse (scripts/ci-gate.ts: "no report").
           if-no-files-found: error
           retention-days: 7
 
@@ -144,6 +145,6 @@ jobs:
         run: bun scripts/ci-gate.ts test-results tests-1 tests-2 tests-3 tests-4 tests-5 tests-6 quiet
       - name: The type-check, the lint, the image and every shard's job passed
         # A shard's job succeeds with failing tests, which the gate judges. It fails when it could not be set up
-        # or left no report to upload, and after a re-run the gate above would then read its older attempt's.
+        # or left nothing to upload, and after a re-run the gate above would then read its older attempt's.
         if: always()
         run: test "${{ needs.static.result }}" = success && test "${{ needs.image.result }}" = success && test "${{ needs.tests.result }}" = success

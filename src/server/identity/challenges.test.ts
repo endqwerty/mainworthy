@@ -54,7 +54,8 @@ test("a challenge is found for the purpose it was issued for, with the relying p
 	// Neither answers the other ceremony, and a text the server never issued answers none.
 	expect(findChallenge(app, signIn, "register")).toBeNull();
 	expect(findChallenge(app, register, "sign-in")).toBeNull();
-	// Its last character changed: to `A`, unless it is `A`, which one challenge in 64 ends in.
+	// Its last character changed: to `A`, unless it is `A`, which one challenge in 16 ends in (the last of the 43
+	// characters carries four bits of the 32 bytes).
 	expect(findChallenge(app, `${signIn.slice(0, -1)}${signIn.endsWith("A") ? "B" : "A"}`, "sign-in")).toBeNull();
 	expect(findChallenge(app, "", "sign-in")).toBeNull();
 	// Finding does not spend. One millisecond before the end it is there, at the end it is not.
