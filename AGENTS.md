@@ -20,9 +20,10 @@ It runs on the owner's Coolify for their own use since 2026-10-12, at
 say where and how to redeploy). This repository's CI reports to it since 2026-10-13 (issue #92).
 No blocking defect is known: issue
 #81, in the web UI's conflict card, is fixed (`docs/decisions/0013-ask-what-became-of-a-command.md`).
-Sign-in is being rebuilt in four pull requests (`docs/decisions/0017-sign-in-sessions-and-credentials.md`):
-the first, a browser session that is not the token, is built; the limit on failed
-attempts, token expiry and people signing in as themselves follow it.
+Sign-in was rebuilt on 2026-10-13 (`docs/decisions/0017-sign-in-sessions-and-credentials.md`): a browser
+session that is not the token, token expiry, a limit on failed attempts, and people signing in as themselves
+with a password or a passkey after an invitation. The server and the command line hold all of it; the web
+pages for invitations, passwords and passkeys are the pull request after this one.
 
 ## Stack rules
 
@@ -98,8 +99,9 @@ attempts, token expiry and people signing in as themselves follow it.
 - Nothing has to stay compatible before 1.0, and the owner says when that is (2026-10-13): the product has no
   users and has promised nothing. A change may break stored data, cookies, tokens, the API and the CLI when that
   makes the result simpler. Say what breaks in `CHANGELOG.md`; do not build a migration path nobody needs.
-- The instance follows `main` (the owner, 2026-10-13). After a pull request lands, redeploy the instance and
-  check it answers; the home lab's notes say how. Issue #90 is the job that will do this by itself.
+- The instance follows `main` (the owner, 2026-10-13). A job on the home server deploys the tip of `main` once it
+  has stood for ten minutes (issue #90; the home lab's notes say where the job is and how to hold it). After a
+  pull request lands, check that `/healthz` names its commit and that the instance answers.
 - Behaviour changes need tests and a check run on the real surface.
 - Record user-visible changes in `CHANGELOG.md`; record design decisions in
   `docs/decisions/NNNN-title.md`.
