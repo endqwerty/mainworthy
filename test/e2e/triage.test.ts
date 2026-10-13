@@ -220,6 +220,18 @@ async function recordedDecisions(server: Server, ref: string) {
 				expect(bounds && bounds.y >= 0 && bounds.y + bounds.height <= 772).toBe(true);
 			}
 			await page.locator(".assertion-comparison").waitFor();
+			// The count says how many failures wait to be explained and how many questions can wait, and the
+			// sidebar is red only for the first.
+			expect(await page.locator("#list .phead .dim").innerText()).toBe("5 failures to explain · 15 can wait");
+			const badge = page.locator('#nav a[aria-label="Queue"] em');
+			expect(await badge.getAttribute("class")).toBe("hot");
+			expect(await badge.getAttribute("title")).toBe("5 failures to explain · 15 can wait");
+			// Failures come first, and each says what leaving it costs. These were typed for a session, so they
+			// name no run.
+			expect(first.kind).toBe("failure");
+			expect(await page.locator(".queue-stakes").innerText()).toBe(
+				"While this is open, no gate that counts the unexplained failure passes.",
+			);
 			const loads = view.loads();
 			await page.keyboard.press("g");
 			await page.keyboard.press("q");
@@ -584,6 +596,10 @@ async function recordedDecisions(server: Server, ref: string) {
 			view = await openPage(server, { path: `/p/scratch/queue/${map.q.slice(2)}` });
 			view.page.setDefaultTimeout(8000);
 			await view.page.waitForSelector("[data-current-question]");
+			// A test with no case holds nothing: the row says so, and the sidebar's count is not red.
+			expect(await view.page.locator(".queue-stakes").innerText()).toStartWith("Blocks nothing. Left alone,");
+			expect(await view.page.locator("#list .phead .dim").innerText()).toBe("1 can wait");
+			expect(await view.page.locator('#nav a[aria-label="Queue"] em').getAttribute("class")).toBe("");
 			await view.page.keyboard.press("l");
 			await view.page.locator(".palette-input").waitFor();
 			await view.page.keyboard.type("C-1");

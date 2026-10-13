@@ -3,6 +3,7 @@ import { flushSync } from "react-dom";
 import { z } from "zod";
 import type { SessionInfo } from "../core/api.ts";
 import { DOC_PAGES, type DocSlug, docUrl, SCREEN_DOCS } from "../core/docs.ts";
+import { waiting, waitingPhrase } from "../core/stakes.ts";
 import { CaseScreen } from "./case/index.tsx";
 import { ChangesScreen } from "./changes/index.tsx";
 import { ApiError, session, signedOut, unauthenticatedEvent } from "./lib/api.ts";
@@ -530,7 +531,11 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 								<span className="nav-label">{item.label}</span>
 								{item.screen === "suite" && <em>{folders.data?.count?.toLocaleString()}</em>}
 								{item.screen === "queue" && (
-									<em className={inbox.data?.counts.open ? "hot" : ""}>
+									// Red only while a failure waits to be explained: a count that is always red is one nobody reads.
+									<em
+										className={waiting(inbox.data?.counts ?? {}).failures > 0 ? "hot" : ""}
+										title={waitingPhrase(inbox.data?.counts ?? {})}
+									>
 										{inbox.data?.counts.open ?? Object.values(inbox.data?.counts ?? {}).reduce((a, b) => a + b, 0)}
 									</em>
 								)}
