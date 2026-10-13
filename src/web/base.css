@@ -95,14 +95,23 @@ kbd {
 	text-align: center;
 	white-space: nowrap;
 }
+/*
+ * The sidebar's width is said here and nowhere else: `--side-open` is its width when it is open, at each width
+ * of the window, and `--side-width` is that or the collapsed rail. Every set of columns starts with
+ * `var(--side-width)`, and the pane on the right adds `--side-freed`, so collapsing changes the sidebar and the
+ * pane that is read and leaves the list as wide as it was (decision 0020). (`--side` is the sidebar's colour.)
+ */
 #app {
+	--side-open: 236px;
+	--side-width: var(--side-open);
+	--side-freed: calc(var(--side-open) - var(--side-width));
 	display: grid;
-	grid-template-columns: 236px minmax(0, 1fr) minmax(420px, 38%);
+	grid-template-columns: var(--side-width) minmax(0, 1fr) minmax(420px, calc(38% + var(--side-freed)));
 	grid-template-rows: minmax(0, 1fr) 28px;
 	height: 100vh;
 }
 #app.zoom {
-	grid-template-columns: 236px 340px minmax(0, 1fr);
+	grid-template-columns: var(--side-width) 340px minmax(0, 1fr);
 }
 /* sidebar */
 #side {
@@ -133,6 +142,21 @@ kbd {
 .brand .logo svg {
 	width: 100%;
 	height: 100%;
+}
+/* Collapses the sidebar and opens it again: after the name, and under the mark where there is no name. */
+.side-toggle {
+	flex: none;
+	margin-left: auto;
+	width: 26px;
+	height: 26px;
+	border-radius: 6px;
+	color: var(--faint);
+	display: grid;
+	place-items: center;
+}
+.side-toggle:hover {
+	background: var(--line2);
+	color: var(--ink);
 }
 /* The project that is open: a button to another one, or its name alone where there is one project. */
 .project {
@@ -1355,9 +1379,6 @@ pre.log .ok {
 #root {
 	height: 100%;
 }
-#app {
-	grid-template-columns: 236px minmax(0, 1fr) minmax(420px, 38%);
-}
 #nav a {
 	text-decoration: none;
 }
@@ -1530,7 +1551,8 @@ button[aria-disabled="true"] {
 }
 @media (max-width: 1100px) {
 	#app {
-		grid-template-columns: 190px minmax(260px, 1fr) minmax(350px, 42%);
+		--side-open: 190px;
+		grid-template-columns: var(--side-width) minmax(260px, 1fr) minmax(350px, calc(42% + var(--side-freed)));
 	}
 	.brand {
 		padding-inline: 10px;
@@ -1550,7 +1572,8 @@ button[aria-disabled="true"] {
 }
 @media (max-width: 760px) {
 	#app {
-		grid-template-columns: 120px minmax(220px, 1fr);
+		--side-open: 120px;
+		grid-template-columns: var(--side-width) minmax(220px, 1fr);
 		grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) 28px;
 	}
 	#side {
@@ -1578,6 +1601,10 @@ button[aria-disabled="true"] {
 	.brand {
 		gap: 4px;
 		font-size: 12px;
+	}
+	/* The sidebar is 120 px here: the mark and the button fit, and the name between them does not. */
+	.brand b {
+		display: none;
 	}
 	.sfoot {
 		flex-wrap: wrap;
@@ -1647,28 +1674,28 @@ button[aria-disabled="true"] {
 .sfoot {
 	margin-top: auto;
 }
-#app.sidebar-collapsed {
-	grid-template-columns: 64px minmax(0, 1fr) minmax(420px, 38%);
+#app[data-sidebar="collapsed"] {
+	--side-width: 64px;
 }
-#app.sidebar-collapsed.zoom {
-	grid-template-columns: 64px 340px minmax(0, 1fr);
-}
-.sidebar-collapsed .brand {
-	justify-content: center;
+[data-sidebar="collapsed"] .brand {
+	flex-direction: column;
 	padding: 14px 0 10px;
 }
-#app.sidebar-collapsed .brand b,
-.sidebar-collapsed .project-turn,
-.sidebar-collapsed .search span,
-.sidebar-collapsed kbd,
-.sidebar-collapsed .nav-label,
-.sidebar-collapsed #nav em,
-.sidebar-collapsed .suite-tree,
-.sidebar-collapsed .me,
-.sidebar-collapsed .sfoot span {
+[data-sidebar="collapsed"] .side-toggle {
+	margin-left: 0;
+}
+#app[data-sidebar="collapsed"] .brand b,
+[data-sidebar="collapsed"] .project-turn,
+[data-sidebar="collapsed"] .search span,
+[data-sidebar="collapsed"] #side kbd,
+[data-sidebar="collapsed"] .nav-label,
+[data-sidebar="collapsed"] #nav em,
+[data-sidebar="collapsed"] .suite-tree,
+[data-sidebar="collapsed"] .me,
+[data-sidebar="collapsed"] .sfoot span {
 	display: none;
 }
-.sidebar-collapsed .project {
+[data-sidebar="collapsed"] .project {
 	position: relative;
 	grid-template-columns: 1fr;
 	place-items: center;
@@ -1676,30 +1703,30 @@ button[aria-disabled="true"] {
 	padding: 0;
 }
 /* Out of sight and still read out: where the line is no button, the name is all that says which project it is. */
-.sidebar-collapsed .project-word,
-.sidebar-collapsed .project-name {
+[data-sidebar="collapsed"] .project-word,
+[data-sidebar="collapsed"] .project-name {
 	position: absolute;
 	width: 1px;
 	height: 1px;
 	overflow: hidden;
 	clip-path: inset(50%);
 }
-.sidebar-collapsed .project-initial {
+[data-sidebar="collapsed"] .project-initial {
 	display: block;
 }
-.sidebar-collapsed .search {
+[data-sidebar="collapsed"] .search {
 	justify-content: center;
 	padding: 0;
 }
-.sidebar-collapsed .search::before {
+[data-sidebar="collapsed"] .search::before {
 	content: "⌕";
 	font-size: 18px;
 }
-.sidebar-collapsed #nav a {
+[data-sidebar="collapsed"] #nav a {
 	justify-content: center;
 	padding: 0;
 }
-.sidebar-collapsed .sfoot {
+[data-sidebar="collapsed"] .sfoot {
 	flex-direction: column;
 	padding: 8px;
 }

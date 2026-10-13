@@ -320,6 +320,36 @@ describe("the phone layout", () => {
 		).toEqual([]);
 	});
 
+	test("the columns of the app start with the sidebar's width, which one stylesheet says", () => {
+		// Each screen has its own columns, and until decision 0020 each wrote the sidebar's width as a number.
+		// The collapsed sidebar then had one set of columns for all of them: it took the room of Queue's and
+		// Runs' right pane and of the whole of Settings. A screen that names the variable gets the collapsed
+		// sidebar, and the width of a narrower window, without saying anything about either.
+		const desktop = sheets.filter((file) => file !== "src/web/phone.css");
+		const rules = desktop.flatMap((file) =>
+			[
+				...readFileSync(file, "utf8")
+					.replace(/\/\*[\s\S]*?\*\//g, "")
+					.matchAll(/(?<=^|[{}])\s*(#app[^{}]*?)\s*\{([^{}]*)\}/g),
+			].map((rule) => ({ file, selector: rule[1] ?? "", body: rule[2] ?? "" })),
+		);
+		const columns = rules.flatMap(({ file, selector, body }) =>
+			[...body.matchAll(/grid-template-columns:\s*([^;]+);/g)].map((found) => ({
+				file,
+				selector,
+				columns: found[1] ?? "",
+			})),
+		);
+		// The five screens, at three widths of the window each, and the widened case pane.
+		expect(columns.length).toBeGreaterThanOrEqual(16);
+		expect(columns.filter((rule) => !rule.columns.startsWith("var(--side-width) "))).toEqual([]);
+		expect(
+			desktop.filter(
+				(file) => file !== "src/web/base.css" && /--side-(width|open|freed)\s*:/.test(readFileSync(file, "utf8")),
+			),
+		).toEqual([]);
+	});
+
 	test("the bindings marked `list`, which run on a phone while the detail is covered, are the ones named here", () => {
 		// `list: true` lets a key or the palette run a binding while the detail of the selected row is covered
 		// (`Binding.list` in src/web/lib/keys.ts). An answer, a result, an archive or an accepted proposal marked

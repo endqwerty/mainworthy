@@ -58,6 +58,24 @@ function Mark() {
 		</svg>
 	);
 }
+/** The sidebar's button: a window with its left column drawn in. */
+function SidebarIcon() {
+	return (
+		<svg
+			viewBox="0 0 16 16"
+			width="16"
+			height="16"
+			aria-hidden="true"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.5"
+			strokeLinejoin="round"
+		>
+			<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" />
+			<path d="M6 2.75V13.25" />
+		</svg>
+	);
+}
 /**
  * What a project is called on the page: its name, or its key where the name shows nothing. The server takes a
  * name of spaces, or of characters that have no glyph, and a line or a row with nothing on it names no project.
@@ -67,6 +85,8 @@ const projectLabel = (entry: { key: string; name: string }): string =>
 /** The first letter of a name as it is read: a flag or a family is one, though it is several code points. */
 const initial = (name: string): string =>
 	[...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(name)][0]?.segment ?? "";
+/** Where the browser keeps that the sidebar is collapsed. With the sidebar open, nothing is kept. */
+const SIDEBAR_KEY = "mainworthy:sidebar";
 function theme(): void {
 	const chosen = localStorage.getItem("mainworthy:theme");
 	document.documentElement.dataset.theme =
@@ -224,7 +244,13 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 		);
 	}, [signingOut]);
 	const [inInput, setInInput] = useState(false);
-	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+	// Collapsed or open is this browser's choice, as the theme is: a reload and the next visit find it as it was.
+	const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === "collapsed");
+	useEffect(() => {
+		if (sidebarCollapsed) localStorage.setItem(SIDEBAR_KEY, "collapsed");
+		else localStorage.removeItem(SIDEBAR_KEY);
+	}, [sidebarCollapsed]);
+	const sidebarAction = sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar";
 	const { phone, pane, showList, menu, setMenu, listOnly } = usePhoneShell(route, palette !== null || help);
 	const suiteOpen = route.screen === "suite" || route.screen === "case";
 	useEffect(() => {
@@ -383,8 +409,13 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 		>
 			<div
 				id="app"
-				className={sidebarCollapsed && !phone ? "sidebar-collapsed" : ""}
-				{...(phone ? { "data-pane": pane, "data-menu": menu ? "open" : "closed" } : {})}
+				// An attribute and not a class: the Suite puts `zoom` in the class list itself (`z`), and a class
+				// written here would take it out again each time the sidebar changed.
+				{...(phone
+					? { "data-pane": pane, "data-menu": menu ? "open" : "closed" }
+					: sidebarCollapsed
+						? { "data-sidebar": "collapsed" }
+						: {})}
 				// On a phone the palette and the sheet of keys cover the whole app, and nothing under them takes
 				// the focus or a key. (On the desktop the field of the palette holds the focus.)
 				inert={phone && (palette !== null || help)}
@@ -408,15 +439,29 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				)}
 				<aside id="side">
 					<div className="brand">
-						<button
-							type="button"
-							className="logo"
-							aria-label={phone ? "Close menu" : sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-							onClick={() => (phone ? setMenu(false) : setSidebarCollapsed((value) => !value))}
-						>
-							<Mark />
-						</button>
+						{/* On a phone the mark closes the drawer. On the desktop it is the mark, and the button after the
+						    name collapses the sidebar: a button that looks like one, and says its key. */}
+						{phone ? (
+							<button type="button" className="logo" aria-label="Close menu" onClick={() => setMenu(false)}>
+								<Mark />
+							</button>
+						) : (
+							<span className="logo">
+								<Mark />
+							</span>
+						)}
 						<b>Mainworthy</b>
+						{!phone && (
+							<button
+								type="button"
+								className="side-toggle"
+								aria-label={sidebarAction}
+								title={`${sidebarAction} ([)`}
+								onClick={() => setSidebarCollapsed((value) => !value)}
+							>
+								<SidebarIcon />
+							</button>
+						)}
 					</div>
 					{/* The project that is open, always here; with another to go to, the way there. */}
 					{switchable ? (
