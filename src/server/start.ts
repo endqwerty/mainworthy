@@ -1,7 +1,7 @@
 // Starting an instance: open the data, make sure an owner and a first project exist, finish interrupted work,
 // then listen. The same function is the Local layer on a laptop and the Server layer in a container; only the
 // configuration differs (decision 0002).
-import { type Extra, serve, VERSION } from "../surfaces/http.ts";
+import { type Extra, type Patience, serve, VERSION } from "../surfaces/http.ts";
 import { bootstrap, ruleActor } from "./identity/identity.ts";
 import { recoverAccepted, sweep } from "./jobs.ts";
 import { type App, type Config, openApp } from "./kernel/app.ts";
@@ -15,6 +15,8 @@ export type Instance = {
 	url: string;
 	project: string;
 	generatedToken: string | null;
+	/** What the operator must be told about this start, one line each (see `bootstrap`). */
+	warnings: string[];
 	stop: () => Promise<void>;
 };
 
@@ -22,24 +24,30 @@ export type Instance = {
 export function open(
 	config: Config,
 	options: { memory?: boolean; firstProject?: string } = {},
-): { app: App; owner: Actor; project: string; generatedToken: string | null } {
+): { app: App; owner: Actor; project: string; generatedToken: string | null; warnings: string[] } {
 	const app = openApp(config, options.memory ? { memory: true } : {});
-	const { owner, generatedToken } = bootstrap(app);
-	let project = allProjects(app.db)[0]?.key;
-	if (!project) {
-		// Zero configuration to first value: a project exists before the first case is typed.
-		project = options.firstProject ?? "scratch";
-		app.db.transaction(() =>
-			createProject({ app, actor: owner, now: app.now() }, { key: project ?? "scratch", preset: "loose" }),
-		);
+	try {
+		const { owner, generatedToken, warnings } = bootstrap(app);
+		let project = allProjects(app.db)[0]?.key;
+		if (!project) {
+			// Zero configuration to first value: a project exists before the first case is typed.
+			project = options.firstProject ?? "scratch";
+			app.db.transaction(() =>
+				createProject({ app, actor: owner, now: app.now() }, { key: project ?? "scratch", preset: "loose" }),
+			);
+		}
+		return { app, owner, project, generatedToken, warnings };
+	} catch (error) {
+		// A start that is refused (an owner name that is not a person's) leaves the database closed, not held.
+		app.close();
+		throw error;
 	}
-	return { app, owner, project, generatedToken };
 }
 
 export function start(
 	config: Config,
 	extra: (app: App, owner: Actor) => Extra,
-	options: { firstProject?: string; readers?: number } = {},
+	options: { firstProject?: string; readers?: number; patience?: Patience } = {},
 ): Instance {
 	const count = readerCount({
 		MAINWORTHY_READERS: options.readers === undefined ? process.env.MAINWORTHY_READERS : String(options.readers),
@@ -50,7 +58,7 @@ export function start(
 	const rule = ruleActor(app.db).id;
 	let server: ReturnType<typeof serve>;
 	try {
-		server = serve(app, owner, extra(app, owner));
+		server = serve(app, owner, extra(app, owner), options.patience);
 	} catch (error) {
 		app.close();
 		throw error;

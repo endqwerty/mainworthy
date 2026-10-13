@@ -1,10 +1,12 @@
 // Administering the instance: projects, actors, tokens, and reading a project's policy.
-import { defaultCapabilities } from "../../core/kinds.ts";
+import { type ActorKind, defaultCapabilities } from "../../core/kinds.ts";
 import { AdminInput } from "../../core/ops.ts";
 import {
 	actorByName,
 	createToken,
 	forgetActor,
+	KIND_NOUN,
+	lastTokenOf,
 	listActors,
 	listTokens,
 	orgId,
@@ -12,9 +14,9 @@ import {
 	revokeToken,
 	setGrant,
 } from "../identity/identity.ts";
-import { allProjects, findProject, insertProject, makeCtx, stampSeq } from "../kernel/ctx.ts";
+import { type Actor, allProjects, findProject, insertProject, makeCtx, stampSeq } from "../kernel/ctx.ts";
 import type { Db } from "../kernel/db.ts";
-import { conflict, invalid, notFound } from "../kernel/errors.ts";
+import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { currentPolicy, isPreset, policyName, seedPolicy } from "../policy/policy.ts";
 import { defineInstanceOp, type InstanceCtx } from "./registry.ts";
 
@@ -57,8 +59,43 @@ function projectOf(db: Db, key: string | undefined): number {
 	return project.id;
 }
 
+/**
+ * Who a person is, what a person may do and whether a person is remembered are for a person to change. An agent
+ * may hold `admin` and do the rest of it (projects, its own kind's tokens, the lists); with a person's token it
+ * would be a person to every policy clause that says "not an agent", and with a grant of its choosing it would be
+ * whatever it liked.
+ */
+function personOnly(env: InstanceCtx, what: string): void {
+	if (env.actor.kind !== "human")
+		throw forbidden(
+			`${env.actor.name} is ${KIND_NOUN[env.actor.kind]}: ${what} by a person who administers this instance`,
+		);
+}
+
+/**
+ * Who may make a token for whom. Whoever holds a token for a name acts under that name, and the record says that
+ * what was decided or typed is that person's. So a token for a person who exists is made by that person or by
+ * the owner of the instance, and one for the owner by the owner alone: an admin's word is not enough to become
+ * somebody else. A new person is anybody's to add who administers and is a person; agents' and pipelines' tokens
+ * are made by whoever administers.
+ */
+function refuseToken(env: InstanceCtx, input: { kind: ActorKind }, existing: Actor | null): void {
+	// What the actor is decides, not what the request calls it: naming another kind for a person does not help.
+	const forPerson = existing ? existing.kind === "human" : input.kind === "human";
+	if (!forPerson) return;
+	personOnly(env, "a person's token is made");
+	const owner = env.app.config.owner;
+	if (!existing || existing.id === env.actor.id || env.actor.name === owner) return;
+	throw forbidden(
+		existing.name === owner
+			? `only ${owner}, who owns this instance, makes a token for ${owner}`
+			: `a token for ${existing.name} is made by ${existing.name} or by ${owner}, who owns this instance`,
+	);
+}
+
 export function admin(env: InstanceCtx, input: AdminInput): unknown {
 	const db = env.app.db;
+	const owner = env.app.config.owner;
 	switch (input.do) {
 		case "project.create":
 			return createProject(env, input);
@@ -66,9 +103,11 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 			return listProjects(db);
 		case "token.create": {
 			const project = projectOf(db, input.project);
+			const existing = actorByName(db, input.actor, project);
+			refuseToken(env, input, existing);
 			// A new actor is given what was asked, or its kind's default. One that exists keeps its grants, and
 			// `createToken` refuses a list for it.
-			const isNew = actorByName(db, input.actor, project) === null;
+			const isNew = existing === null;
 			const created = createToken(env.app, {
 				actor: input.actor,
 				kind: input.kind,
@@ -94,8 +133,17 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 				lastUsedAt: row.last_used_at,
 				revoked: row.revoked_at !== null,
 			}));
-		case "token.revoke":
+		case "token.revoke": {
+			// In server mode a token is the owner's one way in, and the owner is who repairs the instance when
+			// everything else is wrong. The last one is kept whoever asks, the owner included: the button is one
+			// click. (In local mode the owner is whoever sits at the machine, and holds a token only for a script.)
+			if (env.app.config.mode === "server" && lastTokenOf(db, input.id) === owner) {
+				throw invalid(
+					`token ${input.id} is the last one ${owner} can sign in with, and ${owner} owns this instance. As ${owner}, make ${owner} another token first (mainworthy token new --human ${owner}), then revoke this one`,
+				);
+			}
 			return { revoked: revokeToken(env.app, input.id) };
+		}
 		case "actor.list": {
 			const keys = new Map(allProjects(db).map((project) => [project.id, project.key]));
 			return listActors(db).map((actor) => ({
@@ -109,11 +157,12 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 		}
 		case "grant.set":
 		case "grant.remove": {
+			personOnly(env, "a grant is changed");
 			// An admin's own grant is another admin's to change: a slip here would lock the instance. The owner's is
 			// nobody's: it is written again on every start, and until then nobody might be left to administer.
 			if (input.actor === env.actor.name)
 				throw invalid("you cannot change what you yourself may do; another admin must do it");
-			if (input.actor === env.app.config.owner)
+			if (input.actor === owner)
 				throw invalid(`${input.actor} owns this instance and may do everything; that is not changed here`);
 			const project = projectOf(db, input.project);
 			if (input.do === "grant.remove") return { removed: removeGrant(env.app, { actor: input.actor, project }) };
@@ -121,7 +170,15 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 			return { actor: input.actor, project: input.project ?? "*", can: input.can };
 		}
 		case "actor.forget": {
+			personOnly(env, "an actor is forgotten");
 			if (input.name === env.actor.name) throw invalid("you cannot forget yourself; another admin must do it");
+			// Forgetting disables the actor and revokes its tokens. The start would make a new owner of the same
+			// name, with every capability and no token that works: nobody could sign in as the owner again.
+			if (input.name === owner) {
+				throw invalid(
+					`${owner} owns this instance and is not forgotten: nobody would be left who can always repair it. To hand the instance to somebody else, start it with MAINWORTHY_OWNER set to their name; ${owner} can be forgotten after that`,
+				);
+			}
 			return forgetActor(env.app, input.name);
 		}
 		case "policy.show": {

@@ -25,6 +25,7 @@ export function serveCommand(args: Args, ui: unknown): void {
 	const policy = project ? policyName(currentPolicy(instance.app.db, project.id)) : "unknown";
 	line(`project "${instance.project}" · you are ${owner} · policy: ${policy}`);
 	if (config.mode === "server" && instance.generatedToken) line(`owner token (shown once): ${instance.generatedToken}`);
+	for (const text of instance.warnings) warning(`mainworthy: ${text}`);
 	let stopping = false;
 	const stop = (): void => {
 		if (stopping) return;

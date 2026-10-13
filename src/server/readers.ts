@@ -3,6 +3,7 @@ import { Worker } from "node:worker_threads";
 import { z } from "zod";
 import type { Envelope } from "../core/api.ts";
 import type { ReadCall, ReadPool } from "./kernel/app.ts";
+import { INTERNAL_ERROR } from "./kernel/errors.ts";
 
 /**
  * How many reader threads to start. By default: the cores, less one for the thread that writes and answers
@@ -181,10 +182,8 @@ export class Readers implements ReadPool {
 			try {
 				request.resolve(request.fallback());
 			} catch (error) {
-				request.resolve({
-					ok: false,
-					error: { code: "internal", message: error instanceof Error ? error.message : String(error) },
-				});
+				console.error("[mainworthy] a read replayed inline failed:", error);
+				request.resolve({ ok: false, error: { code: "internal", message: INTERNAL_ERROR } });
 			}
 		}
 	}

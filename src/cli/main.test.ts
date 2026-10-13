@@ -152,7 +152,11 @@ test("a pipeline's token runs both pipeline lines and nothing else, and its secr
 		expect([beyond.code, beyond.stderr]).toEqual([4, expect.stringContaining("a pipeline may hold read and record")]);
 		const dropped = await cli(["--project", "scratch", "actor", "ungrant", "pipeline"]);
 		expect(dropped.stdout).toBe("pipeline holds no grant on scratch any more\n");
-		expect((await cli(["report", RED_XML, "--commit", COMMIT], { env })).stderr).toContain("forbidden:");
+		// With no grant on the project, the token is told what it would be told of a project that does not exist:
+		// a refusal that named the capability would confirm the project's key to any token.
+		expect((await cli(["report", RED_XML, "--commit", COMMIT], { env })).stderr).toBe(
+			"not_found: no project named scratch, or no grant on it\n",
+		);
 
 		const tokens = outputWith(z.array(z.object({ id: z.number() })), await cli(["token", "list", "--json"]));
 		const id = tokens[0]?.id;

@@ -338,7 +338,10 @@ test.skipIf(!browserAvailable)(
 				error.error.message,
 			);
 			expect(await page.locator("#list").innerText()).not.toContain("No cases yet");
-			expect(await page.locator("#list").innerText()).toContain("Your session may not read this project.");
+			// The session holds no grant on `second`, so the server says what it says of a project that does not
+			// exist, and the page shows that sentence: it cannot know more than the reply tells it.
+			expect(error.error.message).toBe("no project named second, or no grant on it");
+			expect(await page.locator("#list").innerText()).toContain("Could not read cases.");
 			expect(await page.locator("#lcount").innerText()).not.toBe("0 cases");
 			expect(await page.locator("#app").count()).toBe(1);
 		} finally {

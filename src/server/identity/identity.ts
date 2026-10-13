@@ -33,6 +33,12 @@ const Q = {
 	insertToken: sql<{ actor: number; hash: string; label: string; at: number }>(
 		"INSERT INTO tokens (actor, hash, label, created_at) VALUES ($actor, $hash, $label, $at)",
 	),
+	tokenById: sql<{ id: number }, { actor: number; revoked_at: number | null }>(
+		"SELECT actor, revoked_at FROM tokens WHERE id = $id",
+	),
+	activeTokens: sql<{ actor: number }, { n: number }>(
+		"SELECT count(*) AS n FROM tokens WHERE actor = $actor AND revoked_at IS NULL",
+	),
 	touchToken: sql<{ id: number; at: number }>("UPDATE tokens SET last_used_at = $at WHERE id = $id"),
 	tokens: sql<
 		{ org: number },
@@ -64,6 +70,21 @@ export const ALL_CAPABILITIES: readonly Capability[] = Capability.options;
 /** The actor that stands for the project's own policy when a rule clause answers a question. */
 export const RULE_ACTOR = "policy";
 
+/** What an actor of each kind is called in a sentence written for a person. */
+export const KIND_NOUN: Record<ActorKind, string> = {
+	human: "a person",
+	agent: "an agent",
+	ci: "a pipeline",
+	rule: "the policy's own actor",
+};
+
+/**
+ * `forgotten-<id>` is what history calls an actor that was forgotten. Nobody is given such a name, by a token or
+ * as the owner at start-up: every view would read them as somebody who is gone, and the actor with that id could
+ * then not be forgotten.
+ */
+const isForgottenName = (name: string): boolean => /^forgotten-/i.test(name);
+
 export const hashToken = (secret: string): string => bytesToHex(sha256(new TextEncoder().encode(secret)));
 
 function newSecret(): string {
@@ -80,30 +101,66 @@ export function orgId(db: Db): number {
 }
 
 /**
- * First start: one organisation, the rule actor and the owner. Idempotent.
- * Returns the owner's token only when it was created on this call and the operator did not supply one.
+ * Every start: one organisation, the rule actor and the owner, with every capability and, in server mode, a way
+ * in. Idempotent.
+ *
+ * The owner is the actor the configuration names, and it is a person: a name that is an agent's, a pipeline's or
+ * the policy's on this instance is refused, and nothing is granted. (The name comes from a variable; one that was
+ * lost or renamed must not turn a token that reads one project into the administrator of the instance.)
+ *
+ * `generatedToken` is the owner's token when this call made one: in server mode, with none configured, whenever
+ * the owner holds no token that works, which is the first start and the start after an import. `warnings` are
+ * for the operator, one line each: a configured token that signs the owner in no more is said, not revived.
  */
-export function bootstrap(app: App): { owner: Actor; generatedToken: string | null } {
+export function bootstrap(app: App): { owner: Actor; generatedToken: string | null; warnings: string[] } {
 	return app.db.transaction(() => {
 		const at = app.now();
 		if (!app.db.get(Q.org)) app.db.run(Q.insertOrg, { name: "default", at });
 		const org = orgId(app.db);
 		ensureActor(app.db, { org, kind: "rule", name: RULE_ACTOR, at });
+		if (isForgottenName(app.config.owner)) {
+			throw invalid(
+				`MAINWORTHY_OWNER names ${app.config.owner}, and a name that starts with forgotten- is what a forgotten actor is called. Set MAINWORTHY_OWNER to the owner's name and start again; nothing was changed`,
+			);
+		}
 		const existing = app.db.get(Q.actorByName, { org, name: app.config.owner });
+		if (existing && existing.kind !== "human") {
+			throw invalid(
+				`MAINWORTHY_OWNER names ${existing.name}, which is ${KIND_NOUN[existing.kind]} on this instance and not a person. Set MAINWORTHY_OWNER to the owner's name and start again; nothing was changed`,
+			);
+		}
 		const owner = existing ?? ensureActor(app.db, { org, kind: "human", name: app.config.owner, at });
 		// Written on every start, so the owner of the instance is never left without the means to repair it.
 		app.db.run(Q.setGrant, { actor: owner.id, project: 0, can: JSON.stringify(ALL_CAPABILITIES) });
+		const server = app.config.mode === "server";
+		const warnings: string[] = [];
 		let generatedToken: string | null = null;
 		if (app.config.ownerToken) {
-			const hash = hashToken(app.config.ownerToken);
-			if (!app.db.get(Q.tokenByHash, { hash })) {
-				app.db.run(Q.insertToken, { actor: owner.id, hash, label: "owner (from MAINWORTHY_OWNER_TOKEN)", at });
+			const row = app.db.get(Q.tokenByHash, { hash: hashToken(app.config.ownerToken) });
+			if (!row) {
+				app.db.run(Q.insertToken, {
+					actor: owner.id,
+					hash: hashToken(app.config.ownerToken),
+					label: "owner (from MAINWORTHY_OWNER_TOKEN)",
+					at,
+				});
+			} else if (server && (row.revoked_at !== null || row.actor !== owner.id)) {
+				// A token that was revoked stays revoked, and one that is somebody else's stays theirs: bringing it
+				// back, or handing it to the owner, would undo a decision somebody made. The operator is told, because
+				// the start otherwise looks like any other and the owner is left outside.
+				const why =
+					row.actor !== owner.id
+						? `is the token of ${app.db.get(Q.actorById, { id: row.actor })?.name ?? "another actor"}, not of the owner ${owner.name}`
+						: "was revoked";
+				warnings.push(
+					`MAINWORTHY_OWNER_TOKEN ${why}: it does not sign ${owner.name} in, and it was left as it is. Set MAINWORTHY_OWNER_TOKEN to a new value and start again.`,
+				);
 			}
-		} else if (!existing && app.config.mode === "server") {
+		} else if (server && (app.db.get(Q.activeTokens, { actor: owner.id })?.n ?? 0) === 0) {
 			generatedToken = newSecret();
 			app.db.run(Q.insertToken, { actor: owner.id, hash: hashToken(generatedToken), label: "owner (generated)", at });
 		}
-		return { owner: toActor(app.db, owner, 0), generatedToken };
+		return { owner: toActor(app.db, owner, 0), generatedToken, warnings };
 	});
 }
 
@@ -198,6 +255,8 @@ export function createToken(
 ): { secret: string; actor: string } {
 	if (input.kind === "rule") throw invalid("a rule does not hold a token");
 	if (!/^[a-zA-Z0-9][a-zA-Z0-9._@-]{0,63}$/.test(input.actor)) throw invalid("actor name: letters, digits, . _ @ -");
+	if (isForgottenName(input.actor))
+		throw invalid("actor name: a name that starts with forgotten- is what a forgotten actor is called; choose another");
 	const db = app.db;
 	const org = orgId(db);
 	const at = app.now();
@@ -253,6 +312,17 @@ export function removeGrant(app: App, input: { actor: string; project: number })
 
 export function listTokens(db: Db) {
 	return db.all(Q.tokens, { org: orgId(db) });
+}
+
+/**
+ * The name of the actor that this token is the last way in for: the token works, and its actor holds no other
+ * that does. Null for any other token, and for an id that names none.
+ */
+export function lastTokenOf(db: Db, id: number): string | null {
+	const token = db.get(Q.tokenById, { id });
+	if (!token || token.revoked_at !== null) return null;
+	if ((db.get(Q.activeTokens, { actor: token.actor })?.n ?? 0) > 1) return null;
+	return db.get(Q.actorById, { id: token.actor })?.name ?? null;
 }
 
 export function revokeToken(app: App, id: number): boolean {

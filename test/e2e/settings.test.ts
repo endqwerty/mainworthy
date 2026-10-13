@@ -155,10 +155,12 @@ import { PRESETS } from "../../src/core/presets.ts";
 				headers: { "Content-Type": "application/json", authorization: `Bearer ${secret}` },
 				body: JSON.stringify({ in: "cases" }),
 			});
-			expect(denied.status).toBe(403);
+			// The token holds no grant on `restricted`: it is told what it would be told of a project that does
+			// not exist, so that the reply does not confirm the project's key (test/http.test.ts).
+			expect(denied.status).toBe(404);
 			expect(
 				z.object({ ok: z.literal(false), error: z.object({ code: z.string() }) }).parse(await denied.json()).error.code,
-			).toBe("forbidden");
+			).toBe("not_found");
 			const tokens = z
 				.array(z.object({ id: z.number(), actor: z.string(), revoked: z.boolean() }))
 				.parse(await server.api("admin", { do: "token.list" }));
