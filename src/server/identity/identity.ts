@@ -206,9 +206,11 @@ export const KIND_NOUN: Record<ActorKind, string> = {
  */
 const isForgottenName = (name: string): boolean => /^forgotten-/i.test(name);
 
+const NAME = /^[a-zA-Z0-9][a-zA-Z0-9._@-]{0,63}$/;
+
 /** Refuses a name no actor is given: one with other characters than these, longer than 64, or a forgotten actor's. */
 function mustBeName(name: string): void {
-	if (!/^[a-zA-Z0-9][a-zA-Z0-9._@-]{0,63}$/.test(name)) throw invalid("actor name: letters, digits, . _ @ -");
+	if (!NAME.test(name)) throw invalid("actor name: letters, digits, . _ @ -");
 	if (isForgottenName(name))
 		throw invalid("actor name: a name that starts with forgotten- is what a forgotten actor is called; choose another");
 }
@@ -356,6 +358,13 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
 	});
 }
 
+/** Whether the actor holds what a start gives the owner: every capability, on every project. */
+function ownsEverything(db: Db, actor: number): boolean {
+	const held = db.all(Q.grants, { actor }).find((grant) => grant.project === 0);
+	const can = held ? json<Capability[]>(held.can) : [];
+	return ALL_CAPABILITIES.every((capability) => can.includes(capability));
+}
+
 /**
  * The owner under a new name: the person `MAINWORTHY_OWNER_WAS` names becomes the one `MAINWORTHY_OWNER` names,
  * and keeps the row everything of theirs points at. Returns what the operator is told, or null when the variable
@@ -366,7 +375,12 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
  * instance at the following start.
  *
  * A former name that cannot be renamed stops the start. Without that, a name that was mistyped would make a
- * second owner, as a changed `MAINWORTHY_OWNER` alone does, and the new name would be taken.
+ * second owner, as a changed `MAINWORTHY_OWNER` alone does, and the new name would be taken. The former name
+ * must be the owner's: nothing stores who the owner is, so the owner is told apart by what every start gives
+ * them, every capability on every project. Anybody else would be renamed and made an owner beside the first.
+ *
+ * The new name must be one a person can be given. The start does not ask that of a new owner's name, and has
+ * not since the first build; here an existing person's password would move to a name no sign-in reads.
  */
 function renameOwner(app: App, org: number): string | null {
 	const was = app.config.ownerWas;
@@ -383,10 +397,17 @@ function renameOwner(app: App, org: number): string | null {
 			? `which is ${KIND_NOUN[row.kind]} on this instance and not a person`
 			: row.disabled_at !== null
 				? "who was forgotten"
-				: null;
+				: !ownsEverything(app.db, row.id)
+					? "who does not own this instance: the owner holds every capability on every project"
+					: null;
 	if (!row || why !== null) {
 		throw invalid(
 			`MAINWORTHY_OWNER_WAS names ${was}, ${why}. Set it to the name the owner has now, or unset it to make ${to} a new person who owns this instance, and start again; ${START_REFUSED}`,
+		);
+	}
+	if (!NAME.test(to)) {
+		throw invalid(
+			`MAINWORTHY_OWNER is ${JSON.stringify(to)}, which is not a name a person can be given: letters, digits and . _ @ -, starting with a letter or a digit, 64 characters at most. Set MAINWORTHY_OWNER to the owner's new name and start again; ${START_REFUSED}`,
 		);
 	}
 	app.db.run(Q.rename, { id: row.id, name: to });
