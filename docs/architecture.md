@@ -40,6 +40,10 @@ sixteen operations. The whole instance is one process and one SQLite file.
                           one SQLite file (WAL)          one writer connection, reader threads
 ```
 
+The documentation a user reads is served by the same process, at `/docs`: the Markdown pages in `docs/guide`,
+rendered once and sent without a session, because they are the same for every instance of a version
+(`src/surfaces/docs`, decision 0016).
+
 `src/core` is beside all of this: pure functions and schemas with no I/O (the case document, the outline
 grammar, canonical Markdown, diff, three-way merge, hashes, failure signatures, the policy presets, the verdict
 function). The browser and the server run the same code from it.
@@ -224,7 +228,8 @@ when a hot path gets slow.
 | `src/server/kernel/` | the database wrapper, migrations, the command context, the witness |
 | `src/server/{suite,evidence,runs,decisions,identity,policy}/` | one module per owner of tables |
 | `src/server/ops/` | the registry and the operations |
-| `src/surfaces/` | HTTP, MCP, the JUnit reader, CI environment detection, archive routes |
+| `src/surfaces/` | HTTP, MCP, the JUnit reader, CI environment detection, archive routes, the documentation site |
+| `docs/guide/` | the user documentation, served at `/docs`; its table of contents is `src/core/docs.ts` |
 | `src/cli/` | the command line, generated from the registry plus a few adapters |
 | `src/web/` | the web UI |
 | `skill/mainworthy/` | the skill that teaches an agent the case model |

@@ -38,7 +38,8 @@ No blocking defect is known: issue
   the job can use it, else a Mainworthy the job starts: `scripts/ci-instance.ts`,
   decision 0014; since 2026-10-13 that is `https://mainworthy.com`, project `mainworthy`: `docs/deploy.md`);
   a shard with no report fails it, and so does a test
-  file in which every test was skipped. On GitHub the workflow takes about four
+  file in which every test was skipped. An `image` job builds the container and
+  asks it for `/docs`; the gate job fails with it. On GitHub the workflow takes about four
   minutes (2026-10-12, two runs: 4 min 24 s and 3 min 49 s; it was about 12 in one job).
 - **One registry.** A capability is an operation in `src/server/ops/index.ts`. HTTP,
   the OpenAPI document, the CLI, the MCP tools and the web client come from it. Never
@@ -88,6 +89,18 @@ No blocking defect is known: issue
 - Behaviour changes need tests and a check run on the real surface.
 - Record user-visible changes in `CHANGELOG.md`; record design decisions in
   `docs/decisions/NNNN-title.md`.
+- **A user-visible change updates the user docs in the same pull request.** The
+  docs are the Markdown pages in `docs/guide/`, which the instance serves at
+  `/docs` (decision 0016). Change the page that describes what you changed; a new
+  page goes in `src/core/docs.ts` and `src/surfaces/docs/content.ts` too. After a
+  change to an operation, a command, a preset, a capability or an answer, run
+  `bun scripts/gen-docs.ts`, which rewrites the tables between the
+  `<!-- generated:NAME -->` markers. A diagram is built from its source in
+  `docs/diagrams/src/` with `bun scripts/diagrams.ts build <archify directory>
+  <name>` (`docs/diagrams/src/README.md`). `test/docs.test.ts` and
+  `test/e2e/docs.test.ts` fail on a stale table, a name the docs do not say, a
+  dead link, a key the keyboard page lacks and a diagram not built again. They
+  cannot tell whether a sentence is still true: read the page you touched.
 - Secrets never enter the repo, logs or chat.
 - The owner's name is not written in the repository (their request, 2026-10-13):
   not in docs, comments, tests, commit messages or pull requests. Write "the

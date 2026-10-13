@@ -507,13 +507,20 @@ export type Extra = {
 	ui: unknown;
 	/** Further routes owned by other surfaces (the MCP endpoint, the archive stream). */
 	routes?: Record<string, (req: Request, session: Session) => Response | Promise<Response>>;
+	/**
+	 * Routes that answer without a session. A handler here is given the request and nothing of the instance, so
+	 * it can only say what is the same for every instance of a version: the documentation (`docs/site.ts`).
+	 */
+	open?: Record<string, (req: Request) => Response | Promise<Response>>;
 };
 
 /**
- * The routes. Everything that reads or changes a project needs a session. Four routes answer without one, on
- * purpose: `/healthz` (is the process up, and which version and commit: the container's health check), `/api/openapi.json`
- * (the description of the API, the same for every instance of a version), `/api/login` and `/api/logout` (which
- * take or clear the cookie, same-origin only), and the web UI's static files. An unknown path is a 404.
+ * The routes. Everything that reads or changes a project needs a session. These answer without one, on purpose:
+ * `/healthz` (is the process up, and which version and commit: the container's health check),
+ * `/api/openapi.json` (the description of the API, the same for every instance of a version), `/api/login` and
+ * `/api/logout` (which take or clear the cookie, same-origin only), the web UI's static files, and what the caller
+ * passes as `open` (the documentation at `/docs`, which is likewise the same for every instance). An unknown path
+ * is a 404.
  *
  * A connection nobody has vouched for is closed after `patience.idleSeconds` of silence: one that asks for a
  * route that needs no session, one whose request was refused, one that stops in the middle of a sign-in. A request
@@ -555,6 +562,7 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patie
 		},
 	};
 	for (const [path, handler] of Object.entries(extra.routes ?? {})) routes[path] = guarded(handler);
+	for (const [path, handler] of Object.entries(extra.open ?? {})) routes[path] = handler;
 	if (extra.ui) routes["/*"] = extra.ui;
 	return Bun.serve({
 		hostname: app.config.host,

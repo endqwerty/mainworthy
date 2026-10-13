@@ -27,6 +27,10 @@ project "scratch" · you are robin@this-machine · policy: loose
 
 Open the URL. On your own machine you are signed in as the owner with no step.
 
+The documentation comes with the server, at `/docs` (http://127.0.0.1:7357/docs, or **Docs** in the sidebar, which opens the page about the screen you are on):
+how it works, each workflow, what you can customize, and a reference of every key, command and operation. The
+sections below are the short version.
+
 ## Write a case
 
 Press `c`. Type a title, Enter, then steps. ` > ` starts the expected result. Paste a list and it is split for
@@ -119,9 +123,10 @@ Rules for contributors, people and agents: [AGENTS.md](AGENTS.md).
 
 | File | What |
 | --- | --- |
+| [docs/guide/](docs/guide/index.md) | the user documentation, which the instance serves at `/docs` |
 | [docs/architecture.md](docs/architecture.md) | how it fits together, with diagrams |
 | [docs/product-design.md](docs/product-design.md) | the product design: thesis, domain model, operation layer, product surface |
-| [docs/decisions/](docs/decisions/) | decision records: 0009 the owner's answers, 0010 the stack, 0011 the UI, 0012 what the MVP builds and where it departs, 0013 asking what became of a command, 0014 a pipeline's token and which Mainworthy CI reports to |
+| [docs/decisions/](docs/decisions/) | decision records: 0009 the owner's answers, 0010 the stack, 0011 the UI, 0012 what the MVP builds and where it departs, 0013 asking what became of a command, 0014 a pipeline's token and which Mainworthy CI reports to, 0016 the documentation at `/docs` |
 | [docs/compliance.md](docs/compliance.md) | what each legal regime needs, what is met, what is not |
 | [docs/deploy.md](docs/deploy.md) | running it on a server |
 | [docs/product-vision.md](docs/product-vision.md) | the problem and the priorities |

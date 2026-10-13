@@ -1,5 +1,6 @@
-import { start } from "../../src/server/start.ts";
+import { start, VERSION } from "../../src/server/start.ts";
 import { archiveRoutes } from "../../src/surfaces/archive.ts";
+import { docsRoutes } from "../../src/surfaces/docs/site.ts";
 import ui from "../../src/web/index.html";
 
 const instance = start(
@@ -12,7 +13,7 @@ const instance = start(
 		ownerToken: process.env.MAINWORTHY_OWNER_TOKEN ?? null,
 		commit: null,
 	},
-	(app, owner) => ({ ui, routes: archiveRoutes(app, owner) }),
+	(app, owner) => ({ ui, routes: archiveRoutes(app, owner), open: docsRoutes(VERSION) }),
 );
 console.info(instance.url);
 for (const signal of ["SIGTERM", "SIGINT"] satisfies NodeJS.Signals[])
