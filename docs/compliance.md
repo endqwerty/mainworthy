@@ -32,8 +32,8 @@ Read this first. These are the known gaps, in order of how soon they bite.
 5. **Accessibility has not been audited.** The UI is keyboard-first, with visible focus and live status, but
    nobody has checked it against WCAG 2.2 AA. Public-sector and many enterprise buyers require a conformance
    report. Cost: medium. Tracked in #47.
-6. **No project licence.** The repository is private and `UNLICENSED`. Before a public release the owner has to
-   choose one. Tracked in #34 with the name check.
+6. **No project licence.** The repository is public since 2026-10-13 and `UNLICENSED`: anyone can read the code,
+   and nobody else has the right to use it. The owner has to choose a licence. Tracked in #34 with the name check.
 
 ## Privacy (GDPR, UK GDPR, CCPA)
 

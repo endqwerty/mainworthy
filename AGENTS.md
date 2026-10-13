@@ -2,8 +2,8 @@
 
 A test case management system, called Casebook until 2026-10-13
 (`docs/decisions/0015-the-project-is-called-mainworthy.md`). Owner: `endqwerty`,
-the person your global instructions name. Personal project, but the owner
-reviews every change on GitHub before it lands. Your global
+the person your global instructions name. Personal project, public on GitHub since 2026-10-13, and the owner
+reviews every change there before it lands. Your global
 `~/.<agent>/AGENTS.md` applies too.
 
 Read [README.md](README.md) first, then `docs/product-vision.md`,
@@ -118,6 +118,11 @@ and "Your sign-in", "Your sessions" and "People" in Settings), through the API a
   dead link, a key the keyboard page lacks and a diagram not built again. They
   cannot tell whether a sentence is still true: read the page you touched.
 - Secrets never enter the repo, logs or chat.
+- The repository is public (the owner, 2026-10-13). Anyone can read the code, every commit, every issue and pull
+  request with its comments, and the log of every workflow run. Do not write there the tailnet's name, an address
+  on the tailnet or the home network, or the name of a machine at home. Write `example.ts.net` and an address
+  from a documentation range; the real ones are in the home lab's notes. Commits made before that day still
+  carry the tailnet's name and one address: the history was not rewritten.
 - The owner's name is not written in the repository (their request, 2026-10-13):
   not in docs, comments, tests, commit messages or pull requests. Write "the
   owner"; an example person is `robin`.
