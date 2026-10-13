@@ -25,3 +25,5 @@
 - 2026-10-13: an icon, `src/web/icon.svg`: a gate with a check mark. It is the page's favicon and the mark beside the name in the header, in place of the letter C.
 - 2026-10-13: the repository is `endqwerty/mainworthy`, and the instance on Coolify runs the renamed build with its data carried over (decision 0015; `docs/deploy.md`).
 - 2026-10-13: the instance is public at `https://mainworthy.com`, the owner's decision for the MVP. `docs/deploy.md` says how it is routed, why the tunnel goes to the proxy's HTTPS port, and how to take it offline.
+- 2026-10-13: this repository's CI reports to the instance at `https://mainworthy.com` (issue #92): project `mainworthy` with the `standard` preset, and a pipeline's token that only records. A failing test on a pull request now blocks the `gate` job until a person answers the question on the instance; a re-run of that job alone then passes. `docs/deploy.md` has the set-up and what was checked.
+- 2026-10-13: the `gate` job fails for a test file name of 500 characters or more, which a report cuts short (issue #82).
