@@ -20,6 +20,11 @@ type Shard = {
 	seconds?: number;
 	/** The report's text, where a test wants one that `files` cannot describe. */
 	xml?: string;
+	/**
+	 * The attempt of the run this report is from. With it the files are where the workflow's download puts them,
+	 * in the directory of that attempt's artifact; without it they are in the directory the job is given.
+	 */
+	attempt?: number;
 };
 
 /** A report as Bun writes it. */
@@ -84,12 +89,22 @@ async function gate(
 					if (options.missing?.includes(shard.name)) continue;
 					const failed = Object.values(shard.files).some((failure) => failure !== null);
 					const outcome = { exit: shard.exit ?? (failed ? 1 : 0), seconds: shard.seconds ?? 60 };
-					if (options.unreadable?.includes(shard.name)) await mkdir(join(root, "test-results", `${shard.name}.xml`));
-					else await writeFile(join(root, "test-results", `${shard.name}.xml`), shard.xml ?? junit(shard.files));
-					await writeFile(join(root, "test-results", `${shard.name}.json`), JSON.stringify(outcome));
+					const directory =
+						shard.attempt === undefined
+							? join(root, "test-results")
+							: join(root, "test-results", `results-${shard.name}-attempt-${shard.attempt}`);
+					await mkdir(directory, { recursive: true });
+					if (options.unreadable?.includes(shard.name)) await mkdir(join(directory, `${shard.name}.xml`));
+					else await writeFile(join(directory, `${shard.name}.xml`), shard.xml ?? junit(shard.files));
+					await writeFile(join(directory, `${shard.name}.json`), JSON.stringify(outcome));
 				}
 				const child = Bun.spawn(
-					[process.execPath, resolve("scripts/ci-gate.ts"), "test-results", ...shards.map((shard) => shard.name)],
+					[
+						process.execPath,
+						resolve("scripts/ci-gate.ts"),
+						"test-results",
+						...new Set(shards.map((shard) => shard.name)),
+					],
 					{
 						cwd: root,
 						env: {
@@ -247,6 +262,58 @@ test("a shard that left no report fails the job, though the gate passes on the o
 	expect(result.output).toContain("::error::in no shard's report: test/c.test.ts");
 	expect(result.code).toBe(1);
 }, 20_000);
+
+// Issue #124. A run that was run again holds one artifact of a shard for each attempt the shard ran in. The
+// workflow names each for its attempt and downloads each into its own directory.
+test("a shard that ran again is read from its newest attempt, and the others from the attempt they ran in", async () => {
+	const result = await gate(
+		[
+			...green.filter((shard) => shard.name !== "tests-2").map((shard) => ({ ...shard, attempt: 1 })),
+			// The newer one is written first: which file was written last decides nothing.
+			{ name: "tests-2", files: { "test/c.test.ts": null }, attempt: 2, seconds: 61 },
+			{ name: "tests-2", files: { "test/c.test.ts": "expected 1, got 2" }, attempt: 1, seconds: 118 },
+		],
+		{ configure: async () => ({ MAINWORTHY_URL: "" }) },
+	);
+	expect(result.output).toContain(
+		"$ mainworthy report test-results/results-tests-2-attempt-2/tests-2.xml --job tests-2",
+	);
+	expect(result.output).toContain(
+		"$ mainworthy report test-results/results-tests-1-attempt-1/tests-1.xml --job tests-1",
+	);
+	// The table says which attempt each row is from, and the row is that attempt's.
+	expect(result.output).toMatch(/^tests-1 +1 +4 +0 +0 +60\.0 s$/m);
+	expect(result.output).toMatch(/^tests-2 +2 +2 +0 +0 +61\.0 s$/m);
+	expect(result.output).toMatch(/mainworthy gate\s+passed/);
+	expect(result.output).not.toContain("::error::");
+	expect(result.code).toBe(0);
+}, 20_000);
+
+test("the newest attempt of a shard is its report also when it failed, or left an artifact with no report in it", async () => {
+	const failedAgain = await gate(
+		[
+			...green.filter((shard) => shard.name !== "tests-2").map((shard) => ({ ...shard, attempt: 1 })),
+			{ name: "tests-2", files: { "test/c.test.ts": null }, attempt: 1 },
+			{ name: "tests-2", files: { "test/c.test.ts": "expected 1, got 2" }, attempt: 2 },
+		],
+		{ configure: async () => ({ MAINWORTHY_URL: "" }) },
+	);
+	expect(failedAgain.output).toMatch(/mainworthy gate\s+blocked/);
+	expect(failedAgain.code).toBe(2);
+	// An older attempt that passed does not stand in for a newer one that says nothing.
+	const empty = await gate(
+		[
+			...green.filter((shard) => shard.name !== "tests-2").map((shard) => ({ ...shard, attempt: 1 })),
+			{ name: "tests-2", files: { "test/c.test.ts": null }, attempt: 1 },
+			{ name: "tests-2", files: {}, xml: "", attempt: 2 },
+		],
+		{ configure: async () => ({ MAINWORTHY_URL: "" }) },
+	);
+	expect(empty.output).toContain(
+		"::error::tests-2: no report (test-results/results-tests-2-attempt-2/tests-2.xml is missing or empty)",
+	);
+	expect(empty.code).toBe(1);
+}, 40_000);
 
 test("a test file whose tests were all skipped fails the job, though the gate passes on the others", async () => {
 	// A runner with no browser skips every browser test, exits 0 and writes a complete report.

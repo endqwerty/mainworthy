@@ -1,7 +1,8 @@
 // What the check runs and how long it may take. One place, read by `scripts/check.ts`, `scripts/ci-gate.ts`,
 // the browser tests' set-up and `test/check.test.ts`.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
+import { join } from "node:path";
 
 /** Per-file durations in milliseconds, written by Bun. Shards are balanced by it; the slowest files start first. */
 export const TIMINGS = "scripts/test-timings.json";
@@ -144,6 +145,28 @@ export function readOutcome(path: string): Outcome | null {
 	} catch {
 		return null;
 	}
+}
+
+/** The artifact a shard's job uploads its report in is named for the attempt of the run that made it. */
+const artifactPrefix = (shard: string): string => `results-${shard}-attempt-`;
+
+/**
+ * Where a shard's report is, for `scripts/ci-gate.ts`. The gate job downloads every artifact of the run, each
+ * into a directory of its own name. A run that was run again holds one artifact of a shard for every attempt the
+ * shard ran in, and the newest is the shard's report: by its number, not by which file was written last (issue
+ * #124). A shard that did not run again has only the artifact of the attempt it ran in. With no artifact of the
+ * shard there, its files are looked for in `directory` itself.
+ */
+export function newestAttempt(directory: string, shard: string): { directory: string; attempt: number | null } {
+	const prefix = artifactPrefix(shard);
+	let newest: number | null = null;
+	for (const entry of existsSync(directory) ? readdirSync(directory, { withFileTypes: true }) : []) {
+		const attempt = entry.name.startsWith(prefix) ? entry.name.slice(prefix.length) : "";
+		if (entry.isDirectory() && /^[1-9]\d*$/.test(attempt)) newest = Math.max(newest ?? 0, Number(attempt));
+	}
+	return newest === null
+		? { directory, attempt: null }
+		: { directory: join(directory, `${prefix}${newest}`), attempt: newest };
 }
 
 /** The slowest files of a run, from the timings Bun wrote. */

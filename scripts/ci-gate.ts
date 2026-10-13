@@ -7,9 +7,11 @@
 //
 //   bun scripts/ci-gate.ts <directory> <shard>...        from the repository's root
 //
-// For each shard the directory holds `<shard>.xml` (JUnit) and `<shard>.json` (what `scripts/check.ts test
-// --junit` wrote beside it). Each file is reported under the shard's name as its job, with the two commands a
-// pipeline would run: `mainworthy report` and `mainworthy gate`.
+// For each shard there are two files: `<shard>.xml` (JUnit) and `<shard>.json` (what `scripts/check.ts test
+// --junit` wrote beside it). In the workflow they are in the directory of the shard's artifact, one for each
+// attempt of the run the shard ran in, and the newest attempt is read (`newestAttempt` in
+// `scripts/check-plan.ts`); otherwise they are in the directory itself. Each report goes in under the shard's
+// name as its job, with the two commands a pipeline would run: `mainworthy report` and `mainworthy gate`.
 //
 // Which Mainworthy: the one MAINWORTHY_URL names when it can be used, else one started here for this run
 // (`scripts/ci-instance.ts`). The run's summary says which, also when the gate passes.
@@ -17,7 +19,7 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
-import { CI_SHARD_LIMITS, type Outcome, over, readOutcome, seconds } from "./check-plan.ts";
+import { CI_SHARD_LIMITS, newestAttempt, type Outcome, over, readOutcome, seconds } from "./check-plan.ts";
 import { chooseInstance, describeChoice, type Environment, type Own, startOwn } from "./ci-instance.ts";
 
 const [directory, ...shards] = process.argv.slice(2);
@@ -63,7 +65,7 @@ const cli = (argv: string[]): number => {
 };
 
 const problems: string[] = [];
-const rows: { shard: string; outcome: Outcome | null; tests: number; failed: number }[] = [];
+const rows: { shard: string; attempt: number | null; outcome: Outcome | null; tests: number; failed: number }[] = [];
 const reported = new Set<string>();
 let gate: number;
 try {
@@ -74,18 +76,19 @@ try {
 	}
 	for (const shard of shards) {
 		await heard();
-		const file = join(directory, `${shard}.xml`);
-		const outcome = readOutcome(join(directory, `${shard}.json`));
+		const from = newestAttempt(directory, shard);
+		const file = join(from.directory, `${shard}.xml`);
+		const outcome = readOutcome(join(from.directory, `${shard}.json`));
 		const text = existsSync(file) ? readFileSync(file, "utf8") : "";
 		if (text.trim() === "" || outcome === null) {
 			const what = text.trim() === "" ? `${file} is missing or empty` : "its outcome file is missing";
 			problems.push(`${shard}: no report (${what})`);
-			rows.push({ shard, outcome, tests: 0, failed: 0 });
+			rows.push({ shard, attempt: from.attempt, outcome, tests: 0, failed: 0 });
 			continue;
 		}
 		const results = parseJUnit(text, { file }).results;
 		const failed = results.filter((result) => result.outcome === "fail" || result.outcome === "error").length;
-		rows.push({ shard, outcome, tests: results.length, failed });
+		rows.push({ shard, attempt: from.attempt, outcome, tests: results.length, failed });
 		for (const suite of text.matchAll(/<testsuite\b[^>]*\bfile="([^"]+)"/g)) reported.add(suite[1] ?? "");
 		// A skipped test proves nothing, and one skipped test beside others that ran is somebody's decision. A file
 		// in which nothing ran is a file that was not tested.
@@ -129,11 +132,12 @@ const unreported = [...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")]
 	.sort();
 if (unreported.length > 0) problems.push(`in no shard's report: ${unreported.join(", ")}`);
 
-console.log("\nShard            tests  failed  exit      wall");
+// The attempt is the one of the run whose report the row is: a shard that did not run again keeps its own.
+console.log("\nShard            attempt  tests  failed  exit      wall");
 for (const row of rows) {
 	const cells = [row.tests, row.failed, row.outcome?.exit ?? "-", row.outcome ? seconds(row.outcome.seconds) : "-"];
 	console.log(
-		`${row.shard.padEnd(16)} ${String(cells[0]).padStart(5)}  ${String(cells[1]).padStart(6)}  ${String(cells[2]).padStart(4)}  ${String(cells[3]).padStart(8)}`,
+		`${row.shard.padEnd(16)} ${String(row.attempt ?? "-").padStart(7)}  ${String(cells[0]).padStart(5)}  ${String(cells[1]).padStart(6)}  ${String(cells[2]).padStart(4)}  ${String(cells[3]).padStart(8)}`,
 	);
 }
 const longest = Math.max(0, ...rows.map((row) => row.outcome?.seconds ?? 0));
