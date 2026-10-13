@@ -79,6 +79,7 @@ async function fixture({
 
 import { z } from "zod";
 import { Policy } from "../../src/core/kinds.ts";
+import { PRESET_GUIDE, PRESET_SUMMARY } from "../../src/core/policy-guide.ts";
 
 (browserAvailable ? test : test.skip)(
 	"settings records policy decisions, scopes and revokes tokens, and switches projects",
@@ -100,12 +101,30 @@ import { Policy } from "../../src/core/kinds.ts";
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
 			page.setDefaultTimeout(8000);
+			// The policy in force is explained where it is read, and the comparison marks it.
+			const inForce = page.locator("#detail .settings-preset-summary");
+			expect(await inForce.innerText()).toBe(PRESET_SUMMARY.loose);
+			const comparison = page.locator("#detail .settings-guide");
+			expect(await comparison.getByRole("table").isVisible()).toBe(false);
+			await comparison.getByText("Compare the policies", { exact: true }).click();
+			expect(await comparison.locator("thead th").allInnerTexts()).toEqual([
+				"Who answers",
+				"loose · in force",
+				"standard",
+				"strict",
+			]);
+			expect(await comparison.getByRole("row", { name: "An agent's edit to a case", exact: false }).innerText()).toBe(
+				["An agent's edit to a case", "By rule: Accept", "A person", "A person, with a reason"].join("\t"),
+			);
+			expect(await comparison.locator("tbody tr").count()).toBe(PRESET_GUIDE.length);
 			await page.getByRole("switch", { name: "Agent edits need a person", exact: false }).check();
 			await eventually(
 				() => server.api("admin", { do: "policy.show", project: "scratch" }),
 				(reply) => Policy.parse(reply).preset === "standard",
 			);
 			await page.getByText("are both recorded.", { exact: false }).waitFor();
+			await page.getByText(PRESET_SUMMARY.standard, { exact: true }).waitFor();
+			await comparison.getByRole("columnheader", { name: "standard · in force", exact: true }).waitFor();
 			const adopted = (await server.api("inbox", { state: "decided", kind: "adopt" })).items.find(
 				(q) => q.evidence.author === "daniel",
 			);
@@ -163,6 +182,15 @@ import { Policy } from "../../src/core/kinds.ts";
 			await page.getByRole("option", { name: "Projects", exact: true }).click();
 			await page.getByLabel("Project key").fill("other");
 			await page.getByLabel("Project name, optional").fill("Other project");
+			// Choosing a project's first policy: the choice is explained as it is made.
+			const chosen = page.locator("#project-preset-help");
+			expect(await chosen.innerText()).toBe(PRESET_SUMMARY.loose);
+			await page.getByLabel("Initial policy").selectOption("strict");
+			expect(await chosen.innerText()).toBe(PRESET_SUMMARY.strict);
+			expect(await page.getByLabel("Initial policy").getAttribute("aria-describedby")).toBe("project-preset-help");
+			await page.locator(".settings-form").getByText("Compare the policies", { exact: true }).click();
+			await page.getByRole("columnheader", { name: "strict · selected", exact: true }).waitFor();
+			await page.getByLabel("Initial policy").selectOption("loose");
 			await page.getByRole("button", { name: "Create project", exact: true }).click();
 			await page.waitForURL("**/p/other/settings");
 			await page.getByRole("option", { name: "Projects", exact: true }).click();

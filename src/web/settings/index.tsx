@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { z } from "zod";
 import { Capability, Policy } from "../../core/kinds.ts";
+import { PRESET_GUIDE, PRESET_SUMMARY, presetOf } from "../../core/policy-guide.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
 import { randomId } from "../lib/ids.ts";
@@ -22,6 +23,60 @@ const Token = z.object({
 });
 const CreatedToken = z.object({ actor: z.string(), token: z.string(), can: z.array(Capability), note: z.string() });
 const Preset = z.enum(["loose", "standard", "strict"]);
+type Preset = z.infer<typeof Preset>;
+
+/**
+ * The presets side by side, wherever one is chosen. `marked` is the preset in force or the one about to be
+ * chosen, and `as` says which.
+ */
+function PresetGuide({ marked, as }: { marked: Preset | null; as: string }) {
+	return (
+		<details className="settings-guide">
+			<summary>Compare the policies</summary>
+			<div className="settings-table-scroll">
+				<table className="settings-table">
+					<thead>
+						<tr>
+							<th scope="col">Who answers</th>
+							{Preset.options.map((name) => (
+								<th key={name} scope="col" aria-current={name === marked ? "true" : undefined}>
+									{name === marked ? `${name} · ${as}` : name}
+								</th>
+							))}
+						</tr>
+					</thead>
+					<tbody>
+						{PRESET_GUIDE.map((row) => (
+							<tr key={row.question}>
+								<th scope="row">{row.question}</th>
+								{Preset.options.map((name) => (
+									<td key={name} className={name === marked ? "marked" : undefined}>
+										{row.answeredBy[name]}
+									</td>
+								))}
+							</tr>
+						))}
+					</tbody>
+				</table>
+			</div>
+			<ul className="dim">
+				<li>
+					By rule: nobody is asked. The policy gives that answer and records the decision, and a person can still
+					overrule it.
+				</li>
+				<li>
+					A person is anyone with the answer permission. Where agents advise, an agent's answer is shown with the
+					question and settles nothing.
+				</li>
+				<li>
+					Under every policy, only an admin changes the policy, and an edit that conflicts with a newer version goes
+					back to its author.
+				</li>
+				<li>No policy decides what blocks a build. A failure nobody has explained blocks every run that shows it.</li>
+			</ul>
+		</details>
+	);
+}
 
 export function SettingsScreen() {
 	const { project } = useApp();
@@ -45,6 +100,8 @@ function SettingsWorkbench() {
 	const parsedPolicy = Policy.safeParse(policyRead.data);
 	const policy = parsedPolicy.success ? parsedPolicy.data : null;
 	const preset = policy?.preset ?? session.projects.find((p) => p.key === project)?.policy ?? "Policy unavailable";
+	// Without the clauses (only an instance admin reads them) the name is all there is to go by.
+	const inForce = policy ? presetOf(policy) : (Preset.safeParse(preset).data ?? null);
 	const actorRef = useRef<HTMLInputElement>(null);
 	const projectRef = useRef<HTMLInputElement>(null);
 	useBindings([
@@ -139,6 +196,11 @@ function SettingsWorkbench() {
 								<div>
 									<h2>{preset}</h2>
 									<p className="dim">The policy decides whose answers count.</p>
+									<p className="settings-preset-summary">
+										{inForce
+											? PRESET_SUMMARY[inForce]
+											: "This project's clauses are not a preset's. The clause table says who answers."}
+									</p>
 								</div>
 								<label>
 									Preset{" "}
@@ -160,6 +222,7 @@ function SettingsWorkbench() {
 									</select>
 								</label>
 							</div>
+							<PresetGuide marked={inForce} as="in force" />
 							<label className="settings-agent-toggle">
 								<input
 									type="checkbox"
@@ -445,7 +508,7 @@ function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElem
 	const { session, instanceCan, project, refreshSession, setStatus } = useApp();
 	const [key, setKey] = useState("");
 	const [name, setName] = useState("");
-	const [preset, setPreset] = useState("loose");
+	const [preset, setPreset] = useState<Preset>("loose");
 	const [busy, setBusy] = useState(false);
 	return (
 		<>
@@ -519,10 +582,11 @@ function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElem
 						<select
 							className="form-input"
 							id="project-preset"
+							aria-describedby="project-preset-help"
 							value={preset}
 							onChange={(event) => {
 								event.currentTarget.blur();
-								setPreset(event.target.value);
+								setPreset(Preset.parse(event.target.value));
 							}}
 						>
 							{Preset.options.map((p) => (
@@ -531,6 +595,10 @@ function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElem
 								</option>
 							))}
 						</select>
+						<p className="settings-preset-summary" id="project-preset-help">
+							{PRESET_SUMMARY[preset]}
+						</p>
+						<PresetGuide marked={preset} as="selected" />
 						<button className="out" type="submit" disabled={busy || !key}>
 							Create project
 						</button>
