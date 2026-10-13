@@ -67,11 +67,12 @@ jobs:
       matrix:
         # The shard count is CI_SHARDS in scripts/check-plan.ts; the names are the ones the gate job lists.
         include:
-          - { name: tests-1, phase: "--only=parallel --shard=1/5" }
-          - { name: tests-2, phase: "--only=parallel --shard=2/5" }
-          - { name: tests-3, phase: "--only=parallel --shard=3/5" }
-          - { name: tests-4, phase: "--only=parallel --shard=4/5" }
-          - { name: tests-5, phase: "--only=parallel --shard=5/5" }
+          - { name: tests-1, phase: "--only=parallel --shard=1/6" }
+          - { name: tests-2, phase: "--only=parallel --shard=2/6" }
+          - { name: tests-3, phase: "--only=parallel --shard=3/6" }
+          - { name: tests-4, phase: "--only=parallel --shard=4/6" }
+          - { name: tests-5, phase: "--only=parallel --shard=5/6" }
+          - { name: tests-6, phase: "--only=parallel --shard=6/6" }
           - { name: quiet, phase: "--only=quiet" }
     steps:
       - uses: actions/checkout@v4
@@ -135,7 +136,7 @@ jobs:
           MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}
           MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}
           MAINWORTHY_PROJECT: ${{ vars.MAINWORTHY_PROJECT }}
-        run: bun scripts/ci-gate.ts test-results tests-1 tests-2 tests-3 tests-4 tests-5 quiet
+        run: bun scripts/ci-gate.ts test-results tests-1 tests-2 tests-3 tests-4 tests-5 tests-6 quiet
       - name: The type-check, the lint and the image passed
         if: always()
         run: test "${{ needs.static.result }}" = success && test "${{ needs.image.result }}" = success

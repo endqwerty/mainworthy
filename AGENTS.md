@@ -22,8 +22,8 @@ No blocking defect is known: issue
 #81, in the web UI's conflict card, is fixed (`docs/decisions/0013-ask-what-became-of-a-command.md`).
 Sign-in was rebuilt on 2026-10-13 (`docs/decisions/0017-sign-in-sessions-and-credentials.md`): a browser
 session that is not the token, token expiry, a limit on failed attempts, and people signing in as themselves
-with a password or a passkey after an invitation. The server and the command line hold all of it; the web
-pages for invitations, passwords and passkeys are the pull request after this one.
+with a password or a passkey after an invitation, in the web UI (the sign-in page, the page of an invitation,
+and "Your sign-in", "Your sessions" and "People" in Settings), through the API and on the command line.
 
 ## Stack rules
 
@@ -35,8 +35,8 @@ pages for invitations, passwords and passkeys are the pull request after this on
   The check takes 120 to 122 s on the 16-thread desktop (2026-10-13, eight runs;
   it was 403 s with the files one after another). `bun run test` is the
   tests alone, printed as they run. One file: `bun test test/suite.test.ts`. One
-  shard, as CI runs it: `bun run test --only=parallel --shard=2/5`; the quiet
-  tests: `bun run test --only=quiet`. CI (`.github/workflows/check.yml`) runs five shards and the quiet
+  shard, as CI runs it: `bun run test --only=parallel --shard=2/6`; the quiet
+  tests: `bun run test --only=quiet`. CI (`.github/workflows/check.yml`) runs six shards (five until 2026-10-13) and the quiet
   tests on a runner each, then one `gate` job reports every shard to Mainworthy and
   its gate is the result (the deployed instance when the repository names one and
   the job can use it, else a Mainworthy the job starts: `scripts/ci-instance.ts`,
