@@ -26,6 +26,9 @@ test.skipIf(!browserAvailable)(
 
 			// The password is typed twice and counted as it is typed. Focus starts in the first field.
 			expect(await page.evaluate(() => document.activeElement?.id)).toBe("invite-password");
+			// What a password manager is told about a password it makes up: the lengths the server takes.
+			for (const id of ["#invite-password", "#invite-password-again"])
+				expect(await page.locator(id).getAttribute("passwordrules")).toBe("minlength: 12; maxlength: 256;");
 			await page.keyboard.type("short");
 			await page.getByText("5 of 12 characters", { exact: true }).waitFor();
 			// A password that is too short is refused in the page, beside the field, and what was typed stays.
@@ -107,6 +110,8 @@ test.skipIf(!browserAvailable)(
 			expect(order).toEqual(["signin-password", "Sign in", "token", "Sign in with the token"]);
 			expect(await page.getByRole("button", { name: "Sign in with a passkey" }).count()).toBe(0);
 
+			// A password manager is told to leave the token alone: it is not the person's password.
+			expect(await page.locator("#token").getAttribute("data-1p-ignore")).not.toBeNull();
 			await page.locator("#token").fill("not-a-valid-owner-token");
 			await page.keyboard.press("Enter");
 			await page.getByRole("status").filter({ hasText: "That token was not accepted." }).waitFor();

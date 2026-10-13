@@ -98,8 +98,26 @@ test.skipIf(!browserAvailable)(
 			expect(await page.locator("#password-current").count()).toBe(0);
 			await page.locator("#password-next").fill("a password set later");
 			await page.locator("#password-again").fill("a password set later");
+			for (const id of ["#password-next", "#password-again"])
+				expect(await page.locator(id).getAttribute("passwordrules")).toBe("minlength: 12; maxlength: 256;");
+			// A password manager that filled the two fields marks them, and paints them by the mark. 1Password
+			// sets this attribute and takes it away only when the person types in the field.
+			const marked = page.locator("[data-com-onepassword-filled]");
+			await page.evaluate(() => {
+				for (const id of ["password-next", "password-again"])
+					document.getElementById(id)?.setAttribute("data-com-onepassword-filled", "dark");
+			});
+			expect(await marked.count()).toBe(2);
 			await page.keyboard.press("Enter");
 			await page.getByRole("status").filter({ hasText: "Password set." }).waitFor();
+			// The page emptied the fields itself, so nothing typed took the marks away: the fields are new ones.
+			// The caret was in one of them, and is on the button now, not in a field a manager would offer to fill.
+			expect(await marked.count()).toBe(0);
+			expect([
+				await page.locator("#password-next").inputValue(),
+				await page.locator("#password-again").inputValue(),
+				await page.evaluate(() => document.activeElement?.textContent),
+			]).toEqual(["", "", "Change password"]);
 			await rows.filter({ hasText: "Password" }).waitFor();
 			expect(await credentials()).toMatchObject([{ kind: "passkey" }, { kind: "password" }]);
 			// From now on it is changed, with the current one asked for.
