@@ -295,6 +295,20 @@ kbd {
 	background: var(--panel);
 	font-size: 12px;
 }
+/* With a session to sign out of, the footer is two lines: who is signed in and the way out, then the rest. */
+.sfoot.account {
+	flex-wrap: wrap;
+}
+.account .me {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.sfoot-break {
+	flex-basis: 100%;
+	height: 0;
+}
 /* panes */
 .pane {
 	display: flex;

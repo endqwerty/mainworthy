@@ -3,6 +3,7 @@ import { z } from "zod";
 import { diffBodies, diffWords } from "../../core/diff.ts";
 import { type DocSlug, docUrl } from "../../core/docs.ts";
 import type { CaseBody } from "../../core/model.ts";
+import { PASSWORD_LENGTH } from "../../core/people.ts";
 
 export function KeyCap({ children }: { children: ReactNode }) {
 	return <kbd>{children}</kbd>;
@@ -93,6 +94,23 @@ export function EmptyState({ children, doc }: { children: ReactNode; doc?: { pag
 }
 export function SectionHeading({ children }: { children: ReactNode }) {
 	return <div className="sech">{children}</div>;
+}
+/**
+ * How long a new password is, as it is typed, against the shortest and the longest the server takes. A field
+ * names it with `aria-describedby`.
+ */
+export function PasswordCount({ id, text, className }: { id: string; text: string; className: string }) {
+	// Characters as a person counts them, and as the server does: an emoji is one.
+	const length = [...text].length;
+	return (
+		<div id={id} className={className}>
+			{length < PASSWORD_LENGTH.min
+				? `${length} of ${PASSWORD_LENGTH.min} characters`
+				: length > PASSWORD_LENGTH.max
+					? `${length} characters, and ${PASSWORD_LENGTH.max} is the most`
+					: `${length} characters`}
+		</div>
+	);
 }
 export function ListRow({
 	children,

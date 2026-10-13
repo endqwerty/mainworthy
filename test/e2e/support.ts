@@ -176,6 +176,18 @@ export async function startServer({
 		throw error;
 	}
 }
+/**
+ * Moves the clock of a server `startServer` started forward, so that a test of something that runs out (an
+ * invitation) does not wait for it. The clock only goes forward, and stays there for the tests that follow.
+ */
+export async function advanceClock(server: Server, ms: number): Promise<void> {
+	const moved = await fetch(`${server.url}/test/clock`, {
+		method: "POST",
+		headers: { authorization: `Bearer ${server.token}`, "content-type": "application/json" },
+		body: JSON.stringify({ advanceMs: ms }),
+	});
+	if (!moved.ok) throw new Error(`The e2e server's clock did not move: ${moved.status}`);
+}
 export async function launchBrowser({ args = [] }: { args?: string[] } = {}): Promise<Browser> {
 	if (!chromiumPath) throw new Error("System Chromium is missing");
 	return chromium.launch({
@@ -223,14 +235,27 @@ export async function openPage(
 	{
 		path = "/p/scratch/suite",
 		signedIn = true,
+		as,
+		ready,
 		browser,
-	}: { path?: string; signedIn?: boolean; browser?: Browser } = {},
+	}: {
+		path?: string;
+		signedIn?: boolean;
+		/** Who is signed in when not the owner by their token: a person, by name and password. */
+		as?: { name: string; password: string };
+		/** What shows that the page is up, for a page that is neither the app nor the sign-in page. */
+		ready?: string;
+		browser?: Browser;
+	} = {},
 ): Promise<PageHarness> {
 	const lent = browser ?? (await fileBrowser());
 	const ownedBrowser = lent ?? (await launchBrowser());
 	const context = await ownedBrowser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
 	routesWaitForInterception(context);
-	if (signedIn) await context.request.post(`${server.url}/api/login`, { data: { token: server.token } });
+	if (signedIn) {
+		const opened = await context.request.post(`${server.url}/api/login`, { data: as ?? { token: server.token } });
+		if (as && !opened.ok()) throw new Error(`The e2e sign-in of ${as.name} was refused: ${opened.status()}`);
+	}
 	const page = await context.newPage();
 	const errors: string[] = [];
 	const dialogs: string[] = [];
@@ -256,7 +281,7 @@ export async function openPage(
 		Object.defineProperty(window, "mainworthyKeyCount", { get: () => count });
 	});
 	await page.goto(`${server.url}${path}`);
-	await page.waitForSelector(signedIn ? "#app" : "#token");
+	await page.waitForSelector(ready ?? (signedIn ? "#app" : "#token"));
 	return {
 		page,
 		context,
@@ -267,6 +292,30 @@ export async function openPage(
 		close: async () => {
 			await context.close();
 			if (!lent) await ownedBrowser.close();
+		},
+	};
+}
+/**
+ * Gives the page an authenticator that Chromium keeps in memory and that confirms the person by itself, so a
+ * passkey is made and used with no dialog. `remove` takes it away again: a second one stands for another device.
+ * The page must be open at `localhost` (`startServer({ passkeys: true })`).
+ */
+export async function addAuthenticator(harness: PageHarness): Promise<{ remove: () => Promise<void> }> {
+	const cdp = await harness.context.newCDPSession(harness.page);
+	await cdp.send("WebAuthn.enable");
+	const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
+		options: {
+			protocol: "ctap2",
+			transport: "internal",
+			hasResidentKey: true,
+			hasUserVerification: true,
+			isUserVerified: true,
+			automaticPresenceSimulation: true,
+		},
+	});
+	return {
+		remove: async () => {
+			await cdp.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
 		},
 	};
 }
