@@ -8,7 +8,7 @@ The same program runs in two modes. The mode decides how a request proves who se
 
 In local mode you are the owner. The server listens on the loopback address, and a request from this machine needs no token. The web UI opens signed in, and commands run without `--token`. A request counts as yours when three things hold: its `Host` header is a loopback name (`localhost`, `127.0.0.1` or `[::1]`), the connection comes from a loopback address, and it carries none of the headers a proxy or a tunnel adds (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Real-IP`, `Via`, `CF-Connecting-IP`). Any other request needs a token. A request that the browser says another site made is refused in both modes.
 
-In server mode every request needs a token. The web UI shows a sign-in page, and a command needs `--token` or `MAINWORTHY_TOKEN`. [People, agents and pipelines](./access.md#sign-in-to-the-web-ui) explains tokens and signing in.
+In server mode every request needs a token or a browser that is signed in. The web UI shows a sign-in page, and a command needs `--token` or `MAINWORTHY_TOKEN`. [People, agents and pipelines](./access.md#sign-in-to-the-web-ui) explains tokens and signing in.
 
 Two things choose server mode. One is `MAINWORTHY_MODE=server`. The other is any `MAINWORTHY_HOST` that is not a loopback address. Either one is enough, and setting `MAINWORTHY_MODE=local` does not undo the second. Every other start is local mode. The first line the server prints says which mode it is in:
 
@@ -119,7 +119,7 @@ The server accepts a request body of up to 64 MiB for an operation. A proxy with
 
 ## What answers without a token
 
-In server mode everything that reads or changes a project needs a token. These addresses answer anyone who can reach the server, and none of them shows a project, a person or a setting.
+In server mode everything that reads or changes a project needs a token or a signed-in session. These addresses answer anyone who can reach the server, and none of them shows a project, a person or a setting.
 
 | Address | What it returns |
 | --- | --- |

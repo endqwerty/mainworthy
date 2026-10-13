@@ -70,6 +70,12 @@ sign-in" (`signin.tsx`, a person only), "Your sessions" (`sessions.tsx`) and "Pe
 section's first field: the new password, the invited person's name. A section's key is
 registered only for a caller who has the section.
 
+On these pages and sections a control whose request is under way is marked `aria-disabled`
+and not disabled, so it keeps the focus; its handler lets one request through. The selects
+of the invitation form keep the focus when they change. A request that changes something
+and gets no reply says what may have happened (`saidOfWrite` in `settings/list.ts`), not
+"try again".
+
 ## Device draft ownership
 
 One live window owns each draft, for both new and existing cases. Opening a draft claims it only when its owner is absent. Another live owner's editor and conflict card show the stored text read-only, with "This case is being edited in another window" and "Take over here". Taking over preserves the text, changes the stored owner and gives future requests a fresh command id. Pending requests stay with the window that sent them.
