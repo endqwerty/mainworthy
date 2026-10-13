@@ -57,8 +57,10 @@ a control that floats over the list.
 
 **The browser keeps the choice**, under `mainworthy:sidebar` in its local storage, as it keeps the theme. It is
 not kept per person or on the server: how wide a window is belongs to the device. A browser whose store refuses
-(it is full, or switched off for the site) collapses and opens the sidebar for the page that is open and keeps
-nothing; the independent review found the first version leaving an empty page there. A phone (decision 0018) lays
+(it is full, or switched off for the site) collapses and opens the sidebar for the page that is open, and a
+reload finds what the store last took: open, where it never took anything, and still collapsed, where it took
+that once and now refuses to forget it. The independent review found the first version leaving an empty page
+there. A phone (decision 0018) lays
 itself out without it, whatever is kept, and has no button; Menu opens its sidebar.
 
 **The page marks the collapsed sidebar with an attribute**, `data-sidebar="collapsed"` on `#app`, not a class.
