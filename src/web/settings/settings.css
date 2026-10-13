@@ -105,13 +105,20 @@
 .settings-form {
 	display: grid;
 	gap: 8px;
+	max-width: 450px;
 	margin-block: 16px;
 }
-.settings-form > * {
+/* A form that holds the comparison: the fields keep their width and the table gets more. */
+.settings-form.wide {
+	grid-template-columns: minmax(0, 1fr);
+	max-width: none;
+}
+.settings-form.wide > * {
 	max-width: 450px;
 }
-.settings-form > .settings-guide {
-	max-width: 760px;
+.settings-form.wide > .settings-guide {
+	min-width: 0;
+	max-width: 860px;
 	margin-block: 4px;
 }
 .settings-form > label {

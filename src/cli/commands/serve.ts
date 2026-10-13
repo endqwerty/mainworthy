@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { defaultConfig } from "../../server/kernel/app.ts";
 import { findProject } from "../../server/kernel/ctx.ts";
-import { currentPolicy } from "../../server/policy/policy.ts";
+import { currentPolicy, policyName } from "../../server/policy/policy.ts";
 import { start, VERSION } from "../../server/start.ts";
 import { archiveRoutes } from "../../surfaces/archive.ts";
 import { mcpRoute } from "../../surfaces/mcp.ts";
@@ -21,7 +21,7 @@ export function serveCommand(args: Args, ui: unknown): void {
 	const owner = instance.owner.name.includes("@") ? instance.owner.name : `${instance.owner.name}@this-machine`;
 	line(`Casebook ${VERSION} · ${config.mode} · data in ${data} · ${instance.url}`);
 	const project = findProject(instance.app.db, instance.project);
-	const policy = project ? currentPolicy(instance.app.db, project.id).preset : "unknown";
+	const policy = project ? policyName(currentPolicy(instance.app.db, project.id)) : "unknown";
 	line(`project "${instance.project}" · you are ${owner} · policy: ${policy}`);
 	if (config.mode === "server" && instance.generatedToken) line(`owner token (shown once): ${instance.generatedToken}`);
 	let stopping = false;

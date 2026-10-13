@@ -1,7 +1,7 @@
 // The project's policy: a versioned clause table. Owns the table `policies`.
 // Reading is open to every module; the only writer is the effect of an `adopt` decision (see suite/adopt).
 import { type Clause, type Facts, firstMatch, type Kind, Policy } from "../../core/kinds.ts";
-import { missingCatchAll, PRESETS, type PresetName } from "../../core/presets.ts";
+import { missingCatchAll, PRESETS, type PresetName, presetOf } from "../../core/presets.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
@@ -36,6 +36,12 @@ export function currentPolicy(db: Db, project: number): CurrentPolicy {
 	if (!row) throw new Error(`project ${project} has no policy`);
 	return { version: row.version, preset: row.preset, clauses: json(row.clauses), settings: json(row.settings) };
 }
+
+/**
+ * What a policy is called where only its name is shown (the project list, the session, the banner): its preset
+ * while it has that preset's clauses, otherwise `custom`. The stored name can outlive its clauses.
+ */
+export const policyName = (policy: Pick<Policy, "preset" | "clauses">): string => presetOf(policy) ?? "custom";
 
 /** The clause that owns a question. A policy is checked for totality when written, so this always finds one. */
 export function clauseFor(policy: Policy, facts: Facts): Clause {

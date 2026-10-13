@@ -57,7 +57,7 @@ import { actorLabel } from "../identity/identity.ts";
 import { type Ctx, findCommand, UNFINISHED } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
-import { currentPolicy } from "../policy/policy.ts";
+import { currentPolicy, policyName } from "../policy/policy.ts";
 import {
 	failingTestsOf,
 	fillsOf,
@@ -907,7 +907,7 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 		cases: cases.slice(0, 200),
 		uncovered: uncovered.slice(0, 50),
 		decided,
-		policy: currentPolicy(ctx.db, project).preset,
+		policy: policyName(currentPolicy(ctx.db, project)),
 		cursor: `s:${ctx.seq}`,
 	};
 }

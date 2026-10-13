@@ -1,5 +1,5 @@
 import { Policy } from "../../core/kinds.ts";
-import { PRESET_NAMES } from "../../core/presets.ts";
+import { PRESET_NAMES, presetOf } from "../../core/presets.ts";
 import { assertPositionals } from "../args.ts";
 import { CliError } from "../errors.ts";
 import { line, printJson } from "../output.ts";
@@ -7,7 +7,7 @@ import type { AdapterCommand } from "./types.ts";
 
 /** Policy is printed as its clause table, preserving order because the first matching clause wins. */
 export function printPolicy(policy: Policy): void {
-	line(`policy: ${policy.preset}`);
+	line(`policy: ${presetOf(policy) ?? "custom"}`);
 	const rows = [
 		["kind", "when", "who answers", "agent's answer", "blocks", "rule's answer"],
 		...policy.clauses.map((clause) => [

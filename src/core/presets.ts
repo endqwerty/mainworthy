@@ -1,7 +1,7 @@
 // The policy presets: three clause lists over one model (principle P5). A team's strictness is which list is in
 // force. `strict` is a fixture that proves the same data works under a policy where a person answers everything;
 // the regulated preset proper needs the `gap` kind and role sign-off, which are not built yet.
-import { type Ask, type Clause, KINDS, type Kind, type Policy, type PolicySettings } from "./kinds.ts";
+import { type Ask, Clause, KINDS, type Kind, type Policy, type PolicySettings } from "./kinds.ts";
 
 const rule: Ask = { who: "rule", agents: "none", notProducer: false, reason: "optional" };
 const member: Ask = { who: "member", agents: "advise", notProducer: false, reason: "optional" };
@@ -101,6 +101,18 @@ export const PRESETS: Record<PresetName, Policy> = {
 };
 
 export const PRESET_NAMES = Object.keys(PRESETS) as PresetName[];
+
+const canonical = (clauses: readonly Clause[]): string => JSON.stringify(Clause.array().parse(clauses));
+
+/**
+ * The preset a policy is, or null. A policy can carry a preset's name over clauses of its own (an edit may name
+ * both, and a stored policy keeps its clauses when a later release changes the preset), so the name alone does
+ * not say what is in force.
+ */
+export function presetOf(policy: Pick<Policy, "preset" | "clauses">): PresetName | null {
+	const name = PRESET_NAMES.find((preset) => preset === policy.preset);
+	return name && canonical(policy.clauses) === canonical(PRESETS[name].clauses) ? name : null;
+}
 
 /** A policy is total when every kind ends in a clause that always matches, so no question is left unowned. */
 export function missingCatchAll(clauses: readonly Clause[]): Kind[] {
