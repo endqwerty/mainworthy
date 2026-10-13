@@ -8,6 +8,13 @@ export type Binding = {
 	when?: () => boolean;
 	allowInInput?: boolean;
 	hidden?: boolean;
+	/**
+	 * An action of the list: it runs on a phone while the list is shown, from the palette and from a key of a
+	 * keyboard attached to it. Every other action runs there only while the detail is shown, because it may act
+	 * on what the detail shows (an answer, a result, an accepted proposal) and nobody decides about what they
+	 * cannot see. The desktop shows both panes, so this changes nothing there.
+	 */
+	list?: boolean;
 };
 const groups = new Map<string, { current: Binding[] }>();
 const listeners = new Set<() => void>();
@@ -60,7 +67,10 @@ function keyOf(event: KeyboardEvent): string {
 	const key = event.key === " " ? "space" : event.key.toLowerCase();
 	return `${event.ctrlKey || event.metaKey ? "mod+" : ""}${event.altKey ? "alt+" : ""}${event.shiftKey && key.length > 1 ? "shift+" : ""}${key}`;
 }
-export function useKeyboard(): void {
+/** `listOnly`: a phone that shows the list. Then a key runs an action of the list and no other (`Binding.list`). */
+export function useKeyboard(listOnly = false): void {
+	const onlyList = useRef(listOnly);
+	onlyList.current = listOnly;
 	useEffect(() => {
 		const openingKeys = new Set<string>();
 		const release = (event: KeyboardEvent) => openingKeys.delete(event.code);
@@ -119,6 +129,7 @@ export function useKeyboard(): void {
 			const candidates = bindings().filter(
 				(binding) =>
 					(!binding.when || binding.when()) &&
+					(!onlyList.current || binding.list) &&
 					(!input || key.startsWith("mod+") || key === "escape" || binding.allowInInput) &&
 					(!inOverlay || key === "escape" || key === "mod+k"),
 			);

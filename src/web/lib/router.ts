@@ -5,6 +5,12 @@ export type Route = { project: string; screen: Screen; ref: string | null; folde
 const changed = "mainworthy:route";
 let entry: "initial" | "navigation" | "history" = "initial";
 export const routeEntry = (): typeof entry => entry;
+/**
+ * Sent when somebody goes somewhere: a `navigate` that is not `replace`, also to the address the page is
+ * already at. A phone listens, to show the pane of where they went (`phone.tsx`). A `replace` is nobody going
+ * anywhere: the selection moved, or a case that was just recorded got its address.
+ */
+export const WENT = "mainworthy:went";
 function subscribe(listener: () => void): () => void {
 	const popped = () => {
 		entry = "history";
@@ -73,10 +79,14 @@ export function refUrl({ project, ref }: { project: string; ref: string }): stri
 }
 /** Changes selection without a document load. Editors receive a leave event before the URL changes. */
 export function navigate(path: string, options: { replace?: boolean; seal?: boolean } = {}): void {
-	if (path === location.pathname + location.search) return;
+	if (path === location.pathname + location.search) {
+		if (!options.replace) window.dispatchEvent(new Event(WENT));
+		return;
+	}
 	if (options.seal !== false) window.dispatchEvent(new Event("mainworthy:leave"));
 	entry = "navigation";
 	if (options.replace) history.replaceState(null, "", path);
 	else history.pushState(null, "", path);
 	window.dispatchEvent(new Event(changed));
+	if (!options.replace) window.dispatchEvent(new Event(WENT));
 }

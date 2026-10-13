@@ -241,6 +241,7 @@ export async function openPage(
 		as,
 		ready,
 		browser,
+		device = "desktop",
 	}: {
 		path?: string;
 		signedIn?: boolean;
@@ -249,11 +250,21 @@ export async function openPage(
 		/** What shows that the page is up, for a page that is neither the app nor the sign-in page. */
 		ready?: string;
 		browser?: Browser;
+		/**
+		 * A phone is a window 390 wide whose pointer is a finger, so the page lays itself out for one
+		 * (`src/web/lib/layout.ts`); `tap` is its press. The desktop is a mouse at 1440 by 900.
+		 */
+		device?: "desktop" | "phone";
 	} = {},
 ): Promise<PageHarness> {
 	const lent = browser ?? (await fileBrowser());
 	const ownedBrowser = lent ?? (await launchBrowser());
-	const context = await ownedBrowser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: "light" });
+	const context = await ownedBrowser.newContext({
+		...(device === "phone"
+			? { viewport: { width: 390, height: 844 }, hasTouch: true }
+			: { viewport: { width: 1440, height: 900 } }),
+		colorScheme: "light",
+	});
 	routesWaitForInterception(context);
 	if (signedIn) {
 		const opened = await context.request.post(`${server.url}/api/login`, { data: as ?? { token: server.token } });

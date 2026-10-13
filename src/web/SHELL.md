@@ -121,6 +121,39 @@ Tokens: `--bg`, `--panel`, `--side`, `--line`, `--line2`, `--ink`, `--dim`,
 `--agent-soft`, `--fail-soft`, `--pass-soft`, `--sans`, `--mono`.
 Use these tokens in both themes. Base CSS provides visible focus rings.
 
+## A phone
+
+Decision 0018. `lib/layout.ts` says what a phone is, in one media query that requires `(pointer: coarse)`, and
+sets `data-layout="phone"` on the root element where it matches. `usePhone()` reads the same query.
+
+The shell does the rest. `usePhoneShell(route, overlayOpen)` in `phone.tsx` keeps which pane is
+shown (`data-pane` on `#app`) and whether the sidebar is drawn over it (`data-menu`). `PhoneBar` is the bar with
+Menu, Back and Actions; it is rendered on a phone only. The detail is shown when a `[role=option]` inside
+`#list` is pressed, when somebody goes to an address with a ref (`navigate` without `replace`, also to the
+address the page is at, and the browser's Back and Forward), and when anything inside `#detail` takes the focus. So a screen's
+list stays a `listbox` of `option` rows, and an action whose form is in the detail focuses its first field.
+
+Every style for a phone goes in `phone.css`, each rule starting with `:root[data-layout="phone"]`, and no other
+stylesheet names the attribute: the desktop cannot be changed from there (`test/architecture.test.ts`). The
+desktop's `@media (max-width: 760px)` rules match a phone too; undo in `phone.css` what a phone does not want.
+Do not add a touch control to one screen for what a key does. The palette lists the bindings that are not
+`hidden`, of which a phone that shows the list is offered those marked `list` (below), and runs one on a tap.
+
+What is covered cannot be acted on. The covered pane takes no pointer events. Whatever takes the focus in the
+detail is shown; in the list, a field that takes it, or what Tab reaches. A screen may give its list the focus
+back after an answer, and the detail stays. What gets covered gives the focus up. Under the palette and the
+sheet of keys `#app` is `inert`, and the palette holds the focus. Back sends `mainworthy:leave`, as `navigate`
+does, so an editor records what was typed (not a conflict that waits for an answer). An address changed in
+place (`navigate` with `replace`) leaves the pane as it is: use it when nobody goes anywhere. `navigate` sends
+`mainworthy:went` (`WENT` in `lib/router.ts`) for every other call, and the shell decides the pane from it.
+
+A binding that is an action of the list says `list: true`: New case, Filter, Plan run. While the detail is
+covered, by the list or by the sidebar (`listOnly`), only those run, from the palette and from a key of an
+attached keyboard (`useKeyboard(listOnly)`), because every other binding may act on the selected row. Mark a new binding `list` only
+if it records no answer, result or change about the selected row, and add it to the list of marked bindings in
+`test/architecture.test.ts`. `openPage(server, { device: "phone" })` opens a page as a phone
+(`test/e2e/phone.test.ts`).
+
 ## Links to the documentation
 
 The user documentation is served at `/docs` from `docs/guide` (decision 0016).

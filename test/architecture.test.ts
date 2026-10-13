@@ -287,6 +287,82 @@ describe("the module map", () => {
 	});
 });
 
+describe("the phone layout", () => {
+	// Decision 0018: a phone gets a layout of its own, and no style of the desktop changes for it. The first three
+	// hold that. The fourth holds what a phone may do while the detail is covered.
+	const phone = ':root[data-layout="phone"]';
+	const sheets = [...new Glob("src/web/**/*.css").scanSync(".")];
+
+	test("a phone is a device whose first pointer is a finger: a mouse matches no part of the query", () => {
+		const query = /export const PHONE\s*=\s*"([^"]+)"/.exec(readFileSync("src/web/lib/layout.ts", "utf8"))?.[1] ?? "";
+		const alternatives = query.split(",").map((part) => part.trim());
+		expect(alternatives.length).toBeGreaterThan(0);
+		expect(alternatives.filter((part) => !part.startsWith("(pointer: coarse) and "))).toEqual([]);
+	});
+
+	test("every rule of phone.css applies on a phone only", () => {
+		const css = readFileSync("src/web/phone.css", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+		const selectors = [...css.matchAll(/(?:^|[{}])\s*([^{}@]+?)\s*\{/g)].flatMap((rule) =>
+			(rule[1] ?? "")
+				// A comma inside :is(...) separates arguments, not selectors.
+				.replace(/\([^()]*\)/g, "()")
+				.split(",")
+				.map((selector) => selector.trim()),
+		);
+		expect(selectors.length).toBeGreaterThan(20);
+		expect(selectors.filter((selector) => !selector.startsWith(phone))).toEqual([]);
+	});
+
+	test("no other stylesheet has a rule for the phone, so the desktop's styles say nothing about it", () => {
+		expect(sheets).toContain("src/web/phone.css");
+		expect(
+			sheets.filter((file) => file !== "src/web/phone.css" && readFileSync(file, "utf8").includes("data-layout")),
+		).toEqual([]);
+	});
+
+	test("the bindings marked `list`, which run on a phone while the detail is covered, are the ones named here", () => {
+		// `list: true` lets a key or the palette run a binding while the detail of the selected row is covered
+		// (`Binding.list` in src/web/lib/keys.ts). An answer, a result, an archive or an accepted proposal marked
+		// so would be recorded about something nobody had opened. Whoever adds a binding here says that it goes
+		// somewhere or opens something new. The test reads the source as text: it shows a reviewer every mark
+		// written as a literal, and cannot see one that is computed.
+		const sources = files
+			.filter((file) => file.startsWith("src/web/"))
+			.map((file) => ({
+				file,
+				// Without comments, where "the list: ..." is prose.
+				text: readFileSync(file, "utf8")
+					.replace(/\/\*[\s\S]*?\*\//g, "")
+					.replace(/^\s*\/\/.*$/gm, ""),
+			}));
+		const marked = sources
+			.flatMap(({ file, text }) =>
+				[...text.matchAll(/label:\s*(["`])([^"`]+)\1,[^{}]*?\blist\s*:\s*true\b/g)].map(
+					(match) => `${file}: ${(match[2] ?? "").replace(/\$\{[^}]*\}/g, "…")}`,
+				),
+			)
+			.sort();
+		expect(marked).toEqual([
+			"src/web/app.tsx: All keys",
+			"src/web/app.tsx: Close palette / keys",
+			"src/web/app.tsx: Docs for this screen",
+			// One binding for each of the five screens: the label is a template, and "…" stands for the screen.
+			"src/web/app.tsx: Go to …",
+			"src/web/app.tsx: Jump to or run",
+			"src/web/app.tsx: Sign out",
+			"src/web/runs/index.tsx: Plan run",
+			"src/web/suite/bindings.ts: Filter",
+			"src/web/suite/bindings.ts: New case",
+		]);
+		// Every `list` property in the source is one of those: written `true`, and where the pattern above reads it.
+		const values = sources.flatMap(({ file, text }) =>
+			[...text.matchAll(/\blist\s*:\s*([^,}\n]+)/g)].map((match) => `${file}: ${(match[1] ?? "").trim()}`),
+		);
+		expect(values.filter((value) => !value.endsWith(": true"))).toEqual([]);
+		expect(values.length).toBe(marked.length);
+	});
+});
+
 describe("the registry", () => {
 	test("every statement the server can run prepares against the schema", () => {
 		const db = new Db(":memory:");

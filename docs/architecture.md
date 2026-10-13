@@ -322,6 +322,13 @@ refetches what the server's change stream says was touched. The answer keys in t
 sentence beside each come from three maps in `src/core/kinds.ts` (`ANSWER_KEYS`, `ANSWER_LABELS`,
 `ANSWER_HELP`).
 
+A phone gets a layout of its own: one pane at a time, the sidebar as a drawer, and the palette behind one button
+for what the keys do (decision 0018). The shell does it (`src/web/phone.tsx`, `src/web/phone.css`) for a device
+whose first pointer is a finger (`src/web/lib/layout.ts`), and a browser worked with a mouse gets the desktop
+layout at every width. A screen's one part in it: a binding says when it is an action of the list
+(`Binding.list`), and while the detail is covered on a phone only those run, from the palette or from a key.
+What takes the focus in the detail is shown, and under the palette the app is inert.
+
 What the device keeps (drafts, the notes typed for a run) is kept per person. Every request the page makes names
 the person it was loaded as (`X-Mainworthy-As`), and the server refuses it when the session has become somebody
 else's, in another tab for instance: text one person typed is never recorded under another's name. A caller that

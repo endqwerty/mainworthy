@@ -59,6 +59,15 @@ and "Your sign-in", "Your sessions" and "People" in Settings), through the API a
   and a test allows only the kind handlers to call them.
 - **`src/core` is pure** and runs in the browser and the server. No I/O, no Node or
   Bun APIs. `src/web` imports only `src/core`.
+- **A phone is styled in one file.** A phone gets its own layout (decision 0018): one pane at a time, the
+  sidebar as a drawer, the actions under one button. Its styles are `src/web/phone.css`, each rule starting
+  with `:root[data-layout="phone"]`, which only a device whose first pointer is a finger gets
+  (`src/web/lib/layout.ts`). No other stylesheet names the attribute, and the desktop layout does not change for
+  a phone's sake. Both are tests. A screen adds no touch control for what a key does: the palette lists it.
+  A binding is `list: true` only when it decides nothing about the selected row (New case, Filter): while a
+  phone shows the list, neither a key nor the palette runs anything else, so nobody answers a question they have
+  not opened. A test names the marked bindings, so a new mark is seen in review (it reads the source as text,
+  and does not see a mark that is computed).
 - **SQL** is declared with `sql()` in the module that owns the table (the owner of
   each table is listed in `test/architecture.test.ts`), so the check can prepare every
   statement against the schema. To read another module's data, call its functions; do

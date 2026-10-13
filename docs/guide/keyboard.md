@@ -10,6 +10,27 @@ Every key of the web UI, by screen. In the app, <kbd>?</kbd> lists the keys of t
 - While the palette or the list of keys is open, only <kbd>Esc</kbd> and <kbd>⌘</kbd> <kbd>K</kbd> work.
 - <kbd>↵</kbd> and <kbd>Space</kbd> press a button that you reached with <kbd>Tab</kbd>, and <kbd>↵</kbd> follows a link you reached that way. Everywhere else they are the screen's keys. That includes a button you clicked with the mouse, until the focus moves on, and the rows of a screen's list.
 
+## On a phone
+
+A phone, or a tablet held upright, is worked with a finger, so the app is laid out for one there. It shows one pane at a time.
+
+- **Menu** (☰) opens the sidebar: the screens, the project, the folders and tags of the suite, the theme and Sign out.
+- A screen opens on its list. Tap a row to read it, and **Back** to return to the list. A link to one case, question, run or change opens on that thing.
+- **Actions** opens the palette. It lists what the keys of the screen do. Tap one to run it. Tap the field at the top to search for a case or to jump to a ref.
+- While a list is shown, **Actions** offers what belongs to the list, such as New case, Filter and Plan run. Open a row for the actions on it, such as Edit case, an answer or Record version. Nothing is decided about a case or a question you have not opened.
+- With a keyboard attached, the keys follow the same rule. While a list is shown, the keys of the list work: <kbd>c</kbd>, <kbd>/</kbd>, <kbd>n</kbd> in Runs, and the keys under [Everywhere](#everywhere) but <kbd>[</kbd>. Once a row is open, every key of the screen works but <kbd>n</kbd> <kbd>f</kbd>, whose form is in the sidebar, which is closed by then. <kbd>Tab</kbd> into the detail shows it. While the sidebar is open, only the keys of the list work. While the palette is open, only <kbd>Esc</kbd> and <kbd>⌘</kbd> <kbd>K</kbd> do, as on the desktop.
+- A button does what it does on a desktop: an answer in the Queue, Pass, Fail, Blocked and Skip in a run, Accept and Reject on a proposal.
+
+Three things need a keyboard and have another way without one:
+
+| On a desktop | On a phone |
+| --- | --- |
+| A digit marks the step a run failed at | Write the step in the note |
+| Drag a case onto a folder | **Actions**, then Move selected |
+| <kbd>Esc</kbd> leaves the case editor | **Back**, or **Actions**, then Seal and leave editor. Both record what you typed. A conflict that waits for your answer stays as it is. |
+
+The layout follows the pointer, not the width of the window. A browser worked with a mouse keeps the desktop layout however narrow its window is. So does a tablet whose window is wider than 900 px and taller than 500 px, as most are on their side.
+
 ## Everywhere
 
 | Key | What it does |
