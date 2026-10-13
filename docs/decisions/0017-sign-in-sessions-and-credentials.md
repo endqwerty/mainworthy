@@ -452,16 +452,20 @@ it, is in `src/web/CHECKS.md`; the guide describes them for a person (`docs/guid
   says only what it knows and how to find out, and does not say "try again": the server may have acted, and a
   second press would act again. It infers nothing from what happens next either. The first wording for a
   password said that a refused current password meant the change had gone through, which a mistyped current
-  password disproves. A sign-out with no reply is looked up at `/api/session`. Ending a session, removing a
+  password disproves. A sign-out with no reply is looked up at `/api/session`; when that gets no reply either, the
+  page says it cannot tell and to try again, since a second sign-out ends nothing more. Ending a session, removing a
   way of signing in and revoking an invitation are safe to repeat, and do say to try again, with their list
   read again.
 - A proof or a change is sent once for each press, never again by the page itself. What the page repeats by
   itself only reads: a list, and `/api/session`.
-- Enter and Space belong to a button that shows the focus (`src/web/lib/keys.ts`). The screens bind those keys
-  too, and took them from "Sign out" on the Suite, which could then not be pressed by keyboard. The one
-  handler now lets them through to a button or a link that matches `:focus-visible` and is not a row of the
-  screen's list. A button that was clicked holds the focus without showing it, so the screen's Enter and Space
-  still work after a click.
+- Enter and Space belong to a button that was reached with the keyboard (`src/web/lib/keys.ts`). The screens
+  bind those keys too, and took them from "Sign out" on the Suite, which could then not be pressed by
+  keyboard. The one handler now lets them through to a button or a link that is not a row of the screen's
+  list, unless the pointer gave it the focus: the handler remembers the control a pointer pressed, until the
+  focus moves or Tab is pressed, so the screen's Enter and Space still work after a click. `:focus-visible`
+  was the first version of that test and was wrong: a browser starts matching it on a clicked button the
+  moment a key arrives (the third independent check, with the theme button). Space on a link is left to the
+  browser, which does not follow a link on Space.
 - Ending this browser's own session in "Your sessions" calls `/api/logout`, as "Sign out" does, so the cookie
   is cleared too.
 - The lists of sessions, credentials and invitations are read again every time their section opens. The cache

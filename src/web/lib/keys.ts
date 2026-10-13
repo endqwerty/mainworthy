@@ -70,6 +70,20 @@ export function useKeyboard(): void {
 				event.stopImmediatePropagation();
 			}
 		};
+		// The control the pointer gave the focus to, until the focus goes elsewhere. `:focus-visible` cannot say
+		// this: a browser starts matching it on a clicked button the moment a key arrives, before `handle` runs.
+		let clicked: Element | null = null;
+		const pointed = (event: PointerEvent) => {
+			clicked = event.target instanceof Element ? event.target.closest("button, a[href], summary") : null;
+		};
+		const focused = (event: FocusEvent) => {
+			if (event.target !== clicked) clicked = null;
+		};
+		// Tab moves the focus by keyboard, also back to a control that was clicked a moment ago and, in a browser
+		// that gives a clicked button no focus, to one that was clicked and never focused.
+		const tabbed = (event: KeyboardEvent) => {
+			if (event.key === "Tab") clicked = null;
+		};
 		const handle = (event: KeyboardEvent) => {
 			if (
 				event.defaultPrevented ||
@@ -87,14 +101,14 @@ export function useKeyboard(): void {
 			// Enter and Space are a focused control's own keys: they press the button or follow the link that
 			// shows the focus. A screen's binding on either key does not take them from it, or a button reached
 			// with Tab could not be pressed at all (Sign out on the Suite, 2026-10-13). Two things keep the
-			// screens' own use of the keys: a control that was clicked holds the focus without showing it
-			// (`:focus-visible`), so the next Enter is still the screen's; and the rows of a screen's list are
-			// the screen's to act on, whichever of them has the focus.
+			// screens' own use of the keys: a control the pointer gave the focus to (`clicked`) leaves the next
+			// Enter to the screen, as it did before; and the rows of a screen's list are the screen's to act on,
+			// whichever of them has the focus.
 			if (
 				(key === "enter" || key === "space") &&
 				target instanceof HTMLElement &&
 				target.matches("button, a[href], summary") &&
-				target.matches(":focus-visible") &&
+				target !== clicked &&
 				target.closest("#list") === null
 			) {
 				// A key held down presses once, as it does where a screen's binding takes it.
@@ -146,7 +160,13 @@ export function useKeyboard(): void {
 		window.addEventListener("keydown", suppress, true);
 		window.addEventListener("keyup", release, true);
 		window.addEventListener("keydown", handle);
+		window.addEventListener("pointerdown", pointed, true);
+		window.addEventListener("focusin", focused, true);
+		window.addEventListener("keydown", tabbed, true);
 		return () => {
+			window.removeEventListener("keydown", tabbed, true);
+			window.removeEventListener("pointerdown", pointed, true);
+			window.removeEventListener("focusin", focused, true);
 			window.removeEventListener("keydown", suppress, true);
 			window.removeEventListener("keyup", release, true);
 			window.removeEventListener("keydown", handle);
