@@ -1,3 +1,4 @@
+import { SESSION_LIFETIMES } from "../../src/server/kernel/app.ts";
 import { start, VERSION } from "../../src/server/start.ts";
 import { archiveRoutes } from "../../src/surfaces/archive.ts";
 import { docsRoutes } from "../../src/surfaces/docs/site.ts";
@@ -12,6 +13,7 @@ const instance = start(
 		owner: "robin",
 		ownerToken: process.env.MAINWORTHY_OWNER_TOKEN ?? null,
 		commit: null,
+		...SESSION_LIFETIMES,
 	},
 	(app, owner) => ({ ui, routes: archiveRoutes(app, owner), open: docsRoutes(VERSION) }),
 );

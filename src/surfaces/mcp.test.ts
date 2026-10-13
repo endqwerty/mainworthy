@@ -461,7 +461,7 @@ test("an HTTP tool write waits for an applying report and records token use", as
 		resultOf(tool, z.object({ status: z.literal("adopted") }));
 		expect((await pendingReport).ok).toBe(true);
 		await h.app.gate.run(() => undefined);
-		expect(listTokens(h.app.reader).find((token) => token.actor === "queue-writer")?.last_used_at).toBe(h.app.now());
+		expect(listTokens(h.app).find((token) => token.actor === "queue-writer")?.last_used_at).toBe(h.app.now());
 	} finally {
 		unsubscribe();
 		await pendingReport;

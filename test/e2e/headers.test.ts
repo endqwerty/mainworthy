@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { SESSION_LIFETIMES } from "../../src/server/kernel/app.ts";
 import { start } from "../../src/server/start.ts";
 import { securityHeaders } from "../../src/surfaces/headers.ts";
 import { browserAvailable, eventually, launchBrowser, openPage, reservePort, startServer } from "./support.ts";
@@ -142,6 +143,7 @@ test.skipIf(!browserAvailable)(
 				owner: "robin",
 				ownerToken: null,
 				commit: null,
+				...SESSION_LIFETIMES,
 			},
 			() => ({ ui: imported.default }),
 		);

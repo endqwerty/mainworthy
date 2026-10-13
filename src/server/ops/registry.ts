@@ -291,14 +291,22 @@ export function invokeAsync(app: App, ops: Readonly<Record<string, AnyOp>>, call
 		const project = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
 		if (op.scope === "project" && !project) return Promise.resolve(invoke(app, ops, call));
 		const actor = call.actor(project?.id ?? 0);
-		// Who may read is decided here, in the thread that knows the caller. A reader thread is only ever handed a
-		// call its caller is allowed to make; a refusal is answered inline and never reaches one.
+		// Who may read is decided here, in the thread that knows the caller, and asked again when the reader has
+		// answered. A reader thread is only ever handed a call its caller is allowed to make; a refusal is answered
+		// inline and never reaches one.
 		if (!actor || !mayRun(actor.can, op.needs)) return Promise.resolve(invoke(app, ops, call));
 		return app.readers
 			.run({ op: call.op, project: call.project, input: call.input, actor }, () =>
 				invoke(app, ops, { ...call, actor: () => actor }),
 			)
-			.then((reply) => (reply.ok ? reply : fail(reply.error.code, reply.error.message, reply.error.details)));
+			.then((reply) => {
+				// The reader was handed the actor as it stood when the call was dispatched, and may have started the
+				// read much later: it was busy, or it failed and the read was replayed here. So the caller is asked
+				// once more before the reply leaves. A session that ended meanwhile, a token that was revoked and an
+				// actor that was forgotten get no data, which is what a write gets by asking after its wait at the gate.
+				if (!call.actor(project?.id ?? 0)) return fail("unauthenticated", "a token is required");
+				return reply.ok ? reply : fail(reply.error.code, reply.error.message, reply.error.details);
+			});
 	}
 	if (ops[call.op]?.effect !== "write") return Promise.resolve(invoke(app, ops, call));
 	return app.gate.run(async () => {

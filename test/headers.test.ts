@@ -6,6 +6,7 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { type Instance, start } from "../src/server/start.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { docsRoutes } from "../src/surfaces/docs/site.ts";
@@ -154,7 +155,16 @@ const scratch = (): string => {
 /** A server-mode instance with every surface `mainworthy serve` has, and one route that fails. */
 function boot(ui: unknown = null): Instance {
 	const instance = start(
-		{ dataDir: scratch(), host: "127.0.0.1", port: 0, mode: "server", owner: "robin", ownerToken: TOKEN, commit: null },
+		{
+			dataDir: scratch(),
+			host: "127.0.0.1",
+			port: 0,
+			mode: "server",
+			owner: "robin",
+			ownerToken: TOKEN,
+			commit: null,
+			...SESSION_LIFETIMES,
+		},
 		(app, owner) => ({
 			ui,
 			routes: {
@@ -324,7 +334,7 @@ describe("on a real listener, without the web UI", () => {
 			headers: json,
 			body: JSON.stringify({ token: TOKEN }),
 		});
-		expect(signedIn.headers.get("set-cookie")).toContain("mainworthy_session=");
+		expect(signedIn.headers.getSetCookie()[0]).toStartWith("mainworthy_sid=");
 		expect(signedIn.headers.get("cache-control")).toBe("no-store");
 		expect(signedIn.headers.get("content-type")).toBe("application/json; charset=utf-8");
 		const refused = await fetch(`${instance.url}/mcp`, { headers: bearer });
@@ -363,6 +373,7 @@ describe("a route that answers without a session and writes the policy of its ow
 				owner: "robin",
 				ownerToken: TOKEN,
 				commit: null,
+				...SESSION_LIFETIMES,
 			},
 			() => ({
 				ui: null,
@@ -432,6 +443,7 @@ describe("a route that answers without a session and writes the policy of its ow
 				owner: "robin",
 				ownerToken: TOKEN,
 				commit: null,
+				...SESSION_LIFETIMES,
 			},
 			() => ({ ui: null, open: docsRoutes("0.0.0") }),
 		);

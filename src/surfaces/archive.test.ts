@@ -5,11 +5,10 @@ import { join } from "node:path";
 import { z } from "zod";
 import { withInstance } from "../cli/test-support.ts";
 import type { GateStatus } from "../core/ops.ts";
-import { actorByName, authenticate } from "../server/identity/identity.ts";
+import { actorByName, authenticate, type Session } from "../server/identity/identity.ts";
 import { findProject, makeCtx, stampSeq } from "../server/kernel/ctx.ts";
 import { acceptReport } from "../server/ops/writes.ts";
 import { archiveRoutes } from "./archive.ts";
-import type { Session } from "./http.ts";
 
 test("archive routes require admin for reads and writes over the real HTTP server", async () => {
 	await withInstance(async ({ client, instance }) => {
@@ -92,7 +91,7 @@ test("export pulls fixed chunks and cancels without leaving its spool on disk", 
 		const own = await mkdtemp(join(tmpdir(), "mainworthy-spool-test-"));
 		process.env.TMPDIR = own;
 		try {
-			const session: Session = { via: "local", secret: null, actor: () => instance.owner };
+			const session: Session = { via: "local", actor: () => instance.owner };
 			const route = archiveRoutes(instance.app)["/api/export"];
 			if (!route) throw new Error("export route is missing");
 			const response = await route(new Request(`${instance.url}/api/export`), session);
@@ -132,7 +131,6 @@ test("a token revoked while the body is uploading cannot complete the import", a
 				if (!token) throw new Error("the second token is missing");
 				const session: Session = {
 					via: "token",
-					secret,
 					actor: (project) => authenticate(instance.app, secret, project),
 				};
 				let input: ReadableStreamDefaultController<Uint8Array> | undefined;

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { harness } from "../../test/helpers.ts";
-import { type App, type Config, openApp } from "./kernel/app.ts";
+import { type App, type Config, openApp, SESSION_LIFETIMES } from "./kernel/app.ts";
 import { Readers, readerCount } from "./readers.ts";
 
 const apps: App[] = [];
@@ -21,7 +21,16 @@ afterEach(async () => {
 function config(): Config {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-reader-"));
 	dirs.push(dataDir);
-	return { dataDir, host: "127.0.0.1", port: 0, mode: "local", owner: "robin", ownerToken: null, commit: null };
+	return {
+		dataDir,
+		host: "127.0.0.1",
+		port: 0,
+		mode: "local",
+		owner: "robin",
+		ownerToken: null,
+		commit: null,
+		...SESSION_LIFETIMES,
+	};
 }
 
 function workerUrl(source: string): string {

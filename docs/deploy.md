@@ -19,7 +19,10 @@ docker compose up -d --build
 docker compose logs mainworthy | head -5      # the owner token, shown once, if you did not set one
 ```
 
-Then open `http://localhost:7357` and paste the owner token.
+Then open `http://localhost:7357` and paste the owner token. The browser gets a session cookie and does not keep
+the token. It stays signed in for 14 days without use and for 90 days at most. `POST /api/logout` ends the
+session for every copy of the cookie; the web UI has no button for it yet. Scripts, pipelines and agents keep
+sending the token itself.
 
 | Variable | Default in the image | What |
 | --- | --- | --- |
@@ -29,6 +32,8 @@ Then open `http://localhost:7357` and paste the owner token.
 | `MAINWORTHY_PORT` | `7357` | The port to listen on. |
 | `MAINWORTHY_HOST` | `0.0.0.0` | The address to bind. |
 | `MAINWORTHY_READERS` | available cores minus two, minimum 1, maximum 8 | Reader threads, each with its own read-only connection, so a read does not wait for a write. A non-negative integer; `0` runs reads inline on the server thread, which is slower under load and only for debugging. |
+| `MAINWORTHY_SESSION_IDLE` | `14d` | How long a browser stays signed in without being used. A whole number and `h`, `d` or `w`: `12h`, `14d`, `2w`. A value that is not one stops the start with a line that names the variable. |
+| `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. Same form. The session cookie is given this age. |
 | `MAINWORTHY_MODE` | `server` | `server`: every request needs a token. `local` (the default outside a container, on loopback): the browser on the same machine is the owner with no step. Local mode is for that machine only. The server checks what it can see: the connection comes from a loopback address, the `Host` is a loopback name, and the request carries none of the headers a proxy or a tunnel adds; a request that fails one of these needs a token. It cannot see through a relay that passes bytes on unchanged from this machine (`ssh -L`, `socat`, a port forward that adds no header): through one, anyone who reaches the relay is the owner. Never expose a local-mode port that way. To reach an instance from elsewhere, run it in `server` mode. |
 | `MAINWORTHY_COMMIT` | empty | The commit the build was made from, which `/healthz` reports as `commit` with no sign-in. Exactly 40 lower-case hexadecimal characters, else it counts as not set; the server then reads `SOURCE_COMMIT` (Coolify sets it on the running container), and reports `null` when neither holds a commit. The image takes it as a build argument: `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`, or `docker build --build-arg MAINWORTHY_COMMIT=$(git rev-parse HEAD) .`. Without it a plain build reports `null`. |
 
@@ -250,17 +255,44 @@ node and variables. Each can be moved by hand, and none has to be:
 | `CASEBOOK_OWNER_TOKEN`, `CASEBOOK_OWNER` | Coolify's variables | Add the variables under the new names, change the two lines in the file, delete the old ones. |
 | `casebook` (service) | `compose.coolify.yaml` | Rename it together with the proxy address in the `tailscale-serve` config. |
 
+## The upgrade to sessions
+
+Until 2026-10-13 a browser's cookie held the token itself, for a year. A build from that day on gives the
+browser a session instead (decision 0017). What the first start of the new build does by itself:
+
+- It adds the table `sessions` to the database, after writing a copy of the database beside it
+  (`mainworthy.db.v1.bak`).
+- Tokens are untouched. The owner token, a pipeline's `MAINWORTHY_TOKEN` and an agent's token work as before.
+- An archive exported by the earlier build still imports.
+
+What you do once:
+
+- **Sign in again**, in every browser. The upgrade signs every browser out: the old cookie, `mainworthy_session`,
+  is no longer read. Paste the owner token as on the first day. That sign-in also removes the old cookie from
+  the browser, so the token does not stay there.
+
+Nothing else changes for a browser. Drafts and run notes are kept by the page, not by the cookie.
+
+To go back, stop the container, put `mainworthy.db.v1.bak` in place of `mainworthy.db` and start the previous
+image. Sessions made since are gone with the table, and each browser signs in once more.
+
+`compose.coolify.yaml` does not pass the two lifetime variables, so the instance on Coolify runs with 14 and 90
+days. To change them there, add the two lines from `compose.yaml` to the service and set the variables in
+Coolify.
+
 ## Backup and restore
 
 The data is `/data/mainworthy.db` (with `-wal` and `-shm` beside it while running).
 
 - **Backup:** `mainworthy export --out /backup/mainworthy-$(date +%F).ndjson.gz` writes every fact, decision and
-  document as text, from a consistent snapshot, while the server runs. Tokens are not exported.
+  document as text, from a consistent snapshot, while the server runs. Tokens and sessions are not exported.
 - **Restore:** start an empty instance, run `mainworthy import <file>` before creating any token, then restart the
   server. The import replaces the instance's first rows, the owner's token among them, so the token you imported
-  with stops working. The restart takes the owner's token from `MAINWORTHY_OWNER_TOKEN`, or, when that is not
-  set, generates one and prints it once in the log. A test imports into an empty instance
-  and compares every table (`src/server/transfer/transfer.test.ts`).
+  with stops working and every browser is signed out. The restart takes the owner's token from
+  `MAINWORTHY_OWNER_TOKEN`, or, when that is not set, generates one and prints it once in the log. A test imports
+  into an empty instance and compares every table (`src/server/transfer/transfer.test.ts`). An archive names the
+  version of what it holds, which changes only when an exported table does, so one taken before an upgrade that
+  added other tables still imports (`test/sessions.test.ts` imports one from the build before sessions).
 - **Upgrade:** a new image migrates the database on start. Before it changes a database that holds data, it
   writes a copy beside it (`mainworthy.db.v<N>.bak`); to go back, stop the container, put that copy in place of
   `mainworthy.db`, and start the previous image.

@@ -2,7 +2,7 @@
 // then listen. The same function is the Local layer on a laptop and the Server layer in a container; only the
 // configuration differs (decision 0002).
 import { type Extra, type Patience, serve, VERSION } from "../surfaces/http.ts";
-import { bootstrap, ruleActor } from "./identity/identity.ts";
+import { bootstrap, flushUses, ruleActor, sweepSessions } from "./identity/identity.ts";
 import { recoverAccepted, sweep } from "./jobs.ts";
 import { type App, type Config, openApp } from "./kernel/app.ts";
 import { type Actor, allProjects } from "./kernel/ctx.ts";
@@ -17,15 +17,20 @@ export type Instance = {
 	generatedToken: string | null;
 	/** What the operator must be told about this start, one line each (see `bootstrap`). */
 	warnings: string[];
+	/** What the server does by itself once a minute, run now. For a test, which cannot wait for the timer. */
+	minute: () => Promise<void>;
 	stop: () => Promise<void>;
 };
 
 /** Opens the instance without listening: for the CLI commands that work on the data directly, and for tests. */
 export function open(
 	config: Config,
-	options: { memory?: boolean; firstProject?: string } = {},
+	options: { memory?: boolean; firstProject?: string; now?: () => number } = {},
 ): { app: App; owner: Actor; project: string; generatedToken: string | null; warnings: string[] } {
-	const app = openApp(config, options.memory ? { memory: true } : {});
+	const app = openApp(config, {
+		...(options.memory ? { memory: true } : {}),
+		...(options.now ? { now: options.now } : {}),
+	});
 	try {
 		const { owner, generatedToken, warnings } = bootstrap(app);
 		let project = allProjects(app.db)[0]?.key;
@@ -47,7 +52,8 @@ export function open(
 export function start(
 	config: Config,
 	extra: (app: App, owner: Actor) => Extra,
-	options: { firstProject?: string; readers?: number; patience?: Patience } = {},
+	/** `now` is the instance's clock: a test passes its own, so nothing in it has to wait for time to pass. */
+	options: { firstProject?: string; readers?: number; patience?: Patience; now?: () => number } = {},
 ): Instance {
 	const count = readerCount({
 		MAINWORTHY_READERS: options.readers === undefined ? process.env.MAINWORTHY_READERS : String(options.readers),
@@ -69,19 +75,34 @@ export function start(
 		app.db.deferCheckpoints();
 	}
 	// Through the gate, like every other writer, so it never lands inside another command's open transaction.
-	const timer = setInterval(() => {
-		app.gate.run(() => sweep(app, rule)).catch((error) => console.error("[mainworthy] sweep failed:", error));
-	}, 60_000);
+	// Three jobs, each its own turn at the gate and in this order, so one that fails does not stop the next:
+	// questions whose decisions ran out are reopened, what was noted of the use of tokens and sessions is written,
+	// and then, with the rows current, sessions past a lifetime are ended and old ones deleted.
+	const minute = async (): Promise<void> => {
+		const jobs = [
+			["sweep", app.gate.run(() => sweep(app, rule))],
+			["writing last uses", flushUses(app)],
+			["ending expired sessions", app.gate.run(() => sweepSessions(app))],
+		] as const;
+		for (const [name, job] of jobs) {
+			await job.catch((error: unknown) => console.error(`[mainworthy] ${name} failed:`, error));
+		}
+	};
+	const timer = setInterval(() => void minute(), 60_000);
 	const url = `http://${config.host === "0.0.0.0" || config.host === "::" ? "localhost" : config.host}:${server.port}`;
 	let stopping: Promise<void> | null = null;
 	return {
 		...opened,
 		url,
+		minute,
 		stop() {
 			stopping ??= (async () => {
 				clearInterval(timer);
 				await server.stop(true);
 				await app.readers?.stop();
+				// No request is being served any more. What was noted since the last minute is written, so a
+				// session used a moment ago is not found idle by the next start.
+				await flushUses(app).catch((error: unknown) => console.error("[mainworthy] writing last uses failed:", error));
 				await app.gate.run(() => undefined);
 				app.close();
 			})();

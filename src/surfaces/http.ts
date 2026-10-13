@@ -1,7 +1,14 @@
 // The HTTP surface. It has no logic of its own: every route is the registry's `invoke` behind authentication, plus
 // the session, the change stream and the generated API description. Nothing here knows what an operation does.
 import { z } from "zod";
-import { authenticate, noteTokenUse } from "../server/identity/identity.ts";
+import {
+	admit,
+	type Facts,
+	type Session,
+	type SignedIn,
+	signInWithToken,
+	signOut,
+} from "../server/identity/identity.ts";
 import type { App, ChangeEvent } from "../server/kernel/app.ts";
 import { type Actor, findProject } from "../server/kernel/ctx.ts";
 import { HTTP_STATUS, INTERNAL_ERROR, noProject } from "../server/kernel/errors.ts";
@@ -13,30 +20,19 @@ import { uiSurface } from "./ui.ts";
 import { keepingPolicyOnEvery, withHeaders, withHeadersOnEvery } from "./with-headers.ts";
 
 export const VERSION = "0.1.0";
-const COOKIE = "mainworthy_session";
 
-const jsonResponse = (body: unknown, status = 200, headers: Record<string, string> = {}): Response =>
-	new Response(JSON.stringify(body), {
-		status,
-		headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers },
-	});
+/**
+ * A JSON reply. `extra` may be a `Headers` object, which is how a reply carries more than one `Set-Cookie`: each
+ * is a header of its own, and a record has room for one.
+ */
+const jsonResponse = (body: unknown, status = 200, extra: Headers | Record<string, string> = {}): Response => {
+	const headers = new Headers(extra);
+	if (!headers.has("content-type")) headers.set("content-type", "application/json; charset=utf-8");
+	if (!headers.has("cache-control")) headers.set("cache-control", "no-store");
+	return new Response(JSON.stringify(body), { status, headers });
+};
 
 const replyResponse = (reply: Reply): Response => jsonResponse(reply, reply.ok ? 200 : HTTP_STATUS[reply.error.code]);
-
-/** The value of a cookie, or null when the request has none of that name or its value cannot be decoded. */
-function cookieOf(req: Request, name: string): string | null {
-	for (const part of (req.headers.get("cookie") ?? "").split(";")) {
-		const [key, ...rest] = part.trim().split("=");
-		if (key !== name) continue;
-		try {
-			return decodeURIComponent(rest.join("="));
-		} catch {
-			// Anybody can send `%` as a cookie. It is no session, and it is not worth a line in the log either.
-			return null;
-		}
-	}
-	return null;
-}
 
 /**
  * The scheme the browser used, as a URL's `protocol` writes it (`https:`). Behind a proxy that ends TLS it is
@@ -70,6 +66,68 @@ function sameOrigin(req: Request): boolean {
 	}
 }
 
+/**
+ * The session cookie's name. Over https it carries the `__Host-` prefix, which a browser accepts only with
+ * `Secure`, `Path=/` and no `Domain`: no other host of the site, and no page reached over plain http, can then
+ * set or replace it. A browser refuses that prefix from plain http, where an instance on a private network or a
+ * published port is still reached, so there the cookie has the bare name.
+ */
+const SESSION_COOKIE = "mainworthy_sid";
+const HOST_SESSION_COOKIE = `__Host-${SESSION_COOKIE}`;
+/**
+ * The cookie of the builds before sessions. Its value was the token itself. It signs nobody in, and a sign-in
+ * and a sign-out expire it, so the token does not stay in a browser for the year that cookie was given.
+ */
+const FORMER_COOKIE = "mainworthy_session";
+const COOKIE_ATTRIBUTES = "Path=/; HttpOnly; SameSite=Strict";
+/** What a session cookie's value looks like: 32 bytes in base64url. Anything else is not one of ours. */
+const COOKIE_VALUE = /^[A-Za-z0-9_-]{43}$/;
+
+const isHttps = (req: Request): boolean => schemeOf(req) === "https:";
+const sessionCookieName = (req: Request): string => (isHttps(req) ? HOST_SESSION_COOKIE : SESSION_COOKIE);
+
+/**
+ * The value of the session cookie a request carries under the name its scheme selects, or null. Null too when
+ * the request carries two cookies of that name: a browser sends two when something planted a second one beside
+ * the real one, and nothing says which is which. A value that does not look like a session's is not looked up.
+ */
+function sessionCookieOf(req: Request): string | null {
+	const name = sessionCookieName(req);
+	const values: string[] = [];
+	for (const part of (req.headers.get("cookie") ?? "").split(";")) {
+		const at = part.indexOf("=");
+		if (at !== -1 && part.slice(0, at).trim() === name) values.push(part.slice(at + 1).trim());
+	}
+	const [value, ...others] = values;
+	return value !== undefined && others.length === 0 && COOKIE_VALUE.test(value) ? value : null;
+}
+
+/**
+ * The `Set-Cookie` headers of a sign-in (`signedIn`) or of a sign-out (null), one header for each cookie.
+ *
+ * The scheme the browser used decides the session cookie's name and whether the cookies say `Secure`, here and
+ * wherever the cookie is read (`schemeOf`). Every other name a browser may still hold is expired, with the
+ * attributes its own name needs: the former cookie, and the session cookie's other name, which is left over
+ * when an instance moves between http and https. Over plain http the `__Host-` name cannot be expired, because a
+ * browser refuses that prefix there; what ends a session is its row, not the browser's jar.
+ */
+function sessionCookies(app: App, req: Request, signedIn: SignedIn | null): Headers {
+	const https = isHttps(req);
+	const secure = https ? "; Secure" : "";
+	const expired = (name: string): string => `${name}=; ${COOKIE_ATTRIBUTES}; Max-Age=0${secure}`;
+	const name = sessionCookieName(req);
+	const headers = new Headers();
+	headers.append(
+		"set-cookie",
+		signedIn
+			? `${name}=${signedIn.cookie}; ${COOKIE_ATTRIBUTES}; Max-Age=${Math.ceil((signedIn.expiresAt - app.now()) / 1000)}${secure}`
+			: expired(name),
+	);
+	if (https) headers.append("set-cookie", expired(SESSION_COOKIE));
+	headers.append("set-cookie", expired(FORMER_COOKIE));
+	return headers;
+}
+
 const isLoopbackHost = (host: string | null): boolean => /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host ?? "");
 /** 127.0.0.0/8 and ::1, also as an IPv4 address written the IPv6 way. An unknown address is not one. */
 const isLoopbackAddress = (address: string | null): boolean =>
@@ -93,37 +151,32 @@ function isLocal(req: Request, peer: string | null): boolean {
 	);
 }
 
-export type Session = {
-	via: "token" | "cookie" | "local";
-	secret: string | null;
-	actor: (project: number) => Actor | null;
-};
-
 /**
- * Who is calling. A bearer token, else the session cookie, else (in local mode only) the owner of this machine.
+ * What a request carries that says who it is, for `admit` to judge: a bearer token, the session cookie, whether
+ * it comes from this server's own page, and whether it started on this machine.
  *
- * Local mode trusts the loopback interface, so it must make sure the request really is local and same-origin:
- * it started on this machine (`isLocal`; the loopback Host also means a page on another site cannot reach us
- * through DNS rebinding) and it comes from this server's own page (`sameOrigin`: another site cannot act on the
- * owner's behalf). The same-origin rule protects the cookie in server mode.
+ * Local mode trusts the loopback interface, so the request must really be local and same-origin: it started on
+ * this machine (`isLocal`; the loopback Host also means a page on another site cannot reach us through DNS
+ * rebinding) and it comes from this server's own page (`sameOrigin`: another site cannot act on the owner's
+ * behalf). The same-origin rule protects the cookie in server mode.
  *
  * `peer` is the address the connection came from, as the listener knows it. A caller that does not know it
  * (a request that never was on a connection) is never the local owner.
  */
-export function sessionOf(app: App, req: Request, owner: Actor, peer: string | null = null): Session | null {
+function factsOf(req: Request, owner: Actor, peer: string | null): Facts {
 	const header = req.headers.get("authorization");
-	if (header?.toLowerCase().startsWith("bearer ")) {
-		const secret = header.slice(7).trim();
-		return authenticate(app, secret, 0)
-			? { via: "token", secret, actor: (project) => authenticate(app, secret, project) }
-			: null;
-	}
-	if (!sameOrigin(req)) return null;
-	const cookie = cookieOf(req, COOKIE);
-	if (cookie && authenticate(app, cookie, 0))
-		return { via: "cookie", secret: cookie, actor: (project) => authenticate(app, cookie, project) };
-	if (app.config.mode === "local" && isLocal(req, peer)) return { via: "local", secret: null, actor: () => owner };
-	return null;
+	return {
+		bearer: header?.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : null,
+		cookie: sessionCookieOf(req),
+		sameOrigin: sameOrigin(req),
+		localOwner: isLocal(req, peer) ? owner : null,
+	};
+}
+
+/** Who is calling: a bearer token, else the session cookie, else (in local mode only) the owner of this machine. */
+export function sessionOf(app: App, req: Request, owner: Actor, peer: string | null = null): Session | null {
+	const admission = admit(app, factsOf(req, owner, peer));
+	return admission.kind === "admitted" ? admission.session : null;
 }
 
 const unauthenticated = (): Response =>
@@ -173,7 +226,7 @@ export type Patience = {
 	/**
 	 * Seconds a connection nobody has vouched for may send and receive nothing before the server closes it: one
 	 * that stops in the middle of a body, one kept open after a reply that needed no session or refused one. A
-	 * request that is given a session has this taken off its connection (`admit`). Bun counts in steps of four
+	 * request that is given a session has this taken off its connection (`sessionFor`). Bun counts in steps of four
 	 * seconds, so a connection is closed up to four seconds later than this. (One that never finishes its
 	 * request's headers is closed by Bun itself after about ten seconds, whatever this says.)
 	 */
@@ -261,7 +314,7 @@ type Listener = Pick<ReturnType<typeof Bun.serve>, "requestIP" | "timeout">;
  * open. (Bun keeps the timeout off while the connection stays idle after the reply; the next request on it is
  * under the timeout again until it is given a session in its turn.)
  */
-function admit(app: App, owner: Actor, req: Request, server: Listener): Session | Response {
+function sessionFor(app: App, owner: Actor, req: Request, server: Listener): Session | Response {
 	// The address the connection came from decides, in local mode, whether the request started on this machine.
 	const session = sessionOf(app, req, owner, server.requestIP(req)?.address ?? null);
 	if (!session) return unauthenticated();
@@ -279,7 +332,7 @@ export async function handleOp(
 	project: string | null,
 	op: string,
 ): Promise<Response> {
-	const session = admit(app, owner, req, server);
+	const session = sessionFor(app, owner, req, server);
 	if (session instanceof Response) return session;
 	let input: unknown;
 	try {
@@ -288,12 +341,7 @@ export async function handleOp(
 		if (error instanceof BodyTooLarge) return tooLarge(OP_BODY_LIMIT);
 		return jsonResponse({ ok: false, error: { code: "invalid", message: "the request body is not JSON" } }, 400);
 	}
-	const reply = await invokeAsync(app, OPS, { op, project, input, actor: session.actor });
-	if (session.secret && reply.ok && OPS[op]?.effect === "write") {
-		const secret = session.secret;
-		void app.gate.run(() => noteTokenUse(app, secret));
-	}
-	return replyResponse(reply);
+	return replyResponse(await invokeAsync(app, OPS, { op, project, input, actor: session.actor }));
 }
 
 /**
@@ -339,7 +387,11 @@ function mayRead(app: App, session: Session, key: string): "yes" | "no" | "missi
 	return can.includes("read") ? "yes" : "no";
 }
 
-async function login(app: App, req: Request, patience: Patience): Promise<Response> {
+/**
+ * Signs a browser in: a token goes in and a session cookie comes out. It is not an operation: nobody is signed in
+ * yet, and the registry runs nothing for a caller it cannot name.
+ */
+async function login(app: App, req: Request, server: Listener, patience: Patience): Promise<Response> {
 	if (!sameOrigin(req)) return unauthenticated();
 	// A sign-in body is a token and nothing else: a few kilobytes at most and one packet, read before anyone is
 	// authenticated. So it is held to a size and to a time, and one that is still arriving after that is answered
@@ -356,16 +408,41 @@ async function login(app: App, req: Request, patience: Patience): Promise<Respon
 		);
 	}
 	const body = z.object({ token: z.string().min(8) }).safeParse(input);
-	if (!body.success || !authenticate(app, body.data.token, 0)) return unauthenticated();
-	const secure = schemeOf(req) === "https:";
-	const cookie = `${COOKIE}=${encodeURIComponent(body.data.token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000${secure ? "; Secure" : ""}`;
-	return jsonResponse({ ok: true, result: { signedIn: true } }, 200, { "set-cookie": cookie });
+	if (!body.success) return unauthenticated();
+	const opening = signInWithToken(app, body.data.token, { userAgent: req.headers.get("user-agent") });
+	if (!opening) return unauthenticated();
+	// The token is good, so the caller is vouched for as any request with a session is (`sessionFor`): the
+	// session is written at the gate, and the wait there may outlast the idle timeout.
+	server.timeout(req, 0);
+	const signedIn = await opening;
+	if (!signedIn) return unauthenticated();
+	return jsonResponse({ ok: true, result: { signedIn: true } }, 200, sessionCookies(app, req, signedIn));
+}
+
+/**
+ * Signs a browser out: ends the session its cookie names, then clears the cookie. The end is committed before
+ * the reply leaves, so a copy of the cookie made earlier is refused from then on.
+ *
+ * It needs no session and is the same every time: with no cookie, an unknown one or one that has ended, there
+ * is nothing to end, and the reply still clears. Only the cookie says which session ends. A bearer token on the
+ * same request ends nothing: it is not a browser's session.
+ */
+async function logout(app: App, req: Request, server: Listener): Promise<Response> {
+	if (!sameOrigin(req)) return unauthenticated();
+	const cookie = sessionCookieOf(req);
+	const ending = cookie === null ? null : signOut(app, cookie);
+	if (ending) {
+		// A session that is open is being ended: its holder is vouched for while the end waits at the gate.
+		server.timeout(req, 0);
+		await ending;
+	}
+	return jsonResponse({ ok: true, result: {} }, 200, sessionCookies(app, req, null));
 }
 
 /**
  * The change stream for one project, for a session that may read it. Correctness never depends on it: a client
  * that misses an event refetches. It is silent for as long as nothing changes; like every request with a session,
- * it is not held to the idle timeout (`admit`).
+ * it is not held to the idle timeout (`sessionFor`).
  */
 function events(app: App, req: Request, session: Session, project: string): Response {
 	const allowed = mayRead(app, session, project);
@@ -520,35 +597,29 @@ export type Extra = {
  * The routes. Everything that reads or changes a project needs a session. These answer without one, on purpose:
  * `/healthz` (is the process up, and which version and commit: the container's health check),
  * `/api/openapi.json` (the description of the API, the same for every instance of a version), `/api/login` and
- * `/api/logout` (which take or clear the cookie, same-origin only), the web UI's static files, and what the caller
+ * `/api/logout` (which open and end a browser's session and set or clear its cookie, same-origin only), the web
+ * UI's static files, and what the caller
  * passes as `open` (the documentation at `/docs`, which is likewise the same for every instance). An unknown path
  * is a 404.
  *
  * A connection nobody has vouched for is closed after `patience.idleSeconds` of silence: one that asks for a
  * route that needs no session, one whose request was refused, one that stops in the middle of a sign-in. A request
  * that is given a session has the timeout taken off its connection, so its reply may take as long as the work
- * takes (`admit` says why, and what remains).
+ * takes (`sessionFor` says why, and what remains).
  */
 export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patience: Patience = PATIENCE) {
-	// Every route that takes a session takes it here or in `handleOp`, and both through `admit`.
+	// Every route that takes a session takes it here or in `handleOp`, and both through `sessionFor`.
 	const guarded =
 		(handler: (req: Request, session: Session) => Response | Promise<Response>) => (req: Request, server: Listener) => {
-			const session = admit(app, owner, req, server);
+			const session = sessionFor(app, owner, req, server);
 			return session instanceof Response ? session : handler(req, session);
 		};
 	const routes: Record<string, unknown> = {
 		"/healthz": () => jsonResponse({ ok: true, version: VERSION, commit: app.config.commit }),
 		"/api/openapi.json": () => jsonResponse(openApi()),
 		"/api/session": { GET: guarded((_req, session) => sessionInfo(app, session)) },
-		"/api/login": { POST: (req: Request) => login(app, req, patience) },
-		"/api/logout": {
-			POST: (req: Request) =>
-				sameOrigin(req)
-					? jsonResponse({ ok: true, result: {} }, 200, {
-							"set-cookie": `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`,
-						})
-					: unauthenticated(),
-		},
+		"/api/login": { POST: (req: Request, server: Listener) => login(app, req, server, patience) },
+		"/api/logout": { POST: (req: Request, server: Listener) => logout(app, req, server) },
 		"/api/p/:project/events": {
 			GET: guarded((req, session) =>
 				events(app, req, session, (req as Request & { params: { project: string } }).params.project),

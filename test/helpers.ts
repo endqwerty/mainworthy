@@ -1,7 +1,7 @@
 // A whole instance in memory for tests: the same app, registry and invoke() the server uses.
 import type { ActorKind, Capability } from "../src/core/kinds.ts";
 import { authenticate, bootstrap, createToken } from "../src/server/identity/identity.ts";
-import { type App, openApp } from "../src/server/kernel/app.ts";
+import { type App, openApp, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke, type Reply } from "../src/server/ops/registry.ts";
@@ -22,7 +22,16 @@ export type Harness = {
 export function harness(options: { preset?: string; project?: string } = {}): Harness {
 	let now = 1_800_000_000_000;
 	const app = openApp(
-		{ dataDir: ":memory:", host: "127.0.0.1", port: 0, mode: "local", owner: "robin", ownerToken: null, commit: null },
+		{
+			dataDir: ":memory:",
+			host: "127.0.0.1",
+			port: 0,
+			mode: "local",
+			owner: "robin",
+			ownerToken: null,
+			commit: null,
+			...SESSION_LIFETIMES,
+		},
 		{ memory: true, now: () => now },
 	);
 	const { owner } = bootstrap(app);

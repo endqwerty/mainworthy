@@ -5,8 +5,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { Glob } from "bun";
 import { needs } from "../src/core/kinds.ts";
 import { Db, declaredSql } from "../src/server/kernel/db.ts";
-import { migrate } from "../src/server/kernel/migrate.ts";
+import { MIGRATIONS, migrate } from "../src/server/kernel/migrate.ts";
 import { MCP_OPS, OP_LIST } from "../src/server/ops/index.ts";
+import { UNEXPORTED } from "../src/server/transfer/transfer.ts";
 import "../src/server/jobs.ts";
 
 const files = [...new Glob("src/**/*.{ts,tsx}").scanSync(".")].filter(
@@ -119,40 +120,41 @@ describe("the module map", () => {
 		expect(offenders).toEqual([]);
 	});
 
+	// The owner of each table. A read of another module's data goes through that module's functions, so the
+	// rules about its rows live in one place and a join cannot quietly depend on another module's schema.
+	const owners: Record<string, string[]> = {
+		"server/kernel": ["meta", "projects", "counters", "commands"],
+		"server/identity": ["orgs", "actors", "grants", "tokens", "sessions"],
+		"server/policy": ["policies"],
+		"server/suite": [
+			"folders",
+			"cases",
+			"case_tags",
+			"case_aliases",
+			"versions",
+			"placements",
+			"proposals",
+			"search_docs",
+			"requirements",
+			"covers",
+		],
+		"server/evidence": [
+			"tests",
+			"targets",
+			"changes",
+			"batches",
+			"signatures",
+			"results",
+			"flips",
+			"findings",
+			"reviews",
+			"excuses",
+		],
+		"server/runs": ["runs", "run_tests", "slots", "slot_results", "depends_on"],
+		"server/decisions": ["questions", "question_refs", "answers", "decisions"],
+	};
+
 	test("a module runs SQL only on the tables it owns", () => {
-		// The owner of each table. A read of another module's data goes through that module's functions, so the
-		// rules about its rows live in one place and a join cannot quietly depend on another module's schema.
-		const owners: Record<string, string[]> = {
-			"server/kernel": ["meta", "projects", "counters", "commands"],
-			"server/identity": ["orgs", "actors", "grants", "tokens"],
-			"server/policy": ["policies"],
-			"server/suite": [
-				"folders",
-				"cases",
-				"case_tags",
-				"case_aliases",
-				"versions",
-				"placements",
-				"proposals",
-				"search_docs",
-				"requirements",
-				"covers",
-			],
-			"server/evidence": [
-				"tests",
-				"targets",
-				"changes",
-				"batches",
-				"signatures",
-				"results",
-				"flips",
-				"findings",
-				"reviews",
-				"excuses",
-			],
-			"server/runs": ["runs", "run_tests", "slots", "slot_results", "depends_on"],
-			"server/decisions": ["questions", "question_refs", "answers", "decisions"],
-		};
 		const ownerOf = new Map(
 			Object.entries(owners).flatMap(([layer, tables]) => tables.map((table) => [table, layer] as const)),
 		);
@@ -183,6 +185,75 @@ describe("the module map", () => {
 		db.close();
 		expect(tables.filter((table) => !ownerOf.has(table))).toEqual([]);
 		expect([...ownerOf.keys()].filter((table) => !tables.includes(table))).toEqual([]);
+	});
+
+	test("identity is entered through identity.ts: no other layer imports another file of it", () => {
+		// Tokens, sessions and what is noted of their use are files of one module, and `identity.ts` is its
+		// interface. A surface that imported `sessions.ts` could open a session without the proof that
+		// `identity.ts` asks for first.
+		const offenders = files
+			.filter((file) => !file.startsWith("src/server/identity/"))
+			.flatMap((file) =>
+				imports(file)
+					.filter((path) => path.startsWith("."))
+					.map((path) => new URL(path, `file:///${file}`).pathname.slice(1))
+					.filter((target) => target.startsWith("src/server/identity/") && target !== "src/server/identity/identity.ts")
+					.map((target) => `${file} imports ${target}`),
+			);
+		expect(offenders).toEqual([]);
+	});
+
+	test("an archive leaves out every identity table that holds the hash of a secret, and only those", () => {
+		// A token and a session are let in by a secret whose SHA-256 is in a column named `hash`. A table like
+		// that never travels in an archive, and an import empties it. One that is added later and not listed in
+		// `UNEXPORTED` fails here, before an export carries what signs somebody in.
+		const db = new Db(":memory:");
+		migrate(db, ":memory:");
+		const holdsHash = (table: string): boolean =>
+			db.raw
+				.query<{ name: string }, []>(`PRAGMA table_info(${table})`)
+				.all()
+				.some((column) => column.name === "hash");
+		const secret = (owners["server/identity"] ?? []).filter(holdsHash);
+		db.close();
+		expect([...UNEXPORTED].sort()).toEqual(secret.sort());
+	});
+
+	test("each migration says truly whether it changes what an archive holds", () => {
+		// An import requires the archive version, which is the last migration marked `archive`. A migration that
+		// changes an exported table and is not marked would let an older archive in with a column missing; one
+		// that is marked and changes none would refuse every archive taken before it for nothing.
+		const db = new Db(":memory:");
+		const exported = (): string =>
+			JSON.stringify(
+				db.raw
+					.query<{ name: string }, []>(
+						"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'search_docs%' ORDER BY name",
+					)
+					.all()
+					.filter((table) => !UNEXPORTED.includes(table.name))
+					.map((table) => [
+						table.name,
+						db.raw
+							.query<{ name: string; type: string; notnull: number; pk: number }, []>(
+								`PRAGMA table_info(${table.name})`,
+							)
+							.all()
+							.map((column) => `${column.name} ${column.type} ${column.notnull} ${column.pk}`),
+					]),
+			);
+		const changes: string[] = [];
+		let before = exported();
+		for (const migration of MIGRATIONS) {
+			db.exec(migration.sql);
+			const after = exported();
+			changes.push(`${migration.version} ${migration.name}: ${after !== before}`);
+			before = after;
+		}
+		db.close();
+		expect(MIGRATIONS.map((migration) => `${migration.version} ${migration.name}: ${migration.archive}`)).toEqual(
+			changes,
+		);
 	});
 
 	test("writers that undo a withdrawn decision are called only by the kind handlers", () => {

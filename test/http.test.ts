@@ -6,7 +6,7 @@ import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
-import { type Config, defaultConfig } from "../src/server/kernel/app.ts";
+import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { OP_LIST, OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { Readers } from "../src/server/readers.ts";
@@ -37,6 +37,7 @@ function boot(
 			owner: options.owner ?? "robin",
 			ownerToken,
 			commit: null,
+			...SESSION_LIFETIMES,
 		},
 		() => ({ ui: null }),
 		options.patience ? { patience: options.patience } : {},
@@ -98,7 +99,16 @@ function bootReaders(count: number): Instance {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-http-readers-"));
 	dirs.push(dataDir);
 	const instance = start(
-		{ dataDir, host: "127.0.0.1", port: 0, mode: "local", owner: "robin", ownerToken: null, commit: null },
+		{
+			dataDir,
+			host: "127.0.0.1",
+			port: 0,
+			mode: "local",
+			owner: "robin",
+			ownerToken: null,
+			commit: null,
+			...SESSION_LIFETIMES,
+		},
 		() => ({ ui: null }),
 		{ readers: count },
 	);
@@ -416,7 +426,7 @@ describe("server mode", () => {
 		const instance = boot("server", "owner-secret-0123456789");
 		const logged = spyOn(console, "error").mockImplementation(() => {});
 		try {
-			const cookie = { cookie: "mainworthy_session=%" };
+			const cookie = { cookie: "mainworthy_sid=%" };
 			const seen = [
 				(await fetch(`${instance.url}/api/session`, { headers: cookie })).status,
 				(await fetch(`${instance.url}/api/p/scratch/events`, { headers: cookie })).status,
