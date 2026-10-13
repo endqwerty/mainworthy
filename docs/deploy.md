@@ -6,8 +6,11 @@ database container to run, upgrade or back up separately (decision 0010).
 **What is verified:** the image builds, starts, serves the UI and the API, keeps its data across a restart, and
 passes its health check on the development machine. It also runs on the owner's Coolify (since 2026-10-12, the
 steps under "On Coolify" as they were done): `/healthz` answers, a request with no token gets 401, and a browser
-signed in with the owner token over plain HTTP and saved a case through the page.
-**What is not:** the Tailscale sidecar in `compose.coolify.yaml` on that instance (`docker compose config` accepts the file once Coolify's own `exclude_from_hc` line is removed; the node has not joined yet), a restore from a backup on that instance, and an upgrade of an instance that holds data.
+signed in with the owner token over plain HTTP and saved a case through the page. That instance was upgraded
+across the rename on 2026-10-13: Coolify built the image, the server logged
+`moved /data/casebook.db to /data/mainworthy.db`, and the one case and the owner token were still there. An
+export taken just before is in the volume (`/data/before-rename-2026-10-13.ndjson.gz`).
+**What is not:** the Tailscale sidecar in `compose.coolify.yaml` on that instance (`docker compose config` accepts the file once Coolify's own `exclude_from_hc` line is removed; the node has not joined yet), a restore from a backup on that instance, and an upgrade that changes the schema of an instance that holds data.
 
 ## The container
 
