@@ -11,6 +11,12 @@ export const conflictEditorStatus =
 	"Resolve the conflict first. Edit the merged fields in the conflict card; other fields can be edited after it is resolved.";
 
 export const draftOwnershipStatus = "This case is being edited in another window";
+/** A draft another window owned and has removed: what the pane says while this tab still shows it. */
+export const draftEndedStatus = {
+	reading: "Another window recorded or ended this draft. Reading the case as it is now…",
+	unread:
+		"Another window recorded or ended this draft, and the case could not be read. This stays as it was until it is.",
+};
 
 export type DraftChange = (draft: Draft, focus?: boolean) => void;
 function freshStep(draft: Draft) {

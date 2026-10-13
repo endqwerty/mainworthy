@@ -93,6 +93,8 @@ export function SuiteScreen() {
 	const adoptedRefs = useRef(new Map<string, string>());
 	const pending = useRef(new Map<string, Promise<void>>());
 	const [selected, setSelected] = useState<string | null>(route.ref);
+	const selectedRef = useRef(selected);
+	selectedRef.current = selected;
 	const conflict = draft?.conflict ?? (selected ? captures.get(selected)?.conflict : undefined) ?? null;
 	const displayedDraft = draft ?? (conflict ? captures.get(conflict.draftId) : null);
 	const ownedElsewhere = Boolean(displayedDraft && displayedDraft.owner !== windowId);
@@ -157,12 +159,15 @@ export function SuiteScreen() {
 		[project, mayWrite, writeOwnedDraft, draftStored, setStatus],
 	);
 	/**
-	 * The page holds these rows of a case from now on, unless it holds a later version already. Three paths call
-	 * this, each in the step in which a draft leaves the pane: a card whose merge the server recorded
-	 * (`endMergedCard`), a card answered by a merge from elsewhere that holds all of its text (`settleAnswered`),
-	 * and a draft another window removed (`endFollowed`). From then on the pane shows the case the page holds, and
-	 * `e` opens the editor on it. What the page held until then may be from before the write. The read that
-	 * `invalidateProject` starts in the same step replaces any read still on its way.
+	 * The page holds these rows of a case from now on, unless it holds a later version already. The paths that
+	 * can finish a draft call this before they do: a card whose merge the server recorded (`endMergedCard`), a
+	 * card answered by a merge from elsewhere that holds all of its text (`settleAnswered`), a draft another
+	 * window removed (`endFollowed`), and an editor asked for on a case the page still owes a read of
+	 * (`readOwed`). Where the draft then leaves the pane, it does so in the same step, the pane shows the case the
+	 * page holds, and `e` opens the editor on it. Not every call ends that way: `endMergedCard` keeps text later
+	 * than the merge as a draft, and `endFollowed` holds what it read although the person has moved to another
+	 * case. What the page held until then may be from before the write. The read that `invalidateProject` starts
+	 * in the same step replaces any read still on its way.
 	 */
 	const holdCase = useCallback(
 		({ ref, rows }: { ref: string; rows: Api["get"]["reply"] }): void => {
@@ -177,13 +182,22 @@ export function SuiteScreen() {
 	 * its case on the way. While it is the draft in the pane, nothing here changes it or writes it back.
 	 */
 	const gone = useRef<{ draft: Draft; reading: boolean } | null>(null);
+	/** What the pane says of that draft: its case is being read, or could not be (`draftEndedStatus`). */
+	const [ending, setEnding] = useState<"reading" | "unread" | null>(null);
+	/**
+	 * The cases the page owes a read of: a draft of the case ended in another window, and no read of the case
+	 * has come back since. Only a read that succeeds, in the session that owes it, takes a case out. It outlasts
+	 * the removed draft, which goes when the person selects another case, and no editor opens on a case in it
+	 * before that read (`readOwed`). The removed draft itself is never stored again.
+	 */
+	const owed = useRef(new Set<string>());
 	/**
 	 * Another window removed the draft this tab shows: it recorded it, settled its conflict or dropped it. This
 	 * tab has no reply that names a version, so it reads the case as it is now. That read began after the draft
 	 * was removed, so it holds what was recorded or something later. Until the page holds it the draft stays in
 	 * the pane as it was, with its card: the case the page holds may be from before, and `e` would open the editor
-	 * on it (issue #94). A read that fails leaves the draft there, and the status line says so. `e`, "Take over
-	 * here" and a later storage event for the draft read again.
+	 * on it (issue #94). A read that fails leaves the draft there, and the pane and the status line say so. `e`,
+	 * "Read the case again" and a later storage event for the draft read again.
 	 */
 	const endFollowed = useCallback(
 		async (ended: Draft): Promise<void> => {
@@ -192,8 +206,12 @@ export function SuiteScreen() {
 			if (gone.current?.draft === ended && gone.current.reading) return;
 			const state = { draft: ended, reading: true };
 			gone.current = state;
-			const what = ended.conflict ? "Conflict resolved in another window." : "The draft ended in another window.";
-			setStatus(`${what} Reading the recorded version…`);
+			owed.current.add(ref);
+			setEnding("reading");
+			const what = ended.conflict
+				? "Conflict resolved in another window."
+				: "The draft was recorded or ended in another window.";
+			setStatus(`${what} Reading the case as it is now…`);
 			let rows: Api["get"]["reply"] | null = null;
 			let failure = "";
 			try {
@@ -203,23 +221,31 @@ export function SuiteScreen() {
 			}
 			state.reading = false;
 			if (!sessionCurrent(owner)) return;
-			if (rows) holdCase({ ref, rows });
+			if (rows) {
+				holdCase({ ref, rows });
+				owed.current.delete(ref);
+			}
 			// The tab moved on meanwhile: to another case, or to a draft of this one that was stored again.
 			if (draftRef.current !== ended || readDraft({ project, id: ended.id })) {
-				if (gone.current === state) gone.current = null;
+				if (gone.current === state) {
+					gone.current = null;
+					setEnding(null);
+				}
 				return;
 			}
 			if (!rows) {
+				setEnding("unread");
 				setStatus(
-					`${what} The case could not be read (${failure}), so this stays as it was. Press e or choose "Take over here" to read it again.`,
+					`${what} The case could not be read (${failure}), so this stays as it was. Press e or choose "Read the case again".`,
 				);
 				return;
 			}
 			gone.current = null;
+			setEnding(null);
 			liveDrafts.current.delete(ended.id);
 			draftRef.current = null;
 			setDraftState(null);
-			setStatus(`${what} The recorded version is shown.`);
+			setStatus(`${what} The case is shown as the server recorded it.`);
 			void invalidateProject(project);
 		},
 		[project, owner, holdCase, setStatus],
@@ -247,7 +273,8 @@ export function SuiteScreen() {
 				setStatus(
 					saved
 						? "The conflict ended in another window. Your current draft is kept and editable."
-						: "Conflict resolved in another window. The recorded version is shown.",
+						: // Only the draft of a new case comes here: `endFollowed` has taken every other one.
+							"This draft was recorded or ended in another window.",
 				);
 				void invalidateProject(project);
 			}
@@ -397,6 +424,12 @@ export function SuiteScreen() {
 		if (!sessionCurrent(owner)) return;
 		// Another window's draft that it removed is not stored again from here. The person's own text still is.
 		if (endingDraft()?.id === next.id && next.owner !== windowId) return;
+		// No draft is made of a case the page owes a read of. `edit` and `begin` read first and open on what comes
+		// back. A property changed from the read view comes here: the case is read, and the change is to be made again.
+		if (next.ref !== null && owes(next.ref)) {
+			void readOwed(next.ref, () => {});
+			return;
+		}
 		const prior = draftRef.current;
 		const contentChanged =
 			prior &&
@@ -1185,7 +1218,36 @@ export function SuiteScreen() {
 
 		focusDraft(next);
 	}
-	function edit(): void {
+	/** Whether an editor asked for on this case has to wait for the read the page owes of it. */
+	function owes(ref: string): boolean {
+		return owed.current.has(ref) && draftRef.current?.ref !== ref && !readDraft({ project, id: ref });
+	}
+	/**
+	 * Makes the read the page owes of a case and holds it, then runs `open` with the case as read if it is still
+	 * the one in the pane. A read that fails opens nothing and says so; the next press or click reads again.
+	 */
+	async function readOwed(ref: string, open: (read: CaseView) => void): Promise<void> {
+		setStatus("This case changed in another window. Reading it before the editor opens…");
+		let rows: Api["get"]["reply"];
+		try {
+			rows = await call("get", { refs: [ref] }, { project, owner });
+		} catch (error) {
+			if (sessionCurrent(owner))
+				setStatus(
+					`This case changed in another window and could not be read (${error instanceof Error ? error.message : "no reply"}), so no editor opens on it. Press e to read it again.`,
+				);
+			return;
+		}
+		if (!sessionCurrent(owner)) return;
+		const read = CaseView.parse(rows[0]);
+		holdCase({ ref, rows });
+		owed.current.delete(ref);
+		setStatus("The case is shown as the server recorded it.");
+		void invalidateProject(project);
+		if (selectedRef.current === ref && draftRef.current === null) open(read);
+	}
+	/** Opens the editor on the case in the pane, or on `read`, the same case as `readOwed` has just read it. */
+	function edit(read: CaseView | null = null): void {
 		if (draftRef.current?.ref === null) {
 			firstStep({ draft: draftRef.current, change });
 			return;
@@ -1195,13 +1257,39 @@ export function SuiteScreen() {
 			void endFollowed(ended);
 			return;
 		}
-		if (!view) return;
-		const saved = readDraft({ project, id: view.ref });
-		const next = ownedDraft(saved ?? (draftRef.current?.ref === view.ref ? draftRef.current : editDraft(view)));
+		const shown = read ?? view;
+		if (!shown) return;
+		if (owes(shown.ref)) {
+			void readOwed(shown.ref, edit);
+			return;
+		}
+		const saved = readDraft({ project, id: shown.ref });
+		const next = ownedDraft(saved ?? (draftRef.current?.ref === shown.ref ? draftRef.current : editDraft(shown)));
 		change(
 			saved ? next : { ...next, caret: { field: "title", start: next.body.title.length, end: next.body.title.length } },
 			true,
 		);
+	}
+	/** A click on a field of the read view opens the editor there. `read` is as for `edit`. */
+	function begin(field = "title", read: CaseView | null = null): void {
+		const shown = read ?? view;
+		if (!shown) return;
+		if (owes(shown.ref)) {
+			void readOwed(shown.ref, (fresh) => begin(field, fresh));
+			return;
+		}
+		const next = ownedDraft(readDraft({ project, id: shown.ref }) ?? editDraft(shown));
+		const parts = field.split(":");
+		const step = next.body.steps.find((item) => item.id === parts[0]);
+		const value =
+			field === "title"
+				? next.body.title
+				: field === "pre"
+					? next.body.pre
+					: parts[1] === "expected"
+						? (step?.expected ?? "")
+						: (step?.action ?? "");
+		change({ ...next, caret: { field, start: value.length, end: value.length } }, true);
 	}
 	function takeOver(): void {
 		const id = draftRef.current?.id ?? conflict?.draftId;
@@ -1446,7 +1534,7 @@ export function SuiteScreen() {
 	useSuiteBindings({
 		enabled: !overlayOpen,
 		create,
-		edit,
+		edit: () => edit(),
 		next: () => stepCursor(1),
 		previous: () => stepCursor(-1),
 		filter: () => filter.current?.focus(),
@@ -1688,27 +1776,13 @@ export function SuiteScreen() {
 			</section>
 			<CasePane
 				ownedElsewhere={ownedElsewhere}
+				ending={draft && gone.current?.draft === draft ? ending : null}
 				onTakeOver={takeOver}
 				view={view}
 				draft={draft}
 				stored={draftStored}
 				change={change}
-				begin={(field = "title") => {
-					if (view) {
-						const next = ownedDraft(readDraft({ project, id: view.ref }) ?? editDraft(view));
-						const parts = field.split(":");
-						const step = next.body.steps.find((item) => item.id === parts[0]);
-						const value =
-							field === "title"
-								? next.body.title
-								: field === "pre"
-									? next.body.pre
-									: parts[1] === "expected"
-										? (step?.expected ?? "")
-										: (step?.action ?? "");
-						change({ ...next, caret: { field, start: value.length, end: value.length } }, true);
-					}
-				}}
+				begin={begin}
 				seal={leaveEditor}
 				rapid={create}
 				hasDraft={Boolean(selected && captures.get(selected)?.dirty)}
