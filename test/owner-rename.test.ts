@@ -87,7 +87,12 @@ async function asRobin(dataDir: string): Promise<{ cookie: string }> {
 	const first = boot({ dataDir, owner: "robin" });
 	const { cookie } = await post(first, "/api/login", { token: TOKEN });
 	expect((await post(first, "/api/account/password", { next: PASSWORD }, { cookie })).status).toBe(200);
-	const made = await post(first, "/api/admin", { do: "token.create", actor: "sam", kind: "human" }, bearer);
+	const made = await post(
+		first,
+		"/api/admin",
+		{ do: "token.create", actor: "sam", kind: "human", can: ["read"] },
+		bearer,
+	);
 	expect(made.status).toBe(200);
 	await first.stop();
 	return { cookie };
@@ -148,6 +153,16 @@ test("the former name must be a person who is there to rename, or the start is r
 	// A name that was mistyped would otherwise make a second owner, and the rename could not be done after it.
 	refused("robn", "and nobody on this instance has that name");
 	refused("policy", "which is the policy's own actor on this instance and not a person");
+	// Somebody else's name: sam would be renamed, and made the owner beside robin. The owner is told apart by
+	// what every start gives them.
+	refused("sam", "who does not own this instance: the owner holds every capability on every project");
+	// The new name is one a person can be given, as it is for anybody else. One that is not would move the
+	// owner's password to a name the sign-in page refuses to read.
+	for (const owner of ["ro wan", "rowan\nextra", "r".repeat(65), "-rowan"]) {
+		expect(() => boot({ dataDir, owner, ownerWas: "robin" })).toThrow(
+			`MAINWORTHY_OWNER is ${JSON.stringify(owner)}, which is not a name a person can be given: letters, digits and . _ @ -, starting with a letter or a digit, 64 characters at most. Set MAINWORTHY_OWNER to the owner's new name and start again${UNCHANGED}`,
+		);
+	}
 
 	const again = boot({ dataDir, owner: "robin" });
 	expect(

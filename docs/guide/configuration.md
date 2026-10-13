@@ -73,9 +73,13 @@ The person is the same one. Their tokens and their passkeys work as before, the 
 - A passkey signs in as before. The device or password manager that holds it still shows the old name for it.
 - A browser keeps a draft that is not yet recorded under the name of whoever typed it. Record your drafts before the rename: one kept under the old name is not shown to the new one.
 
-The start is refused, and changes nothing, when `MAINWORTHY_OWNER_WAS` names nobody on the instance, an agent, a pipeline or a person who was forgotten. The line says which. A mistyped name would otherwise make a second owner. When the new name is already somebody's, the start renames nobody and says so. That person becomes an owner, as they do without the variable.
+The start is refused, and changes nothing, when `MAINWORTHY_OWNER_WAS` names nobody on the instance, an agent, a pipeline, a person who was forgotten, or a person who is not the owner. The line says which. A mistyped name would otherwise make a second owner. Nothing stores who the owner is, so the start takes a person for the owner when they hold every capability on every project, which every start gives the owner. An admin who was granted all of that passes too, and becomes the owner under the new name.
 
-Only the owner is renamed this way. Nobody else's name can be changed.
+The new name follows the rule for every name: letters, digits, `.`, `_`, `@` and `-`, starting with a letter or a digit, 64 characters at most. Another one stops the start.
+
+When the new name is already somebody's, the start renames nobody and says so. That person becomes an owner, as they do without the variable.
+
+Nobody else's name can be changed.
 
 A start that is refused for the owner's name or the owner's token changes no actor and no token. If the server is newer than the database, it has already brought the database up to date by then, and it left a copy of the database as it was beside it, named `mainworthy.db.v<N>.bak`.
 
