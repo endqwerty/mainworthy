@@ -75,7 +75,7 @@ Create or change test cases. Each edit of an existing case names the version it 
 | `edits[][policy].clauses` | `array<object>` | no |  |
 | `edits[][policy].clauses[].id` | `string` | yes |  |
 | `edits[][policy].clauses[].kind` | `"adopt" \| "map" \| "failure" \| "finding" \| "signoff"` | yes |  |
-| `edits[][policy].clauses[].when` | `array<"always" \| "author:human" \| "author:agent" \| "author:ci" \| "conflict" \| "policy" \| "scope:change" \| "scope:trunk" \| "scope:run" \| "hint:disputed" \| "category:defect" \| "verdict:passed" \| string>` | yes |  |
+| `edits[][policy].clauses[].when` | `array<"always" \| "author:human" \| "author:agent" \| "author:ci" \| "conflict" \| "policy" \| "scope:change" \| "scope:trunk" \| "scope:run" \| "hint:disputed" \| "category:defect" \| "verdict:passed" \| "unlinked:track" \| "unlinked:create" \| string>` | yes |  |
 | `edits[][policy].clauses[].ask` | `object` | yes |  |
 | `edits[][policy].clauses[].ask.who` | `"rule" \| "member" \| "admin" \| "author"` | yes |  |
 | `edits[][policy].clauses[].ask.agents` | `"answer" \| "advise" \| "none"` | yes |  |
@@ -84,10 +84,12 @@ Create or change test cases. Each edit of an existing case names the version it 
 | `edits[][policy].clauses[].answer` | `unknown` | no |  |
 | `edits[][policy].clauses[].blocks` | `"nothing" \| "change" \| "release" \| "all"` | yes |  |
 | `edits[][policy].settings` | `object` | no |  |
+| `edits[][policy].settings.unlinked` | `"ask" \| "track" \| "create"` | yes |  |
 | `edits[][policy].settings.basis` | `"exact" \| "exact-or-assumed"` | yes |  |
 | `edits[][policy].settings.holds` | `object` | yes |  |
 | `edits[][policy].settings.holds.flakyDays` | `integer` | yes |  |
 | `edits[][policy].settings.holds.infraThisTargetOnly` | `boolean` | yes |  |
+| `edits[][policy].unlinked` | `"ask" \| "track" \| "create"` | no |  |
 | `reason` | `string` | no | Why. Shown in the case history. |
 | `project` | `string` | no | Project key; omit only if there is one project. |
 

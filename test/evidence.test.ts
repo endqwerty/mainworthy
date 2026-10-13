@@ -287,7 +287,7 @@ describe("who may answer", () => {
 describe("basis", () => {
 	test("E3: a linked test is assumed at the current version; an annotation with a version is exact; neither is guessed", () => {
 		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
-		const s = harness({ preset: "standard" });
+		const s = harness({ preset: "standard", unlinked: "ask" });
 		s.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
 		s.call("report", ciReport({ commit: "4444444a", n: 2 }));
 		const map = first(s.call<InboxReply>("inbox", { kind: "map" }).items);

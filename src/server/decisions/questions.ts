@@ -69,7 +69,10 @@ export type HoldTerm =
 	/** Holds on the target the person answering was looking at (the latest the question had seen), and on no other. */
 	| { until: "this-target"; targets: number[] }
 	| { until: "time"; at: number }
-	/** Holds for the results the decision named and for nothing reported later: a new result is asked about. */
+	/**
+	 * Holds for what the decision named and for nothing reported later: the results a "mistaken" answer set
+	 * aside, the tests a link gave a case. What turns up later is asked about, and does not undo it.
+	 */
 	| { until: "results-named" };
 
 export type Signer = { by: number; clause: string; policy: number; reason: string | null };
@@ -185,6 +188,9 @@ const Q = {
 	ledgerOfKind: sql<{ project: number; kind: string; rev: number; id: number; limit: number }, QuestionRow>(
 		`SELECT * FROM questions WHERE project = $project AND state = 'decided' AND kind = $kind AND (rev, id) < ($rev, $id)
 		 ORDER BY rev DESC, id DESC LIMIT $limit`,
+	),
+	openIdsOfKind: sql<{ project: number; kind: string }, { id: number }>(
+		"SELECT id FROM questions WHERE project = $project AND state = 'open' AND owner = 0 AND kind = $kind ORDER BY id",
 	),
 	openCount: sql<{ project: number }, { n: number }>(
 		"SELECT count(*) AS n FROM questions WHERE project = $project AND state = 'open' AND owner = 0",
@@ -396,6 +402,10 @@ export function ledgerPage(
 	const base = { project: input.project, rev: at.rev, id: at.id, limit: input.limit };
 	return input.kind ? db.all(Q.ledgerOfKind, { ...base, kind: input.kind }) : db.all(Q.ledger, base);
 }
+
+/** The ids of every open question of a kind in the queue, oldest first, however many there are. */
+export const openQuestionIds = (db: Db, project: number, kind: Kind): number[] =>
+	db.all(Q.openIdsOfKind, { project, kind }).map((row) => row.id);
 
 export function openCounts(db: Db, project: number): Record<string, number> {
 	const counts: Record<string, number> = { open: db.get(Q.openCount, { project })?.n ?? 0 };

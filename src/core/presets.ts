@@ -11,6 +11,7 @@ const author: Ask = { who: "author", agents: "none", notProducer: false, reason:
 const admin: Ask = { who: "admin", agents: "none", notProducer: false, reason: "optional" };
 
 const settings: PolicySettings = {
+	unlinked: "track",
 	basis: "exact-or-assumed",
 	holds: { flakyDays: 14, infraThisTargetOnly: true },
 };
@@ -34,10 +35,20 @@ const common: Clause[] = [
 	{ id: "adopt-conflict", kind: "adopt", when: ["conflict"], ask: author, blocks: "nothing" },
 ];
 
+/**
+ * A test with no case, in every preset: the project's `unlinked` setting says whether a rule tracks it, a rule
+ * makes its case, or somebody is asked. The presets differ in the setting they start with and in who is asked.
+ */
+const unlinked = (ask: Ask): Clause[] => [
+	{ id: "map-track", kind: "map", when: ["unlinked:track"], ask: rule, answer: { is: "track" }, blocks: "nothing" },
+	{ id: "map-create", kind: "map", when: ["unlinked:create"], ask: rule, answer: { is: "create" }, blocks: "nothing" },
+	{ id: "map-any", kind: "map", when: ["always"], ask, blocks: "nothing" },
+];
+
 const loose: Clause[] = [
 	...common,
 	{ id: "adopt-any", kind: "adopt", when: ["always"], ask: rule, answer: { is: "accept" }, blocks: "nothing" },
-	{ id: "map-track", kind: "map", when: ["always"], ask: rule, answer: { is: "track" }, blocks: "nothing" },
+	...unlinked(memberOrAgent),
 	{ id: "failure-disputed", kind: "failure", when: ["hint:disputed"], ask: member, blocks: "all" },
 	{ id: "failure-change", kind: "failure", when: ["scope:change"], ask: member, blocks: "change" },
 	{ id: "failure-any", kind: "failure", when: ["always"], ask: member, blocks: "release" },
@@ -58,7 +69,7 @@ const standard: Clause[] = [
 	...common,
 	{ id: "adopt-agent", kind: "adopt", when: ["author:agent"], ask: memberOnly, blocks: "nothing" },
 	{ id: "adopt-any", kind: "adopt", when: ["always"], ask: rule, answer: { is: "accept" }, blocks: "nothing" },
-	{ id: "map-any", kind: "map", when: ["always"], ask: memberOrAgent, blocks: "nothing" },
+	...unlinked(memberOrAgent),
 	{
 		id: "failure-disputed",
 		kind: "failure",
@@ -86,7 +97,7 @@ const reasoned: Ask = { who: "member", agents: "none", notProducer: false, reaso
 const strict: Clause[] = [
 	...common,
 	{ id: "adopt-any", kind: "adopt", when: ["always"], ask: reasoned, blocks: "nothing" },
-	{ id: "map-any", kind: "map", when: ["always"], ask: reasoned, blocks: "nothing" },
+	...unlinked(reasoned),
 	{ id: "failure-any", kind: "failure", when: ["always"], ask: { ...reasoned, notProducer: true }, blocks: "all" },
 	{ id: "finding-any", kind: "finding", when: ["always"], ask: reasoned, blocks: "nothing" },
 	{ id: "signoff-any", kind: "signoff", when: ["always"], ask: reasoned, blocks: "nothing" },
@@ -97,7 +108,7 @@ export type PresetName = "loose" | "standard" | "strict";
 export const PRESETS: Record<PresetName, Policy> = {
 	loose: { preset: "loose", clauses: loose, settings },
 	standard: { preset: "standard", clauses: standard, settings },
-	strict: { preset: "strict", clauses: strict, settings: { ...settings, basis: "exact" } },
+	strict: { preset: "strict", clauses: strict, settings: { ...settings, unlinked: "ask", basis: "exact" } },
 };
 
 export const PRESET_NAMES = Object.keys(PRESETS) as PresetName[];

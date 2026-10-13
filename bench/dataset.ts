@@ -337,7 +337,13 @@ export function buildDataset(options: {
 		return result;
 	};
 	try {
-		call(app, owner, "admin", { do: "project.create", key: "benchmark", preset: "standard" }, z.unknown());
+		call(
+			app,
+			owner,
+			"admin",
+			{ do: "project.create", key: "benchmark", preset: "standard", unlinked: "ask" },
+			z.unknown(),
+		);
 		const roots = Math.max(1, Math.min(20, Math.floor(parameters.cases / 250)));
 		const folders = phase("folders", roots * 25, () => {
 			const edits: Edit[] = [];

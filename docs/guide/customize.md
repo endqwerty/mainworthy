@@ -21,6 +21,7 @@ Two words recur below. An instance admin holds the `admin` capability on every p
 | What | Where you change it | Who may | Details |
 | --- | --- | --- | --- |
 | The policy preset | Settings, Policy, "Preset", or `mainworthy policy use` | An admin on the project who also holds `produce` | [Policy](./policy.md) |
+| What happens to a test with no case | Settings, Policy, "Tests with no case", or `mainworthy policy tests` | The same | [Policy](./policy.md#tests-with-no-case) |
 | Single clauses, the flaky hold, the evidence basis | `mainworthy propose` with a policy edit. Settings has no control for these | The same | [Policy](./policy.md#change-single-clauses) |
 | Projects | Settings, Projects, "Create a project", or `mainworthy admin` | An instance admin | [Policy](./policy.md#choose-a-preset-for-a-new-project) |
 | What each person, agent or pipeline may do | `mainworthy actor grant` and `actor ungrant`. Settings shows tokens only | An instance admin who is a person | [People, agents and pipelines](./access.md) |
@@ -67,7 +68,7 @@ seeded demo: 2000 cases, run R-4, 5 questions
 http://127.0.0.1:7357/p/demo/suite
 ```
 
-The demo is a shop's suite: checkout, accounts, orders and a catalog. A pipeline named `pipeline` has reported three commits, the last of them pull request 482, where one test fails. A run named "Checkout regression" is planned on that pull request. An agent named `reviewer` has left a finding and a proposed edit. The queue holds five questions for you: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The project ends on the `standard` preset. `--cases` sets how many cases the demo writes, from 1 to 100000.
+The demo is a shop's suite: checkout, accounts, orders and a catalog. A pipeline named `pipeline` has reported three commits, the last of them pull request 482, where one test fails. A run named "Checkout regression" is planned on that pull request. An agent named `reviewer` has left a finding and a proposed edit. The queue holds five questions for you: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The project ends on the `standard` preset, set to ask about tests with no case. `--cases` sets how many cases the demo writes, from 1 to 100000.
 
 You name the project each time. `seed` makes it when the instance has none of that name, and it does not read `--project` or `MAINWORTHY_PROJECT`. It refuses a project that already holds cases, tests or runs, so it cannot add the demo to your own work. If a seed stops halfway, send the same command again: it finishes the rest and writes nothing twice.
 

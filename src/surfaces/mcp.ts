@@ -21,7 +21,7 @@ import { grantedProjects, VERSION } from "./http.ts";
 
 // SDK 1.32.1 implements MCP 2025-11-25. Structured tool results start at revision 2025-06-18.
 /** The measured tools/list ceiling in o200k_base tokens. B7's draft target of 1,500 remains unmet. */
-export const TOOL_TOKEN_BUDGET = 3900;
+export const TOOL_TOKEN_BUDGET = 3950;
 
 const INSTRUCTIONS =
 	"Start with impact for a change, or inbox for questions. Pass hashes back with unless and onEvidence, and reuse cursors with since. Your answers may be advice; check the reply status.";

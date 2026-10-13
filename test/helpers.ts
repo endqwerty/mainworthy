@@ -19,7 +19,9 @@ export type Harness = {
 	close: () => void;
 };
 
-export function harness(options: { preset?: string; project?: string } = {}): Harness {
+export function harness(
+	options: { preset?: string; project?: string; unlinked?: "ask" | "track" | "create" } = {},
+): Harness {
 	let now = 1_800_000_000_000;
 	const app = openApp(
 		{
@@ -46,7 +48,12 @@ export function harness(options: { preset?: string; project?: string } = {}): Ha
 		if (!reply.ok) throw new Error(`${op}: ${reply.error.code}: ${reply.error.message}`);
 		return reply.result as T;
 	};
-	call("admin", { do: "project.create", key: project, preset: options.preset ?? "loose" });
+	call("admin", {
+		do: "project.create",
+		key: project,
+		preset: options.preset ?? "loose",
+		...(options.unlinked ? { unlinked: options.unlinked } : {}),
+	});
 	return {
 		app,
 		owner,

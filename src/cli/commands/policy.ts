@@ -1,4 +1,4 @@
-import { Policy } from "../../core/kinds.ts";
+import { Policy, Unlinked } from "../../core/kinds.ts";
 import { PRESET_NAMES, presetOf } from "../../core/presets.ts";
 import { assertPositionals } from "../args.ts";
 import { CliError } from "../errors.ts";
@@ -27,13 +27,16 @@ export function printPolicy(policy: Policy): void {
 				.join("  ")
 				.trimEnd(),
 		);
-	line(`basis: ${policy.settings.basis}; flaky hold: ${policy.settings.holds.flakyDays} days`);
+	line(
+		`basis: ${policy.settings.basis}; flaky hold: ${policy.settings.holds.flakyDays} days; tests with no case: ${policy.settings.unlinked}`,
+	);
 }
 
 export const policyCommand: AdapterCommand = {
 	name: "policy",
-	summary: "Show policy clauses or propose and record an admin's choice of preset.",
-	usage: "policy show | policy use <loose|standard|strict> [--json]",
+	summary:
+		"Show policy clauses, or propose and record an admin's choice of preset or of what happens to a test with no case.",
+	usage: "policy show | policy use <loose|standard|strict> | policy tests <ask|track|create> [--json]",
 	flags: [],
 	async run(args, client) {
 		const action = args.positionals[0];
@@ -44,14 +47,28 @@ export const policyCommand: AdapterCommand = {
 			else printPolicy(policy);
 			return 0;
 		}
-		if (action !== "use") throw new CliError("invalid", `usage: mainworthy ${policyCommand.usage}`);
+		if (action !== "use" && action !== "tests")
+			throw new CliError("invalid", `usage: mainworthy ${policyCommand.usage}`);
 		assertPositionals(args, 2, 2, policyCommand.usage);
-		const preset = args.positionals[1];
-		if (!PRESET_NAMES.some((name) => name === preset))
-			throw new CliError("invalid", "policy use needs loose, standard or strict");
+		const chosen = args.positionals[1];
+		// What is proposed, why, and how the result is named in the line printed.
+		let change: { edit: { preset: string } | { unlinked: Unlinked }; reason: string; name: string };
+		if (action === "use") {
+			if (!PRESET_NAMES.some((name) => name === chosen))
+				throw new CliError("invalid", "policy use needs loose, standard or strict");
+			change = { edit: { preset: chosen ?? "" }, reason: `Use the ${chosen} policy preset`, name: `policy: ${chosen}` };
+		} else {
+			const unlinked = Unlinked.safeParse(chosen);
+			if (!unlinked.success) throw new CliError("invalid", "policy tests needs ask, track or create");
+			change = {
+				edit: { unlinked: unlinked.data },
+				reason: `Tests with no case: ${unlinked.data}`,
+				name: `tests with no case: ${unlinked.data}`,
+			};
+		}
 		const proposal = await client.call("propose", {
-			edits: [{ op: "policy", preset }],
-			reason: `Use the ${preset} policy preset`,
+			edits: [{ op: "policy", ...change.edit }],
+			reason: change.reason,
 		});
 		let decision = null;
 		if (proposal.status === "open" && proposal.question && proposal.proposal) {
@@ -64,14 +81,17 @@ export const policyCommand: AdapterCommand = {
 					q: question.q,
 					onEvidence: question.evidenceHash,
 					answer: { is: "accept" },
-					reason: `Use the ${preset} policy preset`,
+					reason: change.reason,
 				});
 			}
 		}
 		if (args.has("json")) printJson({ proposal, decision }, args.bool("compact"));
 		else if (decision?.some((reply) => reply.status === "decided" || reply.status === "already")) {
-			line(`policy: ${preset}; proposal ${proposal.proposal} and decision ${decision[0]?.decision} are both recorded`);
-		} else if (proposal.status === "adopted") line(`policy: ${preset}; proposal and decision are recorded`);
+			const ruled = decision[0]?.effects?.ruled;
+			line(
+				`${change.name}; proposal ${proposal.proposal} and decision ${decision[0]?.decision} are both recorded${typeof ruled === "number" ? `; ${ruled} open question${ruled === 1 ? "" : "s"} answered by the rule` : ""}`,
+			);
+		} else if (proposal.status === "adopted") line(`${change.name}; proposal and decision are recorded`);
 		else
 			line(
 				`policy proposal ${proposal.proposal}: ${proposal.status}${proposal.question ? ` ${proposal.question}` : ""}${proposal.needs ? ` needs ${proposal.needs}` : ""}`,

@@ -185,6 +185,30 @@ test("standard policy records both a proposal and a decision and prints its clau
 	});
 });
 
+test("policy tests changes what happens to a test with no case, and says how many open questions the rule answered", async () => {
+	await withInstance(async ({ cli, client }) => {
+		expect((await cli(["policy", "show"])).stdout).toContain("tests with no case: track");
+		const asking = await cli(["policy", "tests", "ask"]);
+		expect(asking.stdout).toMatch(/^tests with no case: ask; proposal P-1 and decision \d+ are both recorded\n$/);
+		for (const file of ["tests/a.spec.ts", "tests/b.spec.ts"])
+			await client.call("report", {
+				target: { commit: "cafe0001", branch: "main" },
+				job: file,
+				results: [{ test: { key: `${file}::one`, file }, outcome: "pass" }],
+			});
+		expect((await client.call("inbox", {})).counts.map).toBe(2);
+		const tracking = await cli(["policy", "tests", "track"]);
+		expect(tracking.code).toBe(0);
+		expect(tracking.stdout).toContain("tests with no case: track;");
+		expect(tracking.stdout).toEndWith("; 2 open questions answered by the rule\n");
+		expect((await client.call("inbox", {})).counts.open).toBe(0);
+		expect((await cli(["policy", "show"])).stdout).toContain("policy: loose");
+		const wrong = await cli(["policy", "tests", "sometimes"]);
+		expect(wrong.code).not.toBe(0);
+		expect(wrong.stderr).toContain("policy tests needs ask, track or create");
+	});
+});
+
 test("outline stdin, get --md, and fmt round trip the canonical case", async () => {
 	await withInstance(async ({ cli, directory }) => {
 		const created = await cli(["new", "-"], {

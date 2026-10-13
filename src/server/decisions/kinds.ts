@@ -50,7 +50,11 @@ import {
 import type { Raise, Raised } from "./decisions.ts";
 import { type DecisionRow, decisionById, type HoldTerm, type QuestionRow, questionById, refsOf } from "./questions.ts";
 
-type Tools = { raise: (ctx: Ctx, r: Raise) => Raised };
+type Tools = {
+	raise: (ctx: Ctx, r: Raise) => Raised;
+	/** After a policy change: lets the new policy's rule answer the open questions about tests with no case. */
+	ruleTakesUnlinked: (ctx: Ctx) => number;
+};
 
 type Handler<K extends Kind> = {
 	effect: (
@@ -74,7 +78,11 @@ const untilBasisChanges = (question: QuestionRow): HoldTerm[] => [{ until: "basi
 const DAY = 86_400_000;
 
 /** Raises the `adopt` question for a sealed proposal. Shared by every path that proposes: there is only this one. */
-export function raiseAdopt(ctx: Ctx, tools: Tools, sealed: NonNullable<ReturnType<typeof seal>>): Raised {
+export function raiseAdopt(
+	ctx: Ctx,
+	tools: Pick<Tools, "raise">,
+	sealed: NonNullable<ReturnType<typeof seal>>,
+): Raised {
 	const { proposal, resolved } = sealed;
 	const summary = resolved.slice(0, 20).map((edit) => {
 		switch (edit.op) {
@@ -138,7 +146,10 @@ const adoptHandler: Handler<"adopt"> = {
 		if (answer.is === "reject") return { rejected: true };
 		if (answer.is === "merge") return resolveConflict(ctx, proposal, answer.body, tools);
 		const adopted = adopt(ctx, witness, proposal);
-		return { cases: adopted.cases, created: adopted.created, policyVersion: adopted.policyVersion };
+		const effects = { cases: adopted.cases, created: adopted.created, policyVersion: adopted.policyVersion };
+		if (adopted.policyVersion === null) return effects;
+		const ruled = tools.ruleTakesUnlinked(ctx);
+		return ruled > 0 ? { ...effects, ruled } : effects;
 	},
 	revert() {
 		throw invalid("an adopted edit is undone by restoring the earlier version, which keeps both in the history");
@@ -287,7 +298,10 @@ const mapHandler: Handler<"map"> = {
 			restoreLink(ctx, test, decision.id, earlier);
 		}
 	},
-	holds: ({ question }) => untilBasisChanges(question),
+	// "Track" is a judgement about the file as it was: it is asked again when the file's tests with no case
+	// change. A link is about the tests it names: it does not carry to a test that turns up later in the file,
+	// and that test's question does not undo it.
+	holds: ({ question, answer }) => (answer.is === "track" ? untilBasisChanges(question) : [{ until: "results-named" }]),
 	isAuthor: () => false,
 	isProducer: () => false,
 	undoable: true,

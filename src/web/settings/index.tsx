@@ -1,7 +1,15 @@
 import { useRef, useState } from "react";
 import { z } from "zod";
 import { untilPhrase } from "../../core/duration.ts";
-import { Capability, CI_CAPABILITIES, defaultCapabilities, Policy } from "../../core/kinds.ts";
+import {
+	Capability,
+	CI_CAPABILITIES,
+	defaultCapabilities,
+	Policy,
+	UNLINKED_HELP,
+	UNLINKED_LABELS,
+	Unlinked,
+} from "../../core/kinds.ts";
 import { PRESET_GUIDE, PRESET_SUMMARY } from "../../core/policy-guide.ts";
 import { presetOf } from "../../core/presets.ts";
 import { call } from "../lib/api.ts";
@@ -135,7 +143,8 @@ export function SettingsScreen() {
 function SettingsWorkbench() {
 	const { project, session, instanceCan, overlayOpen, refreshSession, setStatus } = useApp();
 	const [section, setSection] = useState("Policy");
-	const [switching, setSwitching] = useState<string | null>(null);
+	// The change on its way: a preset, or what happens to a test with no case.
+	const [switching, setSwitching] = useState<{ preset: string } | { unlinked: Unlinked } | null>(null);
 	const [policyMessage, setPolicyMessage] = useState("");
 	const admin = session.can.includes("admin");
 	const instanceAdmin = instanceCan.includes("admin");
@@ -155,6 +164,9 @@ function SettingsWorkbench() {
 		? (presetOf(policy) ?? "custom")
 		: (session.projects.find((p) => p.key === project)?.policy ?? "Policy unavailable");
 	const inForce = Preset.safeParse(preset).data ?? null;
+	const unlinked = policy?.settings.unlinked ?? currentProject?.unlinked ?? null;
+	const switchingPreset = switching && "preset" in switching ? switching.preset : null;
+	const switchingUnlinked = switching && "unlinked" in switching ? switching.unlinked : null;
 	const actorRef = useRef<HTMLInputElement>(null);
 	const projectRef = useRef<HTMLInputElement>(null);
 	const inviteRef = useRef<HTMLInputElement>(null);
@@ -202,18 +214,20 @@ function SettingsWorkbench() {
 				]
 			: []),
 	]);
-	async function changePolicy(next: string): Promise<void> {
-		if (!admin || switching || next === preset) return;
-		setSwitching(next);
-		setPolicyMessage(`Recording the ${next} policy proposal and decision…`);
+	async function changePolicy(change: { preset: string } | { unlinked: Unlinked }): Promise<void> {
+		if (!admin || switching) return;
+		if ("preset" in change ? change.preset === preset : change.unlinked === unlinked) return;
+		const name = "preset" in change ? `${change.preset} policy` : `"${UNLINKED_LABELS[change.unlinked]}"`;
+		const reason =
+			"preset" in change
+				? `Use the ${change.preset} preset, selected in Settings.`
+				: `Tests with no case: ${change.unlinked}, selected in Settings.`;
+		setSwitching(change);
+		setPolicyMessage(`Recording the ${name} proposal and decision…`);
 		try {
 			const proposed = await call(
 				"propose",
-				{
-					edits: [{ op: "policy", preset: next }],
-					reason: `Use the ${next} preset, selected in Settings.`,
-					cmd: randomId(),
-				},
+				{ edits: [{ op: "policy", ...change }], reason, cmd: randomId() },
 				{ project },
 			);
 			if (!proposed.question) throw new Error("The policy proposal did not return a review question.");
@@ -222,21 +236,18 @@ function SettingsWorkbench() {
 				.parse((await call("get", { refs: [proposed.question] }, { project }))[0]);
 			const replies = await call(
 				"decide",
-				{
-					q: question.q,
-					onEvidence: question.evidenceHash,
-					answer: { is: "accept" },
-					reason: `Use the ${next} preset, selected in Settings.`,
-					cmd: randomId(),
-				},
+				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" }, reason, cmd: randomId() },
 				{ project },
 			);
 			if (replies[0]?.status !== "decided" && replies[0]?.status !== "already")
 				throw new Error(`Policy is awaiting ${replies[0]?.needs ?? "review"}. Open ${question.q} in Queue.`);
+			const ruled = z.object({ ruled: z.number() }).safeParse(replies[0]?.effects).data?.ruled ?? 0;
+			const answered =
+				ruled > 0 ? ` The rule answered ${ruled} open question${ruled === 1 ? "" : "s"} about tests with no case.` : "";
 			setPolicyMessage(
-				`${next} is in force. Proposal ${proposed.proposal} and decision ${question.q} are both recorded.`,
+				`${"preset" in change ? `${change.preset} is in force.` : `Tests with no case: ${UNLINKED_LABELS[change.unlinked]}.`}${answered} Proposal ${proposed.proposal} and decision ${question.q} are both recorded.`,
 			);
-			setStatus(`${next} policy recorded through ${proposed.proposal} and ${question.q}.`);
+			setStatus(`${name} recorded through ${proposed.proposal} and ${question.q}.`);
 			await invalidateProject(project);
 			await refreshSession();
 		} catch (error) {
@@ -287,11 +298,11 @@ function SettingsWorkbench() {
 									<select
 										className="form-input"
 										aria-label="Policy preset"
-										value={switching ?? preset}
+										value={switchingPreset ?? preset}
 										disabled={!admin || Boolean(switching)}
 										onChange={(event) => {
 											event.currentTarget.blur();
-											void changePolicy(event.target.value);
+											void changePolicy({ preset: event.target.value });
 										}}
 									>
 										{!inForce && (
@@ -314,10 +325,10 @@ function SettingsWorkbench() {
 									<input
 										type="checkbox"
 										role="switch"
-										aria-checked={(switching ?? preset) !== "loose"}
-										checked={(switching ?? preset) !== "loose"}
+										aria-checked={(switchingPreset ?? preset) !== "loose"}
+										checked={(switchingPreset ?? preset) !== "loose"}
 										disabled={!admin || Boolean(switching)}
-										onChange={(event) => void changePolicy(event.target.checked ? "standard" : "loose")}
+										onChange={(event) => void changePolicy({ preset: event.target.checked ? "standard" : "loose" })}
 									/>
 									<span>
 										<b>Agent edits need a person</b>
@@ -326,6 +337,33 @@ function SettingsWorkbench() {
 											recorded.
 										</small>
 									</span>
+								</label>
+							)}
+							{/* A custom policy's clauses may not read the setting, so the choice is offered under a preset only. */}
+							{inForce && unlinked && (
+								<label className="settings-unlinked">
+									<span>
+										<b>Tests with no case</b>
+										<small>{UNLINKED_HELP[switchingUnlinked ?? unlinked]}</small>
+									</span>
+									<select
+										className="form-input"
+										aria-label="Tests with no case"
+										value={switchingUnlinked ?? unlinked}
+										disabled={!admin || Boolean(switching)}
+										onChange={(event) => {
+											event.currentTarget.blur();
+											const chosen = Unlinked.safeParse(event.target.value);
+											if (chosen.success) void changePolicy({ unlinked: chosen.data });
+										}}
+									>
+										{Unlinked.options.map((value) => (
+											// Under `strict` a person adopts every new case, so a rule cannot make one.
+											<option key={value} value={value} disabled={value === "create" && inForce === "strict"}>
+												{UNLINKED_LABELS[value]}
+											</option>
+										))}
+									</select>
 								</label>
 							)}
 							<p className="settings-message" role="status">
@@ -400,7 +438,8 @@ function SettingsWorkbench() {
 							<pre className="settings-command">{`MAINWORTHY_URL=${location.origin}\nMAINWORTHY_PROJECT=${project}\nmainworthy report results/*.xml\nmainworthy gate`}</pre>
 							<p className="dim">
 								Set MAINWORTHY_TOKEN to a pipeline token in the runner's secret store. A pipeline token records results
-								and reads the gate; it cannot read or change the suite.{" "}
+								and reads the gate; it cannot read the suite or change a case. Where the policy creates a case for each
+								test with none, its reports add those cases.{" "}
 								<DocLink page="report-results">How to report results</DocLink>
 							</p>
 							<SectionHeading>Connect an agent</SectionHeading>

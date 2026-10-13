@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { type Api, type Envelope, ERROR_CODES, INSTANCE_OPS, type OpName, type SessionInfo } from "../../core/api.ts";
+import { Unlinked } from "../../core/kinds.ts";
 import { type DeviceSession, deviceSession, sessionCurrent, suspendDeviceSession } from "./device.ts";
 
 const Wire = z.discriminatedUnion("ok", [
@@ -30,6 +31,7 @@ const Session = z.object({
 			seq: z.number(),
 			createdAt: z.number(),
 			policy: z.string(),
+			unlinked: Unlinked,
 			can: z.array(z.string()),
 		}),
 	),

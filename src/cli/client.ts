@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { type Api, type Envelope, ERROR_CODES, type OpName, type SessionInfo } from "../core/api.ts";
+import { Unlinked } from "../core/kinds.ts";
 import { OPS } from "../server/ops/index.ts";
 import type { Reply } from "../server/ops/registry.ts";
 import type { Args } from "./args.ts";
@@ -32,6 +33,7 @@ const SessionSchema = z.object({
 			seq: z.number(),
 			createdAt: z.number(),
 			policy: z.string(),
+			unlinked: Unlinked.optional(),
 			can: z.array(z.string()).default([]),
 		}),
 	),

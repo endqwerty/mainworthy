@@ -106,12 +106,15 @@ export async function startServer({
 	cases = 0,
 	mode = "local",
 	preset,
+	unlinked,
 	seed: seedData = cases > 0,
 	passkeys = false,
 }: {
 	cases?: number;
 	mode?: "local" | "server";
 	preset?: string;
+	/** What happens to a test with no case, when it is not what the preset starts with. */
+	unlinked?: "ask" | "track" | "create";
 	seed?: boolean;
 	/**
 	 * The server is told that people open it at `http://localhost:<port>`, so it offers passkeys there. A test
@@ -164,8 +167,10 @@ export async function startServer({
 		const seeded = seedData
 			? await seed(new Client({ url, token, project: "scratch" }), { project: "scratch", cases })
 			: null;
-		if (preset) {
-			const proposed = await api("propose", { edits: [{ op: "policy", preset }] });
+		if (preset || unlinked) {
+			const proposed = await api("propose", {
+				edits: [{ op: "policy", ...(preset ? { preset } : {}), ...(unlinked ? { unlinked } : {}) }],
+			});
 			const question = (await api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
 			if (question) await api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } });
 		}

@@ -45,7 +45,7 @@ const first = <T>(items: T[]): T => {
 	if (item === undefined) throw new Error("expected at least one item");
 	return item;
 };
-/** Links the automated test `key` to a case by answering the `map` question of a standard project. */
+/** Links the automated test `key` to a case by answering the `map` question of a project that asks about tests with no case. */
 function link(key: string, caseRef: string, commit: string) {
 	h.call("report", {
 		target: { commit, branch: "main" },
@@ -145,7 +145,7 @@ describe("a run typed by hand", () => {
 
 describe("a run that accepts a build", () => {
 	beforeEach(() => {
-		h = harness({ preset: "standard" });
+		h = harness({ preset: "standard", unlinked: "ask" });
 		seed();
 		link("tests/a.spec.ts::case one", "C-1", "seed0001");
 	});

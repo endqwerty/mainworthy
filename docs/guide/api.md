@@ -149,7 +149,7 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 | `edits[][policy].clauses` | `array<object>` | no |  |
 | `edits[][policy].clauses[].id` | `string` | yes |  |
 | `edits[][policy].clauses[].kind` | `"adopt" \| "map" \| "failure" \| "finding" \| "signoff"` | yes |  |
-| `edits[][policy].clauses[].when` | `array<"always" \| "author:human" \| "author:agent" \| "author:ci" \| "conflict" \| "policy" \| "scope:change" \| "scope:trunk" \| "scope:run" \| "hint:disputed" \| "category:defect" \| "verdict:passed" \| string>` | yes |  |
+| `edits[][policy].clauses[].when` | `array<"always" \| "author:human" \| "author:agent" \| "author:ci" \| "conflict" \| "policy" \| "scope:change" \| "scope:trunk" \| "scope:run" \| "hint:disputed" \| "category:defect" \| "verdict:passed" \| "unlinked:track" \| "unlinked:create" \| string>` | yes |  |
 | `edits[][policy].clauses[].ask` | `object` | yes |  |
 | `edits[][policy].clauses[].ask.who` | `"rule" \| "member" \| "admin" \| "author"` | yes |  |
 | `edits[][policy].clauses[].ask.agents` | `"answer" \| "advise" \| "none"` | yes |  |
@@ -158,10 +158,12 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 | `edits[][policy].clauses[].answer` | `unknown` | no |  |
 | `edits[][policy].clauses[].blocks` | `"nothing" \| "change" \| "release" \| "all"` | yes |  |
 | `edits[][policy].settings` | `object` | no |  |
+| `edits[][policy].settings.unlinked` | `"ask" \| "track" \| "create"` | yes |  |
 | `edits[][policy].settings.basis` | `"exact" \| "exact-or-assumed"` | yes |  |
 | `edits[][policy].settings.holds` | `object` | yes |  |
 | `edits[][policy].settings.holds.flakyDays` | `integer` | yes |  |
 | `edits[][policy].settings.holds.infraThisTargetOnly` | `boolean` | yes |  |
+| `edits[][policy].unlinked` | `"ask" \| "track" \| "create"` | no |  |
 | `reason` | `string` | no | Why. Shown in the case history. |
 
 </details>
@@ -579,6 +581,7 @@ Projects, actors, grants and tokens. There are no seats: an actor is free, and a
 | `[1].key` | `string` | yes |  |
 | `[1].name` | `string` | no |  |
 | `[1].preset` | `string` | no |  |
+| `[1].unlinked` | `"ask" \| "track" \| "create"` | no | What happens to a test with no case: ask, track or create. Absent: what the preset starts with. |
 | `[2].do` | `"project.list"` | yes |  |
 | `[3].do` | `"token.create"` | yes |  |
 | `[3].actor` | `string` | yes |  |

@@ -35,7 +35,7 @@ import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json } from "../kernel/db.ts";
 import { conflict, OpError } from "../kernel/errors.ts";
 import { claimMint } from "../kernel/witness.ts";
-import { clauseFor, currentPolicy } from "../policy/policy.ts";
+import { clauseFor, currentPolicy, policyAt } from "../policy/policy.ts";
 import {
 	type Blocker,
 	causeKey,
@@ -74,6 +74,7 @@ import {
 	liveByFingerprint,
 	mustQuestion,
 	noteCarried,
+	openQuestionIds,
 	openQuestionsOn,
 	type QuestionRow,
 	questionById,
@@ -297,14 +298,24 @@ function heldOpen(ctx: Ctx, question: QuestionRow, hash: string): boolean {
 }
 
 /**
- * A person answered this question, or the one it follows, against what the rule's clause answers, and that
- * answer has since ended because the evidence moved or its time ran out. The rule does not take the question
- * back: it was overruled by someone with the right to, so a person is asked the next time too, until a person
- * gives the answer the rule would. (A withdrawal alone is not a refusal: see `heldOpen`.)
+ * A person answered this question, or the one it follows, against what a rule's clause answers. The rule does
+ * not take the question back: it was overruled by someone with the right to, so a person is asked the next time
+ * too, until a person gives the answer the rule would. (A withdrawal alone is not a refusal: see `heldOpen`.)
+ *
+ * Overruling takes a rule to overrule. A person who answered while the policy asked people decided what nobody
+ * else would: a rule the policy gets later answers the next question. A signature names the clause it was given
+ * under and the version of the policy that clause was in, and that version says whether the clause was a rule.
+ * The policy in force now does not: a clause can be renamed, or keep its name and become a rule.
  */
 function overruled(ctx: Ctx, question: QuestionRow | null, ruleAnswer: unknown): boolean {
 	const rule = ruleActor(ctx.db).id;
 	const wanted = (ruleAnswer as { is?: string } | undefined)?.is;
+	const overRule = (signer: Signer): boolean =>
+		signer.by !== rule &&
+		(policyAt(ctx.db, ctx.project.id, signer.policy)?.clauses.some(
+			(clause) => clause.id === signer.clause && clause.ask.who === "rule",
+		) ??
+			false);
 	let at = question;
 	for (let hops = 0; at && hops < 100; hops++) {
 		const given = decisionsOf(ctx.db, at.id).filter(
@@ -312,8 +323,7 @@ function overruled(ctx: Ctx, question: QuestionRow | null, ruleAnswer: unknown):
 		);
 		const last = given.at(-1);
 		if (last) {
-			const byPerson = json<Signer[]>(last.signers).some((signer) => signer.by !== rule);
-			return byPerson && json<{ is?: string }>(last.answer).is !== wanted;
+			return json<Signer[]>(last.signers).some(overRule) && json<{ is?: string }>(last.answer).is !== wanted;
 		}
 		at = at.prior !== null ? questionById(ctx.db, at.prior) : null;
 	}
@@ -375,6 +385,31 @@ function settleByRule(ctx: Ctx, question: QuestionRow, clause: string, answer: u
 		if (error instanceof OpError) return { s: "open", question };
 		throw error;
 	}
+}
+
+/**
+ * A policy has just come into force: the open questions about tests with no case that it gives a rule's answer
+ * are answered by the rule now, and the number is returned. The next report that names their files would hand
+ * them to the rule anyway (see `raise`); done here, whoever changed the setting sees the queue as the new policy
+ * leaves it. Only `map` questions: a proposal or a run that waited for a person under the old policy still waits
+ * for one under the new, because no later report asks about those again.
+ */
+function ruleTakesUnlinked(ctx: Ctx): number {
+	const policy = currentPolicy(ctx.db, ctx.project.id);
+	if (!policy.clauses.some((clause) => clause.kind === "map" && clause.ask.who === "rule")) return 0;
+	let taken = 0;
+	// Every one of them, by id: the queue's order cannot page them, because questions raised by one report can
+	// share a rank.
+	for (const id of openQuestionIds(ctx.db, ctx.project.id, "map")) {
+		const question = questionById(ctx.db, id);
+		if (question?.state !== "open") continue;
+		const clause = clauseFor(policy, { kind: "map", facts: factsNow(ctx.db, question) });
+		if (clause.ask.who !== "rule") continue;
+		if (heldOpen(ctx, question, question.basis) || overruled(ctx, question, clause.answer)) continue;
+		setQuestionAsk(ctx, question, clause.ask);
+		if (settleByRule(ctx, question, clause.id, clause.answer).s === "decided") taken++;
+	}
+	return taken;
 }
 
 /**
@@ -565,7 +600,7 @@ function settle(
 		signers.map((signer) => signer.by),
 		decision.expires_at,
 	);
-	const effects = handler.effect(ctx, witness, question, given, { raise });
+	const effects = handler.effect(ctx, witness, question, given, { raise, ruleTakesUnlinked });
 	setDecisionEffects(ctx, decision.id, effects);
 	const about = runsAbout(ctx, question);
 	if (Array.isArray(effects.reask) && effects.reask.length > 0) askAgain(ctx, question, effects.reask as number[]);

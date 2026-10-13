@@ -11,10 +11,10 @@ beforeEach(() => {
 	h = harness();
 });
 afterEach(() => h.close());
-/** Replaces the default loose project with one under another preset. */
-const use = (preset: string): void => {
+/** Replaces the default loose project with one under another preset, and another choice for tests with no case. */
+const use = (preset: string, unlinked?: "ask" | "track" | "create"): void => {
 	h.close();
-	h = harness({ preset });
+	h = harness({ preset, ...(unlinked ? { unlinked } : {}) });
 };
 
 type Proposed = {
@@ -321,20 +321,51 @@ describe("findings", () => {
 	});
 });
 
+/** Changes what happens to a test with no case, as a project's admin does: a proposal and its acceptance. */
+const setUnlinked = (unlinked: string): { status: string; effects: { ruled?: number } } => {
+	const proposed = h.call<Proposed>("propose", { edits: [{ op: "policy", unlinked }] });
+	const asked = first(queue({ kind: "adopt", on: proposed.proposal }).items);
+	return first(
+		h.call<{ status: string; effects: { ruled?: number } }[]>("decide", {
+			q: asked.q,
+			onEvidence: asked.evidenceHash,
+			answer: { is: "accept" },
+		}),
+	);
+};
+const unlinkedTests = () => h.call<{ count: number }>("find", { in: "tests", unlinked: true }).count;
+
 describe("unlinked tests", () => {
-	test("loose: tests with no case are tracked by the rule and still gate the build; nobody is asked", () => {
-		const receipt = h.call<ReportReceipt>("report", ciReport({ commit: "bbbb0001", n: 5 }));
-		expect(receipt.unlinked).toBe(5);
-		expect(queue().counts.open).toBe(0);
-		expect(first(queue({ state: "decided", kind: "map" }).items).decision).toMatchObject({
-			answer: { is: "track" },
-			rule: "map-track",
-		});
-		expect(receipt.gate?.verdict).toBe("passed");
+	test.each(["loose", "standard"])(
+		"%s: tests with no case are tracked by the rule and still gate the build; nobody is asked",
+		(preset) => {
+			use(preset);
+			const receipt = h.call<ReportReceipt>("report", ciReport({ commit: "bbbb0001", n: 5 }));
+			expect(receipt.unlinked).toBe(5);
+			expect(queue().counts.open).toBe(0);
+			expect(first(queue({ state: "decided", kind: "map" }).items).decision).toMatchObject({
+				answer: { is: "track" },
+				rule: "map-track",
+			});
+			expect(receipt.gate?.verdict).toBe("passed");
+		},
+	);
+
+	test("strict starts by asking, and a new project may start with another choice than its preset's", () => {
+		use("strict");
+		h.call("report", ciReport({ commit: "bbbb0001", n: 2 }));
+		expect(queue().counts.map).toBe(1);
+		h.call("admin", { do: "project.create", key: "asked", preset: "standard", unlinked: "ask" });
+		const projects = h.call<{ key: string; policy: string; unlinked: string }[]>("admin", { do: "project.list" });
+		expect(projects.map((p) => [p.key, p.policy, p.unlinked])).toEqual([
+			["scratch", "strict", "ask"],
+			["asked", "standard", "ask"],
+		]);
 	});
 
-	test("standard: one question per file; `create` makes a case per test through the ordinary adopt path and links them", () => {
+	test("ask: one question per file; `create` makes a case per test through the ordinary adopt path and links them", () => {
 		use("standard");
+		expect(setUnlinked("ask")).toMatchObject({ status: "decided" });
 		h.call("report", ciReport({ commit: "bbbb0002", n: 3, file: "tests/checkout/coupon.spec.ts" }));
 		const q = first(queue({ kind: "map" }).items);
 		expect(q.title).toBe("3 tests in tests/checkout/coupon.spec.ts have no case");
@@ -357,13 +388,247 @@ describe("unlinked tests", () => {
 		expect(next.basis).toEqual({ exact: 0, assumed: 3, unresolved: 0 });
 		// undo unlinks, and keeps both decisions
 		h.call("decide", { undo: q.q });
-		expect(h.call<{ count: number }>("find", { in: "tests", unlinked: true }).count).toBe(3);
+		expect(unlinkedTests()).toBe(3);
+	});
+
+	test("a link stands when another test turns up in its file: only the new test is asked about", () => {
+		use("standard", "ask");
+		const file = "tests/checkout/coupon.spec.ts";
+		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		h.call("report", ciReport({ commit: "bbbb0011", n: 2, file }));
+		const asked = first(queue({ kind: "map" }).items);
+		h.call("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "link", pairs: [["T-1", "C-1"]] } });
+		expect(unlinkedTests()).toBe(1);
+		h.call("report", ciReport({ commit: "bbbb0012", n: 3, file }));
+		expect(unlinkedTests()).toBe(2);
+		expect(queue({ kind: "map" }).items.map((item) => item.title)).toEqual([`2 tests in ${file} have no case`]);
+		expect(h.call<{ tests: { t: string }[] }[]>("get", { refs: ["C-1"] })[0]?.tests.map((t) => t.t)).toEqual(["T-1"]);
+		// The link is still its own decision, and still the person's to take back.
+		expect(first(h.call<{ status: string }[]>("decide", { undo: asked.q }))).toMatchObject({ status: "reopened" });
+		expect(unlinkedTests()).toBe(3);
+	});
+
+	test("a person who answered while people were asked overruled no rule: a rule the policy gets later answers", () => {
+		use("standard", "ask");
+		const file = "tests/checkout/coupon.spec.ts";
+		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		h.call("report", ciReport({ commit: "bbbb0013", n: 2, file }));
+		const asked = first(queue({ kind: "map" }).items);
+		h.call("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "link", pairs: [["T-1", "C-1"]] } });
+		h.call("report", ciReport({ commit: "bbbb0014", n: 3, file }));
+		expect(queue().counts.map).toBe(1);
+		expect(setUnlinked("track")).toMatchObject({ effects: { ruled: 1 } });
+		expect(queue().counts.open).toBe(0);
+	});
+
+	test("a person who linked a test the rule had tracked is asked about the file's next test: the rule was overruled", () => {
+		use("standard");
+		const file = "tests/checkout/coupon.spec.ts";
+		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		h.call("report", ciReport({ commit: "bbbb0015", n: 2, file }));
+		const tracked = first(queue({ state: "decided", kind: "map" }).items);
+		h.call("decide", {
+			q: tracked.q,
+			onEvidence: tracked.evidenceHash,
+			answer: { is: "link", pairs: [["T-1", "C-1"]] },
+		});
+		h.call("report", ciReport({ commit: "bbbb0016", n: 3, file }));
+		expect(queue({ kind: "map" }).items.map((item) => item.title)).toEqual([`2 tests in ${file} have no case`]);
+	});
+
+	test("an override is judged by the policy it was given under, not by the clause names of the policy in force", () => {
+		const file = "tests/checkout/coupon.spec.ts";
+		const changeClauses = (change: (clauses: Clause[]) => Clause[]) => {
+			const proposed = h.call<Proposed>("propose", {
+				edits: [{ op: "policy", clauses: change(structuredClone(PRESETS.standard.clauses)) }],
+			});
+			const asked = first(queue({ kind: "adopt", on: proposed.proposal }).items);
+			return first(
+				h.call<{ effects: { ruled?: number } }[]>("decide", {
+					q: asked.q,
+					onEvidence: asked.evidenceHash,
+					answer: { is: "accept" },
+				}),
+			).effects.ruled;
+		};
+		// A person linked a test the rule had tracked. Renaming the rule's clause does not undo that they overruled it.
+		use("standard");
+		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		h.call("report", ciReport({ commit: "bbbb0018", n: 2, file }));
+		const tracked = first(queue({ state: "decided", kind: "map" }).items);
+		h.call("decide", {
+			q: tracked.q,
+			onEvidence: tracked.evidenceHash,
+			answer: { is: "link", pairs: [["T-1", "C-1"]] },
+		});
+		h.call("report", ciReport({ commit: "bbbb0019", n: 3, file }));
+		expect(queue().counts.map).toBe(1);
+		const renamed = changeClauses((clauses) =>
+			clauses.map((clause) => (clause.id === "map-track" ? { ...clause, id: "renamed-track" } : clause)),
+		);
+		expect(renamed).toBeUndefined();
+		expect(queue().counts.map).toBe(1);
+		// A person linked a test while people were asked. Making the clause they answered under a rule later does
+		// not turn their answer into an override.
+		use("standard", "ask");
+		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		h.call("report", ciReport({ commit: "bbbb0020", n: 2, file }));
+		const asked = first(queue({ kind: "map" }).items);
+		h.call("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "link", pairs: [["T-1", "C-1"]] } });
+		h.call("report", ciReport({ commit: "bbbb0021", n: 3, file }));
+		expect(queue().counts.map).toBe(1);
+		const ruled = changeClauses((clauses) =>
+			clauses.map((clause) =>
+				clause.id === "map-any"
+					? {
+							...clause,
+							ask: { ...clause.ask, who: "rule" as const, agents: "none" as const },
+							answer: { is: "track" },
+						}
+					: clause,
+			),
+		);
+		expect(ruled).toBe(1);
+		expect(queue().counts.open).toBe(0);
+	});
+
+	test("changing the choice answers every open question, however many one report raised", () => {
+		use("standard", "ask");
+		// More than a thousand questions from one report share ranks in the queue's order.
+		const files = 2001;
+		h.call("report", {
+			target: { commit: "bbbb0022", branch: "main" },
+			results: Array.from({ length: files }, (_, i) => ({
+				test: { key: `tests/f${i}.spec.ts::one`, name: "one", file: `tests/f${i}.spec.ts` },
+				outcome: "pass",
+			})),
+		});
+		expect(queue().counts.map).toBe(files);
+		expect(setUnlinked("track")).toMatchObject({ effects: { ruled: files } });
+		expect(queue().counts.open).toBe(0);
+	});
+
+	test("create: a report makes a case for each test with none and links it; nobody is asked, and nothing is made twice", () => {
+		use("standard");
+		setUnlinked("create");
+		const pipeline = h.actor("pipeline", "ci", ["record"]);
+		const receipt = h.call<ReportReceipt>(
+			"report",
+			ciReport({ commit: "bbbb0004", n: 3, file: "tests/checkout/coupon.spec.ts" }),
+			pipeline,
+		);
+		expect(receipt.unlinked).toBe(3);
+		expect(queue().counts.open).toBe(0);
+		expect(unlinkedTests()).toBe(0);
+		expect(first(queue({ state: "decided", kind: "map" }).items).decision).toMatchObject({
+			answer: { is: "create" },
+			rule: "map-create",
+		});
+		const made = h.call<{ title: string; folder: { path: string }; tests: { t: string }[] }[]>("get", {
+			refs: ["C-1", "C-2", "C-3"],
+		});
+		expect(made.map((c) => [c.title, c.folder.path, c.tests.map((t) => t.t)])).toEqual([
+			["test 0", "checkout", ["T-1"]],
+			["test 1", "checkout", ["T-2"]],
+			["test 2", "checkout", ["T-3"]],
+		]);
+		// The same tests again, and one more in the file: only the new one gets a case.
+		const next = h.call<ReportReceipt>(
+			"report",
+			ciReport({ commit: "bbbb0005", n: 4, file: "tests/checkout/coupon.spec.ts" }),
+			pipeline,
+		);
+		expect(next.basis).toEqual({ exact: 0, assumed: 3, unresolved: 1 });
+		expect(h.call<{ count: number }>("find", { in: "cases" }).count).toBe(4);
+		expect(unlinkedTests()).toBe(0);
+		expect(queue().counts.open).toBe(0);
+	});
+
+	test("create under standard: an agent's new case waits for a person, so its report leaves the file's question open", () => {
+		use("standard", "create");
+		const agent = h.actor("runner", "agent", ["read", "produce"]);
+		h.call("report", ciReport({ commit: "bbbb0017", n: 2 }), agent);
+		expect(queue().counts.map).toBe(1);
+		expect(h.call<{ count: number }>("find", { in: "cases" }).count).toBe(0);
+		expect(unlinkedTests()).toBe(2);
+	});
+
+	test("changing the choice answers every open question about a file at once, with no new report", () => {
+		use("standard");
+		setUnlinked("ask");
+		for (const file of ["tests/a.spec.ts", "tests/b.spec.ts", "tests/c.spec.ts"])
+			h.call("report", ciReport({ commit: "bbbb0006", n: 2, file, job: file }));
+		expect(queue().counts.map).toBe(3);
+		expect(setUnlinked("track")).toMatchObject({ status: "decided", effects: { ruled: 3 } });
+		expect(queue().counts.open).toBe(0);
+		const settled = queue({ state: "decided", kind: "map" }).items;
+		expect(settled.map((item) => item.decision?.rule)).toEqual(["map-track", "map-track", "map-track"]);
+		expect(unlinkedTests()).toBe(6);
+		// Asking again opens nothing by itself: the rule's answers stand until a file's tests change.
+		setUnlinked("ask");
+		expect(queue().counts.open).toBe(0);
+		h.call("report", ciReport({ commit: "bbbb0007", n: 3, file: "tests/a.spec.ts", job: "tests/a.spec.ts" }));
+		expect(queue({ kind: "map" }).items.map((item) => item.title)).toEqual(["3 tests in tests/a.spec.ts have no case"]);
+		// And `create` takes what is open: the cases are made by whoever changed the choice.
+		expect(setUnlinked("create")).toMatchObject({ effects: { ruled: 1 } });
+		expect(h.call<{ count: number }>("find", { in: "cases" }).count).toBe(3);
+		// The two files the rule tracked are left as they were decided.
+		expect(unlinkedTests()).toBe(4);
+	});
+
+	test("a question a person took back from the rule stays with people when the policy changes", () => {
+		use("standard");
+		h.call("report", ciReport({ commit: "bbbb0008", n: 2 }));
+		const tracked = first(queue({ state: "decided", kind: "map" }).items);
+		h.call("decide", { undo: tracked.q });
+		expect(queue().counts.map).toBe(1);
+		// Any change to the policy lets its rules look at the open questions again.
+		expect(setUnlinked("create").effects.ruled).toBeUndefined();
+		expect(queue().counts.map).toBe(1);
+		expect(unlinkedTests()).toBe(2);
+	});
+
+	test("create is refused where a person adopts every new case: the rule would make none and say nothing", () => {
+		use("strict");
+		const refused = h.raw("propose", { edits: [{ op: "policy", unlinked: "create" }] });
+		expect(refused).toMatchObject({ ok: false, error: { code: "invalid" } });
+		expect(refused.ok ? "" : refused.error.message).toContain("choose ask or track");
+		// `track` is open to it: the rule answers, and nobody gives a reason for a file nobody looked at.
+		h.call("report", ciReport({ commit: "bbbb0009", n: 2 }));
+		expect(queue().counts.map).toBe(1);
+		const proposed = h.call<Proposed>("propose", { edits: [{ op: "policy", unlinked: "track" }] });
+		const asked = first(queue({ kind: "adopt", on: proposed.proposal }).items);
+		const reply = first(
+			h.call<{ status: string; effects: { ruled?: number } }[]>("decide", {
+				q: asked.q,
+				onEvidence: asked.evidenceHash,
+				answer: { is: "accept" },
+				reason: "nobody maps unit tests here",
+			}),
+		);
+		expect(reply).toMatchObject({ status: "decided", effects: { ruled: 1 } });
+		expect(queue().counts.open).toBe(0);
+	});
+
+	test("a policy stored before the setting existed keeps asking as its clauses say", () => {
+		use("standard");
+		const old = PRESETS.standard.clauses.filter((clause) => !["map-track", "map-create"].includes(clause.id));
+		h.app.db.raw
+			.query("UPDATE policies SET clauses = ?, settings = ?")
+			.run(
+				JSON.stringify(old),
+				JSON.stringify({ basis: "exact-or-assumed", holds: { flakyDays: 14, infraThisTargetOnly: true } }),
+			);
+		h.call("report", ciReport({ commit: "bbbb0010", n: 2 }));
+		expect(queue().counts.map).toBe(1);
+		const projects = h.call<{ policy: string; unlinked: string }[]>("admin", { do: "project.list" });
+		expect(projects[0]).toMatchObject({ policy: "custom", unlinked: "ask" });
 	});
 });
 
 describe("what an agent reads", () => {
 	test("impact names the cases a change touches and why; since returns only what moved; get skips what the caller holds", () => {
-		use("standard");
+		use("standard", "ask");
 		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
 		h.call("propose", {
 			edits: [
