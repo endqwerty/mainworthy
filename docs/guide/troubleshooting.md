@@ -43,7 +43,11 @@ The server is in server mode, or the token is wrong or was revoked. Pass a token
 
 ### `forbidden: propose needs the produce capability on scratch`
 
-The token's actor may not run that operation on that project. The message names the capability. An admin can change the grant. A pipeline's token records results and reads the gate, and can be granted `read` besides. It can never edit a case, answer, plan or administer, whatever it is granted.
+The token's actor holds a grant on that project and lacks the capability the message names. An admin can change the grant. A pipeline's token records results and reads the gate, and can be granted `read` besides. It can never edit a case, answer, plan or administer, whatever it is granted.
+
+### `not_found: no project named scratch, or no grant on it`
+
+The project does not exist, or the token's actor holds no grant on it. The two are answered alike, so that a token cannot find out which projects an instance has. Check the key, then ask an admin for a grant with `mainworthy actor grant`.
 
 ### `conflict`
 
@@ -65,7 +69,11 @@ A browser's requests must come from the same address the server sees itself at. 
 
 ### The owner token was never shown
 
-In server mode the server prints a generated owner token once, on its first start, unless you set `MAINWORTHY_OWNER_TOKEN` yourself. See [configuration](./configuration.md).
+In server mode the server prints a generated owner token on a start where the owner holds no token that works and none is configured: the first start, and the start after an import. If the owner has a token and you lost it, set `MAINWORTHY_OWNER_TOKEN` to a new value and restart. See [configuration](./configuration.md).
+
+### Revoke refuses the owner's token
+
+In server mode the last token the owner can sign in with is kept, whoever asks, because the owner is who repairs the instance. As the owner, make another token first with `mainworthy token new --human <owner>`, then revoke the old one.
 
 ## The web UI
 

@@ -1,6 +1,6 @@
 # People, agents and pipelines
 
-Decide who may do what in each project, give a person, an agent or a pipeline a token, and take it away again. Making tokens and changing grants needs an instance admin, who holds `admin` on every project.
+Decide who may do what in each project, give a person, an agent or a pipeline a token, and take it away again. Making tokens and changing grants needs an instance admin, who holds `admin` on every project. Some of it only a person may do, and a token for a person who already exists is made by that person or by the owner.
 
 ## Kinds of actor
 
@@ -55,7 +55,7 @@ $ mainworthy actor ungrant reviewer --project checkout
 reviewer holds no grant on checkout any more
 ```
 
-Leave out `--project` to change the grant on every project. You cannot change your own grant, because a slip could lock the instance. Another admin does it. Nobody changes the owner's grant, which Mainworthy writes again at every start.
+Leave out `--project` to change the grant on every project. Only a person changes a grant: an agent that holds `admin` is refused. You cannot change your own grant, because a slip could lock the instance. Another admin does it. Nobody changes the owner's grant, which Mainworthy writes again at every start.
 
 The owner is the person named by `MAINWORTHY_OWNER`. See [configuration](./configuration.md).
 
@@ -78,11 +78,13 @@ Use `--human` for a person and `--ci` for a pipeline. Add `--project <key>` to l
 
 Mainworthy shows a token once and keeps only a hash, so it cannot show it again. If you lose one, revoke it and make another.
 
+Who may make a token depends on whose it is. Anyone who administers makes a token for an agent or a pipeline. A person who administers adds a new person. A token for a person who already exists is made by that person or by the owner, and a token for the owner by the owner alone, because whoever holds a person's token acts under that person's name. A name that starts with `forgotten-` is refused.
+
 Making a token for a name that exists adds a token to that actor and does not change its grants. Naming a different `--can` for an existing actor is refused. Use `actor grant` for that.
 
 ## See and revoke tokens
 
-Settings, Tokens, lists "Issued tokens" with each token's actor, when it was made and when it was last used. "Revoke" next to a token stops it at once.
+Settings, Tokens, lists "Issued tokens" with each token's actor, when it was made and when it was last used. "Revoke" next to a token stops it at once. In server mode the last token the owner can sign in with is not revoked: make the owner another one first.
 
 ```
 $ mainworthy token list
@@ -92,7 +94,7 @@ $ mainworthy token revoke 2
 token 2 revoked
 ```
 
-A token never expires on its own, so revoke one you no longer use. Revoking a token leaves the actor and its grants in place. To stop an actor on one project, use `actor ungrant`. To remove who a person was, forget the actor. The name becomes a pseudonym, the tokens stop working, and the history keeps what the actor did.
+A token never expires on its own, so revoke one you no longer use. Revoking a token leaves the actor and its grants in place. To stop an actor on one project, use `actor ungrant`. To remove who a person was, forget the actor. Only a person who administers forgets an actor, and the owner is not forgotten. The name becomes a pseudonym, the tokens stop working, and the history keeps what the actor did.
 
 ```
 $ mainworthy admin --json '{"do":"actor.forget","name":"dana"}'
@@ -115,7 +117,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 owner token (shown once): <token>
 ```
 
-Copy it then. If you miss it, set `MAINWORTHY_OWNER_TOKEN` and restart, and that value becomes a token too. In the container, `docker compose logs` has the line.
+Copy it then. If you miss it, set `MAINWORTHY_OWNER_TOKEN` to a new value and restart, and that value becomes a token too. A value that was revoked, or that is somebody else's token, is not accepted: the server says so in one line when it starts and leaves the token as it is. With no value set, a start on which the owner holds no token that works prints a new one, as the first start does. In the container, `docker compose logs` has the line.
 
 The command line needs no token in local mode on the same machine. In server mode, give it one with `--token` or `MAINWORTHY_TOKEN`.
 

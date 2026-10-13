@@ -6,7 +6,7 @@ Run a Mainworthy instance on your machine or on a server, and set where it liste
 
 The same program runs in two modes. The mode decides how a request proves who sent it.
 
-In local mode you are the owner. The server listens on the loopback address, and a request from this machine needs no token. The web UI opens signed in, and commands run without `--token`. A request whose `Host` header is not a loopback name (`localhost`, `127.0.0.1` or `[::1]`) is refused, so a web page on another site cannot reach the server through your browser.
+In local mode you are the owner. The server listens on the loopback address, and a request from this machine needs no token. The web UI opens signed in, and commands run without `--token`. A request counts as yours when three things hold: its `Host` header is a loopback name (`localhost`, `127.0.0.1` or `[::1]`), the connection comes from a loopback address, and it carries none of the headers a proxy or a tunnel adds (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Real-IP`, `Via`, `CF-Connecting-IP`). Any other request needs a token. A request that the browser says another site made is refused in both modes.
 
 In server mode every request needs a token. The web UI shows a sign-in page, and a command needs `--token` or `MAINWORTHY_TOKEN`. [People, agents and pipelines](./access.md#sign-in-to-the-web-ui) explains tokens and signing in.
 
@@ -19,7 +19,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 ```
 
 > [!WARNING]
-> Always set `MAINWORTHY_MODE=server` when anything sits between users and the server. A proxy on the same machine can rewrite `Host` to `localhost`, and local mode would then trust everyone as the owner.
+> Always set `MAINWORTHY_MODE=server` when anything sits between users and the server. A proxy that adds its headers is not taken for you, but a relay on the same machine that passes bytes on unchanged cannot be told apart from you, and local mode would trust everyone who reaches it as the owner.
 
 ## Variables the server reads
 
@@ -39,9 +39,9 @@ A value that is not a whole number for `MAINWORTHY_READERS` stops the start with
 
 The first start creates the data directory, one owner and a project named `scratch`. It does not need any variable.
 
-Every start gives the owner named by `MAINWORTHY_OWNER` every capability. If you change the name later, you get a second owner, and the first one keeps its grant. Remove its grant with `mainworthy actor ungrant`.
+Every start gives the owner named by `MAINWORTHY_OWNER` every capability. The owner is a person: the server does not start when the name belongs to an agent or a pipeline on this instance, or starts with `forgotten-`. If you change the name later, you get a second owner, and the first one keeps its grant. Remove its grant with `mainworthy actor ungrant`.
 
-In server mode, an owner token is needed to sign in. If you set `MAINWORTHY_OWNER_TOKEN`, the server adds that value as a token for the owner. If you do not, the first start prints a generated token once. To get a token after you lost it, set `MAINWORTHY_OWNER_TOKEN` and restart. Use a long random value and keep it out of version control.
+In server mode, an owner token is needed to sign in. If you set `MAINWORTHY_OWNER_TOKEN`, the server adds that value as a token for the owner. If you do not, a start on which the owner holds no token that works prints a generated one: the first start, and the start after an import. To get a token after you lost it, set `MAINWORTHY_OWNER_TOKEN` to a new value and restart. A value that was revoked, or that is somebody else's token, is not brought back: the server says so in one line on standard error. Use a long random value and keep it out of version control.
 
 Reader threads let reads continue while a large report is applied. The default suits most machines. Set `0` to turn them off.
 
@@ -91,9 +91,11 @@ Back up the volume. [Your data](./data.md) explains how.
 The server speaks plain HTTP. To serve it over HTTPS, put a proxy in front that ends TLS, and set `MAINWORTHY_MODE=server`. The proxy must do two things.
 
 1. Pass the `Host` header on unchanged, so the server sees the name the browser used.
-2. Set `X-Forwarded-Proto: https`.
+2. Set `X-Forwarded-Proto: https`. A list such as `https,http` counts as https.
 
 A browser's request is accepted only when its `Origin` has the same scheme and host as the request. Without the second header, the server sees `http`, an `https` page looks like another site, and sign-in is refused with `unauthenticated: a token is required`, which does not name the cause. With the header, the session cookie is marked `Secure`.
+
+The server closes a connection nobody has signed in on after three minutes of silence, and answers a sign-in whose body has not arrived within five seconds with 408. A request with a valid token or session is not timed out, so a long reply is not cut off.
 
 The server accepts a request body of up to 64 MiB for an operation. A proxy with a lower limit rejects a large report. `mainworthy export` and `mainworthy import` stream archives of up to 8 GiB, so give those paths the same room.
 

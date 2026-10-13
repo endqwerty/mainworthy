@@ -302,9 +302,9 @@
       "dot": "rose",
       "title": "Instance access \u00b7 actors, tokens and grants",
       "items": [
-        "An instance admin creates and revokes tokens in Settings under Tokens, or with mainworthy token new, token list and token revoke. Choose a person, agent or pipeline and the capabilities of a new actor.",
+        "An instance admin creates and revokes tokens in Settings under Tokens, or with mainworthy token new, token list and token revoke. Choose a person, agent or pipeline and the capabilities of a new actor. A token for a person who exists is made by that person or by the owner.",
         "Use mainworthy actor list, actor grant and actor ungrant to change an existing actor\u2019s grants. Add --project for one project; omit it for all projects. Tokens identify the actor and use its current grants, rather than having separate permissions.",
-        "A pipeline may hold record and read only. A new pipeline defaults to record; a new agent defaults to read and produce. The owner\u2019s grant cannot be changed here, and an admin cannot change their own grant."
+        "A pipeline may hold record and read only. A new pipeline defaults to record; a new agent defaults to read and produce. The owner\u2019s grant cannot be changed here, an admin cannot change their own grant, and only a person changes a grant."
       ]
     },
     {

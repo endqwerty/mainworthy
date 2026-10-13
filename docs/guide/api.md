@@ -25,10 +25,10 @@ A reply that did not run has `ok: false` and an `error` with a `code` and a `mes
 | --- | --- | --- |
 | `invalid` | 400 | The input is wrong. `details` says which field. |
 | `unauthenticated` | 401 | No token, or one the server does not know. |
-| `forbidden` | 403 | The caller lacks the capability, or the policy says no. |
-| `not_found` | 404 | No such operation, project or ref. |
+| `forbidden` | 403 | The caller holds a grant on the project and lacks the capability, or the policy says no. |
+| `not_found` | 404 | No such operation, project or ref. A project the caller holds no grant on is answered the same way. |
 | `conflict` | 409 | The edit was made on an older version, or the command id was used for something else. |
-| `internal` | 500 | The server failed. Nothing was written. |
+| `internal` | 500 | The server failed. Nothing was written. The message is `internal error`, and the detail is in the server's log. |
 
 ## Authenticate
 

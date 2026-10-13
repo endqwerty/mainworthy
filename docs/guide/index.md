@@ -34,7 +34,7 @@ Mainworthy keeps your test cases, the results that people, pipelines and agents 
 
 - [What you can customize](./customize.md). See everything a team can adjust in Mainworthy, who may adjust it, and where to do it. Use this page to find the right setting, then follow the link to the page that explains it.
 - [Policy](./policy.md). Decide how strict a project is, read its policy, and switch it. A policy says who must answer each kind of question and what an agent's answer is worth.
-- [People, agents and pipelines](./access.md). Decide who may do what in each project, give a person, an agent or a pipeline a token, and take it away again. Making tokens and changing grants needs an instance admin, who holds `admin` on every project.
+- [People, agents and pipelines](./access.md). Decide who may do what in each project, give a person, an agent or a pipeline a token, and take it away again. Making tokens and changing grants needs an instance admin, who holds `admin` on every project. Some of it only a person may do, and a token for a person who already exists is made by that person or by the owner.
 - [Configuration](./configuration.md). Run a Mainworthy instance on your machine or on a server, and set where it listens, where it keeps its data and who owns it. The server reads its settings from environment variables. There is no configuration file.
 - [Your data](./data.md). Find your data, export it to a text file, back it up and move it to another machine. Your cases, results and decisions are yours, and you can take them out at any time.
 
