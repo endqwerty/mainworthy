@@ -35,12 +35,14 @@ console.log(
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${chosen}\n`);
 if (choice.use === "none") process.exit(4);
 const own = choice.use === "own" ? await startOwn(CLI) : null;
-// The job's own Casebook is stopped on every way out of this script: its end, an error, a signal.
+// The job's own Casebook is stopped on every way out of this script: its end, an error, a signal. Every command
+// below blocks until it is done, so a signal waits; `heard` lets a waiting one in, before the next command.
 for (const signal of ["SIGINT", "SIGTERM"] as const)
 	process.on(signal, () => {
 		own?.stop();
 		process.exit(signal === "SIGINT" ? 130 : 143);
 	});
+const heard = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 const cli = (argv: string[]): number => {
 	console.log(`\n$ casebook ${argv.join(" ")}`);
@@ -61,6 +63,7 @@ const reported = new Set<string>();
 let gate: number;
 try {
 	for (const shard of shards) {
+		await heard();
 		const file = join(directory, `${shard}.xml`);
 		const outcome = readOutcome(join(directory, `${shard}.json`));
 		const text = existsSync(file) ? readFileSync(file, "utf8") : "";
@@ -97,7 +100,9 @@ try {
 		if (exit !== 0) problems.push(`${shard}: casebook report exited ${exit}`);
 	}
 
+	await heard();
 	gate = cli(["gate"]);
+	await heard();
 } finally {
 	own?.stop();
 }
