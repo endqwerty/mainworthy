@@ -21,6 +21,9 @@ services:
       # that failed sign-ins are counted for each visitor. Both or neither; empty means not set (docs/deploy.md).
       MAINWORTHY_TRUSTED_PROXY: ${MAINWORTHY_TRUSTED_PROXY:-}
       MAINWORTHY_CLIENT_ADDRESS_HEADER: ${MAINWORTHY_CLIENT_ADDRESS_HEADER:-}
+      # The address people open the instance at, like https://mainworthy.example. Passkeys belong to its host
+      # name and an invitation link starts with it. Empty means no passkeys and a link without a host.
+      MAINWORTHY_PUBLIC_URL: ${MAINWORTHY_PUBLIC_URL:-}
     volumes:
       - mainworthy-data:/data
 

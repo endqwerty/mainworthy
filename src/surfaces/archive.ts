@@ -2,7 +2,7 @@ import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HTTP_STATUS } from "../core/api.ts";
-import { bootstrap, clearUses, type Session } from "../server/identity/identity.ts";
+import { bootstrap, clearChallenges, clearUses, type Session } from "../server/identity/identity.ts";
 import { recoverAccepted } from "../server/jobs.ts";
 import type { App } from "../server/kernel/app.ts";
 import type { Actor } from "../server/kernel/ctx.ts";
@@ -155,6 +155,9 @@ export function archiveRoutes(
 					// The import is committed: every token and session row is gone, and the next ones made take
 					// their ids. What was noted of the old rows' use must not become the new rows' use.
 					clearUses(app);
+					// The same for a passkey ceremony that was under way: its challenge was issued for a person who
+					// may not be there any more, and must not be answered for whoever is.
+					clearChallenges(app);
 					if (localOwner && restored.owner) Object.assign(localOwner, restored.owner);
 					// An export taken while a report was between its two transactions holds that report accepted and
 					// not applied. The original applied it a moment later; so does this instance, now, and not only

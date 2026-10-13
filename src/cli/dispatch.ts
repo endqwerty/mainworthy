@@ -8,6 +8,7 @@ import { gateCommand } from "./commands/gate.ts";
 import { getCommand } from "./commands/get.ts";
 import { healthCommand } from "./commands/health.ts";
 import { importCommand } from "./commands/import.ts";
+import { inviteCommand } from "./commands/invite.ts";
 import { mcpCommand } from "./commands/mcp.ts";
 import { newCommand } from "./commands/new.ts";
 import { openCommand } from "./commands/open.ts";
@@ -25,6 +26,7 @@ export const ADAPTER_COMMANDS: ReadonlyMap<string, AdapterCommand> = new Map(
 		reportCommand,
 		gateCommand,
 		tokenCommand,
+		inviteCommand,
 		actorCommand,
 		policyCommand,
 		newCommand,

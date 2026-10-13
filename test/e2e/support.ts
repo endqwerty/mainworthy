@@ -110,11 +110,17 @@ export async function startServer({
 	mode = "local",
 	preset,
 	seed: seedData = cases > 0,
+	passkeys = false,
 }: {
 	cases?: number;
 	mode?: "local" | "server";
 	preset?: string;
 	seed?: boolean;
+	/**
+	 * The server is told that people open it at `http://localhost:<port>`, so it offers passkeys there. A test
+	 * then opens its pages at `localhost`: Chromium makes no passkey at `127.0.0.1` (`passkey-verifier.test.ts`).
+	 */
+	passkeys?: boolean;
 } = {}): Promise<Server> {
 	const dataDir = await mkdtemp(join(tmpdir(), `mainworthy-e2e-${process.pid}-`));
 	ownedDirectories.add(dataDir);
@@ -131,6 +137,7 @@ export async function startServer({
 			MAINWORTHY_PORT: String(port),
 			MAINWORTHY_MODE: mode,
 			MAINWORTHY_OWNER_TOKEN: token,
+			MAINWORTHY_PUBLIC_URL: passkeys ? `http://localhost:${port}` : "",
 			MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
 		},
 		stdout: "ignore",

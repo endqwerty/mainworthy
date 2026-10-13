@@ -18,6 +18,8 @@ const Session = z.object({
 	can: z.array(z.string()),
 	mode: z.enum(["local", "server"]),
 	via: z.enum(["token", "cookie", "local"]),
+	session: z.number().nullable(),
+	credentials: z.object({ password: z.boolean(), passkeys: z.number() }).nullable(),
 	version: z.string(),
 	projects: z.array(
 		z.object({

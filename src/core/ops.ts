@@ -21,7 +21,7 @@ import { Obligation, TargetMatch, type Verdict } from "./runs.ts";
  * A client-generated id that names one request. Sent again unchanged, it returns the first reply and writes
  * nothing; sent again with other content, it is refused with `conflict`.
  */
-const cmd = z
+export const cmd = z
 	.string()
 	.min(8)
 	.max(64)

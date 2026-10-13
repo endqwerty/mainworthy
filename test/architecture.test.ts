@@ -127,7 +127,16 @@ describe("the module map", () => {
 	// rules about its rows live in one place and a join cannot quietly depend on another module's schema.
 	const owners: Record<string, string[]> = {
 		"server/kernel": ["meta", "projects", "counters", "commands"],
-		"server/identity": ["orgs", "actors", "grants", "tokens", "sessions"],
+		"server/identity": [
+			"orgs",
+			"actors",
+			"grants",
+			"tokens",
+			"sessions",
+			"credentials",
+			"invitations",
+			"passkey_users",
+		],
 		"server/policy": ["policies"],
 		"server/suite": [
 			"folders",
@@ -206,20 +215,15 @@ describe("the module map", () => {
 		expect(offenders).toEqual([]);
 	});
 
-	test("an archive leaves out every identity table that holds the hash of a secret, and only those", () => {
-		// A token and a session are let in by a secret whose SHA-256 is in a column named `hash`. A table like
-		// that never travels in an archive, and an import empties it. One that is added later and not listed in
-		// `UNEXPORTED` fails here, before an export carries what signs somebody in.
-		const db = new Db(":memory:");
-		migrate(db, ":memory:");
-		const holdsHash = (table: string): boolean =>
-			db.raw
-				.query<{ name: string }, []>(`PRAGMA table_info(${table})`)
-				.all()
-				.some((column) => column.name === "hash");
-		const secret = (owners["server/identity"] ?? []).filter(holdsHash);
-		db.close();
-		expect([...UNEXPORTED].sort()).toEqual(secret.sort());
+	test("an archive holds who the actors are and what they may do, and no other table of identity", () => {
+		// What lets somebody in never travels in an archive, and an import empties it: a token and a session (the
+		// SHA-256 of a secret), a password's hash, a passkey's public key and the handle it is filed under, an
+		// invitation's code. The three tables named here are all of identity that an archive holds. A table that
+		// is added later is unexported, or it is added to these three on purpose: until then this fails, before
+		// an export carries what signs somebody in.
+		const exported = ["orgs", "actors", "grants"];
+		const identity = owners["server/identity"] ?? [];
+		expect([...UNEXPORTED].sort()).toEqual(identity.filter((table) => !exported.includes(table)).sort());
 	});
 
 	test("each migration says truly whether it changes what an archive holds", () => {
@@ -318,6 +322,47 @@ describe("the registry", () => {
 		expect(OP_LIST.filter((op) => typeof op.needs !== "string").map((op) => op.name)).toEqual(["gate"]);
 		// What a pipeline may be let do besides: the reads, and nothing that writes.
 		expect(OP_LIST.filter((op) => accepts("read").includes(op.name) && op.effect !== "read")).toEqual([]);
+	});
+
+	test("the operations any signed-in caller may run are session and credential, and one function says whose things they touch", () => {
+		// `self` asks for no capability: whoever is signed in runs the operation, on what is their own. Whether
+		// something is the caller's own, or is anyone's because the caller is a person who administers, is
+		// decided by `mayActFor` in `identity.ts` and nowhere else. An operation that compared ids itself, or
+		// looked for `admin` itself, would be a second rule, and the two would drift.
+		const self = OP_LIST.filter((op) => op.needs === "self");
+		expect(self.map((op) => op.name)).toEqual(["session", "credential"]);
+		for (const op of OP_LIST.filter((op) => ["session", "credential", "invitation"].includes(op.name)))
+			expect(`${op.name}: ${op.mcp}`).toBe(`${op.name}: null`);
+		const declaring = files.filter((file) => /needs: "self"/.test(readFileSync(file, "utf8")));
+		expect(declaring).toEqual(["src/server/ops/people.ts"]);
+		const source = readFileSync("src/server/ops/people.ts", "utf8");
+		expect(source).toContain("mayActFor(");
+		expect(source.match(/actor\.id\s*[!=]==|[!=]==\s*env\.actor\.id|includes\("admin"\)/g) ?? []).toEqual([]);
+		const deciding = files.filter((file) => /function mayActFor\b/.test(readFileSync(file, "utf8")));
+		expect(deciding).toEqual(["src/server/identity/identity.ts"]);
+	});
+
+	test("no operation takes a password: no field of any input schema is named like one", () => {
+		// The registry keeps a digest of every request that carries a command id, and an operation's input is
+		// what the CLI takes as flags, which a shell keeps in its history. A secret a person chose goes through
+		// the sign-in routes (`src/surfaces/signin.ts`) and never through here.
+		const named: string[] = [];
+		const walk = (op: string, node: unknown): void => {
+			if (Array.isArray(node)) for (const item of node) walk(op, item);
+			else if (typeof node === "object" && node !== null) {
+				for (const [key, value] of Object.entries(node)) {
+					if (key === "properties" && typeof value === "object" && value !== null)
+						for (const field of Object.keys(value))
+							if (/password|passphrase|secret|pwd/i.test(field)) named.push(`${op}.${field}`);
+					walk(op, value);
+				}
+			}
+		};
+		for (const op of OP_LIST) walk(op.name, z.toJSONSchema(op.input, { io: "input", unrepresentable: "any" }));
+		expect(named).toEqual([]);
+		// The check finds a field it is given, at any depth.
+		walk("example", z.toJSONSchema(z.object({ nested: z.array(z.object({ newPassword: z.string() })) })));
+		expect(named).toEqual(["example.newPassword"]);
 	});
 
 	test("there is no second way to do what propose, report, plan and decide do", () => {

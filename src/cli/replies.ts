@@ -47,6 +47,18 @@ const Gate = z.object({
 	stale: z.boolean(),
 });
 const CaseStamp = z.object({ ref: z.string(), version: z.number(), hash: z.string() });
+const InvitationPurpose = z.enum(["join", "recover"]);
+const InvitationCreated = z.object({
+	id: z.number(),
+	name: z.string(),
+	purpose: InvitationPurpose,
+	can: strings,
+	project: z.string(),
+	expiresAt: z.number(),
+	code: z.string(),
+	link: z.string(),
+	note: z.string(),
+});
 
 /** Runtime reply validation stays checked against Api: a changed required field or type fails compilation here. */
 export const REPLY_SCHEMAS: { [N in OpName]: z.ZodType<Api[N]["reply"]> } = {
@@ -130,4 +142,46 @@ export const REPLY_SCHEMAS: { [N in OpName]: z.ZodType<Api[N]["reply"]> } = {
 		z.object({ state: z.literal("done"), op: z.string(), seq: z.number(), reply: z.unknown() }),
 	]),
 	admin: z.unknown(),
+	session: z.union([
+		z.array(
+			z.object({
+				id: z.number(),
+				openedWith: z.enum(["token", "password", "passkey"]),
+				label: z.string(),
+				userAgent: z.string().nullable(),
+				createdAt: z.number(),
+				lastUsedAt: z.number(),
+				expiresAt: z.number(),
+				current: z.boolean(),
+			}),
+		),
+		z.object({ ended: z.literal(true), current: z.boolean() }),
+	]),
+	credential: z.union([
+		z.array(
+			z.object({
+				id: z.number(),
+				kind: z.enum(["password", "passkey"]),
+				label: z.string(),
+				createdAt: z.number(),
+				lastUsedAt: z.number().nullable(),
+			}),
+		),
+		record,
+	]),
+	invitation: z.union([
+		InvitationCreated,
+		z.array(
+			z.object({
+				id: z.number(),
+				name: z.string(),
+				purpose: InvitationPurpose,
+				createdBy: z.string(),
+				createdAt: z.number(),
+				expiresAt: z.number(),
+				state: z.enum(["open", "used", "revoked", "expired"]),
+			}),
+		),
+		z.object({ revoked: z.boolean() }),
+	]),
 };

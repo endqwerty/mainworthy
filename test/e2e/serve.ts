@@ -15,6 +15,7 @@ const instance = start(
 		commit: null,
 		...SESSION_LIFETIMES,
 		proxy: null,
+		...(process.env.MAINWORTHY_PUBLIC_URL ? { publicUrl: process.env.MAINWORTHY_PUBLIC_URL } : {}),
 	},
 	(app, owner) => ({ ui, routes: archiveRoutes(app, owner), open: docsRoutes(VERSION) }),
 );

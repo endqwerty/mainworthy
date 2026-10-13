@@ -28,6 +28,16 @@ import type {
 	SinceInput,
 	TimelineInput,
 } from "./ops.ts";
+import type {
+	CredentialInput,
+	CredentialRow,
+	CredentialSummary,
+	InvitationCreated,
+	InvitationInput,
+	InvitationRow,
+	SessionInput,
+	SessionRow,
+} from "./people.ts";
 
 type In<S extends z.ZodType> = z.input<S>;
 type Rows = Record<string, unknown>[];
@@ -56,6 +66,18 @@ export type Api = {
 	check: { input: In<typeof CheckInput>; reply: { problems: Problem[]; counts: Record<string, number> } };
 	command: { input: In<typeof CommandInput>; reply: CommandFate };
 	admin: { input: In<typeof AdminInput>; reply: unknown };
+	/** `list`: `SessionRow[]`. `end`: `{ ended: true, current }`, where `current` says it was the caller's own. */
+	session: { input: In<typeof SessionInput>; reply: SessionRow[] | { ended: true; current: boolean } };
+	/**
+	 * `list`: `CredentialRow[]`. `passkey.begin`: the options for `navigator.credentials.create`. `passkey.add`:
+	 * `{ id, label }`. `remove`: `{ removed: true, sessionsEnded }`.
+	 */
+	credential: { input: In<typeof CredentialInput>; reply: CredentialRow[] | Record<string, unknown> };
+	/** `create`: `InvitationCreated`. `list`: `InvitationRow[]`. `revoke`: `{ revoked }`. */
+	invitation: {
+		input: In<typeof InvitationInput>;
+		reply: InvitationCreated | InvitationRow[] | { revoked: boolean };
+	};
 };
 export type OpName = keyof Api;
 
@@ -112,6 +134,10 @@ export type SessionInfo = {
 	can: string[];
 	mode: "local" | "server";
 	via: "token" | "cookie" | "local";
+	/** The id of the browser session the request came by (`via: "cookie"`), else null. It marks one row of `session list`. */
+	session: number | null;
+	/** How the caller signs in, when the caller is a person; null for an agent or a pipeline. */
+	credentials: CredentialSummary | null;
 	version: string;
 	projects: { key: string; name: string; seq: number; createdAt: number; policy: string; can?: string[] }[];
 };

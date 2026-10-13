@@ -42,12 +42,14 @@ const ConstraintError = z.object({ code: z.string().startsWith("SQLITE_CONSTRAIN
 type Table = { name: string; columns: string[]; primary: string[]; parents: string[] };
 
 /**
- * The tables an archive never holds: each keeps the hash of a secret that lets somebody in. An export leaves them
- * out and an import empties them, in this order, so a table comes before the one it refers to. This one list
- * serves both, and `test/architecture.test.ts` holds it to the schema: an identity table with a `hash` column
- * that is missing here fails.
+ * The tables an archive never holds: each keeps what lets somebody in. A token's, a session's and an
+ * invitation's row holds the hash of a secret; a credential's holds a password's hash or a passkey's public key;
+ * `passkey_users` holds the handle a person's passkeys are filed under. An export leaves them out and an import
+ * empties them, in this order, so a table comes before the one it refers to. This one list serves both, and
+ * `test/architecture.test.ts` holds it to the schema: a table of identity that is neither listed here nor one
+ * of the three an archive is meant to hold fails there.
  */
-export const UNEXPORTED: readonly string[] = ["sessions", "tokens"];
+export const UNEXPORTED: readonly string[] = ["sessions", "credentials", "invitations", "passkey_users", "tokens"];
 
 /** The row counts describe exported data, excluding migration metadata, credentials and the search index. */
 export type ArchiveCounts = { rows: number; tables: Record<string, number> };
@@ -117,7 +119,7 @@ function discoverTables(db: Db): Table[] {
 /**
  * Streams a whole migrated instance as NDJSON inside one consistent read snapshot. Rows follow primary keys;
  * JSON-typed TEXT remains text, and SQLite serializes integers exactly, including values outside JS's safe range.
- * Tokens and sessions never travel because they are credentials (`UNEXPORTED`). The FTS index is omitted and
+ * Tokens, sessions, passwords, passkeys and invitations never travel (`UNEXPORTED`). The FTS index is omitted and
  * rebuilt during import. The header names the archive version, not the schema version (`ARCHIVE_VERSION`).
  * Invalid UTF-8 in stored TEXT is refused because replacing bytes would make the archive lossy.
  * Chunks contain whole lines and are at most about 64 KiB, except for a single larger row. The synchronous

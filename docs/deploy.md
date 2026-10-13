@@ -36,6 +36,7 @@ sending the token itself.
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. Same form. The session cookie is given this age. |
 | `MAINWORTHY_TRUSTED_PROXY` | not set | The addresses the proxy in front connects from: addresses and ranges, separated by commas (`10.0.1.0/24, 2001:db8::/32, 203.0.113.9`). Set it together with the next variable, or neither: one without the other stops the start with a line that says which is missing, and so does an entry that is not an address or a range. See "The limit on failed sign-ins". |
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | not set | The header in which that proxy writes the address of the visitor, for example `cf-connecting-ip`. It is read only from a peer `MAINWORTHY_TRUSTED_PROXY` names, and must hold exactly one address. |
+| `MAINWORTHY_PUBLIC_URL` | not set | The address people open the instance at, as they type it: `https://mainworthy.example`. A passkey belongs to the host name in it, and an invitation link starts with it. Write https and a host name, or `http://localhost:<port>` on a developer's machine. An IP address, plain http anywhere else, a path or a query stops the start with a line that names the variable, because no browser makes a passkey there. Not set: the instance has no passkeys, people sign in with a name and a password or with a token, and `mainworthy invite` prints a link without a host. The server never takes this address from a request's `Host`. |
 | `MAINWORTHY_MODE` | `server` | `server`: every request needs a token. `local` (the default outside a container, on loopback): the browser on the same machine is the owner with no step. Local mode is for that machine only. The server checks what it can see: the connection comes from a loopback address, the `Host` is a loopback name, and the request carries none of the headers a proxy or a tunnel adds; a request that fails one of these needs a token. It cannot see through a relay that passes bytes on unchanged from this machine (`ssh -L`, `socat`, a port forward that adds no header): through one, anyone who reaches the relay is the owner. Never expose a local-mode port that way. To reach an instance from elsewhere, run it in `server` mode. |
 | `MAINWORTHY_COMMIT` | empty | The commit the build was made from, which `/healthz` reports as `commit` with no sign-in. Exactly 40 lower-case hexadecimal characters, else it counts as not set; the server then reads `SOURCE_COMMIT` (Coolify sets it on the running container), and reports `null` when neither holds a commit. The image takes it as a build argument: `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`, or `docker build --build-arg MAINWORTHY_COMMIT=$(git rev-parse HEAD) .`. Without it a plain build reports `null`. |
 
@@ -454,16 +455,82 @@ more than 512 characters that an earlier build accepted is refused everywhere af
 and at sign-in, whether or not the variable still holds it; the server cannot tell a token's length from its
 stored hash, so no start says so. Set a new value.
 
+## People sign in as themselves
+
+Since 2026-10-13 a person signs in with a name and a password or with a passkey, and gets there through a link
+an admin hands them, because Mainworthy sends no mail (decision 0016). A token still signs a browser in, and the
+owner keeps theirs. What the first start of the new build does by itself:
+
+- It adds the tables `credentials`, `invitations` and `passkey_users` and a column to `sessions`, after writing
+  a copy of the database beside it (`mainworthy.db.v<N>.bak`, `N` being the version it had).
+- Tokens and sessions are untouched: nobody is signed out.
+
+What you do once:
+
+- **Set `MAINWORTHY_PUBLIC_URL`** to the address people open the instance at, and start it again. For the
+  instance on Coolify that is `https://mainworthy.com`; `compose.coolify.yaml` passes the variable on. Without
+  it nobody can register a passkey and an invitation link has no host.
+- **Give yourself a password or a passkey**, if you want one beside the owner token:
+  `mainworthy invite new <your name>` as the owner prints a link for yourself. The owner token keeps working
+  whatever else you sign in with, and the last one is still not revoked.
+
+### Inviting a person
+
+```
+export MAINWORTHY_URL=https://mainworthy.example MAINWORTHY_TOKEN=<an admin's token>
+mainworthy invite new robin --can read,produce,answer --project web     # prints the link once
+mainworthy invite list                                                  # never shows a link
+mainworthy invite revoke 3
+```
+
+- The link is `<MAINWORTHY_PUBLIC_URL>/invite#<code>`. It is printed once and only the SHA-256 of the code is
+  stored, so copy it when it is printed. The code is after the `#`, which a browser does not send, so it
+  reaches no proxy's log.
+- It works once, for three days (`--expires 12h`, `2w`; at most `30d`). A new invitation for the same person
+  replaces the one before it.
+- With no `--can`, a new person may do everything, as a new person's token may. `--project` limits the grant to
+  one project.
+- Whoever administers and is a person invites a new person. An agent that holds `admin` invites nobody.
+- The person opens the link and chooses a password of 12 characters or more, registers a passkey, or both. The
+  page that takes the link is part of the web UI and arrives with the pull request after this one. Until then
+  an invitation is accepted with `POST /api/login` (`{ "invitation": "<code>", "password": "..." }`).
+
+### A lost password or passkey
+
+`mainworthy invite new <name>` for a person who exists makes a recovery link. That person makes it for
+themselves, or the owner makes it; another admin's word is not enough to become somebody. When the link is
+accepted, every password and passkey the person had stops working and every session of theirs ends. Until then
+nothing of theirs changes, so a link that is never used locks nobody out. Their tokens are not touched:
+`mainworthy token revoke <id>` ends those.
+
+A person removes one of their own ways of signing in (the operation `credential`, `do: "remove"`), and the
+last one they have stays.
+
+### What a passkey is tied to
+
+A passkey belongs to one host name: the one in `MAINWORTHY_PUBLIC_URL` when it was registered. One made at
+`https://mainworthy.com` does not sign in at another name of the same instance, such as its tailnet name;
+there people use a password or a token. If you change the variable to another host name, the passkeys made
+under the old one stay stored and no browser offers them: people sign in with a password and register again.
+
+### What it costs
+
+A password is hashed with argon2id, which takes 64 MiB and about a tenth of a second on purpose. The server
+hashes two at a time and lets thirty-two wait, so leave the container 130 MiB above what it otherwise uses.
+
 ## Backup and restore
 
 The data is `/data/mainworthy.db` (with `-wal` and `-shm` beside it while running).
 
 - **Backup:** `mainworthy export --out /backup/mainworthy-$(date +%F).ndjson.gz` writes every fact, decision and
-  document as text, from a consistent snapshot, while the server runs. Tokens and sessions are not exported.
+  document as text, from a consistent snapshot, while the server runs. Tokens, sessions, passwords, passkeys and
+  invitations are not exported: an archive holds nothing that signs somebody in.
 - **Restore:** start an empty instance, run `mainworthy import <file>` before creating any token, then restart the
   server. The import replaces the instance's first rows, the owner's token among them, so the token you imported
   with stops working and every browser is signed out. The restart takes the owner's token from
-  `MAINWORTHY_OWNER_TOKEN`, or, when that is not set, generates one and prints it once in the log. A test imports
+  `MAINWORTHY_OWNER_TOKEN`, or, when that is not set, generates one and prints it once in the log. The people
+  and what they may do came with the archive; their passwords and passkeys did not. As the owner, run
+  `mainworthy invite new <name>` for each person, and hand each the link. A test imports
   into an empty instance and compares every table (`src/server/transfer/transfer.test.ts`). An archive names the
   version of what it holds, which changes only when an exported table does, so one taken before an upgrade that
   added other tables still imports (`test/sessions.test.ts` imports one from the build before sessions).

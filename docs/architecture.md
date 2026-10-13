@@ -63,6 +63,7 @@ an operation named like a shortcut (`createCase`, `closeRun`) appears.
 | Decide | `decide` (answer a question, or withdraw a decision) |
 | Read | `inbox` · `get` · `find` · `impact` · `since` · `gate` · `history` · `timeline` · `check` · `command` |
 | Administer | `admin` (projects, actors, grants, tokens) |
+| Sign in as yourself | `session` (your browser sessions: list, end) · `credential` (your password and passkeys: list, register a passkey, remove) · `invitation` (an admin invites a person with a link) |
 
 `invoke` does the same things for every operation: check that the caller may run it, parse the input at the
 boundary, and for a write, open a transaction, give the command the project's next **sequence number**, run it, record the
@@ -91,6 +92,12 @@ A pipeline holds `read` and `record` at most, whatever its grant says: it cannot
 plan under any policy, because it cannot call the operations that do (`heldCapabilities` in `src/core/kinds.ts`;
 decision 0014). The caller is refused before the operation checks its input. `grant.set` and `grant.remove` are the one way a
 grant changes; a new token for an actor that exists changes nothing it may do.
+
+`session` and `credential` ask for no capability. Their need is `self`: whoever is signed in runs them, a person
+or an agent, with whatever grants, on what is their own. A person who holds `admin` on every project may also
+list and end what is somebody else's, and one function decides that for every such operation (`mayActFor` in
+`src/server/identity/identity.ts`; a test names the operations and where the decision is made). A pipeline is
+refused: its token reaches `report` and `gate` and nothing else.
 
 A caller that holds no grant on a project is told what it would be told of a project that does not exist, word
 for word, in an operation and on the change stream: a refusal that named the missing capability would confirm
@@ -136,6 +143,39 @@ session ends when its browser signs out, after 14 days without use, after 90 day
 that opened it is revoked or reaches its end, and when its actor is forgotten. `POST /api/logout` commits the end before it answers,
 so a copy of the cookie stops working with it. Signing in and out are routes of the HTTP surface and not
 operations: nobody is signed in yet, and the registry runs nothing for a caller it cannot name.
+
+A person signs in as themselves with a name and a password or with a passkey, and the first time with an
+invitation, the link an admin hands them since there is no mail (decision 0016). These are further bodies of
+`POST /api/login`, beside the token, in `src/surfaces/signin.ts`, with `POST /api/login/challenge` for a
+passkey's challenge and `POST /api/account/password` to set a password. They are routes and not operations for
+one more reason: the registry keeps a digest of each request that carries a command id, and a password must
+not reach it. A test fails when an operation's input has a field named like a password. A refused sign-in is
+answered 401 and one sentence whatever was wrong, and the reason goes to the log as a code, so a reply does not
+say which names exist. A name with no password is checked against a hash nobody's password matches, so the
+refusal takes as long.
+
+What a person signs in with is a row of `credentials`: a password as an argon2id string (`Bun.password`), a
+passkey as its public key and counter. A row is one secret and is never changed into another, and a session
+rests on the row or the token that opened it, never on both. Removing a credential, or changing a password,
+ends the sessions that rested on it; the session that changed the password moves to the new row. An
+invitation and a session cookie are stored as SHA-256 hashes, like a token. None of these tables is in an
+archive.
+
+Every way in has two halves (`src/server/identity/people.ts`). Outside the write gate the proof is judged
+against committed rows: a password is hashed on another thread, two at a time, and a passkey's signature is
+checked. Under the gate, in one transaction, everything is read and judged again before anything is written,
+and it is read by what it holds and never by a row's number alone: a person by name, a password by its stored
+hash, a passkey by its credential id, key and counter, an invitation by the hash of its code. Between the two
+halves a password can change, a person can be forgotten and an archive can be imported, after which a row's
+number belongs to somebody else.
+
+The passkey verifier (`src/server/identity/webauthn.ts`) is hand-written, parses no CBOR and keeps nothing.
+The code around it keeps what it must (the list above `verifyRegistration` there). A challenge lives in memory
+for five minutes with what it was issued for, and the commit that stores the passkey or opens the session
+spends it. A credential id is unique on the instance for good, by an index. The person is the one the stored
+row names, and the user handle the browser returns must be theirs. The counter is compared again in the
+commit. The relying party comes from `MAINWORTHY_PUBLIC_URL` and never from a request's `Host`; without the
+variable the instance has no passkeys.
 
 Being used is not a write. `admit` notes in memory when a token or a session was last used and from which
 address, and the server writes the notes once a minute and when it stops (`src/server/identity/uses.ts`). The
@@ -340,12 +380,14 @@ so a 500 carries every header but `Strict-Transport-Security` and `Cross-Origin-
 ## Rules the code enforces on itself
 
 `test/architecture.test.ts` fails the check when: a module imports up the map (the suite reaching into
-decisions); a module runs SQL on a table another module owns (every one of the 38 tables has one owner, and a
+decisions); a module runs SQL on a table another module owns (every one of the 42 tables has one owner, and a
 read of someone else's data goes through their functions); anything but the kernel talks to SQLite; anything
 but the decision machinery mints a witness; a writer that undoes a withdrawn decision is called from anywhere
 but a kind handler; the core imports I/O; the web UI imports the server; a declared SQL statement does not
 prepare against the schema; the error codes of a reply are written out a second time outside `src/core/api.ts`;
-or the agent surface grows past ten tools. `test/integrity.test.ts` holds one test
+a table of identity other than `orgs`, `actors` and `grants` could travel in an archive; an operation that needs
+`self` decides by itself whose things it touches; an operation's input has a field named like a password; or the
+agent surface grows past ten tools. `test/integrity.test.ts` holds one test
 per thing that must never happen (a green gate with nothing proven, an agent's result counted as a pipeline's, a
 conflict used to skip a review), each found by an independent review. `test/budgets.test.ts` fails the check
 when a hot path gets slow.
