@@ -94,6 +94,25 @@
 .queue-evidence .hintbox {
 	margin: 8px 0;
 }
+/* A settled answer reads down the pane: its name, who gave it, the reason, the button that withdraws it. It is
+   not a row of the timeline (`.ev`), whose first column is as wide as a glyph. */
+.queue-decision {
+	margin: 6px 0;
+	padding: 10px 0 4px;
+	border-top: 1px solid var(--line2);
+	font-size: 12.5px;
+}
+.queue-decision b {
+	display: block;
+	font-size: 14px;
+}
+.queue-decision p {
+	overflow-wrap: anywhere;
+}
+.queue-decision .out {
+	width: fit-content;
+	margin-top: 10px;
+}
 .queue-answers {
 	padding: 8px 24px 12px;
 	display: grid;
