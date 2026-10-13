@@ -173,8 +173,8 @@ How the instance on the home server was set up. It takes about five minutes thro
 dashboard. This page writes the tailnet's name as `example.ts.net` and the node's tailnet address as
 `100.64.0.10`; the real ones are in the home lab's notes.
 
-1. **A deploy key.** The repository is private. Add a read-only deploy key to it on GitHub and give Coolify the
-   private half (Security → Private Keys).
+1. **A deploy key.** The repository was private then (it is public since 2026-10-13, and a public one needs no
+   key). Add a read-only deploy key to it on GitHub and give Coolify the private half (Security → Private Keys).
 2. **New resource → Docker Compose**, from this repository with that key: compose file `/compose.coolify.yaml`
    (the instance's own file, with the Tailscale sidecar; `/compose.yaml` is the plain one), the branch to follow
    (`main`).
