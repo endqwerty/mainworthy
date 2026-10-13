@@ -18,6 +18,7 @@
     "test/http.test.ts": 12433,
     "test/e2e/conflict-merge.test.ts": 11758,
     "test/e2e/execution.test.ts": 10253,
+    "test/e2e/phone.test.ts": 10000,
     "test/e2e/round5.test.ts": 9744,
     "test/e2e/session-and-keys.test.ts": 9272,
     "test/e2e/recovery.test.ts": 8827,

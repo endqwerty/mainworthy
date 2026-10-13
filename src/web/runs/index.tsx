@@ -33,7 +33,7 @@ function RunListing() {
 	const open = (run: string) => navigate(routeUrl({ project, screen: "runs", ref: run }));
 	const active = () => !overlayOpen && !planning;
 	useBindings([
-		{ key: "n", label: "Plan run", when: active, handler: () => setPlanning(true) },
+		{ key: "n", label: "Plan run", list: true, when: active, handler: () => setPlanning(true) },
 		{
 			key: "j",
 			label: "Next run",

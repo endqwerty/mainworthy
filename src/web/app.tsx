@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { z } from "zod";
 import type { SessionInfo } from "../core/api.ts";
 import { DOC_PAGES, type DocSlug, docUrl, SCREEN_DOCS } from "../core/docs.ts";
@@ -10,6 +11,7 @@ import { deviceSession, sessionPersonKey, setDevicePerson, suspendDeviceSession 
 import { useBindings, useKeyboard, useKeyRegistry } from "./lib/keys.ts";
 import { navigate, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
 import { signOut } from "./lib/signin.ts";
+import { PhoneBar, usePhoneShell } from "./phone.tsx";
 import { QueueScreen } from "./queue/index.tsx";
 import { RunsScreen } from "./runs/index.tsx";
 import { SettingsScreen } from "./settings/index.tsx";
@@ -210,6 +212,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 	}, [signingOut]);
 	const [inInput, setInInput] = useState(false);
 	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+	const { phone, pane, showList, menu, setMenu, listOnly } = usePhoneShell(route, palette !== null || help);
 	const suiteOpen = route.screen === "suite" || route.screen === "case";
 	useEffect(() => {
 		const change = () =>
@@ -225,7 +228,9 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 		};
 	}, []);
 	const registry = useKeyRegistry();
-	useKeyboard();
+	// A phone on which the detail of the selected row is covered: only the actions of the list run, by a key
+	// or from the palette (decision 0018).
+	useKeyboard(listOnly);
 	useEvents(project, setStatus);
 	const folders = useQueryOp({ project, op: "find", input: { in: "folders" } });
 	const tags = useQueryOp({ project, op: "find", input: { in: "tags" }, enabled: suiteOpen });
@@ -237,20 +242,27 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 	const go = (screen: Screen) => navigate(routeUrl({ project, screen }));
 	const globalKeys = useMemo(
 		() => [
-			{
-				key: "[",
-				label: "Collapse / expand sidebar",
-				when: () => palette === null && !help,
-				handler: () => setSidebarCollapsed((value) => !value),
-			},
+			// A phone has no sidebar to collapse: the Menu button draws it over the pane.
+			...(phone
+				? []
+				: [
+						{
+							key: "[",
+							label: "Collapse / expand sidebar",
+							when: () => palette === null && !help,
+							handler: () => setSidebarCollapsed((value) => !value),
+						},
+					]),
 			...[...navigation, settings].map((item) => ({
 				key: item.key,
 				label: `Go to ${item.label}`,
+				list: true,
 				handler: () => navigate(routeUrl({ project, screen: item.screen })),
 			})),
 			{
 				key: "mod+k",
 				label: "Jump to or run",
+				list: true,
 				handler: () => {
 					setHelp(false);
 					if (palette) closePalette();
@@ -260,11 +272,13 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 			{
 				key: "g d",
 				label: "Docs for this screen",
+				list: true,
 				handler: () => openDocs(screenDocs[route.screen]),
 			},
 			{
 				key: "?",
 				label: "All keys",
+				list: true,
 				handler: () => {
 					setPalette(null);
 					setHelp(true);
@@ -273,6 +287,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 			{
 				key: "escape",
 				label: "Close palette / keys",
+				list: true,
 				hidden: true,
 				when: () => palette !== null || help,
 				handler: () => {
@@ -282,9 +297,9 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 			},
 			// Registered only where there is a session to end, so the palette and the keys sheet do not offer it
 			// to the owner of a machine in local mode.
-			...(account ? [{ key: "g x", label: "Sign out", handler: leave }] : []),
+			...(account ? [{ key: "g x", label: "Sign out", list: true, handler: leave }] : []),
 		],
-		[project, route.screen, palette, help, openPalette, closePalette, account, leave],
+		[project, route.screen, palette, help, openPalette, closePalette, account, leave, phone],
 	);
 	useBindings(globalKeys);
 	useEffect(() => {
@@ -325,14 +340,38 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				overlayOpen: palette !== null || help,
 			}}
 		>
-			<div id="app" className={sidebarCollapsed ? "sidebar-collapsed" : ""}>
+			<div
+				id="app"
+				className={sidebarCollapsed && !phone ? "sidebar-collapsed" : ""}
+				{...(phone ? { "data-pane": pane, "data-menu": menu ? "open" : "closed" } : {})}
+				// On a phone the palette and the sheet of keys cover the whole app, and nothing under them takes
+				// the focus or a key. (On the desktop the field of the palette holds the focus.)
+				inert={phone && (palette !== null || help)}
+			>
+				{phone && (
+					<PhoneBar
+						title={
+							[...navigation, settings].find(
+								(item) => item.screen === (route.screen === "case" ? "suite" : route.screen),
+							)?.label ?? ""
+						}
+						pane={pane}
+						menu={menu}
+						onMenu={() => setMenu(!menu)}
+						onBack={showList}
+						onActions={() => openPalette()}
+					/>
+				)}
+				{menu && (
+					<button type="button" className="menu-backdrop" aria-label="Close menu" onClick={() => setMenu(false)} />
+				)}
 				<aside id="side">
 					<div className="brand">
 						<button
 							type="button"
 							className="logo"
-							aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-							onClick={() => setSidebarCollapsed((value) => !value)}
+							aria-label={phone ? "Close menu" : sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+							onClick={() => (phone ? setMenu(false) : setSidebarCollapsed((value) => !value))}
 						>
 							<Mark />
 						</button>
@@ -533,7 +572,9 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 					</div>
 				</footer>
 			</div>
-			{palette && <Palette project={project} options={palette} close={closePalette} />}{" "}
+			{palette && (
+				<Palette project={project} options={palette} close={closePalette} typing={!phone} listOnly={listOnly} />
+			)}{" "}
 			{help && (
 				<div className="overlay" data-overlay="help">
 					<button type="button" className="overlay-backdrop" aria-label="Close keys" onClick={() => setHelp(false)} />
@@ -574,10 +615,19 @@ function Palette({
 	project,
 	options,
 	close,
+	typing,
+	listOnly,
 }: {
 	project: string;
 	options: PaletteOptions;
 	close: (chosen?: boolean) => void;
+	/**
+	 * Whether the field takes the focus as the palette opens. On a phone it does not: the keyboard that comes
+	 * with the focus would cover the actions, which a finger chooses from the list.
+	 */
+	typing: boolean;
+	/** A phone that shows the list: only the actions of the list are offered (`Binding.list`). */
+	listOnly: boolean;
 }) {
 	const [text, setText] = useState("");
 	const [cursor, setCursor] = useState(0);
@@ -591,7 +641,7 @@ function Palette({
 	const actions =
 		options.items ??
 		registry
-			.filter((item) => !item.hidden)
+			.filter((item) => !item.hidden && (!listOnly || item.list))
 			.map((item) => ({ id: item.key, label: item.label, detail: item.key, handler: item.handler }));
 	const cases =
 		found.data?.items
@@ -643,18 +693,32 @@ function Palette({
 	const choose = (index: number) => {
 		const item = items[index];
 		if (item) {
-			close(true);
+			// On a phone the app under the palette is inert until the palette is gone from the page, so it is
+			// gone before the action runs: New case puts the caret in the editor.
+			if (typing) close(true);
+			else flushSync(() => close(true));
 			item.handler();
 		}
 	};
+	// On a phone the palette itself takes the focus, since its field does not: a key then goes to the palette
+	// and not to what is under it.
+	const sheet = useRef<HTMLElement | null>(null);
+	useEffect(() => {
+		if (!typing) sheet.current?.focus();
+	}, [typing]);
 	return (
 		<div className="overlay" data-overlay="palette">
 			<button type="button" className="overlay-backdrop" aria-label="Close palette" onClick={() => close()} />
-			<section className="pal" aria-label={options.title ?? "Command palette"}>
+			<section
+				className="pal"
+				aria-label={options.title ?? "Command palette"}
+				ref={sheet}
+				{...(typing ? {} : { tabIndex: -1 })}
+			>
 				<input
 					className="palette-input"
 					ref={(element) => {
-						element?.focus();
+						if (typing) element?.focus();
 					}}
 					aria-label={options.title ?? "Jump to or run"}
 					placeholder={options.title ?? "Jump to a ref, search cases, or run an action…"}
