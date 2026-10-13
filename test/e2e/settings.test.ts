@@ -80,6 +80,7 @@ async function fixture({
 import { z } from "zod";
 import { Policy } from "../../src/core/kinds.ts";
 import { PRESET_GUIDE, PRESET_SUMMARY } from "../../src/core/policy-guide.ts";
+import { PRESETS } from "../../src/core/presets.ts";
 
 (browserAvailable ? test : test.skip)(
 	"settings records policy decisions, scopes and revokes tokens, and switches projects",
@@ -208,6 +209,33 @@ import { PRESET_GUIDE, PRESET_SUMMARY } from "../../src/core/policy-guide.ts";
 			await page.waitForURL("**/p/scratch/settings");
 			await page.getByRole("option", { name: "Connect", exact: true }).click();
 			expect(await page.locator(".settings-command").last().innerText()).toBe(`${server.url}/mcp`);
+			// A preset's name over other clauses is a custom policy: no preset's help, and no switch between two presets.
+			const proposed = await server.api("propose", {
+				edits: [
+					{
+						op: "policy",
+						preset: "loose",
+						clauses: PRESETS.loose.clauses.map((clause) =>
+							clause.id === "finding-any" ? { ...clause, ask: { ...clause.ask, reason: "required" as const } } : clause,
+						),
+					},
+				],
+			});
+			const asked = (await server.api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
+			if (!asked) throw new Error("The custom policy was not asked about");
+			await server.api("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "accept" } });
+			await page.goto(`${server.url}/p/scratch/settings`);
+			await page.getByRole("heading", { name: "custom", exact: true }).waitFor();
+			expect(await inForce.innerText()).toBe(
+				"This project has a custom policy. Its clause table says who answers, and an instance admin can read it.",
+			);
+			expect(await page.getByRole("switch").count()).toBe(0);
+			expect(await page.locator("#detail .settings-guide th[aria-current]").count()).toBe(0);
+			await page.getByLabel("Policy preset").selectOption("loose");
+			await page.getByText(PRESET_SUMMARY.loose, { exact: true }).waitFor();
+			expect(await page.getByRole("switch", { name: "Agent edits need a person", exact: false }).isChecked()).toBe(
+				false,
+			);
 			expect(view.errors).toEqual([]);
 			expect(view.dialogs).toEqual([]);
 		} finally {
