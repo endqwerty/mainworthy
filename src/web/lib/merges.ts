@@ -86,8 +86,8 @@ const CaseStamp = z.object({ ref: z.string(), version: z.number() });
 
 /**
  * The rows the page holds for a case once it has read `read`, a version the server recorded: `read`, unless the
- * page already holds that version or a later one. What it held before is from before the write. Its own read of
- * the case after the write can come back first, and may by then hold more than `read`.
+ * page already holds that version or a later one. What it holds may be from before the write. It may also be
+ * the page's own read of the case after the write, which can come back first and hold more than `read`.
  */
 export function caseHeld<Row extends Record<string, unknown>>({
 	held,

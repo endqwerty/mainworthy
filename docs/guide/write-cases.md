@@ -118,6 +118,9 @@ The current version stays current while you resolve the conflict.
 Resolving submits a new proposal. It still follows the policy for ordinary edits.
 If someone changes the case again meanwhile, the new edit merges or opens another conflict.
 
+The card stays until the page has read the merged version, in a second tab of yours as well, so the case and the editor show it from then on.
+If that read fails, the card stays and the status line says so: choose "Resolve conflict" again, or press `e` in a second tab.
+
 ## Review under a stricter policy
 
 Under `loose`, ordinary case proposals take effect at once.
