@@ -85,8 +85,27 @@ const projectLabel = (entry: { key: string; name: string }): string =>
 /** The first letter of a name as it is read: a flag or a family is one, though it is several code points. */
 const initial = (name: string): string =>
 	[...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(name)][0]?.segment ?? "";
-/** Where the browser keeps that the sidebar is collapsed. With the sidebar open, nothing is kept. */
+/**
+ * Where the browser keeps that the sidebar is collapsed. With the sidebar open, nothing is kept. A browser can
+ * refuse its store (it is full, or switched off for the site): the sidebar then collapses and opens for the page
+ * that is open, and a reload finds it open.
+ */
 const SIDEBAR_KEY = "mainworthy:sidebar";
+function sidebarKept(): boolean {
+	try {
+		return localStorage.getItem(SIDEBAR_KEY) === "collapsed";
+	} catch {
+		return false;
+	}
+}
+function keepSidebar(collapsed: boolean): void {
+	try {
+		if (collapsed) localStorage.setItem(SIDEBAR_KEY, "collapsed");
+		else localStorage.removeItem(SIDEBAR_KEY);
+	} catch {
+		// Not kept: the page goes on with the choice it was given.
+	}
+}
 function theme(): void {
 	const chosen = localStorage.getItem("mainworthy:theme");
 	document.documentElement.dataset.theme =
@@ -245,11 +264,8 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 	}, [signingOut]);
 	const [inInput, setInInput] = useState(false);
 	// Collapsed or open is this browser's choice, as the theme is: a reload and the next visit find it as it was.
-	const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === "collapsed");
-	useEffect(() => {
-		if (sidebarCollapsed) localStorage.setItem(SIDEBAR_KEY, "collapsed");
-		else localStorage.removeItem(SIDEBAR_KEY);
-	}, [sidebarCollapsed]);
+	const [sidebarCollapsed, setSidebarCollapsed] = useState(sidebarKept);
+	useEffect(() => keepSidebar(sidebarCollapsed), [sidebarCollapsed]);
 	const sidebarAction = sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar";
 	const { phone, pane, showList, menu, setMenu, listOnly } = usePhoneShell(route, palette !== null || help);
 	const suiteOpen = route.screen === "suite" || route.screen === "case";

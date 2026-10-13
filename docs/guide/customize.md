@@ -91,9 +91,9 @@ To make room for what you are reading, collapse the sidebar: press the button be
 
 The pane on the right takes the width the sidebar gave up. That is the pane where you read a case, a question, a run or a change. The list keeps its width. In a window narrower than 760 px the list is above the other pane, and both get wider.
 
-Press the button or <kbd>[</kbd> again to open the sidebar. The choice stays in this browser, so a reload and your next visit find the sidebar as you left it.
+Press the button or <kbd>[</kbd> again to open the sidebar. The choice stays in this browser, so a reload and your next visit find the sidebar as you left it. A browser that stores nothing for the site still collapses the sidebar, and opens with it open.
 
-In the Suite, <kbd>z</kbd> widens the case further: the list narrows to 340 px and the case takes the rest. The two work together.
+In the Suite, <kbd>z</kbd> widens the case further: the list narrows to 340 px and the case takes the rest. The two work together. In a window narrower than 760 px <kbd>z</kbd> changes nothing, because the case is under the list.
 
 A phone has no strip. There, **Menu** opens the sidebar over the pane ([Keyboard](./keyboard.md)).
 
