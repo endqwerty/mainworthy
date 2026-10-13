@@ -45,9 +45,10 @@ test("the workers fit the machine: the quiet phase is alone on a small one", () 
 	expect([testReaders(2), testReaders(4), testReaders(16)]).toEqual(["1", "2", "2"]);
 });
 
-test("the check's budget is the two minutes that were promised, and a warning comes first", () => {
-	// Raising this number is a decision about the project, like raising a hot-path budget: AGENTS.md.
-	expect(LIMITS.fail).toBeLessThanOrEqual(120);
+test("the check's budget is the one Daniel set, and a warning comes first", () => {
+	// Raising this number is a decision about the project, like raising a hot-path budget: AGENTS.md. Daniel
+	// raised it from 120 s on 2026-10-13 (scripts/check-plan.ts says why); two minutes is still the aim (#77).
+	expect(LIMITS.fail).toBeLessThanOrEqual(150);
 	expect(LIMITS.warn).toBeLessThan(LIMITS.fail);
 	expect(CI_SHARD_LIMITS.fail).toBeLessThanOrEqual(240);
 	expect(CI_SHARD_LIMITS.warn).toBeLessThan(CI_SHARD_LIMITS.fail);

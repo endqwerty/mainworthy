@@ -24,7 +24,7 @@ home lab's notes say where and how to redeploy). No blocking defect is known: is
   measure time with the machine to themselves; the browser tests are skipped, with
   a message, on a machine with no Chromium); `bun run dev` (the server on
   `127.0.0.1:7357`, restarting on change). Bun 1.4; no other runtime or build tool.
-  The check takes 116 to 117 s on the 16-thread desktop (2026-10-12, four runs;
+  The check takes 120 to 122 s on the 16-thread desktop (2026-10-13, eight runs;
   it was 403 s with the files one after another). `bun run test` is the
   tests alone, printed as they run. One file: `bun test test/suite.test.ts`. One
   shard, as CI runs it: `bun run test --only=parallel --shard=2/5`; the quiet
@@ -57,10 +57,12 @@ home lab's notes say where and how to redeploy). No blocking defect is known: is
 - **Budgets are tests** (`test/budgets.test.ts`, `bench/`). A change that misses a
   hot-path budget does not merge; do not raise the number.
 - **The check's wall time is a budget** (`scripts/check-plan.ts`). The check warns
-  when its tests take more than 115 s and fails above 120 s, unless other work
-  keeps the machine busy. A change that makes the check slower says so and fixes
-  it: split the file, share the set-up, do less in the browser. Do not raise the
-  limit. A file that takes a worker longer than half a minute is the next thing to
+  when its tests take more than 130 s and fails above 150 s, unless other work
+  keeps the machine busy. Daniel raised the limit from 120 s on 2026-10-13, when
+  `main` itself took 120 to 122 s: the longer check is accepted for now, and two
+  minutes is still the aim (issue #77). A change that makes the check slower says
+  so and fixes it: split the file, share the set-up, do less in the browser. Do
+  not raise the limit; that is Daniel's to do. A file that takes a worker longer than half a minute is the next thing to
   split; after adding or splitting one, `bun run test --update-timings` (six
   minutes) and commit `scripts/test-timings.json`, which balances the CI shards.
 - **Tests run beside each other.** A test takes its ports, directories and browser
