@@ -6,7 +6,8 @@
 `docs/product-design.md` and decision 0008 describe the product. The MVP is the thin slice "one red build, three
 producers" (design section 9), built in one night on the stack of decision 0010. This record lists what the slice
 contains, each place the code departs from the design and why, and what was left out. Everything left out has an
-issue in the milestone `Backlog to 1.0`, and #64 lists them all on one page.
+issue in the milestone `Backlog to 1.0`, and #64 lists them all on one page. (Since 2026-10-13 that milestone is
+the seven milestones M1 to M7 of `docs/roadmap.md`.)
 
 Bend rule check (decision 0007): nothing here bends P0, P1 on a hot path, P2 or P3. The cuts are missing things,
 not the same things done worse.

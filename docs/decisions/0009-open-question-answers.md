@@ -7,7 +7,8 @@
 The owner answered all 28 questions in `docs/open-questions.md` when they asked for
 the MVP. Their general rule: "we want flexibility, but that comes at a cost, so
 for an MVP we can build basics and increase flexibility and more options as we
-go." Every deferral below has a GitHub issue in the milestone `Backlog to 1.0`.
+go." Every deferral below has a GitHub issue in the milestone `Backlog to 1.0`
+(since 2026-10-13 the seven milestones M1 to M7 of `docs/roadmap.md`).
 
 ## Answers
 

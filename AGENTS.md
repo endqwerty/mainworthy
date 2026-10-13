@@ -13,8 +13,10 @@ Read [README.md](README.md) first, then `docs/product-vision.md`,
 
 The MVP is built (2026-10-12): TypeScript on Bun, one SQLite file, a React web UI
 (`docs/decisions/0010-stack.md`). What it contains and where it departs from the
-design: `docs/decisions/0012-mvp-scope-and-departures.md`. What is deferred: the
-GitHub milestone `Backlog to 1.0`. How it fits together: `docs/architecture.md`.
+design: `docs/decisions/0012-mvp-scope-and-departures.md`. What is left: the
+GitHub milestones M1 to M7, in the order they are meant to be worked
+(`docs/roadmap.md`; issue #64 lists every open issue on one page). How it fits
+together: `docs/architecture.md`.
 It runs on the owner's Coolify for their own use since 2026-10-12, at
 `https://mainworthy.com` since 2026-10-13 (`docs/deploy.md`; the home lab's notes
 say where and how to redeploy). This repository's CI reports to it since 2026-10-13 (issue #92).
@@ -213,6 +215,12 @@ is under the GitHub milestone `iOS app`.
   On the desktop `/tmp` is kept in memory and `test/budgets.test.ts` refuses it, so the export goes under
   `~/.cache`. To wait for another agent's test run: `pgrep -f '[t]est-worker'`; without the brackets pgrep
   finds the shell that runs it and the wait never ends (both on 2026-10-12, PR #97).
+- An issue has one milestone from the day it is filed (2026-10-13), and an `area:` label when it is about a
+  part of the product. The milestones M1 to M7 are in the order of `docs/roadmap.md`, and each one's
+  description says what belongs in it.
+  A test that fails by chance gets `flaky-test` and goes to M1. `decision` and `waiting-for-feedback` mark what
+  an agent cannot finish alone. Add the issue to its list in #64; a milestone is renamed or added in
+  `docs/roadmap.md` and #64 in the same change.
 - Scratch files stay out of the worktree: a log, a draft of a pull request, screenshots. `test/architecture.test.ts`
   reads every file in it, tracked or not, and fails when one holds the former name. On 2026-10-13 an agent's
   decision log under `.audit/` failed a nine-minute `--update-timings` run that way. `~/.cache` is the place.
