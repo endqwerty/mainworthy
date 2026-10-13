@@ -47,8 +47,8 @@ const exercise = (methods: string[] = ["human", "auto"]) => [
 ];
 const rows = <T = Record<string, unknown>>(sql: string, ...args: (string | number)[]): T[] =>
 	h.app.db.raw.query(sql).all(...args) as T[];
-const usePolicy = (preset: string) => {
-	h.call("propose", { edits: [{ op: "policy", preset }] });
+const usePolicy = (preset: string, unlinked?: "ask" | "track" | "create") => {
+	h.call("propose", { edits: [{ op: "policy", preset, ...(unlinked ? { unlinked } : {}) }] });
 	return decide(open("adopt"), { is: "accept" }, h.owner, { reason: "switch for the test" });
 };
 
@@ -1634,7 +1634,7 @@ describe("what a decision may change", () => {
 	});
 
 	test("withdrawing an older link decision leaves a newer decision's link alone", () => {
-		usePolicy("standard");
+		usePolicy("standard", "ask");
 		seed(3);
 		report({
 			target: { commit: "map00001" },
@@ -1789,7 +1789,7 @@ describe("what a decision may change", () => {
 		expect(rows("SELECT count(*) AS n FROM proposals")).toEqual(before);
 		expect(h.call<InboxReply>("inbox", { kind: "map" }).items).toHaveLength(1);
 		// Where the policy adopts them at once, the same answer creates and links.
-		usePolicy("standard");
+		usePolicy("standard", "ask");
 		expect(decide(open("map"), { is: "create" }).status).toBe("decided");
 		expect(rows("SELECT count(*) AS n FROM tests WHERE case_id IS NOT NULL")).toEqual([{ n: 1 }]);
 	});

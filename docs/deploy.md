@@ -255,8 +255,9 @@ the steps are kept below for an instance that has none.
    mainworthy actor list                                           # ci  github-actions  mainworthy  record
    ```
 
-   That token records results on `mainworthy` and reads its gate. It cannot read or change the suite, answer a
-   question, plan a run or administer, under any policy.
+   That token records results on `mainworthy` and reads its gate. It cannot read the suite, edit a case, answer
+   a question, plan a run or administer, under any policy. Where a project's policy creates a case for each test
+   with none (decision 0021), its reports add those cases; `mainworthy` tracks such tests and makes none.
 
    On the Coolify instance the commands ran inside the container, which already holds the owner token, so that
    token was copied nowhere: `docker exec <container> sh -c 'MAINWORTHY_TOKEN="$MAINWORTHY_OWNER_TOKEN" mainworthy …'`.
@@ -293,8 +294,11 @@ the steps are kept below for an instance that has none.
   one whose tests left nothing to upload, at its upload step (`if-no-files-found: error`). The `gate` job fails
   with it: its last step requires every shard's job to have succeeded. An attempt that uploaded files and no whole
   report is the newest attempt all the same, and `scripts/ci-gate.ts` refuses it as "no report".
-- **A test file with no case is one `map` question** under `standard`. The first two runs left 70 of them in the
-  queue. They do not block the gate.
+- **A test file with no case was one `map` question** under `standard` until 2026-10-13. The first two runs left
+  70 of them in the queue, and a day later 104 of its 105 open questions were these. They never blocked the
+  gate. `standard` now tracks such tests by rule, and what happens to them is the project's own choice
+  (`docs/guide/policy.md`, "Tests with no case"). A project made before that keeps the clauses it had and is
+  listed as `custom`: choose `standard` again in Settings, Policy, and the rule answers the open questions.
 - **A push to `main` reports too**, as the workflow runs on it.
 
 What can go wrong, and what the job does: the instance is down (its own Mainworthy, a warning); the instance is an

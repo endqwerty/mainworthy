@@ -101,7 +101,7 @@ The merged body is another proposal and still follows the adoption policy.
 
 ## Give an unlinked test a home
 
-An unlinked-test question asks how to keep a test that has no case.
+An unlinked-test question asks how to keep a test that has no case. A project asks it when its policy says "Ask in the queue" for tests with no case. Otherwise a rule tracks the tests or makes their cases, and you find its answers under "Settled". A rule leaves a file's question open in two cases: a person took the rule's answer back or answered against it, or, under `standard` with "Create a case for each test", an agent reported the tests and its new cases wait for a person. See [policy](./policy.md#tests-with-no-case).
 "Link to a case" makes future results count for the chosen case.
 "Create cases" creates one case per test and links each test to its case.
 It works where the policy adopts your new case by rule: under `loose`, and for a person
@@ -109,6 +109,14 @@ under `standard`. Where a person must adopt a new case, under `strict` or for an
 under `standard`, the answer is refused. Propose the cases, have them adopted, then
 answer with "Link to a case".
 "Track without a case" keeps the test without a case. The test still gates the build.
+
+To give every file the same answer, change the project's choice instead of answering each row.
+In Settings, Policy, choose "Track without a case" or "Create a case for each test" under
+"Tests with no case". The rule then answers every open question about a file at once.
+
+A link holds for the tests it names. A test that turns up later in the same file is a new
+question, and the earlier links stay. "Track without a case" is about the file as it was:
+the file is asked about again when its tests with no case change.
 
 These choices settle the mapping question. They do not turn a failed result into a pass.
 An already recorded result keeps its original basis. Link decisions affect later results.

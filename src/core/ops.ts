@@ -13,6 +13,7 @@ import {
 	MapAnswer,
 	PolicySettings,
 	SignoffAnswer,
+	Unlinked,
 } from "./kinds.ts";
 import { Automate, CaseBody, MethodKind } from "./model.ts";
 import { Obligation, TargetMatch, type Verdict } from "./runs.ts";
@@ -97,6 +98,8 @@ export const Edit = z.discriminatedUnion("op", [
 		preset: z.string().optional(),
 		clauses: z.array(Clause).optional(),
 		settings: PolicySettings.optional(),
+		/** The one setting a project admin changes without reading the others: what happens to a test with no case. */
+		unlinked: Unlinked.optional(),
 	}),
 ]);
 export type Edit = z.infer<typeof Edit>;
@@ -462,6 +465,9 @@ export const AdminInput = z.discriminatedUnion("do", [
 		key: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/),
 		name: z.string().max(120).optional(),
 		preset: z.string().optional(),
+		unlinked: Unlinked.optional().describe(
+			"What happens to a test with no case: ask, track or create. Absent: what the preset starts with.",
+		),
 		cmd,
 	}),
 	z.object({ do: z.literal("project.list") }),

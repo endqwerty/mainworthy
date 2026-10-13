@@ -59,7 +59,10 @@ async function fixture({
 			}
 		}, Boolean);
 		if (preset !== "loose") {
-			const proposed = await api("propose", { edits: [{ op: "policy", preset }] });
+			// These tests answer questions about tests with no case, so the project asks them, as `strict` does.
+			const proposed = await api("propose", {
+				edits: [{ op: "policy", preset, ...(preset === "strict" ? {} : { unlinked: "ask" as const }) }],
+			});
 			const q = (await api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
 			if (!q) throw new Error("Preset proposal question is missing");
 			const replies = await api("decide", {
@@ -78,7 +81,7 @@ async function fixture({
 }
 
 import { z } from "zod";
-import { Policy } from "../../src/core/kinds.ts";
+import { Policy, UNLINKED_HELP, UNLINKED_LABELS } from "../../src/core/kinds.ts";
 import { PRESET_GUIDE, PRESET_SUMMARY } from "../../src/core/policy-guide.ts";
 import { PRESETS } from "../../src/core/presets.ts";
 
@@ -136,10 +139,42 @@ import { PRESETS } from "../../src/core/presets.ts";
 				() => server.api("admin", { do: "policy.show", project: "scratch" }),
 				(reply) => Policy.parse(reply).preset === "strict",
 			);
+			// Under `strict` a person adopts every new case, so the rule that would make them is not offered.
+			const unlinked = page.getByLabel("Tests with no case", { exact: true });
+			await eventually(
+				() => unlinked.inputValue(),
+				(value) => value === "ask",
+			);
+			await eventually(
+				() => unlinked.locator('option[value="create"]').evaluate((option: HTMLOptionElement) => option.disabled),
+				(disabled) => disabled,
+			);
 			await page.getByLabel("Policy preset").selectOption("standard");
 			await eventually(
 				() => server.api("admin", { do: "policy.show", project: "scratch" }),
 				(reply) => Policy.parse(reply).preset === "standard",
+			);
+			// What happens to a test with no case is its own choice. `standard` starts by tracking them; asking puts
+			// one question per file in the queue, and tracking again answers every one of them at once.
+			await eventually(
+				() => unlinked.inputValue(),
+				(value) => value === "track",
+			);
+			await page.getByText(UNLINKED_HELP.track, { exact: true }).waitFor();
+			await unlinked.selectOption("ask");
+			await page.getByText(`Tests with no case: ${UNLINKED_LABELS.ask}.`, { exact: false }).waitFor();
+			for (const file of ["tests/a.spec.ts", "tests/b.spec.ts"])
+				await server.api("report", {
+					target: { commit: "cafe0001", branch: "main" },
+					job: file,
+					results: [{ test: { key: `${file}::one`, file }, outcome: "pass" }],
+				});
+			expect((await server.api("inbox", {})).counts.map).toBe(2);
+			await unlinked.selectOption("track");
+			await page.getByText("The rule answered 2 open questions about tests with no case.", { exact: false }).waitFor();
+			expect((await server.api("inbox", {})).counts.open).toBe(0);
+			expect(Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" })).preset).toBe(
+				"standard",
 			);
 			await page.getByRole("option", { name: "Tokens", exact: true }).click();
 			await page.getByLabel("Token actor").fill("reviewer");

@@ -307,6 +307,9 @@ export const Predicate = z.union([
 		"hint:disputed",
 		"category:defect",
 		"verdict:passed",
+		// What the project's own `unlinked` setting says, so a clause can test a setting like any other fact.
+		"unlinked:track",
+		"unlinked:create",
 	]),
 	z.templateLiteral(["answer:", z.string().regex(/^[a-z]+$/)]),
 ]);
@@ -331,8 +334,29 @@ export const Clause = z.object({
 });
 export type Clause = z.infer<typeof Clause>;
 
-/** Numbers a project may change without touching a clause (open questions 12 and 25). */
+/**
+ * What happens to a test that arrives with no case. `ask`: a question in the queue, one per file. `track`: the
+ * test is kept without a case and nobody is asked. `create`: a case is made for each test and linked to it.
+ */
+export const Unlinked = z.enum(["ask", "track", "create"]);
+export type Unlinked = z.infer<typeof Unlinked>;
+
+export const UNLINKED_LABELS: Record<Unlinked, string> = {
+	ask: "Ask in the queue",
+	track: "Track without a case",
+	create: "Create a case for each test",
+};
+
+/** What each choice does, in a sentence, shown where the choice is made. */
+export const UNLINKED_HELP: Record<Unlinked, string> = {
+	ask: "Each file with such tests is one question in the queue. It blocks nothing.",
+	track: "The tests are kept without cases and nobody is asked. They still gate the build.",
+	create: "A case is made for each test, named after it and linked to it. Nobody is asked.",
+};
+
+/** What a project may change without touching a clause (open questions 12 and 25). */
 export const PolicySettings = z.object({
+	unlinked: Unlinked,
 	/** Which bases a planned run's slots accept by default. */
 	basis: z.enum(["exact", "exact-or-assumed"]),
 	holds: z.object({
@@ -354,11 +378,20 @@ export type Policy = z.infer<typeof Policy>;
 /** What a clause is matched against: the facts of a question, plus the answer once one is proposed. */
 export type Facts = { kind: Kind; facts: ReadonlySet<string>; answer?: string };
 
-/** The first clause of the question's kind whose predicates all hold, or null if the policy is not total. */
-export function firstMatch(clauses: readonly Clause[], q: Facts): Clause | null {
-	for (const clause of clauses) {
+/** The facts a policy's settings add to every question it is asked about. */
+const settingFacts = (settings: PolicySettings): string[] =>
+	settings.unlinked === "ask" ? [] : [`unlinked:${settings.unlinked}`];
+
+/**
+ * The clause of a policy that owns a question, or null if the policy is not total: the first clause of the
+ * question's kind whose predicates all hold, the policy's settings counted among the facts.
+ */
+export function clauseOf(policy: Pick<Policy, "clauses" | "settings">, q: Facts): Clause | null {
+	const added = settingFacts(policy.settings);
+	const facts = added.length === 0 ? q : { ...q, facts: new Set([...q.facts, ...added]) };
+	for (const clause of policy.clauses) {
 		if (clause.kind !== q.kind) continue;
-		if (clause.when.every((p) => holds(p, q))) return clause;
+		if (clause.when.every((p) => holds(p, facts))) return clause;
 	}
 	return null;
 }

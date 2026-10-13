@@ -87,8 +87,10 @@ Mainworthy identifies a test using its file, or its class name when there is no 
 together with its suite path and name. Keep those values stable across reports.
 The report file's name is not the test's source file.
 
-Under `loose`, tests without cases are tracked without asking you to link them.
-Under `standard` and `strict`, they raise an unlinked-test question.
+What happens to a test without a case is the project's choice. Under `loose` and `standard`
+it starts as "Track without a case": the test is kept and nobody is asked. A project can have
+a case made for each such test, or have each file raise an unlinked-test question, which is
+where `strict` starts. See [policy](./policy.md#tests-with-no-case).
 An unlinked automated test still counts toward the commit gate.
 
 ## Read the result's basis

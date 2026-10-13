@@ -1,6 +1,6 @@
 // Administering the instance: projects, actors, tokens, and reading a project's policy.
 import { durationMs } from "../../core/duration.ts";
-import { type ActorKind, defaultCapabilities } from "../../core/kinds.ts";
+import { type ActorKind, defaultCapabilities, type Unlinked } from "../../core/kinds.ts";
 import { AdminInput } from "../../core/ops.ts";
 import {
 	actorByName,
@@ -18,24 +18,26 @@ import {
 import { type Actor, allProjects, findProject, insertProject, makeCtx, stampSeq } from "../kernel/ctx.ts";
 import type { Db } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
-import { currentPolicy, isPreset, policyName, seedPolicy } from "../policy/policy.ts";
+import { currentPolicy, isPreset, policySummary, seedPolicy } from "../policy/policy.ts";
 import { defineInstanceOp, type InstanceCtx } from "./registry.ts";
 
 /** Every project with the policy in force. A plain read, so the session endpoint can call it during a long write. */
-export function listProjects(db: Db): { key: string; name: string; seq: number; createdAt: number; policy: string }[] {
+export function listProjects(
+	db: Db,
+): { key: string; name: string; seq: number; createdAt: number; policy: string; unlinked: Unlinked }[] {
 	return allProjects(db).map((row) => ({
 		key: row.key,
 		name: row.name,
 		seq: row.seq,
 		createdAt: row.created_at,
-		policy: policyName(currentPolicy(db, row.id)),
+		...policySummary(currentPolicy(db, row.id)),
 	}));
 }
 
 /** Creates a project with its first policy. Used by the admin operation and by first start. */
 export function createProject(
 	env: InstanceCtx,
-	input: { key: string; name?: string | undefined; preset?: string | undefined },
+	input: { key: string; name?: string | undefined; preset?: string | undefined; unlinked?: Unlinked | undefined },
 ) {
 	const preset = input.preset ?? "loose";
 	if (!isPreset(preset)) throw invalid(`unknown preset ${preset}`);
@@ -47,7 +49,7 @@ export function createProject(
 		at: env.now,
 	});
 	const ctx = makeCtx(env.app, project, env.actor, true);
-	seedPolicy(ctx, preset);
+	seedPolicy(ctx, preset, input.unlinked);
 	stampSeq(ctx);
 	return { key: project.key, name: project.name, policy: preset };
 }

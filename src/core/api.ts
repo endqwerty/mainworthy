@@ -1,6 +1,7 @@
 // The operations as a client sees them: each name with its input and its reply. The web client and the CLI are
 // typed from this map, so a call site that sends the wrong shape does not compile.
 import type { z } from "zod";
+import type { Unlinked } from "./kinds.ts";
 import type {
 	AdminInput,
 	CheckInput,
@@ -152,5 +153,14 @@ export type SessionInfo = {
 	 */
 	owner: boolean;
 	version: string;
-	projects: { key: string; name: string; seq: number; createdAt: number; policy: string; can?: string[] }[];
+	projects: {
+		key: string;
+		name: string;
+		seq: number;
+		createdAt: number;
+		policy: string;
+		/** What happens to a test with no case. Absent only in the reply of a server older than the setting. */
+		unlinked?: Unlinked | undefined;
+		can?: string[];
+	}[];
 };

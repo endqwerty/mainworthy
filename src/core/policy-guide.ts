@@ -2,16 +2,16 @@
 // The table is read from the presets' clauses, so it cannot say something a preset does not do. The sentences
 // are written by hand and restate the table (a test holds the table, so a changed preset shows up beside them).
 import { z } from "zod";
-import { ANSWER_LABELS, applicableAnswers, type Clause, type Facts, firstMatch } from "./kinds.ts";
+import { ANSWER_LABELS, applicableAnswers, type Clause, clauseOf, type Facts } from "./kinds.ts";
 import { PRESETS, type PresetName } from "./presets.ts";
 
 export const PRESET_SUMMARY: Record<PresetName, string> = {
 	loose:
 		"Edits to cases take effect at once and a test needs no case. A person is asked about failures and findings, and a run that passed closes by itself.",
 	standard:
-		"An agent's edit waits for a person, and a test with no case is a question. A person's own edit still takes effect at once.",
+		"An agent's edit waits for a person. A person's own edit still takes effect at once, and a test needs no case.",
 	strict:
-		"A person, never an agent, answers every edit, test with no case, failure, finding and passed run, and gives a reason. A policy change and a conflicting edit are handled as under the other presets. Approval by a named role or by two people is not built yet.",
+		"A person, never an agent, answers every edit, test with no case, failure, finding and passed run, and gives a reason. The project can have its tests with no case tracked instead. A policy change and a conflicting edit are handled as under the other presets. Approval by a named role or by two people is not built yet.",
 };
 
 /** The questions the guide lists, each with the facts such a question carries when the server raises it. */
@@ -81,7 +81,7 @@ const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text
  */
 function answeredBy(preset: PresetName, facts: Facts): string {
 	const who = (answer?: string): string => {
-		const clause = firstMatch(PRESETS[preset].clauses, answer === undefined ? facts : { ...facts, answer });
+		const clause = clauseOf(PRESETS[preset], answer === undefined ? facts : { ...facts, answer });
 		if (!clause) throw new Error(`preset ${preset} has no clause for a ${facts.kind} question`);
 		return whoAnswers(clause);
 	};

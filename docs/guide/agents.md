@@ -76,7 +76,7 @@ An answer from an agent is one of three things, and the reply to `decide` says w
 [{"q":"Q-19","status":"advised","needs":"one member who is not an agent","decision":null}]
 ```
 
-An answer counts only if the clause lets agents answer and the agent holds `answer`. Under the presets that is rare. Today it covers a duplicate finding under `loose` and an unlinked-test answer under `standard`. There is one exception: an agent may withdraw its own conflicting proposal without holding `answer`.
+An answer counts only if the clause lets agents answer and the agent holds `answer`. Under the presets that is rare. Today it covers a duplicate finding under `loose`, and an unlinked-test answer under `loose` and `standard` where the project asks about tests with no case. There is one exception: an agent may withdraw its own conflicting proposal without holding `answer`.
 
 ## Why an agent's report never moves a gate
 

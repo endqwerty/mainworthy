@@ -41,7 +41,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy token new --agent <name> \| --ci <name> \| --human <name> [--can read,produce] [--project <key>] [--expires 90d] \| token list \| token revoke <id>` | Issue, list and revoke actor tokens. A new secret is shown once. |
 | `mainworthy invite new <name> [--can read,answer] [--project <key>] [--expires 3d] \| invite list \| invite revoke <id>` | Invite a person with a link that is shown once, list invitations, and revoke one. |
 | `mainworthy actor list \| actor grant <name> --can read,record [--project <key>] \| actor ungrant <name> [--project <key>]` | List who may do what on which project, and change or take away a grant. |
-| `mainworthy policy show \| policy use <loose\|standard\|strict> [--json]` | Show policy clauses or propose and record an admin's choice of preset. |
+| `mainworthy policy show \| policy use <loose\|standard\|strict> \| policy tests <ask\|track\|create> [--json]` | Show policy clauses, or propose and record an admin's choice of preset or of what happens to a test with no case. |
 | `mainworthy new [file\|-] [--json]` | Create a case from a canonical Markdown file or an outline on stdin. |
 | `mainworthy seed <project> [--cases 2000] [--json]` | Fill a new or empty project with demo data: a shop's cases, results, a run and questions to answer. |
 | `mainworthy get <ref> [--md] [--json]` | Read a ref, or print a case's canonical Markdown with --md. |

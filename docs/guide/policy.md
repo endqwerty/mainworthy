@@ -10,7 +10,7 @@ A policy is a table of clauses. Each clause covers one kind of question: a propo
 
 [Diagram: who answers a question under a policy](../diagrams/policy-routing.html)
 
-The `when` column holds the conditions a clause tests. `always` matches every question of its kind. The others describe the question: `author:agent` for an edit by an agent, `conflict` for an edit that clashes with a newer version, `policy` for a change to the policy itself, `scope:change` for a failure on a change, `hint:disputed` for two reports that disagree, and `verdict:passed` for a run that passed. `answer:reject` matches only once someone picks that answer.
+The `when` column holds the conditions a clause tests. `always` matches every question of its kind. The others describe the question: `author:agent` for an edit by an agent, `conflict` for an edit that clashes with a newer version, `policy` for a change to the policy itself, `scope:change` for a failure on a change, `hint:disputed` for two reports that disagree, and `verdict:passed` for a run that passed. `answer:reject` matches only once someone picks that answer. `unlinked:track` and `unlinked:create` test the project's choice for [tests with no case](#tests-with-no-case).
 
 "Who answers" is one of these.
 
@@ -36,20 +36,22 @@ kind     when                      who answers  agent's answer  blocks   rule's 
 adopt    conflict & answer:reject  author       counts          nothing
 adopt    policy                    admin        refused         nothing
 adopt    always                    rule         refused         nothing  {"is":"accept"}
-map      always                    rule         refused         nothing  {"is":"track"}
+map      unlinked:track            rule         refused         nothing  {"is":"track"}
+map      unlinked:create           rule         refused         nothing  {"is":"create"}
+map      always                    member       counts          nothing
 failure  scope:change              member       advice          change
 failure  always                    member       advice          release
 signoff  verdict:passed            rule         refused         nothing  {"is":"approve"}
-basis: exact-or-assumed; flaky hold: 14 days
+basis: exact-or-assumed; flaky hold: 14 days; tests with no case: track
 ```
 
-The last line holds two numbers. The basis is which evidence a planned run accepts for a slot by default, and `strict` raises it to `exact`. The flaky hold is how many days a "Flaky" answer carries forward.
+The last line holds the settings. The basis is which evidence a planned run accepts for a slot by default, and `strict` raises it to `exact`. The flaky hold is how many days a "Flaky" answer carries forward. The third says what happens to a test with no case.
 
 ## The three presets
 
 `loose` is the default. Edits take effect at once, a test needs no case, and a person answers failures and findings. A run that passed closes by itself.
 
-`standard` holds an agent's edit for a person and turns a test with no case into a question. A person's own edit still takes effect at once. Two reports that disagree go to a person who did not produce either one.
+`standard` holds an agent's edit for a person. A person's own edit still takes effect at once, and a test needs no case. Two reports that disagree go to a person who did not produce either one.
 
 `strict` asks a person for every edit, test with no case, failure, finding and passed run, and the person gives a reason. No agent answers any of them. Approval by a named role or by two people is not built yet, so `strict` is as far as the product goes today.
 
@@ -60,8 +62,8 @@ All three send a change to the policy to an admin, and send a conflicting edit b
 | Preset | In short |
 | --- | --- |
 | `loose` | Edits to cases take effect at once and a test needs no case. A person is asked about failures and findings, and a run that passed closes by itself. |
-| `standard` | An agent's edit waits for a person, and a test with no case is a question. A person's own edit still takes effect at once. |
-| `strict` | A person, never an agent, answers every edit, test with no case, failure, finding and passed run, and gives a reason. A policy change and a conflicting edit are handled as under the other presets. Approval by a named role or by two people is not built yet. |
+| `standard` | An agent's edit waits for a person. A person's own edit still takes effect at once, and a test needs no case. |
+| `strict` | A person, never an agent, answers every edit, test with no case, failure, finding and passed run, and gives a reason. The project can have its tests with no case tracked instead. A policy change and a conflicting edit are handled as under the other presets. Approval by a named role or by two people is not built yet. |
 
 Who answers each question:
 
@@ -69,7 +71,7 @@ Who answers each question:
 | --- | --- | --- | --- |
 | A person's edit to a case | By rule: Accept | By rule: Accept | A person, with a reason |
 | An agent's edit to a case | By rule: Accept | A person | A person, with a reason |
-| A test with no case | By rule: Track without a case | A person or an agent | A person, with a reason |
+| A test with no case | By rule: Track without a case | By rule: Track without a case | A person, with a reason |
 | A failed result | A person; agents advise | A person; agents advise | A person who did not report it, with a reason |
 | A result that two reports disagree on | A person; agents advise | A person who did not report it | A person who did not report it, with a reason |
 | A finding | A person; agents advise. Duplicate: a person or an agent | A person; agents advise | A person, with a reason |
@@ -80,6 +82,37 @@ Who answers each question:
 | What fills a slot of a planned run | Also a result assumed to be for the current version | Also a result assumed to be for the current version | Only a result that names the pinned version |
 
 <!-- /generated -->
+
+## Tests with no case
+
+A pipeline reports tests that no case names. What happens to them is one choice for the whole project, apart from the preset.
+
+| Choice | What happens |
+| --- | --- |
+| Track without a case (`track`) | The tests are kept without cases and nobody is asked. They still gate the build. `loose` and `standard` start here. |
+| Create a case for each test (`create`) | Each test gets a case named after it, in a folder named after its file's directory, and is linked to it. Nobody is asked. |
+| Ask in the queue (`ask`) | Each file with such tests is one question in the queue. It blocks nothing. `strict` starts here. |
+
+In Settings, open Policy and choose under "Tests with no case". From the command line:
+
+```
+$ mainworthy policy tests create
+tests with no case: create; proposal P-3 and decision 4 are both recorded; 12 open questions answered by the rule
+```
+
+The change is a proposal and a decision like any policy change, so it needs `produce` and `admin` on the project. It takes effect for the questions that are already open: the rule answers every open question about a file at once, and the line above says how many. A question that a person took back from the rule stays with people.
+
+`create` makes cases the way a person's edit does, so it works where the policy adopts a pipeline's new case by rule. `strict` has a person adopt every new case, and refuses `create`:
+
+```
+invalid: under this policy a person adopts every new case, so a rule cannot create cases for tests: choose ask or track
+```
+
+Under `create`, anyone who can report results can add cases, one for each test name they send. A report still cannot change or remove a case. Under `standard` an agent's report is the exception: an agent's new case waits for a person, so the rule makes none and the file's question stays open.
+
+A link holds for the tests it names. When another test turns up in the same file, only the new test is asked about or given a case. A "track" answer is about the file as it was, so the file is looked at again when its tests with no case change. Under `track` the rule answers again and you see nothing.
+
+A custom policy reads the choice only if its clauses test `unlinked:track` or `unlinked:create`. Settings offers the choice under a preset.
 
 ## Switch the policy
 
@@ -106,14 +139,14 @@ policy proposal P-2: open Q-2 needs an admin
 
 An admin finds it in Queue under "Proposals". Reading the clause table needs `admin` on every project, which is more than switching needs.
 
-Data does not change when the policy does. Results, decisions and cases stay as they were. What changes is who may answer, and whether a reason is needed. That holds for the next question and for every question that is still open: an open question now waits for whoever the new policy names.
+A policy change rewrites nothing that is recorded. Results, decisions and cases stay as they were. What changes is who may answer, and whether a reason is needed. That holds for the next question and for every question that is still open: an open question now waits for whoever the new policy names. One kind of question is answered at the change: where the new policy has a rule for [tests with no case](#tests-with-no-case), the rule answers the open questions about them, and under `create` that makes their cases.
 
 ## Change single clauses
 
 Settings has no control for one clause. To change one, send a policy edit to `mainworthy propose`. The edit carries the whole clause list, so start from what `mainworthy policy show --json` prints, change a clause, and send it back. This example, with the clauses cut to `[...]`, makes a reason mandatory for findings and shortens the flaky hold to 7 days:
 
 ```
-$ mainworthy propose --json '{"edits":[{"op":"policy","preset":"standard","clauses":[...],"settings":{"basis":"exact-or-assumed","holds":{"flakyDays":7,"infraThisTargetOnly":true}}}]}'
+$ mainworthy propose --json '{"edits":[{"op":"policy","preset":"standard","clauses":[...],"settings":{"unlinked":"track","basis":"exact-or-assumed","holds":{"flakyDays":7,"infraThisTargetOnly":true}}}]}'
 {"proposal":"P-9","question":"Q-9","conflicts":[],"status":"open","needs":"an admin","cases":[]}
 ```
 
@@ -123,7 +156,7 @@ An admin accepts it like any policy change. Mainworthy refuses a policy in which
 invalid: every kind must end with a clause that always matches; missing for: finding
 ```
 
-The flaky hold takes 1 to 365 days. `infraThisTargetOnly` is true when an "Infrastructure" answer covers only the build it was given for.
+The settings are sent whole: `unlinked`, the basis and the holds. The flaky hold takes 1 to 365 days. `infraThisTargetOnly` is true when an "Infrastructure" answer covers only the build it was given for.
 
 ## What custom means
 
@@ -134,8 +167,10 @@ A policy is `custom` when its clauses are not exactly those of a preset. A prese
 Choose the first policy when you create a project. In Settings, open Projects and pick "Initial policy" under "Create a project". It defaults to `loose`. You can switch later without migrating anything.
 
 - Start with `loose` when one person or a small trusted team writes the cases, and you want the queue to hold only failures.
-- Use `standard` when agents propose edits, or when you want every test without a case raised as a question.
+- Use `standard` when agents propose edits and a person should read each one first.
 - Use `strict` when each answer needs a person and a recorded reason, for example when someone else audits the queue.
+
+Whether each test needs a case is a separate choice. Leave it at "Track without a case" when the cases describe what people check and the pipeline's tests stand beside them. Choose "Create a case for each test" when every test should appear in the suite. Choose "Ask in the queue" when someone links each file's tests by hand.
 
 A policy belongs to one project. A team can run a `loose` scratch project and a `strict` release project on one instance.
 

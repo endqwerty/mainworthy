@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import { type Ask, firstMatch, type Kind, standingOf } from "./kinds.ts";
+import { type Ask, clauseOf, type Kind, standingOf } from "./kinds.ts";
 import { PRESET_GUIDE, PRESET_SUMMARY, whoAnswers } from "./policy-guide.ts";
 import { PRESET_NAMES, PRESETS, type PresetName, presetOf } from "./presets.ts";
 
 const clause = (preset: PresetName, kind: Kind, facts: string[], answer?: string) => {
-	const found = firstMatch(PRESETS[preset].clauses, { kind, facts: new Set(facts), ...(answer ? { answer } : {}) });
+	const found = clauseOf(PRESETS[preset], { kind, facts: new Set(facts), ...(answer ? { answer } : {}) });
 	if (!found) throw new Error(`${preset} has no clause for ${kind}`);
 	return found;
 };
@@ -21,7 +21,7 @@ test("the guide says who answers each question under each preset", () => {
 	expect(PRESET_GUIDE.map((row) => [row.question, row.answeredBy.loose, row.answeredBy.standard])).toEqual([
 		["A person's edit to a case", "By rule: Accept", "By rule: Accept"],
 		["An agent's edit to a case", "By rule: Accept", person],
-		["A test with no case", "By rule: Track without a case", "A person or an agent"],
+		["A test with no case", "By rule: Track without a case", "By rule: Track without a case"],
 		["A failed result", advised, advised],
 		["A result that two reports disagree on", advised, notReporter],
 		["A finding", `${advised}. Duplicate: a person or an agent`, advised],

@@ -181,7 +181,10 @@ export async function seed(
 		select: { cases: refs.slice(0, 40) },
 		accepts: { commit: change, repo: "demo/shop" },
 	});
-	const policy = await owner.call("propose", { cmd: id("standard"), edits: [{ op: "policy", preset: "standard" }] });
+	const policy = await owner.call("propose", {
+		cmd: id("standard"),
+		edits: [{ op: "policy", preset: "standard", unlinked: "ask" }],
+	});
 	if (policy.question) {
 		const question = (await owner.call("inbox", { kind: "adopt" })).items.find((q) => q.q === policy.question);
 		if (question)
@@ -235,7 +238,7 @@ export async function seed(
 		],
 	});
 	// What the demo leaves to answer, read back: more than the replies above name. The failing test is a question
-	// on `main` and on the pull request, and under `standard` the test with no case is one too.
+	// on `main` and on the pull request, and the demo asks about a test with no case, so that one is too.
 	const open = await owner.call("inbox", { limit: 50 });
 	return { cases: refs, run: planned.run, proposal: proposal.proposal, questions: open.items.map((item) => item.q) };
 }

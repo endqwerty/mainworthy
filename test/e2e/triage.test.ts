@@ -59,7 +59,10 @@ async function fixture({
 			}
 		}, Boolean);
 		if (preset !== "loose") {
-			const proposed = await api("propose", { edits: [{ op: "policy", preset }] });
+			// These tests answer questions about tests with no case, so the project asks them, as `strict` does.
+			const proposed = await api("propose", {
+				edits: [{ op: "policy", preset, ...(preset === "strict" ? {} : { unlinked: "ask" as const }) }],
+			});
 			const q = (await api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
 			if (!q) throw new Error("Preset proposal question is missing");
 			const replies = await api("decide", {

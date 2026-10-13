@@ -7,7 +7,7 @@ for (const refusal of ["request", "changed evidence"]) {
 	test.skipIf(!browserAvailable)(
 		`a late queue ${refusal} refusal keeps the next question selected for its answer key`,
 		async () => {
-			const server = await startServer({ preset: "standard" });
+			const server = await startServer({ preset: "standard", unlinked: "ask" });
 			let browser: Awaited<ReturnType<typeof openPage>> | null = null;
 			let release = () => {};
 			const held = new Promise<void>((resolve) => {
