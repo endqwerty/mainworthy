@@ -307,6 +307,23 @@ for (const first of ["resolves the conflict", "records the edit"])
 		30000,
 	);
 
+/**
+ * What the page's reads of C-1 get from here on: no reply ("lost"), the server's answer ("answered"), or a
+ * refusal that carries any other text as its message, so a test can tell one refused read from the next.
+ */
+async function unreadable(page: Page): Promise<{ reads: string }> {
+	const state = { reads: "lost" };
+	await page.route("**/get", async (route) => {
+		const read = caseReads.parse(route.request().postDataJSON()).refs.includes("C-1");
+		if (!read || state.reads === "answered") await route.continue().catch(() => {});
+		else if (state.reads === "lost") await route.abort("failed");
+		else await route.fulfill({ json: { ok: false, error: { code: "internal", message: state.reads } } });
+	});
+	return state;
+}
+const editors = (page: Page) =>
+	title(page).evaluateAll((fields) => fields.map((field) => (field instanceof HTMLTextAreaElement ? field.value : "")));
+
 check(
 	"R6-1 a second tab that cannot read the case keeps its card until a read of it succeeds",
 	async () => {
@@ -319,33 +336,75 @@ check(
 			const b = await follower(server, h);
 			await conflict(server, a);
 			await b.locator(".conflict-card").waitFor();
-			// A read of the case gets no reply at first, then a refusal, then its answer.
-			let reads: "lost" | "refused" | "answered" = "lost";
-			await b.route("**/get", async (route) => {
-				const read = caseReads.parse(route.request().postDataJSON()).refs.includes("C-1");
-				if (read && reads === "lost") await route.abort("failed");
-				else if (read && reads === "refused")
-					await route.fulfill({ json: { ok: false, error: { code: "internal", message: "Refused the second time" } } });
-				else await route.continue().catch(() => {});
-			});
+			const get = await unreadable(b);
 			await a.getByRole("textbox", { name: "Merged title", exact: true }).fill("Merged in the card");
 			await resolve(a);
 			await a.locator(".conflict-card").waitFor({ state: "detached" });
 			await b.getByText("could not be read", { exact: false }).first().waitFor();
 			expect(await b.locator(".conflict-card").count()).toBe(1);
 			expect(await b.locator("#detail .read-body .ctitle").count()).toBe(0);
-			// The button reads the case again, and so does `e`. A read that fails again changes nothing.
-			reads = "refused";
-			await b.getByRole("button", { name: "Take over here", exact: true }).click();
+			// The pane says why nothing here can be typed into, and its button reads the case again. So does `e`.
+			// A read that fails again changes nothing.
+			expect(await b.locator("#detail").innerText()).not.toContain("being edited in another window");
+			get.reads = "Refused the second time";
+			await b.getByRole("button", { name: "Read the case again", exact: true }).click();
 			await b.getByText("Refused the second time", { exact: false }).first().waitFor();
 			expect(await b.locator(".conflict-card").count()).toBe(1);
 			expect(await drafts(b)).toHaveLength(0);
-			reads = "answered";
+			get.reads = "answered";
 			await leaveField(b);
 			await b.keyboard.press("e");
 			await b.locator(".conflict-card").waitFor({ state: "detached" });
 			expect(await b.locator("#detail .read-body .ctitle").innerText()).toBe("Merged in the card");
 			await b.keyboard.press("e");
+			expect(await title(b).inputValue()).toBe("Merged in the card");
+			expect(await drafts(b)).toHaveLength(0);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+check(
+	"R6-1 a case left before the second tab could read it opens no editor until it is read",
+	async () => {
+		const server = await startServer();
+		await cases(server, 2);
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const a = h.page;
+			a.setDefaultTimeout(5000);
+			const b = await follower(server, h);
+			await conflict(server, a);
+			await b.locator(".conflict-card").waitFor();
+			const get = await unreadable(b);
+			await a.getByRole("textbox", { name: "Merged title", exact: true }).fill("Merged in the card");
+			await resolve(a);
+			await a.locator(".conflict-card").waitFor({ state: "detached" });
+			await b.getByText("could not be read", { exact: false }).first().waitFor();
+			// The person selects another case and comes back. The removed draft and its card went with that, and
+			// the case is shown as the page last read it.
+			await b.getByRole("option", { name: /Case 2/ }).click();
+			expect(await b.locator("#detail .read-body .ctitle").innerText()).toBe("Case 2");
+			await b.getByRole("option", { name: /Merged in the card|Their title/ }).click();
+			await b.locator("#detail .cid").filter({ hasText: "C-1" }).waitFor();
+			// `e` reads the case first, and so does a click on the title. No editor opens on a read that is refused.
+			get.reads = "Refused on return";
+			await leaveField(b);
+			await b.keyboard.press("e");
+			expect(await editors(b)).toEqual([]);
+			await b.getByText("Refused on return", { exact: false }).first().waitFor();
+			get.reads = "Refused the click";
+			await b.locator("#detail .read-body .ctitle").click();
+			await b.getByText("Refused the click", { exact: false }).first().waitFor();
+			expect(await editors(b)).toEqual([]);
+			expect(await drafts(b)).toHaveLength(0);
+			get.reads = "answered";
+			await leaveField(b);
+			await b.keyboard.press("e");
+			await title(b).waitFor();
 			expect(await title(b).inputValue()).toBe("Merged in the card");
 			expect(await drafts(b)).toHaveLength(0);
 		} finally {

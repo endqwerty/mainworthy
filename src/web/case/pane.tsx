@@ -13,7 +13,13 @@ import { bodyOf, CaseView, editDraft } from "../suite/model.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DiffView, EmptyState, KeyCap, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
 import { useCaseBindings } from "./bindings.ts";
-import { BodyEditor, conflictEditorStatus, type DraftChange, draftOwnershipStatus } from "./editor.tsx";
+import {
+	BodyEditor,
+	conflictEditorStatus,
+	type DraftChange,
+	draftEndedStatus,
+	draftOwnershipStatus,
+} from "./editor.tsx";
 
 export type ConflictState = DraftConflict;
 const EntryBase = z.object({ seq: z.number(), at: z.number(), by: z.string() });
@@ -85,6 +91,7 @@ export function CasePane({
 	onConflictChange,
 	hasDraft = false,
 	ownedElsewhere = false,
+	ending = null,
 	onTakeOver,
 }: {
 	view: CaseView | null;
@@ -99,9 +106,12 @@ export function CasePane({
 	onConflictChange: (state: ConflictState) => void;
 	hasDraft?: boolean;
 	ownedElsewhere?: boolean;
+	/** The other window has removed the draft shown: the case is being read, or could not be. */
+	ending?: keyof typeof draftEndedStatus | null;
 	onTakeOver: () => void;
 }) {
 	const { project, session, setStatus, overlayOpen } = useApp();
+	const elsewhereStatus = ending ? draftEndedStatus[ending] : draftOwnershipStatus;
 	const owner = useRef(deviceSession()).current;
 	const ref = draft?.ref ?? view?.ref ?? null;
 	const timelineInput = { ref: ref ?? "C-0", limit: 100 };
@@ -243,10 +253,12 @@ export function CasePane({
 					</div>
 					{ownedElsewhere && (
 						<div role="status">
-							<p>{draftOwnershipStatus}</p>
-							<button type="button" onClick={onTakeOver}>
-								Take over here
-							</button>
+							<p>{elsewhereStatus}</p>
+							{ending !== "reading" && (
+								<button type="button" onClick={onTakeOver}>
+									{ending ? "Read the case again" : "Take over here"}
+								</button>
+							)}
 						</div>
 					)}
 					{conflict && (
@@ -255,7 +267,7 @@ export function CasePane({
 							state={conflict}
 							resolved={onResolved}
 							changed={onConflictChange}
-							readOnlyStatus={ownedElsewhere ? draftOwnershipStatus : null}
+							readOnlyStatus={ownedElsewhere ? elsewhereStatus : null}
 						/>
 					)}
 					{draft ? (
@@ -264,7 +276,7 @@ export function CasePane({
 							change={change}
 							seal={seal}
 							rapid={rapid}
-							readOnlyStatus={ownedElsewhere ? draftOwnershipStatus : conflict ? conflictEditorStatus : null}
+							readOnlyStatus={ownedElsewhere ? elsewhereStatus : conflict ? conflictEditorStatus : null}
 						/>
 					) : (
 						<ReadBody body={body} tags={view?.tags ?? []} begin={begin} />
