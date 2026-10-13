@@ -22,7 +22,7 @@ import { OP_LIST } from "../src/server/ops/index.ts";
 import { type Instance, start, VERSION } from "../src/server/start.ts";
 import { DIAGRAMS, PAGES, SCREENSHOTS } from "../src/surfaces/docs/content.ts";
 import { renderArticle } from "../src/surfaces/docs/render.ts";
-import { docsRoutes } from "../src/surfaces/docs/site.ts";
+import { docsRoutes, withoutRepositoryAddress } from "../src/surfaces/docs/site.ts";
 
 const GUIDE = "docs/guide";
 const files = readdirSync(GUIDE)
@@ -266,6 +266,24 @@ describe("the site", () => {
 			expect(html).toContain('"label":"mainworthy"');
 			expect(html).toContain('"path":"src/');
 		}
+	});
+
+	test("a diagram page keeps its files and loses its repository's address, and one that cannot be read is left alone", () => {
+		const page = (data: string): string =>
+			`<p>before</p><script id="archify-source-evidence-data" type="application/json">${data}</script><p>after</p>`;
+		const sent = withoutRepositoryAddress(
+			page(
+				'{"repository":{"url":"git@example.com:someone/thing","label":"someone/thing","revision":"abc"},"nodes":{"a":[{"path":"src/x.ts"}],"b":"1 \\u003c 2"}}',
+			),
+		);
+		expect(sent).not.toContain("someone");
+		expect(sent).toContain('"repository":{"url":"mainworthy","label":"mainworthy","revision":"abc"}');
+		expect(sent).toContain('"nodes":{"a":[{"path":"src/x.ts"}],"b":"1 \\u003c 2"}');
+		expect(sent.startsWith("<p>before</p>") && sent.endsWith("</script><p>after</p>")).toBe(true);
+		// Nothing to read, or nothing it knows: the page is what it was, and the site still answers.
+		for (const data of ["{not json", "[]", '{"nodes":{}}'])
+			expect(withoutRepositoryAddress(page(data))).toBe(page(data));
+		expect(withoutRepositoryAddress("<svg></svg>")).toBe("<svg></svg>");
 	});
 
 	test("what a page shows is there: the style sheet, the script, the icon and each screenshot", async () => {
