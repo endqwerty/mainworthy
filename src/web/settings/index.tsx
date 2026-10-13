@@ -200,7 +200,7 @@ function SettingsWorkbench() {
 									<p className="settings-preset-summary">
 										{inForce
 											? PRESET_SUMMARY[inForce]
-											: "This project's clauses are not a preset's. The clause table says who answers, and an instance admin can read it."}
+											: "This project has a custom policy. Its clause table says who answers, and an instance admin can read it."}
 									</p>
 								</div>
 								<label>
@@ -229,23 +229,26 @@ function SettingsWorkbench() {
 								</label>
 							</div>
 							<PresetGuide marked={inForce} as="in force" />
-							<label className="settings-agent-toggle">
-								<input
-									type="checkbox"
-									role="switch"
-									aria-checked={(switching ?? preset) !== "loose"}
-									checked={(switching ?? preset) !== "loose"}
-									disabled={!admin || Boolean(switching)}
-									onChange={(event) => void changePolicy(event.target.checked ? "standard" : "loose")}
-								/>
-								<span>
-									<b>Agent edits need a person</b>
-									<small>
-										Switches between loose and standard. Both the policy proposal and its accepting decision are
-										recorded.
-									</small>
-								</span>
-							</label>
+							{/* A switch between two presets says nothing true of a policy that is neither. */}
+							{(inForce || switching) && (
+								<label className="settings-agent-toggle">
+									<input
+										type="checkbox"
+										role="switch"
+										aria-checked={(switching ?? preset) !== "loose"}
+										checked={(switching ?? preset) !== "loose"}
+										disabled={!admin || Boolean(switching)}
+										onChange={(event) => void changePolicy(event.target.checked ? "standard" : "loose")}
+									/>
+									<span>
+										<b>Agent edits need a person</b>
+										<small>
+											Switches between loose and standard. Both the policy proposal and its accepting decision are
+											recorded.
+										</small>
+									</span>
+								</label>
+							)}
 							<p className="settings-message" role="status">
 								{policyMessage}
 							</p>
