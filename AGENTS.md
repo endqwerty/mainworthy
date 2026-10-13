@@ -30,7 +30,9 @@ home lab's notes say where and how to redeploy). No blocking defect is known: is
   shard, as CI runs it: `bun run test --only=parallel --shard=2/5`; the quiet
   tests: `bun run test --only=quiet`. CI (`.github/workflows/check.yml`) runs five shards and the quiet
   tests on a runner each, then one `gate` job reports every shard to Casebook and
-  its gate is the result; a shard with no report fails it, and so does a test
+  its gate is the result (the deployed instance when the repository names one and
+  the job can use it, else a Casebook the job starts: `scripts/ci-instance.ts`,
+  decision 0014; switching it on is issue #92); a shard with no report fails it, and so does a test
   file in which every test was skipped. On GitHub the workflow takes about four
   minutes (2026-10-12, two runs: 4 min 24 s and 3 min 49 s; it was about 12 in one job).
 - **One registry.** A capability is an operation in `src/server/ops/index.ts`. HTTP,

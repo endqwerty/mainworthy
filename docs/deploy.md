@@ -52,7 +52,7 @@ dashboard.
    a few seconds). Nothing is published on the LAN; port 7357 is bound to `127.0.0.1` on the host for debugging
    only. Anything on the tailnet can reach the name, and every request still needs a token. Casebook holds test
    evidence and tokens: keep it off the public internet until accounts exist (#30) and sign-in is rate limited
-   (no issue yet). The node's identity lives in the `tailscale-state` volume: deleting it registers a new node.
+   (#88). The node's identity lives in the `tailscale-state` volume: deleting it registers a new node.
    Once the node is up, disable its key expiry in the Tailscale admin console (Machines → the node), and delete
    `TS_AUTHKEY` from Coolify. For a server without Tailscale, use `compose.yaml` (publishes 7357) or give the
    service a domain in Coolify.
@@ -62,11 +62,64 @@ dashboard.
 Nothing redeploys by itself. After a change lands on the branch, press Redeploy in Coolify or call its API
 (`POST /api/v1/deploy?uuid=<application>`).
 
-To have this repository report its own test results to that instance, set the repository variables
-`CASEBOOK_URL` and `CASEBOOK_PROJECT` and the secret `CASEBOOK_TOKEN` (a `ci` token:
-`casebook token new --ci github-actions --can read,produce`). Without them the workflow starts a throwaway
-Casebook inside the job. A GitHub-hosted runner can only reach an instance with a public address; for this
-tailnet-only instance use a self-hosted runner or add the Tailscale action to the workflow.
+## This repository's CI reporting to the instance
+
+Built in decision 0014; switched on in issue #92. The `gate` job of `.github/workflows/check.yml` reports to the
+instance `CASEBOOK_URL` names when it can use it, and otherwise starts a Casebook of its own for that run and
+says so on the run's summary page (`scripts/ci-instance.ts` has the rule, `test/ci-gate.test.ts` the cases).
+
+**What is verified:** every branch of that rule against real local servers, and, from a machine on the tailnet,
+that the job recognises the home instance as an older build and uses its own Casebook. **What is not:** a report
+and a gate against the home instance on a build that has `record`, and the tailnet join from a GitHub runner,
+which needs the three Tailscale steps below.
+
+1. **Deploy** a build that has the `record` capability (anything after decision 0014), then on the instance:
+
+   ```
+   casebook admin --json '{"do":"project.create","key":"casebook","preset":"standard"}'
+   casebook --project casebook token new --ci github-actions     # shown once
+   casebook actor list                                           # ci  github-actions  casebook  record
+   ```
+
+   That token records results on `casebook` and reads its gate. It cannot read or change the suite, answer a
+   question, plan a run or administer, under any policy.
+2. **In the GitHub repository** (Settings → Secrets and variables → Actions): variables
+   `CASEBOOK_URL=https://casebook.owl-perch.ts.net` and `CASEBOOK_PROJECT=casebook`, secret `CASEBOOK_TOKEN`.
+   The workflow gives the secret to the one step that reports.
+3. **In the Tailscale admin console** (an agent cannot do these):
+   1. *Access controls.* Add the tag: `"tagOwners": { "tag:ci": ["autogroup:admin"] }`. Then **replace** the rule
+      that lets everything reach everything; a narrow rule added beside it restricts nothing. On 2026-10-12 the
+      tailnet had exactly that one rule (read from a member node's packet filter). With `"hosts": { "casebook":
+      "100.75.70.124" }`:
+
+      ```
+      "grants": [
+        { "src": ["autogroup:member"], "dst": ["*"], "ip": ["*"] },
+        { "src": ["tag:ci"], "dst": ["casebook"], "ip": ["tcp:443"] }
+      ]
+      ```
+
+      (In the older `acls` form: `autogroup:member` to `*:*`, and `tag:ci` to `casebook:443`.) Every node on the
+      tailnet was owned by a member on that day, so the first rule keeps what they have. Check the console's
+      preview for a device that is shared in or tagged before saving.
+   2. *Settings → Trust credentials → Credential → OpenID Connect.* Issuer GitHub
+      (`https://token.actions.githubusercontent.com`), subject `repo:endqwerty/casebook:*`, scope `auth_keys`
+      (write), tag `tag:ci`. It is a federated identity: GitHub signs who the job is, and no Tailscale secret is
+      stored anywhere.
+   3. Copy its Client ID and Audience into the repository variables `TS_OAUTH_CLIENT_ID` and `TS_AUDIENCE`.
+      Neither is a secret.
+4. **Check** on the next pull request: the `gate` job's summary reads "Reported to the deployed Casebook", and
+   the run is in the instance's queue. A runner node is removed from the tailnet when its job ends.
+
+What can go wrong, and what the job does: the home server is down or the join fails (its own Casebook, a
+warning); the instance is an older or newer build that describes `report` or `gate` differently (the same); the
+token was revoked or is for another project (the job fails and says which). To stop reporting to the instance,
+delete the `CASEBOOK_URL` variable. A pull request that changes the shape of a `report` or `gate` reply fails
+against the instance until it is redeployed (#90): delete the variable for that pull request.
+
+The token is visible to the code of every pull request, because the `gate` job runs it. That code can report
+wrong results for this one project; it cannot do anything else with the token. Until backups exist (#59) the
+instance's history is one disk.
 
 ## Backup and restore
 

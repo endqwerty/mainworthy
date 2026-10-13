@@ -1,11 +1,14 @@
 // The last job of the check workflow (`scripts/ci-gate.ts`), run as the workflow runs it against a real
 // Casebook: the result is Casebook's gate, and a report that is missing or says less than happened is not a pass.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { z } from "zod";
 import { CI_SHARD_LIMITS } from "../scripts/check-plan.ts";
-import { withInstance } from "../src/cli/test-support.ts";
+import { chooseInstance, contractDifferences, type Probe } from "../scripts/ci-instance.ts";
+import { type Running, withInstance } from "../src/cli/test-support.ts";
+import { openApi } from "../src/surfaces/http.ts";
 
 /** A file whose tests did not run at all, as on a runner with no browser. */
 const SKIPPED = Symbol("every test skipped");
@@ -45,58 +48,84 @@ function junit(files: Shard["files"]): string {
 	return `<?xml version="1.0" encoding="UTF-8"?>\n<testsuites name="bun test" tests="${suites.length * 2}" failures="0" skipped="0" time="0.4">\n${suites.join("\n")}\n</testsuites>\n`;
 }
 
-/** A checkout with those test files, the shards' artifacts as downloaded, and the gate job's last step. */
-async function gate(shards: Shard[], options: { repository?: string[]; missing?: string[] } = {}) {
-	return withInstance(async ({ instance }) => {
-		const root = await mkdtemp(join(tmpdir(), "casebook-ci-gate-"));
-		try {
-			const sources = options.repository ?? shards.flatMap((shard) => Object.keys(shard.files));
-			for (const file of sources) {
-				await mkdir(join(root, dirname(file)), { recursive: true });
-				await writeFile(join(root, file), "");
-			}
-			await mkdir(join(root, "test-results"));
-			for (const shard of shards) {
-				if (options.missing?.includes(shard.name)) continue;
-				const failed = Object.values(shard.files).some((failure) => failure !== null);
-				const outcome = { exit: shard.exit ?? (failed ? 1 : 0), seconds: shard.seconds ?? 60 };
-				await writeFile(join(root, "test-results", `${shard.name}.xml`), shard.xml ?? junit(shard.files));
-				await writeFile(join(root, "test-results", `${shard.name}.json`), JSON.stringify(outcome));
-			}
-			const child = Bun.spawn(
-				[process.execPath, resolve("scripts/ci-gate.ts"), "test-results", ...shards.map((shard) => shard.name)],
-				{
-					cwd: root,
-					env: {
-						PATH: process.env.PATH ?? "",
-						HOME: root,
-						CASEBOOK_URL: instance.url,
-						CASEBOOK_TOKEN: "",
-						CASEBOOK_PROJECT: "",
-						GITHUB_ACTIONS: "true",
-						GITHUB_EVENT_NAME: "pull_request",
-						GITHUB_REF: "refs/pull/77/merge",
-						GITHUB_HEAD_REF: "dx/fast-check",
-						GITHUB_SHA: "c0ffee0123456789012345678901234567890123",
-						GITHUB_REPOSITORY: "endqwerty/casebook",
-						GITHUB_RUN_ID: "1",
-						GITHUB_RUN_ATTEMPT: "1",
-						GITHUB_JOB: "gate",
+/**
+ * A checkout with those test files, the shards' artifacts as downloaded, and the gate job's last step. The job
+ * is pointed at the instance of the test unless `configure` says where else, or nowhere.
+ */
+async function gate(
+	shards: Shard[],
+	options: {
+		repository?: string[];
+		missing?: string[];
+		mode?: "local" | "server";
+		/** Routes of the instance of the test that answer in place of its own. */
+		routes?: NonNullable<Parameters<typeof withInstance>[1]>["routes"];
+		configure?: (running: Running) => Promise<Record<string, string>>;
+	} = {},
+) {
+	return withInstance(
+		async (running) => {
+			const { instance } = running;
+			const configured = (await options.configure?.(running)) ?? {};
+			const root = await mkdtemp(join(tmpdir(), "casebook-ci-gate-"));
+			try {
+				const sources = options.repository ?? shards.flatMap((shard) => Object.keys(shard.files));
+				for (const file of sources) {
+					await mkdir(join(root, dirname(file)), { recursive: true });
+					await writeFile(join(root, file), "");
+				}
+				await mkdir(join(root, "test-results"));
+				for (const shard of shards) {
+					if (options.missing?.includes(shard.name)) continue;
+					const failed = Object.values(shard.files).some((failure) => failure !== null);
+					const outcome = { exit: shard.exit ?? (failed ? 1 : 0), seconds: shard.seconds ?? 60 };
+					await writeFile(join(root, "test-results", `${shard.name}.xml`), shard.xml ?? junit(shard.files));
+					await writeFile(join(root, "test-results", `${shard.name}.json`), JSON.stringify(outcome));
+				}
+				const child = Bun.spawn(
+					[process.execPath, resolve("scripts/ci-gate.ts"), "test-results", ...shards.map((shard) => shard.name)],
+					{
+						cwd: root,
+						env: {
+							PATH: process.env.PATH ?? "",
+							HOME: root,
+							CASEBOOK_URL: instance.url,
+							CASEBOOK_TOKEN: "",
+							CASEBOOK_PROJECT: "",
+							GITHUB_ACTIONS: "true",
+							GITHUB_EVENT_NAME: "pull_request",
+							GITHUB_REF: "refs/pull/77/merge",
+							GITHUB_HEAD_REF: "dx/fast-check",
+							GITHUB_SHA: "c0ffee0123456789012345678901234567890123",
+							GITHUB_REPOSITORY: "endqwerty/casebook",
+							GITHUB_RUN_ID: "1",
+							GITHUB_RUN_ATTEMPT: "1",
+							GITHUB_JOB: "gate",
+							GITHUB_STEP_SUMMARY: join(root, "summary.md"),
+							...configured,
+						},
+						stdout: "pipe",
+						stderr: "pipe",
 					},
-					stdout: "pipe",
-					stderr: "pipe",
-				},
-			);
-			const [stdout, stderr, code] = await Promise.all([
-				new Response(child.stdout).text(),
-				new Response(child.stderr).text(),
-				child.exited,
-			]);
-			return { code, output: stdout + stderr };
-		} finally {
-			await rm(root, { recursive: true, force: true });
-		}
-	});
+				);
+				const [stdout, stderr, code] = await Promise.all([
+					new Response(child.stdout).text(),
+					new Response(child.stderr).text(),
+					child.exited,
+				]);
+				return {
+					code,
+					output: stdout + stderr,
+					summary: await readFile(join(root, "summary.md"), "utf8").catch(() => ""),
+					/** How many reports the instance of the test holds. */
+					batches: instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n,
+				};
+			} finally {
+				await rm(root, { recursive: true, force: true });
+			}
+		},
+		{ ...(options.mode ? { mode: options.mode } : {}), ...(options.routes ? { routes: options.routes } : {}) },
+	);
 }
 
 const green: Shard[] = [
@@ -107,18 +136,53 @@ const green: Shard[] = [
 const withFailure = (message: string): Shard[] =>
 	green.map((shard) => (shard.name === "tests-2" ? { ...shard, files: { "test/c.test.ts": message } } : shard));
 
-test("every shard passed: each is reported under its own job and the gate passes", async () => {
-	const result = await gate(green);
+// Which Casebook the job reports to is `scripts/ci-instance.ts`. The first three tests are each on one of its
+// three ways through; the others use the instance of the test with no token, as a job on one machine does.
+
+/** The pipeline's own token on the instance of the test, as an operator issues it. */
+async function pipelineToken({ client }: Running): Promise<string> {
+	const made = await client.call("admin", {
+		do: "token.create",
+		actor: "github-actions",
+		kind: "ci",
+		project: "scratch",
+	});
+	return z.object({ token: z.string() }).parse(made).token;
+}
+
+test("every shard passed: each is reported under its own job to the deployed instance, and the gate passes", async () => {
+	// A deployed instance asks for a token. This one records and reads the gate, and may do nothing else there.
+	const result = await gate(green, {
+		mode: "server",
+		configure: async (running) => ({ CASEBOOK_TOKEN: await pipelineToken(running), CASEBOOK_PROJECT: "scratch" }),
+	});
+	expect(result.output).toMatch(
+		/^::notice::Reported to the deployed Casebook: http:\/\/127\.0\.0\.1:\d+, project scratch\.$/m,
+	);
+	expect(result.summary).toBe(`${/Reported to the deployed Casebook: .*\./.exec(result.output)?.[0]}\n`);
 	expect(result.output).toContain("$ casebook report test-results/tests-1.xml --job tests-1");
 	expect(result.output).toContain("job tests-2");
 	expect(result.output).toContain("job quiet");
 	expect(result.output).toMatch(/casebook gate\s+passed/);
 	expect(result.output).not.toContain("::error::");
-	expect(result.code).toBe(0);
+	expect([result.code, result.batches]).toEqual([0, 3]);
 }, 20_000);
 
-test("a failing test in one shard ends in a blocked gate", async () => {
-	const result = await gate(withFailure("expected 1, got 2"));
+test("a failing test in one shard ends in a blocked gate, also in the Casebook the job starts itself", async () => {
+	// The instance named is another version: it does not describe `report` and `gate` as this checkout does. The
+	// job starts its own and says so. That one knows no earlier decision, so the failure blocks.
+	const result = await gate(withFailure("expected 1, got 2"), {
+		routes: { "/api/openapi.json": () => Response.json({ ...openApi(), paths: {} }) },
+		configure: async () => ({ CASEBOOK_TOKEN: "cb_secret-of-the-deployed-one", CASEBOOK_PROJECT: "casebook" }),
+	});
+	expect(result.output).toMatch(
+		/^::warning::Reported to a Casebook started for this job: \S+ describes report and gate differently from this checkout \(another version\); the decisions kept at \S+ do not count in this run\.$/m,
+	);
+	expect(result.summary).toContain("Reported to a Casebook started for this job");
+	// Nothing reached the instance that was not chosen, and its token went nowhere: the job's own Casebook would
+	// have refused a token it does not know, and has no project of that name.
+	expect(result.batches).toBe(0);
+	expect(result.output).not.toContain("cb_secret-of-the-deployed-one");
 	expect(result.output).toMatch(/casebook gate\s+blocked/);
 	expect(result.output).toContain("needs an answer");
 	expect(result.output).toContain("The gate did not pass (exit 2).");
@@ -126,7 +190,11 @@ test("a failing test in one shard ends in a blocked gate", async () => {
 }, 20_000);
 
 test("a shard that left no report fails the job, though the gate passes on the others", async () => {
-	const result = await gate(green, { missing: ["tests-2"] });
+	// With no instance named the job starts its own, and that is a notice, not a warning.
+	const result = await gate(green, { missing: ["tests-2"], configure: async () => ({ CASEBOOK_URL: "" }) });
+	expect(result.output).toMatch(/^::notice::Reported to a Casebook started for this job: CASEBOOK_URL is not set\.$/m);
+	expect(result.output).not.toContain("::warning::");
+	expect(result.batches).toBe(0);
 	expect(result.output).toContain("job tests-1");
 	expect(result.output).toMatch(/casebook gate\s+passed/);
 	expect(result.output).toContain("::error::tests-2: no report (test-results/tests-2.xml is missing or empty)");
@@ -216,3 +284,113 @@ test("a slow shard is a warning above the budget and a failure above the limit",
 	expect(failed.output).toContain(`::error::the slowest shard's tests took ${(CI_SHARD_LIMITS.fail + 1).toFixed(1)} s`);
 	expect(failed.code).toBe(1);
 }, 30_000);
+
+// ── Which Casebook the job reports to: what is wrong with a deployed one, and what follows ─────────────────
+
+test("a credential the instance refuses fails the job, and nothing is reported anywhere", async () => {
+	const wrong = await gate(green, {
+		mode: "server",
+		configure: async () => ({ CASEBOOK_TOKEN: "cb_not-a-token-of-this-instance" }),
+	});
+	expect(wrong.output).toMatch(
+		/^::error::Nothing was reported: \S+ refuses CASEBOOK_TOKEN \(revoked or mistyped\)\.$/m,
+	);
+	expect(wrong.output).not.toContain("$ casebook report");
+	expect([wrong.code, wrong.batches]).toEqual([4, 0]);
+}, 20_000);
+
+test("choosing the instance: each thing that can be wrong with a deployed one, and what follows", async () => {
+	const session = (projects: { key: string; can: string[] }[]) => Response.json({ ok: true, result: { projects } });
+	const recorder = () => session([{ key: "casebook", can: ["record"] }]);
+	type Answers = Record<string, () => Response>;
+	const asked: string[] = [];
+	const probe = (answers: Answers): Probe => ({
+		attempts: 3,
+		pauseMs: 0,
+		timeoutMs: 1000,
+		fetch: async (url) => {
+			const path = new URL(url).pathname;
+			asked.push(path);
+			const answer = answers[path];
+			if (!answer) throw new Error("connection refused");
+			return answer();
+		},
+	});
+	const healthy: Answers = {
+		"/healthz": () => Response.json({ ok: true }),
+		"/api/openapi.json": () => Response.json(openApi()),
+		"/api/session": recorder,
+	};
+	const env = { CASEBOOK_URL: "https://casebook.example/", CASEBOOK_TOKEN: "cb_x", CASEBOOK_PROJECT: "casebook" };
+	const choose = async (answers: Answers, changed: Partial<typeof env> = {}) => {
+		const choice = await chooseInstance({ ...env, ...changed }, probe(answers));
+		return `${choice.use}${choice.use === "own" && choice.warn ? " (warning)" : ""}: ${choice.why}`;
+	};
+
+	expect(await choose(healthy)).toBe("deployed: https://casebook.example, project casebook");
+	expect(await choose(healthy, { CASEBOOK_URL: "" })).toBe("own: CASEBOOK_URL is not set");
+
+	// Unreachable: asked three times, then the job's own.
+	asked.length = 0;
+	expect(await choose({})).toStartWith(
+		"own (warning): https://casebook.example cannot be reached (connection refused)",
+	);
+	expect(asked).toEqual(["/healthz", "/healthz", "/healthz"]);
+	expect(await choose({ ...healthy, "/healthz": () => new Response("", { status: 502 }) })).toStartWith(
+		"own (warning): https://casebook.example cannot be reached (it answered 502)",
+	);
+	// A runner that has just joined the network: the first try fails and the second answers.
+	let tries = 0;
+	const slow = () => {
+		if (++tries === 1) throw new Error("no route yet");
+		return Response.json({ ok: true });
+	};
+	expect(await choose({ ...healthy, "/healthz": slow })).toStartWith("deployed:");
+
+	// Another version: it describes report or gate differently, or does not describe them.
+	const other = structuredClone(openApi()) as { paths: Record<string, Record<string, unknown>> };
+	(other.paths["/api/p/{project}/report"] ?? {}).post = { "x-casebook-needs": "produce" };
+	expect(await choose({ ...healthy, "/api/openapi.json": () => Response.json(other) })).toStartWith(
+		"own (warning): https://casebook.example describes report differently from this checkout",
+	);
+	expect(await choose({ ...healthy, "/api/openapi.json": () => new Response("not json") })).toStartWith(
+		"own (warning): https://casebook.example describes report and gate differently",
+	);
+	expect(contractDifferences(openApi())).toEqual([]);
+	expect(contractDifferences({ paths: {} })).toEqual(["report", "gate"]);
+
+	// The credential: refused, or good and not for this project. Neither is a reason to look elsewhere.
+	const refused = { ...healthy, "/api/session": () => new Response("{}", { status: 401 }) };
+	expect(await choose(refused)).toBe("none: https://casebook.example refuses CASEBOOK_TOKEN (revoked or mistyped)");
+	expect(await choose(refused, { CASEBOOK_TOKEN: "" })).toBe(
+		"none: https://casebook.example refuses a job with no CASEBOOK_TOKEN",
+	);
+	const reader = {
+		...healthy,
+		"/api/session": () =>
+			session([
+				{ key: "casebook", can: ["read"] },
+				{ key: "web", can: ["record"] },
+			]),
+	};
+	expect(await choose(reader)).toBe(
+		"none: the token may not record results on project casebook at https://casebook.example (it may on: web)",
+	);
+	// With no project named, the CLI takes the only one: so there must be exactly one to record on.
+	expect(await choose(healthy, { CASEBOOK_PROJECT: "" })).toBe("deployed: https://casebook.example");
+	const two = {
+		...healthy,
+		"/api/session": () =>
+			session([
+				{ key: "a", can: ["record"] },
+				{ key: "b", can: ["read", "record"] },
+			]),
+	};
+	expect(await choose(two, { CASEBOOK_PROJECT: "" })).toBe(
+		"none: CASEBOOK_PROJECT is not set and the token may record on 2 projects at https://casebook.example (a, b)",
+	);
+	// An instance that answers and cannot say who is calling is not this change's fault.
+	expect(await choose({ ...healthy, "/api/session": () => new Response("", { status: 503 }) })).toStartWith(
+		"own (warning): https://casebook.example did not say who this job is",
+	);
+});

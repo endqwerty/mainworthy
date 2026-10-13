@@ -2,6 +2,7 @@
 // is measured by the check (`scripts/check.ts`); this keeps the plan whole and the limit where it was set.
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
+import { z } from "zod";
 import {
 	CI_SHARD_LIMITS,
 	CI_SHARDS,
@@ -65,6 +66,42 @@ test("the workflow runs every shard of the plan and its gate reads every one of 
 	expect(workflow).toContain('{ name: quiet, phase: "--only=quiet" }');
 	expect([...workflow.matchAll(/- \{ name: /g)]).toHaveLength(CI_SHARDS + 1);
 	expect(workflow).toContain(`run: bun scripts/ci-gate.ts test-results ${shards.join(" ")} quiet\n`);
+});
+
+test("the workflow gives the pipeline's token to the one step that reports, and that step chooses the Casebook", () => {
+	const Step = z.object({ name: z.string().optional(), env: z.record(z.string(), z.string()).optional() });
+	const Job = z.object({
+		permissions: z.record(z.string(), z.string()).optional(),
+		env: z.unknown().optional(),
+		steps: z.array(Step),
+	});
+	const workflow = z
+		.object({
+			permissions: z.record(z.string(), z.string()),
+			env: z.unknown().optional(),
+			jobs: z.record(z.string(), Job),
+		})
+		.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
+	const holders = Object.entries(workflow.jobs).flatMap(([job, { steps }]) =>
+		steps.filter((step) => JSON.stringify(step.env ?? {}).includes("secrets.")).map((step) => `${job}: ${step.name}`),
+	);
+	expect(holders).toEqual(["gate: Report every shard to Casebook, then the gate"]);
+	// No secret in an environment every step of a job or of the workflow would share.
+	expect([workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)]).toEqual([
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+	]);
+	// Only the gate job may ask GitHub who it is (to join the tailnet); the jobs that run the tests may not.
+	expect(workflow.permissions).toEqual({ contents: "read" });
+	expect(
+		Object.entries(workflow.jobs)
+			.filter(([, job]) => job.permissions)
+			.map(([name, job]) => [name, job.permissions]),
+	).toEqual([["gate", { contents: "read", "id-token": "write" }]]);
+	// The choice of instance is the script's (scripts/ci-instance.ts): no step starts a server.
+	expect(readFileSync(".github/workflows/check.yml", "utf8")).not.toContain("serve");
 });
 
 test("the slowest files are read from the timings Bun writes", () => {
