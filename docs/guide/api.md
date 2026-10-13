@@ -24,16 +24,36 @@ A reply that did not run has `ok: false` and an `error` with a `code` and a `mes
 | Code | HTTP status | Meaning |
 | --- | --- | --- |
 | `invalid` | 400 | The input is wrong. `details` says which field. |
-| `unauthenticated` | 401 | No token, or one the server does not know. |
+| `unauthenticated` | 401 | No token, or one the server does not know. A sign-in that was refused, whatever was wrong with it. |
 | `forbidden` | 403 | The caller holds a grant on the project and lacks the capability, or the policy says no. |
 | `not_found` | 404 | No such operation, project or ref. A project the caller holds no grant on is answered the same way. |
 | `conflict` | 409 | The edit was made on an older version, or the command id was used for something else. |
-| `limited` | 429 | Too many wrong tokens from this address, or for a token that starts as this one does. The `Retry-After` header says how many seconds to wait. |
+| `limited` | 429 | Too many failed attempts: wrong tokens from this address or for a token that starts as this one does, wrong passwords from this address or for this name, or refused passkeys or invitation codes from this address. The `Retry-After` header says how many seconds to wait. |
 | `internal` | 500 | The server failed. Nothing was written. The message is `internal error`, and the detail is in the server's log. |
 
 ## Authenticate
 
 Send a token as `Authorization: Bearer <token>`. A server in local mode trusts requests from the same machine and needs none. [People, agents and pipelines](./access.md) explains how to make a token and what it may do.
+
+## Sign in as a person
+
+A browser signs in with these requests and then holds a session cookie. They are not operations: nobody is signed in yet, and a password never passes through an operation. Each accepts only a request from the server's own pages, takes JSON and answers with the same envelope as an operation, without `seq`. [People, agents and pipelines](./access.md#sign-in-as-yourself) says what they are for.
+
+| Request | Body | What it does |
+| --- | --- | --- |
+| `GET /api/login/methods` | none | `{"password": true, "passkey": <boolean>}`: whether this instance has passkeys. |
+| `POST /api/login` | `{"token"}` | Signs in with a token. |
+| `POST /api/login` | `{"name", "password"}` | Signs in with a name and a password. |
+| `POST /api/login/challenge` | `{}` | The options for `navigator.credentials.get`, with a challenge that is good once, for five minutes. |
+| `POST /api/login` | `{"passkey"}` | Signs in with what the browser returned for those options: `id`, `clientDataJSON`, `authenticatorData`, `signature`, `userHandle`, each base64url. |
+| `POST /api/login/challenge` | `{"invitation"}` | Who the invitation is for, what it does (`join` or `recover`) and when it runs out, with the options for `navigator.credentials.create`, or `null` for them on an instance without passkeys. It changes nothing. A code that accepts nothing is answered `not_found`. |
+| `POST /api/login` | `{"invitation", "password"?, "passkey"?, "label"?, "replace"?}` | Accepts an invitation with a password, a passkey or both, and signs in. `passkey` is what the browser returned for the options above: `id`, `clientDataJSON`, `authenticatorData`, `publicKey`, `publicKeyAlgorithm`, `transports`. In a browser that is signed in as somebody else it is refused with `conflict` until it says `"replace": true`. |
+| `POST /api/account/password` | `{"current"?, "next"}` | Sets or changes the password of the person whose browser session sends it. `current` is required when they have one. |
+| `POST /api/logout` | none | Ends the browser's session and clears its cookie. |
+
+A body holds one of these shapes and nothing beside it. `GET /api/session` says who is signed in, which session the request came by (`session`) and, for a person, what they sign in with (`credentials`: whether they have a password, and how many passkeys).
+
+A signed-in person registers a further passkey with the `credential` operation: `passkey.begin` answers the options for `navigator.credentials.create`, and `passkey.add` takes what the browser returned and a label.
 
 ## Send a write twice safely
 
@@ -582,6 +602,86 @@ Projects, actors, grants and tokens. There are no seats: an actor is free, and a
 | `[9].name` | `string` | yes | Removes who this actor was: a pseudonym replaces the name and its tokens stop working. History keeps what was done. |
 | `[10].do` | `"policy.show"` | yes |  |
 | `[10].project` | `string` | yes |  |
+
+</details>
+
+### session
+
+Your browser sessions: list them, and end one. An admin who is a person lists and ends anyone's.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/session` |
+| Command | `mainworthy session` |
+| Needs | no capability: any person or agent that is signed in, for what is their own |
+| Effect | writes |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>session</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `[1].do` | `"list"` | yes |  |
+| `[1].actor` | `string` | no | Whose sessions. Absent: your own. Somebody else's is for an admin who is a person. |
+| `[2].do` | `"end"` | yes |  |
+| `[2].id` | `integer` | yes | The session, from the list. Your own, or anyone's for an admin who is a person. |
+
+</details>
+
+### credential
+
+How you sign in: list your password and passkeys, register a passkey, remove one. A password is set in the web UI, never here.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/credential` |
+| Command | `mainworthy credential` |
+| Needs | no capability: any person or agent that is signed in, for what is their own |
+| Effect | writes |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>credential</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `[1].do` | `"list"` | yes |  |
+| `[1].actor` | `string` | no | Whose. Absent: your own. Somebody else's is for an admin who is a person. |
+| `[2].do` | `"passkey.begin"` | yes |  |
+| `[3].do` | `"passkey.add"` | yes |  |
+| `[3].passkey` | `record<unknown>` | yes | What the browser returned for the options of passkey.begin: id, clientDataJSON, authenticatorData, publicKey, publicKeyAlgorithm, transports. |
+| `[3].label` | `string` | yes | What you call this passkey: the device it is on. |
+| `[4].do` | `"remove"` | yes |  |
+| `[4].id` | `integer` | yes | The credential, from the list. The last one a person has is not removed. |
+
+</details>
+
+### invitation
+
+Invite a person with a link, since there is no mail: make one, list them, revoke one. The link is shown once.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/invitation` |
+| Command | `mainworthy invitation` |
+| Needs | `admin` |
+| Effect | writes |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>invitation</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `[1].do` | `"create"` | yes |  |
+| `[1].name` | `string` | yes | The person. A new name: an invitation to join. A person who exists: a recovery, which replaces every way they sign in once it is accepted. |
+| `[1].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | no | What a new person may do. Absent: everything. Not for a person who exists: use grant.set. Default: `[]`. |
+| `[1].project` | `string` | no | Limit the grant to one project. Absent: every project. |
+| `[1].expires` | `string` | no | How long the link works: 12h, 3d, 2w. At most 30d. Default: `"3d"`. |
+| `[2].do` | `"list"` | yes |  |
+| `[3].do` | `"revoke"` | yes |  |
+| `[3].id` | `integer` | yes |  |
 
 </details>
 

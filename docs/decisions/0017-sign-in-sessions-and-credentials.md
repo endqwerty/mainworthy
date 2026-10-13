@@ -119,7 +119,8 @@ it and an import requires it. It is 1 before and after this change.
 ## What the second pull request builds
 
 A limit on failed attempts (issue #88 item 1). `src/server/identity/limiter.ts` holds the rule. It is pure, takes
-the clock as an argument and counts opaque keys. `identity.ts` keeps one limiter for each instance, in memory.
+the clock as an argument and counts opaque keys. One limiter is kept for each instance, in memory (`attempts.ts` since the fourth pull request, which counts
+people in it too).
 
 **What is counted.** A secret presented as a token where the server asks who the caller is: in an
 `Authorization` header on a route that takes a session, or in a body `POST /api/login` accepts. Both go through
@@ -131,7 +132,7 @@ is never counted, right or wrong, and neither is the owner of the machine in loc
 **The keys.** The address the request came from, and the first 8 characters of the secret (after `cb_` when
 it has that marker). An IPv4 address is its own key. An IPv6 address is keyed by its /64, the network one
 subscriber holds. A loopback or private address has no key, and neither has an empty secret: each would be one
-key for many callers, and one of them could block the rest. Later the account name is a third key.
+key for many callers, and one of them could block the rest. The account name is a third key, since the fourth pull request (`accountKey`).
 
 **The rule.** The fifth failure of a key within 15 minutes blocks it for 1 second. Every failure after that
 doubles the block, up to 15 minutes. A key is forgotten 15 minutes after its last failure or the end of its
@@ -261,8 +262,9 @@ credential id in a column of its own under a unique index, so an id is registere
 good. `invitations` holds the SHA-256 of a link's code. `passkey_users` holds one random handle per person,
 which an authenticator files their passkeys under; it is not a column of `actors` because an archive holds
 `actors`. `sessions` gains `credential`: a session rests on the token or on the credential that opened it. The
-table refuses a row with both, `openSession` makes none with neither, and one with neither is alive to no
-reader.
+table refuses a row with both, `openSession` makes a row with a token and `openSessionOnCredential` one with a
+credential, and a row with neither is alive to no reader. A session of either kind says where it was opened
+from and last used from, and `session list` shows both.
 
 **Signing in** is four bodies of `POST /api/login`: `{ token }`, `{ name, password }`, `{ passkey }` and
 `{ invitation, password?, passkey?, label?, replace? }`. `POST /api/login/challenge` answers a passkey's
@@ -294,6 +296,14 @@ an invitation's link once.
   and not before. A person who exists is invited only by themselves or the owner, as a token for them is made.
 - A person's last credential is not removed, by them or by an admin: a recovery link is the way.
 - The owner's token rule does not change: the last one is not revoked, whatever else the owner signs in with.
+- The limit on failed attempts counts a person's sign-in in the limiter that counts tokens, so an address
+  blocked for one is blocked for the other. A name and a password, and the current password of a change, are
+  counted under the address and under the name (`accountKey`: lower-cased, cut to a name's length). A password
+  is a secret a person chose, so while either key is blocked it is not looked at, and a success clears the
+  name and never the address. A name nobody has is counted exactly as a wrong password is. A passkey's answer
+  that is refused and an invitation code that accepts nothing, at acceptance or where the page looks at it,
+  are counted under the address alone, and a right one of either passes a blocked address, as a right
+  generated token does: nobody guesses a signature or 256 random bits.
 
 **Where it departs from the design above, and why.**
 
@@ -315,12 +325,14 @@ an invitation's link once.
 - Two passwords are hashed at once and thirty-two wait; past that a sign-in is refused. One hash takes 64 MiB,
   and a sign-in needs no name that exists to ask for one.
 - A revoked credential's row is kept, for the credential id, and what it held is erased.
-- The reply of a wrong token keeps its sentence (`a token is required`): that branch of `/api/login` belongs to
-  the pull request about failed attempts, built beside this one.
+- The reply of a wrong token keeps its sentence (`a token is required`), and a refused sign-in of a person has
+  its own (`that did not sign you in`). Both are 401 `unauthenticated`.
+- Counting by name lets whoever knows a name keep that name's password sign-in blocked, for as long as they
+  keep guessing. It is accepted: the other choice is unlimited guesses at one person's password from many
+  addresses. A passkey is not held up by it, and a block is at most fifteen minutes after the last guess.
 
-**Not built here.** The pages. A limit on failed attempts for a name, which pull request 2 adds for tokens
-and must extend to `{ name, password }` and to the `current` of `/api/account/password`. Unicode
-normalisation of a password: it is compared as the bytes that were typed.
+**Not built here.** The pages. Unicode normalisation of a password: it is compared as the bytes that were
+typed.
 
 ## The three candidates
 
