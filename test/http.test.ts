@@ -906,7 +906,8 @@ describe("who may make a token for whom", () => {
 });
 
 describe("the owner always has a way in", () => {
-	const OWNER = "owner-secret-0123456789";
+	// Long enough that the start has nothing to say about its length (32 characters or more).
+	const OWNER = "owner-secret-0123456789abcdef-012345";
 	const owner = bearer(OWNER);
 	const admin = <T>(instance: Instance, input: unknown, headers: Record<string, string> = owner) =>
 		post<T>(instance, "/api/admin", input, headers);
@@ -1013,8 +1014,8 @@ describe("the owner always has a way in", () => {
 		await borrowed.stop();
 
 		// A new value is a new token for the owner, and the start has nothing to say.
-		const renewed = boot("server", "another-owner-secret-0123456789", first.app.config.dataDir);
-		expect([renewed.warnings, await whoIs(renewed, "another-owner-secret-0123456789")]).toEqual([[], "robin"]);
+		const renewed = boot("server", "another-owner-secret-0123456789abcdef", first.app.config.dataDir);
+		expect([renewed.warnings, await whoIs(renewed, "another-owner-secret-0123456789abcdef")]).toEqual([[], "robin"]);
 	});
 
 	test("with no token configured and none left for the owner, as after an import, the start makes one and shows it", async () => {

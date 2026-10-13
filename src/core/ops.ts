@@ -1,6 +1,7 @@
 // The wire contract of every operation: one input schema and one output type each. The HTTP API, the OpenAPI
 // document, the MCP tools, the CLI and the web client are all derived from these, so a shape is declared once.
 import { z } from "zod";
+import { DURATION_FORMAT, DURATION_PATTERN } from "./duration.ts";
 import {
 	ActorKind,
 	AdoptAnswer,
@@ -476,6 +477,13 @@ export const AdminInput = z.discriminatedUnion("do", [
 			),
 		project: z.string().optional().describe("Limit the grant to one project. Absent: every project."),
 		label: z.string().max(120).optional(),
+		expires: z
+			.string()
+			.regex(DURATION_PATTERN, `not a duration: write ${DURATION_FORMAT}`)
+			.optional()
+			.describe(
+				"How long the token works from now: 90d, 12h, 2w. After that it is refused as a revoked one is. Absent: it has no end.",
+			),
 		cmd,
 	}),
 	z.object({ do: z.literal("token.list") }),

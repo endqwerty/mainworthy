@@ -32,7 +32,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_DATA` | `~/.mainworthy` | The data directory. It holds one SQLite file. |
 | `MAINWORTHY_MODE` | none | `server` selects server mode. |
 | `MAINWORTHY_OWNER` | `USER`, else `owner` | The name of the owner, who holds every capability on every project. |
-| `MAINWORTHY_OWNER_TOKEN` | none | A token for the owner. Server mode needs one to sign in. |
+| `MAINWORTHY_OWNER_TOKEN` | none | A token for the owner, 20 to 512 characters. Server mode needs one to sign in. |
 | `MAINWORTHY_SESSION_IDLE` | `14d` | How long a browser stays signed in without being used. A whole number and `h`, `d` or `w`: `12h`, `14d`, `2w`. |
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. The same form. |
 | `MAINWORTHY_READERS` | the CPU count minus 2, at least 1 and at most 8 | How many reader threads answer reads. `0` answers them on the main thread. |
@@ -42,9 +42,11 @@ A value that is not a whole number for `MAINWORTHY_READERS` stops the start with
 
 The first start creates the data directory, one owner and a project named `scratch`. It does not need any variable.
 
-Every start gives the owner named by `MAINWORTHY_OWNER` every capability. The owner is a person: the server does not start when the name belongs to an agent or a pipeline on this instance, or starts with `forgotten-`. If you change the name later, you get a second owner, and the first one keeps its grant. Remove its grant with `mainworthy actor ungrant`.
+Every start gives the owner named by `MAINWORTHY_OWNER` every capability. The owner is a person: the server does not start when the name belongs to an agent or a pipeline on this instance, or starts with `forgotten-`. If you change the name later, you get a second owner, and the first one keeps its grant. Remove its grant with `mainworthy actor ungrant`. The first one keeps its tokens too, except the one that came from `MAINWORTHY_OWNER_TOKEN` when you set that variable to a new value: see the next paragraph.
 
-In server mode, an owner token is needed to sign in. If you set `MAINWORTHY_OWNER_TOKEN`, the server adds that value as a token for the owner. If you do not, a start on which the owner holds no token that works prints a generated one: the first start, and the start after an import. To get a token after you lost it, set `MAINWORTHY_OWNER_TOKEN` to a new value and restart. A value that was revoked, or that is somebody else's token, is not brought back: the server says so in one line on standard error. Use a long random value and keep it out of version control.
+A start that is refused for the owner's name or the owner's token changes no actor and no token. If the server is newer than the database, it has already brought the database up to date by then, and it left a copy of the database as it was beside it, named `mainworthy.db.v<N>.bak`.
+
+In server mode, an owner token is needed to sign in. If you set `MAINWORTHY_OWNER_TOKEN`, the server adds that value as a token for the owner. If you do not, a start on which the owner holds no token that works prints a generated one: the first start, and the start after an import. To get a token after you lost it, set `MAINWORTHY_OWNER_TOKEN` to a new value and restart. A new value retires the old one: the start revokes every token that came from this variable before, whoever was the owner then, ends the browser sessions opened with them, and names each token and its actor in one line. A token you made yourself, and one the server generated, keep working, with one exception: a token made by hand before this build and labelled like the variable's own (a label that begins `owner (from `) was marked as the variable's when the database was upgraded, and is retired with it. A value shorter than 20 characters or longer than 512 stops the start; one shorter than 32 starts and warns each time. No token longer than 512 characters works, as a bearer or at sign-in: if an earlier build accepted a longer owner token, set a new value. `openssl rand -hex 32` makes a good one. A value that is already a token retires nothing. If that token was revoked, has reached its end, or is somebody else's, it is not brought back: the server says which in one line on standard error, and you set a new value. Use a long random value and keep it out of version control.
 
 Reader threads let reads continue while a large report is applied. The default suits most machines. Set `0` to turn them off.
 

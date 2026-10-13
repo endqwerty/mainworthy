@@ -82,19 +82,31 @@ Who may make a token depends on whose it is. Anyone who administers makes a toke
 
 Making a token for a name that exists adds a token to that actor and does not change its grants. Naming a different `--can` for an existing actor is refused. Use `actor grant` for that.
 
+## Give a token an end
+
+A token works until you revoke it, unless you give it an end. `--expires` takes a whole number and `h`, `d` or `w`:
+
+```
+$ mainworthy token new --ci github-actions --project scratch --expires 90d
+```
+
+In Settings, Tokens, choose "Expires" before you create the token: never, 30 days, 90 days or 1 year. A token past its end is refused exactly as a revoked one is, and so is a browser that signed in with it.
+
+To replace a token without a gap, make a second one for the same actor, put it where the first is used, then revoke the first. Two tokens of one actor work side by side. Each start of the server names every token that ends within 14 days, by its id, actor and label.
+
 ## See and revoke tokens
 
-Settings, Tokens, lists "Issued tokens" with each token's actor, when it was made and when it was last used. "Revoke" next to a token stops it at once. In server mode the last token the owner can sign in with is not revoked: make the owner another one first.
+Settings, Tokens, lists "Issued tokens" with each token's actor, who made it, when it was made, when and from which address it was last used, and when it ends. "Revoke" next to a token stops it at once. In server mode the last token the owner can sign in with is not revoked: make the owner another one first.
 
 ```
 $ mainworthy token list
-1  agent reviewer  agent token  active
-2  ci github-actions  ci token  active
+1  agent reviewer  agent token  active  made by robin  last used from 203.0.113.9
+2  ci github-actions  ci token  active, expires in 90 days  made by robin
 $ mainworthy token revoke 2
 token 2 revoked
 ```
 
-A token never expires on its own, so revoke one you no longer use. Revoking a token leaves the actor and its grants in place. To stop an actor on one project, use `actor ungrant`. To remove who a person was, forget the actor. Only a person who administers forgets an actor, and the owner is not forgotten. The name becomes a pseudonym, the tokens stop working, and the history keeps what the actor did.
+A token with no end works until somebody revokes it, so revoke one you no longer use. Revoking a token leaves the actor and its grants in place. To stop an actor on one project, use `actor ungrant`. To remove who a person was, forget the actor. Only a person who administers forgets an actor, and the owner is not forgotten. The name becomes a pseudonym, the tokens stop working, and the history keeps what the actor did.
 
 ```
 $ mainworthy admin --json '{"do":"actor.forget","name":"dana"}'
@@ -109,7 +121,7 @@ In local mode you sign in as the owner, with no step. See [configuration](./conf
 
 In server mode the page asks "Sign in with your token". Paste a token and choose "Sign in". The server opens a session for that browser, and the browser keeps a cookie that names the session. The cookie is not the token: the browser does not hold the token after that.
 
-A session ends after 14 days without use and after 90 days in any case. It also ends when the token you signed in with is revoked, and when your actor is forgotten. Each of these sends you back to the sign-in page. [Configuration](./configuration.md#variables-the-server-reads) says how to change the two lifetimes. The web UI has no sign-out button yet; `POST /api/logout` from the page's own origin ends the session.
+A session ends after 14 days without use and after 90 days in any case. It also ends when the token you signed in with is revoked or reaches its end, and when your actor is forgotten. Each of these sends you back to the sign-in page. [Configuration](./configuration.md#variables-the-server-reads) says how to change the two lifetimes. The web UI has no sign-out button yet; `POST /api/logout` from the page's own origin ends the session.
 
 The owner's token comes from the server. If you set `MAINWORTHY_OWNER_TOKEN`, that value is the token. If you did not, the server prints one on its first start:
 
@@ -119,7 +131,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 owner token (shown once): <token>
 ```
 
-Copy it then. If you miss it, set `MAINWORTHY_OWNER_TOKEN` to a new value and restart, and that value becomes a token too. A value that was revoked, or that is somebody else's token, is not accepted: the server says so in one line when it starts and leaves the token as it is. With no value set, a start on which the owner holds no token that works prints a new one, as the first start does. In the container, `docker compose logs` has the line.
+Copy it then. If you miss it, set `MAINWORTHY_OWNER_TOKEN` to a new value of 20 to 512 characters and restart, and that value becomes a token too. A new value there also retires every token that came from the variable before: the server revokes them and names them in one line when it starts. A value that is a token which was revoked, has reached its end, or is somebody else's is not accepted: the server says which in one line when it starts and leaves the token as it is. With no value set, a start on which the owner holds no token that works prints a new one, as the first start does. In the container, `docker compose logs` has the line.
 
 The command line needs no token in local mode on the same machine. In server mode, give it one with `--token` or `MAINWORTHY_TOKEN`.
 
