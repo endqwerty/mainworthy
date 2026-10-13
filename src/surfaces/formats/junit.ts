@@ -37,6 +37,9 @@ type Element =
 	| { kind: "other"; tag: string };
 type Warn = (message: string, offset: number) => void;
 
+/** How much of a test's file name a result keeps. Two longer names that begin alike read as one name. */
+export const TEST_FILE_LIMIT = 500;
+
 const attributePattern = /([^ \t\r\n=/>]+)[ \t\r\n]*=[ \t\r\n]*(?:"([^"]*)"|'([^']*)')/y;
 const nameStart =
 	"[:A-Z_a-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF" +
@@ -585,7 +588,7 @@ export function parseJUnit(
 					test: {
 						key: testKey(prefix, suite, keyPart(stableName(nameText)), prefixDigests, start, warn),
 						name: limited(nameText, 500, "Test name", start),
-						...(file === undefined ? {} : { file: limited(file, 500, "Test file", start) }),
+						...(file === undefined ? {} : { file: limited(file, TEST_FILE_LIMIT, "Test file", start) }),
 					},
 					outcome: status === "skipped" || status === "notrun" || status === "disabled" ? "skip" : "pass",
 				};
