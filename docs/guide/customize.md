@@ -23,8 +23,8 @@ Two words recur below. An instance admin holds the `admin` capability on every p
 | The policy preset | Settings, Policy, "Preset", or `mainworthy policy use` | An admin on the project who also holds `produce` | [Policy](./policy.md) |
 | Single clauses, the flaky hold, the evidence basis | `mainworthy propose` with a policy edit. Settings has no control for these | The same | [Policy](./policy.md#change-single-clauses) |
 | Projects | Settings, Projects, "Create a project", or `mainworthy admin` | An instance admin | [Policy](./policy.md#choose-a-preset-for-a-new-project) |
-| What each person, agent or pipeline may do | `mainworthy actor grant` and `actor ungrant`. Settings shows tokens only | An instance admin | [People, agents and pipelines](./access.md) |
-| Tokens | Settings, Tokens, or `mainworthy token new`, `list` and `revoke` | An instance admin | [People, agents and pipelines](./access.md#make-a-token) |
+| What each person, agent or pipeline may do | `mainworthy actor grant` and `actor ungrant`. Settings shows tokens only | An instance admin who is a person | [People, agents and pipelines](./access.md) |
+| Tokens | Settings, Tokens, or `mainworthy token new`, `list` and `revoke` | An instance admin. A token for a person who exists: that person or the owner | [People, agents and pipelines](./access.md#make-a-token) |
 | How an agent connects | Settings, Connect, then `mainworthy mcp` or the `/mcp` address | Whoever holds an agent token | [Let an agent in](./agents.md) |
 | What a run asks for | Runs, <kbd>n</kbd>, or `mainworthy plan` for methods, people and required jobs | Anyone with `plan` | [Planned runs](./runs.md) |
 | Folders and tags | Suite | Anyone with `produce`. The policy decides whether the edit applies at once | [Write cases](./write-cases.md#organize-the-suite) |
