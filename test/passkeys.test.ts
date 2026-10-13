@@ -11,12 +11,14 @@ import {
 	bearer,
 	cleanUp,
 	clockAt,
+	from,
 	holdGate,
 	invite,
 	joined,
 	must,
 	OWNER,
 	type Sent,
+	said,
 	scratch,
 	signIn,
 	TOKEN,
@@ -665,5 +667,50 @@ describe("the relying party", () => {
 		expect(lines).toEqual(["[mainworthy] sign-in refused: challenge"]);
 		expect(w.rows("SELECT id FROM credentials")).toEqual([]);
 		expect(w.rows("SELECT actor FROM passkey_users")).toEqual([]);
+	});
+});
+
+describe("the limit on failed attempts", () => {
+	test("a passkey answer that fails is counted under the address; a right one passes a blocked address, and a wrong one there is 429", async () => {
+		const clock = clockAt();
+		const w = world({ clock, proxied: true });
+		const { device } = await person(w, "robin");
+		const at = (n: number): Sent => from(`203.0.113.${n}`);
+		const before = sessionCount(w);
+		const lines = await logged(async () => {
+			// Five answers nobody could accept, each for a challenge of its own: a key nobody registered, another
+			// site's origin, a person who was not verified, a challenge never issued, and a body that is no answer.
+			const stranger = authenticator();
+			const failures = [
+				await withPasskey(w, stranger.assert(await challenge(w), { userHandle: "AAAAAAAAAAAAAAAAAAAAAA" }), at(1)),
+				await withPasskey(w, device.assert(await challenge(w), { origin: "https://evil.example" }), at(1)),
+				await withPasskey(w, device.assert(await challenge(w), { unverified: true }), at(1)),
+				await withPasskey(w, device.assert({ ...(await challenge(w)), challenge: "x".repeat(43) as never }), at(1)),
+				await withPasskey(w, { id: device.id }, at(1)),
+			];
+			expect(failures.map(said)).toEqual(Array.from({ length: 5 }, () => "401 unauthenticated"));
+			// The address is blocked: a wrong answer is told to wait, and is not counted or logged again.
+			const blocked = await withPasskey(w, stranger.assert(await challenge(w)), at(1));
+			expect(`${said(blocked)} ${blocked.setCookies.length}`).toBe("429 limited, retry after 1 0");
+			// A right answer is a signature nobody guesses: it signs in from the blocked address.
+			expect(said(await withPasskey(w, device.assert(await challenge(w), { signCount: 5 }), at(1)))).toBe("200");
+			// Another address was never affected.
+			expect(said(await withPasskey(w, stranger.assert(await challenge(w)), at(2)))).toBe("401 unauthenticated");
+			// The block is the address's, so a wrong password from it is told to wait too.
+			expect(said(await signIn(w, "robin", "not the password", at(1)))).toBe("429 limited, retry after 1");
+			clock.advance(1000);
+			expect(said(await signIn(w, "robin", PASSWORD, at(1)))).toBe("200");
+		});
+		expect(lines).toEqual([
+			"[mainworthy] sign-in refused: unknown-passkey",
+			"[mainworthy] sign-in refused: origin",
+			"[mainworthy] sign-in refused: user-not-verified",
+			"[mainworthy] sign-in refused: challenge",
+			"[mainworthy] sign-in refused: input",
+			"[mainworthy] sign-in refused: unknown-passkey",
+		]);
+		expect(sessionCount(w)).toBe(before + 2);
+		// The session a passkey opened says where it was opened from.
+		expect(w.rows("SELECT created_addr FROM sessions WHERE credential = 2")).toEqual([{ created_addr: "203.0.113.1" }]);
 	});
 });

@@ -15,6 +15,7 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import type { App, Config } from "../kernel/app.ts";
 import { type Db, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
+import { limiterOf } from "./attempts.ts";
 import { type Ceremony, challengeOf, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
 import {
 	type CredentialRow,
@@ -42,6 +43,7 @@ import {
 	revokeInvitationsOf,
 	spendInvitation,
 } from "./invitations.ts";
+import { accountKey, addressKey, type LimiterAnswer } from "./limiter.ts";
 import { dummyHash, hashPassword, PasswordWorkBusy, verifyPassword } from "./passwords.ts";
 import {
 	endSession,
@@ -164,9 +166,50 @@ export type WhyNot =
 	| "has-credentials";
 
 export type Refused = { ok: false; why: WhyNot; credential?: number };
-export type Entry = { ok: true; signedIn: SignedIn } | Refused;
+/** A caller that failed too often, by its address or at this name, and is told to wait `retryAfter` whole seconds. */
+export type Limited = { ok: false; why: "limited"; retryAfter: number };
+export type Entry = { ok: true; signedIn: SignedIn } | Refused | Limited;
 const no = (why: WhyNot, credential?: number): Refused =>
 	credential === undefined ? { ok: false, why } : { ok: false, why, credential };
+
+// ── The limit on failed attempts ───────────────────────────────────────────────────────────────────────────
+//
+// A person's sign-in is counted in the limiter a token is counted in (`limiter.ts` has the rule, `attempts.ts`
+// the instance's one). What differs is the keys, and what passes a block:
+//
+// - A name and a password, and the current password of a change: the address and the name. A password is a
+//   secret a person chose, so while either key is blocked it is not looked at, right or wrong. A name nobody
+//   has is counted exactly as a wrong password is, or the count would say which names exist. A success clears
+//   the name and never the address.
+// - A passkey's answer and an invitation's code: the address alone. Neither is a guess anybody makes (a
+//   signature, 256 random bits the server made), so a right one is looked at and passes while the address is
+//   blocked, as a right generated token does. A wrong one during a block is told to wait and is not counted.
+
+/** The keys an attempt counts under, without the ones that count nothing (an unknown or private address). */
+const counted = (...keys: (string | null)[]): string[] => keys.filter((key) => key !== null);
+const waiting = (answer: Extract<LimiterAnswer, { kind: "blocked" }>): Limited => ({
+	ok: false,
+	why: "limited",
+	retryAfter: answer.retryAfterSeconds,
+});
+
+/**
+ * The count for something that is not a guess when it is right: a passkey's answer, an invitation's code. It
+ * is asked before the thing is looked at, and `wrong` is what a failure is answered with: the wait when the
+ * address was blocked as the attempt arrived, and else the refusal itself, counted.
+ */
+function byAddress(app: App, address: string | null): { wrong: <R extends Refused>(refused: R) => R | Limited } {
+	const limiter = limiterOf(app);
+	const keys = counted(addressKey(address));
+	const answer = limiter.check(keys, app.now());
+	return {
+		wrong: (refused) => {
+			if (answer.kind === "blocked") return waiting(answer);
+			limiter.failed(keys, app.now());
+			return refused;
+		},
+	};
+}
 
 /** Thrown inside a commit to undo what it wrote and answer with a refusal. */
 class Stop extends Error {
@@ -216,13 +259,19 @@ function openOn(app: App, row: CredentialRow, cookie: string, about: About) {
  *
  * A password is checked whoever is named: for a name that has none, against a hash nobody's password matches
  * (`dummyHash`). So the unknown name, the forgotten person, the person without a password and the wrong
- * password all cost the same work and get the same answer.
+ * password all cost the same work and get the same answer, and all four are counted alike under the address
+ * and the name. While either is blocked the password is not checked at all.
  */
 export async function signInWithPassword(
 	app: App,
 	input: { name: string; password: string },
 	about: About,
 ): Promise<Entry> {
+	const limiter = limiterOf(app);
+	const account = accountKey(input.name);
+	const keys = counted(addressKey(about.address), account);
+	const answer = limiter.check(keys, app.now());
+	if (answer.kind === "blocked") return waiting(answer);
 	const person = app.reader.get(Q.personByName, { name: input.name });
 	const stored = person ? livePassword(app.reader, person.id) : null;
 	let right: boolean;
@@ -234,9 +283,14 @@ export async function signInWithPassword(
 		if (error instanceof PasswordWorkBusy) return no("busy");
 		throw error;
 	}
-	if (!person) return no("unknown-name");
-	if (!stored) return no("no-password");
-	if (!right) return no("wrong-password");
+	if (!person || !stored || !right) {
+		// The clock is read again: the check took a tenth of a second, and a failure counts from when it is known.
+		limiter.failed(keys, app.now());
+		return no(!person ? "unknown-name" : !stored ? "no-password" : "wrong-password");
+	}
+	// The name's count starts again. The address's does not: one right password between guesses must not reset
+	// the count of the address that is guessing at other names.
+	if (account !== null) limiter.succeeded([account]);
 	about.proven?.();
 	const cookie = newSessionSecret();
 	return commit(app, () => {
@@ -256,14 +310,17 @@ export type PasswordChange =
 	| {
 			ok: false;
 			why: "not-signed-in" | "not-a-person" | "current-required" | "wrong-current" | "changed-meanwhile" | "busy";
-	  };
+	  }
+	| Limited;
 
 /**
  * Sets a person's password, or replaces it. `who` and `session` are the caller's browser session, asked again
  * inside the commit: the person it signs in, and its row.
  *
  * The current password is required when there is one, so a browser left open is not enough to lock its owner
- * out. The old row is revoked and a new one made. The sessions that rested on the old password end, but for the
+ * out. It is a guess like any other at that person's password: it is counted under `address`, where the
+ * request came from, and under the person's name, with the sign-ins for that name, and is not looked at while
+ * either is blocked. The old row is revoked and a new one made. The sessions that rested on the old password end, but for the
  * one that made the change, which rests on the new password from then on.
  */
 export async function changePassword(
@@ -273,6 +330,7 @@ export async function changePassword(
 		session: () => number | null;
 		current: string | undefined;
 		next: string;
+		address: string | null;
 	},
 ): Promise<PasswordChange> {
 	const caller = input.who();
@@ -284,7 +342,16 @@ export async function changePassword(
 	try {
 		if (held) {
 			if (input.current === undefined) return { ok: false, why: "current-required" };
-			if (!(await verifyPassword(input.current, held.data))) return { ok: false, why: "wrong-current" };
+			const limiter = limiterOf(app);
+			const account = accountKey(person.name);
+			const keys = counted(addressKey(input.address), account);
+			const answer = limiter.check(keys, app.now());
+			if (answer.kind === "blocked") return waiting(answer);
+			if (!(await verifyPassword(input.current, held.data))) {
+				limiter.failed(keys, app.now());
+				return { ok: false, why: "wrong-current" };
+			}
+			if (account !== null) limiter.succeeded([account]);
 		}
 		hash = await hashPassword(input.next, app.config.passwordCost);
 	} catch (error) {
@@ -374,13 +441,17 @@ function judgeAssertion(
  * against the rows as they are then. The second time is the one that counts. It is where the counter is
  * compared with the stored one for good, where the challenge is found still unspent, and where the new counter
  * is stored, the challenge spent and the session opened, all or none.
+ *
+ * An answer that is refused, the first time or the second, is counted under the address it came from. A right
+ * one signs in from an address that is blocked: nobody guesses a signature (`byAddress`).
  */
-export function signInWithPasskey(app: App, answer: unknown, about: About): Promise<Entry> {
+export async function signInWithPasskey(app: App, answer: unknown, about: About): Promise<Entry> {
+	const attempt = byAddress(app, about.address);
 	const first = judgeAssertion(app, app.reader, answer);
-	if (!first.ok) return Promise.resolve(first);
+	if (!first.ok) return attempt.wrong(first);
 	about.proven?.();
 	const cookie = newSessionSecret();
-	return commit(app, () => {
+	const entry = await commit(app, () => {
 		const now = judgeAssertion(app, app.db, answer);
 		if (!now.ok) return now;
 		const opened = openOn(app, now.row, cookie, about);
@@ -388,6 +459,8 @@ export function signInWithPasskey(app: App, answer: unknown, about: About): Prom
 		spendChallenge(app, now.challenge);
 		return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } } as const;
 	});
+	// A row that changed under a good answer is nobody's wrong guess. Anything else the commit refused is one.
+	return entry.ok || entry.why === "changed-meanwhile" ? entry : attempt.wrong(entry);
 }
 
 /** The options for a new passkey of one person, with a new challenge that only an answer for that person spends. */
@@ -551,22 +624,37 @@ function openInvitation(app: App, db: Db, hash: string): { invitation: Invitatio
  *
  * The options exclude no passkey: whoever holds a recovery code is not told which authenticators the person
  * had, and accepting revokes those anyway.
+ *
+ * A code that accepts nothing is counted under `address`, where the request came from, exactly as it is at
+ * acceptance: this is the cheaper place to try codes at. A right one is answered from a blocked address.
  */
 export function showInvitation(
 	app: App,
 	code: string,
-): {
-	invitation: { name: string; purpose: InvitationPurpose; expiresAt: number };
-	passkey: RegistrationOptions | null;
-} | null {
+	address: string | null,
+):
+	| {
+			ok: true;
+			shown: {
+				invitation: { name: string; purpose: InvitationPurpose; expiresAt: number };
+				passkey: RegistrationOptions | null;
+			};
+	  }
+	| Refused
+	| Limited {
+	const attempt = byAddress(app, address);
 	const found = openInvitation(app, app.reader, hashOf(code));
-	if (!found) return null;
+	if (!found) return attempt.wrong(no("invitation"));
 	const { invitation, person } = found;
 	const party = publicAddress(app.config)?.party;
 	const handle = userHandleOf(app.reader, person.id);
 	return {
-		invitation: { name: person.name, purpose: invitation.purpose, expiresAt: invitation.expires_at },
-		passkey: party && handle !== null ? registrationFor(app, { party, person, userHandle: handle, exclude: [] }) : null,
+		ok: true,
+		shown: {
+			invitation: { name: person.name, purpose: invitation.purpose, expiresAt: invitation.expires_at },
+			passkey:
+				party && handle !== null ? registrationFor(app, { party, person, userHandle: handle, exclude: [] }) : null,
+		},
 	};
 }
 
@@ -609,8 +697,11 @@ export async function acceptInvitation(
 		const registration = judgeRegistration(app, db, found.person, input.passkey);
 		return registration.ok ? ({ ok: true, ...found, registration } as const) : registration;
 	};
+	const attempt = byAddress(app, about.address);
 	const first = judge(app.reader);
-	if (!first.ok) return first;
+	// A code that accepts nothing is a wrong guess at one, and is counted. A good code with a passkey that was
+	// not accepted is somebody who holds the invitation, and is not.
+	if (!first.ok) return first.why === "invitation" ? attempt.wrong(first) : first;
 	const other = input.browser === null ? null : holderOf(app, input.browser);
 	if (other && other.id !== first.person.id && !input.replace)
 		return { ok: false, why: "other-session", signedInAs: other.name };

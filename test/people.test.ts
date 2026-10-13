@@ -11,6 +11,7 @@ import {
 	cleanUp,
 	clockAt,
 	DAY,
+	from,
 	HOUR,
 	holdGate,
 	invite,
@@ -18,6 +19,7 @@ import {
 	OWNER,
 	PUBLIC,
 	type Sent,
+	said,
 	scratch,
 	sha256,
 	signIn,
@@ -815,5 +817,200 @@ describe("an upgrade and an import", () => {
 		} finally {
 			logged.mockRestore();
 		}
+	});
+});
+
+describe("the limit on failed attempts", () => {
+	// Every request of a `proxied` world comes from the address it names, as a visitor behind a proxy does.
+	const address = (n: number): Sent => from(`203.0.113.${n}`);
+	const LIMITED = '{"ok":false,"error":{"code":"limited","message":"too many failed attempts; try again in 1 second"}}';
+	/** Runs with the log silenced: a refused sign-in writes a line. */
+	async function quietly<T>(run: () => Promise<T>): Promise<T> {
+		const logged = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			return await run();
+		} finally {
+			logged.mockRestore();
+		}
+	}
+
+	test("the fifth wrong password for a name blocks the name from every address: the right password is 429 then and is not looked at, and a success clears the name", async () => {
+		const clock = clockAt();
+		const w = world({ clock, proxied: true });
+		await joined(w, "robin", FIRST);
+		const verified = spyOn(Bun.password, "verify");
+		try {
+			await quietly(async () => {
+				// Five guesses, each from another address, so no address is near its own limit. The name is one
+				// target however it is capitalised, and a capitalised one is nobody's name here.
+				const guesses: string[] = [];
+				for (let n = 1; n <= 5; n++)
+					guesses.push(said(await signIn(w, n > 3 ? "ROBIN" : "robin", `a wrong guess number ${n}`, address(n))));
+				expect(guesses).toEqual(Array.from({ length: 5 }, () => "401 unauthenticated"));
+				// From an address that never failed, with the right password.
+				const before = verified.mock.calls.length;
+				const blocked = await signIn(w, "robin", FIRST, address(6));
+				expect(`${said(blocked)} ${blocked.setCookies.length} ${blocked.text}`).toBe(
+					`429 limited, retry after 1 0 ${LIMITED}`,
+				);
+				expect(verified.mock.calls.length).toBe(before);
+				// Asking again during the block is not counted: it stays one second.
+				expect(said(await signIn(w, "robin", SECOND, address(7)))).toBe("429 limited, retry after 1");
+				// Another name is not blocked, and neither is the owner's token.
+				expect(said(await signIn(w, "sam", SECOND, address(6)))).toBe("401 unauthenticated");
+				expect(await w.status({ ...address(6), ...bearer(TOKEN) })).toBe(200);
+				clock.advance(1000);
+				expect(said(await signIn(w, "robin", FIRST, address(6)))).toBe("200");
+				// The success cleared the name: four wrong guesses are free again, where one more would have doubled
+				// the block.
+				for (let n = 11; n <= 14; n++)
+					expect(said(await signIn(w, "robin", "wrong once more", address(n)))).toBe("401 unauthenticated");
+				expect(said(await signIn(w, "robin", FIRST, address(15)))).toBe("200");
+			});
+		} finally {
+			verified.mockRestore();
+		}
+	});
+
+	test("a name nobody has is counted exactly as a wrong password is, so the count does not say which names exist", async () => {
+		const w = world({ proxied: true });
+		await joined(w, "robin", FIRST);
+		await quietly(async () => {
+			const replies: Record<string, string[]> = { robin: [], nobody: [] };
+			for (const name of ["robin", "nobody"])
+				for (let n = 1; n <= 7; n++) {
+					const reply = await signIn(w, name, "not the password", address(name === "robin" ? n : 20 + n));
+					replies[name]?.push(`${said(reply)} ${reply.text}`);
+				}
+			expect(replies.nobody).toEqual(replies.robin ?? []);
+			expect(replies.robin?.map((line) => line.slice(0, 3))).toEqual(["401", "401", "401", "401", "401", "429", "429"]);
+		});
+	});
+
+	test("five wrong passwords from one address block the address for every name and for a token, and a success clears the name and never the address", async () => {
+		const clock = clockAt();
+		const w = world({ clock, proxied: true });
+		await joined(w, "robin", FIRST);
+		await quietly(async () => {
+			// Five names, one guess each: no name is near its limit, the address is at its own.
+			for (let n = 1; n <= 5; n++)
+				expect(said(await signIn(w, `person-${n}`, "not the password", address(1)))).toBe("401 unauthenticated");
+			expect(said(await signIn(w, "robin", FIRST, address(1)))).toBe("429 limited, retry after 1");
+			// The count is the instance's one: the address is blocked for the owner's token, which a person chose.
+			const token = await w.get("/api/session", { ...address(1), ...bearer(TOKEN) });
+			expect(said(token)).toBe("429 limited, retry after 1");
+			// From another address the same password signs in.
+			expect(said(await signIn(w, "robin", FIRST, address(2)))).toBe("200");
+			clock.advance(1000);
+			expect(said(await signIn(w, "robin", FIRST, address(1)))).toBe("200");
+			// That success did not clear the address: its next failure doubles the block, where a cleared address
+			// would have four free ones.
+			expect(said(await signIn(w, "person-6", "not the password", address(1)))).toBe("401 unauthenticated");
+			expect(said(await signIn(w, "robin", FIRST, address(1)))).toBe("429 limited, retry after 2");
+		});
+	});
+
+	test("the current password of a password change is counted under the address and the name, as a sign-in is", async () => {
+		const clock = clockAt();
+		const w = world({ clock, proxied: true });
+		const cookie = await joined(w, "robin", FIRST);
+		const change = (current: string, n: number) =>
+			w.post("/api/account/password", { current, next: SECOND }, { cookie, ...address(n) });
+		await quietly(async () => {
+			for (let n = 1; n <= 5; n++) expect(said(await change(`a wrong guess number ${n}`, n))).toBe("403 forbidden");
+			// The right current password, from an address that never failed: the name is blocked.
+			const blocked = await change(FIRST, 6);
+			expect(`${said(blocked)} ${blocked.text}`).toBe(`429 limited, retry after 1 ${LIMITED}`);
+			// The sign-in for that name is blocked by the same count, and the session itself is not: a cookie is
+			// never counted.
+			expect(said(await signIn(w, "robin", FIRST, address(7)))).toBe("429 limited, retry after 1");
+			expect(await w.status({ cookie, ...address(6) })).toBe(200);
+			expect(credentials(w)).toMatchObject([{ id: 1, revoked_at: null }]);
+			clock.advance(1000);
+			expect(said(await change(FIRST, 6))).toBe("200");
+			// Five wrong ones from one address block the address, whoever's session sends them.
+			for (let n = 1; n <= 5; n++) expect(said(await change(`wrong again ${n}`, 9))).toBe("403 forbidden");
+			expect(said(await signIn(w, "sam", SECOND, address(9)))).toBe("429 limited, retry after 1");
+		});
+	});
+
+	test("a wrong invitation code is counted under the address, at acceptance and where the page looks at it; a right one passes a blocked address", async () => {
+		const w = world({ proxied: true });
+		const { code } = await invite(w, { name: "robin" });
+		const wrong = (n: number): string => `${String(n).padStart(2, "0")}${"x".repeat(41)}`;
+		await quietly(async () => {
+			const replies: string[] = [];
+			for (let n = 1; n <= 3; n++)
+				replies.push(said(await w.post("/api/login", { invitation: wrong(n), password: FIRST }, address(1))));
+			for (let n = 4; n <= 5; n++)
+				replies.push(said(await w.post("/api/login/challenge", { invitation: wrong(n) }, address(1))));
+			expect(replies).toEqual([
+				"401 unauthenticated",
+				"401 unauthenticated",
+				"401 unauthenticated",
+				"404 not_found",
+				"404 not_found",
+			]);
+			// Blocked: a wrong code is answered 429 on both routes, and another address is not affected.
+			expect(said(await w.post("/api/login", { invitation: wrong(6), password: FIRST }, address(1)))).toBe(
+				"429 limited, retry after 1",
+			);
+			expect(said(await w.post("/api/login/challenge", { invitation: wrong(7) }, address(1)))).toBe(
+				"429 limited, retry after 1",
+			);
+			expect(said(await w.post("/api/login/challenge", { invitation: wrong(8) }, address(2)))).toBe("404 not_found");
+			// The right code is 256 random bits the server made: it is looked at during the block, and it is good.
+			expect(said(await w.post("/api/login/challenge", { invitation: code }, address(1)))).toBe("200");
+			expect(said(await w.post("/api/login", { invitation: code, password: FIRST }, address(1)))).toBe("200");
+		});
+	});
+
+	test("a request from the loopback address, which behind a proxy is everybody's, is counted by the name and not by the address", async () => {
+		const w = world();
+		await joined(w, "robin", FIRST);
+		await quietly(async () => {
+			for (let n = 1; n <= 12; n++)
+				expect(said(await signIn(w, `person-${n}`, "not the password"))).toBe("401 unauthenticated");
+			expect(said(await signIn(w, "robin", FIRST))).toBe("200");
+			for (let n = 1; n <= 5; n++) await signIn(w, "robin", "not the password");
+			expect(said(await signIn(w, "robin", FIRST))).toBe("429 limited, retry after 1");
+		});
+	});
+
+	test("a session opened with a password says where it was opened and last used from, and one whose token has reached its end is not listed", async () => {
+		const clock = clockAt();
+		const w = world({ clock, proxied: true });
+		const { code } = await invite(w, { name: "robin", can: ["read"], project: "scratch" });
+		const accepted = await w.post("/api/login", { invitation: code, password: FIRST }, address(1));
+		const byPassword = await signIn(w, "robin", FIRST, address(2));
+		expect(w.rows("SELECT id, created_addr, last_seen_addr FROM sessions ORDER BY id")).toEqual([
+			{ id: 1, created_addr: "203.0.113.1", last_seen_addr: "203.0.113.1" },
+			{ id: 2, created_addr: "203.0.113.2", last_seen_addr: "203.0.113.2" },
+		]);
+		// A token for the same person, with an end, and a browser signed in with it.
+		const made = await w.ok<{ token: string }>("admin", {
+			do: "token.create",
+			actor: "robin",
+			kind: "human",
+			expires: "1d",
+		});
+		const byToken = await w.post("/api/login", { token: made.token }, address(3));
+		expect(byToken.status).toBe(200);
+		clock.advance(HOUR);
+		type Row = { id: number; openedWith: string; createdFrom: string | null; lastUsedFrom: string | null };
+		const listed = await w.ok<Row[]>("session", { do: "list" }, { cookie: accepted.cookie, ...address(4) });
+		expect(listed.map((row) => `${row.id} ${row.openedWith} ${row.createdFrom} ${row.lastUsedFrom}`)).toEqual([
+			// The request that asked is this session's latest use, known before it is written.
+			"1 password 203.0.113.1 203.0.113.4",
+			"2 password 203.0.113.2 203.0.113.2",
+			"3 token 203.0.113.3 203.0.113.3",
+		]);
+		// The token reaches its end: its session is refused, and the list says so too. The others live on.
+		clock.advance(DAY);
+		expect([await w.status({ cookie: byToken.cookie }), await w.status({ cookie: byPassword.cookie })]).toEqual([
+			401, 200,
+		]);
+		const after = await w.ok<Row[]>("session", { do: "list" }, { cookie: accepted.cookie });
+		expect(after.map((row) => row.id)).toEqual([1, 2]);
 	});
 });

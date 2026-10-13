@@ -130,6 +130,8 @@ export function signInRoutes(app: App, tools: Tools) {
 			);
 		} else return refused("input");
 		if (entry.ok) return tools.json({ ok: true, result: { signedIn: true } }, 200, tools.cookies(req, entry.signedIn));
+		// Too many failed attempts from this address, or at this name: the wait, and nothing about which.
+		if (entry.why === "limited") return tools.limited(entry.retryAfter);
 		if (entry.why === "other-session") {
 			return failed(
 				"conflict",
@@ -145,7 +147,7 @@ export function signInRoutes(app: App, tools: Tools) {
 	 * invitation is for, and the options for registering a passkey with it. It writes nothing, so a page that
 	 * is reloaded, or a preview that fetches it, changes nothing.
 	 */
-	async function challenge(req: Request): Promise<Response> {
+	async function challenge(req: Request, server: Listener): Promise<Response> {
 		if (!tools.sameOrigin(req)) return failed("unauthenticated", NOT_SIGNED_IN);
 		const read = await tools.read(req, CHALLENGE_BODY_LIMIT);
 		if (read instanceof Response) return read;
@@ -153,14 +155,18 @@ export function signInRoutes(app: App, tools: Tools) {
 		if (!body.success)
 			return failed("invalid", "send {} to sign in with a passkey, or { invitation } to look at an invitation");
 		if ("invitation" in body.data) {
-			const shown = showInvitation(app, body.data.invitation);
-			return shown ? answered(shown) : failed("not_found", NO_INVITATION);
+			const looked = showInvitation(app, body.data.invitation, tools.address(req, server));
+			if (looked.ok) return answered(looked.shown);
+			return looked.why === "limited" ? tools.limited(looked.retryAfter) : failed("not_found", NO_INVITATION);
 		}
 		const options = passkeySignInOptions(app);
 		return options ? answered({ passkey: options }) : passkeysOff();
 	}
 
-	const CHANGE_REFUSED: Record<Extract<PasswordChange, { ok: false }>["why"], [ErrorCode, string]> = {
+	const CHANGE_REFUSED: Record<
+		Exclude<Extract<PasswordChange, { ok: false }>["why"], "limited">,
+		[ErrorCode, string]
+	> = {
 		"not-signed-in": ["unauthenticated", "sign in again; the session ended before the password was changed"],
 		"not-a-person": ["forbidden", "only a person has a password"],
 		"current-required": ["invalid", "current: the current password is required to change it"],
@@ -191,8 +197,10 @@ export function signInRoutes(app: App, tools: Tools) {
 			session: sessionId,
 			current: body.data.current,
 			next: body.data.next,
+			address: tools.address(req, server),
 		});
 		if (changed.ok) return answered({ changed: true, sessionsEnded: changed.sessionsEnded });
+		if (changed.why === "limited") return tools.limited(changed.retryAfter);
 		if (changed.why === "wrong-current") console.warn("[mainworthy] password change refused: wrong-password");
 		const [code, message] = CHANGE_REFUSED[changed.why];
 		return failed(code, message);
@@ -202,7 +210,7 @@ export function signInRoutes(app: App, tools: Tools) {
 		signIn,
 		routes: {
 			"/api/login/methods": { GET: () => answered(signInMethods(app)) },
-			"/api/login/challenge": { POST: (req: Request) => challenge(req) },
+			"/api/login/challenge": { POST: (req: Request, server: Listener) => challenge(req, server) },
 			"/api/account/password": { POST: (req: Request, server: Listener) => password(req, server) },
 		},
 	};
