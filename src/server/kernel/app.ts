@@ -20,6 +20,11 @@ export type Config = {
 	mode: "local" | "server";
 	/** The name of the owner created on first start. */
 	owner: string;
+	/**
+	 * `MAINWORTHY_OWNER_WAS`: the name the owner has on this instance now, when `owner` is a new name for the same
+	 * person. The start renames that person (`bootstrap`). Absent on every other start.
+	 */
+	ownerWas?: string;
 	/** In `server` mode: the owner's token, if the operator wants to choose it. Otherwise one is generated and logged once. */
 	ownerToken: string | null;
 	/**
@@ -229,12 +234,13 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		port: Number(env.MAINWORTHY_PORT ?? env.PORT ?? 7357),
 		mode: env.MAINWORTHY_MODE === "server" || !loopback ? "server" : "local",
 		owner: env.MAINWORTHY_OWNER ?? env.USER ?? "owner",
+		// A variable that is set and empty (a compose file passes one on empty) is one that was not set.
+		...(env.MAINWORTHY_OWNER_WAS ? { ownerWas: env.MAINWORTHY_OWNER_WAS } : {}),
 		ownerToken: env.MAINWORTHY_OWNER_TOKEN ?? null,
 		commit: commitOf(env),
 		sessionIdleMs: lifetime(env, "MAINWORTHY_SESSION_IDLE", SESSION_LIFETIMES.sessionIdleMs),
 		sessionMaxMs: lifetime(env, "MAINWORTHY_SESSION_MAX", SESSION_LIFETIMES.sessionMaxMs),
 		proxy: proxyOf(env),
-		// A variable that is set and empty (a compose file passes one on empty) is one that was not set.
 		...(env.MAINWORTHY_PUBLIC_URL ? { publicUrl: env.MAINWORTHY_PUBLIC_URL } : {}),
 	};
 }

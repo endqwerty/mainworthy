@@ -14,6 +14,8 @@ services:
       # A long random string. Leave unset to have one generated and printed once on first start.
       MAINWORTHY_OWNER_TOKEN: ${MAINWORTHY_OWNER_TOKEN:-}
       MAINWORTHY_OWNER: ${MAINWORTHY_OWNER:-owner}
+      # To rename the owner: the name the owner has now, beside the new name above. Unset it after that start.
+      MAINWORTHY_OWNER_WAS: ${MAINWORTHY_OWNER_WAS:-}
       # How long a browser stays signed in: unused, and at most. Empty means 14d and 90d.
       MAINWORTHY_SESSION_IDLE: ${MAINWORTHY_SESSION_IDLE:-}
       MAINWORTHY_SESSION_MAX: ${MAINWORTHY_SESSION_MAX:-}
