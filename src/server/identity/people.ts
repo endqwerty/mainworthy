@@ -16,7 +16,7 @@ import type { App, Config } from "../kernel/app.ts";
 import { type Db, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
-import { type Ceremony, challengeOf, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
+import { CONTEXT, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
 import {
 	type CredentialRow,
 	countPasskeyUse,
@@ -59,6 +59,8 @@ import {
 	type AssertionOptions,
 	AssertionResponse,
 	assertionOptions,
+	CEREMONY_MS,
+	challengeOf,
 	type Passkey,
 	type Refusal,
 	type RegistrationOptions,
@@ -153,6 +155,8 @@ export type WhyNot =
 	| "changed-meanwhile"
 	/** No challenge of this server, for this purpose and this person, inside its time and not yet spent. */
 	| "challenge"
+	/** The answer does not come from where its ceremony began: another browser, another session, another invitation. */
+	| "context"
 	| "unknown-passkey"
 	/** The passkey was removed, or its person was forgotten. */
 	| "revoked-passkey"
@@ -385,32 +389,47 @@ export async function changePassword(
  * What a page passes to the browser to sign in with a passkey, with a new challenge. It names no passkey: the
  * browser offers the ones it holds for this instance, so nobody types a name first and the reply says nothing
  * about who has a passkey. Null on an instance with no public address.
+ *
+ * Nobody is signed in, so the ceremony is tied to the browser that asks: `ceremony` is a new random secret the
+ * surface hands that browser as a cookie for `lastsMs`, and the challenge keeps its SHA-256. The answer is
+ * taken only with that cookie (`signInWithPasskey`).
  */
-export function passkeySignInOptions(app: App): AssertionOptions | null {
+export function passkeySignInOptions(
+	app: App,
+): { options: AssertionOptions; ceremony: string; lastsMs: number } | null {
 	const address = publicAddress(app.config);
 	if (!address) return null;
-	return assertionOptions({
-		rpId: address.party.id,
-		challenge: issueChallenge(app, { purpose: "sign-in" }, address.party),
-		allow: [],
-	});
+	const ceremony = newSessionSecret();
+	const context = CONTEXT.browser(hashOf(ceremony));
+	return {
+		options: assertionOptions({
+			rpId: address.party.id,
+			challenge: issueChallenge(app, { purpose: "sign-in", context }, address.party),
+			allow: [],
+		}),
+		ceremony,
+		lastsMs: CEREMONY_MS,
+	};
 }
 
 /**
  * Judges a passkey's answer to a sign-in challenge against the rows of `db`. The person is the one the stored
  * row names, found by the credential id; nothing else in the answer chooses who signs in. The sign-in named no
- * passkey, so the answer must carry the user handle, and it must be that person's.
+ * passkey, so the answer must carry the user handle, and it must be that person's. `ceremony` is the ceremony
+ * cookie the request carried, or null: the answer is taken only from the browser its challenge was issued to.
  */
 function judgeAssertion(
 	app: App,
 	db: Db,
 	answer: unknown,
+	ceremony: string | null,
 ): { ok: true; row: CredentialRow; person: Person; shown: Assertion; challenge: string } | Refused {
 	const parsed = AssertionResponse.safeParse(answer);
 	const challenge = challengeOf(answer);
 	if (!parsed.success || challenge === null) return no("input");
 	const found = findChallenge(app, challenge, "sign-in");
 	if (!found) return no("challenge");
+	if (ceremony === null || found.ceremony.context !== CONTEXT.browser(hashOf(ceremony))) return no("context");
 	const row = passkeyByCredentialId(db, parsed.data.id);
 	if (!row) return no("unknown-passkey");
 	const person = row.revoked_at === null ? db.get(Q.personById, { id: row.actor }) : null;
@@ -444,15 +463,23 @@ function judgeAssertion(
  *
  * An answer that is refused, the first time or the second, is counted under the address it came from. A right
  * one signs in from an address that is blocked: nobody guesses a signature (`byAddress`).
+ *
+ * `ceremony` is the value of the ceremony cookie the request carried (`passkeySignInOptions`), or null. An
+ * answer without the cookie of the browser that asked for its challenge is refused like any other.
  */
-export async function signInWithPasskey(app: App, answer: unknown, about: About): Promise<Entry> {
+export async function signInWithPasskey(
+	app: App,
+	input: { answer: unknown; ceremony: string | null },
+	about: About,
+): Promise<Entry> {
+	const { answer, ceremony } = input;
 	const attempt = byAddress(app, about.address);
-	const first = judgeAssertion(app, app.reader, answer);
+	const first = judgeAssertion(app, app.reader, answer, ceremony);
 	if (!first.ok) return attempt.wrong(first);
 	about.proven?.();
 	const cookie = newSessionSecret();
 	const entry = await commit(app, () => {
-		const now = judgeAssertion(app, app.db, answer);
+		const now = judgeAssertion(app, app.db, answer, ceremony);
 		if (!now.ok) return now;
 		const opened = openOn(app, now.row, cookie, about);
 		if (!opened || !countPasskeyUse(app.db, now.row, now.shown, app.now())) throw new Stop(no("changed-meanwhile"));
@@ -463,45 +490,53 @@ export async function signInWithPasskey(app: App, answer: unknown, about: About)
 	return entry.ok || entry.why === "changed-meanwhile" ? entry : attempt.wrong(entry);
 }
 
-/** The options for a new passkey of one person, with a new challenge that only an answer for that person spends. */
+/**
+ * The options for a new passkey of one person, with a new challenge that only an answer for that person, from
+ * where the ceremony began (`context`), spends.
+ */
 function registrationFor(
 	app: App,
-	input: { party: RelyingParty; person: Person; userHandle: string; exclude: readonly CredentialRow[] },
+	input: {
+		party: RelyingParty;
+		person: Person;
+		userHandle: string;
+		context: string;
+		exclude: readonly CredentialRow[];
+	},
 ): RegistrationOptions {
-	const { party, person, userHandle, exclude } = input;
+	const { party, person, userHandle, context, exclude } = input;
 	return registrationOptions({
 		rpId: party.id,
 		rpName: RP_NAME,
 		user: { handle: userHandle, name: person.name, displayName: person.name },
-		challenge: issueChallenge(app, { purpose: "register", userHandle }, party),
+		challenge: issueChallenge(app, { purpose: "register", userHandle, context }, party),
 		exclude: exclude.flatMap((row) => storedPasskey(row) ?? []),
 	});
 }
 
 /**
  * Judges the answer to a registration challenge, for one person. The challenge must be one issued for a
- * registration of this very person, who is named in it by the handle their passkeys are filed under. The
- * credential id must be on no row, live or revoked, of anybody.
+ * registration of this very person, who is named in it by the handle their passkeys are filed under, and
+ * issued where this answer comes from (`context`): the same session, or the same invitation. The credential
+ * id must be on no row, live or revoked, of anybody.
  */
 function judgeRegistration(
 	app: App,
 	db: Db,
-	person: Person,
-	answer: unknown,
+	input: { person: Person; answer: unknown; context: string },
 ): { ok: true; passkey: Passkey; challenge: string } | Refused {
+	const { person, answer, context } = input;
 	const challenge = challengeOf(answer);
 	if (challenge === null) return no("input");
 	const found = findChallenge(app, challenge, "register");
 	const handle = userHandleOf(db, person.id);
-	if (!found || handle === null || !isFor(found.ceremony, handle)) return no("challenge");
+	if (!found || handle === null || found.ceremony.userHandle !== handle) return no("challenge");
+	if (found.ceremony.context !== context) return no("context");
 	const verdict = verifyRegistration(answer, found.expected);
 	if (!verdict.ok) return no(verdict.reason);
 	if (passkeyByCredentialId(db, verdict.value.credentialId)) return no("credential-exists");
 	return { ok: true, passkey: verdict.value, challenge };
 }
-const isFor = (ceremony: Extract<Ceremony, { purpose: "register" }>, userHandle: string): boolean =>
-	ceremony.userHandle === userHandle;
-
 function mustBePerson(db: Db, actor: number): Person {
 	const person = db.get(Q.personById, { id: actor });
 	if (!person) throw invalid("only a person has a password or a passkey");
@@ -511,12 +546,21 @@ function mustBePerson(db: Db, actor: number): Person {
 /**
  * Begins the registration of a passkey for a signed-in person: what the page passes to the browser. In the
  * operation's transaction, because the person's handle is made here the first time.
+ *
+ * `context` is where the caller is signed in (`Session.context`): the registration is completed there and
+ * nowhere else, so another session of the same person does not store a passkey this one asked for.
  */
-export function beginPasskey(app: App, actor: number): RegistrationOptions {
+export function beginPasskey(app: App, input: { actor: number; context: string }): RegistrationOptions {
 	const party = mustHavePasskeys(app);
-	const person = mustBePerson(app.db, actor);
+	const person = mustBePerson(app.db, input.actor);
 	const userHandle = ensureUserHandle(app.db, person.id, app.now());
-	return registrationFor(app, { party, person, userHandle, exclude: liveCredentials(app.db, person.id) });
+	return registrationFor(app, {
+		party,
+		person,
+		userHandle,
+		context: input.context,
+		exclude: liveCredentials(app.db, person.id),
+	});
 }
 
 /**
@@ -525,11 +569,11 @@ export function beginPasskey(app: App, actor: number): RegistrationOptions {
  */
 export function addPasskey(
 	app: App,
-	input: { actor: number; answer: unknown; label: string },
+	input: { actor: number; context: string; answer: unknown; label: string },
 ): { id: number; label: string } {
 	mustHavePasskeys(app);
 	const person = mustBePerson(app.db, input.actor);
-	const judged = judgeRegistration(app, app.db, person, input.answer);
+	const judged = judgeRegistration(app, app.db, { person, answer: input.answer, context: input.context });
 	if (!judged.ok) {
 		if (judged.why === "credential-exists")
 			throw conflict("this passkey is registered on this instance already; a passkey is registered once");
@@ -643,7 +687,8 @@ export function showInvitation(
 	| Refused
 	| Limited {
 	const attempt = byAddress(app, address);
-	const found = openInvitation(app, app.reader, hashOf(code));
+	const hash = hashOf(code);
+	const found = openInvitation(app, app.reader, hash);
 	if (!found) return attempt.wrong(no("invitation"));
 	const { invitation, person } = found;
 	const party = publicAddress(app.config)?.party;
@@ -652,8 +697,18 @@ export function showInvitation(
 		ok: true,
 		shown: {
 			invitation: { name: person.name, purpose: invitation.purpose, expiresAt: invitation.expires_at },
+			// The challenge is this invitation's, by the hash of its code: another invitation for the same person
+			// does not accept a passkey made for this one.
 			passkey:
-				party && handle !== null ? registrationFor(app, { party, person, userHandle: handle, exclude: [] }) : null,
+				party && handle !== null
+					? registrationFor(app, {
+							party,
+							person,
+							userHandle: handle,
+							context: CONTEXT.invitation(hash),
+							exclude: [],
+						})
+					: null,
 		},
 	};
 }
@@ -694,7 +749,11 @@ export async function acceptInvitation(
 		const found = openInvitation(app, db, hash);
 		if (!found) return no("invitation");
 		if (input.passkey === undefined) return { ok: true, ...found, registration: null } as const;
-		const registration = judgeRegistration(app, db, found.person, input.passkey);
+		const registration = judgeRegistration(app, db, {
+			person: found.person,
+			answer: input.passkey,
+			context: CONTEXT.invitation(hash),
+		});
 		return registration.ok ? ({ ok: true, ...found, registration } as const) : registration;
 	};
 	const attempt = byAddress(app, about.address);

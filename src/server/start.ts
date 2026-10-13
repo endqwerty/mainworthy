@@ -41,7 +41,7 @@ export function open(
 			project = options.firstProject ?? "scratch";
 			app.db.transaction(() =>
 				createProject(
-					{ app, actor: owner, now: app.now(), session: null },
+					{ app, actor: owner, now: app.now(), session: null, context: null },
 					{ key: project ?? "scratch", preset: "loose" },
 				),
 			);

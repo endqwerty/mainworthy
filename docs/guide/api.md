@@ -44,7 +44,7 @@ A browser signs in with these requests and then holds a session cookie. They are
 | `GET /api/login/methods` | none | `{"password": true, "passkey": <boolean>}`: whether this instance has passkeys. |
 | `POST /api/login` | `{"token"}` | Signs in with a token. |
 | `POST /api/login` | `{"name", "password"}` | Signs in with a name and a password. |
-| `POST /api/login/challenge` | `{}` | The options for `navigator.credentials.get`, with a challenge that is good once, for five minutes. |
+| `POST /api/login/challenge` | `{}` | The options for `navigator.credentials.get`, with a challenge that is good once, for five minutes. The reply also sets a cookie (`mainworthy_ceremony`, `HttpOnly`) that ties the challenge to the browser that asked: the answer is taken only with it. A browser sends it by itself; a script has to keep it. |
 | `POST /api/login` | `{"passkey"}` | Signs in with what the browser returned for those options: `id`, `clientDataJSON`, `authenticatorData`, `signature`, `userHandle`, each base64url. |
 | `POST /api/login/challenge` | `{"invitation"}` | Who the invitation is for, what it does (`join` or `recover`) and when it runs out, with the options for `navigator.credentials.create`, or `null` for them on an instance without passkeys. It changes nothing. A code that accepts nothing is answered `not_found`. |
 | `POST /api/login` | `{"invitation", "password"?, "passkey"?, "label"?, "replace"?}` | Accepts an invitation with a password, a passkey or both, and signs in. `passkey` is what the browser returned for the options above: `id`, `clientDataJSON`, `authenticatorData`, `publicKey`, `publicKeyAlgorithm`, `transports`. In a browser that is signed in as somebody else it is refused with `conflict` until it says `"replace": true`. |
@@ -53,7 +53,7 @@ A browser signs in with these requests and then holds a session cookie. They are
 
 A body holds one of these shapes and nothing beside it. `GET /api/session` says who is signed in, which session the request came by (`session`), whether the caller owns the instance (`owner`) and, for a person, what they sign in with (`credentials`: whether they have a password, and how many passkeys).
 
-A signed-in person registers a further passkey with the `credential` operation: `passkey.begin` answers the options for `navigator.credentials.create`, and `passkey.add` takes what the browser returned and a label.
+A signed-in person registers a further passkey with the `credential` operation: `passkey.begin` answers the options for `navigator.credentials.create`, and `passkey.add` takes what the browser returned and a label. Both are for a browser that is signed in, and the session that begins a registration is the one that finishes it. A token is refused with `forbidden`, as it is when it tries to set a password.
 
 ## Send a write twice safely
 

@@ -17,7 +17,7 @@ import type { Actor } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
-import { clearChallenges } from "./challenges.ts";
+import { CONTEXT, clearChallenges } from "./challenges.ts";
 import { credentialSummary, dropUserHandle, revokeCredentialsOf } from "./credentials.ts";
 import { listInvitations, revokeInvitation, revokeInvitationsOf } from "./invitations.ts";
 import { addressKey, isGeneratedSecret, prefixKey } from "./limiter.ts";
@@ -437,6 +437,14 @@ export type Session = {
 	 * machine have no such row.
 	 */
 	id?: () => number | null;
+	/**
+	 * Where the caller is signed in, as one text that every request of the same browser session gives and no
+	 * other does (`CONTEXT` in `challenges.ts`), or null once that session has ended. A passkey ceremony keeps
+	 * it with its challenge, so that what one session began another does not complete. The owner of this
+	 * machine, who has no session, is one place too. A token has none: it is no browser's session, and a way
+	 * of signing in is not added with one.
+	 */
+	context?: () => string | null;
 };
 
 /**
@@ -554,6 +562,8 @@ export function admit(app: App, facts: Facts): Admission {
 				session: {
 					via: "cookie",
 					id: () => findSession(app, hash)?.id ?? null,
+					// By the hash of the cookie, which is what the row stores, and never by the row's number.
+					context: () => (findSession(app, hash) ? CONTEXT.session(hash) : null),
 					actor: (project) => {
 						const standing = findSession(app, hash);
 						return standing ? toActor(app.reader, standing.actor, project) : null;
@@ -563,7 +573,9 @@ export function admit(app: App, facts: Facts): Admission {
 		}
 	}
 	const owner = app.config.mode === "local" ? facts.localOwner : null;
-	return owner ? { kind: "admitted", session: { via: "local", actor: () => owner } } : REFUSED;
+	return owner
+		? { kind: "admitted", session: { via: "local", actor: () => owner, context: () => CONTEXT.local } }
+		: REFUSED;
 }
 
 /** What a browser is given at sign-in: the cookie's value, and when the session it names ends at the latest. */

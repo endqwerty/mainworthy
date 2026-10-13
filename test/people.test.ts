@@ -1098,3 +1098,32 @@ describe("what the pages of the web UI asked of the server", () => {
 		expect(said(await w.post("/api/find", {}, bearer(TOKEN)))).toBe("400 invalid");
 	});
 });
+
+describe("a sign-in body the server cannot read", () => {
+	test("one that is too large, or is not JSON, is answered as any body that is no way of signing in: not with a sentence about tokens", async () => {
+		const w = world();
+		await joined(w, "robin", FIRST);
+		const logged = spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const send = (body: string) =>
+				fetch(`${w.instance.url}/api/login`, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body,
+				}).then(async (reply) => `${reply.status} ${reply.headers.getSetCookie().length} ${await reply.text()}`);
+			// A passkey's answer is the longest body there is, and sixteen kibibytes is past any of them.
+			const large = JSON.stringify({ passkey: { id: "x".repeat(17 * 1024) } });
+			expect([await send(large), await send("{not json"), await send('"a string"')]).toEqual(
+				Array.from({ length: 3 }, () => `401 0 ${REFUSED}`),
+			);
+			expect(logged.mock.calls.map((call) => String(call[0]))).toEqual(
+				Array.from({ length: 3 }, () => "[mainworthy] sign-in refused: input"),
+			);
+			// One byte inside the limit is read, and refused for what it is.
+			const fits = JSON.stringify({ name: "robin", password: "x".repeat(400), pad: "y".repeat(8 * 1024) });
+			expect(await send(fits)).toBe(`401 0 ${REFUSED}`);
+		} finally {
+			logged.mockRestore();
+		}
+	});
+});

@@ -72,32 +72,41 @@ function sameOrigin(req: Request): boolean {
 }
 
 /**
- * The session cookie's name. Over https it carries the `__Host-` prefix, which a browser accepts only with
- * `Secure`, `Path=/` and no `Domain`: no other host of the site, and no page reached over plain http, can then
- * set or replace it. A browser refuses that prefix from plain http, where an instance on a private network or a
- * published port is still reached, so there the cookie has the bare name.
+ * The names of this server's two cookies, as they are over plain http. Over https each carries the `__Host-`
+ * prefix, which a browser accepts only with `Secure`, `Path=/` and no `Domain`: no other host of the site, and
+ * no page reached over plain http, can then set or replace it. A browser refuses that prefix from plain http,
+ * where an instance on a private network or a published port is still reached, so there a cookie has the bare
+ * name. Everything below that names, reads, sets or expires a cookie goes by this one rule (`cookieName`,
+ * `cookieOf`, `cookieHeaders`).
  */
 const SESSION_COOKIE = "mainworthy_sid";
-const HOST_SESSION_COOKIE = `__Host-${SESSION_COOKIE}`;
+/**
+ * What ties a passkey sign-in to the browser that asked for its challenge. Nobody is signed in then, so the
+ * reply that carries the challenge sets this cookie, and the answer is taken only with it (`signin.ts`).
+ */
+const CEREMONY_COOKIE = "mainworthy_ceremony";
 /**
  * The cookie of the builds before sessions. Its value was the token itself. It signs nobody in, and a sign-in
  * and a sign-out expire it, so the token does not stay in a browser for the year that cookie was given.
  */
 const FORMER_COOKIE = "mainworthy_session";
 const COOKIE_ATTRIBUTES = "Path=/; HttpOnly; SameSite=Strict";
-/** What a session cookie's value looks like: 32 bytes in base64url. Anything else is not one of ours. */
+/** What a cookie's value looks like: 32 bytes in base64url. Anything else is not one of ours. */
 const COOKIE_VALUE = /^[A-Za-z0-9_-]{43}$/;
 
 const isHttps = (req: Request): boolean => schemeOf(req) === "https:";
-const sessionCookieName = (req: Request): string => (isHttps(req) ? HOST_SESSION_COOKIE : SESSION_COOKIE);
+/** The name a cookie has on the scheme of this request. */
+const cookieName = (req: Request, plain: string): string => (isHttps(req) ? `__Host-${plain}` : plain);
+const expiredCookie = (req: Request, name: string): string =>
+	`${name}=; ${COOKIE_ATTRIBUTES}; Max-Age=0${isHttps(req) ? "; Secure" : ""}`;
 
 /**
- * The value of the session cookie a request carries under the name its scheme selects, or null. Null too when
- * the request carries two cookies of that name: a browser sends two when something planted a second one beside
- * the real one, and nothing says which is which. A value that does not look like a session's is not looked up.
+ * The value of the cookie a request carries under the name its scheme selects, or null. Null too when the
+ * request carries two cookies of that name: a browser sends two when something planted a second one beside
+ * the real one, and nothing says which is which. A value that does not look like one of ours is not looked up.
  */
-function sessionCookieOf(req: Request): string | null {
-	const name = sessionCookieName(req);
+function cookieOf(req: Request, plain: string): string | null {
+	const name = cookieName(req, plain);
 	const values: string[] = [];
 	for (const part of (req.headers.get("cookie") ?? "").split(";")) {
 		const at = part.indexOf("=");
@@ -108,28 +117,34 @@ function sessionCookieOf(req: Request): string | null {
 }
 
 /**
- * The `Set-Cookie` headers of a sign-in (`signedIn`) or of a sign-out (null), one header for each cookie.
+ * The `Set-Cookie` values that give a browser one of this server's cookies (`set`: its value, and the seconds
+ * it lasts) or take it away (null), one for each header.
  *
- * The scheme the browser used decides the session cookie's name and whether the cookies say `Secure`, here and
- * wherever the cookie is read (`schemeOf`). Every other name a browser may still hold is expired, with the
- * attributes its own name needs: the former cookie, and the session cookie's other name, which is left over
- * when an instance moves between http and https. Over plain http the `__Host-` name cannot be expired, because a
- * browser refuses that prefix there; what ends a session is its row, not the browser's jar.
+ * The scheme the browser used decides the cookie's name and whether it says `Secure`, here and wherever the
+ * cookie is read (`schemeOf`). Over https the cookie's other name is expired too: it is left over when an
+ * instance moves between http and https. Over plain http the `__Host-` name cannot be expired, because a
+ * browser refuses that prefix there; what ends a session or a ceremony is the server's own record, not the
+ * browser's jar.
+ */
+function cookieHeaders(req: Request, plain: string, set: { value: string; seconds: number } | null): string[] {
+	const name = cookieName(req, plain);
+	const given = set
+		? `${name}=${set.value}; ${COOKIE_ATTRIBUTES}; Max-Age=${set.seconds}${isHttps(req) ? "; Secure" : ""}`
+		: expiredCookie(req, name);
+	return isHttps(req) ? [given, expiredCookie(req, plain)] : [given];
+}
+
+const sessionCookieOf = (req: Request): string | null => cookieOf(req, SESSION_COOKIE);
+
+/**
+ * The `Set-Cookie` headers of a sign-in (`signedIn`) or of a sign-out (null), one header for each cookie: the
+ * session cookie (`cookieHeaders`), and the former cookie, which every sign-in and sign-out expires.
  */
 function sessionCookies(app: App, req: Request, signedIn: SignedIn | null): Headers {
-	const https = isHttps(req);
-	const secure = https ? "; Secure" : "";
-	const expired = (name: string): string => `${name}=; ${COOKIE_ATTRIBUTES}; Max-Age=0${secure}`;
-	const name = sessionCookieName(req);
 	const headers = new Headers();
-	headers.append(
-		"set-cookie",
-		signedIn
-			? `${name}=${signedIn.cookie}; ${COOKIE_ATTRIBUTES}; Max-Age=${Math.ceil((signedIn.expiresAt - app.now()) / 1000)}${secure}`
-			: expired(name),
-	);
-	if (https) headers.append("set-cookie", expired(SESSION_COOKIE));
-	headers.append("set-cookie", expired(FORMER_COOKIE));
+	const set = signedIn ? { value: signedIn.cookie, seconds: Math.ceil((signedIn.expiresAt - app.now()) / 1000) } : null;
+	for (const cookie of cookieHeaders(req, SESSION_COOKIE, set)) headers.append("set-cookie", cookie);
+	headers.append("set-cookie", expiredCookie(req, FORMER_COOKIE));
 	return headers;
 }
 
@@ -405,6 +420,8 @@ export async function handleOp(
 			actor: session.actor,
 			// Which of the caller's browser sessions this is, for an operation that lists or ends them.
 			...(session.id ? { session: session.id } : {}),
+			// Where the caller is signed in, for an operation that another request finishes (a passkey registration).
+			...(session.context ? { context: session.context } : {}),
 		}),
 	);
 }
@@ -477,7 +494,9 @@ async function login(
 	try {
 		input = await readJson(req, SIGN_IN_BODY_LIMIT, patience.signInBodyMs);
 	} catch (error) {
-		if (!(error instanceof BodyTooSlow)) return unauthenticated();
+		// A body that is too large or is not JSON is no way of signing in, and is answered as one that could be
+		// read and is none: nothing was looked at that could say more.
+		if (!(error instanceof BodyTooSlow)) return otherwise(req, server, undefined);
 		return jsonResponse(
 			{ ok: false, error: { code: "invalid", message: "the sign-in request took too long to arrive" } },
 			408,
@@ -720,6 +739,11 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patie
 		json: jsonResponse,
 		cookies: (req, signedIn) => sessionCookies(app, req, signedIn),
 		cookieOf: sessionCookieOf,
+		ceremony: {
+			of: (req) => cookieOf(req, CEREMONY_COOKIE),
+			set: (req, value, seconds) => cookieHeaders(req, CEREMONY_COOKIE, { value, seconds }),
+			clear: (req) => cookieHeaders(req, CEREMONY_COOKIE, null),
+		},
 		sessionFor: (req, server) => sessionFor(app, owner, req, server),
 		address: (req, server) => clientAddress(req, server, app.config),
 		limited,

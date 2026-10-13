@@ -288,6 +288,30 @@ an invitation's link once.
   showed a sign-in that waited across one and opened a session for whoever came after.
 - A challenge is kept in memory for five minutes with what it was issued for, bounded at ten thousand, and
   spent by the commit that stores the passkey or opens the session. An import ends every ceremony under way.
+- A ceremony is finished where it began. The challenge keeps its initiating context, and an answer is taken
+  only from there, compared when it arrives and again in the commit that spends the challenge:
+  - A sign-in, where nobody is signed in yet: the reply that carries the challenge sets a cookie of 32 random
+    bytes (`mainworthy_ceremony`, or `__Host-mainworthy_ceremony` over https; `HttpOnly; SameSite=Strict;
+    Path=/`, `Max-Age` of the challenge's five minutes, `Secure` over https, by the same function that
+    names and sets the session cookie). The challenge keeps the cookie's SHA-256. An answer with no such
+    cookie, another one, or two of them is refused with the one refusal of a sign-in and counted like any
+    refused answer. The reply to an answer clears the cookie, whatever came of it.
+  - A signed-in registration: the session that asked, by the hash of its session cookie, which is what its
+    row stores. Another session of the same person does not complete it. The owner of the machine in local
+    mode, who has no session, is one context. A bearer token is none: `passkey.begin` and `passkey.add`
+    refuse a token (403), as the password route does, because a way in that a script could add would outlive
+    the token.
+  - A registration with an invitation: that invitation, by the hash of its code. Another invitation for the
+    same person does not accept a passkey made for the first.
+
+  No row's number is kept: an import gives it to another row. The earlier review of the verifier asked for
+  this, the list above `verifyRegistration` left it out, and the independent check of this pull request found
+  each of the three completed from somewhere else. No takeover was shown, since a valid signature or the
+  account's own authority was still needed; a signed answer is now also worth nothing without the browser,
+  session or invitation it was made for.
+- The challenge an answer names is read from its client data by the verifier's own reader (`challengeOf` in
+  `webauthn.ts`), so the caller accepts exactly the bytes the verifier accepts, one leading byte-order mark
+  included.
 - The relying party is `MAINWORTHY_PUBLIC_URL` and nothing a request says. A value no browser would make a
   passkey at stops the start. Without it there are no passkeys and a link has no host.
 - A password is 12 to 256 characters. Changing one makes a new row and revokes the old, which erases its hash;

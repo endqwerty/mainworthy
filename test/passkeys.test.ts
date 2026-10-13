@@ -4,7 +4,12 @@
 // stored row names, the counter is compared again in the commit, and the relying party comes from the
 // configuration. The authenticator is written from the specification (`test/people-support.ts`).
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { type AssertionOptions, CEREMONY_MS, type RegistrationOptions } from "../src/server/identity/webauthn.ts";
+import {
+	type AssertionOptions,
+	CEREMONY_MS,
+	challengeOf,
+	type RegistrationOptions,
+} from "../src/server/identity/webauthn.ts";
 import {
 	type Authenticator,
 	authenticator,
@@ -62,12 +67,26 @@ async function addPasskey(w: World, cookie: string, device: Authenticator, label
 	);
 	return { options, added };
 }
+/**
+ * The ceremony cookie each sign-in challenge was handed out with, by challenge: what the browser that asked
+ * for it holds. `challenge` and `withPasskey` are that browser, so an answer goes back with the cookie of its
+ * own challenge. A test about another browser sends its own cookie header, or asks without these two.
+ */
+const ceremonies = new Map<string, string>();
 const challenge = async (w: World): Promise<AssertionOptions> => {
 	const reply = await w.post<{ passkey: AssertionOptions }>("/api/login/challenge", {});
 	if (!reply.body.ok) throw new Error(`no challenge: ${reply.text}`);
+	ceremonies.set(reply.body.result.passkey.challenge, reply.cookie);
 	return reply.body.result.passkey;
 };
-const withPasskey = (w: World, passkey: unknown, headers: Sent = {}) => w.post("/api/login", { passkey }, headers);
+const withPasskey = (w: World, passkey: unknown, headers: Sent = {}) => {
+	const held = ceremonies.get(challengeOf(passkey) ?? "");
+	const sent = held === undefined || "cookie" in headers ? headers : { ...headers, cookie: held };
+	return w.post("/api/login", { passkey }, sent);
+};
+/** How many cookies a reply hands the browser, not counting the ones it takes away: a refusal hands none. */
+const handed = (reply: { setCookies: string[] }): number =>
+	reply.setCookies.filter((cookie) => !cookie.includes("Max-Age=0")).length;
 /** A person with a password and one passkey. */
 async function person(w: World, name: string): Promise<{ cookie: string; device: Authenticator }> {
 	const cookie = await joined(w, name, PASSWORD);
@@ -350,7 +369,7 @@ describe("signing in with a passkey", () => {
 			replies.push(await withPasskey(w, { id: device.id }));
 			// The person was not verified: somebody touched the key, and nothing says it was its owner.
 			replies.push(await withPasskey(w, device.assert(await challenge(w), { unverified: true })));
-			expect(replies.map((reply) => `${reply.status} ${reply.setCookies.length} ${reply.text}`)).toEqual(
+			expect(replies.map((reply) => `${reply.status} ${handed(reply)} ${reply.text}`)).toEqual(
 				Array.from({ length: 9 }, () => `401 0 ${REFUSED}`),
 			);
 		});
@@ -566,6 +585,7 @@ describe("the relying party", () => {
 		expect(options.body).toMatchObject({ ok: true, result: { rp: { id: "mainworthy.example" } } });
 		// An answer made at the name the request claimed is not accepted, whichever Host carries it back.
 		const offered = must(viaHost).passkey;
+		ceremonies.set(offered.challenge, viaHost.cookie);
 		const registering = must(options);
 		const lines = await logged(async () => {
 			const there = device.assert({ ...offered, rpId: "evil.example" }, { origin: "https://evil.example" });
@@ -694,7 +714,7 @@ describe("the limit on failed attempts", () => {
 			expect(failures.map(said)).toEqual(Array.from({ length: 5 }, () => "401 unauthenticated"));
 			// The address is blocked: a wrong answer is told to wait, and is not counted or logged again.
 			const blocked = await withPasskey(w, stranger.assert(await challenge(w)), at(1));
-			expect(`${said(blocked)} ${blocked.setCookies.length}`).toBe("429 limited, retry after 1 0");
+			expect(`${said(blocked)} ${handed(blocked)}`).toBe("429 limited, retry after 1 0");
 			// A right answer is a signature nobody guesses: it signs in from the blocked address.
 			expect(said(await withPasskey(w, device.assert(await challenge(w), { signCount: 5 }), at(1)))).toBe("200");
 			// Another address was never affected.
@@ -715,5 +735,229 @@ describe("the limit on failed attempts", () => {
 		expect(sessionCount(w)).toBe(before + 2);
 		// The session a passkey opened says where it was opened from.
 		expect(w.rows("SELECT created_addr FROM sessions WHERE credential = 2")).toEqual([{ created_addr: "203.0.113.1" }]);
+	});
+});
+
+describe("a ceremony belongs to where it began", () => {
+	/** Asks for a sign-in challenge as one browser does: the options, and the ceremony cookie the reply set. */
+	async function ask(w: World, headers: Sent = {}) {
+		const reply = await w.post<{ passkey: AssertionOptions }>("/api/login/challenge", {}, headers);
+		return { options: must(reply).passkey, cookie: reply.cookie, setCookies: reply.setCookies };
+	}
+
+	test("a sign-in challenge is answered only by the browser that asked for it: the reply sets a cookie, and an answer without it, with another or with two is refused", async () => {
+		const w = world();
+		const { device } = await person(w, "robin");
+		const mine = await ask(w);
+		// What the browser is handed: a random value it cannot read, for this ceremony's five minutes.
+		expect(mine.setCookies).toEqual([
+			expect.stringMatching(/^mainworthy_ceremony=[A-Za-z0-9_-]{43}; Path=\/; HttpOnly; SameSite=Strict; Max-Age=300$/),
+		]);
+		// Only its SHA-256 is kept, and that only in memory: the value is nowhere on disk.
+		expect(w.disk().includes(mine.cookie.split("=")[1] ?? "")).toBe(false);
+		const other = await ask(w);
+		expect(other.cookie).not.toBe(mine.cookie);
+		const answer = device.assert(mine.options);
+		const before = sessionCount(w);
+		const lines = await logged(async () => {
+			const replies = [
+				// Another browser, which holds the answer and no cookie; one that asked for a challenge of its own;
+				// and a request that carries two, of which nothing says which is the browser's.
+				await withPasskey(w, answer),
+				await withPasskey(w, answer, { cookie: other.cookie }),
+				await withPasskey(w, answer, { cookie: `${mine.cookie}; ${other.cookie}` }),
+				await withPasskey(w, answer, { cookie: `${mine.cookie}; ${mine.cookie}` }),
+				await withPasskey(w, answer, { cookie: "mainworthy_ceremony=not-a-ceremony" }),
+			];
+			expect(replies.map((reply) => `${reply.status} ${reply.text}`)).toEqual(
+				Array.from({ length: 5 }, () => `401 ${REFUSED}`),
+			);
+			// A refusal clears the cookie as a success does, and sets no session.
+			for (const reply of replies)
+				expect(reply.setCookies).toEqual(["mainworthy_ceremony=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"]);
+		});
+		expect(lines).toEqual(Array.from({ length: 5 }, () => "[mainworthy] sign-in refused: context"));
+		expect(sessionCount(w)).toBe(before);
+		// None of that spent the challenge: the browser that asked still signs in, and its cookie is cleared.
+		const signedIn = await withPasskey(w, answer, { cookie: mine.cookie });
+		expect(signedIn.status).toBe(200);
+		expect(signedIn.setCookies).toEqual([
+			expect.stringMatching(/^mainworthy_sid=[A-Za-z0-9_-]{43}; /),
+			"mainworthy_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0",
+			"mainworthy_ceremony=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0",
+		]);
+		expect((await w.get("/api/session", { cookie: signedIn.cookie })).body).toMatchObject({
+			result: { actor: "robin" },
+		});
+	});
+
+	test("over https the ceremony cookie has the __Host- name and Secure, and the plain name is no ceremony there", async () => {
+		const w = world();
+		const { device } = await person(w, "robin");
+		const https: Sent = { origin: `https://${new URL(w.instance.url).host}`, "x-forwarded-proto": "https" };
+		const mine = await ask(w, https);
+		expect(mine.setCookies).toEqual([
+			expect.stringMatching(
+				/^__Host-mainworthy_ceremony=[A-Za-z0-9_-]{43}; Path=\/; HttpOnly; SameSite=Strict; Max-Age=300; Secure$/,
+			),
+			"mainworthy_ceremony=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0; Secure",
+		]);
+		const answer = device.assert(mine.options);
+		const lines = await logged(async () => {
+			const plain = mine.cookie.replace("__Host-", "");
+			expect((await withPasskey(w, answer, { ...https, cookie: plain })).status).toBe(401);
+			expect((await withPasskey(w, answer, { cookie: mine.cookie })).status).toBe(401);
+		});
+		expect(lines).toEqual(Array.from({ length: 2 }, () => "[mainworthy] sign-in refused: context"));
+		const signedIn = await withPasskey(w, answer, { ...https, cookie: mine.cookie });
+		expect(signedIn.status).toBe(200);
+		expect(signedIn.setCookies.slice(-2)).toEqual([
+			"__Host-mainworthy_ceremony=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0; Secure",
+			"mainworthy_ceremony=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0; Secure",
+		]);
+	});
+
+	test("an answer without its ceremony cookie is counted under the address like any refused answer", async () => {
+		const w = world({ proxied: true });
+		const { device } = await person(w, "robin");
+		const at: Sent = from("203.0.113.40");
+		const lines = await logged(async () => {
+			for (let n = 1; n <= 5; n++) {
+				const mine = await ask(w, at);
+				expect(said(await withPasskey(w, device.assert(mine.options), at))).toBe("401 unauthenticated");
+			}
+			const mine = await ask(w, at);
+			expect(said(await withPasskey(w, device.assert(mine.options), at))).toBe("429 limited, retry after 1");
+			// The browser that asked signs in from the blocked address, as a right answer does.
+			expect(said(await withPasskey(w, device.assert(mine.options), { ...at, cookie: mine.cookie }))).toBe("200");
+		});
+		expect(lines).toEqual(Array.from({ length: 5 }, () => "[mainworthy] sign-in refused: context"));
+	});
+
+	test("a registration is completed by the session that began it: not by another session of the same person, and not with a token", async () => {
+		const w = world();
+		const laptop = await joined(w, "robin", PASSWORD);
+		const phone = (await signIn(w, "robin", PASSWORD)).cookie;
+		const begin = (headers: Sent) => w.op<RegistrationOptions>("credential", { do: "passkey.begin" }, headers);
+		const add = async (headers: Sent, passkey: unknown): Promise<string> => {
+			const reply = await w.op("credential", { do: "passkey.add", passkey, label: "key" }, headers);
+			return `${reply.status} ${reply.body.ok ? "added" : (/\(([a-z-]+)\)/.exec(reply.body.error.message)?.[1] ?? reply.body.error.code)}`;
+		};
+		const device = authenticator();
+		const answer = device.register(must(await begin({ cookie: laptop })));
+		// The phone is signed in as the same person, and did not begin this.
+		expect(await add({ cookie: phone }, answer)).toBe("400 context");
+		// Nor after the laptop signed out, which is how an answer would outlive the session that asked for it.
+		expect((await w.post("/api/logout", {}, { cookie: laptop })).status).toBe(200);
+		expect(await add({ cookie: phone }, answer)).toBe("400 context");
+		expect(credentials(w).filter((row) => row.kind === "passkey")).toEqual([]);
+		// The session that begins one completes it.
+		const own = authenticator();
+		expect(await add({ cookie: phone }, own.register(must(await begin({ cookie: phone }))))).toBe("200 added");
+		// A token is no browser's session: it lists what the person signs in with and registers nothing, as it
+		// sets no password. A way in that a script could add would outlive the token.
+		const token = (await w.ok<{ token: string }>("admin", { do: "token.create", actor: "robin", kind: "human" })).token;
+		expect((await w.op("credential", { do: "list" }, bearer(token))).status).toBe(200);
+		const refused = await begin(bearer(token));
+		expect(`${refused.status} ${refused.body.ok ? "" : refused.body.error.message}`).toBe(
+			"403 a passkey is registered from a browser that is signed in, not with a token",
+		);
+		const forPhone = authenticator().register(must(await begin({ cookie: phone })));
+		expect(await add(bearer(token), forPhone)).toBe("403 forbidden");
+		expect(await add({ cookie: phone }, forPhone)).toBe("200 added");
+	});
+
+	test("the owner of the machine, who needs no sign-in in local mode, registers a passkey there, and a browser session does not complete it", async () => {
+		const w = world({ mode: "local" });
+		const options = must(await w.op<RegistrationOptions>("credential", { do: "passkey.begin" }, {}));
+		const answer = authenticator().register(options);
+		// A browser that signed in on the same machine is another context than the machine's owner with no sign-in.
+		const token = (await w.ok<{ token: string }>("admin", { do: "token.create", actor: OWNER, kind: "human" }, {}))
+			.token;
+		const session = (await w.post("/api/login", { token })).cookie;
+		const elsewhere = await w.op(
+			"credential",
+			{ do: "passkey.add", passkey: answer, label: "key" },
+			{ cookie: session },
+		);
+		expect(elsewhere.status).toBe(400);
+		expect(elsewhere.body.ok ? "" : elsewhere.body.error.message).toContain("(context)");
+		const added = await w.op("credential", { do: "passkey.add", passkey: answer, label: "key" }, {});
+		expect(added.body).toMatchObject({ ok: true, result: { label: "key" } });
+	});
+
+	test("an invitation's passkey is made for that invitation: the answer to one's challenge does not accept another for the same person", async () => {
+		const w = world();
+		const first = await invite(w, { name: "robin" });
+		const forFirst = must(
+			await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: first.code }),
+		).passkey;
+		const device = authenticator();
+		const answer = device.register(forFirst);
+		// A second invitation for the same person replaces the first, whose challenge is still inside its time.
+		const second = await invite(w, { name: "robin" });
+		const lines = await logged(async () => {
+			const moved = await w.post("/api/login", { invitation: second.code, passkey: answer });
+			expect(`${moved.status} ${moved.text}`).toBe(`401 ${REFUSED}`);
+			const old = await w.post("/api/login", { invitation: first.code, passkey: answer });
+			expect(`${old.status} ${old.text}`).toBe(`401 ${REFUSED}`);
+		});
+		expect(lines).toEqual(["[mainworthy] sign-in refused: context", "[mainworthy] sign-in refused: invitation"]);
+		expect(credentials(w)).toEqual([]);
+		// The second invitation's own challenge accepts it.
+		const forSecond = must(
+			await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: second.code }),
+		).passkey;
+		const accepted = await w.post("/api/login", { invitation: second.code, passkey: device.register(forSecond) });
+		expect(accepted.status).toBe(200);
+		// A recovery's challenge is the recovery's too: the person's own session, which could register a passkey of
+		// its own, does not store the one made for the link.
+		const recovery = await invite(w, { name: "robin" });
+		const forRecovery = must(
+			await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: recovery.code }),
+		).passkey;
+		const other = authenticator();
+		const made = other.register(forRecovery);
+		const viaSession = await w.op(
+			"credential",
+			{ do: "passkey.add", passkey: made, label: "key" },
+			{ cookie: accepted.cookie },
+		);
+		expect(viaSession.status).toBe(400);
+		expect(viaSession.body.ok ? "" : viaSession.body.error.message).toContain("(context)");
+		expect((await w.post("/api/login", { invitation: recovery.code, passkey: made })).status).toBe(200);
+	});
+
+	test("a registration whose client data begins with a byte-order mark is read as the verifier reads it, and is stored", async () => {
+		const w = world();
+		const cookie = await joined(w, "robin", PASSWORD);
+		const options = await w.ok<RegistrationOptions>("credential", { do: "passkey.begin" }, { cookie });
+		const marked = authenticator().register(options, { bom: true });
+		expect(Buffer.from(marked.clientDataJSON, "base64url").subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+		const added = await w.op("credential", { do: "passkey.add", passkey: marked, label: "marked" }, { cookie });
+		expect(`${added.status} ${added.text}`).toBe('200 {"ok":true,"result":{"id":2,"label":"marked"},"seq":null}');
+	});
+
+	test("a sign-in whose client data begins with a byte-order mark is accepted, and the mark is part of what was signed", async () => {
+		const w = world();
+		const { device } = await person(w, "robin");
+		const mine = await ask(w);
+		const answer = device.assert(mine.options, { bom: true });
+		expect(Buffer.from(answer.clientDataJSON, "base64url").subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+		const signedIn = await withPasskey(w, answer, { cookie: mine.cookie });
+		expect(`${signedIn.status} ${signedIn.text}`).toBe('200 {"ok":true,"result":{"signedIn":true}}');
+		// The same answer without the mark is another message than the one the key signed, and is refused.
+		const again = await ask(w);
+		const stripped = device.assert(again.options, { bom: true });
+		const lines = await logged(async () => {
+			const bytes = Buffer.from(stripped.clientDataJSON, "base64url").subarray(3);
+			const reply = await withPasskey(
+				w,
+				{ ...stripped, clientDataJSON: bytes.toString("base64url") },
+				{ cookie: again.cookie },
+			);
+			expect(reply.status).toBe(401);
+		});
+		expect(lines).toEqual(["[mainworthy] sign-in refused: signature"]);
 	});
 });

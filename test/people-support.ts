@@ -265,6 +265,8 @@ export type Twist = {
 	origin?: string;
 	/** The authenticator did not check who the person is (no fingerprint, face or PIN): only that somebody is there. */
 	unverified?: boolean;
+	/** The client data begins with a UTF-8 byte-order mark, which a reader of JSON drops and a signature covers. */
+	bom?: boolean;
 };
 
 /**
@@ -301,7 +303,10 @@ export function authenticator(origin = PUBLIC): Authenticator {
 		return Buffer.concat([fixed, Buffer.alloc(16), length, id, cose]);
 	};
 	const clientData = (type: string, challenge: string, twist: Twist): Buffer =>
-		Buffer.from(JSON.stringify({ type, challenge, origin: twist.origin ?? origin, crossOrigin: false }));
+		Buffer.concat([
+			Buffer.from(twist.bom ? [0xef, 0xbb, 0xbf] : []),
+			Buffer.from(JSON.stringify({ type, challenge, origin: twist.origin ?? origin, crossOrigin: false })),
+		]);
 	return {
 		id: encoded(id),
 		register(options, twist = {}) {

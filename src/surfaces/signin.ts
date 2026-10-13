@@ -47,6 +47,16 @@ export type Tools = {
 	cookies: (req: Request, signedIn: SignedIn) => Headers;
 	/** The value of the session cookie the request carries, or null. */
 	cookieOf: (req: Request) => string | null;
+	/**
+	 * The ceremony cookie, which ties a passkey sign-in to the browser that asked for its challenge: its value on
+	 * a request (null for none, and for two), and the `Set-Cookie` values that set it for some seconds or clear
+	 * it. Its name and attributes follow the session cookie's rules, which `http.ts` holds once.
+	 */
+	ceremony: {
+		of: (req: Request) => string | null;
+		set: (req: Request, value: string, seconds: number) => string[];
+		clear: (req: Request) => string[];
+	};
 	/** The session of a request, or the reply that refuses it. */
 	sessionFor: (req: Request, server: Listener) => Session | Response;
 	/** The address a request came from, as failed attempts are counted and a session records it; null when nothing says. */
@@ -99,6 +109,15 @@ export function signInRoutes(app: App, tools: Tools) {
 	 * from and read its body.
 	 */
 	async function signIn(req: Request, server: Listener, input: unknown): Promise<Response> {
+		const reply = await answerSignIn(req, server, input);
+		// A sign-in with a passkey ends its ceremony whatever came of it: the cookie that tied the challenge to
+		// this browser is cleared with the reply, accepted, refused or told to wait.
+		if (WithPasskey.safeParse(input).success)
+			for (const cookie of tools.ceremony.clear(req)) reply.headers.append("set-cookie", cookie);
+		return reply;
+	}
+
+	async function answerSignIn(req: Request, server: Listener, input: unknown): Promise<Response> {
 		const about = {
 			userAgent: req.headers.get("user-agent"),
 			address: tools.address(req, server),
@@ -113,7 +132,11 @@ export function signInRoutes(app: App, tools: Tools) {
 		if (withPassword.success) entry = await signInWithPassword(app, withPassword.data, about);
 		else if (withPasskey.success) {
 			if (!publicAddress(app.config)) return passkeysOff();
-			entry = await signInWithPasskey(app, withPasskey.data.passkey, about);
+			entry = await signInWithPasskey(
+				app,
+				{ answer: withPasskey.data.passkey, ceremony: tools.ceremony.of(req) },
+				about,
+			);
 		} else if (withInvitation.success) {
 			const { invitation, password, passkey, label, replace } = withInvitation.data;
 			// What is wrong with the request itself is said before the invitation is looked at, so it says nothing
@@ -159,8 +182,14 @@ export function signInRoutes(app: App, tools: Tools) {
 			if (looked.ok) return answered(looked.shown);
 			return looked.why === "limited" ? tools.limited(looked.retryAfter) : failed("not_found", NO_INVITATION);
 		}
-		const options = passkeySignInOptions(app);
-		return options ? answered({ passkey: options }) : passkeysOff();
+		const begun = passkeySignInOptions(app);
+		if (!begun) return passkeysOff();
+		// The browser that asked is handed a cookie it cannot read, for as long as the challenge lasts. Only that
+		// browser can answer: the challenge keeps the cookie's hash, and the answer is taken with the cookie.
+		const headers = new Headers();
+		for (const cookie of tools.ceremony.set(req, begun.ceremony, Math.ceil(begun.lastsMs / 1000)))
+			headers.append("set-cookie", cookie);
+		return tools.json({ ok: true, result: { passkey: begun.options } }, 200, headers);
 	}
 
 	const CHANGE_REFUSED: Record<

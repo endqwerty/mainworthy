@@ -55,6 +55,13 @@ function own(env: InstanceCtx, owner: number | null, what: string): void {
 	if (owner === null || !mayActFor(env.actor, owner)) throw notFound(what);
 }
 
+/** Where the caller is signed in, for a passkey registration; a caller with a token is refused. */
+function signedInAt(env: InstanceCtx): string {
+	if (env.context === null)
+		throw forbidden("a passkey is registered from a browser that is signed in, not with a token");
+	return env.context;
+}
+
 export const sessionOp = defineInstanceOp({
 	name: "session",
 	summary: "Your browser sessions: list them, and end one. An admin who is a person lists and ends anyone's.",
@@ -106,10 +113,19 @@ export const credentialOp = defineInstanceOp({
 				return listCredentials(db, subject(env, input.actor, "the passwords and passkeys").id);
 			// A passkey is registered by the person it is for, signed in, and for nobody else: an admin who could
 			// add one to another person's account could sign in as them.
+			// It is registered where the person is signed in, and finished there: the challenge keeps the caller's
+			// context, and another session of the same person does not complete it. A token is no place to sign in
+			// from, so it begins and finishes none, as it sets no password: a way in that a script could add would
+			// outlive the token.
 			case "passkey.begin":
-				return beginPasskey(env.app, env.actor.id);
+				return beginPasskey(env.app, { actor: env.actor.id, context: signedInAt(env) });
 			case "passkey.add":
-				return addPasskey(env.app, { actor: env.actor.id, answer: input.passkey, label: input.label });
+				return addPasskey(env.app, {
+					actor: env.actor.id,
+					context: signedInAt(env),
+					answer: input.passkey,
+					label: input.label,
+				});
 			case "remove":
 				own(env, credentialOwner(db, input.id), `credential ${input.id}`);
 				return removeCredential(env.app, input.id);
