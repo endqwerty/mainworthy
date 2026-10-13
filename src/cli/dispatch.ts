@@ -1,5 +1,6 @@
 import { type Args, GLOBAL_FLAGS, hasJsonInput, parseArgs } from "./args.ts";
 import { Client, clientOptions } from "./client.ts";
+import { actorCommand } from "./commands/actor.ts";
 import { checkCommand } from "./commands/check.ts";
 import { exportCommand } from "./commands/export.ts";
 import { fmtCommand } from "./commands/fmt.ts";
@@ -24,6 +25,7 @@ export const ADAPTER_COMMANDS: ReadonlyMap<string, AdapterCommand> = new Map(
 		reportCommand,
 		gateCommand,
 		tokenCommand,
+		actorCommand,
 		policyCommand,
 		newCommand,
 		getCommand,

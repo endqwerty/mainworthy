@@ -535,5 +535,5 @@ export function executeWorkload(instance: DatasetInstance, iterations: number): 
 
 /** Confirms that a workload's actor is an authenticated producer without altering measured inputs. */
 export function assertProducer(actor: Actor): void {
-	ensure(actor.kind === "ci" && actor.can.includes("produce"), "ingest must use the authenticated CI producer");
+	ensure(actor.kind === "ci" && actor.can.includes("record"), "ingest must use the authenticated CI producer");
 }

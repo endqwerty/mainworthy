@@ -105,7 +105,9 @@ export async function session(
 	if (options.owner && !sessionCurrent(options.owner))
 		throw new ApiError("unauthenticated", "The session changed. Your input is kept.");
 	if (!envelope.ok) refuse(envelope.error);
-	return Session.parse(envelope.result);
+	const info = Session.parse(envelope.result);
+	// The pages show a project's content. A project the caller holds a grant on and may not read is not one of them.
+	return { ...info, projects: info.projects.filter((project) => project.can.includes("read")) };
 }
 export async function login(token: string): Promise<void> {
 	const envelope = Wire.parse(

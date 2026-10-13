@@ -376,7 +376,7 @@ describe("what a result may prove", () => {
 
 	test("the same attempt reported twice keeps the failure; a newer attempt or a correction replaces it", () => {
 		seed();
-		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const ci = h.actor("pipeline", "ci", ["read", "record"]);
 		const planned = plan({ name: "Same attempt", select: {}, accepts: { commit: "sameatt01" } });
 		const one = (outcome: string, extra: Record<string, unknown> = {}) => ({
 			target: { commit: "sameatt01", branch: "main" },
@@ -402,7 +402,7 @@ describe("what a result may prove", () => {
 	});
 
 	test("the 'already failing on the base' hint reads what the base's gate counts, after corrections and attempts", () => {
-		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const ci = h.actor("pipeline", "ci", ["read", "record"]);
 		const one = (target: Record<string, unknown>, outcome: string, extra: Record<string, unknown> = {}) => ({
 			target,
 			job: "e2e",
@@ -611,7 +611,7 @@ describe("what a result may prove", () => {
 
 	test("an agent's results never count in a commit's gate, and cannot clear a pipeline's failure", () => {
 		const agent = h.actor("explorer", "agent", ["read", "produce"]);
-		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const ci = h.actor("pipeline", "ci", ["read", "record"]);
 		const keyed = (key: string, outcome: string) => ({
 			test: { key },
 			outcome,
@@ -634,7 +634,7 @@ describe("what a result may prove", () => {
 	});
 
 	test("one producer's pass does not replace another job's or another producer's failure of the same test", () => {
-		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const ci = h.actor("pipeline", "ci", ["read", "record"]);
 		const one = (outcome: string, job: string) => ({
 			target: { commit: "lanes0001", branch: "main" },
 			job,
@@ -896,7 +896,7 @@ describe("what a result may prove", () => {
 });
 
 describe("what a run and a change may count", () => {
-	const pipeline = () => h.actor("pipeline", "ci", ["read", "produce"]);
+	const pipeline = () => h.actor("pipeline", "ci", ["read", "record"]);
 	const explorer = () => h.actor("explorer", "agent", ["read", "produce"]);
 	const linked = (outcome: string, message = "boom") => ({
 		test: { key: "t1" },
@@ -1824,7 +1824,7 @@ describe("what a decision may change", () => {
 			...(outcome === "fail" ? { failure: { message: "shared cause" } } : {}),
 		});
 		// A pipeline fails the case and a person passes it: the slot is disputed, and a person calls it flaky.
-		report({ target, results: [result("fail")] }, h.actor("pipeline", "ci", ["read", "produce"]));
+		report({ target, results: [result("fail")] }, h.actor("pipeline", "ci", ["read", "record"]));
 		report({ target, results: [result("pass")] });
 		const dispute = open("failure");
 		expect((dispute.evidence as { hints: string[] }).hints).toContain("disputed");
@@ -1842,7 +1842,7 @@ describe("what a decision may change", () => {
 	});
 
 	test("an agent's failure is asked about even where a pipeline passes the same test", () => {
-		const pipeline = h.actor("pipeline", "ci", ["read", "produce"]);
+		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
 		const explorer = h.actor("explorer", "agent", ["read", "produce"]);
 		const target = { commit: "found001", branch: "main" };
 		report({ target, results: [{ test: { key: "checkout" }, outcome: "pass" }] }, pipeline);
@@ -1859,7 +1859,7 @@ describe("what a decision may change", () => {
 	});
 
 	test("an agent's report does not close a person's question about an older commit", () => {
-		const pipeline = h.actor("pipeline", "ci", ["read", "produce"]);
+		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
 		const explorer = h.actor("explorer", "agent", ["read", "produce"]);
 		const fail = (key: string) => ({ test: { key }, outcome: "fail", failure: { message: "shared cause" } });
 		report(
@@ -1885,7 +1885,7 @@ describe("what a decision may change", () => {
 	});
 
 	test("an answer withdrawn after its failure went away leaves nobody asked", () => {
-		const pipeline = h.actor("pipeline", "ci", ["read", "produce"]);
+		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
 		report(
 			{
 				target: { commit: "gone0001", branch: "main" },
@@ -1959,7 +1959,7 @@ describe("what a decision may change", () => {
 			outcome,
 			...(outcome === "fail" ? { failure: { message: "shared cause" } } : {}),
 		});
-		report({ target, results: [result("fail")] }, h.actor("pipeline", "ci", ["read", "produce"]));
+		report({ target, results: [result("fail")] }, h.actor("pipeline", "ci", ["read", "record"]));
 		report({ target, results: [result("pass")] });
 		expect(open("failure").answers).toContain("mistaken");
 		// The same cause from an agent, in a report that touches no slot. The slot is still disputed, so the
@@ -1975,7 +1975,7 @@ describe("what a decision may change", () => {
 	test("a pipeline's pass does not close the question about a failure a planned run still shows", () => {
 		seed(1, ["human", "agent"]);
 		const agent = h.actor("agent", "agent", ["read", "produce"]);
-		const pipeline = h.actor("pipeline", "ci", ["read", "produce"]);
+		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
 		const planned = plan({
 			name: "Agent run",
 			select: {},
@@ -2260,7 +2260,7 @@ describe("what a decision may change", () => {
 		const alice = h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
 		const bob = h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
 		const carol = h.actor("carol", "human", ["read", "produce", "answer", "plan"]);
-		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const ci = h.actor("pipeline", "ci", ["read", "record"]);
 		const result = (outcome: string) => ({
 			test: { key: "one" },
 			annotation: { case: "C-1", version: 1 },
@@ -2312,7 +2312,7 @@ describe("what a decision may change", () => {
 		seed(1, ["human", "auto"]);
 		const alice = h.actor("alice", "human", ["read", "produce", "answer", "plan"]);
 		const bob = h.actor("bob", "human", ["read", "produce", "answer", "plan"]);
-		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const ci = h.actor("pipeline", "ci", ["read", "record"]);
 		const result = (outcome: string) => ({
 			test: { key: "one" },
 			annotation: { case: "C-1", version: 1 },
@@ -2768,7 +2768,7 @@ describe("what a caller is told", () => {
 		expect(fate("admin-command-09")).toMatchObject({ ok: true, result: { state: "none" } });
 		expect(fate("short")).toMatchObject({ ok: false, error: { code: "invalid" } });
 		// A caller who may not read is refused.
-		const writer = h.actor("writer", "ci", ["produce"]);
+		const writer = h.actor("writer", "ci", ["record"]);
 		expect(fate("asked-about-01", writer)).toMatchObject({ ok: false, error: { code: "forbidden" } });
 	});
 
@@ -2835,7 +2835,7 @@ describe("what a caller is told", () => {
 				target: { commit: "message01", branch: "main" },
 				results: [{ test: { key: "one" }, annotation: { case: "C-1", version: 1 }, outcome: "pass" }],
 			},
-			h.actor("pipeline", "ci", ["read", "produce"]),
+			h.actor("pipeline", "ci", ["read", "record"]),
 		);
 		const now = open("failure");
 		expect((now.evidence as { hints: string[] }).hints).toContain("disputed");
@@ -2844,7 +2844,7 @@ describe("what a caller is told", () => {
 	});
 
 	test("the number of tests a question has seen does not fall when a later report adds one", () => {
-		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const ci = h.actor("pipeline", "ci", ["read", "record"]);
 		const failing = (key: string) => ({ test: { key }, outcome: "fail", failure: { message: "one cause" } });
 		const target = { commit: "many0001", branch: "main" };
 		report({ target, results: Array.from({ length: 60 }, (_, i) => failing(`t${i}`)) }, ci);
@@ -2856,7 +2856,7 @@ describe("what a caller is told", () => {
 	});
 
 	test("a question says who is asked under the policy in force, not the one it was asked under", () => {
-		report(ciReport({ commit: "policy001", n: 1, fail: { 0: "bug" } }), h.actor("pipeline", "ci", ["read", "produce"]));
+		report(ciReport({ commit: "policy001", n: 1, fail: { 0: "bug" } }), h.actor("pipeline", "ci", ["read", "record"]));
 		const before = open("failure").needs;
 		usePolicy("strict");
 		const after = open("failure").needs;
@@ -2874,7 +2874,7 @@ describe("what a caller is told", () => {
 			do: "token.create",
 			actor: "ci-bot",
 			kind: "ci",
-			can: ["read", "produce"],
+			can: ["read", "record"],
 			cmd: "admin-command-02",
 		};
 		expect(h.raw("admin", token).ok).toBe(true);

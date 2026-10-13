@@ -324,7 +324,7 @@ for (const preset of ["strict", "standard"]) {
 						do: "token.create",
 						actor: "pipeline",
 						kind: "ci",
-						can: ["read", "produce"],
+						can: ["read", "record"],
 						project: "scratch",
 					}),
 				).token;

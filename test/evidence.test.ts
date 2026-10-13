@@ -257,13 +257,15 @@ describe("who may answer", () => {
 	});
 
 	test("a pipeline cannot answer, and a reader cannot answer", () => {
-		const ci = h.actor("github-actions", "ci", ["read", "produce"]);
+		const ci = h.actor("github-actions", "ci", ["read", "record"]);
 		const reader = h.actor("pm", "human", ["read"]);
 		h.call("report", ciReport({ commit: "3333333b", n: 3, fail: { 0: "expected 1, got 2" } }), ci);
 		const q = first(queue().items);
-		expect(decide(q, { is: "flaky" }, ci)?.status).toBe("forbidden");
-		const refused = h.raw("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" } }, reader);
-		expect(refused).toMatchObject({ ok: false, error: { code: "forbidden" } });
+		// Neither may call `decide` at all: a pipeline records, a reader reads.
+		for (const actor of [ci, reader]) {
+			const refused = h.raw("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "flaky" } }, actor);
+			expect(refused).toMatchObject({ ok: false, error: { code: "forbidden" } });
+		}
 	});
 
 	test("an answer the kind does not have is invalid and says which are allowed", () => {

@@ -165,6 +165,26 @@ import { PRESETS } from "../../src/core/presets.ts";
 			expect(tokens.find((token) => token.actor === "reviewer")?.revoked).toBe(false);
 			await page.getByRole("button", { name: "Dismiss secret" }).click();
 			expect(await page.getByLabel("New token").count()).toBe(0);
+			// A pipeline: the form offers what a pipeline may hold and starts from recording alone.
+			await page.getByLabel("Token actor").fill("github-actions");
+			await page.getByLabel("Producer").selectOption("ci");
+			const offered = await page.locator(".settings-capabilities label").allInnerTexts();
+			expect(offered.map((text) => text.trim())).toEqual(["read", "record"]);
+			expect(await page.locator(".settings-capabilities input:checked").count()).toBe(1);
+			await page.getByRole("button", { name: "Create token", exact: true }).click();
+			await page.getByLabel("New token").waitFor();
+			const pipeline = {
+				"Content-Type": "application/json",
+				authorization: `Bearer ${await page.getByLabel("New token").inputValue()}`,
+			};
+			const recorded = await fetch(`${server.url}/api/p/scratch/report`, {
+				method: "POST",
+				headers: pipeline,
+				body: JSON.stringify({ target: { commit: "abc1234" }, results: [{ test: { key: "a::b" }, outcome: "pass" }] }),
+			});
+			const read = await fetch(`${server.url}/api/p/scratch/find`, { method: "POST", headers: pipeline, body: "{}" });
+			expect([recorded.status, read.status]).toEqual([200, 403]);
+			await page.getByRole("button", { name: "Dismiss secret" }).click();
 			await page.getByRole("button", { name: "Revoke reviewer", exact: true }).click();
 			await eventually(
 				() => server.api("admin", { do: "token.list" }),

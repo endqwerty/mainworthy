@@ -67,7 +67,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 		h.app.db.raw.query(sql).all(...args) as T[];
 	const trace: unknown[] = [];
 	let people: Actor[] = [h.owner, h.actor("second", "human", ["read", "produce", "answer", "plan"])];
-	const pipeline = h.actor("pipeline", "ci", ["read", "produce"]);
+	const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
 	let agents: Actor[] = [h.actor("explorer", "agent", ["read", "produce"])];
 	const rule = Number(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")[0]?.id ?? 0);
 	const project = Number(rows<{ id: number }>("SELECT id FROM projects WHERE key = 'scratch'")[0]?.id ?? 0);

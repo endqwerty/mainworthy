@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { z } from "zod";
-import { Capability, Policy } from "../../core/kinds.ts";
+import { Capability, CI_CAPABILITIES, defaultCapabilities, Policy } from "../../core/kinds.ts";
 import { PRESET_GUIDE, PRESET_SUMMARY } from "../../core/policy-guide.ts";
 import { presetOf } from "../../core/presets.ts";
 import { call } from "../lib/api.ts";
@@ -316,7 +316,10 @@ function SettingsWorkbench() {
 							<h2>Connect a pipeline</h2>
 							<p>Report the runner's JUnit XML, then read the gate.</p>
 							<pre className="settings-command">{`CASEBOOK_URL=${location.origin}\nCASEBOOK_PROJECT=${project}\ncasebook report results/*.xml\ncasebook gate`}</pre>
-							<p className="dim">Set CASEBOOK_TOKEN to a pipeline token in the runner's secret store.</p>
+							<p className="dim">
+								Set CASEBOOK_TOKEN to a pipeline token in the runner's secret store. A pipeline token records results
+								and reads the gate; it cannot read or change the suite.
+							</p>
 							<SectionHeading>Connect an agent</SectionHeading>
 							<p>Create an agent token with read and produce permissions. Under standard, edits wait for a person.</p>
 							<pre className="settings-command">{`${location.origin}/mcp`}</pre>
@@ -334,7 +337,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 	const parsed = Token.array().safeParse(read.data);
 	const [actor, setActor] = useState("");
 	const [kind, setKind] = useState<"human" | "agent" | "ci">("agent");
-	const [capabilities, setCapabilities] = useState<z.infer<typeof Capability>[]>(["read", "produce"]);
+	const [capabilities, setCapabilities] = useState<z.infer<typeof Capability>[]>([...defaultCapabilities("agent")]);
 	const [created, setCreated] = useState<z.infer<typeof CreatedToken> | null>(null);
 	const secretRef = useRef<HTMLInputElement>(null);
 	const [busy, setBusy] = useState(false);
@@ -390,7 +393,10 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 					value={kind}
 					onChange={(event) => {
 						event.currentTarget.blur();
-						setKind(z.enum(["human", "agent", "ci"]).parse(event.target.value));
+						const chosen = z.enum(["human", "agent", "ci"]).parse(event.target.value);
+						setKind(chosen);
+						// Each producer starts from what its kind is for; a pipeline records and nothing else.
+						setCapabilities([...defaultCapabilities(chosen)]);
 					}}
 				>
 					<option value="agent">Agent</option>
@@ -399,7 +405,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 				</select>
 				<fieldset className="settings-capabilities">
 					<legend>Permissions</legend>
-					{Capability.options.map((can) => (
+					{(kind === "ci" ? CI_CAPABILITIES : Capability.options).map((can) => (
 						<label key={can}>
 							<input
 								type="checkbox"

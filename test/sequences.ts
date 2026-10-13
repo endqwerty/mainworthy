@@ -67,7 +67,7 @@ function sequence(seed: number, preset: string): Problem | null {
 	const rows = <T = Row>(sql: string, ...args: (string | number)[]): T[] => h.app.db.raw.query(sql).all(...args) as T[];
 	const trace: unknown[] = [];
 	const people: Actor[] = [h.owner, h.actor("second", "human", ["read", "produce", "answer", "plan"])];
-	const pipeline = h.actor("pipeline", "ci", ["read", "produce"]);
+	const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
 	const agent = h.actor("explorer", "agent", ["read", "produce"]);
 	const rule = Number(rows<{ id: number }>("SELECT id FROM actors WHERE kind = 'rule'")[0]?.id ?? 0);
 	const command = (op: string, input: unknown, as: Actor = h.owner): unknown => {

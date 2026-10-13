@@ -17,7 +17,7 @@ test("archive routes require admin for reads and writes over the real HTTP serve
 			do: "token.create",
 			actor: "pipeline",
 			kind: "ci",
-			can: ["read", "produce"],
+			can: ["read", "record"],
 		});
 		const parsed = z.object({ token: z.string() }).parse(created);
 		for (const { path, method } of [
