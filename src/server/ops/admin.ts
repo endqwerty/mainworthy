@@ -109,9 +109,12 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 		}
 		case "grant.set":
 		case "grant.remove": {
-			// An admin's own grant is another admin's to change: a slip here would lock the instance.
+			// An admin's own grant is another admin's to change: a slip here would lock the instance. The owner's is
+			// nobody's: it is written again on every start, and until then nobody might be left to administer.
 			if (input.actor === env.actor.name)
 				throw invalid("you cannot change what you yourself may do; another admin must do it");
+			if (input.actor === env.app.config.owner)
+				throw invalid(`${input.actor} owns this instance and may do everything; that is not changed here`);
 			const project = projectOf(db, input.project);
 			if (input.do === "grant.remove") return { removed: removeGrant(env.app, { actor: input.actor, project }) };
 			setGrant(env.app, { actor: input.actor, project, can: input.can });

@@ -35,11 +35,22 @@ console.log(
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${chosen}\n`);
 if (choice.use === "none") process.exit(4);
 const own = choice.use === "own" ? await startOwn(CLI) : null;
+// The job's own Casebook is stopped on every way out of this script: its end, an error, a signal.
+for (const signal of ["SIGINT", "SIGTERM"] as const)
+	process.on(signal, () => {
+		own?.stop();
+		process.exit(signal === "SIGINT" ? 130 : 143);
+	});
 
 const cli = (argv: string[]): number => {
 	console.log(`\n$ casebook ${argv.join(" ")}`);
 	return Bun.spawnSync([process.execPath, CLI, ...argv], {
-		env: { ...process.env, ...own?.env },
+		env: {
+			...process.env,
+			// The project the choice settled on, also when none was named: the CLI is not left to pick one.
+			...(choice.use === "deployed" ? { CASEBOOK_PROJECT: choice.project } : {}),
+			...own?.env,
+		},
 		stdio: ["ignore", "inherit", "inherit"],
 	}).exitCode;
 };
@@ -47,45 +58,49 @@ const cli = (argv: string[]): number => {
 const problems: string[] = [];
 const rows: { shard: string; outcome: Outcome | null; tests: number; failed: number }[] = [];
 const reported = new Set<string>();
-for (const shard of shards) {
-	const file = join(directory, `${shard}.xml`);
-	const outcome = readOutcome(join(directory, `${shard}.json`));
-	const text = existsSync(file) ? readFileSync(file, "utf8") : "";
-	if (text.trim() === "" || outcome === null) {
-		const what = text.trim() === "" ? `${file} is missing or empty` : "its outcome file is missing";
-		problems.push(`${shard}: no report (${what})`);
-		rows.push({ shard, outcome, tests: 0, failed: 0 });
-		continue;
+let gate: number;
+try {
+	for (const shard of shards) {
+		const file = join(directory, `${shard}.xml`);
+		const outcome = readOutcome(join(directory, `${shard}.json`));
+		const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+		if (text.trim() === "" || outcome === null) {
+			const what = text.trim() === "" ? `${file} is missing or empty` : "its outcome file is missing";
+			problems.push(`${shard}: no report (${what})`);
+			rows.push({ shard, outcome, tests: 0, failed: 0 });
+			continue;
+		}
+		const results = parseJUnit(text, { file }).results;
+		const failed = results.filter((result) => result.outcome === "fail" || result.outcome === "error").length;
+		rows.push({ shard, outcome, tests: results.length, failed });
+		for (const suite of text.matchAll(/<testsuite\b[^>]*\bfile="([^"]+)"/g)) reported.add(suite[1] ?? "");
+		// A skipped test proves nothing, and one skipped test beside others that ran is somebody's decision. A file
+		// in which nothing ran is a file that was not tested.
+		// Counted from the results as Casebook's own reader understands the report, so the job and the gate read one
+		// report one way: text inside a test's output is not a test, and a test takes its suite's file when it
+		// names none.
+		const ran = new Map<string, { tests: number; skipped: number }>();
+		for (const result of results) {
+			const name = ("file" in result.test ? result.test.file : undefined) ?? "";
+			const count = ran.get(name) ?? { tests: 0, skipped: 0 };
+			count.tests++;
+			if (result.outcome === "skip") count.skipped++;
+			ran.set(name, count);
+		}
+		for (const [name, count] of ran)
+			if (count.skipped === count.tests)
+				problems.push(`${shard}: every test of ${name || "a suite that names no file"} was skipped (${count.tests})`);
+		if (results.length === 0) problems.push(`${shard}: its report holds no test`);
+		if (outcome.exit !== 0 && failed === 0)
+			problems.push(`${shard}: the tests exited ${outcome.exit} and the report shows no failure`);
+		const exit = cli(["report", file, "--job", shard]);
+		if (exit !== 0) problems.push(`${shard}: casebook report exited ${exit}`);
 	}
-	const results = parseJUnit(text, { file }).results;
-	const failed = results.filter((result) => result.outcome === "fail" || result.outcome === "error").length;
-	rows.push({ shard, outcome, tests: results.length, failed });
-	for (const suite of text.matchAll(/<testsuite\b[^>]*\bfile="([^"]+)"/g)) reported.add(suite[1] ?? "");
-	// A skipped test proves nothing, and one skipped test beside others that ran is somebody's decision. A file
-	// in which nothing ran is a file that was not tested.
-	// Counted from the results as Casebook's own reader understands the report, so the job and the gate read one
-	// report one way: text inside a test's output is not a test, and a test takes its suite's file when it
-	// names none.
-	const ran = new Map<string, { tests: number; skipped: number }>();
-	for (const result of results) {
-		const name = ("file" in result.test ? result.test.file : undefined) ?? "";
-		const count = ran.get(name) ?? { tests: 0, skipped: 0 };
-		count.tests++;
-		if (result.outcome === "skip") count.skipped++;
-		ran.set(name, count);
-	}
-	for (const [name, count] of ran)
-		if (count.skipped === count.tests)
-			problems.push(`${shard}: every test of ${name || "a suite that names no file"} was skipped (${count.tests})`);
-	if (results.length === 0) problems.push(`${shard}: its report holds no test`);
-	if (outcome.exit !== 0 && failed === 0)
-		problems.push(`${shard}: the tests exited ${outcome.exit} and the report shows no failure`);
-	const exit = cli(["report", file, "--job", shard]);
-	if (exit !== 0) problems.push(`${shard}: casebook report exited ${exit}`);
-}
 
-const gate = cli(["gate"]);
-own?.stop();
+	gate = cli(["gate"]);
+} finally {
+	own?.stop();
+}
 
 const unreported = [...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")]
 	.filter((file) => !reported.has(file))

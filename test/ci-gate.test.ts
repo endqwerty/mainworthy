@@ -1,7 +1,7 @@
 // The last job of the check workflow (`scripts/ci-gate.ts`), run as the workflow runs it against a real
 // Casebook: the result is Casebook's gate, and a report that is missing or says less than happened is not a pass.
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
@@ -57,6 +57,8 @@ async function gate(
 	options: {
 		repository?: string[];
 		missing?: string[];
+		/** Shards whose report is there and cannot be read (a directory of that name). */
+		unreadable?: string[];
 		mode?: "local" | "server";
 		/** Routes of the instance of the test that answer in place of its own. */
 		routes?: NonNullable<Parameters<typeof withInstance>[1]>["routes"];
@@ -75,11 +77,13 @@ async function gate(
 					await writeFile(join(root, file), "");
 				}
 				await mkdir(join(root, "test-results"));
+				await mkdir(join(root, "tmp"));
 				for (const shard of shards) {
 					if (options.missing?.includes(shard.name)) continue;
 					const failed = Object.values(shard.files).some((failure) => failure !== null);
 					const outcome = { exit: shard.exit ?? (failed ? 1 : 0), seconds: shard.seconds ?? 60 };
-					await writeFile(join(root, "test-results", `${shard.name}.xml`), shard.xml ?? junit(shard.files));
+					if (options.unreadable?.includes(shard.name)) await mkdir(join(root, "test-results", `${shard.name}.xml`));
+					else await writeFile(join(root, "test-results", `${shard.name}.xml`), shard.xml ?? junit(shard.files));
 					await writeFile(join(root, "test-results", `${shard.name}.json`), JSON.stringify(outcome));
 				}
 				const child = Bun.spawn(
@@ -89,6 +93,8 @@ async function gate(
 						env: {
 							PATH: process.env.PATH ?? "",
 							HOME: root,
+							// What the job leaves in the temporary directory is this test's to count.
+							TMPDIR: join(root, "tmp"),
 							CASEBOOK_URL: instance.url,
 							CASEBOOK_TOKEN: "",
 							CASEBOOK_PROJECT: "",
@@ -117,6 +123,8 @@ async function gate(
 					code,
 					output: stdout + stderr,
 					summary: await readFile(join(root, "summary.md"), "utf8").catch(() => ""),
+					/** What the job left behind: files in its temporary directory, and its own Casebook if that still runs. */
+					left: [...(await readdir(join(root, "tmp"))), ...(await stillRunning(stdout))],
 					/** How many reports the instance of the test holds. */
 					batches: instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n,
 				};
@@ -139,6 +147,21 @@ const withFailure = (message: string): Shard[] =>
 // Which Casebook the job reports to is `scripts/ci-instance.ts`. The first three tests are each on one of its
 // three ways through; the others use the instance of the test with no token, as a job on one machine does.
 
+/** The Casebook the job said it started, if its process is still there a moment after the job ended. */
+async function stillRunning(output: string): Promise<string[]> {
+	const pid = Number(/^Started a Casebook for this job: \S+ \(process (\d+)\)$/m.exec(output)?.[1]);
+	if (!pid) return [];
+	for (let waited = 0; waited < 2000; waited += 50) {
+		try {
+			process.kill(pid, 0);
+		} catch {
+			return [];
+		}
+		await Bun.sleep(50);
+	}
+	return [`process ${pid}`];
+}
+
 /** The pipeline's own token on the instance of the test, as an operator issues it. */
 async function pipelineToken({ client }: Running): Promise<string> {
 	const made = await client.call("admin", {
@@ -151,10 +174,17 @@ async function pipelineToken({ client }: Running): Promise<string> {
 }
 
 test("every shard passed: each is reported under its own job to the deployed instance, and the gate passes", async () => {
-	// A deployed instance asks for a token. This one records and reads the gate, and may do nothing else there.
+	// A deployed instance asks for a token. This one records on `scratch` and reads its gate. No project is named
+	// to the job, and the token sees a second one it may read and not record on: the job reports to the one
+	// project it may record on.
 	const result = await gate(green, {
 		mode: "server",
-		configure: async (running) => ({ CASEBOOK_TOKEN: await pipelineToken(running), CASEBOOK_PROJECT: "scratch" }),
+		configure: async (running) => {
+			const token = await pipelineToken(running);
+			await running.client.call("admin", { do: "project.create", key: "other" });
+			await running.client.call("admin", { do: "grant.set", actor: "github-actions", project: "other", can: ["read"] });
+			return { CASEBOOK_TOKEN: token };
+		},
 	});
 	expect(result.output).toMatch(
 		/^::notice::Reported to the deployed Casebook: http:\/\/127\.0\.0\.1:\d+, project scratch\.$/m,
@@ -195,6 +225,9 @@ test("a shard that left no report fails the job, though the gate passes on the o
 	expect(result.output).toMatch(/^::notice::Reported to a Casebook started for this job: CASEBOOK_URL is not set\.$/m);
 	expect(result.output).not.toContain("::warning::");
 	expect(result.batches).toBe(0);
+	// Its own Casebook is stopped and its data removed when the job ends.
+	expect(result.output).toMatch(/^Started a Casebook for this job: http:\/\/127\.0\.0\.1:\d+ \(process \d+\)$/m);
+	expect(result.left).toEqual([]);
 	expect(result.output).toContain("job tests-1");
 	expect(result.output).toMatch(/casebook gate\s+passed/);
 	expect(result.output).toContain("::error::tests-2: no report (test-results/tests-2.xml is missing or empty)");
@@ -284,6 +317,15 @@ test("a slow shard is a warning above the budget and a failure above the limit",
 	expect(failed.output).toContain(`::error::the slowest shard's tests took ${(CI_SHARD_LIMITS.fail + 1).toFixed(1)} s`);
 	expect(failed.code).toBe(1);
 }, 30_000);
+
+test("a job that breaks off leaves no Casebook running and nothing in the temporary directory", async () => {
+	// A report that cannot be read is an error nobody planned for: the job stops there, and still cleans up.
+	const result = await gate(green, { unreadable: ["tests-2"], configure: async () => ({ CASEBOOK_URL: "" }) });
+	expect(result.output).toMatch(/^Started a Casebook for this job: /m);
+	expect(result.output).toContain("EISDIR");
+	expect(result.code).not.toBe(0);
+	expect(result.left).toEqual([]);
+}, 20_000);
 
 // ── Which Casebook the job reports to: what is wrong with a deployed one, and what follows ─────────────────
 
@@ -377,7 +419,18 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 		"none: the token may not record results on project casebook at https://casebook.example (it may on: web)",
 	);
 	// With no project named, the CLI takes the only one: so there must be exactly one to record on.
-	expect(await choose(healthy, { CASEBOOK_PROJECT: "" })).toBe("deployed: https://casebook.example");
+	expect(await choose(healthy, { CASEBOOK_PROJECT: "" })).toBe("deployed: https://casebook.example, project casebook");
+	// Other projects it may read do not make that a choice: the job is told which one, and tells the CLI.
+	const mixed = {
+		...healthy,
+		"/api/session": () =>
+			session([
+				{ key: "docs", can: ["read"] },
+				{ key: "web", can: ["record"] },
+			]),
+	};
+	const taken = await chooseInstance({ ...env, CASEBOOK_PROJECT: "" }, probe(mixed));
+	expect(taken).toMatchObject({ use: "deployed", project: "web" });
 	const two = {
 		...healthy,
 		"/api/session": () =>

@@ -12,8 +12,8 @@ import { z } from "zod";
 import { openApi } from "../src/surfaces/http.ts";
 
 export type Choice =
-	/** Report to the deployed instance, with the environment as it is. */
-	| { use: "deployed"; url: string; why: string }
+	/** Report to the deployed instance, to this project: the one named, or the only one the token may record on. */
+	| { use: "deployed"; url: string; project: string; why: string }
 	/** Start a Casebook for this job. `warn` when a deployed one was configured and could not be used. */
 	| { use: "own"; warn: boolean; why: string }
 	/** The configuration is wrong. Nothing is reported. */
@@ -101,18 +101,23 @@ export async function chooseInstance(env: Environment, probe: Probe = PROBE): Pr
 		};
 	const session = Session.safeParse(await response.json().catch(() => null));
 	if (!session.success) return own(`${url} did not say who this job is`);
-	const recordable = session.data.result.projects.filter((project) => project.can.includes("record"));
-	const project = env.CASEBOOK_PROJECT;
-	if (project ? !recordable.some((entry) => entry.key === project) : recordable.length !== 1) {
-		const held = recordable.map((entry) => entry.key).join(", ") || "none";
+	const recordable = session.data.result.projects
+		.filter((project) => project.can.includes("record"))
+		.map((entry) => entry.key);
+	const named = env.CASEBOOK_PROJECT;
+	// With no project named it is the one the token may record on. The CLI is told which: left to itself it takes
+	// the only project the session names, and the session also names the ones the token may only read.
+	const project = named ? recordable.find((key) => key === named) : recordable.length === 1 ? recordable[0] : undefined;
+	if (project === undefined) {
+		const held = recordable.join(", ") || "none";
 		return {
 			use: "none",
-			why: project
-				? `the token may not record results on project ${project} at ${url} (it may on: ${held})`
+			why: named
+				? `the token may not record results on project ${named} at ${url} (it may on: ${held})`
 				: `CASEBOOK_PROJECT is not set and the token may record on ${recordable.length} projects at ${url} (${held})`,
 		};
 	}
-	return { use: "deployed", url, why: `${url}${project ? `, project ${project}` : ""}` };
+	return { use: "deployed", url, project, why: `${url}, project ${project}` };
 }
 
 /** One sentence for the log and the run's summary page: which Casebook decided, and why that one. */
@@ -124,7 +129,8 @@ export function describeChoice(choice: Choice): string {
 
 /**
  * Starts a Casebook for this job: its own data directory, a port the system picks, the owner of the machine as
- * the caller. Returns the environment a `casebook` command needs to reach it, and how to stop it.
+ * the caller. Returns the environment a `casebook` command needs to reach it, and how to stop it. The caller
+ * stops it on every way out: a server left running outlives the job and holds its output open.
  */
 export async function startOwn(cli: string): Promise<{ env: Environment; stop: () => void }> {
 	const data = mkdtempSync(join(tmpdir(), "casebook-ci-"));
@@ -140,7 +146,8 @@ export async function startOwn(cli: string): Promise<{ env: Environment; stop: (
 		stderr: "inherit",
 	});
 	const stop = (): void => {
-		child.kill();
+		// Not asked to finish what it is doing: nothing is in flight when the job is done with it, and the data goes.
+		child.kill("SIGKILL");
 		rmSync(data, { recursive: true, force: true });
 	};
 	// The server's first line ends with its address.
@@ -159,6 +166,7 @@ export async function startOwn(cli: string): Promise<{ env: Environment; stop: (
 		stop();
 		throw new Error(`the job's own Casebook did not start: ${printed.trim() || "it printed nothing"}`);
 	}
+	console.log(`Started a Casebook for this job: ${url} (process ${child.pid})`);
 	// The token and the project are the deployed instance's: neither goes to this one, which has its own project.
 	return { env: { CASEBOOK_URL: url, CASEBOOK_TOKEN: "", CASEBOOK_PROJECT: "" }, stop };
 }
