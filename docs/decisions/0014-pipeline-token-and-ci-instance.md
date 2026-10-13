@@ -62,8 +62,10 @@ so the rule holds for a grant written before this change, edited by hand or brou
 wider grant for a pipeline is refused with the reason, so an operator hears about it. No policy preset can
 matter to an actor that cannot call `propose`, `claim` or `decide`. `--ci` with no `--can` grants `record` alone.
 
-**Who may call is settled before the input is read.** `execute` used to parse the input first, so a caller with
-no right to an operation was told what was wrong with its input. Now it is told it may not call. This also lets
+**Who may call is settled before the operation checks its input.** `execute` used to check the input against
+the operation's schema first, so a caller with no right to an operation was told what was wrong with its input.
+Now it is told it may not call. (The HTTP surface still wants the body to be JSON before it asks the registry: a
+body that is not JSON is `invalid` for everyone.) This also lets
 one test ask every operation in the registry with a pipeline's token and expect `403` from all but two; an
 operation added later is in that loop the day it is added. `test/architecture.test.ts` names the operations that
 accept `record`, so one more is a decision here and not a copy of `report`.
@@ -71,7 +73,8 @@ accept `record`, so one more is a decision here and not a copy of `report`.
 **A grant has one writer.** `grant.set` replaces what an actor may do on a project and `grant.remove` takes it
 away (`admin` actions; `casebook actor grant|ungrant`). `token.create` gives a new actor its first grant and
 leaves an existing actor alone: naming the grant it already holds is accepted, anything else is refused and
-names `grant.set`. Nobody changes their own grant. `actor.list` shows every grant with its project.
+names `grant.set`. Nobody changes their own grant, and nobody changes the owner's, which is written again on
+every start. `actor.list` shows every grant with its project.
 
 **The session names a project the caller holds any grant on**, not only one it may read. That is how the job
 checks a pipeline's token before reporting. The web UI shows the projects the session may read, as before.
@@ -84,8 +87,12 @@ checks a pipeline's token before reporting. The web UI shows the projects the se
 | the instance does not answer `/healthz` in three tries | starts its own; a warning |
 | the instance describes `report` or `gate` differently from this checkout (`/api/openapi.json`) | starts its own; a warning |
 | the instance refuses the token (401) | fails, exit 4, nothing reported |
-| the token may not record on `CASEBOOK_PROJECT` | fails, exit 4, nothing reported |
+| the token may not record on `CASEBOOK_PROJECT`, or none is named and it may record on several or none | fails, exit 4, nothing reported |
 | none of these | reports to the instance |
+
+With no `CASEBOOK_PROJECT` the job takes the one project the token may record on and names it to the CLI, which
+would otherwise count the projects the token may only read. The job's own Casebook is stopped and its data
+removed on every way out, an error included.
 
 A Casebook started for the job knows no earlier decision, so it blocks every failing test: it is never the
 looser of the two for a failure. It is looser in one way: it has not seen an earlier attempt's results.

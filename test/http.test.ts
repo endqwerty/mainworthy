@@ -557,6 +557,15 @@ describe("a pipeline's token", () => {
 		// An admin does not change or drop their own grant: a slip there locks the instance.
 		expect((await admin(instance, { do: "grant.remove", actor: "daniel" })).body).toMatchObject(invalid);
 		expect((await admin(instance, { do: "grant.set", actor: "daniel", can: ["read"] })).body).toMatchObject(invalid);
+		// Nor does another admin change the owner's: it is written again on every start, and until then the
+		// instance could be left with nobody to administer it.
+		const second = await token(instance, { actor: "ops", kind: "human" });
+		expect((await admin(instance, { do: "grant.remove", actor: "daniel" }, second)).body).toMatchObject(invalid);
+		expect((await admin(instance, { do: "grant.set", actor: "daniel", can: ["read"] }, second)).body).toMatchObject(
+			invalid,
+		);
+		expect((await admin(instance, { do: "grant.set", actor: "ops", can: ["read"] })).body).toMatchObject({ ok: true });
+		expect((await admin(instance, { do: "token.list" }, second)).body).toMatchObject(forbidden);
 		expect((await admin(instance, { do: "token.list" })).body).toMatchObject({ ok: true });
 	});
 
@@ -581,6 +590,12 @@ describe("a pipeline's token", () => {
 			ok: false,
 			error: { code: "invalid", message: expect.stringContaining("grant") },
 		});
+		// An actor that was forgotten gets no new token: its name is a pseudonym and it can do nothing.
+		const forgotten = await admin<{ forgotten: string }>(instance, { do: "actor.forget", name: "reviewer" });
+		const pseudonym = forgotten.body.ok ? forgotten.body.result.forgotten : "";
+		expect((await admin(instance, { do: "token.create", actor: pseudonym, kind: "agent" })).body).toMatchObject(
+			invalid,
+		);
 		// The owner's own grant is not rewritten by a token made for the owner.
 		expect(
 			(await admin(instance, { do: "token.create", actor: "daniel", kind: "human", can: ["read"] })).body,

@@ -120,8 +120,8 @@ export type Call = {
 function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Generator<void, Reply, void> {
 	const op = ops[call.op];
 	if (!op) return fail("not_found", `no operation named ${call.op}`);
-	// Who may call is settled before the input is read: a caller that may not run the operation learns that and
-	// nothing else, whatever it sent.
+	// Who may call is settled before the operation's input is checked: a caller that may not run the operation
+	// learns that and nothing about what it sent. (A surface has read the body by then: HTTP wants it to be JSON.)
 	const found = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
 	if (op.scope === "project") {
 		if (!call.project) return fail("invalid", `${op.name} needs a project`);

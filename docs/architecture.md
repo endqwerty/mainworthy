@@ -85,7 +85,7 @@ one for every project): a list of capabilities. A token names an actor and carri
 
 A pipeline holds `read` and `record` at most, whatever its grant says: it cannot change the suite, answer or
 plan under any policy, because it cannot call the operations that do (`heldCapabilities` in `src/core/kinds.ts`;
-decision 0014). The caller is refused before its input is read. `grant.set` and `grant.remove` are the one way a
+decision 0014). The caller is refused before the operation checks its input. `grant.set` and `grant.remove` are the one way a
 grant changes; a new token for an actor that exists changes nothing it may do.
 
 ## The record

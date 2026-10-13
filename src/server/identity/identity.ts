@@ -190,7 +190,7 @@ export function actorLabel(db: Db, id: number): { name: string; kind: ActorKind 
  * Creates a token, and the actor it names if that actor does not exist. The secret is returned once and never
  * stored. A token carries its actor's grants: `can` on `project` is what a new actor starts with. An actor that
  * exists keeps what it has: naming the grant it already holds there is accepted, anything else is refused, and
- * `setGrant` is the one way to change it.
+ * `setGrant` is the one way to change it. An actor that was forgotten gets none.
  */
 export function createToken(
 	app: App,
@@ -205,6 +205,7 @@ export function createToken(
 	if (existing && existing.kind !== input.kind) {
 		throw conflict(`actor ${input.actor} exists and is a ${existing.kind}, not a ${input.kind}`);
 	}
+	if (existing && existing.disabled_at !== null) throw invalid(`actor ${input.actor} was forgotten and holds no token`);
 	if (existing && input.can.length > 0 && !sameGrant(db, existing.id, input.project, input.can)) {
 		throw invalid(
 			`actor ${input.actor} exists: a new token carries what it may already do. Change that with grant.set (casebook actor grant)`,
