@@ -34,7 +34,10 @@ ordinary Markdown what to add (`src/surfaces/docs/render.ts`):
 
 **A diagram is served as a stranger.** Each diagram is a page that archify builds, with its script inside it.
 It is sent with a `sandbox` policy that gives it an origin of its own and lets it load nothing, so it cannot
-read what the app keeps in the browser or call the API as the person looking at it. A page of the docs itself
+read what the app keeps in the browser or call the API as the person looking at it. A diagram page also
+records the address of the repository its sources are in. The server sends the page with the product's name
+in its place (`withoutRepositoryAddress`): which files a part was drawn from is useful to a reader, whose
+repository they are in is not, and the site is public. A page of the docs itself
 runs one script file and no script written into the page.
 
 **What can be read from the code is read from the code.** The tables of commands, operations, agent tools,
