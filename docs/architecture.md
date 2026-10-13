@@ -94,7 +94,9 @@ decision 0014). The caller is refused before the operation checks its input. `gr
 grant changes; a new token for an actor that exists changes nothing it may do.
 
 `session` and `credential` ask for no capability. Their need is `self`: whoever is signed in runs them, a person
-or an agent, with whatever grants, on what is their own. A person who holds `admin` on every project may also
+or an agent, with whatever grants, on what is their own. `credential` then refuses an agent (403), which has
+no password and no passkey: an agent lists and ends its own sessions and no more. A person who holds `admin` on
+every project may also
 list and end what is somebody else's, and one function decides that for every such operation (`mayActFor` in
 `src/server/identity/identity.ts`; a test names the operations and where the decision is made). A pipeline is
 refused: its token reaches `report` and `gate` and nothing else.
@@ -149,9 +151,12 @@ invitation, the link an admin hands them since there is no mail (decision 0017).
 `POST /api/login`, beside the token, in `src/surfaces/signin.ts`, with `POST /api/login/challenge` for a
 passkey's challenge and `POST /api/account/password` to set a password. They are routes and not operations for
 one more reason: the registry keeps a digest of each request that carries a command id, and a password must
-not reach it. A test fails when an operation's input has a field named like a password. A refused sign-in is
-answered 401 and one sentence whatever was wrong, and the reason goes to the log as a code, so a reply does not
-say which names exist. A name with no password is checked against a hash nobody's password matches, so the
+not reach it. A test fails when an operation's input has a field named like a password. A name, a password, a
+passkey's answer or an invitation code that is looked at and refused is answered 401 and one sentence whatever
+was wrong, and the reason goes to the log as a code, so a reply does not say which names exist. The other
+replies are 429 while the caller is limited, 400 for a request that is wrong in itself (a password's length, a
+passkey where there are none), 409 for a browser signed in as somebody else and 408 for a body that took too
+long (decision 0017). A name with no password is checked against a hash nobody's password matches, so the
 refusal takes as long.
 
 What a person signs in with is a row of `credentials`: a password as an argon2id string (`Bun.password`), a
@@ -172,10 +177,12 @@ number belongs to somebody else.
 
 The passkey verifier (`src/server/identity/webauthn.ts`) is hand-written, parses no CBOR and keeps nothing.
 The code around it keeps what it must (the list above `verifyRegistration` there). A challenge lives in memory
-for five minutes with what it was issued for, and the commit that stores the passkey or opens the session
-spends it. A credential id is unique on the instance for good, by an index. The person is the one the stored
+for five minutes with what it was issued for and where it was asked from (a browser's ceremony cookie, a
+session, an invitation), an answer is taken only from there, and the commit that stores the passkey or opens
+the session spends it. A credential id is unique on the instance for good, by an index. The person is the one the stored
 row names, and the user handle the browser returns must be theirs. The counter is compared again in the
-commit. The relying party comes from `MAINWORTHY_PUBLIC_URL` and never from a request's `Host`; without the
+commit: of two answers with the same counter above zero the second is refused. Two answers that are zero
+against a stored zero both sign in, each on its own challenge: such an authenticator does not count. The relying party comes from `MAINWORTHY_PUBLIC_URL` and never from a request's `Host`; without the
 variable the instance has no passkeys.
 
 Being used is not a write. `admit` notes in memory when a token or a session was last used and from which

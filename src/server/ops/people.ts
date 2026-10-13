@@ -97,7 +97,7 @@ export const sessionOp = defineInstanceOp({
 export const credentialOp = defineInstanceOp({
 	name: "credential",
 	summary:
-		"How you sign in: list your password and passkeys, register a passkey, remove one. A password is set in the web UI, never here.",
+		"How a person signs in: list your password and passkeys, register a passkey, remove one. An agent is refused: it signs in with a token only. A password is set in the web UI, never here.",
 	input: CredentialInput,
 	needs: "self",
 	scope: "instance",

@@ -24,7 +24,7 @@ A reply that did not run has `ok: false` and an `error` with a `code` and a `mes
 | Code | HTTP status | Meaning |
 | --- | --- | --- |
 | `invalid` | 400 | The input is wrong. `details` says which field. |
-| `unauthenticated` | 401 | No token, or one the server does not know. A sign-in that was refused, whatever was wrong with it. |
+| `unauthenticated` | 401 | No token, or one the server does not know. A name, a password, a passkey's answer or an invitation code that was looked at and refused, whatever was wrong with it. |
 | `forbidden` | 403 | The caller holds a grant on the project and lacks the capability, or the policy says no. |
 | `not_found` | 404 | No such operation, project or ref. A project the caller holds no grant on is answered the same way. |
 | `conflict` | 409 | The edit was made on an older version, or the command id was used for something else. |
@@ -37,7 +37,7 @@ Send a token as `Authorization: Bearer <token>`. A server in local mode trusts r
 
 ## Sign in as a person
 
-A browser signs in with these requests and then holds a session cookie. They are not operations: nobody is signed in yet, and a password never passes through an operation. Each accepts only a request from the server's own pages, takes JSON and answers with the same envelope as an operation, without `seq`. [People, agents and pipelines](./access.md#sign-in-as-yourself) says what they are for.
+A browser signs in with these requests and then holds a session cookie. They are not operations: nobody is signed in yet, and a password never passes through an operation. Each `POST` refuses a request that a browser makes from another site's page and accepts one that names no site (a script, `curl`); `GET /api/login/methods` answers anybody. Each takes JSON and answers with the same envelope as an operation, without `seq`. [People, agents and pipelines](./access.md#sign-in-as-yourself) says what they are for.
 
 | Request | Body | What it does |
 | --- | --- | --- |
@@ -631,7 +631,7 @@ Your browser sessions: list them, and end one. An admin who is a person lists an
 
 ### credential
 
-How you sign in: list your password and passkeys, register a passkey, remove one. A password is set in the web UI, never here.
+How a person signs in: list your password and passkeys, register a passkey, remove one. An agent is refused: it signs in with a token only. A password is set in the web UI, never here.
 
 |  |  |
 | --- | --- |

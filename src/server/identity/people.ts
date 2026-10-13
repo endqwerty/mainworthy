@@ -101,8 +101,9 @@ export const PASSKEYS_OFF =
  * from nothing else: never from a request's `Host` or a forwarded header, which whoever sends the request
  * chooses. Null when the configuration names none: the instance then has no passkeys.
  *
- * Throws for a value a browser would not make a passkey at, which stops the start (`open` in `start.ts` asks
- * once, before anything else). A typing error must not leave an instance where passkeys silently never work,
+ * Throws for a value a browser would not make a passkey at (an IP address, plain http off `localhost`) and for
+ * one with anything after the host, since the server wants the root address of the instance. Either stops the
+ * start (`open` in `start.ts` asks once, before anything else). A typing error must not leave an instance where passkeys silently never work,
  * or where one is registered for a name the instance is not reached at. The value is not repeated in the
  * message: an address can carry a password.
  */
@@ -629,7 +630,7 @@ export function removeCredential(app: App, id: number): { removed: true; session
  * Makes an invitation for a person and returns its code, which is shown once and of which only the SHA-256 is
  * stored. In the operation's transaction. A new invitation replaces the person's earlier ones that nobody
  * accepted, so one link is good for a person at a time. The person's passkey handle is made here if there is
- * none, so that showing the invitation later writes nothing.
+ * none, so that showing the invitation later writes no row.
  */
 export function createInvitation(
 	app: App,
@@ -664,7 +665,8 @@ function openInvitation(app: App, db: Db, hash: string): { invitation: Invitatio
  * What the page of an invitation shows: who it is for, what accepting does and when it runs out, and the
  * options for registering a passkey with it (null on an instance with no public address). Null for a code
  * that accepts nothing, whatever the reason. It writes no row, so a link that a mail or chat preview opens,
- * or a page that is reloaded, changes nothing; each asking gets a challenge of its own.
+ * or a page that is reloaded, changes nothing that is stored; each asking gets a challenge of its own, which
+ * is an entry in the bounded map in memory and can push out the oldest one there.
  *
  * The options exclude no passkey: whoever holds a recovery code is not told which authenticators the person
  * had, and accepting revokes those anyway.

@@ -36,7 +36,7 @@ sending the token itself.
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. Same form. The session cookie is given this age. |
 | `MAINWORTHY_TRUSTED_PROXY` | not set | The addresses the proxy in front connects from: addresses and ranges, separated by commas (`10.0.1.0/24, 2001:db8::/32, 203.0.113.9`). Set it together with the next variable, or neither: one without the other stops the start with a line that says which is missing, and so does an entry that is not an address or a range. See "The limit on failed sign-ins". |
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | not set | The header in which that proxy writes the address of the visitor, for example `cf-connecting-ip`. It is read only from a peer `MAINWORTHY_TRUSTED_PROXY` names, and must hold exactly one address. |
-| `MAINWORTHY_PUBLIC_URL` | not set | The address people open the instance at, as they type it: `https://mainworthy.example`. A passkey belongs to the host name in it, and an invitation link starts with it. Write https and a host name, or `http://localhost:<port>` on a developer's machine. An IP address, plain http anywhere else, a path or a query stops the start with a line that names the variable, because no browser makes a passkey there. Not set: the instance has no passkeys, people sign in with a name and a password or with a token, and `mainworthy invite` prints a link without a host. The server never takes this address from a request's `Host`. |
+| `MAINWORTHY_PUBLIC_URL` | not set | The address people open the instance at, as they type it: `https://mainworthy.example`. A passkey belongs to the host name in it, and an invitation link starts with it. Write https and a host name, or `http://localhost:<port>` on a developer's machine. An IP address or plain http anywhere else stops the start with a line that names the variable, because no browser makes a passkey there. So does a path or a query, because the server wants the root address of the instance. Not set: the instance has no passkeys, people sign in with a name and a password or with a token, and `mainworthy invite` prints a link without a host. The server never takes this address from a request's `Host`. |
 | `MAINWORTHY_MODE` | `server` | `server`: every request needs a token. `local` (the default outside a container, on loopback): the browser on the same machine is the owner with no step. Local mode is for that machine only. The server checks what it can see: the connection comes from a loopback address, the `Host` is a loopback name, and the request carries none of the headers a proxy or a tunnel adds; a request that fails one of these needs a token. It cannot see through a relay that passes bytes on unchanged from this machine (`ssh -L`, `socat`, a port forward that adds no header): through one, anyone who reaches the relay is the owner. Never expose a local-mode port that way. To reach an instance from elsewhere, run it in `server` mode. |
 | `MAINWORTHY_COMMIT` | empty | The commit the build was made from, which `/healthz` reports as `commit` with no sign-in. Exactly 40 lower-case hexadecimal characters, else it counts as not set; the server then reads `SOURCE_COMMIT` (Coolify sets it on the running container), and reports `null` when neither holds a commit. The image takes it as a build argument: `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`, or `docker build --build-arg MAINWORTHY_COMMIT=$(git rev-parse HEAD) .`. Without it a plain build reports `null`. |
 
@@ -504,8 +504,9 @@ mainworthy invite revoke 3
 
 ### A lost password or passkey
 
-`mainworthy invite new <name>` for a person who exists makes a recovery link. That person makes it for
-themselves, or the owner makes it; another admin's word is not enough to become somebody. When the link is
+`mainworthy invite new <name>` for a person who exists makes a recovery link. The owner makes one for anybody.
+An admin who is a person can make their own. Everybody else asks the owner: a person who does not administer
+makes no invitation, and another admin's word is not enough to become somebody. When the link is
 accepted, every password and passkey the person had stops working and every session of theirs ends. Until then
 nothing of theirs changes, so a link that is never used locks nobody out. Their tokens are not touched:
 `mainworthy token revoke <id>` ends those.
@@ -519,6 +520,10 @@ A passkey belongs to one host name: the one in `MAINWORTHY_PUBLIC_URL` when it w
 `https://mainworthy.com` does not sign in at another name of the same instance, such as its tailnet name;
 there people use a password or a token. If you change the variable to another host name, the passkeys made
 under the old one stay stored and no browser offers them: people sign in with a password and register again.
+
+In a browser, passkeys were tried with Chromium's built-in test authenticator and nothing else
+(`test/e2e/people.test.ts`, `test/e2e/passkey-verifier.test.ts`). No physical security key, no synced passkey
+and neither Safari nor Firefox has been tried.
 
 ### What it costs
 

@@ -41,7 +41,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_READERS` | the CPU count minus 2, at least 1 and at most 8 | How many reader threads answer reads. `0` answers them on the main thread. |
 | `MAINWORTHY_COMMIT` | none | The commit this server was built from, which `/healthz` reports. 40 lower-case hexadecimal characters, or it reads as unknown. Without it the server reads `SOURCE_COMMIT`. |
 
-A value that is not a whole number for `MAINWORTHY_READERS` stops the start with `invalid: MAINWORTHY_READERS must be a non-negative integer`. A session lifetime that is not a duration stops the start too, with a line that names the variable. So does a `MAINWORTHY_PUBLIC_URL` that no browser would make a passkey at: write `https` and a host name with nothing after it, or `http://localhost` with its port. An IP address, plain `http` anywhere else, a path and a query are refused.
+A value that is not a whole number for `MAINWORTHY_READERS` stops the start with `invalid: MAINWORTHY_READERS must be a non-negative integer`. A session lifetime that is not a duration stops the start too, with a line that names the variable. So does a `MAINWORTHY_PUBLIC_URL` that is not such an address: write `https` and a host name with nothing after it, or `http://localhost` with its port. An IP address and plain `http` anywhere else are refused because no browser makes a passkey there. A path and a query are refused because the server wants the root address of the instance.
 
 The first start creates the data directory, one owner and a project named `scratch`. It does not need any variable.
 
@@ -128,7 +128,7 @@ In server mode everything that reads or changes a project needs a token. These a
 | `/api/openapi.json` | The description of the API, built from the list of operations |
 | `/` | The web UI's own files. The page then asks for a token. |
 
-`/api/login` opens a browser's session and sets its cookie, and `/api/logout` ends the session and clears the cookie. `/api/login/methods` says whether the instance has passkeys, and `/api/login/challenge` gives a browser what it needs to use one. Given the code of an invitation that is still open, it also says whose invitation it is and when it runs out, and nothing to anybody without the code. All four accept only a request from the server's own pages. If nobody outside your network should see even these, keep the server off the public internet or put the proxy's own access control in front of it.
+`/api/login` opens a browser's session and sets its cookie, and `/api/logout` ends the session and clears the cookie. `/api/login/methods` says whether the instance has passkeys, and `/api/login/challenge` gives a browser what it needs to use one. Given the code of an invitation that is still open, it also says whose invitation it is and when it runs out, and nothing to anybody without the code. `/api/login`, `/api/logout` and `/api/login/challenge` refuse a request that a browser makes from another site's page. A request that names no site (a script, `curl`, the command line) is accepted on purpose: the check is against another site's page, and a script is none. `GET /api/login/methods` answers anybody. If nobody outside your network should see even these, keep the server off the public internet or put the proxy's own access control in front of it.
 
 ## Build the single executable
 

@@ -269,10 +269,12 @@ from and last used from, and `session list` shows both.
 **Signing in** is four bodies of `POST /api/login`: `{ token }`, `{ name, password }`, `{ passkey }` and
 `{ invitation, password?, passkey?, label?, replace? }`. `POST /api/login/challenge` answers a passkey's
 options for a sign-in (`{}`) or shows an invitation with the options to register a passkey with it
-(`{ invitation }`), and writes nothing. `GET /api/login/methods` says whether the instance has passkeys.
+(`{ invitation }`), and writes no row: a challenge is an entry in a map in memory, bounded at ten thousand,
+and a new one can push out the oldest. `GET /api/login/methods` says whether the instance has passkeys.
 `POST /api/account/password` sets or changes a password from a signed-in browser. They are in
-`src/surfaces/signin.ts`. A refused sign-in is 401 and one sentence whatever was wrong, with the reason in the
-log as a code.
+`src/surfaces/signin.ts`. A name, a password, a passkey's answer or an invitation code that is looked at and
+refused is 401 and one sentence whatever was wrong, with the reason in the log as a code. The replies that
+are not that 401 are listed with the departures below.
 
 **Operations.** `Need` gains `self`. `session` (list, end) and `credential` (list, `passkey.begin`,
 `passkey.add`, remove) need it; `invitation` (create, list, revoke) needs `admin` and a person. `mayActFor` in
@@ -313,11 +315,14 @@ an invitation's link once.
   `webauthn.ts`), so the caller accepts exactly the bytes the verifier accepts, one leading byte-order mark
   included.
 - The relying party is `MAINWORTHY_PUBLIC_URL` and nothing a request says. A value no browser would make a
-  passkey at stops the start. Without it there are no passkeys and a link has no host.
+  passkey at (an IP address, plain http off `localhost`) stops the start. So does one with a path or a
+  query, for another reason: the server wants the root address of the instance. Without it there are no passkeys and a link has no host.
 - A password is 12 to 256 characters. Changing one makes a new row and revokes the old, which erases its hash;
   the sessions that rested on the old one end, but for the one that made the change.
 - An invitation to recover revokes every credential and ends every session of the person when it is accepted,
-  and not before. A person who exists is invited only by themselves or the owner, as a token for them is made.
+  and not before. The owner makes one for anybody, and an admin who is a person makes their own, as a token
+  for a person is made. Nobody else makes one: `invitation` needs `admin`, so a person who does not
+  administer asks the owner.
 - A person's last credential is not removed, by them or by an admin: a recovery link is the way.
 - The owner's token rule does not change: the last one is not revoked, whatever else the owner signs in with.
 - The limit on failed attempts counts a person's sign-in in the limiter that counts tokens, so an address
@@ -338,12 +343,19 @@ an invitation's link once.
 - The link is `/invite#<code>`, not `/invite/<code>`: the part after the `#` is not sent to a server, so the
   code reaches no proxy's log.
 - The page of an invitation is told 404 for a code that accepts nothing, and an acceptance is told the 401 of
-  every refused sign-in. Each is one reply for every reason.
-- Three refusals of `POST /api/login` are not that 401: a password that is not 12 to 256 characters (400, said
-  before the invitation is looked at), a passkey on an instance with none (400), and a browser signed in as
-  somebody else (409, with the name), which the page needs in order to ask.
+  every refused sign-in. Each is one reply for every reason a code does not work. From an address that is
+  limited, a code that does not work is told 429 instead.
+- These replies of `POST /api/login` are not that 401: too many failed attempts (429, with the seconds to
+  wait), a password that is not 12 to 256 characters (400, said before the invitation is looked at), an
+  invitation accepted with neither a password nor a passkey (400), a passkey on an instance with none (400),
+  a browser signed in as somebody else (409, with the name), which the page needs in order to ask, and a
+  body that is still arriving after the time a sign-in is given (408, and the connection is closed). A body
+  over 16 KiB or one that is not JSON is told that 401; until the independent check found it, it was told
+  the sentence of a wrong token. A request from another site's page is refused before its body is read,
+  with a wrong token's sentence.
 - A new invitation for a person revokes their earlier ones that nobody accepted, so one link is good at a time.
-- A person's passkey handle is made when they are invited, so that showing an invitation writes nothing.
+- A person's passkey handle is made when they are invited, so that showing an invitation writes no row. It
+  does add a challenge to the map in memory.
 - A failed answer does not spend its challenge; a successful one does. A wrong answer proves nothing about the
   challenge, and the next answer is judged the same.
 - Two passwords are hashed at once and thirty-two wait; past that a sign-in is refused. One hash takes 64 MiB,
@@ -368,6 +380,10 @@ an invitation's link once.
 
 **Not built here.** The pages. Unicode normalisation of a password: it is compared as the bytes that were
 typed.
+
+**Not tried.** In a browser, passkeys were tried with Chromium's built-in test authenticator only
+(`test/e2e/people.test.ts`, `test/e2e/passkey-verifier.test.ts`). No physical security key, no synced passkey
+and neither Safari nor Firefox has been tried.
 
 ## The three candidates
 
