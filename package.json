@@ -9,7 +9,7 @@
 	},
 	"scripts": {
 		"dev": "bun --watch src/cli/main.ts serve",
-		"start": "bun src/cli/main.ts serve",
+		"start": "NODE_ENV=production bun src/cli/main.ts serve",
 		"typecheck": "tsc --noEmit",
 		"lint": "biome check .",
 		"format": "biome check --write .",
