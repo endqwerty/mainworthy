@@ -1,0 +1,102 @@
+/* The sign-in page and the page of an invitation. The frame (`.signin`, its inputs and its buttons) is in
+   `base.css`; this is what the two pages add to it. */
+.signin {
+	overflow: auto;
+}
+/* Centred while it fits, and from the top with a scroll bar when the window is shorter than the page. */
+.signin-card {
+	width: 320px;
+	margin: auto;
+	padding: 24px 0;
+}
+.signin-card h1 {
+	margin: 0 0 12px;
+}
+.signin-card h2 {
+	margin: 0;
+	font-size: 13px;
+	font-weight: 600;
+}
+.signin-card label {
+	display: block;
+	margin: 10px 0 4px;
+	color: var(--dim);
+}
+.signin-card p {
+	margin: 8px 0;
+}
+/* A second and a third way of doing what the first form does: set apart, and quieter than the first. */
+.signin-way {
+	margin-top: 14px;
+	padding-top: 14px;
+	border-top: 1px solid var(--line);
+}
+.signin .signin-way > button:first-child {
+	margin-top: 0;
+}
+.signin button.plain {
+	background: var(--panel);
+	color: var(--ink);
+	border: 1px solid var(--line);
+}
+.signin-note {
+	margin-top: 14px;
+	font-size: 12px;
+}
+/* A refusal takes room only when there is one, so the fields of a longer form do not stand apart. */
+.signin .signin-problem {
+	margin-top: 6px;
+	color: var(--fail);
+}
+.signin .signin-problem:empty {
+	display: none;
+}
+/* Under the first form the room is kept, so the button below it does not move when a refusal appears. */
+.signin .signin-problem.kept {
+	display: block;
+	min-height: 22px;
+}
+.signin-count {
+	margin-top: 4px;
+	color: var(--dim);
+	font-size: 12px;
+}
+.signin-card fieldset {
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+.signin-card fieldset:disabled {
+	opacity: 0.5;
+}
+.signin-card label.signin-check {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 14px;
+	color: var(--ink);
+}
+.signin .signin-check input {
+	width: auto;
+	accent-color: var(--acc);
+}
+/* The question a browser is asked when it is signed in as somebody else: it comes before the form. */
+.signin-ask {
+	margin: 12px 0;
+	padding: 12px 14px;
+	border: 1px solid var(--warn);
+	border-radius: 8px;
+	background: var(--panel);
+}
+.signin-ask p {
+	margin: 0;
+}
+.signin-ask div {
+	display: flex;
+	flex-wrap: wrap;
+	column-gap: 8px;
+}
+.signin .signin-ask button {
+	margin-top: 10px;
+}

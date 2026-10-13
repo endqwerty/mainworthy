@@ -4,14 +4,17 @@ import type { SessionInfo } from "../core/api.ts";
 import { DOC_PAGES, type DocSlug, docUrl, SCREEN_DOCS } from "../core/docs.ts";
 import { CaseScreen } from "./case/index.tsx";
 import { ChangesScreen } from "./changes/index.tsx";
-import { ApiError, login, session, unauthenticatedEvent } from "./lib/api.ts";
+import { ApiError, session, signedOut, unauthenticatedEvent } from "./lib/api.ts";
 import { queryClient, useEvents, useQueryOp } from "./lib/data.ts";
 import { deviceSession, sessionPersonKey, setDevicePerson, suspendDeviceSession } from "./lib/device.ts";
 import { useBindings, useKeyboard, useKeyRegistry } from "./lib/keys.ts";
 import { navigate, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
+import { signOut } from "./lib/signin.ts";
 import { QueueScreen } from "./queue/index.tsx";
 import { RunsScreen } from "./runs/index.tsx";
 import { SettingsScreen } from "./settings/index.tsx";
+import { SignIn } from "./signin/index.tsx";
+import { INVITE_PATH, Invitation } from "./signin/invite.tsx";
 import { SuiteScreen } from "./suite/index.tsx";
 import { AppContext, type PaletteOptions } from "./ui/context.tsx";
 import { DocLink, KeyCap, openDocs, ProducerGlyph, StatusLine } from "./ui/index.tsx";
@@ -64,6 +67,7 @@ export function App() {
 		| { kind: "ready"; session: SessionInfo }
 		| { kind: "error"; message: string }
 	>({ kind: "loading" });
+	const [inviting, setInviting] = useState(() => location.pathname === INVITE_PATH);
 	const person = useRef<string | null>(null);
 	const refreshSession = useCallback(async (): Promise<void> => {
 		try {
@@ -107,7 +111,22 @@ export function App() {
 		media.addEventListener("change", changed);
 		return () => media.removeEventListener("change", changed);
 	}, []);
-	if (auth.kind === "signin") return <SignIn onLogin={refreshSession} />;
+	// The page of an invitation is shown whoever is or is not signed in: it is how somebody gets in at all, and
+	// a browser signed in as another person is asked there before anything is replaced.
+	if (inviting)
+		return (
+			<Invitation
+				signedInAs={auth.kind === "ready" ? auth.session.actor : auth.kind === "loading" ? undefined : null}
+				onDone={async () => {
+					// The address first, so the app opens at its start and not at the invitation's path. The page
+					// stays until the session is read, so nobody sees the app as the person signed in before.
+					history.replaceState(null, "", "/");
+					await refreshSession();
+					setInviting(false);
+				}}
+			/>
+		);
+	if (auth.kind === "signin") return <SignIn onSignedIn={refreshSession} />;
 	if (auth.kind === "error")
 		return (
 			<div className="signin">
@@ -129,45 +148,6 @@ export function App() {
 			</div>
 		);
 	return <Workbench key={auth.session.actor} info={auth.session} refreshSession={refreshSession} />;
-}
-function SignIn({ onLogin }: { onLogin: () => Promise<void> }) {
-	const [token, setToken] = useState("");
-	const [error, setError] = useState("");
-	return (
-		<div className="signin">
-			<form
-				onSubmit={(event) => {
-					event.preventDefault();
-					void login(token)
-						.then(onLogin)
-						.catch((reason: unknown) => {
-							setError(reason instanceof Error ? reason.message : "That token was not accepted");
-						});
-				}}
-			>
-				<h1>Mainworthy</h1>
-				<label htmlFor="token">Sign in with your token</label>
-				<input
-					id="token"
-					name="token"
-					type="password"
-					autoComplete="current-password"
-					ref={(element) => {
-						element?.focus();
-					}}
-					value={token}
-					onChange={(event) => setToken(event.target.value)}
-				/>
-				<div className="error" role="status">
-					{error}
-				</div>
-				<button type="submit">Sign in</button>
-				<p className="signin-help">
-					New here? <DocLink page="index">Read the docs</DocLink>
-				</p>
-			</form>
-		</div>
-	);
 }
 function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession: () => Promise<void> }) {
 	const route = useRoute();
@@ -192,6 +172,20 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 			});
 	}, []);
 	const [help, setHelp] = useState(false);
+	// A browser session is what there is to sign out of. In local mode the owner of the machine has none, and
+	// neither the button nor its key is there.
+	const account = info.via === "cookie";
+	const [signingOut, setSigningOut] = useState(false);
+	const leave = useCallback((): void => {
+		if (signingOut) return;
+		setSigningOut(true);
+		// The server ends the session and clears the cookie; only then does the page show the sign-in page. What
+		// is typed and not yet recorded stays on this device, under this person's name, for when they are back.
+		void signOut().then(signedOut, () => {
+			setSigningOut(false);
+			setStatus("Mainworthy did not answer, so you are still signed in. Try again.");
+		});
+	}, [signingOut]);
 	const [inInput, setInInput] = useState(false);
 	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 	const suiteOpen = route.screen === "suite" || route.screen === "case";
@@ -264,8 +258,11 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 					setHelp(false);
 				},
 			},
+			// Registered only where there is a session to end, so the palette and the keys sheet do not offer it
+			// to the owner of a machine in local mode.
+			...(account ? [{ key: "g x", label: "Sign out", handler: leave }] : []),
 		],
-		[project, route.screen, palette, help, openPalette, closePalette],
+		[project, route.screen, palette, help, openPalette, closePalette, account, leave],
 	);
 	useBindings(globalKeys);
 	useEffect(() => {
@@ -455,11 +452,26 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 						</div>
 					)}
 
-					<div className="sfoot">
+					<div className={account ? "sfoot account" : "sfoot"}>
 						<span className="me">
 							<ProducerGlyph kind={info.kind} />
 							{info.actor}
 						</span>
+						{account && (
+							<>
+								<button
+									type="button"
+									aria-label="Sign out"
+									title="Sign out (g x)"
+									disabled={signingOut}
+									onClick={leave}
+								>
+									⇥ <span>{signingOut ? "Signing out…" : "Sign out"}</span>
+								</button>
+								{/* The name and the way out share the first line; the keys and the theme take the second. */}
+								<span className="sfoot-break" />
+							</>
+						)}
 						<button type="button" aria-label="Keyboard shortcuts" onClick={() => setHelp(true)}>
 							? <span>Keys</span>
 						</button>
