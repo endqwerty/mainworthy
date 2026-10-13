@@ -115,7 +115,8 @@ test("invite new prints the link once, invite list never shows the code, and inv
 		},
 		{ env: { MAINWORTHY_PUBLIC_URL: "https://mainworthy.example" } },
 	);
-});
+	// It starts the command sixteen times, one after another: more than the default 5 s on a busy runner.
+}, 20_000);
 
 test("with no public address the link is relative and the command says what to put before it", async () => {
 	await withInstance(async ({ cli }) => {
