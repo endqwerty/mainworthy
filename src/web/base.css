@@ -1604,8 +1604,9 @@ button[aria-disabled="true"] {
 		gap: 4px;
 		font-size: 12px;
 	}
-	/* The sidebar is 120 px here: the mark and the button fit, and the name between them does not. */
-	.brand b {
+	/* The sidebar is 120 px here: the mark and the button fit, and the name between them does not. Only where
+	   the button is: a phone's drawer has none, and room for the name. */
+	.brand:has(.side-toggle) b {
 		display: none;
 	}
 	.sfoot {

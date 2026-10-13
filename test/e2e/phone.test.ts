@@ -154,6 +154,9 @@ test.skipIf(!browserAvailable)(
 			await menu.tap();
 			expect(await side.isVisible()).toBe(true);
 			expect(await menu.getAttribute("aria-expanded")).toBe("true");
+			// The drawer says the product's name beside the mark, as the desktop's sidebar does.
+			expect(await side.locator(".brand b").isVisible()).toBe(true);
+			expect(await side.locator(".brand b").innerText()).toBe("Mainworthy");
 			// The folders are in it, and choosing one closes it.
 			await side.getByRole("button", { name: /^Accounts/ }).tap();
 			await page.waitForURL("**/suite?folder=Accounts");
