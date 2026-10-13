@@ -135,6 +135,11 @@ export type Call = {
 function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Generator<void, Reply, void> {
 	const op = ops[call.op];
 	if (!op) return fail("not_found", `no operation named ${call.op}`);
+	// An operation of the instance has one address. Named under a project it is refused, whichever project and
+	// whether or not it exists: answered there, it would look as if it were about that project, and a client
+	// written against the wrong address would work until the day the two differ.
+	if (op.scope === "instance" && call.project !== null)
+		return fail("not_found", `${op.name} is an operation of the instance and of no project: POST /api/${op.name}`);
 	// Who may call is settled before the operation's input is checked: a caller that may not run the operation
 	// learns that and nothing about what it sent. (A surface has read the body by then: HTTP wants it to be JSON.)
 	const found = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;

@@ -136,7 +136,7 @@ This link is shown once. Hand it to dana: it works once.
 - The link starts with the address in `MAINWORTHY_PUBLIC_URL`. With that variable unset, the command prints `/invite#<code>` and tells you to put the address of the instance before it. See [configuration](./configuration.md#variables-the-server-reads).
 - Only a person who administers invites somebody. An agent that holds `admin` is refused.
 
-`mainworthy invite list` shows every invitation, who made it and whether it is open, used, revoked or expired. It never shows a link. `mainworthy invite revoke <id>` withdraws one that nobody has accepted.
+`mainworthy invite list` shows every invitation, who made it, whether it is open, used, revoked or expired, and what its person may do on which project. It never shows a link. `mainworthy invite revoke <id>` withdraws one that nobody has accepted.
 
 To accept, the person sends the code with a password, a passkey or both, to `POST /api/login`:
 

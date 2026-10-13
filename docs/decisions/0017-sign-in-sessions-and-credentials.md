@@ -331,6 +331,17 @@ an invitation's link once.
   keep guessing. It is accepted: the other choice is unlimited guesses at one person's password from many
   addresses. A passkey is not held up by it, and a block is at most fifteen minutes after the last guess.
 
+**What the pages asked for**, found when the web UI was built from these routes:
+
+- `GET /api/session` says whether the caller is the owner (`owner`), because the owner alone makes a recovery
+  link for another person and a page must know where the server will refuse.
+- How long a password is (`PASSWORD_LENGTH`, `whyNotPassword`) is in `src/core/people.ts`, which the page
+  imports, and no longer in the server.
+- `invitation list` shows each person's grants, as `actor.list` does.
+- A credential stored by accepting an invitation is marked as used at that moment: it signed its person in.
+- An operation of the instance is answered at `/api/<operation>` only. Before, the registry ran one under any
+  project's address, `admin` included, and a client written against the wrong address worked.
+
 **Not built here.** The pages. Unicode normalisation of a password: it is compared as the bytes that were
 typed.
 

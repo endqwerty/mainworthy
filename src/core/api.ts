@@ -138,6 +138,11 @@ export type SessionInfo = {
 	session: number | null;
 	/** How the caller signs in, when the caller is a person; null for an agent or a pipeline. */
 	credentials: CredentialSummary | null;
+	/**
+	 * Whether the caller is the owner of the instance: the person its configuration names. The owner alone makes
+	 * a token or a recovery link for another person who exists, so a page offers those where this is true.
+	 */
+	owner: boolean;
 	version: string;
 	projects: { key: string; name: string; seq: number; createdAt: number; policy: string; can?: string[] }[];
 };

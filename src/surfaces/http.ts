@@ -438,6 +438,8 @@ function sessionInfo(app: App, session: Session): Response {
 			// What a page needs to show a person their own sign-in: which session this is, and what they sign in with.
 			session: session.id?.() ?? null,
 			credentials: actor.kind === "human" ? credentialSummary(app.reader, actor.id) : null,
+			// The owner is the person the configuration names, as `refuseToken` in `ops/admin.ts` takes it.
+			owner: actor.kind === "human" && actor.name === app.config.owner,
 			version: VERSION,
 			projects: grantedProjects(app, session),
 		},

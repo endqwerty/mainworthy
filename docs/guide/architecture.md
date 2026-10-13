@@ -12,7 +12,7 @@ The file has one writer. A write waits its turn in a queue, and reads run on the
 
 ## One list of operations
 
-Everything the product can do is one of sixteen operations, such as `propose`, `report`, `decide` and `gate`. The HTTP routes, the OpenAPI document, the commands of `mainworthy` and the agent tools are all made from that one list. Every operation is an HTTP route and a command. Ten of them, marked in the list, are also agent tools.
+Everything the product can do is one of nineteen operations, such as `propose`, `report`, `decide` and `gate`. The HTTP routes, the OpenAPI document, the commands of `mainworthy` and the agent tools are all made from that one list. Every operation is an HTTP route and a command. Ten of them, marked in the list, are also agent tools.
 
 Each operation does the same things in the same order. It checks that the caller may run it. It checks the input. For a write it opens a transaction, takes the project's next sequence number, runs, commits, and tells listening clients what changed. [API and agent tools](./api.md) lists the operations.
 

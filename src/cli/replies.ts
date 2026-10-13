@@ -182,6 +182,7 @@ export const REPLY_SCHEMAS: { [N in OpName]: z.ZodType<Api[N]["reply"]> } = {
 				createdAt: z.number(),
 				expiresAt: z.number(),
 				state: z.enum(["open", "used", "revoked", "expired"]),
+				grants: z.array(z.object({ project: z.string(), can: strings })),
 			}),
 		),
 		z.object({ revoked: z.boolean() }),

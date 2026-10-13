@@ -29,7 +29,7 @@ import {
 } from "../identity/identity.ts";
 import type { Actor } from "../kernel/ctx.ts";
 import { forbidden, invalid, notFound } from "../kernel/errors.ts";
-import { personOnly, projectOf, refuseToken } from "./admin.ts";
+import { actorsWithGrants, personOnly, projectOf, refuseToken } from "./admin.ts";
 import { defineInstanceOp, type InstanceCtx } from "./registry.ts";
 
 /**
@@ -176,8 +176,12 @@ export const invitationOp = defineInstanceOp({
 					}`,
 				} satisfies InvitationCreated;
 			}
-			case "list":
-				return listInvitations(db, env.now);
+			case "list": {
+				// What an invitation gives is what its person holds, on which project: the grant is the person's and
+				// not the link's, so it is read as `actor.list` reads it, now.
+				const held = new Map(actorsWithGrants(db).map((actor) => [actor.name, actor.grants]));
+				return listInvitations(db, env.now).map((row) => ({ ...row, grants: held.get(row.name) ?? [] }));
+			}
 			case "revoke":
 				return { revoked: revokeInvitation(db, input.id, env.now) };
 			default: {

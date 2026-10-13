@@ -1,10 +1,10 @@
 # API and agent tools
 
-Every operation Mainworthy has, with its address, the capability it needs and its input. The web UI, the command line and an agent's tools all call these same operations. The command line and the HTTP API reach all sixteen. An agent's tools are ten of them.
+Every operation Mainworthy has, with its address, the capability it needs and its input. The web UI, the command line and an agent's tools all call these same operations. The command line and the HTTP API reach all nineteen. An agent's tools are ten of them.
 
 ## Call an operation
 
-An operation is one `POST` with a JSON body. An operation on a project is at `/api/p/<project>/<operation>`. The one operation on the instance, `admin`, is at `/api/admin`.
+An operation is one `POST` with a JSON body. An operation on a project is at `/api/p/<project>/<operation>`. An operation on the instance (`admin`, `session`, `credential` and `invitation`) is at `/api/<operation>`, and only there: under a project's address it is answered `not_found`, with the address to use.
 
 ```
 $ curl -s -X POST http://127.0.0.1:7357/api/p/scratch/find \
@@ -51,7 +51,7 @@ A browser signs in with these requests and then holds a session cookie. They are
 | `POST /api/account/password` | `{"current"?, "next"}` | Sets or changes the password of the person whose browser session sends it. `current` is required when they have one. |
 | `POST /api/logout` | none | Ends the browser's session and clears its cookie. |
 
-A body holds one of these shapes and nothing beside it. `GET /api/session` says who is signed in, which session the request came by (`session`) and, for a person, what they sign in with (`credentials`: whether they have a password, and how many passkeys).
+A body holds one of these shapes and nothing beside it. `GET /api/session` says who is signed in, which session the request came by (`session`), whether the caller owns the instance (`owner`) and, for a person, what they sign in with (`credentials`: whether they have a password, and how many passkeys).
 
 A signed-in person registers a further passkey with the `credential` operation: `passkey.begin` answers the options for `navigator.credentials.create`, and `passkey.add` takes what the browser returned and a label.
 

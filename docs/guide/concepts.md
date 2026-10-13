@@ -68,7 +68,7 @@ The data is the same under all three. You can switch without migrating anything.
 
 ## People, pipelines and agents use the same operations
 
-The web UI, the `mainworthy` command, the HTTP API and an agent's tools are four ways to call one list of operations. There is no feature that exists in the UI and not in the API. An agent's tools are ten of the sixteen operations. For another one, such as planning a run, an agent uses the command line or the API.
+The web UI, the `mainworthy` command, the HTTP API and an agent's tools are four ways to call one list of operations. There is no feature that exists in the UI and not in the API. An agent's tools are ten of the nineteen operations. For another one, such as planning a run, an agent uses the command line or the API.
 
 What a caller may do depends on who it is. A person, an agent and a pipeline each hold capabilities on a project. A pipeline can record results and read the gate, and can be let read. It can never edit, answer, plan or administer, whatever it is granted. An agent's report is shown and asked about but never moves a commit's gate. [People, agents and pipelines](./access.md) explains grants and tokens.
 

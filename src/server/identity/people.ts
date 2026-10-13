@@ -738,6 +738,8 @@ export async function acceptInvitation(
 		if (!root) throw new Stop(no("input"));
 		const opened = openOn(app, root, cookie, about);
 		if (!opened) throw new Stop(no("changed-meanwhile"));
+		// What was just stored signed its person in, and says so: a list does not call it "never used".
+		for (const row of liveCredentials(app.db, person.id)) noteCredentialUse(app.db, row.id, at);
 		// The browser was somebody else's until now. That session ends as a sign-out does.
 		if (input.browser !== null && other && other.id !== person.id) endSession(app, hashOf(input.browser), "signed-out");
 		if (registration) spendChallenge(app, registration.challenge);

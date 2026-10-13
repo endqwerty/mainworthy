@@ -23,6 +23,7 @@ const SessionSchema = z.object({
 	via: z.enum(["token", "cookie", "local"]),
 	session: z.number().nullable(),
 	credentials: z.object({ password: z.boolean(), passkeys: z.number() }).nullable(),
+	owner: z.boolean(),
 	version: z.string(),
 	projects: z.array(
 		z.object({

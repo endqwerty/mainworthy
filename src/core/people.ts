@@ -12,6 +12,22 @@ import { cmd } from "./ops.ts";
 
 const actor = z.string().max(64);
 
+/**
+ * How long a password is, in characters. Twelve, because nothing else is asked of it: no digit, no capital
+ * and no sign, which make passwords harder to remember and no harder to guess. The upper end only bounds the
+ * work of hashing what a stranger sends. Said here once, for the server that refuses and the page that warns.
+ */
+export const PASSWORD_LENGTH = { min: 12, max: 256 } as const;
+
+/** Why this text cannot be a password, as a sentence for the person who typed it, or null when it can. */
+export function whyNotPassword(text: string): string | null {
+	// Characters as a person counts them, not UTF-16 units.
+	const length = [...text].length;
+	return length >= PASSWORD_LENGTH.min && length <= PASSWORD_LENGTH.max
+		? null
+		: `a password is ${PASSWORD_LENGTH.min} to ${PASSWORD_LENGTH.max} characters`;
+}
+
 export const SessionInput = z.discriminatedUnion("do", [
 	z.object({
 		do: z.literal("list"),
@@ -128,6 +144,11 @@ export type InvitationRow = {
 	createdAt: number;
 	expiresAt: number;
 	state: "open" | "used" | "revoked" | "expired";
+	/**
+	 * What the person holds now, as `actor.list` shows it: each grant with its project's key, or `*` for every
+	 * project. It is the person's and not the link's: a grant changed after the invitation was made shows here.
+	 */
+	grants: { project: string; can: string[] }[];
 };
 
 /**

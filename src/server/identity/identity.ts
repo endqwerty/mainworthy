@@ -35,7 +35,6 @@ import {
 } from "./sessions.ts";
 import { clearUses, flushUses, forgetNotedAddresses, lastAddress, notedUse, noteUse } from "./uses.ts";
 
-export { whyNotPassword } from "./passwords.ts";
 // What the sign-in routes and the operations of a signed-in person need of them.
 export {
 	type Accepted,

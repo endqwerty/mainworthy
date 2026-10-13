@@ -1014,3 +1014,87 @@ describe("the limit on failed attempts", () => {
 		expect(after.map((row) => row.id)).toEqual([1, 2]);
 	});
 });
+
+describe("what the pages of the web UI asked of the server", () => {
+	test("the session says whether the caller owns the instance, which decides who may make a recovery link for somebody else", async () => {
+		const w = world();
+		const robin = await joined(w, "robin", FIRST, { can: ["read", "admin"] });
+		const agent = await tokenFor(w, { actor: "helper", kind: "agent", can: ["read", "admin"] });
+		const owner = (await w.post("/api/login", { token: TOKEN })).cookie;
+		expect([
+			(await me(w, bearer(TOKEN))).owner,
+			(await me(w, { cookie: owner })).owner,
+			(await me(w, { cookie: robin })).owner,
+			(await me(w, bearer(agent))).owner,
+		]).toEqual([true, true, false, false]);
+		// It is the same rule the server refuses by: an admin who is not the owner makes no recovery for another.
+		await joined(w, "sam", SECOND);
+		expect((await w.op("invitation", { do: "create", name: "sam" }, { cookie: robin })).status).toBe(403);
+		expect((await w.op("invitation", { do: "create", name: "sam" }, { cookie: owner })).status).toBe(200);
+	});
+
+	test("the list of invitations says what each person may do and where, as the list of actors does", async () => {
+		const w = world();
+		await w.ok("admin", { do: "project.create", key: "checkout" });
+		await invite(w, { name: "robin", can: ["read", "produce"], project: "checkout" });
+		await invite(w, { name: "sam" });
+		await invite(w, { name: OWNER });
+		type Row = { name: string; purpose: string; grants: { project: string; can: string[] }[] };
+		const listed = await w.ok<Row[]>("invitation", { do: "list" });
+		expect(listed.map((row) => ({ name: row.name, purpose: row.purpose, grants: row.grants }))).toEqual([
+			// `produce` includes `record`, and the list says what the person holds, as the registry will see it.
+			{ name: "robin", purpose: "join", grants: [{ project: "checkout", can: ["read", "record", "produce"] }] },
+			{
+				name: "sam",
+				purpose: "join",
+				grants: [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"] }],
+			},
+			{
+				name: OWNER,
+				purpose: "recover",
+				grants: [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"] }],
+			},
+		]);
+		// A grant that changes after the invitation was made is what the list shows: it is the person's, not the link's.
+		await w.ok("admin", { do: "grant.set", actor: "robin", project: "checkout", can: ["read"] });
+		const after = await w.ok<Row[]>("invitation", { do: "list" });
+		expect(after[0]?.grants).toEqual([{ project: "checkout", can: ["read"] }]);
+	});
+
+	test("a password an invitation was accepted with says when it was last used: the moment it signed its person in", async () => {
+		const clock = clockAt();
+		const w = world({ clock });
+		const { code } = await invite(w, { name: "robin" });
+		clock.advance(HOUR);
+		const accepted = await w.post("/api/login", { invitation: code, password: FIRST });
+		expect(await w.ok("credential", { do: "list" }, { cookie: accepted.cookie })).toMatchObject([
+			{ id: 1, kind: "password", lastUsedAt: T0 + HOUR },
+		]);
+	});
+
+	test("an operation of the instance is called at /api/<operation> and nowhere else: under a project's path it is refused", async () => {
+		const w = world();
+		const cookie = await joined(w, "robin", FIRST);
+		const { OP_LIST } = await import("../src/server/ops/index.ts");
+		const instance = OP_LIST.filter((op) => op.scope === "instance").map((op) => op.name);
+		expect(instance).toEqual(["admin", "session", "credential", "invitation"]);
+		for (const name of instance) {
+			const input = name === "admin" ? { do: "project.list" } : { do: "list" };
+			const under = await w.post(`/api/p/scratch/${name}`, input, bearer(TOKEN));
+			expect(`${name}: ${said(under)}`).toBe(`${name}: 404 not_found`);
+			expect(under.body.ok ? "" : under.body.error.message).toBe(
+				`${name} is an operation of the instance and of no project: POST /api/${name}`,
+			);
+			// A project that does not exist is no different, and neither is a caller with no grant there.
+			expect(said(await w.post(`/api/p/nowhere/${name}`, input, bearer(TOKEN)))).toBe("404 not_found");
+			expect(said(await w.post(`/api/${name}`, input, bearer(TOKEN)))).toBe("200");
+		}
+		expect(said(await w.post("/api/p/scratch/session", { do: "list" }, { cookie }))).toBe("404 not_found");
+		// Nothing was made under the wrong path.
+		const made = await w.post("/api/p/scratch/invitation", { do: "create", name: "sam" }, bearer(TOKEN));
+		expect(said(made)).toBe("404 not_found");
+		expect(w.rows("SELECT id FROM invitations")).toHaveLength(1);
+		// And an operation of a project has no path without one.
+		expect(said(await w.post("/api/find", {}, bearer(TOKEN)))).toBe("400 invalid");
+	});
+});

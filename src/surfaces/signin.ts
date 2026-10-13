@@ -11,6 +11,7 @@
 // code, with no name and nothing the caller typed, since a name field is where a password is typed by mistake.
 import { z } from "zod";
 import { type ErrorCode, HTTP_STATUS } from "../core/api.ts";
+import { whyNotPassword } from "../core/people.ts";
 import {
 	type Accepted,
 	acceptInvitation,
@@ -26,7 +27,6 @@ import {
 	signInWithPasskey,
 	signInWithPassword,
 	type WhyNot,
-	whyNotPassword,
 } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
 
