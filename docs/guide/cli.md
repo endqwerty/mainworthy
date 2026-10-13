@@ -2,7 +2,7 @@
 
 Every command of `mainworthy`, with its flags and exit codes. The tables on this page are read from the program, so they match the version you are running.
 
-`mainworthy` is one executable. With no arguments it starts the server. Every other command talks to a running server over HTTP, on this machine or another one.
+`mainworthy` is one executable. With no arguments it starts the server. Almost every other command talks to a running server over HTTP, on this machine or another one. `mainworthy fmt` and `mainworthy help` need no server.
 
 ## Reach a server
 
@@ -134,11 +134,12 @@ Every operation of the API is also a command with the same name. Give its input 
 | 1 | `mainworthy gate`: the verdict is `failed` |
 | 2 | `mainworthy gate`: the verdict is `blocked` |
 | 3 | `mainworthy gate`: the verdict is `pending` |
-| 4 | The command failed: the server refused it, could not be reached, or the input was wrong |
+| 1 | `mainworthy check` found problems in the suite; `mainworthy health` got no answer |
+| 4 | The command could not run: the server refused it, could not be reached, or the input was wrong |
 
 <!-- /generated -->
 
-A command that fails prints one line to standard error, the error code and then the message, for example `forbidden: ...`. [Troubleshooting](./troubleshooting.md) lists the codes.
+A command that could not run prints one line to standard error, the error code and then the message, for example `forbidden: ...`, and exits with 4. [Troubleshooting](./troubleshooting.md) lists the codes. A command that ran and has bad news, such as a gate that is blocked or a suite with problems, prints its result and uses the exit code in the table above.
 
 ## See also
 

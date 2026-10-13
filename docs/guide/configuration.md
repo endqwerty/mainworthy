@@ -47,7 +47,7 @@ Reader threads let reads continue while a large report is applied. The default s
 
 ## Variables and flags the command line reads
 
-Every command except `serve` talks to a server. It finds the server in this order: the flag, then the variable, then the default.
+Every command except `serve`, `fmt` and `help` talks to a server. It finds the server in this order: the flag, then the variable, then the default.
 
 | Variable | Flag | Default |
 | --- | --- | --- |

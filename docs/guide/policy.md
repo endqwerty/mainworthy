@@ -106,7 +106,7 @@ policy proposal P-2: open Q-2 needs an admin
 
 An admin finds it in Queue under "Proposals". Reading the clause table needs `admin` on every project, which is more than switching needs.
 
-Data does not change when the policy does. Results, decisions and cases stay as they were. Only the answer to the next question changes.
+Data does not change when the policy does. Results, decisions and cases stay as they were. What changes is who may answer, and whether a reason is needed. That holds for the next question and for every question that is still open: an open question now waits for whoever the new policy names.
 
 ## Change single clauses
 

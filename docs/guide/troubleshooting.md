@@ -27,11 +27,11 @@ Someone already decided about that cause, and the decision still holds, so nobod
 
 ### A result did not fill a slot in my planned run
 
-A result fills a slot only when three things are true: it is for that case at the pinned version, its method is one the run asked for, and the case admits that method. See [planned runs](./runs.md).
+A result fills a slot only when three things are true. It is for that case at the pinned version. Its method is one the run asked for. And the method is admitted: a person or an agent must be among the methods the case declares, and an automated test must be linked to the case or name it. See [planned runs](./runs.md).
 
 ## Commands
 
-Every command that fails prints one line, the code and then the message, and exits with 4.
+A command that could not run prints one line to standard error, the code and then the message, and exits with 4. The sections below are such messages. A command that ran and has bad news uses a code of its own: `mainworthy gate` exits 1, 2 or 3 for its verdicts, and `mainworthy check` and `mainworthy health` exit 1.
 
 ### `connection: cannot connect to ...`
 
@@ -43,7 +43,7 @@ The server is in server mode, or the token is wrong or was revoked. Pass a token
 
 ### `forbidden: propose needs the produce capability on scratch`
 
-The token's actor may not run that operation on that project. The message names the capability. An admin can change the grant. A pipeline's token records results and reads the gate and can do nothing else, whatever it is granted.
+The token's actor may not run that operation on that project. The message names the capability. An admin can change the grant. A pipeline's token records results and reads the gate, and can be granted `read` besides. It can never edit a case, answer, plan or administer, whatever it is granted.
 
 ### `conflict`
 
@@ -71,7 +71,7 @@ In server mode the server prints a generated owner token once, on its first star
 
 ### A key does nothing
 
-Keys other than <kbd>⌘</kbd> combinations and <kbd>Esc</kbd> are off while you type in a field. Press <kbd>Esc</kbd> to leave the field. Press <kbd>?</kbd> to see the keys that work on the current screen. The full list is on the [keyboard](./keyboard.md) page.
+Keys other than <kbd>⌘</kbd> combinations and <kbd>Esc</kbd> are off while you type in a field. Press <kbd>Esc</kbd> to leave the case editor, the filter or a run's note. In Settings, click outside the field. Press <kbd>?</kbd> to see the keys that work on the current screen. The full list is on the [keyboard](./keyboard.md) page.
 
 ### What I typed is not a version yet
 

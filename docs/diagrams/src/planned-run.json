@@ -538,7 +538,7 @@
       "title": "What a plan asks for",
       "items": [
         "A person chooses the cases, which methods count (people, automated tests, agents), the commit the run counts, and any CI jobs the run must hear from. The run screen offers people and automated tests; agents, custom requirements and jobs are set with the command line or the API.",
-        "A run that counts only results recorded in it takes nothing from a pipeline and cannot require a job. Evidence already recorded for the commit fills slots when the run is planned; later reports fill them while it is open."
+        "A run that counts only results recorded in it takes a pipeline's result only from a report that names the run, and cannot require a job. Evidence already recorded for the commit fills slots when the run is planned; later reports fill them while it is open."
       ]
     },
     {

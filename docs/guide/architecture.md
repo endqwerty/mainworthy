@@ -12,7 +12,7 @@ The file has one writer. A write waits its turn in a queue, and reads run on the
 
 ## One list of operations
 
-Everything the product can do is one of sixteen operations, such as `propose`, `report`, `decide` and `gate`. The HTTP routes, the OpenAPI document, the commands of `mainworthy` and the agent tools are all made from that one list. A capability exists on every one of them or on none.
+Everything the product can do is one of sixteen operations, such as `propose`, `report`, `decide` and `gate`. The HTTP routes, the OpenAPI document, the commands of `mainworthy` and the agent tools are all made from that one list. Every operation is an HTTP route and a command. Ten of them, marked in the list, are also agent tools.
 
 Each operation does the same things in the same order. It checks that the caller may run it. It checks the input. For a write it opens a transaction, takes the project's next sequence number, runs, commits, and tells listening clients what changed. [API and agent tools](./api.md) lists the operations.
 
@@ -26,7 +26,7 @@ Each project has one clock. Every write gets the next sequence number and stamps
 
 The head version of a case, the case a test belongs to, how a failure counts, whether a run is closed and the policy in force are the things Mainworthy treats as current. The code has exactly one way to change each of them: a function that needs proof of a recorded decision. The database refuses a row that cites a decision the record does not hold.
 
-So no path through the product, and no bug that takes a shortcut, can change a verdict without a row that says who decided, on what evidence, under which clause of the policy. [How Mainworthy works](./concepts.md) explains what this means when you use it.
+So no path through the product, and no bug that takes a shortcut, can change what is current without a row that says who decided, on what evidence, under which clause of the policy. A verdict is worked out from the evidence and from what is current, so it changes only when evidence arrives or a decision is recorded. [How Mainworthy works](./concepts.md) explains what this means when you use it.
 
 ## What happens when a pipeline reports
 

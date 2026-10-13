@@ -6,7 +6,7 @@ Every key of the web UI, by screen. In the app, <kbd>?</kbd> lists the keys of t
 
 - Two keys in a row, such as <kbd>g</kbd> <kbd>q</kbd>, are pressed one after the other, not together. You have a little under a second for the second key.
 - <kbd>⌘</kbd> is Command on macOS and Ctrl everywhere else.
-- While you type in a field, only <kbd>⌘</kbd> combinations, <kbd>Esc</kbd> and the keys of the case editor work. Press <kbd>Esc</kbd> to leave the field.
+- While you type in a field, only <kbd>⌘</kbd> combinations, <kbd>Esc</kbd> and the keys of the case editor work. <kbd>Esc</kbd> leaves the case editor, the filter and a run's note. A field in Settings keeps the focus: click outside it first.
 - While the palette or the list of keys is open, only <kbd>Esc</kbd> and <kbd>⌘</kbd> <kbd>K</kbd> work.
 
 ## Everywhere

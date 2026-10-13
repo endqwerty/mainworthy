@@ -398,7 +398,7 @@
       "title": "One queue of questions",
       "items": [
         "Detectors raise a question for each cause: an edit to a case, a test with no case, a failure, a finding, or the closing of a run. The same cause seen again joins its question, and while an answer to it still holds, nobody is asked twice.",
-        "A question waits for the person the policy names. Where the policy allows a rule, Mainworthy records the rule's answer at once. An agent's answer is advice and leaves the question open."
+        "A question waits for the person the policy names. Where the policy allows a rule, Mainworthy records the rule's answer at once. An agent's answer settles a question only where the policy lets agents answer and the agent holds the right. Otherwise it is advice, or is refused."
       ]
     },
     {

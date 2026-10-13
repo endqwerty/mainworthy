@@ -1,6 +1,6 @@
 # How Mainworthy works
 
-The whole product in one page: what it records, how a failed test becomes a question, and why only a decision can change a verdict. Read it once and the screens and commands will make sense.
+The whole product in one page: what it records, how a failed test becomes a question, and how evidence and decisions together give a verdict. Read it once and the screens and commands will make sense.
 
 [Diagram: how Mainworthy works](../diagrams/overview.html)
 
@@ -8,7 +8,7 @@ The whole product in one page: what it records, how a failed test becomes a ques
 
 Mainworthy keeps three things, and keeps them apart.
 
-- **Cases** say what the software should do. A case is a title and steps, each with an expected result. Every edit is a new version. Old versions stay.
+- **Cases** say what the software should do. A case is a title and steps, each with an expected result. Every edit to that content is a new version, and old versions stay. Moving a case, tagging it or archiving it is recorded in its history without a new version.
 - **Results** say what was observed. A person pressing <kbd>p</kbd> in a run, a pipeline uploading JUnit XML and an agent reporting a batch all produce the same kind of record.
 - **Decisions** say what people made of it. "This failure is a product bug." "This edit is accepted." Each one names who decided and on what evidence.
 
@@ -58,7 +58,7 @@ The gate is the answer for a commit, a change or a run. It has four verdicts, an
 | `blocked` | 2 | A decision. A failure has no explanation yet, or two results disagree. |
 | `pending` | 3 | Evidence. A report has not arrived or is still being applied, or nothing was proven. |
 
-When you answer a failure in the queue, the verdict is worked out again at once. A flaky test you excuse turns the gate green without the pipeline running again. [Changes and the gate](./changes.md) has the details.
+The verdict is worked out from the evidence and the decisions in force, so it changes when either does. When you answer a failure in the queue, it is worked out again at once: a flaky test you excuse turns the gate green without the pipeline running again. A retry that passes turns it green too, with no decision at all. [Changes and the gate](./changes.md) has the details.
 
 ## Policy says who answers
 
@@ -68,9 +68,9 @@ The data is the same under all three. You can switch without migrating anything.
 
 ## People, pipelines and agents use the same operations
 
-The web UI, the `mainworthy` command, the HTTP API and an agent's tools are four ways to call one list of operations. There is no feature that exists in the UI and not in the API.
+The web UI, the `mainworthy` command, the HTTP API and an agent's tools are four ways to call one list of operations. There is no feature that exists in the UI and not in the API. An agent's tools are ten of the sixteen operations. For another one, such as planning a run, an agent uses the command line or the API.
 
-What a caller may do depends on who it is. A person, an agent and a pipeline each hold capabilities on a project. A pipeline can record results and read the gate, and nothing else, whatever it is granted. An agent's report is shown and asked about but never moves a commit's gate. [People, agents and pipelines](./access.md) explains grants and tokens.
+What a caller may do depends on who it is. A person, an agent and a pipeline each hold capabilities on a project. A pipeline can record results and read the gate, and can be let read. It can never edit, answer, plan or administer, whatever it is granted. An agent's report is shown and asked about but never moves a commit's gate. [People, agents and pipelines](./access.md) explains grants and tokens.
 
 ## Where to go next
 
