@@ -74,12 +74,14 @@ each of them by hand.
 - **The owner's name is not written in the repository** (their request, 2026-10-13). The documents say "the
   owner", and examples use `dana`.
 
-## Not done here
+## Done after the merge (2026-10-13)
 
-- The repository is still `endqwerty/casebook`; the owner renames it after this merges. Links in the diagrams
-  already point at `endqwerty/mainworthy` and work from then on.
-- The trademark search.
-- A redeploy of the instance on Coolify. Until then this repository's CI reports to a Mainworthy of its own: the
-  gate job compares the instance's API description with its own (decision 0014), and the names in it changed.
+- The repository is `endqwerty/mainworthy`. GitHub redirects the former address.
+- The instance on Coolify was redeployed from the new address and carried its data over (`docs/deploy.md`).
+- The npm package `mainworthy` is published from the owner's account, as a placeholder that holds the name.
+
+## Not done
+
+- The trademark search. The owner put it off.
 - `scripts/test-timings.json` has hand-written entries for the two new test files (both take milliseconds);
   the next `bun run test --update-timings` replaces them.
