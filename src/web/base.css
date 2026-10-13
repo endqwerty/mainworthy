@@ -272,8 +272,10 @@ kbd {
 	color: var(--faint);
 	padding-left: 8px;
 }
+/* Two lines: who is signed in with their settings and the way out, then the docs, the keys and the theme. */
 .sfoot {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 6px;
 	padding: 8px 10px;
@@ -286,8 +288,17 @@ kbd {
 	align-items: center;
 	gap: 6px;
 	margin-right: auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
-.sfoot button {
+.sfoot button,
+.sfoot-link {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
 	height: 24px;
 	min-width: 26px;
 	padding: 0 8px;
@@ -295,17 +306,17 @@ kbd {
 	border: 1px solid var(--line);
 	border-radius: 6px;
 	background: var(--panel);
+	color: inherit;
 	font-size: 12px;
+	text-decoration: none;
 }
-/* With a session to sign out of, the footer is two lines: who is signed in and the way out, then the rest. */
-.sfoot.account {
-	flex-wrap: wrap;
+.sfoot-link:hover {
+	background: var(--line2);
 }
-.account .me {
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+/* Settings is open: the link says so as a place in the navigation does. */
+.sfoot-link.on {
+	color: var(--ink);
+	border-color: var(--dim);
 }
 .sfoot-break {
 	flex-basis: 100%;

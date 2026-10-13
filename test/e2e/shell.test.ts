@@ -44,9 +44,39 @@ test.skipIf(!browserAvailable)(
 				expect(await page.locator("#list").count()).toBe(1);
 				expect(await page.locator("#tree").count()).toBe(route === "suite" ? 1 : 0);
 			}
+			// The navigation is the four places the work is done. Settings and the docs are in the footer:
+			// Settings beside who is signed in, the docs beside the keys and the theme.
+			const nav = page.getByRole("navigation", { name: "Main" });
+			expect(await nav.getByRole("link").allInnerTexts()).toEqual([
+				expect.stringContaining("Suite"),
+				expect.stringContaining("Queue"),
+				expect.stringContaining("Runs"),
+				expect.stringContaining("Changes"),
+			]);
+			const footer = page.locator(".sfoot");
+			const settings = footer.getByRole("link", { name: "Settings", exact: true });
+			// The loop above ended on Settings, and the link says so as a place in the navigation does.
+			expect(await settings.getAttribute("aria-current")).toBe("page");
+			expect(await footer.getByRole("link", { name: "Docs", exact: true }).getAttribute("href")).toBe(
+				"/docs/customize",
+			);
+			expect(
+				await footer.locator("a, button").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label"))),
+			).toEqual(["Settings", "Sign out", "Docs", "Keyboard shortcuts", "Toggle theme"]);
+			await page.keyboard.type("gs");
+			await page.waitForURL("**/p/scratch/suite");
+			expect(await settings.getAttribute("aria-current")).toBeNull();
+			await settings.click();
+			await page.waitForURL("**/p/scratch/settings");
+			expect(browser.loads()).toBe(1);
 			await page.keyboard.press("[");
 			expect(await page.locator("#side").evaluate((node) => node.getBoundingClientRect().width)).toBe(64);
 			expect(await page.getByRole("link", { name: "Suite", exact: true }).isVisible()).toBe(true);
+			// Collapsed, the footer keeps its links as icons, one under the other and inside the sidebar.
+			for (const name of ["Settings", "Docs"]) {
+				const box = await footer.getByRole("link", { name, exact: true }).boundingBox();
+				expect(box && box.x >= 0 && box.x + box.width <= 64 && box.width > 0).toBe(true);
+			}
 			await page.keyboard.press("[");
 			expect(await page.locator("#side").evaluate((node) => node.getBoundingClientRect().width)).toBe(236);
 			await page.keyboard.press("Control+k");

@@ -29,7 +29,7 @@ Two words recur below. An instance admin holds the `admin` capability on every p
 | What a run asks for | Runs, <kbd>n</kbd>, or `mainworthy plan` for methods, people and required jobs | Anyone with `plan` | [Planned runs](./runs.md) |
 | Folders and tags | Suite | Anyone with `produce`. The policy decides whether the edit applies at once | [Write cases](./write-cases.md#organize-the-suite) |
 | Which methods a case admits | The case's "Can be exercised by" section, or `methods` in its Markdown | Anyone with `produce`, under the same rule | [Let an agent in](./agents.md#what-agent-work-is-worth) |
-| The theme | The "Theme" button in the sidebar | You, in your own browser | This page |
+| The theme | The "Theme" button at the bottom of the sidebar | You, in your own browser | This page |
 | Where the server listens, its mode, data directory and reader threads | Environment variables | Whoever starts the server | [Configuration](./configuration.md) |
 | How CI reports | A pipeline token, and `MAINWORTHY_URL`, `MAINWORTHY_TOKEN` and `MAINWORTHY_PROJECT` in the job | An admin makes the token. Whoever edits the pipeline sets the rest | [Report results](./report-results.md#give-a-pipeline-its-own-token) |
 | Backups and moving machines | `mainworthy export` and `mainworthy import` | An instance admin | [Your data](./data.md) |
@@ -54,7 +54,7 @@ A case lists the methods that may produce evidence for it. People are the defaul
 
 ## The theme
 
-Press "Theme" in the sidebar to switch between light and dark. Until you do, Mainworthy follows your system. The choice stays in this browser.
+Press "Theme" at the bottom of the sidebar to switch between light and dark. Until you do, Mainworthy follows your system. The choice stays in this browser.
 
 ## What is fixed today
 
