@@ -23,17 +23,21 @@ page asks the server about each id. A reply names what the merge did: the versio
 proposal that waits for a person, or nothing.
 
 **A draft keeps the version it was written on.** The page moves a draft onto another version in one case only:
-text typed in the card after a merge was sent is carried onto the version the server made of that merge, and
-only where the person saw what they change. Every field of that version is either theirs, as they sent it, or
-somebody else's. Later text in a field of the second kind stays on the draft's own base. So does the text of a
-card whose question was answered by anything other than its own merge. Proposing a draft on the version it was
-written on lets the server merge it with what is recorded now, or ask, which is what a base version is for
-(decision 0004). The page never takes "the current head" as a draft's base because two bodies look alike.
+text that is later than a merge the server recorded is carried onto the version the server made of that merge,
+and only where the person saw what they change. Later text is what was typed in the card after the merge was
+sent, and what the draft holds that the card was not made of. Every field of that version is either the
+person's, as they sent it, or somebody else's. Later text in a field of the second kind stays on the draft's own
+base. So does the text of a card whose question was answered by anything other than its own merge. Proposing a
+draft on the version it was written on lets the server merge it with what is recorded now, or ask, which is what
+a base version is for (decision 0004). The page never takes "the current head" as a draft's base because two
+bodies look alike.
 
-**Nothing typed leaves the device unrecorded.** A draft can hold text that no merge carries, such as a step
-with an expected result and no action yet. It stays with the draft on every path. A card and its draft are
-dropped in two cases only: the card's own merge was recorded and neither holds anything beyond it, or the
-recorded head holds all of their text.
+**Settling a card removes nothing typed that is not recorded.** A draft can hold text that no merge carries,
+such as a step with an expected result and no action yet. It stays with the draft when a card is settled or
+moves to a new question. A card and its draft are dropped in two cases only: the card's own merge was recorded
+and neither holds anything beyond it, or the recorded head holds everything the person typed in them. A side
+chosen in the card is text of a recorded version and does not count as typed. This is about settling a card.
+Leaving the editor in the ordinary way still drops a step with no action, as it did before (issue #86).
 
 ## What was turned down
 

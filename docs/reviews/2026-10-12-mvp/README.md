@@ -67,11 +67,16 @@ Written by GPT 6.1 Sol. Each reviewer drove the real page in headless Chromium a
 | 8, re-check of round 7 | `5cc2b3a` | Claude Opus 5.5 | ISSUES (3 blockers) | [ui-r8.md](ui-r8.md) |
 | 9, re-check of round 8 | `5df1747` | Claude Opus 5.5 | ISSUES (1 blocker) | [ui-r9.md](ui-r9.md) |
 
-Round 9 was the last round, and the web UI as delivered is the commit it judged. Its blocker, R9-1, is open as
-issue #81. Two attempts to fix it were each checked by GPT 6 Astra and each found incomplete
+Round 9 was the last round of the delivery, and the web UI as delivered is the commit it judged. Its blocker,
+R9-1, is issue #81. Two attempts to fix it were each checked by GPT 6 Astra and each found incomplete
 ([ui-r9-fix-check-1.md](ui-r9-fix-check-1.md): 1 blocker; [ui-r9-fix-check-2.md](ui-r9-fix-check-2.md): 3
 blockers), so they are not in the stack: they are on the branch `ui/conflict-recovery-attempt`. Round 9's
 findings that do not block are issue #79.
+
+The fix that landed asks the server what became of the merge (decision 0013). GPT 6.1 Sol checked it twice:
+[ui-r9-fix-check-3.md](ui-r9-fix-check-3.md) on `7ef33ca`, ISSUES (1 blocker, introduced by the fix and then
+fixed), and [ui-r9-fix-check-4.md](ui-r9-fix-check-4.md) on `1aecf20`, PASS. The second names two things that
+were so before the fix: issues #86 and #87.
 
 `5cc2b3a` and `5df1747` were rebased onto the stacked branch `t3/mvp-product-delivery`: find them there by
 their subject lines ("one record of a conflict", "one live window owns a case's draft"), not by these hashes.
