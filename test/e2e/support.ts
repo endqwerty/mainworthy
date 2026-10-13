@@ -394,11 +394,12 @@ function routesWaitForInterception(context: BrowserContext): void {
 }
 /**
  * The reply to a request that a route handler sends on to the server, with its body read as JSON, or null when
- * the page was closed while the handler held the request. A page asks again by itself for what it shows (the
- * inbox, a list of tokens), so such a request can be in a handler when the test has passed and closes the page.
- * `route.fetch` then fails, or the reply it brought is already disposed: "json: Response has been disposed"
- * failed R4B-1 in CI on 2026-10-13 (run 38388161751). A navigation does not do this; the reply of a document
- * that was left can still be read. A handler that gets null returns: nobody waits for that request. Any other
+ * the page's browser context was closed while the handler held the request. A page asks again by itself for
+ * what it shows (the inbox, a list of tokens), so such a request can be in a handler when the test has passed
+ * and its `close` ends the context. `route.fetch` then fails, or the reply it brought is already disposed:
+ * "json: Response has been disposed" failed R4B-1 in CI on 2026-10-13 (run 38388161751). A navigation does not
+ * do this, and neither does closing the page alone: the reply of a document that was left, or of a page that
+ * was closed in a context that lives on, can still be read. A handler that gets null returns: nobody waits for that request. Any other
  * failure is thrown, and the handler parses `json` itself, so a wrong reply still fails the test. The handler
  * answers with `answer`, which is quiet in the same case and no other.
  */
@@ -417,7 +418,7 @@ export async function answer(route: Route, reply: Parameters<Route["fulfill"]>[0
 	});
 }
 function abandoned(route: Route, error: unknown): boolean {
-	// The two messages are what a close gives while it is still under way and the page does not say closed yet.
+	// The two messages are what the context's close gives while it is still under way and the page does not say closed yet.
 	const closing = error instanceof Error && /has been (closed|disposed)/.test(error.message);
 	return closing || route.request().frame().page().isClosed();
 }
