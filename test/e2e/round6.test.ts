@@ -85,6 +85,90 @@ for (const choice of ["Use my title", "Use all my changes"])
 		30000,
 	);
 
+// Issue #94. The page read the case before the merge and reads it again after it. Until that second read is
+// back, the case it holds is the colleague's version, and the editor must not open on it.
+check(
+	"R6-1 the editor opens on the version the merge recorded while the case is still being read again",
+	async () => {
+		const server = await startServer();
+		await cases(server);
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		const gate = latch();
+		try {
+			const { page } = h;
+			page.setDefaultTimeout(5000);
+			await conflict(server, page);
+			await page.getByText("Others see version 2", { exact: true }).waitFor();
+			await page.getByRole("textbox", { name: "Merged title", exact: true }).fill("Merged in the card");
+			// From here a read of the case as it is now gets no reply. A read of one version of it does.
+			await page.route("**/get", async (route) => {
+				const input = z
+					.object({ refs: z.array(z.string()), version: z.number().optional() })
+					.parse(route.request().postDataJSON());
+				if (input.refs.includes("C-1") && input.version === undefined) await gate.held;
+				// The page gives up a read it has replaced, and such a request cannot be continued.
+				await route.continue().catch(() => {});
+			});
+			await resolve(page);
+			await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.version === 3,
+			);
+			await page.locator(".conflict-card").waitFor({ state: "detached" });
+			expect(await page.locator("#detail .ctitle").innerText()).toBe("Merged in the card");
+			await page.keyboard.press("e");
+			await title(page).press("End");
+			await page.keyboard.type(" and more");
+			expect(await title(page).inputValue()).toBe("Merged in the card and more");
+			const kept = z.array(z.object({ base: z.number() })).parse((await drafts(page)).map((text) => JSON.parse(text)));
+			expect(kept.map((draft) => draft.base)).toEqual([3]);
+		} finally {
+			gate.release();
+			await h.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+check(
+	"R6-1 a merge whose recorded version cannot be read keeps its card until resolving again reads it",
+	async () => {
+		const server = await startServer();
+		await cases(server);
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			page.setDefaultTimeout(5000);
+			await conflict(server, page);
+			await page.getByRole("textbox", { name: "Merged title", exact: true }).fill("Merged in the card");
+			let failing = true;
+			await page.route("**/get", async (route) => {
+				const input = z.object({ version: z.number().optional() }).parse(route.request().postDataJSON());
+				if (failing && input.version !== undefined) await route.abort("failed");
+				else await route.continue().catch(() => {});
+			});
+			await resolve(page);
+			await page.getByText("Your draft and conflict card are kept", { exact: false }).first().waitFor();
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(3);
+			expect(await page.locator(".conflict-card").count()).toBe(1);
+			expect(await title(page).inputValue()).toBe("My title");
+			failing = false;
+			await resolve(page);
+			await page.locator(".conflict-card").waitFor({ state: "detached" });
+			expect(await page.locator("#detail .ctitle").innerText()).toBe("Merged in the card");
+			expect(await drafts(page)).toHaveLength(0);
+			const saved = await server.api("get", { refs: ["C-1"] });
+			expect(saved[0]?.version).toBe(3);
+			expect(saved[0]?.title).toBe("Merged in the card");
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
 check(
 	"R6-1 a held conflict reply includes every character typed before it arrives",
 	async () => {

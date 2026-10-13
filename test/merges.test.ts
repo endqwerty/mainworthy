@@ -3,7 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import type { CaseBody } from "../src/core/model.ts";
 import type { Draft, DraftConflict } from "../src/web/lib/drafts.ts";
-import { allRecorded, cardText, draftAfterMerge, mergeFate, nextMine } from "../src/web/lib/merges.ts";
+import { allRecorded, cardText, caseHeld, draftAfterMerge, mergeFate, nextMine } from "../src/web/lib/merges.ts";
 
 const body = (title: string, first: string, second: string): CaseBody => ({
 	title,
@@ -230,5 +230,28 @@ describe("what a merge did, read from its reply", () => {
 		expect(() => fate([])).toThrow();
 		expect(() => fate(reply("decided", { rejected: true }))).toThrow();
 		expect(() => fate(reply("decided", { status: "adopted" }))).toThrow();
+	});
+});
+
+// Issue #94. When a card and its draft go, the pane shows the case the page holds, and `e` opens the editor on it.
+describe("the case the page holds once it has read a version the server recorded", () => {
+	const row = (version: number, title: string): Record<string, unknown>[] => [{ ref: "C-1", version, title }];
+
+	test("the version read replaces the one from before it, and stands where the page held none", () => {
+		expect(caseHeld({ held: row(2, "Theirs"), read: row(3, "Merged") })).toEqual(row(3, "Merged"));
+		expect(caseHeld({ held: undefined, read: row(3, "Merged") })).toEqual(row(3, "Merged"));
+		expect(caseHeld({ held: [], read: row(3, "Merged") })).toEqual(row(3, "Merged"));
+	});
+
+	test("the page's own read came back first: that version, or a later one, stays", () => {
+		const same = [{ ref: "C-1", version: 3, title: "Merged", open: 1 }];
+		expect(caseHeld({ held: same, read: row(3, "Merged") })).toBe(same);
+		const later = row(4, "Changed again");
+		expect(caseHeld({ held: later, read: row(3, "Merged") })).toBe(later);
+	});
+
+	test("rows that are not a case are an error, never a guess", () => {
+		expect(() => caseHeld({ held: row(2, "Theirs"), read: [] })).toThrow();
+		expect(() => caseHeld({ held: row(2, "Theirs"), read: [{ ref: "C-1" }] })).toThrow();
 	});
 });
