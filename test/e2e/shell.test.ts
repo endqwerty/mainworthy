@@ -8,6 +8,28 @@ test.skipIf(!browserAvailable)(
 		const browser = await openPage(server);
 		try {
 			const { page } = browser;
+			// The counts end in one column, whatever the width of the label before them, and a count that
+			// turns hot keeps its digits where they were.
+			await page.locator('#nav a[aria-label="Suite"] em').filter({ hasText: "1" }).waitFor();
+			const [suite, queue] = await page.evaluate(() =>
+				["Suite", "Queue"].map((label) => {
+					const count = document.querySelector(`#nav a[aria-label="${label}"] em`);
+					if (!count) throw new Error(`${label} has no count`);
+					const digitsEnd = () => {
+						const digits = document.createRange();
+						digits.selectNodeContents(count);
+						return digits.getBoundingClientRect().right;
+					};
+					const plain = digitsEnd();
+					count.classList.add("hot");
+					const hot = digitsEnd();
+					count.classList.remove("hot");
+					return { plain, hot };
+				}),
+			);
+			expect(queue?.plain).toBe(suite?.plain);
+			expect(suite?.hot).toBe(suite?.plain);
+			expect(queue?.hot).toBe(queue?.plain);
 			for (const [keys, route] of [
 				["gs", "suite"],
 				["gq", "queue"],
