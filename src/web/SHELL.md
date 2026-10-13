@@ -66,7 +66,8 @@ The palette closes before invoking the choice callback. No native dialogs.
 ## Shared UI and styles
 
 `ui/index.tsx` exports `KeyCap({children})`, `ProducerGlyph({kind})`,
-`ProofStrip({proof})`, `StatusLine({children})`, `EmptyState({children})`,
+`ProofStrip({proof})`, `StatusLine({children})`, `EmptyState({children, doc?})`,
+`DocLink({page, children})`, `openDocs(page)`,
 `SectionHeading({children})`, `ListRow({children, selected?, onClick})`,
 `DiffView({before, after})`, `WordDiff({before, after})`, `age(at)` and `Proofs`.
 Diff bodies are core CaseBody values, aligned by stable step ids.
@@ -76,6 +77,17 @@ Tokens: `--bg`, `--panel`, `--side`, `--line`, `--line2`, `--ink`, `--dim`,
 `--faint`, `--acc`, `--sel`, `--pass`, `--fail`, `--warn`, `--ci`, `--agent`,
 `--agent-soft`, `--fail-soft`, `--pass-soft`, `--sans`, `--mono`.
 Use these tokens in both themes. Base CSS provides visible focus rings.
+
+## Links to the documentation
+
+The user documentation is served at `/docs` from `docs/guide` (decision 0016).
+`src/core/docs.ts` lists its pages; `DocLink` and `openDocs` take a page's slug,
+so a link to a page that does not exist does not compile. Both open a new tab.
+`SCREEN_DOCS` in the core names the page for each screen: `g d` and the `?` sheet
+use it, and `app.tsx` does not compile with a screen it does not name.
+`EmptyState` takes `doc={{page, label}}` to say how something gets into an empty
+list. The palette lists the pages once something is typed (`docs policy`).
+A screen that gains a section links to the page that explains it.
 
 ## Real-page test support
 

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { z } from "zod";
 import { diffBodies, diffWords } from "../../core/diff.ts";
+import { type DocSlug, docUrl } from "../../core/docs.ts";
 import type { CaseBody } from "../../core/model.ts";
 
 export function KeyCap({ children }: { children: ReactNode }) {
@@ -69,8 +70,26 @@ export function StatusLine({ children }: { children: ReactNode }) {
 		</span>
 	);
 }
-export function EmptyState({ children }: { children: ReactNode }) {
-	return <div className="empty-state">{children}</div>;
+/** Opens a page of the documentation beside the app, so what is on the screen stays where it is. */
+export const openDocs = (page: DocSlug): void => {
+	window.open(docUrl(page), "_blank", "noopener");
+};
+/** A link to a page of the documentation (`docs/guide`), in a new tab. */
+export function DocLink({ page, children }: { page: DocSlug; children: ReactNode }) {
+	return (
+		<a className="doc-link" href={docUrl(page)} target="_blank" rel="noopener">
+			{children} <span aria-hidden="true">↗</span>
+		</a>
+	);
+}
+/** What a pane says when it has nothing to show. `doc` adds the page that explains how something gets here. */
+export function EmptyState({ children, doc }: { children: ReactNode; doc?: { page: DocSlug; label: string } }) {
+	return (
+		<div className="empty-state">
+			<span>{children}</span>
+			{doc && <DocLink page={doc.page}>{doc.label}</DocLink>}
+		</div>
+	);
 }
 export function SectionHeading({ children }: { children: ReactNode }) {
 	return <div className="sech">{children}</div>;

@@ -762,7 +762,11 @@ function QueueWorkbench() {
 						</p>
 					)}
 					{items.length === 0 && (
-						<EmptyState>
+						<EmptyState
+							{...(!inbox.isPending && state === "open"
+								? { doc: { page: "decide", label: "How a question gets here" } }
+								: {})}
+						>
 							{inbox.isPending
 								? "Reading questions…"
 								: state === "open"

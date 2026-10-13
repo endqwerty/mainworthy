@@ -105,7 +105,11 @@ function ChangesWorkbench() {
 						</ListRow>
 					))}
 					{!changes.length && (
-						<EmptyState>
+						<EmptyState
+							{...(!read.error && !read.isPending
+								? { doc: { page: "report-results", label: "How to send a report" } }
+								: {})}
+						>
 							{read.error?.message ??
 								(read.isPending
 									? "Reading changes…"

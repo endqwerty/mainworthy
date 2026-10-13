@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import type { SessionInfo } from "../core/api.ts";
+import { DOC_PAGES, type DocSlug, docUrl, SCREEN_DOCS } from "../core/docs.ts";
 import { CaseScreen } from "./case/index.tsx";
 import { ChangesScreen } from "./changes/index.tsx";
 import { ApiError, login, session, unauthenticatedEvent } from "./lib/api.ts";
@@ -13,7 +14,7 @@ import { RunsScreen } from "./runs/index.tsx";
 import { SettingsScreen } from "./settings/index.tsx";
 import { SuiteScreen } from "./suite/index.tsx";
 import { AppContext, type PaletteOptions } from "./ui/context.tsx";
-import { KeyCap, ProducerGlyph, StatusLine } from "./ui/index.tsx";
+import { DocLink, KeyCap, openDocs, ProducerGlyph, StatusLine } from "./ui/index.tsx";
 
 const screens = {
 	suite: SuiteScreen,
@@ -30,6 +31,8 @@ const navigation: { screen: Screen; label: string; icon: string; key: string }[]
 	{ screen: "changes", label: "Changes", icon: "↗", key: "g c" },
 	{ screen: "settings", label: "Settings", icon: "⚙︎", key: "g ," },
 ];
+/** The page of the documentation that explains each screen. A screen added to the router must be named here. */
+const screenDocs: Record<Screen, DocSlug> = SCREEN_DOCS;
 /** The gate and its check from `icon.svg`, drawn in the colour of the square they sit in. */
 function Mark() {
 	return (
@@ -159,6 +162,9 @@ function SignIn({ onLogin }: { onLogin: () => Promise<void> }) {
 					{error}
 				</div>
 				<button type="submit">Sign in</button>
+				<p className="signin-help">
+					New here? <DocLink page="index">Read the docs</DocLink>
+				</p>
 			</form>
 		</div>
 	);
@@ -236,6 +242,11 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				},
 			},
 			{
+				key: "g d",
+				label: "Docs for this screen",
+				handler: () => openDocs(screenDocs[route.screen]),
+			},
+			{
 				key: "?",
 				label: "All keys",
 				handler: () => {
@@ -254,7 +265,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				},
 			},
 		],
-		[project, palette, help, openPalette, closePalette],
+		[project, route.screen, palette, help, openPalette, closePalette],
 	);
 	useBindings(globalKeys);
 	useEffect(() => {
@@ -357,6 +368,18 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 								<KeyCap>{item.key}</KeyCap>
 							</a>
 						))}
+						{/* The page about the screen that is open, beside the app: what g d opens. */}
+						<a
+							aria-label="Docs"
+							title="Docs for this screen"
+							href={docUrl(screenDocs[route.screen])}
+							target="_blank"
+							rel="noopener"
+						>
+							<span className="ni">ⓘ</span>
+							<span className="nav-label">Docs</span>
+							<KeyCap>g d</KeyCap>
+						</a>
 					</nav>
 					{suiteOpen && (
 						<div className="suite-tree">
@@ -482,6 +505,10 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 							Close <KeyCap>Esc</KeyCap>
 						</button>
 						<h2>Keys</h2>
+						<p className="help-docs">
+							<DocLink page={screenDocs[route.screen]}>Docs for this screen</DocLink>
+							<DocLink page="keyboard">Every key, on one page</DocLink>
+						</p>
 						<div className="hg">
 							<section>
 								<div className="sech">Current screen and navigation</div>
@@ -547,9 +574,28 @@ function Palette({
 				},
 			]
 		: [];
+	// The pages of the documentation, once something is typed: "docs policy", or a word of a page's title.
+	const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+	const docs =
+		options.items || words.length === 0
+			? []
+			: DOC_PAGES.filter((page) => {
+					const label = `docs ${page.section} ${page.title}`.toLowerCase();
+					return words.every((word) => label.includes(word));
+				}).map((page) => ({
+					id: `docs:${page.slug}`,
+					label: `Docs: ${page.title}`,
+					detail: "↗",
+					handler: () => openDocs(page.slug),
+				}));
 	const items = options.onPickCase
 		? [...jump, ...cases]
-		: [...jump, ...actions.filter((item) => !text || item.label.toLowerCase().includes(text.toLowerCase())), ...cases];
+		: [
+				...jump,
+				...actions.filter((item) => !text || item.label.toLowerCase().includes(text.toLowerCase())),
+				...docs,
+				...cases,
+			];
 	const choose = (index: number) => {
 		const item = items[index];
 		if (item) {
