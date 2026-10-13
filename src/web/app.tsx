@@ -30,6 +30,23 @@ const navigation: { screen: Screen; label: string; icon: string; key: string }[]
 	{ screen: "changes", label: "Changes", icon: "↗", key: "g c" },
 	{ screen: "settings", label: "Settings", icon: "⚙︎", key: "g ," },
 ];
+/** The gate and its check from `icon.svg`, drawn in the colour of the square they sit in. */
+function Mark() {
+	return (
+		<svg
+			viewBox="0 0 64 64"
+			aria-hidden="true"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="7"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+		>
+			<path d="M13 50V17H51V50" />
+			<path d="M23 36L30 43L42 28" />
+		</svg>
+	);
+}
 function theme(): void {
 	const chosen = localStorage.getItem("mainworthy:theme");
 	document.documentElement.dataset.theme =
@@ -101,7 +118,9 @@ export function App() {
 		return (
 			<div className="signin">
 				<span className="brand">
-					<span className="logo">C</span>
+					<span className="logo">
+						<Mark />
+					</span>
 					Mainworthy
 				</span>
 			</div>
@@ -285,7 +304,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 							aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
 							onClick={() => setSidebarCollapsed((value) => !value)}
 						>
-							C
+							<Mark />
 						</button>
 						<b>Mainworthy</b>
 						{info.projects.length > 1 ? (
