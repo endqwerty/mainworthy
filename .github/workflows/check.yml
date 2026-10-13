@@ -140,6 +140,8 @@ jobs:
           MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}
           MAINWORTHY_PROJECT: ${{ vars.MAINWORTHY_PROJECT }}
         run: bun scripts/ci-gate.ts test-results tests-1 tests-2 tests-3 tests-4 tests-5 tests-6 quiet
-      - name: The type-check, the lint and the image passed
+      - name: The type-check, the lint, the image and every shard's job passed
+        # A shard's job succeeds with failing tests, which the gate judges. It fails when it could not run them or
+        # upload their report, and after a re-run the gate above would then read the report of its older attempt.
         if: always()
-        run: test "${{ needs.static.result }}" = success && test "${{ needs.image.result }}" = success
+        run: test "${{ needs.static.result }}" = success && test "${{ needs.image.result }}" = success && test "${{ needs.tests.result }}" = success
