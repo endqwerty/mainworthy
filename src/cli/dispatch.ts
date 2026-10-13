@@ -14,6 +14,7 @@ import { newCommand } from "./commands/new.ts";
 import { openCommand } from "./commands/open.ts";
 import { policyCommand } from "./commands/policy.ts";
 import { reportCommand } from "./commands/report.ts";
+import { seedCommand } from "./commands/seed.ts";
 import { serveCommand } from "./commands/serve.ts";
 import { tokenCommand } from "./commands/token.ts";
 import type { AdapterCommand } from "./commands/types.ts";
@@ -30,6 +31,7 @@ export const ADAPTER_COMMANDS: ReadonlyMap<string, AdapterCommand> = new Map(
 		actorCommand,
 		policyCommand,
 		newCommand,
+		seedCommand,
 		getCommand,
 		fmtCommand,
 		checkCommand,

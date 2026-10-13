@@ -25,7 +25,8 @@ Mainworthy 0.1.0 · local · data in ~/.mainworthy · http://127.0.0.1:7357
 project "scratch" · you are robin@this-machine · policy: loose
 ```
 
-Open the URL. On your own machine you are signed in as the owner with no step.
+Open the URL. On your own machine you are signed in as the owner with no step. To look around a filled
+project first, `mainworthy seed demo` writes a shop's suite with results, a run and five questions to answer.
 
 The documentation comes with the server, at `/docs` (http://127.0.0.1:7357/docs, or **Docs** at the bottom of the sidebar, which opens the page about the screen you are on):
 how it works, each workflow, what you can customize, and a reference of every key, command and operation. The

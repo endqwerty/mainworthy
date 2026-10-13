@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { OP_LIST } from "../server/ops/index.ts";
+import { Client } from "./client.ts";
 import { COMMAND_NAMES } from "./dispatch.ts";
 import { GENERATED_COMMANDS } from "./generated.ts";
 import { COMMIT, outputWith, RED_XML, withInstance } from "./test-support.ts";
@@ -635,4 +636,118 @@ test("an empty MAINWORTHY_URL, MAINWORTHY_TOKEN or MAINWORTHY_PROJECT is the sam
 		expect(inbox.stderr).toBe("");
 		expect(inbox.code).toBe(0);
 	});
+});
+
+const Seeded = z.object({ project: z.string(), cases: z.number(), run: z.string(), questions: z.array(z.string()) });
+const Projects = z.array(z.object({ key: z.string(), seq: z.number(), policy: z.string() }));
+const Actors = z.array(
+	z.object({ name: z.string(), grants: z.array(z.object({ project: z.string(), can: z.array(z.string()) })) }),
+);
+const Tokens = z.array(z.object({ actor: z.string(), expiresAt: z.number().nullable() }));
+const projects = async (client: Client) => Projects.parse(await client.call("admin", { do: "project.list" }));
+const grantsOf = async (client: Client, actor: string) =>
+	Actors.parse(await client.call("admin", { do: "actor.list" })).find((row) => row.name === actor)?.grants;
+const casesIn = async (client: Client, project: string) =>
+	(await new Client({ ...client.options, project }).call("find", { limit: 500 })).items.length;
+
+test("seed fills a project it makes, and leaves its pipeline and agent nothing outside it or after an hour", async () => {
+	await withInstance(async ({ cli, client, instance }) => {
+		const started = Date.now();
+		const result = await cli(["seed", "demo", "--cases", "12"]);
+		expect(result.stderr).toBe("");
+		expect(result.code).toBe(0);
+		// The failing test on `main` and on the pull request, the agent's finding and its edit, and a test with no case.
+		expect(result.stdout).toMatch(/^seeded demo: 12 cases, run R-\d+, 5 questions\n/);
+		expect(result.stdout).toEndWith(`${instance.url}/p/demo/suite\n`);
+		expect(await casesIn(client, "demo")).toBe(12);
+		expect((await projects(client)).find((project) => project.key === "demo")?.policy).toBe("standard");
+		// The project the instance started with is not the one that was named.
+		expect(await casesIn(client, "scratch")).toBe(0);
+		expect(await grantsOf(client, "pipeline")).toEqual([{ project: "demo", can: ["read", "record"] }]);
+		expect((await grantsOf(client, "reviewer"))?.map((grant) => grant.project)).toEqual(["demo"]);
+		const tokens = Tokens.parse(await client.call("admin", { do: "token.list" }));
+		expect(tokens.map((token) => token.actor).sort()).toEqual(["pipeline", "reviewer"]);
+		for (const token of tokens) {
+			expect(token.expiresAt).toBeGreaterThan(started);
+			expect(token.expiresAt).toBeLessThanOrEqual(Date.now() + 3_600_000);
+		}
+	});
+});
+
+test("seed sent again writes nothing twice, and a second project is seeded beside the first", async () => {
+	await withInstance(async ({ cli, client }) => {
+		const first = outputWith(Seeded, await cli(["seed", "demo", "--cases", "12", "--json"]));
+		const seq = (await projects(client)).find((project) => project.key === "demo")?.seq;
+		const again = await cli(["seed", "demo", "--cases", "12", "--json"]);
+		expect(again.code).toBe(0);
+		expect(outputWith(Seeded, again)).toEqual(first);
+		expect(await casesIn(client, "demo")).toBe(12);
+		expect((await projects(client)).find((project) => project.key === "demo")?.seq).toBe(seq);
+		// Another count is another request: it is refused in words about the seed, and adds no case.
+		const other = await cli(["seed", "demo", "--cases", "20"]);
+		expect(other.code).toBe(4);
+		expect(other.stderr).toContain("was seeded with another number of cases");
+		expect(await casesIn(client, "demo")).toBe(12);
+		// The command ids and the two actors of the first seed do not stand in the way of a second project.
+		const beside = await cli(["seed", "demo-2", "--cases", "3", "--json"]);
+		expect(beside.stderr).toBe("");
+		expect(outputWith(Seeded, beside)).toMatchObject({ project: "demo-2", cases: 3 });
+		expect((await grantsOf(client, "pipeline"))?.map((grant) => grant.project)).toEqual(["demo", "demo-2"]);
+		expect(await casesIn(client, "demo")).toBe(12);
+	});
+});
+
+test("seed leaves alone a project that holds work, a name it was not given, and a count it cannot write", async () => {
+	await withInstance(async ({ cli, client }) => {
+		await cli(["new"], { input: "Coupon applies\nApply SAVE10 > Total is 90.00" });
+		const held = await cli(["seed", "scratch"]);
+		expect(held.code).toBe(4);
+		expect(held.stderr).toContain("project scratch already holds cases, tests or runs");
+		// The project a pipeline reports to is in MAINWORTHY_PROJECT: seed does not read it, and refuses the flag.
+		const unnamed = await cli(["seed"], { env: { MAINWORTHY_PROJECT: "scratch" } });
+		expect(unnamed.stderr).toContain("usage: mainworthy seed <project>");
+		const flagged = await cli(["seed", "demo", "--project", "scratch"]);
+		expect(flagged.stderr).toContain("seed takes the project as its argument");
+		for (const count of ["0", "1.5", "100001"]) {
+			const refused = await cli(["seed", "demo", "--cases", count]);
+			expect(refused.code).toBe(4);
+			expect(refused.stderr).toContain("seed writes from 1 to 100000 cases");
+		}
+		// A person of the name the demo's pipeline takes: refused before the project is made.
+		await client.call("admin", { do: "token.create", actor: "pipeline", kind: "human", can: ["read"] });
+		const taken = await cli(["seed", "demo", "--cases", "3"]);
+		expect(taken.code).toBe(4);
+		expect(taken.stderr).toContain("actor pipeline exists and is a human, not a ci");
+		expect((await projects(client)).map((project) => project.key)).toEqual(["scratch"]);
+		expect(await casesIn(client, "scratch")).toBe(1);
+		expect(await grantsOf(client, "reviewer")).toBeUndefined();
+	});
+});
+
+test("seed is refused to a caller who does not administer before anything is made, and the owner's token seeds", async () => {
+	await withInstance(
+		async ({ cli, client }) => {
+			const member = Token.parse(
+				await client.call("admin", {
+					do: "token.create",
+					actor: "sam",
+					kind: "human",
+					can: ["read", "produce", "answer", "plan"],
+				}),
+			).token;
+			for (const project of ["scratch", "demo"]) {
+				const refused = await cli(["seed", project, "--cases", "3"], { env: { MAINWORTHY_TOKEN: member } });
+				expect(refused.code).toBe(4);
+				expect(refused.stderr).toContain("forbidden:");
+			}
+			expect((await projects(client)).map((project) => project.key)).toEqual(["scratch"]);
+			expect(await casesIn(client, "scratch")).toBe(0);
+			expect(await grantsOf(client, "pipeline")).toBeUndefined();
+			const seeded = await cli(["seed", "demo", "--cases", "3"]);
+			expect(seeded.stderr).toBe("");
+			expect(seeded.code).toBe(0);
+			expect(await casesIn(client, "demo")).toBe(3);
+		},
+		{ mode: "server" },
+	);
 });

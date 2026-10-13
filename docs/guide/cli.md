@@ -43,6 +43,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy actor list \| actor grant <name> --can read,record [--project <key>] \| actor ungrant <name> [--project <key>]` | List who may do what on which project, and change or take away a grant. |
 | `mainworthy policy show \| policy use <loose\|standard\|strict> [--json]` | Show policy clauses or propose and record an admin's choice of preset. |
 | `mainworthy new [file\|-] [--json]` | Create a case from a canonical Markdown file or an outline on stdin. |
+| `mainworthy seed <project> [--cases 2000] [--json]` | Fill a new or empty project with demo data: a shop's cases, results, a run and questions to answer. |
 | `mainworthy get <ref> [--md] [--json]` | Read a ref, or print a case's canonical Markdown with --md. |
 | `mainworthy fmt <file> [--json]` | Print canonical case Markdown. Parse errors include source line numbers. |
 | `mainworthy check [--limit <number>] [--json]` | Print suite problems grouped by rule. Exit 0 with none, 1 with problems. |
@@ -89,6 +90,10 @@ Flags of `mainworthy invite`:
 Flags of `mainworthy actor`:
 
 - `--can <a,b,...>`: Capabilities, comma-separated or repeated.
+
+Flags of `mainworthy seed`:
+
+- `--cases <number>`: How many cases to write. Defaults to 2000.
 
 Flags of `mainworthy get`:
 

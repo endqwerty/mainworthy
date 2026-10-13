@@ -46,6 +46,24 @@ Each project keeps its own cases, queue, runs and policy. A new project starts w
 
 A project key is lower-case letters, digits and hyphens, up to 40 characters, and starts with a letter or digit. You cannot rename or delete a project yet. The other commands pick a project with `--project` or `MAINWORTHY_PROJECT`, or use the only one when there is one.
 
+### A project of demo data
+
+To look around before you write a case of your own, fill a project with the demo.
+
+```
+$ mainworthy seed demo
+seeded demo: 2000 cases, run R-4, 5 questions
+http://127.0.0.1:7357/p/demo/suite
+```
+
+The demo is a shop's suite: checkout, accounts, orders and a catalog. A pipeline named `pipeline` has reported three commits, the last of them pull request 482, where one test fails. A run named "Checkout regression" is planned on that pull request. An agent named `reviewer` has left a finding and a proposed edit. The queue holds five questions for you: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The project ends on the `standard` preset. `--cases` sets how many cases the demo writes, from 1 to 100000.
+
+You name the project each time. `seed` makes it when the instance has none of that name, and it does not read `--project` or `MAINWORTHY_PROJECT`. It refuses a project that already holds cases, tests or runs, so it cannot add the demo to your own work. If a seed stops halfway, send the same command again: it finishes the rest and writes nothing twice.
+
+`seed` needs a person who administers the instance, because it makes the project and the two actors. In server mode, give that person's token with `--token` or `MAINWORTHY_TOKEN`. The pipeline and the agent hold a grant on the demo project alone, and the two tokens `seed` used for them end after an hour.
+
+You cannot delete a project yet, so the demo stays until you start with a new data directory.
+
 ## Cases, folders and tags
 
 Folders nest. A tag is lower case, starts with a letter or digit, and can hold `-`, `_`, `.` and `/`. Moving a case or changing its tags is an edit like any other, so under `strict` it waits for a person.

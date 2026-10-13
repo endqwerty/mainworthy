@@ -7,6 +7,7 @@ Mainworthy keeps your test cases, the results that people, pipelines and agents 
 ## Where to start
 
 - You have never used it. Follow the [quickstart](./quickstart.md): about ten minutes from an empty machine to a gate you decided.
+- You want to look around a filled project first. Run `mainworthy seed demo`: see [a project of demo data](./customize.md#a-project-of-demo-data).
 - You want the idea before the keys. Read [how Mainworthy works](./concepts.md).
 - You are wiring a pipeline. Read [report results](./report-results.md), then [changes and the gate](./changes.md).
 - You are setting it up for a team. Read [what you can customize](./customize.md), then [policy](./policy.md) and [people, agents and pipelines](./access.md).

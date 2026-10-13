@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type APIResponse, type Browser, type BrowserContext, chromium, type Page, type Route } from "playwright-core";
 import { testReaders } from "../../scripts/check-plan.ts";
+import { Client } from "../../src/cli/client.ts";
+import { type SeedResult, seed } from "../../src/cli/seed.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
-import { type SeedResult, seed } from "../../src/web/dev/seed.ts";
 import { call } from "../../src/web/lib/api.ts";
 
 export const chromiumPath = [
@@ -164,7 +165,9 @@ export async function startServer({
 		if (!ready) throw new Error("Mainworthy e2e server did not become ready");
 		const api = <O extends OpName>(op: O, input: Api[O]["input"], options: { token?: string } = {}) =>
 			call(op, input, { url, project: "scratch", token: options.token ?? token });
-		const seeded = seedData ? await seed({ url, cases, token }) : null;
+		const seeded = seedData
+			? await seed(new Client({ url, token, project: "scratch" }), { project: "scratch", cases })
+			: null;
 		if (preset) {
 			const proposed = await api("propose", { edits: [{ op: "policy", preset }] });
 			const question = (await api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
