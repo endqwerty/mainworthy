@@ -1,0 +1,283 @@
+{
+  "schema_version": 2,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "The life of a case",
+    "locale": "en",
+    "output": "docs/diagrams/case-lifecycle.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:endqwerty/mainworthy.git",
+      "revision": "688ffae7790fd7741275f35d4d324b9314d754db",
+      "link_mode": "local-only"
+    },
+    "legend": {
+      "mode": "hidden"
+    }
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "Draft, proposal and version"
+    },
+    {
+      "id": "recovery",
+      "label": "Conflicting changes"
+    },
+    {
+      "id": "terminal",
+      "label": "Refused proposal"
+    }
+  ],
+  "states": [
+    {
+      "id": "draft",
+      "label": "Private draft",
+      "sublabel": "Kept on your device",
+      "lane": "main",
+      "col": 0,
+      "type": "start",
+      "width": 158,
+      "height": 68,
+      "sources": [
+        {
+          "path": "src/web/lib/drafts.ts",
+          "line": 109,
+          "end_line": 120
+        },
+        {
+          "path": "src/web/suite/index.tsx",
+          "line": 1019,
+          "end_line": 1046
+        }
+      ]
+    },
+    {
+      "id": "proposal",
+      "label": "Proposal",
+      "sublabel": "Policy chooses who answers",
+      "lane": "main",
+      "col": 1,
+      "type": "decision",
+      "width": 158,
+      "height": 68,
+      "sources": [
+        {
+          "path": "src/server/ops/writes.ts",
+          "line": 76,
+          "end_line": 100
+        },
+        {
+          "path": "src/core/presets.ts",
+          "line": 24,
+          "end_line": 93
+        }
+      ]
+    },
+    {
+      "id": "current",
+      "label": "Current version",
+      "sublabel": "Version 1, then 2, 3…",
+      "lane": "main",
+      "col": 2,
+      "type": "success",
+      "width": 158,
+      "height": 68,
+      "sources": [
+        {
+          "path": "src/server/suite/suite.ts",
+          "line": 625,
+          "end_line": 643
+        },
+        {
+          "path": "src/server/suite/suite.ts",
+          "line": 653,
+          "end_line": 716
+        }
+      ]
+    },
+    {
+      "id": "archived",
+      "label": "Archived case",
+      "sublabel": "History stays",
+      "lane": "main",
+      "col": 3,
+      "type": "neutral",
+      "width": 158,
+      "height": 68,
+      "sources": [
+        {
+          "path": "src/server/suite/suite.ts",
+          "line": 512,
+          "end_line": 515
+        },
+        {
+          "path": "src/server/suite/suite.ts",
+          "line": 740,
+          "end_line": 750
+        },
+        {
+          "path": "src/server/suite/suite.ts",
+          "line": 817,
+          "end_line": 838
+        }
+      ]
+    },
+    {
+      "id": "conflict",
+      "label": "Conflict",
+      "sublabel": "Changes need a choice",
+      "lane": "recovery",
+      "col": 1,
+      "type": "waiting",
+      "width": 158,
+      "height": 68,
+      "sources": [
+        {
+          "path": "src/server/suite/suite.ts",
+          "line": 471,
+          "end_line": 490
+        },
+        {
+          "path": "src/server/decisions/kinds.ts",
+          "line": 158,
+          "end_line": 192
+        },
+        {
+          "path": "src/core/kinds.ts",
+          "line": 373,
+          "end_line": 381
+        }
+      ]
+    },
+    {
+      "id": "refused",
+      "label": "Proposal refused",
+      "sublabel": "No version from this proposal",
+      "lane": "terminal",
+      "col": 1,
+      "type": "failure",
+      "width": 158,
+      "height": 68,
+      "sources": [
+        {
+          "path": "src/server/decisions/kinds.ts",
+          "line": 133,
+          "end_line": 145
+        },
+        {
+          "path": "src/core/presets.ts",
+          "line": 25,
+          "end_line": 34
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "id": "submit",
+      "from": "draft",
+      "to": "proposal",
+      "label": "Leave / key / 30 s"
+    },
+    {
+      "id": "accept",
+      "from": "proposal",
+      "to": "current",
+      "label": "Rule or person accepts",
+      "variant": "emphasis"
+    },
+    {
+      "id": "reject",
+      "from": "proposal",
+      "to": "refused",
+      "label": "Person refuses",
+      "variant": "security"
+    },
+    {
+      "id": "needs-choice",
+      "from": "proposal",
+      "to": "conflict",
+      "label": "Overlapping edits",
+      "variant": "security"
+    },
+    {
+      "id": "retry",
+      "from": "conflict",
+      "to": "proposal",
+      "label": "Merge or retry",
+      "variant": "emphasis"
+    },
+    {
+      "id": "withdraw",
+      "from": "conflict",
+      "to": "refused",
+      "label": "Author withdraws",
+      "variant": "dashed"
+    },
+    {
+      "id": "edit-again",
+      "from": "current",
+      "to": "draft",
+      "label": "Edit",
+      "variant": "dashed",
+      "route": "top-channel"
+    },
+    {
+      "id": "restore",
+      "from": "current",
+      "to": "proposal",
+      "label": "Restore proposed",
+      "variant": "dashed",
+      "route": "bottom-channel"
+    },
+    {
+      "id": "archive",
+      "from": "current",
+      "to": "archived",
+      "label": "Archive accepted"
+    },
+    {
+      "id": "bring-back",
+      "from": "archived",
+      "to": "current",
+      "label": "Return accepted",
+      "variant": "dashed",
+      "route": "top-channel"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "When a draft is submitted",
+      "items": [
+        "Typing keeps a private draft on this device. Leaving the case, Cmd+Enter or Ctrl+Enter, Escape, or 30 seconds without an edit submits it. Hiding the page also submits it.",
+        "A submitted draft is a proposal. Version 1 exists only after acceptance; later accepted content changes add versions. A blank draft or unchanged content adds no version."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Who accepts a proposal",
+      "items": [
+        "Loose accepts ordinary edits by rule. Standard asks a person to accept or refuse an agent’s edit; a person’s ordinary edit is accepted by rule. Strict asks a person for every ordinary edit, with a reason.",
+        "The proposal waits in the queue where a person is required. Refusing it records the answer and leaves the current version alone."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "An older version is a base, not an error",
+      "items": [
+        "Mainworthy merges compatible changes automatically. Conflicting changes wait for a choice by the author if a person, or a human admin. An agent author may withdraw the proposal and try again on the current version.",
+        "A manual merge creates a fresh proposal under the original author’s identity. The policy still applies. More recent overlapping edits can cause another conflict. The device keeps text that the confirmed merge has not recorded."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "History and archive",
+      "items": [
+        "Restoring old content is a proposal too. Acceptance adds a new version containing that content; the old versions stay. If the content already matches, no new version is needed.",
+        "Archiving and bringing a case back also go through a proposal and acceptance under the policy. They change whether the case is active, without adding a content version."
+      ]
+    }
+  ]
+}

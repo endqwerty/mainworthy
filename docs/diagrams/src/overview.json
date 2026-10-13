@@ -1,0 +1,422 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "How Mainworthy works",
+    "locale": "en",
+    "output": "docs/diagrams/overview.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:endqwerty/mainworthy.git",
+      "revision": "688ffae7790fd7741275f35d4d324b9314d754db",
+      "link_mode": "local-only"
+    },
+    "legend": {
+      "mode": "hidden"
+    },
+    "viewBox": [
+      950,
+      606
+    ]
+  },
+  "stages": [
+    {
+      "label": "Produce"
+    },
+    {
+      "label": "Record"
+    },
+    {
+      "label": "Ask"
+    },
+    {
+      "label": "Decide and count"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "people",
+      "type": "frontend",
+      "label": "People",
+      "sublabel": "In the web app",
+      "stage": 0,
+      "row": 0,
+      "width": 120,
+      "height": 62,
+      "sources": [
+        {
+          "path": "src/server/ops/writes.ts",
+          "line": 76,
+          "end_line": 112
+        },
+        {
+          "path": "src/server/ops/writes.ts",
+          "line": 305,
+          "end_line": 314
+        }
+      ]
+    },
+    {
+      "id": "pipelines",
+      "type": "cloud",
+      "label": "Pipelines",
+      "sublabel": "mainworthy report",
+      "stage": 0,
+      "row": 1,
+      "width": 120,
+      "height": 62,
+      "sources": [
+        {
+          "path": "src/cli/commands/report.ts",
+          "line": 70,
+          "end_line": 101
+        },
+        {
+          "path": "src/server/evidence/evidence.ts",
+          "line": 564,
+          "end_line": 584
+        }
+      ]
+    },
+    {
+      "id": "agents",
+      "type": "external",
+      "label": "Agents",
+      "sublabel": "MCP tools",
+      "stage": 0,
+      "row": 2,
+      "width": 120,
+      "height": 62,
+      "sources": [
+        {
+          "path": "src/server/ops/index.ts",
+          "line": 19,
+          "end_line": 45
+        },
+        {
+          "path": "src/server/ops/writes.ts",
+          "line": 396,
+          "end_line": 403
+        }
+      ]
+    },
+    {
+      "id": "evidence",
+      "type": "database",
+      "label": "Evidence",
+      "sublabel": "Results, edits, findings",
+      "stage": 1,
+      "row": 1,
+      "width": 150,
+      "height": 62,
+      "sources": [
+        {
+          "path": "src/server/evidence/evidence.ts",
+          "line": 564,
+          "end_line": 584
+        },
+        {
+          "path": "src/server/ops/writes.ts",
+          "line": 170,
+          "end_line": 215
+        }
+      ]
+    },
+    {
+      "id": "questions",
+      "type": "messagebus",
+      "label": "Questions",
+      "sublabel": "One per cause",
+      "stage": 2,
+      "row": 1,
+      "width": 120,
+      "height": 62,
+      "sources": [
+        {
+          "path": "src/core/kinds.ts",
+          "line": 7,
+          "end_line": 7
+        },
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 160,
+          "end_line": 200
+        }
+      ]
+    },
+    {
+      "id": "decision",
+      "type": "security",
+      "label": "Decision",
+      "sublabel": "Person or rule",
+      "stage": 3,
+      "row": 0,
+      "width": 120,
+      "height": 62,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 323,
+          "end_line": 357
+        },
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 483,
+          "end_line": 505
+        }
+      ]
+    },
+    {
+      "id": "current",
+      "type": "backend",
+      "label": "What is current",
+      "sublabel": "Set by decisions",
+      "stage": 3,
+      "row": 1,
+      "width": 120,
+      "height": 62,
+      "sources": [
+        {
+          "path": "docs/architecture.md",
+          "line": 95,
+          "end_line": 103
+        },
+        {
+          "path": "src/server/evidence/evidence.ts",
+          "line": 1195,
+          "end_line": 1215
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1318,
+          "end_line": 1322
+        }
+      ]
+    },
+    {
+      "id": "gate",
+      "type": "backend",
+      "label": "Gate verdict",
+      "sublabel": "For a commit",
+      "stage": 3,
+      "row": 2,
+      "width": 120,
+      "height": 62,
+      "sources": [
+        {
+          "path": "src/core/runs.ts",
+          "line": 73,
+          "end_line": 88
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1480,
+          "end_line": 1534
+        }
+      ]
+    },
+    {
+      "id": "readers",
+      "type": "frontend",
+      "label": "Who reads it",
+      "sublabel": "CI and Changes",
+      "stage": 3,
+      "row": 3,
+      "width": 120,
+      "height": 62,
+      "sources": [
+        {
+          "path": "src/cli/commands/gate.ts",
+          "line": 16,
+          "end_line": 25
+        },
+        {
+          "path": "docs/architecture.md",
+          "line": 126,
+          "end_line": 134
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "people-record",
+      "from": "people",
+      "to": "evidence",
+      "label": "Results, edits",
+      "variant": "default",
+      "fromSide": "right",
+      "toSide": "top",
+      "via": [
+        [
+          315,
+          159
+        ]
+      ],
+      "labelAt": [
+        237,
+        150
+      ]
+    },
+    {
+      "id": "pipeline-record",
+      "from": "pipelines",
+      "to": "evidence",
+      "label": "JUnit XML",
+      "variant": "default",
+      "route": "straight",
+      "labelAt": [
+        200,
+        265
+      ]
+    },
+    {
+      "id": "agent-record",
+      "from": "agents",
+      "to": "evidence",
+      "label": "Results, findings",
+      "variant": "default",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          315,
+          387
+        ]
+      ],
+      "labelAt": [
+        237,
+        378
+      ]
+    },
+    {
+      "id": "detect",
+      "from": "evidence",
+      "to": "questions",
+      "label": "Detectors",
+      "variant": "default",
+      "route": "straight",
+      "labelAt": [
+        430,
+        256
+      ]
+    },
+    {
+      "id": "answer",
+      "from": "questions",
+      "to": "decision",
+      "label": "Answer",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [
+        [
+          637,
+          273
+        ],
+        [
+          637,
+          159
+        ]
+      ],
+      "labelAt": [
+        637,
+        216
+      ]
+    },
+    {
+      "id": "apply",
+      "from": "decision",
+      "to": "current",
+      "label": "Changes",
+      "variant": "security",
+      "route": "straight",
+      "labelAt": [
+        783,
+        216
+      ]
+    },
+    {
+      "id": "standing",
+      "from": "current",
+      "to": "gate",
+      "label": "Decisions in force",
+      "variant": "default",
+      "route": "straight",
+      "labelAt": [
+        680,
+        330
+      ]
+    },
+    {
+      "id": "counted",
+      "from": "evidence",
+      "to": "gate",
+      "label": "Counted results",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "via": [
+        [
+          430,
+          273
+        ],
+        [
+          430,
+          387
+        ]
+      ],
+      "labelAt": [
+        560,
+        378
+      ]
+    },
+    {
+      "id": "read",
+      "from": "gate",
+      "to": "readers",
+      "label": "Verdict, exit code",
+      "variant": "default",
+      "route": "straight",
+      "labelAt": [
+        675,
+        444
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Evidence has a basis",
+      "items": [
+        "People, pipelines and agents record results in the same shape. Each result says whether its basis is exact, assumed at the case's current version, or unresolved.",
+        "Edits to cases and findings from a review are evidence too. A finding is advice about a case or a change, not a pass."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "One queue of questions",
+      "items": [
+        "Detectors raise a question for each cause: an edit to a case, a test with no case, a failure, a finding, or the closing of a run. The same cause seen again joins its question, and while an answer to it still holds, nobody is asked twice.",
+        "A question waits for the person the policy names. Where the policy allows a rule, Mainworthy records the rule's answer at once. An agent's answer is advice and leaves the question open."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Only a decision changes what is current",
+      "items": [
+        "A decision records who answered, on what evidence and under which clause of the policy. It can change a case's head version, which case a test belongs to, how a failure counts, whether a run is closed, or the policy itself.",
+        "Withdrawing a decision undoes what it did and nothing else. Both decisions stay in the record."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "One verdict for a commit",
+      "items": [
+        "The gate counts the results that people and pipelines reported, under the decisions in force. A pass counts without any question or decision.",
+        "An agent's results never move a commit's gate. They count only in a planned run that asks for agents, on a case that admits them.",
+        "CI reads the verdict with mainworthy gate, and people read it on the Changes screen. Pending needs evidence, blocked needs an answer, failed needs a fix, and passed means something was proven and nothing is outstanding."
+      ]
+    }
+  ]
+}

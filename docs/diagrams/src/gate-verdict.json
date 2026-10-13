@@ -1,0 +1,248 @@
+{
+  "schema_version": 2,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "How a gate reaches its verdict",
+    "locale": "en",
+    "output": "docs/diagrams/gate-verdict.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:endqwerty/mainworthy.git",
+      "revision": "688ffae7790fd7741275f35d4d324b9314d754db",
+      "link_mode": "local-only"
+    },
+    "legend": {
+      "mode": "hidden"
+    }
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "A decision says it is real"
+    },
+    {
+      "id": "wait",
+      "label": "Waiting"
+    },
+    {
+      "id": "terminal",
+      "label": "Nothing outstanding"
+    }
+  ],
+  "states": [
+    {
+      "id": "failed",
+      "type": "failure",
+      "label": "Failed",
+      "sublabel": "Exit code 1: needs a fix",
+      "lane": "main",
+      "col": 2,
+      "width": 190,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/core/runs.ts",
+          "line": 84,
+          "end_line": 84
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1060,
+          "end_line": 1074
+        },
+        {
+          "path": "test/integrity.test.ts",
+          "line": 806,
+          "end_line": 828
+        }
+      ]
+    },
+    {
+      "id": "pending",
+      "type": "waiting",
+      "label": "Pending",
+      "sublabel": "Exit code 3: needs evidence",
+      "lane": "wait",
+      "col": 0,
+      "width": 190,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/core/runs.ts",
+          "line": 39,
+          "end_line": 88
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 515,
+          "end_line": 521
+        },
+        {
+          "path": "test/integrity.test.ts",
+          "line": 1255,
+          "end_line": 1280
+        }
+      ]
+    },
+    {
+      "id": "blocked",
+      "type": "decision",
+      "label": "Blocked",
+      "sublabel": "Exit code 2: needs an answer",
+      "lane": "wait",
+      "col": 4,
+      "width": 190,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/core/runs.ts",
+          "line": 101,
+          "end_line": 108
+        },
+        {
+          "path": "test/integrity.test.ts",
+          "line": 2480,
+          "end_line": 2507
+        },
+        {
+          "path": "test/runs.test.ts",
+          "line": 88,
+          "end_line": 101
+        }
+      ]
+    },
+    {
+      "id": "passed",
+      "type": "success",
+      "label": "Passed",
+      "sublabel": "Exit code 0: proven",
+      "lane": "terminal",
+      "col": 2,
+      "width": 190,
+      "height": 66,
+      "sources": [
+        {
+          "path": "src/core/runs.ts",
+          "line": 110,
+          "end_line": 117
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1519,
+          "end_line": 1534
+        },
+        {
+          "path": "test/integrity.test.ts",
+          "line": 497,
+          "end_line": 523
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "id": "applied-unexplained",
+      "from": "pending",
+      "to": "blocked",
+      "label": "Applied: unexplained or disputed",
+      "variant": "security"
+    },
+    {
+      "id": "applied-real",
+      "from": "pending",
+      "to": "failed",
+      "label": "Applied: judged real",
+      "variant": "security"
+    },
+    {
+      "id": "applied-proven",
+      "from": "pending",
+      "to": "passed",
+      "label": "Applied: proven",
+      "variant": "emphasis"
+    },
+    {
+      "id": "answer-excuses",
+      "from": "blocked",
+      "to": "passed",
+      "label": "Answer excuses it",
+      "variant": "emphasis"
+    },
+    {
+      "id": "answer-real",
+      "from": "blocked",
+      "to": "failed",
+      "label": "Answer: it is real",
+      "variant": "security"
+    },
+    {
+      "id": "withdrawn-fail",
+      "from": "failed",
+      "to": "blocked",
+      "label": "Decision withdrawn",
+      "variant": "dashed"
+    },
+    {
+      "id": "withdrawn-pass",
+      "from": "passed",
+      "to": "blocked",
+      "label": "Decision withdrawn",
+      "variant": "dashed"
+    },
+    {
+      "id": "report-blocked",
+      "from": "blocked",
+      "to": "pending",
+      "label": "New report accepted",
+      "variant": "dashed"
+    },
+    {
+      "id": "report-failed",
+      "from": "failed",
+      "to": "pending",
+      "label": "New report accepted",
+      "variant": "dashed"
+    },
+    {
+      "id": "report-passed",
+      "from": "passed",
+      "to": "pending",
+      "label": "New report, or a hold ends",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Four verdicts, four exit codes",
+      "items": [
+        "mainworthy gate exits 0 for passed, 1 for failed, 2 for blocked and 3 for pending. An exit code of 4 is not a verdict: the command met an input, connection or operation error.",
+        "The Changes screen shows the same verdict and its reason. Reading it computes nothing new: the gate compares counts that Mainworthy keeps up to date."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Pending is the gate saying wait",
+      "items": [
+        "A report is accepted before it is applied. From that moment the gate reads pending, whatever it read before, so nobody is served a verdict from before the upload.",
+        "Pending also means a hold has run out, evidence is missing, or nothing was proven: a report of only skipped results proves nothing. A commit that was never reported reads pending too."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Which verdict wins",
+      "items": [
+        "Pending for an unapplied report or an expired hold comes first. Then failed, then blocked. Only then does missing evidence read pending, and passed is what is left.",
+        "So one failure judged real fails the gate even while another failure is still unexplained."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Answers and disputes move the gate",
+      "items": [
+        "Excusing a failure (flaky, infrastructure, already failing where the change started) lets the gate pass with no new upload. Calling it real (a defect, a wrong test, a changed expectation) fails it. Changing an answer later recomputes the gate at once: an excused failure changed to a defect fails it.",
+        "Withdrawing an answer undoes only what it did, so the failure counts again and the gate blocks. Results disagree only in a planned run, where one producer passes a case and another fails it. That blocks the run until a person decides, and the answer that the failure was a mistake lets the pass stand."
+      ]
+    }
+  ]
+}

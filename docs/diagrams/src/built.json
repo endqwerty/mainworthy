@@ -1,0 +1,42 @@
+{
+	"agent-access": {
+		"candidate": "f48930fbaefb945ccb0a624a11698f6d6c69440c9654279d6ff5dd01336b07cd",
+		"page": "83a943a47d9cec712e20c652e7407d0ece51ee36b97deda91b1c8256c5bb3f40"
+	},
+	"architecture": {
+		"candidate": "f9bdc2bad847298f54bd36d2355ec7c9e2af490d1ec6d51efbe063b50f876bf7",
+		"page": "69a48b5368fa5343b8cc487302e859eb3642faab75dd0aa63ee6544c33fb1ba1"
+	},
+	"case-lifecycle": {
+		"candidate": "95fcf9f83a206aecfb8c60a5b8b89df3be6c2e1aa66be6b043d43ef8a13812a2",
+		"page": "15057565266418488a893f4ce26edc9992e4d80ab96927e0c25e910e8f4ec848"
+	},
+	"customize-map": {
+		"candidate": "c3e150beeffc89e07c812567b7b3af89a5124d842adea04f0f09b9fe623e0298",
+		"page": "3596eed3623aac5b694b065e68ad18fd5209ad57d87bfb60317dad1a0b038700"
+	},
+	"gate-verdict": {
+		"candidate": "35f3c208e1bf00b6edf092b8ab3b3ef7bac2b3849b979448f314bf64b3fe08f1",
+		"page": "182b1ebdc3643e311e6b1448d48fabdcccbb501ce123df148f781adb8b038725"
+	},
+	"overview": {
+		"candidate": "f27bdf1f4d69574d0fa3e1dfe6b509186a4897fdc0f40485c3445e4e1d220d31",
+		"page": "b7c99e2b098028d068564ec250f0b67ef39c064a139417a6e65e21081782a703"
+	},
+	"planned-run": {
+		"candidate": "d9d9d5b12fd9e24a56f6bce5ac43fddc5d35cf8f0a5716ecf1e4b68e3040d7be",
+		"page": "cc2a5058e5fcfe2c9b801fd428bc7472916fc82975681850fd7959b1b35bd65f"
+	},
+	"policy-routing": {
+		"candidate": "f8bf97dd0e6fa4b43f999b871774cf4f5a690ca261aa6369a2979805d5fab24f",
+		"page": "ac1059b8fd76809db54e32759ffe076bb18847be04d3a2eccec11af5b44510a3"
+	},
+	"question-lifecycle": {
+		"candidate": "ead0e9a3849b03db1c318bd370b0528db0e29e6d2b4980ff2aa387ba1a3b8ed1",
+		"page": "463ab050f6bad5e46f73f89d999802c0148d29a199541b76318b55c2ea20c03f"
+	},
+	"red-build": {
+		"candidate": "0faf56afc77382825e894534a9a66ee6b80708f26b38b8bf1a73f0d2ab9ccc6b",
+		"page": "ed7568ee0b3f7abc962181d324f43dbc14da61f4f681f1c3a1bc62dc48c02fe8"
+	}
+}

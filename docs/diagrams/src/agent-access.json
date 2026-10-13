@@ -1,0 +1,322 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "An agent's session, from token to a person's decision",
+    "locale": "en",
+    "output": "docs/diagrams/agent-access.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:endqwerty/mainworthy.git",
+      "revision": "688ffae7790fd7741275f35d4d324b9314d754db",
+      "link_mode": "local-only"
+    },
+    "legend": {
+      "mode": "hidden"
+    },
+    "column_fit": "spread"
+  },
+  "participants": [
+    {
+      "id": "admin",
+      "type": "security",
+      "icon": "person",
+      "label": "Admin",
+      "sublabel": "Issues the token",
+      "sources": [
+        {
+          "path": "src/cli/commands/token.ts",
+          "line": 13,
+          "end_line": 55
+        },
+        {
+          "path": "src/server/ops/admin.ts",
+          "line": 67,
+          "end_line": 85
+        }
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "external",
+      "label": "Agent",
+      "sublabel": "Reads and produces",
+      "sources": [
+        {
+          "path": "skill/mainworthy/SKILL.md",
+          "line": 8,
+          "end_line": 14
+        },
+        {
+          "path": "src/core/presets.ts",
+          "line": 21,
+          "end_line": 100
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 580,
+          "end_line": 586
+        }
+      ]
+    },
+    {
+      "id": "mainworthy",
+      "type": "backend",
+      "icon": "none",
+      "label": "Mainworthy",
+      "sublabel": "Tools and policy",
+      "sources": [
+        {
+          "path": "src/surfaces/mcp.ts",
+          "line": 215,
+          "end_line": 373
+        },
+        {
+          "path": "src/server/ops/writes.ts",
+          "line": 76,
+          "end_line": 466
+        },
+        {
+          "path": "src/server/ops/reads.ts",
+          "line": 388,
+          "end_line": 925
+        }
+      ]
+    },
+    {
+      "id": "person",
+      "type": "frontend",
+      "icon": "person",
+      "label": "Person",
+      "sublabel": "Answers the queue",
+      "sources": [
+        {
+          "path": "test/e2e/agent.test.ts",
+          "line": 83,
+          "end_line": 139
+        },
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 462,
+          "end_line": 505
+        },
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 556,
+          "end_line": 569
+        }
+      ]
+    }
+  ],
+  "segments": [
+    {
+      "from": 148,
+      "to": 360,
+      "label": "Access and context"
+    },
+    {
+      "from": 373,
+      "to": 473,
+      "label": "Produce evidence"
+    },
+    {
+      "from": 485,
+      "to": 652,
+      "label": "A person decides"
+    }
+  ],
+  "messages": [
+    {
+      "id": "issue",
+      "from": "admin",
+      "to": "mainworthy",
+      "y": 160,
+      "label": "Create agent token",
+      "variant": "security"
+    },
+    {
+      "id": "token",
+      "from": "mainworthy",
+      "to": "admin",
+      "y": 188,
+      "label": "Token shown once",
+      "variant": "return"
+    },
+    {
+      "id": "share",
+      "from": "admin",
+      "to": "agent",
+      "y": 216,
+      "label": "Configure token",
+      "variant": "security"
+    },
+    {
+      "id": "connect",
+      "from": "agent",
+      "to": "mainworthy",
+      "y": 244,
+      "label": "MCP: connect and list",
+      "variant": "default"
+    },
+    {
+      "id": "tools",
+      "from": "mainworthy",
+      "to": "agent",
+      "y": 272,
+      "label": "Ten agent tools",
+      "variant": "return"
+    },
+    {
+      "id": "impact",
+      "from": "agent",
+      "to": "mainworthy",
+      "y": 300,
+      "label": "impact",
+      "variant": "emphasis"
+    },
+    {
+      "id": "context",
+      "from": "mainworthy",
+      "to": "agent",
+      "y": 328,
+      "label": "Cases, hashes, cursor",
+      "variant": "return"
+    },
+    {
+      "id": "read",
+      "from": "agent",
+      "to": "mainworthy",
+      "y": 356,
+      "label": "get and find",
+      "variant": "default"
+    },
+    {
+      "id": "propose",
+      "from": "agent",
+      "to": "mainworthy",
+      "y": 384,
+      "label": "propose: case edit",
+      "variant": "emphasis"
+    },
+    {
+      "id": "policy",
+      "from": "mainworthy",
+      "to": "agent",
+      "y": 412,
+      "label": "loose: adopted",
+      "variant": "return",
+      "note": "standard: open question"
+    },
+    {
+      "id": "claim",
+      "from": "agent",
+      "to": "mainworthy",
+      "y": 440,
+      "label": "claim: review, findings",
+      "variant": "default"
+    },
+    {
+      "id": "report",
+      "from": "agent",
+      "to": "mainworthy",
+      "y": 468,
+      "label": "report: results",
+      "variant": "default",
+      "note": "Never moves a commit gate"
+    },
+    {
+      "id": "queue",
+      "from": "person",
+      "to": "mainworthy",
+      "y": 496,
+      "label": "Open the queue",
+      "variant": "default"
+    },
+    {
+      "id": "question",
+      "from": "mainworthy",
+      "to": "person",
+      "y": 524,
+      "label": "Question and evidence",
+      "variant": "return"
+    },
+    {
+      "id": "decide",
+      "from": "person",
+      "to": "mainworthy",
+      "y": 552,
+      "label": "decide: accept edit",
+      "variant": "security"
+    },
+    {
+      "id": "decided",
+      "from": "mainworthy",
+      "to": "person",
+      "y": 580,
+      "label": "Decided; case updated",
+      "variant": "return"
+    },
+    {
+      "id": "since",
+      "from": "agent",
+      "to": "mainworthy",
+      "y": 608,
+      "label": "since: saved cursor",
+      "variant": "emphasis"
+    },
+    {
+      "id": "changes",
+      "from": "mainworthy",
+      "to": "agent",
+      "y": 636,
+      "label": "Changes and decisions",
+      "variant": "return"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Give the agent its own token",
+      "items": [
+        "An admin runs mainworthy token new --agent reviewer --can read,produce. The secret is shown once; configure the agent with it. Add --project to restrict a new actor to one project. Tokens use the actor\u2019s grants.",
+        "Connect over stdio with mainworthy mcp, which forwards to the running server, or use the authenticated HTTP endpoint /mcp. Supply MAINWORTHY_TOKEN to the CLI, or a Bearer token over HTTP.",
+        "The agent sees ten tools. Listing a tool does not grant permission to call it. Pass project unless exactly one project is available."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Read only the context you need",
+      "items": [
+        "Start with impact for a change or changed paths. Keep the case hashes and cursor. Use get for case bodies and find for text, folder or tag searches.",
+        "Use get with as: \"md\" for Markdown and unless for hashes you already hold. Use impact with ledger: false for a fresh review."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "An edit follows the project policy",
+      "items": [
+        "propose names the base version of an existing case. For an ordinary, nonconflicting agent edit, loose adopts it by rule; standard and strict leave a question for a person.",
+        "A conflicting edit follows the conflict clause even under loose. The agent may withdraw its own conflicting proposal, but cannot accept it. Policy changes ask a human admin.",
+        "The decision path below illustrates accepting an open proposal under standard. A rejection leaves the case unchanged. Other questions have their own answers."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "A review and a result are different",
+      "items": [
+        "claim records the cases reviewed as C-1@hash, even with no findings. Findings raise questions; an already known finding returns its existing question and answer.",
+        "report records observed results for a target or a planned run. Agent failures raise questions. Passing results do not each require a decision.",
+        "Agent results never move a commit\u2019s gate. They can count in a planned run only when the run asks for agents and the pinned case admits them."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Read the person\u2019s decision",
+      "items": [
+        "A person with answer capability reads the question and current evidence in the queue, then decides. The accepted edit keeps the agent\u2019s authorship. Strict requires a reason for an ordinary adoption.",
+        "since uses the saved cursor to return changed case summaries and settled questions. Read the changed case with get; if more is true, call since again with its new cursor.",
+        "An agent with read and produce can offer advice on failures and findings where policy allows it. Check advised, decided or forbidden before treating an answer as settled."
+      ]
+    }
+  ]
+}
