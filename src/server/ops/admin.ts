@@ -60,6 +60,19 @@ export function projectOf(db: Db, key: string | undefined): number {
 	return project.id;
 }
 
+/** Every actor with its grants as a person reads them: each names its project by key, and every project as `*`. */
+export function actorsWithGrants(db: Db) {
+	const keys = new Map(allProjects(db).map((project) => [project.id, project.key]));
+	return listActors(db).map((actor) => ({
+		...actor,
+		// `*` is every project. A grant on a project that no longer exists is not shown: it gives nothing.
+		grants: actor.grants.flatMap((grant) => {
+			const project = grant.project === 0 ? "*" : keys.get(grant.project);
+			return project === undefined ? [] : [{ project, can: grant.can }];
+		}),
+	}));
+}
+
 /**
  * Who a person is, what a person may do and whether a person is remembered are for a person to change. An agent
  * may hold `admin` and do the rest of it (projects, its own kind's tokens, the lists); with a person's token it
@@ -163,17 +176,8 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 			}
 			return { revoked: revokeToken(env.app, input.id) };
 		}
-		case "actor.list": {
-			const keys = new Map(allProjects(db).map((project) => [project.id, project.key]));
-			return listActors(db).map((actor) => ({
-				...actor,
-				// `*` is every project. A grant on a project that no longer exists is not shown: it gives nothing.
-				grants: actor.grants.flatMap((grant) => {
-					const project = grant.project === 0 ? "*" : keys.get(grant.project);
-					return project === undefined ? [] : [{ project, can: grant.can }];
-				}),
-			}));
-		}
+		case "actor.list":
+			return actorsWithGrants(db);
 		case "grant.set":
 		case "grant.remove": {
 			personOnly(env, "a grant is changed");

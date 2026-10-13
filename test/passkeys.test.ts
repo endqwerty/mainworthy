@@ -253,7 +253,10 @@ describe("registering a passkey", () => {
 			label: "phone",
 		});
 		expect(accepted.status).toBe(200);
-		expect(credentials(w)).toMatchObject([{ id: 1, kind: "passkey", label: "phone", handle: device.id }]);
+		// The passkey signed its person in just now, and its row says so: it is not "never used".
+		expect(credentials(w)).toMatchObject([
+			{ id: 1, kind: "passkey", label: "phone", handle: device.id, last_used_at: expect.any(Number) },
+		]);
 		expect(w.rows("SELECT credential FROM sessions")).toEqual([{ credential: 1 }]);
 		expect((await withPasskey(w, device.assert(await challenge(w)))).status).toBe(200);
 
@@ -269,8 +272,8 @@ describe("registering a passkey", () => {
 		});
 		expect(both.status).toBe(200);
 		expect(credentials(w).slice(1)).toMatchObject([
-			{ id: 2, kind: "password", actor: 4 },
-			{ id: 3, kind: "passkey", actor: 4, label: "passkey" },
+			{ id: 2, kind: "password", actor: 4, last_used_at: expect.any(Number) },
+			{ id: 3, kind: "passkey", actor: 4, label: "passkey", last_used_at: expect.any(Number) },
 		]);
 		expect(w.rows("SELECT credential FROM sessions WHERE actor = 4")).toEqual([{ credential: 3 }]);
 		expect((await signIn(w, "sam", PASSWORD)).status).toBe(200);

@@ -51,7 +51,9 @@ test("invite new prints the link once, invite list never shows the code, and inv
 			expect(Math.abs(until - (before + 7 * 86_400_000))).toBeLessThan(120_000);
 
 			const listed = await cli(["invite", "list"]);
-			expect(listed.stdout).toMatch(new RegExp(`^1 {2}sam {2}join {2}open {2}${UNTIL} {2}by robin\n$`));
+			expect(listed.stdout).toMatch(
+				new RegExp(`^1 {2}sam {2}join {2}open {2}${UNTIL} {2}by robin {2}may read, answer on scratch\n$`),
+			);
 			expect(listed.stdout).not.toContain(code);
 			expect(outputWith(Listed, await cli(["invite", "list", "--json"]))).toMatchObject([
 				{ id: 1, name: "sam", purpose: "join", state: "open" },

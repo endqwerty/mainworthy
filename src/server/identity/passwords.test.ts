@@ -1,7 +1,10 @@
 // What a password may be, and how many are hashed at once. The hashing itself is Bun's: here it is replaced by
 // a stand-in that a test opens and closes, so that "at once" is something the test sees and does not time.
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { dummyHash, hashPassword, PasswordWorkBusy, verifyPassword, whyNotPassword } from "./passwords.ts";
+import { readFileSync } from "node:fs";
+import { Glob } from "bun";
+import { PASSWORD_LENGTH, whyNotPassword } from "../../core/people.ts";
+import { dummyHash, hashPassword, PasswordWorkBusy, verifyPassword } from "./passwords.ts";
 
 const CHEAP = { memoryCost: 8, timeCost: 1 };
 
@@ -19,6 +22,17 @@ describe("what a password may be", () => {
 		expect(whyNotPassword("🔑".repeat(12))).toBeNull();
 		expect(whyNotPassword("🔑".repeat(6))).not.toBeNull();
 		expect(whyNotPassword("🔑".repeat(257))).not.toBeNull();
+	});
+
+	test("how long a password is, is said once, where the server and a page can both read it", () => {
+		expect(PASSWORD_LENGTH).toEqual({ min: 12, max: 256 });
+		expect(whyNotPassword("x".repeat(PASSWORD_LENGTH.min - 1))).toContain("12 to 256");
+		expect(whyNotPassword("x".repeat(PASSWORD_LENGTH.max))).toBeNull();
+		// Neither number is written again in the server or in the web client.
+		const again = [...new Glob("src/{server,surfaces,web,cli}/**/*.{ts,tsx}").scanSync(".")]
+			.filter((file) => !file.endsWith(".test.ts"))
+			.filter((file) => /\b(min|max): (12|256)\b|12 to 256/.test(readFileSync(file, "utf8")));
+		expect(again).toEqual([]);
 	});
 
 	test("a hash is argon2id with a salt of its own, and only its own password matches it", async () => {

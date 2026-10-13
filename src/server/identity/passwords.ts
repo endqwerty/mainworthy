@@ -1,25 +1,10 @@
-// A password: what one may be, how it is hashed and how it is checked. Owns no table and keeps no password:
-// one comes in as an argument and leaves as an argon2id string, or as yes or no.
+// A password: how it is hashed and how it is checked. Owns no table and keeps no password: one comes in as an
+// argument and leaves as an argon2id string, or as yes or no. What a password may be is said in
+// `src/core/people.ts`, where a page reads it too.
 //
 // Hashing is slow on purpose and runs on another thread (`Bun.password`), so whoever calls this is outside the
 // write gate: a sign-in that is being checked never holds up a writer.
 import type { Config } from "../kernel/app.ts";
-
-/**
- * How long a password is, in characters. Twelve, because nothing else is asked of it: no digit, no capital
- * and no sign, which make passwords harder to remember and no harder to guess. The upper end only bounds the
- * work of hashing what a stranger sends.
- */
-export const PASSWORD_LENGTH = { min: 12, max: 256 } as const;
-
-/** Why this text cannot be a password, as a sentence for the person who typed it, or null when it can. */
-export function whyNotPassword(text: string): string | null {
-	// Characters as a person counts them, not UTF-16 units.
-	const length = [...text].length;
-	return length >= PASSWORD_LENGTH.min && length <= PASSWORD_LENGTH.max
-		? null
-		: `a password is ${PASSWORD_LENGTH.min} to ${PASSWORD_LENGTH.max} characters`;
-}
 
 type Cost = Config["passwordCost"];
 

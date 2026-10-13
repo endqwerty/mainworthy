@@ -25,6 +25,7 @@ const Listed = z.array(
 		createdBy: z.string(),
 		expiresAt: z.number(),
 		state: z.enum(["open", "used", "revoked", "expired"]),
+		grants: z.array(z.object({ project: z.string(), can: z.array(z.string()) })),
 	}),
 );
 
@@ -75,7 +76,9 @@ export const inviteCommand: AdapterCommand = {
 			else
 				for (const row of result)
 					line(
-						`${row.id}  ${row.name}  ${row.purpose}  ${row.state}  until ${when(row.expiresAt)}  by ${row.createdBy}`,
+						`${row.id}  ${row.name}  ${row.purpose}  ${row.state}  until ${when(row.expiresAt)}  by ${row.createdBy}  ${
+							row.grants.map((grant) => `may ${grant.can.join(", ")} on ${grant.project}`).join("; ") || "no grant"
+						}`,
 					);
 			return 0;
 		}
