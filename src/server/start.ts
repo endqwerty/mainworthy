@@ -67,7 +67,6 @@ export function start(
 	const opened = open(config, options);
 	const { app, owner } = opened;
 	recoverAccepted(app);
-	const rule = ruleActor(app.db).id;
 	let server: ReturnType<typeof serve>;
 	try {
 		server = serve(app, owner, extra(app, owner), options.patience);
@@ -84,9 +83,11 @@ export function start(
 	// Three jobs, each its own turn at the gate and in this order, so one that fails does not stop the next:
 	// questions whose decisions ran out are reopened, what was noted of the use of tokens and sessions is written,
 	// and then, with the rows current, sessions past a lifetime are ended and old ones deleted.
+	// The policy's own actor is looked up inside the gate, each time: an import replaces the actors, and the id
+	// it had when the server started may then be somebody else's (issue #123).
 	const minute = async (): Promise<void> => {
 		const jobs = [
-			["sweep", app.gate.run(() => sweep(app, rule))],
+			["sweep", app.gate.run(() => sweep(app, ruleActor(app.db).id))],
 			["writing last uses", flushUses(app)],
 			["ending expired sessions", app.gate.run(() => sweepSessions(app))],
 		] as const;

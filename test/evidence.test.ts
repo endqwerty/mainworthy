@@ -1,10 +1,18 @@
 // One red build: reports, causes, decisions and the gate. The fixtures named D1, D3, C3, C5, E3 and E8 are the
 // commitments in docs/product-design.md sections 4.2 and 9.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { z } from "zod";
+import { Client } from "../src/cli/client.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { recoverAccepted, sweep } from "../src/server/jobs.ts";
+import { type Config, defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { acceptReport, processBatch } from "../src/server/ops/writes.ts";
+import { type Instance, start } from "../src/server/start.ts";
+import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -356,6 +364,91 @@ describe("work the server does on its own", () => {
 		expect(recoverAccepted(h.app)).toBe(1);
 		expect(gate("6666666a")).toMatchObject({ verdict: "blocked", stale: false });
 		expect(recoverAccepted(h.app)).toBe(0);
+	});
+
+	// Issue #123. The server read the id of the policy's actor once, when it started, and an import replaces the
+	// actors. In an archive from an instance whose first actor is a person, `policy` has that person's id plus one.
+	test("the minute job acts as the policy after an import gave the policy's actor another id", async () => {
+		let now = 1_800_000_000_000;
+		const directories: string[] = [];
+		const instances: Instance[] = [];
+		const configFor = async (): Promise<Config> => {
+			const directory = await mkdtemp(join(tmpdir(), "mainworthy-minute-"));
+			directories.push(directory);
+			return defaultConfig({
+				MAINWORTHY_DATA: directory,
+				MAINWORTHY_PORT: "0",
+				MAINWORTHY_OWNER: "robin",
+				MAINWORTHY_MODE: "local",
+			});
+		};
+		const boot = (config: Config): Instance => {
+			const instance = start(config, (app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }), {
+				readers: 0,
+				now: () => now,
+			});
+			instances.push(instance);
+			return instance;
+		};
+		const actors = (instance: Instance) =>
+			instance.app.db.raw.query<{ id: number; name: string }, []>("SELECT id, name FROM actors ORDER BY id").all();
+		const client = (instance: Instance) => new Client({ url: instance.url, token: undefined, project: "scratch" });
+		const asked = z.object({
+			counts: z.object({ open: z.number() }),
+			items: z.array(z.object({ q: z.string(), evidenceHash: z.string() })),
+		});
+		try {
+			const from = await configFor();
+			const seed = openApp(from);
+			seed.db.raw.exec(
+				"INSERT INTO orgs (name, created_at) VALUES ('default', 0); INSERT INTO actors (org, kind, name, created_at) VALUES (1, 'human', 'robin', 0)",
+			);
+			seed.close();
+			const source = boot(from);
+			const target = boot(await configFor());
+			expect(actors(source)).toEqual([
+				{ id: 1, name: "robin" },
+				{ id: 2, name: "policy" },
+			]);
+			expect(actors(target)).toEqual([
+				{ id: 1, name: "policy" },
+				{ id: 2, name: "robin" },
+			]);
+
+			await client(source).call("report", ciReport({ commit: "8888888a", n: 3, fail: { 0: "expected 1, got 2" } }));
+			const question = first(asked.parse(await client(source).call("inbox", {})).items);
+			await client(source).call("decide", {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "flaky" },
+			});
+			const archive = await client(source).request("/api/export");
+			const imported = await client(target).request("/api/import", { method: "POST", body: await archive.text() });
+			expect(imported.status).toBe(200);
+			expect(actors(target)).toEqual(actors(source));
+			expect(asked.parse(await client(target).call("inbox", {})).counts.open).toBe(0);
+
+			const published: { op: string; actor: string }[] = [];
+			target.app.subscribe((event) => published.push({ op: event.op, actor: event.actor }));
+			now += 15 * 86_400_000;
+			await target.minute();
+			expect(asked.parse(await client(target).call("inbox", {})).counts.open).toBe(1);
+			// What every open page is told about the change names the policy, not the person who now has the id the
+			// policy had when the server started. The row that records that the excuse ran out is the policy's too.
+			expect(published).toEqual([{ op: "sweep", actor: "policy" }]);
+			const ranOut = target.app.db.raw
+				.query<{ answer: string; signers: string }, []>(
+					"SELECT answer, signers FROM decisions WHERE kind = 'failure' ORDER BY id DESC LIMIT 1",
+				)
+				.get();
+			expect(ranOut).toEqual({
+				answer: '{"is":"expired"}',
+				signers: '[{"by":2,"clause":"hold-expired","policy":1,"reason":null}]',
+			});
+		} finally {
+			for (const instance of instances) await instance.stop();
+			for (const directory of directories) await rm(directory, { recursive: true, force: true });
+		}
 	});
 
 	test("the sweep reopens a question whose excuse ran out, so it is visible before the next report", () => {
