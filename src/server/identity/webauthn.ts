@@ -221,23 +221,45 @@ function sameText(a: string, b: string): boolean {
 	return left.length === right.length && timingSafeEqual(left, right);
 }
 
-/** Why this `clientDataJSON` is not an answer to the expected ceremony, or null when it is. */
-function clientDataRefusal(
-	bytes: Buffer,
-	type: "webauthn.create" | "webauthn.get",
-	expected: Expected,
-): Refusal | null {
+/**
+ * What the bytes of a `clientDataJSON` say, or null when they are not UTF-8, not JSON, or not an object with a
+ * type, a challenge and an origin. The one reading of client data there is: the two checks below judge by it,
+ * and the caller finds its challenge by it (`challengeOf`), so both read the same bytes the same way.
+ */
+function readClientData(bytes: Buffer): z.infer<typeof ClientData> | null {
 	let json: unknown;
 	try {
 		// One leading byte-order mark is stripped, as the specification's decoding does. Only this reading
 		// loses it: a sign-in's signature is checked over the bytes as they came, mark included.
 		json = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
 	} catch {
-		return "client-data";
+		return null;
 	}
 	const parsed = ClientData.safeParse(json);
-	if (!parsed.success) return "client-data";
-	const data = parsed.data;
+	return parsed.success ? parsed.data : null;
+}
+
+/**
+ * The challenge an answer says it answers: the `challenge` member of its `clientDataJSON`, read exactly as
+ * `verifyRegistration` and `verifyAssertion` read it, or null when they would find none. It is for the caller,
+ * which keeps the challenges it issued, to find its record by, and it judges nothing: the challenge it
+ * returns is the answer's word, and the verifier compares it with the server's own again.
+ */
+export function challengeOf(answer: unknown): string | null {
+	if (typeof answer !== "object" || answer === null || !("clientDataJSON" in answer)) return null;
+	if (typeof answer.clientDataJSON !== "string") return null;
+	const bytes = bytesOf(answer.clientDataJSON, MAX.clientData);
+	return bytes.ok ? (readClientData(bytes.value)?.challenge ?? null) : null;
+}
+
+/** Why this `clientDataJSON` is not an answer to the expected ceremony, or null when it is. */
+function clientDataRefusal(
+	bytes: Buffer,
+	type: "webauthn.create" | "webauthn.get",
+	expected: Expected,
+): Refusal | null {
+	const data = readClientData(bytes);
+	if (!data) return "client-data";
 	if (data.type !== type) return "type";
 	if (data.challenge.length < CHALLENGE_MIN || !sameText(data.challenge, expected.challenge)) return "challenge";
 	// The whole string, never a prefix, a suffix or a parsed host: `https://mainworthy.com.example` and
@@ -343,6 +365,12 @@ function signedBy(key: KeyObject, algorithm: Algorithm, message: Buffer, signatu
 //   that record, never from the answer. The challenge is used up in the same commit that stores the passkey or
 //   creates the session, so of two answers to one challenge only one succeeds. Nothing else stops a second
 //   use: a counter that stays at zero does not, and neither does the twin of an ECDSA signature.
+// - Where the ceremony began. The record of a challenge also says who asked for it, and an answer is taken
+//   only from there: a sign-in from the browser that asked, known by a cookie set with the challenge of which
+//   the record keeps the hash; a signed-in registration from the session that asked; a registration with an
+//   invitation for that invitation, by the hash of its code. It is compared when the answer arrives and again
+//   in the commit that uses the challenge up. A row's number is never what is kept: an import gives it to
+//   another row. Without this, a signed answer would be good in any browser that came to hold it.
 // - Registration is for one account: the one of the signed-in session that asked for the challenge, or the
 //   one of the invitation, which is used up in the same commit. The answer never says which account.
 // - A credential id is unique across the instance, by a constraint in the database. A second registration of
@@ -356,7 +384,10 @@ function signedBy(key: KeyObject, algorithm: Algorithm, message: Buffer, signatu
 //   without it, so there is nothing for the caller to pass and nothing to get wrong.
 // - The counter is compared again, with the row as it is then, in the commit that creates the session: zero
 //   against a stored zero is accepted, and otherwise the new counter is greater than the stored one. That
-//   commit also stores the counter and uses up the challenge, and no session is handed out before it.
+//   commit also stores the counter and uses up the challenge, and no session is handed out before it. So of
+//   two answers that carry the same counter above zero, the second to commit is refused. Two answers to two
+//   challenges from an authenticator that does not count (zero against zero) are both accepted, and that is
+//   right: nothing in them says a copy exists.
 // - The RP ID and the origin come from the instance's configured public address. They never come from the
 //   Host header or a forwarded header, which whoever sends the request chooses.
 // - The backup flags and the transports describe a passkey and decide nothing. A rule that came to depend on
@@ -413,8 +444,10 @@ export function verifyRegistration(input: unknown, expected: Expected): Verdict<
  * flags to store, and the user handle to compare. The counter is judged as the code below says: zero against a
  * stored zero is accepted, and otherwise the new counter must be greater than the stored one. Two sign-ins with
  * one passkey can be checked at the same moment against the same stored counter, so the caller repeats that
- * comparison against the current row inside the commit that creates the session, and refuses the sign-in that
- * came second. What else the caller has to do is in the list above `verifyRegistration`: the challenge, the
+ * comparison against the current row inside the commit that creates the session. That refuses the second of two
+ * answers whose counter is the same and above zero. It does not refuse the second of two answers from an
+ * authenticator that does not count: zero against zero passes both times, and each answers a challenge of its
+ * own. What else the caller has to do is in the list above `verifyRegistration`: the challenge, the
  * account the stored row belongs to, the passkeys the sign-in named and the user handle.
  */
 export function verifyAssertion(input: unknown, stored: StoredPasskey, expected: Expected): Verdict<Assertion> {

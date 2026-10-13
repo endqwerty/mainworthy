@@ -2,10 +2,12 @@
 // bounded in number, and gone after an import. The clock is the test's own.
 import { afterEach, expect, test } from "bun:test";
 import { type App, openApp, SESSION_LIFETIMES } from "../kernel/app.ts";
-import { challengeOf, clearChallenges, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
-import { CEREMONY_MS } from "./webauthn.ts";
+import { CONTEXT, clearChallenges, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
+import { CEREMONY_MS, challengeOf } from "./webauthn.ts";
 
 const PARTY = { id: "mainworthy.example", origin: "https://mainworthy.example" };
+/** A sign-in begun in some browser: the hash of its ceremony cookie stands in for it. */
+const SIGN_IN = { purpose: "sign-in", context: CONTEXT.browser("c".repeat(64)) } as const;
 const apps: App[] = [];
 afterEach(() => {
 	for (const app of apps.splice(0)) app.close();
@@ -38,15 +40,17 @@ function instance(): { app: App; advance: (ms: number) => void } {
 
 test("a challenge is found for the purpose it was issued for, with the relying party it was issued under, until its time runs out", () => {
 	const { app, advance } = instance();
-	const signIn = issueChallenge(app, { purpose: "sign-in" }, PARTY);
-	const register = issueChallenge(app, { purpose: "register", userHandle: "aGFuZGxl" }, PARTY);
+	const signIn = issueChallenge(app, SIGN_IN, PARTY);
+	const begun = { purpose: "register", userHandle: "aGFuZGxl", context: CONTEXT.session("5".repeat(64)) } as const;
+	const register = issueChallenge(app, begun, PARTY);
 	expect(signIn).toMatch(/^[A-Za-z0-9_-]{43}$/);
 	expect(signIn).not.toBe(register);
 	expect(findChallenge(app, signIn, "sign-in")).toEqual({
-		ceremony: { purpose: "sign-in" },
+		ceremony: SIGN_IN,
 		expected: { challenge: signIn, origin: "https://mainworthy.example", rpId: "mainworthy.example" },
 	});
-	expect(findChallenge(app, register, "register")?.ceremony).toEqual({ purpose: "register", userHandle: "aGFuZGxl" });
+	// What is found says where the ceremony began, for the caller to compare with where the answer comes from.
+	expect(findChallenge(app, register, "register")?.ceremony).toEqual(begun);
 	// Neither answers the other ceremony, and a text the server never issued answers none.
 	expect(findChallenge(app, signIn, "register")).toBeNull();
 	expect(findChallenge(app, register, "sign-in")).toBeNull();
@@ -63,7 +67,7 @@ test("a challenge is found for the purpose it was issued for, with the relying p
 test("a spent challenge answers nothing again, and another instance's challenge is not this one's", () => {
 	const { app } = instance();
 	const other = instance().app;
-	const challenge = issueChallenge(app, { purpose: "sign-in" }, PARTY);
+	const challenge = issueChallenge(app, SIGN_IN, PARTY);
 	expect(findChallenge(other, challenge, "sign-in")).toBeNull();
 	spendChallenge(other, challenge);
 	expect(findChallenge(app, challenge, "sign-in")).not.toBeNull();
@@ -71,8 +75,8 @@ test("a spent challenge answers nothing again, and another instance's challenge 
 	expect(findChallenge(app, challenge, "sign-in")).toBeNull();
 	spendChallenge(app, challenge);
 	// Clearing ends every ceremony of the instance it is asked of, and of no other.
-	const kept = issueChallenge(other, { purpose: "sign-in" }, PARTY);
-	const gone = [issueChallenge(app, { purpose: "sign-in" }, PARTY), issueChallenge(app, { purpose: "sign-in" }, PARTY)];
+	const kept = issueChallenge(other, SIGN_IN, PARTY);
+	const gone = [issueChallenge(app, SIGN_IN, PARTY), issueChallenge(app, SIGN_IN, PARTY)];
 	clearChallenges(app);
 	expect(gone.map((one) => findChallenge(app, one, "sign-in"))).toEqual([null, null]);
 	expect(findChallenge(other, kept, "sign-in")).not.toBeNull();
@@ -80,28 +84,32 @@ test("a spent challenge answers nothing again, and another instance's challenge 
 
 test("the challenges under way are bounded: past ten thousand the ones whose time ran out go first, then the oldest", () => {
 	const { app, advance } = instance();
-	const first = issueChallenge(app, { purpose: "sign-in" }, PARTY);
-	const second = issueChallenge(app, { purpose: "sign-in" }, PARTY);
-	for (let i = 2; i < 10_000; i++) issueChallenge(app, { purpose: "sign-in" }, PARTY);
+	const first = issueChallenge(app, SIGN_IN, PARTY);
+	const second = issueChallenge(app, SIGN_IN, PARTY);
+	for (let i = 2; i < 10_000; i++) issueChallenge(app, SIGN_IN, PARTY);
 	expect([first, second].map((one) => findChallenge(app, one, "sign-in") !== null)).toEqual([true, true]);
 	// The ten-thousand-and-first pushes the oldest out, and only that one.
-	const next = issueChallenge(app, { purpose: "sign-in" }, PARTY);
+	const next = issueChallenge(app, SIGN_IN, PARTY);
 	expect([first, second, next].map((one) => findChallenge(app, one, "sign-in") !== null)).toEqual([false, true, true]);
 	// When time has run out for all of them, one new challenge clears the lot and stands alone.
 	advance(CEREMONY_MS);
-	const fresh = issueChallenge(app, { purpose: "sign-in" }, PARTY);
+	const fresh = issueChallenge(app, SIGN_IN, PARTY);
 	advance(CEREMONY_MS - 1);
 	expect(findChallenge(app, fresh, "sign-in")).not.toBeNull();
 	// Ten thousand more fit beside it before it is the oldest.
-	for (let i = 1; i < 10_000; i++) issueChallenge(app, { purpose: "sign-in" }, PARTY);
+	for (let i = 1; i < 10_000; i++) issueChallenge(app, SIGN_IN, PARTY);
 	expect(findChallenge(app, fresh, "sign-in")).not.toBeNull();
-	issueChallenge(app, { purpose: "sign-in" }, PARTY);
+	issueChallenge(app, SIGN_IN, PARTY);
 	expect(findChallenge(app, fresh, "sign-in")).toBeNull();
 });
 
 test("the challenge an answer names is read from its client data, and anything else names none", () => {
 	const encoded = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString("base64url");
-	expect(challengeOf({ clientDataJSON: encoded({ type: "webauthn.get", challenge: "abc", origin: "x" }) })).toBe("abc");
+	const data = { type: "webauthn.get", challenge: "abc", origin: "x" };
+	expect(challengeOf({ clientDataJSON: encoded(data) })).toBe("abc");
+	// One leading byte-order mark is dropped, as the verifier drops it when it reads the same bytes.
+	const marked = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(JSON.stringify(data))]);
+	expect(challengeOf({ clientDataJSON: marked.toString("base64url") })).toBe("abc");
 	for (const answer of [
 		null,
 		"text",
@@ -115,7 +123,11 @@ test("the challenge an answer names is read from its client data, and anything e
 		{ clientDataJSON: encoded(null) },
 		{ clientDataJSON: encoded({ type: "webauthn.get" }) },
 		{ clientDataJSON: encoded({ challenge: 7 }) },
-		{ clientDataJSON: encoded({ challenge: "x".repeat(9000) }) },
+		{ clientDataJSON: encoded({ challenge: "abc" }) },
+		{ clientDataJSON: encoded({ ...data, challenge: "x".repeat(9000) }) },
+		// Not UTF-8, and base64 with padding, which is not the one spelling the verifier takes.
+		{ clientDataJSON: Buffer.from([0xff, 0xfe, 0x7b, 0x7d]).toString("base64url") },
+		{ clientDataJSON: `${encoded(data)}=` },
 	])
 		expect(challengeOf(answer)).toBeNull();
 });

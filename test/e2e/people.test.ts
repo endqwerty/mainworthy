@@ -124,8 +124,15 @@ test.skipIf(!browserAvailable)(
 			expect((await send(page, "/api/logout", {})).status).toBe(200);
 			expect((await send(page, "/api/session")).status).toBe(401);
 			const offered = resultOf<{ passkey: { challenge: string } }>(await send(page, "/api/login/challenge", {}));
+			// The challenge came with a cookie that ties it to this browser. The page cannot read it, sends it back
+			// by itself with a plain same-origin request, and has it taken away again with the answer's reply.
+			const ceremony = async () =>
+				(await browser?.context.cookies())?.filter((cookie) => cookie.name === "mainworthy_ceremony") ?? [];
+			expect(await ceremony()).toMatchObject([{ httpOnly: true, sameSite: "Strict", path: "/" }]);
+			expect(await page.evaluate(() => document.cookie)).not.toContain("mainworthy_ceremony");
 			const answer = await assert(page, offered.passkey);
 			expect((await send(page, "/api/login", { passkey: answer })).status).toBe(200);
+			expect(await ceremony()).toEqual([]);
 			const second = resultOf<{ actor: string; session: number }>(await send(page, "/api/session"));
 			expect(second.actor).toBe("sam");
 			expect(second.session).not.toBe(first.session);

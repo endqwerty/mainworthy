@@ -5,18 +5,36 @@
 // is handed comes from here: the challenge the server made, what it was made for, and the origin and RP ID it
 // was made under. A challenge is found by an answer and spent by the commit that the answer leads to, so of
 // two answers to one challenge only one stores a passkey or opens a session.
+//
+// A challenge also remembers where its ceremony began (`Ceremony.context`), and whoever completes it shows the
+// same: a signed answer is then good only in the browser, the session or for the invitation that asked for it.
 import type { App } from "../kernel/app.ts";
 import { CEREMONY_MS, type Challenge, type Expected, newChallenge, type RelyingParty } from "./webauthn.ts";
 
-/** What a challenge was issued for. An answer to one is no answer to the other. */
+/**
+ * Where a ceremony began, as one text that only the same place makes again. Each holds the SHA-256 of a secret
+ * and never a row's number: an import gives a number to another row, and a hash goes with what it is of.
+ */
+export const CONTEXT = {
+	/** A browser nobody is signed in on, known by the ceremony cookie set with the challenge: the cookie's hash. */
+	browser: (cookieHash: string): string => `browser ${cookieHash}`,
+	/** A signed-in browser's session: the hash of its session cookie, which is what its row stores. */
+	session: (sessionHash: string): string => `session ${sessionHash}`,
+	/** The owner of the machine in local mode, who has no session: every such request is that one person. */
+	local: "local",
+	/** An invitation: the hash of its code. */
+	invitation: (codeHash: string): string => `invitation ${codeHash}`,
+} as const;
+
+/** What a challenge was issued for, and where. An answer to one is no answer to the other. */
 export type Ceremony =
 	/**
 	 * A new passkey for one person, named by the handle their passkeys are filed under and not by the number of
 	 * their row: an import gives the numbers to other people, and the handle goes with the person.
 	 */
-	| { readonly purpose: "register"; readonly userHandle: string }
+	| { readonly purpose: "register"; readonly userHandle: string; readonly context: string }
 	/** A sign-in by whoever holds a passkey of this instance. It names nobody. */
-	| { readonly purpose: "sign-in" };
+	| { readonly purpose: "sign-in"; readonly context: string };
 
 type Kept = { readonly ceremony: Ceremony; readonly expected: Expected; readonly deadline: number };
 
@@ -60,8 +78,10 @@ export function issueChallenge(app: App, ceremony: Ceremony, party: RelyingParty
 
 /**
  * What the verifier must hold an answer to, when `challenge` is one this server issued for this purpose and
- * its time has not run out; else null. `challenge` is what the answer says it answers, so it is only a key
- * here: everything in the result is the server's own record. Finding a challenge does not spend it.
+ * its time has not run out; else null. `challenge` is what the answer says it answers (`challengeOf` in
+ * `webauthn.ts` reads it as the verifier does), so it is only a key here: everything in the result is the
+ * server's own record. Finding a challenge does not spend it. Whether the answer comes from where the
+ * ceremony began is the caller's to compare (`ceremony.context`), each time it finds one.
  */
 export function findChallenge<P extends Ceremony["purpose"]>(
 	app: App,
@@ -93,22 +113,4 @@ export function spendChallenge(app: App, challenge: string): void {
  */
 export function clearChallenges(app: App): void {
 	kept.delete(app);
-}
-
-/**
- * The challenge an answer says it answers: the `challenge` member of its `clientDataJSON`, or null when there
- * is none to read. Used to find the server's record and for nothing else; the verifier compares the two again.
- */
-export function challengeOf(answer: unknown): string | null {
-	if (typeof answer !== "object" || answer === null || !("clientDataJSON" in answer)) return null;
-	const encoded = answer.clientDataJSON;
-	// A browser's client data is a few hundred bytes. Nothing longer is decoded to look for a key.
-	if (typeof encoded !== "string" || encoded.length > 8192) return null;
-	try {
-		const data: unknown = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
-		if (typeof data !== "object" || data === null || !("challenge" in data)) return null;
-		return typeof data.challenge === "string" ? data.challenge : null;
-	} catch {
-		return null;
-	}
 }

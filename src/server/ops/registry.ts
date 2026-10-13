@@ -71,6 +71,13 @@ export type InstanceCtx = {
 	 * the current one. The cookie itself never reaches an operation.
 	 */
 	session: number | null;
+	/**
+	 * Where the caller is signed in, as an opaque text that is the same for every request of one browser
+	 * session and differs for every other (`Session.context` in the identity module), or null for a token and
+	 * for no request at all. An operation that begins something another request finishes keeps it, and
+	 * compares it: a passkey registration is finished where it was begun.
+	 */
+	context: string | null;
 };
 
 // biome-ignore lint/suspicious/noExplicitAny: the registry holds operations of every input and output type; each is typed where it is declared.
@@ -124,6 +131,8 @@ export type Call = {
 	 * operation runs, after its wait at the gate, as `actor` is: an id is given to another row after an import.
 	 */
 	session?: () => number | null;
+	/** Where the caller is signed in, as it stands when it is asked, or null (see `InstanceCtx`). */
+	context?: () => string | null;
 };
 
 /**
@@ -187,7 +196,13 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 
 	try {
 		if (op.scope === "instance") {
-			const env: InstanceCtx = { app, actor, now: app.now(), session: call.session?.() ?? null };
+			const env: InstanceCtx = {
+				app,
+				actor,
+				now: app.now(),
+				session: call.session?.() ?? null,
+				context: call.context?.() ?? null,
+			};
 			if (!writing) return { ok: true, result: app.reader.snapshot(() => op.run(env, input)), seq: null };
 			const result = app.db.transaction(() => {
 				const prior = cmd ? findCommand(app.db, cmd) : null;
