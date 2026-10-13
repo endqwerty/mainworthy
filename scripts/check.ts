@@ -4,11 +4,11 @@
 //
 //   bun scripts/check.ts                      everything (`bun run check`)
 //   bun scripts/check.ts test                 the tests only, output as it comes (`bun run test`)
-//   bun scripts/check.ts test --shard=2/5     one share of the parallel phase
+//   bun scripts/check.ts test --shard=2/6     one share of the parallel phase
 //   bun scripts/check.ts test --only=quiet    one phase: parallel or quiet
 //   bun scripts/check.ts test --workers=4     that many workers in the parallel phase
 //   bun scripts/check.ts test --update-timings     record scripts/test-timings.json: every file alone, six minutes
-//   bun scripts/check.ts test --only=parallel --shard=2/5 --junit=test-results/tests-2.xml     a CI shard
+//   bun scripts/check.ts test --only=parallel --shard=2/6 --junit=test-results/tests-2.xml     a CI shard
 //
 // One file is `bun test <file>`; this is for the whole suite.
 import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";

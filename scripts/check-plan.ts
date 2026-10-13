@@ -72,12 +72,16 @@ export const REFERENCE_THREADS = 16;
 export const SHARED_CORES = 2;
 
 /** The shards the workflow splits the parallel phase into; `.github/workflows/check.yml` lists as many. */
-export const CI_SHARDS = 5;
+export const CI_SHARDS = 6;
 
 /**
  * Seconds the tests of one CI shard may take. Not measured on GitHub's runner yet: the suite took 716 s there in
  * one job, which is about 125 s for each of five shards and 100 s for the quiet one. Set from the first pushed
  * runs; until then these only catch a shard that takes twice what is expected. A shard has ten minutes in all.
+ *
+ * Measured since (2026-10-13): with five shards the slowest, which holds most of the browser files, took 176 to
+ * 215 s on `main` and 234 to 258 s once the sign-in pages' browser tests were added, so the gate passed or failed
+ * by the runner it drew. Six shards bring it back under the limit. The limits are the owner's to change.
  */
 export const CI_SHARD_LIMITS: Limits = { warn: 180, fail: 240 };
 
