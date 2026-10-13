@@ -9,6 +9,12 @@ You need the `mainworthy` command. From the source tree, `bun run build` makes i
 one file, `dist/mainworthy`, and `bun src/cli/main.ts` is the same command without a
 build. See [configuration](./configuration.md#build-the-single-executable).
 
+To run the server from the source tree, use `bun run start` in place of
+`mainworthy serve`. It serves the same web UI as the executable. `bun src/cli/main.ts serve`
+by itself, and `bun run dev`, serve the web UI as a development bundle that reloads when
+the code changes, under a looser page policy: that is for working on Mainworthy, not for
+using it.
+
 This tutorial uses a fresh temporary data directory and port `7701`, so it does not
 touch an instance you already run. Run the commands in a shell on your own machine.
 
