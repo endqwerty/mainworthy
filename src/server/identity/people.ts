@@ -731,7 +731,10 @@ export type Accepted = Entry | { ok: false; why: "other-session"; signedInAs: st
  * theirs: until it is accepted nothing of theirs changes, so a link that is never used locks nobody out.
  *
  * `browser` is the session cookie the request carried, if any. When it signs in somebody else, the invitation
- * is accepted only with `replace`, and that other session ends in the same transaction: the page asked first.
+ * is accepted only when `replace` is that person's name, and that session ends in the same transaction: the
+ * page asked about them first. A yes about one person ends no other person's session: who the browser holds
+ * is asked again in the commit, and the answer names whoever that is now, so the page can ask again. With no
+ * session, or the invited person's own, `replace` ends nothing.
  * The new session rests on the passkey when there is one, else on the password.
  */
 export async function acceptInvitation(
@@ -741,7 +744,7 @@ export async function acceptInvitation(
 		password: string | undefined;
 		passkey: unknown;
 		label: string | undefined;
-		replace: boolean;
+		replace: string | null;
 		browser: string | null;
 	},
 	about: About,
@@ -763,9 +766,17 @@ export async function acceptInvitation(
 	// A code that accepts nothing is a wrong guess at one, and is counted. A good code with a passkey that was
 	// not accepted is somebody who holds the invitation, and is not.
 	if (!first.ok) return first.why === "invitation" ? attempt.wrong(first) : first;
-	const other = input.browser === null ? null : holderOf(app, input.browser);
-	if (other && other.id !== first.person.id && !input.replace)
-		return { ok: false, why: "other-session", signedInAs: other.name };
+	// Somebody other than `person` whom the browser's cookie signs in now, and whether the page said their name.
+	// Nothing of this is carried over the wait at the gate: it is asked here, and asked again in the commit.
+	const elsewhere = (person: { id: number }): { name: string; agreed: boolean } | null => {
+		const holder = input.browser === null ? null : holderOf(app, input.browser);
+		return holder && holder.id !== person.id ? { name: holder.name, agreed: input.replace === holder.name } : null;
+	};
+	const unasked = (held: { name: string; agreed: boolean } | null): Accepted | null =>
+		held && !held.agreed ? { ok: false, why: "other-session", signedInAs: held.name } : null;
+	// Said before a password is hashed for an acceptance that cannot go through as it stands.
+	const early = unasked(elsewhere(first.person));
+	if (early) return early;
 	about.proven?.();
 	let passwordHash: string | null = null;
 	try {
@@ -775,10 +786,15 @@ export async function acceptInvitation(
 		throw error;
 	}
 	const cookie = newSessionSecret();
-	return commit(app, () => {
+	return commit(app, (): Accepted => {
 		const now = judge(app.db);
 		if (!now.ok) return now;
 		const { invitation, person, registration } = now;
+		// Who the browser holds, on committed rows and before anything is written: nothing else writes while this
+		// holds the gate. The name is the one that person has now.
+		const held = elsewhere(person);
+		const refused = unasked(held);
+		if (refused) return refused;
 		const at = app.now();
 		// By the hash of its code, and only while it is still good: of two acceptances one finds it spent.
 		if (!spendInvitation(app.db, hash, at)) throw new Stop(no("invitation"));
@@ -801,8 +817,8 @@ export async function acceptInvitation(
 		if (!opened) throw new Stop(no("changed-meanwhile"));
 		// What was just stored signed its person in, and says so: a list does not call it "never used".
 		for (const row of liveCredentials(app.db, person.id)) noteCredentialUse(app.db, row.id, at);
-		// The browser was somebody else's until now. That session ends as a sign-out does.
-		if (input.browser !== null && other && other.id !== person.id) endSession(app, hashOf(input.browser), "signed-out");
+		// The browser was somebody else's until now, and the page said whose. That session ends as a sign-out does.
+		if (input.browser !== null && held) endSession(app, hashOf(input.browser), "signed-out");
 		if (registration) spendChallenge(app, registration.challenge);
 		return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } } as const;
 	});

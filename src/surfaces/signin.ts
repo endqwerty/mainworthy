@@ -84,8 +84,14 @@ const WithInvitation = z.strictObject({
 	password: z.string().max(4096).optional(),
 	passkey: z.record(z.string(), z.unknown()).optional(),
 	label: z.string().trim().min(1).max(60).optional(),
-	replace: z.boolean().optional(),
+	// Judged where the body is, so that a bare yes is told what to send and is not answered as a wrong proof.
+	replace: z.unknown().optional(),
 });
+/**
+ * Who the page asked about before it went on: the name of the person the browser was signed in as. A yes that
+ * names nobody could end the session of somebody the page never asked about, so it is not taken.
+ */
+const Replace = z.string().min(1).max(64);
 const Challenge = z.union([z.strictObject({}), z.strictObject({ invitation: z.string().min(1).max(128) })]);
 const NewPassword = z.strictObject({ current: z.string().min(1).max(512).optional(), next: z.string().max(4096) });
 
@@ -142,17 +148,23 @@ export function signInRoutes(app: App, tools: Tools) {
 				about,
 			);
 		} else if (withInvitation.success) {
-			const { invitation, password, passkey, label, replace } = withInvitation.data;
+			const { invitation, password, passkey, label } = withInvitation.data;
+			const replace = withInvitation.data.replace === undefined ? null : Replace.safeParse(withInvitation.data.replace);
 			// What is wrong with the request itself is said before the invitation is looked at, so it says nothing
 			// about the invitation.
 			if (password === undefined && passkey === undefined)
 				return failed("invalid", "accepting an invitation needs a password, a passkey or both");
 			const why = password === undefined ? null : whyNotPassword(password);
 			if (why) return failed("invalid", why);
+			if (replace && !replace.success)
+				return failed(
+					"invalid",
+					"replace: the name of the person this browser is signed in as, the one the page asked about",
+				);
 			if (passkey !== undefined && !publicAddress(app.config)) return passkeysOff();
 			entry = await acceptInvitation(
 				app,
-				{ code: invitation, password, passkey, label, replace: replace ?? false, browser: tools.cookieOf(req) },
+				{ code: invitation, password, passkey, label, replace: replace?.data ?? null, browser: tools.cookieOf(req) },
 				about,
 			);
 		} else return refused("input");
@@ -162,7 +174,7 @@ export function signInRoutes(app: App, tools: Tools) {
 		if (entry.why === "other-session") {
 			return failed(
 				"conflict",
-				`this browser is signed in as ${entry.signedInAs}, and the invitation is for somebody else. Send replace: true to sign ${entry.signedInAs} out of this browser and accept it`,
+				`this browser is signed in as ${entry.signedInAs}, and the invitation is for somebody else. Send replace: "${entry.signedInAs}" to sign ${entry.signedInAs} out of this browser and accept it`,
 				{ signedInAs: entry.signedInAs },
 			);
 		}
