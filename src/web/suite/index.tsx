@@ -156,6 +156,74 @@ export function SuiteScreen() {
 		},
 		[project, mayWrite, writeOwnedDraft, draftStored, setStatus],
 	);
+	/**
+	 * The page holds these rows of a case from now on, unless it holds a later version already. Three paths call
+	 * this, each in the step in which a draft leaves the pane: a card whose merge the server recorded
+	 * (`endMergedCard`), a card answered by a merge from elsewhere that holds all of its text (`settleAnswered`),
+	 * and a draft another window removed (`endFollowed`). From then on the pane shows the case the page holds, and
+	 * `e` opens the editor on it. What the page held until then may be from before the write. The read that
+	 * `invalidateProject` starts in the same step replaces any read still on its way.
+	 */
+	const holdCase = useCallback(
+		({ ref, rows }: { ref: string; rows: Api["get"]["reply"] }): void => {
+			queryClient.setQueryData<Api["get"]["reply"]>(queryKey({ project, op: "get", input: { refs: [ref] } }), (held) =>
+				caseHeld({ held, read: rows }),
+			);
+		},
+		[project],
+	);
+	/**
+	 * The draft this tab still shows although another window removed it, and whether `endFollowed` has a read of
+	 * its case on the way. While it is the draft in the pane, nothing here changes it or writes it back.
+	 */
+	const gone = useRef<{ draft: Draft; reading: boolean } | null>(null);
+	/**
+	 * Another window removed the draft this tab shows: it recorded it, settled its conflict or dropped it. This
+	 * tab has no reply that names a version, so it reads the case as it is now. That read began after the draft
+	 * was removed, so it holds what was recorded or something later. Until the page holds it the draft stays in
+	 * the pane as it was, with its card: the case the page holds may be from before, and `e` would open the editor
+	 * on it (issue #94). A read that fails leaves the draft there, and the status line says so. `e`, "Take over
+	 * here" and a later storage event for the draft read again.
+	 */
+	const endFollowed = useCallback(
+		async (ended: Draft): Promise<void> => {
+			const ref = ended.ref;
+			if (ref === null || draftRef.current !== ended) return;
+			if (gone.current?.draft === ended && gone.current.reading) return;
+			const state = { draft: ended, reading: true };
+			gone.current = state;
+			const what = ended.conflict ? "Conflict resolved in another window." : "The draft ended in another window.";
+			setStatus(`${what} Reading the recorded version…`);
+			let rows: Api["get"]["reply"] | null = null;
+			let failure = "";
+			try {
+				rows = await call("get", { refs: [ref] }, { project, owner });
+			} catch (error) {
+				failure = error instanceof Error ? error.message : "no reply";
+			}
+			state.reading = false;
+			if (!sessionCurrent(owner)) return;
+			if (rows) holdCase({ ref, rows });
+			// The tab moved on meanwhile: to another case, or to a draft of this one that was stored again.
+			if (draftRef.current !== ended || readDraft({ project, id: ended.id })) {
+				if (gone.current === state) gone.current = null;
+				return;
+			}
+			if (!rows) {
+				setStatus(
+					`${what} The case could not be read (${failure}), so this stays as it was. Press e or choose "Take over here" to read it again.`,
+				);
+				return;
+			}
+			gone.current = null;
+			liveDrafts.current.delete(ended.id);
+			draftRef.current = null;
+			setDraftState(null);
+			setStatus(`${what} The recorded version is shown.`);
+			void invalidateProject(project);
+		},
+		[project, owner, holdCase, setStatus],
+	);
 	useEffect(() => {
 		const changed = (event: StorageEvent): void => {
 			if (!sessionCurrent(owner) || (event.key !== null && !event.key.startsWith(draftKey({ project, id: "" }))))
@@ -164,6 +232,10 @@ export function SuiteScreen() {
 			const current = draftRef.current;
 			if (!current || (event.key !== null && event.key !== draftKey({ project, id: current.id }))) return;
 			const saved = readDraft({ project, id: current.id });
+			if (!saved && current.ref !== null) {
+				void endFollowed(current);
+				return;
+			}
 			if (saved) liveDrafts.current.set(saved.id, saved);
 			else liveDrafts.current.delete(current.id);
 			draftRef.current = saved;
@@ -182,7 +254,7 @@ export function SuiteScreen() {
 		};
 		window.addEventListener("storage", changed);
 		return () => window.removeEventListener("storage", changed);
-	}, [project, owner, windowId, setStatus]);
+	}, [project, owner, windowId, endFollowed, setStatus]);
 	const conflictQuestion = useQueryOp({
 		project,
 		op: "get",
@@ -316,8 +388,15 @@ export function SuiteScreen() {
 			target.setSelectionRange(next.caret.start, next.caret.end);
 		}
 	}
+	/** The draft in the pane, when another window removed it and the case has not been read since (`endFollowed`). */
+	function endingDraft(): Draft | null {
+		const ended = gone.current?.draft;
+		return ended && ended === draftRef.current ? ended : null;
+	}
 	function change(next: Draft, focus = false): void {
 		if (!sessionCurrent(owner)) return;
+		// Another window's draft that it removed is not stored again from here. The person's own text still is.
+		if (endingDraft()?.id === next.id && next.owner !== windowId) return;
 		const prior = draftRef.current;
 		const contentChanged =
 			prior &&
@@ -464,20 +543,6 @@ export function SuiteScreen() {
 		[cardDraft, storeConflict],
 	);
 	/**
-	 * The page holds these rows of a case from now on, unless it holds a later version already. A card that ends
-	 * calls this in the step in which its draft goes: from then on the pane shows the case the page holds, and
-	 * `e` opens the editor on it. What the page held until then was read before the card's question was answered.
-	 * The read that `invalidateProject` starts in the same step replaces any read still on its way.
-	 */
-	const holdCase = useCallback(
-		({ ref, rows }: { ref: string; rows: Api["get"]["reply"] }): void => {
-			queryClient.setQueryData<Api["get"]["reply"]>(queryKey({ project, op: "get", input: { refs: [ref] } }), (held) =>
-				caseHeld({ held, read: rows }),
-			);
-		},
-		[project],
-	);
-	/**
 	 * Ends a card whose merge the server recorded: as `version`, or with no version of its own (null). Text
 	 * later than that merge stays as a draft (`draftAfterMerge`); with none, the draft is done.
 	 */
@@ -497,15 +562,20 @@ export function SuiteScreen() {
 				const card = cardDraft(state);
 				return card && draftAfterMerge({ ...card, sent, recorded });
 			};
-			// The version the merge made is read before the card ends, with later text to carry onto it or without:
-			// the reply names the version and not its text, and the case the page holds is from before the merge
-			// (issue #94).
-			const rows = version !== null ? await call("get", { refs: [state.ref], version }, { project, owner }) : null;
-			const view = rows && CaseView.parse(rows[0]);
+			// The case is read before the card ends, with later text to carry or without: the reply names a version
+			// and not its text, and the case the page holds may be from before the merge (issue #94). A merge that
+			// made a version is read at that version. One that made none (the head held its text already, or it
+			// waits for a person) is read as it is now, which is the version the card was shown against or a later one.
+			const rows = await call(
+				"get",
+				{ refs: [state.ref], ...(version !== null ? { version } : {}) },
+				{ project, owner },
+			);
+			const view = version !== null ? CaseView.parse(rows[0]) : null;
 			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
 			const next = left(view && { version: view.version, body: bodyOf(view), tags: view.tags, covers: view.covers });
 			if (next === undefined) return;
-			if (rows) holdCase({ ref: state.ref, rows });
+			holdCase({ ref: state.ref, rows });
 			if (next === null) dropDraft(state.draftId);
 			else if (!putDraft(next)) return;
 			uncertainMerges.current.delete(state.q);
@@ -703,6 +773,7 @@ export function SuiteScreen() {
 	async function sealDraft({ keepalive = false, saved }: { keepalive?: boolean; saved?: Draft } = {}): Promise<void> {
 		const snapshot = saved ?? draftRef.current;
 		if (!sessionCurrent(owner)) return;
+		if (snapshot && snapshot === endingDraft() && snapshot.owner !== windowId) return;
 		if (!snapshot || !mayWrite(snapshot.id, !snapshot.dirty || !draftStored) || dropEmpty(snapshot)) return;
 		if (snapshot.ref && readDraft({ project, id: snapshot.id })?.conflict) return;
 		if (!snapshot.dirty) {
@@ -1119,6 +1190,11 @@ export function SuiteScreen() {
 			firstStep({ draft: draftRef.current, change });
 			return;
 		}
+		const ended = endingDraft();
+		if (ended) {
+			void endFollowed(ended);
+			return;
+		}
 		if (!view) return;
 		const saved = readDraft({ project, id: view.ref });
 		const next = ownedDraft(saved ?? (draftRef.current?.ref === view.ref ? draftRef.current : editDraft(view)));
@@ -1130,7 +1206,12 @@ export function SuiteScreen() {
 	function takeOver(): void {
 		const id = draftRef.current?.id ?? conflict?.draftId;
 		const saved = id ? readDraft({ project, id }) : null;
-		if (!saved) return;
+		if (!saved) {
+			// Nothing is stored to take over. If the draft shown was removed elsewhere, the case is read again.
+			const ended = endingDraft();
+			if (ended) void endFollowed(ended);
+			return;
+		}
 		const next = claimDraft({ project, draft: saved, takeOver: true });
 		followDraft(next);
 		setStatus(next.conflict ? conflictEditorStatus : "Continue editing here. Your draft is kept on this device.");
