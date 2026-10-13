@@ -119,9 +119,23 @@ There is no shorter command for it. See [API](./api.md).
 
 A person can sign in with their name and a password, or with a passkey, and needs no token for it. Mainworthy sends no mail and nobody chooses a password for somebody else, so a person gets their first way in through a link that an admin hands them.
 
-> The web UI does not show any of this yet. Its sign-in page takes a token, and it has no page for an invitation link and no list of your sessions. Those pages come with the next change to the web UI. Until then, do what this section describes from the command line and the API.
+Each step below is in the web UI, under Settings, and has a command that does the same for a script.
 
 ### Invite a person
+
+In Settings, open People. You see it when you are a person who holds `admin` on every project.
+
+1. Type the person's name. <kbd>n</kbd> puts the caret in the field.
+2. Tick what they may do. It starts as `read`, `record`, `produce`, `answer` and `plan`. `admin` starts unticked: tick it only for somebody who should change the policy, and on every project also invite people, make tokens and projects and change what others may do.
+3. Choose one project, or every project.
+4. Choose how long the link works, from 12 hours to 30 days. Three days is the start.
+5. Press "Make invitation link".
+
+The link appears once, masked, with "Copy link". Copy it and hand it to the person. "Dismiss link" takes it off the page, and so does leaving the section. Nothing shows it again.
+
+"Open invitations" lists the links nobody has accepted yet: who each is for, what that person may do, who made it and when it runs out. "Revoke" withdraws one.
+
+The same from the command line:
 
 ```
 $ mainworthy invite new dana --can read,produce,answer --project checkout
@@ -138,27 +152,39 @@ This link is shown once. Hand it to dana: it works once.
 
 `mainworthy invite list` shows every invitation, who made it, whether it is open, used, revoked or expired, and what its person may do on which project. It never shows a link. `mainworthy invite revoke <id>` withdraws one that nobody has accepted.
 
-To accept, the person sends the code with a password, a passkey or both, to `POST /api/login`:
+### Accept an invitation
 
-```
-{"invitation": "<code>", "password": "<12 characters or more>"}
-```
+Open the link. The page says "You are invited as dana" and until when the link works.
 
-The reply signs that browser in. A password is 12 to 256 characters. Nothing else is asked of it: no digit, no capital letter, no symbol.
+1. Type a password twice. The page counts the characters as you type. A password is 12 to 256 characters, and nothing else is asked of it: no digit, no capital letter, no symbol.
+2. Or tick "Make a passkey on this device" and give the passkey a name. It starts as the name of your browser. You can do both.
+3. Press "Accept and sign in". You are signed in and the app opens.
+
+The page takes the code out of the address bar as soon as it has read it, so the code is not left in the tab's history. If you reload the page, it has no code: open the link again.
+
+If the browser is signed in as somebody else, the page says who and asks before it signs them out of that browser. "Stay signed in" leaves the invitation as it is.
+
+A link that was used, was revoked or has run out says "This invitation does not work any more." So does one that was cut short when it was copied. Ask whoever sent it for a new one.
+
+A script accepts an invitation with `POST /api/login`. [API](./api.md#sign-in-as-a-person) has the request.
 
 ### A name and a password, or a passkey
 
-After that the person signs in with `POST /api/login` and `{"name": "dana", "password": "..."}`. A name and a password that are looked at and refused get one answer whatever was wrong with them, `unauthenticated: that did not sign you in`. The reply does not say whether the name exists or the password was wrong. The server's log has the reason as a code, and never the name or the password that was tried.
+After that the person signs in on the sign-in page with their name and password, or with "Sign in with a passkey". A wrong name or password gets one sentence, whichever of the two was wrong: "That name and password did not sign you in." A wrong token and a passkey that is refused each have a sentence of their own, and after too many failed attempts the page says how long to wait instead. A script signs in with `POST /api/login` and `{"name": "dana", "password": "..."}`. A name and a password that are looked at and refused get one answer whatever was wrong with them, `unauthenticated: that did not sign you in`. The reply does not say whether the name exists or the password was wrong. The server's log has the reason as a code, and never the name or the password that was tried.
 
-A passkey is a key that a device or a password manager holds and unlocks with a fingerprint, a face or a PIN. It needs `MAINWORTHY_PUBLIC_URL`, because a passkey belongs to the host name people open the instance at. One made at `https://mainworthy.example` does not sign in at another name of the same instance. `GET /api/login/methods` says whether an instance has passkeys. [API](./api.md#sign-in-as-a-person) lists the requests a page makes to register and use one.
+A passkey is a key that a device or a password manager holds and unlocks with a fingerprint, a face or a PIN. It needs `MAINWORTHY_PUBLIC_URL`, because a passkey belongs to the host name people open the instance at. One made at `https://mainworthy.example` does not sign in at another name of the same instance. Without that variable the pages offer no passkey. [API](./api.md#sign-in-as-a-person) lists the requests a page makes to register and use one.
 
-To change a password, a signed-in browser sends `POST /api/account/password` with the current password and the new one. The other browsers that signed in with the old password are signed out. The one that made the change stays signed in. A token cannot change a password.
+To set or change your password, open Settings, "Your sign-in". <kbd>n</kbd> puts the caret in the new password. Changing a password asks for the current one. The other browsers that signed in with the old password are signed out, and the page says how many. The one that made the change stays signed in. A token cannot change a password.
+
+To add a passkey, give it a name under "Passkeys" in the same section and press "Add a passkey". "Ways you sign in" lists your password and each passkey with when it was last used, and "Remove" beside each. Your last way of signing in has no working "Remove".
 
 Failed attempts are counted. The fifth wrong password for one name within 15 minutes blocks sign-in with a password for that name for one second, from every address, and each further one doubles the wait, up to 15 minutes. A blocked sign-in is answered `limited` and is not looked at, so the right password waits too. A name nobody has is counted the same way, so the count does not say which names exist. A passkey is not held up by a block on the name. [Troubleshooting](./troubleshooting.md#limited-too-many-failed-attempts) says what to do.
 
 ### A lost password or passkey
 
-Invite the person again. For a person who exists, the link is a recovery:
+The sign-in page has no "forgot password", because there is no mail to send one by. A recovery link replaces it. In Settings, People, "People who sign in" lists each person. The owner sees "Recovery link" beside every person, and anybody else beside their own name. Press it, read what it replaces, and press "Make the recovery link". The link is shown once, as an invitation's is.
+
+From the command line, invite the person again. For a person who exists, the link is a recovery:
 
 ```
 $ mainworthy invite new dana
@@ -171,7 +197,9 @@ Nothing changes until the link is accepted, so a link nobody uses locks nobody o
 
 ### Your sessions and your ways of signing in
 
-A session is one browser that is signed in. List yours, and end one you no longer use:
+A session is one browser that is signed in. Settings, "Your sessions" lists yours: what opened each one and from which address, the browser as it named itself, when and from where it was last used, and when it ends at the latest. "this browser" marks the one you are looking at. "End" signs that browser out. On your own it is the same as signing out.
+
+A script lists them and ends one:
 
 ```
 $ mainworthy session --do list
@@ -215,15 +243,23 @@ A person who holds `admin` on every project can:
 - list somebody's password and passkeys with `mainworthy credential --do list --actor dana`, and remove one by its id, but not the last;
 - invite a new person, and list and revoke invitations.
 
-An admin cannot see or set anybody's password, and cannot register a passkey for somebody else. Only the owner makes a recovery link for another person. An agent that holds `admin` can do none of this.
+An admin cannot see or set anybody's password, and cannot register a passkey for somebody else. Only the owner makes a recovery link for another person. An agent that holds `admin` can do none of this. The first two are commands only: Settings shows your own sessions and ways of signing in, not somebody else's.
 
 ## Sign in to the web UI
 
 In local mode you sign in as the owner, with no step. See [configuration](./configuration.md#local-mode-and-server-mode) for what local mode means.
 
-In server mode the page asks "Sign in with your token". Paste a token and choose "Sign in". The server opens a session for that browser, and the browser keeps a cookie that names the session. The cookie is not the token: the browser does not hold the token after that.
+In server mode the sign-in page has three ways in, one under the other:
 
-A session ends after 14 days without use and after 90 days in any case. It also ends when the token you signed in with is revoked or reaches its end, when the password or passkey you signed in with is removed or replaced, and when your actor is forgotten. Each of these sends you back to the sign-in page. [Configuration](./configuration.md#variables-the-server-reads) says how to change the two lifetimes. The web UI has no sign-out button yet; `POST /api/logout` from the page's own origin ends the session.
+- Your name and password, then "Sign in".
+- "Sign in with a passkey", where the instance has passkeys and your browser has them. You type no name.
+- "Use a token": paste a token under "Sign in with your token" and press "Sign in with the token". This is how the owner signs in before anybody has a password, and how you try a token somebody handed you.
+
+The caret starts in the name, <kbd>Tab</kbd> goes down the page, and <kbd>↵</kbd> sends the form the caret is in. The server opens a session for that browser, and the browser keeps a cookie that names the session. The cookie is not the token or the password: the browser holds neither after that.
+
+To sign out, press "Sign out" at the bottom of the sidebar, or <kbd>g</kbd> <kbd>x</kbd>. That ends the session on the server, so a copy of the cookie stops working too. Text you typed and had not recorded stays in that browser under your name, and is there when you sign in again. In local mode there is nothing to sign out of, and no button.
+
+A session ends after 14 days without use and after 90 days in any case. It also ends when the token you signed in with is revoked or reaches its end, when the password or passkey you signed in with is removed or replaced, and when your actor is forgotten. Each of these sends you back to the sign-in page. [Configuration](./configuration.md#variables-the-server-reads) says how to change the two lifetimes.
 
 The owner's token comes from the server. If you set `MAINWORTHY_OWNER_TOKEN`, that value is the token. If you did not, the server prints one on its first start:
 
@@ -252,8 +288,11 @@ A pipeline with only `record` cannot read cases or the queue either. Add `read` 
 
 - Policy shows who answers under the current policy. See [policy](./policy.md).
 - Tokens makes, lists and revokes tokens. An admin sees the form, and anyone else sees "An admin creates and revokes tokens."
+- People invites a person, lists and revokes open invitations, and makes a recovery link. Only a person who holds `admin` on every project has this section.
 - Projects lists the projects you can reach and creates a new one.
 - Connect shows the pipeline and agent connection lines, with the address of this instance.
+- Your sign-in sets or changes your password and adds and removes passkeys. Only a person has this section.
+- Your sessions lists the browsers you are signed in on and ends any of them.
 
 Settings does not show grants. Use `mainworthy actor list` and `actor grant`.
 

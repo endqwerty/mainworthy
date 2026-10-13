@@ -19,6 +19,7 @@ Every key of the web UI, by screen. In the app, <kbd>?</kbd> lists the keys of t
 | <kbd>g</kbd> <kbd>c</kbd> | Go to Changes |
 | <kbd>g</kbd> <kbd>,</kbd> | Go to Settings |
 | <kbd>g</kbd> <kbd>d</kbd> | Docs for this screen. Opens the page about the screen you are on, in a new tab. |
+| <kbd>g</kbd> <kbd>x</kbd> | Sign out. Ends this browser's session and shows the sign-in page. It is there when you signed in, and not in local mode, where the owner of the machine needs no sign-in. |
 | <kbd>⌘</kbd> <kbd>K</kbd> | Jump to or run. Opens the palette: type a ref such as `C-12`, words from a case title, the name of an action, or `docs` and a word. |
 | <kbd>?</kbd> | All keys of the current screen |
 | <kbd>[</kbd> | Collapse / expand sidebar |
@@ -147,3 +148,19 @@ To say which step failed, type its number and then <kbd>f</kbd>. [Planned runs](
 | <kbd>k</kbd> | Previous setting |
 | <kbd>n</kbd> | New token, in the Tokens section |
 | <kbd>n</kbd> | New project, in the Projects section |
+| <kbd>n</kbd> | New invitation, in the People section: the caret goes to the person's name |
+| <kbd>n</kbd> | New password, in the Your sign-in section |
+
+Settings has no key that ends a session or removes a passkey: <kbd>Tab</kbd> reaches "End" and "Remove".
+
+## The sign-in page and an invitation
+
+These two pages open before you are signed in, so the keys above do not work on them. They are plain forms.
+
+| Key | What it does |
+| --- | --- |
+| <kbd>Tab</kbd> | Next field or button, in the order they are on the page |
+| <kbd>↵</kbd> | Sends the form the caret is in: sign in, or accept the invitation |
+| <kbd>Space</kbd> | Ticks "Make a passkey on this device" on an invitation, when the caret is on it |
+
+The caret starts in the name on the sign-in page and in the password on an invitation.

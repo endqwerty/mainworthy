@@ -24,8 +24,16 @@ Use anchors with `href`, preventDefault and navigate for accessible links.
 ## Calls and queries
 
 `call(op, input, {project, keepalive?, token?, url?, signal?})` from `lib/api.ts`
-is typed from core `Api`. `admin` uses `/api/admin`; others use the project.
-A failure throws `ApiError`; `unauthenticated` returns to sign-in. Keep input on device.
+is typed from core `Api`. The instance's operations (`INSTANCE_OPS` in core `api.ts`:
+`admin`, `session`, `credential`, `invitation`) use `/api/<op>`; others use the project.
+A failure throws `ApiError` with the server's `code`, `message`, `details` and HTTP `status`;
+`unauthenticated` returns to sign-in. Keep input on device.
+The routes that are not operations are in `lib/signin.ts`, one function each: sign-in in
+its four forms, the passkey challenge, the instance's methods, the password, sign-out.
+They go through `exchange` in `lib/api.ts`, which words a `limited` reply as the wait its
+`Retry-After` names ("Too many attempts. Try again in N seconds."), so every form says it alike.
+`lib/passkey.ts` runs the two passkey ceremonies. `lib/people.ts` reads the replies of
+`session`, `credential` and `invitation` into the core's row types.
 `useQueryOp({project, op, input, enabled?})` from `lib/data.ts` returns the
 TanStack query, including `data`, `error`, `refetch`, `isPending`.
 Parse generic row data with Zod at the screen boundary. Core schemas are shared.
@@ -40,6 +48,27 @@ restore the cache and call `setStatus(error.message)`, keeping the input.
 `optimisticWrite({key, update, write})` is available for a single cache; it
 cancels queries, snapshots, patches, rolls back on errors, and invalidates.
 For multiple caches or same-frame keyboard effects, patch manually before call.
+
+## Signing in and out
+
+`app.tsx` shows one of four things: the page of an invitation (`signin/invite.tsx`, at
+`/invite`, whoever is signed in), the sign-in page (`signin/index.tsx`), a connection
+error, or the workbench. Neither page is a screen: they render with no session, no
+project and no key registry, so they use plain forms. Enter submits, focus starts in the
+first field and Tab follows the order on the page.
+
+The sidebar's footer is the account area: who is signed in, and "Sign out" where the
+session is a browser's (`session.via === "cookie"`). `g x` signs out; the binding is
+registered only then, so the palette and the `?` sheet do not offer it in local mode.
+Signing out calls `/api/logout`, then `signedOut()` from `lib/api.ts`, which is also what
+a refused request does: the device session is suspended and the sign-in page is shown.
+
+Settings has three sections about signing in, each its own file in `settings/`: "Your
+sign-in" (`signin.tsx`, a person only), "Your sessions" (`sessions.tsx`) and "People"
+(`people.tsx`, an instance admin who is a person). Their lists use `useList` from
+`settings/list.ts`, which reads again each time the section opens. `n` goes to the
+section's first field: the new password, the invited person's name. A section's key is
+registered only for a caller who has the section.
 
 ## Device draft ownership
 
@@ -92,8 +121,13 @@ A screen that gains a section links to the page that explains it.
 ## Real-page test support
 
 `test/e2e/support.ts` exports `browserAvailable`, `startServer({cases?, mode?,
-preset?, seed?})`, `openPage(server, {path?, signedIn?, browser?})`,
+preset?, seed?, passkeys?})`, `openPage(server, {path?, signedIn?, as?, ready?, browser?})`,
 `launchBrowser()`, `paste(page,text)`, `keyCount(page)`, `eventually(read, accepts)`.
+`as: {name, password}` signs a person in instead of the owner. `ready` is the selector
+that shows a page is up when it is neither the app nor the sign-in page (`/invite`).
+`addAuthenticator(harness)` gives the page a virtual authenticator for passkeys; the
+server needs `passkeys: true` and the page `localhost`. `advanceClock(server, ms)` moves
+the server's clock forward.
 Server has `url`, `project`, `token`, `seeded`, `api(op,input,{token?})`, `stop()`.
 Page helper has `page`, `context`, `errors`, `dialogs`, `loads()`, `keys()`, `close()`.
 `keys()` is async. Use try/finally to close page and server. Skip if no Chromium.

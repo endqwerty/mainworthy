@@ -126,7 +126,7 @@ In server mode everything that reads or changes a project needs a token. These a
 | `/healthz` | Whether the server is up, its version, and the commit it runs when it was told |
 | `/docs` and the pages under it | This documentation, the same for every instance of a version |
 | `/api/openapi.json` | The description of the API, built from the list of operations |
-| `/` | The web UI's own files. The page then asks for a token. |
+| `/` | The web UI's own files. The page then asks you to sign in. `/invite`, the page an invitation link opens, is one of them. |
 
 `/api/login` opens a browser's session and sets its cookie, and `/api/logout` ends the session and clears the cookie. `/api/login/methods` says whether the instance has passkeys, and `/api/login/challenge` gives a browser what it needs to use one. Given the code of an invitation that is still open, it also says whose invitation it is and when it runs out, and nothing to anybody without the code. `/api/login`, `/api/logout` and `/api/login/challenge` refuse a request that a browser makes from another site's page. A request that names no site (a script, `curl`, the command line) is accepted on purpose: the check is against another site's page, and a script is none. `GET /api/login/methods` answers anybody. If nobody outside your network should see even these, keep the server off the public internet or put the proxy's own access control in front of it.
 

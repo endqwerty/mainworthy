@@ -43,6 +43,8 @@ Five wrong tokens came from your address, or five wrong tokens that begin as you
 
 A person's sign-in gets this message too. Five wrong passwords for one name within 15 minutes block sign-in with a password for that name, from every address, and five from one address block that address. The right password waits like a wrong one, so wait and then type it once. If you have a passkey, it still signs you in. Somebody who keeps guessing at your name can keep it blocked. A passkey is the way round that. Mainworthy keeps no log of requests, so where the guesses come from is in the proxy's log, if anywhere.
 
+In the web UI the sign-in page, an invitation and "Your sign-in" in Settings say "Too many attempts. Try again in N seconds." under what you tried, and keep what you typed. Nothing is sent again by itself: press the button after the wait.
+
 If everybody behind one proxy gets this message together, the server is counting the proxy as one address. Name the proxy with `MAINWORTHY_TRUSTED_PROXY` and `MAINWORTHY_CLIENT_ADDRESS_HEADER`: see [configuration](./configuration.md).
 
 ### `unauthenticated: a token is required`
@@ -69,9 +71,25 @@ One report may be at most 64 MB. Split the results into several `mainworthy repo
 
 ### The page sends me back to sign in
 
-A browser's session ends after 14 days without use and after 90 days in any case, and when the token you signed in with is revoked or the password or passkey you signed in with is removed or replaced. Changing your password signs out your other browsers that used the old one. Sign in again with a token that works. After an upgrade from a build in which the browser held the token itself, everyone signs in once more.
+A browser's session ends after 14 days without use and after 90 days in any case, and when the token you signed in with is revoked or the password or passkey you signed in with is removed or replaced. Changing your password signs out your other browsers that used the old one. Sign in again, with your password, your passkey or a token that works. After an upgrade from a build in which the browser held the token itself, everyone signs in once more.
 
 Your session belongs to someone else now, usually because another tab signed in with a different token. Mainworthy refuses the request instead of recording your text under their name. Sign in again. Your drafts are kept per person and are still there.
+
+### "This browser could not use a passkey here"
+
+A passkey belongs to one host name: the one in `MAINWORTHY_PUBLIC_URL`. The page was opened at another name of the same instance, such as an IP address, `127.0.0.1` in place of `localhost`, or a second name the proxy also answers at, and the browser refuses to make or use a passkey there. Open the instance at the address in that variable. If your browser has no passkeys at all, the page shows no passkey button. Sign in with your name and password, or a token.
+
+"No passkey was used: the request was cancelled or ran out of time" means the browser's own dialog was closed or left open too long. Press the button again. "This passkey is already registered" means the device already holds one of your passkeys for this instance.
+
+### "This invitation does not work any more"
+
+An invitation link works once and until the time it was made with, and a new invitation for the same person replaces the one before it. The page says the same for a link that was used, was revoked, has run out or was cut short when it was copied, and for all of them the way on is the same: ask whoever sent it for a new one. An admin makes it in Settings, People, or with `mainworthy invite new`.
+
+"This address holds no invitation" means the page was opened or reloaded without the part after the `#`. The page takes the code out of the address bar when it reads it. Open the link you were given again.
+
+### I lost my password or my passkey
+
+There is no "forgot password", because Mainworthy sends no mail. Ask the owner for a recovery link, or make one for yourself if you are still signed in somewhere and administer the instance: Settings, People, "Recovery link" beside your name. See [people, agents and pipelines](./access.md#a-lost-password-or-passkey).
 
 ### The token is not accepted behind a proxy
 

@@ -477,11 +477,20 @@ What you do once:
 - **Set `MAINWORTHY_PUBLIC_URL`** to the address people open the instance at, and start it again. For the
   instance on Coolify that is `https://mainworthy.com`; `compose.coolify.yaml` passes the variable on. Without
   it nobody can register a passkey and an invitation link has no host.
-- **Give yourself a password or a passkey**, if you want one beside the owner token:
-  `mainworthy invite new <your name>` as the owner prints a link for yourself. The owner token keeps working
+- **Give yourself a password or a passkey**, if you want one beside the owner token: sign in with the token,
+  open Settings, "Your sign-in", and set a password or add a passkey there. The owner token keeps working
   whatever else you sign in with, and the last one is still not revoked.
 
 ### Inviting a person
+
+The first person is invited by the owner. Sign in on the sign-in page under "Use a token" with the owner
+token, open Settings, "People", type the person's name, choose what they may do and on which project, and
+press "Make invitation link". The link is shown once, with a button that copies it; hand it to the person. The
+same section lists the open invitations with "Revoke" on each, and makes a recovery link for a person who
+exists. An instance with no `MAINWORTHY_PUBLIC_URL` gives a link that starts with the address you opened
+Settings at.
+
+The command line does the same:
 
 ```
 export MAINWORTHY_URL=https://mainworthy.example MAINWORTHY_TOKEN=<an admin's token>
@@ -498,21 +507,27 @@ mainworthy invite revoke 3
 - With no `--can`, a new person may do everything, as a new person's token may. `--project` limits the grant to
   one project.
 - Whoever administers and is a person invites a new person. An agent that holds `admin` invites nobody.
-- The person opens the link and chooses a password of 12 characters or more, registers a passkey, or both. The
-  page that takes the link is part of the web UI and arrives with the pull request after this one. Until then
-  an invitation is accepted with `POST /api/login` (`{ "invitation": "<code>", "password": "..." }`).
+- The person opens the link. The page says who the invitation is for and until when it works, and the person
+  chooses a password of 12 characters or more, makes a passkey, or both; that signs them in. The page takes the
+  code out of the address bar as soon as it has read it, so a reload of that page has no code: open the link
+  again. A browser that is signed in as somebody else is told who, and asked before that session is replaced.
+- A link that was used, revoked or has run out, and one that was cut short when it was copied, all get the same
+  sentence: the invitation does not work any more. Make a new one.
 
 ### A lost password or passkey
 
-`mainworthy invite new <name>` for a person who exists makes a recovery link. The owner makes one for anybody.
-An admin who is a person can make their own. Everybody else asks the owner: a person who does not administer
-makes no invitation, and another admin's word is not enough to become somebody. When the link is
+The sign-in page has no "forgot password": there is no mail to send one by. "Recovery link" beside a person in
+Settings, "People", or `mainworthy invite new <name>` for a person who exists, makes a recovery link. The owner
+makes one for anybody. An admin who is a person can make their own. Everybody else asks the owner: a person who
+does not administer makes no invitation, and another admin's word is not enough to become somebody. The page has
+the button where the server allows it and nowhere else. When the link is
 accepted, every password and passkey the person had stops working and every session of theirs ends. Until then
 nothing of theirs changes, so a link that is never used locks nobody out. Their tokens are not touched:
 `mainworthy token revoke <id>` ends those.
 
-A person removes one of their own ways of signing in (the operation `credential`, `do: "remove"`), and the
-last one they have stays.
+A person changes their password, adds a passkey and removes one of their ways of signing in under Settings,
+"Your sign-in" (the operation `credential` for a script). The last one they have stays. "Your sessions" lists
+the browsers they are signed in on and ends any of them.
 
 ### What a passkey is tied to
 
