@@ -6,7 +6,7 @@ import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
-import type { Config } from "../src/server/kernel/app.ts";
+import { type Config, defaultConfig } from "../src/server/kernel/app.ts";
 import { OP_LIST, OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { Readers } from "../src/server/readers.ts";
@@ -29,7 +29,15 @@ function boot(
 	const dataDir = existing ?? mkdtempSync(join(tmpdir(), "mainworthy-http-"));
 	if (!existing) dirs.push(dataDir);
 	const instance = start(
-		{ dataDir, host: options.host ?? "127.0.0.1", port: 0, mode, owner: options.owner ?? "robin", ownerToken },
+		{
+			dataDir,
+			host: options.host ?? "127.0.0.1",
+			port: 0,
+			mode,
+			owner: options.owner ?? "robin",
+			ownerToken,
+			commit: null,
+		},
 		() => ({ ui: null }),
 		options.patience ? { patience: options.patience } : {},
 	);
@@ -90,7 +98,7 @@ function bootReaders(count: number): Instance {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-http-readers-"));
 	dirs.push(dataDir);
 	const instance = start(
-		{ dataDir, host: "127.0.0.1", port: 0, mode: "local", owner: "robin", ownerToken: null },
+		{ dataDir, host: "127.0.0.1", port: 0, mode: "local", owner: "robin", ownerToken: null, commit: null },
 		() => ({ ui: null }),
 		{ readers: count },
 	);
@@ -1318,6 +1326,63 @@ describe("the surface", () => {
 	});
 });
 
+describe("/healthz and the commit", () => {
+	const SHA = "2f6b67e1ac063e6ac29c9fe45fdae07137b81c76";
+
+	/** Asks `/healthz` of a server whose configuration was read from `env`, as `mainworthy serve` reads it. */
+	async function healthz(env: Record<string, string>): Promise<unknown> {
+		const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-http-healthz-"));
+		dirs.push(dataDir);
+		const config = defaultConfig({ MAINWORTHY_DATA: dataDir, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin", ...env });
+		// No reader threads: this route does not read a project, and the loop below starts one server per value.
+		const instance = start(config, () => ({ ui: null }), { readers: 0 });
+		try {
+			const response = await fetch(`${instance.url}/healthz`);
+			expect(response.status).toBe(200);
+			return await response.json();
+		} finally {
+			await instance.stop();
+		}
+	}
+
+	test("it names the commit the process was told, with no sign-in", async () => {
+		expect(await healthz({ MAINWORTHY_COMMIT: SHA })).toEqual({ ok: true, version: "0.1.0", commit: SHA });
+	});
+
+	test("it says null when no commit is known", async () => {
+		expect(await healthz({})).toEqual({ ok: true, version: "0.1.0", commit: null });
+		expect(await healthz({ MAINWORTHY_COMMIT: "" })).toEqual({ ok: true, version: "0.1.0", commit: null });
+	});
+
+	test("MAINWORTHY_COMMIT wins over SOURCE_COMMIT, which Coolify sets, and an unusable first value falls through", async () => {
+		const other = "0123456789abcdef0123456789abcdef01234567";
+		expect(await healthz({ MAINWORTHY_COMMIT: SHA, SOURCE_COMMIT: other })).toMatchObject({ commit: SHA });
+		expect(await healthz({ SOURCE_COMMIT: other })).toMatchObject({ commit: other });
+		// The image bakes an empty MAINWORTHY_COMMIT when it was built without the argument.
+		expect(await healthz({ MAINWORTHY_COMMIT: "", SOURCE_COMMIT: other })).toMatchObject({ commit: other });
+	});
+
+	test("it never echoes a value that is not exactly 40 lower-case hexadecimal characters", async () => {
+		const refused = [
+			"HEAD",
+			"unknown",
+			SHA.toUpperCase(),
+			`${SHA.slice(0, 39)}F`,
+			`${SHA.slice(0, 39)}g`,
+			`${SHA}0`,
+			SHA.slice(0, 39),
+			SHA.slice(0, 12),
+			` ${SHA}`,
+			`${SHA}\n`,
+			"<script>alert(1)</script>",
+		];
+		for (const value of refused) {
+			expect(await healthz({ MAINWORTHY_COMMIT: value })).toEqual({ ok: true, version: "0.1.0", commit: null });
+			expect(await healthz({ SOURCE_COMMIT: value })).toEqual({ ok: true, version: "0.1.0", commit: null });
+		}
+	});
+});
+
 describe("a large report on a live server", () => {
 	test("C5 and E2: from the moment it is accepted the gate reads pending, reads are answered while it is applied, and no stale green is served", async () => {
 		const instance = boot("local");
@@ -1388,7 +1453,7 @@ describe("a large report on a live server", () => {
 
 describe("a connection that sends nothing", () => {
 	test("is closed after the idle time, and a change stream outlives it", async () => {
-		// One second here; thirty on a server nobody configured. Bun counts idle time in steps of four seconds, so
+		// One second here; three minutes on a server nobody configured. Bun counts idle time in steps of four seconds, so
 		// one second is over within five.
 		const instance = boot("local", null, undefined, { patience: { idleSeconds: 1, signInBodyMs: 5000 } });
 		const host = `Host: ${new URL(instance.url).host}\r\n`;

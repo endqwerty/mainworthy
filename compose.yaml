@@ -2,7 +2,11 @@
 # token: set MAINWORTHY_OWNER_TOKEN below, or read the generated one from the first lines of `docker compose logs`.
 services:
   mainworthy:
-    build: .
+    build:
+      context: .
+      args:
+        # `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build` makes /healthz name the commit; unset, it says null.
+        MAINWORTHY_COMMIT: ${MAINWORTHY_COMMIT:-}
     restart: unless-stopped
     ports:
       - "7357:7357"

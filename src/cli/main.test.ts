@@ -348,6 +348,43 @@ test("health exits 0 when the server answers and 1 when nothing does, with no to
 	});
 }, 20_000);
 
+test("health prints the first 12 characters of the commit the server reports, and all of it with --json", async () => {
+	const sha = "2f6b67e1ac063e6ac29c9fe45fdae07137b81c76";
+	await withInstance(
+		async ({ cli, instance }) => {
+			const text = await cli(["health"]);
+			expect(text.code).toBe(0);
+			expect(text.stdout).toBe(`healthy: Mainworthy 0.1.0 (commit ${sha.slice(0, 12)}) at ${instance.url}\n`);
+			const json = await cli(["health", "--json"]);
+			expect(JSON.parse(json.stdout)).toEqual({ url: instance.url, healthy: true, version: "0.1.0", commit: sha });
+		},
+		{ env: { MAINWORTHY_COMMIT: sha } },
+	);
+}, 20_000);
+
+test("health stays compatible with a server that reports no commit", async () => {
+	// An older server answers `{"ok":true,"version":"0.1.0"}`; a newer one with no commit answers `"commit":null`.
+	const answers = [
+		{ ok: true, version: "0.1.0" },
+		{ ok: true, version: "0.1.0", commit: null },
+	];
+	for (const body of answers) {
+		const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => Response.json(body) });
+		try {
+			await withInstance(async ({ cli }) => {
+				const url = `http://127.0.0.1:${server.port}`;
+				const text = await cli(["health", "--url", url]);
+				expect(text.code).toBe(0);
+				expect(text.stdout).toBe(`healthy: Mainworthy 0.1.0 at ${url}\n`);
+				const json = await cli(["health", "--url", url, "--json"]);
+				expect(JSON.parse(json.stdout)).toEqual({ url, healthy: true, version: "0.1.0", commit: null });
+			});
+		} finally {
+			await server.stop(true);
+		}
+	}
+}, 20_000);
+
 test("open prints the running web UI URL", async () => {
 	await withInstance(async ({ cli, instance }) => {
 		const result = await cli(["open"]);

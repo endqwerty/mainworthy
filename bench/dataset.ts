@@ -154,7 +154,15 @@ export function random(seed: number): () => number {
 
 /** Opens the production configuration on a real filesystem, with no benchmark pragma overrides. */
 export function config(dir: string): Config {
-	return { dataDir: dir, host: "127.0.0.1", port: 0, mode: "local", owner: "benchmark-owner", ownerToken: null };
+	return {
+		dataDir: dir,
+		host: "127.0.0.1",
+		port: 0,
+		mode: "local",
+		owner: "benchmark-owner",
+		ownerToken: null,
+		commit: null,
+	};
 }
 
 /** Rejects memory filesystems so an apparent disk measurement cannot silently become a RAM measurement. */

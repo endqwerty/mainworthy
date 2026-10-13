@@ -13,6 +13,11 @@ RUN bun build --compile --minify --sourcemap src/cli/main.ts src/server/read-wor
 FROM debian:bookworm-slim
 RUN useradd --system --uid 10001 --home-dir /data mainworthy && mkdir -p /data && chown mainworthy:mainworthy /data
 COPY --from=build /out/mainworthy /usr/local/bin/mainworthy
+# The commit /healthz reports, for a plain `docker build` or `docker compose build`: `--build-arg MAINWORTHY_COMMIT=$(git rev-parse HEAD)`.
+# Here, after the compile stage, so a new commit does not invalidate the cached layers above. Empty means unknown;
+# the server then tries SOURCE_COMMIT, which Coolify sets on the running container and does not pass to the build.
+ARG MAINWORTHY_COMMIT=
+ENV MAINWORTHY_COMMIT=$MAINWORTHY_COMMIT
 USER mainworthy
 ENV MAINWORTHY_MODE=server \
     MAINWORTHY_HOST=0.0.0.0 \

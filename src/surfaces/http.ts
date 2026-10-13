@@ -511,7 +511,7 @@ export type Extra = {
 
 /**
  * The routes. Everything that reads or changes a project needs a session. Four routes answer without one, on
- * purpose: `/healthz` (is the process up, and which version: the container's health check), `/api/openapi.json`
+ * purpose: `/healthz` (is the process up, and which version and commit: the container's health check), `/api/openapi.json`
  * (the description of the API, the same for every instance of a version), `/api/login` and `/api/logout` (which
  * take or clear the cookie, same-origin only), and the web UI's static files. An unknown path is a 404.
  *
@@ -528,7 +528,7 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patie
 			return session instanceof Response ? session : handler(req, session);
 		};
 	const routes: Record<string, unknown> = {
-		"/healthz": () => jsonResponse({ ok: true, version: VERSION }),
+		"/healthz": () => jsonResponse({ ok: true, version: VERSION, commit: app.config.commit }),
 		"/api/openapi.json": () => jsonResponse(openApi()),
 		"/api/session": { GET: guarded((_req, session) => sessionInfo(app, session)) },
 		"/api/login": { POST: (req: Request) => login(app, req, patience) },
