@@ -84,12 +84,20 @@ Written by Claude Opus 5.5.
 | --- | --- | --- | --- | --- |
 | The parallel check, the split test files, the shared browser set-up and CI in shards | `6d7d12c` | GPT 6 Astra (Codex) | ISSUES (2 blockers) | [check-speed-r1.md](check-speed-r1.md) |
 | The fix for the first finding (a test file in which every test was skipped) | `4a4f1fa` | GPT 6 Astra (Codex) | ISSUES (1 blocker) | [check-speed-r2.md](check-speed-r2.md) |
+| The next fix (a test that takes its file from its suite) and the skipped-browser notice | `c824dce` | GPT 6 Astra (Codex) | ISSUES (1 blocker) | [check-speed-r3.md](check-speed-r3.md) |
+| The fix after that (skipped files counted from Casebook's own JUnit reader) | `8168a5e` | GPT 6 Astra (Codex) | ISSUES (1 blocker) | [check-speed-r4.md](check-speed-r4.md) |
 
-Both findings of the first are dealt with: the gate job fails on a test file in which every test was skipped,
-and the pull request's description counts eight jobs, not nine. The second check passed every report Bun
-writes and found one more shape, a test that takes its file from its suite, which no report in this
-repository has. The commit after it counts those tests for their suite's file. That last commit has not had
-an independent look.
+Both findings of the first check are dealt with: the gate job fails on a test file in which every test was
+skipped, and the pull request's description counts eight jobs, not nine. Each later check passed every report
+Bun writes for this repository and found one more shape that could be read wrongly; each is fixed in the commit
+after it, except the last. That one is issue #82: two test files whose paths share their first 500 characters
+are counted as one. No path here is longer than 40.
+
+## Two changes checked before the first two pull requests were merged
+
+| Review | Commit | Reviewer | Verdict | Report |
+| --- | --- | --- | --- | --- |
+| The archive import (a report accepted and not yet applied) and clipping in failure signatures | `506e3ec` | GPT 6 Astra (Codex) | PASS (no blockers) | [archive-and-signature-r1.md](archive-and-signature-r1.md) |
 
 ## A failure that was the tests' and not the product's
 
