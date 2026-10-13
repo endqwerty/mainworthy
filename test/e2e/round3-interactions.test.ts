@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { Slot } from "../../src/web/runs/models.ts";
-import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
+import { answer, browserAvailable, eventually, fetched, openPage, type Server, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
 const setupCases = (server: Server, count = 3) =>
@@ -107,6 +107,64 @@ check(
 			expect((await server.api("get", { refs: [q] }))[0]?.decision).toMatchObject({ answer: { is: "infra" } });
 			expect((await server.api("get", { refs: [other.q] }))[0]?.state).toBe("open");
 		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+// Issue #87. The test above failed in about one check of three on a 10-thread Mac and passed alone: the queue
+// first reads a question when an answer to it is begun, and now and then the settlement fell between the
+// server's reading and the page's receiving it. The page took that reply as the question's state and never said
+// "settled". This is that order every time: the first read is held on its way back until the settlement is told.
+check(
+	"R3B-2 a question settled elsewhere while the queue first reads it is read again and shown as settled",
+	async () => {
+		const server = await startServer({ preset: "standard" });
+		await setupCases(server);
+		await failure(server, 1);
+		const h = await openPage(server, { path: "/p/scratch/queue" });
+		const read = latch();
+		const told = latch();
+		try {
+			const { page } = h;
+			page.setDefaultTimeout(5000);
+			await page.locator("[data-current-question]").waitFor();
+			const q = await currentQ(page);
+			if (!q) throw new Error("No question");
+			const original = (await server.api("inbox", { kind: "failure" })).items.find((row) => row.q === q);
+			if (!original) throw new Error("Original missing");
+			const states: string[] = [];
+			await page.route("**/api/p/scratch/get", async (route) => {
+				if (!route.request().postData()?.includes(`"${q}"`)) return route.continue();
+				const reply = await fetched(route);
+				if (!reply) return;
+				const first = states.length === 0;
+				states.push(
+					z.object({ result: z.array(z.object({ state: z.string() })) }).parse(reply.json).result[0]?.state ?? "",
+				);
+				if (first) {
+					read.release();
+					await told.held;
+				}
+				await answer(route, { response: reply.response });
+			});
+			await page.keyboard.press("d");
+			await page.locator("#answer-extra").fill("BUG-12");
+			await read.held;
+			// The page reads the inbox again when the settlement is told: that reply is the sign that it was.
+			const inbox = page.waitForResponse((response) => response.url().endsWith("/api/p/scratch/inbox"));
+			await server.api("decide", { q, onEvidence: original.evidenceHash, answer: { is: "infra" } });
+			await inbox;
+			told.release();
+			await page.waitForFunction(() => document.querySelector("#detail")?.textContent?.includes("settled"));
+			expect(states).toEqual(["open", "decided"]);
+			expect(await page.locator("#answer-extra").inputValue()).toBe("BUG-12");
+			expect(h.errors).toEqual([]);
+		} finally {
+			read.release();
+			told.release();
 			await h.close();
 			await server.stop();
 		}

@@ -1,4 +1,5 @@
 {
+    "src/web/lib/data.test.ts": 85,
   "version": 1,
   "files": {
     "test/e2e/latency-10000.test.ts": 37191,
