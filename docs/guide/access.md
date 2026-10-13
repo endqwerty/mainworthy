@@ -148,7 +148,7 @@ The reply signs that browser in. A password is 12 to 256 characters. Nothing els
 
 ### A name and a password, or a passkey
 
-After that the person signs in with `POST /api/login` and `{"name": "dana", "password": "..."}`. A sign-in that is refused gets one answer whatever was wrong, `unauthenticated: that did not sign you in`. The reply does not say whether the name exists or the password was wrong. The server's log has the reason as a code, and never the name or the password that was tried.
+After that the person signs in with `POST /api/login` and `{"name": "dana", "password": "..."}`. A name and a password that are looked at and refused get one answer whatever was wrong with them, `unauthenticated: that did not sign you in`. The reply does not say whether the name exists or the password was wrong. The server's log has the reason as a code, and never the name or the password that was tried.
 
 A passkey is a key that a device or a password manager holds and unlocks with a fingerprint, a face or a PIN. It needs `MAINWORTHY_PUBLIC_URL`, because a passkey belongs to the host name people open the instance at. One made at `https://mainworthy.example` does not sign in at another name of the same instance. `GET /api/login/methods` says whether an instance has passkeys. [API](./api.md#sign-in-as-a-person) lists the requests a page makes to register and use one.
 
@@ -167,7 +167,7 @@ https://mainworthy.example/invite#<code>
 This link is shown once. Hand it to dana: it works once. When it is accepted, every password and passkey dana had stops working and every session of theirs ends.
 ```
 
-Nothing changes until the link is accepted, so a link nobody uses locks nobody out. A recovery is made by that person or by the owner. Another admin is refused, for the same reason as with a token: whoever accepts the link is that person from then on. A recovery does not touch the person's tokens. Revoke those with `mainworthy token revoke`.
+Nothing changes until the link is accepted, so a link nobody uses locks nobody out. The owner makes a recovery link for anybody. An admin who is a person can make their own. Everybody else asks the owner: a person who does not administer cannot make an invitation at all, and an admin who asks for another person's link is refused, for the same reason as with a token: whoever accepts the link is that person from then on. A recovery does not touch the person's tokens. Revoke those with `mainworthy token revoke`.
 
 ### Your sessions and your ways of signing in
 
@@ -205,7 +205,7 @@ $ mainworthy credential --do remove --id 1
 invalid: this is the last way dana signs in, so it stays. Add a passkey or set a password first, then remove this one. If it is lost, an admin can make a recovery link (mainworthy invite new dana)
 ```
 
-These two commands need no capability. Any person or agent that is signed in runs them for what is their own. A pipeline is refused.
+These two commands need no capability. A person who is signed in runs them for what is their own. An agent lists and ends its own sessions, and `credential` refuses it with `forbidden`: only a person has a password or a passkey. A pipeline is refused by both.
 
 ### What an admin can do for somebody else
 

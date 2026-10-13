@@ -125,7 +125,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy command` | What became of a command you sent under an idempotency key: not recorded, begun, or done with its reply. |
 | `mainworthy admin` | Projects, actors, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. |
 | `mainworthy session` | Your browser sessions: list them, and end one. An admin who is a person lists and ends anyone's. |
-| `mainworthy credential` | How you sign in: list your password and passkeys, register a passkey, remove one. A password is set in the web UI, never here. |
+| `mainworthy credential` | How a person signs in: list your password and passkeys, register a passkey, remove one. An agent is refused: it signs in with a token only. A password is set in the web UI, never here. |
 | `mainworthy invitation` | Invite a person with a link, since there is no mail: make one, list them, revoke one. The link is shown once. |
 
 ### Flags every command takes

@@ -27,7 +27,8 @@ export function open(
 	config: Config,
 	options: { memory?: boolean; firstProject?: string; now?: () => number } = {},
 ): { app: App; owner: Actor; project: string; generatedToken: string | null; warnings: string[] } {
-	// A public address that no browser would make a passkey at stops the start here, before the data is opened.
+	// A public address that no browser would make a passkey at, or that is not the root address of the instance,
+	// stops the start here, before the data is opened.
 	publicAddress(config);
 	const app = openApp(config, {
 		...(options.memory ? { memory: true } : {}),

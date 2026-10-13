@@ -446,7 +446,7 @@ describe("signing in with a passkey", () => {
 			expect((await withPasskey(w, uncounted.assert(await challenge(w), { signCount: 0 }))).status).toBe(200);
 	});
 
-	test("two sign-ins racing on one passkey with one counter open at most one session, and so do two answers to one challenge", async () => {
+	test("two sign-ins racing on one passkey with the same counter above zero open one session, and so do two answers to one challenge", async () => {
 		const w = world();
 		const { device } = await person(w, "robin");
 		const before = sessionCount(w);
@@ -478,6 +478,24 @@ describe("signing in with a passkey", () => {
 			"[mainworthy] sign-in refused: possibly-cloned (credential 2)",
 			"[mainworthy] sign-in refused: challenge",
 		]);
+	});
+
+	test("two answers to two challenges from an authenticator that does not count both sign in, at the same moment too", async () => {
+		// Zero against a stored zero says nothing of a copy, so the counter refuses neither. What keeps one answer
+		// from signing in twice is its challenge, which the test above holds.
+		const w = world();
+		const { device } = await person(w, "robin");
+		const before = sessionCount(w);
+		const one = device.assert(await challenge(w), { signCount: 0 });
+		const two = device.assert(await challenge(w), { signCount: 0 });
+		const gate = holdGate(w.instance);
+		const waiting = waitingAtGate(w.instance, 2);
+		const racing = [withPasskey(w, one), withPasskey(w, two)];
+		await waiting;
+		await gate.release();
+		expect((await Promise.all(racing)).map((reply) => reply.status)).toEqual([200, 200]);
+		expect(sessionCount(w)).toBe(before + 2);
+		expect(passkeyRow(w, device).stored.counter).toBe(0);
 	});
 
 	test("a passkey that was removed, and one whose person was forgotten, sign nobody in", async () => {

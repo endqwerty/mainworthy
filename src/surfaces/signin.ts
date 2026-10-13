@@ -7,8 +7,12 @@
 // file reads no header the other file reads differently. Who somebody is, is decided in the identity module;
 // this file turns a body into a question for it and an answer into a reply.
 //
-// A refused sign-in is answered one way, whatever was wrong: 401 and one sentence. Why goes to the log as a
-// code, with no name and nothing the caller typed, since a name field is where a password is typed by mistake.
+// A name, a password, a passkey's answer or an invitation code that is looked at and refused is answered one
+// way, whatever was wrong: 401 and one sentence. Why goes to the log as a code, with no name and nothing the
+// caller typed, since a name field is where a password is typed by mistake. The other replies say nothing of
+// a proof: 429 while the caller is limited, 400 for a request that is wrong in itself (a password's length, a
+// passkey where there are none), 409 for a browser signed in as somebody else, and 408 for a body that took
+// too long to arrive.
 import { z } from "zod";
 import { type ErrorCode, HTTP_STATUS } from "../core/api.ts";
 import { whyNotPassword } from "../core/people.ts";
@@ -167,8 +171,9 @@ export function signInRoutes(app: App, tools: Tools) {
 
 	/**
 	 * `POST /api/login/challenge`. `{}`: the options for signing in with a passkey. `{ invitation }`: who the
-	 * invitation is for, and the options for registering a passkey with it. It writes nothing, so a page that
-	 * is reloaded, or a preview that fetches it, changes nothing.
+	 * invitation is for, and the options for registering a passkey with it. It writes no row, so a page that
+	 * is reloaded, or a preview that fetches it, changes nothing that is stored. Each asking does add a challenge
+	 * to the map in memory, which is bounded and drops its oldest entry when it is full.
 	 */
 	async function challenge(req: Request, server: Listener): Promise<Response> {
 		if (!tools.sameOrigin(req)) return failed("unauthenticated", NOT_SIGNED_IN);
