@@ -57,13 +57,14 @@ an operation named like a shortcut (`createCase`, `closeRun`) appears.
 | Produce evidence | `propose` (create or change cases, folders, links, the policy) · `report` (results) · `claim` (a review and its findings) |
 | Request evidence | `plan` (start a run) |
 | Decide | `decide` (answer a question, or withdraw a decision) |
-| Read | `inbox` · `get` · `find` · `impact` · `since` · `gate` · `history` · `timeline` · `check` |
+| Read | `inbox` · `get` · `find` · `impact` · `since` · `gate` · `history` · `timeline` · `check` · `command` |
 | Administer | `admin` (projects, actors, tokens) |
 
 `invoke` does the same things for every operation: parse the input at the boundary, check the capability, and
 for a write, open a transaction, give the command the project's next **sequence number**, run it, record the
 command id, commit, and publish what changed. A command id names one request: sent again unchanged it gets the
-first reply and writes nothing; sent again with other content it is refused. A report is the one command that
+first reply and writes nothing; sent again with other content it is refused. A client whose reply was lost can
+also ask `command` what became of the id, which writes nothing (decision 0013). A report is the one command that
 commits twice, and it takes a sequence number for each transaction (see the red build below). A read runs on a
 reader thread with its own read-only connection, so a long write does not hold it up; a write waits its turn at
 one gate, because the file has one writer.
