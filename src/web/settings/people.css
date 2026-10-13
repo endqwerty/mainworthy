@@ -1,0 +1,69 @@
+/* The three sections of Settings about signing in: "Your sign-in", "Your sessions" and "People". Their forms
+   and the box a new link is shown in are the ones `settings.css` gives the token and project forms. */
+
+/* One session, one way of signing in, one invitation, one person: the line an issued token has. */
+.settings-row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 0;
+	border-bottom: 1px solid var(--line2);
+}
+.settings-row > span:first-of-type {
+	flex: 1;
+	min-width: 0;
+}
+.settings-row small {
+	display: block;
+	color: var(--dim);
+	margin-top: 3px;
+}
+.settings-row small:empty {
+	display: none;
+}
+.settings-row .out {
+	height: 28px;
+	font-size: 12px;
+	white-space: nowrap;
+}
+.settings-tag {
+	margin-left: 8px;
+	padding: 1px 7px;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	color: var(--dim);
+	font-size: 11px;
+	font-style: normal;
+}
+/* What a browser called itself: long, and of use only to tell two sessions apart. One line, whole in the title. */
+.settings-row .settings-agent {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--faint);
+	font: 11px var(--mono);
+}
+.settings-row .settings-refusal,
+.settings-problem {
+	color: var(--fail);
+}
+/* A refusal beside a field takes room only when there is one. */
+.settings-problem {
+	margin: 0;
+}
+.settings-problem:empty,
+.settings-form > .settings-message:empty {
+	display: none;
+}
+.settings-count {
+	color: var(--dim);
+	font-size: 12px;
+}
+.settings-invitation p {
+	margin: 6px 0;
+}
+/* A line that explains the field above it. */
+.settings-hint {
+	margin: 0;
+	font-size: 12px;
+}
