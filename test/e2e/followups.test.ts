@@ -351,3 +351,61 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"a case on its first version says there is nothing to diff, and a long question in its timeline is one box",
+	async () => {
+		const server = await startServer({ preset: "standard" });
+		let browser: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Expired coupon\n  Apply OLD10 > Error" }] });
+			await server.api("claim", {
+				lens: "browser-review",
+				findings: [
+					{
+						on: "C-1",
+						category: "ambiguous",
+						note: `The expected result does not say which message is shown to the customer. ${"It names no wording. ".repeat(12)}`,
+					},
+				],
+			});
+			browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			const { page } = browser;
+			page.setDefaultTimeout(5000);
+			const card = page.locator("a.question-card");
+			await card.waitFor();
+			// A link that wraps as inline text is one box for each line, and its padding lies over the row above.
+			const boxes = await card.evaluate((node) => {
+				const above = node.previousElementSibling?.getBoundingClientRect();
+				const own = node.getBoundingClientRect();
+				// The title is the longest piece of text in the card, and a piece of text has one box for each line.
+				const title = Array.from(node.childNodes)
+					.filter((child) => child.nodeType === Node.TEXT_NODE)
+					.sort((a, b) => (b.textContent?.length ?? 0) - (a.textContent?.length ?? 0))[0];
+				const text = document.createRange();
+				if (title) text.selectNodeContents(title);
+				return {
+					fragments: node.getClientRects().length,
+					lines: text.getClientRects().length,
+					clearOfRowAbove: above ? own.top >= above.bottom : false,
+				};
+			});
+			expect(boxes.lines).toBeGreaterThan(1);
+			expect(boxes).toMatchObject({ fragments: 1, clearOfRowAbove: true });
+
+			const first = "Version 1 of C-1 is the first. There is no earlier version to compare it with.";
+			await page.keyboard.press("v");
+			await page.locator("#stat").getByText(first, { exact: true }).waitFor();
+			expect(await page.locator("div.question-card").count()).toBe(0);
+			await page.keyboard.press("Escape");
+			await page.locator('[data-version="1"]').click();
+			await page.locator("#stat").getByText(first, { exact: true }).waitFor();
+			expect(await page.locator("div.question-card").count()).toBe(0);
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser?.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);

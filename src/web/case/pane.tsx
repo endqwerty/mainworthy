@@ -156,12 +156,15 @@ export function CasePane({
 			setStatus(error instanceof Error ? error.message : "The answer failed");
 		}
 	}
+	/** Shows what a version changed. The first has none before it, and the status line says so. */
+	function openDiff(to: number): void {
+		if (to > 1) setDiffVersion(to);
+		else if (ref) setStatus(`Version 1 of ${ref} is the first. There is no earlier version to compare it with.`);
+		else setStatus("This case has no version yet. There is nothing to compare.");
+	}
 	useCaseBindings({
 		enabled: !overlayOpen && ref !== null,
-		diff: () => {
-			const version = draft?.base ?? view?.version ?? 1;
-			if (version > 1) setDiffVersion(version);
-		},
+		diff: () => openDiff(draft?.base ?? view?.version ?? 1),
 		accept: () => answerByKey("accept"),
 		reject: () => answerByKey("reject"),
 	});
@@ -331,7 +334,7 @@ export function CasePane({
 					<section className="timeline-block">
 						<div className="history-title">
 							<SectionHeading>Timeline</SectionHeading>
-							<button type="button" onClick={() => version > 1 && setDiffVersion(version)}>
+							<button type="button" onClick={() => openDiff(version)}>
 								<KeyCap>v</KeyCap> diff another version
 							</button>
 						</div>
@@ -375,12 +378,12 @@ export function CasePane({
 											</span>
 										</summary>
 										{group.entries.map((entry) => (
-											<VersionRow key={entry.seq} entry={entry} diff={() => setDiffVersion(entry.version)} />
+											<VersionRow key={entry.seq} entry={entry} diff={() => openDiff(entry.version)} />
 										))}
 									</details>
 								) : (
 									group.entries.map((entry) => (
-										<VersionRow key={entry.seq} entry={entry} diff={() => setDiffVersion(entry.version)} />
+										<VersionRow key={entry.seq} entry={entry} diff={() => openDiff(entry.version)} />
 									))
 								)
 							) : (

@@ -72,6 +72,9 @@ A result names the case version it exercised. Editing the case does not rewrite 
 2. Select a version in the timeline to compare it with its preceding version.
 3. Choose "Close" to dismiss the diff.
 
+The first version of a case has nothing before it. Asking for its diff opens nothing,
+and the status line at the bottom of the window says that there is no earlier version.
+
 In Suite, <kbd>u</kbd> first undoes the latest placement action when one is available.
 Otherwise, on a recorded case with more than one version, it restores the preceding
 version as a new version. With a timeline version focused, it restores that version's
