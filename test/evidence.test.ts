@@ -11,8 +11,11 @@ import { stakes } from "../src/core/stakes.ts";
 import { recoverAccepted, sweep } from "../src/server/jobs.ts";
 import { type Config, defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
+import { Db } from "../src/server/kernel/db.ts";
+import { migrate } from "../src/server/kernel/migrate.ts";
 import { acceptReport, processBatch } from "../src/server/ops/writes.ts";
 import { type Instance, start } from "../src/server/start.ts";
+import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
@@ -587,5 +590,189 @@ describe("which answers apply", () => {
 		);
 		const change = queue().items.find((item) => item.about.includes("pr:12"));
 		expect(change?.answers).toEqual(["defect", "test", "expected", "flaky", "infra", "inherited"]);
+	});
+});
+
+describe("a change that ends", () => {
+	type Ended = { change: string; state: string; questions: string[]; already: boolean };
+	const end = (change: string, state: "merged" | "closed" | "open", as = h.owner) =>
+		h.call<Ended>("change", { change, state }, as);
+	const changes = () =>
+		h.call<{ items: { key: string; state: string; verdict: string | null }[] }>("find", { in: "changes" }).items;
+	/** A pull request whose only commit fails one test, and the question about it. */
+	const failingPull = (pr = 12, commit = "ended0001") => {
+		h.call("report", ciReport({ commit, branch: "fix", pr, n: 2, fail: { 0: "expected 90, got 100" } }));
+		const asked = queue().items.find((item) => item.about.includes(`pr:${pr}`));
+		if (!asked) throw new Error("the failing pull request raised no question");
+		return asked;
+	};
+
+	test("its unanswered failures are no longer asked about, and nothing else about it changes", () => {
+		const asked = failingPull();
+		expect(asked.blocks).toHaveLength(1);
+		expect(end("pr:12", "merged")).toEqual({ change: "pr:12", state: "merged", questions: [asked.q], already: false });
+		expect(queue().counts.open).toBe(0);
+		expect(h.call<{ state: string }[]>("get", { refs: [asked.q] })[0]?.state).toBe("dissolved");
+		expect(changes()).toMatchObject([{ key: "pr:12", state: "merged", verdict: "blocked" }]);
+		// The commit's own verdict is history: it failed, nobody explained it, and nobody is asked now.
+		expect(gate("ended0001")).toMatchObject({ verdict: "blocked", open: [] });
+		// Saying it again changes nothing about the change or its questions.
+		expect(end("PR:12", "merged")).toEqual({ change: "pr:12", state: "merged", questions: [], already: true });
+	});
+
+	test("the same failure on the line is its own question, and stays", () => {
+		failingPull();
+		h.call("report", ciReport({ commit: "ended0002", n: 2, fail: { 0: "expected 90, got 100" } }));
+		expect(queue().counts.failure).toBe(2);
+		end("pr:12", "merged");
+		const left = queue().items;
+		expect(left.map((item) => item.evidence.scope)).toEqual(["line:trunk@acme/web"]);
+		expect(gate("ended0002")).toMatchObject({ verdict: "blocked", open: [first(left).q] });
+	});
+
+	test("an answer already given stands, and a finding about the change is still asked", () => {
+		const asked = failingPull();
+		decide(asked, { is: "flaky" });
+		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		h.call(
+			"claim",
+			{ lens: "review", about: "pr:12", findings: [{ on: "C-1", category: "ambiguous", note: "Say which total" }] },
+			agent,
+		);
+		expect(end("pr:12", "closed").questions).toEqual([]);
+		expect(queue().counts).toMatchObject({ open: 1, finding: 1 });
+		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure" }).items.map((item) => item.q)).toEqual([
+			asked.q,
+		]);
+		expect(gate("ended0001").verdict).toBe("passed");
+	});
+
+	test("a report that arrives after the end is recorded and counted, and nobody is asked", () => {
+		failingPull();
+		end("pr:12", "merged");
+		// The pipeline's second shard finishes after the merge, with another failure.
+		const late = h.call<ReportReceipt>("report", {
+			...ciReport({
+				commit: "ended0001",
+				branch: "fix",
+				pr: 12,
+				n: 1,
+				fail: { 0: "timed out" },
+				file: "tests/late.spec.ts",
+			}),
+			job: "late",
+		});
+		expect(late.counts.fail).toBe(1);
+		expect(late.questions).toEqual([]);
+		expect(queue().counts.open).toBe(0);
+		expect(gate("ended0001")).toMatchObject({ verdict: "blocked", open: [] });
+		// A newer commit of the ended change is not asked about either.
+		h.call(
+			"report",
+			ciReport({ commit: "ended0003", branch: "fix", pr: 12, n: 2, fail: { 0: "expected 90, got 100" } }),
+		);
+		expect(queue().counts.open).toBe(0);
+	});
+
+	test("a change that is open again is asked about at once, with no new report", () => {
+		const asked = failingPull();
+		end("pr:12", "closed");
+		const reopened = end("pr:12", "open");
+		expect(reopened).toMatchObject({ change: "pr:12", state: "open", already: false });
+		expect(reopened.questions).toHaveLength(1);
+		const again = first(queue().items);
+		expect(reopened.questions).toEqual([again.q]);
+		expect(again.q).not.toBe(asked.q);
+		expect(again.title).toBe(asked.title);
+		expect(gate("ended0001")).toMatchObject({ verdict: "blocked", open: [again.q] });
+		expect(changes()[0]?.state).toBe("open");
+	});
+
+	test("an open planned run that shows the failure still waits for its answer", () => {
+		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		h.call("report", {
+			target: { commit: "ended0004", repo: "acme/web", branch: "fix", pr: 12 },
+			results: [
+				{
+					test: { key: "tests/coupon.spec.ts::applies", file: "tests/coupon.spec.ts" },
+					annotation: { case: "C-1", version: 1 },
+					outcome: "fail",
+					failure: { message: "expected 90, got 100" },
+				},
+			],
+		});
+		const planned = h.call<{ run: string }>("plan", {
+			name: "Release check",
+			select: { cases: ["C-1"] },
+			accepts: { commit: "ended0004", repo: "acme/web" },
+		});
+		const asked = first(queue().items.filter((item) => item.kind === "failure"));
+		expect(asked.about).toContain(planned.run);
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "blocked", open: [asked.q] });
+		expect(end("pr:12", "merged").questions).toEqual([]);
+		expect(queue().items.map((item) => item.q)).toContain(asked.q);
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "blocked", open: [asked.q] });
+		// Once the run has its answer, nothing is left to ask about the ended change.
+		decide(asked, { is: "flaky" });
+		expect(queue().counts.failure ?? 0).toBe(0);
+	});
+
+	test("an answer taken back or run out after the end asks nobody", () => {
+		const asked = failingPull();
+		decide(asked, { is: "flaky" });
+		end("pr:12", "merged");
+		const undone = h.call<{ status: string; needs: string | null }[]>("decide", { undo: asked.q })[0];
+		expect(undone?.status).toBe("reopened");
+		expect(undone?.needs).toContain("has ended");
+		expect(queue().counts.open).toBe(0);
+		expect(gate("ended0001")).toMatchObject({ verdict: "blocked", open: [] });
+		// A flaky answer that runs out on another ended change does not come back to the queue either.
+		const other = failingPull(13, "ended0005");
+		decide(other, { is: "flaky" });
+		end("pr:13", "closed");
+		h.advance(15 * 86_400_000);
+		const rule = h.app.db.raw.query<{ id: number }, []>("SELECT id FROM actors WHERE kind = 'rule'").get()?.id ?? 0;
+		sweep(h.app, rule);
+		expect(queue().counts.open).toBe(0);
+	});
+
+	test("an archive does not say which changes ended: after an import each is open, and what was closed stays closed", () => {
+		const asked = failingPull();
+		end("pr:12", "merged");
+		const chunks: string[] = [];
+		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
+		expect(chunks.join("")).not.toContain("change_ends");
+		const other = new Db(":memory:");
+		try {
+			migrate(other, ":memory:");
+			importArchive(other, linesOf(chunks.join("")));
+			expect(other.raw.query("SELECT count(*) AS n FROM change_ends").get()).toEqual({ n: 0 });
+			const rows = other.raw
+				.query<{ key: string; state: string }, []>(
+					`SELECT c.key, q.state FROM changes c JOIN questions q ON q.no = ${asked.q.slice(2)}`,
+				)
+				.all();
+			expect(rows).toEqual([{ key: "pr:12", state: "dissolved" }]);
+		} finally {
+			other.close();
+		}
+	});
+
+	test("a pipeline or a person says so; an agent's word is not taken, and an unknown change is not found", () => {
+		failingPull();
+		const pipeline = h.actor("pipeline", "ci", ["record"]);
+		const agent = h.actor("runner", "agent", ["read", "produce"]);
+		expect(h.raw("change", { change: "pr:12", state: "merged" }, agent)).toMatchObject({
+			ok: false,
+			error: { code: "forbidden" },
+		});
+		expect(queue().counts.open).toBe(1);
+		expect(h.raw("change", { change: "pr:404", state: "merged" }, pipeline)).toMatchObject({
+			ok: false,
+			error: { code: "not_found" },
+		});
+		expect(end("pr:12", "merged", pipeline).questions).toHaveLength(1);
+		expect(queue().counts.open).toBe(0);
 	});
 });

@@ -33,6 +33,19 @@
 .changes-pane .v-pending {
 	color: var(--dim);
 }
+.change-ended {
+	flex: none;
+	padding: 1px 7px;
+	border: 1px solid var(--line);
+	border-radius: 9px;
+	color: var(--dim);
+	font: 11px var(--mono);
+}
+.change-ended-note {
+	margin: 10px 0 0;
+	color: var(--dim);
+	max-width: 78ch;
+}
 .change-gate h2 {
 	font-size: 25px;
 	margin: 5px 0;

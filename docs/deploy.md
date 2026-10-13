@@ -299,6 +299,11 @@ the steps are kept below for an instance that has none.
   gate. `standard` now tracks such tests by rule, and what happens to them is the project's own choice
   (`docs/guide/policy.md`, "Tests with no case"). A project made before that keeps the clauses it had and is
   listed as `custom`: choose `standard` again in Settings, Policy, and the rule answers the open questions.
+- **A pull request that is merged or closed tells the instance** (`.github/workflows/change.yml`, decision
+  0022, since 2026-10-13). A failure nobody explained on it is then no longer asked about. Before this, such a
+  question stayed in the queue until a person answered it: the one about pull request 150 outlived its merge.
+  For a pull request that ended earlier, or whose event was missed: `gh workflow run change.yml -f pull=150
+  -f state=merged`.
 - **A push to `main` reports too**, as the workflow runs on it.
 
 What can go wrong, and what the job does: the instance is down (its own Mainworthy, a warning); the instance is an

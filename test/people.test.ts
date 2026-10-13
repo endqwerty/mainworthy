@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SessionInfo } from "../src/core/api.ts";
 import { databasePath } from "../src/server/kernel/app.ts";
+import { SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
 import {
 	bearer,
 	cleanUp,
@@ -840,7 +841,7 @@ describe("an upgrade and an import", () => {
 			expect(copy.query("SELECT value FROM meta WHERE key = 'schema_version'").get()).toEqual({ value: "2" });
 			copy.close();
 			expect(instance.app.reader.raw.query("SELECT value FROM meta WHERE key = 'schema_version'").get()).toEqual({
-				value: "4",
+				value: String(SCHEMA_VERSION),
 			});
 			const status = async (headers: Sent): Promise<number> =>
 				(await fetch(`${instance.url}/api/session`, { headers })).status;

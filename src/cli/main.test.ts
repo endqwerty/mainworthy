@@ -177,6 +177,7 @@ test("standard policy records both a proposal and a decision and prints its clau
 		const shown = await cli(["policy", "show"]);
 		expect(shown.code).toBe(0);
 		expect(shown.stdout).toContain("policy: standard");
+		expect(shown.stdout).toContain("tests with no case: track");
 		expect(shown.stdout).toContain("who answers");
 		expect(shown.stdout).toContain("agent's answer");
 		expect(shown.stdout).toContain("author:agent");
@@ -185,9 +186,35 @@ test("standard policy records both a proposal and a decision and prints its clau
 	});
 });
 
+test("change says a pull request ended, and the questions about it are no longer asked", async () => {
+	await withInstance(async ({ cli, client }) => {
+		await client.call("report", {
+			target: { commit: "cafe0002", branch: "fix", pr: 482 },
+			results: [
+				{
+					test: { key: "tests/a.spec.ts::one", file: "tests/a.spec.ts" },
+					outcome: "fail",
+					failure: { message: "expected 90, got 100" },
+				},
+			],
+		});
+		const asked = (await client.call("inbox", { kind: "failure" })).items[0]?.q;
+		// The command is the operation, with its input as flags. One start of it is enough to hold that: what the
+		// operation does with every other input is held where it costs no process (test/evidence.test.ts).
+		const ended = await cli(["change", "--change", "pr:482", "--state", "merged", "--compact"]);
+		expect(ended.stderr).toBe("");
+		expect(ended.stdout).toBe(`{"change":"pr:482","state":"merged","questions":["${asked}"],"already":false}\n`);
+		expect((await client.call("inbox", {})).counts.open).toBe(0);
+		expect(await client.call("change", { change: "pr:482", state: "open" })).toMatchObject({
+			state: "open",
+			already: false,
+		});
+		expect((await client.call("inbox", {})).counts.failure).toBe(1);
+	});
+});
+
 test("policy tests changes what happens to a test with no case, and says how many open questions the rule answered", async () => {
 	await withInstance(async ({ cli, client }) => {
-		expect((await cli(["policy", "show"])).stdout).toContain("tests with no case: track");
 		const asking = await cli(["policy", "tests", "ask"]);
 		expect(asking.stdout).toMatch(/^tests with no case: ask; proposal P-1 and decision \d+ are both recorded\n$/);
 		for (const file of ["tests/a.spec.ts", "tests/b.spec.ts"])
@@ -202,7 +229,8 @@ test("policy tests changes what happens to a test with no case, and says how man
 		expect(tracking.stdout).toContain("tests with no case: track;");
 		expect(tracking.stdout).toEndWith("; 2 open questions answered by the rule\n");
 		expect((await client.call("inbox", {})).counts.open).toBe(0);
-		expect((await cli(["policy", "show"])).stdout).toContain("policy: loose");
+		// The choice is not the preset: the project is still `loose`.
+		expect(await client.call("admin", { do: "project.list" })).toMatchObject([{ policy: "loose", unlinked: "track" }]);
 		const wrong = await cli(["policy", "tests", "sometimes"]);
 		expect(wrong.code).not.toBe(0);
 		expect(wrong.stderr).toContain("policy tests needs ask, track or create");

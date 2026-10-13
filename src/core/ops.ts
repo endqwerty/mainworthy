@@ -310,6 +310,25 @@ export type DecideReply = {
 	evidence: string | null;
 };
 
+// ── change ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+export const ChangeInput = z.object({
+	change: z.string().min(1).max(300).describe("The change, for example pr:482."),
+	state: z
+		.enum(["merged", "closed", "open"])
+		.describe("How the change ended: merged, or closed without merging. open: it is open again."),
+	cmd,
+});
+export type ChangeInput = z.infer<typeof ChangeInput>;
+export type ChangeReply = {
+	change: string;
+	state: "merged" | "closed" | "open";
+	/** The failure questions this ended (no longer asked) or, for a change that is open again, the ones asked now. */
+	questions: string[];
+	/** True when the change was already as the caller says: its end and its questions are as they were. */
+	already: boolean;
+};
+
 // ── plan ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const Selection = z.object({

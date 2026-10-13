@@ -76,7 +76,7 @@ A key that a device or a password manager holds for one site and unlocks with a 
 
 ## Pipeline
 
-A CI system that reports results with a token of its own. A pipeline records results and reads the gate, and may be let read. It never edits, answers, plans or administers. See [report results](./report-results.md).
+A CI system that reports results with a token of its own. A pipeline records results, says when a change ended, and reads the gate, and may be let read. It never edits, answers, plans or administers. See [report results](./report-results.md).
 
 ## Planned run
 

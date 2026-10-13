@@ -116,6 +116,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy propose` | Create or change cases, folders, links or the policy. Saving and proposing are the same call; policy decides what happens next. |
 | `mainworthy report` | Record results: a parsed CI report, one manual result, or an agent's batch. The producer is the token's actor. |
 | `mainworthy claim` | Record a review and what it found. A review with no findings is still recorded. |
+| `mainworthy change` | Say that a change ended (merged, or closed without merging) or is open again. An ended change is not asked about. |
 | `mainworthy plan` | Start a run: choose cases, say which results count and what completes it. Evidence already recorded fills it at once. |
 | `mainworthy decide` | Answer a question, or withdraw a decision. Policy says whether your answer settles it, is advice, or is refused. |
 | `mainworthy inbox` | The queue: every question that needs an answer, most blocking first. With state=decided: the ledger. |

@@ -373,6 +373,14 @@ import { PRESETS } from "../../src/core/presets.ts";
 			expect((await server.api("inbox", { state: "decided", on: "pr:482" })).items[0]?.decision?.answer.is).toBe(
 				"infra",
 			);
+			// The pull request is merged: the list and the detail say so, without a reload, and the answer stays.
+			expect(await view.page.locator(".change-ended").count()).toBe(0);
+			expect(await server.api("change", { change: "pr:482", state: "merged" })).toMatchObject({ state: "merged" });
+			await view.page.locator("#list .change-ended").getByText("merged", { exact: true }).waitFor();
+			await view.page
+				.getByText("Merged. The verdict above is the last one its commits had.", { exact: false })
+				.waitFor();
+			await view.page.getByText("Infrastructure", { exact: true }).waitFor();
 			expect(view.errors).toEqual([]);
 		} finally {
 			await view?.close();

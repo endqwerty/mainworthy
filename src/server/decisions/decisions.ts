@@ -20,10 +20,12 @@ import {
 import type { DecideReply, QuestionItem } from "../../core/ops.ts";
 import { clip } from "../../core/text.ts";
 import {
+	type ChangeRow,
 	changeById,
 	excuseFor,
 	mustTarget,
 	ownChangeOf,
+	scopeEnded,
 	scopeOf,
 	signatureById,
 	type TargetRow,
@@ -851,14 +853,17 @@ export function undo(ctx: Ctx, input: { q: string; reason: string | undefined })
 	const closed = closeAnswered(ctx, question);
 	refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, prior.id), ...closed]);
 	const covered = questionById(ctx.db, question.id)?.state === "dissolved";
+	const ended = !covered && endedUnawaited(ctx, question);
 	const gone = !covered && closeIfGone(ctx, question.id);
 	return reply(question, "reopened", {
 		decision: decision.id,
 		...(covered
 			? { needs: "withdrawn; another answer in force still covers this failure, so nobody is asked about it" }
-			: gone
-				? { needs: "withdrawn; nothing shows this failure any more, so nobody is asked about it" }
-				: {}),
+			: ended
+				? { needs: "withdrawn; the change this failure was on has ended, so nobody is asked about it" }
+				: gone
+					? { needs: "withdrawn; nothing shows this failure any more, so nobody is asked about it" }
+					: {}),
 	});
 }
 
@@ -986,13 +991,16 @@ export function raiseFailure(
  * is recomputed, and not left to each path that can take a question away: an answer changed to one that covers
  * less, an answer withdrawn after another closed its neighbour's question, a closed run opened again. A run that
  * speaks (an open planned run, or the run of the newest commit in its scope) is never blocked with nobody asked.
- * An older commit of a change is not asked about again: a newer commit has replaced it.
+ * An older commit of a change is not asked about again: a newer commit has replaced it. Nor is a change that has
+ * ended: it was merged or closed, and nobody will act on an answer about it.
  */
 function askUnexplained(ctx: Ctx, run: RunRow): boolean {
 	const speaks =
 		run.origin === "planned"
 			? run.state === "open"
-			: run.scope !== null && newestInScope(ctx.db, run.project, run.scope)?.id === run.id;
+			: run.scope !== null &&
+				!scopeEnded(ctx.db, run.scope) &&
+				newestInScope(ctx.db, run.project, run.scope)?.id === run.id;
 	if (!speaks) return false;
 	let asked = false;
 	for (const cause of unexplainedShown(ctx.db, run)) {
@@ -1016,6 +1024,39 @@ function askUnexplained(ctx: Ctx, run: RunRow): boolean {
 		asked ||= raised.s !== "carried";
 	}
 	return asked;
+}
+
+/**
+ * A change has ended: its open failure questions are closed, and their refs returned. Nobody will act on an
+ * answer about a pull request that was merged or closed, and a failure that came with it into the line fails
+ * there and is asked about there. A question an open planned run still shows unexplained stays: that run waits
+ * for the answer whatever became of the change. Answers already given stand as they are.
+ */
+export function stopAskingAbout(ctx: Ctx, change: ChangeRow): string[] {
+	const scope = `change:${change.id}`;
+	const closed: string[] = [];
+	for (const asked of openQuestionsOn(ctx.db, ctx.project.id, `scope:${scope}`)) {
+		const question = questionById(ctx.db, asked.id);
+		if (question?.state !== "open" || json<{ scope?: string }>(question.subject).scope !== scope) continue;
+		if (!endedUnawaited(ctx, question)) continue;
+		dissolve(ctx, question);
+		ctx.touched.add(questionRef(question));
+		closed.push(questionRef(question));
+	}
+	return closed;
+}
+
+/**
+ * A change that had ended is open again: what its newest commit shows unexplained is asked about now, without
+ * waiting for the next report. Returns the refs of the failure questions open in its scope.
+ */
+export function askAgainAbout(ctx: Ctx, change: ChangeRow): string[] {
+	const scope = `change:${change.id}`;
+	const newest = newestInScope(ctx.db, ctx.project.id, scope);
+	if (newest) refold(ctx, [newest.id]);
+	return openQuestionsOn(ctx.db, ctx.project.id, `scope:${scope}`).flatMap((asked) =>
+		asked.kind === "failure" && json<{ scope?: string }>(asked.subject).scope === scope ? [`Q-${asked.no}`] : [],
+	);
 }
 
 // ── Keeping runs in step ───────────────────────────────────────────────────────────────────────────────────
@@ -1251,14 +1292,32 @@ function dissolve(ctx: Ctx, question: QuestionRow, later?: Set<number>): void {
 /**
  * A question put back in front of people, because its answer was withdrawn or ran out, is closed again when the
  * failure it asks about went away meanwhile: nobody is asked about a failure that nothing shows, and no commit's
- * gate names a question for it until some later report happens to look. True when it was closed.
+ * gate names a question for it until some later report happens to look. The same when its change has ended
+ * meanwhile: nobody would act on the answer. True when it was closed.
  */
 function closeIfGone(ctx: Ctx, id: number): boolean {
 	const question = questionById(ctx.db, id);
 	if (question?.kind !== "failure" || question.state !== "open") return false;
-	if (!stoppedFailing(ctx, question, new Map())) return false;
+	if (!endedUnawaited(ctx, question) && !stoppedFailing(ctx, question, new Map())) return false;
 	dissolve(ctx, question);
 	return true;
+}
+
+/**
+ * Is this a failure question about a change that has ended, which no open planned run still shows unexplained?
+ * Then nobody is asked: a pull request that was merged or closed is acted on by nobody. A planned run was asked
+ * for by a person, and waits for the answer whatever became of the change.
+ */
+function endedUnawaited(ctx: Ctx, question: QuestionRow): boolean {
+	if (question.kind !== "failure") return false;
+	const subject = json<{ signature?: number; scope?: string }>(question.subject);
+	if (subject.signature === undefined || subject.scope === undefined) return false;
+	if (!scopeEnded(ctx.db, subject.scope)) return false;
+	const key = causeKey(subject.signature, subject.scope);
+	return !runsAbout(ctx, question).some((id) => {
+		const run = runById(ctx.db, id);
+		return run?.origin === "planned" && run.state === "open" && unexplainedIn(ctx.db, run).has(key);
+	});
 }
 
 /**

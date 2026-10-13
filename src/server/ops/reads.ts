@@ -521,6 +521,7 @@ export function find(ctx: Ctx, input: FindInput): Found {
 					branch: change.branch,
 					head: change.head_sha,
 					url: change.url,
+					state: change.ended ?? "open",
 					run: status?.run ?? null,
 					verdict: status?.verdict ?? null,
 					reason: status?.reason ?? null,

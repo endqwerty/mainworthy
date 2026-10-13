@@ -77,6 +77,45 @@ Use `--wait <seconds>` to wait while the verdict is pending.
 It does not wait for a person to answer a blocked question.
 Use `--json` for structured output. [The CLI guide](./cli.md) lists every flag.
 
+## When a change ends
+
+A pull request ends when it is merged, or closed without merging. Tell Mainworthy, and it
+stops asking about the change:
+
+```sh
+$ mainworthy change --change pr:482 --state merged --compact
+{"change":"pr:482","state":"merged","questions":["Q-115"],"already":false}
+```
+
+`--state` takes `merged`, `closed` or `open`. The reply lists the failure questions that were open
+about the change and are no longer asked. Nobody will act on an answer about a pull request
+that has ended. A failure that came with the merge fails on the line too, and is asked about
+there as its own question.
+
+What stays as it was:
+
+- The verdict. The change's last commit keeps the gate it had: a failure nobody explained
+  still reads `blocked`, with no open question behind it.
+- Answers already given. They stay under "Settled and excused".
+- Findings about the change. A finding is about a case, and is still worth an answer.
+- A question that an open planned run shows unexplained. That run waits for the answer
+  whatever became of the change.
+
+A report that arrives after the end, from a job that finished late, is recorded and counted.
+It raises no question.
+
+When a pull request is opened again, say so, and what its newest commit shows unexplained
+is asked about at once:
+
+```sh
+$ mainworthy change --change pr:482 --state open
+```
+
+A pipeline or a person says how a change ended. An agent's word about it is refused, as its
+word about where a commit belongs is. In Changes, an ended change is marked "merged" or
+"closed". See [report results](./report-results.md#say-when-a-pull-request-ends) for the
+workflow that sends this from GitHub Actions.
+
 ## Distinguish uploads from gates
 
 A successful report records evidence and prints a receipt.

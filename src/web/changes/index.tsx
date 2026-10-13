@@ -15,6 +15,7 @@ const Change = z.object({
 	branch: z.string().nullable(),
 	head: z.string().nullable(),
 	url: z.string().nullable(),
+	state: z.enum(["merged", "closed", "open"]),
 	verdict: Verdict.nullable(),
 	reason: z.string().nullable(),
 });
@@ -101,6 +102,7 @@ function ChangesWorkbench() {
 								<b>{change.title ?? change.branch ?? change.key}</b>
 								<span className="dim">{change.reason ?? "No evidence for the latest commit"}</span>
 							</span>
+							{change.state !== "open" && <span className="change-ended">{change.state}</span>}
 							<span className={`change-verdict v-${change.verdict ?? "pending"}`}>{change.verdict ?? "pending"}</span>
 						</ListRow>
 					))}
@@ -132,6 +134,13 @@ function ChangesWorkbench() {
 								<p>{gateData?.reason ?? gate.error?.message}</p>
 								{gateData?.stale && <p>The verdict awaits new evidence or a fresh decision.</p>}
 							</div>
+							{current && current.state !== "open" && (
+								<p className="change-ended-note">
+									{current.state === "merged" ? "Merged." : "Closed without merging."} The verdict above is the last one
+									its commits had. A failure nobody explained is no longer asked about here: if it came with the change,
+									the line fails and asks.
+								</p>
+							)}
 							{gateData && (
 								<div className="change-tally">
 									{Object.entries(gateData.tally)
@@ -161,7 +170,13 @@ function ChangesWorkbench() {
 									{q.blocks.length > 0 && <span className="blk">blocks gate</span>}
 								</a>
 							))}
-							{openData?.items.length === 0 && <p className="dim">No open questions about this change.</p>}
+							{openData?.items.length === 0 && (
+								<p className="dim">
+									{current && current.state !== "open"
+										? "Nothing is asked about a change that has ended."
+										: "No open questions about this change."}
+								</p>
+							)}
 							<SectionHeading>Settled and excused</SectionHeading>
 							{settled.error && <p role="status">{settled.error.message}</p>}
 							{settledData?.items.map((q) => (

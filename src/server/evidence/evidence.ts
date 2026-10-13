@@ -52,6 +52,9 @@ export type ChangeRow = {
 	url: string | null;
 	files: string;
 	rev: number;
+	/** How the change ended, or null while it is open: read from `change_ends`. An ended change is not asked about. */
+	ended: "merged" | "closed" | null;
+	ended_at: number | null;
 };
 export type BatchRow = {
 	id: number;
@@ -134,12 +137,17 @@ const Q = {
 		`INSERT INTO targets (project, what, env, repo, commit_sha, branch, line, change, first_seq)
 		 VALUES ($project, $what, $env, $repo, $commit, $branch, $line, $change, $seq)`,
 	),
+	// A change is read with how it ended, which is a row of `change_ends` or none.
 	change: sql<{ project: number; key: string }, ChangeRow>(
-		"SELECT * FROM changes WHERE project = $project AND key = $key",
+		`SELECT c.*, e.ended, e.at AS ended_at FROM changes c LEFT JOIN change_ends e ON e.change = c.id
+		 WHERE c.project = $project AND c.key = $key`,
 	),
-	changeById: sql<{ id: number }, ChangeRow>("SELECT * FROM changes WHERE id = $id"),
+	changeById: sql<{ id: number }, ChangeRow>(
+		"SELECT c.*, e.ended, e.at AS ended_at FROM changes c LEFT JOIN change_ends e ON e.change = c.id WHERE c.id = $id",
+	),
 	changes: sql<{ project: number; limit: number }, ChangeRow>(
-		"SELECT * FROM changes WHERE project = $project ORDER BY rev DESC LIMIT $limit",
+		`SELECT c.*, e.ended, e.at AS ended_at FROM changes c LEFT JOIN change_ends e ON e.change = c.id
+		 WHERE c.project = $project ORDER BY c.rev DESC LIMIT $limit`,
 	),
 	insertChange: sql<{
 		project: number;
@@ -167,6 +175,12 @@ const Q = {
 	}>(
 		"UPDATE changes SET base_sha = $base, head_sha = $head, title = $title, url = $url, files = $files, rev = $rev WHERE id = $id",
 	),
+	endChange: sql<{ id: number; ended: string; at: number }>(
+		`INSERT INTO change_ends (change, ended, at) VALUES ($id, $ended, $at)
+		 ON CONFLICT (change) DO UPDATE SET ended = excluded.ended, at = excluded.at`,
+	),
+	reopenChange: sql<{ id: number }>("DELETE FROM change_ends WHERE change = $id"),
+	touchChange: sql<{ id: number; rev: number }>("UPDATE changes SET rev = $rev WHERE id = $id"),
 	batchByKey: sql<{ project: number; key: string }, BatchRow>(
 		"SELECT * FROM batches WHERE project = $project AND key = $key",
 	),
@@ -540,6 +554,25 @@ export const targetsOfCommit = (db: Db, project: number, what: string): TargetRo
 export const changeByKey = (db: Db, project: number, key: string): ChangeRow | null =>
 	db.get(Q.change, { project, key });
 export const changeById = (db: Db, id: number): ChangeRow | null => db.get(Q.changeById, { id });
+
+/**
+ * Records that a change ended, or with null that it is open again. A fact about the change, like where its head
+ * is: said by whoever reports for it, and not a decision. What follows for its questions is the caller's.
+ */
+export function setChangeEnded(ctx: Ctx, change: ChangeRow, ended: ChangeRow["ended"]): ChangeRow {
+	if (ended === null) ctx.db.run(Q.reopenChange, { id: change.id });
+	else ctx.db.run(Q.endChange, { id: change.id, ended, at: ctx.now });
+	ctx.db.run(Q.touchChange, { id: change.id, rev: ctx.seq });
+	ctx.touched.add(change.key);
+	return { ...change, ended, ended_at: ended === null ? null : ctx.now, rev: ctx.seq };
+}
+
+/** Whether the change a scope names (`change:<id>`) has ended. A line and a run never end this way. */
+export function scopeEnded(db: Db, scope: string): boolean {
+	if (!scope.startsWith("change:")) return false;
+	const change = db.get(Q.changeById, { id: Number(scope.slice("change:".length)) });
+	return change !== null && change.ended !== null;
+}
 export const recentChanges = (db: Db, project: number, limit: number): ChangeRow[] =>
 	db.all(Q.changes, { project, limit });
 
