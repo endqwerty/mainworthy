@@ -161,6 +161,29 @@ test("a test that takes its file from its suite is counted for that file", async
 	expect(none.code).toBe(1);
 }, 40_000);
 
+test("text inside a test's output is not counted as a test or as a skip", async () => {
+	const withReport = (xml: string): Shard[] =>
+		green.map((shard) => (shard.name === "tests-2" ? { ...shard, xml, exit: 0 } : shard));
+	const report = (body: string) =>
+		`<?xml version="1.0" encoding="UTF-8"?>\n<testsuites name="bun test" tests="1" failures="0" skipped="0" time="0.1">\n  <testsuite name="test/c.test.ts" file="test/c.test.ts" tests="1" failures="0" skipped="0" time="0.1" hostname="runner">\n${body}\n  </testsuite>\n</testsuites>\n`;
+	// A file whose one test was skipped, with a passing test's markup quoted in its output: still not tested.
+	const fake = await gate(
+		withReport(
+			report(
+				'    <testcase name="skips" file="test/c.test.ts"><skipped /></testcase>\n    <system-out><![CDATA[<testcase name="example" />]]></system-out>',
+			),
+		),
+	);
+	expect(fake.output).toContain("::error::tests-2: every test of test/c.test.ts was skipped");
+	expect(fake.code).toBe(1);
+	// A test that passed, with the word for a skip quoted in its output: tested.
+	const quoted = await gate(
+		withReport(report('    <testcase name="passes"><system-out><![CDATA[<skipped />]]></system-out></testcase>')),
+	);
+	expect(quoted.output).not.toContain("::error::");
+	expect(quoted.code).toBe(0);
+}, 40_000);
+
 test("tests that exited with a failure the report does not show fail the job", async () => {
 	// A test file that does not load is an error for Bun and is absent from its JUnit file.
 	const result = await gate(green.map((shard) => (shard.name === "tests-1" ? { ...shard, exit: 1 } : shard)));

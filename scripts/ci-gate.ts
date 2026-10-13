@@ -47,23 +47,16 @@ for (const shard of shards) {
 	for (const suite of text.matchAll(/<testsuite\b[^>]*\bfile="([^"]+)"/g)) reported.add(suite[1] ?? "");
 	// A skipped test proves nothing, and one skipped test beside others that ran is somebody's decision. A file
 	// in which nothing ran is a file that was not tested.
+	// Counted from the results as Casebook's own reader understands the report, so the job and the gate read one
+	// report one way: text inside a test's output is not a test, and a test takes its suite's file when it
+	// names none.
 	const ran = new Map<string, { tests: number; skipped: number }>();
-	// A test belongs to the file it names, or else to the file of the suite it is in.
-	const suites: string[] = [];
-	const fileOf = (attributes: string | undefined) => /\bfile="([^"]+)"/.exec(attributes ?? "")?.[1];
-	for (const tag of text.matchAll(
-		/<testsuite\b([^>]*)>|<\/testsuite>|<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g,
-	)) {
-		if (tag[0].startsWith("</testsuite")) suites.pop();
-		else if (tag[0].startsWith("<testsuite")) {
-			if (!tag[0].endsWith("/>")) suites.push(fileOf(tag[1]) ?? suites.at(-1) ?? "");
-		} else {
-			const name = fileOf(tag[2]) ?? suites.at(-1) ?? "";
-			const count = ran.get(name) ?? { tests: 0, skipped: 0 };
-			count.tests++;
-			if (/<skipped\b/.test(tag[4] ?? "")) count.skipped++;
-			ran.set(name, count);
-		}
+	for (const result of results) {
+		const name = ("file" in result.test ? result.test.file : undefined) ?? "";
+		const count = ran.get(name) ?? { tests: 0, skipped: 0 };
+		count.tests++;
+		if (result.outcome === "skip") count.skipped++;
+		ran.set(name, count);
 	}
 	for (const [name, count] of ran)
 		if (count.skipped === count.tests)
