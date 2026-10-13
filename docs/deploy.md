@@ -84,16 +84,27 @@ Nothing redeploys by itself. After a change lands on the branch, press Redeploy 
 
 ## This repository's CI reporting to the instance
 
-Built in decision 0014; switched on in issue #92. The `gate` job of `.github/workflows/check.yml` reports to the
-instance `MAINWORTHY_URL` names when it can use it, and otherwise starts a Mainworthy of its own for that run and
-says so on the run's summary page (`scripts/ci-instance.ts` has the rule, `test/ci-gate.test.ts` the cases).
+Built in decision 0014; switched on 2026-10-13 (issue #92). The `gate` job of `.github/workflows/check.yml`
+reports to the instance `MAINWORTHY_URL` names when it can use it, and otherwise starts a Mainworthy of its own for
+that run and says so on the run's summary page (`scripts/ci-instance.ts` has the rule, `test/ci-gate.test.ts` the
+cases). For this repository that instance is `https://mainworthy.com`, project `mainworthy`.
 
-**What is verified:** every branch of that rule against real local servers, and, from a machine on the tailnet,
-that the job recognises the home instance as an older build and uses its own Mainworthy. **What is not:** a report
-and a gate against the home instance on a build that has `record`, and the tailnet join from a GitHub runner,
-which needs the three Tailscale steps below.
+**What is verified** (2026-10-13, the last two from GitHub's own runners):
 
-1. **Deploy** a build that has the `record` capability (anything after decision 0014), then on the instance:
+- Every branch of that rule, against real local servers (`test/ci-gate.test.ts`).
+- A passing pull request (#102). The `gate` job's summary read "Reported to the deployed Mainworthy:
+  https://mainworthy.com, project mainworthy.", six reports held 941 results, the browser tests among them, and
+  the gate passed. Asked afterwards, the instance gave the same verdict for that commit.
+- A failing one (#104, one test that failed on purpose, closed unmerged). The gate was `blocked` on one question
+  and the job exited 2. The question was answered on the instance as `infra`, which excuses the failure for that
+  pull request only. A re-run of the `gate` job alone then printed "1 already decided" and passed.
+
+**What is not:** the tailnet join from a GitHub runner. This instance has a public address and does not need it;
+the steps are kept below for an instance that has none.
+
+### How it was set up
+
+1. **On the instance**, with a build that has the `record` capability (anything after decision 0014):
 
    ```
    mainworthy admin --json '{"do":"project.create","key":"mainworthy","preset":"standard"}'
@@ -103,10 +114,46 @@ which needs the three Tailscale steps below.
 
    That token records results on `mainworthy` and reads its gate. It cannot read or change the suite, answer a
    question, plan a run or administer, under any policy.
-2. **In the GitHub repository** (Settings → Secrets and variables → Actions): variables
-   `MAINWORTHY_URL=https://casebook.owl-perch.ts.net` and `MAINWORTHY_PROJECT=mainworthy`, secret `MAINWORTHY_TOKEN`.
-   The workflow gives the secret to the one step that reports.
-3. **In the Tailscale admin console** (an agent cannot do these):
+
+   On the Coolify instance the commands ran inside the container, which already holds the owner token, so that
+   token was copied nowhere: `docker exec <container> sh -c 'MAINWORTHY_TOKEN="$MAINWORTHY_OWNER_TOKEN" mainworthy …'`.
+   The new token went from that command's output into `gh secret set MAINWORTHY_TOKEN` and was never printed.
+2. **In the GitHub repository** (Settings → Secrets and variables → Actions, or `gh variable set` and
+   `gh secret set`): variables `MAINWORTHY_URL=https://mainworthy.com` and `MAINWORTHY_PROJECT=mainworthy`, secret
+   `MAINWORTHY_TOKEN`. The workflow gives the secret to the one step that reports. `TS_OAUTH_CLIENT_ID` and
+   `TS_AUDIENCE` are not set, so the job skips the tailnet step.
+3. **Check** on the next pull request: the `gate` job's summary reads "Reported to the deployed Mainworthy", and
+   `mainworthy gate --commit <sha>` on the instance gives the verdict the job printed.
+
+### What changes for a pull request
+
+- **A failing test is a question on the instance.** The gate is `blocked` and the job exits 2. The job's log
+  names the question ("Q-70 needs an answer"). Either a later commit passes the test, and its run is green, or a
+  person answers the question in the queue (`g q`). After an answer, re-run the `gate` job alone: the shards'
+  reports are artifacts of the run, kept for seven days. The pipeline's token cannot answer, and under `standard`
+  an agent's answer is advice.
+- **A test file with no case is one `map` question** under `standard`. The first two runs left 70 of them in the
+  queue. They do not block the gate.
+- **A push to `main` reports too**, as the workflow runs on it.
+
+What can go wrong, and what the job does: the instance is down (its own Mainworthy, a warning); the instance is an
+older or newer build that describes `report` or `gate` differently (the same); the token was revoked or is for
+another project (the job fails and says which). To stop reporting to the instance, delete the `MAINWORTHY_URL`
+variable. A pull request that changes the shape of a `report` or `gate` reply fails against the instance until it
+is redeployed (#90): delete the variable for that pull request. To replace the token (not tried on this instance):
+`mainworthy token list`, `mainworthy token revoke <id>`, issue a new one as above and set the secret again.
+
+The token is visible to the code of every pull request, because the `gate` job runs it. That code can report
+wrong results for this one project; it cannot do anything else with the token. Until backups exist (#59) the
+instance's history is one disk.
+
+### An instance with no public address
+
+Not tried from a GitHub runner. Before 2026-10-13 this instance was reachable on its tailnet only
+(`https://casebook.owl-perch.ts.net`), and the `gate` job can join a tailnet for its own length.
+
+1. **In the GitHub repository**, `MAINWORTHY_URL` is the tailnet address.
+2. **In the Tailscale admin console** (an agent cannot do these):
    1. *Access controls.* Add the tag: `"tagOwners": { "tag:ci": ["autogroup:admin"] }`. Then **replace** the rule
       that lets everything reach everything; a narrow rule added beside it restricts nothing. On 2026-10-12 the
       tailnet had exactly that one rule (read from a member node's packet filter). With `"hosts": { "mainworthy":
@@ -128,18 +175,9 @@ which needs the three Tailscale steps below.
       stored anywhere.
    3. Copy its Client ID and Audience into the repository variables `TS_OAUTH_CLIENT_ID` and `TS_AUDIENCE`.
       Neither is a secret.
-4. **Check** on the next pull request: the `gate` job's summary reads "Reported to the deployed Mainworthy", and
-   the run is in the instance's queue. A runner node is removed from the tailnet when its job ends.
 
-What can go wrong, and what the job does: the home server is down or the join fails (its own Mainworthy, a
-warning); the instance is an older or newer build that describes `report` or `gate` differently (the same); the
-token was revoked or is for another project (the job fails and says which). To stop reporting to the instance,
-delete the `MAINWORTHY_URL` variable. A pull request that changes the shape of a `report` or `gate` reply fails
-against the instance until it is redeployed (#90): delete the variable for that pull request.
-
-The token is visible to the code of every pull request, because the `gate` job runs it. That code can report
-wrong results for this one project; it cannot do anything else with the token. Until backups exist (#59) the
-instance's history is one disk.
+A runner node is removed from the tailnet when its job ends. A join that fails leaves the instance unreachable,
+and the job then starts its own Mainworthy and warns.
 
 ## An instance made before the rename
 

@@ -17,7 +17,8 @@ design: `docs/decisions/0012-mvp-scope-and-departures.md`. What is deferred: the
 GitHub milestone `Backlog to 1.0`. How it fits together: `docs/architecture.md`.
 It runs on the owner's Coolify for their own use since 2026-10-12, at
 `https://mainworthy.com` since 2026-10-13 (`docs/deploy.md`; the home lab's notes
-say where and how to redeploy). No blocking defect is known: issue
+say where and how to redeploy). This repository's CI reports to it since 2026-10-13 (issue #92).
+No blocking defect is known: issue
 #81, in the web UI's conflict card, is fixed (`docs/decisions/0013-ask-what-became-of-a-command.md`).
 
 ## Stack rules
@@ -35,7 +36,8 @@ say where and how to redeploy). No blocking defect is known: issue
   tests on a runner each, then one `gate` job reports every shard to Mainworthy and
   its gate is the result (the deployed instance when the repository names one and
   the job can use it, else a Mainworthy the job starts: `scripts/ci-instance.ts`,
-  decision 0014; switching it on is issue #92); a shard with no report fails it, and so does a test
+  decision 0014; since 2026-10-13 that is `https://mainworthy.com`, project `mainworthy`: `docs/deploy.md`);
+  a shard with no report fails it, and so does a test
   file in which every test was skipped. On GitHub the workflow takes about four
   minutes (2026-10-12, two runs: 4 min 24 s and 3 min 49 s; it was about 12 in one job).
 - **One registry.** A capability is an operation in `src/server/ops/index.ts`. HTTP,
@@ -101,6 +103,11 @@ say where and how to redeploy). No blocking defect is known: issue
 - One agent at a time runs the whole browser suite on a machine. On 2026-10-12 an
   agent's serial pass ran beside another agent's parallel check for an hour and
   failed for reasons outside its code. A second agent runs single files, or waits.
+- A failing test in CI is a question on the instance, and the `gate` job stays red (exit 2) until a person
+  answers it there (`docs/deploy.md`). Fix the test, or leave the question to the owner and say which one it is.
+  Do not answer a failure of your own pull request with the owner token (issue #91). On 2026-10-13 an agent did
+  that once, for a test that failed on purpose in a pull request made to try the switch-on (#104), and the reason
+  recorded with the decision says so.
 - Briefing a verifier: write the brief as a QA review of application logic and say
   that everything runs locally. On 2026-10-12 a Codex verifier was stopped by its
   provider's content filter in the middle of a run whose brief used the vocabulary
