@@ -81,6 +81,11 @@ $ casebook policy use standard   # agent edits need a person; unlinked tests are
 $ casebook policy show           # the whole policy is one table
 ```
 
+A policy says who answers each kind of question. Under `loose`, the default, edits take effect at once, a test
+needs no case, and a person is asked about failures and findings. Under `standard` an agent's edit waits for a
+person and a test with no case is a question. Under `strict` a person answers every question and gives a reason,
+and no agent's answer counts. The web UI compares the three in Settings, under Policy and under Projects.
+
 ## Deploy (one container, one volume)
 
 ```
