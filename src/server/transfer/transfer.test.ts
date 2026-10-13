@@ -489,7 +489,7 @@ function tables(db: Db): string[] {
 function exportedTables(db: Db): string[] {
 	return tables(db).filter(
 		(name) =>
-			!["tokens", "sessions", "credentials", "invitations", "passkey_users"].includes(name) &&
+			!["tokens", "sessions", "credentials", "invitations", "passkey_users", "change_ends"].includes(name) &&
 			!name.startsWith("search_docs") &&
 			!name.startsWith("sqlite_"),
 	);
@@ -860,7 +860,14 @@ describe("Mainworthy instance archives", () => {
 		people(to, 1, "f");
 		importArchive(to, linesOf(text));
 		for (const table of UNEXPORTED) expect(to.raw.query(`SELECT * FROM ${table}`).all()).toEqual([]);
-		expect([...UNEXPORTED].sort()).toEqual(["credentials", "invitations", "passkey_users", "sessions", "tokens"]);
+		expect([...UNEXPORTED].sort()).toEqual([
+			"change_ends",
+			"credentials",
+			"invitations",
+			"passkey_users",
+			"sessions",
+			"tokens",
+		]);
 		// The list is the order they are emptied in: a table comes before every table it refers to.
 		const late: string[] = [];
 		UNEXPORTED.forEach((table, at) => {

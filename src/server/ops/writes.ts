@@ -3,6 +3,8 @@
 import { contentHash } from "../../core/hash.ts";
 import type { ActorKind } from "../../core/kinds.ts";
 import {
+	ChangeInput,
+	type ChangeReply,
 	ClaimInput,
 	type ClaimReply,
 	DecideInput,
@@ -18,12 +20,14 @@ import {
 import { clip } from "../../core/text.ts";
 import {
 	answer,
+	askAgainAbout,
 	askWhereCommitIs,
 	type Raise,
 	type Raised,
 	raise,
 	raiseFailure,
 	refold,
+	stopAskingAbout,
 	undo,
 } from "../decisions/decisions.ts";
 import { raiseAdopt } from "../decisions/kinds.ts";
@@ -33,11 +37,15 @@ import {
 	applySteps,
 	type BatchRow,
 	batchById,
+	changeById,
+	changeByKey,
 	ensureTarget,
 	firstCountedReport,
 	keepReceipt,
 	markProcessed,
 	mustTarget,
+	scopeEnded,
+	setChangeEnded,
 	type TargetRow,
 	testRef,
 	unlinkedInFile,
@@ -46,7 +54,7 @@ import { insertFinding, insertReview, reviewedAt } from "../evidence/findings.ts
 import { actorByName, actorLabel } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
-import { conflict, invalid, notFound } from "../kernel/errors.ts";
+import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { currentPolicy } from "../policy/policy.ts";
 import {
 	applyBatchSteps,
@@ -182,6 +190,10 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 
 	const questions: QuestionBrief[] = [];
 	for (const group of groups) {
+		// A report for a change that has ended (a pipeline that finished after the merge) is recorded and counted,
+		// and not asked about, unless an open planned run shows the failure and waits for the answer.
+		if (scopeEnded(ctx.db, group.scope) && !group.runs.some((run) => run.origin === "planned" && run.state === "open"))
+			continue;
 		const raised = raiseFailure(ctx, { group, target, by: batch.actor, producer });
 		questions.push(brief(ctx, raised, group.tests.length));
 	}
@@ -216,6 +228,10 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 		runs.map((run) => run.id),
 		{ dissolveStale: true },
 	);
+	// Whatever else asked on the way here (a commit that found its place, a run recomputed): a change that has
+	// ended is not asked about.
+	const ended = target.change !== null ? changeById(ctx.db, target.change) : null;
+	if (ended && ended.ended !== null) stopAskingAbout(ctx, ended);
 	const gated = runs.find((run) => run.origin === "change") ?? runs.find((run) => run.id === batch.run) ?? null;
 	const fresh = gated ? runById(ctx.db, gated.id) : null;
 	const receipt: ReportReceipt = {
@@ -401,6 +417,34 @@ export const claimOp = defineOp({
 	effect: "write",
 	mcp: "Record a review: the cases you read (`reviewed`, as C-311@hash) and your findings. A finding already raised comes back under `known` with its answer, so you do not raise it twice.",
 	run: claim,
+});
+
+// ── change ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+export function changeEnds(ctx: Ctx, input: ChangeInput): ChangeReply {
+	// Where a change is, is said by a pipeline or a person, as where a commit is (see `resolveTarget`).
+	if (ctx.actor.kind === "agent")
+		throw forbidden("whether a change ended is said by a pipeline or a person: an agent's word about it is not taken");
+	const key = input.change.toUpperCase().startsWith("PR:") ? input.change.toLowerCase() : input.change;
+	const change = changeByKey(ctx.db, ctx.project.id, key);
+	if (!change) throw notFound(`change ${input.change}`);
+	const ended = input.state === "open" ? null : input.state;
+	if (change.ended === ended) return { change: change.key, state: input.state, questions: [], already: true };
+	const now = setChangeEnded(ctx, change, ended);
+	const questions = ended === null ? askAgainAbout(ctx, now) : stopAskingAbout(ctx, now);
+	return { change: now.key, state: input.state, questions, already: false };
+}
+
+export const changeOp = defineOp({
+	name: "change",
+	summary:
+		"Say that a change ended (merged, or closed without merging) or is open again. An ended change is not asked about.",
+	input: ChangeInput,
+	needs: "record",
+	scope: "project",
+	effect: "write",
+	mcp: null,
+	run: changeEnds,
 });
 
 // ── plan ───────────────────────────────────────────────────────────────────────────────────────────────────

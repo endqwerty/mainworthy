@@ -129,7 +129,7 @@ $ mainworthy token new --ci github-actions --project scratch
 ```
 
 Store the returned secret in your CI secret store. It is shown once.
-A pipeline token can report results and read the gate. It cannot answer questions,
+A pipeline token can report results, say when a change ended, and read the gate. It cannot answer questions,
 edit cases, plan runs, or administer the instance.
 See [access](./access.md) for token scope and revocation.
 
@@ -160,3 +160,35 @@ that a job ran when the job sent no evidence. For a planned run, require named j
 as described in [runs](./runs.md#require-ci-jobs).
 Mainworthy does not yet post a check to your code host. The `gate` command's exit
 code is what makes this workflow step pass or fail.
+
+## Say when a pull request ends
+
+Mainworthy does not watch your code host, so it does not know that a pull request was
+merged or closed. Until it is told, a failure nobody explained on that pull request stays
+in the queue. Add a workflow that tells it. It needs the same variables and the pipeline's
+token, and no checkout:
+
+```yaml
+on:
+  pull_request:
+    types: [closed, reopened]
+
+jobs:
+  tell:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}
+          MAINWORTHY_PROJECT: ${{ vars.MAINWORTHY_PROJECT }}
+          MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}
+          PULL: ${{ github.event.pull_request.number }}
+          STATE: ${{ github.event.action == 'reopened' && 'open' || (github.event.pull_request.merged && 'merged' || 'closed') }}
+        run: |
+          curl -fsS -X POST "$MAINWORTHY_URL/api/p/$MAINWORTHY_PROJECT/change" \
+            -H "authorization: Bearer $MAINWORTHY_TOKEN" -H 'content-type: application/json' \
+            -d "{\"change\":\"pr:$PULL\",\"state\":\"$STATE\"}"
+```
+
+With `mainworthy` on the job's path, the step is `mainworthy change --change "pr:$PULL" --state "$STATE"`.
+The call is answered `not_found` for a pull request that never sent a report.
+[Changes and the gate](./changes.md#when-a-change-ends) says what ending a change does.

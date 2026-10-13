@@ -12,7 +12,8 @@ export const ActorKind = z.enum(["human", "agent", "ci", "rule"]);
 export type ActorKind = z.infer<typeof ActorKind>;
 
 /**
- * What a grant may hold. `record` is a pipeline's whole job: put results on the record and read the verdict.
+ * What a grant may hold. `record` is a pipeline's whole job: put results on the record, say that a change
+ * ended, and read the verdict.
  * `produce` is everything a producer does (cases, results, reviews, answers) and so includes it.
  */
 export const Capability = z.enum(["read", "record", "produce", "answer", "plan", "admin"]);
@@ -71,8 +72,8 @@ export function defaultCapabilities(kind: Exclude<ActorKind, "rule">): readonly 
  *
  * `self` asks for no capability. The operation is about what is the caller's own (their sessions, their ways of
  * signing in), so whoever is signed in may run it, whatever their grants, and the operation says whose things it
- * touches. A pipeline is the exception: its token reaches the two operations of its job and no other (decision
- * 0014), and the policy's own actor is never a caller.
+ * touches. A pipeline is the exception: its token reaches the operations of its job and no other (decisions
+ * 0014 and 0022), and the policy's own actor is never a caller.
  */
 export type Need = Capability | "self" | readonly [Capability, Capability, ...Capability[]];
 /** The capabilities a need names, any one of which is enough. None for `self`, which names no capability. */

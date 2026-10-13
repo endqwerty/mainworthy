@@ -5,6 +5,7 @@ import init from "./migrations/0001_init.sql" with { type: "text" };
 import sessions from "./migrations/0002_sessions.sql" with { type: "text" };
 import tokenLimits from "./migrations/0003_token_limits.sql" with { type: "text" };
 import people from "./migrations/0004_people.sql" with { type: "text" };
+import changeEnds from "./migrations/0005_change_ends.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -18,6 +19,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 2, name: "sessions", sql: sessions, archive: false },
 	{ version: 3, name: "token_limits", sql: tokenLimits, archive: false },
 	{ version: 4, name: "people", sql: people, archive: false },
+	{ version: 5, name: "change_ends", sql: changeEnds, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

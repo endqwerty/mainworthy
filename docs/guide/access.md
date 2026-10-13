@@ -22,7 +22,7 @@ A grant lists capabilities, and a capability is permission to call a group of op
 | Capability | Operations it allows | Held by default by |
 | --- | --- | --- |
 | `read` | `inbox`, `get`, `find`, `impact`, `since`, `gate`, `history`, `timeline`, `check`, `command` | a person, an agent |
-| `record` | `report`, `gate` | a person, a pipeline |
+| `record` | `report`, `change`, `gate` | a person, a pipeline |
 | `produce` | `propose`, `claim`, `decide` | a person, an agent |
 | `answer` | none by itself; it makes an answer count where the policy asks a member | a person |
 | `plan` | `plan` | a person |
@@ -277,7 +277,7 @@ The command line needs no token in local mode on the same machine. In server mod
 
 ## What a pipeline can never do
 
-A pipeline can hold `read` and `record`, and nothing more, under every grant and every policy. It reports results and reads a commit's gate. It cannot answer a question, edit a case, plan a run or administer the instance. A grant for a pipeline that lists more is refused:
+A pipeline can hold `read` and `record`, and nothing more, under every grant and every policy. It reports results, says when a change ended, and reads a commit's gate. It cannot answer a question, edit a case, plan a run or administer the instance. A grant for a pipeline that lists more is refused:
 
 ```
 $ mainworthy actor grant github-actions --can produce --project scratch

@@ -1,0 +1,56 @@
+# Tells Mainworthy when a pull request ends or is opened again (decision 0022). A failure nobody explained on a
+# pull request that was merged or closed is then no longer asked about: nobody will act on the answer, and a
+# failure that came with the merge fails on `main` and is asked about there.
+#
+# One request with the pipeline's token, and no checkout: the operation is `change`, the same call as
+# `mainworthy change --change pr:482 --state merged`. Nothing runs when the repository names no instance.
+#
+# Run it by hand for a pull request that ended before this workflow existed, or whose event was missed:
+# `gh workflow run change.yml -f pull=150 -f state=merged`.
+name: change
+
+on:
+  pull_request:
+    types: [closed, reopened]
+  workflow_dispatch:
+    inputs:
+      pull:
+        description: The pull request's number
+        required: true
+        type: number
+      state:
+        description: How it ended, or open if it is open again
+        required: true
+        type: choice
+        options: [merged, closed, open]
+
+permissions: {}
+
+jobs:
+  tell:
+    # A pull request from a fork is given no secret, so nothing is said about it.
+    if: ${{ vars.MAINWORTHY_URL != '' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Say how the pull request ended
+        env:
+          MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}
+          MAINWORTHY_PROJECT: ${{ vars.MAINWORTHY_PROJECT }}
+          MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}
+          PULL: ${{ inputs.pull || github.event.pull_request.number }}
+          STATE: ${{ inputs.state || (github.event.action == 'reopened' && 'open' || (github.event.pull_request.merged && 'merged' || 'closed')) }}
+        run: |
+          status=$(curl -sS -o reply.json -w '%{http_code}' -X POST "$MAINWORTHY_URL/api/p/$MAINWORTHY_PROJECT/change" \
+            -H "authorization: Bearer $MAINWORTHY_TOKEN" -H 'content-type: application/json' \
+            -d "{\"change\":\"pr:$PULL\",\"state\":\"$STATE\"}")
+          cat reply.json
+          echo
+          # 404: the pull request never reported, or the instance is older than this operation. Neither stops a merge.
+          case "$status" in
+            200 | 404) ;;
+            *)
+              echo "::error::Mainworthy answered $status"
+              exit 1
+              ;;
+          esac

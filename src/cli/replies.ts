@@ -110,6 +110,12 @@ export const REPLY_SCHEMAS: { [N in OpName]: z.ZodType<Api[N]["reply"]> } = {
 		reviewed: z.number(),
 	}),
 	plan: z.object({ run: z.string(), slots: z.number(), already: z.number() }),
+	change: z.object({
+		change: z.string(),
+		state: z.enum(["merged", "closed", "open"]),
+		questions: z.array(z.string()),
+		already: z.boolean(),
+	}),
 	decide: z.array(
 		z.object({
 			q: z.string(),

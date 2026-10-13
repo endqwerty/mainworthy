@@ -15,13 +15,14 @@ import {
 	timelineOp,
 } from "./reads.ts";
 import type { AnyOp } from "./registry.ts";
-import { claimOp, decideOp, planOp, proposeOp, reportOp } from "./writes.ts";
+import { changeOp, claimOp, decideOp, planOp, proposeOp, reportOp } from "./writes.ts";
 
 const list: AnyOp[] = [
 	// produce evidence
 	proposeOp,
 	reportOp,
 	claimOp,
+	changeOp,
 	// request evidence
 	planOp,
 	// decide

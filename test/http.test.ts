@@ -634,7 +634,7 @@ describe("a pipeline's token", () => {
 			.query("SELECT count(*) AS n FROM cases c JOIN projects p ON p.id = c.project WHERE p.key = ?")
 			.get(project);
 
-	test("issued with no list of capabilities, it records and reads the gate, and nothing else, under every preset", async () => {
+	test("issued with no list of capabilities, it records, says when a change ended and reads the gate, and nothing else, under every preset", async () => {
 		const instance = boot("server", OWNER);
 		for (const preset of ["loose", "standard", "strict"]) {
 			await admin(instance, { do: "project.create", key: preset, preset });
@@ -651,9 +651,13 @@ describe("a pipeline's token", () => {
 				ok: true,
 				result: { verdict: "blocked" },
 			});
+			// Saying that a change ended is the third thing it may do (decision 0022): it is let in, and here there is
+			// no such change to end.
+			const ended = await post(instance, `/api/p/${preset}/change`, { change: "pr:404", state: "merged" }, ci);
+			expect(ended.status).toBe(404);
 			// Every other operation of the registry, whatever it is: one added later is refused here too.
 			for (const op of OP_LIST) {
-				if (op.name === "report" || op.name === "gate") continue;
+				if (op.name === "report" || op.name === "gate" || op.name === "change") continue;
 				const path = op.scope === "project" ? `/api/p/${preset}/${op.name}` : `/api/${op.name}`;
 				const reply = await post(instance, path, op.name === "propose" ? create : {}, ci);
 				expect(`${preset} ${op.name}: ${reply.status}`).toBe(`${preset} ${op.name}: 403`);

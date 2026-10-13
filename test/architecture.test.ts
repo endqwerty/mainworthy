@@ -154,6 +154,7 @@ describe("the module map", () => {
 			"tests",
 			"targets",
 			"changes",
+			"change_ends",
 			"batches",
 			"signatures",
 			"results",
@@ -223,7 +224,13 @@ describe("the module map", () => {
 		// an export carries what signs somebody in.
 		const exported = ["orgs", "actors", "grants"];
 		const identity = owners["server/identity"] ?? [];
-		expect([...UNEXPORTED].sort()).toEqual(identity.filter((table) => !exported.includes(table)).sort());
+		// One table an archive leaves out holds no secret: which changes have ended (decision 0022). It is left
+		// out so that the archive version, and every archive taken before it, stays as it is.
+		const other = ["change_ends"];
+		expect(UNEXPORTED.filter((table) => !other.includes(table)).sort()).toEqual(
+			identity.filter((table) => !exported.includes(table)).sort(),
+		);
+		expect(UNEXPORTED.filter((table) => other.includes(table))).toEqual(other);
 	});
 
 	test("each migration says truly whether it changes what an archive holds", () => {
@@ -426,13 +433,14 @@ describe("the registry", () => {
 		expect(MCP_OPS.length).toBeLessThanOrEqual(10);
 	});
 
-	test("a pipeline's token reaches two operations: report and gate", () => {
+	test("a pipeline's token reaches three operations: report, change and gate", () => {
 		// `record` is all a pipeline's token holds by default, so an operation that accepts it is one more thing a
 		// secret in a CI system can do. Adding to this list is a decision (docs/decisions/0014), not a copy of the
-		// nearest operation. `gate` is also the one operation that accepts either of two capabilities.
+		// nearest operation: `change`, which says that a pull request ended, came with decision 0022. `gate` is
+		// also the one operation that accepts either of two capabilities.
 		const accepts = (capability: "record" | "read") =>
 			OP_LIST.filter((op) => needs(op.needs).includes(capability)).map((op) => op.name);
-		expect(accepts("record")).toEqual(["report", "gate"]);
+		expect(accepts("record")).toEqual(["report", "change", "gate"]);
 		expect(OP_LIST.filter((op) => typeof op.needs !== "string").map((op) => op.name)).toEqual(["gate"]);
 		// What a pipeline may be let do besides: the reads, and nothing that writes.
 		expect(OP_LIST.filter((op) => accepts("read").includes(op.name) && op.effect !== "read")).toEqual([]);

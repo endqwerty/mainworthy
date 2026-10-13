@@ -4,6 +4,8 @@ import type { z } from "zod";
 import type { Unlinked } from "./kinds.ts";
 import type {
 	AdminInput,
+	ChangeInput,
+	ChangeReply,
 	CheckInput,
 	ClaimInput,
 	ClaimReply,
@@ -48,6 +50,7 @@ export type Api = {
 	report: { input: In<typeof ReportInput>; reply: ReportReceipt };
 	claim: { input: In<typeof ClaimInput>; reply: ClaimReply };
 	plan: { input: In<typeof PlanInput>; reply: PlanReply };
+	change: { input: In<typeof ChangeInput>; reply: ChangeReply };
 	decide: { input: In<typeof DecideInput>; reply: DecideReply[] };
 	inbox: { input: In<typeof InboxInput>; reply: InboxReply };
 	get: { input: In<typeof GetInput>; reply: Rows };

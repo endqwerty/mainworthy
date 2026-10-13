@@ -259,6 +259,28 @@ Record a review and what it found. A review with no findings is still recorded.
 
 </details>
 
+### change
+
+Say that a change ended (merged, or closed without merging) or is open again. An ended change is not asked about.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/p/<project>/change` |
+| Command | `mainworthy change` |
+| Needs | `record` |
+| Effect | writes |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>change</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `change` | `string` | yes | The change, for example pr:482. |
+| `state` | `"merged" \| "closed" \| "open"` | yes | How the change ended: merged, or closed without merging. open: it is open again. |
+
+</details>
+
 ### plan
 
 Start a run: choose cases, say which results count and what completes it. Evidence already recorded fills it at once.
