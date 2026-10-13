@@ -288,8 +288,9 @@ the steps are kept below for an instance that has none.
   says which. Until 2026-10-13 the artifacts of two attempts had one name and were merged into one directory, so
   the one read was the one written last: on pull request #109 (run 38367395704) shard `tests-2` passed in
   attempt 2 and the gate still reported attempt 1's failure. A shard whose newer attempt left no artifact at all
-  (its job ended before the upload) is still read from the older one. The shard's own job is red then, and the
-  `gate` job fails with it: its last step requires every shard's job to have succeeded.
+  is still read from the older one. That attempt's job is red: a job that could not be set up fails, and so does
+  one whose tests left no report, at its upload step (`if-no-files-found: error`). The `gate` job fails with it:
+  its last step requires every shard's job to have succeeded.
 - **A test file with no case is one `map` question** under `standard`. The first two runs left 70 of them in the
   queue. They do not block the gate.
 - **A push to `main` reports too**, as the workflow runs on it.
