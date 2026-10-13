@@ -120,7 +120,10 @@
 .ev p {
 	margin: 3px 0;
 }
+/* A block, although the card of a question is a link: as inline text its padding lies over the rows around it. */
 .question-card {
+	display: block;
+	overflow-wrap: anywhere;
 	padding: 10px;
 	background: var(--bg);
 	border: 1px solid var(--line);
