@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { type Api, type Envelope, ERROR_CODES, type OpName, type SessionInfo } from "../../core/api.ts";
+import { type Api, type Envelope, ERROR_CODES, INSTANCE_OPS, type OpName, type SessionInfo } from "../../core/api.ts";
 import { type DeviceSession, deviceSession, sessionCurrent, suspendDeviceSession } from "./device.ts";
 
 const Wire = z.discriminatedUnion("ok", [
@@ -9,6 +9,7 @@ const Wire = z.discriminatedUnion("ok", [
 		error: z.object({
 			code: z.enum(ERROR_CODES),
 			message: z.string(),
+			details: z.record(z.string(), z.unknown()).optional(),
 		}),
 	}),
 ]);
@@ -34,22 +35,32 @@ const Session = z.object({
 	),
 });
 
+type Refusal = Extract<Envelope<unknown>, { ok: false }>["error"];
 export class ApiError extends Error {
 	constructor(
-		readonly code: Extract<Envelope<unknown>, { ok: false }>["error"]["code"],
+		readonly code: Refusal["code"],
 		message: string,
+		/** What the server added for the page to act on, such as who a browser is signed in as. */
+		readonly details: Readonly<Record<string, unknown>> = {},
+		/** The HTTP status of the reply that refused. Null for a refusal the page made itself, before asking. */
+		readonly status: number | null = null,
 	) {
 		super(message);
 		this.name = "ApiError";
 	}
 }
 export const unauthenticatedEvent = "mainworthy:unauthenticated";
-function refuse(error: Extract<Envelope<unknown>, { ok: false }>["error"], message = error.message): never {
-	if (error.code === "unauthenticated" && typeof window !== "undefined") {
-		suspendDeviceSession();
-		window.dispatchEvent(new Event(unauthenticatedEvent));
-	}
-	throw new ApiError(error.code, message);
+/**
+ * The page is signed in no more: its session ended, or the person signed out. What the device keeps for the
+ * person is set aside and the app shows the sign-in page.
+ */
+export function signedOut(): void {
+	suspendDeviceSession();
+	window.dispatchEvent(new Event(unauthenticatedEvent));
+}
+function refuse(error: Refusal, status: number): never {
+	if (error.code === "unauthenticated" && typeof window !== "undefined") signedOut();
+	throw new ApiError(error.code, error.message, error.details, status);
 }
 export type CallOptions = {
 	project?: string;
@@ -59,6 +70,8 @@ export type CallOptions = {
 	keepalive?: boolean;
 	owner?: DeviceSession;
 };
+
+const instanceOps: readonly OpName[] = INSTANCE_OPS;
 
 /** The operation map owns input and reply types; wire envelopes are validated at this boundary. */
 export async function call<O extends OpName>(
@@ -77,7 +90,7 @@ export async function call<O extends OpName>(
 	const project =
 		options.project ??
 		(typeof location === "undefined" ? "scratch" : decodeURIComponent(location.pathname.split("/")[2] ?? "scratch"));
-	const path = op === "admin" ? `/api/${op}` : `/api/p/${encodeURIComponent(project)}/${op}`;
+	const path = instanceOps.includes(op) ? `/api/${op}` : `/api/p/${encodeURIComponent(project)}/${op}`;
 	const response = await fetch(`${options.url ?? ""}${path}`, {
 		method: "POST",
 		headers: {
@@ -91,40 +104,66 @@ export async function call<O extends OpName>(
 	});
 	const envelope = Wire.parse(await response.json());
 	assertOwner();
-	if (!envelope.ok) refuse(envelope.error);
+	if (!envelope.ok) refuse(envelope.error, response.status);
 	return envelope.result as Api[O]["reply"];
 }
 export async function session(
 	options: { owner?: DeviceSession; signal?: AbortSignal; keepalive?: boolean } = {},
 ): Promise<SessionInfo> {
-	const envelope = Wire.parse(
-		await (
-			await fetch("/api/session", {
-				...(options.signal ? { signal: options.signal } : {}),
-				keepalive: options.keepalive ?? false,
-			})
-		).json(),
-	);
+	const response = await fetch("/api/session", {
+		...(options.signal ? { signal: options.signal } : {}),
+		keepalive: options.keepalive ?? false,
+	});
+	const envelope = Wire.parse(await response.json());
 	if (options.owner && !sessionCurrent(options.owner))
 		throw new ApiError("unauthenticated", "The session changed. Your input is kept.");
-	if (!envelope.ok) refuse(envelope.error);
+	if (!envelope.ok) refuse(envelope.error, response.status);
 	const info = Session.parse(envelope.result);
 	// The pages show a project's content. A project the caller holds a grant on and may not read is not one of them.
 	return { ...info, projects: info.projects.filter((project) => project.can.includes("read")) };
 }
-export async function login(token: string): Promise<void> {
-	const response = await fetch("/api/login", {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ token }),
-	});
-	const envelope = Wire.parse(await response.json());
-	if (envelope.ok) return;
-	if (envelope.error.code !== "limited") refuse(envelope.error, "That token was not accepted. Try again.");
-	// Too many wrong tokens, from this address or at this token. The server says how long to wait in a header;
-	// a proxy that dropped it leaves the sentence without a number.
+/**
+ * What a page says of a reply that was refused for too many failed attempts (`limited`, 429): how long to wait,
+ * and nothing about what was counted. The server says how long in a header; a proxy that dropped it leaves the
+ * sentence without a number.
+ */
+function waitSentence(response: Response): string {
 	const seconds = Number(response.headers.get("retry-after") ?? "");
 	const wait =
 		Number.isInteger(seconds) && seconds > 0 ? `in ${seconds} ${seconds === 1 ? "second" : "seconds"}` : "later";
-	refuse(envelope.error, `Too many attempts. Try again ${wait}.`);
+	return `Too many attempts. Try again ${wait}.`;
+}
+/**
+ * One of the routes that are not operations: signing in and out, and setting a password (`signin.ts` has a
+ * function for each). With a body it is a POST. `signedIn` says the page asks as the person it is signed in as:
+ * the request names them, so the server refuses it when the cookie has become somebody else's, and a 401 means
+ * the session ended, as it does for an operation. Without it nobody is signed in yet, and a 401 is a refusal
+ * for the caller to show.
+ */
+export async function exchange(
+	path: string,
+	{ body, signedIn = false }: { body?: unknown; signedIn?: boolean } = {},
+): Promise<unknown> {
+	const owner = signedIn ? deviceSession() : null;
+	const response = await fetch(
+		path,
+		body === undefined
+			? {}
+			: {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						...(owner ? { "X-Mainworthy-As": encodeURIComponent(owner.person) } : {}),
+					},
+					body: JSON.stringify(body),
+				},
+	);
+	const envelope = Wire.parse(await response.json());
+	if (envelope.ok) return envelope.result;
+	// Every one of these routes may be answered `limited`: a wrong token, password, passkey or invitation code
+	// too often, or a wrong current password. The sentence is the same wherever it is shown.
+	const error =
+		envelope.error.code === "limited" ? { ...envelope.error, message: waitSentence(response) } : envelope.error;
+	if (signedIn) refuse(error, response.status);
+	throw new ApiError(error.code, error.message, error.details, response.status);
 }

@@ -82,6 +82,14 @@ export type Api = {
 export type OpName = keyof Api;
 
 /**
+ * The operations that are the instance's and not a project's: a client sends these to `/api/<op>`, the one
+ * address that answers them, and every other one to `/api/p/<project>/<op>`. The registry is where an
+ * operation's scope is declared; this list is for a client that cannot import the registry (the web UI), and
+ * a test holds the two equal (`test/web-client.test.ts`).
+ */
+export const INSTANCE_OPS = ["admin", "session", "credential", "invitation"] as const satisfies readonly OpName[];
+
+/**
  * Why a request did not run. `conflict` is a stale base or a duplicate; a rule that says no is `forbidden`;
  * `limited` is a caller that failed to prove itself too often, and is told how long to wait.
  *
