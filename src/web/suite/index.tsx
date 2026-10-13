@@ -26,7 +26,16 @@ import {
 	writeDraft,
 } from "../lib/drafts.ts";
 import { draftOwner, randomId } from "../lib/ids.ts";
-import { cardText, draftAfterMerge, type MergeFate, mergeFate, recordable, sameBody } from "../lib/merges.ts";
+import {
+	allRecorded,
+	cardText,
+	draftAfterMerge,
+	type MergeFate,
+	mergeFate,
+	nextMine,
+	recordable,
+	sameBody,
+} from "../lib/merges.ts";
 import { navigate, readRoute, refUrl, routeEntry, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, ProofStrip } from "../ui/index.tsx";
@@ -121,9 +130,11 @@ export function SuiteScreen() {
 			if (!latest || !mayWrite(state.draftId, !draftStored)) return;
 			const next = {
 				...latest,
+				// A card that moves to a new question has a new side for the person. The draft follows it, and keeps
+				// what it held beyond the old one, such as a step that is still being typed.
 				body:
-					latest.conflict && latest.conflict.q !== state.q && sameBody(sentBody(latest), latest.conflict.mine)
-						? state.mine
+					latest.conflict && latest.conflict.q !== state.q
+						? mergeBodies({ base: latest.conflict.mine, mine: latest.body, theirs: state.mine }).merged
 						: latest.body,
 				conflict: state,
 				sent: null,
@@ -383,12 +394,11 @@ export function SuiteScreen() {
 		(id: string): void => {
 			const latest = readDraft({ project, id });
 			if (!latest || !mayWrite(id)) return;
+			const cleaned = cleanTitle(latest);
 			const next = {
-				...latest,
-				body:
-					latest.conflict && hasTypedMerge(latest.conflict)
-						? cardText({ draft: latest, conflict: latest.conflict })
-						: latest.body,
+				...(latest.conflict && hasTypedMerge(latest.conflict)
+					? { ...cleaned, body: cardText({ draft: cleaned, conflict: latest.conflict }) }
+					: latest),
 				sent: null,
 				conflict: undefined,
 				cmd: randomId(),
@@ -432,12 +442,15 @@ export function SuiteScreen() {
 		},
 		[project],
 	);
-	/** The draft of a card as it is now, while its conflict is still the question `state` was shown for. */
+	/**
+	 * The draft of a card as it is now, while its conflict is still the question `state` was shown for. Tags and
+	 * links typed inline are out of its text and in its lists, as they were when the card's side was made.
+	 */
 	const cardDraft = useCallback(
 		(state: ConflictState): { draft: Draft; conflict: ConflictState } | null => {
 			const draft = readDraft({ project, id: state.draftId }) ?? liveDrafts.current.get(state.draftId);
 			const conflict = draft?.conflict;
-			return draft && conflict?.q === state.q ? { draft, conflict } : null;
+			return draft && conflict?.q === state.q ? { draft: cleanTitle(draft), conflict } : null;
 		},
 		[project],
 	);
@@ -467,7 +480,7 @@ export function SuiteScreen() {
 		}): Promise<void> => {
 			const left = (recorded: Parameters<typeof draftAfterMerge>[0]["recorded"]): Draft | null | undefined => {
 				const card = cardDraft(state);
-				return card && draftAfterMerge({ ...card, body: sentBody(card.draft), sent, recorded });
+				return card && draftAfterMerge({ ...card, sent, recorded });
 			};
 			// The recorded version is read only when there is later text to carry onto it.
 			const view =
@@ -519,7 +532,7 @@ export function SuiteScreen() {
 					if (!card) return true;
 					// Nothing of the merge was adopted, so all of the card is still the person's text: what was
 					// sent, and what they typed in it since.
-					const mine = recordable(card.conflict.merged);
+					const mine = nextMine({ merged: card.conflict.merged, sent: sent.body });
 					const current = bodyOf(CaseView.parse(rows[0]));
 					const next = mergeBodies({ base: card.conflict.current, mine, theirs: current });
 					storeConflict({
@@ -593,7 +606,7 @@ export function SuiteScreen() {
 			if (!card) return;
 			const head = CaseView.parse(rows[0]);
 			const typed = hasTypedMerge(card.conflict);
-			if (answer === "merge" && sameBody(typed ? card.conflict.merged : sentBody(card.draft), bodyOf(head))) {
+			if (answer === "merge" && allRecorded({ ...card, head: bodyOf(head) })) {
 				dropDraft(state.draftId);
 				setStatus(`Conflict resolved elsewhere. Version ${head.version} holds your text.`);
 			} else {

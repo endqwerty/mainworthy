@@ -3,7 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import type { CaseBody } from "../src/core/model.ts";
 import type { Draft, DraftConflict } from "../src/web/lib/drafts.ts";
-import { cardText, draftAfterMerge, mergeFate } from "../src/web/lib/merges.ts";
+import { allRecorded, cardText, draftAfterMerge, mergeFate, nextMine } from "../src/web/lib/merges.ts";
 
 const body = (title: string, first: string, second: string): CaseBody => ({
 	title,
@@ -58,12 +58,8 @@ const draft = (card: DraftConflict, text: Draft["body"] = mine): Draft => ({
 	cmd: "draft-cmd-01",
 	submission: { kind: "none" },
 });
-const after = (
-	card: DraftConflict,
-	at: typeof recorded | null,
-	text: Draft["body"] = mine,
-	sendable: CaseBody = mine,
-) => draftAfterMerge({ draft: draft(card, text), conflict: card, body: sendable, sent, recorded: at });
+const after = (card: DraftConflict, at: typeof recorded | null, text: Draft["body"] = mine) =>
+	draftAfterMerge({ draft: draft(card, text), conflict: card, sent, recorded: at });
 
 describe("the draft left after a recorded merge", () => {
 	test("none, although the recorded version differs from what was sent", () => {
@@ -103,15 +99,37 @@ describe("the draft left after a recorded merge", () => {
 			...text,
 			steps: text.steps.map((step) => (step.id === "s2" ? { ...step, action: "Typed since" } : step)),
 		});
-		expect(after(conflict(sent), recorded, typed(mine), typed(mine))).toMatchObject({ base: 4, body: typed(v4) });
+		expect(after(conflict(sent), recorded, typed(mine))).toMatchObject({ base: 4, body: typed(v4) });
 		// With nothing to carry it onto, it is added to the card's text, on the base the draft was written on.
 		const card = conflict({ ...sent, title: "Merged by hand, and later" });
-		expect(after(card, null, typed(mine), typed(mine))).toMatchObject({ base: 1, body: typed(card.merged) });
+		expect(after(card, null, typed(mine))).toMatchObject({ base: 1, body: typed(card.merged) });
 	});
 
 	test("a step the person has not typed into yet is not later text", () => {
 		const typing = { ...mine, steps: [...mine.steps, { id: "s3", action: "", expected: null }] };
-		expect(after(conflict(sent), recorded, typing, mine)).toBeNull();
+		expect(after(conflict(sent), recorded, typing)).toBeNull();
+		expect(
+			after(conflict(sent), recorded, { ...typing, steps: typing.steps.map((s) => ({ ...s, expected: "" })) }),
+		).toBeNull();
+	});
+
+	// The first independent check of this change (V1): such a step cannot be recorded, and it is typed text.
+	test("a step with an expectation and no action yet stays, whatever the merge did", () => {
+		const unfinished = { id: "s3", action: "", expected: "Typed, and not recorded" };
+		const typing = { ...mine, steps: [...mine.steps, unfinished] };
+		expect(after(conflict(sent), recorded, typing)).toMatchObject({
+			base: 4,
+			body: { ...v4, steps: [...v4.steps, unfinished] },
+		});
+		expect(after(conflict(sent), null, typing)).toMatchObject({
+			base: 1,
+			body: { ...sent, steps: [...sent.steps, unfinished] },
+		});
+		const card = conflict({ ...sent, title: "Merged by hand, and later" });
+		expect(after(card, recorded, typing)).toMatchObject({
+			base: 4,
+			body: { ...v4, title: "Merged by hand, and later", steps: [...v4.steps, unfinished] },
+		});
 	});
 });
 
@@ -137,6 +155,47 @@ describe("the text of a card that its own merge did not end", () => {
 	test("a side chosen for the current version is not a claim either", () => {
 		const card = conflict({ ...mine, title: v2.title });
 		expect(cardText({ draft: draft(card), conflict: card })).toEqual({ ...mine, title: v1.title });
+	});
+
+	test("what the draft holds beyond the card stays, and the card's text stands where both changed a field", () => {
+		const unfinished = { id: "s3", action: "", expected: "Typed, and not recorded" };
+		const card = conflict({ ...sent, title: "Typed in the card" });
+		const held = draft(card, { ...mine, title: "Changed under the card", steps: [...mine.steps, unfinished] });
+		expect(cardText({ draft: held, conflict: card })).toEqual({
+			...sent,
+			title: "Typed in the card",
+			steps: [...sent.steps, unfinished],
+		});
+	});
+
+	test("the card and its draft can go only when the head holds all of their text", () => {
+		const typed = conflict({ ...sent, title: "Typed in the card" });
+		const gone = (card: DraftConflict, head: CaseBody, held = draft(card)) =>
+			allRecorded({ draft: held, conflict: card, head });
+		expect(gone(typed, typed.merged)).toBe(true);
+		expect(gone(typed, { ...typed.merged, pre: "Something else" })).toBe(false);
+		// A card nobody typed in: the draft is the person's text.
+		expect(gone(conflict(mine), mine)).toBe(true);
+		expect(gone(conflict(mine), v2)).toBe(false);
+		// A step being typed, or a tag, is recorded nowhere.
+		const unfinished = { id: "s3", action: "", expected: "Typed, and not recorded" };
+		const typing = { ...mine, steps: [...mine.steps, unfinished] };
+		expect(gone(typed, typed.merged, draft(typed, typing))).toBe(false);
+		expect(gone(conflict(mine), mine, draft(conflict(mine), typing))).toBe(false);
+		expect(gone(conflict(mine), mine, { ...draft(conflict(mine)), tags: ["checkout"] })).toBe(false);
+	});
+
+	test("the person's side of the next card is recordable, and keeps a step whose action they emptied", () => {
+		const emptied = {
+			...sent,
+			steps: sent.steps.map((s) => (s.id === "s2" ? { ...s, action: "", expected: "Kept" } : s)),
+		};
+		expect(nextMine({ merged: emptied, sent })).toEqual({
+			...sent,
+			steps: sent.steps.map((s) => (s.id === "s2" ? { ...s, expected: "Kept" } : s)),
+		});
+		const added = { ...sent, steps: [...sent.steps, { id: "s9", action: "", expected: null }] };
+		expect(nextMine({ merged: added, sent })).toEqual(sent);
 	});
 });
 

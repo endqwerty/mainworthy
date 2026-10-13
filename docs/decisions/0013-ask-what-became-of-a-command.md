@@ -30,6 +30,11 @@ card whose question was answered by anything other than its own merge. Proposing
 written on lets the server merge it with what is recorded now, or ask, which is what a base version is for
 (decision 0004). The page never takes "the current head" as a draft's base because two bodies look alike.
 
+**Nothing typed leaves the device unrecorded.** A draft can hold text that no merge carries, such as a step
+with an expected result and no action yet. It stays with the draft on every path. A card and its draft are
+dropped in two cases only: the card's own merge was recorded and neither holds anything beyond it, or the
+recorded head holds all of their text.
+
 ## What was turned down
 
 - **Cutting the hand-typed merged field** (the smaller option in issue #81). Without it a card has no later

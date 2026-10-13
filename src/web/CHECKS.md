@@ -550,8 +550,10 @@ title, after a colleague changed another field while the card was open.
 | `api-different-title`, `api-different-step`: the merge never arrived and the same person answered elsewhere | second check, F3 and F4 | The card's text stays a draft; leaving shows a conflict card; the other client's version stands until resolved |
 | A merge the page gave up arrives while a second attempt is on its way | this change | The first is recorded, the second refused; the later words are a draft on the recorded version |
 | A typed merge is kept after a rejection, and a colleague undoes a change the card had held | this change | The undone change does not come back |
+| A step with an expected result and no action yet is in the draft; the merge is recorded, or meets a new conflict | the check of this change, V1 | The step stays on the device, and is in the editor again after the merge |
 
-All eleven failed on the revision before the change (`899c428`), run from a clean export:
+The first eleven failed on the revision before the change (`899c428`), run from a clean export. The last two
+rows are the finding of the independent check of the first version of this change (`7ef33ca`), and failed there:
 
 ```text
 (fail) a merge typed by hand that the server combines with a colleague's newer change leaves no draft to undo it
@@ -560,6 +562,10 @@ error: The expected server state did not arrive
 Expected: "Open the cart, changed by a colleague"  Received: "Open the cart"
  0 pass
  11 fail
+
+on 7ef33ca:
+(fail) a step still being typed, with an expected result and no action, stays on the device when the merge is recorded
+Expected to contain: "UNRECORDED EXPECTATION"  Received: ""
 ```
 
 One earlier test changed. `R6-3 a stored conflict resolved elsewhere preserves hand-typed card text on return`

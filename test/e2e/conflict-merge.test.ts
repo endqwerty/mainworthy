@@ -48,7 +48,13 @@ async function colleagueEdits(server: Server, change: (body: Head) => Partial<He
  * A person edits the title and the second step. A colleague records a version that changes the title too, so
  * leaving the editor meets a conflict and the card opens.
  */
-async function card1(theirs: (body: Head) => Partial<Head> = () => ({ title: "Coupon case theirs" })) {
+async function card1({
+	theirs = () => ({ title: "Coupon case theirs" }),
+	alsoTyped = async () => {},
+}: {
+	theirs?: (body: Head) => Partial<Head>;
+	alsoTyped?: (page: Page) => Promise<void>;
+} = {}) {
 	const server = await startServer();
 	await server.api("propose", {
 		edits: [{ op: "create", outline: "Coupon case\n  Open the cart\n  Apply the coupon" }],
@@ -60,6 +66,7 @@ async function card1(theirs: (body: Head) => Partial<Head> = () => ({ title: "Co
 	await page.keyboard.press("e");
 	await caseTitle(page).fill("Coupon case mine");
 	await page.getByRole("textbox", { name: "Step 2", exact: true }).fill(MINE);
+	await alsoTyped(page);
 	await colleagueEdits(server, theirs);
 	await page.keyboard.press("Escape");
 	await card(page).waitFor();
@@ -422,10 +429,9 @@ for (const differs of ["title", "step"])
 check(
 	"a typed merge kept after a rejection does not put back a colleague's change that was undone since",
 	async () => {
-		const { server, page, close } = await card1((body) => ({
-			title: "Coupon case theirs",
-			...firstStep(COLLEAGUE)(body),
-		}));
+		const { server, page, close } = await card1({
+			theirs: (body) => ({ title: "Coupon case theirs", ...firstStep(COLLEAGUE)(body) }),
+		});
 		try {
 			await mergedTitle(page).fill(MERGED);
 			const question = (await server.api("inbox", { on: "C-1", kind: "adopt" })).items[0];
@@ -450,3 +456,45 @@ check(
 	},
 	30_000,
 );
+
+// The first independent check of this change (V1). A step with an expected result and no action yet cannot be
+// recorded, so no merge holds it: it has to stay on the device when the card ends, and when the card moves.
+for (const outcome of ["is recorded", "meets a new conflict"])
+	check(
+		`a step still being typed, with an expected result and no action, stays on the device when the merge ${outcome}`,
+		async () => {
+			const { server, page, close } = await card1({
+				alsoTyped: async (page) => {
+					await page.getByRole("textbox", { name: "Step 2", exact: true }).press("End");
+					await page.keyboard.press("Enter");
+					await page.getByRole("textbox", { name: "Step 3", exact: true }).press("Tab");
+					await page.getByRole("textbox", { name: "Expected result 3", exact: true }).fill("UNRECORDED EXPECTATION");
+				},
+			});
+			try {
+				await mergedTitle(page).fill(MERGED);
+				if (outcome === "meets a new conflict")
+					await colleagueEdits(server, () => ({ title: "Colleague title again" }));
+				await resolve(page);
+				await page
+					.getByText(outcome === "is recorded" ? "Conflict resolved" : "Nothing was adopted", { exact: false })
+					.first()
+					.waitFor();
+				expect(JSON.stringify(await head(server))).not.toContain("UNRECORDED EXPECTATION");
+				expect((await storedDrafts(page)).join(" ")).toContain("UNRECORDED EXPECTATION");
+				if (outcome === "is recorded") {
+					const merged = await head(server);
+					expect(merged.title).toBe(MERGED);
+					expect(actions(merged)).toEqual(["Open the cart", MINE]);
+					// The step is in the editor again, on the recorded version, for the person to finish.
+					await card(page).waitFor({ state: "detached" });
+					expect(await page.getByRole("textbox", { name: "Expected result 3", exact: true }).inputValue()).toBe(
+						"UNRECORDED EXPECTATION",
+					);
+				} else expect((await storedDrafts(page)).join(" ")).toContain(MINE);
+			} finally {
+				await close();
+			}
+		},
+		30_000,
+	);
