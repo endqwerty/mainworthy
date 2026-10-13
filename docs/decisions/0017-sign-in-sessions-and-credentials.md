@@ -412,12 +412,17 @@ it, is in `src/web/CHECKS.md`; the guide describes them for a person (`docs/guid
   (429) is "Too many attempts. Try again in N seconds.", with N read from `Retry-After`, the same wherever a
   proof can fail: the three ways of signing in, the invitation page and the current password in "Your
   sign-in". One function words it (`exchange` in `src/web/lib/api.ts`). Any other refusal is shown as the
-  server wrote it. The page sends nothing again by itself after a wait.
+  server wrote it. After a wait the page does not send the proof again by itself: the person presses the
+  button.
 - The invitation page takes the code out of the address bar when it reads it, not when the invitation is
   accepted: a code that sits in the address while a form is filled in is copied with it. The price is that a
   reload has no code, and the page then says to open the link again.
 - The question for a browser signed in as somebody else comes before the form, from `/api/session`. The
-  fields wait until the page knows who is signed in, and then for the answer.
+  fields wait until the page knows who is signed in, and then for the answer. Not knowing is a state of its
+  own and is not taken for "nobody": when the lookup fails, or has no answer after twenty seconds, the page
+  says that it could not find out and offers to ask again, and the fields stay closed. Twenty seconds,
+  because the answer is one small reply that a slow connection brings in a second or two; the first asking is
+  not given up, and an answer that comes late is still taken.
 - The answer is about one person, and `replace` carries that person's name. The first version sent
   `replace: true`, and an independent check showed what that allowed: the page asked about robin, somebody
   else signed in from another tab, and the acceptance ended their session with no question about them. Now
@@ -443,8 +448,20 @@ it, is in `src/web/CHECKS.md`; the guide describes them for a person (`docs/guid
   one request through. Disabled, it dropped the focus, and somebody working by keyboard was left on nothing
   after a refusal. The two selects of the invitation form keep the focus when they change, unlike the shell's
   selects, which give it up so that the next plain key is a shortcut: here the next key is another arrow.
-- When a request that changes something gets no reply, the page says what may have happened and how to find
-  out, and does not say "try again": the server may have acted, and a second press would act again.
+- When accepting an invitation, making a link, changing a password or signing out gets no reply, the page
+  says only what it knows and how to find out, and does not say "try again": the server may have acted, and a
+  second press would act again. It infers nothing from what happens next either. The first wording for a
+  password said that a refused current password meant the change had gone through, which a mistyped current
+  password disproves. A sign-out with no reply is looked up at `/api/session`. Ending a session, removing a
+  way of signing in and revoking an invitation are safe to repeat, and do say to try again, with their list
+  read again.
+- A proof or a change is sent once for each press, never again by the page itself. What the page repeats by
+  itself only reads: a list, and `/api/session`.
+- Enter and Space belong to a button that shows the focus (`src/web/lib/keys.ts`). The screens bind those keys
+  too, and took them from "Sign out" on the Suite, which could then not be pressed by keyboard. The one
+  handler now lets them through to a button or a link that matches `:focus-visible` and is not a row of the
+  screen's list. A button that was clicked holds the focus without showing it, so the screen's Enter and Space
+  still work after a click.
 - Ending this browser's own session in "Your sessions" calls `/api/logout`, as "Sign out" does, so the cookie
   is cleared too.
 - The lists of sessions, credentials and invitations are read again every time their section opens. The cache
