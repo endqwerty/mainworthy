@@ -30,6 +30,7 @@ Two words recur below. An instance admin holds the `admin` capability on every p
 | Folders and tags | Suite | Anyone with `produce`. The policy decides whether the edit applies at once | [Write cases](./write-cases.md#organize-the-suite) |
 | Which methods a case admits | The case's "Can be exercised by" section, or `methods` in its Markdown | Anyone with `produce`, under the same rule | [Let an agent in](./agents.md#what-agent-work-is-worth) |
 | The theme | The "Theme" button at the bottom of the sidebar | You, in your own browser | This page |
+| The sidebar, open or collapsed | The button beside "Mainworthy" at the top of the sidebar, or <kbd>[</kbd> | You, in your own browser | [This page](#the-sidebar) |
 | Where the server listens, its mode, data directory and reader threads | Environment variables | Whoever starts the server | [Configuration](./configuration.md) |
 | How CI reports | A pipeline token, and `MAINWORTHY_URL`, `MAINWORTHY_TOKEN` and `MAINWORTHY_PROJECT` in the job | An admin makes the token. Whoever edits the pipeline sets the rest | [Report results](./report-results.md#give-a-pipeline-its-own-token) |
 | Backups and moving machines | `mainworthy export` and `mainworthy import` | An instance admin | [Your data](./data.md) |
@@ -83,6 +84,18 @@ A case lists the methods that may produce evidence for it. People are the defaul
 ## The theme
 
 Press "Theme" at the bottom of the sidebar to switch between light and dark. Until you do, Mainworthy follows your system. The choice stays in this browser.
+
+## The sidebar
+
+To make room for what you are reading, collapse the sidebar: press the button beside "Mainworthy" at its top, or <kbd>[</kbd>. The sidebar becomes a strip 64 px wide. The strip keeps the project, the search, the four screens and the footer, each as an icon. It does not show the folders and tags of the Suite.
+
+The pane on the right takes the width the sidebar gave up. That is the pane where you read a case, a question, a run or a change. The list keeps its width. In a window narrower than 760 px the list is above the other pane, and both get wider.
+
+Press the button or <kbd>[</kbd> again to open the sidebar. The choice stays in this browser, so a reload and your next visit find the sidebar as you left it.
+
+In the Suite, <kbd>z</kbd> widens the case further: the list narrows to 340 px and the case takes the rest. The two work together.
+
+A phone has no strip. There, **Menu** opens the sidebar over the pane ([Keyboard](./keyboard.md)).
 
 ## What is fixed today
 

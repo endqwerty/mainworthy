@@ -211,6 +211,7 @@ test.skipIf(!browserAvailable)(
 			expect(await inView(page)).toBe("overlay");
 			expect(await page.evaluate(() => document.activeElement?.className)).not.toBe("palette-input");
 			expect(await offered(/Collapse/)).toBe(0);
+			expect(await page.getByRole("button", { name: /sidebar/i }).count()).toBe(0);
 			// Over the list of cases: New case and the filter, and nothing that acts on the case not shown.
 			expect([await offered(/New case/), await offered(/Filter/)]).toEqual([1, 1]);
 			expect([await offered(/Edit case/), await offered(/Archive selected/), await offered(/Accept proposal/)]).toEqual(

@@ -1,5 +1,5 @@
 #app:has(.run-pane) {
-	grid-template-columns: 236px minmax(0, 1fr) minmax(480px, 46%);
+	grid-template-columns: var(--side-width) minmax(0, 1fr) minmax(480px, calc(46% + var(--side-freed)));
 }
 .run-pane .row {
 	height: 36px;
@@ -276,7 +276,7 @@
 }
 @media (max-width: 1100px) {
 	#app:has(.run-pane) {
-		grid-template-columns: 190px minmax(240px, 1fr) minmax(420px, 46%);
+		grid-template-columns: var(--side-width) minmax(240px, 1fr) minmax(420px, calc(46% + var(--side-freed)));
 	}
 	.run-document,
 	.run-controls {
@@ -285,7 +285,7 @@
 }
 @media (max-width: 760px) {
 	#app:has(.run-pane) {
-		grid-template-columns: 120px minmax(220px, 1fr);
+		grid-template-columns: var(--side-width) minmax(220px, 1fr);
 	}
 	.run-controls {
 		padding-inline: 8px;

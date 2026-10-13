@@ -8,7 +8,10 @@ router, palette, keys overlay, themes and sign-in have a Chromium check.
 `app.tsx` registers named exports `QueueScreen`, `RunsScreen`,
 `ChangesScreen`, `SettingsScreen` from each directory's `index.tsx`.
 A screen returns two sibling `section.pane` elements, `#list` and `#detail`.
-The frame owns the sidebar (`[` collapses), Suite-only folder tree and footer.
+The frame owns the sidebar (`[` and the button in its first row collapse it), Suite-only folder tree and footer.
+A screen with its own columns starts them with `var(--side-width)` and adds `var(--side-freed)` to the pane on
+the right, as `queue.css` does (decision 0020). Do not write the sidebar's width as a number: base.css says it
+once, and a test fails on a set of columns that starts with anything else.
 Put scrolling content in `.pane-scroll`.
 Each screen imports its own CSS. Do not edit another screen or the shell.
 
