@@ -14,8 +14,8 @@
     "test/sequences-extended-loose.test.ts": 17190,
     "test/e2e/draft-conflicts.test.ts": 16133,
     "src/cli/main.test.ts": 15775,
+    "test/e2e/conflict-merge.test.ts": 14560,
     "test/e2e/round6.test.ts": 13151,
-    "test/e2e/conflict-merge.test.ts": 12370,
     "test/e2e/execution.test.ts": 10175,
     "test/e2e/round5.test.ts": 10135,
     "test/e2e/session-and-keys.test.ts": 9412,
@@ -65,7 +65,7 @@
     "test/architecture.test.ts": 60,
     "src/surfaces/ci-env.test.ts": 26,
     "test/check.test.ts": 26,
-    "test/merges.test.ts": 21,
+    "test/merges.test.ts": 25,
     "src/core/text.test.ts": 0
   }
 }
