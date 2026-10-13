@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import { isLoopbackOrPrivate } from "../kernel/address.ts";
-import { addressKey, createLimiter, isGeneratedSecret, type LimiterAnswer, prefixKey } from "./limiter.ts";
+import { accountKey, addressKey, createLimiter, isGeneratedSecret, type LimiterAnswer, prefixKey } from "./limiter.ts";
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -787,5 +787,35 @@ describe("for any sequence of failures, successes and waits", () => {
 			),
 			{ numRuns: 500 },
 		);
+	});
+});
+
+describe("accountKey", () => {
+	test("a name is one key however it is capitalised or padded, and never more than a name's length", () => {
+		expect(accountKey("robin")).toBe("account:robin");
+		expect(accountKey("Robin")).toBe("account:robin");
+		expect(accountKey("  ROBIN\t")).toBe("account:robin");
+		expect(accountKey("robin@example.com")).toBe("account:robin@example.com");
+		// What a stranger types does not decide how much memory a key takes.
+		expect(accountKey("x".repeat(5000))).toBe(`account:${"x".repeat(64)}`);
+		expect(accountKey(`${"a".repeat(64)}b`)).toBe(accountKey(`${"A".repeat(64)}c`));
+		// Another name is another key, and no key is one a token or an address is counted under.
+		expect(accountKey("robin")).not.toBe(accountKey("robina"));
+		expect(accountKey("203.0.113.9")).not.toBe(addressKey("203.0.113.9"));
+		expect(accountKey("robin")).not.toBe(prefixKey("robin"));
+	});
+
+	test("a name that is empty or only spaces has no key: it would be one key for everybody who sends nothing", () => {
+		for (const name of ["", " ", "\t\n "]) expect(accountKey(name)).toBeNull();
+	});
+
+	test("the fifth failure for a name blocks it under any spelling, and a success for it clears it", () => {
+		const w = world();
+		w.fail(accountKey("robin") ?? "", 3);
+		w.fail(accountKey("ROBIN") ?? "", 2);
+		expect(w.check(accountKey("Robin") ?? "")).toEqual(blocked(1));
+		expect(w.check(accountKey("sam") ?? "")).toEqual(FREE);
+		w.limiter.succeeded([accountKey("robin") ?? ""]);
+		expect(w.check(accountKey("ROBIN") ?? "")).toEqual(FREE);
 	});
 });

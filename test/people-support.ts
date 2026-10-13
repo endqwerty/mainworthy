@@ -45,7 +45,18 @@ export const sha256 = (text: string): string => createHash("sha256").update(text
 export type Body<T> =
 	| { ok: true; result: T; seq?: number | null }
 	| { ok: false; error: { code: string; message: string; details?: Record<string, unknown> } };
-export type Answer<T> = { status: number; body: Body<T>; text: string; setCookies: string[]; cookie: string };
+export type Answer<T> = {
+	status: number;
+	body: Body<T>;
+	text: string;
+	setCookies: string[];
+	cookie: string;
+	/** The `Retry-After` header, or null. */
+	retryAfter: string | null;
+};
+/** A reply in one line: `200`, `401 unauthenticated`, `429 limited, retry after 1`. */
+export const said = (reply: Answer<unknown>): string =>
+	`${reply.status}${reply.body.ok ? "" : ` ${reply.body.error.code}`}${reply.retryAfter === null ? "" : `, retry after ${reply.retryAfter}`}`;
 /** The result of an answer that must be a success. */
 export function must<T>(reply: Answer<T>): T {
 	if (!reply.body.ok) throw new Error(`refused: ${reply.status} ${reply.text}`);
@@ -144,6 +155,7 @@ export function world(options: Boot = {}): World {
 			setCookies,
 			// The first cookie of the reply as a browser sends it back: `name=value`.
 			cookie: (setCookies[0] ?? "").split(";")[0] ?? "",
+			retryAfter: response.headers.get("retry-after"),
 		};
 	};
 	const post = <T>(path: string, body: unknown, headers: Sent = {}) => send<T>("POST", path, body, headers);

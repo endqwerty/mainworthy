@@ -206,6 +206,13 @@ export const KIND_NOUN: Record<ActorKind, string> = {
  */
 const isForgottenName = (name: string): boolean => /^forgotten-/i.test(name);
 
+/** Refuses a name no actor is given: one with other characters than these, longer than 64, or a forgotten actor's. */
+function mustBeName(name: string): void {
+	if (!/^[a-zA-Z0-9][a-zA-Z0-9._@-]{0,63}$/.test(name)) throw invalid("actor name: letters, digits, . _ @ -");
+	if (isForgottenName(name))
+		throw invalid("actor name: a name that starts with forgotten- is what a forgotten actor is called; choose another");
+}
+
 export const hashToken = (secret: string): string => bytesToHex(sha256(new TextEncoder().encode(secret)));
 
 function newSecret(): string {
@@ -677,9 +684,7 @@ export function createToken(
 	},
 ): { secret: string; actor: string; expiresAt: number | null } {
 	if (input.kind === "rule") throw invalid("a rule does not hold a token");
-	if (!/^[a-zA-Z0-9][a-zA-Z0-9._@-]{0,63}$/.test(input.actor)) throw invalid("actor name: letters, digits, . _ @ -");
-	if (isForgottenName(input.actor))
-		throw invalid("actor name: a name that starts with forgotten- is what a forgotten actor is called; choose another");
+	mustBeName(input.actor);
 	const db = app.db;
 	const org = orgId(db);
 	const at = app.now();
@@ -725,8 +730,9 @@ function refuseGrant(kind: ActorKind, can: readonly Capability[]): void {
 
 /**
  * The person an invitation is for: the one of this name, made now with the grant if there is none, exactly as
- * `createToken` makes a new person for a token. The rules are that function's, sentence for sentence: a name
- * that is an agent's, a pipeline's or the policy's is refused, so is a forgotten one, and a person who exists
+ * `createToken` makes a new person for a token. The rules are that function's: a name no actor is given is
+ * refused by the same check (`mustBeName`), a name that is an agent's, a pipeline's or the policy's is refused,
+ * so is a forgotten actor, and a person who exists
  * keeps what they hold (naming that very grant is accepted, any other is refused, and `setGrant` changes it).
  * `isNew` says which it was, because it decides what the invitation does: a new person joins, one who exists
  * recovers.
@@ -735,9 +741,7 @@ export function invitedPerson(
 	app: App,
 	input: { name: string; can: readonly Capability[]; project: number },
 ): { id: number; name: string; isNew: boolean } {
-	if (!/^[a-zA-Z0-9][a-zA-Z0-9._@-]{0,63}$/.test(input.name)) throw invalid("actor name: letters, digits, . _ @ -");
-	if (isForgottenName(input.name))
-		throw invalid("actor name: a name that starts with forgotten- is what a forgotten actor is called; choose another");
+	mustBeName(input.name);
 	const db = app.db;
 	const org = orgId(db);
 	const existing = db.get(Q.actorByName, { org, name: input.name });
