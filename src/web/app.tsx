@@ -88,7 +88,7 @@ const initial = (name: string): string =>
 /**
  * Where the browser keeps that the sidebar is collapsed. With the sidebar open, nothing is kept. A browser can
  * refuse its store (it is full, or switched off for the site): the sidebar then collapses and opens for the page
- * that is open, and a reload finds it open.
+ * that is open, and a reload finds what the store last took, which is open where it never took anything.
  */
 const SIDEBAR_KEY = "mainworthy:sidebar";
 function sidebarKept(): boolean {

@@ -93,7 +93,7 @@ The pane on the right takes the width the sidebar gave up. That is the pane wher
 
 Press the button or <kbd>[</kbd> again to open the sidebar. The choice stays in this browser, so a reload and your next visit find the sidebar as you left it. A browser that stores nothing for the site still collapses the sidebar, and opens with it open.
 
-In the Suite, <kbd>z</kbd> widens the case further: the list narrows to 340 px and the case takes the rest. The two work together. In a window narrower than 760 px <kbd>z</kbd> changes nothing, because the case is under the list.
+In the Suite, <kbd>z</kbd> sets the list to 340 px and gives the case the rest, which widens the case further in a window wider than about 900 px. The two work together. In a narrower window the list is under 340 px already, so <kbd>z</kbd> takes width from the case. In a window narrower than 760 px <kbd>z</kbd> changes nothing, because the case is under the list.
 
 A phone has no strip. There, **Menu** opens the sidebar over the pane ([Keyboard](./keyboard.md)).
 
