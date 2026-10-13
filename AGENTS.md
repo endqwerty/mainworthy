@@ -159,6 +159,14 @@ and "Your sign-in", "Your sessions" and "People" in Settings), through the API a
   On the desktop `/tmp` is kept in memory and `test/budgets.test.ts` refuses it, so the export goes under
   `~/.cache`. To wait for another agent's test run: `pgrep -f '[t]est-worker'`; without the brackets pgrep
   finds the shell that runs it and the wait never ends (both on 2026-10-12, PR #97).
+- Scratch files stay out of the worktree: a log, a draft of a pull request, screenshots. `test/architecture.test.ts`
+  reads every file in it, tracked or not, and fails when one holds the former name. On 2026-10-13 an agent's
+  decision log under `.audit/` failed a nine-minute `--update-timings` run that way. `~/.cache` is the place.
+- A verifier that is asked for the check's time leaves `TMPDIR` alone and times the base beside the head. On
+  2026-10-13 a verifier's run with `TMPDIR` on disk took 156 s and failed the 150 s limit on a change that added
+  0.1 s, while `main` itself took about 140 s that day (#77). The verdict waited for a third round that compared
+  the two. And `main` moves while a review runs: a change that passed and is then rebased gets a short round that
+  compares the two revisions (`git range-diff`, the trees) and runs the tests next to it, not the whole review again.
 
 ## Model profile
 
