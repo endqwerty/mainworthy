@@ -430,9 +430,10 @@ A model from another provider reviewed the design against the code before anythi
 
 ## Deferred
 
-Each of these becomes an issue and is not built in the four pull requests: reading authority inside the
-transaction or snapshot that runs the operation, reader threads included; OIDC; TOTP; teams and roles for each
-project; a chain of trusted proxies; a person's own CLI token.
+Each of these is an issue and is not built in the four pull requests: reading authority inside the
+transaction or snapshot that runs the operation, reader threads included (#113); OIDC (#114); TOTP (#115);
+teams and roles for each project (#30); a chain of trusted proxies, and the two proxy settings on the owner's
+instance (#116); a person's own CLI token (#117); mail for invitations and recovery (#122).
 
 ## What breaks
 
