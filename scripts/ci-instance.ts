@@ -19,7 +19,7 @@ export type Choice =
 	/** The configuration is wrong. Nothing is reported. */
 	| { use: "none"; why: string };
 
-type Environment = Record<string, string | undefined>;
+export type Environment = Record<string, string | undefined>;
 export type Probe = {
 	fetch: (url: string, init?: RequestInit) => Promise<Response>;
 	/** How often `/healthz` is asked before the instance counts as unreachable, and the wait between two tries. */
@@ -127,12 +127,20 @@ export function describeChoice(choice: Choice): string {
 	return `Reported to a Casebook started for this job: ${choice.why}.`;
 }
 
+/** A Casebook this job started. */
+export type Own = {
+	/** Kills the server and removes its data. Safe at any moment after `startOwn` returned, and more than once. */
+	stop: () => void;
+	/** The environment a `casebook` command needs to reach it, once it listens. */
+	ready: Promise<Environment>;
+};
+
 /**
  * Starts a Casebook for this job: its own data directory, a port the system picks, the owner of the machine as
- * the caller. Returns the environment a `casebook` command needs to reach it, and how to stop it. The caller
- * stops it on every way out: a server left running outlives the job and holds its output open.
+ * the caller. It returns at once, before the server listens, so the caller holds `stop` from the moment there is
+ * something to stop: a server left running outlives the job and holds its output open.
  */
-export async function startOwn(cli: string): Promise<{ env: Environment; stop: () => void }> {
+export function startOwn(cli: string): Own {
 	const data = mkdtempSync(join(tmpdir(), "casebook-ci-"));
 	const child = Bun.spawn([process.execPath, cli, "serve"], {
 		env: {
@@ -150,23 +158,26 @@ export async function startOwn(cli: string): Promise<{ env: Environment; stop: (
 		child.kill("SIGKILL");
 		rmSync(data, { recursive: true, force: true });
 	};
-	// The server's first line ends with its address.
-	let printed = "";
-	const reader = child.stdout.getReader();
-	const decoder = new TextDecoder();
-	const deadline = Date.now() + 15_000;
-	while (!printed.includes("\n")) {
-		const chunk = await Promise.race([reader.read(), Bun.sleep(Math.max(0, deadline - Date.now())).then(() => null)]);
-		if (chunk === null || chunk.done) break;
-		printed += decoder.decode(chunk.value, { stream: true });
-	}
-	reader.releaseLock();
-	const url = /(http:\/\/\S+)\s*$/.exec(printed.split("\n")[0] ?? "")?.[1];
-	if (!url) {
-		stop();
-		throw new Error(`the job's own Casebook did not start: ${printed.trim() || "it printed nothing"}`);
-	}
-	console.log(`Started a Casebook for this job: ${url} (process ${child.pid})`);
-	// The token and the project are the deployed instance's: neither goes to this one, which has its own project.
-	return { env: { CASEBOOK_URL: url, CASEBOOK_TOKEN: "", CASEBOOK_PROJECT: "" }, stop };
+	const listening = async (): Promise<Environment> => {
+		// The server's first line ends with its address.
+		let printed = "";
+		const reader = child.stdout.getReader();
+		const decoder = new TextDecoder();
+		const deadline = Date.now() + 15_000;
+		while (!printed.includes("\n")) {
+			const chunk = await Promise.race([reader.read(), Bun.sleep(Math.max(0, deadline - Date.now())).then(() => null)]);
+			if (chunk === null || chunk.done) break;
+			printed += decoder.decode(chunk.value, { stream: true });
+		}
+		reader.releaseLock();
+		const url = /(http:\/\/\S+)\s*$/.exec(printed.split("\n")[0] ?? "")?.[1];
+		if (!url) {
+			stop();
+			throw new Error(`the job's own Casebook did not start: ${printed.trim() || "it printed nothing"}`);
+		}
+		console.log(`Started a Casebook for this job: ${url} (process ${child.pid})`);
+		// The token and the project are the deployed instance's: neither goes to this one, which has its own project.
+		return { CASEBOOK_URL: url, CASEBOOK_TOKEN: "", CASEBOOK_PROJECT: "" };
+	};
+	return { stop, ready: listening() };
 }

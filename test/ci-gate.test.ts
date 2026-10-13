@@ -60,8 +60,8 @@ async function gate(
 		/** Shards whose report is there and cannot be read (a directory of that name). */
 		unreadable?: string[];
 		mode?: "local" | "server";
-		/** Sent to the job as soon as it says it has started its own Casebook. */
-		signal?: "SIGINT" | "SIGTERM";
+		/** A signal for the job, sent as soon as its output holds `after`. */
+		signal?: { send: "SIGINT" | "SIGTERM"; after: string };
 		/** Routes of the instance of the test that answer in place of its own. */
 		routes?: NonNullable<Parameters<typeof withInstance>[1]>["routes"];
 		configure?: (running: Running) => Promise<Record<string, string>>;
@@ -122,9 +122,9 @@ async function gate(
 					const decoder = new TextDecoder();
 					for await (const chunk of child.stdout) {
 						text += decoder.decode(chunk, { stream: true });
-						if (options.signal && !signalled && text.includes("Started a Casebook for this job")) {
+						if (options.signal && !signalled && text.includes(options.signal.after)) {
 							signalled = true;
-							child.kill(options.signal);
+							child.kill(options.signal.send);
 						}
 					}
 					return text;
@@ -339,14 +339,16 @@ test("a job that breaks off leaves no Casebook running and nothing in the tempor
 }, 20_000);
 
 test("a job that is told to stop does so before its next command, exits as stopped, and leaves nothing", async () => {
-	for (const [signal, exit] of [
-		["SIGTERM", 143],
-		["SIGINT", 130],
+	// Told while its own Casebook is starting, and told once that one runs. A Casebook left behind would hold the
+	// job's output open, and this test would not end.
+	for (const [send, after, exit] of [
+		["SIGTERM", "::notice::Reported to a Casebook started for this job", 143],
+		["SIGINT", "Started a Casebook for this job: ", 130],
 	] as const) {
-		const result = await gate(green, { signal, configure: async () => ({ CASEBOOK_URL: "" }) });
+		const result = await gate(green, { signal: { send, after }, configure: async () => ({ CASEBOOK_URL: "" }) });
 		// It does not go on to the gate and exit with the verdict of a run that was called off.
 		expect(result.output).not.toContain("$ casebook gate");
-		expect([signal, result.code, result.left]).toEqual([signal, exit, []]);
+		expect([send, result.code, result.left]).toEqual([send, exit, []]);
 	}
 }, 20_000);
 

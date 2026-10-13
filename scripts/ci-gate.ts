@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { Glob } from "bun";
 import { parseJUnit } from "../src/surfaces/formats/junit.ts";
 import { CI_SHARD_LIMITS, type Outcome, over, readOutcome, seconds } from "./check-plan.ts";
-import { chooseInstance, describeChoice, startOwn } from "./ci-instance.ts";
+import { chooseInstance, describeChoice, type Environment, type Own, startOwn } from "./ci-instance.ts";
 
 const [directory, ...shards] = process.argv.slice(2);
 if (!directory || shards.length === 0) {
@@ -26,6 +26,19 @@ if (!directory || shards.length === 0) {
 }
 
 const CLI = join(import.meta.dir, "../src/cli/main.ts");
+// The job's own Casebook, once there is one. It is stopped on every way out of this script: its end, an error, a
+// signal. The signals are listened for before anything is started, so there is no moment at which a Casebook
+// runs and nobody would stop it. Every command below blocks until it is done, so a signal waits; `heard` lets a
+// waiting one in, before the next command.
+let own: Own | null = null;
+let ownEnv: Environment = {};
+for (const signal of ["SIGINT", "SIGTERM"] as const)
+	process.on(signal, () => {
+		own?.stop();
+		process.exit(signal === "SIGINT" ? 130 : 143);
+	});
+const heard = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 const choice = await chooseInstance(process.env);
 const chosen = describeChoice(choice);
 // GitHub puts a line that starts with ::notice::, ::warning:: or ::error:: on the run's summary page.
@@ -34,15 +47,6 @@ console.log(
 );
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${chosen}\n`);
 if (choice.use === "none") process.exit(4);
-const own = choice.use === "own" ? await startOwn(CLI) : null;
-// The job's own Casebook is stopped on every way out of this script: its end, an error, a signal. Every command
-// below blocks until it is done, so a signal waits; `heard` lets a waiting one in, before the next command.
-for (const signal of ["SIGINT", "SIGTERM"] as const)
-	process.on(signal, () => {
-		own?.stop();
-		process.exit(signal === "SIGINT" ? 130 : 143);
-	});
-const heard = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 const cli = (argv: string[]): number => {
 	console.log(`\n$ casebook ${argv.join(" ")}`);
@@ -51,7 +55,7 @@ const cli = (argv: string[]): number => {
 			...process.env,
 			// The project the choice settled on, also when none was named: the CLI is not left to pick one.
 			...(choice.use === "deployed" ? { CASEBOOK_PROJECT: choice.project } : {}),
-			...own?.env,
+			...ownEnv,
 		},
 		stdio: ["ignore", "inherit", "inherit"],
 	}).exitCode;
@@ -62,6 +66,11 @@ const rows: { shard: string; outcome: Outcome | null; tests: number; failed: num
 const reported = new Set<string>();
 let gate: number;
 try {
+	if (choice.use === "own") {
+		// Held from the same turn it is spawned in: a signal that comes while it starts finds it here.
+		own = startOwn(CLI);
+		ownEnv = await own.ready;
+	}
 	for (const shard of shards) {
 		await heard();
 		const file = join(directory, `${shard}.xml`);
