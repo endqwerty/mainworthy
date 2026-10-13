@@ -1,6 +1,7 @@
 // The documentation site: `/docs` and everything under it. It is built from the files in `content.ts` and from
 // nothing else. It is not given the instance, so it cannot show a project's name, a person or a setting: the
 // same pages for every instance of a version, which is why they need no session (`serve` in `../http.ts`).
+import { z } from "zod";
 import { DOC_PAGES, DOCS_ROOT, type DocPage, docUrl, isDocSlug } from "../../core/docs.ts";
 import { type Article, escapeHtml, renderArticle, renderDocument } from "./render.ts";
 
@@ -39,6 +40,24 @@ const DIAGRAM_POLICY = [
 ].join("; ");
 
 const ASSET_POLICY = "default-src 'none'; frame-ancestors 'none'";
+
+/**
+ * A diagram page records which files each of its parts was drawn from, and the address of the repository they
+ * are in. The files stay: they say what a part stands for. The address is replaced by the product's name: the
+ * site is read by people who have no business with whose repository it is, and the link could not be opened.
+ */
+export function withoutRepositoryAddress(html: string): string {
+	return html.replace(
+		/(<script id="archify-source-evidence-data" type="application\/json">)([\s\S]*?)(<\/script>)/,
+		(all, open: string, json: string, close: string) => {
+			const evidence = z.looseObject({ repository: z.looseObject({}) }).safeParse(JSON.parse(json));
+			if (!evidence.success) return all;
+			const repository = { ...evidence.data.repository, url: "mainworthy", label: "mainworthy" };
+			// As archify writes it: a `<` inside the JSON must not end the script element.
+			return `${open}${JSON.stringify({ ...evidence.data, repository }).replaceAll("<", "\\u003c")}${close}`;
+		},
+	);
+}
 
 type Entry = {
 	status: number;
@@ -104,7 +123,10 @@ export async function buildSite(version: string): Promise<Site> {
 		}
 	}
 	for (const [name, html] of Object.entries(DIAGRAMS))
-		entries.set(`${DOCS_ROOT}/diagrams/${name}.html`, entry({ body: html, type: HTML, policy: DIAGRAM_POLICY }));
+		entries.set(
+			`${DOCS_ROOT}/diagrams/${name}.html`,
+			entry({ body: withoutRepositoryAddress(html), type: HTML, policy: DIAGRAM_POLICY }),
+		);
 	for (const [name, path] of Object.entries(SCREENSHOTS)) {
 		const body = await Bun.file(path).bytes();
 		entries.set(`${DOCS_ROOT}/screenshots/${name}.png`, entry({ body, type: "image/png", policy: ASSET_POLICY }));

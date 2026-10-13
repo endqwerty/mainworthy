@@ -8,7 +8,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
-import { currentStamp, diagramNames, STAMP, Stamp } from "../scripts/diagrams.ts";
+import { z } from "zod";
+import { candidatePath, currentStamp, diagramNames, STAMP, Stamp } from "../scripts/diagrams.ts";
 import { applyBlocks, blocksIn, generatedBlocks } from "../scripts/gen-docs.ts";
 import { ADAPTER_COMMANDS } from "../src/cli/dispatch.ts";
 import { DOC_PAGES, DOCS_ROOT, docUrl, isDocSlug, SCREEN_DOCS } from "../src/core/docs.ts";
@@ -251,7 +252,19 @@ describe("the site", () => {
 			expect(policy).not.toContain("allow-same-origin");
 			expect(policy).toContain("default-src 'none'");
 			expect(policy).not.toContain("connect-src");
-			expect(await response.text()).toContain("<svg");
+			const html = await response.text();
+			expect(html).toContain("<svg");
+			// The page says which files a part was drawn from, and not whose repository they are in.
+			const candidate = z
+				.object({ meta: z.object({ repository: z.object({ url: z.string() }) }) })
+				.parse(JSON.parse(readFileSync(candidatePath(name), "utf8")));
+			const address = candidate.meta.repository.url.replace(/\.git$/, "");
+			const account = address.split(/[:/]/).slice(-2).join("/");
+			expect(account.split("/")).toHaveLength(2);
+			expect(html).not.toContain(address);
+			expect(html).not.toContain(account);
+			expect(html).toContain('"label":"mainworthy"');
+			expect(html).toContain('"path":"src/');
 		}
 	});
 
