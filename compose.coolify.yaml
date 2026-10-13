@@ -1,4 +1,4 @@
-# The Coolify deployment: Mainworthy as its own node on the tailnet, https://casebook.owl-perch.ts.net, through a
+# The Coolify deployment: Mainworthy as its own node on the tailnet, https://casebook.example.ts.net, through a
 # Tailscale sidecar (the pattern in the home lab's services/coolify-tailnet-apps.md). Nothing is published on the
 # LAN. For a laptop or a plain server use compose.yaml instead.
 #
