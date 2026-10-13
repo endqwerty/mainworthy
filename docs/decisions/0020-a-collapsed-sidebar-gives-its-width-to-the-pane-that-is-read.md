@@ -73,6 +73,8 @@ third, empty column and made both panes 340 px wide; there it now changes nothin
 ## Not done
 
 - The sidebar does not collapse by itself in a narrow window. It narrows to 190 px under 1100 px and to 120 px
-  under 760 px, as before, and under 760 px its first row shows the mark and the button without the name.
+  under 760 px, as before, and under 760 px its first row shows the mark and the button without the name. (A
+  phone's drawer keeps the name: the rule is for a row that has the button. The first version hid it there too,
+  which the independent review found.)
 - The strip's search, Keys and Theme icons have no tooltip. The screens, Settings, Sign out and Docs have one.
 - `z` still changes the class list from the Suite. Moving it into the shell's state is a change to the Suite.

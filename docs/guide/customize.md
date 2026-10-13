@@ -89,7 +89,7 @@ Press "Theme" at the bottom of the sidebar to switch between light and dark. Unt
 
 To make room for what you are reading, collapse the sidebar: press the button beside "Mainworthy" at its top, or <kbd>[</kbd>. The sidebar becomes a strip 64 px wide. The strip keeps the project, the search, the four screens and the footer, each as an icon. It does not show the folders and tags of the Suite.
 
-The pane on the right takes the width the sidebar gave up. That is the pane where you read a case, a question, a run or a change. The list keeps its width. In a window narrower than 760 px the list is above the other pane, and both get wider.
+The pane on the right takes the width the sidebar gave up. That is the pane where you read a case, a question, a run or a change. The list keeps its width. In a window narrower than about 900 px the panes are at their least width and do not all fit beside the open sidebar, so part of the width goes to fitting them in first. In a window narrower than 760 px the list is above the other pane, and both get wider.
 
 Press the button or <kbd>[</kbd> again to open the sidebar. The choice stays in this browser, so a reload and your next visit find the sidebar as you left it. A browser that stores nothing for the site still collapses the sidebar, and opens with it open.
 

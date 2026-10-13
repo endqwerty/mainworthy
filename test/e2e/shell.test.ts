@@ -158,8 +158,16 @@ test.skipIf(!browserAvailable)(
 					await page.waitForURL(`**/p/scratch/${screen}`);
 					await page.locator("#detail").waitFor();
 					const [side = 0, list = 0, detail = 0] = await widths();
+					// The button is inside the sidebar at every width, open and collapsed.
+					const toggle = () =>
+						page.locator(".side-toggle").evaluate((node) => {
+							const box = node.getBoundingClientRect();
+							return box.width > 0 && box.x >= 0 ? box.right : Number.NaN;
+						});
+					expect(await toggle()).toBeLessThanOrEqual(side);
 					await page.keyboard.press("[");
 					const freed = side - 64;
+					expect(await toggle()).toBeLessThanOrEqual(64);
 					const collapsed = await widths();
 					// The list keeps its width and the pane on its right takes what the sidebar gave up. Where one is
 					// above the other, both take it.
