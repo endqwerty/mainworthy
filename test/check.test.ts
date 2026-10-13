@@ -1,13 +1,16 @@
 // The plan of the check (`scripts/check-plan.ts`) and what the workflow says about it. The check's own wall time
 // is measured by the check (`scripts/check.ts`); this keeps the plan whole and the limit where it was set.
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
 import {
 	CI_SHARD_LIMITS,
 	CI_SHARDS,
 	LIMITS,
+	newestAttempt,
 	over,
 	parallelWorkers,
 	QUIET,
@@ -77,6 +80,44 @@ test("the workflow runs every shard of the plan and its gate reads every one of 
 	expect(workflow).toContain('{ name: quiet, phase: "--only=quiet" }');
 	expect([...workflow.matchAll(/- \{ name: /g)]).toHaveLength(CI_SHARDS + 1);
 	expect(workflow).toContain(`run: bun scripts/ci-gate.ts test-results ${shards.join(" ")} quiet\n`);
+});
+
+// Issue #124. The name the workflow gives a shard's artifact and the name the gate looks for are written in two
+// places: this holds them together, and holds the download to a directory for each artifact.
+test("a shard's artifact is named for its attempt and downloaded into its own directory, where the gate finds the newest", () => {
+	const step = z.looseObject({ uses: z.string().optional(), with: z.record(z.string(), z.unknown()).optional() });
+	const { jobs } = z
+		.object({ jobs: z.object({ tests: z.object({ steps: z.array(step) }), gate: z.object({ steps: z.array(step) }) }) })
+		.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
+	const upload = jobs.tests.steps.find((one) => one.uses?.startsWith("actions/upload-artifact@"))?.with;
+	const download = jobs.gate.steps.find((one) => one.uses?.startsWith("actions/download-artifact@"))?.with;
+	// What GitHub replaces in the workflow's text, written so that it is not read as a placeholder of this file.
+	const expression = (name: string): string => `$\{{ ${name} }}`;
+	expect(upload?.name).toBe(`results-${expression("matrix.name")}-attempt-${expression("github.run_attempt")}`);
+	// No `merge-multiple`: merged, two attempts of one shard are two files of one name in one directory.
+	expect(download).toEqual({ pattern: "results-*", path: "test-results" });
+
+	const named = (shard: string, attempt: string): string =>
+		String(upload?.name).replace(expression("matrix.name"), shard).replace(expression("github.run_attempt"), attempt);
+	const root = mkdtempSync(join(tmpdir(), "mainworthy-attempts-"));
+	try {
+		expect(newestAttempt(root, "tests-2")).toEqual({ directory: root, attempt: null });
+		expect(newestAttempt(join(root, "not-there"), "tests-2")).toEqual({
+			directory: join(root, "not-there"),
+			attempt: null,
+		});
+		for (const attempt of ["2", "9", "10"]) mkdirSync(join(root, named("tests-2", attempt)));
+		// None of these is an attempt of `tests-2`: another shard's, a file, and names that are not a whole number.
+		mkdirSync(join(root, named("tests-20", "30")));
+		mkdirSync(join(root, named("tests", "40")));
+		writeFileSync(join(root, named("tests-2", "50")), "");
+		for (const attempt of ["0", "011", "12x", "-13", "1.5", ""]) mkdirSync(join(root, named("tests-2", attempt)));
+		expect(newestAttempt(root, "tests-2")).toEqual({ directory: join(root, named("tests-2", "10")), attempt: 10 });
+		expect(newestAttempt(root, "tests")).toEqual({ directory: join(root, named("tests", "40")), attempt: 40 });
+		expect(newestAttempt(root, "quiet")).toEqual({ directory: root, attempt: null });
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 test("the workflow gives the pipeline's token to the one step that reports, and that step chooses the Mainworthy", () => {

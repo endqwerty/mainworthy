@@ -91,7 +91,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: results-${{ matrix.name }}
+          # Named for the attempt, so that a shard that is run again leaves two artifacts the gate can tell apart
+          # (newestAttempt in scripts/check-plan.ts).
+          name: results-${{ matrix.name }}-attempt-${{ github.run_attempt }}
           path: test-results/
           if-no-files-found: warn
           retention-days: 7
@@ -115,10 +117,11 @@ jobs:
       - uses: actions/download-artifact@v4
         # A shard with nothing to download is named, and failed, by the next step but one.
         continue-on-error: true
+        # Each artifact into a directory of its own name. Merged into one directory, two attempts of a shard are
+        # two files of one name, and which is read is which was written last (issue #124).
         with:
           pattern: results-*
           path: test-results
-          merge-multiple: true
       - name: Join the tailnet the deployed Mainworthy is on
         if: ${{ vars.MAINWORTHY_URL != '' && vars.TS_OAUTH_CLIENT_ID != '' }}
         # A join that fails leaves the instance unreachable, and the next step then starts its own and says so.

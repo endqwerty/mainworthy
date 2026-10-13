@@ -281,6 +281,14 @@ the steps are kept below for an instance that has none.
   to the gate. Re-run the shard's own job (`gh run rerun <run> --job <id>`): `gate` runs again after it and reads
   the other shards' reports from the earlier attempt. A test that fails now and then is still a defect to fix,
   not to retry (`AGENTS.md`).
+
+  Which attempt the gate reads is decided by the attempt's number (issue #124). Each shard uploads its report as
+  `results-<shard>-attempt-<n>`, the `gate` job downloads every artifact of the run into a directory of its own
+  name, and `scripts/ci-gate.ts` reads, for each shard, the highest attempt there is; its table has a column that
+  says which. Until 2026-10-13 the artifacts of two attempts had one name and were merged into one directory, so
+  the one read was the one written last: on pull request #109 (run 38367395704) shard `tests-2` passed in
+  attempt 2 and the gate still reported attempt 1's failure. A shard whose newer attempt left no artifact at all
+  (its job ended before the upload) is still read from the older one; the shard's own job is red then.
 - **A test file with no case is one `map` question** under `standard`. The first two runs left 70 of them in the
   queue. They do not block the gate.
 - **A push to `main` reports too**, as the workflow runs on it.
