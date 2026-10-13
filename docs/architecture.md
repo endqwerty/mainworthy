@@ -327,6 +327,15 @@ the person it was loaded as (`X-Mainworthy-As`), and the server refuses it when 
 else's, in another tab for instance: text one person typed is never recorded under another's name. A caller that
 sends no name (a script, the CLI, an agent) is whoever its token says.
 
+Two pages render with nobody signed in: the sign-in page and the page of an invitation, at `/invite`
+(`src/web/signin/`). They call the routes of `src/surfaces/signin.ts` through `src/web/lib/signin.ts`. An
+invitation's code arrives after the `#` of its link, which a browser sends to no server; the page reads it,
+takes it out of the address bar and keeps it in memory until the invitation is accepted. `src/web/lib/passkey.ts`
+turns the server's passkey options into what `navigator.credentials` takes and a browser's answer into what the
+server reads: the new key as `getPublicKey()` gives it and the authenticator data as bytes, so the server parses
+no CBOR. Which operations are the instance's, and so are sent to `/api/<op>`, is a list in `src/core/api.ts`
+that a test holds equal to the registry's.
+
 ## What every reply carries
 
 Every reply of the server carries the same headers, whichever route wrote it: the API's JSON, the change

@@ -1,9 +1,10 @@
 # 0017: Sign-in, sessions and credentials
 
 - Date: 2026-10-13
-- Status: proposed. Four pull requests deliver it. The first is built in the pull request that adds this file,
-  the second (the limit on failed attempts) in the one after it, and the fourth (people) in the one that adds
-  the section "What the fourth pull request builds"; the owner reviews.
+- Status: proposed. Four pull requests deliver it, and a fifth the pages. The first is built in the pull
+  request that adds this file, the second (the limit on failed attempts) in the one after it, the fourth
+  (people) in the one that adds the section "What the fourth pull request builds", and the pages in the one
+  that adds "The pages"; the owner reviews.
 
 The instance has been public since 2026-10-13. Issue #88 lists what sign-in needs before more than one person
 uses it, and issue #30 asks that a person sign in as themselves. This record holds the design for both, so that
@@ -395,6 +396,50 @@ typed.
 **Not tried.** In a browser, passkeys were tried with Chromium's built-in test authenticator only
 (`test/e2e/people.test.ts`, `test/e2e/passkey-verifier.test.ts`). No physical security key, no synced passkey
 and neither Safari nor Firefox has been tried.
+
+## The pages
+
+The web UI for the fourth pull request: the sign-in page, the page of an invitation, "Your sign-in", "Your
+sessions" and "People" in Settings, and sign-out. What each screen must do, and the browser test that holds
+it, is in `src/web/CHECKS.md`; the guide describes them for a person (`docs/guide/access.md`).
+
+**Choices.**
+
+- The three ways of signing in are on the page at once: name and password, the passkey button, and the token
+  form under "Use a token". A disclosure for the token form was turned down. It would put the owner's only way
+  into a new instance behind a click, and every way is otherwise one Tab away.
+- The page says its own sentence for the server's 401 ("That name and password did not sign you in."). A wait
+  (429) is "Too many attempts. Try again in N seconds.", with N read from `Retry-After`, the same wherever a
+  proof can fail: the three ways of signing in, the invitation page and the current password in "Your
+  sign-in". One function words it (`exchange` in `src/web/lib/api.ts`). Any other refusal is shown as the
+  server wrote it. The page sends nothing again by itself after a wait.
+- The invitation page takes the code out of the address bar when it reads it, not when the invitation is
+  accepted: a code that sits in the address while a form is filled in is copied with it. The price is that a
+  reload has no code, and the page then says to open the link again.
+- The question for a browser signed in as somebody else comes before the form, from `/api/session`, and the
+  fields wait for the answer. The server's 409 is still handled, for somebody who signs in elsewhere while
+  the page is open: the same acceptance is sent again with `replace`, passkey included.
+- The page shows a new link under sentences of its own, written from `purpose`, `name` and whether the link has
+  a host, and does not show the reply's `note`. For an instance with no public address the note says to put
+  the address before the link, and the page has already done that with the address it was opened at.
+- "Recovery link" is offered where the server allows it and nowhere else: beside every person for the owner
+  (`owner` of the session), and beside their own name for anybody else, who is told that the owner makes the
+  others. A button that is always answered 403 was the first version, before the session said who the owner is.
+- A new invitation starts with what a person needs to work: read, record, produce, answer and plan. `admin`
+  is for the inviter to tick, with a line saying what it gives, and is unticked again after an invitation that
+  had it. The server's own default for an invitation with no `can` is still everything, as for a token; the
+  page always sends what is ticked.
+- A link that was made stays on the page until it is dismissed or the section is left. A second link, or a
+  recovery link that is refused, does not take it away.
+- Ending this browser's own session in "Your sessions" calls `/api/logout`, as "Sign out" does, so the cookie
+  is cleared too.
+- The lists of sessions, credentials and invitations are read again every time their section opens. The cache
+  keeps a read for fifteen seconds, and in that time a session that ended elsewhere would stay in the list
+  with a button to end it.
+
+**Not built.** An admin's view of another person's sessions and credentials, which the operations allow
+(`actor`). Signing out does not record an open draft first; it stays on the device under the person's name, as
+it does when a session ends by itself.
 
 ## The three candidates
 

@@ -596,3 +596,70 @@ The checks that decide this change, written before it. `test/docs.test.ts` and `
 - D7: No page of the docs runs a script or a style written into the page, and none makes the browser report an
   error.
 
+## People sign in as themselves: the pages (issue #30, decision 0017)
+
+The pages for what the server and the command line already did: the sign-in page, the page of an invitation,
+"Your sign-in", "Your sessions" and "People" in Settings, and sign-out. Each row is something a screen must do
+and the browser test that holds it. The tests run Chromium against the real server; a passkey is made and used
+on Chromium's virtual authenticator, with the page at `localhost`.
+
+| Screen | What it must do | Test |
+| --- | --- | --- |
+| Sign-in | Focus starts in the name. Tab goes name, password, "Sign in", the passkey button where there is one, token, "Sign in with the token". Enter submits the form the caret is in. | `people-signin.test.ts`: the token form still signs the owner in |
+| Sign-in | A wrong name or password shows one sentence under the form and keeps the name and the password. The page says that an admin can send a new link. | `people-signin.test.ts`: an invited person accepts with a password |
+| Sign-in | After five wrong passwords for one name the form says "Too many attempts. Try again in N seconds.", with N from the reply's `Retry-After`, and keeps the name and the password. Nothing is sent again by itself. | `people-signin.test.ts`: five wrong passwords for a name; `limit.test.ts` for a token |
+| Sign-in | A refusal that is neither a wrong proof (401) nor a wait (429) is shown as the server wrote it, under the way that was tried. A wait whose length a proxy dropped says "Try again later." One refusal is on the page at a time. | `people-signin.test.ts`: a refusal that is neither a wrong proof nor a wait |
+| Sign-in | "Read the docs" opens `/docs`, which needs no account. | `docs.test.ts`, D2 |
+| Sign-in | "Sign in with a passkey" is there only when the instance says it has passkeys and the browser has them. At another name of the instance the browser refuses, and the page says "This browser could not use a passkey here." | `people-passkey.test.ts`, both tests |
+| Sign-in | The token form signs in whoever holds a token, and a wrong token says "That token was not accepted." | `people-signin.test.ts`, `signin.test.ts` |
+| Invitation | It renders with nobody signed in, says who the invitation is for and until when, and takes the code out of the address bar as soon as it has read it. A second link opened in the same tab is read too. | `people-invite.test.ts`: a wrong, a used and an expired link |
+| Invitation | A wrong, a used and an expired link each show "This invitation does not work any more. Ask whoever sent it for a new one." and no form. The address with no code says to open the link again. | the same test |
+| Invitation | The password is typed twice and counted as it is typed. One that is too short, and two that differ, are refused in the page beside the field, with what was typed kept. Accepting signs the person in and opens the app. | `people-signin.test.ts`: an invited person accepts with a password |
+| Invitation | With a passkey: by keys alone, Tab to the box, Space, Tab to the name (it starts as the browser's own), Enter. | `people-passkey.test.ts`: a person accepts an invitation with a passkey |
+| Invitation | A browser signed in as somebody else is told who and asked. The fields are disabled until the answer. "Continue" ends the other session with the acceptance. | `people-invite.test.ts`: a browser signed in as somebody else |
+| Invitation | Somebody who signs in elsewhere after the page opened is asked when they accept. What they typed stays, and "Continue" sends it again. | `people-invite.test.ts`: somebody who signs in elsewhere |
+| Invitation | A recovery link says "Accepting replaces every way you sign in and signs you out everywhere else." | `people-invite.test.ts`: a recovery link |
+| Invitation | When looking at the invitation is answered with a wait, the page says it and "Try again" asks once more, with the code still in memory. When accepting is, the wait is under the form and the passwords stay. | `people-invite.test.ts`: the invitation page says how long to wait |
+| Shell | "Sign out" is in the sidebar's footer and on `g x` when the session is a browser's. It ends the session on the server: a reload is still the sign-in page. In local mode there is no button, no key and no line in the keys sheet. | `people-signin.test.ts`: the first and the last test |
+| Your sign-in | `n` goes to the new password. "Change password" asks for the current one; a wrong one says so beside its field and keeps the rest. A change says how many other sessions ended, and the fields are emptied. "Set password" asks for no current one. A wait is said beside the current password, with the rest kept. | `people-settings.test.ts`: changing the password; `people-passkey.test.ts` |
+| Your sign-in | Each passkey has its name and when it was last used. A new one is named from the browser. The authenticator that holds one already is told "This passkey is already registered.", and the name typed stays. | `people-passkey.test.ts` |
+| Your sign-in | The last way of signing in has a disabled "Remove" and the reason under the list. Removing the passkey this browser signed in with returns to the sign-in page. | `people-passkey.test.ts` |
+| Your sessions | Each session says what opened it and from which address, the browser as the server recorded it, and when and from where it was last used; this browser's is marked. The list is read again each time the section opens. "End" on another session signs that browser out; on this one it returns to the sign-in page. | `people-settings.test.ts`: changing the password |
+| People | An admin who is a person names somebody, chooses what they may do, the project and how long the link works, and gets the link once, masked, with "Copy link". After "Dismiss link" the page does not hold it. `n` goes to the name. | `people-settings.test.ts`: an admin invites somebody |
+| People | A new invitation starts with read, record, produce, answer and plan ticked and `admin` not, with a line under the boxes saying what `admin` gives. After an invitation that had it ticked, it is unticked again. | the same test |
+| People | Open invitations show what each person may do, who made each and when it runs out; "Revoke" removes one and the link accepts nothing. A name that signs in already is not invited as new. | the same test |
+| People | "Recovery link" asks first and says that it replaces every way the person signs in. The owner has it beside every person. Anybody else has it beside their own name only, with a sentence saying the owner makes the others, so no button is answered 403. | the same test; `people-settings.test.ts`: a person who is not an admin |
+| People | A person who does not administer the instance has no "People" section. | `people-settings.test.ts`: a person who is not an admin |
+
+Every test asserts what the browser logged. For most that is nothing, which under the page's
+`Content-Security-Policy` includes any inline script or style the pages might have added. Six tests ask for a
+refusal and assert exactly what they asked for: the 404s of links that accept nothing, the 409 of a browser
+signed in as somebody else, the 403 of a wrong current password, the 429 of a name with five wrong passwords,
+and the 408 and the 429s that a test answers in the server's place. (A 401 is not in the list:
+`test/e2e/support.ts` leaves it out for every browser test.)
+
+The waits on the invitation page and in "Your sign-in" are answered by the test, not the server. The browser
+reaches the test's server from the loopback address, which the server does not count, and a real block on a
+name would refuse the right password a few lines later in the same test. The server's own counting is held by
+`test/people.test.ts` and `test/limit.test.ts`.
+
+Three checks were broken on purpose to see their tests fail, and restored: with the sign-out button shown to
+any session, "local mode has no sign-in page and nothing to sign out of" fails with `Expected: 0`,
+`Received: 1`; with the code left in the address, the invitation test fails with the address still ending in
+`#not-a-code-anybody-made`; with the wait shown in the server's words and not read from `Retry-After`, the two
+tests of a wait on the sign-in page time out waiting for "Too many attempts".
+
+What no browser test holds:
+
+- A passkey in a browser other than Chromium, and on a real authenticator. The conversions between the
+  server's text and a browser's bytes are unit-tested (`src/web/lib/passkey.test.ts`), and the message for a
+  browser without `getPublicKey()` is written and never shown by a test: Chromium has it.
+- The copy button over plain http at a name that is not this machine's, where a browser has no
+  `navigator.clipboard`. The token's copy button has that test (R2-5); the link's uses the same steps
+  (`src/web/lib/clipboard.ts`) and is tested with the clipboard only.
+- A person cancelling the browser's passkey dialog: the virtual authenticator answers by itself. The sentence
+  for it is unit-tested by the refusal's name.
+- A passkey challenge older than four minutes, which the invitation page asks for again before it makes the
+  passkey. The page has no clock a test can move.
+- What a password manager does with the forms. They carry `autocomplete` values and a hidden field with the
+  person's name; nothing checks that a manager reads them.
