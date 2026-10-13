@@ -23,7 +23,8 @@ test.skipIf(!browserAvailable)(
 			// blocks.
 			for (let n = 1; n <= 5; n++) {
 				expect(await attempt(n)).toBe(401);
-				expect(await message.textContent()).toBe("That token was not accepted. Try again.");
+				// The page writes the sentence a moment after the answer arrives; a person reads it when it is there.
+				await message.filter({ hasText: /^That token was not accepted\. Try again\.$/ }).waitFor({ timeout: 4000 });
 			}
 			// The sixth is refused unread while the block lasts, which is one second at first. The server's clock is
 			// the real one here: on a machine too busy to type inside that second, the sixth is one more failure,
