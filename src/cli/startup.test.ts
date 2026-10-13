@@ -114,6 +114,9 @@ test("an install under the former name is carried over on the next start, and it
 		await read(() => stdout.includes("policy:"));
 		const url = /http:\/\/127\.0\.0\.1:\d+/.exec(stdout)?.[0];
 		if (!url) throw new Error(`startup did not print the server URL: ${stdout}`);
+		// The command installs its signal handlers after it prints these lines. An answered request proves it has
+		// returned to the event loop, so a SIGTERM from here on is handled, not fatal (exit 143).
+		expect((await fetch(`${url}/healthz`)).status).toBe(200);
 		return {
 			url,
 			async stop() {
