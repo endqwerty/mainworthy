@@ -6,14 +6,14 @@ import { join } from "node:path";
 import { z } from "zod";
 import { outputWith, withInstance } from "./test-support.ts";
 
-test("serve does not start with a public address no browser makes a passkey at, and says why before it opens the data", async () => {
+test("serve does not start with a public address it cannot use for passkeys, and says why before it opens the data", async () => {
 	await withInstance(async ({ cli, directory }) => {
 		const refused = await cli(["serve"], {
 			env: { MAINWORTHY_PUBLIC_URL: "http://192.168.1.20:7357", MAINWORTHY_PORT: "0" },
 		});
 		expect(refused.code).toBe(4);
 		expect(refused.stdout).toBe("");
-		expect(refused.stderr).toContain("MAINWORTHY_PUBLIC_URL is not an address a browser makes a passkey at");
+		expect(refused.stderr).toContain("MAINWORTHY_PUBLIC_URL is not an address this instance can use for passkeys");
 		// The line does not repeat the value, which may carry a password.
 		expect(refused.stderr).not.toContain("192.168.1.20");
 		expect(existsSync(join(directory, ".mainworthy"))).toBe(false);

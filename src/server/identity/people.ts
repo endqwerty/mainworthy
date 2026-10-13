@@ -119,7 +119,7 @@ export function publicAddress(config: Config): { url: string; party: RelyingPart
 	const bare = url !== null && url.pathname === "/" && url.search === "" && url.hash === "" && url.username === "";
 	if (!party || !bare) {
 		throw new Error(
-			"MAINWORTHY_PUBLIC_URL is not an address a browser makes a passkey at. Write the address people open this instance at and nothing after the host: https and a host name (https://mainworthy.example), or http://localhost with its port. An IP address, plain http anywhere else, a path and a query are refused. Unset it to start without passkeys",
+			"MAINWORTHY_PUBLIC_URL is not an address this instance can use for passkeys. Write the address people open this instance at and nothing after the host: https and a host name (https://mainworthy.example), or http://localhost with its port. No browser makes a passkey at an IP address or over plain http anywhere else, and this server wants the root address, so a path and a query are refused too. Unset it to start without passkeys",
 		);
 	}
 	return { url: party.origin, party };
