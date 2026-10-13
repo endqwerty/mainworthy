@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Api } from "../../core/api.ts";
 import { ANSWER_HELP, ANSWER_KEYS, ANSWER_LABELS, ANSWERS, KINDS, type Kind } from "../../core/kinds.ts";
 import type { InboxReply, QuestionItem } from "../../core/ops.ts";
+import { stakes, waitingPhrase } from "../../core/stakes.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { deviceKey, deviceSession, sessionCurrent } from "../lib/device.ts";
@@ -661,7 +662,7 @@ function QueueWorkbench() {
 			<section className="pane queue-pane" id="list">
 				<div className="phead">
 					<b>Queue</b>
-					<span className="dim">{counts.open ?? 0} need an answer</span>
+					<span className="dim">{waitingPhrase(counts)}</span>
 					<div className="queue-state">
 						<button
 							type="button"
@@ -795,6 +796,15 @@ function QueueWorkbench() {
 								{current.blocks.length > 0 && <span className="blk">blocks {current.blocks.join(", ")}</span>}
 							</div>
 							<h2>{current.title}</h2>
+							{state === "open" && (
+								<p className="queue-stakes">
+									{stakes({
+										kind: current.kind,
+										blocks: current.blocks,
+										facts: new Set(z.array(z.string()).safeParse(current.evidence.facts).data ?? []),
+									})}
+								</p>
+							)}
 						</div>
 						<div className="pane-scroll queue-evidence" key={current.q}>
 							<div className="sech">

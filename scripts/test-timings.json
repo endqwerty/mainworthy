@@ -97,6 +97,7 @@
     "src/web/lib/passkey.test.ts": 20,
     "src/web/lib/former-name.test.ts": 17,
     "src/core/policy-guide.test.ts": 14,
+    "src/core/stakes.test.ts": 12,
     "src/server/kernel/former-name.test.ts": 8,
     "src/core/text.test.ts": 1,
     "src/web/lib/browser.test.ts": 1,

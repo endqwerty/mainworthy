@@ -18,9 +18,41 @@ The "Open" view contains questions that need an answer. "Settled" contains decis
 You can filter by "Proposals", "Unlinked", "Failures", "Findings", or "Sign-offs".
 See [the keyboard guide](./keyboard.md) for the full key list.
 
+## Know what needs you today
+
+The line beside "Queue" splits the open questions in two, for example
+"1 failure to explain · 104 can wait". Start with the failures. They are listed first,
+and the count beside Queue in the sidebar is red only while one is open.
+
+A failure is the one kind of question that blocks anything. While nobody has explained a
+failure, no gate that counts it passes. An earlier occurrence of the same cause that someone
+answered for another build stays excused there. Every other kind leaves things as they are until
+someone answers: a proposed edit waits, a finding stays on record, and a test with no case
+still runs and still gates the build.
+
+Under its title, each open question says what leaving it costs. For example:
+
+- "Listed as blocking R-83. While this is open, no gate that counts the unexplained failure passes."
+- "Blocks nothing. Left alone, these tests still run and still gate the build, and no case gets credit for them."
+
+The runs a failure lists are the ones it was listed under as its results arrived. Open a
+run to read its gate as it is now: an older commit's run can pass again while a newer
+commit keeps the question open.
+
+A failure stops blocking a gate in two ways. Someone answers the question. Or the failing
+result is replaced. A newer attempt of the same job that passes replaces it; an attempt
+that is skipped or blocked leaves the failure in place. A result that names
+the failing one as the result it corrects replaces it whatever its outcome: passed, skipped
+or blocked. A pass reported beside the failure replaces nothing. The two disagree, and a
+person settles that.
+A pull request's gate is the gate of its newest commit, so a newer commit that passes moves
+the pull request on. The older commit keeps the verdict it had.
+
+A failure that only an agent reported, or one typed for a session, is counted by no commit's
+gate. It is still a failure to explain.
+
 A question asks for a judgment about recorded evidence. It is not a test result.
 Several occurrences of the same failure cause can share one question.
-A question can block a gate, or ask for a decision without blocking anything.
 Look for "blocks gate" and the runs named beside the question.
 
 [Diagram: the life of a question](../diagrams/question-lifecycle.html)

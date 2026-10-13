@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { Client } from "../src/cli/client.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
+import { stakes } from "../src/core/stakes.ts";
 import { recoverAccepted, sweep } from "../src/server/jobs.ts";
 import { type Config, defaultConfig, openApp } from "../src/server/kernel/app.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
@@ -464,6 +465,88 @@ describe("work the server does on its own", () => {
 		// The expired decision stays in the ledger, followed by the row that records that it ran out.
 		expect(count("decisions WHERE kind = 'failure'")).toBe(2);
 		expect(count("excuses")).toBe(0);
+	});
+});
+
+describe("what a failure question says leaving it costs", () => {
+	// The sentence under a question's title (`stakes`) is held to what the server does with the same question.
+	const said = (item: InboxReply["items"][number]) =>
+		stakes({ kind: item.kind, blocks: item.blocks, facts: new Set(item.evidence.facts as string[]) });
+	const held = "While this is open, no gate that counts the unexplained failure passes.";
+
+	test("while a failure question is open, no gate that counts the failure passes, whether or not it names a run", () => {
+		h.call("report", ciReport({ commit: "stakes001", n: 1, fail: { 0: "expected 90, got 100" } }));
+		h.call("report", ciReport({ commit: "stakes002", branch: "fix", pr: 7, n: 1, fail: { 0: "timed out" } }));
+		const [change, trunk] = queue().items;
+		if (!change || !trunk) throw new Error("two failure questions expected");
+		expect(said(change)).toBe(`Listed as blocking ${change.blocks.join(", ")}. ${held}`);
+		expect(gate("stakes002").verdict).toBe("blocked");
+		// A failure on the line names no run under `loose`, and its commit's gate does not pass all the same.
+		expect(trunk.blocks).toEqual([]);
+		expect(said(trunk)).toBe(held);
+		expect(gate("stakes001").verdict).toBe("blocked");
+		// Beside a failure a person called a defect, the gate reads failed: still not passed.
+		h.call("report", {
+			...ciReport({ commit: "stakes001", n: 1, fail: { 0: "another cause entirely" }, file: "tests/other.spec.ts" }),
+			job: "other",
+		});
+		const other = first(queue().items.filter((item) => item.title.includes("another cause")));
+		decide(other, { is: "defect" });
+		expect(gate("stakes001").verdict).not.toBe("passed");
+	});
+
+	test("the sentence is true of a failure no gate counts: an agent's, on a commit whose gate passes", () => {
+		const agent = h.actor("runner", "agent", ["read", "produce"]);
+		h.call("report", ciReport({ commit: "stakes003", n: 1, file: "tests/passes.spec.ts" }));
+		h.call(
+			"report",
+			ciReport({ commit: "stakes003", n: 1, file: "tests/agent.spec.ts", fail: { 0: "agent saw it" } }),
+			agent,
+		);
+		expect(said(first(queue().items))).toBe(held);
+		expect(gate("stakes003")).toMatchObject({ verdict: "passed", open: [] });
+	});
+
+	test("a listed run can pass again while the question stays open for a newer commit: it is listed, not said to be blocked", () => {
+		// The same test fails in job `one` on two commits of a pull request, and the older commit's job is run again.
+		for (const commit of ["stakes005", "stakes006"])
+			h.call("report", { ...ciReport({ commit, branch: "fix", pr: 9, n: 1, fail: { 0: "timed out" } }), job: "one" });
+		h.call("report", { ...ciReport({ commit: "stakes005", branch: "fix", pr: 9, n: 1 }), job: "one", attempt: 2 });
+		const asked = first(queue().items);
+		expect(gate("stakes005").verdict).toBe("passed");
+		expect(gate("stakes006").verdict).toBe("blocked");
+		expect(said(asked)).toStartWith("Listed as blocking ");
+		expect(said(asked)).toEndWith(held);
+	});
+
+	test("a failing result stops counting when it is replaced, and not when a pass is reported beside it", () => {
+		// The guide's account of how a block ends without an answer, which the sentence leaves to it.
+		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		const run = h.call<{ run: string }>("plan", { name: "Release check", select: { cases: ["C-1"] } }).run;
+		const failed = h.call<ReportReceipt>("report", {
+			run,
+			results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "expected 90, got 100" } }],
+		});
+		h.call("report", { run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		expect(h.call<GateStatus>("gate", { run }).verdict).toBe("blocked");
+		// A result that corrects it replaces it, whatever its outcome: skipped, the run waits for a result again.
+		h.call("report", { run, results: [{ test: { case: "C-1" }, outcome: "skip", corrects: failed.results[0] }] });
+		expect(h.call<GateStatus>("gate", { run }).verdict).not.toBe("blocked");
+		// On a commit: a newer attempt of another job does not replace it, nor does a newer attempt of the same
+		// job in which the test was skipped. A newer attempt of the same job that passes does.
+		h.call("report", { ...ciReport({ commit: "stakes004", n: 1, fail: { 0: "timed out" } }), job: "one" });
+		h.call("report", { ...ciReport({ commit: "stakes004", n: 1 }), job: "two", attempt: 2 });
+		expect(gate("stakes004").verdict).toBe("blocked");
+		const again = ciReport({ commit: "stakes004", n: 1 });
+		h.call("report", {
+			...again,
+			job: "one",
+			attempt: 2,
+			results: again.results.map((result) => ({ test: result.test, outcome: "skip" })),
+		});
+		expect(gate("stakes004").verdict).toBe("blocked");
+		h.call("report", { ...again, job: "one", attempt: 3 });
+		expect(gate("stakes004").verdict).toBe("passed");
 	});
 });
 
