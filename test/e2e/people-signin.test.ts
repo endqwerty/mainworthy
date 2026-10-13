@@ -279,6 +279,36 @@ for (const key of ["Enter", "Space"] as const)
 	);
 
 test.skipIf(!browserAvailable)(
+	"on the Suite screen, Enter after a button was clicked is still the screen's key: it does not press the button again",
+	async () => {
+		let browser: PageHarness | null = null;
+		try {
+			browser = await openPage(server, { path: "/p/scratch/suite" });
+			const { page } = browser;
+			page.setDefaultTimeout(8000);
+			await page.locator("#list").waitFor();
+			const shown = () => page.evaluate(() => document.documentElement.dataset.theme);
+			const before = await shown();
+			await page.getByRole("button", { name: "Toggle theme" }).click();
+			const clicked = await shown();
+			expect(clicked).not.toBe(before);
+			// The pointer gave the button the focus. Enter is the Suite's key, as it was before the click.
+			await page.keyboard.press("Enter");
+			expect(await shown()).toBe(clicked);
+			// Reached with Tab, the same button takes its own Enter.
+			await page.keyboard.press("Shift+Tab");
+			await page.keyboard.press("Tab");
+			expect(await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))).toBe("Toggle theme");
+			await page.keyboard.press("Enter");
+			expect(await shown()).toBe(before);
+		} finally {
+			await browser?.close();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
 	"a sign-out whose reply is lost is looked up, not guessed: the session ended, so the page shows the sign-in page",
 	async () => {
 		let browser: PageHarness | null = null;
