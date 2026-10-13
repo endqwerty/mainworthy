@@ -6,6 +6,8 @@ import type {
 	CheckInput,
 	ClaimInput,
 	ClaimReply,
+	CommandFate,
+	CommandInput,
 	DecideInput,
 	DecideReply,
 	FindInput,
@@ -52,6 +54,7 @@ export type Api = {
 		reply: { ref: string; head: number; entries: Rows; questions: InboxReply["items"] };
 	};
 	check: { input: In<typeof CheckInput>; reply: { problems: Problem[]; counts: Record<string, number> } };
+	command: { input: In<typeof CommandInput>; reply: CommandFate };
 	admin: { input: In<typeof AdminInput>; reply: unknown };
 };
 export type OpName = keyof Api;

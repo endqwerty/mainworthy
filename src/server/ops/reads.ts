@@ -6,6 +6,8 @@ import { printCase } from "../../core/markdown.ts";
 import type { CaseBody, MethodKind } from "../../core/model.ts";
 import {
 	CheckInput,
+	type CommandFate,
+	CommandInput,
 	FindInput,
 	GateInput,
 	type GateStatus,
@@ -52,7 +54,7 @@ import {
 } from "../evidence/evidence.ts";
 import { findingsOfCase, reviewsAtVersion, reviewsOfCase } from "../evidence/findings.ts";
 import { actorLabel } from "../identity/identity.ts";
-import type { Ctx } from "../kernel/ctx.ts";
+import { type Ctx, findCommand, UNFINISHED } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 import { currentPolicy } from "../policy/policy.ts";
@@ -920,6 +922,32 @@ export const impactOp = defineOp({
 	effect: "read",
 	mcp: "Start here for a review. Given a change (`pr:482`) or changed `files`, returns the cases it touches, why, their hashes, what you already reviewed, open questions and uncovered files. Pass the returned `cursor` as `since` next time.",
 	run: impact,
+});
+
+// ── command ────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What became of a command the caller sent. A client whose reply was lost asks this, instead of guessing from
+ * what it reads back or sending the request again (issue #71). A command of another caller or another project
+ * is `none`: an id tells nobody what somebody else did. An instance command is in no project, so its reply,
+ * which can stand for a secret, is never returned here.
+ */
+export function commandFate(ctx: Ctx, input: CommandInput): CommandFate {
+	const row = findCommand(ctx.db, input.cmd);
+	if (!row || row.project !== ctx.project.id || row.actor !== ctx.actor.id) return { state: "none" };
+	if (row.outcome === UNFINISHED) return { state: "begun", op: row.op };
+	return { state: "done", op: row.op, seq: row.seq, reply: json<unknown>(row.outcome) };
+}
+
+export const commandOp = defineOp({
+	name: "command",
+	summary: "What became of a command you sent under an idempotency key: not recorded, begun, or done with its reply.",
+	input: CommandInput,
+	needs: "read",
+	scope: "project",
+	effect: "read",
+	mcp: null,
+	run: commandFate,
 });
 
 export { runById };
