@@ -145,3 +145,44 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"a passkey made before the question about somebody else is kept, and sent again once the question is answered",
+	async () => {
+		const made = await server.api("invitation", { do: "create", name: "nia", can: ["read"] });
+		if (!("code" in made)) throw new Error("no invitation was made");
+		const acceptances: Record<string, unknown>[] = [];
+		let browser: PageHarness | null = null;
+		try {
+			browser = await openPage(server, { signedIn: false, path: `/invite#${made.code}`, ready: "h1" });
+			const { page } = browser;
+			page.setDefaultTimeout(8000);
+			await addAuthenticator(browser);
+			page.on("request", (request) => {
+				if (request.url().endsWith("/api/login") && request.method() === "POST")
+					acceptances.push(request.postDataJSON());
+			});
+			await page.getByRole("heading", { name: "You are invited as nia" }).waitFor();
+			await page.getByRole("checkbox", { name: "Make a passkey on this device" }).check();
+			// The owner signs in to this browser from another tab before the invitation is accepted.
+			await browser.context.request.post(`${server.url}/api/login`, { data: { token: server.token } });
+			await page.getByRole("button", { name: "Accept and sign in" }).click();
+			// The passkey is made, the acceptance is refused, and the page asks about the owner.
+			await page.getByText("You are signed in as robin. This invitation is for nia.", { exact: false }).waitFor();
+			expect(await server.api("credential", { do: "list", actor: "nia" })).toHaveLength(0);
+			await page.getByRole("button", { name: "Continue as nia" }).click();
+			await page.locator("#app").waitFor();
+			expect(await page.locator(".sfoot .me").textContent()).toContain("nia");
+			// One passkey was made and it is the one that was stored: the second sending carried the first's
+			// answer, with the name the question was about, and the authenticator was not asked twice.
+			expect(acceptances).toHaveLength(2);
+			expect(acceptances[0]?.replace).toBeUndefined();
+			expect(acceptances[1]).toEqual({ ...acceptances[0], replace: "robin" });
+			expect(await server.api("credential", { do: "list", actor: "nia" })).toMatchObject([{ kind: "passkey" }]);
+			expect(browser.errors).toEqual(["Failed to load resource: the server responded with a status of 409 (Conflict)"]);
+		} finally {
+			await browser?.close();
+		}
+	},
+	30_000,
+);
