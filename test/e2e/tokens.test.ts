@@ -1,7 +1,7 @@
 // A token's end, its maker and its last address, as the settings page shows them in a real browser.
 import { expect, test } from "bun:test";
 import { z } from "zod";
-import { browserAvailable, openPage, startServer } from "./support.ts";
+import { answer, browserAvailable, fetched, openPage, startServer } from "./support.ts";
 
 const DAY = 86_400_000;
 const Listed = z.array(
@@ -69,11 +69,13 @@ test.skipIf(!browserAvailable)(
 			expect(await page.getByRole("button", { name: "Revoke nightly", exact: true }).count()).toBe(1);
 			await page.route("**/api/admin", async (route) => {
 				if (!route.request().postData()?.includes('"token.list"')) return route.continue();
-				const response = await route.fetch();
+				// The page lists the tokens again by itself. One such request can be here when the test closes it.
+				const listed = await fetched(route);
+				if (!listed) return;
 				const reply = z.object({ ok: z.literal(true), result: z.array(z.looseObject({ actor: z.string() })) });
-				const body = reply.parse(await response.json());
-				await route.fulfill({
-					response,
+				const body = reply.parse(listed.json);
+				await answer(route, {
+					response: listed.response,
 					json: {
 						...body,
 						result: body.result.map((token) => (token.actor === "nightly" ? { ...token, expired: true } : token)),

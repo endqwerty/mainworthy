@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { Slot } from "../../src/web/runs/models.ts";
-import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
+import { answer, browserAvailable, eventually, fetched, openPage, type Server, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
 const latch = () => {
@@ -384,16 +384,18 @@ for (const kind of ["failure", "finding", "map", "signoff", "adopt"])
 				const { page } = h;
 				page.setDefaultTimeout(5000);
 				await page.route("**/inbox", async (route) => {
-					const response = await route.fetch();
+					// The page asks for the inbox again by itself. One such request can be here when the test closes it.
+					const reply = await fetched(route);
+					if (!reply) return;
 					const raw = z
 						.object({
 							ok: z.literal(true),
 							result: z.object({ items: z.array(z.record(z.string(), z.unknown())) }).passthrough(),
 						})
-						.parse(await response.json());
+						.parse(reply.json);
 					const first = raw.result.items[0];
 					if (first) raw.result.items = [{ ...first, kind, evidence: {}, answers: undefined }];
-					await route.fulfill({ json: raw });
+					await answer(route, { json: raw });
 				});
 				await page.goto(`${server.url}/p/scratch/queue`);
 				await page.locator("[data-current-question]").waitFor();
@@ -472,7 +474,9 @@ check(
 			const { page } = h;
 			page.setDefaultTimeout(5000);
 			await page.route("**/inbox", async (route) => {
-				const response = await route.fetch();
+				// The page asks for the inbox again by itself. One such request can be here when the test closes it.
+				const reply = await fetched(route);
+				if (!reply) return;
 				const raw = z
 					.object({
 						ok: z.literal(true),
@@ -480,12 +484,12 @@ check(
 							.object({ items: z.array(z.object({ evidence: z.record(z.string(), z.unknown()) }).passthrough()) })
 							.passthrough(),
 					})
-					.parse(await response.json());
+					.parse(reply.json);
 				for (const item of raw.result.items) {
 					item.evidence.message = null;
 					item.evidence.sample = null;
 				}
-				await route.fulfill({ json: raw });
+				await answer(route, { json: raw });
 			});
 			await page.goto(`${server.url}/p/scratch/queue`);
 			await page.locator("[data-current-question]").waitFor();
