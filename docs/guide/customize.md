@@ -66,7 +66,7 @@ Some things look like settings and are not. Each of these is the same on every i
 - A pipeline holds `read` and `record` at most, whatever its grant says.
 - Three named presets. A policy with different clauses is called `custom`, and no screen edits clauses.
 - The shape of a case: a title, preconditions, steps with expected results, methods, an automation intent, tags, a folder and the requirements it covers. A case can carry free `fields` of text in its Markdown, but the web UI does not show or edit them, and there are no typed or required custom fields.
-- Sign-in is by token. There are no passwords, accounts or single sign-on, and a token works until you revoke it.
+- Sign-in is by token. There are no passwords, accounts or single sign-on. A token works until you revoke it or until the end you gave it.
 - The database is one SQLite file.
 
 These are not built yet: a flaky-test detector, a requirements coverage matrix, sign-off by a named role or by two people, attachments, a gate check posted to your code host, importers from other tools, and reports or dashboards.

@@ -3,17 +3,19 @@ import { existsSync } from "node:fs";
 import type { Db } from "./db.ts";
 import init from "./migrations/0001_init.sql" with { type: "text" };
 import sessions from "./migrations/0002_sessions.sql" with { type: "text" };
+import tokenLimits from "./migrations/0003_token_limits.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
  *
  * `archive` says whether the migration changes what an archive holds: a table or a column of the tables an export
- * writes. One that only adds a table an archive leaves out (`sessions`) does not, and an archive taken before it
- * still imports after it.
+ * writes. One that only adds a table an archive leaves out (`sessions`), or columns to one (`tokens`), does not,
+ * and an archive taken before it still imports after it.
  */
 export const MIGRATIONS: readonly { version: number; name: string; sql: string; archive: boolean }[] = [
 	{ version: 1, name: "init", sql: init, archive: true },
 	{ version: 2, name: "sessions", sql: sessions, archive: false },
+	{ version: 3, name: "token_limits", sql: tokenLimits, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

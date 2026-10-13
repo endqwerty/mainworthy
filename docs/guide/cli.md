@@ -38,7 +38,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy serve` | Start the server and web UI. Also the default with no arguments. |
 | `mainworthy report <files...> [--session <name>] [--run R-4] [--json]` | Upload JUnit files, detect the CI build, and print the receipt. Use gate to check the verdict. |
 | `mainworthy gate [--commit <sha> \| --run R-4 \| --change pr:482] [--wait <seconds>] [--json]` | Check a commit, change or run. Exit 0 passed, 1 failed, 2 blocked, 3 pending. |
-| `mainworthy token new --agent <name> \| --ci <name> \| --human <name> [--can read,produce] [--project <key>] \| token list \| token revoke <id>` | Issue, list and revoke actor tokens. A new secret is shown once. |
+| `mainworthy token new --agent <name> \| --ci <name> \| --human <name> [--can read,produce] [--project <key>] [--expires 90d] \| token list \| token revoke <id>` | Issue, list and revoke actor tokens. A new secret is shown once. |
 | `mainworthy actor list \| actor grant <name> --can read,record [--project <key>] \| actor ungrant <name> [--project <key>]` | List who may do what on which project, and change or take away a grant. |
 | `mainworthy policy show \| policy use <loose\|standard\|strict> [--json]` | Show policy clauses or propose and record an admin's choice of preset. |
 | `mainworthy new [file\|-] [--json]` | Create a case from a canonical Markdown file or an outline on stdin. |
@@ -78,6 +78,7 @@ Flags of `mainworthy token`:
 - `--ci <string>`: Issue a token for this pipeline: it records results and reads the gate.
 - `--human <string>`: Issue a token for this person.
 - `--can <a,b,...>`: What a new actor may do, comma-separated or repeated. Not for one that exists.
+- `--expires <string>`: How long the new token works: 90d, 12h, 2w. Without it the token has no end.
 
 Flags of `mainworthy actor`:
 

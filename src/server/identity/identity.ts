@@ -6,18 +6,44 @@
 // `admit` who a request is, and signs a browser in and out through `signInWithToken` and `signOut`.
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
+import { untilPhrase } from "../../core/duration.ts";
 import { type ActorKind, Capability, heldCapabilities, whyNotGrantable } from "../../core/kinds.ts";
 import type { App } from "../kernel/app.ts";
 import type { Actor } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { endSession, endSessionsOf, findSession, hasUnendedSession, openSession, sweepSessions } from "./sessions.ts";
-import { clearUses, flushUses, notedUse, noteUse } from "./uses.ts";
+import { clearUses, flushUses, forgetNotedAddresses, lastAddress, notedUse, noteUse } from "./uses.ts";
 
 // What the server's start and the archive need of the module's other files.
 export { clearUses, flushUses, sweepSessions };
 
 type ActorRow = { id: number; org: number; kind: ActorKind; name: string; disabled_at: number | null };
+/** What decides whether a token works: whose it is, whether it was revoked, and when it ends (null: never). */
+type TokenState = { actor: number; revoked_at: number | null; expires_at: number | null };
+/**
+ * Which start-up rule made a token. `env`: it is the value of `MAINWORTHY_OWNER_TOKEN`. `generated`: a start made
+ * it because the owner held none. A token somebody made with `token.create` has no source.
+ */
+type TokenSource = "env" | "generated";
+
+/** A token the owner chose and shorter than this stops the start. */
+const OWNER_TOKEN_MIN = 20;
+/**
+ * The longest token a sign-in reads (`POST /api/login` takes its schema from here). A configured owner token that
+ * is longer stops the start too: it would work as a bearer and never sign a browser in.
+ */
+export const TOKEN_MAX = 512;
+/** One shorter than this starts, and every start says so. */
+const OWNER_TOKEN_SOUND = 32;
+/**
+ * How the refusal of a start ends: what it left alone. Not "nothing": the database is opened, and brought to this
+ * build's schema with a copy of it written beside it, before the owner and the owner's token are looked at.
+ */
+const START_REFUSED =
+	"no actor and no token was changed (the database may have been brought to this build's schema first, with a copy of it as it was beside it)";
+/** How long before a token ends the start names it. */
+const ENDING_SOON_MS = 14 * 86_400_000;
 
 const Q = {
 	org: sql<readonly [], { id: number }>("SELECT id FROM orgs ORDER BY id LIMIT 1"),
@@ -36,17 +62,26 @@ const Q = {
 		`INSERT INTO grants (actor, project, can) VALUES ($actor, $project, $can)
 		 ON CONFLICT (actor, project) DO UPDATE SET can = excluded.can`,
 	),
-	tokenByHash: sql<{ hash: string }, { id: number; actor: number; revoked_at: number | null }>(
-		"SELECT id, actor, revoked_at FROM tokens WHERE hash = $hash",
+	tokenByHash: sql<{ hash: string }, TokenState & { id: number }>(
+		"SELECT id, actor, revoked_at, expires_at FROM tokens WHERE hash = $hash",
 	),
-	insertToken: sql<{ actor: number; hash: string; label: string; at: number }>(
-		"INSERT INTO tokens (actor, hash, label, created_at) VALUES ($actor, $hash, $label, $at)",
+	insertToken: sql<{
+		actor: number;
+		hash: string;
+		label: string;
+		at: number;
+		expires: number | null;
+		by: number | null;
+		source: TokenSource | null;
+	}>(
+		`INSERT INTO tokens (actor, hash, label, created_at, expires_at, created_by, source)
+		 VALUES ($actor, $hash, $label, $at, $expires, $by, $source)`,
 	),
-	tokenById: sql<{ id: number }, { actor: number; revoked_at: number | null }>(
-		"SELECT actor, revoked_at FROM tokens WHERE id = $id",
-	),
-	activeTokens: sql<{ actor: number }, { n: number }>(
-		"SELECT count(*) AS n FROM tokens WHERE actor = $actor AND revoked_at IS NULL",
+	tokenById: sql<{ id: number }, TokenState>("SELECT actor, revoked_at, expires_at FROM tokens WHERE id = $id"),
+	// A token works when it was not revoked and the clock has not reached its end.
+	activeTokens: sql<{ actor: number; now: number }, { n: number }>(
+		`SELECT count(*) AS n FROM tokens
+		 WHERE actor = $actor AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > $now)`,
 	),
 	tokens: sql<
 		{ org: number },
@@ -56,19 +91,44 @@ const Q = {
 			kind: string;
 			label: string;
 			created_at: number;
+			created_by: string | null;
+			expires_at: number | null;
 			last_used_at: number | null;
+			last_used_addr: string | null;
 			revoked_at: number | null;
 		}
 	>(
-		`SELECT t.id, a.name AS actor, a.kind, t.label, t.created_at, t.last_used_at, t.revoked_at
-		 FROM tokens t JOIN actors a ON a.id = t.actor WHERE a.org = $org ORDER BY t.id`,
+		`SELECT t.id, a.name AS actor, a.kind, t.label, t.created_at, maker.name AS created_by, t.expires_at,
+			t.last_used_at, t.last_used_addr, t.revoked_at
+		 FROM tokens t JOIN actors a ON a.id = t.actor LEFT JOIN actors maker ON maker.id = t.created_by
+		 WHERE a.org = $org ORDER BY t.id`,
+	),
+	// The tokens that work now and stop working by `until`, each with the actor it signs in.
+	endingTokens: sql<
+		{ org: number; now: number; until: number },
+		{ id: number; actor: string; label: string; expires_at: number }
+	>(
+		`SELECT t.id, a.name AS actor, t.label, t.expires_at
+		 FROM tokens t JOIN actors a ON a.id = t.actor
+		 WHERE a.org = $org AND t.revoked_at IS NULL AND t.expires_at > $now AND t.expires_at <= $until
+		 ORDER BY t.expires_at, t.id`,
 	),
 	revokeToken: sql<{ id: number; at: number }>(
 		"UPDATE tokens SET revoked_at = $at WHERE id = $id AND revoked_at IS NULL",
 	),
+	// Every token that came from the environment and was not revoked, with the actor it signs in: what a new value
+	// there replaces. Whoever's it is, and not the owner's alone: the variable is one, the owner's name is another
+	// variable, and when both change in one start the old value is the token of whoever was the owner before.
+	envTokens: sql<readonly [], { id: number; actor: string }>(
+		`SELECT t.id, a.name AS actor FROM tokens t JOIN actors a ON a.id = t.actor
+		 WHERE t.source = 'env' AND t.revoked_at IS NULL ORDER BY t.id`,
+	),
 	revokeTokensOf: sql<{ actor: number; at: number }>(
 		"UPDATE tokens SET revoked_at = $at WHERE actor = $actor AND revoked_at IS NULL",
 	),
+	// Every token of an actor, revoked or not, and the erasure of where each was last used from.
+	tokensOf: sql<{ actor: number }, { id: number }>("SELECT id FROM tokens WHERE actor = $actor"),
+	forgetAddresses: sql<{ actor: number }>("UPDATE tokens SET last_used_addr = NULL WHERE actor = $actor"),
 	forget: sql<{ id: number; name: string; at: number }>(
 		"UPDATE actors SET name = $name, disabled_at = $at WHERE id = $id",
 	),
@@ -117,10 +177,28 @@ export function orgId(db: Db): number {
  * lost or renamed must not turn a token that reads one project into the administrator of the instance.)
  *
  * `generatedToken` is the owner's token when this call made one: in server mode, with none configured, whenever
- * the owner holds no token that works, which is the first start and the start after an import. `warnings` are
- * for the operator, one line each: a configured token that signs the owner in no more is said, not revived.
+ * the owner holds no token that works, which is the first start, the start after an import and the start after
+ * the owner's last token ended. `warnings` are for the operator, one line each, and none holds a secret: a
+ * configured token that signs the owner in no more (it was revoked, it reached its end, or it is somebody else's)
+ * is said, not revived; so is one that is short, every token that a new value retired, and every token that ends
+ * within 14 days.
+ *
+ * The configured token is the one secret here that a person chose, and it opens everything. One shorter than 20
+ * characters stops the start, and so does one longer than a sign-in reads, in local mode too: the value becomes a
+ * token there as well. A start that is refused changes no actor and no token; the schema is another matter, and
+ * the refusal says so (`START_REFUSED`).
  */
 export function bootstrap(app: App): { owner: Actor; generatedToken: string | null; warnings: string[] } {
+	const configured = app.config.ownerToken;
+	if (configured && (configured.length < OWNER_TOKEN_MIN || configured.length > TOKEN_MAX)) {
+		const why =
+			configured.length < OWNER_TOKEN_MIN
+				? `is shorter than ${OWNER_TOKEN_MIN} characters, and it opens everything on this instance`
+				: `is longer than ${TOKEN_MAX} characters, and a sign-in reads no token longer than that`;
+		throw invalid(
+			`MAINWORTHY_OWNER_TOKEN ${why}. Make one with \`openssl rand -hex 32\`, set MAINWORTHY_OWNER_TOKEN to it and start again; ${START_REFUSED}`,
+		);
+	}
 	return app.db.transaction(() => {
 		const at = app.now();
 		if (!app.db.get(Q.org)) app.db.run(Q.insertOrg, { name: "default", at });
@@ -128,13 +206,13 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
 		ensureActor(app.db, { org, kind: "rule", name: RULE_ACTOR, at });
 		if (isForgottenName(app.config.owner)) {
 			throw invalid(
-				`MAINWORTHY_OWNER names ${app.config.owner}, and a name that starts with forgotten- is what a forgotten actor is called. Set MAINWORTHY_OWNER to the owner's name and start again; nothing was changed`,
+				`MAINWORTHY_OWNER names ${app.config.owner}, and a name that starts with forgotten- is what a forgotten actor is called. Set MAINWORTHY_OWNER to the owner's name and start again; ${START_REFUSED}`,
 			);
 		}
 		const existing = app.db.get(Q.actorByName, { org, name: app.config.owner });
 		if (existing && existing.kind !== "human") {
 			throw invalid(
-				`MAINWORTHY_OWNER names ${existing.name}, which is ${KIND_NOUN[existing.kind]} on this instance and not a person. Set MAINWORTHY_OWNER to the owner's name and start again; nothing was changed`,
+				`MAINWORTHY_OWNER names ${existing.name}, which is ${KIND_NOUN[existing.kind]} on this instance and not a person. Set MAINWORTHY_OWNER to the owner's name and start again; ${START_REFUSED}`,
 			);
 		}
 		const owner = existing ?? ensureActor(app.db, { org, kind: "human", name: app.config.owner, at });
@@ -143,30 +221,73 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
 		const server = app.config.mode === "server";
 		const warnings: string[] = [];
 		let generatedToken: string | null = null;
-		if (app.config.ownerToken) {
-			const row = app.db.get(Q.tokenByHash, { hash: hashToken(app.config.ownerToken) });
+		if (configured) {
+			if (configured.length < OWNER_TOKEN_SOUND) {
+				warnings.push(
+					`MAINWORTHY_OWNER_TOKEN is shorter than ${OWNER_TOKEN_SOUND} characters. It signs ${owner.name} in as it is; a longer one is harder to guess. Make one with \`openssl rand -hex 32\`.`,
+				);
+			}
+			const row = app.db.get(Q.tokenByHash, { hash: hashToken(configured) });
 			if (!row) {
+				// The variable holds a value that is not a token yet, so it was changed. What it held before is
+				// retired here, in the transaction that makes the new one: an operator who replaces a value that
+				// leaked expects the old one to stop working, and until now it worked for as long as its row.
+				// That is every token marked `env`, whoever its actor is: there is one such variable, so at most
+				// one of them should work, and the owner's name may have changed in this same start. The sessions
+				// they opened end with them, because a session is read with its token.
+				const retired = app.db.all(Q.envTokens);
+				for (const token of retired) app.db.run(Q.revokeToken, { id: token.id, at });
 				app.db.run(Q.insertToken, {
 					actor: owner.id,
-					hash: hashToken(app.config.ownerToken),
+					hash: hashToken(configured),
 					label: "owner (from MAINWORTHY_OWNER_TOKEN)",
 					at,
+					expires: null,
+					by: null,
+					source: "env",
 				});
-			} else if (server && (row.revoked_at !== null || row.actor !== owner.id)) {
-				// A token that was revoked stays revoked, and one that is somebody else's stays theirs: bringing it
-				// back, or handing it to the owner, would undo a decision somebody made. The operator is told, because
-				// the start otherwise looks like any other and the owner is left outside.
+				if (retired.length > 0) {
+					const named = retired.map((token) => `token ${token.id} of ${token.actor}`).join(", ");
+					const held =
+						retired.length === 1
+							? `the token it held before (${named}) was revoked, and every session opened with it has ended`
+							: `the tokens it held before (${named}) were revoked, and every session opened with them has ended`;
+					warnings.push(`MAINWORTHY_OWNER_TOKEN has a new value: ${held}. Sign in with the new value.`);
+				}
+			} else if (server && (!works(row, at) || row.actor !== owner.id)) {
+				// A token that was revoked stays revoked, one that reached its end stays ended, and one that is
+				// somebody else's stays theirs: bringing it back, or handing it to the owner, would undo a decision
+				// somebody made. The operator is told, because the start otherwise looks like any other and the
+				// owner is left outside.
+				// (The owner's token that works does not come here, so one that was not revoked has an end.)
 				const why =
 					row.actor !== owner.id
 						? `is the token of ${app.db.get(Q.actorById, { id: row.actor })?.name ?? "another actor"}, not of the owner ${owner.name}`
-						: "was revoked";
+						: row.revoked_at !== null || row.expires_at === null
+							? "was revoked"
+							: `reached its end at ${new Date(row.expires_at).toISOString()}`;
 				warnings.push(
 					`MAINWORTHY_OWNER_TOKEN ${why}: it does not sign ${owner.name} in, and it was left as it is. Set MAINWORTHY_OWNER_TOKEN to a new value and start again.`,
 				);
 			}
-		} else if (server && (app.db.get(Q.activeTokens, { actor: owner.id })?.n ?? 0) === 0) {
+		} else if (server && (app.db.get(Q.activeTokens, { actor: owner.id, now: at })?.n ?? 0) === 0) {
 			generatedToken = newSecret();
-			app.db.run(Q.insertToken, { actor: owner.id, hash: hashToken(generatedToken), label: "owner (generated)", at });
+			app.db.run(Q.insertToken, {
+				actor: owner.id,
+				hash: hashToken(generatedToken),
+				label: "owner (generated)",
+				at,
+				expires: null,
+				by: null,
+				source: "generated",
+			});
+		}
+		// Nothing tells whoever holds a token that it is about to end, so the operator is told at each start. The
+		// label is written as JSON: it is free text, and a warning is one line.
+		for (const token of app.db.all(Q.endingTokens, { org, now: at, until: at + ENDING_SOON_MS })) {
+			warnings.push(
+				`token ${token.id} of ${token.actor} (${JSON.stringify(token.label)}) expires ${untilPhrase(token.expires_at, at)}, and what uses it is refused from then on. Make its replacement with \`mainworthy token new\`, and revoke this one once the replacement is in use.`,
+			);
 		}
 		return { owner: toActor(app.db, owner, 0), generatedToken, warnings };
 	});
@@ -195,13 +316,22 @@ function toActor(db: Db, row: ActorRow, project: number): Actor {
 }
 
 /**
+ * Whether a token works at `now`: it was not revoked, and the clock has not reached its end. The one rule, for
+ * a bearer, a sign-in and the question which token is an actor's last. (`sessions.ts`, `activeTokens` and
+ * `endingTokens` say the same in SQL.) A token past its end is refused exactly as a revoked one is, and nothing
+ * is written when that moment comes: the row keeps saying when it ended.
+ */
+const works = (token: TokenState, now: number): boolean =>
+	token.revoked_at === null && (token.expires_at === null || now < token.expires_at);
+
+/**
  * The token with this hash and its actor's row, when the token works and the actor stands. On the reader: a
  * request is admitted before it queues at the write gate, and must not touch the writing connection while another
  * command's transaction is open on it.
  */
-function standingToken(db: Db, hash: string): { id: number; actor: ActorRow } | null {
+function standingToken(db: Db, hash: string, now: number): { id: number; actor: ActorRow } | null {
 	const token = db.get(Q.tokenByHash, { hash });
-	if (!token || token.revoked_at !== null) return null;
+	if (!token || !works(token, now)) return null;
 	const actor = db.get(Q.actorById, { id: token.actor });
 	if (!actor || actor.disabled_at !== null) return null;
 	return { id: token.id, actor };
@@ -212,14 +342,14 @@ function standingToken(db: Db, hash: string): { id: number; actor: ActorRow } | 
  * For the tests' harness and for code that holds a token and no request; a surface asks `admit`.
  */
 export function authenticate(app: App, secret: string, project: number): Actor | null {
-	const token = standingToken(app.reader, hashToken(secret));
+	const token = standingToken(app.reader, hashToken(secret), app.now());
 	return token ? toActor(app.reader, token.actor, project) : null;
 }
 
 /**
  * A caller that was let in. It holds no secret. `actor` asks again each time it is called, so an operation that
- * waited at the gate, and a change stream opened an hour ago, stop when the token was revoked, the session ended
- * or the actor was forgotten. Asking is not a use: only `admit` notes one.
+ * waited at the gate, and a change stream opened an hour ago, stop when the token was revoked or reached its end,
+ * the session ended or the actor was forgotten. Asking is not a use: only `admit` notes one.
  */
 export type Session = {
 	/** How the caller proved itself. `cookie` is a browser's session; `local` is the owner of this machine. */
@@ -244,6 +374,11 @@ export type Facts = {
 	sameOrigin: boolean;
 	/** The owner of this machine when the request started on it, else null. Counts in local mode only. */
 	localOwner: Actor | null;
+	/**
+	 * The address the request came from, or null for one that never was on a connection. It decides nothing here:
+	 * it is noted with the use, so a person can see where a token or a session was last used from.
+	 */
+	address: string | null;
 };
 
 export type Admission = { kind: "admitted"; session: Session } | { kind: "refused" };
@@ -262,16 +397,19 @@ const REFUSED: Admission = { kind: "refused" };
  */
 export function admit(app: App, facts: Facts): Admission {
 	if (facts.bearer !== null) {
+		// A sign-in reads no token longer than `TOKEN_MAX`, so a bearer is none either: a token must not work one
+		// way and not the other. (An earlier build took an owner token of any length, and such a row is still there.)
+		if (facts.bearer.length > TOKEN_MAX) return REFUSED;
 		const hash = hashToken(facts.bearer);
-		const token = standingToken(app.reader, hash);
+		const token = standingToken(app.reader, hash, app.now());
 		if (!token) return REFUSED;
-		noteUse(app, "token", token.id, app.now());
+		noteUse(app, "token", token.id, app.now(), facts.address);
 		return {
 			kind: "admitted",
 			session: {
 				via: "token",
 				actor: (project) => {
-					const standing = standingToken(app.reader, hash);
+					const standing = standingToken(app.reader, hash, app.now());
 					return standing ? toActor(app.reader, standing.actor, project) : null;
 				},
 			},
@@ -282,7 +420,7 @@ export function admit(app: App, facts: Facts): Admission {
 		const hash = hashToken(facts.cookie);
 		const found = findSession(app, hash);
 		if (found) {
-			noteUse(app, "session", found.id, app.now());
+			noteUse(app, "session", found.id, app.now(), facts.address);
 			return {
 				kind: "admitted",
 				session: {
@@ -311,20 +449,23 @@ const newSessionSecret = (): string => Buffer.from(randomBytes(32)).toString("ba
  *
  * Null, at once, when the token does not work: the caller answers without waiting. Otherwise a promise, because
  * the session is written at the gate. That write looks the token up again by its hash (`openSession`), and the
- * promise is null when the token stopped working while the request waited: it was revoked, or an import
+ * promise is null when the token stopped working while the request waited: it was revoked, reached its end, or an import
  * replaced every token. Nothing read before the wait is trusted after it. The token's id, in particular, is
  * not carried across: after an import a new token holds it.
+ *
+ * `about` is what the request said of itself, kept for a person looking at their own sessions: what the client
+ * calls itself, and the address it came from (null for a request that never was on a connection).
  */
 export function signInWithToken(
 	app: App,
 	secret: string,
-	about: { userAgent: string | null },
+	about: { userAgent: string | null; address: string | null },
 ): Promise<SignedIn | null> | null {
 	const tokenHash = hashToken(secret);
-	const token = standingToken(app.reader, tokenHash);
+	const token = standingToken(app.reader, tokenHash, app.now());
 	if (!token) return null;
 	// The use is of the token as it stands now, noted before any wait. An import clears the notes when it commits.
-	noteUse(app, "token", token.id, app.now());
+	noteUse(app, "token", token.id, app.now(), about.address);
 	const cookie = newSessionSecret();
 	return app.gate.run(() => {
 		const opened = openSession(app, {
@@ -333,6 +474,7 @@ export function signInWithToken(
 			// What the client calls itself, for a person looking at their own sessions. Never trusted, and cut:
 			// the header is as long as its sender likes.
 			userAgent: about.userAgent?.slice(0, 256) ?? null,
+			address: about.address,
 		});
 		return opened ? { cookie, expiresAt: opened.expiresAt } : null;
 	});
@@ -395,11 +537,22 @@ export function actorLabel(db: Db, id: number): { name: string; kind: ActorKind 
  * stored. A token carries its actor's grants: `can` on `project` is what a new actor starts with. An actor that
  * exists keeps what it has: naming the grant it already holds there is accepted, anything else is refused, and
  * `setGrant` is the one way to change it. An actor that was forgotten gets none.
+ *
+ * `lastsMs` is how long the token works from now; absent, it has no end. `madeBy` is the id of the actor that
+ * asked for it, which the row keeps; absent for a harness that makes a token with nobody asking.
  */
 export function createToken(
 	app: App,
-	input: { actor: string; kind: ActorKind; can: readonly Capability[]; project: number; label: string },
-): { secret: string; actor: string } {
+	input: {
+		actor: string;
+		kind: ActorKind;
+		can: readonly Capability[];
+		project: number;
+		label: string;
+		lastsMs?: number;
+		madeBy?: number;
+	},
+): { secret: string; actor: string; expiresAt: number | null } {
 	if (input.kind === "rule") throw invalid("a rule does not hold a token");
 	if (!/^[a-zA-Z0-9][a-zA-Z0-9._@-]{0,63}$/.test(input.actor)) throw invalid("actor name: letters, digits, . _ @ -");
 	if (isForgottenName(input.actor))
@@ -422,8 +575,17 @@ export function createToken(
 	if (!existing && input.can.length > 0)
 		db.run(Q.setGrant, { actor: actor.id, project: input.project, can: JSON.stringify(input.can) });
 	const secret = newSecret();
-	db.run(Q.insertToken, { actor: actor.id, hash: hashToken(secret), label: input.label, at });
-	return { secret, actor: actor.name };
+	const expiresAt = input.lastsMs === undefined ? null : at + input.lastsMs;
+	db.run(Q.insertToken, {
+		actor: actor.id,
+		hash: hashToken(secret),
+		label: input.label,
+		at,
+		expires: expiresAt,
+		by: input.madeBy ?? null,
+		source: null,
+	});
+	return { secret, actor: actor.name, expiresAt };
 }
 
 /** Whether the actor's grant on exactly this project lists exactly these capabilities. */
@@ -458,25 +620,33 @@ export function removeGrant(app: App, input: { actor: string; project: number })
 }
 
 /**
- * Every token of the instance. `last_used_at` is the newer of the row and what is noted and not yet written
- * (`uses.ts`), so a use shows in the list at once and not a minute later.
+ * Every token of the instance. `last_used_at` and `last_used_addr` are the newer of the row and what is noted and
+ * not yet written (`uses.ts`), so a use shows in the list at once and not a minute later. `created_by` is the
+ * name of the actor that made the token as history calls it now, or null when a start made it. `expired` is
+ * whether the clock of this instance has reached the token's end, for a caller whose own clock may differ.
  */
 export function listTokens(app: App) {
 	const db = app.reader;
+	const now = app.now();
 	return db.all(Q.tokens, { org: orgId(db) }).map((row) => {
 		const noted = notedUse(app, "token", row.id);
-		return noted === null ? row : { ...row, last_used_at: Math.max(row.last_used_at ?? 0, noted) };
+		return {
+			...row,
+			last_used_at: noted === null ? row.last_used_at : Math.max(row.last_used_at ?? 0, noted),
+			last_used_addr: lastAddress(app, "token", row.id, { at: row.last_used_at, addr: row.last_used_addr }),
+			expired: row.expires_at !== null && now >= row.expires_at,
+		};
 	});
 }
 
 /**
- * The name of the actor that this token is the last way in for: the token works, and its actor holds no other
- * that does. Null for any other token, and for an id that names none.
+ * The name of the actor that this token is the last way in for: the token works at `now`, and its actor holds
+ * no other that does. Null for any other token, and for an id that names none.
  */
-export function lastTokenOf(db: Db, id: number): string | null {
+export function lastTokenOf(db: Db, id: number, now: number): string | null {
 	const token = db.get(Q.tokenById, { id });
-	if (!token || token.revoked_at !== null) return null;
-	if ((db.get(Q.activeTokens, { actor: token.actor })?.n ?? 0) > 1) return null;
+	if (!token || !works(token, now)) return null;
+	if ((db.get(Q.activeTokens, { actor: token.actor, now })?.n ?? 0) > 1) return null;
 	return db.get(Q.actorById, { id: token.actor })?.name ?? null;
 }
 
@@ -486,9 +656,9 @@ export function revokeToken(app: App, id: number): boolean {
 
 /**
  * Removes an actor's identity and keeps the record true: the name becomes a pseudonym, the actor is disabled, its
- * tokens are revoked and its sessions are ended. Every fact still points at the same actor row, so history says
- * the same actor did each thing; it no longer says who that was. Text the person typed elsewhere is not touched
- * (docs/compliance.md).
+ * tokens are revoked and no longer say where they were used from, and its sessions are ended. Every fact still
+ * points at the same actor row, so history says the same actor did each thing; it no longer says who that was.
+ * Text the person typed elsewhere is not touched (docs/compliance.md).
  */
 export function forgetActor(app: App, name: string): { forgotten: string; tokensRevoked: number } {
 	const db = app.db;
@@ -499,6 +669,14 @@ export function forgetActor(app: App, name: string): { forgotten: string; tokens
 	const at = app.now();
 	db.run(Q.forget, { id: row.id, name: pseudonym, at });
 	const revoked = db.run(Q.revokeTokensOf, { actor: row.id, at }).changes;
+	// An address says where the person was. A token's row is never deleted, so the address goes now, from the row
+	// and from what is noted of it and not yet written. When each token was last used stays: that names nobody.
+	db.run(Q.forgetAddresses, { actor: row.id });
+	forgetNotedAddresses(
+		app,
+		"token",
+		db.all(Q.tokensOf, { actor: row.id }).map((token) => token.id),
+	);
 	// A disabled actor's sessions are refused anyway. Ending them says why in each row, and keeps them ended if
 	// the row of the actor is ever changed by hand.
 	endSessionsOf(db, row.id, at);

@@ -10,6 +10,7 @@ import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import { flushUses, sweepSessions } from "../src/server/identity/identity.ts";
 import { openSession } from "../src/server/identity/sessions.ts";
 import { type Config, databasePath, defaultConfig, type ReadPool } from "../src/server/kernel/app.ts";
+import { SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
 import { type Instance, start } from "../src/server/start.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 
@@ -751,7 +752,8 @@ describe("an upgrade and an archive", () => {
 		const version = instance.app.reader.raw
 			.query<{ value: string }, []>("SELECT value FROM meta WHERE key = 'schema_version'")
 			.get();
-		expect(version).toEqual({ value: "2" });
+		// Every migration since has run on it too, each on a database that holds data.
+		expect(version).toEqual({ value: String(SCHEMA_VERSION) });
 		// The copy beside it is the way back: the database as the previous build left it.
 		expect(peek(`${path}.v1.bak`)).toEqual({ version: "1", cases: 1, tables: [] });
 		// What the instance held is there, and the token is a token as before.
@@ -930,7 +932,12 @@ describe("the rules a session is made under", () => {
 		// `openSession` takes the token's hash and no id: there is nothing else to open a session with.
 		const open = (tokenHash: string) =>
 			instance.app.gate.run(() =>
-				openSession(instance.app, { tokenHash, sessionHash: sha256(`a session of ${tokenHash}`), userAgent: null }),
+				openSession(instance.app, {
+					tokenHash,
+					sessionHash: sha256(`a session of ${tokenHash}`),
+					userAgent: null,
+					address: null,
+				}),
 			);
 		// A token that was revoked, a secret that is no token's, and a token whose actor no longer stands.
 		await admin(instance, { do: "token.revoke", id: sam.id });

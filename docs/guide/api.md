@@ -565,6 +565,7 @@ Projects, actors, grants and tokens. There are no seats: an actor is free, and a
 | `[3].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | no | What a new actor may do. Absent: a person everything, an agent read and produce, a pipeline record. Not for an actor that exists: use grant.set. Default: `[]`. |
 | `[3].project` | `string` | no | Limit the grant to one project. Absent: every project. |
 | `[3].label` | `string` | no |  |
+| `[3].expires` | `string` | no | How long the token works from now: 90d, 12h, 2w. After that it is refused as a revoked one is. Absent: it has no end. |
 | `[4].do` | `"token.list"` | yes |  |
 | `[5].do` | `"token.revoke"` | yes |  |
 | `[5].id` | `integer` | yes |  |

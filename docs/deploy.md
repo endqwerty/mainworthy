@@ -26,7 +26,7 @@ sending the token itself.
 
 | Variable | Default in the image | What |
 | --- | --- | --- |
-| `MAINWORTHY_OWNER_TOKEN` | not set | The owner's token. Set it to a long random string (`openssl rand -hex 32`). If unset, one is generated and printed once in the log whenever the owner holds no token that works: on the first start, and on the start after an import. A value that names a token that was revoked, or somebody else's token, is not brought back: the start says so in one line on stderr, and the owner signs in again once the variable has a new value. |
+| `MAINWORTHY_OWNER_TOKEN` | not set | The owner's token. Set it to a long random string (`openssl rand -hex 32`). A value shorter than 20 characters or longer than 512 stops the start, in local mode too; one shorter than 32 starts, and every start warns. If unset, one is generated and printed once in the log whenever the owner holds no token that works: on the first start, on the start after an import, and on the start after the owner's last token expired. A value that is not yet a token replaces the old one: the start revokes every token that came from this variable and still works, whoever was the owner when it was set, and names them in one line ("Replacing a token" below). A value that is already a token replaces nothing. When that token was revoked, has reached its end or is somebody else's, it is not brought back: the start says which in one line on stderr, and the owner signs in again once the variable has a new value. |
 | `MAINWORTHY_OWNER` | `owner` | The owner's name, as it appears in history. Set it before the first start. The start gives this person every capability; when the name is an agent's or a pipeline's on the instance, the server does not start and says which variable to change. |
 | `MAINWORTHY_DATA` | `/data` | Where `mainworthy.db` lives. Mount a volume here. |
 | `MAINWORTHY_PORT` | `7357` | The port to listen on. |
@@ -184,8 +184,8 @@ What can go wrong, and what the job does: the instance is down (its own Mainwort
 older or newer build that describes `report` or `gate` differently (the same); the token was revoked or is for
 another project (the job fails and says which). To stop reporting to the instance, delete the `MAINWORTHY_URL`
 variable. A pull request that changes the shape of a `report` or `gate` reply fails against the instance until it
-is redeployed (#90): delete the variable for that pull request. To replace the token (not tried on this instance):
-`mainworthy token list`, `mainworthy token revoke <id>`, issue a new one as above and set the secret again.
+is redeployed (#90): delete the variable for that pull request. To replace the token, follow "Replacing a token"
+below: the new one is in use before the old one is revoked, so no run is refused in between.
 
 The token is visible to the code of every pull request, because the `gate` job runs it. That code can report
 wrong results for this one project; it cannot do anything else with the token. Until backups exist (#59) the
@@ -279,6 +279,82 @@ image. Sessions made since are gone with the table, and each browser signs in on
 `compose.coolify.yaml` does not pass the two lifetime variables, so the instance on Coolify runs with 14 and 90
 days. To change them there, add the two lines from `compose.yaml` to the service and set the variables in
 Coolify.
+
+## Replacing a token
+
+A token works until it is revoked or, when it was made with an end, until that end. Give a token an end with
+`mainworthy token new --expires 90d` or with "Expires" in Settings; a duration is a whole number and `h`, `d` or
+`w` (`12h`, `90d`, `2w`). From its end on, a token is refused exactly as a revoked one is, and every browser
+session that was opened with it ends with it. A token made without `--expires` has no end.
+
+`mainworthy token list` and Settings show for each token when it ends, who made it, and the address it was last
+used from. Each start of the server names, in one line on stderr, every token that ends within 14 days:
+
+```
+mainworthy: token 7 of github-actions ("ci token") expires in 13 days, and what uses it is refused from then on. Make its replacement with `mainworthy token new`, and revoke this one once the replacement is in use.
+```
+
+Nothing else announces the end. A pipeline whose token has expired is answered `unauthenticated`.
+
+### A pipeline's or an agent's token
+
+Two tokens of one actor work side by side, so the old one is revoked only after the new one is in use:
+
+1. Make the second token. The actor exists, so the new token carries the grant the actor already holds:
+   `mainworthy token new --ci github-actions --expires 90d`.
+2. Put the new value where the pipeline reads it. For this repository: `gh secret set MAINWORTHY_TOKEN`.
+3. Run the pipeline once. `mainworthy token list` then shows the new token with `last used from` and an address.
+4. Revoke the old one by its id: `mainworthy token revoke <id>`.
+
+`test/tokens.test.ts` runs these steps with the real command. They were not tried on the Coolify instance.
+
+### The owner's token from the environment
+
+`MAINWORTHY_OWNER_TOKEN` holds one value, so this replacement has no overlap. It costs one restart:
+
+1. Make a value: `openssl rand -hex 32`.
+2. Set the variable to it and restart the server. On Coolify the value comes from the variable that
+   `compose.coolify.yaml` names, and the restart is a redeploy.
+3. The start finds that the value is not yet a token. In one transaction it makes the value the owner's token
+   and revokes every token that came from the variable before and was not revoked. It names each one and the
+   actor it signed in, in one line on stderr:
+
+   ```
+   mainworthy: MAINWORTHY_OWNER_TOKEN has a new value: the token it held before (token 1 of robin) was revoked, and every session opened with it has ended. Sign in with the new value.
+   ```
+
+4. Sign in with the new value in each browser that was signed in with the old one.
+
+The start goes by where a token came from, not by whose it is. So a start that changes `MAINWORTHY_OWNER` and
+`MAINWORTHY_OWNER_TOKEN` together still retires the earlier value, which is the token of whoever was the owner
+before; that person keeps the name and the grants, and holds one token fewer.
+
+Three things the start does not do:
+
+- It does not touch a token the owner made (`mainworthy token new --human <owner>`) or one an earlier start
+  generated. Revoke those by id.
+- It retires nothing when the value is already a token. Setting the variable back to a value that was revoked
+  does not bring that token back, and the start says so. It says so too when the value is a token that has
+  reached its end, with the time it ended.
+- It cannot tell a token an earlier build made from the variable from one somebody labelled like it. The upgrade
+  marked every token whose label starts with `owner (from ` as coming from the variable, so a token made by hand
+  with such a label before the upgrade is retired with the rest. `mainworthy token list` shows the labels.
+
+When no variable is set, the owner's token is the one a start generated. To replace it, sign in as the owner,
+make another (`mainworthy token new --human <owner>`), sign in with that one and revoke the first. The server
+refuses to revoke the last token the owner can sign in with.
+
+### The upgrade to this build
+
+The first start adds columns to `tokens` and `sessions`, after writing a copy of the database beside it
+(`mainworthy.db.v2.bak`). Every token and every session keeps working, except a token longer than 512 characters (see below). A token made before the upgrade has no
+end and names no maker. Before you deploy, check that `MAINWORTHY_OWNER_TOKEN` has at least 20 characters and at
+most 512: a value outside that stops the start, and the message says how to make one. The schema is brought up
+to date before that check, so a start that is refused for the token's length has already migrated the database;
+it has changed no actor and no token, and the next start with a good value carries on from there. A token of
+more than 512 characters that an earlier build accepted is refused everywhere after the upgrade, as a bearer
+and at sign-in, whether or not the variable still holds it; the server cannot tell a token's length from its
+stored hash, so no start says so. Set a new value.
 
 ## Backup and restore
 

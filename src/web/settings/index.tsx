@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { z } from "zod";
+import { untilPhrase } from "../../core/duration.ts";
 import { Capability, CI_CAPABILITIES, defaultCapabilities, Policy } from "../../core/kinds.ts";
 import { PRESET_GUIDE, PRESET_SUMMARY } from "../../core/policy-guide.ts";
 import { presetOf } from "../../core/presets.ts";
@@ -19,10 +20,45 @@ const Token = z.object({
 	kind: z.string(),
 	label: z.string(),
 	createdAt: z.number(),
+	createdBy: z.string().nullable(),
+	expiresAt: z.number().nullable(),
+	expired: z.boolean(),
 	lastUsedAt: z.number().nullable(),
+	lastUsedFrom: z.string().nullable(),
 	revoked: z.boolean(),
 });
+type Token = z.infer<typeof Token>;
 const CreatedToken = z.object({ actor: z.string(), token: z.string(), can: z.array(Capability), note: z.string() });
+/**
+ * How long a new token may work. Each value is a duration as `token.create` reads it (`src/core/duration.ts`);
+ * the empty one is a token with no end.
+ */
+const LIFETIMES = [
+	{ value: "", label: "Never" },
+	{ value: "30d", label: "30 days" },
+	{ value: "90d", label: "90 days" },
+	{ value: "365d", label: "1 year" },
+] as const;
+
+/**
+ * Whether a token works, in one word. `expired` is the server's word, by its own clock: a browser whose clock is
+ * off must not call a token active that the server refuses.
+ */
+const tokenStanding = (token: Token): string => (token.revoked ? "Revoked" : token.expired ? "Expired" : "Active");
+
+/** What is known of a token, in one line: who made it and when, when it ends, and its last use and from where. */
+function tokenFacts(token: Token): string {
+	const left =
+		token.revoked || token.expired || token.expiresAt === null ? null : untilPhrase(token.expiresAt, Date.now());
+	return [
+		token.label,
+		`created ${age(token.createdAt)}${token.createdBy === null ? "" : ` by ${token.createdBy}`}`,
+		...(left ? [`expires ${left}`] : []),
+		...(token.lastUsedAt === null
+			? []
+			: [`last used ${age(token.lastUsedAt)}${token.lastUsedFrom === null ? "" : ` from ${token.lastUsedFrom}`}`]),
+	].join(" · ");
+}
 const Preset = z.enum(["loose", "standard", "strict"]);
 type Preset = z.infer<typeof Preset>;
 
@@ -344,6 +380,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 	const [actor, setActor] = useState("");
 	const [kind, setKind] = useState<"human" | "agent" | "ci">("agent");
 	const [capabilities, setCapabilities] = useState<z.infer<typeof Capability>[]>([...defaultCapabilities("agent")]);
+	const [expires, setExpires] = useState<(typeof LIFETIMES)[number]["value"]>("");
 	const [created, setCreated] = useState<z.infer<typeof CreatedToken> | null>(null);
 	const secretRef = useRef<HTMLInputElement>(null);
 	const [busy, setBusy] = useState(false);
@@ -371,6 +408,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 							project,
 							can: capabilities,
 							label: `${kind} for ${project}`,
+							...(expires ? { expires } : {}),
 						},
 						{ project },
 					)
@@ -429,6 +467,23 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 						</label>
 					))}
 				</fieldset>
+				<label htmlFor="token-expires">Expires</label>
+				<select
+					className="form-input"
+					id="token-expires"
+					value={expires}
+					onChange={(event) => {
+						event.currentTarget.blur();
+						const chosen = LIFETIMES.find((lifetime) => lifetime.value === event.target.value);
+						if (chosen) setExpires(chosen.value);
+					}}
+				>
+					{LIFETIMES.map((lifetime) => (
+						<option key={lifetime.value} value={lifetime.value}>
+							{lifetime.label}
+						</option>
+					))}
+				</select>
 				<button className="out" type="submit" disabled={busy || !actor.trim() || !capabilities.length}>
 					Create token
 				</button>
@@ -491,13 +546,11 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 						<ProducerGlyph kind={token.kind} />
 						<span>
 							<b>{token.actor}</b>
-							<small>
-								{token.label} · created {age(token.createdAt)}
-								{token.lastUsedAt && ` · last used ${age(token.lastUsedAt)}`}
-							</small>
+							<small>{tokenFacts(token)}</small>
 						</span>
-						<span className="dim">{token.revoked ? "Revoked" : "Active"}</span>
-						{!token.revoked && (
+						<span className="dim">{tokenStanding(token)}</span>
+						{/* A token past its end has nothing left to take away. */}
+						{!token.revoked && !token.expired && (
 							<button
 								className="out"
 								type="button"

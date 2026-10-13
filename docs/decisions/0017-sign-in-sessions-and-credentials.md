@@ -125,10 +125,48 @@ let anybody who shares an address with a pipeline stop it. A secret a person cho
 is never counted. The client address comes from `MAINWORTHY_CLIENT_ADDRESS_HEADER`, believed only from the peers
 `MAINWORTHY_TRUSTED_PROXY` names; setting one without the other stops the start.
 
-**3. What a token may be** (issue #88 items 2, 4, 5). Migration `0003` adds a token's expiry, creator, source and
-last address. `token.create` takes `expires`; an expired token is refused and its sessions with it. A changed
-`MAINWORTHY_OWNER_TOKEN` retires the one it replaces. A hand-set owner token shorter than 20 characters stops
-the start, and one under 32 warns.
+**3. What a token may be** (issue #88 items 2, 4, 5). Built. Migration `0003_token_limits.sql` adds
+`expires_at`, `created_by`, `source` and `last_used_addr` to `tokens`, and `created_addr` and `last_seen_addr` to
+`sessions`.
+
+- **An end.** `token.create` takes `expires`, a duration, and stores the moment. One rule decides whether a token
+  works (`works` in `identity.ts`): it was not revoked, and the clock is before `expires_at`. The join that reads
+  a session with its token holds the same condition. So a token past its end is refused exactly as a revoked one
+  is: as a bearer, at sign-in, by every session it opened and by a change stream before its next event. Nothing is
+  written when the end comes. A token that ended is not another way in for the owner: `token.revoke` still keeps
+  the owner's last token that works, and a start with no token configured generates one when all of the owner's
+  have ended.
+- **Replacing one with no gap.** Two tokens of one actor already worked side by side. What was missing is the
+  end, `mainworthy token new --expires 90d`, the end and the maker in `mainworthy token list` and in Settings,
+  and a line at each start for every token that ends within 14 days. The line names the token's id, actor and
+  label.
+- **The owner's token from the environment.** `source` says which start-up rule made a token: `env` or
+  `generated`. When `MAINWORTHY_OWNER_TOKEN` holds a value that is not yet a token, the start revokes every
+  `env` token that was not revoked, whoever its actor is, in the transaction that inserts the new one, and one
+  line names each token and its actor. There is one such variable, so at most one `env` token should work. The
+  first build retired only the `env` tokens of the owner the start named; the independent review showed that a
+  start which changed `MAINWORTHY_OWNER` and the token together left the earlier value working as an
+  administrator. A value that is already a token retires nothing: setting the variable back to a revoked value
+  does not revive it and does not revoke the current one. A configured value that is a token which was revoked,
+  has reached its end or is somebody else's is left as it is, and the start says which. A value shorter than 20
+  characters stops the start, and one shorter than 32 warns on every start. `POST /api/login` no longer requires
+  8 characters; its schema says a token is a string of at most 512, and a configured value longer than that
+  stops the start, so no token that works is too long to sign a browser in. A start that is refused says that no
+  actor and no token was changed: the database is brought to the build's schema before the owner is looked at.
+- **Last use, with the address.** A note in `uses.ts` carries the address beside the time. The flush writes the
+  address only when the note has one and is not older than the row, so a use with no address erases none and an
+  old use does not replace a newer address. `openSession` writes where a session was opened from. The address is
+  `peerAddress(req, server)` in `src/surfaces/http.ts`: the other end of the connection, until pull request 2's
+  client address takes its place.
+- **Who made it.** `createToken` records the actor that asked. `token.list` shows `expiresAt`, `createdBy` and
+  `lastUsedFrom`.
+
+Four things were added to the design while it was built. `token.list` also answers `expired`, by the server's
+clock, so that a client whose clock is off does not call a refused token active. `openSession` writes the
+sign-in's address as the session's last address too, since the sign-in is its first use. The length rule holds in
+local mode as well, because the configured value becomes a token there too. And forgetting an actor erases the
+address each of its tokens was last used from, in the row and in the notes: a token's row is never deleted, and
+an address says where a person was.
 
 **4. People** (issue #30, first slice). Migration `0004` adds `credentials` and `invitations`. A person signs in
 with a name and a password, or with a passkey. An admin invites a person with a link, since there is no email.
@@ -200,6 +238,22 @@ A model from another provider reviewed the design against the code before anythi
   ended it yet, is alive again until the clock reaches its end a second time. A use noted at a time that is now
   in the future counts as a use now.
 - The limit's state is in memory and a restart forgets it, so a failed attempt never reaches the write gate.
+- A token past its end is refused by the clock alone. A clock set back to before the end makes the token work
+  again until the clock reaches the end a second time. The minute timer does not end it in the database as it
+  ends a session: the only mark a token's row has for that is `revoked_at`, and an expiry is not a revocation.
+- The start retires a token by its `source`, and `source` was filled from the label for tokens made before the
+  column existed. A token somebody labelled `owner (from ...` by hand before the upgrade is marked `env` and is
+  retired by the next changed value, whoever its actor is.
+- A changed value retires the previous owner's `env` token when the owner's name changes in the same start. That
+  person keeps the name and the grants and loses that one token. The other choice left an administrator's token
+  working after the operator replaced it.
+- The owner can still run out of tokens: the owner revokes the one with no end while another works, and that
+  other one then ends. `token.revoke` keeps the last token that works now and does not look ahead. The next start
+  is the way back in. With no token configured it generates one. With one configured that no longer signs the
+  owner in, it says why (the token was revoked, or reached its end and when) and asks for a new value; a value
+  that is not yet a token becomes the owner's token.
+- A token's last address stays with its row after the token is revoked or has ended, and nothing deletes a
+  token's row yet (`docs/compliance.md`).
 
 ## Deferred
 
@@ -213,3 +267,10 @@ Nothing has to stay compatible before 1.0. A signed-in browser is signed out by 
 with a token. `Session` has no `secret`. Two things are kept on purpose, because the owner's own instance holds
 data: a database made by the previous build is migrated with a backup beside it, and an archive exported by the
 previous build still imports. Each has a test with a file that build made (`test/fixtures/sessions/`).
+
+Pull request 3 breaks three things. A `MAINWORTHY_OWNER_TOKEN` shorter than 20 characters or longer than 512
+stops the start. A row of `token.list` has four more fields, and a line of `mainworthy token list` has more
+columns. A changed `MAINWORTHY_OWNER_TOKEN` now revokes every token that came from the variable before, where
+both values worked before. A database made by
+the build before it is migrated with a backup beside it, and its tokens and sessions keep working; the test uses
+a database that build made (`test/fixtures/tokens/`).

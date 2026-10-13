@@ -8,6 +8,7 @@ import {
 	type SignedIn,
 	signInWithToken,
 	signOut,
+	TOKEN_MAX,
 } from "../server/identity/identity.ts";
 import type { App, ChangeEvent } from "../server/kernel/app.ts";
 import { type Actor, findProject } from "../server/kernel/ctx.ts";
@@ -161,21 +162,29 @@ function isLocal(req: Request, peer: string | null): boolean {
  * behalf). The same-origin rule protects the cookie in server mode.
  *
  * `peer` is the address the connection came from, as the listener knows it. A caller that does not know it
- * (a request that never was on a connection) is never the local owner.
+ * (a request that never was on a connection) is never the local owner. `address` is where the request is said
+ * to come from in what is kept of a use (`peerAddress`); it is not what decides whether a request is local.
  */
-function factsOf(req: Request, owner: Actor, peer: string | null): Facts {
+function factsOf(req: Request, owner: Actor, peer: string | null, address: string | null): Facts {
 	const header = req.headers.get("authorization");
 	return {
 		bearer: header?.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : null,
 		cookie: sessionCookieOf(req),
 		sameOrigin: sameOrigin(req),
 		localOwner: isLocal(req, peer) ? owner : null,
+		address,
 	};
 }
 
 /** Who is calling: a bearer token, else the session cookie, else (in local mode only) the owner of this machine. */
-export function sessionOf(app: App, req: Request, owner: Actor, peer: string | null = null): Session | null {
-	const admission = admit(app, factsOf(req, owner, peer));
+export function sessionOf(
+	app: App,
+	req: Request,
+	owner: Actor,
+	peer: string | null = null,
+	address: string | null = null,
+): Session | null {
+	const admission = admit(app, factsOf(req, owner, peer, address));
 	return admission.kind === "admitted" ? admission.session : null;
 }
 
@@ -300,6 +309,15 @@ const tooLarge = (limit: number): Response =>
 type Listener = Pick<ReturnType<typeof Bun.serve>, "requestIP" | "timeout">;
 
 /**
+ * The address a request came from, for what is kept of a use: where a token was last used from, where a session
+ * was opened and last seen. It is the address of the connection's other end and nothing cleverer, so behind a
+ * proxy it is the proxy's. Null when the listener does not know it.
+ */
+export function peerAddress(req: Request, server: Listener): string | null {
+	return server.requestIP(req)?.address ?? null;
+}
+
+/**
  * The session of a request, or the reply that refuses it. Every route that takes a session takes it here, so
  * every one holds a request to the person it names (`sameCaller`).
  *
@@ -316,7 +334,8 @@ type Listener = Pick<ReturnType<typeof Bun.serve>, "requestIP" | "timeout">;
  */
 function sessionFor(app: App, owner: Actor, req: Request, server: Listener): Session | Response {
 	// The address the connection came from decides, in local mode, whether the request started on this machine.
-	const session = sessionOf(app, req, owner, server.requestIP(req)?.address ?? null);
+	// That is the connection itself and never `peerAddress`, which says where a use is recorded as coming from.
+	const session = sessionOf(app, req, owner, server.requestIP(req)?.address ?? null, peerAddress(req, server));
 	if (!session) return unauthenticated();
 	if (!sameCaller(req, session)) return changedSession();
 	server.timeout(req, 0);
@@ -407,9 +426,15 @@ async function login(app: App, req: Request, server: Listener, patience: Patienc
 			{ connection: "close" },
 		);
 	}
-	const body = z.object({ token: z.string().min(8) }).safeParse(input);
+	// A token is a string of at most `TOKEN_MAX` characters, and the schema says no more. The start holds the
+	// owner's configured token to the same number (`bootstrap`), so no token that works is too long to sign in
+	// with. How short the owner's may be is decided there too, not by what this route will look at.
+	const body = z.object({ token: z.string().max(TOKEN_MAX) }).safeParse(input);
 	if (!body.success) return unauthenticated();
-	const opening = signInWithToken(app, body.data.token, { userAgent: req.headers.get("user-agent") });
+	const opening = signInWithToken(app, body.data.token, {
+		userAgent: req.headers.get("user-agent"),
+		address: peerAddress(req, server),
+	});
 	if (!opening) return unauthenticated();
 	// The token is good, so the caller is vouched for as any request with a session is (`sessionFor`): the
 	// session is written at the gate, and the wait there may outlast the idle timeout.

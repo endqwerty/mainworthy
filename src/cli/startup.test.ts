@@ -157,7 +157,8 @@ test("an install under the former name is carried over on the next start, and it
 
 test("a start says when the configured owner token is not the owner's, and refuses an owner name that is not a person's", async () => {
 	const home = await mkdtemp(join(tmpdir(), "mainworthy-owner-cli-"));
-	const OWNER = "owner-secret-0123456789";
+	// Long enough that the start has nothing to say about its length (32 characters or more).
+	const OWNER = "owner-secret-0123456789abcdef-012345";
 	/** Starts the server with these variables. If it comes up, runs `during` against it and stops it. */
 	const serve = async (
 		env: Record<string, string>,
@@ -236,7 +237,7 @@ test("a start says when the configured owner token is not the owner's, and refus
 		const third = await serve({ MAINWORTHY_OWNER_TOKEN: OWNER, MAINWORTHY_OWNER: "helper" });
 		expect([third.code, third.stdout]).toEqual([4, ""]);
 		expect(third.stderr).toBe(
-			"invalid: MAINWORTHY_OWNER names helper, which is an agent on this instance and not a person. Set MAINWORTHY_OWNER to the owner's name and start again; nothing was changed\n",
+			"invalid: MAINWORTHY_OWNER names helper, which is an agent on this instance and not a person. Set MAINWORTHY_OWNER to the owner's name and start again; no actor and no token was changed (the database may have been brought to this build's schema first, with a copy of it as it was beside it)\n",
 		);
 	} finally {
 		await rm(home, { recursive: true, force: true });

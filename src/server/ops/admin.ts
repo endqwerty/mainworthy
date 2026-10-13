@@ -1,4 +1,5 @@
 // Administering the instance: projects, actors, tokens, and reading a project's policy.
+import { durationMs } from "../../core/duration.ts";
 import { type ActorKind, defaultCapabilities } from "../../core/kinds.ts";
 import { AdminInput } from "../../core/ops.ts";
 import {
@@ -108,18 +109,23 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 			// A new actor is given what was asked, or its kind's default. One that exists keeps its grants, and
 			// `createToken` refuses a list for it.
 			const isNew = existing === null;
+			// The schema lets through only what `durationMs` reads, so a null here is an `expires` that was absent.
+			const lastsMs = input.expires === undefined ? null : durationMs(input.expires);
 			const created = createToken(env.app, {
 				actor: input.actor,
 				kind: input.kind,
 				can: isNew && input.can.length === 0 ? defaultCapabilities(input.kind) : input.can,
 				project,
 				label: input.label ?? `${input.kind} token`,
+				...(lastsMs === null ? {} : { lastsMs }),
+				madeBy: env.actor.id,
 			});
 			return {
 				actor: created.actor,
 				token: created.secret,
 				// What the token's holder may do on the project asked about, as the registry will see it.
 				can: actorByName(db, created.actor, project)?.can ?? [],
+				expiresAt: created.expiresAt,
 				note: "This token is shown once. Store it now.",
 			};
 		}
@@ -130,14 +136,19 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 				kind: row.kind,
 				label: row.label,
 				createdAt: row.created_at,
+				createdBy: row.created_by,
+				expiresAt: row.expires_at,
+				expired: row.expired,
 				lastUsedAt: row.last_used_at,
+				lastUsedFrom: row.last_used_addr,
 				revoked: row.revoked_at !== null,
 			}));
 		case "token.revoke": {
 			// In server mode a token is the owner's one way in, and the owner is who repairs the instance when
-			// everything else is wrong. The last one is kept whoever asks, the owner included: the button is one
-			// click. (In local mode the owner is whoever sits at the machine, and holds a token only for a script.)
-			if (env.app.config.mode === "server" && lastTokenOf(db, input.id) === owner) {
+			// everything else is wrong. The last one that works is kept whoever asks, the owner included: the
+			// button is one click. A token past its end is not another way in. (In local mode the owner is whoever
+			// sits at the machine, and holds a token only for a script.)
+			if (env.app.config.mode === "server" && lastTokenOf(db, input.id, env.now) === owner) {
 				throw invalid(
 					`token ${input.id} is the last one ${owner} can sign in with, and ${owner} owns this instance. As ${owner}, make ${owner} another token first (mainworthy token new --human ${owner}), then revoke this one`,
 				);

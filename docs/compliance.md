@@ -43,12 +43,32 @@ agreement, a list of sub-processors, breach notification, data residency): plann
 
 | # | Requirement | Status | How, or what is missing |
 | --- | --- | --- | --- |
-| P1 | Know what personal data is held | met | Actor names, and whatever people type into text fields. For each browser session, what the browser calls itself (its `User-Agent`, cut to 256 characters), kept with the session's row. The minute job deletes a row 30 days after the row records its end: at once for a sign-out or a forgotten actor, and for a session that stopped working another way (its token was revoked, or it went unused) only when the job marks it expired, which for a revoked token is when a lifetime runs out. The cookie is refused from the moment the token is revoked; the row, with the `User-Agent`, can stay up to the session's lifetime longer. No email, no IP addresses, no analytics, no telemetry. The only cookie is the session cookie, which is strictly necessary and needs no consent banner. |
+| P1 | Know what personal data is held | met | Actor names, and whatever people type into text fields. For each browser session, what the browser calls itself (its `User-Agent`, cut to 256 characters) and two network addresses; for each token, one network address ("Network addresses" below). The minute job deletes a session's row 30 days after the row records its end: at once for a sign-out or a forgotten actor, and for a session that stopped working another way (its token was revoked or ended, or it went unused) only when the job marks it expired, which for a revoked token is when a lifetime runs out. The cookie is refused from the moment the token stops working; the row, with the `User-Agent` and the addresses, can stay up to the session's lifetime longer. No email, no analytics, no telemetry, and the server writes no log of requests. The only cookie is the session cookie, which is strictly necessary and needs no consent banner. |
 | P2 | Access and portability | met | `mainworthy export` writes every fact, decision and document in an open text format. Check: the export and import round-trip test. Tokens and sessions are not exported. |
-| P3 | Erasure of a person | partly | `admin { do: "actor.forget" }` replaces the actor's name with a pseudonym, disables the actor, revokes its tokens and ends its sessions, whose rows are deleted 30 days later. History still says the same actor did each thing; it no longer says who that was. Text the person typed stays (gap 1). |
+| P3 | Erasure of a person | partly | `admin { do: "actor.forget" }` replaces the actor's name with a pseudonym, disables the actor, revokes its tokens, erases the address each of them was last used from, and ends its sessions, whose rows are deleted 30 days later with the addresses they hold. History still says the same actor did each thing; it no longer says who that was. Text the person typed stays (gap 1). |
 | P4 | Storage limitation | not met | Gap 2. |
-| P5 | Security of processing | partly | Tokens are stored as SHA-256 hashes and shown once. A browser holds a session cookie and not a token; the cookie's value is stored as a SHA-256 hash too, and a session ends at sign-out, after 14 days without use and after 90 days (decision 0017). Local mode accepts only same-origin loopback requests. Transport encryption is the reverse proxy's job (Coolify's Traefik), encryption at rest the disk's. No rate limiting on sign-in yet (#30). |
+| P5 | Security of processing | partly | Tokens are stored as SHA-256 hashes and shown once. A token can be given an end, after which it is refused as a revoked one is, and the owner's token from the environment must have at least 20 characters. A browser holds a session cookie and not a token; the cookie's value is stored as a SHA-256 hash too, and a session ends at sign-out, after 14 days without use and after 90 days (decision 0017). Local mode accepts only same-origin loopback requests. Transport encryption is the reverse proxy's job (Coolify's Traefik), encryption at rest the disk's. No rate limiting on sign-in yet (#30). |
 | P6 | Records of who did what | met | Every write names an actor and a time and has a place in the project's sequence. Check: the idempotent command log and the ledger tests. |
+
+### Network addresses
+
+The server stores three network addresses, so that a person can see where a token or a session was used from and
+notice a use that was not theirs. Each is the address the request came from as the server sees it (`peerAddress`
+in `src/surfaces/http.ts`): the other end of the connection. Behind a reverse proxy that is the proxy's address
+and not the visitor's.
+
+| Address | Column | Written | Kept until |
+| --- | --- | --- | --- |
+| Where a session was opened from | `sessions.created_addr` | At sign-in | The session's row is deleted, 30 days after the row records its end. A sign-out and a forgotten actor record it at once; a session that stopped working another way (its token was revoked or ended, or it went unused) records it only when the minute job marks it expired, which can be up to the session's lifetime after it stopped working. |
+| Where a session was last used from | `sessions.last_seen_addr` | At sign-in, and then with each later use: noted in memory and written in a batch, normally within a minute and longer behind a long write | The same. |
+| Where a token was last used from | `tokens.last_used_addr` | With each use: noted in memory and written in a batch, normally within a minute and longer behind a long write | A later use replaces it. After the last use it stays for as long as the token's row, and nothing deletes a token's row today: revoking a token and a token's expiry both leave the row. Forgetting the token's actor erases it at once. |
+
+Only the latest address of each kind is kept; there is no history of addresses. An import empties both tables. An
+export holds neither table, so no archive carries an address. Each start also names the tokens that expire soon,
+by id, actor and label; that line holds no address and no secret.
+
+Check: `test/tokens.test.ts` (what is written and when, and what forgetting a person erases) and
+`test/sessions.test.ts` (the 30 days).
 
 ## Electronic records and signatures (21 CFR Part 11, EU GMP Annex 11)
 

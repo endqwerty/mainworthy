@@ -139,7 +139,7 @@ describe("the policy", () => {
 	});
 });
 
-const TOKEN = "headers-owner-token-0123456789";
+const TOKEN = "headers-owner-token-0123456789abcdef";
 const dirs: string[] = [];
 const running: Instance[] = [];
 afterEach(async () => {

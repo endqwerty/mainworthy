@@ -2,7 +2,8 @@
 //
 // The cookie carries 32 random bytes and this file never sees them: it is given their SHA-256 and stores that.
 // A session is opened by a token and lives only while that token works and its actor stands. That is read each
-// time, by a join, so revoking a token ends the sessions it opened without a second write.
+// time, by a join, so revoking a token ends the sessions it opened without a second write, and so does the
+// token's own end (`expires_at`) when the clock reaches it.
 import type { ActorKind } from "../../core/kinds.ts";
 import type { App } from "../kernel/app.ts";
 import { type Db, sql } from "../kernel/db.ts";
@@ -20,23 +21,34 @@ type Times = { id: number; last_seen_at: number; expires_at: number };
 type Standing = Times & { actor: number; org: number; kind: ActorKind; name: string };
 
 const Q = {
-	// A session of a token that was revoked, or names another actor, or is gone, has no row here: both joins are
-	// inner, so a session with no token at all is nobody's. So is one whose actor was forgotten.
-	standing: sql<{ hash: string }, Standing>(
+	// A session of a token that was revoked, or has passed its end, or names another actor, or is gone, has no
+	// row here: both joins are inner, so a session with no token at all is nobody's. So is one whose actor was
+	// forgotten.
+	standing: sql<{ hash: string; now: number }, Standing>(
 		`SELECT s.id, s.last_seen_at, s.expires_at, a.id AS actor, a.org, a.kind, a.name
 		 FROM sessions s
 		 JOIN tokens t ON t.id = s.token AND t.actor = s.actor AND t.revoked_at IS NULL
+			AND (t.expires_at IS NULL OR t.expires_at > $now)
 		 JOIN actors a ON a.id = s.actor AND a.disabled_at IS NULL
 		 WHERE s.hash = $hash AND s.ended_at IS NULL`,
 	),
 	// The row is made only if, in the statement that makes it, a token with the presented hash exists and works
 	// and its actor stands. The token's id and its actor are read here, from that row, and are never parameters:
 	// an id says which row, not which token, and after an import another token holds it.
-	insert: sql<{ tokenHash: string; sessionHash: string; at: number; expires: number; agent: string | null }>(
-		`INSERT INTO sessions (actor, hash, token, created_at, last_seen_at, expires_at, user_agent)
-		 SELECT a.id, $sessionHash, t.id, $at, $at, $expires, $agent
+	insert: sql<{
+		tokenHash: string;
+		sessionHash: string;
+		at: number;
+		expires: number;
+		agent: string | null;
+		addr: string | null;
+	}>(
+		`INSERT INTO sessions
+			(actor, hash, token, created_at, last_seen_at, expires_at, user_agent, created_addr, last_seen_addr)
+		 SELECT a.id, $sessionHash, t.id, $at, $at, $expires, $agent, $addr, $addr
 		 FROM tokens t JOIN actors a ON a.id = t.actor AND a.disabled_at IS NULL
-		 WHERE t.hash = $tokenHash AND t.revoked_at IS NULL`,
+		 WHERE t.hash = $tokenHash AND t.revoked_at IS NULL
+			AND (t.expires_at IS NULL OR t.expires_at > $at)`,
 	),
 	unended: sql<{ hash: string }, { id: number }>("SELECT id FROM sessions WHERE hash = $hash AND ended_at IS NULL"),
 	end: sql<{ hash: string; at: number; why: EndedWhy }>(
@@ -69,17 +81,18 @@ function inLifetime(app: App, session: Times, now: number): boolean {
 /**
  * Opens a session for whoever presented a token, named by the token's hash. Under the gate. The session is the
  * token's actor's and depends on that token's row, both as they are when this writes. Null when no token has
- * that hash any more, when it was revoked, or when its actor was forgotten: a session has a working token under
+ * that hash any more, when it was revoked or has passed its end, or when its actor was forgotten: a session has a working token under
  * it or it is not made.
  *
  * It takes the hash and no id, on purpose. Its caller read the token before it waited at the gate, and what it
  * read may be gone by now: an import deletes every token, and the next token made takes the first id again, for
  * an actor that may hold the same id too. The hash is the one thing that still says which token was presented.
- * `sessionHash` is the SHA-256 of the secret the browser will hold.
+ * `sessionHash` is the SHA-256 of the secret the browser will hold. `address` is where the sign-in came from:
+ * the session was opened there and, so far, last seen there.
  */
 export function openSession(
 	app: App,
-	input: { tokenHash: string; sessionHash: string; userAgent: string | null },
+	input: { tokenHash: string; sessionHash: string; userAgent: string | null; address: string | null },
 ): { id: number; expiresAt: number } | null {
 	const at = app.now();
 	const expiresAt = at + app.config.sessionMaxMs;
@@ -89,6 +102,7 @@ export function openSession(
 		at,
 		expires: expiresAt,
 		agent: input.userAgent,
+		addr: input.address,
 	});
 	return made.changes === 1 ? { id: made.lastId, expiresAt } : null;
 }
@@ -102,8 +116,9 @@ export function findSession(
 	app: App,
 	hash: string,
 ): { id: number; actor: { id: number; org: number; kind: ActorKind; name: string; disabled_at: null } } | null {
-	const row = app.reader.get(Q.standing, { hash });
-	if (!row || !inLifetime(app, row, app.now())) return null;
+	const now = app.now();
+	const row = app.reader.get(Q.standing, { hash, now });
+	if (!row || !inLifetime(app, row, now)) return null;
 	return { id: row.id, actor: { id: row.actor, org: row.org, kind: row.kind, name: row.name, disabled_at: null } };
 }
 

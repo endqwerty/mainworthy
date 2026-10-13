@@ -102,7 +102,20 @@ An agent that holds `admin` makes projects and tokens for agents and pipelines; 
 person's token, changes no grant and forgets nobody. The owner is the person the configuration names
 (`MAINWORTHY_OWNER`): the start gives that person every capability, refuses a name that is an agent's or a
 pipeline's, and in server mode makes sure the owner holds a token that works. The owner is not forgotten, and in
-server mode the owner's last token is not revoked.
+server mode the owner's last token that works is not revoked.
+
+A token works until it is revoked or reaches its end. `token.create` takes `expires`, a duration
+(`src/core/duration.ts`), and stores the moment in `tokens.expires_at`; without it the token has no end. One rule
+decides (`works` in `identity.ts`, and the same condition in the SQL that reads a session with its token), so a
+token past its end is refused exactly as a revoked one is: as a bearer, at sign-in, by every session it opened and
+by a change stream before its next event. Nothing is written when the end comes. A token's row also says who made
+it (`created_by`) and which start-up rule made it (`source`): `env` for the value of `MAINWORTHY_OWNER_TOKEN`,
+`generated` for one a start made because the owner held none. When the variable holds a value that is not yet a
+token, the start revokes every `env` token that was not revoked, whoever its actor is, in the transaction that
+inserts the new one, so a changed variable retires what it held before even when the owner's name changed with
+it. A configured owner token shorter than 20 characters, or longer than the 512 a sign-in reads (`TOKEN_MAX`),
+stops the start. Each start lists in `warnings` a short one, the retired ones, a configured one that no longer
+signs the owner in (revoked, past its end, or somebody else's) and every token that ends within 14 days.
 
 Who a request is from is one question, `admit` in `src/server/identity/identity.ts`, and every surface asks it.
 The HTTP surface reads what the request carries (`factsOf` in `src/surfaces/http.ts`) and decides nothing: a
@@ -120,12 +133,14 @@ A browser does not hold a token (decision 0017). `POST /api/login` takes a token
 `sessions` and a cookie of 32 random bytes, of which only the SHA-256 is stored. The cookie is
 `__Host-mainworthy_sid` over https and `mainworthy_sid` over plain http, `HttpOnly` and `SameSite=Strict`. A
 session ends when its browser signs out, after 14 days without use, after 90 days in any case, when the token
-that opened it is revoked and when its actor is forgotten. `POST /api/logout` commits the end before it answers,
+that opened it is revoked or reaches its end, and when its actor is forgotten. `POST /api/logout` commits the end before it answers,
 so a copy of the cookie stops working with it. Signing in and out are routes of the HTTP surface and not
 operations: nobody is signed in yet, and the registry runs nothing for a caller it cannot name.
 
-Being used is not a write. `admit` notes in memory when a token or a session was last used, and the server
-writes the notes once a minute and when it stops (`src/server/identity/uses.ts`). The idle check and
+Being used is not a write. `admit` notes in memory when a token or a session was last used and from which
+address, and the server writes the notes once a minute and when it stops (`src/server/identity/uses.ts`). The
+address is the one `peerAddress` in `src/surfaces/http.ts` gives for the request; a use that has none (a request
+that never was on a connection) writes its time and leaves the address in the row. The idle check and
 `token.list` read the newer of the note and the row, so a read never waits for the writer. A crash loses the
 notes since the last write: somebody may have to sign in again early, and no session lives longer for it. The
 same minute timer ends, in the database, each session that has passed a lifetime, so that a clock set back does
