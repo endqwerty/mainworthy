@@ -190,6 +190,16 @@ import { PRESET_GUIDE, PRESET_SUMMARY } from "../../src/core/policy-guide.ts";
 			expect(await page.getByLabel("Initial policy").getAttribute("aria-describedby")).toBe("project-preset-help");
 			await page.locator(".settings-form").getByText("Compare the policies", { exact: true }).click();
 			await page.getByRole("columnheader", { name: "strict · selected", exact: true }).waitFor();
+			// On a phone the table scrolls inside itself. It does not widen the form or the pane.
+			await page.setViewportSize({ width: 390, height: 844 });
+			const pane = page.locator("#detail .pane-scroll");
+			expect(await pane.evaluate((element) => element.scrollWidth - element.clientWidth)).toBe(0);
+			expect(
+				await page
+					.locator(".settings-form .settings-table-scroll")
+					.evaluate((element) => element.scrollWidth > element.clientWidth),
+			).toBe(true);
+			await page.setViewportSize({ width: 1440, height: 900 });
 			await page.getByLabel("Initial policy").selectOption("loose");
 			await page.getByRole("button", { name: "Create project", exact: true }).click();
 			await page.waitForURL("**/p/other/settings");

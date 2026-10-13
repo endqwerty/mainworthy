@@ -247,6 +247,33 @@ describe("changing the policy", () => {
 		const reply = h.raw("propose", { edits: [{ op: "policy", clauses }] });
 		expect(reply).toMatchObject({ ok: false, error: { code: "invalid" } });
 	});
+
+	test("a project is listed under a preset's name only while it has the preset's clauses", () => {
+		// The help the web shows for a preset goes by this name, and a project admin cannot read the clauses.
+		const listed = () => first(h.call<{ key: string; policy: string }[]>("admin", { do: "project.list" })).policy;
+		expect(listed()).toBe("loose");
+		h.call("propose", { edits: [{ op: "policy", preset: "loose", clauses: PRESETS.strict.clauses }] });
+		const q = first(queue({ kind: "adopt" }).items);
+		// No reason: a policy change is an admin's under every preset, and asks for none.
+		h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+		const stored = h.call<{ preset: string; clauses: unknown[] }>("admin", { do: "policy.show", project: "scratch" });
+		expect(stored.preset).toBe("loose");
+		expect(stored.clauses).toEqual(JSON.parse(JSON.stringify(PRESETS.strict.clauses)));
+		expect(listed()).toBe("custom");
+	});
+
+	test("strict: a policy change needs an admin and no reason, as the guide says", () => {
+		use("strict");
+		h.call("propose", { edits: [{ op: "policy", preset: "standard" }] });
+		const q = first(queue({ kind: "adopt" }).items);
+		const decided = h.call<{ status: string }[]>("decide", {
+			q: q.q,
+			onEvidence: q.evidenceHash,
+			answer: { is: "accept" },
+		});
+		expect(decided[0]?.status).toBe("decided");
+		expect(h.call<{ preset: string }>("admin", { do: "policy.show", project: "scratch" }).preset).toBe("standard");
+	});
 });
 
 describe("findings", () => {

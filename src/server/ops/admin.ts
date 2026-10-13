@@ -12,7 +12,7 @@ import {
 import { allProjects, findProject, insertProject, makeCtx, stampSeq } from "../kernel/ctx.ts";
 import type { Db } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
-import { currentPolicy, isPreset, seedPolicy } from "../policy/policy.ts";
+import { currentPolicy, isPreset, policyName, seedPolicy } from "../policy/policy.ts";
 import { defineInstanceOp, type InstanceCtx } from "./registry.ts";
 
 /** Every project with the policy in force. A plain read, so the session endpoint can call it during a long write. */
@@ -22,7 +22,7 @@ export function listProjects(db: Db): { key: string; name: string; seq: number; 
 		name: row.name,
 		seq: row.seq,
 		createdAt: row.created_at,
-		policy: currentPolicy(db, row.id).preset,
+		policy: policyName(currentPolicy(db, row.id)),
 	}));
 }
 

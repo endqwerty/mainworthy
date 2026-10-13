@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { z } from "zod";
 import { Capability, Policy } from "../../core/kinds.ts";
-import { PRESET_GUIDE, PRESET_SUMMARY, presetOf } from "../../core/policy-guide.ts";
+import { PRESET_GUIDE, PRESET_SUMMARY } from "../../core/policy-guide.ts";
+import { presetOf } from "../../core/presets.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
 import { randomId } from "../lib/ids.ts";
@@ -65,13 +66,10 @@ function PresetGuide({ marked, as }: { marked: Preset | null; as: string }) {
 					overrule it.
 				</li>
 				<li>
-					A person is anyone with the answer permission. Where agents advise, an agent's answer is shown with the
-					question and settles nothing.
+					A person is anyone with the answer permission, and an admin is a person with the admin permission. Where
+					agents advise, an agent's answer is shown with the question and settles nothing.
 				</li>
-				<li>
-					Under every policy, only an admin changes the policy, and an edit that conflicts with a newer version goes
-					back to its author.
-				</li>
+				<li>Where a cell names an answer, such as Duplicate or Reject, that one answer has its own rule.</li>
 				<li>No policy decides what blocks a build. A failure nobody has explained blocks every run that shows it.</li>
 			</ul>
 		</details>
@@ -99,9 +97,12 @@ function SettingsWorkbench() {
 	});
 	const parsedPolicy = Policy.safeParse(policyRead.data);
 	const policy = parsedPolicy.success ? parsedPolicy.data : null;
-	const preset = policy?.preset ?? session.projects.find((p) => p.key === project)?.policy ?? "Policy unavailable";
-	// Without the clauses (only an instance admin reads them) the name is all there is to go by.
-	const inForce = policy ? presetOf(policy) : (Preset.safeParse(preset).data ?? null);
+	// The name is a preset's only while the clauses are that preset's. The session's name is checked by the server;
+	// the clauses, which only an instance admin reads, are checked here.
+	const preset = policy
+		? (presetOf(policy) ?? "custom")
+		: (session.projects.find((p) => p.key === project)?.policy ?? "Policy unavailable");
+	const inForce = Preset.safeParse(preset).data ?? null;
 	const actorRef = useRef<HTMLInputElement>(null);
 	const projectRef = useRef<HTMLInputElement>(null);
 	useBindings([
@@ -199,7 +200,7 @@ function SettingsWorkbench() {
 									<p className="settings-preset-summary">
 										{inForce
 											? PRESET_SUMMARY[inForce]
-											: "This project's clauses are not a preset's. The clause table says who answers."}
+											: "This project's clauses are not a preset's. The clause table says who answers, and an instance admin can read it."}
 									</p>
 								</div>
 								<label>
@@ -214,6 +215,11 @@ function SettingsWorkbench() {
 											void changePolicy(event.target.value);
 										}}
 									>
+										{!inForce && (
+											<option value={preset} disabled>
+												{preset}
+											</option>
+										)}
 										{Preset.options.map((name) => (
 											<option key={name} value={name}>
 												{name}
@@ -532,7 +538,7 @@ function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElem
 				<>
 					<SectionHeading>Create a project</SectionHeading>
 					<form
-						className="settings-form"
+						className="settings-form wide"
 						onSubmit={(event) => {
 							event.preventDefault();
 							if (busy) return;
