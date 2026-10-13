@@ -43,7 +43,7 @@ Five wrong tokens came from your address, or five wrong tokens that begin as you
 
 A person's sign-in gets this message too. Five wrong passwords for one name within 15 minutes block sign-in with a password for that name, from every address, and five from one address block that address. The right password waits like a wrong one, so wait and then type it once. If you have a passkey, it still signs you in. Somebody who keeps guessing at your name can keep it blocked. A passkey is the way round that. Mainworthy keeps no log of requests, so where the guesses come from is in the proxy's log, if anywhere.
 
-In the web UI the sign-in page, an invitation and "Your sign-in" in Settings say "Too many attempts. Try again in N seconds." under what you tried, and keep what you typed. Nothing is sent again by itself: press the button after the wait.
+In the web UI the sign-in page, an invitation and "Your sign-in" in Settings say "Too many attempts. Try again in N seconds." under what you tried, and keep what you typed. What you typed is not sent again by itself: press the button after the wait.
 
 If everybody behind one proxy gets this message together, the server is counting the proxy as one address. Name the proxy with `MAINWORTHY_TRUSTED_PROXY` and `MAINWORTHY_CLIENT_ADDRESS_HEADER`: see [configuration](./configuration.md).
 
