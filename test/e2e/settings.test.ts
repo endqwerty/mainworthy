@@ -231,7 +231,20 @@ import { PRESETS } from "../../src/core/presets.ts";
 			);
 			expect(await page.getByRole("switch").count()).toBe(0);
 			expect(await page.locator("#detail .settings-guide th[aria-current]").count()).toBe(0);
+			// While the change to a preset is on its way the policy in force is still the custom one: no switch yet.
+			let release = (): void => {};
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			await page.route("**/api/p/scratch/propose", async (route) => {
+				await held;
+				await route.continue();
+			});
 			await page.getByLabel("Policy preset").selectOption("loose");
+			await page.getByText("Recording the loose policy proposal and decision…", { exact: true }).waitFor();
+			expect(await page.getByRole("switch").count()).toBe(0);
+			expect(await page.getByRole("heading", { name: "custom", exact: true }).count()).toBe(1);
+			release();
 			await page.getByText(PRESET_SUMMARY.loose, { exact: true }).waitFor();
 			expect(await page.getByRole("switch", { name: "Agent edits need a person", exact: false }).isChecked()).toBe(
 				false,
