@@ -133,10 +133,12 @@ the steps are kept below for an instance that has none.
   reports are artifacts of the run, kept for seven days. The pipeline's token cannot answer, and under `standard`
   an agent's answer is advice.
 - **A newer attempt of a shard replaces the older one.** When the test passes in it, the gate passes and the
-  question leaves the queue with no answer (seen on a local instance, not yet on this one). GitHub's "Re-run
+  question leaves the queue with no answer. Seen on this instance on 2026-10-13: `main` at `89d431a` was blocked
+  by a browser test that fails now and then (#94), and green after a re-run of shard `tests-4`. GitHub's "Re-run
   failed jobs" re-runs only `gate`, because a shard with a failing test ends as a success and leaves the verdict
   to the gate. Re-run the shard's own job (`gh run rerun <run> --job <id>`): `gate` runs again after it and reads
-  the other shards' reports from the earlier attempt.
+  the other shards' reports from the earlier attempt. A test that fails now and then is still a defect to fix,
+  not to retry (`AGENTS.md`).
 - **A test file with no case is one `map` question** under `standard`. The first two runs left 70 of them in the
   queue. They do not block the gate.
 - **A push to `main` reports too**, as the workflow runs on it.
