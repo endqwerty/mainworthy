@@ -46,6 +46,16 @@ Each project keeps its own cases, queue, runs and policy. A new project starts w
 
 A project key is lower-case letters, digits and hyphens, up to 40 characters, and starts with a letter or digit. You cannot rename or delete a project yet. The other commands pick a project with `--project` or `MAINWORTHY_PROJECT`, or use the only one when there is one.
 
+### Switch projects
+
+The sidebar names the project you are in, under "Mainworthy". When you can read more than one project, the name is a button. Press it, or <kbd>g</kbd> <kbd>p</kbd>, and Mainworthy lists your projects, each with its key and its policy. The choice starts on the first project you are not in, so <kbd>↵</kbd> goes there. To find another, type part of its name or its key.
+
+You stay on the screen you were on: from Queue you arrive in the other project's Queue. A case, question or run that was open stays behind, because its ref belongs to one project, and Back returns to it. With the sidebar collapsed, the button shows the first letter of the project's name.
+
+On a phone the project's line is in the menu: tap **Menu**, then the project, then the one to go to. **Actions** offers "Switch project" as well.
+
+The palette (<kbd>⌘</kbd> <kbd>K</kbd>) finds a project too, once you type a word of its name. Settings, Projects lists the same projects, and a press on one opens its Settings.
+
 ### A project of demo data
 
 To look around before you write a case of your own, fill a project with the demo.

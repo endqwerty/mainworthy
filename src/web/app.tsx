@@ -9,7 +9,7 @@ import { ApiError, session, signedOut, unauthenticatedEvent } from "./lib/api.ts
 import { queryClient, useEvents, useQueryOp } from "./lib/data.ts";
 import { deviceSession, sessionPersonKey, setDevicePerson, suspendDeviceSession } from "./lib/device.ts";
 import { useBindings, useKeyboard, useKeyRegistry } from "./lib/keys.ts";
-import { navigate, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
+import { navigate, projectUrl, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
 import { signOut } from "./lib/signin.ts";
 import { PhoneBar, usePhoneShell } from "./phone.tsx";
 import { QueueScreen } from "./queue/index.tsx";
@@ -18,7 +18,7 @@ import { SettingsScreen } from "./settings/index.tsx";
 import { SignIn } from "./signin/index.tsx";
 import { INVITE_PATH, Invitation } from "./signin/invite.tsx";
 import { SuiteScreen } from "./suite/index.tsx";
-import { AppContext, type PaletteOptions } from "./ui/context.tsx";
+import { AppContext, type PaletteItem, type PaletteOptions } from "./ui/context.tsx";
 import { DocLink, KeyCap, openDocs, ProducerGlyph, StatusLine } from "./ui/index.tsx";
 
 const screens = {
@@ -58,6 +58,15 @@ function Mark() {
 		</svg>
 	);
 }
+/**
+ * What a project is called on the page: its name, or its key where the name shows nothing. The server takes a
+ * name of spaces, or of characters that have no glyph, and a line or a row with nothing on it names no project.
+ */
+const projectLabel = (entry: { key: string; name: string }): string =>
+	/[^\s\p{Cf}]/u.test(entry.name) ? entry.name : entry.key;
+/** The first letter of a name as it is read: a flag or a family is one, though it is several code points. */
+const initial = (name: string): string =>
+	[...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(name)][0]?.segment ?? "";
 function theme(): void {
 	const chosen = localStorage.getItem("mainworthy:theme");
 	document.documentElement.dataset.theme =
@@ -169,11 +178,15 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 		"Drafts stay on this device. A version is recorded when you leave, press ⌘↵, or pause for 30 seconds.",
 	);
 	const [palette, setPalette] = useState<PaletteOptions | null>(null);
+	// Counts the openings. A choice in the palette may open it again (a second case to link, the projects), and
+	// each opening starts with nothing typed.
+	const [paletteOpening, setPaletteOpening] = useState(0);
 	const paletteOrigin = useRef<HTMLElement | null>(null);
 	const openPalette = useCallback((options: PaletteOptions = {}): void => {
 		paletteOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		setHelp(false);
 		setPalette(options);
+		setPaletteOpening((count) => count + 1);
 	}, []);
 	const closePalette = useCallback((chosen = false): void => {
 		setPalette(null);
@@ -240,6 +253,32 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 	);
 	const inbox = useQueryOp({ project, op: "inbox", input: { state: "open", limit: 1 } });
 	const go = (screen: Screen) => navigate(routeUrl({ project, screen }));
+	// The projects the session names, as the choices of the palette: the sidebar's button and g p list them
+	// alone, and the palette finds one by a word of its name or key.
+	const projectChoices = useMemo(
+		(): PaletteItem[] =>
+			info.projects.map((entry) => {
+				const current = entry.key === project;
+				return {
+					id: `project:${entry.key}`,
+					label: projectLabel(entry),
+					detail: `${current ? "Current · " : ""}${entry.key} · ${entry.policy}`,
+					current,
+					handler: () => {
+						if (!current) navigate(projectUrl({ project: entry.key, screen: route.screen }));
+					},
+				};
+			}),
+		[info.projects, project, route.screen],
+	);
+	// With one project there is nothing to pick: the sidebar names it, and neither the button nor its key is there.
+	const switchable = info.projects.length > 1;
+	const pickProject = useCallback(
+		(): void => openPalette({ title: "Switch project", items: projectChoices }),
+		[openPalette, projectChoices],
+	);
+	const opened = info.projects.find((entry) => entry.key === project);
+	const projectName = opened ? projectLabel(opened) : project;
 	const globalKeys = useMemo(
 		() => [
 			// A phone has no sidebar to collapse: the Menu button draws it over the pane.
@@ -259,6 +298,8 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				list: true,
 				handler: () => navigate(routeUrl({ project, screen: item.screen })),
 			})),
+			// It goes somewhere and records nothing, so a phone offers it while the list is shown, as it does a screen.
+			...(switchable ? [{ key: "g p", label: "Switch project", list: true, handler: pickProject }] : []),
 			{
 				key: "mod+k",
 				label: "Jump to or run",
@@ -299,7 +340,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 			// to the owner of a machine in local mode.
 			...(account ? [{ key: "g x", label: "Sign out", list: true, handler: leave }] : []),
 		],
-		[project, route.screen, palette, help, openPalette, closePalette, account, leave, phone],
+		[project, route.screen, palette, help, openPalette, closePalette, account, leave, phone, switchable, pickProject],
 	);
 	useBindings(globalKeys);
 	useEffect(() => {
@@ -376,26 +417,35 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 							<Mark />
 						</button>
 						<b>Mainworthy</b>
-						{info.projects.length > 1 ? (
-							<select
-								className="project-select"
-								aria-label="Project"
-								value={project}
-								onChange={(event) => {
-									event.currentTarget.blur();
-									navigate(routeUrl({ project: event.target.value, screen: "suite" }));
-								}}
-							>
-								{info.projects.map((p) => (
-									<option key={p.key} value={p.key}>
-										{p.name}
-									</option>
-								))}
-							</select>
-						) : (
-							<span className="proj">{project}</span>
-						)}
 					</div>
+					{/* The project that is open, always here; with another to go to, the way there. */}
+					{switchable ? (
+						<button
+							type="button"
+							className="project"
+							aria-label={`Project: ${projectName}. Switch project`}
+							title="Switch project (g p)"
+							onClick={pickProject}
+						>
+							<span className="project-word">Project</span>
+							<b className="project-name">{projectName}</b>
+							<span className="project-initial" aria-hidden="true">
+								{initial(projectName)}
+							</span>
+							<span className="project-turn" aria-hidden="true">
+								⇅
+							</span>
+							<KeyCap>g p</KeyCap>
+						</button>
+					) : (
+						<div className="project">
+							<span className="project-word">Project</span>
+							<b className="project-name">{projectName}</b>
+							<span className="project-initial" aria-hidden="true">
+								{initial(projectName)}
+							</span>
+						</div>
+					)}
 					<button className="search" type="button" onClick={() => openPalette()}>
 						<span>Jump to or run…</span>
 						<KeyCap>⌘K</KeyCap>
@@ -573,7 +623,15 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				</footer>
 			</div>
 			{palette && (
-				<Palette project={project} options={palette} close={closePalette} typing={!phone} listOnly={listOnly} />
+				<Palette
+					key={paletteOpening}
+					project={project}
+					projects={switchable ? projectChoices : []}
+					options={palette}
+					close={closePalette}
+					typing={!phone}
+					listOnly={listOnly}
+				/>
 			)}{" "}
 			{help && (
 				<div className="overlay" data-overlay="help">
@@ -613,12 +671,15 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 }
 function Palette({
 	project,
+	projects,
 	options,
 	close,
 	typing,
 	listOnly,
 }: {
 	project: string;
+	/** The other projects to go to, found once something is typed. Empty when there is one project. */
+	projects: PaletteItem[];
 	options: PaletteOptions;
 	close: (chosen?: boolean) => void;
 	/**
@@ -630,13 +691,14 @@ function Palette({
 	listOnly: boolean;
 }) {
 	const [text, setText] = useState("");
-	const [cursor, setCursor] = useState(0);
+	// The choice starts on the first thing that is not already so: with the projects listed, the first other one.
+	const [cursor, setCursor] = useState(() => Math.max(0, options.items?.findIndex((item) => !item.current) ?? 0));
 	const registry = useKeyRegistry();
 	const found = useQueryOp({
 		project,
 		op: "find",
 		input: { in: "cases", text, limit: 30 },
-		enabled: text.length > 0 || Boolean(options.onPickCase),
+		enabled: options.items ? false : text.length > 0 || Boolean(options.onPickCase),
 	});
 	const actions =
 		options.items ??
@@ -668,28 +730,37 @@ function Palette({
 				},
 			]
 		: [];
-	// The pages of the documentation, once something is typed: "docs policy", or a word of a page's title.
 	const words = text.toLowerCase().split(/\s+/).filter(Boolean);
-	const docs =
-		options.items || words.length === 0
+	const says = (said: string) => words.every((word) => said.toLowerCase().includes(word));
+	// The other projects, once something is typed: "project checkout", or a word of a name or a key.
+	const others =
+		words.length === 0
 			? []
-			: DOC_PAGES.filter((page) => {
-					const label = `docs ${page.section} ${page.title}`.toLowerCase();
-					return words.every((word) => label.includes(word));
-				}).map((page) => ({
+			: projects
+					.filter((item) => !item.current && says(`project ${item.label} ${item.detail}`))
+					.map((item) => ({ ...item, label: `Project: ${item.label}` }));
+	// The pages of the documentation, once something is typed: "docs policy", or a word of a page's title.
+	const docs =
+		words.length === 0
+			? []
+			: DOC_PAGES.filter((page) => says(`docs ${page.section} ${page.title}`)).map((page) => ({
 					id: `docs:${page.slug}`,
 					label: `Docs: ${page.title}`,
 					detail: "↗",
 					handler: () => openDocs(page.slug),
 				}));
-	const items = options.onPickCase
+	const items: PaletteItem[] = options.onPickCase
 		? [...jump, ...cases]
-		: [
-				...jump,
-				...actions.filter((item) => !text || item.label.toLowerCase().includes(text.toLowerCase())),
-				...docs,
-				...cases,
-			];
+		: options.items
+			? // A list a screen or the shell gave is all there is to pick from, found by what its rows show.
+				options.items.filter((item) => says(`${item.label} ${item.detail ?? ""}`))
+			: [
+					...jump,
+					...actions.filter((item) => !text || item.label.toLowerCase().includes(text.toLowerCase())),
+					...others,
+					...docs,
+					...cases,
+				];
 	const choose = (index: number) => {
 		const item = items[index];
 		if (item) {
@@ -749,12 +820,17 @@ function Palette({
 							className={`pi ${cursor === index ? "on" : ""}`}
 							onClick={() => choose(index)}
 						>
-							<span className="ic">{item.id.startsWith("C-") ? "▤" : "›"}</span>
+							<span className="ic">{item.current ? "✓" : item.id.startsWith("C-") ? "▤" : "›"}</span>
 							<span className="t">{item.label}</span>
 							<span className="h">{item.detail}</span>
 						</button>
 					))}
-					{items.length === 0 && <div className="pi faint">No matches. Try a case ref or a different title.</div>}
+					{items.length === 0 && (
+						<div className="pi faint">
+							{/* A list that was given holds no cases, so a ref finds nothing in it. */}
+							{options.items ? "No matches." : "No matches. Try a case ref or a different title."}
+						</div>
+					)}
 				</div>
 				<div className="palf">
 					<span>

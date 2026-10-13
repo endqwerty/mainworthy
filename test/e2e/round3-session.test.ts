@@ -180,7 +180,7 @@ check(
 );
 
 check(
-	"R3C-5 project and preset selects give focus back so the next shortcut works",
+	"R3C-5 the project picker and the preset select give focus back so the next shortcut works",
 	async () => {
 		const server = await startServer();
 		await server.api("admin", { do: "project.create", key: "second", name: "Second", preset: "loose" });
@@ -188,8 +188,9 @@ check(
 		try {
 			const { page } = h;
 			page.setDefaultTimeout(5000);
-			await page.getByLabel("Project", { exact: true }).focus();
-			await page.getByLabel("Project", { exact: true }).selectOption("second");
+			await page.getByRole("button", { name: "Project: scratch. Switch project", exact: true }).click();
+			await page.getByRole("option", { name: /Second/ }).click();
+			await page.waitForURL("**/p/second/suite");
 			await page.keyboard.press("c");
 			expect(await page.getByRole("textbox", { name: "Case title", exact: true }).count()).toBe(1);
 			await page.getByRole("link", { name: "Settings", exact: true }).click();

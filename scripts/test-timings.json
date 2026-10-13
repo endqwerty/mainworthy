@@ -51,6 +51,7 @@
     "test/e2e/headers.test.ts": 2157,
     "test/e2e/browser.test.ts": 1973,
     "test/e2e/passkey-verifier.test.ts": 1836,
+    "test/e2e/project-switcher.test.ts": 1790,
     "test/e2e/people-passkey.test.ts": 1596,
     "test/headers.test.ts": 1007,
     "test/e2e/conflict.test.ts": 988,

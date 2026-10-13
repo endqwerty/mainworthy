@@ -350,6 +350,7 @@ describe("the phone layout", () => {
 			"src/web/app.tsx: Go to …",
 			"src/web/app.tsx: Jump to or run",
 			"src/web/app.tsx: Sign out",
+			"src/web/app.tsx: Switch project",
 			"src/web/runs/index.tsx: Plan run",
 			"src/web/suite/bindings.ts: Filter",
 			"src/web/suite/bindings.ts: New case",
