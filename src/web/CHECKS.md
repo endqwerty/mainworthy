@@ -551,9 +551,10 @@ title, after a colleague changed another field while the card was open.
 | A merge the page gave up arrives while a second attempt is on its way | this change | The first is recorded, the second refused; the later words are a draft on the recorded version |
 | A typed merge is kept after a rejection, and a colleague undoes a change the card had held | this change | The undone change does not come back |
 | A step with an expected result and no action yet is in the draft; the merge is recorded, or meets a new conflict | the check of this change, V1 | The step stays on the device, and is in the editor again after the merge |
+| The person takes the current title, a colleague changes it again before the merge, the reply is lost, and a title is typed in the card | the second check of this change, N2 | The typed title stays a draft on the version it was written on; leaving shows a conflict card; the colleague's title stands until resolved |
 
 The first eleven failed on the revision before the change (`899c428`), run from a clean export. The last two
-rows are the finding of the independent check of the first version of this change (`7ef33ca`), and failed there:
+tests are the finding of the independent check of the first version of this change (`7ef33ca`), and failed there:
 
 ```text
 (fail) a merge typed by hand that the server combines with a colleague's newer change leaves no draft to undo it
@@ -571,3 +572,9 @@ Expected to contain: "UNRECORDED EXPECTATION"  Received: ""
 One earlier test changed. `R6-3 a stored conflict resolved elsewhere preserves hand-typed card text on return`
 expected the status "later text is kept". The text is still kept and still editable. It is now a draft on the
 version it was written on, and the status says "typed merge is kept", as it does after a rejection.
+
+Two independent checks of this change are beside the earlier reviews: `ui-r9-fix-check-3.md` (the first
+version, one blocker, V1) and `ui-r9-fix-check-4.md` (with the fix, PASS). The second names two things that
+were so before this change and are not fixed by it. Leaving the editor in the ordinary way still drops a step
+that has an expected result and no action (issue #86). `R3B-2 the first queue cursor survives a new question and
+settlement elsewhere` times out now and then on a 10-thread Mac (issue #87).

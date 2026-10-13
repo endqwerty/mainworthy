@@ -498,3 +498,42 @@ for (const outcome of ["is recorded", "meets a new conflict"])
 		},
 		30_000,
 	);
+
+// The second independent check of this change (N2). The recorded version can hold a colleague's text in the
+// very field the person types in afterwards: they took the current title, and the colleague changed it again
+// before the merge arrived. The typed title was not written on that version, so it is not carried onto it.
+check(
+	"later card text in a field the recorded merge took from a colleague stays on the draft's own version and asks",
+	async () => {
+		const { server, page, close } = await card1();
+		try {
+			await page.getByRole("button", { name: "Use current title", exact: true }).click();
+			await colleagueEdits(server, () => ({ title: "Colleague title, changed again" }));
+			await failTheNextMerge(page, { reaches: true });
+			await resolve(page);
+			await kept(page);
+			const merged = await head(server);
+			expect(merged.version).toBe(4);
+			expect(merged.title).toBe("Colleague title, changed again");
+			expect(actions(merged)).toEqual(["Open the cart", MINE]);
+			await mergedTitle(page).fill("Title typed after the merge");
+			await resolve(page);
+			await page.getByText("later text is kept", { exact: false }).first().waitFor();
+			await card(page).waitFor({ state: "detached" });
+			expect(await caseTitle(page).inputValue()).toBe("Title typed after the merge");
+			await page.keyboard.press("Escape");
+			await card(page).waitFor();
+			expect(await head(server)).toEqual(merged);
+			await resolve(page);
+			const saved = await eventually(
+				() => head(server),
+				(value) => value.version === 5,
+			);
+			expect(saved.title).toBe("Title typed after the merge");
+			expect(actions(saved)).toEqual(["Open the cart", MINE]);
+		} finally {
+			await close();
+		}
+	},
+	30_000,
+);

@@ -16,7 +16,7 @@ Casebook keeps three kinds of record: what the software should do (cases, with v
 (results from people, pipelines and agents, in one shape), and what people decided about it. Producers append
 evidence; detectors turn evidence into questions, one per cause; a decision answers a question and is the only
 thing that can change what is "current". Every surface (web, command line, API, agent tools) calls the same
-fifteen operations. The whole instance is one process and one SQLite file.
+sixteen operations. The whole instance is one process and one SQLite file.
 
 ## One process
 

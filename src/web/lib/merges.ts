@@ -98,8 +98,10 @@ export function cardText({ draft, conflict }: { draft: Draft; conflict: DraftCon
 }
 
 /**
- * Whether `head` holds every piece of text the card and its draft do, and the draft changes no tag or link.
- * Only then can both go when the card's question was answered by somebody else: nothing typed is lost with them.
+ * Whether a card and its draft can go when the card's question was answered by somebody else: nothing the
+ * person typed is lost with them. With text typed in the card, `head` must be the card's whole body, and the
+ * draft must hold nothing beyond the card. With none, `head` must be the draft's text; a side chosen in the card
+ * may then differ from `head`, and is text of a recorded version. Never while the draft changes a tag or a link.
  */
 export function allRecorded({
 	draft,
