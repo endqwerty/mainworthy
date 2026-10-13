@@ -817,9 +817,9 @@ function QueueWorkbench() {
 								</div>
 							))}
 							{state === "decided" && current.decision && (
-								<div className="ev">
+								<div className="queue-decision">
 									<b>{ANSWER_LABELS[String(current.decision.answer.is)] ?? String(current.decision.answer.is)}</b>
-									<p>
+									<p className="dim">
 										{current.decision.rule
 											? `Decided by rule ${current.decision.rule}`
 											: `Decided by ${current.decision.by.join(", ")}`}{" "}

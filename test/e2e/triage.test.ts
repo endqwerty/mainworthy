@@ -666,3 +666,82 @@ async function recordedDecisions(server: Server, ref: string) {
 	},
 	20000,
 );
+
+(browserAvailable ? test : test.skip)(
+	"a settled answer's name, who gave it, the reason and the button to withdraw it stand apart",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Settled amber" }] });
+			await server.api("report", {
+				target: { session: "settled" },
+				results: [{ test: { case: "C-1" }, outcome: "fail", note: "expected amber, got green" }],
+			});
+			const question = (await server.api("inbox", { kind: "failure" })).items[0];
+			if (!question) throw new Error("Failure question missing");
+			const reason =
+				"The test is the one the tracker records as unreliable. The same tree passed it in the run before, and the change does not touch the editor. ".repeat(
+					2,
+				);
+			const reply = await server.api("decide", {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "flaky" },
+				reason,
+			});
+			expect(reply[0]?.status).toBe("decided");
+			for (const device of ["desktop", "phone"] as const) {
+				view = await openPage(server, { path: `/p/scratch/queue/${question.q.slice(2)}`, device });
+				view.page.setDefaultTimeout(8000);
+				await view.page.locator(".queue-decision").waitFor();
+				// Where each part's text is drawn, which is not its box: text that does not fit a box runs out of it.
+				const parts = await view.page.evaluate(() => {
+					const block = document.querySelector(".queue-decision");
+					if (!block) throw new Error("The settled answer is not shown");
+					const frame = block.getBoundingClientRect();
+					return {
+						frame: { left: frame.left, right: frame.right },
+						parts: [...block.children].map((part) => {
+							const range = document.createRange();
+							range.selectNodeContents(part);
+							const drawn = range.getBoundingClientRect();
+							return {
+								text: (part.textContent ?? "").trim().slice(0, 24),
+								left: drawn.left,
+								right: drawn.right,
+								top: drawn.top,
+								bottom: drawn.bottom,
+							};
+						}),
+					};
+				});
+				expect(parts.parts.map((part) => part.text)).toEqual([
+					"Flaky",
+					expect.stringContaining("Decided by robin"),
+					reason.slice(0, 24),
+					"u Withdraw answer",
+				]);
+				for (const [index, part] of parts.parts.entries()) {
+					const inside = part.left >= parts.frame.left - 1 && part.right <= parts.frame.right + 1;
+					expect({ device, part: part.text, inside }).toMatchObject({ inside: true });
+					for (const other of parts.parts.slice(index + 1)) {
+						const apart =
+							part.bottom <= other.top + 1 ||
+							other.bottom <= part.top + 1 ||
+							part.right <= other.left + 1 ||
+							other.right <= part.left + 1;
+						expect({ device, part: part.text, other: other.text, apart }).toMatchObject({ apart: true });
+					}
+				}
+				expect(view.errors).toEqual([]);
+				await view.close();
+				view = null;
+			}
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	25000,
+);
