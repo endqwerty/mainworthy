@@ -1,6 +1,7 @@
 // The HTTP surface. It has no logic of its own: every route is the registry's `invoke` behind authentication, plus
 // the session, the change stream and the generated API description. Nothing here knows what an operation does.
 import { z } from "zod";
+import { ERROR_CODES, HTTP_STATUS } from "../core/api.ts";
 import {
 	admit,
 	type Facts,
@@ -10,9 +11,10 @@ import {
 	signOut,
 	TOKEN_MAX,
 } from "../server/identity/identity.ts";
-import type { App, ChangeEvent } from "../server/kernel/app.ts";
+import { headerAddress } from "../server/kernel/address.ts";
+import type { App, ChangeEvent, Config } from "../server/kernel/app.ts";
 import { type Actor, findProject } from "../server/kernel/ctx.ts";
-import { HTTP_STATUS, INTERNAL_ERROR, noProject } from "../server/kernel/errors.ts";
+import { INTERNAL_ERROR, noProject } from "../server/kernel/errors.ts";
 import { listProjects } from "../server/ops/admin.ts";
 import { OP_LIST, OPS } from "../server/ops/index.ts";
 import { invokeAsync, type Reply } from "../server/ops/registry.ts";
@@ -152,9 +154,33 @@ function isLocal(req: Request, peer: string | null): boolean {
 	);
 }
 
+/** What the listener knows of the connection a request arrived on, and may do to it. */
+type Listener = Pick<ReturnType<typeof Bun.serve>, "requestIP" | "timeout">;
+
+/**
+ * The address a request came from, given the address its connection came from (`peer`), or null when nothing
+ * says. It is what failed sign-ins are counted against.
+ *
+ * A peer is its own address, and whatever its headers say about where it came from is ignored: anybody can
+ * write a header. The one exception is a peer the operator named as the proxy in front (`config.proxy`). Every
+ * request comes from that peer, so its own address tells no two visitors apart, and the address is read from
+ * the header the operator named instead. That header must hold exactly one address. When it is missing or holds
+ * anything else, the proxy is not sending what the operator said it sends: the request then has no address, and
+ * is not counted under the proxy's, which would be every visitor's.
+ */
+function addressOf(req: Request, peer: string | null, config: Config): string | null {
+	const { proxy } = config;
+	return proxy?.peers.contains(peer) ? headerAddress(req.headers.get(proxy.header)) : peer;
+}
+
+/** The address a request came from (`addressOf`), with the connection's own address asked of the listener. */
+export function clientAddress(req: Request, server: Pick<Listener, "requestIP">, config: Config): string | null {
+	return addressOf(req, server.requestIP(req)?.address ?? null, config);
+}
+
 /**
  * What a request carries that says who it is, for `admit` to judge: a bearer token, the session cookie, whether
- * it comes from this server's own page, and whether it started on this machine.
+ * it comes from this server's own page, whether it started on this machine, and the address it came from.
  *
  * Local mode trusts the loopback interface, so the request must really be local and same-origin: it started on
  * this machine (`isLocal`; the loopback Host also means a page on another site cannot reach us through DNS
@@ -162,34 +188,51 @@ function isLocal(req: Request, peer: string | null): boolean {
  * behalf). The same-origin rule protects the cookie in server mode.
  *
  * `peer` is the address the connection came from, as the listener knows it. A caller that does not know it
- * (a request that never was on a connection) is never the local owner. `address` is where the request is said
- * to come from in what is kept of a use (`peerAddress`); it is not what decides whether a request is local.
+ * (a request that never was on a connection) is never the local owner. The address the request is counted and
+ * recorded as coming from (`addressOf`) is another thing: behind a proxy the operator named it is the address
+ * the proxy reported, and it never decides whether a request is local.
  */
-function factsOf(req: Request, owner: Actor, peer: string | null, address: string | null): Facts {
+function factsOf(app: App, req: Request, owner: Actor, peer: string | null): Facts {
 	const header = req.headers.get("authorization");
 	return {
 		bearer: header?.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : null,
 		cookie: sessionCookieOf(req),
 		sameOrigin: sameOrigin(req),
 		localOwner: isLocal(req, peer) ? owner : null,
-		address,
+		address: addressOf(req, peer, app.config),
 	};
 }
 
-/** Who is calling: a bearer token, else the session cookie, else (in local mode only) the owner of this machine. */
-export function sessionOf(
-	app: App,
-	req: Request,
-	owner: Actor,
-	peer: string | null = null,
-	address: string | null = null,
-): Session | null {
-	const admission = admit(app, factsOf(req, owner, peer, address));
+/**
+ * Who is calling: a bearer token, else the session cookie, else (in local mode only) the owner of this machine.
+ * Null for a caller that is refused and for one that is told to wait; a route answers each with its own reply
+ * (`sessionFor`).
+ */
+export function sessionOf(app: App, req: Request, owner: Actor, peer: string | null = null): Session | null {
+	const admission = admit(app, factsOf(app, req, owner, peer));
 	return admission.kind === "admitted" ? admission.session : null;
 }
 
 const unauthenticated = (): Response =>
 	jsonResponse({ ok: false, error: { code: "unauthenticated", message: "a token is required" } }, 401);
+
+/**
+ * The reply to a caller that failed to prove itself too often: 429, with the whole seconds to wait in
+ * `Retry-After` and in the sentence, which is all the CLI shows. It does not say what was counted, the address
+ * or the token: the wait is all the caller can act on.
+ */
+const limited = (seconds: number): Response =>
+	jsonResponse(
+		{
+			ok: false,
+			error: {
+				code: "limited",
+				message: `too many failed attempts; try again in ${seconds} ${seconds === 1 ? "second" : "seconds"}`,
+			},
+		},
+		HTTP_STATUS.limited,
+		{ "retry-after": String(seconds) },
+	);
 
 /**
  * A page may say who it believes it is signed in as (`X-Mainworthy-As`, the actor's name, percent-encoded). When
@@ -305,21 +348,11 @@ const tooLarge = (limit: number): Response =>
 		413,
 	);
 
-/** What the listener knows of the connection a request arrived on, and may do to it. */
-type Listener = Pick<ReturnType<typeof Bun.serve>, "requestIP" | "timeout">;
-
 /**
- * The address a request came from, for what is kept of a use: where a token was last used from, where a session
- * was opened and last seen. It is the address of the connection's other end and nothing cleverer, so behind a
- * proxy it is the proxy's. Null when the listener does not know it.
- */
-export function peerAddress(req: Request, server: Listener): string | null {
-	return server.requestIP(req)?.address ?? null;
-}
-
-/**
- * The session of a request, or the reply that refuses it. Every route that takes a session takes it here, so
- * every one holds a request to the person it names (`sameCaller`).
+ * The session of a request, or the reply that refuses it: 401 for a caller that proved nothing, 429 for one that
+ * failed too often and is told to wait (`limited`). Every route that takes a session takes it here, so every
+ * one holds a request to the person it names (`sameCaller`), and every one is under the limit on failed
+ * attempts: an operation, the change stream, and the routes of the other surfaces (`/mcp`, the archive).
  *
  * A request that is given a session has the idle timeout taken off its connection: the timeout is for a
  * connection nobody has vouched for. It counts the server's own silence too, so without this a reply that takes
@@ -333,10 +366,12 @@ export function peerAddress(req: Request, server: Listener): string | null {
  * under the timeout again until it is given a session in its turn.)
  */
 function sessionFor(app: App, owner: Actor, req: Request, server: Listener): Session | Response {
-	// The address the connection came from decides, in local mode, whether the request started on this machine.
-	// That is the connection itself and never `peerAddress`, which says where a use is recorded as coming from.
-	const session = sessionOf(app, req, owner, server.requestIP(req)?.address ?? null, peerAddress(req, server));
-	if (!session) return unauthenticated();
+	// The address the connection came from decides, in local mode, whether the request started on this machine,
+	// and in every mode where the request is counted as coming from.
+	const admission = admit(app, factsOf(app, req, owner, server.requestIP(req)?.address ?? null));
+	if (admission.kind === "refused") return unauthenticated();
+	if (admission.kind === "limited") return limited(admission.retryAfter);
+	const { session } = admission;
 	if (!sameCaller(req, session)) return changedSession();
 	server.timeout(req, 0);
 	return session;
@@ -431,15 +466,17 @@ async function login(app: App, req: Request, server: Listener, patience: Patienc
 	// with. How short the owner's may be is decided there too, not by what this route will look at.
 	const body = z.object({ token: z.string().max(TOKEN_MAX) }).safeParse(input);
 	if (!body.success) return unauthenticated();
+	// A token typed into the form is a token: it is counted as one sent in a header is, under the same keys.
 	const opening = signInWithToken(app, body.data.token, {
 		userAgent: req.headers.get("user-agent"),
-		address: peerAddress(req, server),
+		address: clientAddress(req, server, app.config),
 	});
-	if (!opening) return unauthenticated();
+	if (opening.kind === "refused") return unauthenticated();
+	if (opening.kind === "limited") return limited(opening.retryAfter);
 	// The token is good, so the caller is vouched for as any request with a session is (`sessionFor`): the
 	// session is written at the gate, and the wait there may outlast the idle timeout.
 	server.timeout(req, 0);
-	const signedIn = await opening;
+	const signedIn = await opening.signedIn;
 	if (!signedIn) return unauthenticated();
 	return jsonResponse({ ok: true, result: { signedIn: true } }, 200, sessionCookies(app, req, signedIn));
 }
@@ -593,7 +630,7 @@ export function openApi(): Record<string, unknown> {
 							type: "object",
 							required: ["code", "message"],
 							properties: {
-								code: { enum: Object.keys(HTTP_STATUS) },
+								code: { enum: [...ERROR_CODES] },
 								message: { type: "string" },
 								details: { type: "object" },
 							},

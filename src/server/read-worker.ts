@@ -52,6 +52,8 @@ function reads(): void {
 		// leaves (`invokeAsync`). Zero, so that a reader which ever did look at a session would find it ended.
 		sessionIdleMs: 0,
 		sessionMaxMs: 0,
+		// Nor does it ask where a request came from: no request reaches a reader.
+		proxy: null,
 	} as const;
 	let app = openApp(config, { reader: true });
 	const ReadMessage = z.object({

@@ -59,13 +59,43 @@ export type Api = {
 };
 export type OpName = keyof Api;
 
+/**
+ * Why a request did not run. `conflict` is a stale base or a duplicate; a rule that says no is `forbidden`;
+ * `limited` is a caller that failed to prove itself too often, and is told how long to wait.
+ *
+ * This is the one place the codes are written. The server's replies, the API description and the schemas with
+ * which the CLI, the web client and the reader threads read a reply all take this list, so a code added here is
+ * one every client can read (`test/architecture.test.ts` fails on a second copy).
+ */
+export const ERROR_CODES = [
+	"invalid",
+	"unauthenticated",
+	"forbidden",
+	"not_found",
+	"conflict",
+	"limited",
+	"internal",
+] as const;
+export type ErrorCode = (typeof ERROR_CODES)[number];
+
+/** The HTTP status of a reply that carries each code. */
+export const HTTP_STATUS: Readonly<Record<ErrorCode, number>> = {
+	invalid: 400,
+	unauthenticated: 401,
+	forbidden: 403,
+	not_found: 404,
+	conflict: 409,
+	limited: 429,
+	internal: 500,
+};
+
 /** The envelope every operation replies with over HTTP. */
 export type Envelope<T> =
 	| { ok: true; result: T; seq: number | null }
 	| {
 			ok: false;
 			error: {
-				code: "invalid" | "unauthenticated" | "forbidden" | "not_found" | "conflict" | "internal";
+				code: ErrorCode;
 				message: string;
 				details?: Record<string, unknown> | undefined;
 			};

@@ -10,7 +10,7 @@ signed in with the owner token over plain HTTP and saved a case through the page
 across the rename on 2026-10-13: Coolify built the image, the server logged
 `moved /data/casebook.db to /data/mainworthy.db`, and the one case and the owner token were still there. An
 export taken just before is in the volume (`/data/before-rename-2026-10-13.ndjson.gz`).
-**What is not:** the Tailscale sidecar in `compose.coolify.yaml` on that instance (`docker compose config` accepts the file once Coolify's own `exclude_from_hc` line is removed; the node has not joined yet), a restore from a backup on that instance, and an upgrade that changes the schema of an instance that holds data.
+**What is not:** the Tailscale sidecar in `compose.coolify.yaml` on that instance (`docker compose config` accepts the file once Coolify's own `exclude_from_hc` line is removed; the node has not joined yet), a restore from a backup on that instance, an upgrade that changes the schema of an instance that holds data, and the limit on failed sign-ins counting each visitor of that instance by address ("The limit on failed sign-ins" says what is expected and what was not measured).
 
 ## The container
 
@@ -34,6 +34,8 @@ sending the token itself.
 | `MAINWORTHY_READERS` | available cores minus two, minimum 1, maximum 8 | Reader threads, each with its own read-only connection, so a read does not wait for a write. A non-negative integer; `0` runs reads inline on the server thread, which is slower under load and only for debugging. |
 | `MAINWORTHY_SESSION_IDLE` | `14d` | How long a browser stays signed in without being used. A whole number and `h`, `d` or `w`: `12h`, `14d`, `2w`. A value that is not one stops the start with a line that names the variable. |
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. Same form. The session cookie is given this age. |
+| `MAINWORTHY_TRUSTED_PROXY` | not set | The addresses the proxy in front connects from: addresses and ranges, separated by commas (`10.0.1.0/24, 2001:db8::/32, 203.0.113.9`). Set it together with the next variable, or neither: one without the other stops the start with a line that says which is missing, and so does an entry that is not an address or a range. See "The limit on failed sign-ins". |
+| `MAINWORTHY_CLIENT_ADDRESS_HEADER` | not set | The header in which that proxy writes the address of the visitor, for example `cf-connecting-ip`. It is read only from a peer `MAINWORTHY_TRUSTED_PROXY` names, and must hold exactly one address. |
 | `MAINWORTHY_MODE` | `server` | `server`: every request needs a token. `local` (the default outside a container, on loopback): the browser on the same machine is the owner with no step. Local mode is for that machine only. The server checks what it can see: the connection comes from a loopback address, the `Host` is a loopback name, and the request carries none of the headers a proxy or a tunnel adds; a request that fails one of these needs a token. It cannot see through a relay that passes bytes on unchanged from this machine (`ssh -L`, `socat`, a port forward that adds no header): through one, anyone who reaches the relay is the owner. Never expose a local-mode port that way. To reach an instance from elsewhere, run it in `server` mode. |
 | `MAINWORTHY_COMMIT` | empty | The commit the build was made from, which `/healthz` reports as `commit` with no sign-in. Exactly 40 lower-case hexadecimal characters, else it counts as not set; the server then reads `SOURCE_COMMIT` (Coolify sets it on the running container), and reports `null` when neither holds a commit. The image takes it as a build argument: `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build`, or `docker build --build-arg MAINWORTHY_COMMIT=$(git rev-parse HEAD) .`. Without it a plain build reports `null`. |
 
@@ -68,6 +70,94 @@ runs one:
 - No page can show the app in a frame, on the same host or another. A dashboard or a tool that embeds
   applications in a frame shows an empty one for Mainworthy.
 
+## The limit on failed sign-ins
+
+A wrong token is counted where the server asks who the caller is: on a route that needs a sign-in, whether a
+script or a pipeline sends it, and when a person types it into the sign-in form. A route that needs no sign-in
+(`/healthz`, the API description, the documentation at `/docs`) looks at no token, and a sign-in body the form
+does not accept (longer than 512 characters, or not text) is refused without being counted. A wrong token is
+counted twice: against the address it came from, and against its own first 8 characters. The fifth failure of
+either within 15 minutes blocks it for one second, and each failure after that doubles the block, up to 15
+minutes.
+While a block lasts, a request is answered `429` with the seconds to wait in `Retry-After`. The CLI prints
+`limited: too many failed attempts; try again in 4 seconds` and exits 4, and the sign-in form says how long to
+wait. What it means for whoever runs an instance:
+
+- A token the server generated (`mainworthy token new`, or the owner token it printed) still works from a
+  blocked address. A pipeline is not stopped because somebody on its network is guessing. Passing does not end
+  the block: it runs out by the clock.
+- A token you chose yourself gets no such pass, and a token the server made from the value of
+  `MAINWORTHY_OWNER_TOKEN` is one you chose whatever it looks like. The server goes by where a token came from
+  and not by its form, so a value written as `cb_` and 32 letters waits like any other. (A token the server
+  generated and you later copied into the variable keeps the row the server made, and still passes.) A request
+  that presents a token is judged by the token, whatever cookie comes with it. If you get `429` with it, wait for the seconds it names.
+  Somebody who knows how your token begins can keep it blocked by guessing at it; a generated token cannot be
+  blocked that way.
+- A browser that is signed in is never counted and never blocked.
+- The count is in memory. A restart clears it.
+
+### Behind a proxy
+
+Without the two variables, the address of a request is the address of its connection. Behind a proxy that is
+the proxy's address, the same for every visitor. What the server does with it depends on the address:
+
+- **A loopback or private address is never counted**, because one visitor could otherwise block all the
+  others. That is a proxy on the same machine, on the same Docker network or on a private network. A wrong
+  token is then counted against its first 8 characters only, which slows guesses at one token and does nothing
+  to somebody whose every guess begins differently. A start in server mode says so in one line on stderr.
+- **A public address is counted, as one address.** The server cannot know that it is a proxy's. Every visitor
+  behind it then shares one count: five wrong tokens from one visitor block that address, and for as long as
+  it stays blocked a token somebody chose (`MAINWORTHY_OWNER_TOKEN`) is refused for all of them. A token the
+  server generated and a browser that is signed in still get through.
+
+Naming the proxy fixes both. Tell the server which peer is the proxy and where the proxy writes the visitor's
+address:
+
+1. **`MAINWORTHY_TRUSTED_PROXY` is the address the server sees connections come from.** With several proxies in
+   a row that is the last one, the one that connects to Mainworthy, and not the first one a visitor reaches. In
+   Docker it is the proxy container's address on the network it shares with the app
+   (`docker network inspect <network>`). A container's address can change when it is redeployed, so name the
+   network's range (`10.0.1.0/24`). Every container on that network is then believed.
+2. **`MAINWORTHY_CLIENT_ADDRESS_HEADER` is the header that reaches Mainworthy with the visitor's own address in
+   it**, and nothing else: one address, no list and no port. Name a header only if a proxy in the row writes it
+   from what it saw itself and replaces whatever the visitor sent under that name. A header the visitor can set
+   and the proxies pass on unchanged lets anybody choose the address they are counted under, a new one for every
+   guess. `X-Forwarded-For` is usually a list that each proxy appends to, and a list is not read.
+3. **Check it from outside**, from a public address. Send eight wrong tokens that differ in their first 8
+   characters, with no pause between them. The first five are answered `401` and the rest `429`. The first
+   block lasts one second, which is why there is no pause.
+
+   ```
+   for i in 1 2 3 4 5 6 7 8; do
+   	curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $i-not-a-token" https://<host>/api/session
+   done
+   ```
+
+   Then, within a quarter of an hour, send two more from another network, one right after the other with new
+   first characters (a phone off the Wi-Fi will do). Both must be answered `401`. What a different result means:
+
+   - **All eight are `401`.** The server did not count the address. The peer is not in
+     `MAINWORTHY_TRUSTED_PROXY`, or the header is missing, holds more than one address, or holds a private
+     address, which is a proxy's and not the visitor's.
+   - **The second of the two from the other network is `429`.** Both networks are counted as one address. The
+     header holds the same address for everybody, a proxy's public one.
+
+   A test runs this check against both kinds of header (`test/limit.test.ts`). Nobody has run it through a real
+   proxy yet.
+
+**The instance at `mainworthy.com` does not set the two variables yet**, and `compose.coolify.yaml` does not
+pass them. Its requests come through Cloudflare's tunnel, then Coolify's proxy, then the container. Nobody has
+measured what the container sees on that path. The values expected to be right, both unverified:
+
+- `MAINWORTHY_CLIENT_ADDRESS_HEADER=cf-connecting-ip`. Cloudflare writes the visitor's address there and
+  replaces what the visitor sent. Not checked: that Coolify's proxy passes the header on unchanged, and that no
+  request reaches that proxy without going through Cloudflare. One that does could write the header itself.
+- `MAINWORTHY_TRUSTED_PROXY` set to the address of Coolify's proxy on the network it shares with the container,
+  or that network's range. Not read from the server yet.
+
+Until both are measured and set, with the check in step 3 done from two networks, that instance counts a wrong
+token against its first 8 characters and not against an address.
+
 ## On Coolify
 
 How the instance on the home server was set up. It takes about five minutes through Coolify's API or its
@@ -98,10 +188,10 @@ dashboard.
    make Coolify list it as one of yours, and an empty value of yours replaces the one it generates). Compare it with
    the tip of `main` (`git ls-remote origin refs/heads/main`) to see whether the instance is behind. Open the page
    and paste the owner token.
-7. **The public address** (since 2026-10-13): `https://mainworthy.com` serves this instance. Earlier this page
-   said to keep it off the public internet until accounts exist (#30) and sign-in is rate limited (#88). The
-   owner decided otherwise for the MVP: it is theirs to dogfood, its database will be wiped before 1.0, and they
-   can cut it off at any time. Every request still needs a token. The path is the one the server's other public
+7. **The public address** (since 2026-10-13): `https://mainworthy.com` serves this instance, before accounts
+   exist (#30). The owner decided that for the MVP: it is theirs to dogfood, its database will be wiped before
+   1.0, and they can cut it off at any time. Every request still needs a token, and wrong tokens are limited
+   ("The limit on failed sign-ins"; on this instance not yet by address). The path is the one the server's other public
    apps use: a proxied Cloudflare record for the name, a route in the server's Cloudflare tunnel, Coolify's
    proxy, and a domain on the service in Coolify (`https://mainworthy.com:7357` on the service `casebook`, with
    "connect to the predefined network" on and Coolify's own HTTPS redirect off). Two things differ from an
@@ -112,6 +202,12 @@ dashboard.
      its own: `http` on port 80, `https` on port 443. Measured on the server: the same sign-in request answers
      401 through port 80 and 200 through port 443.
    - **Cloudflare's "Always Use HTTPS" is on** for the zone, so nobody sends a token over plain HTTP.
+   - **Cloudflare's automatic Web Analytics is to be turned off** for the zone. With it on, Cloudflare writes a
+     script tag for `static.cloudflareinsights.com` into every HTML page it passes on. The page's
+     Content-Security-Policy allows scripts from the server's own origin only, so the browser refuses that
+     script and logs one refusal for each page (seen on the instance on 2026-10-13, in the app and in the
+     documentation). Nothing is broken by it, and the product promises no analytics (`docs/compliance.md`); the
+     setting is in the Cloudflare dashboard under Web Analytics for the site.
 
    To take the instance off the internet, delete the DNS record for the name or its route in the tunnel. A
    firewall rule for incoming connections does not do it: the tunnel is a connection the server opens outward.
@@ -182,7 +278,9 @@ the steps are kept below for an instance that has none.
 
 What can go wrong, and what the job does: the instance is down (its own Mainworthy, a warning); the instance is an
 older or newer build that describes `report` or `gate` differently (the same); the token was revoked or is for
-another project (the job fails and says which). To stop reporting to the instance, delete the `MAINWORTHY_URL`
+another project (the job fails and says which); the instance answers the token `429` after too many failed
+attempts (the job fails too: the right token of a pipeline passes a block, so this one is not it). To stop
+reporting to the instance, delete the `MAINWORTHY_URL`
 variable. A pull request that changes the shape of a `report` or `gate` reply fails against the instance until it
 is redeployed (#90): delete the variable for that pull request. To replace the token, follow "Replacing a token"
 below: the new one is in use before the old one is revoked, so no run is refused in between.

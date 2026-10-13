@@ -1,7 +1,7 @@
 import { availableParallelism } from "node:os";
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
-import type { Envelope } from "../core/api.ts";
+import { type Envelope, ERROR_CODES } from "../core/api.ts";
 import type { ReadCall, ReadPool } from "./kernel/app.ts";
 import { INTERNAL_ERROR } from "./kernel/errors.ts";
 
@@ -27,7 +27,7 @@ const ReplyMessage = z.object({
 		z.object({
 			ok: z.literal(false),
 			error: z.object({
-				code: z.enum(["invalid", "unauthenticated", "forbidden", "not_found", "conflict", "internal"]),
+				code: z.enum(ERROR_CODES),
 				message: z.string(),
 				details: z.record(z.string(), z.unknown()).optional(),
 			}),

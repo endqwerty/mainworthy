@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Api, Envelope, OpName, SessionInfo } from "../core/api.ts";
+import { type Api, type Envelope, ERROR_CODES, type OpName, type SessionInfo } from "../core/api.ts";
 import { OPS } from "../server/ops/index.ts";
 import type { Reply } from "../server/ops/registry.ts";
 import type { Args } from "./args.ts";
@@ -7,7 +7,7 @@ import { CliError } from "./errors.ts";
 import { REPLY_SCHEMAS } from "./replies.ts";
 
 const ErrorSchema = z.object({
-	code: z.enum(["invalid", "unauthenticated", "forbidden", "not_found", "conflict", "internal"]),
+	code: z.enum(ERROR_CODES),
 	message: z.string(),
 	details: z.record(z.string(), z.unknown()).optional(),
 });

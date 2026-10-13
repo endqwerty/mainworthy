@@ -1,9 +1,10 @@
 // Actors, grants and tokens, and who a request is. Owns the tables `orgs`, `actors`, `grants` and `tokens`.
 // There is no seat here: an actor is a free row with capabilities (principle P8).
 //
-// This file is the interface of the module. `sessions.ts` (the table `sessions`) and `uses.ts` (when a token or a
-// session was last used) are its other files, and nothing outside this directory imports them: a surface asks
-// `admit` who a request is, and signs a browser in and out through `signInWithToken` and `signOut`.
+// This file is the interface of the module. `sessions.ts` (the table `sessions`), `uses.ts` (when a token or a
+// session was last used) and `limiter.ts` (the count of failed attempts) are its other files, and nothing outside
+// this directory imports them: a surface asks `admit` who a request is, and signs a browser in and out through
+// `signInWithToken` and `signOut`.
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import { untilPhrase } from "../../core/duration.ts";
@@ -12,6 +13,7 @@ import type { App } from "../kernel/app.ts";
 import type { Actor } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
+import { addressKey, createLimiter, isGeneratedSecret, type Limiter, prefixKey } from "./limiter.ts";
 import { endSession, endSessionsOf, findSession, hasUnendedSession, openSession, sweepSessions } from "./sessions.ts";
 import { clearUses, flushUses, forgetNotedAddresses, lastAddress, notedUse, noteUse } from "./uses.ts";
 
@@ -62,8 +64,8 @@ const Q = {
 		`INSERT INTO grants (actor, project, can) VALUES ($actor, $project, $can)
 		 ON CONFLICT (actor, project) DO UPDATE SET can = excluded.can`,
 	),
-	tokenByHash: sql<{ hash: string }, TokenState & { id: number }>(
-		"SELECT id, actor, revoked_at, expires_at FROM tokens WHERE hash = $hash",
+	tokenByHash: sql<{ hash: string }, TokenState & { id: number; source: TokenSource | null }>(
+		"SELECT id, actor, revoked_at, expires_at, source FROM tokens WHERE hash = $hash",
 	),
 	insertToken: sql<{
 		actor: number;
@@ -181,7 +183,8 @@ export function orgId(db: Db): number {
  * the owner's last token ended. `warnings` are for the operator, one line each, and none holds a secret: a
  * configured token that signs the owner in no more (it was revoked, it reached its end, or it is somebody else's)
  * is said, not revived; so is one that is short, every token that a new value retired, and every token that ends
- * within 14 days.
+ * within 14 days, and a server that names no proxy, because behind one it cannot tell its visitors apart
+ * (`NO_PROXY_NAMED`).
  *
  * The configured token is the one secret here that a person chose, and it opens everything. One shorter than 20
  * characters stops the start, and so does one longer than a sign-in reads, in local mode too: the value becomes a
@@ -289,9 +292,21 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
 				`token ${token.id} of ${token.actor} (${JSON.stringify(token.label)}) expires ${untilPhrase(token.expires_at, at)}, and what uses it is refused from then on. Make its replacement with \`mainworthy token new\`, and revoke this one once the replacement is in use.`,
 			);
 		}
+		if (server && app.config.proxy === null) warnings.push(NO_PROXY_NAMED);
 		return { owner: toActor(app.db, owner, 0), generatedToken, warnings };
 	});
 }
+
+/**
+ * What a start in server mode tells the operator when the configuration names no proxy. The server is then
+ * reached directly, or through a proxy it does not know of. A request from a loopback or private address is
+ * never counted by its address (`addressKey`), because behind a proxy that address is the proxy's and every
+ * visitor shares it. Until the two variables say which peer is the proxy and where it writes the visitor's
+ * address, a wrong token from such a request is counted with the others that begin as it does and with nothing
+ * else, which does not slow somebody whose every guess begins differently.
+ */
+const NO_PROXY_NAMED =
+	"MAINWORTHY_TRUSTED_PROXY and MAINWORTHY_CLIENT_ADDRESS_HEADER are not set: a failed sign-in from a loopback or private address, which behind a proxy is every visitor's, is not counted against that address, only against the first 8 characters of the token it tried. docs/deploy.md says how to set the two.";
 
 function ensureActor(db: Db, input: { org: number; kind: ActorKind; name: string; at: number }): ActorRow {
 	const found = db.get(Q.actorByName, { org: input.org, name: input.name });
@@ -324,17 +339,20 @@ function toActor(db: Db, row: ActorRow, project: number): Actor {
 const works = (token: TokenState, now: number): boolean =>
 	token.revoked_at === null && (token.expires_at === null || now < token.expires_at);
 
+/** A token that works, with its actor's row. `chosen`: its value came from the environment, so a person wrote it. */
+type StandingToken = { id: number; actor: ActorRow; chosen: boolean };
+
 /**
  * The token with this hash and its actor's row, when the token works and the actor stands. On the reader: a
  * request is admitted before it queues at the write gate, and must not touch the writing connection while another
  * command's transaction is open on it.
  */
-function standingToken(db: Db, hash: string, now: number): { id: number; actor: ActorRow } | null {
+function standingToken(db: Db, hash: string, now: number): StandingToken | null {
 	const token = db.get(Q.tokenByHash, { hash });
 	if (!token || !works(token, now)) return null;
 	const actor = db.get(Q.actorById, { id: token.actor });
 	if (!actor || actor.disabled_at !== null) return null;
-	return { id: token.id, actor };
+	return { id: token.id, actor, chosen: token.source === "env" };
 }
 
 /**
@@ -375,14 +393,72 @@ export type Facts = {
 	/** The owner of this machine when the request started on it, else null. Counts in local mode only. */
 	localOwner: Actor | null;
 	/**
-	 * The address the request came from, or null for one that never was on a connection. It decides nothing here:
-	 * it is noted with the use, so a person can see where a token or a session was last used from.
+	 * The address the request came from, as the surface determined it: the connection's own, or the one a proxy
+	 * the operator named reported. Null when the surface cannot tell (a request that never was on a connection).
+	 * Failed attempts are counted against it, and it is noted with the use, so a person can see where a token or
+	 * a session was last used from.
 	 */
 	address: string | null;
 };
 
-export type Admission = { kind: "admitted"; session: Session } | { kind: "refused" };
+/** A caller that failed to prove itself too often, by its address or at this secret: `retryAfter` whole seconds. */
+type Limited = { kind: "limited"; retryAfter: number };
+export type Admission = { kind: "admitted"; session: Session } | { kind: "refused" } | Limited;
 const REFUSED: Admission = { kind: "refused" };
+
+// The count of failed attempts, one for each `App` as `uses.ts` keeps its notes: two instances in one process, as
+// in the tests, do not count each other's failures. Nothing clears it but a restart. An import does not: it
+// replaces the tokens, not whoever is guessing at them.
+const limiters = new WeakMap<App, Limiter>();
+function limiterOf(app: App): Limiter {
+	let limiter = limiters.get(app);
+	if (!limiter) {
+		limiter = createLimiter();
+		limiters.set(app, limiter);
+	}
+	return limiter;
+}
+
+type Presented = { kind: "standing"; token: StandingToken } | { kind: "refused" } | Limited;
+
+/**
+ * Looks at a secret that was presented as a token, under the limit on failed attempts. A bearer token and a
+ * sign-in both come this way, so they are counted under the same keys: the caller's address and the first
+ * characters of the secret. `limiter.ts` says what the rule is and why each line below is as it is.
+ *
+ * While a key is blocked nothing is reported, neither a failure nor a success, and a secret is not looked up,
+ * with one exception: a secret in the form the server generates is looked up, and passes when it is right and
+ * the server made it. The form alone does not say that. The owner's token from the environment is whatever the
+ * operator wrote, and one written as `cb_` and 32 letters is still a person's choice and not 190 random bits:
+ * its row says where it came from (`source`), and it gets no pass. It is answered as a wrong one is.
+ *
+ * A success outside a block clears the secret's own key and never the address's. A pass during a block clears
+ * nothing: the block runs out by the clock.
+ */
+function present(app: App, secret: string, address: string | null): Presented {
+	const limiter = limiterOf(app);
+	const now = app.now();
+	const prefix = prefixKey(secret);
+	const keys = [addressKey(address), prefix].filter((key) => key !== null);
+	const hash = hashToken(secret);
+	const answer = limiter.check(keys, now);
+	if (answer.kind === "blocked") {
+		const token = isGeneratedSecret(secret) ? standingToken(app.reader, hash, now) : null;
+		return token && !token.chosen
+			? { kind: "standing", token }
+			: { kind: "limited", retryAfter: answer.retryAfterSeconds };
+	}
+	// A sign-in reads no token longer than `TOKEN_MAX`, so a bearer is none either: a token must not work one way
+	// and not the other. (An earlier build took an owner token of any length, and such a row is still there.) It
+	// is counted like any other wrong token.
+	const token = secret.length > TOKEN_MAX ? null : standingToken(app.reader, hash, now);
+	if (!token) {
+		limiter.failed(keys, now);
+		return { kind: "refused" };
+	}
+	if (prefix !== null) limiter.succeeded([prefix]);
+	return { kind: "standing", token };
+}
 
 /**
  * Who a request is: the one question every surface asks, once for each request. It reads committed rows on the
@@ -392,17 +468,19 @@ const REFUSED: Admission = { kind: "refused" };
  * request from this server's own page, the session its cookie names. Else, in local mode, the owner of the
  * machine the request started on.
  *
+ * Only a token is held to the limit on failed attempts (`present`). A cookie is never counted, right or wrong:
+ * it is 256 random bits that nobody guesses, and a browser that kept one after its session ended sends it with
+ * every request. The owner of the machine proves nothing, so there is nothing to fail.
+ *
  * The use is noted only after the caller passed, against the newest use known until then. A cookie that is past
  * its idle time is refused however often it is sent: it cannot renew itself.
  */
 export function admit(app: App, facts: Facts): Admission {
 	if (facts.bearer !== null) {
-		// A sign-in reads no token longer than `TOKEN_MAX`, so a bearer is none either: a token must not work one
-		// way and not the other. (An earlier build took an owner token of any length, and such a row is still there.)
-		if (facts.bearer.length > TOKEN_MAX) return REFUSED;
+		const presented = present(app, facts.bearer, facts.address);
+		if (presented.kind !== "standing") return presented;
+		const { token } = presented;
 		const hash = hashToken(facts.bearer);
-		const token = standingToken(app.reader, hash, app.now());
-		if (!token) return REFUSED;
 		noteUse(app, "token", token.id, app.now(), facts.address);
 		return {
 			kind: "admitted",
@@ -447,11 +525,12 @@ const newSessionSecret = (): string => Buffer.from(randomBytes(32)).toString("ba
  * Signs a browser in with a token: opens a session whose secret is new and is not the token. The browser never
  * holds the token again, and only the SHA-256 of what it does hold is stored.
  *
- * Null, at once, when the token does not work: the caller answers without waiting. Otherwise a promise, because
- * the session is written at the gate. That write looks the token up again by its hash (`openSession`), and the
- * promise is null when the token stopped working while the request waited: it was revoked, reached its end, or an import
- * replaced every token. Nothing read before the wait is trusted after it. The token's id, in particular, is
- * not carried across: after an import a new token holds it.
+ * The token is held to the limit on failed attempts exactly as a bearer token is (`present`), with `address` as
+ * the address the request came from. `refused` and `limited` are known at once, and the caller answers without
+ * waiting. Otherwise the session is being opened: it is written at the gate. That write looks the token up again
+ * by its hash (`openSession`), and `signedIn` is null when the token stopped working while the request waited:
+ * it was revoked, reached its end, or an import replaced every token. Nothing read before the wait is trusted
+ * after it. The token's id, in particular, is not carried across: after an import a new token holds it.
  *
  * `about` is what the request said of itself, kept for a person looking at their own sessions: what the client
  * calls itself, and the address it came from (null for a request that never was on a connection).
@@ -460,14 +539,15 @@ export function signInWithToken(
 	app: App,
 	secret: string,
 	about: { userAgent: string | null; address: string | null },
-): Promise<SignedIn | null> | null {
+): { kind: "opening"; signedIn: Promise<SignedIn | null> } | { kind: "refused" } | Limited {
+	const presented = present(app, secret, about.address);
+	if (presented.kind !== "standing") return presented;
+	const { token } = presented;
 	const tokenHash = hashToken(secret);
-	const token = standingToken(app.reader, tokenHash, app.now());
-	if (!token) return null;
 	// The use is of the token as it stands now, noted before any wait. An import clears the notes when it commits.
 	noteUse(app, "token", token.id, app.now(), about.address);
 	const cookie = newSessionSecret();
-	return app.gate.run(() => {
+	const signedIn = app.gate.run(() => {
 		const opened = openSession(app, {
 			tokenHash,
 			sessionHash: hashToken(cookie),
@@ -478,6 +558,7 @@ export function signInWithToken(
 		});
 		return opened ? { cookie, expiresAt: opened.expiresAt } : null;
 	});
+	return { kind: "opening", signedIn };
 }
 
 /**

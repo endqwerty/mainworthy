@@ -464,6 +464,15 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 	expect(await choose(refused, { MAINWORTHY_TOKEN: "" })).toBe(
 		"none: https://mainworthy.example refuses a job with no MAINWORTHY_TOKEN",
 	);
+	// A token that failed too often is told to wait (429). That is a refusal too, and no reason to start the
+	// job's own instance: a pipeline's token is one the instance generated, and a right one passes a block.
+	const waiting = {
+		...healthy,
+		"/api/session": () => new Response("{}", { status: 429, headers: { "retry-after": "8" } }),
+	};
+	expect(await choose(waiting)).toBe(
+		"none: https://mainworthy.example tells MAINWORTHY_TOKEN to wait after too many failed attempts (429): it is revoked or mistyped, or not a token the instance generated",
+	);
 	const reader = {
 		...healthy,
 		"/api/session": () =>

@@ -66,6 +66,13 @@ function scratch(): string {
 	return dir;
 }
 
+/**
+ * What a start said about tokens. A server that names no proxy also says so on every start (the limit on failed
+ * sign-ins, `test/limit.test.ts`); that line is not this file's subject.
+ */
+const said = (instance: { warnings: string[] }): string[] =>
+	instance.warnings.filter((line) => !line.startsWith("MAINWORTHY_TRUSTED_PROXY"));
+
 type Boot = { mode?: Config["mode"]; dataDir?: string; clock?: Clock; owner?: string; ownerToken?: string | null };
 /** An instance with the archive routes. In server mode its owner `robin` signs in with `OWNER` unless told otherwise. */
 function boot(options: Boot = {}): Instance {
@@ -79,6 +86,7 @@ function boot(options: Boot = {}): Instance {
 			owner: options.owner ?? "robin",
 			ownerToken: options.ownerToken === undefined ? (mode === "server" ? OWNER : null) : options.ownerToken,
 			commit: null,
+			proxy: null,
 			sessionIdleMs: 14 * DAY,
 			sessionMaxMs: 90 * DAY,
 		},
@@ -556,7 +564,7 @@ describe("the owner's token from the environment", () => {
 		const clock = clockAt();
 		const dataDir = scratch();
 		const first = boot({ clock, dataDir });
-		expect(first.warnings).toEqual([]);
+		expect(said(first)).toEqual([]);
 		// Two more tokens of the owner, which no variable holds: one the owner made, one a start generated.
 		const own = await token(first, { ...FOR_OWNER, label: "robin's laptop" });
 		await first.app.gate.run(() =>
@@ -572,11 +580,11 @@ describe("the owner's token from the environment", () => {
 
 		clock.advance(DAY);
 		const second = boot({ clock, dataDir, ownerToken: SECOND });
-		expect(second.warnings).toEqual([
+		expect(said(second)).toEqual([
 			"MAINWORTHY_OWNER_TOKEN has a new value: the token it held before (token 1 of robin) was revoked, and every session opened with it has ended. Sign in with the new value.",
 		]);
-		expect(second.warnings.join("")).not.toContain(OWNER);
-		expect(second.warnings.join("")).not.toContain(SECOND);
+		expect(said(second).join("")).not.toContain(OWNER);
+		expect(said(second).join("")).not.toContain(SECOND);
 		expect([
 			await statusOf(second, bearer(OWNER)),
 			(await signIn(second, OWNER)).status,
@@ -594,13 +602,13 @@ describe("the owner's token from the environment", () => {
 
 		// The same value again changes nothing and says nothing.
 		const third = boot({ clock, dataDir, ownerToken: SECOND });
-		expect(third.warnings).toEqual([]);
+		expect(said(third)).toEqual([]);
 		expect(tokens(third).map((row) => row.revoked_at)).toEqual([T0 + DAY, null, null, null]);
 		await third.stop();
 
 		// The first value again is a token that was revoked: it is not revived, and it retires nothing.
 		const fourth = boot({ clock, dataDir, ownerToken: OWNER });
-		expect(fourth.warnings).toEqual([
+		expect(said(fourth)).toEqual([
 			expect.stringMatching(/^MAINWORTHY_OWNER_TOKEN was revoked: .* Set MAINWORTHY_OWNER_TOKEN to a new value/),
 		]);
 		expect([await statusOf(fourth, bearer(OWNER)), await statusOf(fourth, bearer(SECOND))]).toEqual([401, 200]);
@@ -622,7 +630,7 @@ describe("the owner's token from the environment", () => {
 		// No actor and no token was made, and the database was left closed: the next start is the instance's first.
 		const twenty = `${nineteen}k`;
 		const warned = boot({ dataDir, ownerToken: twenty });
-		expect(warned.warnings).toEqual([
+		expect(said(warned)).toEqual([
 			"MAINWORTHY_OWNER_TOKEN is shorter than 32 characters. It signs robin in as it is; a longer one is harder to guess. Make one with `openssl rand -hex 32`.",
 		]);
 		expect(tokens(warned)).toMatchObject([{ id: 1, source: "env" }]);
@@ -630,15 +638,15 @@ describe("the owner's token from the environment", () => {
 		await warned.stop();
 		// It warns on every start, not only on the one that stored it.
 		const again = boot({ dataDir, ownerToken: twenty });
-		expect(again.warnings).toHaveLength(1);
+		expect(said(again)).toHaveLength(1);
 		await again.stop();
 
 		const quiet = boot({ ownerToken: "a".repeat(32) });
-		expect(quiet.warnings).toEqual([]);
+		expect(said(quiet)).toEqual([]);
 		await quiet.stop();
 		// A variable a compose file passes on empty is one that was not set: the start generates the token.
 		const unset = boot({ ownerToken: "" });
-		expect([unset.warnings, unset.generatedToken]).toEqual([[], expect.stringMatching(/^cb_/)]);
+		expect([said(unset), unset.generatedToken]).toEqual([[], expect.stringMatching(/^cb_/)]);
 		// The same rule where the machine's owner needs no token: the value is a token there too.
 		expect(() => boot({ mode: "local", ownerToken: nineteen })).toThrow("shorter than 20 characters");
 	});
@@ -658,7 +666,7 @@ describe("the owner's token from the environment", () => {
 		);
 		const instance = boot({ ownerToken: longest });
 		expect([
-			instance.warnings,
+			said(instance),
 			await statusOf(instance, bearer(longest)),
 			(await signIn(instance, longest)).status,
 			(await signIn(instance, `${longest}k`)).status,
@@ -697,7 +705,7 @@ describe("the owner's token from the environment", () => {
 		const first = boot({ clock, dataDir });
 		await first.stop();
 		const second = boot({ clock, dataDir, ownerToken: SECOND });
-		expect(second.warnings).toEqual([expect.stringContaining("(token 1 of robin) was revoked")]);
+		expect(said(second)).toEqual([expect.stringContaining("(token 1 of robin) was revoked")]);
 		const { cookie } = await signIn(second, SECOND);
 		// Another person's token that the upgrade marked as from the environment, because of its label.
 		const sam = await token(second, { actor: "sam" }, bearer(SECOND));
@@ -713,7 +721,7 @@ describe("the owner's token from the environment", () => {
 		// The owner's name and the configured value change in one start.
 		clock.advance(DAY);
 		const third = boot({ clock, dataDir, owner: "alex", ownerToken: THIRD });
-		expect(third.warnings).toEqual([
+		expect(said(third)).toEqual([
 			"MAINWORTHY_OWNER_TOKEN has a new value: the tokens it held before (token 2 of robin, token 4 of sam) were revoked, and every session opened with them has ended. Sign in with the new value.",
 		]);
 		const listing = await admin(third, { do: "token.list" }, bearer(SECOND));
@@ -746,10 +754,10 @@ describe("the owner's token from the environment", () => {
 
 		clock.set(T0 + HOUR);
 		const second = boot({ clock, dataDir, ownerToken: brief.token });
-		expect(second.warnings).toEqual([
+		expect(said(second)).toEqual([
 			`MAINWORTHY_OWNER_TOKEN reached its end at ${new Date(T0 + HOUR).toISOString()}: it does not sign robin in, and it was left as it is. Set MAINWORTHY_OWNER_TOKEN to a new value and start again.`,
 		]);
-		expect(second.warnings.join("")).not.toContain(brief.token);
+		expect(said(second).join("")).not.toContain(brief.token);
 		expect([await statusOf(second, bearer(brief.token)), second.generatedToken]).toEqual([401, null]);
 		expect(tokens(second)).toMatchObject([
 			{ id: 1, revoked_at: T0 },
@@ -758,7 +766,7 @@ describe("the owner's token from the environment", () => {
 		await second.stop();
 		// A new value is the way back in, as the line says.
 		const third = boot({ clock, dataDir, ownerToken: SECOND });
-		expect([third.warnings, await statusOf(third, bearer(SECOND))]).toEqual([[], 200]);
+		expect([said(third), await statusOf(third, bearer(SECOND))]).toEqual([[], 200]);
 	});
 
 	test("a start that is refused says what it left alone: no actor and no token, though the schema was brought up to date", async () => {
@@ -810,16 +818,16 @@ describe("the owner's token from the environment", () => {
 
 		clock.advance(DAY);
 		const second = boot({ clock, dataDir });
-		expect(second.warnings).toEqual([
+		expect(said(second)).toEqual([
 			`token ${soon.id} of pipeline ("CI\\non main") expires in 13 days, and what uses it is refused from then on. Make its replacement with \`mainworthy token new\`, and revoke this one once the replacement is in use.`,
 		]);
-		for (const made of [soon, later, gone, revoked]) expect(second.warnings.join("")).not.toContain(made.token);
+		for (const made of [soon, later, gone, revoked]) expect(said(second).join("")).not.toContain(made.token);
 		await second.stop();
 
 		// Sixteen days on, the first has ended and is not named again; the second now ends within 14 days.
 		clock.advance(16 * DAY);
 		const third = boot({ clock, dataDir });
-		expect(third.warnings).toEqual([
+		expect(said(third)).toEqual([
 			expect.stringMatching(new RegExp(`^token ${later.id} of helper \\("agent token"\\) expires in 13 days,`)),
 		]);
 	});
@@ -832,7 +840,7 @@ describe("an upgrade", () => {
 		writeFileSync(path, Bun.gunzipSync(readFileSync(FIXTURE.file)));
 		const clock = clockAt(FIXTURE.stoppedAt + HOUR);
 		const instance = boot({ dataDir, clock, ownerToken: FIXTURE.env });
-		expect(instance.warnings).toEqual([]);
+		expect(said(instance)).toEqual([]);
 		expect(existsSync(`${path}.v2.bak`)).toBe(true);
 		const versionOf = (file: string): string | undefined => {
 			const raw = new Database(file, { readonly: true });
@@ -883,7 +891,7 @@ describe("an upgrade", () => {
 		// The mark is what a changed variable goes by: the old build's token from the environment is retired, and
 		// the one that build generated is not.
 		const changed = boot({ dataDir, clock, ownerToken: OWNER });
-		expect(changed.warnings).toEqual([expect.stringContaining("(token 2 of robin) was revoked")]);
+		expect(said(changed)).toEqual([expect.stringContaining("(token 2 of robin) was revoked")]);
 		expect([
 			await statusOf(changed, bearer(FIXTURE.env)),
 			await statusOf(changed, { cookie: FIXTURE.ownerCookie }),
@@ -909,11 +917,11 @@ describe("an upgrade", () => {
 			{ id: 2, label: "owner (from EARLIER_OWNER_TOKEN)", source: "env", revoked_at: null },
 			{ id: 3, source: null },
 		]);
-		expect([kept.warnings, await statusOf(kept, bearer(FIXTURE.env))]).toEqual([[], 200]);
+		expect([said(kept), await statusOf(kept, bearer(FIXTURE.env))]).toEqual([[], 200]);
 		await kept.stop();
 		// So a new value in the variable retires it, as it retires one this build labelled.
 		const changed = boot({ dataDir, clock: clockAt(at), ownerToken: OWNER });
-		expect(changed.warnings).toEqual([expect.stringContaining("(token 2 of robin) was revoked")]);
+		expect(said(changed)).toEqual([expect.stringContaining("(token 2 of robin) was revoked")]);
 		expect(tokens(changed)).toMatchObject([{ id: 1 }, { id: 2, revoked_at: at }, { id: 3 }, { id: 4, source: "env" }]);
 		expect(await statusOf(changed, bearer(FIXTURE.env))).toBe(401);
 	});

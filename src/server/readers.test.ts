@@ -30,6 +30,7 @@ function config(): Config {
 		ownerToken: null,
 		commit: null,
 		...SESSION_LIFETIMES,
+		proxy: null,
 	};
 }
 

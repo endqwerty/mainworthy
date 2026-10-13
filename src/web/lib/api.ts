@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Api, Envelope, OpName, SessionInfo } from "../../core/api.ts";
+import { type Api, type Envelope, ERROR_CODES, type OpName, type SessionInfo } from "../../core/api.ts";
 import { type DeviceSession, deviceSession, sessionCurrent, suspendDeviceSession } from "./device.ts";
 
 const Wire = z.discriminatedUnion("ok", [
@@ -7,7 +7,7 @@ const Wire = z.discriminatedUnion("ok", [
 	z.object({
 		ok: z.literal(false),
 		error: z.object({
-			code: z.enum(["invalid", "unauthenticated", "forbidden", "not_found", "conflict", "internal"]),
+			code: z.enum(ERROR_CODES),
 			message: z.string(),
 		}),
 	}),
@@ -110,14 +110,18 @@ export async function session(
 	return { ...info, projects: info.projects.filter((project) => project.can.includes("read")) };
 }
 export async function login(token: string): Promise<void> {
-	const envelope = Wire.parse(
-		await (
-			await fetch("/api/login", {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ token }),
-			})
-		).json(),
-	);
-	if (!envelope.ok) refuse(envelope.error, "That token was not accepted. Try again.");
+	const response = await fetch("/api/login", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ token }),
+	});
+	const envelope = Wire.parse(await response.json());
+	if (envelope.ok) return;
+	if (envelope.error.code !== "limited") refuse(envelope.error, "That token was not accepted. Try again.");
+	// Too many wrong tokens, from this address or at this token. The server says how long to wait in a header;
+	// a proxy that dropped it leaves the sentence without a number.
+	const seconds = Number(response.headers.get("retry-after") ?? "");
+	const wait =
+		Number.isInteger(seconds) && seconds > 0 ? `in ${seconds} ${seconds === 1 ? "second" : "seconds"}` : "later";
+	refuse(envelope.error, `Too many attempts. Try again ${wait}.`);
 }
