@@ -229,8 +229,8 @@ function SettingsWorkbench() {
 								</label>
 							</div>
 							<PresetGuide marked={inForce} as="in force" />
-							{/* A switch between two presets says nothing true of a policy that is neither. */}
-							{(inForce || switching) && (
+							{/* A switch between two presets says nothing true of a policy that is neither, also while it changes. */}
+							{inForce && (
 								<label className="settings-agent-toggle">
 									<input
 										type="checkbox"
