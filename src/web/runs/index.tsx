@@ -80,7 +80,9 @@ function RunListing() {
 						</ListRow>
 					))}
 					{!runs.length && (
-						<EmptyState>
+						<EmptyState
+							{...(!read.error && !read.isPending ? { doc: { page: "runs", label: "How a planned run works" } } : {})}
+						>
 							{read.error?.message ?? (read.isPending ? "Reading runs…" : "No runs yet. Press n to plan one.")}
 						</EmptyState>
 					)}

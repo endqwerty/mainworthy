@@ -9,7 +9,7 @@ import { randomId } from "../lib/ids.ts";
 import { useBindings } from "../lib/keys.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
-import { age, EmptyState, KeyCap, ListRow, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
+import { age, DocLink, EmptyState, KeyCap, ListRow, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
 import "./settings.css";
 
 const sections = ["Policy", "Tokens", "Projects", "Connect"];
@@ -196,7 +196,9 @@ function SettingsWorkbench() {
 							<div className="settings-policy-head">
 								<div>
 									<h2>{preset}</h2>
-									<p className="dim">The policy decides whose answers count.</p>
+									<p className="dim">
+										The policy decides whose answers count. <DocLink page="policy">How policies work</DocLink>
+									</p>
 									<p className="settings-preset-summary">
 										{inForce
 											? PRESET_SUMMARY[inForce]
@@ -318,12 +320,16 @@ function SettingsWorkbench() {
 							<pre className="settings-command">{`MAINWORTHY_URL=${location.origin}\nMAINWORTHY_PROJECT=${project}\nmainworthy report results/*.xml\nmainworthy gate`}</pre>
 							<p className="dim">
 								Set MAINWORTHY_TOKEN to a pipeline token in the runner's secret store. A pipeline token records results
-								and reads the gate; it cannot read or change the suite.
+								and reads the gate; it cannot read or change the suite.{" "}
+								<DocLink page="report-results">How to report results</DocLink>
 							</p>
 							<SectionHeading>Connect an agent</SectionHeading>
 							<p>Create an agent token with read and produce permissions. Under standard, edits wait for a person.</p>
 							<pre className="settings-command">{`${location.origin}/mcp`}</pre>
-							<p className="dim">Send the token as a Bearer authorization header to the MCP endpoint.</p>
+							<p className="dim">
+								Send the token as a Bearer authorization header to the MCP endpoint.{" "}
+								<DocLink page="agents">How to let an agent in</DocLink>
+							</p>
 						</>
 					)}
 				</div>
@@ -345,7 +351,10 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 	return (
 		<>
 			<h2>Tokens</h2>
-			<p className="dim">A token identifies its producer and is limited to this project.</p>
+			<p className="dim">
+				A token identifies its producer and is limited to this project.{" "}
+				<DocLink page="access">People, agents and pipelines</DocLink>
+			</p>
 			<form
 				className="settings-form"
 				onSubmit={(event) => {
@@ -528,6 +537,9 @@ function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElem
 	return (
 		<>
 			<h2>Projects</h2>
+			<p className="dim">
+				Each project has its own cases, queue and policy. <DocLink page="customize">What you can customize</DocLink>
+			</p>
 			{session.projects.map((p) => (
 				<button
 					className="settings-project"

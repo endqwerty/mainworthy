@@ -578,3 +578,21 @@ version, one blocker, V1) and `ui-r9-fix-check-4.md` (with the fix, PASS). The s
 were so before this change and are not fixed by it. Leaving the editor in the ordinary way still drops a step
 that has an expected result and no action (issue #86). `R3B-2 the first queue cursor survives a new question and
 settlement elsewhere` times out now and then on a 10-thread Mac (issue #87).
+
+## The documentation at `/docs` (decision 0016)
+
+The checks that decide this change, written before it. `test/docs.test.ts` and `test/e2e/docs.test.ts` hold them.
+
+- D1: Signed out, in server mode, `/docs` and each of its pages answer 200 with no cookie set, while
+  `/api/session` and an operation still answer 401.
+- D2: The sidebar has Docs, which opens the page about the screen that is open, and the sign-in page has "Read the docs", which opens `/docs`. Both open a new tab.
+- D3: `g d` on the queue opens `/docs/decide` in a new tab, in the theme the app is in. The `?` sheet links to the
+  same page and to the keyboard page. `docs policy` in the palette offers "Docs: Policy". The empty queue links to
+  the page that says how a question gets there.
+- D4: A diagram on a page is drawn, in the page's theme, and its frame has an origin of its own: a `fetch` of
+  `/api/session` from inside it is refused.
+- D5: `/` focuses the search, typed words list headings that hold them, and Enter goes to the first.
+- D6: Every key the `?` sheet lists on each screen is a row of `docs/guide/keyboard.md` with the same words.
+- D7: No page of the docs runs a script or a style written into the page, and none makes the browser report an
+  error.
+

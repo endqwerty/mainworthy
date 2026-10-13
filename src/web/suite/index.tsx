@@ -1478,7 +1478,9 @@ export function SuiteScreen() {
 					)}
 					{rows.length === 0 ? (
 						list.error ? null : (
-							<EmptyState>
+							<EmptyState
+								{...(!list.isPending && !search ? { doc: { page: "write-cases", label: "How to write a case" } } : {})}
+							>
 								{list.isPending
 									? "Reading cases…"
 									: search
