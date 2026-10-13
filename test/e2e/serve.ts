@@ -14,6 +14,7 @@ const instance = start(
 		ownerToken: process.env.MAINWORTHY_OWNER_TOKEN ?? null,
 		commit: null,
 		...SESSION_LIFETIMES,
+		proxy: null,
 	},
 	(app, owner) => ({ ui, routes: archiveRoutes(app, owner), open: docsRoutes(VERSION) }),
 );

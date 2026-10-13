@@ -3,11 +3,14 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { Glob } from "bun";
+import { z } from "zod";
+import { ERROR_CODES, HTTP_STATUS } from "../src/core/api.ts";
 import { needs } from "../src/core/kinds.ts";
 import { Db, declaredSql } from "../src/server/kernel/db.ts";
 import { MIGRATIONS, migrate } from "../src/server/kernel/migrate.ts";
 import { MCP_OPS, OP_LIST } from "../src/server/ops/index.ts";
 import { UNEXPORTED } from "../src/server/transfer/transfer.ts";
+import { openApi } from "../src/surfaces/http.ts";
 import "../src/server/jobs.ts";
 
 const files = [...new Glob("src/**/*.{ts,tsx}").scanSync(".")].filter(
@@ -330,6 +333,36 @@ describe("the registry", () => {
 			"approve",
 		];
 		expect(OP_LIST.map((op) => op.name).filter((name) => forbidden.includes(name))).toEqual([]);
+	});
+});
+
+describe("the codes of a refusal", () => {
+	test("the error codes are written once, in src/core/api.ts", () => {
+		// A reply that did not run says why with one of `ERROR_CODES`. The status of each, the API description and
+		// the schemas with which the CLI, the web client and the reader threads read a reply all take that list.
+		// Each of them once had a copy of its own, and a code added to one and not to the others was a reply some
+		// client could not read. Four of the codes written side by side, as a union or as an array, are a copy.
+		// (Three are not: what became of a decision is `conflict`, `forbidden` or `invalid` among other words.)
+		const code = `["'\`](?:${ERROR_CODES.join("|")})["'\`]`;
+		const copy = new RegExp(`${code}(?:\\s*[,|]\\s*${code}){3,}`, "g");
+		const copies = files.flatMap((file) => [...readFileSync(file, "utf8").matchAll(copy)].map(() => file));
+		expect(copies).toEqual(["src/core/api.ts"]);
+		// What is made from the list holds every code of it: a status for each, and each in the API description.
+		expect(Object.keys(HTTP_STATUS).sort()).toEqual([...ERROR_CODES].sort());
+		const described = z
+			.object({
+				components: z.object({
+					schemas: z.object({
+						Failed: z.object({
+							properties: z.object({
+								error: z.object({ properties: z.object({ code: z.object({ enum: z.array(z.string()) }) }) }),
+							}),
+						}),
+					}),
+				}),
+			})
+			.parse(openApi()).components.schemas.Failed.properties.error.properties.code.enum;
+		expect(described).toEqual([...ERROR_CODES]);
 	});
 });
 

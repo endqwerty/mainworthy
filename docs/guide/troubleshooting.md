@@ -37,6 +37,12 @@ A command that could not run prints one line to standard error, the code and the
 
 No server answers at that address. Start one with `mainworthy serve`, or point the command at the right one with `--url` or `MAINWORTHY_URL`.
 
+### `limited: too many failed attempts`
+
+Five wrong tokens came from your address, or five wrong tokens that begin as yours does, within 15 minutes. Wait the seconds the message names and try again with the right token. Each further wrong one doubles the wait, up to 15 minutes. If you share an address with whoever is guessing, a token the server generated still works. The owner token the server made from the value of `MAINWORTHY_OWNER_TOKEN` is one somebody chose, whatever it looks like, and waits with the rest.
+
+If everybody behind one proxy gets this message together, the server is counting the proxy as one address. Name the proxy with `MAINWORTHY_TRUSTED_PROXY` and `MAINWORTHY_CLIENT_ADDRESS_HEADER`: see [configuration](./configuration.md).
+
 ### `unauthenticated: a token is required`
 
 The server is in server mode, or the token is wrong or was revoked. Pass a token with `--token` or `MAINWORTHY_TOKEN`. See [people, agents and pipelines](./access.md).

@@ -38,6 +38,7 @@ function boot(
 			ownerToken,
 			commit: null,
 			...SESSION_LIFETIMES,
+			proxy: null,
 		},
 		() => ({ ui: null }),
 		options.patience ? { patience: options.patience } : {},
@@ -108,6 +109,7 @@ function bootReaders(count: number): Instance {
 			ownerToken: null,
 			commit: null,
 			...SESSION_LIFETIMES,
+			proxy: null,
 		},
 		() => ({ ui: null }),
 		{ readers: count },
@@ -909,6 +911,10 @@ describe("the owner always has a way in", () => {
 	// Long enough that the start has nothing to say about its length (32 characters or more).
 	const OWNER = "owner-secret-0123456789abcdef-012345";
 	const owner = bearer(OWNER);
+	/** What every start in server mode says when it names no proxy, as these do (`test/limit.test.ts`). */
+	const NO_PROXY_NAMED = expect.stringMatching(
+		/^MAINWORTHY_TRUSTED_PROXY and MAINWORTHY_CLIENT_ADDRESS_HEADER are not set: /,
+	);
 	const admin = <T>(instance: Instance, input: unknown, headers: Record<string, string> = owner) =>
 		post<T>(instance, "/api/admin", input, headers);
 	async function token(instance: Instance, input: Record<string, unknown>): Promise<string> {
@@ -992,7 +998,7 @@ describe("the owner always has a way in", () => {
 	test("a configured owner token that was revoked, or is somebody else's, is not revived: the start says so and names the variable", async () => {
 		const first = boot("server", OWNER);
 		const dana = await token(first, { actor: "dana", kind: "human" });
-		expect(first.warnings).toEqual([]);
+		expect(first.warnings).toEqual([NO_PROXY_NAMED]);
 		// Revoked before this rule existed, or in the database by hand.
 		first.app.db.raw.query("UPDATE tokens SET revoked_at = 1 WHERE label LIKE 'owner %'").run();
 		await first.stop();
@@ -1000,6 +1006,7 @@ describe("the owner always has a way in", () => {
 		const revoked = boot("server", OWNER, first.app.config.dataDir);
 		expect(revoked.warnings).toEqual([
 			expect.stringMatching(/^MAINWORTHY_OWNER_TOKEN .*revoked.* Set MAINWORTHY_OWNER_TOKEN to a new value/),
+			NO_PROXY_NAMED,
 		]);
 		expect(revoked.warnings.join("")).not.toContain("\n");
 		expect([await whoIs(revoked, OWNER), revoked.generatedToken]).toEqual(["401", null]);
@@ -1008,14 +1015,18 @@ describe("the owner always has a way in", () => {
 		const borrowed = boot("server", dana, first.app.config.dataDir);
 		expect(borrowed.warnings).toEqual([
 			expect.stringMatching(/^MAINWORTHY_OWNER_TOKEN .*dana.* Set MAINWORTHY_OWNER_TOKEN to a new value/),
+			NO_PROXY_NAMED,
 		]);
 		expect([await whoIs(borrowed, dana), borrowed.generatedToken]).toEqual(["dana", null]);
 		expect(borrowed.warnings.join("")).not.toContain(dana);
 		await borrowed.stop();
 
-		// A new value is a new token for the owner, and the start has nothing to say.
+		// A new value is a new token for the owner, and the start has nothing to say about it.
 		const renewed = boot("server", "another-owner-secret-0123456789abcdef", first.app.config.dataDir);
-		expect([renewed.warnings, await whoIs(renewed, "another-owner-secret-0123456789abcdef")]).toEqual([[], "robin"]);
+		expect([renewed.warnings, await whoIs(renewed, "another-owner-secret-0123456789abcdef")]).toEqual([
+			[NO_PROXY_NAMED],
+			"robin",
+		]);
 	});
 
 	test("with no token configured and none left for the owner, as after an import, the start makes one and shows it", async () => {
@@ -1030,7 +1041,7 @@ describe("the owner always has a way in", () => {
 		const generated = again.generatedToken ?? "";
 		expect(generated).toMatch(/^cb_[0-9A-Za-z]{32}$/);
 		expect(generated).not.toBe(original);
-		expect([await whoIs(again, generated), again.warnings]).toEqual(["robin", []]);
+		expect([await whoIs(again, generated), again.warnings]).toEqual(["robin", [NO_PROXY_NAMED]]);
 		await again.stop();
 
 		// Once the owner holds one, the next start makes no other.

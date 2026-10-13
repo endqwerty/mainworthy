@@ -164,6 +164,7 @@ function boot(ui: unknown = null): Instance {
 			ownerToken: TOKEN,
 			commit: null,
 			...SESSION_LIFETIMES,
+			proxy: null,
 		},
 		(app, owner) => ({
 			ui,
@@ -373,6 +374,7 @@ describe("a route that answers without a session and writes the policy of its ow
 				owner: "robin",
 				ownerToken: TOKEN,
 				commit: null,
+				proxy: null,
 				...SESSION_LIFETIMES,
 			},
 			() => ({
@@ -443,6 +445,7 @@ describe("a route that answers without a session and writes the policy of its ow
 				owner: "robin",
 				ownerToken: TOKEN,
 				commit: null,
+				proxy: null,
 				...SESSION_LIFETIMES,
 			},
 			() => ({ ui: null, open: docsRoutes("0.0.0") }),

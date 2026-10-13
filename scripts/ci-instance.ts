@@ -99,6 +99,14 @@ export async function chooseInstance(env: Environment, probe: Probe = PROBE): Pr
 			use: "none",
 			why: `${url} refuses ${token ? "MAINWORTHY_TOKEN (revoked or mistyped)" : "a job with no MAINWORTHY_TOKEN"}`,
 		};
+	// An instance limits failed attempts, and answers 429 to a token whose address or first characters failed
+	// too often. That is a credential the instance refuses and not an instance to give up on: a token the
+	// instance generated, as a pipeline's is, passes a block when it is right.
+	if (response.status === 429)
+		return {
+			use: "none",
+			why: `${url} tells MAINWORTHY_TOKEN to wait after too many failed attempts (429): it is revoked or mistyped, or not a token the instance generated`,
+		};
 	const session = Session.safeParse(await response.json().catch(() => null));
 	if (!session.success) return own(`${url} did not say who this job is`);
 	const recordable = session.data.result.projects

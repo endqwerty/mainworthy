@@ -143,6 +143,7 @@ test.skipIf(!browserAvailable)(
 				owner: "robin",
 				ownerToken: null,
 				commit: null,
+				proxy: null,
 				...SESSION_LIFETIMES,
 			},
 			() => ({ ui: imported.default }),

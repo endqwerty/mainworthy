@@ -1,5 +1,7 @@
-/** Why an operation did not run. `conflict` is for a stale base or a duplicate; a rule that says no is `forbidden`. */
-export type ErrorCode = "invalid" | "unauthenticated" | "forbidden" | "not_found" | "conflict" | "internal";
+import type { ErrorCode } from "../../core/api.ts";
+
+// The codes are written once, in `core/api.ts`, with the status of each. The server names the type from here.
+export type { ErrorCode };
 
 /**
  * The one error type an operation throws. Throwing inside a write rolls the whole command back, so a failed
@@ -35,12 +37,3 @@ export const forbidden = (message: string, details?: Record<string, unknown>) =>
 	new OpError("forbidden", message, details);
 export const conflict = (message: string, details?: Record<string, unknown>) =>
 	new OpError("conflict", message, details);
-
-export const HTTP_STATUS: Record<ErrorCode, number> = {
-	invalid: 400,
-	unauthenticated: 401,
-	forbidden: 403,
-	not_found: 404,
-	conflict: 409,
-	internal: 500,
-};

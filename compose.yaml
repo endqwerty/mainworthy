@@ -17,6 +17,10 @@ services:
       # How long a browser stays signed in: unused, and at most. Empty means 14d and 90d.
       MAINWORTHY_SESSION_IDLE: ${MAINWORTHY_SESSION_IDLE:-}
       MAINWORTHY_SESSION_MAX: ${MAINWORTHY_SESSION_MAX:-}
+      # Behind a proxy: the addresses it connects from, and the header it writes the visitor's address in, so
+      # that failed sign-ins are counted for each visitor. Both or neither; empty means not set (docs/deploy.md).
+      MAINWORTHY_TRUSTED_PROXY: ${MAINWORTHY_TRUSTED_PROXY:-}
+      MAINWORTHY_CLIENT_ADDRESS_HEADER: ${MAINWORTHY_CLIENT_ADDRESS_HEADER:-}
     volumes:
       - mainworthy-data:/data
 

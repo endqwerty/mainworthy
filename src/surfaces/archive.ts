@@ -1,11 +1,12 @@
 import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { HTTP_STATUS } from "../core/api.ts";
 import { bootstrap, clearUses, type Session } from "../server/identity/identity.ts";
 import { recoverAccepted } from "../server/jobs.ts";
 import type { App } from "../server/kernel/app.ts";
 import type { Actor } from "../server/kernel/ctx.ts";
-import { HTTP_STATUS, OpError } from "../server/kernel/errors.ts";
+import { OpError } from "../server/kernel/errors.ts";
 import { exportArchive, importArchive, linesOf, removeBootstrap } from "../server/transfer/transfer.ts";
 
 const CHUNK_BYTES = 64 * 1024;

@@ -35,6 +35,8 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_OWNER_TOKEN` | none | A token for the owner, 20 to 512 characters. Server mode needs one to sign in. |
 | `MAINWORTHY_SESSION_IDLE` | `14d` | How long a browser stays signed in without being used. A whole number and `h`, `d` or `w`: `12h`, `14d`, `2w`. |
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. The same form. |
+| `MAINWORTHY_TRUSTED_PROXY` | none | The addresses or CIDR ranges of the proxy in front, comma-separated. Set it together with the next one, or neither. |
+| `MAINWORTHY_CLIENT_ADDRESS_HEADER` | none | The header in which that proxy reports the visitor's address. Believed only on a connection from a proxy named above. |
 | `MAINWORTHY_READERS` | the CPU count minus 2, at least 1 and at most 8 | How many reader threads answer reads. `0` answers them on the main thread. |
 | `MAINWORTHY_COMMIT` | none | The commit this server was built from, which `/healthz` reports. 40 lower-case hexadecimal characters, or it reads as unknown. Without it the server reads `SOURCE_COMMIT`. |
 
@@ -76,7 +78,7 @@ Mainworthy runs as one container with one volume. The container runs the single 
 $ docker compose up -d
 ```
 
-The file defines one service, `mainworthy`. It publishes port 7357, restarts the container unless you stop it, and mounts a named volume, `mainworthy-data`, at `/data`. It passes these variables from your environment to the server: `MAINWORTHY_OWNER_TOKEN`, `MAINWORTHY_OWNER`, which defaults to `owner`, and the two session lifetimes, `MAINWORTHY_SESSION_IDLE` and `MAINWORTHY_SESSION_MAX`, which take the server's defaults when you leave them empty. Set the token to a long random string. If you leave it empty, the server generates one and prints it once, and `docker compose logs` shows it. Open `http://localhost:7357` and sign in with it.
+The file defines one service, `mainworthy`. It publishes port 7357, restarts the container unless you stop it, and mounts a named volume, `mainworthy-data`, at `/data`. It passes these variables from your environment to the server: `MAINWORTHY_OWNER_TOKEN`, `MAINWORTHY_OWNER`, which defaults to `owner`, the two session lifetimes, `MAINWORTHY_SESSION_IDLE` and `MAINWORTHY_SESSION_MAX`, and the two that name a proxy in front, `MAINWORTHY_TRUSTED_PROXY` and `MAINWORTHY_CLIENT_ADDRESS_HEADER`. The last four take the server's defaults when you leave them empty. Set the token to a long random string. If you leave it empty, the server generates one and prints it once, and `docker compose logs` shows it. Open `http://localhost:7357` and sign in with it.
 
 The image checks its own health every 30 seconds by running `mainworthy health`. The check calls `/healthz`, which needs no token:
 
@@ -101,6 +103,12 @@ The server speaks plain HTTP. To serve it over HTTPS, put a proxy in front that 
 2. Set `X-Forwarded-Proto: https`. A list such as `https,http` counts as https.
 
 A browser's request is accepted only when its `Origin` has the same scheme and host as the request. Without the second header, the server sees `http`, an `https` page looks like another site, and sign-in is refused with `unauthenticated: a token is required`, which does not name the cause. With the header, the session cookie is marked `Secure`.
+
+Wrong tokens are counted, by the address they come from and by their first 8 characters. A token is counted where it is asked for: on a request that needs a sign-in, and in the sign-in form. `/healthz`, the API description and the documentation need no sign-in and look at no token. The fifth wrong one within 15 minutes blocks that address or that beginning for one second, and each further one doubles the wait, up to 15 minutes. A blocked request is answered 429 with `Retry-After`. A browser that is signed in is not affected, and neither is a correct token the server generated: one made with `mainworthy token new` or in Settings, or the owner token a start printed. A token the server made from the value of `MAINWORTHY_OWNER_TOKEN` is one you chose, whatever it looks like, and waits with the rest. (A token the server generated and you later copied into the variable is still one the server made, and still passes.) A request that presents a token is judged by the token, whatever cookie comes with it.
+
+Behind a proxy every connection comes from the proxy, so the server cannot tell visitors apart unless you tell it where to look. Set `MAINWORTHY_TRUSTED_PROXY` to the proxy's address as the server sees it, and `MAINWORTHY_CLIENT_ADDRESS_HEADER` to the header the proxy writes the visitor's address in. Name a header the proxy sets itself and a visitor cannot: a visitor who could write it would choose their own address. The header must hold one address and nothing else. With only one of the two set, with an entry that is not an address or a range, or with a header name that is not one, the server does not start and says which.
+
+With neither set, what happens depends on the proxy's address. A loopback or private address, such as a proxy on the same machine or the same Docker network, is not counted at all, and wrong tokens are counted only by their first 8 characters. A server-mode start says so in one line. A public address is counted as one address: every visitor behind the proxy shares one count, and one visitor's wrong tokens block the owner token you chose for all of them until the wait is over. Setting the two variables fixes both.
 
 The server closes a connection nobody has signed in on after three minutes of silence, and answers a sign-in whose body has not arrived within five seconds with 408. A request with a valid token or session is not timed out, so a long reply is not cut off.
 

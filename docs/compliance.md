@@ -43,19 +43,20 @@ agreement, a list of sub-processors, breach notification, data residency): plann
 
 | # | Requirement | Status | How, or what is missing |
 | --- | --- | --- | --- |
-| P1 | Know what personal data is held | met | Actor names, and whatever people type into text fields. For each browser session, what the browser calls itself (its `User-Agent`, cut to 256 characters) and two network addresses; for each token, one network address ("Network addresses" below). The minute job deletes a session's row 30 days after the row records its end: at once for a sign-out or a forgotten actor, and for a session that stopped working another way (its token was revoked or ended, or it went unused) only when the job marks it expired, which for a revoked token is when a lifetime runs out. The cookie is refused from the moment the token stops working; the row, with the `User-Agent` and the addresses, can stay up to the session's lifetime longer. No email, no analytics, no telemetry, and the server writes no log of requests. The only cookie is the session cookie, which is strictly necessary and needs no consent banner. |
+| P1 | Know what personal data is held | met | Actor names, and whatever people type into text fields. For each browser session, what the browser calls itself (its `User-Agent`, cut to 256 characters) and two network addresses; for each token, one network address ("Network addresses" below). The minute job deletes a session's row 30 days after the row records its end: at once for a sign-out or a forgotten actor, and for a session that stopped working another way (its token was revoked or ended, or it went unused) only when the job marks it expired, which for a revoked token is when a lifetime runs out. The cookie is refused from the moment the token stops working; the row, with the `User-Agent` and the addresses, can stay up to the session's lifetime longer. The limit on failed sign-ins also holds, in the server's memory only, the addresses that wrong tokens came from (an IPv6 address as its /64 network): at most 10,000 keys, never in the database or the log, and a restart clears them. No email, no analytics, no telemetry, and the server writes no log of requests. The only cookie is the session cookie, which is strictly necessary and needs no consent banner. |
 | P2 | Access and portability | met | `mainworthy export` writes every fact, decision and document in an open text format. Check: the export and import round-trip test. Tokens and sessions are not exported. |
 | P3 | Erasure of a person | partly | `admin { do: "actor.forget" }` replaces the actor's name with a pseudonym, disables the actor, revokes its tokens, erases the address each of them was last used from, and ends its sessions, whose rows are deleted 30 days later with the addresses they hold. History still says the same actor did each thing; it no longer says who that was. Text the person typed stays (gap 1). |
 | P4 | Storage limitation | not met | Gap 2. |
-| P5 | Security of processing | partly | Tokens are stored as SHA-256 hashes and shown once. A token can be given an end, after which it is refused as a revoked one is, and the owner's token from the environment must have at least 20 characters. A browser holds a session cookie and not a token; the cookie's value is stored as a SHA-256 hash too, and a session ends at sign-out, after 14 days without use and after 90 days (decision 0017). Local mode accepts only same-origin loopback requests. Transport encryption is the reverse proxy's job (Coolify's Traefik), encryption at rest the disk's. No rate limiting on sign-in yet (#30). |
+| P5 | Security of processing | partly | Tokens are stored as SHA-256 hashes and shown once. A token can be given an end, after which it is refused as a revoked one is, and the owner's token from the environment must have at least 20 characters. A browser holds a session cookie and not a token; the cookie's value is stored as a SHA-256 hash too, and a session ends at sign-out, after 14 days without use and after 90 days (decision 0017). Local mode accepts only same-origin loopback requests. Transport encryption is the reverse proxy's job (Coolify's Traefik), encryption at rest the disk's. Wrong tokens are limited by address and by the token's first 8 characters (decision 0017, issue #88); behind a proxy the limit by address needs two variables set (`docs/deploy.md`), and the instance at `mainworthy.com` does not set them yet. Missing: sign-in as a person (#30). |
 | P6 | Records of who did what | met | Every write names an actor and a time and has a place in the project's sequence. Check: the idempotent command log and the ledger tests. |
 
 ### Network addresses
 
 The server stores three network addresses, so that a person can see where a token or a session was used from and
-notice a use that was not theirs. Each is the address the request came from as the server sees it (`peerAddress`
-in `src/surfaces/http.ts`): the other end of the connection. Behind a reverse proxy that is the proxy's address
-and not the visitor's.
+notice a use that was not theirs. Each is the address the request came from as the server determines it (`clientAddress`
+in `src/surfaces/http.ts`): the other end of the connection, or, when that is a proxy the operator named in
+`MAINWORTHY_TRUSTED_PROXY`, the address that proxy reported in the header named beside it. Behind a proxy that
+is not named, it is the proxy's address and not the visitor's.
 
 | Address | Column | Written | Kept until |
 | --- | --- | --- | --- |
@@ -98,8 +99,8 @@ design. It belongs behind the regulated preset only, never on the loose or stand
 ## Security frameworks (SOC 2, ISO 27001)
 
 They certify an organisation, not software. They apply only to a hosted tier (#31). What the product would
-contribute is already listed above (P5, P6, E1, E4). Missing for that day: sign-in rate limiting, an access log
-of reads, and backup procedures with a tested restore on the hosting side.
+contribute is already listed above (P5, P6, E1, E4). Missing for that day: an access log of reads, and backup
+procedures with a tested restore on the hosting side.
 
 ## Accessibility (EU Accessibility Act, EN 301 549, Section 508, ADA)
 

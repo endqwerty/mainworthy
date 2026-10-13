@@ -31,6 +31,7 @@ export function harness(options: { preset?: string; project?: string } = {}): Ha
 			ownerToken: null,
 			commit: null,
 			...SESSION_LIFETIMES,
+			proxy: null,
 		},
 		{ memory: true, now: () => now },
 	);

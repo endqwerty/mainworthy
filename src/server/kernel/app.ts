@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Envelope } from "../../core/api.ts";
 import { DURATION_FORMAT, durationMs } from "../../core/duration.ts";
+import { type AddressRanges, parseAddressRanges } from "./address.ts";
 import type { Actor } from "./ctx.ts";
 import { Db } from "./db.ts";
 import { migrate } from "./migrate.ts";
@@ -30,6 +31,26 @@ export type Config = {
 	sessionIdleMs: number;
 	/** Milliseconds a browser's session lasts however much it is used. `MAINWORTHY_SESSION_MAX`, by default `90d`. */
 	sessionMaxMs: number;
+	/**
+	 * The proxy in front of the server, when the operator named one, else null. It is what says where a request
+	 * came from: without one a request's address is the address of the connection it arrived on.
+	 */
+	proxy: TrustedProxy | null;
+};
+
+/**
+ * A proxy whose word for the client's address is believed. The two halves come from two variables that are set
+ * together or not at all: a header with no peer to believe it from would be believed from anybody, and a peer
+ * with no header says nothing.
+ */
+export type TrustedProxy = {
+	/** The addresses a connection from the proxy comes from. `MAINWORTHY_TRUSTED_PROXY`: addresses and ranges. */
+	peers: AddressRanges;
+	/**
+	 * The header in which the proxy writes the address of the client it serves, in lower case.
+	 * `MAINWORTHY_CLIENT_ADDRESS_HEADER`. It must be one the proxy sets itself, replacing what the client sent.
+	 */
+	header: string;
 };
 
 /** The two lifetimes of a session when the environment names none. */
@@ -151,6 +172,41 @@ function lifetime(env: Record<string, string | undefined>, name: string, fallbac
 	return ms;
 }
 
+/** A header's name: the characters RFC 9110 allows in one. */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9a-z-]+$/i;
+
+/**
+ * The proxy the environment names, or null when it names none. A variable that is unset or empty (a compose file
+ * passes one on empty) is not set. Anything that is set and cannot be read stops the start, with the variable
+ * and the entry at fault: a proxy left out by a typing error is a peer like any other, and then every visitor
+ * behind it is one address, or none.
+ */
+function proxyOf(env: Record<string, string | undefined>): TrustedProxy | null {
+	const list = env.MAINWORTHY_TRUSTED_PROXY?.trim() ?? "";
+	const header = env.MAINWORTHY_CLIENT_ADDRESS_HEADER?.trim() ?? "";
+	if (list === "" && header === "") return null;
+	if (header === "") {
+		throw new Error(
+			"MAINWORTHY_TRUSTED_PROXY is set and MAINWORTHY_CLIENT_ADDRESS_HEADER is not: name the header in which that proxy writes the client's address, or unset both",
+		);
+	}
+	if (list === "") {
+		throw new Error(
+			"MAINWORTHY_CLIENT_ADDRESS_HEADER is set and MAINWORTHY_TRUSTED_PROXY is not: name the addresses of the proxy whose header is to be believed, or unset both",
+		);
+	}
+	if (!HEADER_NAME.test(header)) {
+		throw new Error(`MAINWORTHY_CLIENT_ADDRESS_HEADER is "${header}", which is not the name of a header`);
+	}
+	const peers = parseAddressRanges(list);
+	if (peers.kind === "malformed") throw new Error(`MAINWORTHY_TRUSTED_PROXY: "${peers.entry}" ${peers.why}`);
+	// Commas and spaces alone are a list that was meant to name somebody.
+	if (list.split(",").every((entry) => entry.trim() === "")) {
+		throw new Error(`MAINWORTHY_TRUSTED_PROXY names no address: it is "${list}"`);
+	}
+	return { peers, header: header.toLowerCase() };
+}
+
 export function defaultConfig(env: Record<string, string | undefined>): Config {
 	const host = env.MAINWORTHY_HOST ?? "127.0.0.1";
 	const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
@@ -164,5 +220,6 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		commit: commitOf(env),
 		sessionIdleMs: lifetime(env, "MAINWORTHY_SESSION_IDLE", SESSION_LIFETIMES.sessionIdleMs),
 		sessionMaxMs: lifetime(env, "MAINWORTHY_SESSION_MAX", SESSION_LIFETIMES.sessionMaxMs),
+		proxy: proxyOf(env),
 	};
 }

@@ -76,6 +76,7 @@ function boot(options: Boot = {}): Instance {
 			commit: null,
 			sessionIdleMs: IDLE,
 			sessionMaxMs: MAX,
+			proxy: null,
 		},
 		(app, owner) => ({ ui: null, routes: archiveRoutes(app, owner) }),
 		{ readers: options.readers ?? 0, ...(options.clock ? { now: options.clock.now } : {}) },

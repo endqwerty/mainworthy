@@ -6,6 +6,15 @@ import { join } from "node:path";
 import { z } from "zod";
 import { CLI_ENTRY, COMMIT, withInstance } from "./test-support.ts";
 
+/**
+ * What a start in server mode says when the environment names no proxy: one line on stderr, once. A start in
+ * local mode does not say it, and neither does one with the two variables set (`BEHIND_PROXY`).
+ */
+const NO_PROXY_NAMED =
+	"mainworthy: MAINWORTHY_TRUSTED_PROXY and MAINWORTHY_CLIENT_ADDRESS_HEADER are not set: a failed sign-in from a loopback or private address, which behind a proxy is every visitor's, is not counted against that address, only against the first 8 characters of the token it tried. docs/deploy.md says how to set the two.\n";
+/** The two variables, for a start that is about something else and should have nothing to say about the limit. */
+const BEHIND_PROXY = { MAINWORTHY_TRUSTED_PROXY: "10.0.0.1", MAINWORTHY_CLIENT_ADDRESS_HEADER: "x-real-ip" };
+
 for (const options of [
 	{ argv: [], mode: "local", signal: "SIGTERM" },
 	{ argv: ["serve"], mode: "local", signal: "SIGINT" },
@@ -70,7 +79,9 @@ for (const options of [
 				}
 				expect(stdout.trim().split("\n")).toHaveLength(options.mode === "server" ? 3 : 2);
 				const stderr = await new Response(child.stderr).text();
-				expect(stderr.replace(/^Bundled page in [\d.]+(?:ms|s): .+\n/gm, "")).toBe("");
+				expect(stderr.replace(/^Bundled page in [\d.]+(?:ms|s): .+\n/gm, "")).toBe(
+					options.mode === "server" ? NO_PROXY_NAMED : "",
+				);
 			} finally {
 				clearTimeout(timeout);
 				child.kill("SIGKILL");
@@ -96,6 +107,7 @@ test("an install under the former name is carried over on the next start, and it
 				USER: "robin",
 				MAINWORTHY_PORT: "0",
 				MAINWORTHY_MODE: "server",
+				...BEHIND_PROXY,
 			},
 			stdout: "pipe",
 			stderr: "pipe",
@@ -172,6 +184,7 @@ test("a start says when the configured owner token is not the owner's, and refus
 				USER: "robin",
 				MAINWORTHY_PORT: "0",
 				MAINWORTHY_MODE: "server",
+				...BEHIND_PROXY,
 				...env,
 			},
 			stdout: "pipe",

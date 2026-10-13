@@ -139,12 +139,42 @@ operations: nobody is signed in yet, and the registry runs nothing for a caller 
 
 Being used is not a write. `admit` notes in memory when a token or a session was last used and from which
 address, and the server writes the notes once a minute and when it stops (`src/server/identity/uses.ts`). The
-address is the one `peerAddress` in `src/surfaces/http.ts` gives for the request; a use that has none (a request
+address is the one `clientAddress` in `src/surfaces/http.ts` gives for the request; a use that has none (a request
 that never was on a connection) writes its time and leaves the address in the row. The idle check and
 `token.list` read the newer of the note and the row, so a read never waits for the writer. A crash loses the
 notes since the last write: somebody may have to sign in again early, and no session lives longer for it. The
 same minute timer ends, in the database, each session that has passed a lifetime, so that a clock set back does
 not revive it.
+
+Failed attempts are limited (decision 0017; `src/server/identity/limiter.ts`). `admit` counts a wrong bearer
+token, and `POST /api/login` a wrong token typed into the form, under two keys: the address the request came
+from and the first 8 characters of the secret. The fifth failure of a key within 15 minutes blocks it for one
+second, and each failure after that doubles the block, up to 15 minutes. A request whose key is blocked is
+answered 429 with `Retry-After` and the error code `limited`, and its secret is not looked up. One secret is
+looked up all the same: a token in the form the server generates passes when it is right and the server made
+it, so a pipeline is not stopped by whoever shares its address. Passing reports nothing and clears nothing; the
+block runs out by the clock. A token a person chose gets no pass, and a token the start made from the value of
+`MAINWORTHY_OWNER_TOKEN` is one whatever its form: the row says where a token came from (`tokens.source`), and
+that decides. (A generated token later copied into the variable keeps the row the server made, and passes.)
+A request that presents a token is judged by the token, whatever cookie comes with it; a session cookie on a
+request with no token is never counted, and neither is the owner of the machine in local mode. The count is in
+memory, one for each instance, at most 10,000 keys, and a restart forgets it: a failed attempt writes nothing
+and never waits at the write gate. Every route that takes a session is under the limit, `/mcp`, the archive and
+the change stream included, because each takes its session in one place (`sessionFor` in `src/surfaces/http.ts`).
+A route that takes none (`/healthz`, the API description, the documentation) looks at no token, and a sign-in
+body the schema refuses is refused before it is counted.
+
+The address a request came from is the address of its connection (`clientAddress` in `src/surfaces/http.ts`).
+Headers that claim another one are ignored, with one exception: when the connection comes from a proxy the
+operator named in `MAINWORTHY_TRUSTED_PROXY`, the address is read from the header named in
+`MAINWORTHY_CLIENT_ADDRESS_HEADER`, which must hold exactly one address. A loopback or private address is never
+counted, because behind a proxy it is every visitor's. So a server that names no proxy and sits behind one
+with a loopback or private address counts a wrong token against its first 8 characters only, which does not
+slow a guesser who varies them, and its start says so in one line. A proxy that is not named and has a public
+address is counted as one address like any other peer: its visitors share one count, and one visitor's
+failures block the others' hand-chosen tokens. Naming the proxy is the fix for both. How an address and a
+range are written is
+`src/server/kernel/address.ts`, which the configuration, the limit and the HTTP surface all read with.
 
 A connection that sends nothing is closed after three minutes, unless somebody has vouched for it: a request that
 is given a session takes the timeout off its connection (`sessionFor` in `src/surfaces/http.ts`). The timeout
@@ -314,7 +344,8 @@ decisions); a module runs SQL on a table another module owns (every one of the 3
 read of someone else's data goes through their functions); anything but the kernel talks to SQLite; anything
 but the decision machinery mints a witness; a writer that undoes a withdrawn decision is called from anywhere
 but a kind handler; the core imports I/O; the web UI imports the server; a declared SQL statement does not
-prepare against the schema; or the agent surface grows past ten tools. `test/integrity.test.ts` holds one test
+prepare against the schema; the error codes of a reply are written out a second time outside `src/core/api.ts`;
+or the agent surface grows past ten tools. `test/integrity.test.ts` holds one test
 per thing that must never happen (a green gate with nothing proven, an agent's result counted as a pipeline's, a
 conflict used to skip a review), each found by an independent review. `test/budgets.test.ts` fails the check
 when a hot path gets slow.
@@ -324,7 +355,7 @@ when a hot path gets slow.
 | Path | What |
 | --- | --- |
 | `src/core/` | pure logic and schemas shared by browser and server |
-| `src/server/kernel/` | the database wrapper, migrations, the command context, the witness |
+| `src/server/kernel/` | the database wrapper, migrations, the command context, the witness, the configuration and how an address is written |
 | `src/server/{suite,evidence,runs,decisions,identity,policy}/` | one module per owner of tables |
 | `src/server/ops/` | the registry and the operations |
 | `src/surfaces/` | HTTP, MCP, the JUnit reader, CI environment detection, archive routes, the documentation site, the web UI's files, the headers on every reply |

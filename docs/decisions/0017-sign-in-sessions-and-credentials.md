@@ -1,8 +1,8 @@
 # 0017: Sign-in, sessions and credentials
 
 - Date: 2026-10-13
-- Status: proposed. Four pull requests deliver it. The first is built in the pull request that adds this file;
-  the owner reviews.
+- Status: proposed. Four pull requests deliver it. The first is built in the pull request that adds this file,
+  and the second (the limit on failed attempts) in the one after it; the owner reviews.
 
 The instance has been public since 2026-10-13. Issue #88 lists what sign-in needs before more than one person
 uses it, and issue #30 asks that a person sign in as themselves. This record holds the design for both, so that
@@ -114,16 +114,79 @@ would have refused every archive taken before it, though no exported table chang
 now says whether it changes what an archive holds. `ARCHIVE_VERSION` is the last entry that does; an export writes
 it and an import requires it. It is 1 before and after this change.
 
-## The three pull requests that follow
+## What the second pull request builds
 
-**2. A limit on failed attempts** (issue #88 item 1). `identity/limiter.ts` is pure and takes the clock as an
-argument. Keys are the client address and the first 8 characters of the presented secret, later also the account
-name. The fifth failure within 15 minutes blocks a key for 1 s, doubling to 15 minutes. A blocked key is
-answered 429 with `Retry-After` before the credential is looked at, with one exception: a right secret in the
-generated format always passes. Guessing 190 bits is not what the limit is for, and refusing a right token would
-let anybody who shares an address with a pipeline stop it. A secret a person chose gets no pass. A session cookie
-is never counted. The client address comes from `MAINWORTHY_CLIENT_ADDRESS_HEADER`, believed only from the peers
-`MAINWORTHY_TRUSTED_PROXY` names; setting one without the other stops the start.
+A limit on failed attempts (issue #88 item 1). `src/server/identity/limiter.ts` holds the rule. It is pure, takes
+the clock as an argument and counts opaque keys. `identity.ts` keeps one limiter for each instance, in memory.
+
+**What is counted.** A secret presented as a token where the server asks who the caller is: in an
+`Authorization` header on a route that takes a session, or in a body `POST /api/login` accepts. Both go through
+one function (`present` in `identity.ts`), so they share their keys. A route that takes no session (`/healthz`,
+the API description, the documentation) looks at no token, and a sign-in body the schema refuses (longer than
+512 characters, or not a string) is refused without being counted; neither tests a credential. A session cookie
+is never counted, right or wrong, and neither is the owner of the machine in local mode or `POST /api/logout`.
+
+**The keys.** The address the request came from, and the first 8 characters of the secret (after `cb_` when
+it has that marker). An IPv4 address is its own key. An IPv6 address is keyed by its /64, the network one
+subscriber holds. A loopback or private address has no key, and neither has an empty secret: each would be one
+key for many callers, and one of them could block the rest. Later the account name is a third key.
+
+**The rule.** The fifth failure of a key within 15 minutes blocks it for 1 second. Every failure after that
+doubles the block, up to 15 minutes. A key is forgotten 15 minutes after its last failure or the end of its
+block, whichever is later. A success outside a block clears the secret's key and never the address's: one valid
+token used between guesses would otherwise reset the count of the address that is guessing. A correct generated
+token that passes during a block reports nothing, so it clears nothing, its own key included. The block runs
+out by the clock.
+
+**A blocked request** is answered 429 with `Retry-After` in whole seconds and the error code `limited`,
+before the secret is looked up, and nothing is reported for it: asking again does not lengthen the block. The
+one exception is a secret in the form the server generates (`cb_` and 32 characters). It is looked up, and it
+passes when it is right and the server made it. Nobody guesses 190 bits, and refusing a right token would let
+anybody who shares an address with a pipeline stop it. A wrong secret in that form is answered 429 like any
+other and is not counted while the block lasts. A secret a person chose gets no pass: a right guess at one is
+what the block is there to prevent.
+
+The form does not say who chose a secret. `MAINWORTHY_OWNER_TOKEN` holds whatever the operator wrote, and
+`cb_` and 32 letters somebody typed are not 190 random bits. So the pass goes by the token's row: a token whose
+`source` is `env` gets none, in any form, and is answered 429 as a wrong one is. A token `token.create` made,
+and the owner's token a start generated, pass. (The first build of the limit went by the form alone; the
+independent review showed an owner token written in that form passing a block.) A generated owner token that
+the operator later copies into the variable keeps its row and its source, and still passes: the server made it.
+
+**The address.** The HTTP surface says where a request came from (`clientAddress` in `src/surfaces/http.ts`)
+and hands it to `admit` as one more fact; the identity module reads no header. It is the address of the
+connection. Headers are ignored, unless the connection comes from a peer in `MAINWORTHY_TRUSTED_PROXY`
+(addresses and ranges): then it is what that peer wrote in the header `MAINWORTHY_CLIENT_ADDRESS_HEADER`
+names. That header must hold exactly one address. Missing, or anything else, and the request has no address
+key; it is not counted under the proxy's own. The two variables are set together or not at all. One without
+the other, a header name that is not one, or a list entry that is not an address or a range stops the start
+with a line that names the variable and the entry, before anything is opened. In server mode with neither set,
+the start says in one line that a failed sign-in from a loopback or private address is not counted against that
+address.
+
+**The memory is bounded** at 10,000 keys. When a failure brings a new key to a full limiter, keys whose time
+has passed are dropped, then the key that failed longest ago. Whoever can fail with 10,000 distinct keys makes
+the limiter forget an older one and so buys its four free failures again: 10,000 requests for five guesses.
+The alternatives are worse. Growing lets a flood take the process's memory, and refusing new keys lets the same
+flood switch the limit off for whoever comes after it.
+
+**The error codes are one list.** `limited` is a new code, and the codes were written out in five places: the
+server's statuses, the envelope's type, the CLI's and the web client's schemas, and the schema the reader
+threads' replies are read with. They are now `ERROR_CODES` and `HTTP_STATUS` in `src/core/api.ts`, the API
+description is made from them, and `test/architecture.test.ts` fails on a second copy.
+
+**Where the code is.** How an address and a range are written is in `src/server/kernel/address.ts`, not in
+the limiter: the configuration is the kernel's, the kernel imports no module above it, and `defaultConfig` has
+to read the list of proxies before anything is opened. `Config` has one field for the proxy,
+`proxy: { peers, header } | null`, and not one for each variable, so a configuration with one half set cannot
+be written down.
+
+**Not done here.** The values of the two variables for the instance at `mainworthy.com` are not measured, and
+`compose.coolify.yaml` does not pass them. `docs/deploy.md` says which values are expected and how to check
+them: eight wrong tokens from one network, then two from another. Until that is done, a failed sign-in on that
+instance is counted against the first 8 characters of its token and against nothing else.
+
+## The two pull requests that follow
 
 **3. What a token may be** (issue #88 items 2, 4, 5). Built. Migration `0003_token_limits.sql` adds
 `expires_at`, `created_by`, `source` and `last_used_addr` to `tokens`, and `created_addr` and `last_seen_addr` to
@@ -156,8 +219,8 @@ is never counted. The client address comes from `MAINWORTHY_CLIENT_ADDRESS_HEADE
 - **Last use, with the address.** A note in `uses.ts` carries the address beside the time. The flush writes the
   address only when the note has one and is not older than the row, so a use with no address erases none and an
   old use does not replace a newer address. `openSession` writes where a session was opened from. The address is
-  `peerAddress(req, server)` in `src/surfaces/http.ts`: the other end of the connection, until pull request 2's
-  client address takes its place.
+  the one the limit counts failed attempts against, `clientAddress` in `src/surfaces/http.ts`: the other end of
+  the connection, or what a proxy the operator named reported.
 - **Who made it.** `createToken` records the actor that asked. `token.list` shows `expiresAt`, `createdBy` and
   `lastUsedFrom`.
 
@@ -254,6 +317,18 @@ A model from another provider reviewed the design against the code before anythi
   that is not yet a token becomes the owner's token.
 - A token's last address stays with its row after the token is revoked or has ended, and nothing deletes a
   token's row yet (`docs/compliance.md`).
+- The address is the key that slows a guesser. The first 8 characters only count guesses that share them, and
+  a guesser who changes them with every guess is counted once under each. So where a request has no address
+  key (from a loopback or private address, which is what a proxy the configuration does not name usually has)
+  that guesser is not slowed at all. The start says so, and the two variables are the fix.
+- A proxy the configuration does not name and whose address is public is counted as one address. Its visitors
+  share one count, and five wrong tokens from one of them block a token a person chose for all of them while
+  that visitor keeps failing. Generated tokens and signed-in browsers still pass. Naming the proxy is the fix.
+- Somebody who knows the first 8 characters of a token a person chose can keep that token blocked by guessing
+  at it, from any address. A generated token cannot be blocked that way, which is one more reason to let the
+  server make the owner's.
+- A holder's success clears the count of their token's first 8 characters. A token in constant use is therefore
+  protected by the count of the guesser's address, and not by its own.
 
 ## Deferred
 
