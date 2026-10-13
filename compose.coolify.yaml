@@ -20,7 +20,8 @@ services:
 
   tailscale:
     image: tailscale/tailscale:stable
-    hostname: casebook
+    # No `hostname:` here: the sidecar would then resolve the service name `casebook` to itself, not to the app.
+    # TS_HOSTNAME names the tailnet node.
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}
       TS_HOSTNAME: ${TS_HOSTNAME:-casebook}
