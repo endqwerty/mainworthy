@@ -51,13 +51,16 @@ Use [the CLI](./cli.md) or [the API](./api.md) for those settings.
 
 1. Select an unfilled slot.
 2. Exercise the pinned case's steps.
-3. Type an optional note in "Result note".
-4. Press the key for the outcome.
+3. Press the key for the outcome.
 
 <kbd>p</kbd> records "Pass". <kbd>b</kbd> records "Blocked".
 <kbd>s</kbd> records "Skip". These keys move you to the next missing slot.
-<kbd>f</kbd> focuses the note. Enter the failure details, then press <kbd>Enter</kbd>
+<kbd>f</kbd> focuses "Result note". Enter the failure details, then press <kbd>Enter</kbd>
 to record "Fail" and move on.
+
+While the note has the focus, the outcome keys type letters and <kbd>Enter</kbd> records
+"Fail". To record another outcome with a note, type the note, press <kbd>Esc</kbd> to
+leave the field, then press the outcome key.
 
 Type a step number before <kbd>f</kbd> to mark the failed step.
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between slots.

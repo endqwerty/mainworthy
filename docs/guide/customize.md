@@ -50,7 +50,7 @@ A project key is lower-case letters, digits and hyphens, up to 40 characters, an
 
 Folders nest. A tag is lower case, starts with a letter or digit, and can hold `-`, `_`, `.` and `/`. Moving a case or changing its tags is an edit like any other, so under `strict` it waits for a person.
 
-A case lists the methods that may produce evidence for it. People are the default. Add the pipeline so an automated test can fill a slot, and add agents so an agent's result can count in a run that asks for agents. A case keeps at least one method.
+A case lists the methods that may produce evidence for it. People are the default. Add agents so an agent's result can count in a run that asks for agents. An automated test does not depend on this list: its link to the case, or the case's ref in the test's name, is what lets its result fill a slot. A case keeps at least one method.
 
 ## The theme
 

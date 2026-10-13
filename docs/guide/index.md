@@ -18,7 +18,7 @@ Mainworthy keeps your test cases, the results that people, pipelines and agents 
 
 ### Start
 
-- [How Mainworthy works](./concepts.md). The whole product in one page: what it records, how a failed test becomes a question, and why only a decision can change a verdict. Read it once and the screens and commands will make sense.
+- [How Mainworthy works](./concepts.md). The whole product in one page: what it records, how a failed test becomes a question, and how evidence and decisions together give a verdict. Read it once and the screens and commands will make sense.
 - [Quickstart](./quickstart.md). Start a local instance, write one case, and upload a failing test result. Then answer its question and read the gate, in about ten minutes.
 
 ### Use it
@@ -42,7 +42,7 @@ Mainworthy keeps your test cases, the results that people, pipelines and agents 
 
 - [Keyboard](./keyboard.md). Every key of the web UI, by screen. In the app, <kbd>?</kbd> lists the keys of the screen you are on, and the bar at the bottom shows the ones you are most likely to want next.
 - [Command line](./cli.md). Every command of `mainworthy`, with its flags and exit codes. The tables on this page are read from the program, so they match the version you are running.
-- [API and agent tools](./api.md). Every operation Mainworthy has, with its address, the capability it needs and its input. The web UI, the command line and an agent's tools all call these same operations, so anything you can do in one you can do in the others.
+- [API and agent tools](./api.md). Every operation Mainworthy has, with its address, the capability it needs and its input. The web UI, the command line and an agent's tools all call these same operations. The command line and the HTTP API reach all sixteen. An agent's tools are ten of them.
 - [Glossary](./glossary.md). The words Mainworthy uses, each in a sentence or two, with the page that says more. The words are the ones you see in the app and in command output.
 - [Troubleshooting](./troubleshooting.md). What the common messages mean and what to do about each. Find the message or the symptom you have, then follow the link for the background.
 - [How it is built](./architecture.md). A short look under the hood for people who run or extend Mainworthy: the parts, how a request travels through them, and the rules the design holds itself to. You do not need this page to use the product.

@@ -1,6 +1,6 @@
 # API and agent tools
 
-Every operation Mainworthy has, with its address, the capability it needs and its input. The web UI, the command line and an agent's tools all call these same operations, so anything you can do in one you can do in the others.
+Every operation Mainworthy has, with its address, the capability it needs and its input. The web UI, the command line and an agent's tools all call these same operations. The command line and the HTTP API reach all sixteen. An agent's tools are ten of them.
 
 ## Call an operation
 

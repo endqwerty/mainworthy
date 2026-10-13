@@ -104,6 +104,10 @@ The merged body is another proposal and still follows the adoption policy.
 An unlinked-test question asks how to keep a test that has no case.
 "Link to a case" makes future results count for the chosen case.
 "Create cases" creates one case per test and links each test to its case.
+It works where the policy adopts your new case by rule: under `loose`, and for a person
+under `standard`. Where a person must adopt a new case, under `strict` or for an agent
+under `standard`, the answer is refused. Propose the cases, have them adopted, then
+answer with "Link to a case".
 "Track without a case" keeps the test without a case. The test still gates the build.
 
 These choices settle the mapping question. They do not turn a failed result into a pass.

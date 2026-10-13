@@ -188,7 +188,8 @@ function cliCommands(): string {
 					String(EXIT_CODE[verdict]),
 					`${code("mainworthy gate")}: the verdict is ${code(verdict)}`,
 				]),
-				["4", "The command failed: the server refused it, could not be reached, or the input was wrong"],
+				["1", "`mainworthy check` found problems in the suite; `mainworthy health` got no answer"],
+				["4", "The command could not run: the server refused it, could not be reached, or the input was wrong"],
 			],
 		),
 	].join("\n");

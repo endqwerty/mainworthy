@@ -64,11 +64,11 @@ A named part of a pipeline, such as `e2e`. A planned run can require that named 
 
 ## Method
 
-How a case may be exercised: by a person, by an automated test, or by an agent. A case declares the methods it admits, and a run says which methods it asks for.
+How a case may be exercised: by a person, by an automated test, or by an agent. A case declares whether people and agents may exercise it, an automated test is admitted by its link to the case, and a run says which methods it asks for.
 
 ## Pipeline
 
-A CI system that reports results with a token of its own. A pipeline records results and reads the gate, and nothing else. See [report results](./report-results.md).
+A CI system that reports results with a token of its own. A pipeline records results and reads the gate, and may be let read. It never edits, answers, plans or administers. See [report results](./report-results.md).
 
 ## Planned run
 
@@ -128,4 +128,4 @@ What a gate says: `passed`, `failed`, `blocked` or `pending`. See [how Mainworth
 
 ## Version
 
-One recorded state of a case. Every edit that takes effect makes the next version. You can compare two versions and restore an old one.
+One recorded state of a case's content. Every edit to the content that takes effect makes the next version. A move, a tag or archiving is recorded in the case's history and makes no version. You can compare two versions and restore an old one.
