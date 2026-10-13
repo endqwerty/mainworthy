@@ -32,6 +32,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_DATA` | `~/.mainworthy` | The data directory. It holds one SQLite file. |
 | `MAINWORTHY_MODE` | none | `server` selects server mode. |
 | `MAINWORTHY_OWNER` | `USER`, else `owner` | The name of the owner, who holds every capability on every project. |
+| `MAINWORTHY_OWNER_WAS` | none | The name the owner has now, when `MAINWORTHY_OWNER` holds a new name for the same person. The start renames them. See [rename the owner](#rename-the-owner). |
 | `MAINWORTHY_OWNER_TOKEN` | none | A token for the owner, 20 to 512 characters. Server mode needs one to sign in. |
 | `MAINWORTHY_SESSION_IDLE` | `14d` | How long a browser stays signed in without being used. A whole number and `h`, `d` or `w`: `12h`, `14d`, `2w`. |
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. The same form. |
@@ -45,7 +46,36 @@ A value that is not a whole number for `MAINWORTHY_READERS` stops the start with
 
 The first start creates the data directory, one owner and a project named `scratch`. It does not need any variable.
 
-Every start gives the owner named by `MAINWORTHY_OWNER` every capability. The owner is a person: the server does not start when the name belongs to an agent or a pipeline on this instance, or starts with `forgotten-`. If you change the name later, you get a second owner, and the first one keeps its grant. Remove its grant with `mainworthy actor ungrant`. The first one keeps its tokens too, except the one that came from `MAINWORTHY_OWNER_TOKEN` when you set that variable to a new value: see the next paragraph.
+Every start gives the owner named by `MAINWORTHY_OWNER` every capability. The owner is a person: the server does not start when the name belongs to an agent or a pipeline on this instance, or starts with `forgotten-`. If you change the name later, you get a second owner, and the first one keeps its grant. Remove its grant with `mainworthy actor ungrant`. To give the same person a new name instead, [rename the owner](#rename-the-owner). The first one keeps its tokens too, except the one that came from `MAINWORTHY_OWNER_TOKEN` when you set that variable to a new value: see the next paragraph.
+
+### Rename the owner
+
+The owner's name is the one in `MAINWORTHY_OWNER`, so the owner is renamed where that variable is set. An instance started with the default has an owner named `owner`. To make that person `robin`:
+
+1. Set `MAINWORTHY_OWNER` to the new name and `MAINWORTHY_OWNER_WAS` to the name the owner has now.
+
+   ```
+   MAINWORTHY_OWNER=robin
+   MAINWORTHY_OWNER_WAS=owner
+   ```
+
+2. Start the server again. It says one line:
+
+   ```
+   MAINWORTHY_OWNER_WAS: owner is now robin, with the tokens, password, passkeys, sessions and history owner had. robin signs in under the new name. Unset MAINWORTHY_OWNER_WAS.
+   ```
+
+3. Unset `MAINWORTHY_OWNER_WAS`. Left in place it renames nobody, and every start says so.
+
+The person is the same one. Their tokens and their passkeys work as before, the browsers they are signed in on stay signed in, and history shows the new name for what they did under the old one. Three things use the name and need a hand:
+
+- A password is typed with the new name. Change the name in your password manager.
+- A passkey signs in as before. The device or password manager that holds it still shows the old name for it.
+- A browser keeps a draft that is not yet recorded under the name of whoever typed it. Record your drafts before the rename: one kept under the old name is not shown to the new one.
+
+The start is refused, and changes nothing, when `MAINWORTHY_OWNER_WAS` names nobody on the instance, an agent, a pipeline or a person who was forgotten. The line says which. A mistyped name would otherwise make a second owner. When the new name is already somebody's, the start renames nobody and says so. That person becomes an owner, as they do without the variable.
+
+Only the owner is renamed this way. Nobody else's name can be changed.
 
 A start that is refused for the owner's name or the owner's token changes no actor and no token. If the server is newer than the database, it has already brought the database up to date by then, and it left a copy of the database as it was beside it, named `mainworthy.db.v<N>.bak`.
 
@@ -79,7 +109,7 @@ Mainworthy runs as one container with one volume. The container runs the single 
 $ docker compose up -d
 ```
 
-The file defines one service, `mainworthy`. It publishes port 7357, restarts the container unless you stop it, and mounts a named volume, `mainworthy-data`, at `/data`. It passes these variables from your environment to the server: `MAINWORTHY_OWNER_TOKEN`, `MAINWORTHY_OWNER`, which defaults to `owner`, the two session lifetimes, `MAINWORTHY_SESSION_IDLE` and `MAINWORTHY_SESSION_MAX`, and the two that name a proxy in front, `MAINWORTHY_TRUSTED_PROXY` and `MAINWORTHY_CLIENT_ADDRESS_HEADER`. The last four take the server's defaults when you leave them empty. Set the token to a long random string. If you leave it empty, the server generates one and prints it once, and `docker compose logs` shows it. Open `http://localhost:7357` and sign in with it.
+The file defines one service, `mainworthy`. It publishes port 7357, restarts the container unless you stop it, and mounts a named volume, `mainworthy-data`, at `/data`. It passes these variables from your environment to the server: `MAINWORTHY_OWNER_TOKEN`, `MAINWORTHY_OWNER`, which defaults to `owner`, `MAINWORTHY_OWNER_WAS`, the two session lifetimes, `MAINWORTHY_SESSION_IDLE` and `MAINWORTHY_SESSION_MAX`, and the two that name a proxy in front, `MAINWORTHY_TRUSTED_PROXY` and `MAINWORTHY_CLIENT_ADDRESS_HEADER`. The last four take the server's defaults when you leave them empty. Set the token to a long random string. If you leave it empty, the server generates one and prints it once, and `docker compose logs` shows it. Open `http://localhost:7357` and sign in with it.
 
 The image checks its own health every 30 seconds by running `mainworthy health`. The check calls `/healthz`, which needs no token:
 

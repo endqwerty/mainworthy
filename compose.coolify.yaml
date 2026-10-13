@@ -23,6 +23,8 @@ services:
       # A long random string. Leave unset to have one generated and printed once on first start.
       MAINWORTHY_OWNER_TOKEN: ${CASEBOOK_OWNER_TOKEN:-}
       MAINWORTHY_OWNER: ${CASEBOOK_OWNER:-owner}
+      # To rename the owner: the name the owner has now, beside the new name above. Unset it after that start.
+      MAINWORTHY_OWNER_WAS: ${MAINWORTHY_OWNER_WAS:-}
       # The address people open the instance at. Passkeys belong to its host name and an invitation link starts
       # with it. Empty means no passkeys and a link without a host.
       MAINWORTHY_PUBLIC_URL: ${MAINWORTHY_PUBLIC_URL:-}

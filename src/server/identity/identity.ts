@@ -184,6 +184,7 @@ const Q = {
 	forget: sql<{ id: number; name: string; at: number }>(
 		"UPDATE actors SET name = $name, disabled_at = $at WHERE id = $id",
 	),
+	rename: sql<{ id: number; name: string }>("UPDATE actors SET name = $name WHERE id = $id"),
 };
 
 export const ALL_CAPABILITIES: readonly Capability[] = Capability.options;
@@ -269,6 +270,7 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
 				`MAINWORTHY_OWNER names ${app.config.owner}, and a name that starts with forgotten- is what a forgotten actor is called. Set MAINWORTHY_OWNER to the owner's name and start again; ${START_REFUSED}`,
 			);
 		}
+		const renamed = renameOwner(app, org);
 		const existing = app.db.get(Q.actorByName, { org, name: app.config.owner });
 		if (existing && existing.kind !== "human") {
 			throw invalid(
@@ -279,7 +281,7 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
 		// Written on every start, so the owner of the instance is never left without the means to repair it.
 		app.db.run(Q.setGrant, { actor: owner.id, project: 0, can: JSON.stringify(ALL_CAPABILITIES) });
 		const server = app.config.mode === "server";
-		const warnings: string[] = [];
+		const warnings: string[] = renamed === null ? [] : [renamed];
 		let generatedToken: string | null = null;
 		if (configured) {
 			if (configured.length < OWNER_TOKEN_SOUND) {
@@ -352,6 +354,43 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
 		if (server && app.config.proxy === null) warnings.push(NO_PROXY_NAMED);
 		return { owner: toActor(app.db, owner, 0), generatedToken, warnings };
 	});
+}
+
+/**
+ * The owner under a new name: the person `MAINWORTHY_OWNER_WAS` names becomes the one `MAINWORTHY_OWNER` names,
+ * and keeps the row everything of theirs points at. Returns what the operator is told, or null when the variable
+ * is not set.
+ *
+ * It is done here and not by an operation because the variable says who owns the instance. An operation would
+ * leave the old name free while the variable still said it, and whoever was given that name next would own the
+ * instance at the following start.
+ *
+ * A former name that cannot be renamed stops the start. Without that, a name that was mistyped would make a
+ * second owner, as a changed `MAINWORTHY_OWNER` alone does, and the new name would be taken.
+ */
+function renameOwner(app: App, org: number): string | null {
+	const was = app.config.ownerWas;
+	if (was === undefined) return null;
+	const to = app.config.owner;
+	// The rename was done at an earlier start, or the new name is somebody else's. Neither is this start's to undo.
+	if (app.db.get(Q.actorByName, { org, name: to })) {
+		return `MAINWORTHY_OWNER_WAS names ${was} and renamed nobody: ${to} is on this instance already. Unset MAINWORTHY_OWNER_WAS.`;
+	}
+	const row = app.db.get(Q.actorByName, { org, name: was });
+	const why = !row
+		? "and nobody on this instance has that name"
+		: row.kind !== "human"
+			? `which is ${KIND_NOUN[row.kind]} on this instance and not a person`
+			: row.disabled_at !== null
+				? "who was forgotten"
+				: null;
+	if (!row || why !== null) {
+		throw invalid(
+			`MAINWORTHY_OWNER_WAS names ${was}, ${why}. Set it to the name the owner has now, or unset it to make ${to} a new person who owns this instance, and start again; ${START_REFUSED}`,
+		);
+	}
+	app.db.run(Q.rename, { id: row.id, name: to });
+	return `MAINWORTHY_OWNER_WAS: ${was} is now ${to}, with the tokens, password, passkeys, sessions and history ${was} had. ${to} signs in under the new name. Unset MAINWORTHY_OWNER_WAS.`;
 }
 
 /**
