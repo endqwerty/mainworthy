@@ -27,13 +27,16 @@ const screens = {
 	changes: ChangesScreen,
 	settings: SettingsScreen,
 } satisfies Record<Screen, typeof SuiteScreen>;
-const navigation: { screen: Screen; label: string; icon: string; key: string }[] = [
+type Place = { screen: Screen; label: string; icon: string; key: string };
+/** Where the work is done: the sidebar's navigation. */
+const navigation: Place[] = [
 	{ screen: "suite", label: "Suite", icon: "▤", key: "g s" },
 	{ screen: "queue", label: "Queue", icon: "◎", key: "g q" },
 	{ screen: "runs", label: "Runs", icon: "▷", key: "g r" },
 	{ screen: "changes", label: "Changes", icon: "↗", key: "g c" },
-	{ screen: "settings", label: "Settings", icon: "⚙︎", key: "g ," },
 ];
+/** Not a place of the work, so not in the navigation: it is in the sidebar's footer, beside who is signed in. */
+const settings: Place = { screen: "settings", label: "Settings", icon: "⚙︎", key: "g ," };
 /** The page of the documentation that explains each screen. A screen added to the router must be named here. */
 const screenDocs: Record<Screen, DocSlug> = SCREEN_DOCS;
 /** The gate and its check from `icon.svg`, drawn in the colour of the square they sit in. */
@@ -240,7 +243,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				when: () => palette === null && !help,
 				handler: () => setSidebarCollapsed((value) => !value),
 			},
-			...navigation.map((item) => ({
+			...[...navigation, settings].map((item) => ({
 				key: item.key,
 				label: `Go to ${item.label}`,
 				handler: () => navigate(routeUrl({ project, screen: item.screen })),
@@ -384,18 +387,6 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 								<KeyCap>{item.key}</KeyCap>
 							</a>
 						))}
-						{/* The page about the screen that is open, beside the app: what g d opens. */}
-						<a
-							aria-label="Docs"
-							title="Docs for this screen"
-							href={docUrl(screenDocs[route.screen])}
-							target="_blank"
-							rel="noopener"
-						>
-							<span className="ni">ⓘ</span>
-							<span className="nav-label">Docs</span>
-							<KeyCap>g d</KeyCap>
-						</a>
 					</nav>
 					{suiteOpen && (
 						<div className="suite-tree">
@@ -471,26 +462,48 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 						</div>
 					)}
 
-					<div className={account ? "sfoot account" : "sfoot"}>
+					{/* Who is signed in, with their settings and the way out; then the docs, the keys and the theme. */}
+					<div className="sfoot">
 						<span className="me">
 							<ProducerGlyph kind={info.kind} />
 							{info.actor}
 						</span>
+						<a
+							aria-label={settings.label}
+							title={`${settings.label} (${settings.key})`}
+							href={routeUrl({ project, screen: settings.screen })}
+							className={route.screen === settings.screen ? "sfoot-link on" : "sfoot-link"}
+							aria-current={route.screen === settings.screen ? "page" : undefined}
+							onClick={(event) => {
+								event.preventDefault();
+								go(settings.screen);
+							}}
+						>
+							{settings.icon}
+						</a>
 						{account && (
-							<>
-								<button
-									type="button"
-									aria-label="Sign out"
-									title="Sign out (g x)"
-									aria-disabled={signingOut}
-									onClick={leave}
-								>
-									⇥ <span>{signingOut ? "Signing out…" : "Sign out"}</span>
-								</button>
-								{/* The name and the way out share the first line; the keys and the theme take the second. */}
-								<span className="sfoot-break" />
-							</>
+							<button
+								type="button"
+								aria-label="Sign out"
+								title="Sign out (g x)"
+								aria-disabled={signingOut}
+								onClick={leave}
+							>
+								⇥ <span>{signingOut ? "Signing out…" : "Sign out"}</span>
+							</button>
 						)}
+						<span className="sfoot-break" />
+						{/* The page about the screen that is open, beside the app: what g d opens. */}
+						<a
+							className="sfoot-link"
+							aria-label="Docs"
+							title="Docs for this screen (g d)"
+							href={docUrl(screenDocs[route.screen])}
+							target="_blank"
+							rel="noopener"
+						>
+							ⓘ <span>Docs</span>
+						</a>
 						<button type="button" aria-label="Keyboard shortcuts" onClick={() => setHelp(true)}>
 							? <span>Keys</span>
 						</button>

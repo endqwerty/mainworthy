@@ -57,8 +57,11 @@ error, or the workbench. Neither page is a screen: they render with no session, 
 project and no key registry, so they use plain forms. Enter submits, focus starts in the
 first field and Tab follows the order on the page.
 
-The sidebar's footer is the account area: who is signed in, and "Sign out" where the
-session is a browser's (`session.via === "cookie"`). `g x` signs out; the binding is
+The sidebar's navigation is the four screens the work is done on: Suite, Queue, Runs and
+Changes. What is not the work is in the footer, on two lines. The first is the account
+area: who is signed in, the link to Settings (a gear, `g ,`) beside the name, and "Sign
+out" where the session is a browser's (`session.via === "cookie"`). The second has Docs
+(the page about the screen that is open, `g d`), Keys and Theme. `g x` signs out; the binding is
 registered only then, so the palette and the `?` sheet do not offer it in local mode.
 Signing out calls `/api/logout`, then `signedOut()` from `lib/api.ts`, which is also what
 a refused request does: the device session is suspended and the sign-in page is shown.

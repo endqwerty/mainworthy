@@ -53,9 +53,9 @@ Mainworthy keeps your test cases, the results that people, pipelines and agents 
 
 You do not need to keep these pages open. The app points back to them:
 
-- **Docs** in the sidebar opens the page about the screen you are on, in a new tab. On the queue that is [decide in the queue](./decide.md). <kbd>g</kbd> <kbd>d</kbd> does the same from the keyboard.
+- **Docs** at the bottom of the sidebar, beside Keys and Theme, opens the page about the screen you are on, in a new tab. On the queue that is [decide in the queue](./decide.md). <kbd>g</kbd> <kbd>d</kbd> does the same from the keyboard.
 - <kbd>?</kbd> lists every key that works on the current screen, with a link to the same page.
-- An empty list links to the page that says how something gets into it, and each section of Settings links to the page that explains it.
+- An empty list links to the page that says how something gets into it, and each section of Settings links to the page that explains it. Settings is the gear beside your name at the bottom of the sidebar, or <kbd>g</kbd> <kbd>,</kbd>.
 - The sign-in page links here too, because the docs need no account.
 - <kbd>⌘</kbd> <kbd>K</kbd> opens the palette. Type `docs` and a word to jump to a page from there.
 
