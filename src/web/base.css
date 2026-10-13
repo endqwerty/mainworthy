@@ -176,8 +176,12 @@ kbd {
 	text-align: center;
 	color: var(--faint);
 }
+/* The label takes the free space of its row, so a count ends beside its key, in one column with the others. */
+:where(#nav) .nav-label {
+	flex: 1;
+}
 #nav em {
-	margin-left: auto;
+	padding: 1px 7px;
 	font: normal 11px var(--mono);
 	color: var(--faint);
 }
@@ -185,11 +189,9 @@ kbd {
 	background: var(--fail);
 	color: #fff;
 	border-radius: 9px;
-	padding: 1px 7px;
 	font-weight: 600;
 }
 :where(#nav) kbd {
-	margin-left: auto;
 	border: 0;
 	background: none;
 	color: var(--faint);
