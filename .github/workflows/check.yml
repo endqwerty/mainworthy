@@ -13,8 +13,11 @@
 # the length of the job (variables TS_OAUTH_CLIENT_ID and TS_AUDIENCE: a federated identity, so no Tailscale
 # secret is stored here).
 #
+# `image` builds the container the way a deployment does and asks it for a page of the documentation: what the
+# image carries is decided by the Dockerfile and .dockerignore, which no test runs. Nothing reports to it.
+#
 # `gate` is the job to require on the branch. It fails when the gate does not pass, when a report is missing,
-# and when the type-check or the lint failed.
+# and when the type-check, the lint or the image failed.
 name: check
 
 on:
@@ -37,6 +40,22 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag mainworthy:check .
+      - name: The container answers, and carries the documentation with its diagrams and screenshots
+        run: |
+          docker run --detach --name mainworthy --publish 7357:7357 mainworthy:check
+          for attempt in $(seq 1 30); do curl --fail --silent http://127.0.0.1:7357/healthz && break; sleep 1; done
+          curl --fail --silent http://127.0.0.1:7357/docs | grep --quiet "Mainworthy documentation"
+          curl --fail --silent --output /dev/null http://127.0.0.1:7357/docs/diagrams/overview.html
+          curl --fail --silent --output /dev/null http://127.0.0.1:7357/docs/screenshots/queue-light.png
+      - if: failure()
+        run: docker logs mainworthy
 
   tests:
     name: ${{ matrix.name }}
@@ -77,7 +96,7 @@ jobs:
           retention-days: 7
 
   gate:
-    needs: [static, tests]
+    needs: [static, tests, image]
     # Also when a shard or the lint failed: Mainworthy is told what ran, and this job is the one that fails.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -117,6 +136,6 @@ jobs:
           MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}
           MAINWORTHY_PROJECT: ${{ vars.MAINWORTHY_PROJECT }}
         run: bun scripts/ci-gate.ts test-results tests-1 tests-2 tests-3 tests-4 tests-5 quiet
-      - name: The type-check and the lint passed
+      - name: The type-check, the lint and the image passed
         if: always()
-        run: test "${{ needs.static.result }}" = success
+        run: test "${{ needs.static.result }}" = success && test "${{ needs.image.result }}" = success

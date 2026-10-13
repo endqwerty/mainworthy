@@ -98,7 +98,9 @@ test("the workflow gives the pipeline's token to the one step that reports, and 
 	);
 	expect(holders).toEqual(["gate: Report every shard to Mainworthy, then the gate"]);
 	// No secret in an environment every step of a job or of the workflow would share.
+	expect(Object.keys(workflow.jobs)).toEqual(["static", "image", "tests", "gate"]);
 	expect([workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)]).toEqual([
+		undefined,
 		undefined,
 		undefined,
 		undefined,
@@ -111,7 +113,8 @@ test("the workflow gives the pipeline's token to the one step that reports, and 
 			.filter(([, job]) => job.permissions)
 			.map(([name, job]) => [name, job.permissions]),
 	).toEqual([["gate", { contents: "read", "id-token": "write" }]]);
-	// The choice of instance is the script's (scripts/ci-instance.ts): no step starts a server.
+	// The choice of instance is the script's (scripts/ci-instance.ts): no step starts a server. (The `image` job
+	// runs the container it built, to ask it for a page; nothing reports to that one.)
 	expect(readFileSync(".github/workflows/check.yml", "utf8")).not.toContain("serve");
 });
 
