@@ -94,6 +94,23 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("status").filter({ hasText: "The current password is not right." }).waitFor();
 			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Change password");
 			expect(await page.locator("#password-next").inputValue()).toBe(NEW);
+
+			// No reply at all. Here the request never left, with the wrong current password in it, so nothing
+			// changed; the page cannot know that, and says only what it knows. It reads the list again.
+			await page.route("**/api/account/password", (route) => route.abort());
+			const reread = page.waitForRequest((request) => request.url().endsWith("/api/credential"));
+			await page.keyboard.press("Enter");
+			const lost = page
+				.getByRole("status")
+				.filter({ hasText: "the page cannot tell whether the password was changed" });
+			await lost.waitFor();
+			expect(await lost.innerText()).toBe(
+				"No answer came back, so the page cannot tell whether the password was changed. It may or may not have been: sign in with the new password to find out. The list below is read again.",
+			);
+			await reread;
+			expect(await page.locator("#password-next").inputValue()).toBe(NEW);
+			await page.unroute("**/api/account/password");
+
 			await page.locator("#password-current").fill(OLD);
 			await page.keyboard.press("Enter");
 			await page.getByRole("status").filter({ hasText: "Password changed. 1 other session ended." }).waitFor();
@@ -132,10 +149,12 @@ test.skipIf(!browserAvailable)(
 			await rows(page).filter({ hasText: "this browser" }).getByRole("button", { name: "End" }).click();
 			await page.locator("#signin-name").waitFor();
 			expect(await page.locator("#app").count()).toBe(0);
-			// The two refusals this journey asked for: the wait a test answered, and the wrong current password.
+			// What this journey asked for: the wait a test answered, the wrong current password, and the request
+			// a test dropped.
 			expect(one.errors).toEqual([
 				"Failed to load resource: the server responded with a status of 429 (Too Many Requests)",
 				"Failed to load resource: the server responded with a status of 403 (Forbidden)",
+				"Failed to load resource: net::ERR_FAILED",
 			]);
 			expect(two.errors).toEqual([]);
 		} finally {

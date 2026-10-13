@@ -368,3 +368,63 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+for (const failure of ["is refused by the network", "never arrives"] as const)
+	test.skipIf(!browserAvailable)(
+		`when the answer to who is signed in ${failure}, the page says it could not find out, keeps the fields closed and offers to ask again`,
+		async () => {
+			const code = await invite(failure === "never arrives" ? "xan" : "yul");
+			let browser: PageHarness | null = null;
+			try {
+				// The owner is signed in. The page is opened afresh, and its first question about who is signed in
+				// gets no answer; the second one is let through.
+				browser = await openPage(server, { path: "/invite", ready: "h1" });
+				const { page } = browser;
+				page.setDefaultTimeout(8000);
+				await page.goto("about:blank");
+				if (failure === "never arrives") await page.clock.install();
+				let asked = 0;
+				await page.route("**/api/session", (route) => {
+					asked++;
+					if (asked > 1) return route.continue();
+					// Aborted: the browser reports a failed request. Never answered: the route is left hanging.
+					return failure === "never arrives" ? undefined : route.abort();
+				});
+				await page.goto(`${server.url}/invite#${code}`);
+				const name = failure === "never arrives" ? "xan" : "yul";
+				await page.getByRole("heading", { name: `You are invited as ${name}` }).waitFor();
+				if (failure === "never arrives") {
+					// A slow answer is waited for. Past twenty seconds the page stops waiting and says so.
+					await page.getByText("Checking who is signed in to this browser", { exact: false }).waitFor();
+					await page.clock.runFor(19_000);
+					expect(await page.getByRole("button", { name: "Try again" }).count()).toBe(0);
+					await page.clock.runFor(2_000);
+				}
+				await page
+					.getByRole("status")
+					.filter({ hasText: "The page could not find out whether somebody is signed in to this browser" })
+					.waitFor();
+				// Nothing can be typed or sent: accepting might sign somebody out who was never asked about.
+				expect(await page.locator("#invite-password").isDisabled()).toBe(true);
+				expect(await page.getByRole("button", { name: "Accept and sign in" }).isDisabled()).toBe(true);
+				expect(await page.getByRole("button", { name: /^Continue as / }).count()).toBe(0);
+				expect(asked).toBe(1);
+
+				// "Try again" asks once more, with the invitation as it was: the code is still in the page's memory.
+				await page.getByRole("button", { name: "Try again" }).click();
+				await page.getByText(`You are signed in as robin. This invitation is for ${name}.`, { exact: false }).waitFor();
+				expect(asked).toBe(2);
+				expect(page.url()).toBe(`${server.url}/invite`);
+				await page.getByRole("button", { name: `Continue as ${name}` }).click();
+				await page.locator("#invite-password").fill(PASSWORD);
+				await page.locator("#invite-password-again").fill(PASSWORD);
+				await page.keyboard.press("Enter");
+				await page.locator("#app").waitFor();
+				expect(await page.locator(".sfoot .me").textContent()).toContain(name);
+				expect(browser.errors).toEqual(failure === "never arrives" ? [] : ["Failed to load resource: net::ERR_FAILED"]);
+			} finally {
+				await browser?.close();
+			}
+		},
+		30_000,
+	);
