@@ -529,3 +529,39 @@ attempt 2: 216 pass, 1 skip, 2 fail, 983 expect() calls.
 | R4C-1 server rejects run write after shared cookie changes without an extra session read | `TimeoutError: waitFor: Timeout 5000ms exceeded.` Waiting for #token. | Round 4 passed 61/61 unchanged. |
 
 Two consecutive full passes were not completed. The lead instructed this worker to stop full-suite runs because other agents were running parallel suites under load, and will perform the full check on a quiet machine. The separate race review confirmed that an action immediately after installing a Playwright route can precede Chrome's interception activation. Another agent owns the guard in `test/e2e/support.ts`; this worker did not edit that file or latency.test.ts, or add route workarounds. Independent verification of the final diff remains with the lead. The existing R5B-4 slot-fill `atStep` skip (issue #72) is unchanged. No commit, push, PR or checkout release was performed.
+
+## Issue #81: a merge the server combined with a newer change (review round 9, R9-1)
+
+The page no longer decides whether its merge was recorded by comparing bodies. It asks the server what became
+of each command id the card sent (`command`, decision 0013) and builds the draft from the answer. The rule
+itself is in `src/web/lib/merges.ts`, with unit tests in `test/merges.test.ts`.
+
+`test/e2e/conflict-merge.test.ts` runs the routes in a browser. Each starts from a card with a hand-typed merged
+title, after a colleague changed another field while the card was open.
+
+| Route | Source | What the test requires |
+| --- | --- | --- |
+| The merge is acknowledged | R9-1 | Version 4 holds the typed title and the colleague's step; no draft is left; leaving proposes nothing |
+| The reply is lost; a second press, or a reload | first check, F1 | The same |
+| The reply is lost; more text is typed in the card | first check | The later words are a draft on version 4 with the colleague's step; leaving records version 5 with both |
+| `same-after`: a colleague changes the title after the lost merge, then later words | second check, F2 | Leaving shows a conflict card; version 5 keeps the colleague's title until the person resolves |
+| `same-before`: the lost reply held a new conflict | second check, F2 | The new card opens with the later words; nothing is recorded; the person's second step is still there |
+| `again-title`: the head moves on before the reload | second check, F3 | No draft; version 5 keeps the colleague's title and the merged steps |
+| `api-different-title`, `api-different-step`: the merge never arrived and the same person answered elsewhere | second check, F3 and F4 | The card's text stays a draft; leaving shows a conflict card; the other client's version stands until resolved |
+| A merge the page gave up arrives while a second attempt is on its way | this change | The first is recorded, the second refused; the later words are a draft on the recorded version |
+| A typed merge is kept after a rejection, and a colleague undoes a change the card had held | this change | The undone change does not come back |
+
+All eleven failed on the revision before the change (`899c428`), run from a clean export:
+
+```text
+(fail) a merge typed by hand that the server combines with a colleague's newer change leaves no draft to undo it
+error: The expected server state did not arrive
+(fail) text typed in the card after a lost merge reply is kept on the recorded version, with the colleague's change
+Expected: "Open the cart, changed by a colleague"  Received: "Open the cart"
+ 0 pass
+ 11 fail
+```
+
+One earlier test changed. `R6-3 a stored conflict resolved elsewhere preserves hand-typed card text on return`
+expected the status "later text is kept". The text is still kept and still editable. It is now a draft on the
+version it was written on, and the status says "typed merge is kept", as it does after a rejection.

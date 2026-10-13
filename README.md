@@ -113,7 +113,7 @@ Rules for contributors, people and agents: [AGENTS.md](AGENTS.md).
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | how it fits together, with diagrams |
 | [docs/product-design.md](docs/product-design.md) | the product design: thesis, domain model, operation layer, product surface |
-| [docs/decisions/](docs/decisions/) | decision records: 0009 the owner's answers, 0010 the stack, 0011 the UI, 0012 what the MVP builds and where it departs |
+| [docs/decisions/](docs/decisions/) | decision records: 0009 the owner's answers, 0010 the stack, 0011 the UI, 0012 what the MVP builds and where it departs, 0013 asking what became of a command |
 | [docs/compliance.md](docs/compliance.md) | what each legal regime needs, what is met, what is not |
 | [docs/deploy.md](docs/deploy.md) | running it on a server |
 | [docs/product-vision.md](docs/product-vision.md) | the problem and the priorities |

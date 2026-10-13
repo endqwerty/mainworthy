@@ -47,7 +47,7 @@ One live window owns each draft, for both new and existing cases. Opening a draf
 
 Storage events update the open editor's text, conflict and owner. Each input, proposal, merge and removal checks the stored owner when it runs, including replies that arrive after a takeover. The editor uses the same visible input refusal for a conflict and another window's ownership. Leaving a read-only editor sends nothing. Only the owner reconciles a settled conflict.
 
-Editable merged fields use the draft-body schema, so a temporarily empty step keeps its owner and conflict. The stored conflict keeps the body last sent for a merge. A merged text field that differs from both sides contains hand-typed text; side choices leave each field equal to one side. Rejection preserves hand-typed merged fields as the editable draft. A lost reply followed by a reload preserves card text entered after that send, on the recorded version.
+Editable merged fields use the draft-body schema, so a temporarily empty step keeps its owner and conflict. The stored conflict keeps every merge it sent, each with the command id it went under. A merged text field that differs from both sides contains hand-typed text; side choices leave each field equal to one side. Rejection preserves hand-typed merged fields as the editable draft. When a card's question is answered, the page asks the server what became of each of those ids (the `command` operation) and never compares the recorded head with what it sent. Card text entered after a merge that was recorded becomes a draft on the version the server made of that merge. Text of a card that something else answered stays a draft on the version it was written on (decision 0013; `lib/merges.ts`).
 
 ## Keyboard and palette
 

@@ -16,7 +16,6 @@ import {
 	activeDraft,
 	claimDraft,
 	type Draft,
-	DraftBody,
 	draftKey,
 	hasTypedMerge,
 	knownStepIds,
@@ -27,6 +26,7 @@ import {
 	writeDraft,
 } from "../lib/drafts.ts";
 import { draftOwner, randomId } from "../lib/ids.ts";
+import { cardText, draftAfterMerge, type MergeFate, mergeFate, recordable, sameBody } from "../lib/merges.ts";
 import { navigate, readRoute, refUrl, routeEntry, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, ProofStrip } from "../ui/index.tsx";
@@ -49,13 +49,15 @@ const ResolvedEdit = z.object({
 	body: CaseBody,
 });
 
-const SettledQuestion = z.object({
+const CardQuestion = z.object({
 	q: z.string(),
 	state: z.string(),
+	evidenceHash: z.string(),
 	decision: z.object({ answer: z.object({ is: z.string() }) }).nullable(),
 });
-function sameBody(left: CaseBody, right: CaseBody): boolean {
-	return JSON.stringify(DraftBody.parse(left)) === JSON.stringify(DraftBody.parse(right));
+/** A draft's body as it is sent: tags and links typed inline are taken out, and a step with no action is left out. */
+function sentBody(draft: Draft): CaseBody {
+	return recordable(cleanTitle(draft).body);
 }
 
 export function SuiteScreen() {
@@ -120,7 +122,7 @@ export function SuiteScreen() {
 			const next = {
 				...latest,
 				body:
-					latest.conflict && latest.conflict.q !== state.q && sameBody(latest.body, latest.conflict.mine)
+					latest.conflict && latest.conflict.q !== state.q && sameBody(sentBody(latest), latest.conflict.mine)
 						? state.mine
 						: latest.body,
 				conflict: state,
@@ -383,7 +385,10 @@ export function SuiteScreen() {
 			if (!latest || !mayWrite(id)) return;
 			const next = {
 				...latest,
-				body: latest.conflict && hasTypedMerge(latest.conflict) ? latest.conflict.merged : latest.body,
+				body:
+					latest.conflict && hasTypedMerge(latest.conflict)
+						? cardText({ draft: latest, conflict: latest.conflict })
+						: latest.body,
 				sent: null,
 				conflict: undefined,
 				cmd: randomId(),
@@ -398,87 +403,212 @@ export function SuiteScreen() {
 		},
 		[project, mayWrite, writeOwnedDraft],
 	);
-	const finishConflict = useCallback(
-		(state: ConflictState, head: CaseView, removeUnchanged: boolean, sent?: CaseBody): void => {
-			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
-			const stored = readDraft({ project, id: state.draftId });
-			if (stored?.conflict && stored.conflict.q !== state.q) return;
-			const recorded = bodyOf(head);
-			const laterMerge =
-				stored?.conflict &&
-				sameBody(stored.body, state.mine) &&
-				!sameBody(stored.conflict.merged, recorded) &&
-				(hasTypedMerge(stored.conflict) || (sent && !sameBody(stored.conflict.merged, sent)))
-					? stored.conflict.merged
-					: null;
-			const remove =
-				!stored ||
-				sameBody(laterMerge ?? stored.body, recorded) ||
-				(!laterMerge && removeUnchanged && stored.conflict?.q === state.q && sameBody(stored.body, state.mine));
-			if (remove) {
-				removeDraft({ project, id: state.draftId });
-				liveDrafts.current.delete(state.draftId);
-				setCaptures((previous) => {
-					const next = new Map(previous);
-					next.delete(state.draftId);
-					return next;
-				});
-				if (draftRef.current?.id === state.draftId) {
-					draftRef.current = null;
-					setDraftState(null);
-				}
-			} else {
-				const next: Draft = {
-					...stored,
-					body: laterMerge ?? stored.body,
-					base: head.version,
-					original: recorded,
-					originalTags: head.tags,
-					originalCovers: head.covers,
-					conflict: undefined,
-					sent: null,
-					cmd: randomId(),
-				};
-				if (!writeOwnedDraft(next)) return;
-				liveDrafts.current.set(next.id, next);
-				setCaptures((previous) => new Map(previous).set(next.id, next));
-				if (draftRef.current?.id === next.id) {
-					draftRef.current = next;
-					setDraftState(next);
-				}
+	const putDraft = useCallback(
+		(next: Draft): boolean => {
+			if (!writeOwnedDraft(next)) return false;
+			liveDrafts.current.set(next.id, next);
+			setCaptures((previous) => new Map(previous).set(next.id, next));
+			if (draftRef.current?.id === next.id) {
+				draftRef.current = next;
+				setDraftState(next);
 			}
+			return true;
+		},
+		[writeOwnedDraft],
+	);
+	const dropDraft = useCallback(
+		(id: string): void => {
+			removeDraft({ project, id });
+			liveDrafts.current.delete(id);
+			setCaptures((previous) => {
+				const next = new Map(previous);
+				next.delete(id);
+				return next;
+			});
+			if (draftRef.current?.id === id) {
+				draftRef.current = null;
+				setDraftState(null);
+			}
+		},
+		[project],
+	);
+	/** The draft of a card as it is now, while its conflict is still the question `state` was shown for. */
+	const cardDraft = useCallback(
+		(state: ConflictState): { draft: Draft; conflict: ConflictState } | null => {
+			const draft = readDraft({ project, id: state.draftId }) ?? liveDrafts.current.get(state.draftId);
+			const conflict = draft?.conflict;
+			return draft && conflict?.q === state.q ? { draft, conflict } : null;
+		},
+		[project],
+	);
+	/** A choice or a key in the card changes its merged body, and nothing else of the stored conflict. */
+	const changeCard = useCallback(
+		(state: ConflictState): void => {
+			const card = cardDraft(state);
+			storeConflict(card ? { ...card.conflict, merged: state.merged } : state);
+		},
+		[cardDraft, storeConflict],
+	);
+	/**
+	 * Ends a card whose merge the server recorded: as `version`, or with no version of its own (null). Text
+	 * later than that merge stays as a draft (`draftAfterMerge`); with none, the draft is done.
+	 */
+	const endMergedCard = useCallback(
+		async ({
+			state,
+			sent,
+			version,
+			done,
+		}: {
+			state: ConflictState;
+			sent: CaseBody;
+			version: number | null;
+			done: string;
+		}): Promise<void> => {
+			const left = (recorded: Parameters<typeof draftAfterMerge>[0]["recorded"]): Draft | null | undefined => {
+				const card = cardDraft(state);
+				return card && draftAfterMerge({ ...card, body: sentBody(card.draft), sent, recorded });
+			};
+			// The recorded version is read only when there is later text to carry onto it.
+			const view =
+				version !== null && left(null)
+					? CaseView.parse((await call("get", { refs: [state.ref], version }, { project, owner }))[0])
+					: null;
+			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
+			const next = left(view && { version: view.version, body: bodyOf(view), tags: view.tags, covers: view.covers });
+			if (next === undefined) return;
+			if (next === null) dropDraft(state.draftId);
+			else if (!putDraft(next)) return;
 			uncertainMerges.current.delete(state.q);
-			queryClient.setQueryData([project, "get", { refs: [head.ref] }], [head]);
 			setStatus(
-				remove
-					? `Conflict resolved. Version ${head.version} is recorded; both earlier versions remain in the timeline.`
-					: `Conflict resolved. Your later text is kept on this device as a draft on version ${head.version}.`,
+				next === null
+					? done
+					: next.base === version
+						? `Conflict resolved. Your later text is kept on this device as a draft on version ${version}.`
+						: "Conflict resolved. Your later text is kept on this device as a draft; leave the editor to propose it.",
 			);
 			void invalidateProject(project);
 		},
-		[project, owner, mayWrite, writeOwnedDraft, setStatus],
+		[project, owner, mayWrite, cardDraft, putDraft, dropDraft, setStatus],
 	);
-	const releaseSettledConflict = useCallback(
-		async (state: ConflictState, answer: string): Promise<void> => {
-			const rows = await call("get", { refs: [state.ref] }, { project, owner });
-			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
-			const head = CaseView.parse(rows[0]);
-			if (answer === "merge") {
-				const sent = readDraft({ project, id: state.draftId })?.conflict?.sentMerge;
-				finishConflict(state, head, sameBody(bodyOf(head), sent ?? state.merged), sent);
-			} else {
-				const stored = readDraft({ project, id: state.draftId });
-				if (stored?.conflict?.q !== state.q) return;
-				forgetRequest(state.draftId);
-				setStatus(
-					`The conflict proposal was ${answer === "reject" ? "rejected" : "answered elsewhere"}. Your ${hasTypedMerge(stored.conflict) ? "typed merge" : "current draft"} is kept; leave the editor to propose it afresh.`,
-				);
+	/** Acts on what the server recorded for a merge this card sent. False when that merge settled nothing. */
+	const settleMerge = useCallback(
+		async ({
+			state,
+			sent,
+			fate,
+		}: {
+			state: ConflictState;
+			sent: ConflictState["sentMerges"][number];
+			fate: MergeFate;
+		}): Promise<boolean> => {
+			switch (fate.kind) {
+				case "refused": {
+					const card = cardDraft(state);
+					if (card)
+						storeConflict({
+							...card.conflict,
+							sentMerges: card.conflict.sentMerges.filter((item) => item.cmd !== sent.cmd),
+						});
+					return false;
+				}
+				case "moved": {
+					const rows = await call("get", { refs: [state.ref] }, { project, owner });
+					if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return true;
+					const card = cardDraft(state);
+					if (!card) return true;
+					// Nothing of the merge was adopted, so all of the card is still the person's text: what was
+					// sent, and what they typed in it since.
+					const mine = recordable(card.conflict.merged);
+					const current = bodyOf(CaseView.parse(rows[0]));
+					const next = mergeBodies({ base: card.conflict.current, mine, theirs: current });
+					storeConflict({
+						...card.conflict,
+						q: fate.question,
+						proposal: fate.proposal,
+						base: card.conflict.current,
+						mine,
+						current,
+						merged: next.merged,
+						paths: next.conflicts.map((conflict) => conflict.path),
+						sentMerges: [],
+					});
+					uncertainMerges.current.delete(state.q);
+					setStatus(
+						"Nothing was adopted: the case changed again. Your draft is kept. Resolve the new conflict in the card.",
+					);
+					void invalidateProject(project);
+					return true;
+				}
+				case "adopted":
+					await endMergedCard({
+						state,
+						sent: sent.body,
+						version: fate.version,
+						done: `Conflict resolved. Version ${fate.version} is recorded; both earlier versions remain in the timeline.`,
+					});
+					return true;
+				case "unchanged":
+					await endMergedCard({
+						state,
+						sent: sent.body,
+						version: null,
+						done: "Conflict resolved. The recorded version already holds this text.",
+					});
+					return true;
+				case "waiting":
+					await endMergedCard({
+						state,
+						sent: sent.body,
+						version: null,
+						done: `Conflict resolved. Your merge is proposed and waits for a person · ${fate.question}`,
+					});
+					return true;
+				default: {
+					const _exhaustive: never = fate;
+					return _exhaustive;
+				}
 			}
 		},
-		[project, owner, mayWrite, finishConflict, forgetRequest, setStatus],
+		[project, owner, mayWrite, cardDraft, storeConflict, endMergedCard, setStatus],
+	);
+	/**
+	 * The card's question is answered. Whether a merge this card sent answered it is asked of the server (the
+	 * `command` operation), never judged by comparing what is recorded with what was sent: a merge is recorded
+	 * together with newer changes, and the same text can be recorded by somebody else. Any other answer, and a
+	 * merge from elsewhere, leave the person's text a draft on the version it was written on, so proposing it
+	 * merges with whatever is recorded now, or asks.
+	 */
+	const settleAnswered = useCallback(
+		async (state: ConflictState, answer: string): Promise<void> => {
+			for (const sent of [...(cardDraft(state)?.conflict.sentMerges ?? [])].reverse()) {
+				const found = await call("command", { cmd: sent.cmd }, { project, owner });
+				if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
+				if (found.state !== "done") continue;
+				if (await settleMerge({ state, sent, fate: mergeFate({ reply: found.reply, ref: state.ref }) })) return;
+			}
+			const rows = await call("get", { refs: [state.ref] }, { project, owner });
+			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
+			const card = cardDraft(state);
+			if (!card) return;
+			const head = CaseView.parse(rows[0]);
+			const typed = hasTypedMerge(card.conflict);
+			if (answer === "merge" && sameBody(typed ? card.conflict.merged : sentBody(card.draft), bodyOf(head))) {
+				dropDraft(state.draftId);
+				setStatus(`Conflict resolved elsewhere. Version ${head.version} holds your text.`);
+			} else {
+				forgetRequest(state.draftId);
+				setStatus(
+					`The conflict proposal was ${answer === "reject" ? "rejected" : answer === "merge" ? "resolved elsewhere" : "answered elsewhere"}. Your ${typed ? "typed merge" : "current draft"} is kept; leave the editor to propose it afresh.`,
+				);
+			}
+			uncertainMerges.current.delete(state.q);
+			void invalidateProject(project);
+		},
+		[project, owner, mayWrite, cardDraft, settleMerge, dropDraft, forgetRequest, setStatus],
 	);
 	useEffect(() => {
-		const read = SettledQuestion.safeParse(conflictQuestion.data?.[0]);
+		const read = CardQuestion.safeParse(conflictQuestion.data?.[0]);
 		if (
 			ownedElsewhere ||
 			!conflict ||
@@ -490,72 +620,47 @@ export function SuiteScreen() {
 		)
 			return;
 		resolving.current.add(conflict.q);
-		void releaseSettledConflict(conflict, read.data.decision?.answer.is ?? "")
+		void settleAnswered(conflict, read.data.decision?.answer.is ?? "")
 			.catch((error: unknown) =>
 				setStatus(error instanceof Error ? error.message : "Could not read the settled conflict. Your draft is kept."),
 			)
 			.finally(() => resolving.current.delete(conflict.q));
-	}, [conflict, ownedElsewhere, conflictQuestion.data, releaseSettledConflict, setStatus]);
+	}, [conflict, ownedElsewhere, conflictQuestion.data, settleAnswered, setStatus]);
 
 	async function resolveConflict(state: ConflictState, merged: CaseBody): Promise<void> {
 		if (resolving.current.has(state.q) || !mayWrite(state.draftId)) return;
 		resolving.current.add(state.q);
-		let sent: CaseBody | undefined;
+		let asked = false;
+		const question = async () => CardQuestion.parse((await call("get", { refs: [state.q] }, { project, owner }))[0]);
 		try {
-			const questions = await call("inbox", { on: state.ref, kind: "adopt" }, { project, owner });
-			const question = questions.items.find((item) => item.q === state.q);
-			if (!question) {
-				const rows = await call("get", { refs: [state.q] }, { project, owner });
-				const settled = SettledQuestion.parse(rows[0]);
-				await releaseSettledConflict(state, settled.decision?.answer.is ?? "");
-				return;
-			}
+			const open = await question();
+			// Answered already, perhaps by a merge sent from here whose reply was lost.
+			if (open.state !== "open") return await settleAnswered(state, open.decision?.answer.is ?? "");
+			const card = cardDraft(state);
+			if (!card || !mayWrite(state.draftId)) return;
+			// A new id for every attempt. An earlier attempt may still arrive: the server records one of the two
+			// and refuses the other, and each id says which.
+			const sent = { cmd: randomId(), body: CaseBody.parse(merged) };
+			storeConflict({ ...card.conflict, sentMerges: [...card.conflict.sentMerges, sent] });
 			if (!mayWrite(state.draftId)) return;
-			sent = CaseBody.parse(merged);
-			storeConflict({ ...state, sentMerge: sent });
-			if (!mayWrite(state.draftId)) return;
+			asked = true;
 			const reply = await call(
 				"decide",
-				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "merge", body: merged } },
+				{ q: open.q, onEvidence: open.evidenceHash, answer: { is: "merge", body: sent.body }, cmd: sent.cmd },
 				{ project, owner },
 			);
 			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
-			const outcome = reply[0];
-			const moved = z
-				.object({ status: z.literal("conflict"), proposal: z.string(), adopt: z.string() })
-				.safeParse(outcome?.effects);
-			if (moved.success) {
-				const rows = await call("get", { refs: [state.ref] }, { project, owner });
-				if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
-				const current = bodyOf(CaseView.parse(rows[0]));
-				const nextMerge = mergeBodies({ base: state.current, mine: merged, theirs: current });
-				storeConflict({
-					...state,
-					q: moved.data.adopt,
-					sentMerge: undefined,
-					proposal: moved.data.proposal,
-					base: state.current,
-					mine: merged,
-					current,
-					merged: nextMerge.merged,
-					paths: nextMerge.conflicts.map((conflict) => conflict.path),
-				});
-				setStatus(
-					"Nothing was adopted: the case changed again. Your draft is kept. Resolve the new conflict in the card.",
-				);
-				void invalidateProject(project);
-				return;
-			}
-			if (outcome?.status !== "decided") {
-				setStatus(outcome?.needs ?? "The evidence changed. Your draft and conflict card are kept.");
-				return;
-			}
-			const rows = await call("get", { refs: [state.ref] }, { project, owner });
+			const fate = mergeFate({ reply, ref: state.ref });
+			if ((await settleMerge({ state, sent, fate })) || fate.kind !== "refused") return;
+			// Refused. That is what an earlier attempt gets the later one when it arrived first after all.
+			const now = await question();
 			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
-			finishConflict(state, CaseView.parse(rows[0]), true, merged);
+			if (now.state !== "open") return await settleAnswered(state, now.decision?.answer.is ?? "");
+			uncertainMerges.current.delete(state.q);
+			setStatus(fate.needs ?? "The evidence changed. Your draft and conflict card are kept.");
 		} catch (error) {
 			if (!mayWrite(state.draftId)) return;
-			if (sent) uncertainMerges.current.add(state.q);
+			if (asked) uncertainMerges.current.add(state.q);
 			if (sessionCurrent(owner))
 				setStatus(
 					`${error instanceof Error ? error.message : "Conflict could not be resolved"}. Your draft and conflict card are kept.`,
@@ -685,13 +790,7 @@ export function SuiteScreen() {
 						.find((item) => item.success && item.data.case === snapshot.ref);
 					const currentBody = edit?.success ? CaseBody.parse(edit.data.current) : body;
 					const latest = liveDrafts.current.get(snapshot.id) ?? snapshot;
-					const normalized = cleanTitle(latest);
-					const mine = {
-						...normalized.body,
-						steps: normalized.body.steps
-							.filter((step) => step.action.trim())
-							.map((step) => ({ ...step, expected: step.expected || null })),
-					};
+					const mine = sentBody(latest);
 					const merged = mergeBodies({ base: latest.original, mine, theirs: currentBody });
 					const conflict: ConflictState = {
 						q: reply.question,
@@ -702,6 +801,7 @@ export function SuiteScreen() {
 						current: currentBody,
 						merged: merged.merged,
 						paths: merged.conflicts.map((conflict) => conflict.path),
+						sentMerges: [],
 						draftId: snapshot.id,
 					};
 					storeConflict(conflict);
@@ -1500,7 +1600,7 @@ export function SuiteScreen() {
 				rapid={create}
 				hasDraft={Boolean(selected && captures.get(selected)?.dirty)}
 				conflict={draft?.conflict ?? null}
-				onConflictChange={storeConflict}
+				onConflictChange={changeCard}
 				onResolved={resolveConflict}
 			/>
 			{creatingFolder &&

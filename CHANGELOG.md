@@ -17,3 +17,4 @@
 - 2026-10-12: the MVP runs on the home server (Coolify, one container, port 7357 on the LAN and the tailnet); `docs/deploy.md` has the steps as they were done.
 - 2026-10-12: `compose.coolify.yaml`: the Coolify instance becomes its own tailnet node (`https://casebook.owl-perch.ts.net`) through a Tailscale sidecar, with no published LAN port; `compose.yaml` stays the plain local file.
 - 2026-10-13: `compose.coolify.yaml`: the sidecar no longer sets the container hostname `casebook`, which made it proxy to itself (502).
+- 2026-10-12: web: a merge typed by hand in the conflict card no longer leaves a draft that undoes a colleague's newer change, and a merge whose reply was lost is settled from what the server recorded, not from a comparison (issue #81, decision 0013). New read operation `command`: what became of a command id (not recorded, begun, or done with its reply).

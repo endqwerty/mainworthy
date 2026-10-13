@@ -260,10 +260,9 @@ for (const answer of ["reject", "merge"] satisfies ("reject" | "merge")[])
 				await returned.goto(`${server.url}/p/scratch/suite/c/1`);
 				await title(returned).waitFor();
 				await returned.locator(".conflict-card").waitFor({ state: "detached" });
-				await returned
-					.getByText(answer === "reject" ? "typed merge is kept" : "later text is kept", { exact: false })
-					.first()
-					.waitFor();
+				// Either way the text was written against the version from before the answer, and is proposed on it:
+				// it is not "later text" on the version somebody else's merge made (issue #81).
+				await returned.getByText("typed merge is kept", { exact: false }).first().waitFor();
 				expect(await title(returned).inputValue()).toBe("Draft typed in the card");
 				await title(returned).press("End");
 				await returned.keyboard.type(" still editable");
