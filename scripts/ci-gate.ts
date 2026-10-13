@@ -1,8 +1,9 @@
 // The last job of the check workflow: every shard's results go to one Mainworthy, and Mainworthy's gate is the
 // job's result. Mainworthy knows only what it was told, so this also refuses what a gate cannot see: a shard that
 // left no report, a shard whose tests exited with a failure its report does not show, a test file that is in no
-// shard's report (it did not load, or no shard was given it), and a test file whose tests were all skipped (a
-// runner with no browser skips every browser test, exits 0 and writes a complete report).
+// shard's report (it did not load, or no shard was given it), a test file whose tests were all skipped (a
+// runner with no browser skips every browser test, exits 0 and writes a complete report), and a test file whose
+// name is too long for a report to keep whole, because its tests cannot be told from another file's.
 //
 //   bun scripts/ci-gate.ts <directory> <shard>...        from the repository's root
 //
@@ -15,7 +16,7 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
-import { parseJUnit } from "../src/surfaces/formats/junit.ts";
+import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
 import { CI_SHARD_LIMITS, type Outcome, over, readOutcome, seconds } from "./check-plan.ts";
 import { chooseInstance, describeChoice, type Environment, type Own, startOwn } from "./ci-instance.ts";
 
@@ -99,9 +100,16 @@ try {
 			if (result.outcome === "skip") count.skipped++;
 			ran.set(name, count);
 		}
-		for (const [name, count] of ran)
+		for (const [name, count] of ran) {
 			if (count.skipped === count.tests)
 				problems.push(`${shard}: every test of ${name || "a suite that names no file"} was skipped (${count.tests})`);
+			// The reader cut this name short, or may have. Two files whose names begin alike are then one entry
+			// here, and a file in which nothing ran is counted with one that ran (issue #82). Refused, not guessed.
+			if (name.length >= TEST_FILE_LIMIT)
+				problems.push(
+					`${shard}: a test file's name is ${TEST_FILE_LIMIT} characters or longer, and a report keeps the first ${TEST_FILE_LIMIT} (${name.slice(0, 80)}...)`,
+				);
+		}
 		if (results.length === 0) problems.push(`${shard}: its report holds no test`);
 		if (outcome.exit !== 0 && failed === 0)
 			problems.push(`${shard}: the tests exited ${outcome.exit} and the report shows no failure`);

@@ -260,6 +260,32 @@ test("a test file whose tests were all skipped fails the job, though the gate pa
 	expect(result.code).toBe(1);
 }, 20_000);
 
+test("a test file whose name the reader cuts short fails the job, so a skipped file cannot be counted with one that ran", async () => {
+	// Issue #82. The reader keeps the first 500 characters of a file's name, and the two names below share them:
+	// counted by that name they are one file with two tests and one skip, and the skipped file goes unreported.
+	const deep = `test/${Array.from({ length: 5 }, () => "a".repeat(99)).join("/")}`;
+	const [ran, skipped] = [`${deep}/pass.test.ts`, `${deep}/skip.test.ts`];
+	expect([ran.length, skipped.length, ran.slice(0, 500) === skipped.slice(0, 500)]).toEqual([517, 517, true]);
+	const result = await gate(
+		green.map((shard) =>
+			shard.name === "tests-2" ? { ...shard, files: { [ran]: null, [skipped]: SKIPPED }, exit: 0 } : shard,
+		),
+	);
+	expect(result.output).toMatch(/mainworthy gate\s+passed/);
+	expect(result.output).toContain(
+		`::error::tests-2: a test file's name is 500 characters or longer, and a report keeps the first 500 (${ran.slice(0, 80)}...)`,
+	);
+	expect(result.code).toBe(1);
+	// A name one character short of the limit is whole, and is counted as itself.
+	const whole = `test/${"b".repeat(99)}/${"c".repeat(99)}/${"d".repeat(99)}/${"e".repeat(99)}/${"f".repeat(86)}.test.ts`;
+	expect(whole.length).toBe(499);
+	const fits = await gate(
+		green.map((shard) => (shard.name === "tests-2" ? { ...shard, files: { [whole]: null }, exit: 0 } : shard)),
+	);
+	expect(fits.output).not.toContain("::error::");
+	expect(fits.code).toBe(0);
+}, 40_000);
+
 test("a test that takes its file from its suite is counted for that file", async () => {
 	// Other producers of JUnit put the file on the suite only. Bun puts it on every test.
 	const inherited = junit({ "test/c.test.ts": null }).replace(/(<testcase\b[^>]*?) file="[^"]+"/g, "$1");

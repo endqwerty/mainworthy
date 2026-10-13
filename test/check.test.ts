@@ -2,6 +2,7 @@
 // is measured by the check (`scripts/check.ts`); this keeps the plan whole and the limit where it was set.
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
+import { Glob } from "bun";
 import { z } from "zod";
 import {
 	CI_SHARD_LIMITS,
@@ -15,6 +16,7 @@ import {
 	testArgs,
 	testReaders,
 } from "../scripts/check-plan.ts";
+import { TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
 
 test("every test file is in exactly one phase: the quiet files, and everything but them", () => {
 	for (const file of QUIET) expect(existsSync(file), `${file} is listed as quiet and is not there`).toBe(true);
@@ -26,6 +28,14 @@ test("every test file is in exactly one phase: the quiet files, and everything b
 		QUIET.map((file) => `--path-ignore-patterns=${file}`),
 	);
 	expect(parallel.slice(-2)).toEqual(["src", "test"]);
+});
+
+test("no test file's name comes near the length at which a report cuts it short", () => {
+	// The gate job tells test files apart by the name a report keeps, and refuses a name that long (issue #82).
+	// This fails here, on the machine that adds the file, long before the job would.
+	const long = [...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")].filter((file) => file.length > 200);
+	expect(long).toEqual([]);
+	expect(TEST_FILE_LIMIT).toBeGreaterThan(200);
 });
 
 test("a shard is a share of the parallel phase, with its report beside it", () => {
