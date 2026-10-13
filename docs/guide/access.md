@@ -131,7 +131,7 @@ In Settings, open People. You see it when you are a person who holds `admin` on 
 4. Choose how long the link works, from 12 hours to 30 days. Three days is the start.
 5. Press "Make invitation link".
 
-The link appears once, masked, with "Copy link". Copy it and hand it to the person. "Dismiss link" takes it off the page, and so does leaving the section. Nothing shows it again.
+The link appears once, masked, with "Copy link". Copy it and hand it to the person. "Dismiss link" takes it off the page, and so does leaving the section. Nothing shows it again. If no answer comes back when you make a link, the page says so and reads its lists again. A person who is in them was invited, and that link is lost: a recovery link is then their way in.
 
 "Open invitations" lists the links nobody has accepted yet: who each is for, what that person may do, who made it and when it runs out. "Revoke" withdraws one.
 
@@ -160,9 +160,11 @@ Open the link. The page says "You are invited as dana" and until when the link w
 2. Or tick "Make a passkey on this device" and give the passkey a name. It starts as the name of your browser. You can do both.
 3. Press "Accept and sign in". You are signed in and the app opens.
 
-The page takes the code out of the address bar as soon as it has read it, so the code is not left in the tab's history. If you reload the page, it has no code: open the link again.
+The page takes the code out of the address bar as soon as it has read it. From then on the address you see, and the one Back returns to, has no code in it, so it is not copied with the address. That is as far as a page can go: the browser's own record of the address that was first opened still holds the whole link, as it does for any address. The code is the part after the `#`, which a browser sends to no server. If you reload the page, it has no code: open the link again.
 
-If the browser is signed in as somebody else, the page says who and asks before it signs them out of that browser. "Stay signed in" leaves the invitation as it is.
+If the browser is signed in as somebody else, the page says who and asks before it signs them out of that browser. Until it knows who is signed in, and until you answer, the fields cannot be typed in. The answer is about the person the page named and nobody else: if another person signs in to that browser before you accept, nothing is accepted, and the page asks again, about them. "Stay signed in" leaves the invitation as it is.
+
+If no answer comes back when you accept, the page says that it cannot tell whether the invitation was accepted. Go to the sign-in page and try what you chose. If that signs you in, it was.
 
 A link that was used, was revoked or has run out says "This invitation does not work any more." So does one that was cut short when it was copied. Ask whoever sent it for a new one.
 
@@ -174,7 +176,7 @@ After that the person signs in on the sign-in page with their name and password,
 
 A passkey is a key that a device or a password manager holds and unlocks with a fingerprint, a face or a PIN. It needs `MAINWORTHY_PUBLIC_URL`, because a passkey belongs to the host name people open the instance at. One made at `https://mainworthy.example` does not sign in at another name of the same instance. Without that variable the pages offer no passkey. [API](./api.md#sign-in-as-a-person) lists the requests a page makes to register and use one.
 
-To set or change your password, open Settings, "Your sign-in". <kbd>n</kbd> puts the caret in the new password. Changing a password asks for the current one. The other browsers that signed in with the old password are signed out, and the page says how many. The one that made the change stays signed in. A token cannot change a password.
+To set or change your password, open Settings, "Your sign-in". <kbd>n</kbd> puts the caret in the new password. Changing a password asks for the current one. The other browsers that signed in with the old password are signed out, and the page says how many. The one that made the change stays signed in. A token cannot change a password. If no answer comes back, the page says that it cannot tell whether the password was changed: when the current password is refused on the next try, the new one is your password already.
 
 To add a passkey, give it a name under "Passkeys" in the same section and press "Add a passkey". "Ways you sign in" lists your password and each passkey with when it was last used, and "Remove" beside each. Your last way of signing in has no working "Remove".
 
@@ -182,7 +184,7 @@ Failed attempts are counted. The fifth wrong password for one name within 15 min
 
 ### A lost password or passkey
 
-The sign-in page has no "forgot password", because there is no mail to send one by. A recovery link replaces it. In Settings, People, "People who sign in" lists each person. The owner sees "Recovery link" beside every person, and anybody else beside their own name. Press it, read what it replaces, and press "Make the recovery link". The link is shown once, as an invitation's is.
+The sign-in page has no "forgot password", because there is no mail to send one by. A recovery link replaces it. In Settings, People, "People who sign in" lists each person. The owner sees "Recovery link" beside every person. Another person who administers the instance sees it beside their own name only. Somebody who does not administer has no People section and asks the owner. Press it, read what it replaces, and press "Make the recovery link". The link is shown once, as an invitation's is.
 
 From the command line, invite the person again. For a person who exists, the link is a recovery:
 

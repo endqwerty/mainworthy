@@ -416,21 +416,35 @@ it, is in `src/web/CHECKS.md`; the guide describes them for a person (`docs/guid
 - The invitation page takes the code out of the address bar when it reads it, not when the invitation is
   accepted: a code that sits in the address while a form is filled in is copied with it. The price is that a
   reload has no code, and the page then says to open the link again.
-- The question for a browser signed in as somebody else comes before the form, from `/api/session`, and the
-  fields wait for the answer. The server's 409 is still handled, for somebody who signs in elsewhere while
-  the page is open: the same acceptance is sent again with `replace`, passkey included.
+- The question for a browser signed in as somebody else comes before the form, from `/api/session`. The
+  fields wait until the page knows who is signed in, and then for the answer.
+- The answer is about one person, and `replace` carries that person's name. The first version sent
+  `replace: true`, and an independent check showed what that allowed: the page asked about robin, somebody
+  else signed in from another tab, and the acceptance ended their session with no question about them. Now
+  the server reads who holds the browser when it accepts and answers 409 with that name unless `replace` is
+  exactly it. The page then asks about the person the 409 names and sends nothing until "Continue". It never
+  sends a name that was not on the page when the answer was given. What was typed is kept for that second
+  sending, and so is a passkey that was already made, while its challenge lasts; past that the page says so
+  and the passkey is made again.
 - The page shows a new link under sentences of its own, written from `purpose`, `name` and whether the link has
   a host, and does not show the reply's `note`. For an instance with no public address the note says to put
   the address before the link, and the page has already done that with the address it was opened at.
 - "Recovery link" is offered where the server allows it and nowhere else: beside every person for the owner
-  (`owner` of the session), and beside their own name for anybody else, who is told that the owner makes the
-  others. A button that is always answered 403 was the first version, before the session said who the owner is.
+  (`owner` of the session), and beside their own name for another admin of the instance, who is told that
+  the owner makes the others. A button that is always answered 403 was the first version, before the session said who the owner is.
 - A new invitation starts with what a person needs to work: read, record, produce, answer and plan. `admin`
   is for the inviter to tick, with a line saying what it gives, and is unticked again after an invitation that
   had it. The server's own default for an invitation with no `can` is still everything, as for a token; the
   page always sends what is ticked.
-- A link that was made stays on the page until it is dismissed or the section is left. A second link, or a
-  recovery link that is refused, does not take it away.
+- A link that was made stays on the page until it is dismissed or the section is left, with one exception: a
+  newer link for the same person takes its place, because the server revoked the earlier one when it made the
+  newer. A link for somebody else, or a recovery link that is refused, does not take it away.
+- A control whose request is under way is marked `aria-disabled` and stays focusable, and its handler lets
+  one request through. Disabled, it dropped the focus, and somebody working by keyboard was left on nothing
+  after a refusal. The two selects of the invitation form keep the focus when they change, unlike the shell's
+  selects, which give it up so that the next plain key is a shortcut: here the next key is another arrow.
+- When a request that changes something gets no reply, the page says what may have happened and how to find
+  out, and does not say "try again": the server may have acted, and a second press would act again.
 - Ending this browser's own session in "Your sessions" calls `/api/logout`, as "Sign out" does, so the cookie
   is cleared too.
 - The lists of sessions, credentials and invitations are read again every time their section opens. The cache

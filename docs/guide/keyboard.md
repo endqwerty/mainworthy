@@ -163,4 +163,4 @@ These two pages open before you are signed in, so the keys above do not work on 
 | <kbd>↵</kbd> | Sends the form the caret is in: sign in, or accept the invitation |
 | <kbd>Space</kbd> | Ticks "Make a passkey on this device" on an invitation, when the caret is on it |
 
-The caret starts in the name on the sign-in page and in the password on an invitation.
+The caret starts in the name on the sign-in page and in the password on an invitation. When the browser is signed in as somebody else, an invitation first asks whether to sign them out, and the caret starts on "Continue". A button that was pressed keeps the keyboard focus while its request runs and after a refusal, so the next <kbd>↵</kbd> tries again.
