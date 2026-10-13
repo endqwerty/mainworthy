@@ -85,7 +85,11 @@ test("the workflow runs every shard of the plan and its gate reads every one of 
 // Issue #124. The name the workflow gives a shard's artifact and the name the gate looks for are written in two
 // places: this holds them together, and holds the download to a directory for each artifact.
 test("a shard's artifact is named for its attempt and downloaded into its own directory, where the gate finds the newest", () => {
-	const step = z.looseObject({ uses: z.string().optional(), with: z.record(z.string(), z.unknown()).optional() });
+	const step = z.looseObject({
+		uses: z.string().optional(),
+		run: z.string().optional(),
+		with: z.record(z.string(), z.unknown()).optional(),
+	});
 	const { jobs } = z
 		.object({ jobs: z.object({ tests: z.object({ steps: z.array(step) }), gate: z.object({ steps: z.array(step) }) }) })
 		.parse(Bun.YAML.parse(readFileSync(".github/workflows/check.yml", "utf8")));
@@ -96,6 +100,12 @@ test("a shard's artifact is named for its attempt and downloaded into its own di
 	expect(upload?.name).toBe(`results-${expression("matrix.name")}-attempt-${expression("github.run_attempt")}`);
 	// No `merge-multiple`: merged, two attempts of one shard are two files of one name in one directory.
 	expect(download).toEqual({ pattern: "results-*", path: "test-results" });
+
+	// A shard that ran again and left no artifact is read from its older attempt. Its job failed then, and the
+	// gate job's last step fails on that, with the type-check, the lint and the image.
+	const last = jobs.gate.steps.at(-1)?.run ?? "";
+	for (const job of ["static", "image", "tests"])
+		expect(last).toContain(`test "${expression(`needs.${job}.result`)}" = success`);
 
 	const named = (shard: string, attempt: string): string =>
 		String(upload?.name).replace(expression("matrix.name"), shard).replace(expression("github.run_attempt"), attempt);
