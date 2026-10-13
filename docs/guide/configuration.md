@@ -34,6 +34,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_OWNER` | `USER`, else `owner` | The name of the owner, who holds every capability on every project. |
 | `MAINWORTHY_OWNER_TOKEN` | none | A token for the owner. Server mode needs one to sign in. |
 | `MAINWORTHY_READERS` | the CPU count minus 2, at least 1 and at most 8 | How many reader threads answer reads. `0` answers them on the main thread. |
+| `MAINWORTHY_COMMIT` | none | The commit this server was built from, which `/healthz` reports. 40 lower-case hexadecimal characters, or it reads as unknown. Without it the server reads `SOURCE_COMMIT`. |
 
 A value that is not a whole number for `MAINWORTHY_READERS` stops the start with `invalid: MAINWORTHY_READERS must be a non-negative integer`.
 
@@ -61,7 +62,7 @@ For these three variables, a value that is set but empty counts as not set. [Com
 
 ## Variables that describe a CI build
 
-`MAINWORTHY_COMMIT`, `MAINWORTHY_BRANCH`, `MAINWORTHY_PR`, `MAINWORTHY_BASE`, `MAINWORTHY_ATTEMPT`, `MAINWORTHY_JOB`, `MAINWORTHY_BUILD_URL`, `MAINWORTHY_REPO` and `MAINWORTHY_ENV` tell `mainworthy report` which build produced the results. A CI job sets them only when Mainworthy cannot detect the build. [Report results](./report-results.md#identify-the-tested-build) explains each.
+`MAINWORTHY_COMMIT`, `MAINWORTHY_BRANCH`, `MAINWORTHY_PR`, `MAINWORTHY_BASE`, `MAINWORTHY_ATTEMPT`, `MAINWORTHY_JOB`, `MAINWORTHY_BUILD_URL`, `MAINWORTHY_REPO` and `MAINWORTHY_ENV` tell `mainworthy report` which build produced the results. (`MAINWORTHY_COMMIT` means something else to the server: see the table above.) A CI job sets them only when Mainworthy cannot detect the build. [Report results](./report-results.md#identify-the-tested-build) explains each.
 
 ## Run one container with one volume
 
@@ -77,12 +78,14 @@ The image checks its own health every 30 seconds by running `mainworthy health`.
 
 ```
 $ curl -s http://127.0.0.1:7357/healthz
-{"ok":true,"version":"0.1.0"}
+{"ok":true,"version":"0.1.0","commit":null}
 $ mainworthy health
 healthy: Mainworthy 0.1.0 at http://127.0.0.1:7357
 ```
 
 `mainworthy health` exits 0 when the server answers and 1 when it does not. Use `/healthz` for a monitor of your own.
+
+`commit` is the commit the server runs, when it was told. Build the image with `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build` and `/healthz` names that commit, and `mainworthy health` prints its first 12 characters. Without it the answer is `null`.
 
 Back up the volume. [Your data](./data.md) explains how.
 
@@ -105,7 +108,7 @@ In server mode everything that reads or changes a project needs a token. These a
 
 | Address | What it returns |
 | --- | --- |
-| `/healthz` | Whether the server is up, and its version |
+| `/healthz` | Whether the server is up, its version, and the commit it runs when it was told |
 | `/docs` and the pages under it | This documentation, the same for every instance of a version |
 | `/api/openapi.json` | The description of the API, built from the list of operations |
 | `/` | The web UI's own files. The page then asks for a token. |
