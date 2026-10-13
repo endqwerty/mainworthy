@@ -291,13 +291,16 @@ an invitation's link once.
 - A challenge is kept in memory for five minutes with what it was issued for, bounded at ten thousand, and
   spent by the commit that stores the passkey or opens the session. An import ends every ceremony under way.
 - A ceremony is finished where it began. The challenge keeps its initiating context, and an answer is taken
-  only from there, compared when it arrives and again in the commit that spends the challenge:
+  only from there. Every path compares it in the commit that spends the challenge; a sign-in and an
+  invitation also compare it when the answer arrives, before the wait for that commit:
   - A sign-in, where nobody is signed in yet: the reply that carries the challenge sets a cookie of 32 random
     bytes (`mainworthy_ceremony`, or `__Host-mainworthy_ceremony` over https; `HttpOnly; SameSite=Strict;
     Path=/`, `Max-Age` of the challenge's five minutes, `Secure` over https, by the same function that
     names and sets the session cookie). The challenge keeps the cookie's SHA-256. An answer with no such
     cookie, another one, or two of them is refused with the one refusal of a sign-in and counted like any
-    refused answer. The reply to an answer clears the cookie, whatever came of it.
+    refused answer. The reply to an answer that was looked at clears the cookie, whatever came of it. A
+    request refused before that (one from another site's page, or a body that is not exactly a passkey's
+    answer) leaves the cookie, and the challenge, as they were.
   - A signed-in registration: the session that asked, by the hash of its session cookie, which is what its
     row stores. Another session of the same person does not complete it. The owner of the machine in local
     mode, who has no session, is one context. A bearer token is none: `passkey.begin` and `passkey.add`

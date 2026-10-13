@@ -368,9 +368,9 @@ function signedBy(key: KeyObject, algorithm: Algorithm, message: Buffer, signatu
 // - Where the ceremony began. The record of a challenge also says who asked for it, and an answer is taken
 //   only from there: a sign-in from the browser that asked, known by a cookie set with the challenge of which
 //   the record keeps the hash; a signed-in registration from the session that asked; a registration with an
-//   invitation for that invitation, by the hash of its code. It is compared when the answer arrives and again
-//   in the commit that uses the challenge up. A row's number is never what is kept: an import gives it to
-//   another row. Without this, a signed answer would be good in any browser that came to hold it.
+//   invitation for that invitation, by the hash of its code. It is compared in the commit that uses the
+//   challenge up, on every path; a sign-in and an invitation compare it when the answer arrives as well. A
+//   row's number is never what is kept: an import gives it to another row. Without this, a signed answer would be good in any browser that came to hold it.
 // - Registration is for one account: the one of the signed-in session that asked for the challenge, or the
 //   one of the invitation, which is used up in the same commit. The answer never says which account.
 // - A credential id is unique across the instance, by a constraint in the database. A second registration of
