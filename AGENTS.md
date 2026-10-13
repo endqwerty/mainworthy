@@ -103,6 +103,9 @@ home lab's notes say where and how to redeploy). No blocking defect is known: is
   children did, and removed `node_modules` under the lead and a builder that were
   still running. Reviewers work in an export (`git archive <rev> | tar -x -C <dir>`)
   and clean only that. If modules vanish mid-task: `bun install --frozen-lockfile`.
+  On the desktop `/tmp` is kept in memory and `test/budgets.test.ts` refuses it, so the export goes under
+  `~/.cache`. To wait for another agent's test run: `pgrep -f '[t]est-worker'`; without the brackets pgrep
+  finds the shell that runs it and the wait never ends (both on 2026-10-12, PR #97).
 
 ## Model profile
 
