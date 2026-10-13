@@ -99,6 +99,13 @@ export function SectionHeading({ children }: { children: ReactNode }) {
  * How long a new password is, as it is typed, against the shortest and the longest the server takes. A field
  * names it with `aria-describedby`.
  */
+/**
+ * What a password manager is told about a new password, so that one it makes up is one the server takes. The
+ * attribute is Safari's and 1Password reads it; React's types do not know it, so it is spread onto the field.
+ */
+export const PASSWORD_RULES = {
+	passwordrules: `minlength: ${PASSWORD_LENGTH.min}; maxlength: ${PASSWORD_LENGTH.max};`,
+};
 export function PasswordCount({ id, text, className }: { id: string; text: string; className: string }) {
 	// Characters as a person counts them, and as the server does: an emoji is one.
 	const length = [...text].length;

@@ -136,6 +136,9 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
 						name="token"
 						type="password"
 						autoComplete="off"
+						// A token is not a password: 1Password offers one wherever a password is typed, whatever
+						// `autocomplete` says, and leaves a field with this attribute alone.
+						data-1p-ignore
 						required
 						value={token}
 						onChange={(event) => setToken(event.target.value)}

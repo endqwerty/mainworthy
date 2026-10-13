@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { type FormEvent, type RefObject, useState } from "react";
+import { type FormEvent, type RefObject, useRef, useState } from "react";
 import { type CredentialRow, whyNotPassword } from "../../core/people.ts";
 import { ApiError } from "../lib/api.ts";
 import { browserName } from "../lib/browser.ts";
@@ -7,7 +7,7 @@ import { makePasskey, PasskeyError, passkeysAvailable } from "../lib/passkey.ts"
 import { addPasskey, beginPasskey, listCredentials, removeCredential } from "../lib/people.ts";
 import { NO_ANSWER, setPassword, signInMethods } from "../lib/signin.ts";
 import { useApp } from "../ui/context.tsx";
-import { age, DocLink, PasswordCount, SectionHeading } from "../ui/index.tsx";
+import { age, DocLink, PASSWORD_RULES, PasswordCount, SectionHeading } from "../ui/index.tsx";
 import { saidBy, useList, withId } from "./list.ts";
 import "./people.css";
 
@@ -144,6 +144,11 @@ function PasswordForm({
 	const [problem, setProblem] = useState<{ at: Field; message: string } | null>(null);
 	const [message, setMessage] = useState("");
 	const said = (at: Field): string => (problem?.at === at ? problem.message : "");
+	// How many times a password was set here. The fields are made again each time (`key`), because the page
+	// empties them itself: a password manager that filled them marks them as filled, takes the mark away only
+	// when the person types, and paints the field by it. 1Password left both fields blue.
+	const [round, setRound] = useState(0);
+	const buttonRef = useRef<HTMLButtonElement | null>(null);
 
 	/** Where a refusal belongs and what it says. The server names the field a message is about before a colon. */
 	function refused(error: unknown): { at: Field; message: string } {
@@ -186,6 +191,12 @@ function PasswordForm({
 				setCurrent("");
 				setNext("");
 				setAgain("");
+				// A caret in a field that is about to go moves to the button, which stays and says what was done.
+				// In the new field a manager would offer to fill a password again.
+				const button = buttonRef.current;
+				if (document.activeElement instanceof HTMLInputElement && document.activeElement.form === button?.form)
+					button?.focus();
+				setRound((count) => count + 1);
 				setMessage(has ? `Password changed.${ended(sessionsEnded)}` : "Password set.");
 				return onChanged();
 			})
@@ -205,8 +216,10 @@ function PasswordForm({
 				<>
 					<label htmlFor="password-current">Current password</label>
 					<input
+						key={`current-${round}`}
 						className="form-input"
 						id="password-current"
+						name="current-password"
 						type="password"
 						autoComplete="current-password"
 						value={current}
@@ -219,11 +232,14 @@ function PasswordForm({
 			)}
 			<label htmlFor="password-next">New password</label>
 			<input
+				key={`next-${round}`}
 				className="form-input"
 				id="password-next"
+				name="new-password"
 				ref={nextRef}
 				type="password"
 				autoComplete="new-password"
+				{...PASSWORD_RULES}
 				aria-describedby="password-count"
 				value={next}
 				onChange={(event) => setNext(event.target.value)}
@@ -234,10 +250,13 @@ function PasswordForm({
 			</p>
 			<label htmlFor="password-again">New password again</label>
 			<input
+				key={`again-${round}`}
 				className="form-input"
 				id="password-again"
+				name="new-password-again"
 				type="password"
 				autoComplete="new-password"
+				{...PASSWORD_RULES}
 				value={again}
 				onChange={(event) => setAgain(event.target.value)}
 			/>
@@ -248,7 +267,7 @@ function PasswordForm({
 				{said("form")}
 			</p>
 			{/* Busy, it keeps the focus and takes no second press: `submit` lets one request through. */}
-			<button className="out" type="submit" aria-disabled={busy}>
+			<button className="out" type="submit" ref={buttonRef} aria-disabled={busy}>
 				{busy ? "Saving…" : has ? "Change password" : "Set password"}
 			</button>
 			<p className="settings-message" role="status">

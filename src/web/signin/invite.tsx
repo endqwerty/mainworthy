@@ -12,7 +12,7 @@ import {
 	type ShownInvitation,
 	showInvitation,
 } from "../lib/signin.ts";
-import { PasswordCount } from "../ui/index.tsx";
+import { PASSWORD_RULES, PasswordCount } from "../ui/index.tsx";
 import "./signin.css";
 
 /** Where the page of an invitation is. The link is this path with the code after a `#`. */
@@ -389,6 +389,7 @@ function Accept({
 							name="password"
 							type="password"
 							autoComplete="new-password"
+							{...PASSWORD_RULES}
 							aria-describedby="invite-count"
 							ref={passwordRef}
 							value={password}
@@ -404,6 +405,7 @@ function Accept({
 							name="password-again"
 							type="password"
 							autoComplete="new-password"
+							{...PASSWORD_RULES}
 							value={again}
 							onChange={(event) => setAgain(event.target.value)}
 						/>
