@@ -1,23 +1,19 @@
 import { afterAll } from "bun:test";
-import { existsSync, rmSync } from "node:fs";
+import { rmSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type APIResponse, type Browser, type BrowserContext, chromium, type Page, type Route } from "playwright-core";
-import { testReaders } from "../../scripts/check-plan.ts";
+import { findChromium, testReaders } from "../../scripts/check-plan.ts";
 import { Client } from "../../src/cli/client.ts";
 import { type SeedResult, seed } from "../../src/cli/seed.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
 import { call } from "../../src/web/lib/api.ts";
 
-export const chromiumPath = [
-	process.env.MAINWORTHY_CHROMIUM,
-	"/usr/bin/chromium",
-	"/usr/bin/google-chrome",
-	"/usr/bin/chromium-browser",
-].find((path) => path && existsSync(path));
-export const browserAvailable = Boolean(chromiumPath);
-if (!browserAvailable) console.info("Skipping Mainworthy e2e: set MAINWORTHY_CHROMIUM or install system Chromium.");
+const found = findChromium();
+export const chromiumPath = found.path;
+export const browserAvailable = found.path !== null;
+if (found.path === null) console.info(`Skipping Mainworthy e2e. ${found.skipped}`);
 export type Server = {
 	url: string;
 	project: string;
@@ -339,10 +335,11 @@ export async function keyCount(page: Page): Promise<number> {
 		return typeof value === "number" ? value : 0;
 	});
 }
+/** Pastes with the key of the machine the browser runs on: Control+V pastes nothing on macOS (issue #103). */
 export async function paste(page: Page, text: string): Promise<void> {
 	await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
 	await page.evaluate((value) => navigator.clipboard.writeText(value), text);
-	await page.keyboard.press("Control+V");
+	await page.keyboard.press("ControlOrMeta+V");
 }
 /**
  * `page.route` and `context.route` return when the browser has accepted the interception. A page that is already

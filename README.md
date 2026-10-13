@@ -112,7 +112,7 @@ $ mainworthy export --out mainworthy.ndjson.gz     # every fact, decision and do
 
 | Command | What |
 | --- | --- |
-| `bun run check` | type-check, lint and every test, including the latency budgets and the browser tests (skipped, with a message, on a machine with no Chromium) |
+| `bun run check` | type-check, lint and every test, including the latency budgets and the browser tests (skipped, with a message, on a machine with no Chromium; `MAINWORTHY_CHROMIUM` names one). It ends with each test that failed. It needs Bun 1.4 and the packages installed, and says so in one line where either is missing |
 | `bun run dev` | the server on `127.0.0.1:7357`, restarting on change, with Bun's development bundle of the web UI: a changed module reaches the open page, under a looser page policy (`docs/architecture.md`) |
 | `bun run start` | the same server as a person runs it: the built web UI under the strict page policy, no reload |
 | `bun bench/run.ts` | the benchmark on 100,000 cases and 1,000,000 results (`--quick` for a small one) |

@@ -45,6 +45,14 @@ and "Your sign-in", "Your sessions" and "People" in Settings), through the API a
   file in which every test was skipped. An `image` job builds the container and
   asks it for `/docs`; the gate job fails with it. On GitHub the workflow takes about four
   minutes (2026-10-12, two runs: 4 min 24 s and 3 min 49 s; it was about 12 in one job).
+- **A failure says what to do.** The suite passes on macOS as on Linux (issue #103, 2026-10-13), so a failure
+  on either is the change's. A test that depends on the system (a key, a tool of the shell, what the browser
+  calls itself) says so where it does; do not write one that holds on Linux alone. `bun run check`, `bun run test`
+  and `bun test <file>` run nothing on a machine with a Bun older than 1.4 or with packages missing, and say which
+  in one line (`scripts/preflight.ts`; exit 4). `bun run` starts the script with the `bun` that is first on `PATH`,
+  not with the one that ran it. A run that fails ends with each failed test, its file and what it said, and with
+  the files that did not load. A run without a browser ends with a note that the browser tests did not run and
+  what to set. Keep it so: a new way for the machine to be wrong gets a line there, not a paragraph here.
 - **One registry.** A capability is an operation in `src/server/ops/index.ts`. HTTP,
   the OpenAPI document, the CLI, the MCP tools and the web client come from it. Never
   add a route, a command or a tool beside it.

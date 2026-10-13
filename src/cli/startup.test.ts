@@ -417,13 +417,15 @@ test("the source entry runs directly through its shebang", async () => {
 test("closing a gate's stdout preserves pending, blocked, failed and passed exits", async () => {
 	await withInstance(async ({ directory, instance, client }) => {
 		const pipeGate = async (commit: string): Promise<number> => {
+			// `true` reads nothing and ends, which closes the pipe before the gate writes. It was `head -0`, which
+			// GNU head takes and BSD head refuses ("illegal line count -- 0"), so the test failed on macOS (issue #103).
 			const child = Bun.spawn(
 				[
 					"bash",
 					"-o",
 					"pipefail",
 					"-c",
-					'"$1" "$2" gate --commit "$3" | head -0',
+					'"$1" "$2" gate --commit "$3" | true',
 					"pipe-test",
 					process.execPath,
 					CLI_ENTRY,
