@@ -116,7 +116,15 @@ export function App() {
 	if (inviting)
 		return (
 			<Invitation
-				signedInAs={auth.kind === "ready" ? auth.session.actor : auth.kind === "loading" ? undefined : null}
+				holder={
+					auth.kind === "ready"
+						? { kind: "known", name: auth.session.actor }
+						: auth.kind === "signin"
+							? { kind: "known", name: null }
+							: // Still being asked, or the asking failed. Neither means that nobody is signed in.
+								{ kind: auth.kind === "error" ? "failed" : "asking" }
+				}
+				askAgain={refreshSession}
 				onDone={async () => {
 					// The address first, so the app opens at its start and not at the invitation's path. The page
 					// stays until the session is read, so nobody sees the app as the person signed in before.
@@ -181,10 +189,21 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 		setSigningOut(true);
 		// The server ends the session and clears the cookie; only then does the page show the sign-in page. What
 		// is typed and not yet recorded stays on this device, under this person's name, for when they are back.
-		void signOut().then(signedOut, () => {
-			setSigningOut(false);
-			setStatus("Mainworthy did not answer, so you are still signed in. Try again.");
-		});
+		void signOut().then(signedOut, () =>
+			// No reply. The server may have ended the session all the same, so the page does not guess: it asks
+			// who is signed in. A 401 there shows the sign-in page (`session` sees to that).
+			session().then(
+				() => {
+					setSigningOut(false);
+					setStatus("No answer came back to the sign-out, and this browser is still signed in. Press Sign out again.");
+				},
+				(error: unknown) => {
+					if (error instanceof ApiError && error.code === "unauthenticated") return;
+					setSigningOut(false);
+					setStatus("Mainworthy did not answer, so the page cannot tell whether you are signed out. Try again.");
+				},
+			),
+		);
 	}, [signingOut]);
 	const [inInput, setInInput] = useState(false);
 	const [sidebarCollapsed, setSidebarCollapsed] = useState(false);

@@ -45,6 +45,48 @@ const MAYBE_ACCEPTED =
 const PASSKEY_RAN_OUT =
 	'The passkey was made too long ago to be taken now. Press "Accept and sign in" to make it again.';
 
+/**
+ * Who this browser is signed in as, as far as the app has found out: somebody, nobody (`name` null), still
+ * being asked, or not found out because the asking failed. The last two are not "nobody": the page may be
+ * about to sign somebody out, and has not been able to ask about them.
+ */
+export type Holder = { kind: "known"; name: string | null } | { kind: "asking" } | { kind: "failed" };
+
+/**
+ * How long the page waits to be told who is signed in before it says that it could not find out and offers to
+ * ask again. The answer is one small reply, which a slow connection brings in a second or two; twenty seconds
+ * without it is a connection that stalled. The first asking is not given up: if its answer comes after all,
+ * the page takes it.
+ */
+const LOOKUP_WAITS_MS = 20_000;
+
+type Who = { state: "known"; name: string | null } | { state: "asking" } | { state: "unknown"; retry: () => void };
+
+/** What the page knows of who is signed in, with a wait that ends and a way to ask again. */
+function useWho(holder: Holder, askAgain: () => Promise<void>): Who {
+	// The asking this page started itself with "Try again" and has no answer to yet. Each is an object of its
+	// own, so that a new one starts a new wait and an old one that ends late does not end the new one's.
+	const [again, setAgain] = useState<object | null>(null);
+	const [overdue, setOverdue] = useState(false);
+	const first = holder.kind === "asking";
+	useEffect(() => {
+		if (!first && again === null) return;
+		const timer = setTimeout(() => setOverdue(true), LOOKUP_WAITS_MS);
+		return () => clearTimeout(timer);
+	}, [first, again]);
+	if (holder.kind === "known") return { state: "known", name: holder.name };
+	if ((first || again !== null) && !overdue) return { state: "asking" };
+	return {
+		state: "unknown",
+		retry: () => {
+			const mine = {};
+			setOverdue(false);
+			setAgain(mine);
+			void askAgain().finally(() => setAgain((now) => (now === mine ? null : now)));
+		},
+	};
+}
+
 type Stage =
 	| { kind: "none" }
 	| { kind: "looking" }
@@ -57,16 +99,19 @@ type Stage =
  * asks the server who the invitation is for, and the person then sets a password, makes a passkey, or both,
  * which accepts the invitation and signs them in.
  *
- * `signedInAs` is who this browser is signed in as already: null for nobody, undefined while that is being
- * found out. `onDone` leaves the page for the app, as whoever the browser is signed in as by then.
+ * `holder` is who this browser is signed in as already, as far as the app knows, and `askAgain` asks the
+ * server once more. `onDone` leaves the page for the app, as whoever the browser is signed in as by then.
  */
 export function Invitation({
-	signedInAs,
+	holder,
+	askAgain,
 	onDone,
 }: {
-	signedInAs: string | null | undefined;
+	holder: Holder;
+	askAgain: () => Promise<void>;
 	onDone: () => Promise<void>;
 }) {
+	const who = useWho(holder, askAgain);
 	// One asking of the server. A new object asks again, for another code or for the same one once more.
 	const [asked, setAsked] = useState(() => ({ code: takeCode() }));
 	const [stage, setStage] = useState<Stage>({ kind: "looking" });
@@ -108,7 +153,7 @@ export function Invitation({
 				code={code}
 				shown={stage.shown}
 				askedAt={stage.askedAt}
-				signedInAs={signedInAs}
+				who={who}
 				onDone={onDone}
 				onGone={() => setStage({ kind: "gone" })}
 				onShown={(shown) => setStage({ kind: "shown", shown, askedAt: Date.now() })}
@@ -145,7 +190,7 @@ function Accept({
 	code,
 	shown,
 	askedAt,
-	signedInAs,
+	who,
 	onDone,
 	onGone,
 	onShown,
@@ -153,7 +198,7 @@ function Accept({
 	code: string;
 	shown: ShownInvitation;
 	askedAt: number;
-	signedInAs: string | null | undefined;
+	who: Who;
 	onDone: () => Promise<void>;
 	onGone: () => void;
 	onShown: (shown: ShownInvitation) => void;
@@ -178,8 +223,10 @@ function Accept({
 	const [confirmed, setConfirmed] = useState<string | null>(null);
 	const passwordRef = useRef<HTMLInputElement>(null);
 	const passkeyOffered = shown.passkey !== null && passkeysAvailable();
-	// Not known yet who is signed in here: the page may be about to sign somebody out, and cannot ask yet.
-	const waiting = signedInAs === undefined && refusedFor === null;
+	// Not known who is signed in here, because the answer is on its way or did not come: the page may be about
+	// to sign somebody out, and cannot ask about them. A refusal that named the holder is an answer too.
+	const waiting = who.state !== "known" && refusedFor === null;
+	const signedInAs = who.state === "known" ? who.name : null;
 	const other = refusedFor?.signedInAs ?? (signedInAs && signedInAs !== name ? signedInAs : null);
 	// Somebody else is signed in here, and the person has not said that this person's session may end. An
 	// answer about one person is no answer about another.
@@ -314,7 +361,24 @@ function Accept({
 						</div>
 					</div>
 				)}
-				{waiting && <p className="dim">Checking who is signed in to this browser…</p>}
+				{waiting && who.state === "asking" && (
+					<p className="dim" role="status">
+						Checking who is signed in to this browser…
+					</p>
+				)}
+				{waiting && who.state === "unknown" && (
+					<div className="signin-ask">
+						<p role="status">
+							The page could not find out whether somebody is signed in to this browser, so it cannot tell whether
+							accepting would sign them out.
+						</p>
+						<div>
+							<button type="button" onClick={who.retry}>
+								Try again
+							</button>
+						</div>
+					</div>
+				)}
 				<form onSubmit={submit}>
 					<fieldset disabled={held}>
 						{/* For a password manager: the name this password is saved under. */}

@@ -72,9 +72,14 @@ registered only for a caller who has the section.
 
 On these pages and sections a control whose request is under way is marked `aria-disabled`
 and not disabled, so it keeps the focus; its handler lets one request through. The selects
-of the invitation form keep the focus when they change. A request that changes something
-and gets no reply says what may have happened (`saidOfWrite` in `settings/list.ts`), not
-"try again".
+of the invitation form keep the focus when they change. A proof (a password, a token, a
+passkey's answer, an invitation) and a change are sent once for each press and never again
+by the page itself. What the page does ask again by itself is what only reads: a list after
+something in it may have changed, and `/api/session` after a sign-out that got no reply.
+When accepting an invitation, making a link or changing a password gets no reply, the page
+says what may have happened (`saidOfWrite` in `settings/list.ts`) and not "try again".
+Ending a session, removing a way of signing in and revoking an invitation may be pressed
+again safely: they say that Mainworthy did not answer, and read their list again.
 
 ## Device draft ownership
 

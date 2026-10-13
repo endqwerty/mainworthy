@@ -147,13 +147,13 @@ function PasswordForm({
 
 	/** Where a refusal belongs and what it says. The server names the field a message is about before a colon. */
 	function refused(error: unknown): { at: Field; message: string } {
-		// The request may have arrived though no reply did. Then the new password is the password already,
-		// and the current one typed here is refused the next time.
+		// The request may have arrived though no reply did, or may never have left. The page knows neither,
+		// and a refusal of the current password on the next try proves nothing: it may simply be mistyped.
 		if (!(error instanceof ApiError))
 			return {
 				at: "form",
 				message:
-					"No answer came back, so the page cannot tell whether the password was changed. If the current password is refused when you try again, the new one is your password already.",
+					"No answer came back, so the page cannot tell whether the password was changed. It may or may not have been: sign in with the new password to find out. The list below is read again.",
 			};
 		if (error.code === "forbidden") return { at: "current", message: "The current password is not right." };
 		// Wrong too often. The wait is all that is said, and the right password is refused too until it is over.
@@ -189,7 +189,11 @@ function PasswordForm({
 				setMessage(has ? `Password changed.${ended(sessionsEnded)}` : "Password set.");
 				return onChanged();
 			})
-			.catch((error: unknown) => setProblem(refused(error)))
+			.catch((error: unknown) => {
+				setProblem(refused(error));
+				// With no reply the password may have changed: the list and the session are read again.
+				if (!(error instanceof ApiError)) void onChanged();
+			})
 			.finally(() => setBusy(false));
 	}
 

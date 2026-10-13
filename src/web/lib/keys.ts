@@ -84,6 +84,24 @@ export function useKeyboard(): void {
 			const input =
 				target instanceof HTMLElement && (target.matches("input,textarea,select") || target.isContentEditable);
 			const inOverlay = target instanceof HTMLElement && target.closest("[data-overlay]") !== null;
+			// Enter and Space are a focused control's own keys: they press the button or follow the link that
+			// shows the focus. A screen's binding on either key does not take them from it, or a button reached
+			// with Tab could not be pressed at all (Sign out on the Suite, 2026-10-13). Two things keep the
+			// screens' own use of the keys: a control that was clicked holds the focus without showing it
+			// (`:focus-visible`), so the next Enter is still the screen's; and the rows of a screen's list are
+			// the screen's to act on, whichever of them has the focus.
+			if (
+				(key === "enter" || key === "space") &&
+				target instanceof HTMLElement &&
+				target.matches("button, a[href], summary") &&
+				target.matches(":focus-visible") &&
+				target.closest("#list") === null
+			) {
+				// A key held down presses once, as it does where a screen's binding takes it.
+				if (event.repeat) event.preventDefault();
+				chord = "";
+				return;
+			}
 			const candidates = bindings().filter(
 				(binding) =>
 					(!binding.when || binding.when()) &&

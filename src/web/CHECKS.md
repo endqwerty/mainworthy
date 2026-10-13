@@ -619,11 +619,14 @@ on Chromium's virtual authenticator, with the page at `localhost`.
 | Invitation | With a passkey: by keys alone, Tab to the box, Space, Tab to the name (it starts as the browser's own), Enter. | `people-passkey.test.ts`: a person accepts an invitation with a passkey |
 | Invitation | A browser signed in as somebody else is told who and asked. The fields are disabled until the answer. "Continue" ends that person's session with the acceptance, which carries their name (`replace`) and no other. | `people-invite.test.ts`: a browser signed in as somebody else |
 | Invitation | Until the page knows who is signed in, the fields and the button are disabled and it says that it is checking. Then it asks, or puts the caret in the password. | `people-invite.test.ts`: the fields of an invitation wait |
+| Invitation | When the page cannot find out who is signed in, because the request failed or no answer came in twenty seconds, it says so, the fields stay disabled, and "Try again" asks once more with the code it holds. An answer that fails is not taken for "nobody". | `people-invite.test.ts`: when the answer to who is signed in is refused by the network; never arrives |
 | Invitation | Somebody who signs in elsewhere after the page opened is asked when they accept. What they typed stays, and "Continue" sends it again with the name the question was about. | `people-invite.test.ts`: somebody who signs in elsewhere |
 | Invitation | An answer about one person signs nobody else out. After "Continue" for robin, tom signs in from another tab: the acceptance names robin, the server refuses it, tom is still signed in, and the page asks about tom. "Continue" then names tom. | `people-invite.test.ts`: an answer about one person signs nobody else out |
-| Invitation | A passkey that was made before the question is kept. After "Continue" the same answer is sent again with the name, the authenticator is not asked twice, and one passkey is stored. Past the five minutes its challenge lasts the page says so and the passkey is made again; that last part has no test, because the page has no clock a test can move. | `people-passkey.test.ts`: a passkey made before the question |
+| Invitation | A passkey that was made before the question is kept. After "Continue" the same answer is sent again with the name, the authenticator is not asked twice, and one passkey is stored. Past the five minutes its challenge lasts the page says so and the passkey is made again; that last part has no test here. | `people-passkey.test.ts`: a passkey made before the question |
 | Invitation | A recovery link says "Accepting replaces every way you sign in and signs you out everywhere else." | `people-invite.test.ts`: a recovery link |
 | Invitation | When looking at the invitation is answered with a wait, the page says it and "Try again" asks once more, with the code still in memory. When accepting is, the wait is under the form and the passwords stay. | `people-invite.test.ts`: the invitation page says how long to wait |
+| Shell | Enter and Space press a button that shows the focus, on every screen: a screen's own binding on those keys does not take them from it. On the Suite, either key on "Sign out" sends one sign-out. A button that was clicked, and the rows of a screen's list, leave the keys to the screen. | `people-signin.test.ts`: on the Suite screen, Enter; Space |
+| Shell | A sign-out that gets no reply is looked up: the page asks who is signed in, and shows the sign-in page, or says that the browser is still signed in and takes another press. | `people-signin.test.ts`: a sign-out whose reply is lost; a sign-out that never reached the server |
 | Shell | "Sign out" is in the sidebar's footer and on `g x` when the session is a browser's. It ends the session on the server: a reload is still the sign-in page. In local mode there is no button, no key and no line in the keys sheet. | `people-signin.test.ts`: the first and the last test |
 | Your sign-in | `n` goes to the new password. "Change password" asks for the current one; a wrong one says so beside its field and keeps the rest. A change says how many other sessions ended, and the fields are emptied. "Set password" asks for no current one. A wait is said beside the current password, with the rest kept. | `people-settings.test.ts`: changing the password; `people-passkey.test.ts` |
 | Your sign-in | Each passkey has its name and when it was last used. A new one is named from the browser. The authenticator that holds one already is told "This passkey is already registered.", and the name typed stays. | `people-passkey.test.ts` |
@@ -644,15 +647,27 @@ signed in as somebody else, the 403 of a wrong current password, the 429 of a na
 the 408 and the 429s that a test answers in the server's place, and the one reply a test drops. (A 401 is not
 in the list: `test/e2e/support.ts` leaves it out for every browser test.)
 
-**When no reply comes back.** A request that changes something may have arrived though its reply did not, and
-the page cannot know. It does not say "try again" there, because a second press would act a second time. After
-accepting an invitation it says to try signing in with what was chosen. After a password change it says that
-the new password is the password already if the current one is refused next time. After making a link it
-reads its lists again and says that a person found in them was invited and that link is lost. Ending a
-session, removing a way of signing in and revoking an invitation read their list again, which shows what
-became of them. A sign-in that gets no reply says "Mainworthy did not answer": nothing is lost by trying it
-again. One of these has a browser test, the lost reply to a new invitation; the others are the same few lines
-with another sentence.
+**When no reply comes back.** A request that changes something may have arrived though its reply did not, or
+may never have left, and the page cannot know which. Where a second press would act a second time it does not
+say "try again", and says only what it knows:
+
+- Accepting an invitation: it cannot tell whether the invitation was accepted; try signing in with what was
+  chosen.
+- Changing a password: it cannot tell whether the password was changed; it may or may not have been, and
+  signing in with the new one finds out. The list of credentials and the session are read again. A refusal of
+  the current password on the next try proves nothing, since it may be mistyped.
+- Making a link: it reads its lists again and says that a person found in them was invited and that link is
+  lost.
+- Signing out: it asks `/api/session`, and shows the sign-in page or says that the browser is still signed in.
+
+Ending a session, removing a way of signing in and revoking an invitation are safe to press again. With no
+reply they say "Mainworthy did not answer. Check the connection and try again." and read their list again,
+which shows what became of them. A sign-in that gets no reply says the same: nothing is lost by trying it
+again.
+
+The page sends a proof or a change once for each press and never again by itself. What it asks again by itself
+only reads: these lists, and `/api/session`. Three of the cases have a browser test: the lost reply to a new
+invitation, to a password change and to a sign-out.
 
 The waits on the invitation page and in "Your sign-in" are answered by the test, not the server. The browser
 reaches the test's server from the loopback address, which the server does not count, and a real block on a

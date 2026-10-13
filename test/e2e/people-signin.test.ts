@@ -250,3 +250,77 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+for (const key of ["Enter", "Space"] as const)
+	test.skipIf(!browserAvailable)(
+		`on the Suite screen, ${key} on the focused Sign out button signs out, with one request`,
+		async () => {
+			let browser: PageHarness | null = null;
+			try {
+				// The Suite has keys of its own on Enter and Space. A button that has the focus takes its own.
+				browser = await openPage(server, { path: "/p/scratch/suite" });
+				const { page } = browser;
+				page.setDefaultTimeout(8000);
+				let posts = 0;
+				page.on("request", (request) => {
+					if (request.url().endsWith("/api/logout") && request.method() === "POST") posts++;
+				});
+				await page.locator("#list").waitFor();
+				await page.getByRole("button", { name: "Sign out" }).focus();
+				await page.keyboard.press(key);
+				await page.locator("#signin-name").waitFor();
+				expect(posts).toBe(1);
+				expect(browser.errors).toEqual([]);
+			} finally {
+				await browser?.close();
+			}
+		},
+		30_000,
+	);
+
+test.skipIf(!browserAvailable)(
+	"a sign-out whose reply is lost is looked up, not guessed: the session ended, so the page shows the sign-in page",
+	async () => {
+		let browser: PageHarness | null = null;
+		try {
+			browser = await openPage(server, { path: "/p/scratch/settings" });
+			const { page } = browser;
+			page.setDefaultTimeout(8000);
+			// The server signs the browser out, and the reply is dropped on its way back.
+			await page.route("**/api/logout", async (route) => {
+				await route.fetch();
+				await route.abort();
+			});
+			await page.getByRole("button", { name: "Sign out" }).click();
+			await page.locator("#signin-name").waitFor();
+			expect(await page.locator("#app").count()).toBe(0);
+			expect(browser.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
+		} finally {
+			await browser?.close();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"a sign-out that never reached the server leaves the browser signed in, and the page says so and takes another press",
+	async () => {
+		let browser: PageHarness | null = null;
+		try {
+			browser = await openPage(server, { path: "/p/scratch/settings" });
+			const { page } = browser;
+			page.setDefaultTimeout(8000);
+			await page.route("**/api/logout", (route) => route.abort());
+			await page.getByRole("button", { name: "Sign out" }).click();
+			await page.getByText("this browser is still signed in", { exact: false }).waitFor();
+			expect(await page.locator("#app").count()).toBe(1);
+			await page.unroute("**/api/logout");
+			await page.getByRole("button", { name: "Sign out" }).click();
+			await page.locator("#signin-name").waitFor();
+			expect(browser.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
+		} finally {
+			await browser?.close();
+		}
+	},
+	30_000,
+);
