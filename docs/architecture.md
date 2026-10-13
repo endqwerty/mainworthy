@@ -369,8 +369,9 @@ route is the server's own (`src/surfaces/ui.ts`), and it has two forms, for the 
   a year. Nothing is bundled when the server runs and nothing else listens.
 - **From source** (`bun run start`, `bun run dev`, the tests) Bun bundles on request, as before, on a socket
   file in a private temporary directory, and the route passes each reply on with the headers. With
-  `NODE_ENV=production` that is the same bundle and the same strict policy as the executable's. Without it, it
-  is Bun's development bundle with its reload socket, which the route relays. That bundle needs three things
+  `NODE_ENV=production`, which `bun run start` and the browser tests set, that is the same bundle and the same
+  strict policy as the executable's. Without it, as under `bun run dev`, it is Bun's development bundle with its
+  reload socket, which the route relays. That bundle needs three things
   more, each measured in a browser: the hash of the one inline script Bun writes into the page, read from the
   page as it is served; `blob:` scripts, from which a changed module is run; and inline styles, with which Bun
   lays out the error it shows in the page for a module that does not build. Scripts get no `'unsafe-inline'`

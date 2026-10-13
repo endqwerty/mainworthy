@@ -113,7 +113,8 @@ $ mainworthy export --out mainworthy.ndjson.gz     # every fact, decision and do
 | Command | What |
 | --- | --- |
 | `bun run check` | type-check, lint and every test, including the latency budgets and the browser tests (skipped, with a message, on a machine with no Chromium) |
-| `bun run dev` | the server on `127.0.0.1:7357`, restarting on change |
+| `bun run dev` | the server on `127.0.0.1:7357`, restarting on change, with Bun's development bundle of the web UI: a changed module reaches the open page, under a looser page policy (`docs/architecture.md`) |
+| `bun run start` | the same server as a person runs it: the built web UI under the strict page policy, no reload |
 | `bun bench/run.ts` | the benchmark on 100,000 cases and 1,000,000 results (`--quick` for a small one) |
 | `bun bench/external.ts <dataset>` | reads, reports and saves under load, with the load generator in its own process |
 | `bun run build` | one self-contained executable in `dist/` |

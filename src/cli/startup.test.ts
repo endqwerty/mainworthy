@@ -4,6 +4,7 @@ import { mkdtemp, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { contentSecurityPolicy } from "../surfaces/headers.ts";
 import { CLI_ENTRY, COMMIT, withInstance } from "./test-support.ts";
 
 /**
@@ -91,6 +92,49 @@ for (const options of [
 		});
 	});
 }
+
+// Issue #120. `bun run start` is what the README's first lines tell a reader to run and leave running. Without
+// `NODE_ENV=production` it served Bun's development bundle: an inline script, a reload socket, the looser policy.
+test("bun run start serves the built bundle under the strict page policy, as the executable does", async () => {
+	const home = await mkdtemp(join(tmpdir(), "mainworthy-start-"));
+	// Nothing of this process's environment but the path: the script itself has to say which bundle it wants.
+	const child = Bun.spawn([process.execPath, "run", "start"], {
+		cwd: join(import.meta.dir, "../.."),
+		env: { PATH: process.env.PATH ?? "", HOME: home, USER: "robin", MAINWORTHY_PORT: "0" },
+		stdout: "pipe",
+		stderr: "ignore",
+		stdin: "ignore",
+	});
+	const timeout = setTimeout(() => child.kill("SIGKILL"), 8000);
+	const reader = child.stdout.getReader();
+	const decoder = new TextDecoder();
+	let stdout = "";
+	try {
+		while (stdout.trim().split("\n").length < 2) {
+			const chunk = await reader.read();
+			if (chunk.done) break;
+			stdout += decoder.decode(chunk.value, { stream: true });
+		}
+		const url = /http:\/\/127\.0\.0\.1:\d+/.exec(stdout)?.[0];
+		if (!url) throw new Error(`bun run start did not print the server URL: ${stdout}`);
+		const page = await fetch(`${url}/`);
+		expect(page.status).toBe(200);
+		expect(page.headers.get("content-security-policy")).toBe(contentSecurityPolicy({ kind: "page" }));
+		// Every script of the built page is a file. The development page has one written into it, and names its socket.
+		const html = await page.text();
+		expect(html).toMatch(/<script\b[^>]*\bsrc="/);
+		expect(html).not.toMatch(/<script\b(?![^>]*\bsrc=)/);
+		expect(html).not.toContain("/_bun/hmr");
+	} finally {
+		// `bun run` passes the signal on to the server it started, which a kill would leave running.
+		child.kill("SIGTERM");
+		const code = await child.exited;
+		clearTimeout(timeout);
+		reader.releaseLock();
+		await rm(home, { recursive: true, force: true });
+		expect(code).toBe(0);
+	}
+}, 10_000);
 
 test("an install under the former name is carried over on the next start, and its owner token still works", async () => {
 	const home = await mkdtemp(join(tmpdir(), "mainworthy-former-cli-"));

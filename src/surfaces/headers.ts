@@ -62,7 +62,7 @@ const isHash = (text: string): boolean => /^[A-Za-z0-9+/]{43}=$/.test(text);
 
 /**
  * The development bundle is Bun's, not ours. It is served by a start from source without `NODE_ENV=production`
- * (`bun run dev`, and `bun run start` as it is written today), never by the executable. Run in Chromium on Bun
+ * (`bun run dev`; `bun run start` sets the variable), never by the executable. Run in Chromium on Bun
  * 1.4.3 under `PAGE`, it was refused three things, and its policy differs from `PAGE` in those three and no more:
  *
  * - Bun writes one short inline script into the document: in the app's page it tells the development server
