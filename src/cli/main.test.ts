@@ -264,7 +264,8 @@ test("all registry operations have generated commands, global help and --help", 
 			expect(result.stdout).toContain("--json");
 		}
 	});
-});
+	// One start of the command for each operation: 3.6 to 4.2 s on a CI runner, and more with each operation added.
+}, 20_000);
 
 test("generated flags handle booleans, numbers, repeated arrays and union fields", async () => {
 	await withInstance(async ({ cli }) => {
