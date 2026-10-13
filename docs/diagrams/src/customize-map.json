@@ -1,0 +1,368 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "What you can customize, and where",
+    "locale": "en",
+    "output": "docs/diagrams/customize-map.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:endqwerty/mainworthy.git",
+      "revision": "688ffae7790fd7741275f35d4d324b9314d754db",
+      "link_mode": "local-only"
+    },
+    "legend": {
+      "mode": "hidden"
+    }
+  },
+  "components": [
+    {
+      "id": "instance",
+      "type": "backend",
+      "label": "Instance",
+      "sublabel": "Mode, address, data, owner",
+      "pos": [
+        360,
+        60
+      ],
+      "size": [
+        190,
+        76
+      ],
+      "tag": "Startup environment",
+      "icon": "none",
+      "sources": [
+        {
+          "path": "src/server/kernel/app.ts",
+          "line": 105,
+          "end_line": 115
+        },
+        {
+          "path": "src/server/readers.ts",
+          "line": 7,
+          "end_line": 18
+        },
+        {
+          "path": "src/cli/commands/serve.ts",
+          "line": 15,
+          "end_line": 38
+        }
+      ]
+    },
+    {
+      "id": "actors",
+      "type": "security",
+      "label": "Actors and tokens",
+      "sublabel": "People, agents, pipelines",
+      "pos": [
+        30,
+        265
+      ],
+      "size": [
+        190,
+        76
+      ],
+      "tag": "Settings \u00b7 Tokens; CLI",
+      "icon": "person",
+      "sources": [
+        {
+          "path": "src/server/ops/admin.ts",
+          "line": 60,
+          "end_line": 149
+        },
+        {
+          "path": "src/cli/commands/actor.ts",
+          "line": 18,
+          "end_line": 68
+        },
+        {
+          "path": "src/web/settings/index.tsx",
+          "line": 334,
+          "end_line": 405
+        }
+      ]
+    },
+    {
+      "id": "project",
+      "type": "backend",
+      "label": "Project",
+      "sublabel": "Policy, grants, folders, tags",
+      "pos": [
+        360,
+        265
+      ],
+      "size": [
+        190,
+        76
+      ],
+      "tag": "Settings; suite; CLI",
+      "icon": "none",
+      "sources": [
+        {
+          "path": "src/core/ops.ts",
+          "line": 44,
+          "end_line": 99
+        },
+        {
+          "path": "src/server/policy/policy.ts",
+          "line": 54,
+          "end_line": 104
+        },
+        {
+          "path": "src/web/settings/index.tsx",
+          "line": 128,
+          "end_line": 303
+        }
+      ]
+    },
+    {
+      "id": "case",
+      "type": "database",
+      "label": "Case",
+      "sublabel": "Content, methods, links",
+      "pos": [
+        360,
+        470
+      ],
+      "size": [
+        190,
+        76
+      ],
+      "tag": "Suite; propose; queue",
+      "icon": "none",
+      "sources": [
+        {
+          "path": "src/core/ops.ts",
+          "line": 44,
+          "end_line": 92
+        },
+        {
+          "path": "src/core/model.ts",
+          "line": 24,
+          "end_line": 55
+        },
+        {
+          "path": "src/server/evidence/evidence.ts",
+          "line": 1164,
+          "end_line": 1168
+        }
+      ]
+    },
+    {
+      "id": "run",
+      "type": "backend",
+      "label": "Run",
+      "sublabel": "Cases, methods, commit, jobs",
+      "pos": [
+        690,
+        265
+      ],
+      "size": [
+        190,
+        76
+      ],
+      "tag": "Runs; plan",
+      "icon": "flag",
+      "sources": [
+        {
+          "path": "src/core/ops.ts",
+          "line": 311,
+          "end_line": 325
+        },
+        {
+          "path": "src/core/runs.ts",
+          "line": 6,
+          "end_line": 35
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1184,
+          "end_line": 1240
+        }
+      ]
+    },
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "Your browser",
+      "sublabel": "Theme, sidebar, drafts",
+      "pos": [
+        30,
+        470
+      ],
+      "size": [
+        190,
+        76
+      ],
+      "tag": "Theme button; [; editor",
+      "icon": "none",
+      "sources": [
+        {
+          "path": "src/web/app.tsx",
+          "line": 49,
+          "end_line": 53
+        },
+        {
+          "path": "src/web/app.tsx",
+          "line": 188,
+          "end_line": 449
+        },
+        {
+          "path": "src/web/lib/drafts.ts",
+          "line": 79,
+          "end_line": 147
+        }
+      ]
+    },
+    {
+      "id": "pipeline",
+      "type": "external",
+      "label": "Your pipeline",
+      "sublabel": "Connection and build identity",
+      "pos": [
+        690,
+        60
+      ],
+      "size": [
+        190,
+        76
+      ],
+      "tag": "Runner variables; report",
+      "icon": "none",
+      "sources": [
+        {
+          "path": "src/cli/client.ts",
+          "line": 37,
+          "end_line": 49
+        },
+        {
+          "path": "src/surfaces/ci-env.ts",
+          "line": 284,
+          "end_line": 332
+        },
+        {
+          "path": "src/cli/commands/report.ts",
+          "line": 69,
+          "end_line": 103
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "hosts",
+      "from": "instance",
+      "to": "project",
+      "label": "Hosts"
+    },
+    {
+      "id": "grants",
+      "from": "actors",
+      "to": "project",
+      "label": "Project grants",
+      "variant": "security"
+    },
+    {
+      "id": "contains",
+      "from": "project",
+      "to": "case",
+      "label": "Contains"
+    },
+    {
+      "id": "plans",
+      "from": "project",
+      "to": "run",
+      "label": "Plans"
+    },
+    {
+      "id": "edit",
+      "from": "browser",
+      "to": "case",
+      "label": "Edit cases"
+    },
+    {
+      "id": "report",
+      "from": "pipeline",
+      "to": "run",
+      "label": "Matching results",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Instance \u00b7 environment at startup",
+      "items": [
+        "The operator sets MAINWORTHY_HOST, MAINWORTHY_PORT, MAINWORTHY_DATA, MAINWORTHY_MODE, MAINWORTHY_OWNER and MAINWORTHY_OWNER_TOKEN before starting Mainworthy. These are deployment settings, not controls in Settings.",
+        "Defaults are loopback, port 7357 and ~/.mainworthy. A nonloopback host forces server mode even if local was requested. Local loopback signs the browser in as the owner; server mode requires a token.",
+        "MAINWORTHY_READERS sets a nonnegative reader thread count. The default uses cores minus two, bounded to one through eight. Zero runs reads inline."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Instance access \u00b7 actors, tokens and grants",
+      "items": [
+        "An instance admin creates and revokes tokens in Settings under Tokens, or with mainworthy token new, token list and token revoke. Choose a person, agent or pipeline and the capabilities of a new actor.",
+        "Use mainworthy actor list, actor grant and actor ungrant to change an existing actor\u2019s grants. Add --project for one project; omit it for all projects. Tokens identify the actor and use its current grants, rather than having separate permissions.",
+        "A pipeline may hold record and read only. A new pipeline defaults to record; a new agent defaults to read and produce. The owner\u2019s grant cannot be changed here, and an admin cannot change their own grant."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Project policy \u00b7 Settings or a proposal",
+      "items": [
+        "A project admin switches loose, standard or strict in Settings under Policy, or with mainworthy policy use. A policy change records a proposal and a human admin\u2019s accepting decision. Proposing it needs produce.",
+        "Settings displays the clause table to an instance admin. mainworthy policy show reads it too. Neither is a clause editor. To change individual clauses, send a policy edit with mainworthy propose --json or the API, then have a human admin accept it.",
+        "Custom clauses choose conditions, who answers, how agents may answer, whether a reason is needed and whether the evidence\u2019s producer may decide. Every question kind must keep a final clause that always matches.",
+        "A policy edit can also set the default evidence basis, flaky hold of 1 to 365 days and whether an infrastructure excuse applies to this target only. The presets use 14 days; strict requires exact basis by default."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Project and case organization \u00b7 the suite",
+      "items": [
+        "Folders can be created, renamed, moved under a parent or archived. Place cases in a folder, reorder them and set, add or remove their tags. Use the suite or propose edits; these changes need produce and follow the project\u2019s adoption policy.",
+        "An instance admin creates a project in Settings under Projects or with the admin command, choosing its key, name and initial preset. Existing project keys and names have no rename operation.",
+        "A case can change its title, preconditions, steps, admitted methods, automation intent, folder, tags and covered requirements. Archive it or restore an earlier version through propose."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Case methods \u00b7 what evidence is admitted",
+      "items": [
+        "The case\u2019s methods name people, automated tests or agents. Change the case with propose; the case\u2019s folder and tags use placement edits. A saved edit follows the policy before it becomes current.",
+        "An automated test\u2019s link names the case it exercises. Link or unlink through a mapping decision in the queue, subject to policy and answer permissions. A link and an admitted method are separate choices.",
+        "Custom case fields are reserved in the MVP. They are not shown here as a working customization."
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Run \u00b7 choose before planning",
+      "items": [
+        "With plan capability, use Runs to choose a name, cases by folder, tag or search, and either a commit or only results recorded in that run. The plan pins the selected case versions.",
+        "mainworthy plan --json or the API also lets you name explicit cases, assignees, accepted repository and environment, methods, one or two required actors and the evidence basis. Required jobs are configured here too; the web planner does not expose these advanced choices.",
+        "Required jobs need a commit run target. Each named job needs an applied pipeline report that ran something; a report of skips only does not satisfy it. A run that accepts only results typed into it cannot require jobs.",
+        "These are choices at planning time. There is no operation to rewrite an existing run\u2019s plan. Agents count only when both the pinned case and the run admit them."
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Your browser \u00b7 local choices",
+      "items": [
+        "Use the Theme button for light or dark. Your choice stays in this browser; until you choose, the system preference supplies the theme.",
+        "Use [ or the sidebar button to collapse or expand it. Collapse is a session choice and resets on reload.",
+        "The editor keeps drafts on this device for the signed-in person. Drafts are automatic, not an instance setting or a team-wide preference."
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Your pipeline \u00b7 runner variables",
+      "items": [
+        "Set MAINWORTHY_URL, MAINWORTHY_TOKEN and MAINWORTHY_PROJECT in the runner; keep the token in its secret store. Settings under Connect shows the connection commands. The reporting actor needs record to upload results and read the gate.",
+        "Build identity comes from supported CI environments or the Git checkout. Override it with MAINWORTHY_COMMIT, MAINWORTHY_BRANCH, MAINWORTHY_REPO, MAINWORTHY_PR, MAINWORTHY_BASE and MAINWORTHY_ENV.",
+        "MAINWORTHY_JOB, MAINWORTHY_ATTEMPT and MAINWORTHY_BUILD_URL describe the report. report command flags override detection where offered. Use the full tested commit hash.",
+        "Results can fill a planned run only when its accepted commit, repository and environment match and its pinned evidence requirements admit them. These variables describe evidence; they do not set a gate verdict."
+      ]
+    }
+  ]
+}

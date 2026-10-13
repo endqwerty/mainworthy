@@ -1,0 +1,363 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Who answers a question under a policy",
+    "locale": "en",
+    "output": "docs/diagrams/policy-routing.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:endqwerty/mainworthy.git",
+      "revision": "688ffae7790fd7741275f35d4d324b9314d754db",
+      "link_mode": "local-only"
+    },
+    "legend": {
+      "mode": "hidden"
+    }
+  },
+  "lanes": [
+    {
+      "id": "routing",
+      "label": "Question and policy"
+    },
+    {
+      "id": "agents",
+      "label": "Agent advice or refusal",
+      "variant": "exception"
+    },
+    {
+      "id": "answers",
+      "label": "Who answers"
+    },
+    {
+      "id": "record",
+      "label": "Decision and effect"
+    }
+  ],
+  "mainPath": [
+    "question",
+    "clause",
+    "queue",
+    "decision",
+    "standing"
+  ],
+  "nodes": [
+    {
+      "id": "question",
+      "lane": "routing",
+      "col": 0,
+      "type": "messagebus",
+      "label": "Question raised",
+      "sublabel": "Kind and evidence",
+      "width": 150,
+      "sources": [
+        {
+          "path": "src/core/kinds.ts",
+          "line": 7,
+          "end_line": 9
+        },
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 323,
+          "end_line": 356
+        }
+      ]
+    },
+    {
+      "id": "clause",
+      "lane": "routing",
+      "col": 1,
+      "type": "security",
+      "label": "Matching clause",
+      "sublabel": "First match for this kind",
+      "width": 150,
+      "sources": [
+        {
+          "path": "src/core/kinds.ts",
+          "line": 311,
+          "end_line": 320
+        },
+        {
+          "path": "src/core/kinds.ts",
+          "line": 343,
+          "end_line": 359
+        },
+        {
+          "path": "src/server/policy/policy.ts",
+          "line": 46,
+          "end_line": 51
+        }
+      ]
+    },
+    {
+      "id": "rule",
+      "lane": "answers",
+      "col": 1,
+      "type": "backend",
+      "icon": "none",
+      "label": "Rule answers",
+      "sublabel": "At once, if applicable",
+      "width": 150,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 355,
+          "end_line": 376
+        }
+      ]
+    },
+    {
+      "id": "queue",
+      "lane": "answers",
+      "col": 2,
+      "type": "frontend",
+      "icon": "person",
+      "label": "Wait in the queue",
+      "sublabel": "Member, admin or author",
+      "width": 150,
+      "sources": [
+        {
+          "path": "src/core/kinds.ts",
+          "line": 262,
+          "end_line": 278
+        },
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 338,
+          "end_line": 356
+        }
+      ]
+    },
+    {
+      "id": "decision",
+      "lane": "record",
+      "col": 2,
+      "type": "database",
+      "label": "Decision recorded",
+      "sublabel": "Who, evidence and clause",
+      "width": 150,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 483,
+          "end_line": 505
+        },
+        {
+          "path": "src/server/decisions/questions.ts",
+          "line": 432,
+          "end_line": 458
+        },
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 556,
+          "end_line": 569
+        }
+      ]
+    },
+    {
+      "id": "standing",
+      "lane": "record",
+      "col": 3,
+      "type": "backend",
+      "icon": "flag",
+      "label": "Current state changes",
+      "sublabel": "Only the decided effect",
+      "width": 166,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 560,
+          "end_line": 569
+        },
+        {
+          "path": "src/server/decisions/kinds.ts",
+          "line": 133,
+          "end_line": 145
+        }
+      ]
+    },
+    {
+      "id": "advice",
+      "lane": "agents",
+      "col": 3,
+      "type": "external",
+      "icon": "person",
+      "label": "Advice shown",
+      "sublabel": "Question stays open",
+      "width": 150,
+      "sources": [
+        {
+          "path": "src/core/kinds.ts",
+          "line": 389,
+          "end_line": 400
+        },
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 483,
+          "end_line": 492
+        },
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 1382,
+          "end_line": 1390
+        }
+      ]
+    },
+    {
+      "id": "refusal",
+      "lane": "agents",
+      "col": 4,
+      "type": "security",
+      "label": "Answer refused",
+      "sublabel": "Question stays open",
+      "width": 150,
+      "sources": [
+        {
+          "path": "src/core/kinds.ts",
+          "line": 370,
+          "end_line": 400
+        },
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 462,
+          "end_line": 474
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "match",
+      "from": "question",
+      "to": "clause",
+      "label": "Match conditions",
+      "role": "main"
+    },
+    {
+      "id": "by-rule",
+      "from": "clause",
+      "to": "rule",
+      "label": "Rule",
+      "role": "main",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "wait",
+      "from": "clause",
+      "to": "queue",
+      "label": "Person required",
+      "role": "branch",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "rule-record",
+      "from": "rule",
+      "to": "decision",
+      "label": "Rule answer applies",
+      "variant": "emphasis",
+      "role": "main",
+      "fromSide": "bottom",
+      "toSide": "left"
+    },
+    {
+      "id": "answer-record",
+      "from": "queue",
+      "to": "decision",
+      "label": "Answer counts",
+      "variant": "emphasis",
+      "role": "branch",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "effect",
+      "from": "decision",
+      "to": "standing",
+      "label": "Apply effect",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "agent-advice",
+      "from": "queue",
+      "to": "advice",
+      "label": "Agent advises",
+      "variant": "dashed",
+      "role": "branch",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "agent-refused",
+      "from": "queue",
+      "to": "refusal",
+      "label": "Answer forbidden",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "right",
+      "toSide": "bottom"
+    },
+    {
+      "id": "rule-fallback",
+      "from": "rule",
+      "to": "queue",
+      "label": "Cannot apply",
+      "variant": "dashed",
+      "role": "branch",
+      "fromSide": "right",
+      "toSide": "left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "The five kinds of question",
+      "items": [
+        "Adopt: accept a proposal, including case edits, conflicts and policy changes. Map: decide what to do with a test with no case. Failure: explain a failed or disputed result. Finding: decide what to do with a finding. Signoff: decide whether to close a run."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "What a clause says",
+      "items": [
+        "The first clause of this kind whose conditions all hold wins. Conditions can include the author, a conflict, a policy change, the result’s scope or an answer being offered. Mainworthy matches again when someone answers.",
+        "The clause names a rule, a member with the right to answer, an admin, or the proposal’s author. It also says whether an agent’s answer counts, is advice, or is refused; whether a reason is required; and whether the evidence’s producer may decide.",
+        "Answers must use current evidence. A counted answer still needs the right permissions and must be applicable. Advice is recorded and shown without settling the question. A refused answer is not recorded."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Loose",
+      "items": [
+        "Ordinary edits are accepted by rule. Tests without cases are tracked by rule, without creating a case. Passed runs are approved by rule. Other signoff answers need a person.",
+        "Failures and findings ask a member; agents advise. For a finding, an agent with the right to answer may count when answering “duplicate”."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Standard",
+      "items": [
+        "A person’s ordinary edits are accepted by rule. An agent’s edits wait for a person; the agent cannot answer that adoption question. Tests without cases ask a member or an agent with the right to answer.",
+        "Failures and findings ask a member; agents advise. A disputed result needs a person who did not produce the evidence, and agents are refused. Passed runs are approved by rule; other signoff answers need a person."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Strict",
+      "items": [
+        "Ordinary edits, tests without cases, failures, findings and run signoff all ask a person for a reason. Agents’ answers are refused. A failure also excludes whoever produced its evidence.",
+        "The shared clauses still apply: a policy change asks a human admin; a conflict asks its author if a person, or a human admin. Neither requires a reason. An agent author may withdraw its own conflicting proposal."
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "A decision comes before a change",
+      "items": [
+        "A rule’s answer enters the same decision record as a person’s, with the signer, policy version, clause, answer, evidence basis and time. Only then is the decided effect applied. Advice and refusal have no decided effect.",
+        "A rejection or “track without a case” may leave current state unchanged. A rule that cannot apply its answer leaves the question open. A withdrawn or overruled rule answer leaves a person to decide rather than silently applying the rule again."
+      ]
+    }
+  ]
+}

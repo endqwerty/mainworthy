@@ -1,0 +1,586 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "A planned run from plan to close",
+    "locale": "en",
+    "output": "docs/diagrams/planned-run.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:endqwerty/mainworthy.git",
+      "revision": "688ffae7790fd7741275f35d4d324b9314d754db",
+      "link_mode": "local-only"
+    },
+    "legend": {
+      "mode": "hidden"
+    }
+  },
+  "lanes": [
+    {
+      "id": "plan",
+      "label": "Planning"
+    },
+    {
+      "id": "fill",
+      "label": "Filling a slot"
+    },
+    {
+      "id": "count",
+      "label": "Counting a slot"
+    },
+    {
+      "id": "verdict",
+      "label": "Run verdict"
+    },
+    {
+      "id": "signoff",
+      "label": "Sign-off and close"
+    }
+  ],
+  "groups": [
+    {
+      "id": "dispute",
+      "label": "Disputed slot",
+      "lane": "count",
+      "fromCol": 3,
+      "toCol": 4,
+      "variant": "security"
+    }
+  ],
+  "mainPath": [
+    "plan",
+    "slots",
+    "pipeline",
+    "compare",
+    "verdict",
+    "question",
+    "answer",
+    "closed"
+  ],
+  "nodes": [
+    {
+      "id": "plan",
+      "lane": "plan",
+      "col": 0,
+      "type": "frontend",
+      "icon": "person",
+      "label": "Plan a run",
+      "sublabel": "Cases, methods, commit, jobs",
+      "width": 170,
+      "sources": [
+        {
+          "path": "src/server/ops/writes.ts",
+          "line": 408,
+          "end_line": 436
+        },
+        {
+          "path": "src/core/runs.ts",
+          "line": 11,
+          "end_line": 35
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1174,
+          "end_line": 1176
+        }
+      ]
+    },
+    {
+      "id": "slots",
+      "lane": "plan",
+      "col": 2,
+      "type": "database",
+      "label": "A slot for each case",
+      "sublabel": "Pinned at its current version",
+      "width": 170,
+      "sources": [
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1228,
+          "end_line": 1243
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1279,
+          "end_line": 1316
+        },
+        {
+          "path": "test/runs.test.ts",
+          "line": 121,
+          "end_line": 133
+        }
+      ]
+    },
+    {
+      "id": "person",
+      "lane": "fill",
+      "col": 1,
+      "type": "frontend",
+      "icon": "person",
+      "label": "A person's key",
+      "sublabel": "In the run screen",
+      "width": 170,
+      "sources": [
+        {
+          "path": "src/web/runs/cockpit.tsx",
+          "line": 198,
+          "end_line": 215
+        },
+        {
+          "path": "src/web/runs/cockpit.tsx",
+          "line": 280,
+          "end_line": 297
+        },
+        {
+          "path": "src/web/runs/cockpit.tsx",
+          "line": 434,
+          "end_line": 468
+        }
+      ]
+    },
+    {
+      "id": "pipeline",
+      "lane": "fill",
+      "col": 2,
+      "type": "backend",
+      "label": "A pipeline's result",
+      "sublabel": "Same commit, if tests are allowed",
+      "width": 170,
+      "sources": [
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 445,
+          "end_line": 460
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 610,
+          "end_line": 636
+        },
+        {
+          "path": "src/core/runs.ts",
+          "line": 222,
+          "end_line": 252
+        }
+      ]
+    },
+    {
+      "id": "agent",
+      "lane": "fill",
+      "col": 3,
+      "type": "external",
+      "icon": "person",
+      "label": "An agent's result",
+      "sublabel": "Only if asked for and declared",
+      "width": 170,
+      "sources": [
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 583,
+          "end_line": 586
+        },
+        {
+          "path": "src/core/runs.ts",
+          "line": 222,
+          "end_line": 252
+        },
+        {
+          "path": "test/runs.test.ts",
+          "line": 266,
+          "end_line": 292
+        }
+      ]
+    },
+    {
+      "id": "compare",
+      "lane": "count",
+      "col": 2,
+      "type": "security",
+      "label": "Count matching results",
+      "sublabel": "Version, method and commit",
+      "width": 170,
+      "sources": [
+        {
+          "path": "src/core/runs.ts",
+          "line": 153,
+          "end_line": 220
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 914,
+          "end_line": 962
+        }
+      ]
+    },
+    {
+      "id": "disputed",
+      "lane": "count",
+      "col": 3,
+      "type": "security",
+      "label": "Slot disputed",
+      "sublabel": "Blocks the run",
+      "width": 170,
+      "sources": [
+        {
+          "path": "src/core/runs.ts",
+          "line": 198,
+          "end_line": 220
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 639,
+          "end_line": 668
+        },
+        {
+          "path": "test/runs.test.ts",
+          "line": 230,
+          "end_line": 263
+        }
+      ]
+    },
+    {
+      "id": "decide",
+      "lane": "count",
+      "col": 4,
+      "type": "frontend",
+      "icon": "person",
+      "label": "A person decides",
+      "sublabel": "In the queue",
+      "width": 170,
+      "sources": [
+        {
+          "path": "src/core/presets.ts",
+          "line": 41,
+          "end_line": 41
+        },
+        {
+          "path": "src/core/presets.ts",
+          "line": 62,
+          "end_line": 68
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1368,
+          "end_line": 1411
+        }
+      ]
+    },
+    {
+      "id": "verdict",
+      "lane": "verdict",
+      "col": 2,
+      "type": "backend",
+      "icon": "flag",
+      "label": "Run verdict",
+      "sublabel": "Passed, failed, blocked or pending",
+      "width": 180,
+      "sources": [
+        {
+          "path": "src/core/runs.ts",
+          "line": 74,
+          "end_line": 90
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1135,
+          "end_line": 1168
+        }
+      ]
+    },
+    {
+      "id": "reopened",
+      "lane": "signoff",
+      "col": 1,
+      "type": "messagebus",
+      "label": "Run reopened",
+      "sublabel": "Counts evidence as it is now",
+      "width": 170,
+      "sources": [
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1325,
+          "end_line": 1371
+        },
+        {
+          "path": "src/server/decisions/kinds.ts",
+          "line": 510,
+          "end_line": 514
+        },
+        {
+          "path": "test/runs.test.ts",
+          "line": 135,
+          "end_line": 143
+        }
+      ]
+    },
+    {
+      "id": "question",
+      "lane": "signoff",
+      "col": 2,
+      "type": "messagebus",
+      "label": "Sign-off question",
+      "sublabel": "Raised when the run passes",
+      "width": 170,
+      "sources": [
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 1115,
+          "end_line": 1156
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1168,
+          "end_line": 1168
+        }
+      ]
+    },
+    {
+      "id": "answer",
+      "lane": "signoff",
+      "col": 3,
+      "type": "frontend",
+      "icon": "person",
+      "label": "A rule or a person",
+      "sublabel": "Policy decides which",
+      "width": 170,
+      "sources": [
+        {
+          "path": "src/core/presets.ts",
+          "line": 44,
+          "end_line": 92
+        },
+        {
+          "path": "src/server/decisions/decisions.ts",
+          "line": 355,
+          "end_line": 376
+        }
+      ]
+    },
+    {
+      "id": "closed",
+      "lane": "signoff",
+      "col": 4,
+      "type": "database",
+      "icon": "flag",
+      "label": "Run closed",
+      "sublabel": "Keeps the evidence it closed on",
+      "width": 170,
+      "sources": [
+        {
+          "path": "src/server/decisions/kinds.ts",
+          "line": 498,
+          "end_line": 509
+        },
+        {
+          "path": "src/server/runs/runs.ts",
+          "line": 1320,
+          "end_line": 1323
+        },
+        {
+          "path": "test/runs.test.ts",
+          "line": 135,
+          "end_line": 143
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "pin",
+      "from": "plan",
+      "to": "slots",
+      "label": "Each selected case",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "by-hand",
+      "from": "slots",
+      "to": "person",
+      "role": "branch",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "by-ci",
+      "from": "slots",
+      "to": "pipeline",
+      "role": "main",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "by-agent",
+      "from": "slots",
+      "to": "agent",
+      "role": "branch",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "person-counts",
+      "from": "person",
+      "to": "compare",
+      "role": "branch",
+      "fromSide": "bottom",
+      "toSide": "left"
+    },
+    {
+      "id": "pipeline-counts",
+      "from": "pipeline",
+      "to": "compare",
+      "role": "main",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "agent-counts",
+      "from": "agent",
+      "to": "compare",
+      "role": "branch",
+      "variant": "dashed"
+    },
+    {
+      "id": "slots-roll-up",
+      "from": "compare",
+      "to": "verdict",
+      "label": "Slots roll up",
+      "role": "main",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "pass-beside-fail",
+      "from": "compare",
+      "to": "disputed",
+      "label": "Pass beside fail",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "ask-person",
+      "from": "disputed",
+      "to": "decide",
+      "label": "Question raised",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "decision-recounts",
+      "from": "decide",
+      "to": "verdict",
+      "label": "Run recounted",
+      "variant": "emphasis",
+      "role": "branch",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "id": "passes",
+      "from": "verdict",
+      "to": "question",
+      "label": "Run passes",
+      "role": "main",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "asked",
+      "from": "question",
+      "to": "answer",
+      "label": "Asked",
+      "role": "main",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "approve",
+      "from": "answer",
+      "to": "closed",
+      "label": "Approve, if it still passes",
+      "role": "main",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "withdraw",
+      "from": "closed",
+      "to": "reopened",
+      "label": "Approval withdrawn",
+      "variant": "dashed",
+      "role": "return",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "route": "bottom-channel"
+    },
+    {
+      "id": "recount",
+      "from": "reopened",
+      "to": "verdict",
+      "label": "Recounted",
+      "variant": "dashed",
+      "role": "return",
+      "fromSide": "top",
+      "toSide": "left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "What a plan asks for",
+      "items": [
+        "A person chooses the cases, which methods count (people, automated tests, agents), the commit the run counts, and any CI jobs the run must hear from. The run screen offers people and automated tests; agents, custom requirements and jobs are set with the command line or the API.",
+        "A run that counts only results recorded in it takes nothing from a pipeline and cannot require a job. Evidence already recorded for the commit fills slots when the run is planned; later reports fill them while it is open."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Which results fill a slot",
+      "items": [
+        "A person's result counts when the pinned case admits people. A pipeline's result counts when a link or annotation ties the test to the case, the run accepts that commit, and the run asks for automated tests.",
+        "An agent's result counts only when the run asked for agents and the pinned case declares them. An agent's review is never a pass, and an agent never counts toward a commit's own gate.",
+        "The result must also name the case at the pinned version, or another version with the same claim where the run allows it. A slot that asks for two people needs two different people to pass."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "A disputed slot",
+      "items": [
+        "A fail from one producer beside a pass from another is disputed. A later write, another test's pass or an older attempt never hides the failure, and the run is blocked.",
+        "The question goes to the queue. Under standard and strict, the person who produced the disputed evidence cannot answer it, and under standard and strict agents are refused. Answering that the failure was a mistake lets the passing evidence stand; explaining it as a defect makes the run fail."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "The verdict",
+      "items": [
+        "Passed: every slot is proven and nothing is open. Pending: evidence is missing, or nothing was proven. Blocked: an unexplained failure, a dispute or an open question. Failed: a decision attributed a failure to the commit.",
+        "Blocked and skipped results are not proof. A run with a slot missing stays pending."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Sign-off by policy",
+      "items": [
+        "Only a planned run that is open and passing raises a sign-off question. If it stops passing, the question closes.",
+        "Loose and standard approve a passed run by rule. Strict asks a person for a reason. Rejecting leaves the run open, and approving a run that no longer passes is refused."
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Closing and reopening",
+      "items": [
+        "A closed run takes no more results and keeps the evidence it closed on.",
+        "Withdrawing the approval in the queue reopens the run and opens the question again for a person. The run now counts corrections, mistaken decisions and results that arrived while it was closed."
+      ]
+    }
+  ]
+}
