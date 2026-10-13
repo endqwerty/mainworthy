@@ -50,7 +50,15 @@ export function withoutRepositoryAddress(html: string): string {
 	return html.replace(
 		/(<script id="archify-source-evidence-data" type="application\/json">)([\s\S]*?)(<\/script>)/,
 		(all, open: string, json: string, close: string) => {
-			const evidence = z.looseObject({ repository: z.looseObject({}) }).safeParse(JSON.parse(json));
+			// Data that cannot be read is left as it is, and the page with it: one bad diagram does not take the
+			// site down. `test/docs.test.ts` holds every page that ships to carrying no address.
+			let data: unknown;
+			try {
+				data = JSON.parse(json);
+			} catch {
+				return all;
+			}
+			const evidence = z.looseObject({ repository: z.looseObject({}) }).safeParse(data);
 			if (!evidence.success) return all;
 			const repository = { ...evidence.data.repository, url: "mainworthy", label: "mainworthy" };
 			// As archify writes it: a `<` inside the JSON must not end the script element.
