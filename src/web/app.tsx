@@ -463,7 +463,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 									type="button"
 									aria-label="Sign out"
 									title="Sign out (g x)"
-									disabled={signingOut}
+									aria-disabled={signingOut}
 									onClick={leave}
 								>
 									⇥ <span>{signingOut ? "Signing out…" : "Sign out"}</span>

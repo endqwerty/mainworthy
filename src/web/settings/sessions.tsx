@@ -59,7 +59,11 @@ export function YourSessions() {
 				if (error instanceof ApiError && error.code === "not_found") {
 					setMessage("That session has already ended.");
 					void sessions.refetch();
-				} else setRefusal({ id: row.id, message: saidBy(error) });
+				} else {
+					setRefusal({ id: row.id, message: saidBy(error) });
+					// With no reply the session may have ended all the same: the list says.
+					void sessions.refetch();
+				}
 			})
 			.finally(() => setEnding((ids) => withId(ids, row.id, false)));
 	}
@@ -95,7 +99,7 @@ export function YourSessions() {
 					<button
 						className="out"
 						type="button"
-						disabled={ending.has(row.id)}
+						aria-disabled={ending.has(row.id)}
 						aria-label={`End the session of ${browserName(row.userAgent)}, opened ${age(row.createdAt)}${row.current ? ", this browser" : ""}`}
 						onClick={() => end(row)}
 					>

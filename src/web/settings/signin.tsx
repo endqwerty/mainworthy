@@ -44,7 +44,11 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
 			.catch((error: unknown) => {
 				// Removed already, from another browser: the list is read again and shows it gone.
 				if (error instanceof ApiError && error.code === "not_found") void credentials.refetch();
-				else setRefusal({ id: row.id, message: saidBy(error) });
+				else {
+					setRefusal({ id: row.id, message: saidBy(error) });
+					// With no reply it may have been removed all the same: the list says.
+					void credentials.refetch();
+				}
 			})
 			.finally(() => setRemoving((ids) => withId(ids, row.id, false)));
 	}
@@ -97,7 +101,8 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
 						<button
 							className="out"
 							type="button"
-							disabled={onlyOne || removing.has(row.id)}
+							disabled={onlyOne}
+							aria-disabled={removing.has(row.id)}
 							aria-label={`Remove ${row.kind === "password" ? "the password" : row.label}`}
 							onClick={() => remove(row)}
 						>
@@ -142,7 +147,14 @@ function PasswordForm({
 
 	/** Where a refusal belongs and what it says. The server names the field a message is about before a colon. */
 	function refused(error: unknown): { at: Field; message: string } {
-		if (!(error instanceof ApiError)) return { at: "form", message: NO_ANSWER };
+		// The request may have arrived though no reply did. Then the new password is the password already,
+		// and the current one typed here is refused the next time.
+		if (!(error instanceof ApiError))
+			return {
+				at: "form",
+				message:
+					"No answer came back, so the page cannot tell whether the password was changed. If the current password is refused when you try again, the new one is your password already.",
+			};
 		if (error.code === "forbidden") return { at: "current", message: "The current password is not right." };
 		// Wrong too often. The wait is all that is said, and the right password is refused too until it is over.
 		if (error.code === "limited") return { at: has ? "current" : "form", message: error.message };
@@ -231,7 +243,8 @@ function PasswordForm({
 			<p className="settings-problem" role="status">
 				{said("form")}
 			</p>
-			<button className="out" type="submit" disabled={busy}>
+			{/* Busy, it keeps the focus and takes no second press: `submit` lets one request through. */}
+			<button className="out" type="submit" aria-disabled={busy}>
 				{busy ? "Saving…" : has ? "Change password" : "Set password"}
 			</button>
 			<p className="settings-message" role="status">
@@ -292,7 +305,7 @@ function PasskeyForm({ onAdded }: { onAdded: () => Promise<void> }) {
 			<p className="settings-problem" role="status">
 				{problem}
 			</p>
-			<button className="out" type="submit" disabled={busy}>
+			<button className="out" type="submit" aria-disabled={busy}>
 				{busy ? "Waiting for the passkey…" : "Add a passkey"}
 			</button>
 			<p className="settings-message" role="status">
