@@ -20,7 +20,7 @@ import {
 	UNFINISHED,
 } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
-import { type ErrorCode, OpError } from "../kernel/errors.ts";
+import { type ErrorCode, INTERNAL_ERROR, noProject, OpError } from "../kernel/errors.ts";
 
 type Base<I> = {
 	name: string;
@@ -123,12 +123,20 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 	// Who may call is settled before the operation's input is checked: a caller that may not run the operation
 	// learns that and nothing about what it sent. (A surface has read the body by then: HTTP wants it to be JSON.)
 	const found = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
+	const noSuchProject = (): Reply => {
+		const { code, message } = noProject(call.project);
+		return fail(code, message);
+	};
 	if (op.scope === "project") {
 		if (!call.project) return fail("invalid", `${op.name} needs a project`);
-		if (!found) return fail("not_found", `no project named ${call.project}`);
+		if (!found) return noSuchProject();
 	}
 	const actor = call.actor(found?.id ?? 0);
 	if (!actor) return fail("unauthenticated", "a token is required");
+	// A caller that holds no grant on a project is told what it would be told of a project that does not exist,
+	// word for word. A refusal that named the capability it lacks would confirm the key to any token, a
+	// pipeline's for another project included. One that holds a grant there is told which capability it lacks.
+	if (found && actor.can.length === 0) return noSuchProject();
 	if (!mayRun(actor.can, op.needs))
 		return fail("forbidden", `${op.name} needs the ${needed(op.needs)} capability${found ? ` on ${found.key}` : ""}`);
 
@@ -252,9 +260,11 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 		}
 	} catch (error) {
 		if (error instanceof OpError) return fail(error.code, error.message, error.details);
-		const message = error instanceof Error ? error.message : String(error);
+		// Anything else is a failure nobody wrote a sentence for: a constraint of the database, a missing file.
+		// Its text can name a table, a path or a statement, so it goes to the log and the caller gets one fixed
+		// sentence, the same one the HTTP surface gives for a failure of its own.
 		console.error(`[mainworthy] ${op.name} failed:`, error);
-		return fail("internal", message);
+		return fail("internal", INTERNAL_ERROR);
 	}
 }
 

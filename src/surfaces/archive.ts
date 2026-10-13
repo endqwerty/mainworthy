@@ -163,7 +163,7 @@ export function archiveRoutes(
 					ok: true,
 					result: {
 						...result,
-						note: `Import replaced the bootstrap rows. Your previous session may no longer exist. ${app.config.mode === "server" ? "Set MAINWORTHY_OWNER_TOKEN and restart the server to reconnect." : "The configured local owner was refreshed."}`,
+						note: `Import replaced the bootstrap rows. Your previous session may no longer exist. ${app.config.mode === "server" ? "No token works now. Restart the server to reconnect: it takes the owner's token from MAINWORTHY_OWNER_TOKEN, or prints a new one when that is not set." : "The configured local owner was refreshed."}`,
 						callerSessionMayHaveChanged: true,
 					},
 					seq: null,

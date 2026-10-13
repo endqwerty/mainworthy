@@ -1,8 +1,8 @@
 // The HTTP surface on a real listener: who gets in, in each mode, and that every operation is there.
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { connect } from "node:net";
-import { tmpdir } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
@@ -11,6 +11,7 @@ import { OP_LIST, OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { Readers } from "../src/server/readers.ts";
 import { type Instance, start } from "../src/server/start.ts";
+import { type Patience, sessionOf } from "../src/surfaces/http.ts";
 
 const dirs: string[] = [];
 const running: Instance[] = [];
@@ -19,12 +20,19 @@ afterEach(async () => {
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function boot(mode: Config["mode"], ownerToken: string | null = null, existing?: string): Instance {
+function boot(
+	mode: Config["mode"],
+	ownerToken: string | null = null,
+	existing?: string,
+	options: { owner?: string; host?: string; patience?: Patience } = {},
+): Instance {
 	const dataDir = existing ?? mkdtempSync(join(tmpdir(), "mainworthy-http-"));
 	if (!existing) dirs.push(dataDir);
-	const instance = start({ dataDir, host: "127.0.0.1", port: 0, mode, owner: "robin", ownerToken }, () => ({
-		ui: null,
-	}));
+	const instance = start(
+		{ dataDir, host: options.host ?? "127.0.0.1", port: 0, mode, owner: options.owner ?? "robin", ownerToken },
+		() => ({ ui: null }),
+		options.patience ? { patience: options.patience } : {},
+	);
 	running.push(instance);
 	return instance;
 }
@@ -47,6 +55,36 @@ async function post<T>(
 	};
 }
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+
+/** A plain socket to the instance: what the server sent on it, and whether the server has closed it. */
+function wire(instance: Instance, payload: string) {
+	const { hostname, port } = new URL(instance.url);
+	const socket = connect(Number(port), hostname);
+	const state = { received: "", closed: false };
+	const closed = new Promise<void>((resolve) => {
+		socket.on("close", () => {
+			state.closed = true;
+			resolve();
+		});
+	});
+	socket.on("error", () => {});
+	socket.on("data", (chunk) => {
+		state.received += chunk.toString("latin1");
+	});
+	socket.on("connect", () => socket.write(payload));
+	return {
+		state,
+		/** Whether the server closes the connection within this many milliseconds. */
+		within: (ms: number): Promise<"closed" | "open"> =>
+			Promise.race([closed.then(() => "closed" as const), Bun.sleep(ms).then(() => "open" as const)]),
+		end: () => socket.destroy(),
+	};
+}
+
+/** An address of this machine that is not the loopback, when it has one: a peer that is not local, with nothing leaving the machine. */
+const lanAddress = Object.values(networkInterfaces())
+	.flat()
+	.find((entry) => entry?.family === "IPv4" && !entry.internal)?.address;
 
 function bootReaders(count: number): Instance {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-http-readers-"));
@@ -303,9 +341,134 @@ describe("local mode", () => {
 		const found = await post<{ items: unknown[] }>(instance, "/api/p/scratch/find", {});
 		expect(found.body.ok && found.body.result.items).toEqual([]);
 	});
+
+	test("a request that came through a forwarder is not the owner, whatever Host the forwarder wrote", async () => {
+		// A proxy that does not keep the client's Host (nginx and Apache by default), or a forwarded port, presents
+		// a loopback Host for a visitor from anywhere. Each of these headers says the request did not start here.
+		const instance = boot("local");
+		const body = { edits: [{ op: "create", outline: "Planted through a proxy" }] };
+		expect((await fetch(`${instance.url}/api/session`)).status).toBe(200);
+		for (const [header, value] of [
+			["forwarded", "for=203.0.113.9;proto=https"],
+			["x-forwarded-for", "203.0.113.9"],
+			["x-forwarded-host", "mainworthy.example"],
+			["x-real-ip", "203.0.113.9"],
+			["via", "1.1 proxy"],
+			["cf-connecting-ip", "203.0.113.9"],
+		] as const) {
+			const read = await fetch(`${instance.url}/api/session`, { headers: { [header]: value } });
+			const write = await post(instance, "/api/p/scratch/propose", body, { [header]: value });
+			expect(`${header}: ${read.status} ${write.status}`).toBe(`${header}: 401 401`);
+		}
+		const found = await post<{ items: unknown[] }>(instance, "/api/p/scratch/find", {});
+		expect(found.body.ok && found.body.result.items).toEqual([]);
+	});
+
+	test("a GET another site's page makes is refused: the browser says so where it sends no Origin", async () => {
+		// An image or a script on any page the owner visits can ask for `/api/session` or the change stream, and a
+		// browser sends no Origin on such a GET. It does send Sec-Fetch-Site.
+		const instance = boot("local");
+		const session = (site: string) => fetch(`${instance.url}/api/session`, { headers: { "sec-fetch-site": site } });
+		const seen: string[] = [];
+		for (const site of ["cross-site", "same-site", "same-origin", "none"])
+			seen.push(`${site}: ${(await session(site)).status}`);
+		expect(seen).toEqual(["cross-site: 401", "same-site: 401", "same-origin: 200", "none: 200"]);
+		const stream = await fetch(`${instance.url}/api/p/scratch/events`, { headers: { "sec-fetch-site": "cross-site" } });
+		expect(stream.status).toBe(401);
+		await stream.body?.cancel();
+	});
+
+	test("the owner with no step is a connection from this machine: any other peer address is refused", () => {
+		const instance = boot("local");
+		const request = new Request(`${instance.url}/api/session`, { headers: { host: new URL(instance.url).host } });
+		const via = (peer: string | null) => sessionOf(instance.app, request, instance.owner, peer)?.via ?? "refused";
+		expect(["127.0.0.1", "127.0.0.53", "::1", "::ffff:127.0.0.1"].map(via)).toEqual(Array(4).fill("local"));
+		expect(["192.168.1.20", "203.0.113.9", "::ffff:10.0.0.7", "fe80::1", "", null].map(via)).toEqual(
+			Array(6).fill("refused"),
+		);
+	});
+
+	// The same over a real connection, on a machine that has an address besides the loopback. The server listens
+	// on every address for the length of this test, as a forwarded port makes it do.
+	test.skipIf(!lanAddress)(
+		"a connection from another address is not the owner, though its Host says loopback",
+		async () => {
+			const instance = boot("local", null, undefined, { host: "0.0.0.0" });
+			const port = new URL(instance.url).port;
+			const session = (address: string) =>
+				fetch(`http://${address}:${port}/api/session`, { headers: { host: `127.0.0.1:${port}` } });
+			expect((await session("127.0.0.1")).status).toBe(200);
+			expect((await session(lanAddress ?? "")).status).toBe(401);
+		},
+	);
 });
 
 describe("server mode", () => {
+	test("a session cookie that cannot be decoded is no session: 401, and nothing in the log", async () => {
+		const instance = boot("server", "owner-secret-0123456789");
+		const logged = spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const cookie = { cookie: "mainworthy_session=%" };
+			const seen = [
+				(await fetch(`${instance.url}/api/session`, { headers: cookie })).status,
+				(await fetch(`${instance.url}/api/p/scratch/events`, { headers: cookie })).status,
+				(await post(instance, "/api/p/scratch/find", {}, cookie)).status,
+			];
+			expect(seen).toEqual([401, 401, 401]);
+			expect(logged.mock.calls).toEqual([]);
+		} finally {
+			logged.mockRestore();
+		}
+	});
+
+	test("the forwarded scheme is read one way: a list or upper case is still https, signs in, and the cookie is Secure", async () => {
+		// A second proxy appends its own scheme to the header, so the first element is the browser's. Before, the
+		// Origin check took the first element and the cookie wanted the whole header to be exactly `https`.
+		const instance = boot("server", "owner-secret-0123456789");
+		const origin = `https://${new URL(instance.url).host}`;
+		const seen: string[] = [];
+		for (const proto of ["https", "https,http", "https, https", "HTTPS"]) {
+			const login = await post(
+				instance,
+				"/api/login",
+				{ token: "owner-secret-0123456789" },
+				{ origin, "x-forwarded-proto": proto },
+			);
+			seen.push(`${proto}: ${login.status}${login.cookie?.includes("; Secure") ? " Secure" : ""}`);
+		}
+		expect(seen).toEqual([
+			"https: 200 Secure",
+			"https,http: 200 Secure",
+			"https, https: 200 Secure",
+			"HTTPS: 200 Secure",
+		]);
+		// Plain HTTP, as on a published port, is still plain: the cookie could not come back otherwise.
+		const plain = await post(instance, "/api/login", { token: "owner-secret-0123456789" });
+		expect(`${plain.status}${plain.cookie?.includes("Secure") ? " Secure" : ""}`).toBe("200");
+		const downgraded = await post(
+			instance,
+			"/api/login",
+			{ token: "owner-secret-0123456789" },
+			{ origin, "x-forwarded-proto": "http,https" },
+		);
+		expect(downgraded.status).toBe(401);
+	});
+
+	test("the cookie does not travel with a GET the browser says another site made", async () => {
+		const instance = boot("server", "owner-secret-0123456789");
+		const login = await post(instance, "/api/login", { token: "owner-secret-0123456789" });
+		const cookie = (login.cookie ?? "").split(";")[0] ?? "";
+		const session = (site: string) =>
+			fetch(`${instance.url}/api/session`, { headers: { cookie, "sec-fetch-site": site } });
+		const seen: string[] = [];
+		for (const site of ["cross-site", "same-site", "same-origin", "none"])
+			seen.push(`${site}: ${(await session(site)).status}`);
+		expect(seen).toEqual(["cross-site: 401", "same-site: 401", "same-origin: 200", "none: 200"]);
+		// A token is not something a browser attaches by itself, so it is not held to the rule.
+		const script = { ...bearer("owner-secret-0123456789"), "sec-fetch-site": "cross-site" };
+		expect((await fetch(`${instance.url}/api/session`, { headers: script })).status).toBe(200);
+	});
+
 	test("a request that names who it believes it is, is refused when the session is somebody else's", async () => {
 		const instance = boot("server", "owner-secret-0123456789");
 		const owner = bearer("owner-secret-0123456789");
@@ -406,9 +569,10 @@ describe("server mode", () => {
 			results: [{ test: { key: "a::b" }, outcome: "pass" }],
 		};
 		expect((await post(instance, "/api/p/scratch/report", report, ci)).status).toBe(200);
+		// It holds no grant on `other`, so to this token there is no such project (see "what a session may see").
 		expect((await post(instance, "/api/p/other/report", report, ci)).body).toMatchObject({
 			ok: false,
-			error: { code: "forbidden" },
+			error: { code: "not_found" },
 		});
 		expect((await post(instance, "/api/p/scratch/plan", { name: "x", select: {} }, ci)).body).toMatchObject({
 			ok: false,
@@ -436,6 +600,7 @@ describe("a pipeline's token", () => {
 	};
 	const create = { edits: [{ op: "create", outline: "Planted by a pipeline" }] };
 	const forbidden = { ok: false, error: { code: "forbidden" } };
+	const missing = { ok: false, error: { code: "not_found" } };
 	const invalid = { ok: false, error: { code: "invalid" } };
 	const admin = <T>(instance: Instance, input: unknown, headers: Record<string, string> = owner) =>
 		post<T>(instance, "/api/admin", input, headers);
@@ -474,8 +639,8 @@ describe("a pipeline's token", () => {
 				expect(`${preset} ${op.name}: ${reply.status}`).toBe(`${preset} ${op.name}: 403`);
 			}
 			expect(cases(instance, preset)).toEqual({ n: 0 });
-			// Its grant is on one project: the same token is nobody on another.
-			expect((await post(instance, "/api/p/scratch/report", report, ci)).body).toMatchObject(forbidden);
+			// Its grant is on one project: the same token is nobody on another, and is told there is no such project.
+			expect((await post(instance, "/api/p/scratch/report", report, ci)).body).toMatchObject(missing);
 		}
 	});
 
@@ -551,7 +716,8 @@ describe("a pipeline's token", () => {
 
 		const remove = { do: "grant.remove", actor: "github-actions", project: "scratch" };
 		expect((await admin(instance, remove)).body).toMatchObject({ ok: true, result: { removed: true } });
-		expect((await post(instance, "/api/p/scratch/report", report, ci)).body).toMatchObject(forbidden);
+		// With its grant on scratch gone, scratch is to this token a project that does not exist.
+		expect((await post(instance, "/api/p/scratch/report", report, ci)).body).toMatchObject(missing);
 		expect((await post(instance, "/api/p/other/report", report, ci)).body).toMatchObject({ ok: true });
 		expect((await admin(instance, remove)).body).toMatchObject({ ok: true, result: { removed: false } });
 		expect((await listed())[2]).toEqual(["github-actions", "ci", [{ project: "other", can: ["record"] }]]);
@@ -620,8 +786,354 @@ describe("a pipeline's token", () => {
 	});
 });
 
+describe("who may make a token for whom", () => {
+	const OWNER = "owner-secret-0123456789";
+	const owner = bearer(OWNER);
+	const admin = <T>(instance: Instance, input: unknown, headers: Record<string, string> = owner) =>
+		post<T>(instance, "/api/admin", input, headers);
+	async function token(instance: Instance, input: Record<string, unknown>): Promise<Record<string, string>> {
+		const made = await admin<{ token: string }>(instance, { do: "token.create", ...input });
+		if (!made.body.ok) throw new Error(`token.create: ${made.body.error.message}`);
+		return bearer(made.body.result.token);
+	}
+	/** A refusal whose sentence says who may. */
+	const refusal = (who: string): Envelope<unknown> => ({
+		ok: false,
+		error: { code: "forbidden", message: expect.stringContaining(who) },
+	});
+	const actors = (instance: Instance) =>
+		instance.app.db.raw
+			.query<{ name: string }, []>("SELECT name FROM actors ORDER BY id")
+			.all()
+			.map((row) => row.name);
+	const tokensOf = (instance: Instance, name: string) =>
+		instance.app.db.raw
+			.query("SELECT count(*) AS n FROM tokens t JOIN actors a ON a.id = t.actor WHERE a.name = ?")
+			.get(name);
+
+	test("a person's token is made by that person or by the owner, and the owner's by the owner alone", async () => {
+		// Whoever holds a token for a name acts under that name: the record says a decision or a typed text is
+		// that person's. So an admin does not make one for somebody else, and nobody makes one for the owner.
+		const instance = boot("server", OWNER);
+		const dana = await token(instance, { actor: "dana", kind: "human" });
+		await token(instance, { actor: "eve", kind: "human", can: ["read"], project: "scratch" });
+		const forOwner = await admin(instance, { do: "token.create", actor: "robin", kind: "human" }, dana);
+		expect([forOwner.status, forOwner.body]).toEqual([403, refusal("only robin")]);
+		const forEve = await admin(instance, { do: "token.create", actor: "eve", kind: "human" }, dana);
+		expect([forEve.status, forEve.body]).toEqual([403, refusal("by eve or by robin")]);
+		// Naming another kind for a person who exists does not get round it.
+		expect((await admin(instance, { do: "token.create", actor: "robin", kind: "agent" }, dana)).status).toBe(403);
+		expect([tokensOf(instance, "robin"), tokensOf(instance, "eve")]).toEqual([{ n: 1 }, { n: 1 }]);
+		// Their own, the owner for anybody, and an admin for somebody new, as before.
+		const second = await admin<{ actor: string }>(instance, { do: "token.create", actor: "dana", kind: "human" }, dana);
+		expect(second.body).toMatchObject({ ok: true, result: { actor: "dana" } });
+		expect((await admin(instance, { do: "token.create", actor: "eve", kind: "human" })).body).toMatchObject({
+			ok: true,
+		});
+		expect((await admin(instance, { do: "token.create", actor: "robin", kind: "human" })).body).toMatchObject({
+			ok: true,
+		});
+		expect((await admin(instance, { do: "token.create", actor: "frank", kind: "human" }, dana)).body).toMatchObject({
+			ok: true,
+		});
+		expect((await admin(instance, { do: "token.create", actor: "helper", kind: "agent" }, dana)).body).toMatchObject({
+			ok: true,
+		});
+	});
+
+	test("an agent that administers makes no person, no person's token, no grant and forgets nobody", async () => {
+		// An agent with a person's token is a person to every policy clause that says "not an agent".
+		const instance = boot("server", OWNER);
+		const bot = await token(instance, { actor: "rootbot", kind: "agent", can: ["admin"] });
+		await token(instance, { actor: "eve", kind: "human", can: ["read"], project: "scratch" });
+		const before = actors(instance);
+		const person = refusal("a person");
+		for (const input of [
+			{ do: "token.create", actor: "robin", kind: "human" },
+			{ do: "token.create", actor: "eve", kind: "human" },
+			{ do: "token.create", actor: "newcomer", kind: "human" },
+			{ do: "grant.set", actor: "eve", can: ["read", "admin"] },
+			{ do: "grant.set", actor: "rootbot", project: "scratch", can: ["answer"] },
+			{ do: "grant.remove", actor: "eve", project: "scratch" },
+			{ do: "actor.forget", name: "eve" },
+		]) {
+			const reply = await admin(instance, input, bot);
+			expect([JSON.stringify(input), reply.status, reply.body]).toEqual([JSON.stringify(input), 403, person]);
+		}
+		expect(actors(instance)).toEqual(before);
+		expect([tokensOf(instance, "robin"), tokensOf(instance, "eve")]).toEqual([{ n: 1 }, { n: 1 }]);
+		const eve = await admin<{ name: string; grants: unknown[] }[]>(instance, { do: "actor.list" });
+		expect(eve.body.ok && eve.body.result.find((actor) => actor.name === "eve")?.grants).toEqual([
+			{ project: "scratch", can: ["read"] },
+		]);
+		// Everything else an agent that administers could do, it still can.
+		expect((await admin(instance, { do: "project.create", key: "made-by-bot" }, bot)).body).toMatchObject({ ok: true });
+		expect((await admin(instance, { do: "token.create", actor: "worker", kind: "agent" }, bot)).body).toMatchObject({
+			ok: true,
+		});
+		expect(
+			(await admin(instance, { do: "token.create", actor: "pipeline", kind: "ci", project: "scratch" }, bot)).body,
+		).toMatchObject({ ok: true });
+		expect((await admin(instance, { do: "token.create", actor: "rootbot", kind: "agent" }, bot)).body).toMatchObject({
+			ok: true,
+		});
+		const listed = await admin<{ id: number; actor: string }[]>(instance, { do: "token.list" }, bot);
+		const worker = listed.body.ok ? listed.body.result.find((row) => row.actor === "worker")?.id : undefined;
+		expect((await admin(instance, { do: "token.revoke", id: worker }, bot)).body).toMatchObject({
+			ok: true,
+			result: { revoked: true },
+		});
+		expect((await admin(instance, { do: "actor.list" }, bot)).body).toMatchObject({ ok: true });
+	});
+});
+
+describe("the owner always has a way in", () => {
+	const OWNER = "owner-secret-0123456789";
+	const owner = bearer(OWNER);
+	const admin = <T>(instance: Instance, input: unknown, headers: Record<string, string> = owner) =>
+		post<T>(instance, "/api/admin", input, headers);
+	async function token(instance: Instance, input: Record<string, unknown>): Promise<string> {
+		const made = await admin<{ token: string }>(instance, { do: "token.create", ...input });
+		if (!made.body.ok) throw new Error(`token.create: ${made.body.error.message}`);
+		return made.body.result.token;
+	}
+	const whoIs = async (instance: Instance, secret: string): Promise<string> => {
+		const reply = await fetch(`${instance.url}/api/session`, { headers: bearer(secret) });
+		const session = (await reply.json()) as Envelope<SessionInfo>;
+		return session.ok ? session.result.actor : String(reply.status);
+	};
+	const ownTokens = async (instance: Instance, headers = owner) => {
+		const listed = await admin<{ id: number; actor: string; revoked: boolean }[]>(
+			instance,
+			{ do: "token.list" },
+			headers,
+		);
+		if (!listed.body.ok) throw new Error(`token.list: ${listed.body.error.message}`);
+		return listed.body.result.filter((row) => row.actor === "robin" && !row.revoked).map((row) => row.id);
+	};
+
+	test("the owner's last token is not revoked and the owner is not forgotten, by the owner or by another admin", async () => {
+		const instance = boot("server", OWNER);
+		const dana = bearer(await token(instance, { actor: "dana", kind: "human" }));
+		const [only] = await ownTokens(instance);
+		for (const caller of [owner, dana]) {
+			const revoked = await admin(instance, { do: "token.revoke", id: only }, caller);
+			expect([revoked.status, revoked.body]).toEqual([
+				400,
+				{ ok: false, error: { code: "invalid", message: expect.stringContaining("make robin another token first") } },
+			]);
+		}
+		const forgotten = await admin(instance, { do: "actor.forget", name: "robin" }, dana);
+		expect([forgotten.status, forgotten.body]).toEqual([
+			400,
+			{ ok: false, error: { code: "invalid", message: expect.stringContaining("MAINWORTHY_OWNER") } },
+		]);
+		expect((await admin(instance, { do: "actor.forget", name: "robin" })).body).toMatchObject({
+			ok: false,
+			error: { code: "invalid" },
+		});
+		expect(await whoIs(instance, OWNER)).toBe("robin");
+		// With a second token the first can go: what is kept is a way in, not this token.
+		const spare = await token(instance, { actor: "robin", kind: "human" });
+		expect((await admin(instance, { do: "token.revoke", id: only })).body).toMatchObject({
+			ok: true,
+			result: { revoked: true },
+		});
+		expect([await whoIs(instance, OWNER), await whoIs(instance, spare)]).toEqual(["401", "robin"]);
+		const [last] = await ownTokens(instance, bearer(spare));
+		expect((await admin(instance, { do: "token.revoke", id: last }, bearer(spare))).body).toMatchObject({
+			ok: false,
+			error: { code: "invalid" },
+		});
+		// Anybody else's last token is theirs to lose.
+		const listed = await admin<{ id: number; actor: string }[]>(instance, { do: "token.list" }, bearer(spare));
+		const danas = listed.body.ok ? listed.body.result.find((row) => row.actor === "dana")?.id : undefined;
+		expect((await admin(instance, { do: "token.revoke", id: danas }, bearer(spare))).body).toMatchObject({
+			ok: true,
+			result: { revoked: true },
+		});
+	});
+
+	test("in local mode the owner needs no token, so the last one can be revoked", async () => {
+		const instance = boot("local");
+		const made = await post<{ token: string }>(instance, "/api/admin", {
+			do: "token.create",
+			actor: "robin",
+			kind: "human",
+		});
+		expect(made.body.ok).toBe(true);
+		const listed = await post<{ id: number }[]>(instance, "/api/admin", { do: "token.list" });
+		const id = listed.body.ok ? listed.body.result[0]?.id : undefined;
+		expect((await post(instance, "/api/admin", { do: "token.revoke", id })).body).toMatchObject({
+			ok: true,
+			result: { revoked: true },
+		});
+	});
+
+	test("a configured owner token that was revoked, or is somebody else's, is not revived: the start says so and names the variable", async () => {
+		const first = boot("server", OWNER);
+		const dana = await token(first, { actor: "dana", kind: "human" });
+		expect(first.warnings).toEqual([]);
+		// Revoked before this rule existed, or in the database by hand.
+		first.app.db.raw.query("UPDATE tokens SET revoked_at = 1 WHERE label LIKE 'owner %'").run();
+		await first.stop();
+
+		const revoked = boot("server", OWNER, first.app.config.dataDir);
+		expect(revoked.warnings).toEqual([
+			expect.stringMatching(/^MAINWORTHY_OWNER_TOKEN .*revoked.* Set MAINWORTHY_OWNER_TOKEN to a new value/),
+		]);
+		expect(revoked.warnings.join("")).not.toContain("\n");
+		expect([await whoIs(revoked, OWNER), revoked.generatedToken]).toEqual(["401", null]);
+		await revoked.stop();
+
+		const borrowed = boot("server", dana, first.app.config.dataDir);
+		expect(borrowed.warnings).toEqual([
+			expect.stringMatching(/^MAINWORTHY_OWNER_TOKEN .*dana.* Set MAINWORTHY_OWNER_TOKEN to a new value/),
+		]);
+		expect([await whoIs(borrowed, dana), borrowed.generatedToken]).toEqual(["dana", null]);
+		expect(borrowed.warnings.join("")).not.toContain(dana);
+		await borrowed.stop();
+
+		// A new value is a new token for the owner, and the start has nothing to say.
+		const renewed = boot("server", "another-owner-secret-0123456789", first.app.config.dataDir);
+		expect([renewed.warnings, await whoIs(renewed, "another-owner-secret-0123456789")]).toEqual([[], "robin"]);
+	});
+
+	test("with no token configured and none left for the owner, as after an import, the start makes one and shows it", async () => {
+		const first = boot("server");
+		const original = first.generatedToken ?? "";
+		expect(await whoIs(first, original)).toBe("robin");
+		// What an import does to the tokens of the instance it replaces.
+		first.app.db.raw.query("DELETE FROM tokens").run();
+		await first.stop();
+
+		const again = boot("server", null, first.app.config.dataDir);
+		const generated = again.generatedToken ?? "";
+		expect(generated).toMatch(/^cb_[0-9A-Za-z]{32}$/);
+		expect(generated).not.toBe(original);
+		expect([await whoIs(again, generated), again.warnings]).toEqual(["robin", []]);
+		await again.stop();
+
+		// Once the owner holds one, the next start makes no other.
+		const third = boot("server", null, first.app.config.dataDir);
+		expect([third.generatedToken, await whoIs(third, generated)]).toEqual([null, "robin"]);
+	});
+
+	test("the start gives everything to a person only: an owner name that is an agent's or a pipeline's stops it", async () => {
+		// The owner's name comes from a variable, and the compose files default it to `owner`. A token issued to
+		// read one project must not administer the instance after a restart in which that variable was lost.
+		const first = boot("server", OWNER);
+		const reader = await token(first, { actor: "owner", kind: "agent", can: ["read"], project: "scratch" });
+		await token(first, { actor: "github-actions", kind: "ci", project: "scratch" });
+		await first.stop();
+		const dataDir = first.app.config.dataDir;
+		for (const name of ["owner", "github-actions", "policy"]) {
+			let message = "started";
+			try {
+				await boot("server", OWNER, dataDir, { owner: name }).stop();
+			} catch (error) {
+				message = error instanceof Error ? error.message : String(error);
+			}
+			expect(message).toContain("MAINWORTHY_OWNER ");
+			expect(message).toContain(name);
+		}
+		// Nothing was granted on the way to the refusal.
+		const again = boot("server", OWNER, dataDir);
+		const session = (await (
+			await fetch(`${again.url}/api/session`, { headers: bearer(reader) })
+		).json()) as Envelope<SessionInfo>;
+		expect(session.ok && [session.result.actor, session.result.kind, session.result.can]).toEqual([
+			"owner",
+			"agent",
+			[],
+		]);
+		expect((await admin(again, { do: "token.list" }, bearer(reader))).status).toBe(403);
+	});
+});
+
+describe("names and failures", () => {
+	test("the owner is not given a forgotten actor's name either: a start with such an owner name is refused", async () => {
+		// `token.create` refuses the name, and the start is the other place an actor is made. An owner called
+		// `forgotten-3` would stop the third actor from ever being forgotten.
+		for (const name of ["forgotten-3", "Forgotten-robin"]) {
+			let message = "started";
+			try {
+				await boot("server", OWNER, undefined, { owner: name }).stop();
+			} catch (error) {
+				message = error instanceof Error ? error.message : String(error);
+			}
+			expect(message).toContain("MAINWORTHY_OWNER ");
+			expect(message).toContain(name);
+		}
+	});
+
+	const OWNER = "owner-secret-0123456789";
+	const owner = bearer(OWNER);
+
+	test("nobody is given the name a forgotten actor is known by", async () => {
+		const instance = boot("server", OWNER);
+		for (const actor of ["forgotten-3", "forgotten-", "Forgotten-12", "forgotten-robin"]) {
+			const made = await post(
+				instance,
+				"/api/admin",
+				{ do: "token.create", actor, kind: "human", can: ["read"] },
+				owner,
+			);
+			expect([actor, made.status, made.body]).toEqual([
+				actor,
+				400,
+				{ ok: false, error: { code: "invalid", message: expect.stringContaining("forgotten") } },
+			]);
+		}
+		expect(instance.app.db.raw.query("SELECT count(*) AS n FROM actors WHERE name LIKE 'forgotten%'").get()).toEqual({
+			n: 0,
+		});
+		// A name that only contains the word is a name.
+		expect(
+			(await post(instance, "/api/admin", { do: "token.create", actor: "not-forgotten-3", kind: "human" }, owner)).body,
+		).toMatchObject({ ok: true });
+	});
+
+	test("a failure nobody foresaw is answered with one fixed sentence, and what failed goes to the log", async () => {
+		const instance = boot("server", OWNER);
+		await post(instance, "/api/admin", { do: "token.create", actor: "dana", kind: "human", can: ["read"] }, owner);
+		await post(instance, "/api/admin", { do: "token.create", actor: "squatter", kind: "human", can: ["read"] }, owner);
+		// An archive from before the rule above can hold the pseudonym as somebody's name. Forgetting dana then
+		// runs into the database's own constraint, which is not an answer for a caller.
+		instance.app.db.raw
+			.query(
+				"UPDATE actors SET name = 'forgotten-' || (SELECT id FROM actors WHERE name = 'dana') WHERE name = 'squatter'",
+			)
+			.run();
+		const logged = spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const reply = await post(instance, "/api/admin", { do: "actor.forget", name: "dana" }, owner);
+			expect([reply.status, reply.body]).toEqual([
+				500,
+				{ ok: false, error: { code: "internal", message: "internal error" } },
+			]);
+			expect(logged.mock.calls.map((call) => call.map(String).join(" ")).join("\n")).toContain(
+				"UNIQUE constraint failed",
+			);
+		} finally {
+			logged.mockRestore();
+		}
+		// The command was rolled back whole: dana is still dana.
+		const listed = await post<{ name: string; disabled: boolean }[]>(
+			instance,
+			"/api/admin",
+			{ do: "actor.list" },
+			owner,
+		);
+		expect(listed.body.ok && listed.body.result.find((actor) => actor.name === "dana")?.disabled).toBe(false);
+	});
+});
+
 describe("what a session may see", () => {
-	test("a token for one project gets neither another project's change stream nor its name", async () => {
+	// This test used to assert 403 for the other project and 404 for one that does not exist, under a title that
+	// said the token does not get the other project's name. The two statuses were the name: any token, a
+	// pipeline's included, could ask for a key and learn whether a project has it (review F4, 2026-10-13).
+	test("a token for one project is told the same of another project as of one that does not exist", async () => {
 		const instance = boot("server", "owner-secret-0123456789");
 		const owner = bearer("owner-secret-0123456789");
 		await post(instance, "/api/admin", { do: "project.create", key: "private-other" }, owner);
@@ -632,8 +1144,54 @@ describe("what a session may see", () => {
 			owner,
 		);
 		const reader = bearer(made.body.ok ? made.body.result.token : "");
-		expect((await fetch(`${instance.url}/api/p/private-other/events`, { headers: reader })).status).toBe(403);
-		expect((await fetch(`${instance.url}/api/p/no-such-project/events`, { headers: reader })).status).toBe(404);
+		const pipeline = await post<{ token: string }>(
+			instance,
+			"/api/admin",
+			{ do: "token.create", actor: "github-actions", kind: "ci", project: "scratch" },
+			owner,
+		);
+		const ci = bearer(pipeline.body.ok ? pipeline.body.result.token : "");
+		/** The status and the body, with the key that was asked for taken out: the caller wrote that itself. */
+		const told = async (reply: Response | Promise<Response>, key: string): Promise<string> => {
+			const response = await reply;
+			return `${response.status} ${(await response.text()).replaceAll(key, "<key>")}`;
+		};
+		const asks: [string, (key: string, headers: Record<string, string>) => Promise<Response>][] = [
+			["the change stream", (key, headers) => fetch(`${instance.url}/api/p/${key}/events`, { headers })],
+			...["find", "gate", "report", "propose", "no-such-operation"].map(
+				(op): [string, (key: string, headers: Record<string, string>) => Promise<Response>] => [
+					op,
+					(key, headers) =>
+						fetch(`${instance.url}/api/p/${key}/${op}`, {
+							method: "POST",
+							headers: { "content-type": "application/json", ...headers },
+							body: "{}",
+						}),
+				],
+			),
+		];
+		for (const caller of [reader, ci]) {
+			for (const [what, ask] of asks) {
+				const other = await told(ask("private-other", caller), "private-other");
+				const missing = await told(ask("no-such-project", caller), "no-such-project");
+				expect(`${what}: ${other}`).toBe(`${what}: ${missing}`);
+				expect(other).toStartWith("404 ");
+			}
+		}
+		const stream = await fetch(`${instance.url}/api/p/private-other/events`, { headers: reader });
+		expect(await stream.text()).toBe(
+			'{"ok":false,"error":{"code":"not_found","message":"no project named private-other, or no grant on it"}}',
+		);
+		// Where a caller holds a grant and lacks the capability, it is told which one it lacks, as before.
+		expect((await fetch(`${instance.url}/api/p/scratch/events`, { headers: ci })).status).toBe(403);
+		expect((await post(instance, "/api/p/scratch/find", {}, ci)).body).toMatchObject({
+			ok: false,
+			error: { code: "forbidden", message: "find needs the read capability on scratch" },
+		});
+		expect((await post(instance, "/api/p/scratch/propose", { edits: [] }, reader)).body).toMatchObject({
+			ok: false,
+			error: { code: "forbidden" },
+		});
 		const own = await fetch(`${instance.url}/api/p/scratch/events`, { headers: reader });
 		expect(own.status).toBe(200);
 		await own.body?.cancel();
@@ -825,6 +1383,105 @@ describe("a large report on a live server", () => {
 		expect(found.body.ok && found.body.result.count).toBe(5);
 		const seqs = [uploaded, ...saved].map((r) => (r.body.ok ? r.body.seq : null));
 		expect(new Set(seqs).size).toBe(6); // every command has its own place on the clock
+	});
+});
+
+describe("a connection that sends nothing", () => {
+	test("is closed after the idle time, and a change stream outlives it", async () => {
+		// One second here; thirty on a server nobody configured. Bun counts idle time in steps of four seconds, so
+		// one second is over within five.
+		const instance = boot("local", null, undefined, { patience: { idleSeconds: 1, signInBodyMs: 5000 } });
+		const host = `Host: ${new URL(instance.url).host}\r\n`;
+		const idle = wire(instance, `GET /healthz HTTP/1.1\r\n${host}\r\n`);
+		const stream = wire(instance, `GET /api/p/scratch/events HTTP/1.1\r\n${host}\r\n`);
+		try {
+			expect(await idle.within(7000)).toBe("closed");
+			// It had been answered: a connection kept open after its request, not one that was refused.
+			expect(idle.state.received).toContain('{"ok":true,"version":');
+			// The stream sent its first line when it opened and nothing since: its next heartbeat is 20 s away.
+			await Bun.sleep(200);
+			expect([stream.state.closed, stream.state.received.includes("retry: 2000")]).toEqual([false, true]);
+			await post(instance, "/api/p/scratch/propose", { edits: [{ op: "create", outline: "After the idle time" }] });
+			for (let waited = 0; !stream.state.received.includes("data:") && waited < 2000; waited += 20) await Bun.sleep(20);
+			expect(stream.state.received).toContain('"op":"propose"');
+		} finally {
+			idle.end();
+			stream.end();
+		}
+	}, 15_000);
+
+	test("the idle time is for a connection nobody has vouched for: an authenticated request's reply may take longer, and a wrong token's connection is closed", async () => {
+		// The idle time counts the server's own silence too. A write that waits at the gate behind a long report, a
+		// large report on a slow machine, a tool call: each may answer after it, and must not lose its reply.
+		const instance = boot("server", "owner-secret-0123456789", undefined, {
+			patience: { idleSeconds: 1, signInBodyMs: 5000 },
+		});
+		const host = `Host: ${new URL(instance.url).host}\r\n`;
+		const refused = wire(
+			instance,
+			`POST /api/p/scratch/find HTTP/1.1\r\n${host}Authorization: Bearer wrong-token-0123456789\r\n` +
+				"Content-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",
+		);
+		// The gate is held until the idle time has provably passed: until the refused connection, silent since the
+		// same moment as the write below, has been closed for it.
+		const held = instance.app.gate.run(async () => {
+			const silent = await refused.within(7000);
+			await Bun.sleep(300);
+			return silent;
+		});
+		// Two writes that wait at that gate, on plain sockets: what comes back is what the server sent, where a
+		// client library may send a request again when its connection is closed. One has a body and one has none
+		// (`curl -X POST` with no data): Bun 1.4.3 holds only a request with no body to the idle time while its
+		// handler works, and the rule must not rest on that.
+		const owner = `${host}Authorization: Bearer owner-secret-0123456789\r\n`;
+		const create = JSON.stringify({ edits: [{ op: "create", outline: "Answered after the idle time" }] });
+		const write = wire(
+			instance,
+			`POST /api/p/scratch/propose HTTP/1.1\r\n${owner}Content-Type: application/json\r\n` +
+				`Content-Length: ${Buffer.byteLength(create)}\r\n\r\n${create}`,
+		);
+		const bare = wire(instance, `POST /api/p/scratch/propose HTTP/1.1\r\n${owner}Content-Length: 0\r\n\r\n`);
+		/** The status line of the reply on this socket, once its body has begun; or that there is none. */
+		const reply = async (socket: ReturnType<typeof wire>): Promise<string> => {
+			const answered = () => socket.state.received.includes("\r\n\r\n{");
+			for (let waited = 0; waited < 3000 && !answered() && !socket.state.closed; waited += 20) await Bun.sleep(20);
+			return answered() ? (socket.state.received.split("\r\n")[0] ?? "") : "closed with no reply";
+		};
+		try {
+			expect(await held).toBe("closed");
+			// It had been answered, and refused: no session, so nothing took the idle time off its connection.
+			expect(refused.state.received.split("\r\n")[0]).toBe("HTTP/1.1 401 Unauthorized");
+			// The write with no body is refused for its input, after the wait: a reply, which is the point.
+			expect([await reply(write), await reply(bare)]).toEqual(["HTTP/1.1 200 OK", "HTTP/1.1 400 Bad Request"]);
+			expect(write.state.received).toContain('"status":"adopted"');
+			expect(bare.state.received).toContain('"code":"invalid"');
+		} finally {
+			refused.end();
+			write.end();
+			bare.end();
+			await held;
+		}
+	}, 15_000);
+
+	test("the body of a sign-in has a few seconds to arrive, then the request is answered and the connection closed", async () => {
+		// 300 ms here; five seconds on a server nobody configured. The body is ten bytes of the 4000 it announced.
+		const instance = boot("server", "owner-secret-0123456789", undefined, {
+			patience: { idleSeconds: 30, signInBodyMs: 300 },
+		});
+		const host = `Host: ${new URL(instance.url).host}\r\n`;
+		const stalled = wire(
+			instance,
+			`POST /api/login HTTP/1.1\r\n${host}Content-Type: application/json\r\nContent-Length: 4000\r\n\r\n{"token":"`,
+		);
+		try {
+			expect(await stalled.within(3000)).toBe("closed");
+			expect(stalled.state.received.split("\r\n")[0]).toBe("HTTP/1.1 408 Request Timeout");
+			expect(stalled.state.received).not.toContain("set-cookie");
+		} finally {
+			stalled.end();
+		}
+		// A sign-in that arrives whole is not held to anything new.
+		expect((await post(instance, "/api/login", { token: "owner-secret-0123456789" })).status).toBe(200);
 	});
 });
 

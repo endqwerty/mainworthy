@@ -88,6 +88,32 @@ plan under any policy, because it cannot call the operations that do (`heldCapab
 decision 0014). The caller is refused before the operation checks its input. `grant.set` and `grant.remove` are the one way a
 grant changes; a new token for an actor that exists changes nothing it may do.
 
+A caller that holds no grant on a project is told what it would be told of a project that does not exist, word
+for word, in an operation and on the change stream: a refusal that named the missing capability would confirm
+the project's key to any token. One that holds a grant there and lacks the capability is told which it lacks.
+
+Holding `admin` is not being anybody. A token for a person who exists is made by that person or by the owner of
+the instance, and one for the owner by the owner alone, because whoever holds a token for a name acts under it.
+An agent that holds `admin` makes projects and tokens for agents and pipelines; it makes no person and no
+person's token, changes no grant and forgets nobody. The owner is the person the configuration names
+(`MAINWORTHY_OWNER`): the start gives that person every capability, refuses a name that is an agent's or a
+pipeline's, and in server mode makes sure the owner holds a token that works. The owner is not forgotten, and in
+server mode the owner's last token is not revoked.
+
+Who a request is from is settled in `src/surfaces/http.ts` (`sessionOf`): a bearer token, else the session
+cookie, else, in local mode, the owner of the machine. The last needs no sign-in, so the server checks what it
+can see of where the request started: a loopback Host, a connection from a loopback address, and none of the
+headers a proxy or a tunnel adds. That is the immediate connection, not the original client: a relay on this
+machine that passes bytes on unchanged looks the same, so a local-mode port is never exposed through one. A cookie or the local owner is accepted only from the server's own page (`Origin`, and
+`Sec-Fetch-Site` where the browser sends it). A failure that is not one of the operation's own refusals is
+answered `internal error` and nothing more; what failed is in the server's log.
+
+A connection that sends nothing is closed after three minutes, unless somebody has vouched for it: a request that
+is given a session takes the timeout off its connection (`admit` in the same file). The timeout counts the
+server's own silence, and a reply that takes longer than it (a write waiting at the gate behind a large report,
+an archive being applied) must not be lost. A client with a session may therefore keep an idle connection open,
+as before there was a timeout.
+
 ## The record
 
 - **Append-only facts.** Versions, results, answers and decisions are never updated. A change of mind is a new

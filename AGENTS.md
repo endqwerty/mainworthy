@@ -80,6 +80,11 @@ No blocking defect is known: issue
 
 ## Working rules
 
+- Nothing has to stay compatible before 1.0, and the owner says when that is (2026-10-13): the product has no
+  users and has promised nothing. A change may break stored data, cookies, tokens, the API and the CLI when that
+  makes the result simpler. Say what breaks in `CHANGELOG.md`; do not build a migration path nobody needs.
+- The instance follows `main` (the owner, 2026-10-13). After a pull request lands, redeploy the instance and
+  check it answers; the home lab's notes say how. Issue #90 is the job that will do this by itself.
 - Behaviour changes need tests and a check run on the real surface.
 - Record user-visible changes in `CHANGELOG.md`; record design decisions in
   `docs/decisions/NNNN-title.md`.

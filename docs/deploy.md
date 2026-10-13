@@ -23,16 +23,25 @@ Then open `http://localhost:7357` and paste the owner token.
 
 | Variable | Default in the image | What |
 | --- | --- | --- |
-| `MAINWORTHY_OWNER_TOKEN` | not set | The owner's token. Set it to a long random string (`openssl rand -hex 32`). If unset, one is generated on the first start and printed once in the log. |
-| `MAINWORTHY_OWNER` | `owner` | The owner's name, as it appears in history. Set it before the first start. |
+| `MAINWORTHY_OWNER_TOKEN` | not set | The owner's token. Set it to a long random string (`openssl rand -hex 32`). If unset, one is generated and printed once in the log whenever the owner holds no token that works: on the first start, and on the start after an import. A value that names a token that was revoked, or somebody else's token, is not brought back: the start says so in one line on stderr, and the owner signs in again once the variable has a new value. |
+| `MAINWORTHY_OWNER` | `owner` | The owner's name, as it appears in history. Set it before the first start. The start gives this person every capability; when the name is an agent's or a pipeline's on the instance, the server does not start and says which variable to change. |
 | `MAINWORTHY_DATA` | `/data` | Where `mainworthy.db` lives. Mount a volume here. |
 | `MAINWORTHY_PORT` | `7357` | The port to listen on. |
 | `MAINWORTHY_HOST` | `0.0.0.0` | The address to bind. |
 | `MAINWORTHY_READERS` | available cores minus two, minimum 1, maximum 8 | Reader threads, each with its own read-only connection, so a read does not wait for a write. A non-negative integer; `0` runs reads inline on the server thread, which is slower under load and only for debugging. |
-| `MAINWORTHY_MODE` | `server` | `server`: every request needs a token. `local` (the default outside a container, on loopback): the browser on the same machine is the owner with no step. |
+| `MAINWORTHY_MODE` | `server` | `server`: every request needs a token. `local` (the default outside a container, on loopback): the browser on the same machine is the owner with no step. Local mode is for that machine only. The server checks what it can see: the connection comes from a loopback address, the `Host` is a loopback name, and the request carries none of the headers a proxy or a tunnel adds; a request that fails one of these needs a token. It cannot see through a relay that passes bytes on unchanged from this machine (`ssh -L`, `socat`, a port forward that adds no header): through one, anyone who reaches the relay is the owner. Never expose a local-mode port that way. To reach an instance from elsewhere, run it in `server` mode. |
 
 The process runs as an unprivileged user (uid 10001). The health check is `mainworthy health`, which reads
 `/healthz`.
+
+A connection nobody has vouched for is closed after three minutes in which it sends and receives nothing, and the
+body of a sign-in has five seconds to arrive. A request that carries a valid token, cookie or local session
+takes that timeout off its connection: its reply may take as long as the work takes, and the change stream
+stays open while nothing changes. So a client that is signed in may keep an idle connection open, as it could
+before there was a timeout; the limit is for callers without a credential. Three minutes is longer than a proxy
+keeps an idle connection by default (Traefik and Cloudflare's tunnel 90 seconds, nginx 60, Caddy two minutes),
+so the proxy closes first; a proxy set to keep them longer than three minutes can lose a request it sends on a
+connection the server has just closed.
 
 ## On Coolify
 
@@ -225,8 +234,9 @@ The data is `/data/mainworthy.db` (with `-wal` and `-shm` beside it while runnin
 - **Backup:** `mainworthy export --out /backup/mainworthy-$(date +%F).ndjson.gz` writes every fact, decision and
   document as text, from a consistent snapshot, while the server runs. Tokens are not exported.
 - **Restore:** start an empty instance, run `mainworthy import <file>` before creating any token, then restart the
-  server with `MAINWORTHY_OWNER_TOKEN` set. The import replaces the instance's first rows, the owner's token among
-  them, so the token you imported with stops working until the restart. A test imports into an empty instance
+  server. The import replaces the instance's first rows, the owner's token among them, so the token you imported
+  with stops working. The restart takes the owner's token from `MAINWORTHY_OWNER_TOKEN`, or, when that is not
+  set, generates one and prints it once in the log. A test imports into an empty instance
   and compares every table (`src/server/transfer/transfer.test.ts`).
 - **Upgrade:** a new image migrates the database on start. Before it changes a database that holds data, it
   writes a copy beside it (`mainworthy.db.v<N>.bak`); to go back, stop the container, put that copy in place of

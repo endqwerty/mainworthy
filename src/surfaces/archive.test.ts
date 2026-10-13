@@ -121,10 +121,15 @@ test("a token revoked while the body is uploading cannot complete the import", a
 		const archive = await (await source.client.request("/api/export")).text();
 		await withInstance(
 			async ({ instance, client }) => {
-				const secret = instance.generatedToken;
-				if (!secret) throw new Error("the server did not create its owner token");
-				const token = z.array(z.object({ id: z.number() })).parse(await client.call("admin", { do: "token.list" }))[0];
-				if (!token) throw new Error("the server's token is missing");
+				// The upload is made with a second token of the owner's: the last one the owner holds is not revoked.
+				const secret = z
+					.object({ token: z.string() })
+					.parse(await client.call("admin", { do: "token.create", actor: "robin", kind: "human" })).token;
+				const token = z
+					.array(z.object({ id: z.number() }))
+					.parse(await client.call("admin", { do: "token.list" }))
+					.at(-1);
+				if (!token) throw new Error("the second token is missing");
 				const session: Session = {
 					via: "token",
 					secret,
