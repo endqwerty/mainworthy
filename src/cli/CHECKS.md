@@ -74,7 +74,7 @@ Implementation notes for integration:
   rejected instead of discarded. A closed stdout is quiet, and the source entry
   is executable through its shebang.
 - EPIPE is swallowed without exiting early. A gate still returns 0/1/2/3 after
-  `head -0` closes its pipe. The regression first returned 0 for a pending gate
+  a reader that reads nothing (`| true`) closes its pipe. The regression first returned 0 for a pending gate
   and now checks every verdict with a closed stdout. Declined warnings appear
   once, and per-project session capabilities are validated and preserved.
 - Cancellation of a valid gzip upload by an early 401/403 response is not a

@@ -4,6 +4,10 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { addAuthenticator, browserAvailable, openPage, type PageHarness, type Server, startServer } from "./support.ts";
 
+// What the browser of this test calls itself, as `browserName` reads it: the system is the one the test runs on.
+// "Chrome on Linux" alone failed on macOS (issue #103).
+const THIS_BROWSER = `Chrome on ${process.platform === "darwin" ? "macOS" : "Linux"}`;
+
 let started: Server;
 let server: Server;
 beforeAll(async () => {
@@ -38,11 +42,11 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.press("Tab");
 			// The name starts as what this browser calls itself.
 			expect(await page.evaluate(() => document.activeElement?.id)).toBe("invite-passkey-name");
-			expect(await page.locator("#invite-passkey-name").inputValue()).toBe("Chrome on Linux");
+			expect(await page.locator("#invite-passkey-name").inputValue()).toBe(THIS_BROWSER);
 			await page.keyboard.press("Enter");
 			await page.locator("#app").waitFor();
 			expect(await page.locator(".sfoot .me").textContent()).toContain("sam");
-			expect(await credentials()).toMatchObject([{ kind: "passkey", label: "Chrome on Linux" }]);
+			expect(await credentials()).toMatchObject([{ kind: "passkey", label: THIS_BROWSER }]);
 
 			// Out, and in again with the passkey: no name is typed.
 			await page.getByRole("button", { name: "Sign out" }).click();
@@ -54,10 +58,10 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.type("g,");
 			await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
 			const rows = page.locator(".settings-row");
-			await rows.filter({ hasText: "Chrome on Linux" }).waitFor();
+			await rows.filter({ hasText: THIS_BROWSER }).waitFor();
 			expect(await rows.count()).toBe(1);
 			expect(await rows.first().innerText()).toContain("last used");
-			expect(await page.getByRole("button", { name: "Remove Chrome on Linux" }).isDisabled()).toBe(true);
+			expect(await page.getByRole("button", { name: `Remove ${THIS_BROWSER}` }).isDisabled()).toBe(true);
 			await page.getByText("The only way you sign in stays.", { exact: false }).waitFor();
 
 			// The authenticator that holds the passkey is not registered twice.
@@ -74,14 +78,14 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.press("Enter");
 			await rows.filter({ hasText: "Security key" }).waitFor();
 			expect(await rows.count()).toBe(2);
-			expect(await credentials()).toMatchObject([{ label: "Chrome on Linux" }, { label: "Security key" }]);
+			expect(await credentials()).toMatchObject([{ label: THIS_BROWSER }, { label: "Security key" }]);
 			// With two, either may go.
-			expect(await page.getByRole("button", { name: "Remove Chrome on Linux" }).isDisabled()).toBe(false);
+			expect(await page.getByRole("button", { name: `Remove ${THIS_BROWSER}` }).isDisabled()).toBe(false);
 
 			await page.getByRole("button", { name: "Remove Security key" }).click();
 			await rows.filter({ hasText: "Security key" }).waitFor({ state: "detached" });
-			expect(await credentials()).toMatchObject([{ label: "Chrome on Linux" }]);
-			expect(await page.getByRole("button", { name: "Remove Chrome on Linux" }).isDisabled()).toBe(true);
+			expect(await credentials()).toMatchObject([{ label: THIS_BROWSER }]);
+			expect(await page.getByRole("button", { name: `Remove ${THIS_BROWSER}` }).isDisabled()).toBe(true);
 			// This browser signed in with the passkey that stayed, so it is still signed in.
 			expect(await page.locator("#app").count()).toBe(1);
 
@@ -89,7 +93,7 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("option", { name: "Your sessions", exact: true }).click();
 			const session = rows.filter({ hasText: "this browser" });
 			await session.waitFor();
-			expect(await session.innerText()).toContain("Chrome on Linux");
+			expect(await session.innerText()).toContain(THIS_BROWSER);
 			expect(await session.innerText()).toContain("passkey");
 
 			// A person with a passkey and no password sets one, and is not asked for a current one.
@@ -126,7 +130,7 @@ test.skipIf(!browserAvailable)(
 
 			// Now the passkey may go. This browser signed in with it, so removing it signs this browser out, and
 			// the password signs it in again.
-			await page.getByRole("button", { name: "Remove Chrome on Linux" }).click();
+			await page.getByRole("button", { name: `Remove ${THIS_BROWSER}` }).click();
 			await page.locator("#signin-name").waitFor();
 			expect(await credentials()).toMatchObject([{ kind: "password" }]);
 			await page.locator("#signin-name").fill("sam");

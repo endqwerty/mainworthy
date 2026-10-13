@@ -517,7 +517,10 @@ describe("the project's name", () => {
 		};
 		const outside = new Set([".git", "node_modules", "dist", ".mainworthy", ".casebook", "test-results"]);
 		const binary = /\.(png|jpe?g|gif|ico|gz|db|db-wal|db-shm)$/;
-		const local = /^(\.env|bench\/results-.*\.json$)/;
+		// Bun writes an executable it is building to `.<hash>-<number>.bun-build` in the directory it was started
+		// in, and removes it. `test/headers.test.ts` builds one from here beside this test, and that file holds the
+		// whole source: seen in that moment it failed this test (2026-10-13, on macOS, in one check of two).
+		const local = /^(\.env|bench\/results-.*\.json$|\.[0-9a-f]+-[0-9a-f]+\.bun-build$)/;
 		const found = readdirSync(".", { withFileTypes: true })
 			.filter((entry) => !outside.has(entry.name))
 			.flatMap((entry) =>

@@ -3,6 +3,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
+import { Glob } from "bun";
+import type { ResultIn } from "../src/core/ops.ts";
 
 /** Per-file durations in milliseconds, written by Bun. Shards are balanced by it; the slowest files start first. */
 export const TIMINGS = "scripts/test-timings.json";
@@ -179,4 +181,126 @@ export function slowest(timings: unknown, count: number): { file: string; second
 		.sort((a, b) => b[1] - a[1])
 		.slice(0, count)
 		.map(([file, ms]) => ({ file, seconds: ms / 1000 }));
+}
+
+/** Where a Linux system keeps a Chromium. The browser tests take the first that is there. */
+const SYSTEM_CHROMIUM = ["/usr/bin/chromium", "/usr/bin/google-chrome", "/usr/bin/chromium-browser"];
+/**
+ * Where macOS keeps one. Named in the message and not started unasked: with the browser tests the suite took
+ * 148 s on the 10-thread Mac and 30 s without (2026-10-13), and a Mac's Chrome is the browser its person uses.
+ */
+const MAC_CHROMIUM = [
+	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+	"/Applications/Chromium.app/Contents/MacOS/Chromium",
+];
+
+/**
+ * The Chromium the browser tests start: the one `MAINWORTHY_CHROMIUM` names, else the system's. With none, the
+ * tests are skipped and `skipped` says what to set, in one line: each browser test file prints it, and the check
+ * says it again at its end, where a run of nothing but skipped tests would otherwise read as a pass of them.
+ */
+export function findChromium(
+	env: Readonly<Record<string, string | undefined>> = process.env,
+	exists: (path: string) => boolean = existsSync,
+): { path: string } | { path: null; skipped: string } {
+	const named = env.MAINWORTHY_CHROMIUM;
+	const path = [named, ...SYSTEM_CHROMIUM].find((candidate) => candidate && exists(candidate));
+	if (path) return { path };
+	const system = `no Chromium at ${SYSTEM_CHROMIUM.slice(0, -1).join(", ")} or ${SYSTEM_CHROMIUM.at(-1)}`;
+	const here = MAC_CHROMIUM.find(exists);
+	return {
+		path: null,
+		skipped: [
+			named ? `MAINWORTHY_CHROMIUM names ${named}, which is not there, and there is ${system}.` : `There is ${system}.`,
+			"Set MAINWORTHY_CHROMIUM to a Chromium or Chrome binary to run the browser tests.",
+			...(here ? [`This machine has one: MAINWORTHY_CHROMIUM="${here}"`] : []),
+		].join(" "),
+	};
+}
+
+/** A test that failed, as the end of a run lists it. */
+export type FailedTest = { file: string; name: string; why: string; at: string | null };
+
+/**
+ * The failed tests of a JUnit report, as `parseJUnit` read it: each with the first line of what it said and the
+ * place it said it. A run prints a failure where it happens, between the output of the files beside it, and Bun
+ * does not repeat it at the end: on 2026-10-13 five failures of `bun run test` were on lines 23 to 149 of 244.
+ */
+export function failedTests(results: readonly ResultIn[]): FailedTest[] {
+	return results
+		.filter((result) => result.outcome === "fail" || result.outcome === "error")
+		.map((result) => ({
+			file: ("file" in result.test ? result.test.file : undefined) ?? "a suite that names no file",
+			name: ("name" in result.test ? result.test.name : undefined) ?? "a test with no name",
+			why:
+				result.failure?.message
+					.split("\n")
+					.find((line) => line.trim() !== "")
+					?.trim() ?? "no message",
+			at: /\bat (?:.*\()?([^\s()]+:\d+:\d+)\)?/.exec(result.failure?.detail ?? "")?.[1] ?? null,
+		}));
+}
+
+/** The test files of a phase, or null for a shard, whose share of them Bun chooses. */
+export function phaseFiles(phase: Phase, shard?: string | undefined): string[] | null {
+	if (phase === "quiet") return QUIET;
+	if (shard) return null;
+	const files = [...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")];
+	return files.filter((file) => !QUIET.includes(file)).sort();
+}
+
+/** What a test phase that did not exit 0 left behind. */
+export type PhaseReport = {
+	name: string;
+	/** The tests its report says failed; null when the runner left no report. */
+	failed: readonly FailedTest[] | null;
+	/** The phase's files that the report has no test of; null where its files are not known (`phaseFiles`). */
+	silent: readonly string[] | null;
+};
+
+/** Reads a phase's report: what failed in it, and which of the phase's `files` it does not mention. */
+export function phaseReport(
+	name: string,
+	results: readonly ResultIn[] | null,
+	files: readonly string[] | null,
+): PhaseReport {
+	if (results === null) return { name, failed: null, silent: null };
+	const reported = new Set(results.map((result) => ("file" in result.test ? result.test.file : undefined)));
+	return { name, failed: failedTests(results), silent: files?.filter((file) => !reported.has(file)) ?? null };
+}
+
+/** How many file names a list at the end of a run holds before it says how many more there are. */
+const LISTED = 10;
+
+/** What the end of a run says about the test phases that did not exit 0. */
+export function failureLines(parts: readonly PhaseReport[]): string[] {
+	const lines: string[] = [];
+	const failed = parts.flatMap((part) => part.failed ?? []);
+	if (failed.length > 0) {
+		lines.push(`${failed.length} ${failed.length === 1 ? "test" : "tests"} failed:`);
+		for (const test of failed)
+			lines.push(`  ${test.file}: ${test.name}`, `      ${test.why}${test.at ? ` (${test.at})` : ""}`);
+		lines.push("Each is above with its whole error, under its file's name. One file alone: `bun test <file>`.");
+	}
+	// A file that does not load is in no report: Bun counts it as an error, not as a test, and names it once, above.
+	const silent = parts.flatMap((part) => part.silent ?? []);
+	if (silent.length > 0) {
+		const one = silent.length === 1;
+		lines.push(
+			`${silent.length} test ${one ? "file" : "files"} gave no result, so no test of ${one ? "it" : "them"} ran:`,
+			...silent.slice(0, LISTED).map((file) => `  ${file}`),
+			...(silent.length > LISTED ? [`  and ${silent.length - LISTED} more`] : []),
+			`${one ? "It" : "Each"} did not load, or the runner stopped in it: the error is above, under the file's name.`,
+		);
+	}
+	for (const part of parts)
+		if (part.failed === null)
+			lines.push(
+				`${part.name} left no report of its tests: the runner stopped before its end. Its last lines say why.`,
+			);
+		else if (part.failed.length === 0 && (part.silent ?? []).length === 0)
+			lines.push(
+				`${part.name} failed and no test in it did: something failed outside a test. Look above for "error:".`,
+			);
+	return lines;
 }

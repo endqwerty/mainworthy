@@ -207,14 +207,25 @@ test.skipIf(!browserAvailable)(
 			await page.getByText("admin lets a person change the policy", { exact: false }).waitFor();
 			await page.getByRole("checkbox", { name: "plan", exact: true }).uncheck();
 			await page.locator("#invite-project").selectOption("scratch");
-			// How long the link works is chosen by the keyboard: the select keeps the keys from one arrow to the
-			// next, from three days to a week to two weeks and back.
+			// How long the link works is chosen by the keyboard: the select keeps the keys from one to the next,
+			// through a change of its value and back to a week. An arrow steps a select everywhere but on macOS,
+			// where it opens the menu and the value stays (issue #103): there the key is an option's first
+			// character, which steps to the next option that starts with it (12 hours, 1 day, 1 week).
 			await page.locator("#invite-expires").focus();
-			await page.keyboard.press("ArrowDown");
-			await page.keyboard.press("ArrowDown");
-			expect(await page.locator("#invite-expires").inputValue()).toBe("2w");
-			await page.keyboard.press("ArrowUp");
-			expect(await page.locator("#invite-expires").inputValue()).toBe("1w");
+			const [away, back] =
+				process.platform === "darwin"
+					? [
+							{ keys: ["1", "1"], value: "12h" },
+							{ keys: ["1", "1"], value: "1w" },
+						]
+					: [
+							{ keys: ["ArrowDown", "ArrowDown"], value: "2w" },
+							{ keys: ["ArrowUp"], value: "1w" },
+						];
+			for (const step of [away, back]) {
+				for (const key of step.keys) await page.keyboard.press(key);
+				expect(await page.locator("#invite-expires").inputValue()).toBe(step.value);
+			}
 			expect(await page.evaluate(() => document.activeElement?.id)).toBe("invite-expires");
 			await page.keyboard.press("Tab");
 			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Make invitation link");

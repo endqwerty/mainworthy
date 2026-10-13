@@ -9,17 +9,23 @@ import { z } from "zod";
 import {
 	CI_SHARD_LIMITS,
 	CI_SHARDS,
+	failedTests,
+	failureLines,
+	findChromium,
 	LIMITS,
 	newestAttempt,
 	over,
 	parallelWorkers,
+	phaseFiles,
+	phaseReport,
 	QUIET,
 	quietWorkers,
 	slowest,
 	testArgs,
 	testReaders,
 } from "../scripts/check-plan.ts";
-import { TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
+import { OLDEST_BUN, unready } from "../scripts/preflight.ts";
+import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
 
 test("every test file is in exactly one phase: the quiet files, and everything but them", () => {
 	for (const file of QUIET) expect(existsSync(file), `${file} is listed as quiet and is not there`).toBe(true);
@@ -190,4 +196,197 @@ test("the check refuses an argument it does not know, so a mistyped one does not
 		expect(await new Response(child.stderr).text()).toContain("check: ");
 		expect(await child.exited).toBe(4);
 	}
+});
+
+// The machine before the code: what `bun run test` said on a Mac with an older Bun first on its PATH, and in a
+// worktree with nothing installed, named neither (scripts/preflight.ts).
+test("a machine that cannot run the tests is told why, and what to do, before anything runs", () => {
+	expect(unready()).toEqual([]);
+	const old = unready({ version: "1.3.11", bun: "/home/robin/.bun/bin/bun" });
+	expect(old).toHaveLength(1);
+	expect(old[0]).toContain(
+		`this is Bun 1.3.11 (/home/robin/.bun/bin/bun) and Mainworthy needs Bun ${OLDEST_BUN} or newer`,
+	);
+	expect(old[0]).toContain("which -a bun");
+	expect(unready({ version: OLDEST_BUN })).toEqual([]);
+
+	const root = mkdtempSync(join(tmpdir(), "mainworthy-preflight-"));
+	try {
+		writeFileSync(
+			join(root, "package.json"),
+			JSON.stringify({ dependencies: { here: "1", gone: "1" }, devDependencies: { "@scope/gone": "1" } }),
+		);
+		mkdirSync(join(root, "node_modules/here"), { recursive: true });
+		writeFileSync(join(root, "node_modules/here/package.json"), "{}");
+		expect(unready({ root })).toEqual([
+			"2 of the packages package.json names are not installed (gone, @scope/gone). Run `bun install --frozen-lockfile`.",
+		]);
+		// An older Bun cannot read the lockfile: the install is with the newer one.
+		expect(unready({ root, version: "1.3.11" }).at(-1)).toEndWith(
+			"Run `bun install --frozen-lockfile`, with the newer Bun.",
+		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("every way to run a test asks the machine first, and the Bun asked for is one the workflow and the image install", () => {
+	// `bun test <file>` loads the preload; `bun run check` and `bun run test` ask before their first import of a package.
+	expect(
+		z
+			.object({ test: z.object({ preload: z.array(z.string()) }) })
+			.parse(Bun.TOML.parse(readFileSync("bunfig.toml", "utf8"))).test.preload,
+	).toEqual(["./test/preflight.ts"]);
+	expect(readFileSync("test/preflight.ts", "utf8")).toContain('requireReady("bun test")');
+	// What the check loads before it asks must be there on a machine with nothing installed: Node's and Bun's own
+	// modules and each other. A type is not loaded. (The check reads a report with a module that needs packages,
+	// and loads it after the run.)
+	const loaded = (file: string): string[] =>
+		[...readFileSync(file, "utf8").matchAll(/^import (?!type )[^;]*? from "([^"]+)";/gms)].map(
+			(match) => match[1] ?? "",
+		);
+	expect(loaded("scripts/check.ts").sort()).toEqual(
+		["./check-plan.ts", "./preflight.ts", "node:fs", "node:os", "node:path"].sort(),
+	);
+	expect(loaded("scripts/check-plan.ts").sort()).toEqual(["bun", "node:fs", "node:os", "node:path"]);
+	expect(loaded("scripts/preflight.ts").sort()).toEqual(["node:fs", "node:path"]);
+	expect(loaded("test/preflight.ts")).toEqual(["../scripts/preflight.ts"]);
+	const check = readFileSync("scripts/check.ts", "utf8");
+	expect(check.indexOf('requireReady("check")')).toBeGreaterThan(0);
+	expect(check.indexOf('requireReady("check")')).toBeLessThan(check.indexOf("await import("));
+
+	const installed = [
+		...readFileSync(".github/workflows/check.yml", "utf8").matchAll(/bun-version: (\S+)/g),
+		...readFileSync("Dockerfile", "utf8").matchAll(/FROM oven\/bun:(\S+)/g),
+	].map((match) => match[1] ?? "");
+	expect(installed.length).toBeGreaterThanOrEqual(4);
+	// The image's tag names a line (`1.4`), which is its newest release.
+	for (const version of installed)
+		expect(
+			Bun.semver.satisfies(/^\d+\.\d+$/.test(version) ? `${version}.0` : version, `>=${OLDEST_BUN}`),
+			version,
+		).toBe(true);
+});
+
+test("a machine with no Chromium is told what to set, and one whose MAINWORTHY_CHROMIUM names nothing is told that", () => {
+	const mac = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+	const has =
+		(...paths: string[]) =>
+		(path: string) =>
+			paths.includes(path);
+	expect(findChromium({ MAINWORTHY_CHROMIUM: "/opt/chrome" }, has("/opt/chrome", "/usr/bin/chromium"))).toEqual({
+		path: "/opt/chrome",
+	});
+	expect(findChromium({}, has("/usr/bin/google-chrome"))).toEqual({ path: "/usr/bin/google-chrome" });
+	// A name that is not there falls back to the system's, as it did.
+	expect(findChromium({ MAINWORTHY_CHROMIUM: "/gone" }, has("/usr/bin/chromium"))).toEqual({
+		path: "/usr/bin/chromium",
+	});
+	expect(findChromium({}, has())).toEqual({
+		path: null,
+		skipped:
+			"There is no Chromium at /usr/bin/chromium, /usr/bin/google-chrome or /usr/bin/chromium-browser. Set MAINWORTHY_CHROMIUM to a Chromium or Chrome binary to run the browser tests.",
+	});
+	expect(findChromium({ MAINWORTHY_CHROMIUM: "/gone" }, has())).toMatchObject({
+		skipped: expect.stringMatching(
+			/^MAINWORTHY_CHROMIUM names \/gone, which is not there, and there is no Chromium at /,
+		),
+	});
+	// A Mac's own Chrome is not started unasked; the line to run it with is given.
+	expect(findChromium({}, has(mac))).toMatchObject({
+		path: null,
+		skipped: expect.stringMatching(
+			/ This machine has one: MAINWORTHY_CHROMIUM="\/Applications\/Google Chrome\.app\/.*"$/,
+		),
+	});
+});
+
+test("the failed tests of a report are listed with what each said and where", () => {
+	const report = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test" tests="3" failures="2">
+  <testsuite name="test/a.test.ts" file="test/a.test.ts" tests="3" failures="2">
+    <testcase name="passes" classname="" time="0.01" file="test/a.test.ts" line="2" />
+    <testsuite name="a group" file="test/a.test.ts" line="3" tests="1" failures="1">
+      <testcase name="fails &lt;here&gt;" classname="a group" time="0.003" file="test/a.test.ts" line="4">
+        <failure type="AssertionError" message="&#10;expect(received).toBe(expected)&#10;&#10;Expected: 2&#10;">AssertionError: expect(received).toBe(expected)&#10;&#10;      at helper (test/support.ts:9:3)&#10;      at test/a.test.ts:4:49&#10;</failure>
+      </testcase>
+    </testsuite>
+    <testcase name="times out" classname="" time="0.1" file="test/a.test.ts" line="6">
+      <failure type="TimeoutError" message="test timed out" />
+    </testcase>
+  </testsuite>
+</testsuites>`;
+	const failed = failedTests(parseJUnit(report).results);
+	expect(failed).toEqual([
+		{ file: "test/a.test.ts", name: "fails <here>", why: "expect(received).toBe(expected)", at: "test/support.ts:9:3" },
+		{ file: "test/a.test.ts", name: "times out", why: "test timed out", at: null },
+	]);
+	// `test/c.test.ts` is a file of the phase that the report has no test of: it did not load.
+	const read = phaseReport("tests: parallel", parseJUnit(report).results, ["test/a.test.ts", "test/c.test.ts"]);
+	expect(read).toEqual({ name: "tests: parallel", failed, silent: ["test/c.test.ts"] });
+	expect(failureLines([read])).toEqual([
+		"2 tests failed:",
+		"  test/a.test.ts: fails <here>",
+		"      expect(received).toBe(expected) (test/support.ts:9:3)",
+		"  test/a.test.ts: times out",
+		"      test timed out",
+		"Each is above with its whole error, under its file's name. One file alone: `bun test <file>`.",
+		"1 test file gave no result, so no test of it ran:",
+		"  test/c.test.ts",
+		"It did not load, or the runner stopped in it: the error is above, under the file's name.",
+	]);
+	const many = Array.from({ length: 12 }, (_, i) => `test/${i}.test.ts`);
+	expect(failureLines([{ name: "tests: parallel", failed: [], silent: many }]).slice(-3)).toEqual([
+		"  test/9.test.ts",
+		"  and 2 more",
+		"Each did not load, or the runner stopped in it: the error is above, under the file's name.",
+	]);
+	// A phase that failed with nothing to name (a shard's files are not known), and one whose runner did not
+	// live to write a report.
+	expect(failureLines([phaseReport("tests: parallel", [], null), phaseReport("tests: quiet", null, QUIET)])).toEqual([
+		'tests: parallel failed and no test in it did: something failed outside a test. Look above for "error:".',
+		"tests: quiet left no report of its tests: the runner stopped before its end. Its last lines say why.",
+	]);
+	// The files of a phase are the ones `bun test` is given: every test file is in one of the two, and a shard's
+	// share is Bun's to choose.
+	const parallel = phaseFiles("parallel") ?? [];
+	expect(phaseFiles("quiet")).toEqual(QUIET);
+	expect(phaseFiles("parallel", "2/6")).toBeNull();
+	expect(parallel).toContain("test/check.test.ts");
+	expect(parallel.filter((file) => QUIET.includes(file))).toEqual([]);
+	expect(parallel.length + QUIET.length).toBe([...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")].length);
+});
+
+test("a run ends with the tests that failed, and says so when a file did not load", async () => {
+	const check = join(import.meta.dir, "../scripts/check.ts");
+	const run = async (files: Record<string, string>): Promise<{ exit: number; end: string }> => {
+		const root = mkdtempSync(join(tmpdir(), "mainworthy-check-run-"));
+		try {
+			mkdirSync(join(root, "test"));
+			for (const [name, text] of Object.entries(files)) writeFileSync(join(root, "test", name), text);
+			const child = Bun.spawn([process.execPath, check, "test", "--only=parallel"], {
+				cwd: root,
+				stdout: "pipe",
+				stderr: "pipe",
+				env: { ...process.env, MAINWORTHY_CHROMIUM: "" },
+			});
+			const [out, exit] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+			return { exit, end: out.slice(out.indexOf("\nFAILED: ")) };
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	};
+	const passes = 'import { test } from "bun:test";\ntest("passes", () => {});\n';
+	const fails = 'import { expect, test } from "bun:test";\ntest("one is two", () => {\n\texpect(1).toBe(2);\n});\n';
+	const failed = await run({ "a.test.ts": passes, "b.test.ts": fails });
+	expect(failed.exit).toBe(1);
+	expect(failed.end).toContain(
+		"\nFAILED: tests: parallel\n\n1 test failed:\n  test/b.test.ts: one is two\n      expect(received).toBe(expected) (test/b.test.ts:3:12)\n",
+	);
+	const unloaded = await run({ "a.test.ts": passes, "c.test.ts": `import "./not-there.ts";\n${passes}` });
+	expect(unloaded.exit).toBe(1);
+	expect(unloaded.end).toContain(
+		"\n1 test file gave no result, so no test of it ran:\n  test/c.test.ts\nIt did not load, or the runner stopped in it",
+	);
+	expect(unloaded.end).not.toContain("test/a.test.ts");
 });

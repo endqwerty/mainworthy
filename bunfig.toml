@@ -1,0 +1,3 @@
+# Before any test file: is this machine able to run the tests (scripts/preflight.ts)?
+[test]
+preload = ["./test/preflight.ts"]

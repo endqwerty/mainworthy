@@ -11,15 +11,23 @@
 //   bun scripts/check.ts test --only=parallel --shard=2/6 --junit=test-results/tests-2.xml     a CI shard
 //
 // One file is `bun test <file>`; this is for the whole suite.
+//
+// It ends with what a reader needs and the output above it does not put in one place: each test that failed, and
+// whether the browser tests ran. On a machine that cannot run the tests it says why and runs nothing
+// (`scripts/preflight.ts`).
 import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { availableParallelism, cpus, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+	failureLines,
+	findChromium,
 	LIMITS,
 	type Outcome,
 	outcomePath,
 	over,
 	type Phase,
+	phaseFiles,
+	phaseReport,
 	REFERENCE_THREADS,
 	SHARED_CORES,
 	seconds,
@@ -28,6 +36,9 @@ import {
 	testArgs,
 	testReaders,
 } from "./check-plan.ts";
+import { requireReady } from "./preflight.ts";
+
+requireReady("check");
 
 const argv = process.argv.slice(2);
 const testsOnly = argv[0] === "test";
@@ -78,6 +89,7 @@ for (const signal of ["SIGINT", "SIGTERM"] satisfies NodeJS.Signals[])
 	});
 
 type Part = { name: string; exit: number; seconds: number; log: string | null };
+type TestPart = Part & { phase: Phase; report: string };
 
 /** Cores the whole machine keeps busy over the next `ms`, whoever by. */
 async function busyCores(ms: number): Promise<number> {
@@ -108,19 +120,23 @@ async function run(name: string, command: string[], capture: boolean): Promise<P
 	return { name, exit, seconds: took, log };
 }
 
-async function tests(capture: boolean): Promise<Part[]> {
-	const parts: Part[] = [];
+async function tests(capture: boolean): Promise<TestPart[]> {
+	const parts: TestPart[] = [];
 	for (const phase of phases) {
 		if (junit) mkdirSync(dirname(junit), { recursive: true }); // Bun does not create the report's directory.
+		// Every phase writes a report, asked for or not: the failed tests are listed from it at the end. One left by
+		// an earlier run goes first, so that a runner that stops before it writes leaves none.
+		const report = junit ?? join(scratch, `${phase}.xml`);
+		rmSync(report, { force: true });
 		const args = testArgs(phase, {
 			shard,
 			workers: phase === "parallel" || record ? workers : undefined,
-			junit,
+			junit: report,
 			timings,
 			failuresOnly: capture,
 		});
 		if (!capture) console.log(`\n$ bun ${args.join(" ")}`);
-		parts.push(await run(`tests: ${phase}`, [process.execPath, ...args], capture));
+		parts.push({ ...(await run(`tests: ${phase}`, [process.execPath, ...args], capture)), phase, report });
 	}
 	return parts;
 }
@@ -143,13 +159,9 @@ const parts = [...staticParts, ...testParts];
 const failed = parts.filter((part) => part.exit !== 0);
 
 // What failed, whole and one part after another, at the end of the run where it is read.
-const notices = new Set<string>();
 for (const part of parts) {
 	if (part.log === null) continue;
 	const text = readFileSync(part.log, "utf8").trimEnd();
-	// A passing part's output is not shown, and a machine with no browser passes with every browser test
-	// skipped: say so where it is read.
-	for (const line of text.split("\n")) if (line.startsWith("Skipping Mainworthy e2e")) notices.add(line.trim());
 	if (part.exit !== 0) console.log(`\n──── ${part.name}: FAILED (exit ${part.exit}) ────\n${text}`);
 	else if (part.name.startsWith("tests")) console.log(`${part.name}: ${text.split("\n").at(-1)?.trim() ?? ""}`);
 }
@@ -173,7 +185,9 @@ if (record) {
 }
 
 console.log("");
-for (const notice of notices) console.log(`NOTE: the browser tests did not run. ${notice}\n`);
+// A machine with no browser passes with every browser test skipped: say so where it is read.
+const chromium = findChromium();
+if (chromium.path === null) console.log(`NOTE: the browser tests did not run. ${chromium.skipped}\n`);
 if (testParts.length > 1) console.log(`${"tests".padEnd(16)} ${seconds(testSeconds).padStart(8)}`);
 console.log(`${"total".padEnd(16)} ${seconds(total).padStart(8)}`);
 if (whole) console.log(`other work kept ${busyBefore.toFixed(1)} cores of this machine busy when the run began`);
@@ -183,6 +197,20 @@ if (everyFile && slow.length > 0)
 
 let code = failed[0]?.exit ?? 0;
 if (failed.length > 0) console.log(`\nFAILED: ${failed.map((part) => part.name).join(", ")}`);
+const failedPhases = testParts.filter((part) => part.exit !== 0);
+if (failedPhases.length > 0) {
+	// Read with Mainworthy's own reader, as the gate job reads a shard's report. Loaded here, after the run: it is
+	// the one import of this script that needs the packages installed.
+	const { parseJUnit } = await import("../src/surfaces/formats/junit.ts");
+	const reports = failedPhases.map((part) =>
+		phaseReport(
+			part.name,
+			existsSync(part.report) ? parseJUnit(readFileSync(part.report, "utf8")).results : null,
+			phaseFiles(part.phase, shard),
+		),
+	);
+	console.log(`\n${failureLines(reports).join("\n")}`);
+}
 if (whole && over(testSeconds, LIMITS) !== "ok") {
 	const where = `scripts/check-plan.ts; AGENTS.md: "the check's wall time is a budget"`;
 	const took = `the tests took ${seconds(testSeconds)}; the budget is ${LIMITS.warn} s and the limit ${LIMITS.fail} s`;
