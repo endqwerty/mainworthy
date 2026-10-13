@@ -22,7 +22,7 @@ afterEach(async () => {
 function boot(mode: Config["mode"], ownerToken: string | null = null, existing?: string): Instance {
 	const dataDir = existing ?? mkdtempSync(join(tmpdir(), "mainworthy-http-"));
 	if (!existing) dirs.push(dataDir);
-	const instance = start({ dataDir, host: "127.0.0.1", port: 0, mode, owner: "daniel", ownerToken }, () => ({
+	const instance = start({ dataDir, host: "127.0.0.1", port: 0, mode, owner: "robin", ownerToken }, () => ({
 		ui: null,
 	}));
 	running.push(instance);
@@ -52,7 +52,7 @@ function bootReaders(count: number): Instance {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-http-readers-"));
 	dirs.push(dataDir);
 	const instance = start(
-		{ dataDir, host: "127.0.0.1", port: 0, mode: "local", owner: "daniel", ownerToken: null },
+		{ dataDir, host: "127.0.0.1", port: 0, mode: "local", owner: "robin", ownerToken: null },
 		() => ({ ui: null }),
 		{ readers: count },
 	);
@@ -286,7 +286,7 @@ describe("local mode", () => {
 	test("the browser on this machine is the owner with no step, and a first project exists", async () => {
 		const instance = boot("local");
 		const session = (await (await fetch(`${instance.url}/api/session`)).json()) as Envelope<SessionInfo>;
-		expect(session.ok && session.result).toMatchObject({ actor: "daniel", kind: "human", mode: "local", via: "local" });
+		expect(session.ok && session.result).toMatchObject({ actor: "robin", kind: "human", mode: "local", via: "local" });
 		expect(session.ok && session.result.projects.map((p) => p.key)).toEqual(["scratch"]);
 		const created = await post(instance, "/api/p/scratch/propose", {
 			edits: [{ op: "create", outline: "First case" }],
@@ -370,7 +370,7 @@ describe("server mode", () => {
 		const session = (await (
 			await fetch(`${instance.url}/api/session`, { headers: { cookie } })
 		).json()) as Envelope<SessionInfo>;
-		expect(session.ok && session.result).toMatchObject({ actor: "daniel", via: "cookie", mode: "server" });
+		expect(session.ok && session.result).toMatchObject({ actor: "robin", via: "cookie", mode: "server" });
 		// the cookie does not travel with a request another site makes
 		expect((await post(instance, "/api/p/scratch/find", {}, { cookie, origin: "http://evil.example" })).status).toBe(
 			401,

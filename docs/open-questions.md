@@ -1,17 +1,17 @@
 # Open questions
 
-**All 28 were answered by Daniel on 2026-10-11.** The answers, what each one
+**All 28 were answered by the owner on 2026-10-11.** The answers, what each one
 changes and the issue that tracks each deferral are in
 [decisions/0009-open-question-answers.md](decisions/0009-open-question-answers.md).
-Only question 3 (his pain points with the incumbents) is still to be written
+Only question 3 (their pain points with the incumbents) is still to be written
 (issue #46). The questions are kept below as they were asked.
 
 New questions go at the end; answer in this file or tell the agent, and the
 next agent records the decision in `docs/decisions/`.
 
-1. Who uses it: you alone (personal tool), a small team, or a product others can adopt? Partly answered 2026-10-10: software QA teams across the process spectrum, loose to regulated (`decisions/0003-scope-software-qa-and-process-spectrum.md`). Answered 2026-10-10: teams in general, not any one team; Daniel's experience across enterprise, large, small and startup teams is practitioner evidence (`decisions/0005-generic-audience-and-practitioner-evidence.md`).
-2. Hosting: ~~self-hosted on the home server or hosted publicly?~~ Answered 2026-10-10: self-hostable in layers, local machine through cloud (`decisions/0002-layered-self-hosting.md`). Still open: is a hosted instance run by Daniel for others ever in scope?
-3. Biggest pain points in TestRail/Qase/Jira/ADO (fill `docs/competitors.md`, "Daniel's notes").
+1. Who uses it: you alone (personal tool), a small team, or a product others can adopt? Partly answered 2026-10-10: software QA teams across the process spectrum, loose to regulated (`decisions/0003-scope-software-qa-and-process-spectrum.md`). Answered 2026-10-10: teams in general, not any one team; the owner's experience across enterprise, large, small and startup teams is practitioner evidence (`decisions/0005-generic-audience-and-practitioner-evidence.md`).
+2. Hosting: ~~self-hosted on the home server or hosted publicly?~~ Answered 2026-10-10: self-hostable in layers, local machine through cloud (`decisions/0002-layered-self-hosting.md`). Still open: is a hosted instance run by the owner for others ever in scope?
+3. Biggest pain points in TestRail/Qase/Jira/ADO (fill `docs/competitors.md`, "The owner's notes").
 4. Must it integrate with Jira or ADO on day one (linking requirements and defects), or is standalone fine at first? Proposed 2026-10-11 (`docs/product-design.md` section 9): Preview 1 stores pasted references only; tracker ports come later.
 5. Is importing from an existing TestRail/Qase/ADO instance a launch requirement?
 6. Any language, framework or database preference or dislike? (Stack is intentionally undecided.)

@@ -78,7 +78,7 @@ whether the dominant access patterns are structural.
 
 ## Open questions and risks
 
-Questions for Daniel:
+Questions for the owner:
 1. Is the **claim/meta split** right: is editing an expected result always a new claim, and are tags/titles/links never? Do you want the "reaffirm after typo" escape, or would you rather that every claim edit demands a re-run (regulated-friendly, annoying to automation-heavy teams)?
 2. Should an **agent's pass count as proof** in a gate by default, or only when a gate document opts in (my default is opt-in per gate)? Related: a failing required case is `fail` and missing proof is `hold`; is that the verdict split you want (open question 12)?
 3. Is **"tests next to the code" a launch need**, or can `repo` mounts wait for the second slice? If it is a launch need, which wins: slimmer authoring UI or the mount?

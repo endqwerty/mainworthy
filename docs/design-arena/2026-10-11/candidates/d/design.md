@@ -130,7 +130,7 @@ constraints (P3, then P4), with two changes:
 
 - **A floor above speed.** P1 is rank zero. A fast tool with an untrustworthy record has no
   value to any profile, and "speed first" alone would permit trading it away.
-- **UX is not third; it is what the first two are measured in.** Daniel's ask is that the
+- **UX is not third; it is what the first two are measured in.** The owner's ask is that the
   incumbents fail on DX/UX. So speed is defined by what it is for (P2: seconds per decision)
   and budgets include keystrokes and tokens, not only server milliseconds (P3). Agent access
   stops being a rank and becomes a consequence of P4.
@@ -237,7 +237,7 @@ decisions they leave for you.
 
     $ mainworthy
     Mainworthy 0.1 · local · data in ~/.mainworthy · http://127.0.0.1:7357
-    project "scratch" · you are daniel@this-machine · policy: loose
+    project "scratch" · you are robin@this-machine · policy: loose
 
 ## Write a case
 

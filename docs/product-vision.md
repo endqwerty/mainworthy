@@ -7,7 +7,7 @@ cases and a "run" button. Those tools get slow at scale, hide history, make
 traceability a manual chore, and charge for every viewer. Teams on Jira or
 Azure DevOps get tests bolted onto a ticket tracker whose model does not fit.
 
-## Priorities (ranked, set by Daniel 2026-10-10)
+## Priorities (ranked, set by the owner 2026-10-10)
 
 When two goals conflict, the higher one wins.
 
@@ -268,7 +268,7 @@ original draft, kept for history:
 - Regulatory certification or compliance claims; the model records what a
   regulated team needs, the claims come later if a real team needs them.
 - Test code generation or execution infrastructure.
-- Multi-tenant SaaS billing in the MVP. A hosted tier run by Daniel must stay possible (decision 0009, answer 2);
+- Multi-tenant SaaS billing in the MVP. A hosted tier run by the owner must stay possible (decision 0009, answer 2);
   it is planned, not built (#31).
 
 Everything above is a starting position. Change it freely; record why.

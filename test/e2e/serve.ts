@@ -8,7 +8,7 @@ const instance = start(
 		host: "127.0.0.1",
 		port: Number(process.env.MAINWORTHY_PORT ?? 7440),
 		mode: process.env.MAINWORTHY_MODE === "server" ? "server" : "local",
-		owner: "daniel",
+		owner: "robin",
 		ownerToken: process.env.MAINWORTHY_OWNER_TOKEN ?? null,
 	},
 	(app, owner) => ({ ui, routes: archiveRoutes(app, owner) }),

@@ -28,7 +28,7 @@ export async function withInstance<T>(
 	const config = defaultConfig({
 		MAINWORTHY_DATA: directory,
 		MAINWORTHY_PORT: "0",
-		MAINWORTHY_OWNER: options.owner ?? "daniel",
+		MAINWORTHY_OWNER: options.owner ?? "robin",
 		MAINWORTHY_MODE: options.mode ?? "local",
 	});
 	const instance = start(config, (app, owner) => ({
@@ -47,7 +47,7 @@ export async function withInstance<T>(
 					env: {
 						PATH: process.env.PATH ?? "",
 						HOME: directory,
-						USER: "daniel",
+						USER: "robin",
 						MAINWORTHY_URL: instance.url,
 						...(instance.generatedToken ? { MAINWORTHY_TOKEN: instance.generatedToken } : {}),
 						...options.env,

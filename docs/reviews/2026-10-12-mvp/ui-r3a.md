@@ -138,8 +138,8 @@ link the draft holds (`tags: { add: … }`, `cover … on: true`), not only the 
 
 Reproduction 1, tags (`probes/tabs2.ts tags`, `logs/tabs2-tags.log`): C-1 has tags `wip, checkout`. `e`, Escape, `j`.
 Somebody removes `wip` (server: `["checkout"]`). `k`, `e` (the editor still shows `#checkout#wip`), add ` v2` to
-the title, Escape. Server: `tags ["checkout","wip"]`, placements `["tags: checkout, wip by daniel", "tags: checkout
-by daniel"]`. The same with the editor simply left open while the tag is removed.
+the title, Escape. Server: `tags ["checkout","wip"]`, placements `["tags: checkout, wip by robin", "tags: checkout
+by robin"]`. The same with the editor simply left open while the tag is removed.
 
 Reproduction 2, requirement links (`probes/tabs2.ts covers`, `logs/tabs2-covers.log`): the same keys with a case
 covering `REQ-12` and the link removed in between: `start ["REQ-12"], afterRemoval [], server {"version":2,
@@ -160,7 +160,7 @@ clean draft up to the current version when the editor opens, and send only the t
 
 Blocks: **yes**, by decision 0011's "no stale proof" (its example is a green tick that stayed "until the user
 navigated away", which is what happens here). It is a judgement: the list row on the same screen is right, and
-round 2 rated the same cause for proposals (R2-8) as not blocking. If Daniel judges it the same way, the count
+round 2 rated the same cause for proposals (R2-8) as not blocking. If the owner judges it the same way, the count
 drops by one.
 
 The `report` event names the run and the question, not the case (`"op":"report","touched":["R-2","Q-3"]`), and the

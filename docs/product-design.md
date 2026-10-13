@@ -144,7 +144,7 @@ the decisions they leave for you.
 
     $ mainworthy
     Mainworthy 0.1 · local · data in ~/.mainworthy · http://127.0.0.1:7357
-    project "scratch" · you are daniel@this-machine · policy: loose
+    project "scratch" · you are robin@this-machine · policy: loose
 
 ## Write a case
 
@@ -1108,7 +1108,7 @@ header).
 
 | Replaces | With | Why | Cost |
 | --- | --- | --- | --- |
-| Vision ranking: fast backend > agents > UX | P0 as a floor; speed defined where thought happens (P1) with budgets in ms, tokens and keystrokes; agents and UX follow from P2. Daniel, 2026-10-11: speed stays a must-have, measured as "the brain never waits", and capture is the job to make faster. | A fast tool with an untrustworthy record has no value; and "fast backend" alone does not say where speed matters | Three kinds of budget to maintain |
+| Vision ranking: fast backend > agents > UX | P0 as a floor; speed defined where thought happens (P1) with budgets in ms, tokens and keystrokes; agents and UX follow from P2. The owner, 2026-10-11: speed stays a must-have, measured as "the brain never waits", and capture is the job to make faster. | A fast tool with an untrustworthy record has no value; and "fast backend" alone does not say where speed matters | Three kinds of budget to maintain |
 | Vision principle 1: every edit is a version | Autosave into a private open proposal; a version exists when a proposal is sealed and adopted | Per-keystroke versions make history unreadable and give reviewers no unit; drafts are durable and visible as drafts | Others see an edit up to ~30 s later; abandoned drafts are sealed by a job |
 | Vision: execution type (manual/automated/both) is a versioned field | Declared `methods` (eligibility) plus derived activity; `intent.automate` is the only wish | A declared type drifts from what reports; eligibility and activity are different facts | Importers map the old field to methods and intent |
 | Vision: unlinked results inbox, optional auto-create | `Test` is a first-class evidence subject with or without a case; mapping is a `map` question | Automation-heavy teams get history, flakiness and gates without writing a case | Two nouns (case, test); coverage reports say "tests without a case" plainly |
@@ -1142,7 +1142,7 @@ the decision witness, and C's claim-hash proof inheritance and D's "never ask
 again" floor assume more than the data proves. The orchestrator was right on
 the surface: A's CI preparation step before tests run, its roster and
 certificate ceremony and its saved-question home do not deliver the DX the
-ask demands, and Daniel's note on the day (speed where thought happens;
+ask demands, and the owner's note on the day (speed where thought happens;
 capture is the job) weighs the surface heavily. The synthesis therefore uses
 **A's evidence semantics as the invariant layer and D's product shape as the
 surface**, and turns each place the judge called a guess into an explicit,
@@ -1260,7 +1260,7 @@ registry; one clock.
 
 ### Open questions and risks
 
-Questions for Daniel are recorded in `docs/open-questions.md` (20 to 28).
+Questions for the owner are recorded in `docs/open-questions.md` (20 to 28).
 Risks: fingerprint and hold quality (needs real failure data in phase 1); the
 Seq commit-order rule as a throughput ceiling; the queue drifting into a
 ticket tracker (the closed kind table is the defence); draft budgets are

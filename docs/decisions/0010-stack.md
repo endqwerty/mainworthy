@@ -1,10 +1,10 @@
 # 0010: The stack: TypeScript on Bun, one SQLite file, React
 
 - Date: 2026-10-12
-- Status: proposed (Daniel reviews). Supersedes [0001](0001-stack-open.md); amends [0002](0002-layered-self-hosting.md).
+- Status: proposed (the owner reviews). Supersedes [0001](0001-stack-open.md); amends [0002](0002-layered-self-hosting.md).
 
-Decision 0001 left the stack open and said it must be chosen on measurements. Daniel's answer on language
-(decision 0009, answer 6): he knows TypeScript best, Python well and Go a little, "but if another language is
+Decision 0001 left the stack open and said it must be chosen on measurements. The owner's answer on language
+(decision 0009, answer 6): they know TypeScript best, Python well and Go a little, "but if another language is
 decidedly better, we want to use the correct language rather than what I know".
 
 ## The arena
@@ -97,8 +97,8 @@ answer 2: self-hosted first, a hosted tier "if this product works well"), and th
 dialects, two migration sets and an asynchronous transaction layer through every module, for a store nobody runs
 yet, is a week that the first user does not benefit from. The judge's own measurement removes the performance
 argument for it ("SQLite-only is sufficient for the measured single-process load"). What is lost is the proof,
-before 1.0, that the design survives a second store. That is a real loss, it is Daniel's call, and it is recorded
-as #57 with the triggers below. If he prefers the judge's position, the change is mechanical and the arena's
+before 1.0, that the design survives a second store. That is a real loss, it is the owner's call, and it is recorded
+as #57 with the triggers below. If they prefer the judge's position, the change is mechanical and the arena's
 TypeScript candidate is a working reference for it.
 
 ## Decision
@@ -130,14 +130,14 @@ The deciding criterion is the third one in the judge's rubric, and it is structu
 - **The design leans on sum types.** Question kinds with closed answer sets, edits, hold terms and verdicts are
   discriminated unions with exhaustive switches; a decision witness is a type only one module can construct.
   Rust expresses this best, TypeScript well, Go by convention only (the judge's notes say the same).
-- **Daniel reads and writes it**, and agents have the most worked examples to copy correctly.
+- **The owner reads and writes it**, and agents have the most worked examples to copy correctly.
 
 **Why not Go.** The best operations story of the three: a 17 MB static binary, the quickest under mixed load,
 the simplest concurrency. It loses on the first two points above, and on exhaustiveness.
 
 **Why not Rust.** The strongest type system for these invariants and the fastest pure logic. A clean build
 takes about 70 seconds and an incremental one about 10; sharing logic with the browser means a WebAssembly
-toolchain; and Daniel does not use it. Its advantages are real and none of them is needed to meet a budget.
+toolchain; and the owner does not use it. Its advantages are real and none of them is needed to meet a budget.
 
 **Why Bun and not Node.** One tool is the runtime, the package manager, the test runner, the bundler for the
 web UI and the compiler of a single executable (94 MB, starts in about a quarter of a second); `bun:sqlite` is

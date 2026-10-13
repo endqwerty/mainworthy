@@ -17,7 +17,7 @@ and the competitor analysis, and it is meant to be wrong in places. Each flow
 has an "Open" line naming what would confirm or reject it. The sources that
 can do that without recruiting users, in order of weight:
 
-1. Daniel's experience as a QA engineer across enterprise, large, small and
+1. The owner's experience as a QA engineer across enterprise, large, small and
    startup teams (open question 18): practitioner judgment on how flows and
    pain differ by kind of team. The best first-hand source available, and a
    single source with its own bias.
@@ -264,8 +264,8 @@ what is open.
 
 ## Rhythm: how the flows fit together
 
-Hypothesised, per profile. This is the part most in need of Daniel's
-comparison across the kinds of team he has worked in. Organisation scale
+Hypothesised, per profile. This is the part most in need of the owner's
+comparison across the kinds of team they have worked in. Organisation scale
 (many teams, shared standards) is not yet in the table.
 
 | Cadence | Loose | Standard | Regulated |
@@ -320,7 +320,7 @@ comparison across the kinds of team he has worked in. Organisation scale
 - The research plan gains a flows step before profiles and the intent model;
   `flows.md` is its first output.
 - The benchmark spec (roadmap phase 1) takes its workload mix from the flows
-  once Daniel has corrected them; the dataset sizes and budgets do not wait.
+  once the owner has corrected them; the dataset sizes and budgets do not wait.
 - Each profile in `docs/ux/profiles.md` is written as a walk through the
   flows above with the policy switches that differ, and checked for
   organisation scale as well as strictness (decision 0005).

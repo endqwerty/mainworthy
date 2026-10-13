@@ -2,12 +2,12 @@
 
 See [competitive-analysis.md](competitive-analysis.md) for the researched,
 source-linked comparison (13 tools, pricing, verified vs reported). This file
-keeps the original hypotheses and Daniel's notes.
+keeps the original hypotheses and the owner's notes.
 
 **Provenance:** the "possible gaps" below are hypotheses from general knowledge
 of these products, not verified findings and not yet checked against current
-pricing or features. The most valuable input is Daniel's own experience: add it
-under "Daniel's notes" and treat it as authoritative. Verify any claim against
+pricing or features. The most valuable input is the owner's own experience: add it
+under "The owner's notes" and treat it as authoritative. Verify any claim against
 the product before building a feature on it.
 
 ## TestRail
@@ -31,6 +31,6 @@ Tight with Boards, Pipelines and Repos.
 Possible gaps: plans/suites/configurations model is confusing; per-user
 licensing for Test Plans; clunky authoring; hard to use outside ADO.
 
-## Daniel's notes
+## The owner's notes
 _To fill in: what specifically annoyed you in each tool, and what you wished
 it did._

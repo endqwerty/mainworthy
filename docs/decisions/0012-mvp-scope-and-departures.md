@@ -1,7 +1,7 @@
 # 0012: What the MVP builds of the design, and where it departs
 
 - Date: 2026-10-12
-- Status: proposed (built in the MVP pull request; Daniel reviews)
+- Status: proposed (built in the MVP pull request; the owner reviews)
 
 `docs/product-design.md` and decision 0008 describe the product. The MVP is the thin slice "one red build, three
 producers" (design section 9), built in one night on the stack of decision 0010. This record lists what the slice

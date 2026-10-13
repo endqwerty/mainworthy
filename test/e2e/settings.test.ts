@@ -127,10 +127,10 @@ import { PRESETS } from "../../src/core/presets.ts";
 			await page.getByText(PRESET_SUMMARY.standard, { exact: true }).waitFor();
 			await comparison.getByRole("columnheader", { name: "standard · in force", exact: true }).waitFor();
 			const adopted = (await server.api("inbox", { state: "decided", kind: "adopt" })).items.find(
-				(q) => q.evidence.author === "daniel",
+				(q) => q.evidence.author === "robin",
 			);
 			expect(adopted?.decision?.answer.is).toBe("accept");
-			expect(adopted?.decision?.by).toEqual(["daniel"]);
+			expect(adopted?.decision?.by).toEqual(["robin"]);
 			await page.getByLabel("Policy preset").selectOption("strict");
 			await eventually(
 				() => server.api("admin", { do: "policy.show", project: "scratch" }),

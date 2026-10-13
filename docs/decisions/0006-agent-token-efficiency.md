@@ -1,18 +1,18 @@
 # 0006: Agent token cost is a measured product property
 
 - Date: 2026-10-10
-- Status: requirement accepted (Daniel); mechanisms proposed, to be measured
+- Status: requirement accepted (the owner); mechanisms proposed, to be measured
   in the phase 1 prototype and the phase 0 competitor MCP audit. Refined
   2026-10-11: mechanism 5's findings ledger becomes the ledger of all
   decisions, and review reuse is keyed by a basis that includes the relevant
   patch ([0008](0008-one-evidence-model.md)).
 
-Daniel's position: with agents doing review and testing, a test management
+The owner's position: with agents doing review and testing, a test management
 system should help reduce the tokens agents spend on adversarial review and
 adversarial testing, not add to them. This extends priority 2 (first-class
 agent access) in the product vision.
 
-## Terms (to be confirmed by Daniel, open question 19)
+## Terms (to be confirmed by the owner, open question 19)
 
 - **Adversarial review:** an agent challenges test artifacts or a change. It
   looks for missing or weak expected results, ambiguous steps, uncovered

@@ -131,10 +131,10 @@ The five that matter most:
 
 ### W9. The start banner in the README is not what the server prints
 
-- `README.md:16`: `project "scratch" · you are daniel · policy: loose`
-- Printed (`USER=daniel bun run start`): `project "scratch" · you are daniel@this-machine · policy: loose`
+- `README.md:16`: `project "scratch" · you are robin · policy: loose`
+- Printed (`USER=robin bun run start`): `project "scratch" · you are robin@this-machine · policy: loose`
   (`src/cli/commands/serve.ts:21`).
-- Proposed: `project "scratch" · you are daniel@this-machine · policy: loose`
+- Proposed: `project "scratch" · you are robin@this-machine · policy: loose`
 
 ## Out of date wording
 

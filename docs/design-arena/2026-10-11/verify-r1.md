@@ -1,6 +1,6 @@
 # Verification report, round 1
 
-**Verdict: issues.** Revision judged: **b5f1feb9ef617235c3621c036b2fa3dd64dd847b**, against **a78b0ad**. This is a docs review, not implementation approval. The synthesis improves D's evidence honesty and reflects Daniel's capture and speed guidance, but several contracts remain inconsistent or underspecified enough to permit false green gates.
+**Verdict: issues.** Revision judged: **b5f1feb9ef617235c3621c036b2fa3dd64dd847b**, against **a78b0ad**. This is a docs review, not implementation approval. The synthesis improves D's evidence honesty and reflects the owner's capture and speed guidance, but several contracts remain inconsistent or underspecified enough to permit false green gates.
 
 Reviewer: Codex, GPT 6.1 Sol. The synthesis identifies its author as Claude Fable 5.1, so this review uses a different provider from that author.
 
@@ -285,7 +285,7 @@ The most material disagreements are acceptance/completeness, fragment immutabili
 
 - **Hand-synced lists/relations: risk remains.** `OPS` and `KINDS` are described as exhaustive, but the documented operation count already differs. The KindTable is left in temporary candidate material. "every hop keyed both ways" (`638`) is not backed by declared reverse result-by-signature/target/defect keys; the impact path needs base/head result access while Result declares only test/Seq and batch/outcome keys (`516,636`). Question-by-subject/revision and queue rank are also used without corresponding complete declarations. The missing structures are exactly the brief's "add an index later" risk.
 
-## 4. Daniel's guidance: pass as intent and principle ordering
+## 4. The owner's guidance: pass as intent and principle ordering
 
 `docs/decisions/0007-guiding-principles.md:13-18` faithfully records the guidance:
 
@@ -373,7 +373,7 @@ This agrees with 0004, and no live text co-editing or full offline replica is in
 
 > "Home is Suite because capture is the job; a user whose day is triage sets Queue as home." (`product-design.md:808-809`)
 
-Open question 20 asks "From your experience across team sizes" (`open-questions.md:29`), rather than treating Daniel's team as the customer. No new actual-team defaults are justified by his personal workflow. Coverage of both organisation scale and strictness still needs research; it is not asserted as measured.
+Open question 20 asks "From your experience across team sizes" (`open-questions.md:29`), rather than treating the owner's team as the customer. No new actual-team defaults are justified by their personal workflow. Coverage of both organisation scale and strictness still needs research; it is not asserted as measured.
 
 ## 6. Repository hygiene: issues, mostly editorial
 

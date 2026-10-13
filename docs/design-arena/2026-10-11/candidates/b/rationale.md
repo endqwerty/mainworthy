@@ -44,7 +44,7 @@ The thesis is change-centric, but case authoring does not require a change. Name
 
 ## Open questions and risks
 
-These are questions for Daniel during synthesis, not requests blocking this candidate.
+These are questions for the owner during synthesis, not requests blocking this candidate.
 
 - Will teams tolerate an explicit case-version annotation or start-time manifest for automation that must satisfy a gate? Should unproven-version evidence be allowed by a clearly weaker loose-profile policy, or remain context-only as proposed?
 - Does the proof-plan screen fit teams that spend most of their time maintaining cases rather than releasing changes? Do named sessions solve that without making every task a forced planning exercise?

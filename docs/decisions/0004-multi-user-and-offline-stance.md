@@ -1,10 +1,10 @@
 # 0004: Multi-user by default, calm concurrency, online-first with a small offline allowance
 
 - Date: 2026-10-10
-- Status: direction accepted (Daniel); mechanisms proposed, to be tested in
+- Status: direction accepted (the owner); mechanisms proposed, to be tested in
   phase 0 mocks and the phase 1 benchmark
 
-Answers open questions 8 and 9. Daniel's position: modern products are
+Answers open questions 8 and 9. The owner's position: modern products are
 multi-user; real-time collaboration is wanted only where it helps the task,
 because badly done live co-editing is more nuisance than help. Offline work
 is welcome if it does not hurt the experience, but data is online unless a

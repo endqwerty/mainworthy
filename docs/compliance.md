@@ -1,7 +1,7 @@
 # Compliance register
 
 What each legal or regulatory regime would need from Mainworthy, what the product already gives, what is missing,
-and what it would cost. Daniel's rule (decision 0009, answer 15): do what is very low cost now; plan what is
+and what it would cost. The owner's rule (decision 0009, answer 15): do what is very low cost now; plan what is
 significant; where compliance would make the product worse to use, say so and document where the requirement is
 not met.
 
@@ -32,13 +32,13 @@ Read this first. These are the known gaps, in order of how soon they bite.
 5. **Accessibility has not been audited.** The UI is keyboard-first, with visible focus and live status, but
    nobody has checked it against WCAG 2.2 AA. Public-sector and many enterprise buyers require a conformance
    report. Cost: medium. Tracked in #47.
-6. **No project licence.** The repository is private and `UNLICENSED`. Before a public release Daniel has to
+6. **No project licence.** The repository is private and `UNLICENSED`. Before a public release the owner has to
    choose one. Tracked in #34 with the name check.
 
 ## Privacy (GDPR, UK GDPR, CCPA)
 
 Self-hosted, the operator is the controller and Mainworthy is software they run; the product's duty is to make
-compliance possible. On a hosted tier Daniel would be a processor, with duties of his own (a data processing
+compliance possible. On a hosted tier the owner would be a processor, with duties of their own (a data processing
 agreement, a list of sub-processors, breach notification, data residency): planned with that tier (#31).
 
 | # | Requirement | Status | How, or what is missing |

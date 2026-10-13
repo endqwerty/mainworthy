@@ -214,7 +214,7 @@ Place the pre-first-usable Cloud proof and all required layer/job/backup/restore
 
 ## 5. Guidance, honesty and existing decisions
 
-- **Daniel's speed/capture guidance: resolved, remains passing as intent.** 0007:13-18 records practical speed, capture and "a better product"; :33-34 puts speed above the integrity admission floor; :40-41 makes capture first. :157 prohibits bending P0/P1 hot paths/P3; :171-173 requires measurable superiority. Product-design :99-100 provides input-to-paint and crash-recovery checks. Measurements remain not checked.
+- **The owner's speed/capture guidance: resolved, remains passing as intent.** 0007:13-18 records practical speed, capture and "a better product"; :33-34 puts speed above the integrity admission floor; :40-41 makes capture first. :157 prohibits bending P0/P1 hot paths/P3; :171-173 requires measurable superiority. Product-design :99-100 provides input-to-paint and crash-recovery checks. Measurements remain not checked.
 
 - **Draft numbers and implementation status: resolved.** Product-design :5-7 says "a sketch ... before any code" and "Numbers are draft budgets"; :906 explicitly says the pure functions are "not implemented". README:7-10 says stack undecided and nothing built. 0007:149-150 labels 2x a proposed limit, :159 labels three bends a proposed limit, and :177-178 labels five minutes draft until measured. These distinguish proposed normative limits from runtime measurements.
 

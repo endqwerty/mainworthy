@@ -205,7 +205,7 @@ How it weighs, said plainly: both routes need more than round 6's "choose, then 
 window already on the Suite, and the person editing the conflicted case there. Route B needs an unresolved
 conflict, the app opened on another case, and the question rejected in between. I rate it a blocker because the
 text is taken by an ordinary editor under "Draft, saved on this device" and is then removed with a success
-message; if Daniel weighs both routes as unusual, the count drops to none.
+message; if the owner weighs both routes as unusual, the count drops to none.
 
 Smallest fix: let the draft that is being opened decide. Where a draft is loaded (`edit()`, `choose()`, the route
 effect, the initial state) take the conflict from `saved.conflict` as well as from the map, and put it in the

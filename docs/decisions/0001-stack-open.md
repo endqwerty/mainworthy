@@ -4,7 +4,7 @@
 - Status: superseded by [0010](0010-stack.md) on 2026-10-12. The criteria below are what
   the stack arena measured against.
 
-Daniel asked that no language or framework be committed to at project
+The owner asked that no language or framework be committed to at project
 creation. The repository therefore contains no manifests, lockfiles or source
 directories. The first design thread must choose the stack, record the choice
 here (superseding this record), and add the matching `t3.json` scripts, check
@@ -15,7 +15,7 @@ answers in [docs/open-questions.md](../open-questions.md).
 
 ## Selection criteria (added 2026-10-10)
 
-Daniel ranked the priorities: fast backend, then agent access through MCP and
+The owner ranked the priorities: fast backend, then agent access through MCP and
 skills, then instant-feeling UI/UX (see "Priorities" in the product vision).
 The stack decision must be judged against these, with evidence rather than
 preference:

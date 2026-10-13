@@ -24,7 +24,7 @@ async function serve(dataDir: string): Promise<{ url: string; child: ReturnType<
 		env: {
 			PATH: process.env.PATH ?? "",
 			HOME: dataDir,
-			USER: "daniel",
+			USER: "robin",
 			MAINWORTHY_DATA: dataDir,
 			MAINWORTHY_PORT: "0",
 			MAINWORTHY_MODE: "local",

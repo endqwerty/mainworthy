@@ -12,10 +12,10 @@ in `/home/endqwerty/.t3/worktrees/mainworthy/t3-639b4b0f`:
 sections 6.6 (access patterns and budgets) and 7.1 (the operation registry).
 Do not write anything in that repository.
 
-What the owner said on 2026-10-11: he knows TypeScript best, Python well and
+What the owner said on 2026-10-11: they know TypeScript best, Python well and
 Go a little, "but if another language is decidedly better, we want to use the
 correct language rather than what I know". First deployment is one container
-on his home server (Coolify on Unraid); later a hosted tier on AWS or GCP must
+on their home server (Coolify on Unraid); later a hosted tier on AWS or GCP must
 be viable and it must grow to any number of users and teams. A container is
 acceptable for every layer; a native single binary is a bonus, not a
 requirement. Agents will write most of the code.

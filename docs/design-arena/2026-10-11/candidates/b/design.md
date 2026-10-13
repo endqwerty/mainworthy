@@ -21,7 +21,7 @@ An MCP badge alone is not a differentiator. A4 and A5 must demonstrate fewer tok
 
 ## Guiding principles
 
-Within the correctness floor below, retain Daniel's order: backend speed, then agent access and token cost, then UI polish. Required task completion is a floor for all three. A fast backend that cannot express a release decision fails before that ranking applies.
+Within the correctness floor below, retain the owner's order: backend speed, then agent access and token cost, then UI polish. Required task completion is a floor for all three. A fast backend that cannot express a release decision fails before that ranking applies.
 
 1. **Organise work around the change, and keep the suite as reusable knowledge.** This rules out making teams construct folders, suites, and copied run cases before their first useful answer. In a tie with convenience, create a named session automatically rather than inventing a commit. Case capture may happen without a change; evidence may not.
 2. **Only evidence with an exact, inspectable basis can satisfy a gate.** This rules out treating yesterday's pass, an unmapped CI row, or a prose review as proof of today's build. This principle outranks speed and optimistic UX. Unknown basis is visible evidence with limited authority, never guessed proof.

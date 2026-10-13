@@ -142,7 +142,7 @@ Judged on interface depth: how much a caller must know versus how much the modul
 
 ## Open questions and risks
 
-For Daniel:
+For the owner:
 
 1. **Is the queue the right home?** From your experience across team sizes, who opens the tool
    daily, and is it to triage, to write or to execute? If most daily users are authors, home

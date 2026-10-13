@@ -101,7 +101,7 @@ describe("a red report", () => {
 		h.call("report", ciReport({ commit: "ddddddd1", n: 10, fail }));
 		decide(first(queue().items), { is: "defect" });
 		const again = h.call<ReportReceipt>("report", ciReport({ commit: "ddddddd1", n: 10, fail, attempt: 2 }));
-		expect(again.questions[0]).toMatchObject({ how: "already decided", answer: "defect", by: "daniel" });
+		expect(again.questions[0]).toMatchObject({ how: "already decided", answer: "defect", by: "robin" });
 		expect(queue().counts.open).toBe(0);
 		expect(count("questions WHERE kind = 'failure'")).toBe(1);
 	});

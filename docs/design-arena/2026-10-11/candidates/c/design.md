@@ -78,7 +78,7 @@ A principle may be bent only if all three hold: (1) the bend is written in a
 decision record that names the principle, the cost and an **expiry** (a date or a
 milestone); (2) it stays above the floor below; (3) the bend is local (one module or
 one release), never a silent default. Bends that remove a check (P8) need a second
-approver; Daniel merges anyway under review-first.
+approver; the owner merges anyway under review-first.
 
 **What "a bad product" means (the floor).** Mainworthy is bad if any of these is true:
 it loses or silently overwrites a user's data; it shows a pass for something not
@@ -847,7 +847,7 @@ function judgeGate(g: GateDoc, rows: GateRow[], decisions: ActiveDecisions): Ver
     }
   }
   return { verdict: reasons.length ? 'hold' : 'pass', because: top(reasons, 20), total: reasons.length /* + counts */ }
-  // TODO: 'fail' vs 'hold': a failing required case is 'fail'; missing proof is 'hold'. Confirm with Daniel (open question 12 default).
+  // TODO: 'fail' vs 'hold': a failing required case is 'fail'; missing proof is 'hold'. Confirm with the owner (open question 12 default).
 }
 
 // impact(): ranking is pure and explainable

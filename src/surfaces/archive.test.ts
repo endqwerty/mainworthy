@@ -163,14 +163,14 @@ test("a local import preserves the configured owner's identity for the next writ
 			if (!archive.body) throw new Error("missing archive body");
 			await withInstance(async (target) => {
 				expect((await target.client.request("/api/import", { method: "POST", body: archive.body })).status).toBe(200);
-				expect((await target.client.session()).actor).toBe("daniel");
+				expect((await target.client.session()).actor).toBe("robin");
 				await target.client.call("propose", {
 					edits: [{ op: "create", outline: "After import\nAn action > Expected" }],
 				});
 				const actor = target.instance.app.reader.raw
 					.query<{ name: string }, []>("SELECT a.name FROM cases c JOIN actors a ON a.id = c.created_by")
 					.get();
-				expect(actor?.name).toBe("daniel");
+				expect(actor?.name).toBe("robin");
 			});
 		},
 		{ owner: "alice" },
@@ -184,7 +184,7 @@ test("a report the original had accepted and not yet applied is applied by the i
 		const app = source.instance.app;
 		app.db.transaction(() => {
 			const project = findProject(app.db, "scratch");
-			const owner = project ? actorByName(app.db, "daniel", project.id) : null;
+			const owner = project ? actorByName(app.db, "robin", project.id) : null;
 			if (!project || !owner) throw new Error("the source has no project or owner");
 			const ctx = makeCtx(app, project, owner, true);
 			acceptReport(ctx, {

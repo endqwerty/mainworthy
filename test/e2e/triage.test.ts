@@ -252,7 +252,7 @@ async function recordedDecisions(server: Server, ref: string) {
 			);
 			for (const question of inbox.items) {
 				const decision = settled.items.find((q) => q.q === question.q)?.decision;
-				expect(decision?.by).toEqual(["daniel"]);
+				expect(decision?.by).toEqual(["robin"]);
 				expect(decision?.answer.is).toBe(
 					question.kind === "failure"
 						? "infra"
@@ -596,7 +596,7 @@ async function recordedDecisions(server: Server, ref: string) {
 					document.querySelector("[data-current-question]")?.getAttribute("data-current-question") !== null &&
 					document.querySelector('.queue-state button[aria-pressed="true"]')?.textContent === "Settled",
 			);
-			expect(await view.page.locator(".queue-evidence").innerText()).toContain("Decided by daniel");
+			expect(await view.page.locator(".queue-evidence").innerText()).toContain("Decided by robin");
 			expect(view.errors).toEqual([]);
 		} finally {
 			await view?.close();

@@ -10,7 +10,7 @@ USD list prices on that date and change often; re-check before relying on one.
   product. A hypothesis until checked.
 - **Open**: could not be established. See [What is not checked](#what-is-not-checked).
 
-[competitors.md](competitors.md) holds the original hypotheses and Daniel's
+[competitors.md](competitors.md) holds the original hypotheses and the owner's
 notes, which override anything here.
 
 ## Landscape
@@ -199,7 +199,7 @@ starts at 20 users, custom price), QMetry (standalone).
    before assuming parity or a gap.
 6. **Self-hosting is rare and expensive** except Kiwi TCMS and TestLink, both
    of which are dated or basic. A modern self-hosted tool has a clear opening
-   if Daniel wants to host on the home server (open question 2).
+   if the owner wants to host on the home server (open question 2).
 
 ## What is not checked
 
@@ -209,6 +209,6 @@ starts at 20 users, custom price), QMetry (standalone).
   no measurement. A benchmark against TestRail or Qase needs trial accounts.
 - Import and export formats of every tool (relevant to open question 5).
 - Depth of competitors' MCP servers (finding 5).
-- Daniel's own experience with each tool.
+- The owner's own experience with each tool.
 - Smaller vendors not covered: TestMonitor, Tuskr, TestCollab, Squash TM,
   Kualitee, aqua cloud.

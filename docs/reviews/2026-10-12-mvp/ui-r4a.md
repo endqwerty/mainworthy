@@ -52,7 +52,7 @@ sends it again unchanged) brought two new defects, and one race in leaving the e
 | --- | --- | --- |
 | A-1 text typed after a reload, a closed tab or a lost reply | **fixed, with new problems** (R4A-1, R4A-2: both come from the stored request being sent again whatever the answer was) | `probes/cmd.ts edit-reload` twice (`logs/cmd-edit-reload.log`): typed `und to the card` after the reload, Escape: `status "Version 3, by you, just now"`, server `version 3, ["Open the order and ask for a refund to the card"]`, `storage []`. `closed-tab`: `C-2 Password reset mail arrives within a minute v2`. `lost-reply` new and edit: `C-2 Card is charged once only v2`, `C-1 Refund case for a card once only v3`. `new-reload` twice: `C-2 Refund is sent to the original payment method v2`, the same 32 s later. Existing case, closed tab (`logs/r4-closed-tab-edit.log`, twice): `version 2`, full text, no conflict with oneself. |
 | A-2 two windows of one browser | **fixed** for two windows opened separately; two residues (R4A-5; the duplicated-tab route of R4A-2) | `probes/tabs2.ts windows`, 4 runs (`logs/tabs2-windows.log`): each window sends its own id (`A cmd 91612d1a`, `B cmd ff4868c3`); different fields: `version 3`; same field: `bStatus "Both edits are kept…"`, `conflict 1`, B's text still in the field and in storage. One window reloading while both type: both texts land, `version 3` (`logs/r4-windows-reload.log`, twice). |
-| A-3 a clean draft reused later | **fixed** | `logs/edit-stale.log`: `storedAfterEEscape []`; `e` after a colleague's version 2 opens on version 2. `logs/tabs2-tags.log`: server `tags ["checkout"]` after my seal, placements `["tags: checkout by daniel"]`; `logs/tabs2-covers.log`: `covers []`. |
+| A-3 a clean draft reused later | **fixed** | `logs/edit-stale.log`: `storedAfterEEscape []`; `e` after a colleague's version 2 opens on version 2. `logs/tabs2-tags.log`: server `tags ["checkout"]` after my seal, placements `["tags: checkout by robin"]`; `logs/tabs2-covers.log`: `covers []`. |
 | A-4 a folder key opened an unsaved new case's editor | **fixed** | `logs/edit-folder-editor.log`: after `]`: `focus DIV[], editors 0`; the draft stays in storage with its title unchanged. |
 | A-5 a result from somebody else left the pane's proof stale | **fixed** | `logs/more-external-result.log`, twice: 1 s after the other producer's failure `row H✗`, `pane H✗ person · fail on v1`, `timelineResults 2`. |
 | A-6 a step holding " > " split by the next character | **fixed** | `logs/recheck-r2-10.log`: after one character `action "Open Settings > Billing!", expected (none)`, focus stays in the action; server v3 the same. |
@@ -99,7 +99,7 @@ click the title, ` with more words`, Shift+Enter, `Next one`, Escape: requests `
 only; server `C-1 Existing case v2`, `C-2 Next one v1`, `storage []`, the same 37 s later; and for a new case.
 
 It is rated a blocker because the loss is silent and the UI reports success, under the condition check 2 sets
-(slow requests); on a fast link the window is a few tens of milliseconds. If Daniel weighs the narrow window
+(slow requests); on a fast link the window is a few tens of milliseconds. If the owner weighs the narrow window
 more than the silence, the count drops by one.
 
 What holds: staying in the editor while the idle seal's reply is under way keeps the text (it is recorded as the

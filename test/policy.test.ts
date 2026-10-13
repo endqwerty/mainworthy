@@ -467,7 +467,7 @@ describe("forgetting a person", () => {
 		expect(
 			h.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM tokens WHERE revoked_at IS NULL").get()?.n,
 		).toBe(0);
-		expect(h.raw("admin", { do: "actor.forget", name: "daniel" })).toMatchObject({
+		expect(h.raw("admin", { do: "actor.forget", name: "robin" })).toMatchObject({
 			ok: false,
 			error: { code: "invalid" },
 		});

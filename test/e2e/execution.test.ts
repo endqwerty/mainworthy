@@ -176,7 +176,7 @@ async function cases(server: Server, count: number) {
 				true,
 			);
 			expect(slots[8]?.fills[0]).toMatchObject({
-				by: "daniel",
+				by: "robin",
 				outcome: "fail",
 				note: "Total is 100",
 				admitted: "exact",
