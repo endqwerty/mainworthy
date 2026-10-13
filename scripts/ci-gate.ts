@@ -9,11 +9,15 @@
 // For each shard the directory holds `<shard>.xml` (JUnit) and `<shard>.json` (what `scripts/check.ts test
 // --junit` wrote beside it). Each file is reported under the shard's name as its job, with the two commands a
 // pipeline would run: `casebook report` and `casebook gate`.
-import { existsSync, readFileSync } from "node:fs";
+//
+// Which Casebook: the one CASEBOOK_URL names when it can be used, else one started here for this run
+// (`scripts/ci-instance.ts`). The run's summary says which, also when the gate passes.
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { parseJUnit } from "../src/surfaces/formats/junit.ts";
 import { CI_SHARD_LIMITS, type Outcome, over, readOutcome, seconds } from "./check-plan.ts";
+import { chooseInstance, describeChoice, startOwn } from "./ci-instance.ts";
 
 const [directory, ...shards] = process.argv.slice(2);
 if (!directory || shards.length === 0) {
@@ -21,9 +25,21 @@ if (!directory || shards.length === 0) {
 	process.exit(4);
 }
 
+const CLI = join(import.meta.dir, "../src/cli/main.ts");
+const choice = await chooseInstance(process.env);
+const chosen = describeChoice(choice);
+// GitHub puts a line that starts with ::notice::, ::warning:: or ::error:: on the run's summary page.
+console.log(
+	`::${choice.use === "none" ? "error" : choice.use === "own" && choice.warn ? "warning" : "notice"}::${chosen}`,
+);
+if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${chosen}\n`);
+if (choice.use === "none") process.exit(4);
+const own = choice.use === "own" ? await startOwn(CLI) : null;
+
 const cli = (argv: string[]): number => {
 	console.log(`\n$ casebook ${argv.join(" ")}`);
-	return Bun.spawnSync([process.execPath, join(import.meta.dir, "../src/cli/main.ts"), ...argv], {
+	return Bun.spawnSync([process.execPath, CLI, ...argv], {
+		env: { ...process.env, ...own?.env },
 		stdio: ["ignore", "inherit", "inherit"],
 	}).exitCode;
 };
@@ -69,6 +85,7 @@ for (const shard of shards) {
 }
 
 const gate = cli(["gate"]);
+own?.stop();
 
 const unreported = [...new Glob("{src,test}/**/*.test.{ts,tsx}").scanSync(".")]
 	.filter((file) => !reported.has(file))
@@ -86,11 +103,11 @@ const longest = Math.max(0, ...rows.map((row) => row.outcome?.seconds ?? 0));
 const budget = over(longest, CI_SHARD_LIMITS);
 const slow = `the slowest shard's tests took ${seconds(longest)}`;
 if (budget === "fail") problems.push(`${slow}, over the limit of ${CI_SHARD_LIMITS.fail} s (scripts/check-plan.ts)`);
-// GitHub puts a line that starts with ::warning:: or ::error:: on the run's summary page.
 if (budget === "warn")
 	console.log(`::warning::${slow}, over the budget of ${CI_SHARD_LIMITS.warn} s (scripts/check-plan.ts)`);
 
 for (const problem of problems) console.log(`::error::${problem}`);
-if (gate !== 0) console.log(`\nThe gate did not pass (exit ${gate}).`);
-else if (problems.length > 0) console.log("\nThe gate passed on what it was told, and that was not everything.");
+console.log(`\n${chosen}`);
+if (gate !== 0) console.log(`The gate did not pass (exit ${gate}).`);
+else if (problems.length > 0) console.log("The gate passed on what it was told, and that was not everything.");
 process.exit(gate !== 0 ? gate : problems.length > 0 ? 1 : 0);
