@@ -17,7 +17,7 @@ type SignIn =
 	| { token: string }
 	| { name: string; password: string }
 	| { passkey: Assertion }
-	| { invitation: string; password?: string; passkey?: Registration; label?: string; replace?: true };
+	| { invitation: string; password?: string; passkey?: Registration; label?: string; replace?: string };
 
 /**
  * `POST /api/login`. The body is exactly one of the four shapes, and the server refuses a member that does not
@@ -41,17 +41,25 @@ export type Acceptance = {
 	/** At least one of a password and a passkey. */
 	password: string | null;
 	passkey: { made: Registration; label: string } | null;
-	/** The browser is signed in as somebody else, and the person said to end that session. */
-	replace: boolean;
+	/**
+	 * The person whose session in this browser may end with the acceptance: the name the page asked about and
+	 * was told yes for, and never one it did not show. Null when it asked about nobody.
+	 */
+	replace: string | null;
 };
 
-/** Accepts an invitation, which signs the person in. A browser signed in as somebody else is answered `conflict`. */
+/**
+ * Accepts an invitation, which signs the person in. A browser that is signed in as somebody other than the
+ * invited person and other than `replace` is answered `conflict`, with who it is in `details.signedInAs`, and
+ * nothing is changed: the server reads who holds the browser when it accepts, so an answer about one person
+ * ends nobody else's session.
+ */
 export const acceptInvitation = (accepted: Acceptance): Promise<void> =>
 	signIn({
 		invitation: accepted.code,
 		...(accepted.password === null ? {} : { password: accepted.password }),
 		...(accepted.passkey ? { passkey: accepted.passkey.made, label: accepted.passkey.label } : {}),
-		...(accepted.replace ? { replace: true } : {}),
+		...(accepted.replace === null ? {} : { replace: accepted.replace }),
 	});
 
 /**
