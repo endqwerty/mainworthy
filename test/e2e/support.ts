@@ -3,7 +3,7 @@ import { existsSync, rmSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Browser, type BrowserContext, chromium, type Page } from "playwright-core";
+import { type APIResponse, type Browser, type BrowserContext, chromium, type Page, type Route } from "playwright-core";
 import { testReaders } from "../../scripts/check-plan.ts";
 import type { Api, OpName } from "../../src/core/api.ts";
 import { type SeedResult, seed } from "../../src/web/dev/seed.ts";
@@ -391,6 +391,35 @@ function routesWaitForInterception(context: BrowserContext): void {
 	};
 	for (const page of context.pages()) wrap(page);
 	context.on("page", wrap);
+}
+/**
+ * The reply to a request that a route handler sends on to the server, with its body read as JSON, or null when
+ * the page was closed while the handler held the request. A page asks again by itself for what it shows (the
+ * inbox, a list of tokens), so such a request can be in a handler when the test has passed and closes the page.
+ * `route.fetch` then fails, or the reply it brought is already disposed: "json: Response has been disposed"
+ * failed R4B-1 in CI on 2026-10-13 (run 38388161751). A navigation does not do this; the reply of a document
+ * that was left can still be read. A handler that gets null returns: nobody waits for that request. Any other
+ * failure is thrown, and the handler parses `json` itself, so a wrong reply still fails the test. The handler
+ * answers with `answer`, which is quiet in the same case and no other.
+ */
+export async function fetched(route: Route): Promise<{ response: APIResponse; json: unknown } | null> {
+	try {
+		const response = await route.fetch();
+		return { response, json: await response.json() };
+	} catch (error) {
+		if (abandoned(route, error)) return null;
+		throw error;
+	}
+}
+export async function answer(route: Route, reply: Parameters<Route["fulfill"]>[0]): Promise<void> {
+	await route.fulfill(reply).catch((error: unknown) => {
+		if (!abandoned(route, error)) throw error;
+	});
+}
+function abandoned(route: Route, error: unknown): boolean {
+	// The two messages are what a close gives while it is still under way and the page does not say closed yet.
+	const closing = error instanceof Error && /has been (closed|disposed)/.test(error.message);
+	return closing || route.request().frame().page().isClosed();
 }
 export async function eventually<T>(read: () => Promise<T>, accepts: (value: T) => boolean): Promise<T> {
 	const end = Date.now() + 10_000;
