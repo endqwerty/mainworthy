@@ -41,7 +41,11 @@ They go through `exchange` in `lib/api.ts`, which words a `limited` reply as the
 TanStack query, including `data`, `error`, `refetch`, `isPending`.
 Parse generic row data with Zod at the screen boundary. Core schemas are shared.
 `queryKey({project, op, input})` creates `[project, op, input]`.
-`queryClient` is the shared QueryClient. `invalidateProject(project)` refetches.
+`queryClient` is the shared QueryClient. `invalidateProject(project)` refetches, and
+`changed(project, change)` refetches what an event of the stream touched. Both ask a
+first read that was still on its way once more when it lands: its reply may be from
+before the change (issue #87). Nothing outside `lib/data.ts` calls
+`queryClient.invalidateQueries`; keep it so.
 The shell owns exactly one event stream for the current project. Streams,
 window focus and reconnect invalidate cached reads; edits also invalidate.
 

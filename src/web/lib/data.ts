@@ -1,4 +1,4 @@
-import { QueryClient, useQuery } from "@tanstack/react-query";
+import { type Query, QueryClient, useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { z } from "zod";
 import type { Api, OpName } from "../../core/api.ts";
@@ -35,10 +35,53 @@ export function useQueryOp<O extends OpName>({
 		placeholderData: (previous) => previous,
 	});
 }
+const askedAgain = new Set<string>();
+/**
+ * Reads again what `stale` says a change on the server may have made out of date.
+ *
+ * A read that already has an answer is dropped if it is on its way and asked afresh. A first read is not: the
+ * query client hands back the read that is on its way (`Query.fetch` drops one only for a query that has data),
+ * and the reply, which the server may have read before the change, then counts as current for `staleTime`. On
+ * 2026-10-13 a question settled elsewhere 10 ms after the queue first asked for it stayed "open" on the page
+ * (issue #87). So a first read on its way is asked once more when it lands. It is not dropped instead: under a
+ * stream of changes a first read that is dropped at each one would never show anything.
+ */
+function readAgain(stale: (query: Query) => boolean): Promise<void> {
+	const first = queryClient
+		.getQueryCache()
+		.findAll({ predicate: (query) => stale(query) && query.state.data === undefined && query.promise !== undefined });
+	for (const query of first) {
+		if (askedAgain.has(query.queryHash)) continue;
+		askedAgain.add(query.queryHash);
+		const again = (): void => {
+			askedAgain.delete(query.queryHash);
+			void queryClient.invalidateQueries({ queryKey: query.queryKey, exact: true });
+		};
+		query.promise?.then(again, again);
+	}
+	return queryClient.invalidateQueries({ predicate: stale });
+}
 export function invalidateProject(project: string): Promise<void> {
-	return queryClient.invalidateQueries({ queryKey: [project] });
+	return readAgain((query) => query.queryKey[0] === project);
 }
 const Change = z.object({ op: z.string().optional(), touched: z.array(z.string()) });
+/** Reads again what a change on the server, as the event stream tells it, may have made out of date. */
+export function changed(project: string, change: z.infer<typeof Change>): void {
+	const refs = change.touched;
+	void readAgain((query) => {
+		if (query.queryKey[0] !== project) return false;
+		const op = query.queryKey[1];
+		if (op === "find" || op === "inbox" || op === "gate" || op === "impact" || op === "admin") return true;
+		// A proposal's event names its proposal and question, so an open case's timeline must be read again.
+		if (
+			(op === "timeline" && change.op === "propose") ||
+			((op === "get" || op === "timeline") && change.op === "report")
+		)
+			return true;
+		const input = JSON.stringify(query.queryKey[2]) ?? "";
+		return refs.length === 0 || refs.some((ref) => input.includes(ref)) || refs.some((ref) => !/^[CQRPT]-/.test(ref));
+	});
+}
 /** One stream per active project. Focus/reconnect refetches repair every missed event. */
 export function useEvents(project: string, setStatus: (text: string) => void): void {
 	useEffect(() => {
@@ -67,25 +110,7 @@ export function useEvents(project: string, setStatus: (text: string) => void): v
 					return;
 				}
 				const parsed = Change.safeParse(raw);
-				if (!parsed.success) return;
-				const refs = parsed.data.touched;
-				void queryClient.invalidateQueries({
-					predicate: (query) => {
-						if (query.queryKey[0] !== project) return false;
-						const op = query.queryKey[1];
-						if (op === "find" || op === "inbox" || op === "gate" || op === "impact" || op === "admin") return true;
-						// A proposal's event names its proposal and question, so an open case's timeline must be read again.
-						if (
-							(op === "timeline" && parsed.data.op === "propose") ||
-							((op === "get" || op === "timeline") && parsed.data.op === "report")
-						)
-							return true;
-						const input = JSON.stringify(query.queryKey[2]) ?? "";
-						return (
-							refs.length === 0 || refs.some((ref) => input.includes(ref)) || refs.some((ref) => !/^[CQRPT]-/.test(ref))
-						);
-					},
-				});
+				if (parsed.success) changed(project, parsed.data);
 			};
 			events.onopen = () => {
 				if (interrupted) {
