@@ -67,6 +67,13 @@ export function routeUrl({
 		: "";
 	return `/p/${encodeURIComponent(project)}/${screen === "case" ? "suite" : screen}${suffix}${folder ? `?folder=${encodeURIComponent(folder)}` : ""}`;
 }
+/**
+ * The screen that is open, in another project. A ref, a folder and a tag are one project's and stay behind, so
+ * a case that was open becomes that project's Suite. Every way of switching projects goes through here.
+ */
+export function projectUrl({ project, screen }: { project: string; screen: Screen }): string {
+	return routeUrl({ project, screen: screen === "case" ? "suite" : screen });
+}
 export function refUrl({ project, ref }: { project: string; ref: string }): string {
 	const screen: Screen = ref.startsWith("C-")
 		? "case"

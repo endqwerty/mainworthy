@@ -8,7 +8,7 @@ import { call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
 import { randomId } from "../lib/ids.ts";
 import { useBindings } from "../lib/keys.ts";
-import { navigate, routeUrl } from "../lib/router.ts";
+import { navigate, projectUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, EmptyState, KeyCap, ListRow, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
 import { People } from "./people.tsx";
@@ -626,7 +626,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 	);
 }
 function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElement | null> }) {
-	const { session, instanceCan, project, refreshSession, setStatus } = useApp();
+	const { session, instanceCan, project, route, refreshSession, setStatus } = useApp();
 	const [key, setKey] = useState("");
 	const [name, setName] = useState("");
 	const [preset, setPreset] = useState<Preset>("loose");
@@ -643,7 +643,7 @@ function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElem
 					key={p.key}
 					type="button"
 					aria-pressed={project === p.key}
-					onClick={() => navigate(routeUrl({ project: p.key, screen: "settings" }))}
+					onClick={() => navigate(projectUrl({ project: p.key, screen: route.screen }))}
 				>
 					<b>{p.name}</b>
 					<span className="mono dim">

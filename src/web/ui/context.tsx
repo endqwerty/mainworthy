@@ -1,7 +1,8 @@
 import { createContext, useContext } from "react";
 import type { SessionInfo } from "../../core/api.ts";
 import type { Route } from "../lib/router.ts";
-export type PaletteItem = { id: string; label: string; detail?: string; handler: () => void };
+/** `current` marks what is already so (the project that is open): it is shown, and the choice starts past it. */
+export type PaletteItem = { id: string; label: string; detail?: string; current?: boolean; handler: () => void };
 export type PaletteOptions = { title?: string; items?: PaletteItem[]; onPickCase?: (ref: string) => void };
 export type AppContext = {
 	project: string;

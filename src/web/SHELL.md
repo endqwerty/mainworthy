@@ -57,6 +57,14 @@ error, or the workbench. Neither page is a screen: they render with no session, 
 project and no key registry, so they use plain forms. Enter submits, focus starts in the
 first field and Tab follows the order on the page.
 
+Under the brand, the sidebar names the project that is open (`.project`). With more than
+one project in the session it is a button that opens the palette with the projects as its
+items, and `g p` does the same; with one, it is the name alone and the key is not
+registered. A choice goes to `projectUrl({project, screen})` from `lib/router.ts`: the same
+screen in the other project, with no ref, folder or tag. Settings, Projects goes through the
+same function. Add no other way to build that URL. On a phone the line is in the drawer,
+and the binding is marked `list`: it goes somewhere and records nothing about a row.
+
 The sidebar's navigation is the four screens the work is done on: Suite, Queue, Runs and
 Changes. What is not the work is in the footer, on two lines. The first is the account
 area: who is signed in, the link to Settings (a gear, `g ,`) beside the name, and "Sign
@@ -102,9 +110,14 @@ Plain keys are ignored in input fields. Escape and modified keys still work.
 Call preventDefault in an input's local handler to keep global keys from firing.
 The same registry feeds footer hints, the palette and the `?` sheet.
 A key handler commits its synchronous React updates before the next key.
-`openPalette({title?, items?})` accepts `{id, label, detail?, handler}` items.
+`openPalette({title?, items?})` accepts `{id, label, detail?, current?, handler}` items.
+Given items, the palette is a picker: it lists those rows and nothing else, and finds them
+by the words of their label and detail. An item marked `current` is what is already so (the
+open project): it shows a check, and the choice starts on the first item without the mark.
 `openPalette({title, onPickCase: ref => ...})` opens searchable case pick mode.
-The palette closes before invoking the choice callback. No native dialogs.
+The palette closes before invoking the choice callback, and each opening starts with
+nothing typed, also one made from a choice. No native dialogs: a list to pick from is the
+palette, not a `<select>` in the shell or a menu of its own.
 
 ## Shared UI and styles
 

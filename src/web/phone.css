@@ -107,12 +107,13 @@
 	padding: 14px 16px 10px;
 	font-size: 15px;
 }
-:root[data-layout="phone"] .brand .proj {
-	display: inline;
+/* The project's line has the room it has in a wide window: the drawer is not the 120 px sidebar of a narrow one. */
+:root[data-layout="phone"] .project {
+	margin-inline: 10px;
+	padding-left: 10px;
 }
-:root[data-layout="phone"] .project-select {
-	display: inline-block;
-	max-width: 140px;
+:root[data-layout="phone"] .project-name {
+	font-size: 15px;
 }
 :root[data-layout="phone"] .sfoot .me {
 	display: flex;
