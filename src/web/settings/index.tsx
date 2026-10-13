@@ -11,9 +11,25 @@ import { useBindings } from "../lib/keys.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, EmptyState, KeyCap, ListRow, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
+import { People } from "./people.tsx";
+import { YourSessions } from "./sessions.tsx";
+import { YourSignIn } from "./signin.tsx";
 import "./settings.css";
 
-const sections = ["Policy", "Tokens", "Projects", "Connect"];
+/**
+ * The sections a caller is shown, in the order of the list. "People" is for an admin of the instance who is a
+ * person, which is who the server lets invite. "Your sign-in" is for a person: nobody else has a password or a
+ * passkey. "Your sessions" is for whoever can have a browser session, which a pipeline cannot.
+ */
+const sectionsFor = (caller: { kind: string; instanceAdmin: boolean }): string[] => [
+	"Policy",
+	"Tokens",
+	...(caller.instanceAdmin && caller.kind === "human" ? ["People"] : []),
+	"Projects",
+	"Connect",
+	...(caller.kind === "human" ? ["Your sign-in"] : []),
+	...(caller.kind === "ci" ? [] : ["Your sessions"]),
+];
 const Token = z.object({
 	id: z.number(),
 	actor: z.string(),
@@ -141,6 +157,9 @@ function SettingsWorkbench() {
 	const inForce = Preset.safeParse(preset).data ?? null;
 	const actorRef = useRef<HTMLInputElement>(null);
 	const projectRef = useRef<HTMLInputElement>(null);
+	const inviteRef = useRef<HTMLInputElement>(null);
+	const passwordRef = useRef<HTMLInputElement>(null);
+	const sections = sectionsFor({ kind: session.kind, instanceAdmin });
 	useBindings([
 		{
 			key: "j",
@@ -160,6 +179,28 @@ function SettingsWorkbench() {
 			when: () => !overlayOpen && instanceAdmin && (section === "Tokens" || section === "Projects"),
 			handler: () => (section === "Tokens" ? actorRef.current?.focus() : projectRef.current?.focus()),
 		},
+		// Each is registered only for a caller who has the section, so the keys sheet does not list it for one
+		// who has not.
+		...(sections.includes("People")
+			? [
+					{
+						key: "n",
+						label: "New invitation",
+						when: () => !overlayOpen && section === "People",
+						handler: () => inviteRef.current?.focus(),
+					},
+				]
+			: []),
+		...(sections.includes("Your sign-in") && session.via === "cookie"
+			? [
+					{
+						key: "n",
+						label: "New password",
+						when: () => !overlayOpen && section === "Your sign-in",
+						handler: () => passwordRef.current?.focus(),
+					},
+				]
+			: []),
 	]);
 	async function changePolicy(next: string): Promise<void> {
 		if (!admin || switching || next === preset) return;
@@ -348,6 +389,9 @@ function SettingsWorkbench() {
 						) : (
 							<EmptyState>An admin creates and revokes tokens.</EmptyState>
 						))}
+					{section === "People" && <People nameRef={inviteRef} />}
+					{section === "Your sign-in" && <YourSignIn passwordRef={passwordRef} />}
+					{section === "Your sessions" && <YourSessions />}
 					{section === "Projects" && <ProjectSettings inputRef={projectRef} />}
 					{section === "Connect" && (
 						<>
