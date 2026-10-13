@@ -229,25 +229,141 @@ describe("an invitation", () => {
 		expect((await w.post("/api/login", { invitation: code, password: "x".repeat(256) })).status).toBe(200);
 	});
 
-	test("a browser signed in as somebody else is refused until it says replace, and the session it held ends then", async () => {
+	/** A refusal in one line, with what it carries for a page: `409 conflict {"signedInAs":"pat"}`. */
+	const refusal = (reply: { status: number; text: string }): string => {
+		const error = (JSON.parse(reply.text) as { error?: { code?: string; details?: unknown } }).error;
+		return `${reply.status} ${error?.code} ${JSON.stringify(error?.details)}`;
+	};
+
+	test("a browser signed in as somebody else is refused until it names who it asked about, and only the session it held ends then", async () => {
 		const w = world();
 		const robin = await joined(w, "robin", FIRST);
+		const elsewhere = (await signIn(w, "robin", FIRST)).cookie;
+		const pat = await joined(w, "pat", FIRST);
 		const { code } = await invite(w, { name: "sam" });
 		const refused = await w.post("/api/login", { invitation: code, password: SECOND }, { cookie: robin });
-		expect(refused.status).toBe(409);
-		expect(refused.body).toMatchObject({ ok: false, error: { code: "conflict", details: { signedInAs: "robin" } } });
+		expect(`${refused.status} ${refused.text}`).toBe(
+			'409 {"ok":false,"error":{"code":"conflict","message":"this browser is signed in as robin, and the invitation is for somebody else. Send replace: \\"robin\\" to sign robin out of this browser and accept it","details":{"signedInAs":"robin"}}}',
+		);
 		expect(refused.setCookies).toEqual([]);
 		// Refusing changed nothing: the invitation still works and Robin is still signed in.
 		expect(await w.status({ cookie: robin })).toBe(200);
 		const replaced = await w.post(
 			"/api/login",
-			{ invitation: code, password: SECOND, replace: true },
+			{ invitation: code, password: SECOND, replace: "robin" },
 			{ cookie: robin },
 		);
 		expect(replaced.status).toBe(200);
 		expect((await me(w, { cookie: replaced.cookie })).actor).toBe("sam");
 		expect(await w.status({ cookie: robin })).toBe(401);
-		expect(sessions(w)).toMatchObject([{ ended_why: "signed-out" }, { ended_at: null }]);
+		// Robin's other browser and Pat's are nobody's to end here.
+		expect(await w.status({ cookie: elsewhere })).toBe(200);
+		expect(await w.status({ cookie: pat })).toBe(200);
+		expect(sessions(w)).toMatchObject([
+			{ ended_why: "signed-out" },
+			{ ended_at: null },
+			{ ended_at: null },
+			{ ended_at: null },
+		]);
+	});
+
+	test("saying yes to one person signs no other person out: the browser is asked again, about who it holds now", async () => {
+		// The page asked "you are signed in as robin, go on as sam?". Before the answer was sent another tab signed
+		// Pat in, so the request carries Pat's cookie and a yes that was about Robin.
+		const w = world();
+		const robin = await joined(w, "robin", FIRST);
+		const pat = await joined(w, "pat", FIRST);
+		const { code } = await invite(w, { name: "sam" });
+		const refused = await w.post(
+			"/api/login",
+			{ invitation: code, password: SECOND, replace: "robin" },
+			{ cookie: pat },
+		);
+		expect(refusal(refused)).toBe('409 conflict {"signedInAs":"pat"}');
+		expect(refused.setCookies).toEqual([]);
+		expect(await w.status({ cookie: pat })).toBe(200);
+		expect(await w.status({ cookie: robin })).toBe(200);
+		expect(sessions(w).filter((row) => row.ended_at !== null)).toEqual([]);
+		// A name in other letters is another name.
+		const shouted = await w.post("/api/login", { invitation: code, password: SECOND, replace: "PAT" }, { cookie: pat });
+		expect(shouted.status).toBe(409);
+		// Asked about Pat, the page says so and goes on.
+		const replaced = await w.post(
+			"/api/login",
+			{ invitation: code, password: SECOND, replace: "pat" },
+			{ cookie: pat },
+		);
+		expect(replaced.status).toBe(200);
+		expect(await w.status({ cookie: pat })).toBe(401);
+		expect(await w.status({ cookie: robin })).toBe(200);
+	});
+
+	test("replace is a name: a bare yes is refused as wrong input, before the invitation is looked at", async () => {
+		const w = world();
+		const robin = await joined(w, "robin", FIRST);
+		const { code } = await invite(w, { name: "sam" });
+		const replies: string[] = [];
+		for (const [invitation, replace] of [
+			[code, true],
+			[code, false],
+			[code, ""],
+			[code, "x".repeat(65)],
+			[code, null],
+			["A".repeat(43), true],
+		] as const) {
+			const reply = await w.post("/api/login", { invitation, password: SECOND, replace }, { cookie: robin });
+			replies.push(said(reply));
+		}
+		expect(replies).toEqual(Array.from({ length: 6 }, () => "400 invalid"));
+		expect(await w.status({ cookie: robin })).toBe(200);
+		expect(sessions(w).filter((row) => row.ended_at !== null)).toEqual([]);
+	});
+
+	test("a name given where nobody else is signed in ends nothing: no session, or the invited person's own", async () => {
+		// The page may have asked a moment before a sign-out.
+		const w = world();
+		const robin = await joined(w, "robin", FIRST);
+		const forSam = await invite(w, { name: "sam" });
+		const joinedNow = await w.post("/api/login", { invitation: forSam.code, password: SECOND, replace: "robin" });
+		expect(joinedNow.status).toBe(200);
+		expect(await w.status({ cookie: robin })).toBe(200);
+		// Signed in as Sam, Sam's own recovery link is accepted whatever name comes with it. A recovery ends Sam's
+		// sessions, as it always does, and Robin's stays.
+		const recovery = await invite(w, { name: "sam" });
+		const recovered = await w.post(
+			"/api/login",
+			{ invitation: recovery.code, password: FIRST, replace: "robin" },
+			{ cookie: joinedNow.cookie },
+		);
+		expect(recovered.status).toBe(200);
+		expect((await me(w, { cookie: recovered.cookie })).actor).toBe("sam");
+		expect(await w.status({ cookie: robin })).toBe(200);
+	});
+
+	test("who the browser holds is asked again in the commit: a session that became another person's while the acceptance waited is not ended", async () => {
+		// No request moves a session to another person today: a cookie names one session, and a session keeps its
+		// person. The commit is not allowed to rest on that. So the test moves the row itself while it holds the
+		// gate, behind which the acceptance waits with a yes that was about Robin.
+		const w = world();
+		const robin = await joined(w, "robin", FIRST);
+		await joined(w, "pat", FIRST);
+		const { code } = await invite(w, { name: "sam" });
+		const [robins, pats] = sessions(w);
+		const gate = holdGate(w.instance);
+		const waiting = waitingAtGate(w.instance, 1);
+		const accepting = w.post("/api/login", { invitation: code, password: SECOND, replace: "robin" }, { cookie: robin });
+		await waiting;
+		w.instance.app.db.raw
+			.query("UPDATE sessions SET actor = ?, credential = ? WHERE id = ?")
+			.run(pats?.actor ?? 0, pats?.credential ?? 0, robins?.id ?? 0);
+		await gate.release();
+		const refused = await accepting;
+		expect(refusal(refused)).toBe('409 conflict {"signedInAs":"pat"}');
+		expect(refused.setCookies).toEqual([]);
+		// The session is Pat's now and still works, and the invitation is still good.
+		expect((await me(w, { cookie: robin })).actor).toBe("pat");
+		expect(sessions(w).filter((row) => row.ended_at !== null)).toEqual([]);
+		expect((await w.post("/api/login", { invitation: code, password: SECOND })).status).toBe(200);
 	});
 
 	test("who may invite whom: a new person is any admin's to invite, a person who exists is the owner's or their own", async () => {

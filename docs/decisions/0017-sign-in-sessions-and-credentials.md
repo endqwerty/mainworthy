@@ -354,6 +354,14 @@ an invitation's link once.
   the sentence of a wrong token. A request from another site's page is refused before its body is read,
   with a wrong token's sentence.
 - A new invitation for a person revokes their earlier ones that nobody accepted, so one link is good at a time.
+- `replace` is the name of the person the page asked about, not a yes. The page asks "you are signed in as
+  robin, go on as sam?" and sends `replace: "robin"`. In the commit that accepts the invitation the server
+  reads again who the browser's cookie signs in. When that is somebody other than the invited person and
+  `replace` is not exactly their name, it answers the 409 with `details.signedInAs`, the name it is now, and
+  changes nothing, so the page asks again. With no session, or the invited person's own, a name ends
+  nothing. A `replace` that is not a name is 400. The first form was a boolean: the reviewer of the pages
+  signed a third person in from another tab between the question and the answer, and the server ended that
+  person's session, about whom nobody had been asked.
 - A person's passkey handle is made when they are invited, so that showing an invitation writes no row. It
   does add a challenge to the map in memory.
 - A failed answer does not spend its challenge; a successful one does. A wrong answer proves nothing about the
