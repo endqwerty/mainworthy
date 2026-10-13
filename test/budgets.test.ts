@@ -67,7 +67,7 @@ test("on-disk hot paths stay inside the design budgets", async () => {
 test("a report that makes many failures go away recomputes each run once, not once per question", () => {
 	const h = harness();
 	try {
-		const ci = h.actor("pipeline", "ci", ["read", "produce"]);
+		const ci = h.actor("pipeline", "ci", ["read", "record"]);
 		const causes = 300;
 		// Letters the signature keeps apart: digits and anything that reads as an identifier are normalised away.
 		const word = (i: number) => [...String(i).padStart(3, "0")].map((digit) => "ghijklmnop"[Number(digit)]).join("");

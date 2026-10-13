@@ -62,12 +62,15 @@ export const gateCommand: AdapterCommand = {
 			if (gate.verdict === "blocked" && gate.run) {
 				let cursor: string | undefined;
 				do {
-					const questions = await client.call("inbox", {
-						on: gate.run,
-						kind: "failure",
-						limit: 500,
-						...(cursor ? { cursor } : {}),
-					});
+					// The queue is the project's to read. A pipeline's token may not, and has what it needs above:
+					// the verdict, the questions that are open, and the address where a person answers them.
+					const questions = await client
+						.call("inbox", { on: gate.run, kind: "failure", limit: 500, ...(cursor ? { cursor } : {}) })
+						.catch((error: unknown) => {
+							if (error instanceof CliError && error.code === "forbidden") return null;
+							throw error;
+						});
+					if (questions === null) break;
 					for (const question of questions.items)
 						if (!gate.open.includes(question.q))
 							line(`  ${question.q} ${JSON.stringify(question.title)} needs an answer`);

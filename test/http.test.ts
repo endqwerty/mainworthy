@@ -190,7 +190,7 @@ describe("reads on other cores through HTTP", () => {
 		const made = await post<{ token: string }>(
 			instance,
 			"/api/admin",
-			{ do: "token.create", actor: "writer-only", kind: "ci", can: ["produce"], project: "scratch" },
+			{ do: "token.create", actor: "writer-only", kind: "ci", can: ["record"], project: "scratch" },
 			owner,
 		);
 		const readers = readersOf(instance);
@@ -395,7 +395,7 @@ describe("server mode", () => {
 		const made = await post<{ token: string }>(
 			instance,
 			"/api/admin",
-			{ do: "token.create", actor: "github-actions", kind: "ci", can: ["read", "produce"], project: "scratch" },
+			{ do: "token.create", actor: "github-actions", kind: "ci", can: ["read", "record"], project: "scratch" },
 			owner,
 		);
 		const ci = bearer(made.body.ok ? made.body.result.token : "");
@@ -421,6 +421,185 @@ describe("server mode", () => {
 		const id = listed.body.ok ? listed.body.result.find((t) => t.actor === "github-actions")?.id : undefined;
 		await post(instance, "/api/admin", { do: "token.revoke", id }, owner);
 		expect((await post(instance, "/api/p/scratch/report", report, ci)).status).toBe(401);
+	});
+});
+
+describe("a pipeline's token", () => {
+	const OWNER = "owner-secret-0123456789";
+	const owner = bearer(OWNER);
+	const report = {
+		target: { commit: "abc1234", branch: "main" },
+		job: "unit",
+		results: [{ test: { key: "a::b" }, outcome: "fail", failure: { message: "boom" } }],
+	};
+	const create = { edits: [{ op: "create", outline: "Planted by a pipeline" }] };
+	const forbidden = { ok: false, error: { code: "forbidden" } };
+	const invalid = { ok: false, error: { code: "invalid" } };
+	const admin = <T>(instance: Instance, input: unknown, headers: Record<string, string> = owner) =>
+		post<T>(instance, "/api/admin", input, headers);
+	async function token(instance: Instance, input: Record<string, unknown>): Promise<Record<string, string>> {
+		const made = await admin<{ token: string }>(instance, { do: "token.create", ...input });
+		if (!made.body.ok) throw new Error(`token.create: ${made.body.error.message}`);
+		return bearer(made.body.result.token);
+	}
+	const cases = (instance: Instance, project: string) =>
+		instance.app.db.raw
+			.query("SELECT count(*) AS n FROM cases c JOIN projects p ON p.id = c.project WHERE p.key = ?")
+			.get(project);
+
+	test("issued with no list of capabilities, it records and reads the gate, and nothing else, under every preset", async () => {
+		const instance = boot("server", OWNER);
+		for (const preset of ["loose", "standard", "strict"]) {
+			await admin(instance, { do: "project.create", key: preset, preset });
+			const made = await admin<{ can: string[] }>(instance, {
+				do: "token.create",
+				actor: `pipeline-${preset}`,
+				kind: "ci",
+				project: preset,
+			});
+			expect(made.body).toMatchObject({ ok: true, result: { can: ["record"] } });
+			const ci = bearer(made.body.ok ? (made.body.result as unknown as { token: string }).token : "");
+			expect((await post(instance, `/api/p/${preset}/report`, report, ci)).body).toMatchObject({ ok: true });
+			expect((await post(instance, `/api/p/${preset}/gate`, { commit: "abc1234" }, ci)).body).toMatchObject({
+				ok: true,
+				result: { verdict: "blocked" },
+			});
+			// Every other operation of the registry, whatever it is: one added later is refused here too.
+			for (const op of OP_LIST) {
+				if (op.name === "report" || op.name === "gate") continue;
+				const path = op.scope === "project" ? `/api/p/${preset}/${op.name}` : `/api/${op.name}`;
+				const reply = await post(instance, path, op.name === "propose" ? create : {}, ci);
+				expect(`${preset} ${op.name}: ${reply.status}`).toBe(`${preset} ${op.name}: 403`);
+			}
+			expect(cases(instance, preset)).toEqual({ n: 0 });
+			// Its grant is on one project: the same token is nobody on another.
+			expect((await post(instance, "/api/p/scratch/report", report, ci)).body).toMatchObject(forbidden);
+		}
+	});
+
+	test("a pipeline is not given more than recording and reading, and a stored grant that says more does not count", async () => {
+		const instance = boot("server", OWNER);
+		for (const can of [["produce"], ["read", "answer"], ["plan"], ["admin"]]) {
+			const refused = await admin(instance, { do: "token.create", actor: "wide", kind: "ci", can, project: "scratch" });
+			expect(refused.body).toMatchObject(invalid);
+		}
+		expect(instance.app.db.raw.query("SELECT count(*) AS n FROM actors WHERE name = 'wide'").get()).toEqual({ n: 0 });
+		// A grant from before this rule, or from an archive: the row holds everything, the actor does not.
+		const old = await token(instance, {
+			actor: "old-pipeline",
+			kind: "ci",
+			can: ["read", "record"],
+			project: "scratch",
+		});
+		instance.app.db.raw
+			.query("UPDATE grants SET can = ? WHERE actor = (SELECT id FROM actors WHERE name = 'old-pipeline')")
+			.run(JSON.stringify(["read", "produce", "answer", "plan", "admin"]));
+		expect((await post(instance, "/api/p/scratch/report", report, old)).body).toMatchObject({ ok: true });
+		expect((await post(instance, "/api/p/scratch/find", {}, old)).body).toMatchObject({ ok: true });
+		expect((await post(instance, "/api/p/scratch/propose", create, old)).body).toMatchObject(forbidden);
+		expect((await post(instance, "/api/p/scratch/plan", { name: "x", select: {} }, old)).body).toMatchObject(forbidden);
+		expect((await admin(instance, { do: "token.list" }, old)).body).toMatchObject(forbidden);
+		expect(cases(instance, "scratch")).toEqual({ n: 0 });
+	});
+
+	test("whoever may produce may record, and reading alone records nothing", async () => {
+		const instance = boot("server", OWNER);
+		const agent = await token(instance, {
+			actor: "reviewer",
+			kind: "agent",
+			can: ["read", "produce"],
+			project: "scratch",
+		});
+		expect((await post(instance, "/api/p/scratch/report", report, agent)).body).toMatchObject({ ok: true });
+		const reader = await token(instance, { actor: "zoe", kind: "human", can: ["read"], project: "scratch" });
+		expect((await post(instance, "/api/p/scratch/report", report, reader)).body).toMatchObject(forbidden);
+		expect((await post(instance, "/api/p/scratch/gate", { commit: "abc1234" }, reader)).body).toMatchObject({
+			ok: true,
+		});
+	});
+
+	test("what each actor may do is listed for each project, and a grant is changed or taken away by name", async () => {
+		const instance = boot("server", OWNER);
+		await admin(instance, { do: "project.create", key: "other" });
+		const ci = await token(instance, { actor: "github-actions", kind: "ci", project: "scratch" });
+		const listed = async () => {
+			const reply = await admin<{ name: string; kind: string; grants: { project: string; can: string[] }[] }[]>(
+				instance,
+				{ do: "actor.list" },
+			);
+			if (!reply.body.ok) throw new Error(`actor.list: ${reply.body.error.message}`);
+			return reply.body.result.map((actor) => [actor.name, actor.kind, actor.grants]);
+		};
+		expect(await listed()).toEqual([
+			["policy", "rule", []],
+			["daniel", "human", [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"] }]],
+			["github-actions", "ci", [{ project: "scratch", can: ["record"] }]],
+		]);
+
+		const set = { do: "grant.set", actor: "github-actions", project: "scratch" };
+		expect((await admin(instance, { ...set, can: ["record", "read"] })).body).toMatchObject({ ok: true });
+		expect((await post(instance, "/api/p/scratch/find", {}, ci)).body).toMatchObject({ ok: true });
+		expect((await admin(instance, { ...set, can: ["record", "produce"] })).body).toMatchObject(invalid);
+		expect((await admin(instance, { ...set, actor: "nobody", can: ["read"] })).body).toMatchObject({
+			ok: false,
+			error: { code: "not_found" },
+		});
+		expect((await admin(instance, { ...set, project: "other", can: ["record"] })).body).toMatchObject({ ok: true });
+		expect((await post(instance, "/api/p/other/report", report, ci)).body).toMatchObject({ ok: true });
+
+		const remove = { do: "grant.remove", actor: "github-actions", project: "scratch" };
+		expect((await admin(instance, remove)).body).toMatchObject({ ok: true, result: { removed: true } });
+		expect((await post(instance, "/api/p/scratch/report", report, ci)).body).toMatchObject(forbidden);
+		expect((await post(instance, "/api/p/other/report", report, ci)).body).toMatchObject({ ok: true });
+		expect((await admin(instance, remove)).body).toMatchObject({ ok: true, result: { removed: false } });
+		expect((await listed())[2]).toEqual(["github-actions", "ci", [{ project: "other", can: ["record"] }]]);
+
+		// An admin does not change or drop their own grant: a slip there locks the instance.
+		expect((await admin(instance, { do: "grant.remove", actor: "daniel" })).body).toMatchObject(invalid);
+		expect((await admin(instance, { do: "grant.set", actor: "daniel", can: ["read"] })).body).toMatchObject(invalid);
+		expect((await admin(instance, { do: "token.list" })).body).toMatchObject({ ok: true });
+	});
+
+	test("a second token for an actor changes nothing the actor may do", async () => {
+		const instance = boot("server", OWNER);
+		const first = await token(instance, { actor: "reviewer", kind: "agent", can: ["read"], project: "scratch" });
+		const second = await token(instance, { actor: "reviewer", kind: "agent" });
+		// Naming the grant the actor already holds asks for no change, and is the same request.
+		const third = await token(instance, { actor: "reviewer", kind: "agent", can: ["read"], project: "scratch" });
+		for (const held of [first, second, third]) {
+			expect((await post(instance, "/api/p/scratch/find", {}, held)).body).toMatchObject({ ok: true });
+			expect((await post(instance, "/api/p/scratch/propose", create, held)).body).toMatchObject(forbidden);
+		}
+		const widened = await admin(instance, {
+			do: "token.create",
+			actor: "reviewer",
+			kind: "agent",
+			can: ["read", "produce"],
+			project: "scratch",
+		});
+		expect(widened.body).toMatchObject({
+			ok: false,
+			error: { code: "invalid", message: expect.stringContaining("grant") },
+		});
+		// The owner's own grant is not rewritten by a token made for the owner.
+		expect(
+			(await admin(instance, { do: "token.create", actor: "daniel", kind: "human", can: ["read"] })).body,
+		).toMatchObject(invalid);
+		expect((await admin(instance, { do: "token.list" })).body).toMatchObject({ ok: true });
+	});
+
+	test("the session names the project a pipeline records for, with what it may do there", async () => {
+		const instance = boot("server", OWNER);
+		await admin(instance, { do: "project.create", key: "other" });
+		const ci = await token(instance, { actor: "github-actions", kind: "ci", project: "scratch" });
+		const session = (await (
+			await fetch(`${instance.url}/api/session`, { headers: ci })
+		).json()) as Envelope<SessionInfo>;
+		expect(session.ok && session.result).toMatchObject({ actor: "github-actions", kind: "ci", can: [] });
+		expect(session.ok && session.result.projects.map((project) => [project.key, project.can])).toEqual([
+			["scratch", ["record"]],
+		]);
+		expect((await fetch(`${instance.url}/api/p/scratch/events`, { headers: ci })).status).toBe(403);
 	});
 });
 

@@ -113,15 +113,20 @@ test("CI environment supplies report identity and the default gate target", asyn
 	});
 });
 
-test("CI token reports but is refused a decision, and its secret is absent from token list", async () => {
+test("a pipeline's token runs both pipeline lines and nothing else, and its secret is absent from token list", async () => {
 	await withInstance(async ({ cli }) => {
-		const issued = await cli(["token", "new", "--ci", "pipeline", "--can", "read,produce", "--json"]);
+		const issued = await cli(["--project", "scratch", "token", "new", "--ci", "pipeline", "--json"]);
 		expect(issued.code).toBe(0);
 		expect(issued.stdout).toContain("will not be shown again");
+		expect(outputWith(z.object({ can: z.array(z.string()) }), issued).can).toEqual(["record"]);
 		const { token } = outputWith(Token, issued);
-		const env = { CASEBOOK_TOKEN: token };
+		const env = { CASEBOOK_TOKEN: token, CASEBOOK_PROJECT: "scratch" };
 		const report = await cli(["report", RED_XML, "--commit", COMMIT], { env });
 		expect(report.code).toBe(0);
+		// Blocked: the verdict and the open question, with a token that may not read the queue.
+		const gate = await cli(["gate", "--commit", COMMIT], { env });
+		expect([gate.code, gate.stderr]).toEqual([2, ""]);
+		expect(gate.stdout).toMatch(/casebook gate {4}blocked: .*\n {2}Q-\d+ needs an answer/);
 		const inbox = outputWith(Inbox, await cli(["inbox", "--kind", "failure"]));
 		const question = inbox.items[0];
 		if (!question) throw new Error("no failure question");
@@ -138,6 +143,17 @@ test("CI token reports but is refused a decision, and its secret is absent from 
 		const list = await cli(["token", "list"]);
 		expect(list.stdout).toContain("pipeline");
 		expect(list.stdout).not.toContain(token);
+
+		// What it may do is listed with its project, changed by name, and taken away by name.
+		expect((await cli(["actor", "list"])).stdout).toContain("ci     pipeline  scratch  record");
+		const widened = await cli(["--project", "scratch", "actor", "grant", "pipeline", "--can", "read,record"]);
+		expect(widened.stdout).toBe("pipeline on scratch: read, record\n");
+		const beyond = await cli(["--project", "scratch", "actor", "grant", "pipeline", "--can", "produce"]);
+		expect([beyond.code, beyond.stderr]).toEqual([4, expect.stringContaining("a pipeline may hold read and record")]);
+		const dropped = await cli(["--project", "scratch", "actor", "ungrant", "pipeline"]);
+		expect(dropped.stdout).toBe("pipeline holds no grant on scratch any more\n");
+		expect((await cli(["report", RED_XML, "--commit", COMMIT], { env })).stderr).toContain("forbidden:");
+
 		const tokens = outputWith(z.array(z.object({ id: z.number() })), await cli(["token", "list", "--json"]));
 		const id = tokens[0]?.id;
 		if (id === undefined) throw new Error("issued token is absent from list");
@@ -550,7 +566,7 @@ test("an early refusal of a large valid gzip reports authorization, not corrupt 
 					expect(result.stderr).not.toContain("invalid gzip");
 				}
 				const token = Token.parse(
-					await client.call("admin", { do: "token.create", actor: "pipeline", kind: "ci", can: ["read", "produce"] }),
+					await client.call("admin", { do: "token.create", actor: "pipeline", kind: "ci", can: ["read", "record"] }),
 				).token;
 				const denied = await cli(["import", file], { env: { CASEBOOK_TOKEN: token } });
 				expect(denied.code).toBe(4);

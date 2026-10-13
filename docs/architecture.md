@@ -58,16 +58,35 @@ an operation named like a shortcut (`createCase`, `closeRun`) appears.
 | Request evidence | `plan` (start a run) |
 | Decide | `decide` (answer a question, or withdraw a decision) |
 | Read | `inbox` · `get` · `find` · `impact` · `since` · `gate` · `history` · `timeline` · `check` · `command` |
-| Administer | `admin` (projects, actors, tokens) |
+| Administer | `admin` (projects, actors, grants, tokens) |
 
-`invoke` does the same things for every operation: parse the input at the boundary, check the capability, and
-for a write, open a transaction, give the command the project's next **sequence number**, run it, record the
+`invoke` does the same things for every operation: check that the caller may run it, parse the input at the
+boundary, and for a write, open a transaction, give the command the project's next **sequence number**, run it, record the
 command id, commit, and publish what changed. A command id names one request: sent again unchanged it gets the
 first reply and writes nothing; sent again with other content it is refused. A client whose reply was lost can
 also ask `command` what became of the id, which writes nothing (decision 0013). A report is the one command that
 commits twice, and it takes a sequence number for each transaction (see the red build below). A read runs on a
 reader thread with its own read-only connection, so a long write does not hold it up; a write waits its turn at
 one gate, because the file has one writer.
+
+## Who may call
+
+An actor is a person, an agent, a pipeline or the policy's own rule. What it may do is a grant per project (or
+one for every project): a list of capabilities. A token names an actor and carries its grants.
+
+| Capability | Lets its holder |
+| --- | --- |
+| `read` | call the reads |
+| `record` | `report` results and read the `gate` |
+| `produce` | `propose`, `claim`, `decide`, and everything `record` does |
+| `answer` | have a `decide` count where the policy asks a member |
+| `plan` | `plan` a run |
+| `admin` | `admin` |
+
+A pipeline holds `read` and `record` at most, whatever its grant says: it cannot change the suite, answer or
+plan under any policy, because it cannot call the operations that do (`heldCapabilities` in `src/core/kinds.ts`;
+decision 0014). The caller is refused before its input is read. `grant.set` and `grant.remove` are the one way a
+grant changes; a new token for an actor that exists changes nothing it may do.
 
 ## The record
 

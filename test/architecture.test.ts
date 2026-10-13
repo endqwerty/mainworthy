@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Glob } from "bun";
+import { needs } from "../src/core/kinds.ts";
 import { Db, declaredSql } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
 import { MCP_OPS, OP_LIST } from "../src/server/ops/index.ts";
@@ -231,6 +232,18 @@ describe("the registry", () => {
 		expect(new Set(OP_LIST.map((op) => op.name)).size).toBe(OP_LIST.length);
 		for (const op of OP_LIST) expect(op.summary.length).toBeGreaterThan(20);
 		expect(MCP_OPS.length).toBeLessThanOrEqual(10);
+	});
+
+	test("a pipeline's token reaches two operations: report and gate", () => {
+		// `record` is all a pipeline's token holds by default, so an operation that accepts it is one more thing a
+		// secret in a CI system can do. Adding to this list is a decision (docs/decisions/0014), not a copy of the
+		// nearest operation. `gate` is also the one operation that accepts either of two capabilities.
+		const accepts = (capability: "record" | "read") =>
+			OP_LIST.filter((op) => needs(op.needs).includes(capability)).map((op) => op.name);
+		expect(accepts("record")).toEqual(["report", "gate"]);
+		expect(OP_LIST.filter((op) => typeof op.needs !== "string").map((op) => op.name)).toEqual(["gate"]);
+		// What a pipeline may be let do besides: the reads, and nothing that writes.
+		expect(OP_LIST.filter((op) => accepts("read").includes(op.name) && op.effect !== "read")).toEqual([]);
 	});
 
 	test("there is no second way to do what propose, report, plan and decide do", () => {

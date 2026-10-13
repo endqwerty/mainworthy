@@ -17,7 +17,7 @@ import { noteTokenUse } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
 import { MCP_OPS, OPS } from "../server/ops/index.ts";
 import { invokeAsync, type Reply } from "../server/ops/registry.ts";
-import { readableProjects, type Session, VERSION } from "./http.ts";
+import { grantedProjects, type Session, VERSION } from "./http.ts";
 
 // SDK 1.32.1 implements MCP 2025-11-25. Structured tool results start at revision 2025-06-18.
 /** The measured tools/list ceiling in o200k_base tokens. B7's draft target of 1,500 remains unmet. */
@@ -355,7 +355,7 @@ export function mcpRoute(app: App): (req: Request, session: Session) => Promise<
 				}
 				return reply;
 			},
-			async () => readableProjects(app, session).map((row) => row.key),
+			async () => grantedProjects(app, session).map((row) => row.key),
 			req.headers.get("mcp-protocol-version") ?? DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
 		);
 		const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });

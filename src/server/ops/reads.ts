@@ -672,7 +672,9 @@ export const gateOp = defineOp({
 	summary:
 		"The verdict for a commit, a change or a run: passed, failed (needs a fix), blocked (needs a decision), pending (needs evidence).",
 	input: GateInput,
-	needs: "read",
+	// A pipeline reads the verdict it reports for, and nothing else of the project: the verdict, the tally and the
+	// refs of the open questions, not a case, a result or a question's text.
+	needs: ["read", "record"],
 	scope: "project",
 	effect: "read",
 	mcp: "Is this commit, change or run tested? Returns passed, failed, blocked or pending with the reason and the open questions.",

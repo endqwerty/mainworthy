@@ -464,7 +464,12 @@ export const AdminInput = z.discriminatedUnion("do", [
 		do: z.literal("token.create"),
 		actor: z.string(),
 		kind: ActorKind.exclude(["rule"]),
-		can: z.array(Capability).default([]),
+		can: z
+			.array(Capability)
+			.default([])
+			.describe(
+				"What a new actor may do. Absent: a person everything, an agent read and produce, a pipeline record. Not for an actor that exists: use grant.set.",
+			),
 		project: z.string().optional().describe("Limit the grant to one project. Absent: every project."),
 		label: z.string().max(120).optional(),
 		cmd,
@@ -472,6 +477,19 @@ export const AdminInput = z.discriminatedUnion("do", [
 	z.object({ do: z.literal("token.list") }),
 	z.object({ do: z.literal("token.revoke"), id: z.number().int(), cmd }),
 	z.object({ do: z.literal("actor.list") }),
+	z.object({
+		do: z.literal("grant.set"),
+		actor: z.string(),
+		project: z.string().optional().describe("The project the grant is for. Absent: every project."),
+		can: z.array(Capability).min(1).describe("What the actor may do there from now on, in place of what it could."),
+		cmd,
+	}),
+	z.object({
+		do: z.literal("grant.remove"),
+		actor: z.string(),
+		project: z.string().optional().describe("The project the grant is for. Absent: the grant on every project."),
+		cmd,
+	}),
 	z.object({
 		do: z.literal("actor.forget"),
 		name: z

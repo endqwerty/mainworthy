@@ -226,7 +226,7 @@ async function cases(server: Server, count: number) {
 					do: "token.create",
 					actor: "pipeline",
 					kind: "ci",
-					can: ["read", "produce"],
+					can: ["read", "record"],
 					project: "scratch",
 				}),
 			).token;

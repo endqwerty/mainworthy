@@ -17,9 +17,17 @@ export const tokenCommand: AdapterCommand = {
 		"token new --agent <name> | --ci <name> | --human <name> [--can read,produce] [--project <key>] | token list | token revoke <id>",
 	flags: [
 		{ name: "agent", kind: "string", description: "Issue a token for this agent." },
-		{ name: "ci", kind: "string", description: "Issue a token for this CI producer." },
+		{
+			name: "ci",
+			kind: "string",
+			description: "Issue a token for this pipeline: it records results and reads the gate.",
+		},
 		{ name: "human", kind: "string", description: "Issue a token for this person." },
-		{ name: "can", kind: "strings", description: "Capabilities, comma-separated or repeated." },
+		{
+			name: "can",
+			kind: "strings",
+			description: "What a new actor may do, comma-separated or repeated. Not for one that exists.",
+		},
 	],
 	async run(args, client) {
 		const action = args.positionals[0];

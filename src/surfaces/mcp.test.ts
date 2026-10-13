@@ -189,7 +189,7 @@ test("an agent completes a real session, with hashes, advice, and compact reads"
 				target: { commit: "9f3c2ab", pr: 482, branch: "coupon-total", files: ["tests/checkout.spec.ts"] },
 				results: [{ test: { key: "tests/other.spec.ts::smoke" }, outcome: "pass" }],
 			},
-			h.actor("pipeline", "ci", ["read", "produce"]),
+			h.actor("pipeline", "ci", ["read", "record"]),
 		);
 		const reported = resultOf(
 			await call("report", {

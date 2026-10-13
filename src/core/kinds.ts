@@ -11,8 +11,66 @@ export const KINDS = Kind.options;
 export const ActorKind = z.enum(["human", "agent", "ci", "rule"]);
 export type ActorKind = z.infer<typeof ActorKind>;
 
-export const Capability = z.enum(["read", "produce", "answer", "plan", "admin"]);
+/**
+ * What a grant may hold. `record` is a pipeline's whole job: put results on the record and read the verdict.
+ * `produce` is everything a producer does (cases, results, reviews, answers) and so includes it.
+ */
+export const Capability = z.enum(["read", "record", "produce", "answer", "plan", "admin"]);
 export type Capability = z.infer<typeof Capability>;
+
+/** What holding one capability also gives. Nothing else implies anything. */
+const IMPLIES: Partial<Record<Capability, readonly Capability[]>> = { produce: ["record"] };
+/**
+ * The most a pipeline may hold, whatever its grant says: it records, and it may be let read. It never changes the
+ * suite, answers, plans or administers, under any policy, because it cannot call the operations that do.
+ */
+export const CI_CAPABILITIES: readonly Capability[] = ["read", "record"];
+
+/**
+ * What an actor of this kind holds, given the capabilities its grants list. The one place a stored grant becomes
+ * authority: the implied capabilities are added, and a pipeline is held to `CI_CAPABILITIES`.
+ */
+export function heldCapabilities(kind: ActorKind, granted: Iterable<Capability>): Capability[] {
+	const held = new Set<Capability>();
+	for (const capability of granted) {
+		held.add(capability);
+		for (const implied of IMPLIES[capability] ?? []) held.add(implied);
+	}
+	return Capability.options.filter(
+		(capability) => held.has(capability) && (kind !== "ci" || CI_CAPABILITIES.includes(capability)),
+	);
+}
+
+/** Why an actor of this kind may not be granted these capabilities, or null when it may. */
+export function whyNotGrantable(kind: ActorKind, can: readonly Capability[]): string | null {
+	if (kind === "rule") return "a rule holds no grant";
+	const beyond = kind === "ci" ? can.filter((capability) => !CI_CAPABILITIES.includes(capability)) : [];
+	return beyond.length > 0
+		? `a pipeline may hold ${CI_CAPABILITIES.join(" and ")}, not ${beyond.join(", ")}; give an agent or a person the rest`
+		: null;
+}
+
+/** What a new actor of this kind is granted when nobody says: a person everything, an agent the work, a pipeline its job. */
+export function defaultCapabilities(kind: Exclude<ActorKind, "rule">): readonly Capability[] {
+	switch (kind) {
+		case "human":
+			return Capability.options;
+		case "agent":
+			return ["read", "produce"];
+		case "ci":
+			return ["record"];
+		default: {
+			const _exhaustive: never = kind;
+			return _exhaustive;
+		}
+	}
+}
+
+/** What an operation asks of its caller: one capability, or any one of several. */
+export type Need = Capability | readonly [Capability, Capability, ...Capability[]];
+export const needs = (need: Need): readonly Capability[] => (typeof need === "string" ? [need] : need);
+export const mayRun = (held: readonly Capability[], need: Need): boolean =>
+	needs(need).some((capability) => held.includes(capability));
 
 // ── Answers ────────────────────────────────────────────────────────────────────────────────────────────────
 

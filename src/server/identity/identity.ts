@@ -2,7 +2,7 @@
 // There is no seat here: an actor is a free row with capabilities (principle P8).
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
-import { type ActorKind, Capability } from "../../core/kinds.ts";
+import { type ActorKind, Capability, heldCapabilities, whyNotGrantable } from "../../core/kinds.ts";
 import type { App } from "../kernel/app.ts";
 import type { Actor } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
@@ -20,8 +20,9 @@ const Q = {
 	),
 	actors: sql<{ org: number }, ActorRow & { created_at: number }>("SELECT * FROM actors WHERE org = $org ORDER BY id"),
 	grants: sql<{ actor: number }, { project: number; can: string }>(
-		"SELECT project, can FROM grants WHERE actor = $actor",
+		"SELECT project, can FROM grants WHERE actor = $actor ORDER BY project",
 	),
+	dropGrant: sql<{ actor: number; project: number }>("DELETE FROM grants WHERE actor = $actor AND project = $project"),
 	setGrant: sql<{ actor: number; project: number; can: string }>(
 		`INSERT INTO grants (actor, project, can) VALUES ($actor, $project, $can)
 		 ON CONFLICT (actor, project) DO UPDATE SET can = excluded.can`,
@@ -90,6 +91,7 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
 		ensureActor(app.db, { org, kind: "rule", name: RULE_ACTOR, at });
 		const existing = app.db.get(Q.actorByName, { org, name: app.config.owner });
 		const owner = existing ?? ensureActor(app.db, { org, kind: "human", name: app.config.owner, at });
+		// Written on every start, so the owner of the instance is never left without the means to repair it.
 		app.db.run(Q.setGrant, { actor: owner.id, project: 0, can: JSON.stringify(ALL_CAPABILITIES) });
 		let generatedToken: string | null = null;
 		if (app.config.ownerToken) {
@@ -119,12 +121,12 @@ function ensureActor(db: Db, input: { org: number; kind: ActorKind; name: string
 }
 
 function toActor(db: Db, row: ActorRow, project: number): Actor {
-	const can = new Set<Capability>();
+	const granted: Capability[] = [];
 	for (const grant of db.all(Q.grants, { actor: row.id })) {
 		if (grant.project !== 0 && grant.project !== project) continue;
-		for (const capability of json<Capability[]>(grant.can)) can.add(capability);
+		granted.push(...json<Capability[]>(grant.can));
 	}
-	return { id: row.id, kind: row.kind, name: row.name, can: [...can] };
+	return { id: row.id, kind: row.kind, name: row.name, can: heldCapabilities(row.kind, granted) };
 }
 
 /** The actor behind a token, with its capabilities on `project` (0 for an operation that is not about a project). */
@@ -186,7 +188,9 @@ export function actorLabel(db: Db, id: number): { name: string; kind: ActorKind 
 
 /**
  * Creates a token, and the actor it names if that actor does not exist. The secret is returned once and never
- * stored. A token for an existing actor may narrow nothing: it carries that actor's grants.
+ * stored. A token carries its actor's grants: `can` on `project` is what a new actor starts with. An actor that
+ * exists keeps what it has: naming the grant it already holds there is accepted, anything else is refused, and
+ * `setGrant` is the one way to change it.
  */
 export function createToken(
 	app: App,
@@ -201,12 +205,49 @@ export function createToken(
 	if (existing && existing.kind !== input.kind) {
 		throw conflict(`actor ${input.actor} exists and is a ${existing.kind}, not a ${input.kind}`);
 	}
+	if (existing && input.can.length > 0 && !sameGrant(db, existing.id, input.project, input.can)) {
+		throw invalid(
+			`actor ${input.actor} exists: a new token carries what it may already do. Change that with grant.set (casebook actor grant)`,
+		);
+	}
+	refuseGrant(input.kind, input.can);
 	const actor = existing ?? ensureActor(db, { org, kind: input.kind, name: input.actor, at });
-	if (input.can.length > 0)
+	if (!existing && input.can.length > 0)
 		db.run(Q.setGrant, { actor: actor.id, project: input.project, can: JSON.stringify(input.can) });
 	const secret = newSecret();
 	db.run(Q.insertToken, { actor: actor.id, hash: hashToken(secret), label: input.label, at });
 	return { secret, actor: actor.name };
+}
+
+/** Whether the actor's grant on exactly this project lists exactly these capabilities. */
+function sameGrant(db: Db, actor: number, project: number, can: readonly Capability[]): boolean {
+	const held = db.all(Q.grants, { actor }).find((grant) => grant.project === project);
+	const stored = new Set(held ? json<Capability[]>(held.can) : []);
+	return stored.size === new Set(can).size && can.every((capability) => stored.has(capability));
+}
+
+function refuseGrant(kind: ActorKind, can: readonly Capability[]): void {
+	const why = whyNotGrantable(kind, can);
+	if (why) throw invalid(why);
+}
+
+function mustActor(db: Db, name: string): ActorRow {
+	const row = db.get(Q.actorByName, { org: orgId(db), name });
+	if (!row || row.disabled_at !== null) throw notFound(`actor ${name}`);
+	return row;
+}
+
+/** Replaces what an actor may do on one project (0: on every project). The one way to change a grant. */
+export function setGrant(app: App, input: { actor: string; project: number; can: readonly Capability[] }): void {
+	const row = mustActor(app.db, input.actor);
+	refuseGrant(row.kind, input.can);
+	app.db.run(Q.setGrant, { actor: row.id, project: input.project, can: JSON.stringify(input.can) });
+}
+
+/** Takes away an actor's grant on one project (0: its grant on every project). False when it held none there. */
+export function removeGrant(app: App, input: { actor: string; project: number }): boolean {
+	const row = mustActor(app.db, input.actor);
+	return app.db.run(Q.dropGrant, { actor: row.id, project: input.project }).changes > 0;
 }
 
 export function listTokens(db: Db) {
@@ -235,11 +276,16 @@ export function forgetActor(app: App, name: string): { forgotten: string; tokens
 	return { forgotten: pseudonym, tokensRevoked: revoked };
 }
 
+/** Every actor with each of its grants: the project (0 for every project) and what the actor holds there by it. */
 export function listActors(db: Db) {
 	return db.all(Q.actors, { org: orgId(db) }).map((row) => ({
 		name: row.name,
 		kind: row.kind,
-		can: toActor(db, row, 0).can,
+		disabled: row.disabled_at !== null,
 		createdAt: row.created_at,
+		grants: db.all(Q.grants, { actor: row.id }).map((grant) => ({
+			project: grant.project,
+			can: heldCapabilities(row.kind, json<Capability[]>(grant.can)),
+		})),
 	}));
 }

@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 import type { z } from "zod";
-import type { Capability } from "../../core/kinds.ts";
+import { mayRun, type Need, needs } from "../../core/kinds.ts";
 import { malformedText } from "../../core/text.ts";
 import type { App } from "../kernel/app.ts";
 import {
@@ -27,7 +27,8 @@ type Base<I> = {
 	/** One line for a person: CLI help and the API reference. */
 	summary: string;
 	input: z.ZodType<I>;
-	needs: Capability;
+	/** What the caller must hold. A list means any one of them; `test/architecture.test.ts` names the operations that give one. */
+	needs: Need;
 	/**
 	 * When set, the operation is one of the agent tools, and this is its description, written for a model: what
 	 * it is for and when to call it. Every word is loaded into an agent's context, so it is short.
@@ -94,6 +95,8 @@ const digest = (input: unknown): string => createHash("sha256").update(JSON.stri
 /** Stored in place of a reply that held a secret. */
 const WITHHELD = "(reply not kept: it held a secret)";
 
+const needed = (need: Need): string => needs(need).join(" or ");
+
 const fail = (code: ErrorCode, message: string, details?: Record<string, unknown>): Reply => ({
 	ok: false,
 	error: details ? { code, message, details } : { code, message },
@@ -117,6 +120,18 @@ export type Call = {
 function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Generator<void, Reply, void> {
 	const op = ops[call.op];
 	if (!op) return fail("not_found", `no operation named ${call.op}`);
+	// Who may call is settled before the input is read: a caller that may not run the operation learns that and
+	// nothing else, whatever it sent.
+	const found = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
+	if (op.scope === "project") {
+		if (!call.project) return fail("invalid", `${op.name} needs a project`);
+		if (!found) return fail("not_found", `no project named ${call.project}`);
+	}
+	const actor = call.actor(found?.id ?? 0);
+	if (!actor) return fail("unauthenticated", "a token is required");
+	if (!mayRun(actor.can, op.needs))
+		return fail("forbidden", `${op.name} needs the ${needed(op.needs)} capability${found ? ` on ${found.key}` : ""}`);
+
 	const parsed = op.input.safeParse(call.input ?? {});
 	if (!parsed.success) {
 		return fail(
@@ -139,9 +154,6 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 
 	try {
 		if (op.scope === "instance") {
-			const actor = call.actor(0);
-			if (!actor) return fail("unauthenticated", "a token is required");
-			if (!actor.can.includes(op.needs)) return fail("forbidden", `${op.name} needs the ${op.needs} capability`);
 			const env: InstanceCtx = { app, actor, now: app.now() };
 			if (!writing) return { ok: true, result: app.reader.snapshot(() => op.run(env, input)), seq: null };
 			const result = app.db.transaction(() => {
@@ -168,13 +180,7 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 			return { ok: true, result, seq: null };
 		}
 
-		if (!call.project) return fail("invalid", `${op.name} needs a project`);
-		const found = findProject(app.reader, call.project);
-		if (!found) return fail("not_found", `no project named ${call.project}`);
-		const actor = call.actor(found.id);
-		if (!actor) return fail("unauthenticated", "a token is required");
-		if (!actor.can.includes(op.needs))
-			return fail("forbidden", `${op.name} needs the ${op.needs} capability on ${found.key}`);
+		if (!found) throw new Error(`${op.name}: a project operation with no project`);
 
 		if (!writing) {
 			if (!("run" in op)) throw new Error(`${op.name}: a read is one function`);
@@ -277,7 +283,7 @@ export function invokeAsync(app: App, ops: Readonly<Record<string, AnyOp>>, call
 		const actor = call.actor(project?.id ?? 0);
 		// Who may read is decided here, in the thread that knows the caller. A reader thread is only ever handed a
 		// call its caller is allowed to make; a refusal is answered inline and never reaches one.
-		if (!actor?.can.includes(op.needs)) return Promise.resolve(invoke(app, ops, call));
+		if (!actor || !mayRun(actor.can, op.needs)) return Promise.resolve(invoke(app, ops, call));
 		return app.readers
 			.run({ op: call.op, project: call.project, input: call.input, actor }, () =>
 				invoke(app, ops, { ...call, actor: () => actor }),

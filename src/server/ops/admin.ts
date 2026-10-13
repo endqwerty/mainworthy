@@ -1,13 +1,16 @@
 // Administering the instance: projects, actors, tokens, and reading a project's policy.
+import { defaultCapabilities } from "../../core/kinds.ts";
 import { AdminInput } from "../../core/ops.ts";
 import {
-	ALL_CAPABILITIES,
+	actorByName,
 	createToken,
 	forgetActor,
 	listActors,
 	listTokens,
 	orgId,
+	removeGrant,
 	revokeToken,
+	setGrant,
 } from "../identity/identity.ts";
 import { allProjects, findProject, insertProject, makeCtx, stampSeq } from "../kernel/ctx.ts";
 import type { Db } from "../kernel/db.ts";
@@ -46,6 +49,14 @@ export function createProject(
 	return { key: project.key, name: project.name, policy: preset };
 }
 
+/** The id of the project a grant names, or 0 when it names none: every project. */
+function projectOf(db: Db, key: string | undefined): number {
+	if (key === undefined) return 0;
+	const project = findProject(db, key);
+	if (!project) throw notFound(`project ${key}`);
+	return project.id;
+}
+
 export function admin(env: InstanceCtx, input: AdminInput): unknown {
 	const db = env.app.db;
 	switch (input.do) {
@@ -54,18 +65,24 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 		case "project.list":
 			return listProjects(db);
 		case "token.create": {
-			const project = input.project ? findProject(db, input.project) : null;
-			if (input.project && !project) throw notFound(`project ${input.project}`);
-			const can =
-				input.can.length > 0 ? input.can : input.kind === "human" ? ALL_CAPABILITIES : (["read", "produce"] as const);
+			const project = projectOf(db, input.project);
+			// A new actor is given what was asked, or its kind's default. One that exists keeps its grants, and
+			// `createToken` refuses a list for it.
+			const isNew = actorByName(db, input.actor, project) === null;
 			const created = createToken(env.app, {
 				actor: input.actor,
 				kind: input.kind,
-				can,
-				project: project?.id ?? 0,
+				can: isNew && input.can.length === 0 ? defaultCapabilities(input.kind) : input.can,
+				project,
 				label: input.label ?? `${input.kind} token`,
 			});
-			return { actor: created.actor, token: created.secret, can, note: "This token is shown once. Store it now." };
+			return {
+				actor: created.actor,
+				token: created.secret,
+				// What the token's holder may do on the project asked about, as the registry will see it.
+				can: actorByName(db, created.actor, project)?.can ?? [],
+				note: "This token is shown once. Store it now.",
+			};
 		}
 		case "token.list":
 			return listTokens(db).map((row) => ({
@@ -79,8 +96,27 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 			}));
 		case "token.revoke":
 			return { revoked: revokeToken(env.app, input.id) };
-		case "actor.list":
-			return listActors(db);
+		case "actor.list": {
+			const keys = new Map(allProjects(db).map((project) => [project.id, project.key]));
+			return listActors(db).map((actor) => ({
+				...actor,
+				// `*` is every project. A grant on a project that no longer exists is not shown: it gives nothing.
+				grants: actor.grants.flatMap((grant) => {
+					const project = grant.project === 0 ? "*" : keys.get(grant.project);
+					return project === undefined ? [] : [{ project, can: grant.can }];
+				}),
+			}));
+		}
+		case "grant.set":
+		case "grant.remove": {
+			// An admin's own grant is another admin's to change: a slip here would lock the instance.
+			if (input.actor === env.actor.name)
+				throw invalid("you cannot change what you yourself may do; another admin must do it");
+			const project = projectOf(db, input.project);
+			if (input.do === "grant.remove") return { removed: removeGrant(env.app, { actor: input.actor, project }) };
+			setGrant(env.app, { actor: input.actor, project, can: input.can });
+			return { actor: input.actor, project: input.project ?? "*", can: input.can };
+		}
 		case "actor.forget": {
 			if (input.name === env.actor.name) throw invalid("you cannot forget yourself; another admin must do it");
 			return forgetActor(env.app, input.name);
@@ -99,7 +135,8 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 
 export const adminOp = defineInstanceOp({
 	name: "admin",
-	summary: "Projects, actors and tokens. There are no seats: an actor is free, and a token carries its capabilities.",
+	summary:
+		"Projects, actors, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do.",
 	input: AdminInput,
 	needs: "admin",
 	scope: "instance",

@@ -56,7 +56,7 @@ async function grant(server: Server, actor: string, kind: "human" | "ci" = "huma
 			do: "token.create",
 			actor,
 			kind,
-			can: ["read", "produce", "answer"],
+			can: kind === "ci" ? ["read", "record"] : ["read", "produce", "answer"],
 			project: "scratch",
 		}),
 	).token;

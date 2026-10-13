@@ -172,7 +172,7 @@ export function ciActor(app: App): { actor: Actor; secret: string } {
 	const { secret } = createToken(app, {
 		actor: "benchmark-ci",
 		kind: "ci",
-		can: ["read", "produce"],
+		can: ["read", "record"],
 		project: 0,
 		label: "benchmark",
 	});

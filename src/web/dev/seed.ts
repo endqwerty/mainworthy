@@ -71,7 +71,7 @@ export async function seed({
 		.parse(
 			await call(
 				"admin",
-				{ do: "token.create", actor: "pipeline", kind: "ci", can: ["read", "produce"], label: "Demo pipeline" },
+				{ do: "token.create", actor: "pipeline", kind: "ci", can: ["read", "record"], label: "Demo pipeline" },
 				options,
 			),
 		);

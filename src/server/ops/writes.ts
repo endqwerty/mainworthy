@@ -306,7 +306,7 @@ export const reportOp = defineOp({
 	summary:
 		"Record results: a parsed CI report, one manual result, or an agent's batch. The producer is the token's actor.",
 	input: ReportInput,
-	needs: "produce",
+	needs: "record",
 	scope: "project",
 	effect: "write",
 	mcp: "Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref. Reply: counts, the questions raised per cause of failure, and the gate.",
