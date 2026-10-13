@@ -53,7 +53,7 @@ export function createProject(
 }
 
 /** The id of the project a grant names, or 0 when it names none: every project. */
-function projectOf(db: Db, key: string | undefined): number {
+export function projectOf(db: Db, key: string | undefined): number {
 	if (key === undefined) return 0;
 	const project = findProject(db, key);
 	if (!project) throw notFound(`project ${key}`);
@@ -66,7 +66,7 @@ function projectOf(db: Db, key: string | undefined): number {
  * would be a person to every policy clause that says "not an agent", and with a grant of its choosing it would be
  * whatever it liked.
  */
-function personOnly(env: InstanceCtx, what: string): void {
+export function personOnly(env: InstanceCtx, what: string): void {
 	if (env.actor.kind !== "human")
 		throw forbidden(
 			`${env.actor.name} is ${KIND_NOUN[env.actor.kind]}: ${what} by a person who administers this instance`,
@@ -79,18 +79,26 @@ function personOnly(env: InstanceCtx, what: string): void {
  * the owner of the instance, and one for the owner by the owner alone: an admin's word is not enough to become
  * somebody else. A new person is anybody's to add who administers and is a person; agents' and pipelines' tokens
  * are made by whoever administers.
+ *
+ * An invitation is held to the same rule (`what`): whoever accepts one for a name signs in under that name.
  */
-function refuseToken(env: InstanceCtx, input: { kind: ActorKind }, existing: Actor | null): void {
+export function refuseToken(
+	env: InstanceCtx,
+	input: { kind: ActorKind },
+	existing: Actor | null,
+	what: "token" | "invitation" = "token",
+): void {
 	// What the actor is decides, not what the request calls it: naming another kind for a person does not help.
 	const forPerson = existing ? existing.kind === "human" : input.kind === "human";
 	if (!forPerson) return;
-	personOnly(env, "a person's token is made");
+	personOnly(env, `a person's ${what} is made`);
 	const owner = env.app.config.owner;
 	if (!existing || existing.id === env.actor.id || env.actor.name === owner) return;
+	const one = what === "token" ? "a token" : "an invitation";
 	throw forbidden(
 		existing.name === owner
-			? `only ${owner}, who owns this instance, makes a token for ${owner}`
-			: `a token for ${existing.name} is made by ${existing.name} or by ${owner}, who owns this instance`,
+			? `only ${owner}, who owns this instance, makes ${one} for ${owner}`
+			: `${one} for ${existing.name} is made by ${existing.name} or by ${owner}, who owns this instance`,
 	);
 }
 

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { ERROR_CODES, HTTP_STATUS } from "../core/api.ts";
 import {
 	admit,
+	credentialSummary,
 	type Facts,
 	type Session,
 	type SignedIn,
@@ -19,6 +20,7 @@ import { listProjects } from "../server/ops/admin.ts";
 import { OP_LIST, OPS } from "../server/ops/index.ts";
 import { invokeAsync, type Reply } from "../server/ops/registry.ts";
 import { forwardedScheme } from "./headers.ts";
+import { SIGN_IN_BODY_LIMIT, signInRoutes } from "./signin.ts";
 import { uiSurface } from "./ui.ts";
 import { keepingPolicyOnEvery, withHeaders, withHeadersOnEvery } from "./with-headers.ts";
 
@@ -395,7 +397,16 @@ export async function handleOp(
 		if (error instanceof BodyTooLarge) return tooLarge(OP_BODY_LIMIT);
 		return jsonResponse({ ok: false, error: { code: "invalid", message: "the request body is not JSON" } }, 400);
 	}
-	return replyResponse(await invokeAsync(app, OPS, { op, project, input, actor: session.actor }));
+	return replyResponse(
+		await invokeAsync(app, OPS, {
+			op,
+			project,
+			input,
+			actor: session.actor,
+			// Which of the caller's browser sessions this is, for an operation that lists or ends them.
+			...(session.id ? { session: session.id } : {}),
+		}),
+	);
 }
 
 /**
@@ -424,6 +435,9 @@ function sessionInfo(app: App, session: Session): Response {
 			can: actor.can,
 			mode: app.config.mode,
 			via: session.via,
+			// What a page needs to show a person their own sign-in: which session this is, and what they sign in with.
+			session: session.id?.() ?? null,
+			credentials: actor.kind === "human" ? credentialSummary(app.reader, actor.id) : null,
 			version: VERSION,
 			projects: grantedProjects(app, session),
 		},
@@ -445,14 +459,21 @@ function mayRead(app: App, session: Session, key: string): "yes" | "no" | "missi
  * Signs a browser in: a token goes in and a session cookie comes out. It is not an operation: nobody is signed in
  * yet, and the registry runs nothing for a caller it cannot name.
  */
-async function login(app: App, req: Request, server: Listener, patience: Patience): Promise<Response> {
+async function login(
+	app: App,
+	req: Request,
+	server: Listener,
+	patience: Patience,
+	/** Signs in with a body that is not a token: a person's password, passkey or invitation (`signin.ts`). */
+	otherwise: (req: Request, server: Listener, input: unknown) => Promise<Response>,
+): Promise<Response> {
 	if (!sameOrigin(req)) return unauthenticated();
 	// A sign-in body is a token and nothing else: a few kilobytes at most and one packet, read before anyone is
 	// authenticated. So it is held to a size and to a time, and one that is still arriving after that is answered
 	// and its connection closed.
 	let input: unknown;
 	try {
-		input = await readJson(req, 4096, patience.signInBodyMs);
+		input = await readJson(req, SIGN_IN_BODY_LIMIT, patience.signInBodyMs);
 	} catch (error) {
 		if (!(error instanceof BodyTooSlow)) return unauthenticated();
 		return jsonResponse(
@@ -464,8 +485,9 @@ async function login(app: App, req: Request, server: Listener, patience: Patienc
 	// A token is a string of at most `TOKEN_MAX` characters, and the schema says no more. The start holds the
 	// owner's configured token to the same number (`bootstrap`), so no token that works is too long to sign in
 	// with. How short the owner's may be is decided there too, not by what this route will look at.
-	const body = z.object({ token: z.string().max(TOKEN_MAX) }).safeParse(input);
-	if (!body.success) return unauthenticated();
+	// A token and nothing beside it: any other body is a person signing in as themselves, or nothing at all.
+	const body = z.strictObject({ token: z.string().max(TOKEN_MAX) }).safeParse(input);
+	if (!body.success) return otherwise(req, server, input);
 	// A token typed into the form is a token: it is counted as one sent in a header is, under the same keys.
 	const opening = signInWithToken(app, body.data.token, {
 		userAgent: req.headers.get("user-agent"),
@@ -659,10 +681,10 @@ export type Extra = {
  * The routes. Everything that reads or changes a project needs a session. These answer without one, on purpose:
  * `/healthz` (is the process up, and which version and commit: the container's health check),
  * `/api/openapi.json` (the description of the API, the same for every instance of a version), `/api/login` and
- * `/api/logout` (which open and end a browser's session and set or clear its cookie, same-origin only), the web
- * UI's static files, and what the caller
- * passes as `open` (the documentation at `/docs`, which is likewise the same for every instance). An unknown path
- * is a 404.
+ * `/api/logout` (which open and end a browser's session and set or clear its cookie, same-origin only),
+ * `/api/login/methods` and `/api/login/challenge` (what a sign-in page is told before anybody is signed in, in
+ * `signin.ts`), the web UI's static files, and what the caller passes as `open` (the documentation at `/docs`,
+ * which is likewise the same for every instance). An unknown path is a 404.
  *
  * A connection nobody has vouched for is closed after `patience.idleSeconds` of silence: one that asks for a
  * route that needs no session, one whose request was refused, one that stops in the middle of a sign-in. A request
@@ -676,11 +698,36 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patie
 			const session = sessionFor(app, owner, req, server);
 			return session instanceof Response ? session : handler(req, session);
 		};
+	// The routes by which a person signs in as themselves are in `signin.ts`, which is lent what this file
+	// knows of a request.
+	const people = signInRoutes(app, {
+		sameOrigin,
+		read: async (req, limit) => {
+			try {
+				return { input: await readJson(req, limit, patience.signInBodyMs) };
+			} catch (error) {
+				return error instanceof BodyTooSlow
+					? jsonResponse(
+							{ ok: false, error: { code: "invalid", message: "the sign-in request took too long to arrive" } },
+							408,
+							{ connection: "close" },
+						)
+					: jsonResponse({ ok: false, error: { code: "invalid", message: "the request body is not JSON" } }, 400);
+			}
+		},
+		json: jsonResponse,
+		cookies: (req, signedIn) => sessionCookies(app, req, signedIn),
+		cookieOf: sessionCookieOf,
+		sessionFor: (req, server) => sessionFor(app, owner, req, server),
+		address: (req, server) => clientAddress(req, server, app.config),
+		limited,
+	});
 	const routes: Record<string, unknown> = {
 		"/healthz": () => jsonResponse({ ok: true, version: VERSION, commit: app.config.commit }),
 		"/api/openapi.json": () => jsonResponse(openApi()),
 		"/api/session": { GET: guarded((_req, session) => sessionInfo(app, session)) },
-		"/api/login": { POST: (req: Request, server: Listener) => login(app, req, server, patience) },
+		"/api/login": { POST: (req: Request, server: Listener) => login(app, req, server, patience, people.signIn) },
+		...people.routes,
 		"/api/logout": { POST: (req: Request, server: Listener) => logout(app, req, server) },
 		"/api/p/:project/events": {
 			GET: guarded((req, session) =>

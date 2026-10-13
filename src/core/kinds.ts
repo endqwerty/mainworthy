@@ -66,11 +66,22 @@ export function defaultCapabilities(kind: Exclude<ActorKind, "rule">): readonly 
 	}
 }
 
-/** What an operation asks of its caller: one capability, or any one of several. */
-export type Need = Capability | readonly [Capability, Capability, ...Capability[]];
-export const needs = (need: Need): readonly Capability[] => (typeof need === "string" ? [need] : need);
-export const mayRun = (held: readonly Capability[], need: Need): boolean =>
-	needs(need).some((capability) => held.includes(capability));
+/**
+ * What an operation asks of its caller: one capability, any one of several, or `self`.
+ *
+ * `self` asks for no capability. The operation is about what is the caller's own (their sessions, their ways of
+ * signing in), so whoever is signed in may run it, whatever their grants, and the operation says whose things it
+ * touches. A pipeline is the exception: its token reaches the two operations of its job and no other (decision
+ * 0014), and the policy's own actor is never a caller.
+ */
+export type Need = Capability | "self" | readonly [Capability, Capability, ...Capability[]];
+/** The capabilities a need names, any one of which is enough. None for `self`, which names no capability. */
+export const needs = (need: Need): readonly Capability[] =>
+	need === "self" ? [] : typeof need === "string" ? [need] : need;
+export const mayRun = (caller: { kind: ActorKind; can: readonly Capability[] }, need: Need): boolean =>
+	need === "self"
+		? caller.kind === "human" || caller.kind === "agent"
+		: needs(need).some((capability) => caller.can.includes(capability));
 
 // ── Answers ────────────────────────────────────────────────────────────────────────────────────────────────
 

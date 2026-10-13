@@ -61,7 +61,17 @@ export type InstanceOp<I, O> = Base<I> & {
 	/** True when the reply to this input holds a secret. It is then never stored, so the command cannot be replayed. */
 	secret?: (input: I) => boolean;
 };
-export type InstanceCtx = { app: App; actor: Actor; now: number };
+export type InstanceCtx = {
+	app: App;
+	actor: Actor;
+	now: number;
+	/**
+	 * The id of the browser session the request came by, or null when it came by a token, from the owner of
+	 * this machine, or from no request at all. It is how an operation knows which of the caller's sessions is
+	 * the current one. The cookie itself never reaches an operation.
+	 */
+	session: number | null;
+};
 
 // biome-ignore lint/suspicious/noExplicitAny: the registry holds operations of every input and output type; each is typed where it is declared.
 export type AnyOp = ProjectOp<any, any> | InstanceOp<any, any>;
@@ -109,6 +119,11 @@ export type Call = {
 	input: unknown;
 	/** Resolves the caller for a project (0 for the instance). Null when the caller is not signed in. */
 	actor: (project: number) => Actor | null;
+	/**
+	 * The caller's browser session as it stands when it is asked, or null (see `InstanceCtx`). Asked where the
+	 * operation runs, after its wait at the gate, as `actor` is: an id is given to another row after an import.
+	 */
+	session?: () => number | null;
 };
 
 /**
@@ -137,8 +152,13 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 	// word for word. A refusal that named the capability it lacks would confirm the key to any token, a
 	// pipeline's for another project included. One that holds a grant there is told which capability it lacks.
 	if (found && actor.can.length === 0) return noSuchProject();
-	if (!mayRun(actor.can, op.needs))
-		return fail("forbidden", `${op.name} needs the ${needed(op.needs)} capability${found ? ` on ${found.key}` : ""}`);
+	if (!mayRun(actor, op.needs))
+		return fail(
+			"forbidden",
+			op.needs === "self"
+				? `${op.name} is for a person or an agent that is signed in, and ${actor.name} is neither`
+				: `${op.name} needs the ${needed(op.needs)} capability${found ? ` on ${found.key}` : ""}`,
+		);
 
 	const parsed = op.input.safeParse(call.input ?? {});
 	if (!parsed.success) {
@@ -162,7 +182,7 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 
 	try {
 		if (op.scope === "instance") {
-			const env: InstanceCtx = { app, actor, now: app.now() };
+			const env: InstanceCtx = { app, actor, now: app.now(), session: call.session?.() ?? null };
 			if (!writing) return { ok: true, result: app.reader.snapshot(() => op.run(env, input)), seq: null };
 			const result = app.db.transaction(() => {
 				const prior = cmd ? findCommand(app.db, cmd) : null;
@@ -294,7 +314,7 @@ export function invokeAsync(app: App, ops: Readonly<Record<string, AnyOp>>, call
 		// Who may read is decided here, in the thread that knows the caller, and asked again when the reader has
 		// answered. A reader thread is only ever handed a call its caller is allowed to make; a refusal is answered
 		// inline and never reaches one.
-		if (!actor || !mayRun(actor.can, op.needs)) return Promise.resolve(invoke(app, ops, call));
+		if (!actor || !mayRun(actor, op.needs)) return Promise.resolve(invoke(app, ops, call));
 		return app.readers
 			.run({ op: call.op, project: call.project, input: call.input, actor }, () =>
 				invoke(app, ops, { ...call, actor: () => actor }),

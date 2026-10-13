@@ -2,7 +2,7 @@
 // then listen. The same function is the Local layer on a laptop and the Server layer in a container; only the
 // configuration differs (decision 0002).
 import { type Extra, type Patience, serve, VERSION } from "../surfaces/http.ts";
-import { bootstrap, flushUses, ruleActor, sweepSessions } from "./identity/identity.ts";
+import { bootstrap, flushUses, publicAddress, ruleActor, sweepSessions } from "./identity/identity.ts";
 import { recoverAccepted, sweep } from "./jobs.ts";
 import { type App, type Config, openApp } from "./kernel/app.ts";
 import { type Actor, allProjects } from "./kernel/ctx.ts";
@@ -27,6 +27,8 @@ export function open(
 	config: Config,
 	options: { memory?: boolean; firstProject?: string; now?: () => number } = {},
 ): { app: App; owner: Actor; project: string; generatedToken: string | null; warnings: string[] } {
+	// A public address that no browser would make a passkey at stops the start here, before the data is opened.
+	publicAddress(config);
 	const app = openApp(config, {
 		...(options.memory ? { memory: true } : {}),
 		...(options.now ? { now: options.now } : {}),
@@ -38,7 +40,10 @@ export function open(
 			// Zero configuration to first value: a project exists before the first case is typed.
 			project = options.firstProject ?? "scratch";
 			app.db.transaction(() =>
-				createProject({ app, actor: owner, now: app.now() }, { key: project ?? "scratch", preset: "loose" }),
+				createProject(
+					{ app, actor: owner, now: app.now(), session: null },
+					{ key: project ?? "scratch", preset: "loose" },
+				),
 			);
 		}
 		return { app, owner, project, generatedToken, warnings };

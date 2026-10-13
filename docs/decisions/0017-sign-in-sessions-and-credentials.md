@@ -2,7 +2,8 @@
 
 - Date: 2026-10-13
 - Status: proposed. Four pull requests deliver it. The first is built in the pull request that adds this file,
-  and the second (the limit on failed attempts) in the one after it; the owner reviews.
+  the second (the limit on failed attempts) in the one after it, and the fourth (people) in the one that adds
+  the section "What the fourth pull request builds"; the owner reviews.
 
 The instance has been public since 2026-10-13. Issue #88 lists what sign-in needs before more than one person
 uses it, and issue #30 asks that a person sign in as themselves. This record holds the design for both, so that
@@ -58,8 +59,9 @@ that signs somebody in. Local mode, where the owner of the machine needs no sign
    be edited.
 10. **Sessions, and later credentials and invitations, are never exported.** `UNEXPORTED` in
     `src/server/transfer/transfer.ts` is the one list: an export leaves those tables out and an import empties
-    them, a table before the one it refers to. A test holds the list equal to the identity tables with a `hash`
-    column.
+    them, a table before the one it refers to. A test holds the list equal to every table of identity but the
+    three an archive is meant to hold: `orgs`, `actors` and `grants`. (Until pull request 4 the test went by a
+    column named `hash`; a password's hash and a passkey's key are in a column of another name.)
 
 ## What the first pull request builds
 
@@ -231,7 +233,8 @@ local mode as well, because the configured value becomes a token there too. And 
 address each of its tokens was last used from, in the row and in the notes: a token's row is never deleted, and
 an address says where a person was.
 
-**4. People** (issue #30, first slice). Migration `0004` adds `credentials` and `invitations`. A person signs in
+**4. People** (issue #30, first slice; as built, see "What the fourth pull request builds" below, which says
+where it departs from this paragraph). Migration `0004` adds `credentials` and `invitations`. A person signs in
 with a name and a password, or with a passkey. An admin invites a person with a link, since there is no email.
 A person lists and ends their own sessions. Three rules came from the review:
 
@@ -246,6 +249,78 @@ A person lists and ends their own sessions. Three rules came from the review:
   opens. The server claims that no attestation was requested, never that one was verified. If that review
   finds a protocol defect that is not a one-line fix, the pull request uses `@simplewebauthn/server` behind the
   same interface.
+
+## What the fourth pull request builds
+
+The server and the command line. The pages of the web UI follow in a pull request of their own, built from
+these routes and operations.
+
+**Tables** (migration `0004_people.sql`; none travels in an archive). `credentials` holds what a person signs in
+with: a password as an argon2id string, a passkey as JSON with its public key and counter, with the passkey's
+credential id in a column of its own under a unique index, so an id is registered once on the instance for
+good. `invitations` holds the SHA-256 of a link's code. `passkey_users` holds one random handle per person,
+which an authenticator files their passkeys under; it is not a column of `actors` because an archive holds
+`actors`. `sessions` gains `credential`: a session rests on the token or on the credential that opened it. The
+table refuses a row with both, `openSession` makes none with neither, and one with neither is alive to no
+reader.
+
+**Signing in** is four bodies of `POST /api/login`: `{ token }`, `{ name, password }`, `{ passkey }` and
+`{ invitation, password?, passkey?, label?, replace? }`. `POST /api/login/challenge` answers a passkey's
+options for a sign-in (`{}`) or shows an invitation with the options to register a passkey with it
+(`{ invitation }`), and writes nothing. `GET /api/login/methods` says whether the instance has passkeys.
+`POST /api/account/password` sets or changes a password from a signed-in browser. They are in
+`src/surfaces/signin.ts`. A refused sign-in is 401 and one sentence whatever was wrong, with the reason in the
+log as a code.
+
+**Operations.** `Need` gains `self`. `session` (list, end) and `credential` (list, `passkey.begin`,
+`passkey.add`, remove) need it; `invitation` (create, list, revoke) needs `admin` and a person. `mayActFor` in
+`identity.ts` is the one place that says whose things a `self` operation may touch. `mainworthy invite` prints
+an invitation's link once.
+
+**Rules.**
+
+- A sign-in is judged twice: outside the write gate, where a password is hashed and a signature checked, and
+  again in the commit. The commit reads everything by what it holds and not by a row's number: a person by
+  name, a password by its stored hash, a passkey by credential id, key and counter, an invitation by the hash
+  of its code. An import gives a row's number to somebody else, and the independent check of pull request 1
+  showed a sign-in that waited across one and opened a session for whoever came after.
+- A challenge is kept in memory for five minutes with what it was issued for, bounded at ten thousand, and
+  spent by the commit that stores the passkey or opens the session. An import ends every ceremony under way.
+- The relying party is `MAINWORTHY_PUBLIC_URL` and nothing a request says. A value no browser would make a
+  passkey at stops the start. Without it there are no passkeys and a link has no host.
+- A password is 12 to 256 characters. Changing one makes a new row and revokes the old, which erases its hash;
+  the sessions that rested on the old one end, but for the one that made the change.
+- An invitation to recover revokes every credential and ends every session of the person when it is accepted,
+  and not before. A person who exists is invited only by themselves or the owner, as a token for them is made.
+- A person's last credential is not removed, by them or by an admin: a recovery link is the way.
+- The owner's token rule does not change: the last one is not revoked, whatever else the owner signs in with.
+
+**Where it departs from the design above, and why.**
+
+- `self` is any signed-in person or agent, and not a pipeline. A pipeline's token reaches `report` and `gate`
+  and nothing else (decision 0014), and a test holds that for every operation of the registry.
+- There is no `credential password.set` (the design's first list had one). A password never enters the
+  registry, so setting one is the route.
+- The link is `/invite#<code>`, not `/invite/<code>`: the part after the `#` is not sent to a server, so the
+  code reaches no proxy's log.
+- The page of an invitation is told 404 for a code that accepts nothing, and an acceptance is told the 401 of
+  every refused sign-in. Each is one reply for every reason.
+- Three refusals of `POST /api/login` are not that 401: a password that is not 12 to 256 characters (400, said
+  before the invitation is looked at), a passkey on an instance with none (400), and a browser signed in as
+  somebody else (409, with the name), which the page needs in order to ask.
+- A new invitation for a person revokes their earlier ones that nobody accepted, so one link is good at a time.
+- A person's passkey handle is made when they are invited, so that showing an invitation writes nothing.
+- A failed answer does not spend its challenge; a successful one does. A wrong answer proves nothing about the
+  challenge, and the next answer is judged the same.
+- Two passwords are hashed at once and thirty-two wait; past that a sign-in is refused. One hash takes 64 MiB,
+  and a sign-in needs no name that exists to ask for one.
+- A revoked credential's row is kept, for the credential id, and what it held is erased.
+- The reply of a wrong token keeps its sentence (`a token is required`): that branch of `/api/login` belongs to
+  the pull request about failed attempts, built beside this one.
+
+**Not built here.** The pages. A limit on failed attempts for a name, which pull request 2 adds for tokens
+and must extend to `{ name, password }` and to the `current` of `/api/account/password`. Unicode
+normalisation of a password: it is compared as the bytes that were typed.
 
 ## The three candidates
 

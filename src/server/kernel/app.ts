@@ -36,6 +36,19 @@ export type Config = {
 	 * came from: without one a request's address is the address of the connection it arrived on.
 	 */
 	proxy: TrustedProxy | null;
+	/**
+	 * The address people open the instance at, as they type it: `MAINWORTHY_PUBLIC_URL`, for example
+	 * `https://mainworthy.com`. A passkey belongs to the host name in it, and an invitation link starts with it.
+	 * It is the one source of both: a request's `Host` never is. Absent, the instance has no passkeys and an
+	 * invitation link is printed without a host. The start refuses a value a browser would not take
+	 * (`publicAddress` in the identity module, which knows what a browser takes).
+	 */
+	publicUrl?: string;
+	/**
+	 * What hashing a password costs, where it is not what the build ships with. A test sets it, because a
+	 * test hashes hundreds of passwords; nothing reads it from the environment.
+	 */
+	passwordCost?: { memoryCost: number; timeCost: number };
 };
 
 /**
@@ -221,5 +234,7 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		sessionIdleMs: lifetime(env, "MAINWORTHY_SESSION_IDLE", SESSION_LIFETIMES.sessionIdleMs),
 		sessionMaxMs: lifetime(env, "MAINWORTHY_SESSION_MAX", SESSION_LIFETIMES.sessionMaxMs),
 		proxy: proxyOf(env),
+		// A variable that is set and empty (a compose file passes one on empty) is one that was not set.
+		...(env.MAINWORTHY_PUBLIC_URL ? { publicUrl: env.MAINWORTHY_PUBLIC_URL } : {}),
 	};
 }

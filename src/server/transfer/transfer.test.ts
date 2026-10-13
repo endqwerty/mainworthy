@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { Db } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
 import { ARCHIVE_VERSION, migrate, SCHEMA_VERSION } from "../kernel/migrate.ts";
-import { exportArchive, importArchive, linesOf, linesOfStream } from "./transfer.ts";
+import { exportArchive, importArchive, linesOf, linesOfStream, UNEXPORTED } from "./transfer.ts";
 
 // Completion checks use real migrated SQLite databases: compare every stored column, query rebuilt FTS,
 // compare the target before/after rejected input, and time actual export/import of 50,000 result rows.
@@ -489,7 +489,9 @@ function tables(db: Db): string[] {
 function exportedTables(db: Db): string[] {
 	return tables(db).filter(
 		(name) =>
-			name !== "tokens" && name !== "sessions" && !name.startsWith("search_docs") && !name.startsWith("sqlite_"),
+			!["tokens", "sessions", "credentials", "invitations", "passkey_users"].includes(name) &&
+			!name.startsWith("search_docs") &&
+			!name.startsWith("sqlite_"),
 	);
 }
 
@@ -803,6 +805,71 @@ describe("Mainworthy instance archives", () => {
 		importArchive(to, linesOf(text));
 		expect(to.raw.query("SELECT * FROM sessions").all()).toEqual([]);
 		expect(to.raw.query("SELECT * FROM tokens").all()).toEqual([]);
+	});
+
+	test("a password, a passkey, its handle and an invitation never travel, and an import empties them in an order the foreign keys allow", () => {
+		const people = (db: Db, actor: number, mark: string): void => {
+			insert(db, "credentials", {
+				id: 1,
+				actor,
+				kind: "password",
+				data: `$argon2id$${mark}`,
+				label: "password",
+				created_at: time,
+			});
+			insert(db, "credentials", {
+				id: 2,
+				actor,
+				kind: "passkey",
+				handle: `credential-${mark}`,
+				data: `{"key":"key-${mark}"}`,
+				label: "laptop",
+				created_at: time,
+			});
+			insert(db, "passkey_users", { actor, handle: `handle-${mark}`, created_at: time });
+			insert(db, "invitations", {
+				id: 1,
+				actor,
+				hash: mark.repeat(64),
+				purpose: "join",
+				created_by: actor,
+				created_at: time,
+				expires_at: time,
+			});
+			// A session that rests on the passkey: it has to go before the credential it refers to.
+			insert(db, "sessions", {
+				id: 1,
+				actor,
+				credential: 2,
+				hash: mark.repeat(63),
+				created_at: time,
+				last_seen_at: time,
+				expires_at: time,
+			});
+		};
+		const from = source();
+		people(from, 71, "e");
+		const text = archive(from);
+		for (const table of ["credentials", "passkey_users", "invitations"]) {
+			expect(text).not.toContain(`"t":"${table}"`);
+			refuse(text.replace('"t":"meta"', `"t":"${table}"`), new RegExp(table));
+		}
+		for (const held of ["$argon2id$e", "credential-e", "key-e", "handle-e", "e".repeat(63)])
+			expect(text).not.toContain(held);
+		const to = target();
+		people(to, 1, "f");
+		importArchive(to, linesOf(text));
+		for (const table of UNEXPORTED) expect(to.raw.query(`SELECT * FROM ${table}`).all()).toEqual([]);
+		expect([...UNEXPORTED].sort()).toEqual(["credentials", "invitations", "passkey_users", "sessions", "tokens"]);
+		// The list is the order they are emptied in: a table comes before every table it refers to.
+		const late: string[] = [];
+		UNEXPORTED.forEach((table, at) => {
+			const parents = to.raw.query<{ table: string }, []>(`PRAGMA foreign_key_list(${table})`).all();
+			for (const parent of parents)
+				if (UNEXPORTED.includes(parent.table) && UNEXPORTED.indexOf(parent.table) < at)
+					late.push(`${table} is emptied after ${parent.table}, which it refers to`);
+		});
+		expect(late).toEqual([]);
 	});
 
 	test("a non-empty target throws conflict and stays unchanged", () => {

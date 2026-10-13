@@ -2,9 +2,12 @@
 // There is no seat here: an actor is a free row with capabilities (principle P8).
 //
 // This file is the interface of the module. `sessions.ts` (the table `sessions`), `uses.ts` (when a token or a
-// session was last used) and `limiter.ts` (the count of failed attempts) are its other files, and nothing outside
+// session was last used) and `limiter.ts` with `attempts.ts` (the count of failed attempts) are its other files, and nothing outside
 // this directory imports them: a surface asks `admit` who a request is, and signs a browser in and out through
 // `signInWithToken` and `signOut`.
+//
+// A person signing in as themselves is in `people.ts`, with the tables under it in `credentials.ts` and
+// `invitations.ts`. What other layers use of those is named once, below, and reached through this file too.
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import { untilPhrase } from "../../core/duration.ts";
@@ -13,12 +16,60 @@ import type { App } from "../kernel/app.ts";
 import type { Actor } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
-import { addressKey, createLimiter, isGeneratedSecret, type Limiter, prefixKey } from "./limiter.ts";
-import { endSession, endSessionsOf, findSession, hasUnendedSession, openSession, sweepSessions } from "./sessions.ts";
+import { limiterOf } from "./attempts.ts";
+import { clearChallenges } from "./challenges.ts";
+import { credentialSummary, dropUserHandle, revokeCredentialsOf } from "./credentials.ts";
+import { listInvitations, revokeInvitation, revokeInvitationsOf } from "./invitations.ts";
+import { addressKey, isGeneratedSecret, prefixKey } from "./limiter.ts";
+import {
+	endSession,
+	endSessionById,
+	endSessionsOf,
+	findSession,
+	hasUnendedSession,
+	listSessions,
+	newSessionSecret,
+	openSession,
+	sessionOwner,
+	sweepSessions,
+} from "./sessions.ts";
 import { clearUses, flushUses, forgetNotedAddresses, lastAddress, notedUse, noteUse } from "./uses.ts";
 
+export { whyNotPassword } from "./passwords.ts";
+// What the sign-in routes and the operations of a signed-in person need of them.
+export {
+	type Accepted,
+	acceptInvitation,
+	addPasskey,
+	beginPasskey,
+	changePassword,
+	createInvitation,
+	credentialOwner,
+	listCredentials,
+	PASSKEYS_OFF,
+	type PasswordChange,
+	passkeySignInOptions,
+	publicAddress,
+	removeCredential,
+	showInvitation,
+	signInMethods,
+	signInWithPasskey,
+	signInWithPassword,
+	type WhyNot,
+} from "./people.ts";
 // What the server's start and the archive need of the module's other files.
-export { clearUses, flushUses, sweepSessions };
+export {
+	clearChallenges,
+	clearUses,
+	credentialSummary,
+	endSessionById,
+	flushUses,
+	listInvitations,
+	listSessions,
+	revokeInvitation,
+	sessionOwner,
+	sweepSessions,
+};
 
 type ActorRow = { id: number; org: number; kind: ActorKind; name: string; disabled_at: number | null };
 /** What decides whether a token works: whose it is, whether it was revoked, and when it ends (null: never). */
@@ -374,6 +425,12 @@ export type Session = {
 	via: "token" | "cookie" | "local";
 	/** The caller on a project (0: the instance) as it stands now, or null once it stands no more. */
 	actor: (project: number) => Actor | null;
+	/**
+	 * For a browser's session (`cookie`): the id of its row as it stands now, or null once it has ended. It is
+	 * how an operation knows which of the caller's sessions the request came by. A token and the owner of this
+	 * machine have no such row.
+	 */
+	id?: () => number | null;
 };
 
 /**
@@ -405,19 +462,6 @@ export type Facts = {
 type Limited = { kind: "limited"; retryAfter: number };
 export type Admission = { kind: "admitted"; session: Session } | { kind: "refused" } | Limited;
 const REFUSED: Admission = { kind: "refused" };
-
-// The count of failed attempts, one for each `App` as `uses.ts` keeps its notes: two instances in one process, as
-// in the tests, do not count each other's failures. Nothing clears it but a restart. An import does not: it
-// replaces the tokens, not whoever is guessing at them.
-const limiters = new WeakMap<App, Limiter>();
-function limiterOf(app: App): Limiter {
-	let limiter = limiters.get(app);
-	if (!limiter) {
-		limiter = createLimiter();
-		limiters.set(app, limiter);
-	}
-	return limiter;
-}
 
 type Presented = { kind: "standing"; token: StandingToken } | { kind: "refused" } | Limited;
 
@@ -503,6 +547,7 @@ export function admit(app: App, facts: Facts): Admission {
 				kind: "admitted",
 				session: {
 					via: "cookie",
+					id: () => findSession(app, hash)?.id ?? null,
 					actor: (project) => {
 						const standing = findSession(app, hash);
 						return standing ? toActor(app.reader, standing.actor, project) : null;
@@ -517,9 +562,6 @@ export function admit(app: App, facts: Facts): Admission {
 
 /** What a browser is given at sign-in: the cookie's value, and when the session it names ends at the latest. */
 export type SignedIn = { cookie: string; expiresAt: number };
-
-/** 32 random bytes as a cookie can carry them: 43 characters of base64url, with no padding. */
-const newSessionSecret = (): string => Buffer.from(randomBytes(32)).toString("base64url");
 
 /**
  * Signs a browser in with a token: opens a session whose secret is new and is not the token. The browser never
@@ -681,6 +723,52 @@ function refuseGrant(kind: ActorKind, can: readonly Capability[]): void {
 	if (why) throw invalid(why);
 }
 
+/**
+ * The person an invitation is for: the one of this name, made now with the grant if there is none, exactly as
+ * `createToken` makes a new person for a token. The rules are that function's, sentence for sentence: a name
+ * that is an agent's, a pipeline's or the policy's is refused, so is a forgotten one, and a person who exists
+ * keeps what they hold (naming that very grant is accepted, any other is refused, and `setGrant` changes it).
+ * `isNew` says which it was, because it decides what the invitation does: a new person joins, one who exists
+ * recovers.
+ */
+export function invitedPerson(
+	app: App,
+	input: { name: string; can: readonly Capability[]; project: number },
+): { id: number; name: string; isNew: boolean } {
+	if (!/^[a-zA-Z0-9][a-zA-Z0-9._@-]{0,63}$/.test(input.name)) throw invalid("actor name: letters, digits, . _ @ -");
+	if (isForgottenName(input.name))
+		throw invalid("actor name: a name that starts with forgotten- is what a forgotten actor is called; choose another");
+	const db = app.db;
+	const org = orgId(db);
+	const existing = db.get(Q.actorByName, { org, name: input.name });
+	if (existing && existing.kind !== "human")
+		throw conflict(
+			`actor ${input.name} exists and is ${KIND_NOUN[existing.kind]}, not a person: only a person is invited`,
+		);
+	if (existing && existing.disabled_at !== null) throw invalid(`actor ${input.name} was forgotten and is not invited`);
+	if (existing && input.can.length > 0 && !sameGrant(db, existing.id, input.project, input.can)) {
+		throw invalid(
+			`actor ${input.name} exists: an invitation does not change what they may do. Change that with grant.set (mainworthy actor grant)`,
+		);
+	}
+	refuseGrant("human", input.can);
+	if (existing) return { id: existing.id, name: existing.name, isNew: false };
+	const made = ensureActor(db, { org, kind: "human", name: input.name, at: app.now() });
+	if (input.can.length > 0)
+		db.run(Q.setGrant, { actor: made.id, project: input.project, can: JSON.stringify(input.can) });
+	return { id: made.id, name: made.name, isNew: true };
+}
+
+/**
+ * Whose things a signed-in caller may see and end: their own, or anyone's when the caller is a person who
+ * administers the instance. Every operation that needs `self` asks here, and nothing else decides it
+ * (`test/architecture.test.ts`). `caller` is the caller on the instance, so `admin` is the grant on every
+ * project. An agent that holds `admin` is not a person: it sees and ends what is its own, like anybody.
+ */
+export function mayActFor(caller: Actor, subject: number): boolean {
+	return caller.id === subject || (caller.kind === "human" && caller.can.includes("admin"));
+}
+
 function mustActor(db: Db, name: string): ActorRow {
 	const row = db.get(Q.actorByName, { org: orgId(db), name });
 	if (!row || row.disabled_at !== null) throw notFound(`actor ${name}`);
@@ -761,6 +849,11 @@ export function forgetActor(app: App, name: string): { forgotten: string; tokens
 	// A disabled actor's sessions are refused anyway. Ending them says why in each row, and keeps them ended if
 	// the row of the actor is ever changed by hand.
 	endSessionsOf(db, row.id, at);
+	// The same for what a person signed in with and for a link that would still let them in. The handle their
+	// passkeys were filed under is deleted: it named the person to an authenticator, and names nobody now.
+	revokeCredentialsOf(db, row.id, at);
+	revokeInvitationsOf(db, row.id, at);
+	dropUserHandle(db, row.id);
 	forgottenCount++;
 	return { forgotten: pseudonym, tokensRevoked: revoked };
 }

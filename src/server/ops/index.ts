@@ -1,6 +1,7 @@
 // OPS: the complete list of operations. Add one here and it exists on HTTP, in the OpenAPI document, in the CLI
 // and (when it has an `mcp` description) as an agent tool. There is no other place to add a capability.
 import { adminOp } from "./admin.ts";
+import { credentialOp, invitationOp, sessionOp } from "./people.ts";
 import {
 	checkOp,
 	commandOp,
@@ -38,6 +39,10 @@ const list: AnyOp[] = [
 	commandOp,
 	// administer
 	adminOp,
+	// sign in as yourself
+	sessionOp,
+	credentialOp,
+	invitationOp,
 ];
 
 export const OPS: Readonly<Record<string, AnyOp>> = Object.fromEntries(list.map((op) => [op.name, op]));
