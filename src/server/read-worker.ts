@@ -47,6 +47,7 @@ function reads(): void {
 		mode: "server",
 		owner: "",
 		ownerToken: null,
+		commit: null,
 	} as const;
 	let app = openApp(config, { reader: true });
 	const ReadMessage = z.object({

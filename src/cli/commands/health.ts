@@ -4,7 +4,7 @@ import type { AdapterCommand } from "./types.ts";
 
 /**
  * The container's health check. It needs no token and reads no project: `/healthz` says the process is up and
- * which version it is. Without `--url` or `MAINWORTHY_URL` it asks the server on this machine at `MAINWORTHY_PORT`.
+ * which version and, when it knows, which commit it is (an older server reports no commit). Without `--url` or `MAINWORTHY_URL` it asks the server on this machine at `MAINWORTHY_PORT`.
  */
 export const healthCommand: AdapterCommand = {
 	name: "health",
@@ -16,15 +16,22 @@ export const healthCommand: AdapterCommand = {
 		const named = args.value("url") ?? process.env.MAINWORTHY_URL;
 		const url = named ? client.url : `http://127.0.0.1:${process.env.MAINWORTHY_PORT || "7357"}`;
 		let version: string | null = null;
+		let commit: string | null = null;
 		try {
 			const response = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(2500) });
 			const body: unknown = await response.json().catch(() => null);
 			if (response.ok && typeof body === "object" && body !== null && "ok" in body && body.ok === true) {
 				version = "version" in body && typeof body.version === "string" ? body.version : "";
+				// Only a full commit is shown: the address may be any server, and a reply must not put its own text on the terminal.
+				commit =
+					"commit" in body && typeof body.commit === "string" && /^[0-9a-f]{40}$/.test(body.commit)
+						? body.commit
+						: null;
 			}
 		} catch {}
-		if (args.has("json")) printJson({ url, healthy: version !== null, version }, args.bool("compact"));
-		else line(version !== null ? `healthy: Mainworthy ${version} at ${url}` : `not answering: ${url}`);
+		if (args.has("json")) printJson({ url, healthy: version !== null, version, commit }, args.bool("compact"));
+		else if (version === null) line(`not answering: ${url}`);
+		else line(`healthy: Mainworthy ${version}${commit ? ` (commit ${commit.slice(0, 12)})` : ""} at ${url}`);
 		return version !== null ? 0 : 1;
 	},
 };

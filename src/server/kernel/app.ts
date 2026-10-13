@@ -20,6 +20,11 @@ export type Config = {
 	owner: string;
 	/** In `server` mode: the owner's token, if the operator wants to choose it. Otherwise one is generated and logged once. */
 	ownerToken: string | null;
+	/**
+	 * The commit this build was made from, if the process was told: 40 lower-case hexadecimal characters, else
+	 * `null`. `/healthz` shows it without a sign-in, so it holds nothing else (see `commitOf`).
+	 */
+	commit: string | null;
 };
 
 /** What changed, pushed to clients after a command commits. Losing one is repaired by a refetch. */
@@ -102,6 +107,23 @@ export function openApp(config: Config, options: { memory?: boolean; now?: () =>
 	};
 }
 
+const FULL_COMMIT = /^[0-9a-f]{40}$/;
+
+/**
+ * The commit this process runs, read once where the configuration is read. `MAINWORTHY_COMMIT` comes first (the
+ * image bakes it in when it is built with the argument, and an operator can set it), then `SOURCE_COMMIT`, which
+ * Coolify gives the running container. A value counts only when it is exactly 40 lower-case hexadecimal
+ * characters: the answer is public, so it must never echo free text from the environment, and Coolify's `HEAD`
+ * or `unknown` and an image built without the argument (an empty value) must read as "not known", with the next
+ * source tried.
+ */
+export function commitOf(env: Record<string, string | undefined>): string | null {
+	for (const value of [env.MAINWORTHY_COMMIT, env.SOURCE_COMMIT]) {
+		if (value !== undefined && FULL_COMMIT.test(value)) return value;
+	}
+	return null;
+}
+
 export function defaultConfig(env: Record<string, string | undefined>): Config {
 	const host = env.MAINWORTHY_HOST ?? "127.0.0.1";
 	const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
@@ -112,5 +134,6 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		mode: env.MAINWORTHY_MODE === "server" || !loopback ? "server" : "local",
 		owner: env.MAINWORTHY_OWNER ?? env.USER ?? "owner",
 		ownerToken: env.MAINWORTHY_OWNER_TOKEN ?? null,
+		commit: commitOf(env),
 	};
 }

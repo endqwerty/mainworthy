@@ -22,7 +22,12 @@ export type Running = {
 /** Starts the production HTTP server on port 0 and always closes it and removes its own data directory. */
 export async function withInstance<T>(
 	run: (running: Running) => Promise<T>,
-	options: { mode?: "local" | "server"; owner?: string; routes?: ReturnType<typeof archiveRoutes> } = {},
+	options: {
+		mode?: "local" | "server";
+		owner?: string;
+		routes?: ReturnType<typeof archiveRoutes>;
+		env?: Record<string, string>;
+	} = {},
 ): Promise<T> {
 	const directory = await mkdtemp(join(tmpdir(), "mainworthy-cli-"));
 	const config = defaultConfig({
@@ -30,6 +35,7 @@ export async function withInstance<T>(
 		MAINWORTHY_PORT: "0",
 		MAINWORTHY_OWNER: options.owner ?? "robin",
 		MAINWORTHY_MODE: options.mode ?? "local",
+		...options.env,
 	});
 	const instance = start(config, (app, owner) => ({
 		ui: null,

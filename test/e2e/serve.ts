@@ -10,6 +10,7 @@ const instance = start(
 		mode: process.env.MAINWORTHY_MODE === "server" ? "server" : "local",
 		owner: "robin",
 		ownerToken: process.env.MAINWORTHY_OWNER_TOKEN ?? null,
+		commit: null,
 	},
 	(app, owner) => ({ ui, routes: archiveRoutes(app, owner) }),
 );

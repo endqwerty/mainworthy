@@ -21,7 +21,7 @@ afterEach(async () => {
 function config(): Config {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-reader-"));
 	dirs.push(dataDir);
-	return { dataDir, host: "127.0.0.1", port: 0, mode: "local", owner: "robin", ownerToken: null };
+	return { dataDir, host: "127.0.0.1", port: 0, mode: "local", owner: "robin", ownerToken: null, commit: null };
 }
 
 function workerUrl(source: string): string {

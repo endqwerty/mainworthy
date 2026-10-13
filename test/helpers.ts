@@ -22,7 +22,7 @@ export type Harness = {
 export function harness(options: { preset?: string; project?: string } = {}): Harness {
 	let now = 1_800_000_000_000;
 	const app = openApp(
-		{ dataDir: ":memory:", host: "127.0.0.1", port: 0, mode: "local", owner: "robin", ownerToken: null },
+		{ dataDir: ":memory:", host: "127.0.0.1", port: 0, mode: "local", owner: "robin", ownerToken: null, commit: null },
 		{ memory: true, now: () => now },
 	);
 	const { owner } = bootstrap(app);
