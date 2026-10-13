@@ -124,7 +124,7 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 			};
 		}
 		case "token.list":
-			return listTokens(db).map((row) => ({
+			return listTokens(env.app).map((row) => ({
 				id: row.id,
 				actor: row.actor,
 				kind: row.kind,

@@ -61,6 +61,8 @@ One report may be at most 64 MB. Split the results into several `mainworthy repo
 
 ### The page sends me back to sign in
 
+A browser's session ends after 14 days without use and after 90 days in any case, and when the token you signed in with is revoked. Sign in again with a token that works. After an upgrade from a build in which the browser held the token itself, everyone signs in once more.
+
 Your session belongs to someone else now, usually because another tab signed in with a different token. Mainworthy refuses the request instead of recording your text under their name. Sign in again. Your drafts are kept per person and are still there.
 
 ### The token is not accepted behind a proxy

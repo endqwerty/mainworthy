@@ -104,19 +104,38 @@ person's token, changes no grant and forgets nobody. The owner is the person the
 pipeline's, and in server mode makes sure the owner holds a token that works. The owner is not forgotten, and in
 server mode the owner's last token is not revoked.
 
-Who a request is from is settled in `src/surfaces/http.ts` (`sessionOf`): a bearer token, else the session
-cookie, else, in local mode, the owner of the machine. The last needs no sign-in, so the server checks what it
-can see of where the request started: a loopback Host, a connection from a loopback address, and none of the
-headers a proxy or a tunnel adds. That is the immediate connection, not the original client: a relay on this
-machine that passes bytes on unchanged looks the same, so a local-mode port is never exposed through one. A cookie or the local owner is accepted only from the server's own page (`Origin`, and
-`Sec-Fetch-Site` where the browser sends it). A failure that is not one of the operation's own refusals is
-answered `internal error` and nothing more; what failed is in the server's log.
+Who a request is from is one question, `admit` in `src/server/identity/identity.ts`, and every surface asks it.
+The HTTP surface reads what the request carries (`factsOf` in `src/surfaces/http.ts`) and decides nothing: a
+bearer token, else the session cookie, else, in local mode, the owner of the machine. The last needs no sign-in,
+so the server checks what it can see of where the request started: a loopback Host, a connection from a loopback
+address, and none of the headers a proxy or a tunnel adds. That is the immediate connection, not the original
+client: a relay on this machine that passes bytes on unchanged looks the same, so a local-mode port is never
+exposed through one. A cookie or the local owner is accepted only from the server's own page
+(`Origin`, and `Sec-Fetch-Site` where the browser sends it). What `admit` answers with holds no secret. It can
+be asked again who the caller is now, and an operation that waited at the gate, a read that ran on a reader
+thread and the change stream before each event all ask. A failure that is not one of the operation's own
+refusals is answered `internal error` and nothing more; what failed is in the server's log.
+
+A browser does not hold a token (decision 0017). `POST /api/login` takes a token and opens a session: a row in
+`sessions` and a cookie of 32 random bytes, of which only the SHA-256 is stored. The cookie is
+`__Host-mainworthy_sid` over https and `mainworthy_sid` over plain http, `HttpOnly` and `SameSite=Strict`. A
+session ends when its browser signs out, after 14 days without use, after 90 days in any case, when the token
+that opened it is revoked and when its actor is forgotten. `POST /api/logout` commits the end before it answers,
+so a copy of the cookie stops working with it. Signing in and out are routes of the HTTP surface and not
+operations: nobody is signed in yet, and the registry runs nothing for a caller it cannot name.
+
+Being used is not a write. `admit` notes in memory when a token or a session was last used, and the server
+writes the notes once a minute and when it stops (`src/server/identity/uses.ts`). The idle check and
+`token.list` read the newer of the note and the row, so a read never waits for the writer. A crash loses the
+notes since the last write: somebody may have to sign in again early, and no session lives longer for it. The
+same minute timer ends, in the database, each session that has passed a lifetime, so that a clock set back does
+not revive it.
 
 A connection that sends nothing is closed after three minutes, unless somebody has vouched for it: a request that
-is given a session takes the timeout off its connection (`admit` in the same file). The timeout counts the
-server's own silence, and a reply that takes longer than it (a write waiting at the gate behind a large report,
-an archive being applied) must not be lost. A client with a session may therefore keep an idle connection open,
-as before there was a timeout.
+is given a session takes the timeout off its connection (`sessionFor` in `src/surfaces/http.ts`). The timeout
+counts the server's own silence, and a reply that takes longer than it (a write waiting at the gate behind a
+large report, an archive being applied) must not be lost. A client with a session may therefore keep an idle
+connection open, as before there was a timeout.
 
 ## The record
 

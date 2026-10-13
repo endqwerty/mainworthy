@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Db } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
-import { SCHEMA_VERSION, schemaVersion } from "../kernel/migrate.ts";
+import { ARCHIVE_VERSION } from "../kernel/migrate.ts";
 
 const CHUNK_BYTES = 64 * 1024;
 const Count = z.number().int().nonnegative();
@@ -41,6 +41,14 @@ const ForeignKey = z.object({ table: z.string() });
 const ConstraintError = z.object({ code: z.string().startsWith("SQLITE_CONSTRAINT"), message: z.string() });
 type Table = { name: string; columns: string[]; primary: string[]; parents: string[] };
 
+/**
+ * The tables an archive never holds: each keeps the hash of a secret that lets somebody in. An export leaves them
+ * out and an import empties them, in this order, so a table comes before the one it refers to. This one list
+ * serves both, and `test/architecture.test.ts` holds it to the schema: an identity table with a `hash` column
+ * that is missing here fails.
+ */
+export const UNEXPORTED: readonly string[] = ["sessions", "tokens"];
+
 /** The row counts describe exported data, excluding migration metadata, credentials and the search index. */
 export type ArchiveCounts = { rows: number; tables: Record<string, number> };
 
@@ -74,7 +82,8 @@ function discoverTables(db: Db): Table[] {
 		.parse(db.raw.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
 		.map((table) => table.name)
 		.filter(
-			(name) => name !== "tokens" && name !== "search_docs" && !shadowTables.has(name) && !name.startsWith("sqlite_"),
+			(name) =>
+				!UNEXPORTED.includes(name) && name !== "search_docs" && !shadowTables.has(name) && !name.startsWith("sqlite_"),
 		);
 	const tables = new Map<string, Table>();
 	for (const name of names) {
@@ -108,7 +117,8 @@ function discoverTables(db: Db): Table[] {
 /**
  * Streams a whole migrated instance as NDJSON inside one consistent read snapshot. Rows follow primary keys;
  * JSON-typed TEXT remains text, and SQLite serializes integers exactly, including values outside JS's safe range.
- * Tokens never travel because they are credentials. The FTS index is omitted and rebuilt during import.
+ * Tokens and sessions never travel because they are credentials (`UNEXPORTED`). The FTS index is omitted and
+ * rebuilt during import. The header names the archive version, not the schema version (`ARCHIVE_VERSION`).
  * Invalid UTF-8 in stored TEXT is refused because replacing bytes would make the archive lossy.
  * Chunks contain whole lines and are at most about 64 KiB, except for a single larger row. The synchronous
  * writer must not mutate this database connection. A writer failure propagates and releases the snapshot.
@@ -146,7 +156,7 @@ export function exportArchive(db: Db, write: (chunk: string) => void, options: {
 			bytes += size;
 			if (bytes >= CHUNK_BYTES) flush();
 		};
-		append(`${JSON.stringify({ mainworthy: "archive", format: 1, schema: schemaVersion(db), exportedAt, tables })}\n`);
+		append(`${JSON.stringify({ mainworthy: "archive", format: 1, schema: ARCHIVE_VERSION, exportedAt, tables })}\n`);
 		for (const table of metadata) {
 			const fields = table.columns.flatMap((column) => [literal(column), identifier(column)]);
 			const order = (table.primary.length > 0 ? table.primary : table.columns).map(identifier).join(", ");
@@ -198,14 +208,14 @@ function readHeader(line: string, metadata: readonly Table[]): Header {
 	if (!result.success) throw invalid(`invalid archive header: ${result.error.message}`);
 	const header = result.data;
 	if (header.format !== 1) throw invalid(`unsupported archive format ${header.format}; this build supports format 1`);
-	if (header.schema > SCHEMA_VERSION) {
+	if (header.schema > ARCHIVE_VERSION) {
 		throw invalid(
-			`archive schema ${header.schema} is newer than this build's schema ${SCHEMA_VERSION}; upgrade Mainworthy`,
+			`archive schema ${header.schema} is newer than this build's archive schema ${ARCHIVE_VERSION}; upgrade Mainworthy`,
 		);
 	}
-	if (header.schema !== SCHEMA_VERSION) {
+	if (header.schema !== ARCHIVE_VERSION) {
 		throw invalid(
-			`archive schema ${header.schema} is older than this build's schema ${SCHEMA_VERSION}; replay across migrations that may rename columns is not supported yet`,
+			`archive schema ${header.schema} is older than this build's archive schema ${ARCHIVE_VERSION}; replay across migrations that may rename columns is not supported yet`,
 		);
 	}
 	const names = new Set(metadata.map((table) => table.name));
@@ -237,9 +247,11 @@ function importTransaction<T>(db: Db, fn: () => T): T {
 
 /**
  * Replays a format-1 archive into an instance with no projects, preserving all IDs and stored values. The
- * header must match this build's schema. Every count, digest, column and foreign key is checked before commit;
- * a failure restores the entire target, including bootstrap rows and the old search index. Bootstrap tokens
- * are discarded on success along with bootstrap identity rows. Migration-owned schema_version is retained.
+ * header must name this build's archive version, which is the last migration that changed an exported table, so an
+ * archive taken before a migration that changed none still imports. Every count, digest, column and foreign key
+ * is checked before commit; a failure restores the entire target, including bootstrap rows, sessions and the old
+ * search index. Tokens and sessions are discarded on success along with bootstrap identity rows.
+ * Migration-owned schema_version is retained.
  * Lines exclude the LF separator and retain all other characters, since their bytes determine the digest.
  * Import uses one write transaction, or a savepoint if its caller already owns a write transaction, restoring
  * the caller's foreign-key deferral setting. Archived rows violating SQLite constraints are invalid operations.
@@ -268,7 +280,8 @@ export function importArchive(db: Db, lines: Iterable<string>): ArchiveCounts {
 			let position = 1;
 			let ended = false;
 			db.raw.exec("PRAGMA defer_foreign_keys = ON");
-			db.raw.exec("DELETE FROM tokens; DELETE FROM search_docs");
+			for (const name of UNEXPORTED) db.raw.exec(`DELETE FROM ${identifier(name)}`);
+			db.raw.exec("DELETE FROM search_docs");
 			for (const table of [...metadata].reverse()) {
 				db.raw.exec(`DELETE FROM ${identifier(table.name)} ${where(table)}`);
 				inserts.set(

@@ -107,7 +107,9 @@ There is no shorter command for it. See [API](./api.md).
 
 In local mode you sign in as the owner, with no step. See [configuration](./configuration.md#local-mode-and-server-mode) for what local mode means.
 
-In server mode the page asks "Sign in with your token". Paste a token and choose "Sign in". The browser keeps you signed in for a year, and a revoked token sends you back to the sign-in page. The web UI has no sign-out button yet.
+In server mode the page asks "Sign in with your token". Paste a token and choose "Sign in". The server opens a session for that browser, and the browser keeps a cookie that names the session. The cookie is not the token: the browser does not hold the token after that.
+
+A session ends after 14 days without use and after 90 days in any case. It also ends when the token you signed in with is revoked, and when your actor is forgotten. Each of these sends you back to the sign-in page. [Configuration](./configuration.md#variables-the-server-reads) says how to change the two lifetimes. The web UI has no sign-out button yet; `POST /api/logout` from the page's own origin ends the session.
 
 The owner's token comes from the server. If you set `MAINWORTHY_OWNER_TOKEN`, that value is the token. If you did not, the server prints one on its first start:
 

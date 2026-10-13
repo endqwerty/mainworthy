@@ -2,6 +2,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Envelope } from "../../core/api.ts";
+import { DURATION_FORMAT, durationMs } from "../../core/duration.ts";
 import type { Actor } from "./ctx.ts";
 import { Db } from "./db.ts";
 import { migrate } from "./migrate.ts";
@@ -25,7 +26,14 @@ export type Config = {
 	 * `null`. `/healthz` shows it without a sign-in, so it holds nothing else (see `commitOf`).
 	 */
 	commit: string | null;
+	/** Milliseconds a browser's session may go unused before it ends. `MAINWORTHY_SESSION_IDLE`, by default `14d`. */
+	sessionIdleMs: number;
+	/** Milliseconds a browser's session lasts however much it is used. `MAINWORTHY_SESSION_MAX`, by default `90d`. */
+	sessionMaxMs: number;
 };
+
+/** The two lifetimes of a session when the environment names none. */
+export const SESSION_LIFETIMES = { sessionIdleMs: 14 * 86_400_000, sessionMaxMs: 90 * 86_400_000 } as const;
 
 /** What changed, pushed to clients after a command commits. Losing one is repaired by a refetch. */
 export type ChangeEvent = { project: string; seq: number; op: string; actor: string; touched: string[] };
@@ -82,7 +90,13 @@ export function openApp(config: Config, options: { memory?: boolean; now?: () =>
 	const path = options.memory ? ":memory:" : databasePath(config.dataDir);
 	if (options.reader && !existsSync(path)) throw new Error("a reader needs an existing database");
 	const db = new Db(path, options.reader ? { reader: true } : {});
-	if (!options.reader) migrate(db, path);
+	try {
+		if (!options.reader) migrate(db, path);
+	} catch (error) {
+		// A migration that fails leaves the database at the version it had. It is left closed too, not held.
+		db.close();
+		throw error;
+	}
 	const reader = options.memory || options.reader ? db : new Db(path, { reader: true });
 	const listeners = new Set<(event: ChangeEvent) => void>();
 	return {
@@ -124,6 +138,19 @@ export function commitOf(env: Record<string, string | undefined>): string | null
 	return null;
 }
 
+/**
+ * A lifetime from the environment, in milliseconds. A variable that is unset or empty (a compose file passes one
+ * on empty) takes the default. One that is set and is not a duration stops the start: a lifetime nobody meant,
+ * guessed from a typing error, would decide how long a stolen cookie works.
+ */
+function lifetime(env: Record<string, string | undefined>, name: string, fallback: number): number {
+	const text = env[name];
+	if (!text) return fallback;
+	const ms = durationMs(text);
+	if (ms === null) throw new Error(`${name} is "${text}", which is not a duration: write ${DURATION_FORMAT}`);
+	return ms;
+}
+
 export function defaultConfig(env: Record<string, string | undefined>): Config {
 	const host = env.MAINWORTHY_HOST ?? "127.0.0.1";
 	const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
@@ -135,5 +162,7 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		owner: env.MAINWORTHY_OWNER ?? env.USER ?? "owner",
 		ownerToken: env.MAINWORTHY_OWNER_TOKEN ?? null,
 		commit: commitOf(env),
+		sessionIdleMs: lifetime(env, "MAINWORTHY_SESSION_IDLE", SESSION_LIFETIMES.sessionIdleMs),
+		sessionMaxMs: lifetime(env, "MAINWORTHY_SESSION_MAX", SESSION_LIFETIMES.sessionMaxMs),
 	};
 }

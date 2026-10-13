@@ -20,6 +20,9 @@ It runs on the owner's Coolify for their own use since 2026-10-12, at
 say where and how to redeploy). This repository's CI reports to it since 2026-10-13 (issue #92).
 No blocking defect is known: issue
 #81, in the web UI's conflict card, is fixed (`docs/decisions/0013-ask-what-became-of-a-command.md`).
+Sign-in is being rebuilt in four pull requests (`docs/decisions/0017-sign-in-sessions-and-credentials.md`):
+the first, a browser session that is not the token, is built; the limit on failed
+attempts, token expiry and people signing in as themselves follow it.
 
 ## Stack rules
 
@@ -59,7 +62,18 @@ No blocking defect is known: issue
   each table is listed in `test/architecture.test.ts`), so the check can prepare every
   statement against the schema. To read another module's data, call its functions; do
   not join its tables. A schema change is a new file in
-  `src/server/kernel/migrations/`; a shipped migration is never edited.
+  `src/server/kernel/migrations/`; a shipped migration is never edited. Its entry
+  in `MIGRATIONS` says whether it changes a table an archive holds (`archive`): an
+  import requires the last version that did, so an archive taken before a migration
+  that changed none still imports. A test checks each entry against the schema.
+- **Who a request is, is asked once.** A surface calls `admit` in
+  `src/server/identity/identity.ts` and holds no secret (decision 0017). Nothing
+  outside `src/server/identity` imports another file of it. A table that holds the
+  hash of a secret is listed in `UNEXPORTED` (`src/server/transfer/transfer.ts`),
+  so no archive carries it. Both are tests. An id read before a wait at the write
+  gate is not used after it: an import deletes every token and session, and the
+  next row made takes the first id again. Carry the hash and look the row up
+  again inside the write (`openSession`; the verifier's finding of 2026-10-13).
 - **Budgets are tests** (`test/budgets.test.ts`, `bench/`). A change that misses a
   hot-path budget does not merge; do not raise the number.
 - **The check's wall time is a budget** (`scripts/check-plan.ts`). The check warns

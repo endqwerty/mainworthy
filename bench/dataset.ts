@@ -13,7 +13,7 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import type { Edit, ReportInput, ResultIn, TargetIn } from "../src/core/ops.ts";
 import { authenticate, createToken } from "../src/server/identity/identity.ts";
-import type { App, Config } from "../src/server/kernel/app.ts";
+import { type App, type Config, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
 import { MIGRATIONS } from "../src/server/kernel/migrate.ts";
 import { open } from "../src/server/start.ts";
@@ -162,6 +162,7 @@ export function config(dir: string): Config {
 		owner: "benchmark-owner",
 		ownerToken: null,
 		commit: null,
+		...SESSION_LIFETIMES,
 	};
 }
 

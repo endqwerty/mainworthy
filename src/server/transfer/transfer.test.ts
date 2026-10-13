@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { Db } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
-import { migrate, SCHEMA_VERSION } from "../kernel/migrate.ts";
+import { ARCHIVE_VERSION, migrate, SCHEMA_VERSION } from "../kernel/migrate.ts";
 import { exportArchive, importArchive, linesOf, linesOfStream } from "./transfer.ts";
 
 // Completion checks use real migrated SQLite databases: compare every stored column, query rebuilt FTS,
@@ -488,7 +488,8 @@ function tables(db: Db): string[] {
 
 function exportedTables(db: Db): string[] {
 	return tables(db).filter(
-		(name) => name !== "tokens" && !name.startsWith("search_docs") && !name.startsWith("sqlite_"),
+		(name) =>
+			name !== "tokens" && name !== "sessions" && !name.startsWith("search_docs") && !name.startsWith("sqlite_"),
 	);
 }
 
@@ -777,11 +778,31 @@ describe("Mainworthy instance archives", () => {
 	});
 
 	test("newer and older schemas are refused with a clear message", () => {
+		// The header names the archive version: the last migration that changed what an archive holds, which is
+		// behind the schema version whenever a later migration only added a table an archive leaves out.
+		expect(archive(source())).toContain(`"schema":${ARCHIVE_VERSION},`);
+		expect(ARCHIVE_VERSION).toBeLessThanOrEqual(SCHEMA_VERSION);
 		refuse(
-			archive(source()).replace(`"schema":${SCHEMA_VERSION}`, `"schema":${SCHEMA_VERSION + 1}`),
+			archive(source()).replace(`"schema":${ARCHIVE_VERSION}`, `"schema":${ARCHIVE_VERSION + 1}`),
 			/schema.*newer|newer.*schema/,
 		);
-		refuse(archive(source()).replace(`"schema":${SCHEMA_VERSION}`, '"schema":0'), /schema.*older|older.*schema/);
+		refuse(archive(source()).replace(`"schema":${ARCHIVE_VERSION}`, '"schema":0'), /schema.*older|older.*schema/);
+	});
+
+	test("sessions never travel, and an import empties them before the tokens they refer to", () => {
+		const from = source();
+		const seen = { created_at: time, last_seen_at: time, expires_at: time };
+		insert(from, "sessions", { id: 1, actor: 71, token: 900, hash: "c".repeat(64), ...seen });
+		const text = archive(from);
+		expect(text).not.toContain('"t":"sessions"');
+		expect(text).not.toContain("c".repeat(64));
+		refuse(text.replace('"t":"meta"', '"t":"sessions"'), /sessions/);
+		// The target's own session refers to the target's own token: both go, the session first.
+		const to = target();
+		insert(to, "sessions", { id: 1, actor: 1, token: 1, hash: "d".repeat(64), ...seen });
+		importArchive(to, linesOf(text));
+		expect(to.raw.query("SELECT * FROM sessions").all()).toEqual([]);
+		expect(to.raw.query("SELECT * FROM tokens").all()).toEqual([]);
 	});
 
 	test("a non-empty target throws conflict and stays unchanged", () => {

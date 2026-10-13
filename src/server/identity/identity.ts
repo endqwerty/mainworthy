@@ -1,5 +1,9 @@
-// Actors, grants and tokens. Owns the tables `orgs`, `actors`, `grants` and `tokens`.
+// Actors, grants and tokens, and who a request is. Owns the tables `orgs`, `actors`, `grants` and `tokens`.
 // There is no seat here: an actor is a free row with capabilities (principle P8).
+//
+// This file is the interface of the module. `sessions.ts` (the table `sessions`) and `uses.ts` (when a token or a
+// session was last used) are its other files, and nothing outside this directory imports them: a surface asks
+// `admit` who a request is, and signs a browser in and out through `signInWithToken` and `signOut`.
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import { type ActorKind, Capability, heldCapabilities, whyNotGrantable } from "../../core/kinds.ts";
@@ -7,6 +11,11 @@ import type { App } from "../kernel/app.ts";
 import type { Actor } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
+import { endSession, endSessionsOf, findSession, hasUnendedSession, openSession, sweepSessions } from "./sessions.ts";
+import { clearUses, flushUses, notedUse, noteUse } from "./uses.ts";
+
+// What the server's start and the archive need of the module's other files.
+export { clearUses, flushUses, sweepSessions };
 
 type ActorRow = { id: number; org: number; kind: ActorKind; name: string; disabled_at: number | null };
 
@@ -39,7 +48,6 @@ const Q = {
 	activeTokens: sql<{ actor: number }, { n: number }>(
 		"SELECT count(*) AS n FROM tokens WHERE actor = $actor AND revoked_at IS NULL",
 	),
-	touchToken: sql<{ id: number; at: number }>("UPDATE tokens SET last_used_at = $at WHERE id = $id"),
 	tokens: sql<
 		{ org: number },
 		{
@@ -186,22 +194,161 @@ function toActor(db: Db, row: ActorRow, project: number): Actor {
 	return { id: row.id, kind: row.kind, name: row.name, can: heldCapabilities(row.kind, granted) };
 }
 
-/** The actor behind a token, with its capabilities on `project` (0 for an operation that is not about a project). */
-export function authenticate(app: App, secret: string, project: number): Actor | null {
-	// On the reader: a request is authenticated before it queues at the write gate, and must not touch the
-	// writing connection while another command's transaction is open on it.
-	const db = app.reader;
-	const token = db.get(Q.tokenByHash, { hash: hashToken(secret) });
+/**
+ * The token with this hash and its actor's row, when the token works and the actor stands. On the reader: a
+ * request is admitted before it queues at the write gate, and must not touch the writing connection while another
+ * command's transaction is open on it.
+ */
+function standingToken(db: Db, hash: string): { id: number; actor: ActorRow } | null {
+	const token = db.get(Q.tokenByHash, { hash });
 	if (!token || token.revoked_at !== null) return null;
-	const row = db.get(Q.actorById, { id: token.actor });
-	if (!row || row.disabled_at !== null) return null;
-	return toActor(db, row, project);
+	const actor = db.get(Q.actorById, { id: token.actor });
+	if (!actor || actor.disabled_at !== null) return null;
+	return { id: token.id, actor };
 }
 
-/** Records that a token was used. Kept out of `authenticate` so a read never writes. */
-export function noteTokenUse(app: App, secret: string): void {
-	const token = app.reader.get(Q.tokenByHash, { hash: hashToken(secret) });
-	if (token) app.db.run(Q.touchToken, { id: token.id, at: app.now() });
+/**
+ * The actor behind a token, with its capabilities on `project` (0 for an operation that is not about a project).
+ * For the tests' harness and for code that holds a token and no request; a surface asks `admit`.
+ */
+export function authenticate(app: App, secret: string, project: number): Actor | null {
+	const token = standingToken(app.reader, hashToken(secret));
+	return token ? toActor(app.reader, token.actor, project) : null;
+}
+
+/**
+ * A caller that was let in. It holds no secret. `actor` asks again each time it is called, so an operation that
+ * waited at the gate, and a change stream opened an hour ago, stop when the token was revoked, the session ended
+ * or the actor was forgotten. Asking is not a use: only `admit` notes one.
+ */
+export type Session = {
+	/** How the caller proved itself. `cookie` is a browser's session; `local` is the owner of this machine. */
+	via: "token" | "cookie" | "local";
+	/** The caller on a project (0: the instance) as it stands now, or null once it stands no more. */
+	actor: (project: number) => Actor | null;
+};
+
+/**
+ * What a surface read from a request, as plain values: no header names and no cookie syntax. The surface says
+ * what the request carried; what that is worth is decided here.
+ */
+export type Facts = {
+	/** The secret the request presented as a token, or null when it presented none. */
+	bearer: string | null;
+	/** The value of this server's session cookie, or null when the request carries none it could read. */
+	cookie: string | null;
+	/**
+	 * Whether the request may use what a browser attaches by itself: it comes from this server's own page, or
+	 * from no page at all. A cookie and the loopback rule count only then; a token is not held to it.
+	 */
+	sameOrigin: boolean;
+	/** The owner of this machine when the request started on it, else null. Counts in local mode only. */
+	localOwner: Actor | null;
+};
+
+export type Admission = { kind: "admitted"; session: Session } | { kind: "refused" };
+const REFUSED: Admission = { kind: "refused" };
+
+/**
+ * Who a request is: the one question every surface asks, once for each request. It reads committed rows on the
+ * reader and writes nothing, so it never waits for a writer.
+ *
+ * A token, when one is presented, and nothing else then: a wrong token is not rescued by a cookie. Else, for a
+ * request from this server's own page, the session its cookie names. Else, in local mode, the owner of the
+ * machine the request started on.
+ *
+ * The use is noted only after the caller passed, against the newest use known until then. A cookie that is past
+ * its idle time is refused however often it is sent: it cannot renew itself.
+ */
+export function admit(app: App, facts: Facts): Admission {
+	if (facts.bearer !== null) {
+		const hash = hashToken(facts.bearer);
+		const token = standingToken(app.reader, hash);
+		if (!token) return REFUSED;
+		noteUse(app, "token", token.id, app.now());
+		return {
+			kind: "admitted",
+			session: {
+				via: "token",
+				actor: (project) => {
+					const standing = standingToken(app.reader, hash);
+					return standing ? toActor(app.reader, standing.actor, project) : null;
+				},
+			},
+		};
+	}
+	if (!facts.sameOrigin) return REFUSED;
+	if (facts.cookie !== null) {
+		const hash = hashToken(facts.cookie);
+		const found = findSession(app, hash);
+		if (found) {
+			noteUse(app, "session", found.id, app.now());
+			return {
+				kind: "admitted",
+				session: {
+					via: "cookie",
+					actor: (project) => {
+						const standing = findSession(app, hash);
+						return standing ? toActor(app.reader, standing.actor, project) : null;
+					},
+				},
+			};
+		}
+	}
+	const owner = app.config.mode === "local" ? facts.localOwner : null;
+	return owner ? { kind: "admitted", session: { via: "local", actor: () => owner } } : REFUSED;
+}
+
+/** What a browser is given at sign-in: the cookie's value, and when the session it names ends at the latest. */
+export type SignedIn = { cookie: string; expiresAt: number };
+
+/** 32 random bytes as a cookie can carry them: 43 characters of base64url, with no padding. */
+const newSessionSecret = (): string => Buffer.from(randomBytes(32)).toString("base64url");
+
+/**
+ * Signs a browser in with a token: opens a session whose secret is new and is not the token. The browser never
+ * holds the token again, and only the SHA-256 of what it does hold is stored.
+ *
+ * Null, at once, when the token does not work: the caller answers without waiting. Otherwise a promise, because
+ * the session is written at the gate. That write looks the token up again by its hash (`openSession`), and the
+ * promise is null when the token stopped working while the request waited: it was revoked, or an import
+ * replaced every token. Nothing read before the wait is trusted after it. The token's id, in particular, is
+ * not carried across: after an import a new token holds it.
+ */
+export function signInWithToken(
+	app: App,
+	secret: string,
+	about: { userAgent: string | null },
+): Promise<SignedIn | null> | null {
+	const tokenHash = hashToken(secret);
+	const token = standingToken(app.reader, tokenHash);
+	if (!token) return null;
+	// The use is of the token as it stands now, noted before any wait. An import clears the notes when it commits.
+	noteUse(app, "token", token.id, app.now());
+	const cookie = newSessionSecret();
+	return app.gate.run(() => {
+		const opened = openSession(app, {
+			tokenHash,
+			sessionHash: hashToken(cookie),
+			// What the client calls itself, for a person looking at their own sessions. Never trusted, and cut:
+			// the header is as long as its sender likes.
+			userAgent: about.userAgent?.slice(0, 256) ?? null,
+		});
+		return opened ? { cookie, expiresAt: opened.expiresAt } : null;
+	});
+}
+
+/**
+ * Ends the session a cookie names. Null when it names none that is still open: nothing is written and the caller
+ * answers at once, which makes signing out twice the same as signing out once. Otherwise the promise settles when
+ * the end is committed, so the caller's reply leaves after it: a copy of the cookie is refused from then on.
+ */
+export function signOut(app: App, cookie: string): Promise<void> | null {
+	const hash = hashToken(cookie);
+	if (!hasUnendedSession(app.reader, hash)) return null;
+	return app.gate.run(() => {
+		endSession(app, hash, "signed-out");
+	});
 }
 
 export function actorByName(db: Db, name: string, project: number): Actor | null {
@@ -310,8 +457,16 @@ export function removeGrant(app: App, input: { actor: string; project: number })
 	return app.db.run(Q.dropGrant, { actor: row.id, project: input.project }).changes > 0;
 }
 
-export function listTokens(db: Db) {
-	return db.all(Q.tokens, { org: orgId(db) });
+/**
+ * Every token of the instance. `last_used_at` is the newer of the row and what is noted and not yet written
+ * (`uses.ts`), so a use shows in the list at once and not a minute later.
+ */
+export function listTokens(app: App) {
+	const db = app.reader;
+	return db.all(Q.tokens, { org: orgId(db) }).map((row) => {
+		const noted = notedUse(app, "token", row.id);
+		return noted === null ? row : { ...row, last_used_at: Math.max(row.last_used_at ?? 0, noted) };
+	});
 }
 
 /**
@@ -330,9 +485,10 @@ export function revokeToken(app: App, id: number): boolean {
 }
 
 /**
- * Removes an actor's identity and keeps the record true: the name becomes a pseudonym, the actor is disabled and
- * its tokens are revoked. Every fact still points at the same actor row, so history says the same actor did each
- * thing; it no longer says who that was. Text the person typed elsewhere is not touched (docs/compliance.md).
+ * Removes an actor's identity and keeps the record true: the name becomes a pseudonym, the actor is disabled, its
+ * tokens are revoked and its sessions are ended. Every fact still points at the same actor row, so history says
+ * the same actor did each thing; it no longer says who that was. Text the person typed elsewhere is not touched
+ * (docs/compliance.md).
  */
 export function forgetActor(app: App, name: string): { forgotten: string; tokensRevoked: number } {
 	const db = app.db;
@@ -343,6 +499,9 @@ export function forgetActor(app: App, name: string): { forgotten: string; tokens
 	const at = app.now();
 	db.run(Q.forget, { id: row.id, name: pseudonym, at });
 	const revoked = db.run(Q.revokeTokensOf, { actor: row.id, at }).changes;
+	// A disabled actor's sessions are refused anyway. Ending them says why in each row, and keeps them ended if
+	// the row of the actor is ever changed by hand.
+	endSessionsOf(db, row.id, at);
 	forgottenCount++;
 	return { forgotten: pseudonym, tokensRevoked: revoked };
 }

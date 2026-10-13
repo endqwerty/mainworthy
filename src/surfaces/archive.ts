@@ -1,13 +1,12 @@
 import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bootstrap } from "../server/identity/identity.ts";
+import { bootstrap, clearUses, type Session } from "../server/identity/identity.ts";
 import { recoverAccepted } from "../server/jobs.ts";
 import type { App } from "../server/kernel/app.ts";
 import type { Actor } from "../server/kernel/ctx.ts";
 import { HTTP_STATUS, OpError } from "../server/kernel/errors.ts";
 import { exportArchive, importArchive, linesOf, removeBootstrap } from "../server/transfer/transfer.ts";
-import type { Session } from "./http.ts";
 
 const CHUNK_BYTES = 64 * 1024;
 const json = (body: unknown, status = 200): Response =>
@@ -152,6 +151,9 @@ export function archiveRoutes(
 						const counts = importArchive(app.db, fileLines(file.path));
 						return { counts, owner: app.config.mode === "local" ? bootstrap(app).owner : null };
 					});
+					// The import is committed: every token and session row is gone, and the next ones made take
+					// their ids. What was noted of the old rows' use must not become the new rows' use.
+					clearUses(app);
 					if (localOwner && restored.owner) Object.assign(localOwner, restored.owner);
 					// An export taken while a report was between its two transactions holds that report accepted and
 					// not applied. The original applied it a moment later; so does this instance, now, and not only
@@ -163,7 +165,7 @@ export function archiveRoutes(
 					ok: true,
 					result: {
 						...result,
-						note: `Import replaced the bootstrap rows. Your previous session may no longer exist. ${app.config.mode === "server" ? "No token works now. Restart the server to reconnect: it takes the owner's token from MAINWORTHY_OWNER_TOKEN, or prints a new one when that is not set." : "The configured local owner was refreshed."}`,
+						note: `Import replaced the bootstrap rows. Your previous session may no longer exist. ${app.config.mode === "server" ? "No token works now and every browser is signed out. Restart the server to reconnect: it takes the owner's token from MAINWORTHY_OWNER_TOKEN, or prints a new one when that is not set." : "The configured local owner was refreshed."}`,
 						callerSessionMayHaveChanged: true,
 					},
 					seq: null,

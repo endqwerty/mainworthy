@@ -2,13 +2,27 @@
 import { existsSync } from "node:fs";
 import type { Db } from "./db.ts";
 import init from "./migrations/0001_init.sql" with { type: "text" };
+import sessions from "./migrations/0002_sessions.sql" with { type: "text" };
 
-/** In order. A migration is never edited after it ships; a change is a new entry. */
-export const MIGRATIONS: readonly { version: number; name: string; sql: string }[] = [
-	{ version: 1, name: "init", sql: init },
+/**
+ * In order. A migration is never edited after it ships; a change is a new entry.
+ *
+ * `archive` says whether the migration changes what an archive holds: a table or a column of the tables an export
+ * writes. One that only adds a table an archive leaves out (`sessions`) does not, and an archive taken before it
+ * still imports after it.
+ */
+export const MIGRATIONS: readonly { version: number; name: string; sql: string; archive: boolean }[] = [
+	{ version: 1, name: "init", sql: init, archive: true },
+	{ version: 2, name: "sessions", sql: sessions, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
+
+/**
+ * The version of what an archive holds: the last migration that changed it. An export writes this number and an
+ * import requires it, so the database's schema can move on without refusing every archive taken before.
+ */
+export const ARCHIVE_VERSION = MIGRATIONS.findLast((migration) => migration.archive)?.version ?? 0;
 
 export function schemaVersion(db: Db): number {
 	const table = db.raw.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'").get();

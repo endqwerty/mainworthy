@@ -33,10 +33,12 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_MODE` | none | `server` selects server mode. |
 | `MAINWORTHY_OWNER` | `USER`, else `owner` | The name of the owner, who holds every capability on every project. |
 | `MAINWORTHY_OWNER_TOKEN` | none | A token for the owner. Server mode needs one to sign in. |
+| `MAINWORTHY_SESSION_IDLE` | `14d` | How long a browser stays signed in without being used. A whole number and `h`, `d` or `w`: `12h`, `14d`, `2w`. |
+| `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. The same form. |
 | `MAINWORTHY_READERS` | the CPU count minus 2, at least 1 and at most 8 | How many reader threads answer reads. `0` answers them on the main thread. |
 | `MAINWORTHY_COMMIT` | none | The commit this server was built from, which `/healthz` reports. 40 lower-case hexadecimal characters, or it reads as unknown. Without it the server reads `SOURCE_COMMIT`. |
 
-A value that is not a whole number for `MAINWORTHY_READERS` stops the start with `invalid: MAINWORTHY_READERS must be a non-negative integer`.
+A value that is not a whole number for `MAINWORTHY_READERS` stops the start with `invalid: MAINWORTHY_READERS must be a non-negative integer`. A session lifetime that is not a duration stops the start too, with a line that names the variable.
 
 The first start creates the data directory, one owner and a project named `scratch`. It does not need any variable.
 
@@ -72,7 +74,7 @@ Mainworthy runs as one container with one volume. The container runs the single 
 $ docker compose up -d
 ```
 
-The file defines one service, `mainworthy`. It publishes port 7357, restarts the container unless you stop it, and mounts a named volume, `mainworthy-data`, at `/data`. It passes two variables from your environment to the server, `MAINWORTHY_OWNER_TOKEN` and `MAINWORTHY_OWNER`, which defaults to `owner`. Set the token to a long random string. If you leave it empty, the server generates one and prints it once, and `docker compose logs` shows it. Open `http://localhost:7357` and sign in with it.
+The file defines one service, `mainworthy`. It publishes port 7357, restarts the container unless you stop it, and mounts a named volume, `mainworthy-data`, at `/data`. It passes these variables from your environment to the server: `MAINWORTHY_OWNER_TOKEN`, `MAINWORTHY_OWNER`, which defaults to `owner`, and the two session lifetimes, `MAINWORTHY_SESSION_IDLE` and `MAINWORTHY_SESSION_MAX`, which take the server's defaults when you leave them empty. Set the token to a long random string. If you leave it empty, the server generates one and prints it once, and `docker compose logs` shows it. Open `http://localhost:7357` and sign in with it.
 
 The image checks its own health every 30 seconds by running `mainworthy health`. The check calls `/healthz`, which needs no token:
 
@@ -113,7 +115,7 @@ In server mode everything that reads or changes a project needs a token. These a
 | `/api/openapi.json` | The description of the API, built from the list of operations |
 | `/` | The web UI's own files. The page then asks for a token. |
 
-`/api/login` and `/api/logout` take or clear the session cookie and accept only a request from the server's own pages. If nobody outside your network should see even these, keep the server off the public internet or put the proxy's own access control in front of it.
+`/api/login` opens a browser's session and sets its cookie, and `/api/logout` ends the session and clears the cookie. Both accept only a request from the server's own pages. If nobody outside your network should see even these, keep the server off the public internet or put the proxy's own access control in front of it.
 
 ## Build the single executable
 

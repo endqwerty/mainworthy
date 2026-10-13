@@ -48,6 +48,10 @@ function reads(): void {
 		owner: "",
 		ownerToken: null,
 		commit: null,
+		// A reader admits nobody: the main thread decides who may read, before the call and again before the reply
+		// leaves (`invokeAsync`). Zero, so that a reader which ever did look at a session would find it ended.
+		sessionIdleMs: 0,
+		sessionMaxMs: 0,
 	} as const;
 	let app = openApp(config, { reader: true });
 	const ReadMessage = z.object({

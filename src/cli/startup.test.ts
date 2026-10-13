@@ -272,6 +272,38 @@ test("an occupied port exits 4 without keeping the failed server alive", async (
 	});
 });
 
+test("a session lifetime that is not a duration stops the start with one line that names the variable", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-lifetime-"));
+	const child = Bun.spawn([process.execPath, CLI_ENTRY, "serve"], {
+		cwd: directory,
+		env: {
+			PATH: process.env.PATH ?? "",
+			HOME: directory,
+			USER: "robin",
+			MAINWORTHY_PORT: "0",
+			MAINWORTHY_SESSION_IDLE: "two weeks",
+		},
+		stdout: "pipe",
+		stderr: "pipe",
+		stdin: "ignore",
+	});
+	const timeout = setTimeout(() => child.kill("SIGKILL"), 4000);
+	try {
+		const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+		expect(code).toBe(4);
+		expect(stderr.trim()).toBe(
+			'invalid: MAINWORTHY_SESSION_IDLE is "two weeks", which is not a duration: write a whole number from 1 to 9999 and h, d or w, like 12h, 14d or 2w',
+		);
+		// It stopped before it opened anything: no instance was made to run with a lifetime nobody chose.
+		expect(existsSync(join(directory, ".mainworthy"))).toBe(false);
+	} finally {
+		clearTimeout(timeout);
+		child.kill("SIGKILL");
+		await child.exited;
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
 test("a consumer closing stdout produces no stack trace or failed-gate exit", async () => {
 	await withInstance(async ({ directory, instance, client }) => {
 		await client.call("propose", {
