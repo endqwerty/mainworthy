@@ -8,6 +8,10 @@ RUN bun install --frozen-lockfile
 COPY tsconfig.json biome.json ./
 COPY src ./src
 COPY skill ./skill
+# The documentation the server carries at /docs: its pages, diagrams and screenshots (src/surfaces/docs/content.ts).
+COPY docs/guide ./docs/guide
+COPY docs/diagrams ./docs/diagrams
+COPY docs/ui/screenshots ./docs/ui/screenshots
 RUN bun build --compile --minify --sourcemap src/cli/main.ts src/server/read-worker.ts --outfile /out/mainworthy
 
 FROM debian:bookworm-slim

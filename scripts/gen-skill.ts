@@ -22,7 +22,8 @@ function schemaType(schema: SchemaNode): string {
 
 const cell = (text: string): string => text.replaceAll("|", "\\|").replaceAll("\n", " ");
 
-function rows(schema: Schema, prefix = "", envelope = true): string[] {
+/** One table row per input property, nested ones included. Also the input tables of the documentation (`gen-docs.ts`). */
+export function rows(schema: Schema, prefix = "", envelope = true): string[] {
 	const lines: string[] = [];
 	for (const [name, property] of Object.entries(schema.properties ?? {})) {
 		if (envelope && name === "cmd") continue;

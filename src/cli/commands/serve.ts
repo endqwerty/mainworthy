@@ -4,6 +4,7 @@ import { adoptFormerInstall } from "../../server/kernel/former-name.ts";
 import { currentPolicy, policyName } from "../../server/policy/policy.ts";
 import { start, VERSION } from "../../server/start.ts";
 import { archiveRoutes } from "../../surfaces/archive.ts";
+import { docsRoutes } from "../../surfaces/docs/site.ts";
 import { mcpRoute } from "../../surfaces/mcp.ts";
 import { type Args, assertPositionals } from "../args.ts";
 import { printError } from "../errors.ts";
@@ -17,6 +18,7 @@ export function serveCommand(args: Args, ui: unknown): void {
 	const instance = start(config, (app, owner) => ({
 		ui,
 		routes: { "/mcp": mcpRoute(app), ...archiveRoutes(app, owner) },
+		open: docsRoutes(VERSION),
 	}));
 	const data = config.dataDir === defaultDataDir(process.env) ? "~/.mainworthy" : config.dataDir;
 	const owner = instance.owner.name.includes("@") ? instance.owner.name : `${instance.owner.name}@this-machine`;

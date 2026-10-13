@@ -1,7 +1,13 @@
 .git
 node_modules
 .mainworthy
-docs
+# Of the docs, only what the server carries at /docs.
+docs/*
+!docs/guide
+!docs/diagrams
+!docs/ui/screenshots
+docs/diagrams/src
+docs/diagrams/*.png
 test
 bench
 *.db

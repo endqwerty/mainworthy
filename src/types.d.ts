@@ -11,3 +11,12 @@ declare module "*.html" {
 	const page: unknown;
 	export default page;
 }
+declare module "*.svg" {
+	const page: unknown;
+	export default page;
+}
+// Imported with `type: "file"`: the value is where the file is, on disk or inside the single-file build.
+declare module "*.png" {
+	const path: string;
+	export default path;
+}
