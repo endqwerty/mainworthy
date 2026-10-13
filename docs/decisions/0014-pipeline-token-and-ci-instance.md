@@ -4,7 +4,7 @@
 - Status: proposed (built in the pull request that adds this file; the owner reviews)
 
 The owner asked whether Mainworthy can test itself yet: its own CI reporting to the instance on their home server,
-`https://casebook.owl-perch.ts.net`, a name that resolves only inside their tailnet. They expected that tokens with
+`https://casebook.example.ts.net`, a name that resolves only inside their tailnet. They expected that tokens with
 roles had to come first. This record says what was missing, what was built and what was left.
 
 ## Problem

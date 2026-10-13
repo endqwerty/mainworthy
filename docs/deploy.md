@@ -170,7 +170,8 @@ token against its first 8 characters and not against an address.
 ## On Coolify
 
 How the instance on the home server was set up. It takes about five minutes through Coolify's API or its
-dashboard.
+dashboard. This page writes the tailnet's name as `example.ts.net` and the node's tailnet address as
+`100.64.0.10`; the real ones are in the home lab's notes.
 
 1. **A deploy key.** The repository is private. Add a read-only deploy key to it on GitHub and give Coolify the
    private half (Security → Private Keys).
@@ -185,14 +186,14 @@ dashboard.
 4. **Storage:** the compose file declares the volume `casebook-data` at `/data`. Coolify creates it as a named
    volume. Bind it to a path you back up if you have one.
 5. **Network:** the `tailscale` service in `compose.coolify.yaml` is its own tailnet node, `casebook`, and serves
-   the app at `https://casebook.owl-perch.ts.net` (Tailscale issues the certificate; the first request can take
+   the app at `https://casebook.example.ts.net` (Tailscale issues the certificate; the first request can take
    a few seconds). Nothing is published on the LAN; port 7357 is bound to `127.0.0.1` on the host for debugging
    only. Anything on the tailnet can reach the name, and every request still needs a token. The node's identity
    lives in the `tailscale-state` volume: deleting it registers a new node.
    Once the node is up, disable its key expiry in the Tailscale admin console (Machines → the node), and delete
    `TS_AUTHKEY` from Coolify. For a server without Tailscale, use `compose.yaml` (publishes 7357) or give the
    service a domain in Coolify.
-6. **Deploy**, then check: `curl https://casebook.owl-perch.ts.net/healthz` answers `{"ok":true,"version":"…","commit":"…"}`, and `commit` is the commit Coolify
+6. **Deploy**, then check: `curl https://casebook.example.ts.net/healthz` answers `{"ok":true,"version":"…","commit":"…"}`, and `commit` is the commit Coolify
    built (it comes from `SOURCE_COMMIT`; `compose.coolify.yaml` needs no line for it: naming the variable there would
    make Coolify list it as one of yours, and an empty value of yours replaces the one it generates). Compare it with
    the tip of `main` (`git ls-remote origin refs/heads/main`) to see whether the instance is behind. Open the page
@@ -312,14 +313,14 @@ instance's history is one disk.
 ### An instance with no public address
 
 Not tried from a GitHub runner. Before 2026-10-13 this instance was reachable on its tailnet only
-(`https://casebook.owl-perch.ts.net`), and the `gate` job can join a tailnet for its own length.
+(`https://casebook.example.ts.net`), and the `gate` job can join a tailnet for its own length.
 
 1. **In the GitHub repository**, `MAINWORTHY_URL` is the tailnet address.
 2. **In the Tailscale admin console** (an agent cannot do these):
    1. *Access controls.* Add the tag: `"tagOwners": { "tag:ci": ["autogroup:admin"] }`. Then **replace** the rule
       that lets everything reach everything; a narrow rule added beside it restricts nothing. On 2026-10-12 the
       tailnet had exactly that one rule (read from a member node's packet filter). With `"hosts": { "mainworthy":
-      "100.75.70.124" }`:
+      "100.64.0.10" }`:
 
       ```
       "grants": [
@@ -368,7 +369,7 @@ node and variables. Each can be moved by hand, and none has to be:
 
 | Name | Where | To move it |
 | --- | --- | --- |
-| `casebook` (tailnet node, `https://casebook.owl-perch.ts.net`) | `TS_HOSTNAME` in `compose.coolify.yaml` | Set `TS_HOSTNAME=mainworthy` in Coolify and redeploy. The address changes; the node's identity does not. |
+| `casebook` (tailnet node, `https://casebook.example.ts.net`) | `TS_HOSTNAME` in `compose.coolify.yaml` | Set `TS_HOSTNAME=mainworthy` in Coolify and redeploy. The address changes; the node's identity does not. |
 | `casebook-data` (volume) | `compose.coolify.yaml` | Stop the app, copy the volume to a new one as above, change the name in the file. |
 | `CASEBOOK_OWNER_TOKEN`, `CASEBOOK_OWNER` | Coolify's variables | Add the variables under the new names, change the two lines in the file, delete the old ones. |
 | `casebook` (service) | `compose.coolify.yaml` | Rename it together with the proxy address in the `tailscale-serve` config. |
