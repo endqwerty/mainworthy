@@ -106,7 +106,7 @@ kbd {
 	--side-width: var(--side-open);
 	--side-freed: calc(var(--side-open) - var(--side-width));
 	display: grid;
-	grid-template-columns: var(--side-width) minmax(0, 1fr) minmax(420px, calc(38% + var(--side-freed)));
+	grid-template-columns: var(--side-width) minmax(0, 1fr) minmax(420px, calc(max(420px, 38%) + var(--side-freed)));
 	grid-template-rows: minmax(0, 1fr) 28px;
 	height: 100vh;
 }
@@ -1552,7 +1552,7 @@ button[aria-disabled="true"] {
 @media (max-width: 1100px) {
 	#app {
 		--side-open: 190px;
-		grid-template-columns: var(--side-width) minmax(260px, 1fr) minmax(350px, calc(42% + var(--side-freed)));
+		grid-template-columns: var(--side-width) minmax(260px, 1fr) minmax(350px, calc(max(350px, 42%) + var(--side-freed)));
 	}
 	.brand {
 		padding-inline: 10px;
@@ -1571,7 +1571,9 @@ button[aria-disabled="true"] {
 	}
 }
 @media (max-width: 760px) {
-	#app {
+	/* The list is above the case here, so there is no pane beside it for `z` to widen. */
+	#app,
+	#app.zoom {
 		--side-open: 120px;
 		grid-template-columns: var(--side-width) minmax(220px, 1fr);
 		grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) 28px;

@@ -112,10 +112,21 @@ test.skipIf(!browserAvailable)(
 						(selector) => document.querySelector(selector)?.getBoundingClientRect().width ?? Number.NaN,
 					),
 				);
+			// The key caps outside the sidebar that are shown, with the sidebar collapsed and with it open. Both are
+			// counted in one task of the page, so nothing a screen is still loading comes between the two.
 			const caps = () =>
-				page
-					.locator("#list kbd, #detail kbd, #bar kbd")
-					.evaluateAll((nodes) => nodes.filter((node) => node.getClientRects().length > 0).length);
+				page.evaluate(() => {
+					const app = document.getElementById("app");
+					const count = () =>
+						[...document.querySelectorAll("#list kbd, #detail kbd, #bar kbd")].filter(
+							(node) => node.getClientRects().length > 0,
+						).length;
+					const collapsed = count();
+					app?.removeAttribute("data-sidebar");
+					const open = count();
+					app?.setAttribute("data-sidebar", "collapsed");
+					return { collapsed, open };
+				});
 			// The sidebar and its mark keep their colours: the mark is drawn in the sidebar's colour on the ink.
 			expect(
 				await page.evaluate(() => {
@@ -126,10 +137,13 @@ test.skipIf(!browserAvailable)(
 					return colour("#side", "backgroundColor") === colour(".brand .logo", "color");
 				}),
 			).toBe(true);
-			// Three columns down to 760 px, and under that the list above the detail, beside the sidebar.
+			// Three columns down to 760 px, and under that the list above the detail, beside the sidebar. At 900 px
+			// the right pane of Queue, Runs and Changes is at its least width, which is more than its share of the
+			// window: what the sidebar gave up is added to that width, not to the share.
 			for (const [window, stacked] of [
 				[1440, false],
 				[1000, false],
+				[900, false],
 				[700, true],
 			] as const) {
 				await page.setViewportSize({ width: window, height: 900 });
@@ -144,7 +158,6 @@ test.skipIf(!browserAvailable)(
 					await page.waitForURL(`**/p/scratch/${screen}`);
 					await page.locator("#detail").waitFor();
 					const [side = 0, list = 0, detail = 0] = await widths();
-					const shown = await caps();
 					await page.keyboard.press("[");
 					const freed = side - 64;
 					const collapsed = await widths();
@@ -158,8 +171,8 @@ test.skipIf(!browserAvailable)(
 						Math.round(detail + freed),
 					]);
 					// A key cap outside the sidebar is as visible as it was.
-					expect([screen, window, await caps()]).toEqual([screen, window, shown]);
-					expect(shown).toBeGreaterThan(0);
+					const shown = await eventually(caps, (count) => count.open > 0);
+					expect([screen, window, shown.collapsed]).toEqual([screen, window, shown.open]);
 					await page.keyboard.press("[");
 					expect((await widths()).map(Math.round)).toEqual([side, list, detail].map(Math.round));
 				}
@@ -177,6 +190,15 @@ test.skipIf(!browserAvailable)(
 			expect(await widths()).toEqual([236, 340, 864]);
 			await page.keyboard.press("z");
 			expect((await widths())[1]).toBeGreaterThan(340);
+			// Where the list is above the case there is no pane beside it to widen: z leaves no empty column.
+			await page.setViewportSize({ width: 700, height: 900 });
+			await page.keyboard.press("z");
+			expect(await widths()).toEqual([120, 580, 580]);
+			await page.keyboard.press("[");
+			expect(await widths()).toEqual([64, 636, 636]);
+			await page.keyboard.press("[");
+			await page.keyboard.press("z");
+			await page.setViewportSize({ width: 1440, height: 900 });
 
 			// The button says what it does and which key does the same, and the choice stays in the browser.
 			const collapse = page.getByRole("button", { name: "Collapse sidebar", exact: true });
@@ -197,6 +219,34 @@ test.skipIf(!browserAvailable)(
 			await page.locator("#app").waitFor();
 			expect((await widths())[0]).toBe(236);
 			expect(await collapse.count()).toBe(1);
+
+			// A browser whose store refuses the choice (it is full, or switched off) still collapses and opens the
+			// sidebar for the page that is open, and loads with it open.
+			await page.addInitScript(() => {
+				const refused = (key: string): void => {
+					if (key === "mainworthy:sidebar") throw new DOMException("The store refused", "QuotaExceededError");
+				};
+				const { getItem, setItem, removeItem } = Storage.prototype;
+				Storage.prototype.getItem = function (key) {
+					refused(key);
+					return getItem.call(this, key);
+				};
+				Storage.prototype.setItem = function (key, value) {
+					refused(key);
+					setItem.call(this, key, value);
+				};
+				Storage.prototype.removeItem = function (key) {
+					refused(key);
+					removeItem.call(this, key);
+				};
+			});
+			await page.reload();
+			await page.locator("#app").waitFor();
+			expect((await widths())[0]).toBe(236);
+			await collapse.click();
+			expect((await widths())[0]).toBe(64);
+			await expand.click();
+			expect((await widths())[0]).toBe(236);
 			expect(browser.dialogs).toEqual([]);
 			expect(browser.errors).toEqual([]);
 		} finally {

@@ -326,19 +326,26 @@ describe("the phone layout", () => {
 		// Runs' right pane and of the whole of Settings. A screen that names the variable gets the collapsed
 		// sidebar, and the width of a narrower window, without saying anything about either.
 		const desktop = sheets.filter((file) => file !== "src/web/phone.css");
-		const rules = desktop.flatMap((file) =>
+		// A rule is about the app's columns when `#app` is what its selector ends in, whatever stands before it
+		// (`body #app:has(.pane)` as much as `#app.zoom`), and not when it is about something inside the app.
+		const subject = (selector: string): string =>
+			selector
+				.replace(/\([^()]*\)|\[[^\]]*\]/g, "")
+				.trim()
+				.split(/[\s>+~]+/)
+				.at(-1) ?? "";
+		const columns = desktop.flatMap((file) =>
 			[
 				...readFileSync(file, "utf8")
 					.replace(/\/\*[\s\S]*?\*\//g, "")
-					.matchAll(/(?<=^|[{}])\s*(#app[^{}]*?)\s*\{([^{}]*)\}/g),
-			].map((rule) => ({ file, selector: rule[1] ?? "", body: rule[2] ?? "" })),
-		);
-		const columns = rules.flatMap(({ file, selector, body }) =>
-			[...body.matchAll(/grid-template-columns:\s*([^;]+);/g)].map((found) => ({
-				file,
-				selector,
-				columns: found[1] ?? "",
-			})),
+					.matchAll(/(?<=^|[{}])\s*([^{}@]+?)\s*\{([^{}]*)\}/g),
+			].flatMap((rule) => {
+				const selectors = (rule[1] ?? "").replace(/\([^()]*\)/g, "()").split(",");
+				const found = /grid-template-columns:\s*([^;]+);/.exec(rule[2] ?? "");
+				return found && selectors.some((selector) => subject(selector).startsWith("#app"))
+					? [{ file, selector: (rule[1] ?? "").replace(/\s+/g, " "), columns: (found[1] ?? "").replace(/\s+/g, " ") }]
+					: [];
+			}),
 		);
 		// The five screens, at three widths of the window each, and the widened case pane.
 		expect(columns.length).toBeGreaterThanOrEqual(16);
