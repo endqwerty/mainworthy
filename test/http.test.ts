@@ -77,6 +77,7 @@ describe("reads on other cores through HTTP", () => {
 			],
 		});
 		await post(instance, "/api/p/scratch/propose", {
+			cmd: "edit-0001",
 			edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Checkout revised" } }],
 		});
 		await post(instance, "/api/p/scratch/report", {
@@ -100,6 +101,7 @@ describe("reads on other cores through HTTP", () => {
 			history: [{ ref: "C-1" }, { ref: "C-1", from: 1, to: 2 }],
 			timeline: [{ ref: "C-1" }],
 			check: [{}],
+			command: [{ cmd: "edit-0001" }, { cmd: "never-sent" }],
 		};
 		const reads = OP_LIST.filter((op) => op.effect === "read");
 		expect(Object.keys(inputs).sort()).toEqual(reads.map((op) => op.name).sort());

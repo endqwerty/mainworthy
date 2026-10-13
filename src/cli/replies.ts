@@ -124,5 +124,10 @@ export const REPLY_SCHEMAS: { [N in OpName]: z.ZodType<Api[N]["reply"]> } = {
 	history: record,
 	timeline: z.object({ ref: z.string(), head: z.number(), entries: rows, questions: z.array(Question) }),
 	check: z.object({ problems: z.array(z.object({ rule: z.string(), ref: z.string(), message: z.string() })), counts }),
+	command: z.discriminatedUnion("state", [
+		z.object({ state: z.literal("none") }),
+		z.object({ state: z.literal("begun"), op: z.string() }),
+		z.object({ state: z.literal("done"), op: z.string(), seq: z.number(), reply: z.unknown() }),
+	]),
 	admin: z.unknown(),
 };

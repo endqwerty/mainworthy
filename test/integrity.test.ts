@@ -10,7 +10,7 @@ import { recoverAccepted, sweep } from "../src/server/jobs.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { claimMint, decisionOf, Witness } from "../src/server/kernel/witness.ts";
 import { OPS } from "../src/server/ops/index.ts";
-import { invoke } from "../src/server/ops/registry.ts";
+import { invoke, invokeAsync } from "../src/server/ops/registry.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { closeRun, runById } from "../src/server/runs/runs.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
@@ -2716,6 +2716,88 @@ describe("what a caller is told", () => {
 			ok: false,
 			error: { code: "conflict" },
 		});
+	});
+
+	test("the caller of a command can ask what became of it, and nobody else is told", async () => {
+		const fate = (cmd: string, as = h.owner, project = "scratch") =>
+			invoke(h.app, OPS, { op: "command", project, input: { cmd }, actor: () => as });
+		expect(fate("never-sent-01")).toMatchObject({ ok: true, result: { state: "none" } });
+		const made = h.raw("propose", { cmd: "asked-about-01", edits: [{ op: "create", outline: "Once" }] });
+		if (!made.ok) throw new Error(made.error.message);
+		expect(fate("asked-about-01")).toMatchObject({
+			ok: true,
+			result: { state: "done", op: "propose", seq: made.seq, reply: made.result },
+		});
+		// A command that was refused wrote nothing, its id included.
+		const refused = { cmd: "refused-cmd-01", edits: [{ op: "edit", case: "C-99", base: 1, body: { title: "No" } }] };
+		expect(h.raw("propose", refused)).toMatchObject({ ok: false, error: { code: "not_found" } });
+		expect(fate("refused-cmd-01")).toMatchObject({ result: { state: "none" } });
+		// A reply that settled nothing is still the reply the command was given.
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Theirs" } }] });
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Mine" } }] });
+		const question = open("adopt");
+		const merge = (cmd: string, title: string, onEvidence = question.evidenceHash) =>
+			h.raw("decide", {
+				cmd,
+				q: question.q,
+				onEvidence,
+				answer: { is: "merge", body: emptyBody(title) },
+			});
+		const stale = merge("merge-stale-01", "Merged", "0000");
+		expect(stale).toMatchObject({ ok: true, result: [{ status: "conflict" }] });
+		expect(fate("merge-stale-01")).toMatchObject({
+			result: { state: "done", op: "decide", reply: stale.ok && stale.result },
+		});
+		// A merge names the version it made: what a page whose reply was lost needs to know.
+		const merged = merge("merge-made-01", "Merged");
+		expect(fate("merge-made-01")).toMatchObject({
+			result: {
+				state: "done",
+				reply: [{ status: "decided", effects: { status: "adopted", cases: [{ ref: "C-1", version: 3 }] } }],
+			},
+		});
+		expect(fate("merge-made-01")).toMatchObject({ result: { reply: merged.ok && merged.result } });
+		// Another caller is told nothing, in this project or another.
+		const member = h.actor("member", "human", ["read", "produce"]);
+		expect(fate("asked-about-01", member)).toMatchObject({ ok: true, result: { state: "none" } });
+		h.call("admin", { do: "project.create", key: "other" });
+		expect(fate("asked-about-01", h.owner, "other")).toMatchObject({ ok: true, result: { state: "none" } });
+		// A command on the instance is in no project. Its stored reply can stand for a secret and is never read here.
+		h.call("admin", { do: "token.create", actor: "ci-bot", kind: "ci", can: ["read"], cmd: "admin-command-09" });
+		expect(rows("SELECT project FROM commands WHERE id = 'admin-command-09'")).toEqual([{ project: 0 }]);
+		expect(fate("admin-command-09")).toMatchObject({ ok: true, result: { state: "none" } });
+		expect(fate("short")).toMatchObject({ ok: false, error: { code: "invalid" } });
+		// A caller who may not read is refused.
+		const writer = h.actor("writer", "ci", ["produce"]);
+		expect(fate("asked-about-01", writer)).toMatchObject({ ok: false, error: { code: "forbidden" } });
+	});
+
+	test("a report that is accepted and not yet applied is a command that has begun", async () => {
+		let onAccepted = (): void => {};
+		const accepted = new Promise<void>((resolve) => {
+			onAccepted = resolve;
+		});
+		const unsubscribe = h.app.subscribe((event) => {
+			if (event.op === "report") onAccepted();
+		});
+		const fate = () =>
+			invoke(h.app, OPS, { op: "command", project: "scratch", input: { cmd: "report-cmd-01" }, actor: () => h.owner });
+		const pending = invokeAsync(h.app, OPS, {
+			op: "report",
+			project: "scratch",
+			actor: () => h.owner,
+			input: { ...ciReport({ commit: "c0ffee01", n: 3 }), cmd: "report-cmd-01" },
+		});
+		try {
+			await accepted;
+			expect(fate()).toMatchObject({ ok: true, result: { state: "begun", op: "report" } });
+			const receipt = await pending;
+			if (!receipt.ok) throw new Error(receipt.error.message);
+			expect(fate()).toMatchObject({ ok: true, result: { state: "done", op: "report", reply: receipt.result } });
+		} finally {
+			unsubscribe();
+			await pending;
+		}
 	});
 
 	test("a retry is the same request however a client orders the keys of its objects", () => {

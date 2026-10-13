@@ -434,6 +434,21 @@ export type Problem = { rule: string; ref: string; message: string };
 
 export const TimelineInput = z.object({ ref: ref("The case."), limit });
 
+export const CommandInput = z.object({
+	cmd: z.string().min(8).max(64).describe("The idempotency key the command was sent under."),
+});
+export type CommandInput = z.infer<typeof CommandInput>;
+
+/**
+ * What became of a command. `none`: nothing is recorded under that id for the caller in this project; the command
+ * did not arrive, has not run yet, or was refused with an error. `begun`: accepted and not finished (a report
+ * accepted and not yet applied). `done`: it ran, and `reply` is the reply it was given, at sequence `seq`.
+ */
+export type CommandFate =
+	| { state: "none" }
+	| { state: "begun"; op: string }
+	| { state: "done"; op: string; seq: number; reply: unknown };
+
 // ── administer ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export const AdminInput = z.discriminatedUnion("do", [
