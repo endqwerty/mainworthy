@@ -534,7 +534,7 @@ describe("a pipeline's token", () => {
 		};
 		expect(await listed()).toEqual([
 			["policy", "rule", []],
-			["daniel", "human", [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"] }]],
+			["robin", "human", [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"] }]],
 			["github-actions", "ci", [{ project: "scratch", can: ["record"] }]],
 		]);
 
@@ -557,13 +557,13 @@ describe("a pipeline's token", () => {
 		expect((await listed())[2]).toEqual(["github-actions", "ci", [{ project: "other", can: ["record"] }]]);
 
 		// An admin does not change or drop their own grant: a slip there locks the instance.
-		expect((await admin(instance, { do: "grant.remove", actor: "daniel" })).body).toMatchObject(invalid);
-		expect((await admin(instance, { do: "grant.set", actor: "daniel", can: ["read"] })).body).toMatchObject(invalid);
+		expect((await admin(instance, { do: "grant.remove", actor: "robin" })).body).toMatchObject(invalid);
+		expect((await admin(instance, { do: "grant.set", actor: "robin", can: ["read"] })).body).toMatchObject(invalid);
 		// Nor does another admin change the owner's: it is written again on every start, and until then the
 		// instance could be left with nobody to administer it.
 		const second = await token(instance, { actor: "ops", kind: "human" });
-		expect((await admin(instance, { do: "grant.remove", actor: "daniel" }, second)).body).toMatchObject(invalid);
-		expect((await admin(instance, { do: "grant.set", actor: "daniel", can: ["read"] }, second)).body).toMatchObject(
+		expect((await admin(instance, { do: "grant.remove", actor: "robin" }, second)).body).toMatchObject(invalid);
+		expect((await admin(instance, { do: "grant.set", actor: "robin", can: ["read"] }, second)).body).toMatchObject(
 			invalid,
 		);
 		expect((await admin(instance, { do: "grant.set", actor: "ops", can: ["read"] })).body).toMatchObject({ ok: true });
@@ -600,7 +600,7 @@ describe("a pipeline's token", () => {
 		);
 		// The owner's own grant is not rewritten by a token made for the owner.
 		expect(
-			(await admin(instance, { do: "token.create", actor: "daniel", kind: "human", can: ["read"] })).body,
+			(await admin(instance, { do: "token.create", actor: "robin", kind: "human", can: ["read"] })).body,
 		).toMatchObject(invalid);
 		expect((await admin(instance, { do: "token.list" })).body).toMatchObject({ ok: true });
 	});

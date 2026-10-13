@@ -17,7 +17,7 @@ function jsonMap<T extends z.ZodType>(values: T) {
 }
 
 const headerFields = { format: Count, schema: Count, exportedAt: Count, tables: jsonMap(Count) };
-/** The second shape is what an export wrote while the project was called Casebook (decision 0014). */
+/** The second shape is what an export wrote while the project was called Casebook (decision 0015). */
 const Header = z.union([
 	z.strictObject({ mainworthy: z.literal("archive"), ...headerFields }),
 	z.strictObject({ casebook: z.literal("archive"), ...headerFields }),

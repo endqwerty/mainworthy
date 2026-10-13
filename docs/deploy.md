@@ -4,7 +4,7 @@ Mainworthy is one process and one SQLite file. A deployment is one container wit
 database container to run, upgrade or back up separately (decision 0010).
 
 **What is verified:** the image builds, starts, serves the UI and the API, keeps its data across a restart, and
-passes its health check on the development machine. It also runs on Daniel's Coolify (since 2026-10-12, the
+passes its health check on the development machine. It also runs on the owner's Coolify (since 2026-10-12, the
 steps under "On Coolify" as they were done): `/healthz` answers, a request with no token gets 401, and a browser
 signed in with the owner token over plain HTTP and saved a case through the page.
 **What is not:** the Tailscale sidecar in `compose.coolify.yaml` on that instance (`docker compose config` accepts the file once Coolify's own `exclude_from_hc` line is removed; the node has not joined yet), a restore from a backup on that instance, and an upgrade of an instance that holds data.
@@ -41,13 +41,14 @@ dashboard.
 2. **New resource → Docker Compose**, from this repository with that key: compose file `/compose.coolify.yaml`
    (the instance's own file, with the Tailscale sidecar; `/compose.yaml` is the plain one), the branch to follow
    (`main`).
-3. **Environment:** Coolify reads `MAINWORTHY_OWNER_TOKEN`, `MAINWORTHY_OWNER` and `TS_AUTHKEY` from the compose
-   file. Set the token to a long random string (`openssl rand -hex 32`) and the owner to your name, before the first start.
+3. **Environment:** Coolify reads `CASEBOOK_OWNER_TOKEN`, `CASEBOOK_OWNER` and `TS_AUTHKEY` from the compose
+   file (the first two keep the names this instance was created with; the file passes them to the container as
+   `MAINWORTHY_OWNER_TOKEN` and `MAINWORTHY_OWNER`). Set the token to a long random string (`openssl rand -hex 32`) and the owner to your name, before the first start.
    `TS_AUTHKEY` is a single-use Tailscale auth key (admin console → Settings → Keys), needed for the first
    deploy only; never use the sign-in link the sidecar prints, it rotates every minute.
-4. **Storage:** the compose file declares the volume `mainworthy-data` at `/data`. Coolify creates it as a named
+4. **Storage:** the compose file declares the volume `casebook-data` at `/data`. Coolify creates it as a named
    volume. Bind it to a path you back up if you have one.
-5. **Network:** the `tailscale` service in `compose.coolify.yaml` is its own tailnet node, `mainworthy`, and serves
+5. **Network:** the `tailscale` service in `compose.coolify.yaml` is its own tailnet node, `casebook`, and serves
    the app at `https://casebook.owl-perch.ts.net` (Tailscale issues the certificate; the first request can take
    a few seconds). Nothing is published on the LAN; port 7357 is bound to `127.0.0.1` on the host for debugging
    only. Anything on the tailnet can reach the name, and every request still needs a token. Mainworthy holds test
@@ -120,6 +121,38 @@ against the instance until it is redeployed (#90): delete the variable for that 
 The token is visible to the code of every pull request, because the `gate` job runs it. That code can report
 wrong results for this one project; it cannot do anything else with the token. Until backups exist (#59) the
 instance's history is one disk.
+
+## An instance made before the rename
+
+The project was called Casebook until 2026-10-13 (decision 0015). An instance made before then is carried over
+by the first start of the new build. What moves by itself:
+
+- `casebook.db` in the data directory becomes `mainworthy.db`. The server folds the write-ahead log into the
+  file first, so the rename carries every committed row. It refuses to start, and changes nothing, while another
+  process has the old file open. Outside a container, `~/.casebook` becomes `~/.mainworthy` in the same step.
+  The server logs one line for each move.
+- A browser's drafts, run notes and theme move to their new keys when the page loads.
+- An archive exported before the rename still imports.
+
+What you do once:
+
+- **Sign in again.** The session cookie has a new name. The owner token is unchanged.
+- **Rename the variables you set**: `CASEBOOK_*` becomes `MAINWORTHY_*`, in a pipeline (`MAINWORTHY_URL`,
+  `MAINWORTHY_TOKEN`, `MAINWORTHY_PROJECT`) and on a server. The old names are not read. `compose.coolify.yaml`
+  is the exception: it still reads `CASEBOOK_OWNER_TOKEN` and `CASEBOOK_OWNER` from Coolify.
+- **`compose.yaml`:** its volume is now `mainworthy-data`. If you started it before the rename, the data is in
+  `casebook-data`; copy it across before the first start, or the instance starts empty:
+  `docker run --rm -v <project>_casebook-data:/from -v <project>_mainworthy-data:/to alpine cp -a /from/. /to/`.
+
+The instance on Coolify keeps four names from before the rename, so that a redeploy finds the same data, tailnet
+node and variables. Each can be moved by hand, and none has to be:
+
+| Name | Where | To move it |
+| --- | --- | --- |
+| `casebook` (tailnet node, `https://casebook.owl-perch.ts.net`) | `TS_HOSTNAME` in `compose.coolify.yaml` | Set `TS_HOSTNAME=mainworthy` in Coolify and redeploy. The address changes; the node's identity does not. |
+| `casebook-data` (volume) | `compose.coolify.yaml` | Stop the app, copy the volume to a new one as above, change the name in the file. |
+| `CASEBOOK_OWNER_TOKEN`, `CASEBOOK_OWNER` | Coolify's variables | Add the variables under the new names, change the two lines in the file, delete the old ones. |
+| `casebook` (service) | `compose.coolify.yaml` | Rename it together with the proxy address in the `tailscale-serve` config. |
 
 ## Backup and restore
 

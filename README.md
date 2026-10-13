@@ -1,11 +1,13 @@
-# Mainworthy
+# <img src="src/web/icon.svg" alt="" width="32" height="32" align="top"> Mainworthy
 
 One place where manual, automated and agent testing land, and one queue of the decisions they leave for you.
+Then one answer for a change: is it worthy of `main`?
 
 A test case management system for software QA, built to fix what is annoying about TestRail, Qase, Jira
 (Xray, Zephyr) and Azure DevOps Test Plans. **Status: MVP (2026-10-12).** It runs, it is tested, and it is a
 preview: what is missing is listed in [decision 0012](docs/decisions/0012-mvp-scope-and-departures.md) and
 tracked in the GitHub milestone *Backlog to 1.0* (one page of it: issue #64).
+It was called Casebook until 2026-10-13 ([decision 0015](docs/decisions/0015-the-project-is-called-mainworthy.md)).
 
 ![The suite: cases on the left with their proof by person, pipeline and agent; the case as a document on the right](docs/ui/screenshots/suite-light.png)
 
@@ -20,7 +22,7 @@ The other screens, in both themes, are in [docs/ui/screenshots](docs/ui/screensh
 $ bun install
 $ bun run start
 Mainworthy 0.1.0 · local · data in ~/.mainworthy · http://127.0.0.1:7357
-project "scratch" · you are daniel@this-machine · policy: loose
+project "scratch" · you are robin@this-machine · policy: loose
 ```
 
 Open the URL. On your own machine you are signed in as the owner with no step.

@@ -56,8 +56,8 @@ export type Limits = { warn: number; fail: number };
  *
  * The limits were 115 and 120 s, the two minutes the check was promised to stay under (issue #77). By 2026-10-13
  * the tests took 120.1 to 122.3 s with nothing else running, on `main` and on every branch, so every check ended
- * in a failure that was not its change. Daniel raised them that day: the longer check is accepted for now and is
- * to be brought back down later (#77). They are his to raise, nobody else's: make the check faster (AGENTS.md).
+ * in a failure that was not its change. The owner raised them that day: the longer check is accepted for now and is
+ * to be brought back down later (#77). They are the owner's to raise, nobody else's: make the check faster (AGENTS.md).
  */
 export const LIMITS: Limits = { warn: 130, fail: 150 };
 

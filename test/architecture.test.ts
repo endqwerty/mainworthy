@@ -1,7 +1,7 @@
 // The rules of the module map, as failing tests (principles P9 and P10). An agent that takes the shortest path that
 // compiles, and reaches across a boundary to do it, fails here with a message that says which rule and why.
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { Glob } from "bun";
 import { needs } from "../src/core/kinds.ts";
 import { Db, declaredSql } from "../src/server/kernel/db.ts";
@@ -259,5 +259,46 @@ describe("the registry", () => {
 			"approve",
 		];
 		expect(OP_LIST.map((op) => op.name).filter((name) => forbidden.includes(name))).toEqual([]);
+	});
+});
+
+describe("the project's name", () => {
+	test("the former name appears only where an install or a deployment still carries it", () => {
+		// The project was called Casebook until 2026-10-13 (decision 0015). Each file here says why it still
+		// says so. A new mention anywhere else fails: use the current name, or add the file with its reason.
+		const allowed: Record<string, string> = {
+			".gitignore": "a checkout made before the rename keeps its `.casebook` directory",
+			"AGENTS.md": "says what the project was called, and releases the `.casebook` of an older checkout",
+			"CHANGELOG.md": "the entry for the rename",
+			"README.md": "says what the project was called",
+			"compose.coolify.yaml": "the names the existing deployment stored",
+			"docs/decisions/0014-pipeline-token-and-ci-instance.md": "the address of the existing deployment",
+			"docs/decisions/0015-the-project-is-called-mainworthy.md": "the decision",
+			"docs/deploy.md": "the existing deployment's names, and how to move them",
+			"src/cli/startup.test.ts": "starts the server on an install under the former name",
+			"src/server/kernel/former-name.test.ts": "the carry-over of a former install",
+			"src/server/kernel/former-name.ts": "the carry-over of a former install",
+			"src/server/kernel/migrations/0001_init.sql": "a shipped migration is never edited",
+			"src/server/transfer/transfer.test.ts": "an archive exported under the former name",
+			"src/server/transfer/transfer.ts": "an archive exported under the former name",
+			"src/surfaces/formats/junit.test.ts": "a report that names its case with the former property",
+			"src/surfaces/formats/junit.ts": "a report that names its case with the former property",
+			"src/web/lib/former-name.test.ts": "what a browser kept under the former name",
+			"src/web/lib/former-name.ts": "what a browser kept under the former name",
+			"t3.json": "releases the `.casebook` of an older checkout",
+			"test/architecture.test.ts": "this list",
+			"test/e2e/shell.test.ts": "what a browser kept under the former name",
+		};
+		const outside = new Set([".git", "node_modules", "dist", ".mainworthy", ".casebook", "test-results"]);
+		const binary = /\.(png|jpe?g|gif|ico|gz|db|db-wal|db-shm)$/;
+		const local = /^(\.env|bench\/results-.*\.json$)/;
+		const found = readdirSync(".", { withFileTypes: true })
+			.filter((entry) => !outside.has(entry.name))
+			.flatMap((entry) =>
+				entry.isDirectory() ? [...new Glob(`${entry.name}/**/*`).scanSync({ cwd: ".", dot: true })] : [entry.name],
+			)
+			.filter((file) => !binary.test(file) && !local.test(file))
+			.filter((file) => /casebook/i.test(readFileSync(file, "utf8")));
+		expect(found.sort()).toEqual(Object.keys(allowed).sort());
 	});
 });

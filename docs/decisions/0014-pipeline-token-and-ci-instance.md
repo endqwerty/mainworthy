@@ -1,10 +1,10 @@
 # 0014: A pipeline's token, and which Mainworthy this repository's CI reports to
 
 - Date: 2026-10-12
-- Status: proposed (built in the pull request that adds this file; Daniel reviews)
+- Status: proposed (built in the pull request that adds this file; the owner reviews)
 
-Daniel asked whether Mainworthy can test itself yet: its own CI reporting to the instance on his home server,
-`https://casebook.owl-perch.ts.net`, a name that resolves only inside his tailnet. He expected that tokens with
+The owner asked whether Mainworthy can test itself yet: its own CI reporting to the instance on their home server,
+`https://casebook.owl-perch.ts.net`, a name that resolves only inside their tailnet. They expected that tokens with
 roles had to come first. This record says what was missing, what was built and what was left.
 
 ## Problem
@@ -19,7 +19,7 @@ that lists capabilities; a token names an actor. Three things were wrong for a t
    `propose` by such a token returned `status: adopted` under both presets.
 2. **An admin could not see or take away a grant.** `actor.list` showed the grants on every project and hid a
    grant on one. The only way to change a grant was a side effect: `token.create` for an actor that existed
-   replaced its grant, so `mainworthy token new --human daniel --can read` cut the owner down to reading until the
+   replaced its grant, so `mainworthy token new --human robin --can read` cut the owner down to reading until the
    next restart.
 3. **CI could not reach the instance, and nothing said what happens when it cannot.** The workflow started a
    throwaway Mainworthy in a shell step when `MAINWORTHY_URL` was unset. With it set, a home server that is down
@@ -160,12 +160,12 @@ shapes to tell apart.
 
 ## Not built here
 
-- The Tailscale side, which needs Daniel's admin console: the tag, the federated identity and the access rule.
+- The Tailscale side, which needs the owner's admin console: the tag, the federated identity and the access rule.
   `docs/deploy.md` has the steps. Until then the job runs as before, on its own Mainworthy.
 - Sign-in hardening before the instance leaves the tailnet (#88), the instance redeploying itself (#90), agents
   on tokens of their own (#91), and switching self-testing on (#92).
 
 ## Answer to the question
 
-Yes, for his own use on the tailnet, once this is merged and deployed and the three Tailscale steps are done.
+Yes, for the owner's own use on the tailnet, once this is merged and deployed and the three Tailscale steps are done.
 Nothing else in the backlog stands between this repository and reporting to its own instance.

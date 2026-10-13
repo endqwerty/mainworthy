@@ -1,4 +1,4 @@
-// The project was called Casebook until 2026-10-13 (decision 0014). An install made before then keeps its data in
+// The project was called Casebook until 2026-10-13 (decision 0015). An install made before then keeps its data in
 // `~/.casebook/casebook.db`. This module moves that data to where this build looks, once, when the server starts.
 import { existsSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";

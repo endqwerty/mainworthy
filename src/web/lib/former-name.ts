@@ -1,4 +1,4 @@
-// The project was called Casebook until 2026-10-13 (decision 0014). A browser that used it then holds drafts,
+// The project was called Casebook until 2026-10-13 (decision 0015). A browser that used it then holds drafts,
 // run notes and the chosen theme under keys that start with `casebook:`. This module moves them to the new
 // prefix once, before anything reads them: `main.tsx` imports it first.
 const FORMER = "casebook:";

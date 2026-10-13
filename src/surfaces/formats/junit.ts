@@ -536,7 +536,7 @@ export function parseJUnit(
 					)
 				: {};
 		let element: Element = { kind: "other", tag };
-		// `casebook` is the property's name from before the project was renamed (decision 0014).
+		// `casebook` is the property's name from before the project was renamed (decision 0015).
 		if (name === "property" && propertyCase !== null && (attrs.name === "mainworthy" || attrs.name === "casebook")) {
 			const claim = annotation(attrs.value ?? "", true);
 			if (claim !== undefined) propertyCase.result.annotation = claim;
