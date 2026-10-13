@@ -4,7 +4,7 @@
  * so the numbers are the server's own. `run.ts` uses this for its under-load rows.
  *
  * usage: bun bench/external.ts <dataset directory> [seconds=20] [reader threads=default]
- * The dataset directory is one `bun bench/run.ts` leaves under `.casebook/bench/` (it holds `casebook.db`).
+ * The dataset directory is one `bun bench/run.ts` leaves under `.mainworthy/bench/` (it holds `mainworthy.db`).
  */
 import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -23,7 +23,7 @@ export type UnderLoad = {
 
 const Reply = z.object({ ok: z.boolean(), result: z.unknown().optional(), error: z.unknown().optional() });
 
-/** One window of load against a fresh copy of the dataset, served by `casebook serve` in its own process. */
+/** One window of load against a fresh copy of the dataset, served by `mainworthy serve` in its own process. */
 export async function underLoad(options: {
 	dataset: string;
 	seconds: number;
@@ -31,16 +31,16 @@ export async function underLoad(options: {
 	readers: number | null;
 }): Promise<UnderLoad> {
 	const seconds = options.seconds;
-	const dir = mkdtempSync(join(resolve(".casebook", "bench"), "external-"));
-	cpSync(join(options.dataset, "casebook.db"), join(dir, "casebook.db"));
+	const dir = mkdtempSync(join(resolve(".mainworthy", "bench"), "external-"));
+	cpSync(join(options.dataset, "mainworthy.db"), join(dir, "mainworthy.db"));
 	const port = 7430 + Math.floor(Math.random() * 20);
 	const server = Bun.spawn([process.execPath, "src/cli/main.ts", "serve"], {
 		env: {
 			...process.env,
-			CASEBOOK_DATA: dir,
-			CASEBOOK_PORT: String(port),
-			CASEBOOK_MODE: "local",
-			...(options.readers === null ? {} : { CASEBOOK_READERS: String(options.readers) }),
+			MAINWORTHY_DATA: dir,
+			MAINWORTHY_PORT: String(port),
+			MAINWORTHY_MODE: "local",
+			...(options.readers === null ? {} : { MAINWORTHY_READERS: String(options.readers) }),
 		},
 		stdout: "ignore",
 		stderr: "inherit",

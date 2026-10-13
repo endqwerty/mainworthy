@@ -15,7 +15,7 @@ product and to fix the DX the way Linear, CircleCI and bun fixed theirs.
 
 Three call sites drive the design (full text in `design.md` §5):
 
-- **CI:** `casebook report results.xml --gate pr` after any runner. Context is read
+- **CI:** `mainworthy report results.xml --gate pr` after any runner. Context is read
   from the environment; 10k results ack in about a second or two; re-running is a
   no-op; unknown tests are visible, not lost; the output is a digest and a gate
   verdict, and the same text becomes the PR check.
@@ -33,9 +33,9 @@ Three call sites drive the design (full text in `design.md` §5):
   the claim hash; coverage, flaky, gates and impact are folds over `(claim x
   evidence)`. Proof carries across a merge automatically (same hash).
 - **Tree + log:** definitions are canonical plain-text documents in a git-shaped
-  commit log owned by Casebook (heads and a temporal table are derived in-txn);
+  commit log owned by Mainworthy (heads and a temporal table are derived in-txn);
   evidence is an append-only log, never a file. Export is the storage format.
-- **Decision on the seed's open question:** the tree lives in Casebook's store, git
+- **Decision on the seed's open question:** the tree lives in Mainworthy's store, git
   is a projection and a mount (`Owner` = `native | repo | upstream`); one owner per
   document. Seed lens bends in three places and I say where (design §1).
 - **One operation surface:** 14 ops, 11 exposed by default to agents; `commit` and
@@ -69,7 +69,7 @@ Three call sites drive the design (full text in `design.md` §5):
 Judged on interface depth (small surface hiding much), ownership clarity and
 whether the dominant access patterns are structural.
 
-1. **Git is canonical (the pure seed).** Tree lives in the code repo; Casebook is an index and evidence service over it. Deep on authoring-with-code, shallow elsewhere: every write needs git plumbing, enforcement is the host's, readers and approvers need git access, the "base hash on write" contract (0004) has to be rebuilt as commit preconditions, no home for a Local project with no remote. Rejected as the *canonical* store; kept as a mount (`Owner.repo`) and as the export format.
+1. **Git is canonical (the pure seed).** Tree lives in the code repo; Mainworthy is an index and evidence service over it. Deep on authoring-with-code, shallow elsewhere: every write needs git plumbing, enforcement is the host's, readers and approvers need git access, the "base hash on write" contract (0004) has to be rebuilt as commit preconditions, no home for a Local project with no remote. Rejected as the *canonical* store; kept as a mount (`Owner.repo`) and as the export format.
 2. **Versioned rows in a relational model (incumbent shape, nicer UI).** `case`, `case_version`, `run`, `result` tables with joins. Simple and familiar. But "add an index/cache" becomes the answer to every access pattern, diffs and exports are second-class, history is possible to gate, and a case has no natural content hash, so proof cannot carry across a merge and agents cannot get conditional reads for free. Rejected: the structure does not make agent tokens or portability cheap.
 3. **Event-sourced everything (docs, results, decisions in one log).** One truth, beautiful replay. But results at 10k per push make the log a poor source for "read one case" and mix two lifecycles (definitions are edited and diffed; results are never read as documents). Chosen split instead: commit log for definitions, append-only evidence for results, shared only by hash.
 4. **Separate Manual / Automation / Agent modules with a reporting layer on top.** Each module is simple, the surface is large, and the whole is the incumbents' problem again: three shapes to reconcile and a "combined" report that is a join of guesses. Rejected by P1.
@@ -83,11 +83,11 @@ Questions for Daniel:
 2. Should an **agent's pass count as proof** in a gate by default, or only when a gate document opts in (my default is opt-in per gate)? Related: a failing required case is `fail` and missing proof is `hold`; is that the verdict split you want (open question 12)?
 3. Is **"tests next to the code" a launch need**, or can `repo` mounts wait for the second slice? If it is a launch need, which wins: slimmer authoring UI or the mount?
 4. **Requirements:** are native `req` documents with optional external stubs acceptable as the answer to open question 16, or must the tracker be strictly the only source?
-5. **CI context for evidence binding:** a CI result is stamped with the case claim at the tree ref the report names (default `main` head at ingest). For a PR that also edits cases, should `casebook report` default to the PR's proposal ref when one is linked? (I lean yes; it needs the PR-to-proposal link.)
-6. The product name and `casebook` as the binary name are placeholders (question 7); the CLI is user-facing, so naming is less cheap here than in other candidates.
+5. **CI context for evidence binding:** a CI result is stamped with the case claim at the tree ref the report names (default `main` head at ingest). For a PR that also edits cases, should `mainworthy report` default to the PR's proposal ref when one is linked? (I lean yes; it needs the PR-to-proposal link.)
+6. The product name and `mainworthy` as the binary name are placeholders (question 7); the CLI is user-facing, so naming is less cheap here than in other candidates.
 
 Risks (ranked):
-1. **Hashing semantics are load-bearing.** If the claim/meta classification, canonical printing, or shared-step re-derivation is wrong, either proof is silently wrong (integrity) or gates are annoyingly red. Mitigation: property tests (`print . parse = id`, `claim` stable under meta edits), a corpus from imported suites, and the `casebook check` explanation of why a case lost standing.
+1. **Hashing semantics are load-bearing.** If the claim/meta classification, canonical printing, or shared-step re-derivation is wrong, either proof is silently wrong (integrity) or gates are annoyingly red. Mitigation: property tests (`print . parse = id`, `claim` stable under meta edits), a corpus from imported suites, and the `mainworthy check` explanation of why a case lost standing.
 2. **Impact sparsity** (decision 0006's own risk): `Watch` globs and requirement trailers may be too sparse in real projects, so `impact` degenerates to search. Mitigation: test-file adjacency and `Binding` keys give a floor; measure coverage of the impact index on imported suites before relying on the token claim.
 3. **Two-representation drift** (store vs git projection). Mitigation: the round-trip test is part of the check command from slice 1.
 4. **Scope of slice 1** is large for "the smallest non-bad product" (UI + MCP + CI + import). If it must shrink, cut in this order: TestRail importer, GitHub status job (keep the CLI exit code), proposals UI (keep `review: none`), `trace` UI (keep the op).

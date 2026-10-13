@@ -890,7 +890,7 @@ export function raiseFailure(
 	// apply and who may give them. It is read from the slots, not from the arriving report, so a report that
 	// touches no slot neither ends a dispute nor an answer. `fails-on-base` is shown and nothing more: every
 	// failing test of this report also fails, with this cause, on the commit the change started from, as
-	// Casebook had it when the report arrived. No rule acts on it; a person reads it and decides.
+	// Mainworthy had it when the report arrived. No rule acts on it; a person reads it and decides.
 	const hints: string[] = [];
 	if (group.disputed || inDispute(ctx.db, ctx.project.id, group.signature.id, group.scope)) hints.push("hint:disputed");
 	const shown = [...hints];

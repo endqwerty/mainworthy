@@ -1,4 +1,4 @@
-# How Casebook fits together
+# How Mainworthy fits together
 
 A guide to the code as built in the MVP. The product design it implements is
 [product-design.md](product-design.md); where the code departs from it is
@@ -12,7 +12,7 @@ Explorable diagrams (open in a browser; they are self-contained HTML):
 
 ## The idea in four sentences
 
-Casebook keeps three kinds of record: what the software should do (cases, with versions), what was observed
+Mainworthy keeps three kinds of record: what the software should do (cases, with versions), what was observed
 (results from people, pipelines and agents, in one shape), and what people decided about it. Producers append
 evidence; detectors turn evidence into questions, one per cause; a decision answers a question and is the only
 thing that can change what is "current". Every surface (web, command line, API, agent tools) calls the same
@@ -21,7 +21,7 @@ sixteen operations. The whole instance is one process and one SQLite file.
 ## One process
 
 ```
- browser (React)     casebook CLI      CI pipeline       agent (MCP)
+ browser (React)     mainworthy CLI      CI pipeline       agent (MCP)
        │                  │                 │                 │
        └──── HTTP: POST /api/p/<project>/<op> ────────────────┘   + /mcp, /api/…/events (change stream)
                                  │
@@ -106,7 +106,7 @@ grant changes; a new token for an actor that exists changes nothing it may do.
 
 ## What happens when a pipeline reports (the red build)
 
-1. `casebook report results.xml` parses JUnit XML into normalised results, reads the commit, branch, pull
+1. `mainworthy report results.xml` parses JUnit XML into normalised results, reads the commit, branch, pull
    request and attempt from the CI environment, and calls `report`.
 2. **Accept**, first transaction: the results are stored under a key made from their content, so the same
    report twice is a no-op. Every run this commit matters to is marked as waiting. From this commit on, the gate
@@ -128,7 +128,7 @@ grant changes; a new token for an actor that exists changes nothing it may do.
    nothing was proven at all).
 7. A person presses one key in the queue. The decision changes how the run counts that cause and the verdict is
    recomputed in the same transaction. If the answer excuses the failure (flaky, infrastructure, already failing
-   on the base), `casebook gate` now exits 0 and the pipeline did not run again. If the answer is that the
+   on the base), `mainworthy gate` now exits 0 and the pipeline did not run again. If the answer is that the
    failure is real (a defect, a wrong test, an expectation that changed), the verdict is `failed` and the exit
    code is 1: the commit needs a fix, and the decision says why.
 
@@ -174,7 +174,7 @@ sentence beside each come from three maps in `src/core/kinds.ts` (`ANSWER_KEYS`,
 `ANSWER_HELP`).
 
 What the device keeps (drafts, the notes typed for a run) is kept per person. Every request the page makes names
-the person it was loaded as (`X-Casebook-As`), and the server refuses it when the session has become somebody
+the person it was loaded as (`X-Mainworthy-As`), and the server refuses it when the session has become somebody
 else's, in another tab for instance: text one person typed is never recorded under another's name. A caller that
 sends no name (a script, the CLI, an agent) is whoever its token says.
 
@@ -201,6 +201,6 @@ when a hot path gets slow.
 | `src/surfaces/` | HTTP, MCP, the JUnit reader, CI environment detection, archive routes |
 | `src/cli/` | the command line, generated from the registry plus a few adapters |
 | `src/web/` | the web UI |
-| `skill/casebook/` | the skill that teaches an agent the case model |
+| `skill/mainworthy/` | the skill that teaches an agent the case model |
 | `test/` | behaviour tests by area, the architecture rules, the budgets, the browser tests |
 | `bench/` | the benchmark on 100,000 cases and 1,000,000 results |

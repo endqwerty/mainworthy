@@ -33,11 +33,11 @@ func entry(args []string) error {
 	if len(args) != 0 && args[0] == "driver-probe" {
 		return driverProbe(ctx, args[1:])
 	}
-	mode := os.Getenv("CASEBOOK_MODE")
+	mode := os.Getenv("MAINWORTHY_MODE")
 	if mode == "" {
 		mode = "embedded"
 	}
-	path := os.Getenv("CASEBOOK_DB")
+	path := os.Getenv("MAINWORTHY_DB")
 	if path == "" {
 		path = "work.db"
 	}

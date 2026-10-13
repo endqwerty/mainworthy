@@ -44,7 +44,7 @@ export const policyCommand: AdapterCommand = {
 			else printPolicy(policy);
 			return 0;
 		}
-		if (action !== "use") throw new CliError("invalid", `usage: casebook ${policyCommand.usage}`);
+		if (action !== "use") throw new CliError("invalid", `usage: mainworthy ${policyCommand.usage}`);
 		assertPositionals(args, 2, 2, policyCommand.usage);
 		const preset = args.positionals[1];
 		if (!PRESET_NAMES.some((name) => name === preset))

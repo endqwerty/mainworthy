@@ -76,4 +76,4 @@ No registry duplication, no missing workload and no false benchmark result found
 - My embedded challenge overlapped part of my server benchmark's W1–W8, and other candidates may have been running, so the server timings above may be inflated.
 - `cb_go` is left in its post-benchmark and post-challenge state. `run.sh` resets it; I never connected to `cb_seed`.
 - I deleted my large scratch database copies and the rebuilt binary. The logs, JSON outputs and `challenge.py` remain in `go/verification-scratch`.
-- No source, script, report or result file was changed, and nothing was written to the Casebook repository.
+- No source, script, report or result file was changed, and nothing was written to the Mainworthy repository.

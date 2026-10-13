@@ -153,7 +153,7 @@ what is open.
   matrix as audit evidence.
 - **Jobs:** J9, J10, J14. **Frequency (guess):** per release; the gate is
   also read by CI many times a day.
-- **Open:** whether requirements live in an external tracker or in Casebook
+- **Open:** whether requirements live in an external tracker or in Mainworthy
   (question 16) and how deployments are reported (question 17).
 
 ### F8. Agent authors or changes, a person reviews
@@ -250,12 +250,12 @@ what is open.
   reaches a test environment, or on a schedule.
 - **Steps:** receive a charter (the relevant cases and requirements, known
   flaky or failing areas, earlier findings) → try to break the software with
-  its own tools, outside Casebook → record results against cases in one
+  its own tools, outside Mainworthy → record results against cases in one
   batch and record new findings with reproduction steps → a person triages:
   link a defect, or turn a finding into a regression case.
 - **Done when:** findings are reproducible and linked, and new regression
   cases are proposed.
-- **Boundary:** Casebook supplies context and records outcomes. It does not
+- **Boundary:** Mainworthy supplies context and records outcomes. It does not
   run the software or provide the agent's browser or API tooling (non-goal).
 - **Jobs:** A6, A1, A3. **Frequency (guess):** unknown; depends on how cheap
   the context and the recording are.

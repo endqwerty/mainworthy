@@ -5,7 +5,7 @@
 
 ## Scope: software QA
 
-Casebook manages tests for software: manual and automated cases, plans, runs,
+Mainworthy manages tests for software: manual and automated cases, plans, runs,
 results, CI/CD integration and traceability to requirements, issues and code.
 Hardware, laboratory, manufacturing and other forms of quality assurance are
 out of scope. Research, competitors and features are judged against software

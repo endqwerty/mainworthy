@@ -1,4 +1,4 @@
-# Casebook: rules for coding agents
+# Mainworthy: rules for coding agents
 
 A test case management system. Owner: Daniel (`endqwerty`). Personal project,
 but Daniel reviews every change on GitHub before it lands. Your global
@@ -29,9 +29,9 @@ home lab's notes say where and how to redeploy). No blocking defect is known: is
   tests alone, printed as they run. One file: `bun test test/suite.test.ts`. One
   shard, as CI runs it: `bun run test --only=parallel --shard=2/5`; the quiet
   tests: `bun run test --only=quiet`. CI (`.github/workflows/check.yml`) runs five shards and the quiet
-  tests on a runner each, then one `gate` job reports every shard to Casebook and
+  tests on a runner each, then one `gate` job reports every shard to Mainworthy and
   its gate is the result (the deployed instance when the repository names one and
-  the job can use it, else a Casebook the job starts: `scripts/ci-instance.ts`,
+  the job can use it, else a Mainworthy the job starts: `scripts/ci-instance.ts`,
   decision 0014; switching it on is issue #92); a shard with no report fails it, and so does a test
   file in which every test was skipped. On GitHub the workflow takes about four
   minutes (2026-10-12, two runs: 4 min 24 s and 3 min 49 s; it was about 12 in one job).
@@ -70,7 +70,7 @@ home lab's notes say where and how to redeploy). No blocking defect is known: is
   or a shared path. One that fails only beside others shares something: fix that,
   do not retry it. Only a test that compares a measured time with a limit goes in
   `QUIET` (`scripts/check-plan.ts`), where it runs after the others.
-- **Worktree release:** `rm -rf node_modules .casebook test-results` (also the
+- **Worktree release:** `rm -rf node_modules .mainworthy test-results` (also the
   `release worktree` script in `t3.json`, which runs when a thread settles).
 
 ## Working rules

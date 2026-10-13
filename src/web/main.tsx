@@ -6,7 +6,7 @@ import { initializeDraftOwners } from "./lib/ids.ts";
 import "./base.css";
 
 const root = document.getElementById("root");
-if (!root) throw new Error("The Casebook HTML must contain #root");
+if (!root) throw new Error("The Mainworthy HTML must contain #root");
 await initializeDraftOwners();
 createRoot(root).render(
 	<QueryClientProvider client={queryClient}>

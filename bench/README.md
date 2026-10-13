@@ -1,4 +1,4 @@
-# Casebook budgets
+# Mainworthy budgets
 
 Run `bun bench/run.ts --quick` for 5k cases / 2k tests / 50k results.
 Run `bun bench/run.ts` for 100k cases / 20k tests / 1M results / 50k open questions.
@@ -21,7 +21,7 @@ Numeric misses or correctness errors exit nonzero, including any repeat miss.
 | HTTP reads while reports and saves arrive (server in its own process) | p95 < 50 pooled |
 | Small check: fresh ingest of 5,000 results | every call < 1,000 |
 
-The seeded baseline lives on disk in `.casebook/bench`, with production WAL and
+The seeded baseline lives on disk in `.mainworthy/bench`, with production WAL and
 pragmas. Memory filesystems are refused. Parameters, generator hash and migration
 hash must match for reuse. Every run clones the closed baseline and removes its
 writes afterward. About 500 folders have two levels. Cases have 3–9 steps, about

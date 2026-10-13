@@ -8,7 +8,7 @@
 		{ "name": "bench (quick)", "command": "bun bench/run.ts --quick", "icon": "debug" },
 		{
 			"name": "release worktree",
-			"command": "rm -rf node_modules .casebook test-results",
+			"command": "rm -rf node_modules .mainworthy test-results",
 			"icon": "configure",
 			"runOnSettle": true
 		}

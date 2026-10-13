@@ -10,7 +10,7 @@ const env:Record<string,string>={};
 for(const [key,value]of Object.entries(process.env))if(value!==undefined)env[key]=value;
 const transport=new StdioClientTransport({command:'bun',args:['dist/server.js','mcp'],env:{...env,MODE:'embedded',DB_PATH:'work.db'},stderr:'pipe'});
 let stderr='';transport.stderr?.on('data',chunk=>{stderr+=String(chunk);});
-const client=new Client({name:'casebook-registry-proof',version:'0.1.0'});
+const client=new Client({name:'mainworthy-registry-proof',version:'0.1.0'});
 try{
   await client.connect(transport);
   const tools=await client.listTools();

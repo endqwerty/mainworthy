@@ -17,7 +17,7 @@ function jsonMap<T extends z.ZodType>(values: T) {
 }
 
 const Header = z.strictObject({
-	casebook: z.literal("archive"),
+	mainworthy: z.literal("archive"),
 	format: Count,
 	schema: Count,
 	exportedAt: Count,
@@ -147,7 +147,7 @@ export function exportArchive(db: Db, write: (chunk: string) => void, options: {
 			bytes += size;
 			if (bytes >= CHUNK_BYTES) flush();
 		};
-		append(`${JSON.stringify({ casebook: "archive", format: 1, schema: schemaVersion(db), exportedAt, tables })}\n`);
+		append(`${JSON.stringify({ mainworthy: "archive", format: 1, schema: schemaVersion(db), exportedAt, tables })}\n`);
 		for (const table of metadata) {
 			const fields = table.columns.flatMap((column) => [literal(column), identifier(column)]);
 			const order = (table.primary.length > 0 ? table.primary : table.columns).map(identifier).join(", ");
@@ -201,7 +201,7 @@ function readHeader(line: string, metadata: readonly Table[]): Header {
 	if (header.format !== 1) throw invalid(`unsupported archive format ${header.format}; this build supports format 1`);
 	if (header.schema > SCHEMA_VERSION) {
 		throw invalid(
-			`archive schema ${header.schema} is newer than this build's schema ${SCHEMA_VERSION}; upgrade Casebook`,
+			`archive schema ${header.schema} is newer than this build's schema ${SCHEMA_VERSION}; upgrade Mainworthy`,
 		);
 	}
 	if (header.schema !== SCHEMA_VERSION) {

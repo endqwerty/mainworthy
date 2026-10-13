@@ -69,7 +69,7 @@ difference in this table: the three candidates used different clients, pool size
 | Logic shared with the browser | 5 | 2 | 3 |
 | Agents write the code correctly | 3 | 3 | 4 |
 | Deploy and operate | 4 | 5 | 4 |
-| Decidedly better for Casebook | 5 | 3 | 3 |
+| Decidedly better for Mainworthy | 5 | 3 | 3 |
 
 In its words: "The decisive result is that backend budgets do not force a second language, while the specified
 keyboard UI requires identical algorithms on both sides." It would change the choice for a repeatable
@@ -162,7 +162,7 @@ This amends decision 0002, which said the Server layer runs on a server database
 
 What it costs: the domain code will have to become asynchronous to add PostgreSQL (the compiler finds every
 site; it is mechanical, and it touches most files), and a self-hoster who is required to use PostgreSQL cannot
-adopt Casebook yet. Both are accepted.
+adopt Mainworthy yet. Both are accepted.
 
 **PostgreSQL is built when one of these is true** (#57): one organisation needs more than one instance
 (availability, or more read throughput than one process gives); an adopter that matters requires it; or the

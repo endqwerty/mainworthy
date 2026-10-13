@@ -25,7 +25,7 @@ export function schemaVersion(db: Db): number {
 export function migrate(db: Db, path: string): { from: number; to: number; backup: string | null } {
 	const from = schemaVersion(db);
 	if (from > SCHEMA_VERSION) {
-		throw new Error(`database schema ${from} is newer than this build (${SCHEMA_VERSION}); upgrade Casebook`);
+		throw new Error(`database schema ${from} is newer than this build (${SCHEMA_VERSION}); upgrade Mainworthy`);
 	}
 	let backup: string | null = null;
 	const pending = MIGRATIONS.filter((m) => m.version > from);

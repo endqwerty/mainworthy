@@ -3,9 +3,9 @@
 Revision: `4a4f1fa6d5e730ca03dccaa389d16e2991977423`, against parent `9fef1c16c4a20b33f1ba2fbea1c04d7e6139f815`.
 Reviewer: Codex, GPT-6 Astra. No other agents started.
 
-The original B1 reproductions are fixed. One blocker remains in the explicitly requested testcase-without-file case. It has two consequences from the same cause: accepting an entirely skipped file and refusing a file that has a passing test. This finding uses synthesized JUnit accepted by Casebook's parser. The actual Bun 1.4.3 reports generated during this review include `file` on every testcase and pass all requested checks.
+The original B1 reproductions are fixed. One blocker remains in the explicitly requested testcase-without-file case. It has two consequences from the same cause: accepting an entirely skipped file and refusing a file that has a passing test. This finding uses synthesized JUnit accepted by Mainworthy's parser. The actual Bun 1.4.3 reports generated during this review include `file` on every testcase and pass all requested checks.
 
-All work ran locally in `/home/endqwerty/.cache/casebook-arena/verify/dx-r2/tree`, exported with `git archive 4a4f1fa`. Scratch files, fixtures, logs, and this report are under `dx-r2`. The repository was read-only. `bun install --frozen-lockfile` succeeded with Bun 1.4.3. No worktree release command ran.
+All work ran locally in `/home/endqwerty/.cache/mainworthy-arena/verify/dx-r2/tree`, exported with `git archive 4a4f1fa`. Scratch files, fixtures, logs, and this report are under `dx-r2`. The repository was read-only. `bun install --frozen-lockfile` succeeded with Bun 1.4.3. No worktree release command ran.
 
 The safety fact is that a report cannot make the CI gate succeed when every test of a reported file was skipped, while a file containing passed and skipped tests remains accepted. Before mutations, the checks were recorded in this report: the prior probes, parser edge cases, both real reports, targeted tests, static checks, and removing the new counting block.
 
@@ -16,7 +16,7 @@ Blocking under the requested missing-file case and definition of a blocker. Loca
 Reproduce from `dx-r2`:
 
 ```
-TMPDIR=/home/endqwerty/.cache/casebook-arena/verify/dx-r2/tmp bun neighbour-probes.ts
+TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r2/tmp bun neighbour-probes.ts
 ```
 
 Fixture `neighbour-fixtures/missing-testcase-file/test-results/tests-1.xml` contains:
@@ -32,14 +32,14 @@ Fixture `neighbour-fixtures/missing-testcase-file/test-results/tests-1.xml` cont
 </testsuites>
 ```
 
-Both test files exist in the fixture. The outcome JSON is `{"exit":0,"seconds":1}`. The unchanged gate runs against a fresh local Casebook. Deciding evidence in `neighbour-missing-testcase-file.log` and `neighbour-summary.log`:
+Both test files exist in the fixture. The outcome JSON is `{"exit":0,"seconds":1}`. The unchanged gate runs against a fresh local Mainworthy. Deciding evidence in `neighbour-missing-testcase-file.log` and `neighbour-summary.log`:
 
-- Casebook accepts `2 results`, including `1 pass` and `1 skip`.
-- `casebook gate    passed: 1 result proven`.
+- Mainworthy accepts `2 results`, including `1 pass` and `1 skip`.
+- `mainworthy gate    passed: 1 result proven`.
 - The counting block sees only `test/a.test.ts`, with no problems.
 - The gate process exits **0**, with no error annotation, although every test of `test/deep/browser.test.ts` was skipped.
 
-The inverse fixture, `missing-file-passing-neighbour`, puts a skipped testcase with an explicit file beside `<testcase name="passes" />` in the same file's suite. Casebook correctly reports a pass, but the new count ignores it. The gate exits **1** with `::error::tests-1: every test of test/deep/browser.test.ts was skipped (1)`. This is a new false rejection for an inherited-file report.
+The inverse fixture, `missing-file-passing-neighbour`, puts a skipped testcase with an explicit file beside `<testcase name="passes" />` in the same file's suite. Mainworthy correctly reports a pass, but the new count ignores it. The gate exits **1** with `::error::tests-1: every test of test/deep/browser.test.ts was skipped (1)`. This is a new false rejection for an inherited-file report.
 
 Suggested fix: count the already parsed `results` by `result.test.file` and `result.outcome`, or resolve suite inheritance in the count. Add both cases to the regression coverage.
 
@@ -49,15 +49,15 @@ Producer limitation: these two reports are synthetic variations. I did not find 
 
 Read the entire `git diff 9fef1c1 4a4f1fa`, the complete gate script and tests, and the relevant existing JUnit parser. The diff is limited to the stated three files. The AGENTS sentence describes the intended per-file requirement.
 
-`neighbour-probes.ts` extracts the exact new counting block from the checked revision, transpiles it with Bun, and records its map and errors. It also invokes the actual full gate against each fixture and a real local Casebook. It does not substitute a different counting implementation.
+`neighbour-probes.ts` extracts the exact new counting block from the checked revision, transpiles it with Bun, and records its map and errors. It also invokes the actual full gate against each fixture and a real local Mainworthy. It does not substitute a different counting implementation.
 
 | Shape | Result and deciding evidence |
 | --- | --- |
 | Self-closing testcase | Pass. Counted as executed; `same-file-mixed` counts two tests and one skip, exits 0. |
 | `<skipped />` child | Pass. `same-shard-one-file-skipped` exits 1 with the skipped-file error. |
 | Nested suites within a file | Pass. `nested-all-skipped` counts two skips, emits `(2)`, and exits 1; `nested-mixed` counts two tests with one skip and exits 0. |
-| Failure child | Pass. `only-failed` counts one executed test and zero skips; Casebook blocks and the script exits 2. |
-| Error child | Pass. `only-error` counts one executed test and zero skips; Casebook blocks and the script exits 2. |
+| Failure child | Pass. `only-failed` counts one executed test and zero skips; Mainworthy blocks and the script exits 2. |
+| Error child | Pass. `only-error` counts one executed test and zero skips; Mainworthy blocks and the script exits 2. |
 | Attribute order | Pass. Explicit file first and last both count; `attribute-order` emits the skipped-file error with `(2)` and exits 1. |
 | File attribute containing a path | Pass. The fixtures use `test/deep/browser.test.ts`; the real browser report uses `test/e2e/round5.test.ts`. Both appear intact in counts and annotations. |
 | Testcase without file attribute | Issues. Ignored instead of inheriting its suite's file; see B1-R2. |
@@ -69,13 +69,13 @@ Evidence: `neighbour-summary.log`, `neighbour-*.log`, and `neighbour-fixtures/`.
 Copied `ci-probes.ts` and `workflow-probe.ts` unchanged from `dx-r1`. Their relative imports now use the new export. Their historical synthetic GitHub SHA is report metadata, not the code revision executed. Commands, from `dx-r2`:
 
 ```
-TMPDIR=/home/endqwerty/.cache/casebook-arena/verify/dx-r2/tmp bun ci-probes.ts
-TMPDIR=/home/endqwerty/.cache/casebook-arena/verify/dx-r2/tmp bun workflow-probe.ts
+TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r2/tmp bun ci-probes.ts
+TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r2/tmp bun workflow-probe.ts
 ```
 
 Pass for both original B1 reproductions:
 
-- `one-shard-skipped`: **exit 1**, `::error::tests-2: every test of test/b.test.ts was skipped (1)`. Casebook itself still says `passed: 1 result proven`; the new check correctly rejects the job.
+- `one-shard-skipped`: **exit 1**, `::error::tests-2: every test of test/b.test.ts was skipped (1)`. Mainworthy itself still says `passed: 1 result proven`; the new check correctly rejects the job.
 - Workflow probe: all six fixture shard commands exit 0, but the gate now **exits 1** with `::error::quiet: every test of test/tests-5.test.ts was skipped (1)`. These reports come from actual Bun runs through `scripts/check.ts`. The fixture shard allocation places the skipped source file in `quiet`. The local server stops in `finally`.
 
 The other probes retain their earlier outcomes:
@@ -99,7 +99,7 @@ Evidence: `ci-summary.log`, `ci-*.log`, `workflow-summary.log`, `workflow-gate.l
 
 Pass for the requested Bun-shaped neighbours:
 
-- Every shard skipped: the script emits an error for each file and exits **3**, because the existing pending Casebook gate code takes precedence over the new exit-1 branch. CI still fails. This does not meet a literal universal “exit 1” statement, but it is not a blocker under the supplied definition.
+- Every shard skipped: the script emits an error for each file and exits **3**, because the existing pending Mainworthy gate code takes precedence over the new exit-1 branch. CI still fails. This does not meet a literal universal “exit 1” statement, but it is not a blocker under the supplied definition.
 - One file entirely skipped beside an executed file in the same shard: **exit 1**, `::error::tests-1: every test of test/deep/browser.test.ts was skipped (1)`.
 - One skipped test beside a pass in the same file: **exit 0**, no skipped-file error.
 - The file's only test fails: **exit 2**, blocked, with no false skipped-file annotation.
@@ -107,12 +107,12 @@ Pass for the requested Bun-shaped neighbours:
 Ran in the unmodified export:
 
 ```
-TMPDIR=/home/endqwerty/.cache/casebook-arena/verify/dx-r2/tmp bun test test/policy.test.ts test/e2e/round5.test.ts --reporter=junit --reporter-outfile=/home/endqwerty/.cache/casebook-arena/verify/dx-r2/real.xml
+TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r2/tmp bun test test/policy.test.ts test/e2e/round5.test.ts --reporter=junit --reporter-outfile=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r2/real.xml
 ```
 
 **Exit 0**. `29 pass`, `1 skip`, `0 fail`, `204 expect() calls`. The actual counting block reports policy `17 tests / 0 skipped` and round5 `13 tests / 1 skipped`, with no flagged files. Feeding the complete real report through the full gate in a fixture containing those two source files yields **exit 0**, `passed: 29 results proven`.
 
-Then `mutation-probes.py` sets `browserAvailable = false` in the exported `test/e2e/support.ts` and runs the same command with `CASEBOOK_CHROMIUM=/nonexistent`, writing `no-browser.xml`. The support override prevents discovery of an installed default browser without altering this machine's browser paths. It restores the original bytes in `finally`.
+Then `mutation-probes.py` sets `browserAvailable = false` in the exported `test/e2e/support.ts` and runs the same command with `MAINWORTHY_CHROMIUM=/nonexistent`, writing `no-browser.xml`. The support override prevents discovery of an installed default browser without altering this machine's browser paths. It restores the original bytes in `finally`.
 
 The test command exits 0 with `17 pass`, `13 skip`, `0 fail`. The exact counting block records round5 `13 tests / 13 skipped`. The full gate **exits 1** with:
 

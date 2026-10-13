@@ -538,7 +538,7 @@ afterEach(() => {
 	for (const db of opened.splice(0)) db.close();
 });
 
-describe("Casebook instance archives", () => {
+describe("Mainworthy instance archives", () => {
 	test("every included table and column survives replay, including full 64-bit integers", () => {
 		const from = source();
 		const to = target();

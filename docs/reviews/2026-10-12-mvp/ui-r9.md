@@ -1,4 +1,4 @@
-# Casebook web UI, verification round 9 (re-check of round 8)
+# Mainworthy web UI, verification round 9 (re-check of round 8)
 
 Revision judged: `5df174722dc991b0399ad26493f3a1a3b17e0b88` (branch `t3/mvp-product-delivery`), a clean
 `git archive` export in `ui-r9/tree`. Verifier: Claude Opus 5.5 (Anthropic). Started 2026-10-12.
@@ -258,7 +258,7 @@ right when the question was merged elsewhere, and the same clause as R9-1 when i
 
 No server, browser or probe of this review is running, and nothing of mine listens on 8950 to 8999. The round-8 test
 file and the fix removals started their servers in the suite's own range (7400 to 7449 by `SHELL.md`), one or two files at a
-time, while another agent's parallel check was running there; none of my runs failed for a port. `/tmp/casebook-ui-r9`,
+time, while another agent's parallel check was running there; none of my runs failed for a port. `/tmp/mainworthy-ui-r9`,
 the scratch copies (`mut/`) and `tree/node_modules` are removed (run `bun install --frozen-lockfile` in `tree/`
 to rerun a probe). Kept: `REPORT.md`, `probes/`, `logs/`, `shots/` and the export in `tree/`. The repository
 checkout was only read (`git archive`, `git show`); no release or clean-up command was run in it. When I finished

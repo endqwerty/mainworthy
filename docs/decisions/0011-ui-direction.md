@@ -73,7 +73,7 @@ The judge's other findings are taken as requirements, not opinions:
 Daniel pointed at Confluence. Its classic editor has an explicit Publish step: people forget it, and others
 read a stale page. Its live docs publish every keystroke: half a sentence is live, and history is noise.
 
-Casebook does neither. Typing saves at once into a private draft on the author's device, and the pane says so
+Mainworthy does neither. Typing saves at once into a private draft on the author's device, and the pane says so
 in one line ("Draft, saved on this device. Others see version 3."). The draft becomes a version when the author
 leaves the case, presses Ctrl+Enter or Cmd+Enter, or stops typing for 30 seconds. There is no button to
 forget, and nobody sees half a sentence. An unchanged draft makes no version. In the timeline, consecutive

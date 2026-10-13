@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 6 (re-check of round 5's six findings)
+# Mainworthy web UI: independent verification, round 6 (re-check of round 5's six findings)
 
 Revision judged: `67ebacc648445a03f2fcd3e6c479540a42c7070b`, branch `t3/mvp-product-delivery`.
 
@@ -38,7 +38,7 @@ line of R6-2 beside it.
 
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, Bun 1.4.3, `/usr/bin/chromium`
   (`--headless=new --ozone-platform=headless`), real server processes on 127.0.0.1, ports 8950 to 8999, data under
-  `/tmp/casebook-ui-r6`. The authors' suite ran unpatched on its own ports (7400 to 7499). No file of the export
+  `/tmp/mainworthy-ui-r6`. The authors' suite ran unpatched on its own ports (7400 to 7499). No file of the export
   is changed; the probes use their own copy of the test helper (`probes/b/support.ts`, ports and flags only).
 - Round 5's probes copied into `probes/a/` (from `ui-r5a/probes/`) and `probes/b/` (from `ui-r5b/probes/`) with
   only paths and ports changed; run from `tree/` as `bun ../probes/<a|b>/<name>.ts <scenario>`. New probes for
@@ -364,11 +364,11 @@ So each fix has a test that fails without it, with these gaps:
 
 ## Cleanup
 
-No server or browser of this review is running (nothing listens on 8950 to 8999). `/tmp/casebook-ui-r6`, my
+No server or browser of this review is running (nothing listens on 8950 to 8999). `/tmp/mainworthy-ui-r6`, my
 port locks, the scratch copy for the mutations (`mut/`), the export of round 5's revision (`r5tree/`) and
 `tree/node_modules` are removed (run `bun install --frozen-lockfile` in `tree/` to rerun a probe; for the
 comparison runs, export `9611d61` into `r5tree/` and link its `node_modules` to `tree/`'s). The repository
 checkout was read with `git archive`, `git diff` and `git log` only; no release or clean-up command was run
-in it, and the `/tmp/casebook-e2e-*` directories of other runs were not touched.
+in it, and the `/tmp/mainworthy-e2e-*` directories of other runs were not touched.
 
 ISSUES (1 blocker)

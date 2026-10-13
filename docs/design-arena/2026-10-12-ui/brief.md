@@ -1,12 +1,12 @@
 # UI arena brief (every candidate gets this file, plus one seed lens)
 
 You are one of several independent candidates designing the web UI of
-**Casebook**, a test case management system. Do not look at other candidates'
+**Mainworthy**, a test case management system. Do not look at other candidates'
 directories. You produce a working interactive mock, not pictures.
 
 ## Read first (in the repository, read-only)
 
-Repository: `/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f`. Do not write
+Repository: `/home/endqwerty/.t3/worktrees/mainworthy/t3-639b4b0f`. Do not write
 anything inside it.
 
 - `docs/product-design.md`: sections 1, 4.1, 5.1, 5.4 and 8 (thesis, the
@@ -23,7 +23,7 @@ anything inside it.
 - Draft versus published: think about Confluence. Its classic editor has an
   explicit Publish step, so people forget to publish and others read stale
   pages; its live docs publish every keystroke, so half-typed edits are live
-  and history is noise. Casebook autosaves into a private draft and makes a
+  and history is noise. Mainworthy autosaves into a private draft and makes a
   version when the author leaves the case, presses an explicit key, or idles.
   Show that state honestly and without ceremony. This is a UX decision; make
   it and defend it.

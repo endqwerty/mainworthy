@@ -1,12 +1,12 @@
 # Stack arena: spike specification (every candidate gets this file plus one seed)
 
 You are one of three independent candidates. Each builds the **same spike** on
-a **different stack** so the lead can choose Casebook's language, runtime and
+a **different stack** so the lead can choose Mainworthy's language, runtime and
 data store from measurements. Do not read other candidates' directories.
 
-Casebook is a test case management system: versioned cases, results from
+Mainworthy is a test case management system: versioned cases, results from
 people, CI and agents in one stream, and a queue of decisions. Read (read-only)
-in `/home/endqwerty/.t3/worktrees/casebook/t3-639b4b0f`:
+in `/home/endqwerty/.t3/worktrees/mainworthy/t3-639b4b0f`:
 `docs/decisions/0001-stack-open.md` (the selection criteria),
 `docs/decisions/0002-layered-self-hosting.md`, and `docs/product-design.md`
 sections 6.6 (access patterns and budgets) and 7.1 (the operation registry).
@@ -22,7 +22,7 @@ requirement. Agents will write most of the code.
 
 ## Shared, fixed inputs (do not regenerate; copy them)
 
-Directory `/home/endqwerty/.cache/casebook-arena/stack/`:
+Directory `/home/endqwerty/.cache/mainworthy-arena/stack/`:
 
 - `schema.sqlite.sql`, `schema.pg.sql` + `schema.pg.indexes.sql`: the schema.
   You may add indexes or settings; list every change in your report.
@@ -118,7 +118,7 @@ State what adding a fourth operation would touch (files and lines).
 
 ## Rules
 
-- Toolchains go under `/home/endqwerty/.cache/casebook-arena/toolchains/<name>`
+- Toolchains go under `/home/endqwerty/.cache/mainworthy-arena/toolchains/<name>`
   (never system-wide; no sudo is available; Docker is not available).
 - Use release builds and production settings. Prepared statements and sane
   connection pools on every stack: this compares stacks, not defaults.

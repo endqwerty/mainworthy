@@ -25,12 +25,12 @@ else reads();
 function checkpoints(): void {
 	// An ordinary connection that never writes a row. A passive checkpoint makes nobody wait: it copies what no
 	// reader still needs and leaves the rest for the next round.
-	const db = new Db(join(data.dataDir, "casebook.db"));
+	const db = new Db(join(data.dataDir, "mainworthy.db"));
 	const timer = setInterval(() => {
 		try {
 			db.checkpoint();
 		} catch (error) {
-			console.error("[casebook] checkpoint failed:", error);
+			console.error("[mainworthy] checkpoint failed:", error);
 		}
 	}, 500);
 	process.once("exit", () => {

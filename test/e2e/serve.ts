@@ -4,12 +4,12 @@ import ui from "../../src/web/index.html";
 
 const instance = start(
 	{
-		dataDir: process.env.CASEBOOK_DATA ?? "/tmp/casebook-ui",
+		dataDir: process.env.MAINWORTHY_DATA ?? "/tmp/mainworthy-ui",
 		host: "127.0.0.1",
-		port: Number(process.env.CASEBOOK_PORT ?? 7440),
-		mode: process.env.CASEBOOK_MODE === "server" ? "server" : "local",
+		port: Number(process.env.MAINWORTHY_PORT ?? 7440),
+		mode: process.env.MAINWORTHY_MODE === "server" ? "server" : "local",
 		owner: "daniel",
-		ownerToken: process.env.CASEBOOK_OWNER_TOKEN ?? null,
+		ownerToken: process.env.MAINWORTHY_OWNER_TOKEN ?? null,
 	},
 	(app, owner) => ({ ui, routes: archiveRoutes(app, owner) }),
 );

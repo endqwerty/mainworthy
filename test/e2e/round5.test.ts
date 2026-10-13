@@ -132,7 +132,7 @@ check(
 			await a.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 			await a.keyboard.press("e");
 			await title(a).fill("Case 1 for returning cust");
-			const firstOwner = await a.evaluate(() => sessionStorage.getItem("casebook:draft-window"));
+			const firstOwner = await a.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
 			await a.close({ runBeforeUnload: true });
 			await eventually(
 				() => server.api("get", { refs: ["C-1"] }),
@@ -142,7 +142,7 @@ check(
 			b.setDefaultTimeout(5000);
 			await b.goto(`${server.url}/p/scratch/suite/c/1`);
 			await title(b).waitFor();
-			expect(await b.evaluate(() => sessionStorage.getItem("casebook:draft-window"))).not.toBe(firstOwner);
+			expect(await b.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"))).not.toBe(firstOwner);
 			await title(b).press("End");
 			await b.keyboard.type("omers");
 			await b.keyboard.press("Escape");

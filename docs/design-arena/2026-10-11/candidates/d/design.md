@@ -1,4 +1,4 @@
-# Casebook, candidate D: the decision queue
+# Mainworthy, candidate D: the decision queue
 
 Stack-neutral. Type sketches are TypeScript-like notation, not a stack choice. Numbers marked
 *(draft)* are budgets to validate on the phase 1 benchmark, not measurements. Competitor facts
@@ -14,7 +14,7 @@ the seed lens was bent.
 
 ## 1. Thesis
 
-Casebook is a test management system that keeps one true record of what was tested and what
+Mainworthy is a test management system that keeps one true record of what was tested and what
 was decided about it, and spends human attention only on the decisions. Its one structural
 idea is that every write is exactly one of three things, **evidence, question or decision**,
 and they have different writers. *Producers* (a person authoring or executing, a CI pipeline,
@@ -55,7 +55,7 @@ label and the structure (not feature) that answers it.
 | M8 | You cannot leave and you cannot host it yourself without paying more. | **Verified** (finding 6): self-hosting is rare, on-prem starts at higher tiers (TestRail Professional, Testomat.io Enterprise, Testiny $300/user/year). | **The export is the log.** Import is replay. One artifact runs Local, Server and Cloud (decision 0002); no feature, limit or history window depends on layer or plan. |
 
 What an organisation gets for the money instead, stated as a measure: **human decisions per
-release, and seconds per decision**. Incumbents cannot report either number. Casebook reports
+release, and seconds per decision**. Incumbents cannot report either number. Mainworthy reports
 both, because the decision is a row.
 
 ---
@@ -173,7 +173,7 @@ commitments that can be checked in this product.
 
 GitHub Issues gives you a list and a label system and leaves the workflow to you. Linear made
 the workflow the product: a triage inbox, opinionated states, IDs on everything, a keyboard for
-every action, and no waiting. The equivalent here: **you do not open Casebook to a folder tree
+every action, and no waiting. The equivalent here: **you do not open Mainworthy to a folder tree
 or a dashboard, you open it to the decisions waiting for you**, each answerable where it lies.
 
 | Commitment | Check |
@@ -196,12 +196,12 @@ code.**
 
 | Commitment | Check |
 | --- | --- |
-| C1. One added line, two environment variables, no plugin, no annotation in test code: `casebook report <files>`. Commit, branch, PR, build URL and attempt are read from the CI environment. | Fixture pipelines for three CI vendors pass with only that line. |
+| C1. One added line, two environment variables, no plugin, no annotation in test code: `mainworthy report <files>`. Commit, branch, PR, build URL and attempt are read from the CI environment. | Fixture pipelines for three CI vendors pass with only that line. |
 | C2. The gate has four verdicts with different meanings and exit codes: `passed` 0, `failed` 1 (needs a fix), `blocked` 2 (needs a decision), `pending` 3 (needs evidence). | Unit test of the pure verdict function; CLI test. |
 | C3. A decision changes the check without re-running the pipeline: answering "infra" or "flaky" turns `blocked` into `passed` in seconds. | Job test: ingest a red report, decide, read the gate. |
 | C4. A failure already failing on the base of the change never blocks the change. Re-running the same failing commit asks nothing new. | Jobs D1 and D3 (§9). |
 | C5. One cause is one question: a report with 500 failures sharing a signature opens at most 3 questions *(draft)*. | Fixture test D1. |
-| C6. Policy can live in the repository as a text file, applied by `casebook policy apply`, which is a proposal like any other edit. | Round trip: export policy, apply, no diff. |
+| C6. Policy can live in the repository as a text file, applied by `mainworthy policy apply`, which is a proposal like any other edit. | Round trip: export policy, apply, no diff. |
 | C7. Ingest of 10,000 results is accepted in < 2 s and its questions are in the queue in < 5 s *(draft, from the vision)*. | Benchmark in the check. |
 
 ### 4.3 The bun/deno move (over npm + tsc + jest + ...): one binary that runs what you already have
@@ -212,10 +212,10 @@ server, the UI, the CLI and the MCP server, and it accepts what teams already pr
 
 | Commitment | Check |
 | --- | --- |
-| B1. `casebook` with no arguments starts Local, creates a project, signs you in as the machine user and opens the UI. First case within 60 s of the binary being on disk, within 5 min of download (J15) *(draft)*. | Scripted install test on a clean machine image. |
-| B2. The same executable is the CLI (`casebook report`), the MCP server (`casebook mcp` on stdio, `/mcp` over HTTP) and the server. Nothing else to install. | Artifact test. |
+| B1. `mainworthy` with no arguments starts Local, creates a project, signs you in as the machine user and opens the UI. First case within 60 s of the binary being on disk, within 5 min of download (J15) *(draft)*. | Scripted install test on a clean machine image. |
+| B2. The same executable is the CLI (`mainworthy report`), the MCP server (`mainworthy mcp` on stdio, `/mcp` over HTTP) and the server. Nothing else to install. | Artifact test. |
 | B3. Drop-in inputs: JUnit XML as produced by existing runners; a pasted list or a Markdown file becomes a case; importers keep foreign IDs as aliases so `C1234` from TestRail still resolves. | Parser fixtures; alias lookup test. |
-| B4. Text out as well as in: every case, question and run renders to Markdown (`casebook get C-311 --md`) and back. | Round-trip test. |
+| B4. Text out as well as in: every case, question and run renders to Markdown (`mainworthy get C-311 --md`) and back. | Round-trip test. |
 | B5. It replaces a stack, not one tool: case management, results history, flaky handling, release gate and agent surface in one process with no required companion service. A cache is never needed for correctness (decision 0002). | Local-layer job suite runs with no other process. |
 | B6. The whole agent surface is at most 10 tools and <= 1,500 tokens of definitions *(draft)*; the shipped skill's main file is <= 400 tokens with references read on demand. | Token count in the check (decision 0006). |
 
@@ -228,15 +228,15 @@ These are the specification. The types in §6 are derived from them.
 ### 5.1 Quickstart, as the user reads it
 
 ````markdown
-# Casebook
+# Mainworthy
 
 One place where manual, automated and agent testing land, and one queue of the
 decisions they leave for you.
 
 ## Start (no account, no configuration)
 
-    $ casebook
-    Casebook 0.1 · local · data in ~/.casebook · http://127.0.0.1:7357
+    $ mainworthy
+    Mainworthy 0.1 · local · data in ~/.mainworthy · http://127.0.0.1:7357
     project "scratch" · you are daniel@this-machine · policy: loose
 
 ## Write a case
@@ -253,13 +253,13 @@ It is `C-1`, version 1.
 
 ## Send test results (any runner that writes JUnit XML)
 
-    $ casebook report results/*.xml
+    $ mainworthy report results/*.xml
     4,812 results for scratch @ 9f3c2ab (main)  ·  4,790 pass  19 fail  3 skip
       16 failures already decided   not blocking
        3 failures are new           Q-12  "expected 90.00, got 100.00"  (3 tests)
     gate: blocked by 1 open question   http://127.0.0.1:7357/q/12
 
-In CI it is the same line. Add `casebook gate` to fail the job on the verdict.
+In CI it is the same line. Add `mainworthy gate` to fail the job on the verdict.
 
 ## Decide
 
@@ -276,45 +276,45 @@ build fill the same run.
 
 ## Let an agent in
 
-    $ casebook token new --agent reviewer --can read,produce
-    $ casebook mcp            # stdio; or point the client at /mcp
+    $ mainworthy token new --agent reviewer --can read,produce
+    $ mainworthy mcp            # stdio; or point the client at /mcp
 
 Ten tools. Start with `impact`.
 
 ## Get stricter when you need to
 
-    $ casebook policy use standard      # agent edits need a person; who may excuse a failure
-    $ casebook policy show              # the whole policy is one table
+    $ mainworthy policy use standard      # agent edits need a person; who may excuse a failure
+    $ mainworthy policy show              # the whole policy is one table
 
 ## Leave whenever you like
 
-    $ casebook export --out acme.casebook      # every fact, decision and attachment
+    $ mainworthy export --out acme.mainworthy      # every fact, decision and attachment
 ````
 
 ### 5.2 Call site (a): a CI pipeline step reporting automated results
 
 ```yaml
-# .github/workflows/test.yml  (any CI works; this is the only Casebook-specific part)
+# .github/workflows/test.yml  (any CI works; this is the only Mainworthy-specific part)
 env:
-  CASEBOOK_URL: ${{ vars.CASEBOOK_URL }}
-  CASEBOOK_TOKEN: ${{ secrets.CASEBOOK_TOKEN }}   # actor kind "ci", capability "produce" on one project
+  MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}
+  MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}   # actor kind "ci", capability "produce" on one project
 steps:
   - run: npx playwright test --reporter=junit      # exits non-zero on failure; that is fine
     continue-on-error: true
-  - run: casebook report test-results/*.xml        # commit, branch, PR, build URL, attempt: from the CI env
-  - run: casebook gate --wait 120                  # exit 0 passed · 1 failed · 2 blocked · 3 pending
+  - run: mainworthy report test-results/*.xml        # commit, branch, PR, build URL, attempt: from the CI env
+  - run: mainworthy gate --wait 120                  # exit 0 passed · 1 failed · 2 blocked · 3 pending
 ```
 
 What the developer sees in the job log:
 
 ```
-casebook report  acme/web @ 9f3c2ab  pr #482  attempt 2  job e2e
+mainworthy report  acme/web @ 9f3c2ab  pr #482  attempt 2  job e2e
   4,812 results   4,790 pass   19 fail   3 skip                         (R-507)
   11 excused   failing on base 41d07e1 (main)                           not this change
    5 excused   Q-2104 flaky, decided by mira 6 days ago, holds 8 more   not this change
    3 new       Q-2291 "expected 90.00, got 100.00" in coupon.ts:41      3 tests, C-311 C-314 C-318
    7 tests have no case (tracked)
-casebook gate    blocked: 1 question needs an answer    https://casebook.acme.example/acme/web/pr/482
+mainworthy gate    blocked: 1 question needs an answer    https://mainworthy.acme.example/acme/web/pr/482
 exit 2
 ```
 
@@ -1090,8 +1090,8 @@ op trace   (i: { from: Ref; toward: 'evidence' | 'requirement' }): Chain
 
 // ---- administer (capability: admin) ---------------------------------------------------------
 op admin   (i: { project?: …; actor?: …; grant?: …; token?: …; field?: … }): AdminReply
-op transfer(i: { export: { project: Ref } } | { import: { from: Blob; format: 'casebook' | 'testrail' | 'qase' | 'csv' } }): TransferReply
-   // 'casebook' export is the journal in Seq order plus blobs; import replays it through the same effects.
+op transfer(i: { export: { project: Ref } } | { import: { from: Blob; format: 'mainworthy' | 'testrail' | 'qase' | 'csv' } }): TransferReply
+   // 'mainworthy' export is the journal in Seq order plus blobs; import replays it through the same effects.
 ```
 
 What is deliberately absent: `createCase`, `updateCase`, `moveCase`, `linkTest`, `quarantine`,
@@ -1359,7 +1359,7 @@ follows the stack decision (roadmap phase 1) and runs as the Local layer.
 
 **In.**
 
-- One artifact; `casebook` starts Local with a project, a machine user and the `loose` preset.
+- One artifact; `mainworthy` starts Local with a project, a machine user and the `loose` preset.
 - Suite: folders, cases with steps and expected results, outline capture with paste splitting,
   tags, open proposals as autosave, sealed proposals, versions with step-level diff and
   restore, search over title and steps, bulk move and retag as one proposal with undo.
@@ -1399,7 +1399,7 @@ and five that are specific to this design:
 | Flaky *detector*, stale-test detector, quarantine standing (`flaky` kind) | `flaky` is already an answer to a failure and carries forward for its window; flips are recorded so the detector has history when it arrives |
 | Requirements coverage, `gap` and `signoff` kinds, evidence freeze, regulated preset | runs close by rule when passed; `Requirement` rows and `cover` changes exist so links made now are kept |
 | Shared steps (fragments), custom fields | the `Step` union and `fields` map are in the body type; no UI |
-| Posting a check to the code host, creating tracker issues (`ports`) | `casebook gate` exit code and URL in the job log; a defect is a pasted reference |
+| Posting a check to the code host, creating tracker issues (`ports`) | `mainworthy gate` exit code and URL in the job log; a defect is a pasted reference |
 | Importers for TestRail, Qase, CSV | Markdown and pasted lists in; full export out |
 | Server and Cloud layers, SSO, roles beyond admin, member, reader | Local only; tokens with capabilities and project scope |
 | Report formats beyond JUnit XML | the parser registry has one entry |

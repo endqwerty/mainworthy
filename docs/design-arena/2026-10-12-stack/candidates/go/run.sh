@@ -2,9 +2,9 @@
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 source ./env.sh
-shared=/home/endqwerty/.cache/casebook-arena/stack
+shared=/home/endqwerty/.cache/mainworthy-arena/stack
 driver=$(cat selected-driver.txt 2>/dev/null || printf cgo)
-binary="./casebook-$driver"
+binary="./mainworthy-$driver"
 rebuild=false
 if ! test -x "$binary"; then rebuild=true; fi
 for source in *.go go.mod go.sum; do
@@ -32,11 +32,11 @@ from pathlib import Path
 Path("results.json").unlink(missing_ok=True)
 PY
 reset_sqlite
-CASEBOOK_DB="$PWD/work.db" "$binary" selfcheck > checks-embedded.txt
+MAINWORTHY_DB="$PWD/work.db" "$binary" selfcheck > checks-embedded.txt
 reset_sqlite
 "$binary" bench --mode embedded --db "$PWD/work.db" --queries queries.txt --out embedded.json
 reset_pg
-CASEBOOK_MODE=server "$binary" selfcheck > checks-server.txt
+MAINWORTHY_MODE=server "$binary" selfcheck > checks-server.txt
 reset_pg
 "$binary" bench --mode server --queries queries.txt --out server.json
 python3 ./proof.py "$binary"

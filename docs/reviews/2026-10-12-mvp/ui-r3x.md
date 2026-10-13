@@ -1,4 +1,4 @@
-# Casebook UI review, round 3
+# Mainworthy UI review, round 3
 
 Revision: `b11d2307959bd1ea7f5edea6351cd5cc7bbf077f`, branch `t3/mvp-product-delivery`.
 
@@ -36,10 +36,10 @@ The old editor resumes under Bob's session. It publishes Alice's newer text as B
 
 ```text
 beforeStore:
-  casebook:alice:draft:scratch:C-1 = ["Alice newer private unsubmitted text"]
-  casebook:bob:draft:scratch:C-1 = ["Bob private unsubmitted text"]
+  mainworthy:alice:draft:scratch:C-1 = ["Alice newer private unsubmitted text"]
+  mainworthy:bob:draft:scratch:C-1 = ["Bob private unsubmitted text"]
 after storage:
-  casebook:alice:draft:scratch:C-1 = ["Alice newer private unsubmitted text"]
+  mainworthy:alice:draft:scratch:C-1 = ["Alice newer private unsubmitted text"]
 timeline: [{version:3,by:"bob"},{version:2,by:"alice"},{version:1,by:"daniel"}]
 server step: "Alice newer private unsubmitted text"
 ```
@@ -101,8 +101,8 @@ Original probes are retained in `original-probes/`. Re-checks preserve their act
 
 The [progress report](REPORT-progress.md) preserves results written during the run. All data is artificial. No repository file, branch, commit, or pull request was changed. No production, engine, migration, full browser-suite, non-Chromium, mobile, screen-reader, or pre-fix device-storage migration review was attempted. No claim of exhaustive concurrency coverage. The remaining UI outside the supplied fix scope was not signed off here.
 
-To reproduce, run `bun install --frozen-lockfile` in `tree/`, create `/tmp/casebook-ui-r3x`, and run `TMPDIR=/tmp/casebook-ui-r3x bun ../<probe>.mjs` from `tree/`. Run each requested browser file separately using the same `TMPDIR`. The mutation copy is recreated by `prepare-mutations.py`; `run-mutations.py` runs its targets and restores each source file afterward.
+To reproduce, run `bun install --frozen-lockfile` in `tree/`, create `/tmp/mainworthy-ui-r3x`, and run `TMPDIR=/tmp/mainworthy-ui-r3x bun ../<probe>.mjs` from `tree/`. Run each requested browser file separately using the same `TMPDIR`. The mutation copy is recreated by `prepare-mutations.py`; `run-mutations.py` runs its targets and restores each source file afterward.
 
-Cleanup verified: no owned server or browser remains, and no listener remains on ports 8250 through 8299. Removed all `/tmp/casebook-ui-r3x` data, exported dependencies, and review test artifacts. Source exports, probes, logs, and reports remain available. The shared repository checkout was never changed or cleaned. [Cleanup record](cleanup.json).
+Cleanup verified: no owned server or browser remains, and no listener remains on ports 8250 through 8299. Removed all `/tmp/mainworthy-ui-r3x` data, exported dependencies, and review test artifacts. Source exports, probes, logs, and reports remain available. The shared repository checkout was never changed or cleaned. [Cleanup record](cleanup.json).
 
 ISSUES (2 blockers)

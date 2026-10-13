@@ -2,12 +2,12 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "Casebook: one record, one operation layer",
+    "title": "Mainworthy: one record, one operation layer",
     "locale": "en",
     "output": "docs/diagrams/architecture.html",
     "quality_profile": "showcase",
     "repository": {
-      "url": "git@github.com:endqwerty/casebook.git",
+      "url": "git@github.com:endqwerty/mainworthy.git",
       "revision": "de737a44d10e90ba00789642f160298f6f165bd3",
       "link_mode": "local-only"
     },
@@ -147,7 +147,7 @@
       "id": "cli",
       "type": "frontend",
       "label": "src/cli",
-      "sublabel": "casebook report; casebook gate",
+      "sublabel": "mainworthy report; mainworthy gate",
       "pos": [
         445,
         220
@@ -619,7 +619,7 @@
     {
       "id": "store",
       "type": "database",
-      "label": "casebook.db",
+      "label": "mainworthy.db",
       "sublabel": "One SQLite file; WAL",
       "pos": [
         650,
@@ -632,20 +632,20 @@
       "sources": [
         {
           "path": "src/server/kernel/app.ts",
-          "label": "openApp: casebook.db"
+          "label": "openApp: mainworthy.db"
         },
         {
           "path": "src/server/kernel/db.ts",
           "label": "WAL; query_only"
         }
       ],
-      "tag": "casebook-data volume at /data"
+      "tag": "mainworthy-data volume at /data"
     }
   ],
   "boundaries": [
     {
       "kind": "region",
-      "label": "casebook container · one Bun server process",
+      "label": "mainworthy container · one Bun server process",
       "wraps": [
         "http",
         "ops",
@@ -667,7 +667,7 @@
     },
     {
       "kind": "region",
-      "label": "casebook-data · one volume",
+      "label": "mainworthy-data · one volume",
       "wraps": [
         "store"
       ],
@@ -897,7 +897,7 @@
         "reportSteps commits acceptance first. outstanding makes each affected gate pending.",
         "processBatchSteps applies the batch in one second transaction. SLICE is 200; a yield keeps that transaction open.",
         "invokeAsync yields to the event loop. Reader threads see committed snapshots while app.gate queues other writes.",
-        "The container stores casebook.db in casebook-data at /data. The React UI runs in the browser."
+        "The container stores mainworthy.db in mainworthy-data at /data. The React UI runs in the browser."
       ]
     }
   ]

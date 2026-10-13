@@ -1,4 +1,4 @@
-# 0005: Casebook is for teams in general; Daniel's career is evidence, not the customer
+# 0005: Mainworthy is for teams in general; Daniel's career is evidence, not the customer
 
 - Date: 2026-10-10
 - Status: accepted (Daniel)
@@ -10,7 +10,7 @@ reference user.
 ## Decision
 
 1. **The audience is software QA teams in general**, from a solo tester or a
-   startup to a large enterprise (scope: decision 0003). Casebook is a
+   startup to a large enterprise (scope: decision 0003). Mainworthy is a
    product others adopt. No team, including Daniel's, is the first or
    reference user, and no flow, default or feature is justified by "my team
    does it".
@@ -45,5 +45,5 @@ reference user.
 - If real teams do become reachable later, the flows are the first thing
   they are shown, and the method constraint (no interviews) is revisited
   then, not now.
-- Open question 1 is answered. Whether Daniel also uses Casebook for his own
+- Open question 1 is answered. Whether Daniel also uses Mainworthy for his own
   work is a bonus, not a requirement.

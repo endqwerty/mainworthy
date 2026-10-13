@@ -68,6 +68,6 @@ export const actorCommand: AdapterCommand = {
 				);
 			return 0;
 		}
-		throw new CliError("invalid", `usage: casebook ${actorCommand.usage}`);
+		throw new CliError("invalid", `usage: mainworthy ${actorCommand.usage}`);
 	},
 };

@@ -1,4 +1,4 @@
-# Casebook engine QA review, round 13
+# Mainworthy engine QA review, round 13
 
 Revision **`3177d996d4acfe0320669b9ff8165f279fab9f3d`**. Verdict: **ISSUES (5 blockers)**, plus one nonblocking count defect and one confirmed test-oracle gap.
 
@@ -8,7 +8,7 @@ The correctness facts at issue are that accepted evidence makes every affected l
 
 Only `git archive` read the shared checkout. All code ran from the clean export under this review directory, with Bun 1.4.3 and dependencies installed using `bun install --frozen-lockfile`. The diff from `de5702371f5e1a6881cb8748a5befdec9a1ca378` was independently compared from two archives; [changed files](logs/changed-files.txt) and [diff](logs/round13.diff) are retained. Required project/design documents were read; only decision 0012's stated behavior was judged as documentation.
 
-Scripts below run from `/home/endqwerty/.cache/casebook-arena/verify/engine-r13` as `bun scripts/<name>.mjs` unless a different command is shown. Assertions in new defect probes express the promised behavior, so their exit 1 is the reproduced defect. Inherited defect probes often assert the old wrong behavior, so exit 1 can mean the repair works. [EARLIER.md](EARLIER.md) records each such disposition and unexecuted tail. Do not treat the old orchestration/cleanup utilities in the copied scripts directory as test scenarios.
+Scripts below run from `/home/endqwerty/.cache/mainworthy-arena/verify/engine-r13` as `bun scripts/<name>.mjs` unless a different command is shown. Assertions in new defect probes express the promised behavior, so their exit 1 is the reproduced defect. Inherited defect probes often assert the old wrong behavior, so exit 1 can mean the repair works. [EARLIER.md](EARLIER.md) records each such disposition and unexecuted tail. Do not treat the old orchestration/cleanup utilities in the copied scripts directory as test scenarios.
 
 ## Twelve checks
 
@@ -21,7 +21,7 @@ Ran the requested commands through [author-checks.py](scripts/author-checks.py),
 - `bunx tsc --noEmit`: exit **0**.
 - `bunx biome check src test bench`: exit **0**, `Checked 186 files ... No fixes applied.`
 
-Independently reran both claimed larger sequence sets: `CASEBOOK_SEQUENCE_SEEDS=300 bun test test/sequences.test.ts` gives **3 pass, 0 fail** ([log](logs/sequences-300.log)); `CASEBOOK_SEQUENCE_SEEDS=150 bun test test/sequences-extended.test.ts` gives **3 pass, 0 fail** ([log](logs/sequences-extended-150.log)). Each covers all three presets. The inherited sequence probes and both hunts' sequence runners also completed; these are reproducible checks, not a proof that every ordering was generated.
+Independently reran both claimed larger sequence sets: `MAINWORTHY_SEQUENCE_SEEDS=300 bun test test/sequences.test.ts` gives **3 pass, 0 fail** ([log](logs/sequences-300.log)); `MAINWORTHY_SEQUENCE_SEEDS=150 bun test test/sequences-extended.test.ts` gives **3 pass, 0 fail** ([log](logs/sequences-extended-150.log)). Each covers all three presets. The inherited sequence probes and both hunts' sequence runners also completed; these are reproducible checks, not a proof that every ordering was generated.
 
 Mutated each requested architecture boundary in the export and watched the intended check fail: upward import, second mint import/call, cross-owner SQL, raw domain SQL, unchecked witness. Invalid declared SQL also fails preparation. **A plain object typed as Witness passes architecture.test.ts alone**, but the required typecheck rejects it: `TS2739 ... missing ... #decision, #kind, #signers, #expiresAt`. The combined check enforces that boundary. Additional core/web/SQLite/undo/registry mutations fail as expected. See [mutation summary](logs/architecture-mutations-summary.log), [additional checks](logs/architecture-additional-summary.log) and [last checks](logs/architecture-last-summary.log). Every source mutation was restored.
 
@@ -87,7 +87,7 @@ B04 disproves the broader rule for supported custom clauses: `notProducer:false`
 
 [live](logs/rerun-live.log) and [checkpoint-live](logs/rerun-checkpoint-live.log) independently verify local origin/host/scheme checks, server authentication, scoped events/session lists, cookies, body limits and all 15 operation routes/OpenAPI entries. Deciding statuses: no Origin/same Origin **200**; foreign Origin, literal null, foreign Host and other scheme **401**. Anonymous session/events and all operation routes **401**; health/OpenAPI **200**, unknown route **404**. Cookies are HttpOnly and SameSite=Strict; foreign-origin cookie use is refused. Declared and chunked oversized bodies return **413**, then an ordinary request still returns **200**. Login/logout and configured public/static handlers are the explicitly public paths in `serve`; no additional anonymous project reader was found.
 
-New header matrix checks all session-taking route categories, with matching/absent headers as controls. All **15 operation routes** refuse a mismatched name. B02: session, event stream and extra-route handlers accept mismatched and malformed names. A real extra-route write via `/mcp` confirms the common HTTP guard consequence: Bob's cookie plus `X-Casebook-As: Alice` creates/adopts the text as Bob with **200**. MCP implementation semantics remain outside this review.
+New header matrix checks all session-taking route categories, with matching/absent headers as controls. All **15 operation routes** refuse a mismatched name. B02: session, event stream and extra-route handlers accept mismatched and malformed names. A real extra-route write via `/mcp` confirms the common HTTP guard consequence: Bob's cookie plus `X-Mainworthy-As: Alice` creates/adopts the text as Bob with **200**. MCP implementation semantics remain outside this review.
 
 ### 11. Concurrency and reader threads — pass (functional QA)
 
@@ -147,9 +147,9 @@ First run: `acceptedPhaseSamples:332, nonPendingSamples:332`, `target.change:2`,
 
 Blocking HTTP contract defect. Reproduced twice with `bun scripts/r13-session-header.mjs`; see [first run](logs/r13-session-header.log) and [repeat](logs/r13-session-header-repeat.log).
 
-A cookie authenticates Bob and the request declares `X-Casebook-As: Alice`. Every operation route correctly returns 401, but `/api/session` returns 200 with Bob's identity/projects, `/api/p/scratch/events` opens with 200, and a route installed through `extra.routes` runs as Bob with 200. A malformed percent-encoded name has the same gap. Matching and absent names are passing controls. Deciding output: `operationRoutesRefused:15`, `guardedRouteMismatchesAccepted` contains all six mismatched/malformed cases.
+A cookie authenticates Bob and the request declares `X-Mainworthy-As: Alice`. Every operation route correctly returns 401, but `/api/session` returns 200 with Bob's identity/projects, `/api/p/scratch/events` opens with 200, and a route installed through `extra.routes` runs as Bob with 200. A malformed percent-encoded name has the same gap. Matching and absent names are passing controls. Deciding output: `operationRoutesRefused:15`, `guardedRouteMismatchesAccepted` contains all six mismatched/malformed cases.
 
-`sameCaller` is called only by `handleOp` in `tree/src/surfaces/http.ts`. The `guarded` wrapper in `serve` authenticates the cookie/token and invokes its handler without applying that check. This wrapper owns the session, events and extra routes. It contradicts the brief's required check of this header on every route taking a session and the promised per-person request guard. Transfer and MCP application logic are not judged here; the common HTTP wrapper is. A concrete extra-route consequence is also reproduced twice in `scripts/r13-header-extra-write.mjs`: a POST to the real `/mcp` handler with Bob's cookie and `X-Casebook-As: Alice` creates and adopts `Text Alice prepared` as Bob, with HTTP 200. See `logs/r13-header-extra-write.log` and its repeat. This is a check of the HTTP identity guard, not a review of MCP semantics.
+`sameCaller` is called only by `handleOp` in `tree/src/surfaces/http.ts`. The `guarded` wrapper in `serve` authenticates the cookie/token and invokes its handler without applying that check. This wrapper owns the session, events and extra routes. It contradicts the brief's required check of this header on every route taking a session and the promised per-person request guard. Transfer and MCP application logic are not judged here; the common HTTP wrapper is. A concrete extra-route consequence is also reproduced twice in `scripts/r13-header-extra-write.mjs`: a POST to the real `/mcp` handler with Bob's cookie and `X-Mainworthy-As: Alice` creates and adopts `Text Alice prepared` as Bob, with HTTP 200. See `logs/r13-header-extra-write.log` and its repeat. This is a check of the HTTP identity guard, not a review of MCP semantics.
 
 ### R13-B04: overlapping answers ignore a dispute clause's admin or human requirement when notProducer is false
 

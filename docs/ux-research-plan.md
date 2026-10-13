@@ -1,6 +1,6 @@
 # UX research and review plan
 
-Casebook's third priority, UI and UX that get out of the way, is the one
+Mainworthy's third priority, UI and UX that get out of the way, is the one
 that most needs evidence before code. Competing tools are the baseline of
 friction; this plan finds where that friction is, what users intend when they
 hit it, and which interactions remove it. It runs before implementation
@@ -116,7 +116,7 @@ a scripted reference agent with a fixed model and tokenizer runs the job, and
 we count the tokens of tool definitions, requests and responses, and the
 number of calls. Budgets come from a baseline: the same job through each
 incumbent's MCP server (audit) and through a naive list-and-get-everything
-use of Casebook's own API.
+use of Mainworthy's own API.
 
 ### 3b. Flows
 

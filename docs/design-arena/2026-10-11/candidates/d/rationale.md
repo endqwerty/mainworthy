@@ -2,7 +2,7 @@
 
 Companion to `design.md` in this directory. Section numbers (§) refer to it.
 
-**Disclosure.** While listing the arena directory I read `/tmp/casebook-arena/rubric.md`, which
+**Disclosure.** While listing the arena directory I read `/tmp/mainworthy-arena/rubric.md`, which
 is marked for the judge only. I did not go back to it and the package follows the brief's
 deliverable list, but I cannot claim I designed blind to it. The judge should weigh that.
 
@@ -39,7 +39,7 @@ impact({ change: 'pr:482', since })            // review brief or test charter: 
 gate({ commit })                               // passed | failed (fix) | blocked (decide) | pending (evidence)
 ```
 
-A pipeline adds one line (`casebook report results/*.xml`). A reviewer agent makes three calls
+A pipeline adds one line (`mainworthy report results/*.xml`). A reviewer agent makes three calls
 for a first review and one for a re-review. A tester presses `p`, `f`, `b`, `s`. A lead presses
 one key per question. The reply to `propose` and `decide` is the same shape at every
 strictness: it says whether the caller settled the matter, advised, or still needs someone, so
@@ -121,7 +121,7 @@ Judged on interface depth: how much a caller must know versus how much the modul
    shapes in one 10M-row union, an authority check on every machine result, and nothing to
    carry forward (§10.2).
 
-4. **Cases as files in the repository, Casebook as an index over git.** Excellent DX for
+4. **Cases as files in the repository, Mainworthy as an index over git.** Excellent DX for
    developers and free versioning. Rejected as the base shape: manual testers and regulated
    approvers are not git users (decision 0005: teams in general), per-step identity and
    policy-governed adoption do not fit a merge, and results at 10M rows are not files anyway.
@@ -161,7 +161,7 @@ For Daniel:
    closes. What would you have wanted in the teams you worked in?
 6. **Will testers name the build?** Results filling a release run depends on manual results
    carrying a target. In your experience do manual testers know which build is on the
-   environment, or must Casebook learn it from `announce deploy` and offer it?
+   environment, or must Mainworthy learn it from `announce deploy` and offer it?
 7. **The slice order (X8).** Are you willing to trade the roadmap's authoring-first phase 2
    for a thin slice across all three producers, knowing shared steps and custom fields move
    later?

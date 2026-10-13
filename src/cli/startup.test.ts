@@ -15,8 +15,8 @@ for (const options of [
 					PATH: process.env.PATH ?? "",
 					HOME: directory,
 					USER: "daniel",
-					CASEBOOK_PORT: "0",
-					CASEBOOK_MODE: options.mode,
+					MAINWORTHY_PORT: "0",
+					MAINWORTHY_MODE: options.mode,
 				},
 				stdout: "pipe",
 				stderr: "pipe",
@@ -33,7 +33,7 @@ for (const options of [
 					stdout += decoder.decode(chunk.value, { stream: true });
 				}
 				expect(stdout).toMatch(
-					/^Casebook 0\.1\.0 · (local|server) · data in ~\/\.casebook · http:\/\/127\.0\.0\.1:\d+\n/,
+					/^Mainworthy 0\.1\.0 · (local|server) · data in ~\/\.mainworthy · http:\/\/127\.0\.0\.1:\d+\n/,
 				);
 				expect(stdout).toContain('project "scratch" · you are daniel@this-machine · policy: loose');
 				const url = /http:\/\/127\.0\.0\.1:\d+/.exec(stdout)?.[0];
@@ -44,7 +44,7 @@ for (const options of [
 				expect((await fetch(`${url}/`)).status).toBe(200);
 				const archive = await fetch(`${url}/api/export`, { headers });
 				expect(archive.status).toBe(200);
-				expect(await archive.text()).toContain('"casebook":"archive"');
+				expect(await archive.text()).toContain('"mainworthy":"archive"');
 				const mcp = await fetch(`${url}/mcp`, {
 					method: "POST",
 					headers: { ...headers, "content-type": "application/json", accept: "application/json, text/event-stream" },
@@ -85,8 +85,8 @@ test("an occupied port exits 4 without keeping the failed server alive", async (
 				PATH: process.env.PATH ?? "",
 				HOME: directory,
 				USER: "daniel",
-				CASEBOOK_PORT: new URL(instance.url).port,
-				CASEBOOK_DATA: join(directory, "failed-start"),
+				MAINWORTHY_PORT: new URL(instance.url).port,
+				MAINWORTHY_DATA: join(directory, "failed-start"),
 			},
 			stdout: "pipe",
 			stderr: "pipe",
@@ -127,7 +127,7 @@ test("a consumer closing stdout produces no stack trace or failed-gate exit", as
 			],
 			{
 				cwd: directory,
-				env: { PATH: process.env.PATH ?? "", HOME: directory, CASEBOOK_URL: instance.url },
+				env: { PATH: process.env.PATH ?? "", HOME: directory, MAINWORTHY_URL: instance.url },
 				stdout: "pipe",
 				stderr: "pipe",
 				stdin: "ignore",
@@ -148,7 +148,7 @@ test("the source entry runs directly through its shebang", async () => {
 	await withInstance(async ({ directory, instance }) => {
 		const child = Bun.spawn([CLI_ENTRY, "open"], {
 			cwd: directory,
-			env: { PATH: process.env.PATH ?? "", HOME: directory, CASEBOOK_URL: instance.url },
+			env: { PATH: process.env.PATH ?? "", HOME: directory, MAINWORTHY_URL: instance.url },
 			stdout: "pipe",
 			stderr: "pipe",
 			stdin: "ignore",
@@ -175,7 +175,7 @@ test("closing a gate's stdout preserves pending, blocked, failed and passed exit
 				],
 				{
 					cwd: directory,
-					env: { PATH: process.env.PATH ?? "", HOME: directory, CASEBOOK_URL: instance.url },
+					env: { PATH: process.env.PATH ?? "", HOME: directory, MAINWORTHY_URL: instance.url },
 					stdout: "pipe",
 					stderr: "pipe",
 					stdin: "ignore",

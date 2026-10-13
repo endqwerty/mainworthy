@@ -10,7 +10,7 @@ The safety fact is that every gate counts only evidence admitted for its particu
 
 I read the round 1 through round 4 findings, the current normative design and decision records, the surrounding usage, projection ownership and slice contracts, and the actual fix diff. Mechanical scans cover the whole change, including all historical arena Markdown. All 31 changed or added files match c93e993. I did not read the author's fix scripts or reasons. Historical candidates remain nonnormative; this round does not re-rank them or refresh competitor claims.
 
-All line references below are at **c93e993**, unless identified as historical. Python transcriptions exercise documentation contracts with fixed fixtures; they do not run a Casebook implementation. Runtime correctness, persistence, latency, token budgets, backup/restore and deployment are **not checked** because this change contains no implementation.
+All line references below are at **c93e993**, unless identified as historical. Python transcriptions exercise documentation contracts with fixed fixtures; they do not run a Mainworthy implementation. Runtime correctness, persistence, latency, token budgets, backup/restore and deployment are **not checked** because this change contains no implementation.
 
 ## 1. Round 4 findings
 
@@ -114,7 +114,7 @@ Still unimplemented: full qualifies branches and policy predicates, Review proje
 
 I ran a fixed-data Python transcription. For the admission fixture, target, case version, declared method and linked binding already match; only exact versus assumed admission differs between the two obligations. Exercise state uses sets of actors with positive pass/fail counts. Rebuild selects uncorrected membership rows and reads their immutable Result facts. The recent array does not participate. The review counterexample uses the documented ResultId/ReviewId distinction and separate matching-basis/lens/independence rule.
 
-Command run: `python /tmp/casebook-arena/verify-r5-counterexamples.py`. Exit 0. Exact stdout:
+Command run: `python /tmp/mainworthy-arena/verify-r5-counterexamples.py`. Exit 0. Exact stdout:
 
 ```text
 SLOT_MEMBERSHIP assumed_qualification {"S-exact": false, "S-loose": true}
@@ -135,7 +135,7 @@ The two requested attacks now pass. The additional review fixture exposes R5-1. 
 
 ## 5. Mechanical checks and exact outputs
 
-Command run: `python /tmp/casebook-arena/verify-r5-checks.py`. Exit 0. The checker reads committed bytes with `git show c93e993:<path>`, enumerates all changed/added paths with `git diff --name-only --diff-filter=ACMR a78b0ad..c93e993`, and compares working bytes for each path.
+Command run: `python /tmp/mainworthy-arena/verify-r5-checks.py`. Exit 0. The checker reads committed bytes with `git show c93e993:<path>`, enumerates all changed/added paths with `git diff --name-only --diff-filter=ACMR a78b0ad..c93e993`, and compares working bytes for each path.
 
 The local link scan covers all 31 changed/added Markdown files. It checks inline/reference destinations outside fenced/inline code and validates local paths and heading/explicit anchors. It skips image syntax and external URL resolution; it does not treat plain/backtick paths as clickable links. The nine absolute links resolve on this machine and are explicitly historical/nonportable in the arena README. No external availability claim is made.
 
@@ -185,15 +185,15 @@ MARKDOWN_FILES 31
 LINK_SCAN_DONE CHECKED 47 BROKEN 0
 REFERENCE_LINKS_USED 0
 ABSOLUTE_LOCAL_LINKS 9
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:15 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:16 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#competitors
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:17 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:18 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#what-is-not-checked
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:19 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#testrail
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:20 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#landscape
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:13 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:16 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/product-vision.md
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:16 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/ux/flows.md
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:15 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:16 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#competitors
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:17 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:18 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#what-is-not-checked
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:19 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#testrail
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:20 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#landscape
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:13 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:16 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/product-vision.md
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:16 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/ux/flows.md
 OPS 18 ['propose', 'report', 'claim', 'announce', 'attach', 'plan', 'decide', 'inbox', 'get', 'find', 'impact', 'since', 'history', 'gate', 'trace', 'check', 'admin', 'transfer']
 MCP_TOOLS 10
 QUESTIONS [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28] CONTIGUOUS True
@@ -210,7 +210,7 @@ Each requested mechanical check is **pass**: committed-byte equality, local link
 
 **Issues on c93e993.** R4-1 and R4-2 are resolved. The sole blocker is **R5-1**, the unconditional aggregate-rebuild instruction that cannot preserve Review-only evidence. The ResultIn selector naming is an editorial note. The remaining implementation and measurement obligations are prototype work, with no runtime approval implied.
 
-The full report is saved to `/tmp/casebook-arena/verify-r5.md`. No repository file, commit, branch, pull request or remote was changed. No service was started. Temporary checker files were removed after their exact outputs were copied into this report. Reviewed commit c93e993 remains in the existing checkout; this review creates or lands no commit.
+The full report is saved to `/tmp/mainworthy-arena/verify-r5.md`. No repository file, commit, branch, pull request or remote was changed. No service was started. Temporary checker files were removed after their exact outputs were copied into this report. Reviewed commit c93e993 remains in the existing checkout; this review creates or lands no commit.
 
 Final read-only checks:
 

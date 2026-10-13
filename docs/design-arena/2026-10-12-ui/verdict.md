@@ -1,4 +1,4 @@
-# Casebook UI arena verdict
+# Mainworthy UI arena verdict
 
 Recommend **u3, the document**, as the base, with the grafts below. The totals are **u1 20/30, u2 22/30, u3 22/30**. P0 breaks the tie: u3 retains the accepted proposal, the reversing decision, and a later human edit; u2 deletes accepted history when undoing it. This chooses a design to implement, not an artifact ready to ship. U3's stale proof strip is also a release blocker.
 

@@ -13,7 +13,7 @@ import type { InboxReply } from "../src/core/ops.ts";
 import { harness } from "./helpers.ts";
 
 test("on-disk hot paths stay inside the design budgets", async () => {
-	const root = resolve(".casebook", "bench");
+	const root = resolve(".mainworthy", "bench");
 	mkdirSync(root, { recursive: true });
 	// The system temporary directory can be tmpfs. A private temporary directory beside the benchmark is disk.
 	const dir = mkdtempSync(join(root, "check-"));

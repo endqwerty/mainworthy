@@ -2,7 +2,7 @@ Machine: Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz; 16 logical cores; 31.2 GiB; 
 Filesystem: Filesystem       Type  1024-blocks     Used Available Capacity Mounted on
 /dev/mapper/root btrfs   486270976 75307944 407047464      16% /home
 Load at start: 2.89 / 3.30 / 4.08
-Reusing dataset: .casebook/bench/dataset-100000-20000-1000000-639-50000-28a6d1c5c1fe-48a19cd2af47 (100000 cases, 1050120 results, 50000 open questions)
+Reusing dataset: .mainworthy/bench/dataset-100000-20000-1000000-639-50000-28a6d1c5c1fe-48a19cd2af47 (100000 cases, 1050120 results, 50000 open questions)
 Measuring case read: 50 iterations in five blocks…
   case read is within 2× its budget; repeating five complete runs on fresh clones.
   p95 median 14.56 ms, range 13.94 to 17.01 ms; any trial miss fails the command.

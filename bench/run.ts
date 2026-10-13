@@ -48,7 +48,7 @@ export function options(args: string[]) {
 		parameters,
 		json: values.json,
 		dir: resolve(
-			".casebook",
+			".mainworthy",
 			"bench",
 			`dataset-${parameters.cases}-${parameters.tests}-${parameters.results}-${parameters.seed}-${parameters.openQuestions}-${revision.generator.slice(0, 12)}-${revision.migrations.slice(0, 12)}`,
 		),

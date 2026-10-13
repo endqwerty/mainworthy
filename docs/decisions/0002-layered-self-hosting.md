@@ -7,7 +7,7 @@
 
 ## Decision
 
-Casebook runs in three deployment layers from one codebase. A user picks the
+Mainworthy runs in three deployment layers from one codebase. A user picks the
 layer that fits them; the product behaves the same in every layer.
 
 | Layer | Who | Shape | Storage |

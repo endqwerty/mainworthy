@@ -1,21 +1,21 @@
-# Casebook candidate B: prove the change
+# Mainworthy candidate B: prove the change
 
 ## Thesis
 
-Casebook is the place a team answers "what does this change need proven, and what has proven it?" Its structural idea is a versioned proof plan for an immutable change revision: each obligation names an expectation, the conditions under which it matters, and the evidence it accepts. Manual runs, CI builds, and agent sessions supply evidence to those same obligations. Cases are the durable expectations behind the plan. A PR, commit, release, or named exploratory session is the working context. The product joins the three testing layers at the decision about a change, rather than merely storing their results together.
+Mainworthy is the place a team answers "what does this change need proven, and what has proven it?" Its structural idea is a versioned proof plan for an immutable change revision: each obligation names an expectation, the conditions under which it matters, and the evidence it accepts. Manual runs, CI builds, and agent sessions supply evidence to those same obligations. Cases are the durable expectations behind the plan. A PR, commit, release, or named exploratory session is the working context. The product joins the three testing layers at the decision about a change, rather than merely storing their results together.
 
 ## Why the incumbents are a poor use of money
 
 The verified facts below are the repository's research dated 2026-10-10, not fresh pricing checks. They establish commercial constraints, not proof that every incumbent has poor architecture. Product friction remains a hypothesis until the planned audits.
 
-| Structural cost | Evidence and limit | Casebook's structural answer |
+| Structural cost | Evidence and limit | Mainworthy's structural answer |
 | --- | --- | --- |
-| A team must buy permission to explain an old decision. | [Competitive analysis, TestRail, Qase, Xray, Testiny, Testomat.io](/home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md): versioning, audit, or retention are gated on these tools. The gates differ. | Every obligation pins its case version, policy, target, and evidence. History and reproducible decisions are part of the base storage model, exportable in every deployment. Storage retention is an explicit project policy, never a feature tier that hides lineage. |
+| A team must buy permission to explain an old decision. | [Competitive analysis, TestRail, Qase, Xray, Testiny, Testomat.io](/home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md): versioning, audit, or retention are gated on these tools. The gates differ. | Every obligation pins its case version, policy, target, and evidence. History and reproducible decisions are part of the base storage model, exportable in every deployment. Storage retention is an explicit project policy, never a feature tier that hides lineage. |
 | Inviting the people who need a release answer adds licence cost. | The analysis verifies Qase's collaborator price, Testiny's discounted viewers, and Xray's total-Jira-user basis. Testmo's plan pricing is a counterexample to a universal per-seat claim. | A principal is an identity and permission record, never a paid seat. Readers and automation principals do not trigger a purchase. Any later hosted price must relate to service capacity or support, not the number of people allowed to see the answer. No price or billing system is selected here. |
 | Bulk automation fights a business-imposed request budget. | The analysis verifies tiered request rates for TestRail, Qase, and Xray. It does not measure actual integration throughput. | A durable report upload is one operation, with resumable processing and a receipt. Cases, findings, and evidence support bounded batches. Resource quotas protect the instance and give explicit backpressure; permissions and throughput are not feature upgrades. |
-| Teams pay for maintaining duplicate representations of the same test knowledge. | Hypothesis from [product vision](/home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/product-vision.md) and [F4, F5, F7, F13](/home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/ux/flows.md), not an audited competitor defect. | A human's run list and an agent's impact set use the same proof-plan selection. CI maps into those obligations. Views derive coverage, gaps, and the gate from the same pinned plan. There is no second release spreadsheet to synchronise. |
+| Teams pay for maintaining duplicate representations of the same test knowledge. | Hypothesis from [product vision](/home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/product-vision.md) and [F4, F5, F7, F13](/home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/ux/flows.md), not an audited competitor defect. | A human's run list and an agent's impact set use the same proof-plan selection. CI maps into those obligations. Views derive coverage, gaps, and the gate from the same pinned plan. There is no second release spreadsheet to synchronise. |
 | A green automation dashboard can coexist with an unexplained release decision. | Hypothesis. Competitor traceability and MCP depth have not been audited. | The default screen lists unmet obligations and conflicting evidence, with the exact target and why each item is in scope. A pass count cannot hide an untested requirement, missing reporter, or manual failure. |
-| The tool makes adoption and exit expensive. | The analysis verifies several commercial on-prem offerings and cloud-only entries. Claims that all self-hosted alternatives are dated are not established. | One build, equivalent Local, Server, and Cloud semantics, and a complete portable archive. External CI and trackers remain external. Casebook supplies context and records evidence; it does not sell an execution platform that the customer must migrate into. |
+| The tool makes adoption and exit expensive. | The analysis verifies several commercial on-prem offerings and cloud-only entries. Claims that all self-hosted alternatives are dated are not established. | One build, equivalent Local, Server, and Cloud semantics, and a complete portable archive. External CI and trackers remain external. Mainworthy supplies context and records evidence; it does not sell an execution platform that the customer must migrate into. |
 
 An MCP badge alone is not a differentiator. A4 and A5 must demonstrate fewer tokens served to finish a review than naive suite reads, while preserving review quality. The hypothesis is that change-bound context and remembered review basis achieve this.
 
@@ -77,10 +77,10 @@ The commands, MCP names, and file format below specify future caller behaviour. 
 
 ### Quickstart as the user reads it
 
-Start Casebook from the downloaded artifact.
+Start Mainworthy from the downloaded artifact.
 
 ```text
-casebook start
+mainworthy start
 # Opens the local project chooser. Stores data locally. Binds to loopback.
 ```
 
@@ -93,9 +93,9 @@ Open the link
 Expect a clear expiry message and no new order
 ```
 
-Casebook saves your draft as you type. The editor proposes a title, precondition, action, and expected result. Accept the split or keep editing the outline. Select the Checkout area when you know it. Area and tracker links are optional during capture. The saved case receives the stable ID `CB-17`; its published version is `v1`.
+Mainworthy saves your draft as you type. The editor proposes a title, precondition, action, and expected result. Accept the split or keep editing the outline. Select the Checkout area when you know it. Area and tracker links are optional during capture. The saved case receives the stable ID `CB-17`; its published version is `v1`.
 
-Select `Prove a change`. Paste a PR URL, commit, or release identifier. For a trial without a repository, choose `Named session` and enter "Checkout expiry rehearsal". Casebook records that session as an explicit target. It does not claim the session proves a commit.
+Select `Prove a change`. Paste a PR URL, commit, or release identifier. For a trial without a repository, choose `Named session` and enter "Checkout expiry rehearsal". Mainworthy records that session as an explicit target. It does not claim the session proves a commit.
 
 Add `CB-17` to the plan. Select `Start manual check`, record the target environment, execute the case, and press `P` to pass. The row now says "manual pass on v1, named session, local environment". Open the row to see who recorded it. Select `Export decision` to save the plan and evidence with their history.
 
@@ -103,25 +103,25 @@ Connect CI or an agent when you need them. In Local, `Connect agent` issues an i
 
 ### Call site A: an existing CI pipeline reports automated results
 
-Before this example, a maintainer links the test ID `checkout/expiry::expired-link` to `CB-17 v1` and commits that exact reference in the test annotation or a version manifest. Casebook's latest case version is not a substitute for what the code tests. The proof recipe requires the reporter `unit-and-integration` in `linux-test`, and the stable build attempt identity comes from CI.
+Before this example, a maintainer links the test ID `checkout/expiry::expired-link` to `CB-17 v1` and commits that exact reference in the test annotation or a version manifest. Mainworthy's latest case version is not a substitute for what the code tests. The proof recipe requires the reporter `unit-and-integration` in `linux-test`, and the stable build attempt identity comes from CI.
 
 ```yaml
-# Illustrative GitHub Actions fragment; the Casebook executable is already available.
+# Illustrative GitHub Actions fragment; the Mainworthy executable is already available.
 steps:
   - name: Prepare proof execution
     run: >-
-      casebook prepare --project Shop
+      mainworthy prepare --project Shop
       --repository "$REPOSITORY_ID" --revision "$CHECKOUT_SHA"
       --branch "$BRANCH" --pr "$PR_NUMBER" --build-url "$BUILD_URL"
       --reporter unit-and-integration --build "$BUILD_ID" --attempt "$ATTEMPT"
-      --environment linux-test --case-manifest tests/casebook-versions.json
-      --output casebook-execution.json
+      --environment linux-test --case-manifest tests/mainworthy-versions.json
+      --output mainworthy-execution.json
   - name: Run existing tests
     run: ./run-tests-with-junit
   - name: Upload outcomes even when tests fail
     if: always()
     run: >-
-      casebook report results.xml --execution casebook-execution.json
+      mainworthy report results.xml --execution mainworthy-execution.json
       --format junit --final --wait processed
 ```
 
@@ -135,22 +135,22 @@ Re-running an upload with the same producer identity and content returns the ori
 
 ### Call site B: an agent challenges a PR through MCP
 
-The agent already has repository tools. Casebook does not fetch arbitrary code or run the application for it.
+The agent already has repository tools. Mainworthy does not fetch arbitrary code or run the application for it.
 
 ```text
-casebook_read({view: "change", ref: "Shop/pr/84", fields: "review_brief",
+mainworthy_read({view: "change", ref: "Shop/pr/84", fields: "review_brief",
 	limit: 20, fresh_eyes: true})
 => target cr-84-3 at repo R, tree T; plan pp-9; 8 obligations;
 	6 linked expectations; 2 unmapped paths; scope confidence incomplete;
 	review basis rb-44; tokens-served counter
 
-casebook_read({view: "impact", change_revision: "cr-84-3", limit: 20,
+mainworthy_read({view: "impact", change_revision: "cr-84-3", limit: 20,
 	fields: ["case_ref", "body", "dependencies", "impact_reason", "failure_digest"]})
 => CB-17 v1 and its pinned shared steps; other relevant expectations;
 	rules that selected them; unresolved scope; no prior reviewer opinions
 
 # Agent reads the PR diff with its repository tool and challenges the assertions.
-casebook_review({action: "record", mutation: "review-84-round1",
+mainworthy_review({action: "record", mutation: "review-84-round1",
 	basis: "rb-44", completed_items: ["ob-1", "ob-2"],
 	findings: [{key: "expiry-boundary", subject: "CB-17@v1",
 		claim: "Expiry equality is unspecified", severity: "medium",
@@ -159,7 +159,7 @@ casebook_review({action: "record", mutation: "review-84-round1",
 => finding f-12; proposal p-8; checkpoint ck-22; remaining review count 6
 
 # Later, after the human accepts the proposal and another push lands:
-casebook_read({view: "delta", checkpoint: "ck-22", change_ref: "Shop/pr/84",
+mainworthy_read({view: "delta", checkpoint: "ck-22", change_ref: "Shop/pr/84",
 	fields: "review_delta", limit: 20})
 => CB-17 v2 diff; changed patch and plan facts; invalidated review items;
 	unchanged applicable review items; unresolved findings; next checkpoint
@@ -169,7 +169,7 @@ A code review records findings and review completion. It does not record a runti
 
 The agent cannot declare the entire plan reviewed by writing one checkpoint. It acknowledges item-specific basis hashes. The checkpoint includes target diff, case and requirement versions, expanded shared-step content, bindings, and policy. An unchanged case on a changed relevant patch needs another code review. Unchanged artifacts can still avoid repeated body reads. A shared prior-review ledger is optional; `fresh_eyes` suppresses subjective findings and completion suggestions, not objective failures or scope gaps.
 
-For adversarial testing, the same impact query supplies a charter. `casebook_execute` starts an `adversarial` execution against a verified deployment target; the agent batches outcomes and reproduction findings. The actor is an agent, the method is adversarial exercise, and the execution is separate from the review above. An agent following an ordinary case procedure can instead declare the manual method. Actor identity does not decide the method.
+For adversarial testing, the same impact query supplies a charter. `mainworthy_execute` starts an `adversarial` execution against a verified deployment target; the agent batches outcomes and reproduction findings. The actor is an agent, the method is adversarial exercise, and the execution is separate from the review above. An agent following an ordinary case procedure can instead declare the manual method. Actor identity does not decide the method.
 
 ### Call site C: a human executes while an author captures new knowledge
 
@@ -367,7 +367,7 @@ Dominant paths through this structure are explicit.
 4. **Flaky state on ingest.** Each chunk updates only touched binding-context accumulators. Same-commit groups use the target-binding index, and the recent branch ring is bounded by configured windows. Duplicate row keys cannot update it twice. Late attempts update their code group before the window is reevaluated. The classifier preserves witnesses and threshold version. A nightly suite scan is unnecessary. Case summaries derive the worst active binding state and disclose the number of affected bindings.
 5. **Impact set for a change.** Changed paths use repository-prefix area rules, then area-case postings. Requirements use reverse links. Shared-step changes use reverse dependency postings. Union and deduplicate case refs, then attach bounded recent evidence and impact reasons. The query materialises its scope basis and returns counts before rows. Unmapped paths produce explicit scope gaps. A fallback may select the touched areas or the whole project for proof; it never labels an incomplete linkage result complete. Broad selection costs execution and tokens but is safer than fabricated precision.
 6. **Changed-since for an agent.** The checkpoint identifies the authorised scope and journal position. Scope postings return new events and tombstones without scanning versions. Changes to shared steps, policies, requirement snapshots, bindings, and change revisions invalidate affected basis hashes. The response gives diffs or hash-only unchanged answers. Expired or incompatible cursors return `ResnapshotRequired`, never an empty "nothing changed". A new access scope also requires a resnapshot.
-7. **Traceability.** Requirement links lead to pinned case refs, obligation rows, qualifying or rejected evidence, target code, builds, seals, deployments, and defect links. Reverse indexes support the reverse walk. Each edge includes recorded revision and provenance. Tracker state is a recorded snapshot with source time; Casebook does not claim a tracker is current while disconnected. Matrix pages use obligation summaries under the selected plan, not every historical result joined live.
+7. **Traceability.** Requirement links lead to pinned case refs, obligation rows, qualifying or rejected evidence, target code, builds, seals, deployments, and defect links. Reverse indexes support the reverse walk. Each edge includes recorded revision and provenance. Tracker state is a recorded snapshot with source time; Mainworthy does not claim a tracker is current while disconnected. Matrix pages use obligation summaries under the selected plan, not every historical result joined live.
 8. **Gate read by CI.** A keyed `GateByPlan` read compares applied and relevant generations, checks required-report completeness, and returns counts and decisive witnesses. Accepted uploads invalidate affected gates transactionally before their evidence is parsed, so a previous green becomes pending. Analysis jobs advance the generation only after matching, flake updates, and clause evaluation for that generation finish. Pending or lagging gates fail closed. A deploy read requires the caller's artifact and expected plan digest and returns a short-lived, generation-bound decision token. The gate's fast path does not scan the suite or reconstruct a million results.
 
 The store must atomically append facts, deduplication receipts, journal entries, relevant gate invalidations, and job intents. This is a stack-selection requirement. A case edit dirties plans that follow current definitions or depend on its scope; it does not rewrite an already pinned execution. A result arriving for an old revision never replaces a new revision's evidence. Plans with immutable pins can reuse that fact only under an explicit matching basis.

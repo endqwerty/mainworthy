@@ -4,7 +4,7 @@ import type { AdapterCommand } from "./types.ts";
 
 /**
  * The container's health check. It needs no token and reads no project: `/healthz` says the process is up and
- * which version it is. Without `--url` or `CASEBOOK_URL` it asks the server on this machine at `CASEBOOK_PORT`.
+ * which version it is. Without `--url` or `MAINWORTHY_URL` it asks the server on this machine at `MAINWORTHY_PORT`.
  */
 export const healthCommand: AdapterCommand = {
 	name: "health",
@@ -13,8 +13,8 @@ export const healthCommand: AdapterCommand = {
 	flags: [],
 	async run(args, client) {
 		assertPositionals(args, 0, 0, healthCommand.usage);
-		const named = args.value("url") ?? process.env.CASEBOOK_URL;
-		const url = named ? client.url : `http://127.0.0.1:${process.env.CASEBOOK_PORT || "7357"}`;
+		const named = args.value("url") ?? process.env.MAINWORTHY_URL;
+		const url = named ? client.url : `http://127.0.0.1:${process.env.MAINWORTHY_PORT || "7357"}`;
 		let version: string | null = null;
 		try {
 			const response = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(2500) });
@@ -24,7 +24,7 @@ export const healthCommand: AdapterCommand = {
 			}
 		} catch {}
 		if (args.has("json")) printJson({ url, healthy: version !== null, version }, args.bool("compact"));
-		else line(version !== null ? `healthy: Casebook ${version} at ${url}` : `not answering: ${url}`);
+		else line(version !== null ? `healthy: Mainworthy ${version} at ${url}` : `not answering: ${url}`);
 		return version !== null ? 0 : 1;
 	},
 };

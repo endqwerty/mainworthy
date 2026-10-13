@@ -76,7 +76,7 @@ const DESCRIPTIONS = new Map([
 	["For slots: the run.", "Run for slots."],
 	["For tests: only those with no case.", "Tests with no case."],
 	["A change key, for example pr:482.", "Change key, e.g. pr:482."],
-	["Changed paths, when the change is not known to Casebook.", "Paths if change is unknown."],
+	["Changed paths, when the change is not known to Mainworthy.", "Paths if change is unknown."],
 	["A cursor from an earlier call: only what moved since.", "Change cursor; only what moved."],
 	["False for fresh eyes: do not hide what was already reviewed.", "False for a fresh review."],
 	["A cursor from any earlier read.", "Change cursor from an earlier read."],
@@ -287,7 +287,7 @@ class AgentServer extends McpServer {
 	private protocolVersion: string;
 
 	constructor(call: Call, listProjects: ListProjects, protocolVersion: string) {
-		super({ name: "casebook", version: VERSION }, { instructions: INSTRUCTIONS });
+		super({ name: "mainworthy", version: VERSION }, { instructions: INSTRUCTIONS });
 		this.protocolVersion = protocolVersion;
 		const tools = mcpTools();
 		for (const tool of tools) {

@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 5, re-check B (the queue and running a suite)
+# Mainworthy web UI: independent verification, round 5, re-check B (the queue and running a suite)
 
 Revision judged: `9611d6136f8486142e26d3835b1e07cd2c03e11c`, branch `t3/mvp-product-delivery`.
 
@@ -32,11 +32,11 @@ the result that stands lacks the note that was in the field when Enter was press
 
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, `/usr/bin/chromium` with
   `--headless=new --ozone-platform=headless`, real server processes on 127.0.0.1, ports 8800 to 8849, data under
-  `/tmp/casebook-ui-r5b`.
+  `/tmp/mainworthy-ui-r5b`.
 - The only files changed in the export are five test helpers (ports moved into 8800..8849, the Chromium flags):
   `test-environment.patch`. No application source and no assertion is changed.
 - Round 4's probes copied unchanged into `probes/` (only the screenshot path differs), run from `tree/` as
-  `TMPDIR=/tmp/casebook-ui-r5b bun ../probes/<name>.ts [scenario]`. First pass in `logs/`, second pass in
+  `TMPDIR=/tmp/mainworthy-ui-r5b bun ../probes/<name>.ts [scenario]`. First pass in `logs/`, second pass in
   `logs/run2/`. New probes: `probes/r5-queue.ts`, `probes/r5-run.ts` (`logs/r5-*.log`).
 - Every probe drives the real UI with trusted key events and reads the server through its API. Slow, failing and
   lost replies are injected at the browser (`page.route`).
@@ -44,7 +44,7 @@ the result that stands lacks the note that was in the field when Enter was press
   (`logs/mutations.log`).
 - One probe was also run against round 4's revision `ec98ba4` (export in `r4tree/`) to tell a new problem from an
   old one (`logs/r4-revision-refail-pace.log`).
-- At the end my servers and browsers are stopped and `/tmp/casebook-ui-r5b` and `tree/node_modules` are removed;
+- At the end my servers and browsers are stopped and `/tmp/mainworthy-ui-r5b` and `tree/node_modules` are removed;
   run `bun install --frozen-lockfile` in `tree/` to rerun a probe (`mut/tree` and `r4tree` link to it).
 - Other reviewers' processes were running on this machine at the same time; no probe result depended on it (every
   timing result was the same on both passes).
@@ -228,7 +228,7 @@ None new. The engine half of R4B-1 is fixed as far as the UI can see: `inbox` no
 ## Not checked
 
 - The whole browser suite, and the Suite, Case, Changes, Settings and sign-in screens, the duplicated-tab window
-  id, the draft resend and the `X-Casebook-As` refusal (the other reviewer); I ran only `round4.test.ts`.
+  id, the draft resend and the `X-Mainworthy-As` refusal (the other reviewer); I ran only `round4.test.ts`.
 - R5B-1 by hand at real network latency: delays and failures were injected at the browser on a loopback server.
 - Sign-off answers, the `l` (link) and `merge` answers, a queue longer than one page, a run longer than 200
   slots.

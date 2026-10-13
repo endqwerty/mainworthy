@@ -1006,7 +1006,7 @@ export const causeKey = (signature: number, scope: string): string => `${signatu
 
 /**
  * Does this test already fail, with this cause, where the change started? That is the base commit the change
- * names, and only that: where the change names none, or Casebook has no result of this test on it, the answer
+ * names, and only that: where the change names none, or Mainworthy has no result of this test on it, the answer
  * is no. It is a hint shown to the person who answers, as of the moment a report arrives; nothing is excused by
  * it and no answer stands on it. It reads what the base's gate counts: the effective result per lane, after
  * attempts and corrections, never an agent's result and never another repository's.

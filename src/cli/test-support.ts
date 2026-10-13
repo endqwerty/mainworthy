@@ -24,12 +24,12 @@ export async function withInstance<T>(
 	run: (running: Running) => Promise<T>,
 	options: { mode?: "local" | "server"; owner?: string; routes?: ReturnType<typeof archiveRoutes> } = {},
 ): Promise<T> {
-	const directory = await mkdtemp(join(tmpdir(), "casebook-cli-"));
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-cli-"));
 	const config = defaultConfig({
-		CASEBOOK_DATA: directory,
-		CASEBOOK_PORT: "0",
-		CASEBOOK_OWNER: options.owner ?? "daniel",
-		CASEBOOK_MODE: options.mode ?? "local",
+		MAINWORTHY_DATA: directory,
+		MAINWORTHY_PORT: "0",
+		MAINWORTHY_OWNER: options.owner ?? "daniel",
+		MAINWORTHY_MODE: options.mode ?? "local",
 	});
 	const instance = start(config, (app, owner) => ({
 		ui: null,
@@ -48,8 +48,8 @@ export async function withInstance<T>(
 						PATH: process.env.PATH ?? "",
 						HOME: directory,
 						USER: "daniel",
-						CASEBOOK_URL: instance.url,
-						...(instance.generatedToken ? { CASEBOOK_TOKEN: instance.generatedToken } : {}),
+						MAINWORTHY_URL: instance.url,
+						...(instance.generatedToken ? { MAINWORTHY_TOKEN: instance.generatedToken } : {}),
 						...options.env,
 					},
 					stdin: "pipe",

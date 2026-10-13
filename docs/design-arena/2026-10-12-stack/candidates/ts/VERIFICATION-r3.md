@@ -10,7 +10,7 @@ Both round 2 blockers are resolved on this revision: the required-mode run compl
 | --- | --- |
 | Final required-mode run | `RUN_COMPLETE` written 23:08:06; `run-duration-v3.txt` = 227.345 s (under 10 min). The log has 20 workload lines, all `"errors":0`, and no error line. |
 | Artifact freshness | `embedded.json` 23:06:10, `server.json` 23:08:01, `openapi.json`, `registry-proof.json` and `results.json` 23:08:06, all from this run. |
-| OpenAPI | `dist/casebook openapi` is byte-identical to `openapi.json` on disk; 6 unique `$id`, 6 refs. The stale-file issue from rounds 1 and 2 is gone. |
+| OpenAPI | `dist/mainworthy openapi` is byte-identical to `openapi.json` on disk; 6 unique `$id`, 6 refs. The stale-file issue from rounds 1 and 2 is gone. |
 | Startup ownership | With my own server holding the port, `bench.ts` failed with `Port belongs to another process; refusing contaminated benchmark`, exit 1, and wrote no result file. |
 | PID header | `/health`, `/counts` and operation responses all carry `x-process-pid` equal to the spawned child, on SQLite and PG. |
 | SQLite save (scratch copy) | One save: version, question, decision, command and seq each +1; head 1 → 2; replay returned the identical receipt with no count change. |

@@ -17,9 +17,9 @@ export function serveCommand(args: Args, ui: unknown): void {
 		ui,
 		routes: { "/mcp": mcpRoute(app), ...archiveRoutes(app, owner) },
 	}));
-	const data = config.dataDir === join(process.env.HOME ?? ".", ".casebook") ? "~/.casebook" : config.dataDir;
+	const data = config.dataDir === join(process.env.HOME ?? ".", ".mainworthy") ? "~/.mainworthy" : config.dataDir;
 	const owner = instance.owner.name.includes("@") ? instance.owner.name : `${instance.owner.name}@this-machine`;
-	line(`Casebook ${VERSION} · ${config.mode} · data in ${data} · ${instance.url}`);
+	line(`Mainworthy ${VERSION} · ${config.mode} · data in ${data} · ${instance.url}`);
 	const project = findProject(instance.app.db, instance.project);
 	const policy = project ? policyName(currentPolicy(instance.app.db, project.id)) : "unknown";
 	line(`project "${instance.project}" · you are ${owner} · policy: ${policy}`);

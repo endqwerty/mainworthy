@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 3, part A (the authors' tests, capture, editing and versions)
+# Mainworthy web UI: independent verification, round 3, part A (the authors' tests, capture, editing and versions)
 
 Revision judged: `b11d2307959bd1ea7f5edea6351cd5cc7bbf077f`, branch `t3/mvp-product-delivery`.
 
@@ -29,7 +29,7 @@ recorded a failure (A-5).
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, Bun 1.4.3, `/usr/bin/chromium`
   (`--headless=new --ozone-platform=headless`), real server processes on 127.0.0.1. Nothing in the export was
   changed: the authors' suite ran unpatched on its own ports (7400 to 7499); my probes start their own servers on
-  8300 to 8349 with data under `/tmp/casebook-ui-r3a`.
+  8300 to 8349 with data under `/tmp/mainworthy-ui-r3a`.
 - Probes are in `probes/` (run from `tree/` as `bun ../probes/<name>.ts [scenario]`; first `bun install
   --frozen-lockfile` in `tree/`, whose `node_modules` is removed at the end of this review), output in `logs/`,
   screenshots in `shots/`. Every probe drives the real UI with trusted key events and then reads the server through
@@ -274,8 +274,8 @@ delimiter, not on text that was already there.
 - IME input, screen readers, mobile widths, Cmd on macOS.
 - The engine, beyond the two observations above.
 
-Cleanup: no server or browser of this review is running; `/tmp/casebook-ui-r3a` and `tree/node_modules` are removed.
-The stale `/tmp/casebook-e2e-*` directories dated 01:44 to 01:56 and the servers on ports 8419 and 8425 belong to
+Cleanup: no server or browser of this review is running; `/tmp/mainworthy-ui-r3a` and `tree/node_modules` are removed.
+The stale `/tmp/mainworthy-e2e-*` directories dated 01:44 to 01:56 and the servers on ports 8419 and 8425 belong to
 other runs and were left alone.
 
 ISSUES (4 blockers)

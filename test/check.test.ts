@@ -69,7 +69,7 @@ test("the workflow runs every shard of the plan and its gate reads every one of 
 	expect(workflow).toContain(`run: bun scripts/ci-gate.ts test-results ${shards.join(" ")} quiet\n`);
 });
 
-test("the workflow gives the pipeline's token to the one step that reports, and that step chooses the Casebook", () => {
+test("the workflow gives the pipeline's token to the one step that reports, and that step chooses the Mainworthy", () => {
 	const Step = z.object({ name: z.string().optional(), env: z.record(z.string(), z.string()).optional() });
 	const Job = z.object({
 		permissions: z.record(z.string(), z.string()).optional(),
@@ -86,7 +86,7 @@ test("the workflow gives the pipeline's token to the one step that reports, and 
 	const holders = Object.entries(workflow.jobs).flatMap(([job, { steps }]) =>
 		steps.filter((step) => JSON.stringify(step.env ?? {}).includes("secrets.")).map((step) => `${job}: ${step.name}`),
 	);
-	expect(holders).toEqual(["gate: Report every shard to Casebook, then the gate"]);
+	expect(holders).toEqual(["gate: Report every shard to Mainworthy, then the gate"]);
 	// No secret in an environment every step of a job or of the workflow would share.
 	expect([workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)]).toEqual([
 		undefined,

@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 2 (full review)
+# Mainworthy web UI: independent verification, round 2 (full review)
 
 Revision judged: `f1a2a2404153513892d0981035085a1acb250a17`, branch `t3/mvp-product-delivery`.
 
@@ -137,7 +137,7 @@ text lost.
 
 Blocks: **yes**.
 
-New-case drafts are stored one per key, but a single pointer (`casebook:active:<project>`) says which to restore.
+New-case drafts are stored one per key, but a single pointer (`mainworthy:active:<project>`) says which to restore.
 After two captures fail to save, a reload restores the last only. The first stays in `localStorage`; no screen
 shows it, and it is never sent.
 
@@ -152,13 +152,13 @@ Promise contradicted: "nothing typed is lost on reload, on a failed request". Th
 ### R2-5: Opened over plain HTTP under any name but localhost, the UI cannot write anything
 
 Blocks: **yes, if server mode is meant to be opened from another machine over HTTP**, which is what `Dockerfile`
-(`CASEBOOK_HOST=0.0.0.0`) and `compose.yaml` set up; no document says HTTPS is required.
+(`MAINWORTHY_HOST=0.0.0.0`) and `compose.yaml` set up; no document says HTTPS is required.
 
 `crypto.randomUUID` exists only in a secure context. The UI calls it for every draft id and command id (13 call
 sites in `src/web`). Chromium treats `http://localhost` and `http://127.0.0.1` as secure, so every test passes;
 `http://tower:7357` or `http://192.168.x.x:7357` is not.
 
-Reproduction (`probes/extra.ts http-name`, `logs/extra.log`; the same server opened as `http://casebook.test:<port>`
+Reproduction (`probes/extra.ts http-name`, `logs/extra.log`; the same server opened as `http://mainworthy.test:<port>`
 with the name mapped to 127.0.0.1 by a Chromium flag): `{"isSecureContext":false,"randomUUID":"undefined","clipboard":"undefined"}`.
 Sign-in works. `c`, type, Escape: no draft row, nothing on the server, uncaught
 `crypto.randomUUID is not a function`. `p` in a run: `C-1:missing`, status `crypto.randomUUID is not a function`.

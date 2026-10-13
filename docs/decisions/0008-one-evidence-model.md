@@ -134,7 +134,7 @@ the decisions that the sketch depends on.
 ## Alternatives rejected
 
 - **Exact-or-unresolved only** (candidates A and B): honest, but makes a
-  drop-in `casebook report` useless for gates until a team adds a manifest
+  drop-in `mainworthy report` useless for gates until a team adds a manifest
   step. The assumed basis keeps drop-in useful and visible.
 - **Stamp the current head and call it the version** (candidates C and D as
   written): guesses silently. Rejected by the judge and here.

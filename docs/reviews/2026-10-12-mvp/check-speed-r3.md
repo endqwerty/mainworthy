@@ -4,7 +4,7 @@ Revision: `c824dce104263eac472bfafbb9476e9bd8f104e9`, against `358a2aa`. Reviewe
 
 B1-R2 is fixed. One blocking regression remains in the gate's handling of text inside JUnit output and comments. The requested ordinary suite-inheritance cases pass.
 
-All execution used the clean export at `/home/endqwerty/.cache/casebook-arena/verify/dx-r3/tree`. The repository was read-only. `git archive c824dce104263eac472bfafbb9476e9bd8f104e9` supplied the export, and `bun install --frozen-lockfile` succeeded with Bun 1.4.3. Logs, fixtures, scripts, and temporary files are under `dx-r3`. No worktree release command ran.
+All execution used the clean export at `/home/endqwerty/.cache/mainworthy-arena/verify/dx-r3/tree`. The repository was read-only. `git archive c824dce104263eac472bfafbb9476e9bd8f104e9` supplied the export, and `bun install --frozen-lockfile` succeeded with Bun 1.4.3. Logs, fixtures, scripts, and temporary files are under `dx-r3`. No worktree release command ran.
 
 The safety fact is that the gate rejects a file whose tests all skipped, accepts a file with an executed test, and preserves failure handling. The runner must show one browser-unavailable note without changing its intended local success status. Checks were recorded in `PLAN.md` before mutations. The gate safety fact is disproved by B1-R3 below.
 
@@ -17,11 +17,11 @@ The new regex walks text inside XML comments and CDATA as though it were result 
 Reproduce from `dx-r3`:
 
 ```
-TMPDIR=/home/endqwerty/.cache/casebook-arena/verify/dx-r3/tmp bun text-probes.ts
-TMPDIR=/home/endqwerty/.cache/casebook-arena/verify/dx-r3/tmp bun baseline-text-probes.ts
+TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r3/tmp bun text-probes.ts
+TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r3/tmp bun baseline-text-probes.ts
 ```
 
-Both scripts run the full gate against a fresh local Casebook, with the fixture source files present and outcome JSON `{"exit":0,"seconds":1}`. The baseline script uses the exact `358a2aa` gate source in `baseline/scripts/ci-gate.ts`, with dependencies linked to the export. Those dependencies are unchanged by the reviewed diff.
+Both scripts run the full gate against a fresh local Mainworthy, with the fixture source files present and outcome JSON `{"exit":0,"seconds":1}`. The baseline script uses the exact `358a2aa` gate source in `baseline/scripts/ci-gate.ts`, with dependencies linked to the export. Those dependencies are unchanged by the reviewed diff.
 
 ### False pass
 
@@ -36,7 +36,7 @@ Fixture `neighbour-fixtures/skipped-file-output-fake-pass/test-results/tests-1.x
 
 Deciding evidence:
 
-- Casebook reports `2 results   1 pass   0 fail   1 skip`.
+- Mainworthy reports `2 results   1 pass   0 fail   1 skip`.
 - Head counts the second file as two tests, one skipped, and exits **0** without an error annotation.
 - Baseline counts it as one test, one skipped, and exits **1** with `::error::tests-1: every test of test/deep/browser.test.ts was skipped (1)`.
 
@@ -52,7 +52,7 @@ Fixture `inherited-pass-output-skipped-text` contains one passing testcase whose
 </testsuite>
 ```
 
-Casebook reports `1 results   1 pass   0 fail   0 skip` and `passed: 1 result proven`. Head nevertheless exits **1** with `::error::tests-1: every test of test/deep/browser.test.ts was skipped (1)`. Baseline exits **0**. Replacing the system-out with `<!-- <skipped /> -->` has the same result.
+Mainworthy reports `1 results   1 pass   0 fail   0 skip` and `passed: 1 result proven`. Head nevertheless exits **1** with `::error::tests-1: every test of test/deep/browser.test.ts was skipped (1)`. Baseline exits **0**. Replacing the system-out with `<!-- <skipped /> -->` has the same result.
 
 Evidence: `neighbour-inherited-pass-output-skipped-text.log`, `neighbour-inherited-pass-comment-skipped-text.log`, their `baseline-` equivalents, and both text summary logs.
 
@@ -103,7 +103,7 @@ Evidence: `neighbour-summary.log`, `extended-summary.log`, `neighbour-*.log`, an
 Pass. In the unmodified export:
 
 ```
-TMPDIR=/home/endqwerty/.cache/casebook-arena/verify/dx-r3/tmp bun test test/policy.test.ts test/e2e/round5.test.ts --reporter=junit --reporter-outfile=/home/endqwerty/.cache/casebook-arena/verify/dx-r3/real.xml
+TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r3/tmp bun test test/policy.test.ts test/e2e/round5.test.ts --reporter=junit --reporter-outfile=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r3/real.xml
 ```
 
 Exit **0**. Deciding lines: `29 pass`, `1 skip`, `0 fail`, `204 expect() calls`.
@@ -136,7 +136,7 @@ Evidence: `old-counting-tests.log` and `old-counting-tests.exit`.
 
 ## Browser notice
 
-Browser-available run passes. In the unmodified export, `TMPDIR=.../dx-r3/tmp bun run check` exits **0**. Both test phases, type-check, and lint say `ok`. Deciding lines include `Ran 708 tests across 59 files` and `Ran 166 tests across 5 files`. There is no `NOTE: the browser tests did not run.` line and no `Skipping Casebook e2e` line.
+Browser-available run passes. In the unmodified export, `TMPDIR=.../dx-r3/tmp bun run check` exits **0**. Both test phases, type-check, and lint say `ok`. Deciding lines include `Ran 708 tests across 59 files` and `Ran 166 tests across 5 files`. There is no `NOTE: the browser tests did not run.` line and no `Skipping Mainworthy e2e` line.
 
 The check emits its existing wall-time warning because the run exceeds its limit and the machine has other work. It retains exit 0 under the existing shared-machine exemption. This review makes no performance claim. Evidence: `check-browser.log` and `check-browser.exit`.
 
@@ -145,7 +145,7 @@ Browser-unavailable run also passes. `python no-browser-check.py` changes the ex
 The check exits **0**. Type-check, lint, and both test phases say `ok`. Exactly one summary note appears:
 
 ```
-NOTE: the browser tests did not run. Skipping Casebook e2e: set CASEBOOK_CHROMIUM or install system Chromium.
+NOTE: the browser tests did not run. Skipping Mainworthy e2e: set MAINWORTHY_CHROMIUM or install system Chromium.
 ```
 
 The driver confirms `exit 0 NOTE count 1` and `Browser support restored byte for byte.` Evidence: `no-browser-check.py`, `no-browser-driver.log`, `check-no-browser.log`, and `check-no-browser.exit`.

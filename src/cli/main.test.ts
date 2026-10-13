@@ -32,7 +32,7 @@ test("red report, blocked gate, generated decision, passed gate without another 
 		]);
 		expect(report.code).toBe(0);
 		expect(report.stderr).toBe("");
-		expect(report.stdout).toContain("casebook report  scratch @ 9f3c2ab  (main)  attempt 2  job e2e");
+		expect(report.stdout).toContain("mainworthy report  scratch @ 9f3c2ab  (main)  attempt 2  job e2e");
 		expect(report.stdout).toContain("2 results   1 pass   1 fail   0 skip");
 		expect(report.stdout).toMatch(/1 new\s+Q-\d+/);
 		expect(report.stdout).toContain("expected 90.00, got 100.00");
@@ -120,13 +120,13 @@ test("a pipeline's token runs both pipeline lines and nothing else, and its secr
 		expect(issued.stdout).toContain("will not be shown again");
 		expect(outputWith(z.object({ can: z.array(z.string()) }), issued).can).toEqual(["record"]);
 		const { token } = outputWith(Token, issued);
-		const env = { CASEBOOK_TOKEN: token, CASEBOOK_PROJECT: "scratch" };
+		const env = { MAINWORTHY_TOKEN: token, MAINWORTHY_PROJECT: "scratch" };
 		const report = await cli(["report", RED_XML, "--commit", COMMIT], { env });
 		expect(report.code).toBe(0);
 		// Blocked: the verdict and the open question, with a token that may not read the queue.
 		const gate = await cli(["gate", "--commit", COMMIT], { env });
 		expect([gate.code, gate.stderr]).toEqual([2, ""]);
-		expect(gate.stdout).toMatch(/casebook gate {4}blocked: .*\n {2}Q-\d+ needs an answer/);
+		expect(gate.stdout).toMatch(/mainworthy gate {4}blocked: .*\n {2}Q-\d+ needs an answer/);
 		const inbox = outputWith(Inbox, await cli(["inbox", "--kind", "failure"]));
 		const question = inbox.items[0];
 		if (!question) throw new Error("no failure question");
@@ -223,7 +223,7 @@ test("check groups real suite problems by rule and exits 1", async () => {
 	});
 });
 
-for (const suffix of [".casebook", ".casebook.gz"]) {
+for (const suffix of [".mainworthy", ".mainworthy.gz"]) {
 	test(`export/import${suffix} preserves the case list in a fresh running instance`, async () => {
 		await withInstance(async (source) => {
 			const created = await source.cli(["new", "--json"], {
@@ -296,7 +296,7 @@ test("project ambiguity names the projects; command-line project overrides envir
 		const ambiguous = await cli(["find"]);
 		expect(ambiguous.code).toBe(4);
 		expect(ambiguous.stderr).toContain("scratch, other");
-		const chosen = await cli(["--project", "scratch", "find"], { env: { CASEBOOK_PROJECT: "absent" } });
+		const chosen = await cli(["--project", "scratch", "find"], { env: { MAINWORTHY_PROJECT: "absent" } });
 		expect(chosen.code).toBe(0);
 	});
 });
@@ -305,7 +305,7 @@ test("connection and operation errors are single-line diagnostics with exit 4", 
 	await withInstance(async ({ cli }) => {
 		const unreachable = await cli(["find", "--url", "http://127.0.0.1:1"]);
 		expect(unreachable.code).toBe(4);
-		expect(unreachable.stderr).toContain("start the server with casebook serve");
+		expect(unreachable.stderr).toContain("start the server with mainworthy serve");
 		expect(unreachable.stderr.trim().split("\n")).toHaveLength(1);
 		const missing = await cli(["get", "C-999"]);
 		expect(missing.code).toBe(4);
@@ -337,7 +337,7 @@ test("health exits 0 when the server answers and 1 when nothing does, with no to
 	await withInstance(async ({ cli, instance }) => {
 		const up = await cli(["health"]);
 		expect(up.code).toBe(0);
-		expect(up.stdout).toBe(`healthy: Casebook 0.1.0 at ${instance.url}\n`);
+		expect(up.stdout).toBe(`healthy: Mainworthy 0.1.0 at ${instance.url}\n`);
 		const down = await cli(["health", "--url", "http://127.0.0.1:9"]);
 		expect(down.code).toBe(1);
 		expect(down.stdout).toBe("not answering: http://127.0.0.1:9\n");
@@ -385,7 +385,7 @@ test("policy use checks the caller's project permission, including a scoped admi
 				project: "scratch",
 			}),
 		).token;
-		const changed = await cli(["policy", "use", "standard"], { env: { CASEBOOK_TOKEN: token } });
+		const changed = await cli(["policy", "use", "standard"], { env: { MAINWORTHY_TOKEN: token } });
 		expect(changed.code).toBe(0);
 		expect(changed.stdout).toContain("both recorded");
 		expect((await cli(["policy", "show"])).stdout).toContain("policy: standard");
@@ -440,7 +440,7 @@ test("schema errors are readable single-line diagnostics", async () => {
 
 test("corrupt gzip is an archive error while the server remains reachable", async () => {
 	await withInstance(async ({ cli, directory }) => {
-		const file = join(directory, "invalid.casebook.gz");
+		const file = join(directory, "invalid.mainworthy.gz");
 		await writeFile(file, "this is not gzip");
 		const result = await cli(["import", file]);
 		expect(result.code).toBe(4);
@@ -502,7 +502,7 @@ test("a JSON payload refuses flags that would otherwise be ignored", async () =>
 test("an HTTP 200 proxy page cannot replace an existing export", async () => {
 	await withInstance(
 		async ({ cli, directory }) => {
-			const file = join(directory, "backup.casebook");
+			const file = join(directory, "backup.mainworthy");
 			await writeFile(file, "previous backup");
 			const result = await cli(["export", "--out", file]);
 			expect(result.code).toBe(4);
@@ -555,12 +555,12 @@ test("an early refusal of a large valid gzip reports authorization, not corrupt 
 				},
 			],
 		});
-		const file = join(source.directory, "valid.casebook.gz");
+		const file = join(source.directory, "valid.mainworthy.gz");
 		expect((await source.cli(["export", "--out", file])).code).toBe(0);
 		await withInstance(
 			async ({ cli, client }) => {
 				for (const token of ["", "unknown-token"]) {
-					const result = await cli(["import", file], { env: { CASEBOOK_TOKEN: token } });
+					const result = await cli(["import", file], { env: { MAINWORTHY_TOKEN: token } });
 					expect(result.code).toBe(4);
 					expect(result.stderr).toContain("unauthenticated:");
 					expect(result.stderr).not.toContain("invalid gzip");
@@ -568,7 +568,7 @@ test("an early refusal of a large valid gzip reports authorization, not corrupt 
 				const token = Token.parse(
 					await client.call("admin", { do: "token.create", actor: "pipeline", kind: "ci", can: ["read", "record"] }),
 				).token;
-				const denied = await cli(["import", file], { env: { CASEBOOK_TOKEN: token } });
+				const denied = await cli(["import", file], { env: { MAINWORTHY_TOKEN: token } });
 				expect(denied.code).toBe(4);
 				expect(denied.stderr).toContain("forbidden:");
 				expect(denied.stderr).not.toContain("invalid gzip");
@@ -578,16 +578,16 @@ test("an early refusal of a large valid gzip reports authorization, not corrupt 
 	});
 });
 
-test("an empty CASEBOOK_URL, CASEBOOK_TOKEN or CASEBOOK_PROJECT is the same as none", async () => {
+test("an empty MAINWORTHY_URL, MAINWORTHY_TOKEN or MAINWORTHY_PROJECT is the same as none", async () => {
 	// A pipeline passes a setting that is not configured as an empty string, not as an absent variable.
 	await withInstance(async ({ cli, instance }) => {
-		const empty = { CASEBOOK_URL: "", CASEBOOK_TOKEN: "", CASEBOOK_PROJECT: "" };
+		const empty = { MAINWORTHY_URL: "", MAINWORTHY_TOKEN: "", MAINWORTHY_PROJECT: "" };
 		// No address named: the server on this machine, at its port.
-		const health = await cli(["health", "--json"], { env: { ...empty, CASEBOOK_PORT: new URL(instance.url).port } });
+		const health = await cli(["health", "--json"], { env: { ...empty, MAINWORTHY_PORT: new URL(instance.url).port } });
 		expect(health.stderr).toBe("");
 		expect(JSON.parse(health.stdout)).toMatchObject({ healthy: true });
 		// An empty port is no port either: the built-in one, whether or not anything listens there.
-		const port = await cli(["health", "--json"], { env: { ...empty, CASEBOOK_PORT: "" } });
+		const port = await cli(["health", "--json"], { env: { ...empty, MAINWORTHY_PORT: "" } });
 		expect(JSON.parse(port.stdout)).toMatchObject({ url: "http://127.0.0.1:7357" });
 		// No token and no project named: the local session and the only project.
 		const inbox = await cli(["inbox", "--json", "{}", "--url", instance.url], { env: empty });

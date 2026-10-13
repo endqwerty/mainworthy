@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real HTTP benchmark for the Rust Casebook spike; Python standard library only."""
+"""Real HTTP benchmark for the Rust Mainworthy spike; Python standard library only."""
 import concurrent.futures
 import hashlib
 import http.client
@@ -21,7 +21,7 @@ from xml.sax.saxutils import escape
 ROOT = Path(__file__).resolve().parent
 SHARED = ROOT.parent
 SCRATCH = ROOT / "tmp" / "driver"
-BINARY = ROOT / "target" / "release" / "casebook-rust-spike"
+BINARY = ROOT / "target" / "release" / "mainworthy-rust-spike"
 PORT = int(os.environ.get("RUST_BENCH_PORT", "18483"))
 PG = "host=127.0.0.1 port=54329 user=postgres dbname=cb_rust"
 WARMUP = 100
@@ -178,7 +178,7 @@ class Driver:
         return int(next(line for line in lines if line.startswith("VmRSS:")).split()[1]) / 1024
 
     def make_fixture(self):
-        xml = ['<?xml version="1.0" encoding="UTF-8"?><testsuites><testsuite name="casebook" tests="10000" failures="200">']
+        xml = ['<?xml version="1.0" encoding="UTF-8"?><testsuites><testsuite name="mainworthy" tests="10000" failures="200">']
         for i in range(10000):
             xml.append(f'<testcase classname="bench.suite" name="test-{i}" time="0.025">')
             if i < 200:
@@ -198,7 +198,7 @@ class Driver:
         self.save_counter += 1
         ref = rng.randint(40001, 100000)
         marker = f"rust{self.mode}save{self.save_counter}"
-        body = {"title": f"Casebook {marker} immutable version", "pre": "Signed in with a project that has existing cases.",
+        body = {"title": f"Mainworthy {marker} immutable version", "pre": "Signed in with a project that has existing cases.",
                 "steps": [{"id": "s1", "action": "Open the versioned case and review its current steps. " + "detail " * 13,
                            "expected": "The saved head and title agree with the canonical document."},
                           {"id": "s2", "action": "Seal this fresh document with the supplied client command id. " + "content " * 10,
@@ -210,7 +210,7 @@ class Driver:
         marker = f"rust-{self.mode}-batch-{self.report_counter}"
         # Letters survive normalisation that removes volatile numbers/addresses.
         token = hashlib.sha256(marker.encode()).hexdigest().translate(str.maketrans("0123456789", "ghijklmnop"))
-        messages = self.samples + [f"Casebook fresh invariant {token} kind {chr(97+i)} violated" for i in range(10)]
+        messages = self.samples + [f"Mainworthy fresh invariant {token} kind {chr(97+i)} violated" for i in range(10)]
         started = time.process_time()
         rows = [{"key": key, "outcome": "fail" if i < 200 else "pass", "durationMs": 25,
                  **({"message": messages[i % 20]} if i < 200 else {})} for i, key in enumerate(self.keys)]
@@ -563,7 +563,7 @@ class Driver:
                         return value, len(wire)
                 raise TimeoutError("MCP response timeout")
             try:
-                send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "casebook-arena", "version": "1"}}})
+                send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "mainworthy-arena", "version": "1"}}})
                 initialize, _ = receive(1)
                 proof["protocol_revision"] = initialize["result"]["protocolVersion"]
                 send({"jsonrpc": "2.0", "method": "notifications/initialized"})

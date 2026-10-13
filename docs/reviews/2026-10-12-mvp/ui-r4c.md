@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 4, part C
+# Mainworthy web UI: independent verification, round 4, part C
 
 Part C: changes and settings, sign-in and session, keyboard, layout and themes, speed; and the re-check of
 R3C-1 to R3C-6 and Astra's R3-1 and R3-2.
@@ -24,12 +24,12 @@ also has a cost nobody listed: a tab that is closed or reloaded no longer record
 
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, Bun 1.4.3, `/usr/bin/chromium` with
   `--headless=new --ozone-platform=headless`, real server processes on 127.0.0.1, ports 8600 to 8649, data under
-  `/tmp/casebook-ui-r4c`.
+  `/tmp/mainworthy-ui-r4c`.
 - The only files changed in the export are five test helpers (ports moved into 8600..8649, the Chromium flags):
   `test-environment.patch`. No application source and no assertion is changed.
 - Probes in `probes/` (round 3's, reused, plus new ones: `person-moments.ts`, `session-cost.ts`,
   `fields-held.ts`, `held2.ts`, `held3.ts`, `misc4.ts`), run from `tree/` as
-  `TMPDIR=/tmp/casebook-ui-r4c bun ../probes/<name> [scenario]`; output in `logs/`, screenshots in `shots/`.
+  `TMPDIR=/tmp/mainworthy-ui-r4c bun ../probes/<name> [scenario]`; output in `logs/`, screenshots in `shots/`.
 - Every probe drives the real UI with trusted key events and then reads the server through its API. Slow, held
   and failing requests are injected at the browser (`page.route`).
 - R4C-1 was reproduced twice; the comparisons for R4C-4 ran against a round-3 export (`r3/tree`) and against
@@ -46,7 +46,7 @@ also has a cost nobody listed: a tab that is closed or reloaded no longer record
 | R3C-4 a held key repeated recording actions | **fixed** for the three round-3 cases (more keys: see check 8) | `probes/keys2.ts held`, `probes/tall.ts held`: `p` held eight repeats `slotsFilledBefore:8, after:9`; an answer key held in the queue `openBefore:5, openAfter:5` (`d` opens its field); `#` held `activeBefore:40, activeAfter:39`; `a` held on the 35-step proposal for 40 repeats: `server:"open"`, `Q-3 is now in view. Read it, then press a again.` |
 | R3C-5 focus stayed in a `select` after a change | **fixed** | `probes/keys2.ts select`: `focus:"BODY[]", jMoved:true, editors:1`. |
 | R3C-6 Settings and Suite on a project the session may not read | **fixed** | `probes/scoped2.ts`, `logs/scoped2.log`: `second/settings at 600 ms: … Policy \| second \| Your session may not read this project.` (also at 3 s and 7 s); `second/suite at 600 ms: All cases \| Reading cases…`, at 3 s `Cases unavailable … Your session may not read this project.`; no "No cases yet" in between. |
-| R3-1 a pending draft reply continued under the next person | **fixed** | Astra's `probes/pending-person.mjs` unchanged, twice: `timeline:[{version:2,by:"alice"},{version:1,by:"daniel"}]`, `serverSteps … "Alice submitted text"`, `writes` holds one request, Bob's stored draft still there (`casebook:bob:draft:scratch:C-1 = ["Bob private unsubmitted text"]`), Alice's too. Across two tabs: `probes/person-moments.ts during`, `versions:["v2 by alice","v1 by daniel"]`. |
+| R3-1 a pending draft reply continued under the next person | **fixed** | Astra's `probes/pending-person.mjs` unchanged, twice: `timeline:[{version:2,by:"alice"},{version:1,by:"daniel"}]`, `serverSteps … "Alice submitted text"`, `writes` holds one request, Bob's stored draft still there (`mainworthy:bob:draft:scratch:C-1 = ["Bob private unsubmitted text"]`), Alice's too. Across two tabs: `probes/person-moments.ts during`, `versions:["v2 by alice","v1 by daniel"]`. |
 | R3-2 another open tab kept the previous person's input and recorded it as the new person | **fixed, with a narrow gap left (R4C-1)** | Astra's probe now stops because tab A shows the sign-in (`logs/identity-tabs.log`). `probes/person-moments.ts before`, case and run note: `aAfterBob:{"signin":1,"app":0}`, `aInputs:[]`, the keys pressed there record nothing (`versions:["v1 by daniel"]`, `["C-1:-","C-2:-"]`), Alice's text stays on the device under her name and comes back when she signs in again on A. |
 
 ## Checks
@@ -99,7 +99,7 @@ it does when it happens is exactly what R3-2 did.
 A write is now two requests one after the other (`src/web/lib/api.ts`, `call`): `GET /api/session`, compare the
 actor with the person the page was opened as, then the write. The write carries no name; the server takes the
 person from whatever cookie the browser holds when the second request leaves. So the guard is only as fresh as
-the first reply. The second guard, the note another tab leaves in `localStorage` (`casebook:session-person`),
+the first reply. The second guard, the note another tab leaves in `localStorage` (`mainworthy:session-person`),
 is written only after that tab's own first session read has come back, one more round trip later.
 
 Reproduction (`probes/person-moments.ts between-slowB`, `logs/person-moments.log`; both surfaces, the same
@@ -192,7 +192,7 @@ round 3 (b11d230):             onServerAfter2s: ["C-4 …"]     (logs/misc4-clos
 this revision, check removed:  onServerAfter2s: ["C-4 …"]     (logs/misc4-close-mutation.log, a scratch copy)
 ```
 
-So a case typed and left by closing the tab is seen by nobody else until its author opens Casebook again in the
+So a case typed and left by closing the tab is seen by nobody else until its author opens Mainworthy again in the
 same browser. Nothing says so. Either send the last write without the read (the server-side check proposed in
 R4C-1 makes that safe), or stop promising it.
 
@@ -284,7 +284,7 @@ the stream again.
 
 ## Cleanup
 
-No listener is left on ports 8600 to 8649 and no browser of this review is running. `/tmp/casebook-ui-r4c` is
+No listener is left on ports 8600 to 8649 and no browser of this review is running. `/tmp/mainworthy-ui-r4c` is
 removed, and so is `node_modules` in the export (run `bun install --frozen-lockfile` in `tree/` to rerun a
 probe; `mut*/tree` and `r3/tree` link to it). The repository checkout was read with `git archive` only. While this review ran, its
 branch moved on to `c3ec096` with uncommitted work by others (among it `src/web/lib/api.ts` and a commit titled

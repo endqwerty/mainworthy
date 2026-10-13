@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 3, part B (the queue, running a suite, errors)
+# Mainworthy web UI: independent verification, round 3, part B (the queue, running a suite, errors)
 
 Revision judged: `b11d2307959bd1ea7f5edea6351cd5cc7bbf077f`, branch `t3/mvp-product-delivery`.
 
@@ -28,13 +28,13 @@ when the reply arrives, in the middle of a note (R3B-3).
 
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, Bun 1.4.3, `/usr/bin/chromium` with
   `--headless=new --ozone-platform=headless`, real server processes on 127.0.0.1, ports 8350 to 8399, data under
-  `/tmp/casebook-ui-r3b`.
+  `/tmp/mainworthy-ui-r3b`.
 - The only files changed in the export are five test helpers (ports moved into 8350..8399, the Chromium flags):
   `test-environment.patch`. No application source and no assertion is changed.
 - Every probe drives the real UI with trusted key events and reads the server through its API (the decision rows
   for "both decisions remain" are read from the server's database file, read-only). Slow and failing requests are
   injected at the browser (`page.route`); the outage checks stop the real server process.
-- Probes: `probes/` (run from `tree/` as `TMPDIR=/tmp/casebook-ui-r3b bun ../probes/<name>.ts [scenario]`), output
+- Probes: `probes/` (run from `tree/` as `TMPDIR=/tmp/mainworthy-ui-r3b bun ../probes/<name>.ts [scenario]`), output
   in `logs/`, screenshots in `shots/`. Round-2 probes reused: `queue-a.ts`, `queue-steal.ts`, `run-a.ts`,
   `run-b.ts`, `extra.ts`. New: `queue-b.ts`, `run-c.ts`, `races.ts`, `misc.ts`, `queue-tabs.ts`, `api-already.ts`.
 - The repository checkout was read with `git archive` only. At the end of this review its working tree held
@@ -68,7 +68,7 @@ when the reply arrives, in the middle of a note (R3B-3).
 
 ### R3B-1: Queue: answer, `u`, answer again before the first reply is back: the undo withdraws the second answer; the screen says "recorded" and the question is open
 
-Blocks: **yes**. It needs a reply slower than the person's next key. If Casebook is judged for loopback use only it
+Blocks: **yes**. It needs a reply slower than the person's next key. If Mainworthy is judged for loopback use only it
 needs keys under about 100 ms apart, and then it is arguable.
 
 `undo` waits for the first answer's reply before sending its request (`if (prior && !(await prior.confirmed))` in

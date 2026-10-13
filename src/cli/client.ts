@@ -39,13 +39,13 @@ export type ClientOptions = { url: string; token: string | undefined; project: s
 /**
  * Command-line flags override the environment. An absent token lets the server authenticate loopback local mode.
  * An environment variable that is set and empty counts as absent: that is how a pipeline passes a setting nobody
- * configured (`CASEBOOK_URL: ${{ vars.CASEBOOK_URL }}`).
+ * configured (`MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}`).
  */
 export function clientOptions(args: Args, env: Record<string, string | undefined> = process.env): ClientOptions {
 	return {
-		url: args.value("url") ?? (env.CASEBOOK_URL || "http://127.0.0.1:7357"),
-		token: args.value("token") ?? (env.CASEBOOK_TOKEN || undefined),
-		project: args.value("project") ?? (env.CASEBOOK_PROJECT || undefined),
+		url: args.value("url") ?? (env.MAINWORTHY_URL || "http://127.0.0.1:7357"),
+		token: args.value("token") ?? (env.MAINWORTHY_TOKEN || undefined),
+		project: args.value("project") ?? (env.MAINWORTHY_PROJECT || undefined),
 	};
 }
 
@@ -82,7 +82,7 @@ export class Client {
 		try {
 			return await fetch(`${this.url}${path}`, { ...init, headers });
 		} catch {
-			throw new CliError("connection", `cannot connect to ${this.url}; start the server with casebook serve`);
+			throw new CliError("connection", `cannot connect to ${this.url}; start the server with mainworthy serve`);
 		}
 	}
 
@@ -103,7 +103,7 @@ export class Client {
 		const { projects } = await this.session();
 		if (projects.length === 1 && projects[0]) return projects[0].key;
 		const existing = projects.map((project) => project.key).join(", ") || "none visible";
-		throw new CliError("invalid", `choose a project with --project or CASEBOOK_PROJECT; projects: ${existing}`);
+		throw new CliError("invalid", `choose a project with --project or MAINWORTHY_PROJECT; projects: ${existing}`);
 	}
 
 	/** Returns the validated envelope, including failures, for MCP's protocol-level forwarding. */

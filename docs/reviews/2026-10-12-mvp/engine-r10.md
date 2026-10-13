@@ -1,4 +1,4 @@
-# Casebook engine QA review, round 10
+# Mainworthy engine QA review, round 10
 
 Revision: `8482d113cda8b81d9187ee0a893824b673dcac1d`, branch `t3/mvp-product-delivery`.
 
@@ -124,7 +124,7 @@ This is in scope and prevents the required `bun run check` from passing. The one
 
 ### R10-T01: the sequence audit accepts the demonstrated wrong states
 
-This is a proof gap supporting the application defects, not an additional blocker count. I reran the author's exact requested command in `tree`: `CASEBOOK_SEQUENCE_SEEDS=300 bun test test/sequences.test.ts`. It prints `3 pass,0 fail`, 300 seeds per policy, 80 steps per seed. The older independent checkers also complete with 80/8000, 80/12000 and 60/7200 seed/check counts and zero reported problems. These outcomes are not proof of the missing properties.
+This is a proof gap supporting the application defects, not an additional blocker count. I reran the author's exact requested command in `tree`: `MAINWORTHY_SEQUENCE_SEEDS=300 bun test test/sequences.test.ts`. It prints `3 pass,0 fail`, 300 seeds per policy, 80 steps per seed. The older independent checkers also complete with 80/8000, 80/12000 and 60/7200 seed/check counts and zero reported problems. These outcomes are not proof of the missing properties.
 
 I copied the current author's `scopeOf` and `audit` function unchanged into three review scripts, supplied the same database query helper, and ran it on each reduced application defect. `oracle-agent-invalidates-flaky.ts`, `oracle-mistaken-stale-plan.ts`, and `oracle-plan-omits-environments.ts` all print `authorSequenceAudit:null` while separately asserting the wrong public result. Their matching logs retain the full evidence. This is a demonstrated false negative, not speculation from a passing random run.
 
@@ -142,6 +142,6 @@ The round-9 unused `Q.newestRunWithTest` and `scopeOfRun` declarations are gone.
 
 ## Cleanup and artifact integrity
 
-All 404 tracked exported files match the specified Git revision: `mismatches:[],allExportedSourceRestored:true` in `logs/export-integrity.json`. Every temporary source mutation was restored. Live scripts stop their servers and workers in finally blocks, and crash probes await their child processes. The final check in `logs/cleanup.json` records no owned processes, no listeners on ports 8150–8199 and no remaining owned `/tmp` data. Only the export's node_modules, .casebook and test-results paths were released. The shared repository and Git state are untouched. No commit or push was made.
+All 404 tracked exported files match the specified Git revision: `mismatches:[],allExportedSourceRestored:true` in `logs/export-integrity.json`. Every temporary source mutation was restored. Live scripts stop their servers and workers in finally blocks, and crash probes await their child processes. The final check in `logs/cleanup.json` records no owned processes, no listeners on ports 8150–8199 and no remaining owned `/tmp` data. Only the export's node_modules, .mainworthy and test-results paths were released. The shared repository and Git state are untouched. No commit or push was made.
 
 ISSUES (4 blockers)

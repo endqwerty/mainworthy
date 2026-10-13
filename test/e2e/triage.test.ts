@@ -13,7 +13,7 @@ async function fixture({
 	preset?: string;
 	mode?: "local" | "server";
 } = {}): Promise<Server> {
-	const directory = await mkdtemp(join(tmpdir(), "casebook-builder2-"));
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-builder2-"));
 	let port = 7451;
 	for (; port <= 7499; port++) {
 		try {
@@ -33,10 +33,10 @@ async function fixture({
 		env: {
 			...process.env,
 			NODE_ENV: "production",
-			CASEBOOK_PORT: String(port),
-			CASEBOOK_DATA: directory,
-			CASEBOOK_MODE: mode,
-			CASEBOOK_OWNER_TOKEN: token,
+			MAINWORTHY_PORT: String(port),
+			MAINWORTHY_DATA: directory,
+			MAINWORTHY_MODE: mode,
+			MAINWORTHY_OWNER_TOKEN: token,
 		},
 		stdout: "ignore",
 		stderr: "pipe",

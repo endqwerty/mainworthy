@@ -25,10 +25,10 @@ async function serve(dataDir: string): Promise<{ url: string; child: ReturnType<
 			PATH: process.env.PATH ?? "",
 			HOME: dataDir,
 			USER: "daniel",
-			CASEBOOK_DATA: dataDir,
-			CASEBOOK_PORT: "0",
-			CASEBOOK_MODE: "local",
-			CASEBOOK_READERS: "2",
+			MAINWORTHY_DATA: dataDir,
+			MAINWORTHY_PORT: "0",
+			MAINWORTHY_MODE: "local",
+			MAINWORTHY_READERS: "2",
 		},
 		stdout: "pipe",
 		stderr: "ignore",
@@ -62,7 +62,7 @@ async function call<T>(url: string, op: string, input: unknown): Promise<T> {
 }
 
 test("a report accepted when the server is killed is applied in full when it starts again, and only once", async () => {
-	const dataDir = mkdtempSync(join(tmpdir(), "casebook-restart-"));
+	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-restart-"));
 	dirs.push(dataDir);
 	const total = 40_000;
 	const failing = total / 100;

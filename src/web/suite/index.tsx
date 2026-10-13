@@ -1025,10 +1025,10 @@ export function SuiteScreen() {
 		const visibility = () => {
 			if (document.visibilityState === "hidden") void sealRef.current({ keepalive: true });
 		};
-		window.addEventListener("casebook:leave", leave);
+		window.addEventListener("mainworthy:leave", leave);
 		document.addEventListener("visibilitychange", visibility);
 		return () => {
-			window.removeEventListener("casebook:leave", leave);
+			window.removeEventListener("mainworthy:leave", leave);
 			document.removeEventListener("visibilitychange", visibility);
 			if (draftRef.current?.dirty) void sealRef.current();
 		};
@@ -1342,8 +1342,8 @@ export function SuiteScreen() {
 			const detail = z.object({ ref: z.string(), folder: z.string() }).safeParse(event.detail);
 			if (detail.success) moveTo(detail.data.folder, [detail.data.ref]);
 		};
-		window.addEventListener("casebook:drop", drop);
-		return () => window.removeEventListener("casebook:drop", drop);
+		window.addEventListener("mainworthy:drop", drop);
+		return () => window.removeEventListener("mainworthy:drop", drop);
 	});
 	useSuiteBindings({
 		enabled: !overlayOpen,

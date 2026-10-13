@@ -10,7 +10,7 @@ The safety fact is that a gate counts evidence only for its admitted obligation,
 
 I read the earlier reports, the current design, the changed decision records, vision, roadmap, questions, index and changelog, and the archived review context. I ran the checks myself. All 30 changed or added Markdown files match the requested commit. I did not read the author's fix scripts or reasons. No repository file was changed.
 
-All line references below identify `0dc9170`. Runtime correctness, persistence, latency, token budgets, backup, restore and deployment are **not checked** because this change contains no implementation. Small Python transcriptions below exercise stated documentation rules; they are not tests of a Casebook binary.
+All line references below identify `0dc9170`. Runtime correctness, persistence, latency, token budgets, backup, restore and deployment are **not checked** because this change contains no implementation. Small Python transcriptions below exercise stated documentation rules; they are not tests of a Mainworthy binary.
 
 ## 1. Disposition of R3-1 through R3-7
 
@@ -152,7 +152,7 @@ These agree with section 6.4:664-675 and 0008:51-56/:106-109. The C5 fixture now
 
 ## 2. Disposition of every round 3 editorial note
 
-1. **Whitespace failure: resolved.** The archived `verify-r1.md:437` ends with "Only `/tmp/casebook-arena/verify-r1.md` was written. No repository files were changed." The surplus blank line is gone. `git diff --check a78b0ad..0dc9170` exits 0 with empty stdout and stderr. The scratch r1 report differs from the archive only by trailing newline bytes; removing the reported excess blank line is the intended change.
+1. **Whitespace failure: resolved.** The archived `verify-r1.md:437` ends with "Only `/tmp/mainworthy-arena/verify-r1.md` was written. No repository files were changed." The surplus blank line is gone. `git diff --check a78b0ad..0dc9170` exits 0 with empty stdout and stderr. The scratch r1 report differs from the archive only by trailing newline bytes; removing the reported excess blank line is the intended change.
 
 2. **Leftover run terminology: resolved.** The deciding replacements in product-design are "where its obligations allow" at :185, "explicit obligations" at :400, "the obligation admits" at :401, "obligation that opts in" at :516, "the obligation allows" at :626, "obligation names `human`" at :1074, and "distinct obligations on a run" at :1148. Decision 0008 says "run obligation of kind review" at :62 and "an explicit obligation option" at :94. Remaining Requirement/requirement references describe tracker items or explicitly historical material.
 
@@ -279,15 +279,15 @@ REVISION_MATCH docs/roadmap.md True
 MARKDOWN_FILES 30
 LINK_SCAN_DONE CHECKED 47 BROKEN 0
 ABSOLUTE_LOCAL_LINKS 9
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:15 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:16 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#competitors
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:17 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:18 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#what-is-not-checked
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:19 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#testrail
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:20 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#landscape
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:13 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:16 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/product-vision.md
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:16 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/ux/flows.md
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:15 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:16 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#competitors
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:17 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:18 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#what-is-not-checked
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:19 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#testrail
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:20 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#landscape
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:13 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:16 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/product-vision.md
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:16 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/ux/flows.md
 OPS 18 ['propose', 'report', 'claim', 'announce', 'attach', 'plan', 'decide', 'inbox', 'get', 'find', 'impact', 'since', 'history', 'gate', 'trace', 'check', 'admin', 'transfer']
 MCP_TOOLS 10
 STATED_OPS ['Eighteen operations.', 'eighteen entries', 'eighteen operations']
@@ -368,7 +368,7 @@ The horizon, reuse, predecessor, suggestion and default transcriptions support t
 
 The round 3 editorial fixes pass. Remaining nonblocking work belongs to the phase-1 prototype: executable policy precedence and predicates, complete read/reverse-key proofs, helper/revert/dependency behavior, patch validation, clean-run cohorts, runtime fixtures and measured budgets. No implementation or production approval is implied.
 
-The full report is saved to `/tmp/casebook-arena/verify-r4.md`. No repository change, commit, push, pull-request mutation or merge was performed.
+The full report is saved to `/tmp/mainworthy-arena/verify-r4.md`. No repository change, commit, push, pull-request mutation or merge was performed.
 
 Final read-only check:
 

@@ -1,4 +1,4 @@
-# Casebook engine verification, round 6
+# Mainworthy engine verification, round 6
 
 Revision: `aa7a6050526bf44ebabeef2ca648b37d0bc796ec`, branch `t3/mvp-product-delivery`.
 
@@ -29,7 +29,7 @@ Verdicts apply to the named check and its stated limits, not approval of the eng
 | 11 | Concurrency and readers | pass | Each 100,000-result upload preserves 40 concurrent case writes, 41 distinct command sequences and 42 contiguous events while reads complete. `readers-live`: 128 read-after-write observations; 27 inline/worker replies over all nine reads, including ten refusals; denied calls never dispatched; worker write forbidden; 80 requests survive a killed worker; `allWorkerExitsAwaited:true,remaining:0`. Checkpoint present during 618 commits; 80 more survive its termination; 698 survive restart. Inline=0 works, default for 16 cores is 8, checkpoints are passive. This is a functional result, with no latency/budget judgment and no different-provider verdict on reader authorship. |
 | 12 | Documented departures | issues | All eighteen assessed below. Defects contradict the lane/judgment/hold promises in 2, 4 and 8. Browser persistence (5) and archive implementation (10) are explicitly not checked. The documented cuts themselves are not defects. |
 
-The test runner temporarily mapped ephemeral listener ports into 7750–7799 and disk-budget scratch into `/tmp/casebook-engine-r6-budgets`, then restored the files. The broad command was `bun test src test --path-ignore-patterns 'test/e2e/**'`; compile and lint commands were `bunx tsc --noEmit` and `bunx biome check src test bench`.
+The test runner temporarily mapped ephemeral listener ports into 7750–7799 and disk-budget scratch into `/tmp/mainworthy-engine-r6-budgets`, then restored the files. The broad command was `bun test src test --path-ignore-patterns 'test/e2e/**'`; compile and lint commands were `bunx tsc --noEmit` and `bunx biome check src test bench`.
 
 All four blocking findings also reproduce through the actual HTTP operation routes with two reader workers (`bun scripts/findings-http.mjs`, `logs/findings-http.log`). That script uses separate projects and actual distinct actors where the finding needs them. The small scripts below use the real `invoke` path and assert the defective outcome: exit 0 means the defect reproduced.
 
@@ -207,6 +207,6 @@ Run `bun scripts/question-missing-from-gate.mjs`. Plan two runs over one failing
 
 ## Cleanup
 
-Every review server was stopped. The final process and listener audit found none running and no listener on ports 7750–7799. All review `/tmp` data is removed; the remaining budget directory was deleted. Exported `node_modules`, `.casebook` and `test-results` were released. Reports, scripts and logs remain under `engine-r6`. The shared repository was not changed. See `logs/cleanup.json`.
+Every review server was stopped. The final process and listener audit found none running and no listener on ports 7750–7799. All review `/tmp` data is removed; the remaining budget directory was deleted. Exported `node_modules`, `.mainworthy` and `test-results` were released. Reports, scripts and logs remain under `engine-r6`. The shared repository was not changed. See `logs/cleanup.json`.
 
 ISSUES (4 blockers)

@@ -10,7 +10,7 @@ The five that matter most:
 
 1. W1: the policy's `blocks` value decides no gate, though the architecture doc says it is "what an open question holds back".
 2. O1: the three diagram pages `docs/architecture.md` links to are older than their sources and still describe the removed `inherited` rule, the `fact-gone` hold and a slice of 500.
-3. W2: `docs/deploy.md` restore steps leave a server-mode instance that refuses its only token until it is restarted with `CASEBOOK_OWNER_TOKEN`.
+3. W2: `docs/deploy.md` restore steps leave a server-mode instance that refuses its only token until it is restarted with `MAINWORTHY_OWNER_TOKEN`.
 4. W3: README says an answer applies to later occurrences of the cause; `i` excuses one build only (checked on a live instance) and `f` ends after 14 days.
 5. W5: decision 0012 says a failure question is closed without an answer "only when" it stopped failing; there is a second path.
 
@@ -21,7 +21,7 @@ The five that matter most:
 - `docs/architecture.md:127-129`: "A project's strictness is a table of clauses: for a kind of question under some
   conditions, who must answer [...], what an agent's answer is worth [...], and what an open question holds back."
 - Same claim in `src/core/kinds.ts:241` ("What an open question holds back: nothing, the gate of its change, a
-  release (planned run), or both") and in the `blocks` column of `casebook policy show`.
+  release (planned run), or both") and in the `blocks` column of `mainworthy policy show`.
 - What the code does: a failure question blocks a run exactly when the run shows its cause unexplained,
   "whatever the policy says a question may hold" (`src/server/runs/runs.ts:1051-1060`), and an unexplained failure
   makes the verdict `blocked` by the tally alone (`src/core/runs.ts:78`). Every other kind of question is raised with
@@ -32,7 +32,7 @@ The five that matter most:
 - Seen on a live instance: policy `loose`, where the clause for a trunk failure reads
   `failure  always  member  advice  release` (release means planned runs only). A failing report on `main`, then:
   ```
-  casebook gate    blocked: 1 failure unexplained, 1 question open
+  mainworthy gate    blocked: 1 failure unexplained, 1 question open
     Q-1 needs an answer
   exit=2
   ```
@@ -46,21 +46,21 @@ The five that matter most:
 
 ### W2. The restore steps leave a server-mode instance nobody can sign in to
 
-- `docs/deploy.md:59`: "**Restore:** start an empty instance and run `casebook import <file>`."
-- What happens (built executable, `CASEBOOK_MODE=server`, token generated on first start, import with that token):
+- `docs/deploy.md:59`: "**Restore:** start an empty instance and run `mainworthy import <file>`."
+- What happens (built executable, `MAINWORTHY_MODE=server`, token generated on first start, import with that token):
   ```
   imported 48 rows across 36 tables
-  Import replaced the bootstrap rows. Your previous session may no longer exist. Set CASEBOOK_OWNER_TOKEN and restart the server to reconnect.
-  $ casebook policy show
+  Import replaced the bootstrap rows. Your previous session may no longer exist. Set MAINWORTHY_OWNER_TOKEN and restart the server to reconnect.
+  $ mainworthy policy show
   unauthenticated: a token is required
   ```
-  After a restart with `CASEBOOK_OWNER_TOKEN` set, `casebook gate --commit ...` answered from the imported data.
-- Also: the instance must have no tokens beyond the owner's. After `casebook token new --ci ...` the import is
+  After a restart with `MAINWORTHY_OWNER_TOKEN` set, `mainworthy gate --commit ...` answered from the imported data.
+- Also: the instance must have no tokens beyond the owner's. After `mainworthy token new --ci ...` the import is
   refused: `conflict: import needs a fresh instance; existing projects or user data will not be replaced`.
-- Proposed: "**Restore:** start an empty instance, run `casebook import <file>` before creating any token, then
-  restart the server with `CASEBOOK_OWNER_TOKEN` set. The import replaces the instance's first rows, the owner's
+- Proposed: "**Restore:** start an empty instance, run `mainworthy import <file>` before creating any token, then
+  restart the server with `MAINWORTHY_OWNER_TOKEN` set. The import replaces the instance's first rows, the owner's
   token among them, so the token you imported with stops working until the restart."
-- Not tested: an instance that had `CASEBOOK_OWNER_TOKEN` set from its first start, and local mode.
+- Not tested: an instance that had `MAINWORTHY_OWNER_TOKEN` set from its first start, and local mode.
 
 ### W3. Not every answer applies to later occurrences of the cause
 
@@ -224,7 +224,7 @@ Proposed: regenerate the three pages and screenshots from the sources after W6 a
 - `docs/diagrams/src/architecture.json:903`: "app.reader sees committed snapshots while app.gate queues other writes."
 - What the code does: a read goes to a pool of reader threads, each with its own connection
   (`invokeAsync`, `src/server/ops/registry.ts`; `src/server/readers.ts`). The single second connection is used only
-  with `CASEBOOK_READERS=0` or as the fallback. `docs/architecture.md:65-67` already says this.
+  with `MAINWORTHY_READERS=0` or as the fallback. `docs/architecture.md:65-67` already says this.
 - Proposed, 0012: "and reads are answered meanwhile by reader threads, each with its own read-only connection."
 - Proposed, diagram: "invokeAsync yields to the event loop. Reader threads see committed snapshots while app.gate
   queues other writes."
@@ -330,13 +330,13 @@ Proposed: regenerate the three pages and screenshots from the sources after W6 a
 ### U7. The browser tests are skipped where no Chromium is found
 
 - `README.md:94` and `AGENTS.md` ("every test including the budgets and the browser tests").
-- `test/e2e/support.ts:9-17`: they run only with `CASEBOOK_CHROMIUM` set or a browser at `/usr/bin/chromium`,
+- `test/e2e/support.ts:9-17`: they run only with `MAINWORTHY_CHROMIUM` set or a browser at `/usr/bin/chromium`,
   `/usr/bin/google-chrome` or `/usr/bin/chromium-browser`; otherwise each is skipped with one line of output.
 - Proposed: "... and the browser tests (skipped, with a message, on a machine with no Chromium)".
 
 ### U8. The `decide` tool description lists five of the seven failure answers
 
-- `skill/casebook/references/tools.md:163` (generated from `src/server/ops/writes.ts:418`): "Failure answers:
+- `skill/mainworthy/references/tools.md:163` (generated from `src/server/ops/writes.ts:418`): "Failure answers:
   {"is":"defect"|"test"|"expected"|"flaky"|"infra"}." `inherited` and `mistaken` exist and are offered per question
   in `answers` (`src/core/kinds.ts:172-197`).
 - Proposed, in the registry: "Failure answers: defect, test, expected, flaky, infra, and where the question's
@@ -345,17 +345,17 @@ Proposed: regenerate the three pages and screenshots from the sources after W6 a
 
 ### U9. The skill does not mention `declined`
 
-- `skill/casebook/references/reporting.md:9`: "A refused result has a reason in `rejected`".
+- `skill/mainworthy/references/reporting.md:9`: "A refused result has a reason in `rejected`".
 - An automated result whose claim about a case is refused is kept with no case and listed under `declined`
   (`src/server/evidence/evidence.ts:752-763`); an agent reading only `rejected` misses it.
 - Proposed: "A refused result has a reason in `rejected`. An automated result kept without the case it claimed has
   its reason in `declined`."
 
-### U10. `casebook report` and `casebook gate` need a commit from CI or a Git checkout
+### U10. `mainworthy report` and `mainworthy gate` need a commit from CI or a Git checkout
 
 - `README.md:36-37` shows the two commands bare. Outside CI and outside a Git checkout:
   ```
-  $ casebook report results/*.xml
+  $ mainworthy report results/*.xml
   invalid: missing commit; provide --commit <sha> or --session <name> (a session has no build identity)
   exit=4
   ```
@@ -371,20 +371,20 @@ Proposed: regenerate the three pages and screenshots from the sources after W6 a
 
 ## Commands in the README, run against a real instance
 
-Instance: `bun run start` with `HOME` pointed at a scratch directory and `CASEBOOK_PORT=8250`. `casebook` was
+Instance: `bun run start` with `HOME` pointed at a scratch directory and `MAINWORTHY_PORT=8250`. `mainworthy` was
 `bun src/cli/main.ts`.
 
 | README | Result |
 | --- | --- |
 | `bun install`, `bun run start` | Works. Banner differs in one word (W9). `/api/session` on loopback: owner, `via: local`. |
-| Outline under "Write a case" (piped to `casebook new`) | Works: C-1, three steps, two expected results, tag `checkout`. |
-| `casebook report results/*.xml` | Works with a CI environment (GitHub variables set by hand). Fails without CI or Git (U10). |
-| `casebook gate` | Works: `blocked ...`, exit 2; after an answer `passed`, exit 0; unknown commit `pending`, exit 3. |
-| `casebook token new --agent reviewer --can read,produce` | Works. |
-| `casebook mcp`, and `/mcp` over HTTP | Both list ten tools. |
-| `casebook policy use standard`, `casebook policy show` | Work. `strict` is accepted too. |
-| `casebook export --out casebook.ndjson.gz` | Works: 36 tables, no tokens. |
-| `bun run build` | Works: `dist/casebook`; started in server mode, `casebook health` exit 0. |
+| Outline under "Write a case" (piped to `mainworthy new`) | Works: C-1, three steps, two expected results, tag `checkout`. |
+| `mainworthy report results/*.xml` | Works with a CI environment (GitHub variables set by hand). Fails without CI or Git (U10). |
+| `mainworthy gate` | Works: `blocked ...`, exit 2; after an answer `passed`, exit 0; unknown commit `pending`, exit 3. |
+| `mainworthy token new --agent reviewer --can read,produce` | Works. |
+| `mainworthy mcp`, and `/mcp` over HTTP | Both list ten tools. |
+| `mainworthy policy use standard`, `mainworthy policy show` | Work. `strict` is accepted too. |
+| `mainworthy export --out mainworthy.ndjson.gz` | Works: 36 tables, no tokens. |
+| `bun run build` | Works: `dist/mainworthy`; started in server mode, `mainworthy health` exit 0. |
 | `docker compose up -d` | Not run. |
 | `bun run check`, `bun run dev`, `bun bench/run.ts`, `bun bench/external.ts` | Not run (see below). |
 
@@ -410,9 +410,9 @@ bindings (`src/core/kinds.ts:101`, `src/web/**`); I did not press them in a brow
 - `docs/architecture.md`: fifteen operations, ten agent tools, 38 tables with one owner each, the rules in
   `test/architecture.test.ts`, the two transactions and the slice of 200.
 - `docs/deploy.md`: the variable table, the reader default, uid 10001, the health check, the backup file name
-  (`casebook.db.v<N>.bak`), the workflow variables, the `--ci` token command.
-- `skill/casebook`: `tools.md` is identical to what `bun scripts/gen-skill.ts` writes now; the 4 MiB limit on `/mcp`
-  is real (HTTP 413 at 5 MiB); the sample Markdown in `writing-cases.md` is canonical (`casebook fmt` prints it back
+  (`mainworthy.db.v<N>.bak`), the workflow variables, the `--ci` token command.
+- `skill/mainworthy`: `tools.md` is identical to what `bun scripts/gen-skill.ts` writes now; the 4 MiB limit on `/mcp`
+  is real (HTTP 413 at 5 MiB); the sample Markdown in `writing-cases.md` is canonical (`mainworthy fmt` prints it back
   unchanged).
 - `src/web/SHELL.md`: every export, route, token and class it names exists.
 - `CHANGELOG.md`, `AGENTS.md` ("State", "Stack rules"), `src/core/presets.ts`, the head comments of

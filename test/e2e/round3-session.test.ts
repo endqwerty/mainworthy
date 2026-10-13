@@ -74,12 +74,12 @@ check(
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
 			expect(
 				await page.evaluate(
-					() => JSON.parse(localStorage.getItem("casebook:bob:draft:scratch:C-1") ?? "null")?.body.steps[0].action,
+					() => JSON.parse(localStorage.getItem("mainworthy:bob:draft:scratch:C-1") ?? "null")?.body.steps[0].action,
 				),
 			).toBe("Bob private text");
 			expect(
 				await page.evaluate(
-					() => JSON.parse(localStorage.getItem("casebook:alice:draft:scratch:C-1") ?? "null")?.body.steps[0].action,
+					() => JSON.parse(localStorage.getItem("mainworthy:alice:draft:scratch:C-1") ?? "null")?.body.steps[0].action,
 				),
 			).toBe("Alice newer private text");
 			expect(await step.inputValue()).toBe("Bob private text");
@@ -141,7 +141,7 @@ for (const surface of ["case", "run"]) {
 				).toHaveLength(0);
 				const kept = await a.evaluate(() =>
 					Object.entries(localStorage)
-						.filter(([k]) => k.startsWith("casebook:alice:"))
+						.filter(([k]) => k.startsWith("mainworthy:alice:"))
 						.map(([, v]) => v)
 						.join(" "),
 				);

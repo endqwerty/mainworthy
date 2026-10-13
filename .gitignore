@@ -7,7 +7,7 @@ dist
 *.db
 *.db-wal
 *.db-shm
-.casebook
+.mainworthy
 test-results
 playwright-report
 bench/results-*.json

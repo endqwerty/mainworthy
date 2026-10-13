@@ -18,7 +18,7 @@ export const exportCommand: AdapterCommand = {
 		if (!response.ok) unwrap(await readEnvelope(response));
 		if (response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/x-ndjson") {
 			await response.body?.cancel();
-			throw new CliError("internal", "the server did not return a Casebook archive (application/x-ndjson)");
+			throw new CliError("internal", "the server did not return a Mainworthy archive (application/x-ndjson)");
 		}
 		if (!response.body) throw new CliError("internal", "the server returned no archive stream");
 		const stream = out.endsWith(".gz") ? response.body.pipeThrough(new CompressionStream("gzip")) : response.body;

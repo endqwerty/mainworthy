@@ -31,7 +31,7 @@ const navigation: { screen: Screen; label: string; icon: string; key: string }[]
 	{ screen: "settings", label: "Settings", icon: "⚙︎", key: "g ," },
 ];
 function theme(): void {
-	const chosen = localStorage.getItem("casebook:theme");
+	const chosen = localStorage.getItem("mainworthy:theme");
 	document.documentElement.dataset.theme =
 		chosen ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
 }
@@ -58,7 +58,7 @@ export function App() {
 			setAuth(
 				error instanceof ApiError && error.code === "unauthenticated"
 					? { kind: "signin" }
-					: { kind: "error", message: error instanceof Error ? error.message : "Cannot connect to Casebook" },
+					: { kind: "error", message: error instanceof Error ? error.message : "Cannot connect to Mainworthy" },
 			);
 		}
 	}, []);
@@ -82,7 +82,7 @@ export function App() {
 	useEffect(() => {
 		const media = matchMedia("(prefers-color-scheme: dark)");
 		const changed = () => {
-			if (!localStorage.getItem("casebook:theme")) theme();
+			if (!localStorage.getItem("mainworthy:theme")) theme();
 		};
 		media.addEventListener("change", changed);
 		return () => media.removeEventListener("change", changed);
@@ -102,7 +102,7 @@ export function App() {
 			<div className="signin">
 				<span className="brand">
 					<span className="logo">C</span>
-					Casebook
+					Mainworthy
 				</span>
 			</div>
 		);
@@ -123,7 +123,7 @@ function SignIn({ onLogin }: { onLogin: () => Promise<void> }) {
 						});
 				}}
 			>
-				<h1>Casebook</h1>
+				<h1>Mainworthy</h1>
 				<label htmlFor="token">Sign in with your token</label>
 				<input
 					id="token"
@@ -287,7 +287,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 						>
 							C
 						</button>
-						<b>Casebook</b>
+						<b>Mainworthy</b>
 						{info.projects.length > 1 ? (
 							<select
 								className="project-select"
@@ -370,7 +370,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 												onDrop={(event) => {
 													event.preventDefault();
 													window.dispatchEvent(
-														new CustomEvent("casebook:drop", {
+														new CustomEvent("mainworthy:drop", {
 															detail: { folder: path, ref: event.dataTransfer.getData("text/plain") },
 														}),
 													);
@@ -426,7 +426,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 							aria-label="Toggle theme"
 							onClick={() => {
 								const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-								localStorage.setItem("casebook:theme", next);
+								localStorage.setItem("mainworthy:theme", next);
 								theme();
 							}}
 						>

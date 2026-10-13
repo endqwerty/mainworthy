@@ -320,7 +320,9 @@ check(
 			const late = await fetch(first.url, {
 				method: "POST",
 				headers: Object.fromEntries(
-					Object.entries(first.headers).filter(([name]) => ["content-type", "cookie", "x-casebook-as"].includes(name)),
+					Object.entries(first.headers).filter(([name]) =>
+						["content-type", "cookie", "x-mainworthy-as"].includes(name),
+					),
 				),
 				body: first.body,
 			});

@@ -6,7 +6,7 @@ import sys
 import urllib.request
 
 binary = sys.argv[1]
-env = dict(os.environ, CASEBOOK_DB=os.path.abspath("work.db"), CASEBOOK_MODE="embedded")
+env = dict(os.environ, MAINWORTHY_DB=os.path.abspath("work.db"), MAINWORTHY_MODE="embedded")
 process = subprocess.Popen([binary, "mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, text=True)
 exchanges = []
 
@@ -52,7 +52,7 @@ assert cli_result["ref"] == 1
 openapi = json.loads(subprocess.check_output([binary, "openapi"], env=env, text=True))
 assert openapi["openapi"] == "3.1.0"
 
-server = subprocess.Popen([binary, "serve", "--db", env["CASEBOOK_DB"]], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+server = subprocess.Popen([binary, "serve", "--db", env["MAINWORTHY_DB"]], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 try:
     address = json.loads(server.stdout.readline())["listen"]
     with urllib.request.urlopen(address + "/openapi.json") as response:

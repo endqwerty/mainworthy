@@ -55,7 +55,7 @@ The incumbent. Folder/section structure, plans, runs, reporting.
 
 ### Qase
 
-Modern UI, the closest to what Casebook wants to feel like.
+Modern UI, the closest to what Mainworthy wants to feel like.
 [Pricing](https://qase.io/pricing):
 
 | Plan | Price | Notes |
@@ -79,7 +79,7 @@ included, not per seat.
   center, custom RBAC), Enterprise $599/mo (25 users; SSO, audit log). Extra
   users cost more; the exact figure was not readable on the page. 15% annual
   discount.
-- Shows a team-sized flat price is workable. Casebook's "no per-seat tax for
+- Shows a team-sized flat price is workable. Mainworthy's "no per-seat tax for
   readers" principle is not unique.
 
 ### Testiny
@@ -179,7 +179,7 @@ starts at 20 users, custom price), QMetry (standalone).
 
 1. **History is gated almost everywhere.** TestRail (Enterprise), Xray
    (Enterprise), Qase (retention by plan), Testiny (paid), Testomat.io
-   (Enterprise). Casebook principle 1 (case as a versioned document) is a
+   (Enterprise). Mainworthy principle 1 (case as a versioned document) is a
    real gap, verified on five tools.
 2. **Per-seat pricing is universal, with a viewer discount in some.** Qase
    ($10 collaborator), Testiny (~20%), PractiTest (comment users). Testmo uses
@@ -188,13 +188,13 @@ starts at 20 users, custom price), QMetry (standalone).
 3. **Free tiers are small and strip the valuable parts.** History, custom
    fields, traceability and reports are removed first.
 4. **API rate limits are a tier feature** (TestRail 100 to 300, Qase 150 to
-   1,000, Xray 60 to 100 req/min). Casebook principle 6 (everything has an
+   1,000, Xray 60 to 100 req/min). Mainworthy principle 6 (everything has an
    API) can be a differentiator if limits are generous.
 5. **MCP servers are appearing** (Qase, Testiny, Testomat.io, PractiTest
    list one; Qase includes it on the free plan). Only the existence was
    seen on pricing pages, not depth: whether they cover authoring and
    running or only reading, scoped tokens, or agent identity in history is
-   **open**. Agent access is Casebook's priority 2
+   **open**. Agent access is Mainworthy's priority 2
    ([product-vision.md](product-vision.md)), so test these servers hands-on
    before assuming parity or a gap.
 6. **Self-hosting is rare and expensive** except Kiwi TCMS and TestLink, both

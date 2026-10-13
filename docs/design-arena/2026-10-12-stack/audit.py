@@ -12,8 +12,8 @@ import time
 import urllib.error
 import urllib.request
 
-ROOT = Path('/home/endqwerty/.cache/casebook-arena/stack')
-OUT = Path('/home/endqwerty/.cache/casebook-arena/judge/stack')
+ROOT = Path('/home/endqwerty/.cache/mainworthy-arena/stack')
+OUT = Path('/home/endqwerty/.cache/mainworthy-arena/judge/stack')
 name = sys.argv[1]
 CANDIDATE = Path(sys.argv[2]) if len(sys.argv)>2 else ROOT/name
 label = sys.argv[3] if len(sys.argv)>3 else name
@@ -24,8 +24,8 @@ subprocess.run(['cp', '--reflink=auto', str(ROOT / 'seed.db'), str(db)], check=T
 port = {'ts': 30581, 'go': 30582, 'rust': 30583}[name]
 url = f'http://127.0.0.1:{port}'
 env = dict(os.environ)
-env.update(DB_PATH=str(db), MODE='embedded', RUNTIME='bun', PORT=str(port), CASEBOOK_DB=str(db), CASEBOOK_MODE='embedded', CB_DB=str(db), CB_MODE='embedded')
-binary = CANDIDATE / ('casebook-cgo' if name == 'go' else 'target/release/casebook-rust-spike')
+env.update(DB_PATH=str(db), MODE='embedded', RUNTIME='bun', PORT=str(port), MAINWORTHY_DB=str(db), MAINWORTHY_MODE='embedded', CB_DB=str(db), CB_MODE='embedded')
+binary = CANDIDATE / ('mainworthy-cgo' if name == 'go' else 'target/release/mainworthy-rust-spike')
 cmd = {'ts': ['bun', str(CANDIDATE / 'dist/server.js'), 'serve'],
        'go': [str(binary), 'serve', '--db', str(db), '--addr', f'127.0.0.1:{port}'],
        'rust': [str(binary), 'serve', 'embedded', str(db), str(port)]}[name]

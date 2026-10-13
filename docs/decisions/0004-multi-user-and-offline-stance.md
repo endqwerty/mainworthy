@@ -19,7 +19,7 @@ git-like sync turns out to be cheap.
    character-level merge of one case body. Two people editing the same case
    is rare and should be handled calmly, not designed around.
 3. **Concurrency is detected, not hidden.** Every edit names the version it
-   started from (casebook versions are already immutable, with a parent).
+   started from (mainworthy versions are already immutable, with a parent).
    - Edits to different fields of the same case merge automatically.
    - Edits to the same field are a conflict: the later save is not lost and
      does not overwrite; the user sees both versions side by side and keeps
@@ -42,7 +42,7 @@ git-like sync turns out to be cheap.
 ## Offline
 
 1. **Online-first.** Data lives on the server (or the Local layer's own
-   store). The UI is not a replica; Casebook does not promise to work with no
+   store). The UI is not a replica; Mainworthy does not promise to work with no
    connection.
 2. **A small, honest offline allowance**, kept only where it costs the user
    nothing:

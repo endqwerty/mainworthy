@@ -98,7 +98,7 @@ test.skipIf(!browserAvailable)(
 	"plain HTTP hostname supports capture, edits, queue answers, run planning and recording, and policy changes",
 	async () => {
 		const server = await startServer({ mode: "server" });
-		const chromium = await launchBrowser({ args: ["--host-resolver-rules=MAP casebook.test 127.0.0.1"] });
+		const chromium = await launchBrowser({ args: ["--host-resolver-rules=MAP mainworthy.test 127.0.0.1"] });
 		let browser: Awaited<ReturnType<typeof openPage>> | null = null;
 		try {
 			await server.api("propose", {
@@ -107,7 +107,7 @@ test.skipIf(!browserAvailable)(
 			browser = await openPage(server, { browser: chromium });
 			const { page } = browser;
 			page.setDefaultTimeout(5000);
-			const origin = server.url.replace("127.0.0.1", "casebook.test");
+			const origin = server.url.replace("127.0.0.1", "mainworthy.test");
 			await page.goto(`${origin}/p/scratch/suite`);
 			await page.locator("#token").fill(server.token);
 			await page.keyboard.press("Enter");
@@ -185,13 +185,13 @@ test.skipIf(!browserAvailable)(
 	"Copy token works on a plain HTTP hostname and keeps the token field masked",
 	async () => {
 		const server = await startServer({ mode: "server" });
-		const chromium = await launchBrowser({ args: ["--host-resolver-rules=MAP casebook.test 127.0.0.1"] });
+		const chromium = await launchBrowser({ args: ["--host-resolver-rules=MAP mainworthy.test 127.0.0.1"] });
 		let browser: Awaited<ReturnType<typeof openPage>> | null = null;
 		try {
 			browser = await openPage(server, { browser: chromium });
 			const { page, context } = browser;
 			page.setDefaultTimeout(5000);
-			await page.goto(`${server.url.replace("127.0.0.1", "casebook.test")}/p/scratch/settings`);
+			await page.goto(`${server.url.replace("127.0.0.1", "mainworthy.test")}/p/scratch/settings`);
 			await page.locator("#token").fill(server.token);
 			await page.keyboard.press("Enter");
 			await page.getByRole("option", { name: "Tokens", exact: true }).click();

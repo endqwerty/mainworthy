@@ -42,9 +42,9 @@ Both drivers were built with the copied `build.sh` (1.4 s and 1.0 s, cache hits)
 
 ### Issues and limits
 
-- **Parent `casebook-pure` is stale.** My rebuild from current source is `7f36ea5f…`, 17,977,504 bytes; the parent binary is `82ac6adf…`, 17,965,216 bytes, built at 22:38 before the 22:52–22:54 source edits. `casebook-cgo` is byte-identical (`adedaaae…`). The parent `driver-comparison.json` (22:25) also predates the final source, so any pure size or timing quoted from it describes older code.
+- **Parent `mainworthy-pure` is stale.** My rebuild from current source is `7f36ea5f…`, 17,977,504 bytes; the parent binary is `82ac6adf…`, 17,965,216 bytes, built at 22:38 before the 22:52–22:54 source edits. `mainworthy-cgo` is byte-identical (`adedaaae…`). The parent `driver-comparison.json` (22:25) also predates the final source, so any pure size or timing quoted from it describes older code.
 - **The machine was loaded.** Load average was 7.9–10.7 and the comparison took 147 s against the expected 80 s. The timings are valid for comparing the two drivers, since rounds alternate, but are pessimistic as absolute numbers.
 - **Carried forward from R2, not re-tested:** the W9 embedded ingest miss of 2119.6 ms under a simultaneous clean compile (1354.9 ms on rerun), and the contended clean builds.
-- **Artifacts:** `REPORT.md` (modified 23:08, not by me), `results.json` and `run.sh` existed at 23:09:12. I edited nothing outside scratch and did not touch the ts or rust directories or the Casebook repository.
+- **Artifacts:** `REPORT.md` (modified 23:08, not by me), `results.json` and `run.sh` existed at 23:09:12. I edited nothing outside scratch and did not touch the ts or rust directories or the Mainworthy repository.
 
-Evidence is in `/home/endqwerty/.cache/casebook-arena/stack/go/verification-scratch-r3/`: `driver-comparison.json`, `driver-{cgo,pure}-{1..5}.json`, `measure-drivers.log`, `pragma-probe-{cgo,pure}.log`, `binary-hashes.txt`, `build.log`.
+Evidence is in `/home/endqwerty/.cache/mainworthy-arena/stack/go/verification-scratch-r3/`: `driver-comparison.json`, `driver-{cgo,pure}-{1..5}.json`, `measure-drivers.log`, `pragma-probe-{cgo,pure}.log`, `binary-hashes.txt`, `build.log`.

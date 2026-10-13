@@ -16,6 +16,6 @@ export type AppContext = {
 export const AppContext = createContext<AppContext | null>(null);
 export function useApp(): AppContext {
 	const value = useContext(AppContext);
-	if (!value) throw new Error("A screen must be inside the Casebook app");
+	if (!value) throw new Error("A screen must be inside the Mainworthy app");
 	return value;
 }

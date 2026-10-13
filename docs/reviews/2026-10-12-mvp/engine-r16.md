@@ -1,4 +1,4 @@
-# Casebook engine review, round 16
+# Mainworthy engine review, round 16
 
 Revision: `a374026c88914701cb9ef09d73b05d62c70dc603`.
 Baseline: `46c9222b03b91bc7fa9d7c51204b7e0e14736ce8`.
@@ -55,8 +55,8 @@ This misses the requested regression property that removing the fix makes its te
 | `bun test src test --path-ignore-patterns 'test/e2e/**'` | Pass. `628 pass`, `0 fail`, `17216 expect() calls`, 29 files. Includes the on-disk budget test. [Log](logs/author-tests.log). |
 | `bunx tsc --noEmit` | Pass, exit 0. [Log](logs/typecheck.log). |
 | `bunx biome check src test bench` | Pass. `Checked 188 files ... No fixes applied.` [Log](logs/lint.log). |
-| `CASEBOOK_SEQUENCE_SEEDS=300 bun test test/sequences.test.ts` | Pass. `3 pass, 0 fail`, 300 histories per preset. [Log](logs/sequences-300.log). |
-| `CASEBOOK_SEQUENCE_SEEDS=150 bun test test/sequences-extended.test.ts` | Pass. `3 pass, 0 fail`, 150 extended histories per preset. [Log](logs/sequences-extended-150.log). |
+| `MAINWORTHY_SEQUENCE_SEEDS=300 bun test test/sequences.test.ts` | Pass. `3 pass, 0 fail`, 300 histories per preset. [Log](logs/sequences-300.log). |
+| `MAINWORTHY_SEQUENCE_SEEDS=150 bun test test/sequences-extended.test.ts` | Pass. `3 pass, 0 fail`, 150 extended histories per preset. [Log](logs/sequences-extended-150.log). |
 | Retained `r14-state-extended` probe | Pass. `seeds:60, checked:7200, problems:0, staleProjections:0`. [Log](logs/r14-state-extended.log). |
 | Remove author restriction | Detected by the new policy assertions. `Expected: "forbidden", Received: "counts"`. [Log](logs/mutation-author-condition.log). |
 | Restore capped placement read | Detected by the new integrity test. Expected no active old infra decisions; received `n:6`. [Log](logs/mutation-placement-cap.log). |

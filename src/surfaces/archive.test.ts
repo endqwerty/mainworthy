@@ -55,7 +55,7 @@ test("invalid import leaves bootstrap rows and the caller's token intact", async
 	await withInstance(
 		async ({ client, instance }) => {
 			const before = await client.call("admin", { do: "project.list" });
-			const response = await client.request("/api/import", { method: "POST", body: '{"casebook":"archive"}\n' });
+			const response = await client.request("/api/import", { method: "POST", body: '{"mainworthy":"archive"}\n' });
 			expect(response.status).toBe(400);
 			expect(await response.text()).toContain('"code":"invalid"');
 			expect(await client.call("admin", { do: "project.list" })).toEqual(before);
@@ -89,7 +89,7 @@ test("export pulls fixed chunks and cancels without leaving its spool on disk", 
 		// The spool goes to the temp directory. Other test files export at the same time in other workers, so this
 		// test gives the export a temp directory of its own and looks only there.
 		const shared = process.env.TMPDIR;
-		const own = await mkdtemp(join(tmpdir(), "casebook-spool-test-"));
+		const own = await mkdtemp(join(tmpdir(), "mainworthy-spool-test-"));
 		process.env.TMPDIR = own;
 		try {
 			const session: Session = { via: "local", secret: null, actor: () => instance.owner };
@@ -101,7 +101,7 @@ test("export pulls fixed chunks and cancels without leaving its spool on disk", 
 			const first = await reader.read();
 			expect(first.value?.byteLength).toBeLessThanOrEqual(64 * 1024);
 			// The spool is in this directory while the export is read, so the check below looks in the right place.
-			expect((await readdir(own)).filter((name) => name.startsWith("casebook-archive-"))).toHaveLength(1);
+			expect((await readdir(own)).filter((name) => name.startsWith("mainworthy-archive-"))).toHaveLength(1);
 			await reader.cancel();
 			reader.releaseLock();
 			expect(await readdir(own)).toEqual([]);

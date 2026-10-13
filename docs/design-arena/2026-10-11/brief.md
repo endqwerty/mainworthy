@@ -1,4 +1,4 @@
-# Casebook design arena: shared brief
+# Mainworthy design arena: shared brief
 
 You are one candidate designer in a parallel design exploration (the "architect" skill, Phase B). Other candidates work independently; an independent judge compares all candidates, then an orchestrator synthesises one design. Produce the strongest design you can. Do not hedge toward a safe middle; differences between candidates are the signal.
 
@@ -10,7 +10,7 @@ You are one candidate designer in a parallel design exploration (the "architect"
 
 ## Grounding: read these first (read-only)
 
-Repository: /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d (do NOT edit anything inside it).
+Repository: /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d (do NOT edit anything inside it).
 
 - README.md
 - docs/product-vision.md (ranked priorities: fast backend > agent access > instant UX; core capabilities; draft principles 1-7)
@@ -27,7 +27,7 @@ The existing decisions are guidelines. You may challenge any of them, but each c
 Write it as Markdown in your own output directory (given in your task). Files:
 
 1. `design.md` (the package, in this order):
-   - **Thesis**: in one paragraph, what Casebook is, and the one structural idea that makes manual QA, automated testing and agentic testing one product instead of three features.
+   - **Thesis**: in one paragraph, what Mainworthy is, and the one structural idea that makes manual QA, automated testing and agentic testing one product instead of three features.
    - **Why the incumbents are a poor use of money**: concrete, structural reasons (cite the competitive analysis where it is verified; label hypotheses). Then how the design answers each reason, structurally, not with a feature list.
    - **Guiding principles**: 6 to 10 principles that decide architecture and product questions. Each: the principle in one sentence; what it rules out; a tie-break rule against the others (the product vision ranks speed > agents > UX; keep, replace or refine that). Include an explicit rule for when and how a principle may be bent for deliverability, and what "a bad product" means so the bend has a floor.
    - **The DX/UX moves, made concrete**: what is the Linear move (over GitHub issues), the CircleCI move (over Jenkins), the bun/deno move (over npm/ts) for a test management tool? Each as a design commitment that can be checked, not an adjective.

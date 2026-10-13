@@ -258,7 +258,7 @@ func reportInput(meta Metadata, key string) ReportInput {
 }
 
 func saveInput(ref, base int64, command string) SaveInput {
-	expected := "The confirmation is visible and the casebook stores the expected result."
+	expected := "The confirmation is visible and the mainworthy stores the expected result."
 	return SaveInput{command, ref, base, Body{
 		Title: "arenaunique" + strings.ReplaceAll(command, "-", "") + " receipt", Pre: "Signed in with permission to author test cases.",
 		Steps:   []Step{{"s1", "Open the receipt and inspect the current amount, currency, customer and tax details.", &expected}, {"s2", "Change the amount and submit the receipt using the primary action.", &expected}},

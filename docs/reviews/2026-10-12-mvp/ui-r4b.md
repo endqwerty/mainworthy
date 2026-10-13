@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 4, part B (the queue, running a suite, errors)
+# Mainworthy web UI: independent verification, round 4, part B (the queue, running a suite, errors)
 
 Revision judged: `ec98ba41d759e037b2ff7b4b6138f587ee2f15ca`, branch `t3/mvp-product-delivery`.
 
@@ -29,10 +29,10 @@ the one they left (R4B-4).
 
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, `/usr/bin/chromium` with
   `--headless=new --ozone-platform=headless`, real server processes on 127.0.0.1, ports 8550 to 8599, data under
-  `/tmp/casebook-ui-r4b`.
+  `/tmp/mainworthy-ui-r4b`.
 - The only files changed in the export are five test helpers (ports moved into 8550..8599, the Chromium flags):
   `test-environment.patch`. No application source and no assertion is changed.
-- Probes in `probes/`, run from `tree/` as `TMPDIR=/tmp/casebook-ui-r4b bun ../probes/<name>.ts [scenario]`;
+- Probes in `probes/`, run from `tree/` as `TMPDIR=/tmp/mainworthy-ui-r4b bun ../probes/<name>.ts [scenario]`;
   output in `logs/`, screenshots in `shots/`. Round 3's, reused unchanged but for the screenshot path:
   `races.ts`, `blind.ts`, `queue-tabs.ts`, `queue-b.ts`, `run-a.ts`, `run-b.ts`, `run-c.ts`, `misc.ts`,
   `extra.ts`. New: `new-queue.ts`, `new-run.ts`, `queue-d2.ts`, `dispute-blind.ts`, `dispute-hint.ts`,
@@ -148,7 +148,7 @@ recorded for the slot, and "no such step" clears it too. The authors' test for R
 ### R4B-3: Queue: a second `u` on one question is dropped while the first withdrawal is still on its way; the next answer key lands on the next question
 
 Blocks: **yes, by the standard round 3 used for R3B-1** (a reply slower than the person's next key); say no if
-Casebook is judged for loopback only: with no injected delay it holds from 40 ms between keys and fails only at
+Mainworthy is judged for loopback only: with no injected delay it holds from 40 ms between keys and fails only at
 machine speed.
 
 `undo` drops any question already in `undoing` (the guard for check 4b, "`u` twice"), and a question stays there

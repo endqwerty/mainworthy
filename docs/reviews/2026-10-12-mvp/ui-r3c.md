@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 3, part C
+# Mainworthy web UI: independent verification, round 3, part C
 
 Part C: changes and settings, sign-in and session, keyboard, layout and themes, speed; and the re-check of
 R2-5, R2-11, Astra R2-2 and Astra R2-3.
@@ -28,12 +28,12 @@ so the rest of the sentence runs as commands (R3C-2, the same result as round 2'
 
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, Bun 1.4.3, `/usr/bin/chromium` with
   `--headless=new --ozone-platform=headless`, real server processes on 127.0.0.1, ports 8400 to 8449, data under
-  `/tmp/casebook-ui-r3c`.
+  `/tmp/mainworthy-ui-r3c`.
 - The only files changed in the export are five test helpers (ports moved into 8400..8449, the Chromium flags):
   `test-environment.patch`. No application source and no assertion is changed.
 - Every probe drives the real UI with trusted key events and then reads the server through its API. Slow and
   failing reads are injected at the browser (`page.route`). Probes are in `probes/` (run from `tree/` as
-  `TMPDIR=/tmp/casebook-ui-r3c bun ../probes/<name>.ts [scenario]`), their output in `logs/`, screenshots in
+  `TMPDIR=/tmp/mainworthy-ui-r3c bun ../probes/<name>.ts [scenario]`), their output in `logs/`, screenshots in
   `shots/`. To rerun, first `bun install --frozen-lockfile` in `tree/` (its `node_modules` is removed at the end).
 - Both blockers were reproduced at least twice. Where a first result was my own mistake it is said at the end.
 - The machine was shared with the other reviewers (load average 4 to 10 on 16 cores).
@@ -42,9 +42,9 @@ so the rest of the sentence runs as commands (R3C-2, the same result as round 2'
 
 | Finding | Result here | Evidence |
 | --- | --- | --- |
-| R2-5 over plain HTTP under a name other than localhost nothing could be written | **fixed** | `probes/http-name.ts`, `logs/http-name.log`, server mode with a token, `http://casebook.test:<port>`: `{"isSecureContext":false,"randomUUID":"undefined","clipboard":"undefined"}`. Capture: `C-4 v1 "Typed over plain http"`, steps `Open the cart => The cart is shown`, `Pay`. Edit: `v2 "Typed over plain http again"`, tag `["smoke"]`. Run: `C-1:satisfied:pass()`, `C-2:failing:fail(total is wrong over http)`, `C-3:skipped:blocked()`. Queue: `Q-9 decided`. Copy token: `"Token copied."`, `fieldTypeAfter:"password"`, `pastedEqualsToken:true`. Policy: `strict is in force. Proposal P-7 and decision Q-10 are both recorded.` New project created. A change made elsewhere appears after 31 ms on both origins (`logs/events-origin.log`). `errors: []`. Cookie `httpOnly:true, sameSite:"Strict"`. |
+| R2-5 over plain HTTP under a name other than localhost nothing could be written | **fixed** | `probes/http-name.ts`, `logs/http-name.log`, server mode with a token, `http://mainworthy.test:<port>`: `{"isSecureContext":false,"randomUUID":"undefined","clipboard":"undefined"}`. Capture: `C-4 v1 "Typed over plain http"`, steps `Open the cart => The cart is shown`, `Pay`. Edit: `v2 "Typed over plain http again"`, tag `["smoke"]`. Run: `C-1:satisfied:pass()`, `C-2:failing:fail(total is wrong over http)`, `C-3:skipped:blocked()`. Queue: `Q-9 decided`. Copy token: `"Token copied."`, `fieldTypeAfter:"password"`, `pastedEqualsToken:true`. Policy: `strict is in force. Proposal P-7 and decision Q-10 are both recorded.` New project created. A change made elsewhere appears after 31 ms on both origins (`logs/events-origin.log`). `errors: []`. Cookie `httpOnly:true, sameSite:"Strict"`. |
 | R2-11 a project the session may not read was shown as empty | **fixed**, two small leftovers (R3C-6) | `logs/session.log`, `logs/scoped2.log`: Suite `Cases unavailable … Your session may not read this project. find needs the read capability on second Retry`; Queue, Runs, a run and Changes each print the refusal. For about a second before it, the Suite still says `No cases yet. Press c and start typing.`; Settings never says it and shows a policy the server does not hold. |
-| Astra R2-2 another person signing in on the same browser was shown the previous person's draft and note (written by Claude Opus 5.5) | **fixed** | `probes/persons.ts`, `logs/persons.log`, `logs/persons-2.log`, four surfaces (an edit of an existing case, a new case, a run note, a queue reason under `strict`). Alice types, her token is revoked, the write returns 401 and the sign-in appears. Bob signs in on the same page: `inputs:[]`, `draftRows:[]`, `body:[]`; opening the same field shows the server's text (`Step 1=Original step`) or nothing; 33 s idle: `writes:[]`, server unchanged; the same in a new tab. Bob types his own, is refused, Alice signs in again (a new token for the same actor): `Step 1=Alice private unfinished sentence`, `Result note=Alice private unfinished sentence`, `answer-extra=Alice private unfinished sentence`, none of Bob's words; recorded as `"by":"alice"`, `alice/fail/Alice private unfinished sentence`, `Q-3 flaky by alice`. Storage keys carry the person (`casebook:alice:draft:…`, `casebook:bob:run-note:…`). |
+| Astra R2-2 another person signing in on the same browser was shown the previous person's draft and note (written by Claude Opus 5.5) | **fixed** | `probes/persons.ts`, `logs/persons.log`, `logs/persons-2.log`, four surfaces (an edit of an existing case, a new case, a run note, a queue reason under `strict`). Alice types, her token is revoked, the write returns 401 and the sign-in appears. Bob signs in on the same page: `inputs:[]`, `draftRows:[]`, `body:[]`; opening the same field shows the server's text (`Step 1=Original step`) or nothing; 33 s idle: `writes:[]`, server unchanged; the same in a new tab. Bob types his own, is refused, Alice signs in again (a new token for the same actor): `Step 1=Alice private unfinished sentence`, `Result note=Alice private unfinished sentence`, `answer-extra=Alice private unfinished sentence`, none of Bob's words; recorded as `"by":"alice"`, `alice/fail/Alice private unfinished sentence`, `Q-3 flaky by alice`. Storage keys carry the person (`mainworthy:alice:draft:…`, `mainworthy:bob:run-note:…`). |
 | Astra R2-3 a tall proposal answered with only its end visible (written by Claude Opus 5.5) | **fixed, with a new problem beside it (R3C-1), and R3C-4** | `probes/tall.ts`, `logs/tall-matrix.log`: thirty-five changed steps on a six-step case. 1280x800, `a` and `r`: press 1 `Q-3 is now in view. Read it, then press a again.`, presses 2 to 7 `Q-3 has more below: the next part is now in view`, steps seen `..10, ..16, 16..21, 22..27, 27..32, ..34`, answered at press 8 with `card [283,764] in pane [0,772]`, `whole:true, heading:true, buttons:true, atEnd:true`. 1440x900: answered at press 7, `card [337,864] in pane [0,872]`. Astra's route (pane scrolled to its end by hand, one key): `server:"open"`, it pages instead (`logs/tall-more.log`). A 480-character reason: card `[156,764]`, still whole. Two proposals: each revealed and answered in turn, the other left open. |
 
 ## Checks
@@ -217,7 +217,7 @@ Blocks: no.
 - **Suite, seen once in two runs, not reproduced on purpose**: in the first run of `probes/http-name.ts` the
   keys `e`, End, ` again`, Ctrl+Enter were pressed in the instant after a new case had sealed, while its row
   still read `new … draft`. The server got `v2` with the title unchanged, and after a reload the row showed
-  `draft` with `casebook:daniel:draft:scratch:C-4` on the device. Nothing was lost (the text was in the stored
+  `draft` with `mainworthy:daniel:draft:scratch:C-4` on the device. Nothing was lost (the text was in the stored
   draft). The second run, a moment slower, was clean: `v2 "Typed over plain http again"`, no draft left. The
   first run's output was overwritten by the second; reviewer A's capture checks are the place for it.
 - **Engine**: `admin` is an instance operation, so a project's `admin` capability grants nothing a screen
@@ -255,7 +255,7 @@ Blocks: no.
 ## Cleanup
 
 No listener is left on ports 8400 to 8449 and no browser of this review is running (one test server orphaned by
-a crashed probe was found and stopped at the end). `/tmp/casebook-ui-r3c` and the export's `node_modules` are
+a crashed probe was found and stopped at the end). `/tmp/mainworthy-ui-r3c` and the export's `node_modules` are
 removed. The repository checkout was read with `git archive` only; `git status` there is clean.
 
 ISSUES (2 blockers)

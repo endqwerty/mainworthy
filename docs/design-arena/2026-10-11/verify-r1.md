@@ -10,7 +10,7 @@ The safety fact is that every gate qualification must be tied to identified evid
 
 ## 1. Judge's synthesis conditions and D's red flags
 
-The judge's deciding requirement is in `/tmp/casebook-arena/judge.md:215`:
+The judge's deciding requirement is in `/tmp/mainworthy-arena/judge.md:215`:
 
 > "one canonical evidence constructor for direct and parsed reports; an explicit completed-review operation that works with zero findings; an exact target and binding acceptance rule; a gate horizon invalidated at durable upload acceptance; basis-checked triage/expiry; and a staged release plan distinguishing preview from first usable."
 
@@ -203,7 +203,7 @@ The `report` correction is real:
 
 But another operation still carries importer wire formats:
 
-> "op transfer ... { import: { from; format: 'casebook' | 'testrail' | 'qase' | 'csv' } }" (`product-design.md:675`)
+> "op transfer ... { import: { from; format: 'mainworthy' | 'testrail' | 'qase' | 'csv' } }" (`product-design.md:675`)
 
 That contradicts the general statement that formats stop at adapters. Define a canonical transfer/import contract and put vendor/CSV decoding in adapters. Also resolve the parsing/acceptance ordering described under 1(d). `get(... as: 'md')` is a representation choice rather than a competing evidence writer, but its adapter ownership should be stated consistently.
 
@@ -392,8 +392,8 @@ Open question 20 asks "From your experience across team sizes" (`open-questions.
 - **Whitespace: issues, minor.** `git diff --check a78b0ad..b5f1feb` exits 2 and reports:
   > "docs/open-questions.md:38: new blank line at EOF."
 
-- **Secrets: pass within the inspected scope.** Manual inspection and scans of the eight changed files found no private-key headers, recognizable GitHub/AWS/OpenAI credential patterns or credential-bearing URLs. `CASEBOOK_TOKEN` appears only as a CI secret reference:
-  > "${{ secrets.CASEBOOK_TOKEN }}" (`product-design.md:230`)
+- **Secrets: pass within the inspected scope.** Manual inspection and scans of the eight changed files found no private-key headers, recognizable GitHub/AWS/OpenAI credential patterns or credential-bearing URLs. `MAINWORTHY_TOKEN` appears only as a CI secret reference:
+  > "${{ secrets.MAINWORTHY_TOKEN }}" (`product-design.md:230`)
   Example loopback/example-domain URLs and placeholder IDs are not credentials. This is not a guarantee against every possible secret encoding.
 
 The exact mechanical checks returned:
@@ -434,4 +434,4 @@ The release boundary is also unresolved: D's Local experiment is described besid
 
 **Disposition:** keep the synthesis as a proposed design, but do not mark all checks passing or treat its evidence/gate contracts as ready for implementation. Resolve the acceptance constructor, binding/target rules, fragment pins, processing/expiry horizon, basis-bearing decide forms and staged release boundary. The editorial count/reference fixes are smaller but should accompany that revision.
 
-Only `/tmp/casebook-arena/verify-r1.md` was written. No repository files were changed.
+Only `/tmp/mainworthy-arena/verify-r1.md` was written. No repository files were changed.

@@ -1,4 +1,4 @@
-# Casebook engine verification, round 4
+# Mainworthy engine verification, round 4
 
 Revision: `cb8e9a3659aa326d894e89250d90e0d61f588d60`, branch `t3/mvp-product-delivery`.
 

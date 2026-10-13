@@ -1,4 +1,4 @@
-// Extended random sequences for the Casebook engine, written by an independent defect hunt (Claude Fable 5.1) and
+// Extended random sequences for the Mainworthy engine, written by an independent defect hunt (Claude Fable 5.1) and
 // kept as a test. Everything `test/sequences.ts` does, plus:
 // several tests per case and several causes; planned runs with `jobs` obligations and `minActors: 2`; runs closed by
 // sign-off and reopened by withdrawing it; the policy switched mid-way; corrections of corrections; the same report
@@ -28,16 +28,16 @@
 //
 // The tests are in `sequences-extended-loose.test.ts`, `-standard` and `-strict`. This file registers none, so a
 // defect hunt can import `sequence` and `stats` from it.
-// More seeds: CASEBOOK_SEQUENCE_SEEDS=500 bun test test/sequences-extended-
+// More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-extended-
 import { expect, test } from "bun:test";
 import { recoverAccepted, sweep } from "../src/server/jobs.ts";
 import { type Actor, findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { harness } from "./helpers.ts";
 
-const SEEDS = Number(process.env.CASEBOOK_SEQUENCE_SEEDS ?? 40);
-const STEPS = Number(process.env.CASEBOOK_SEQUENCE_STEPS ?? 100);
-const FIRST = Number(process.env.CASEBOOK_SEQUENCE_FIRST ?? 1);
+const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
+const STEPS = Number(process.env.MAINWORTHY_SEQUENCE_STEPS ?? 100);
+const FIRST = Number(process.env.MAINWORTHY_SEQUENCE_FIRST ?? 1);
 
 type Row = Record<string, string | number | null>;
 type Problem = { seed: number; step: number; what: string; detail: unknown; last: unknown[] };

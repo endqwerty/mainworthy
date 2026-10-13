@@ -1,4 +1,4 @@
-module casebook-arena-go
+module mainworthy-arena-go
 
 go 1.27.2
 

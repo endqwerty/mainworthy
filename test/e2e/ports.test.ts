@@ -8,11 +8,11 @@ import { reservePort } from "./support.ts";
 
 let directory = "";
 let ports: number[] = [];
-const lockOf = (port: number): string => join(directory, `casebook-e2e-port-${port}`);
+const lockOf = (port: number): string => join(directory, `mainworthy-e2e-port-${port}`);
 
 /** Ports the system says are free, and a lock directory nobody else uses. */
 beforeEach(async () => {
-	directory = await mkdtemp(join(tmpdir(), "casebook-ports-"));
+	directory = await mkdtemp(join(tmpdir(), "mainworthy-ports-"));
 	const probes = [0, 0].map(() => Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() }));
 	ports = probes.map((probe) => probe.port ?? 0);
 	for (const probe of probes) await probe.stop(true);
@@ -32,7 +32,7 @@ test("two reservations never share a port, and a released port can be taken agai
 	const second = await reservePort(ports, directory);
 	expect(new Set([first.port, second.port])).toEqual(new Set(ports));
 	expect(await readFile(join(lockOf(first.port), "pid"), "utf8")).toBe(String(process.pid));
-	await expect(reservePort(ports, directory)).rejects.toThrow("No free Casebook e2e port");
+	await expect(reservePort(ports, directory)).rejects.toThrow("No free Mainworthy e2e port");
 	await first.release();
 	expect(existsSync(lockOf(first.port))).toBe(false);
 	const again = await reservePort(ports, directory);
@@ -45,7 +45,7 @@ test("a lock of the first protocol, a bare directory, is respected while it is y
 	const [held = 0, free = 0] = ports;
 	await mkdir(lockOf(held));
 	expect((await reservePort(ports, directory)).port).toBe(free);
-	await expect(reservePort(ports, directory)).rejects.toThrow("No free Casebook e2e port");
+	await expect(reservePort(ports, directory)).rejects.toThrow("No free Mainworthy e2e port");
 	expect(existsSync(lockOf(held))).toBe(true);
 });
 
@@ -58,7 +58,7 @@ test("a lock whose owner has ended is taken over, and one whose owner runs is no
 	const taken = await reservePort(ports, directory);
 	expect(taken.port).toBe(abandoned);
 	expect(await readFile(join(lockOf(abandoned), "pid"), "utf8")).toBe(String(process.pid));
-	await expect(reservePort(ports, directory)).rejects.toThrow("No free Casebook e2e port");
+	await expect(reservePort(ports, directory)).rejects.toThrow("No free Mainworthy e2e port");
 	expect(await readFile(join(lockOf(running), "pid"), "utf8")).toBe(String(process.ppid));
 });
 

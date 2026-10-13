@@ -20,7 +20,7 @@ agent access) in the product vision.
   adequately tested.
 - **Adversarial testing:** an agent tries to break the software, using the
   cases as a map, and records results and new findings with reproduction
-  steps. Casebook does not run the software or provide the agent's browser
+  steps. Mainworthy does not run the software or provide the agent's browser
   or API tooling (non-goal); it supplies context and records outcomes.
 
 ## Where tokens go (hypothesis, to be measured)
@@ -38,16 +38,16 @@ With a naive tool surface, an agent spends tokens on:
 
 ## Requirement
 
-The tokens an agent needs to finish a job through Casebook are measured and
+The tokens an agent needs to finish a job through Mainworthy are measured and
 budgeted like latency. A scripted reference agent with a fixed model and
 tokenizer runs the agent jobs (A1 to A6 in the research plan). We count every
 token of tool definitions, requests and responses, and the number of calls.
 Budgets are set from a baseline: the same jobs through incumbents' MCP
 servers (phase 0 audit) and through a naive "list and get everything" use of
-Casebook's own API. A change that breaks a budget does not merge, as with
+Mainworthy's own API. A change that breaks a budget does not merge, as with
 latency.
 
-Limit of the claim: Casebook controls what it serves, not the agent's own
+Limit of the claim: Mainworthy controls what it serves, not the agent's own
 reasoning or the client's context handling. Claims are stated as "tokens
 served to complete the job under the reference agent", never as total agent
 cost.

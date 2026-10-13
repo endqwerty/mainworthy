@@ -4,7 +4,7 @@
 - Status: accepted with one amendment (Daniel, 2026-10-11: "probably"; F3
   applies to 1.0, see decision 0009, answer 28)
 
-Casebook needs principles that decide architecture and product questions,
+Mainworthy needs principles that decide architecture and product questions,
 with tie-breaks, so that a contributor (person or agent) who sees one file
 makes the choice the whole product would make. They replace the draft
 principles 1 to 7 in `docs/product-vision.md`, which they absorb, and refine

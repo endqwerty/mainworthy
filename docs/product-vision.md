@@ -49,7 +49,7 @@ When two goals conflict, the higher one wins.
   same way as any other version.
 - The OpenAPI description and the MCP tool list come from the same source.
 - **Token efficiency.** Agents doing adversarial review and testing should
-  spend fewer tokens because of Casebook, not more. The tokens served to
+  spend fewer tokens because of Mainworthy, not more. The tokens served to
   finish an agent job are measured and budgeted like latency: impact sets
   from a change instead of suite scans, "changed since" reads instead of
   re-reading, stored findings so reviews are not rediscovered, failure
@@ -185,7 +185,7 @@ one of them is available through the API and MCP, and stays fast at scale).
 
 Software QA only (decision 0003), for teams in general from a startup to a
 large enterprise, not for any one team (decision 0005). Teams range from loose and
-automation-heavy to regulated with strict gates and sign-offs; Casebook
+automation-heavy to regulated with strict gates and sign-offs; Mainworthy
 serves the whole range with one data model and per-project policy switches
 (review required, approval to run, release gates, evidence freeze,
 sign-off), with presets for each profile. The full CI/CD flow is in scope
@@ -202,7 +202,7 @@ roadmap; see `docs/ux/traceability-views.md` once written.
 
 ## Deployment: self-hostable in layers
 
-Casebook is self-hosted in three layers from one build: Local (one process
+Mainworthy is self-hosted in three layers from one build: Local (one process
 on a person's machine, zero configuration), Server (a team on a home server
 or small host) and Cloud (one organisation on several instances, optional
 cache, workers). No feature is layer-specific and a cache is never required

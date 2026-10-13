@@ -1,4 +1,4 @@
-# Casebook engine review, round 14
+# Mainworthy engine review, round 14
 
 Revision: `3ef3aed2d9ac9cd9003acc6e36e20bc6e8314e68`.
 Reviewer: Codex, GPT-6 Astra. Independent of the Claude-authored engine. The Codex-authored reader threads receive functional QA here, not a different-provider signoff.

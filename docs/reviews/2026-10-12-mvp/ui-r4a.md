@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 4, part A (the authors' tests, capture, editing and versions)
+# Mainworthy web UI: independent verification, round 4, part A (the authors' tests, capture, editing and versions)
 
 Revision judged: `ec98ba41d759e037b2ff7b4b6138f587ee2f15ca`, branch `t3/mvp-product-delivery`.
 
@@ -29,7 +29,7 @@ sends it again unchanged) brought two new defects, and one race in leaving the e
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, Bun 1.4.3, `/usr/bin/chromium`
   (`--headless=new --ozone-platform=headless`), real server processes on 127.0.0.1. The authors' suite ran
   unpatched on its own ports; my probes start their own servers on 8500 to 8549 with data under
-  `/tmp/casebook-ui-r4a`.
+  `/tmp/mainworthy-ui-r4a`.
 - Probes are in `probes/` (run from `tree/` as `bun ../probes/<name>.ts <scenario>` after `bun install
   --frozen-lockfile` there): the round-3 probes unchanged except for paths and ports (`cmd.ts`, `tabs2.ts`,
   `edit.ts`, `more.ts`, `recheck.ts`, `capture.ts`), and new ones (`r4.ts`, `person.ts`, `apierr.ts`,
@@ -332,8 +332,8 @@ not restored into another window (the owner id is already stored on it); restore
   one caret sample.
 - IME input, screen readers, mobile widths, Cmd on macOS.
 
-Cleanup: no server or browser of this review is running; `/tmp/casebook-ui-r4a`, the scratch copy `mut/` and
-`tree/node_modules` are removed. The `/tmp/casebook-e2e-*` directories and port locks left by other runs were
+Cleanup: no server or browser of this review is running; `/tmp/mainworthy-ui-r4a`, the scratch copy `mut/` and
+`tree/node_modules` are removed. The `/tmp/mainworthy-e2e-*` directories and port locks left by other runs were
 not touched.
 
 ISSUES (3 blockers)
