@@ -60,6 +60,8 @@ async function gate(
 		/** Shards whose report is there and cannot be read (a directory of that name). */
 		unreadable?: string[];
 		mode?: "local" | "server";
+		/** Sent to the job as soon as it says it has started its own Casebook. */
+		signal?: "SIGINT" | "SIGTERM";
 		/** Routes of the instance of the test that answer in place of its own. */
 		routes?: NonNullable<Parameters<typeof withInstance>[1]>["routes"];
 		configure?: (running: Running) => Promise<Record<string, string>>;
@@ -114,11 +116,20 @@ async function gate(
 						stderr: "pipe",
 					},
 				);
-				const [stdout, stderr, code] = await Promise.all([
-					new Response(child.stdout).text(),
-					new Response(child.stderr).text(),
-					child.exited,
-				]);
+				const printed = async (): Promise<string> => {
+					let text = "";
+					let signalled = false;
+					const decoder = new TextDecoder();
+					for await (const chunk of child.stdout) {
+						text += decoder.decode(chunk, { stream: true });
+						if (options.signal && !signalled && text.includes("Started a Casebook for this job")) {
+							signalled = true;
+							child.kill(options.signal);
+						}
+					}
+					return text;
+				};
+				const [stdout, stderr, code] = await Promise.all([printed(), new Response(child.stderr).text(), child.exited]);
 				return {
 					code,
 					output: stdout + stderr,
@@ -325,6 +336,18 @@ test("a job that breaks off leaves no Casebook running and nothing in the tempor
 	expect(result.output).toContain("EISDIR");
 	expect(result.code).not.toBe(0);
 	expect(result.left).toEqual([]);
+}, 20_000);
+
+test("a job that is told to stop does so before its next command, exits as stopped, and leaves nothing", async () => {
+	for (const [signal, exit] of [
+		["SIGTERM", 143],
+		["SIGINT", 130],
+	] as const) {
+		const result = await gate(green, { signal, configure: async () => ({ CASEBOOK_URL: "" }) });
+		// It does not go on to the gate and exit with the verdict of a run that was called off.
+		expect(result.output).not.toContain("$ casebook gate");
+		expect([signal, result.code, result.left]).toEqual([signal, exit, []]);
+	}
 }, 20_000);
 
 // ── Which Casebook the job reports to: what is wrong with a deployed one, and what follows ─────────────────
