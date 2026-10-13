@@ -8,6 +8,9 @@ import { HTTP_STATUS, INTERNAL_ERROR, noProject } from "../server/kernel/errors.
 import { listProjects } from "../server/ops/admin.ts";
 import { OP_LIST, OPS } from "../server/ops/index.ts";
 import { invokeAsync, type Reply } from "../server/ops/registry.ts";
+import { forwardedScheme } from "./headers.ts";
+import { uiSurface } from "./ui.ts";
+import { keepingPolicyOnEvery, withHeaders, withHeadersOnEvery } from "./with-headers.ts";
 
 export const VERSION = "0.1.0";
 const COOKIE = "mainworthy_session";
@@ -37,12 +40,11 @@ function cookieOf(req: Request, name: string): string | null {
 
 /**
  * The scheme the browser used, as a URL's `protocol` writes it (`https:`). Behind a proxy that ends TLS it is
- * the one the proxy reports in `X-Forwarded-Proto`: the first of a list, since each further proxy appends its
- * own, and in lower case. The one reader of that header: the Origin check and the cookie's `Secure` cannot
- * disagree about it.
+ * the one the proxy reports in `X-Forwarded-Proto`, read by `forwardedScheme`: the first of a list, since each
+ * further proxy appends its own, and in lower case.
  */
 function schemeOf(req: Request): string {
-	const forwarded = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+	const forwarded = forwardedScheme(req.headers.get("x-forwarded-proto"));
 	return forwarded ? `${forwarded}:` : new URL(req.url).protocol;
 }
 
@@ -562,19 +564,28 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patie
 		},
 	};
 	for (const [path, handler] of Object.entries(extra.routes ?? {})) routes[path] = guarded(handler);
-	for (const [path, handler] of Object.entries(extra.open ?? {})) routes[path] = handler;
-	if (extra.ui) routes["/*"] = extra.ui;
+	// Every reply carries the headers of `headers.ts`: the routes above through `withHeadersOnEvery`, the two
+	// replies below directly, and the web UI's files in `ui.ts`, where the page gets the policy it runs under.
+	// A route that answers without a session (`open`: the documentation) writes the policy of its own pages,
+	// which differ from the app's (a page of the documentation frames its diagrams), and keeps it.
+	const ui = extra.ui ? uiSurface(extra.ui, sameOrigin) : null;
 	return Bun.serve({
 		hostname: app.config.host,
 		port: app.config.port,
 		idleTimeout: patience.idleSeconds,
 		maxRequestBodySize: STREAM_BODY_LIMIT,
-		// biome-ignore lint/suspicious/noExplicitAny: Bun's route table type is a mapped type over literal paths; these are built at run time.
-		routes: routes as any,
-		fetch: () => jsonResponse({ ok: false, error: { code: "not_found", message: "no such route" } }, 404),
+		...(ui?.websocket ? { websocket: ui.websocket } : {}),
+		routes: {
+			...withHeadersOnEvery(routes),
+			...keepingPolicyOnEvery(extra.open ?? {}),
+			...(ui ? { "/*": ui.route } : {}),
+			// biome-ignore lint/suspicious/noExplicitAny: Bun's route table type is a mapped type over literal paths; these are built at run time.
+		} as any,
+		fetch: (req) =>
+			withHeaders(req, jsonResponse({ ok: false, error: { code: "not_found", message: "no such route" } }, 404)),
 		error(error) {
 			console.error("[mainworthy] request failed:", error);
-			return jsonResponse({ ok: false, error: { code: "internal", message: INTERNAL_ERROR } }, 500);
+			return withHeaders(null, jsonResponse({ ok: false, error: { code: "internal", message: INTERNAL_ERROR } }, 500));
 		},
 	});
 }

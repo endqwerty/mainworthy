@@ -208,6 +208,71 @@ the person it was loaded as (`X-Mainworthy-As`), and the server refuses it when 
 else's, in another tab for instance: text one person typed is never recorded under another's name. A caller that
 sends no name (a script, the CLI, an agent) is whoever its token says.
 
+## What every reply carries
+
+Every reply of the server carries the same headers, whichever route wrote it: the API's JSON, the change
+stream, an archive, `/mcp`, a 404, a 500, and the web UI's page, script and style sheet. The policy is one file
+of pure functions, `src/surfaces/headers.ts`, and each line of it says why it is there. One reply carries none
+of them: the 101 that opens the development reload socket (below). A browser applies none of these headers to
+a socket, so there they would promise nothing; who may open that socket is decided before it is opened.
+
+| Header | Value | What it is for |
+| --- | --- | --- |
+| `Content-Security-Policy` | for the page: `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`. For every other reply: `default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` | The page runs the one script and the one style sheet this instance serves and talks to this instance only. No page, here or elsewhere, can show it in a frame: in local mode the workbench opens without a sign-in, so a frame on any site the person visits would have been the workbench itself. |
+| `X-Frame-Options` | `DENY` | The same rule for browsers that only know this header. |
+| `X-Content-Type-Options` | `nosniff` | A reply is what its content type says. |
+| `Referrer-Policy` | `no-referrer` | An address names a project and a case; no other site learns it from a link. |
+| `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy` | `same-origin` | Another origin gets no handle on the window and cannot embed a reply. The opener policy is sent over https and to a name of this machine only: a browser ignores it on plain http to a network name and logs an error. |
+| `Strict-Transport-Security` | `max-age=31536000` | Only when the request came over https: by its own scheme, or by the first element of `X-Forwarded-Proto`, in lower case. For this host alone: no `includeSubDomains`, no `preload`. |
+
+The page's policy has no `'unsafe-inline'` and no `'unsafe-eval'`. It was found by running the app under it:
+the browser tests collect every console error, and a refusal is one, so a change that needs something the
+policy does not allow fails the test of whatever it broke. One library needed a change: zod builds its parsers
+from a string when it may, and asks by trying. `src/web/lib/no-eval.ts` tells it not to. What that costs was
+measured on 2026-10-13 in Chromium 152: a page parsed 10,000 rows of the case list (`z.array(CaseRow)`) fifty
+times, and four pages did so each way. The median was 2.9 to 3.4 ms with zod compiling its parsers and 2.9 to
+3.0 ms without.
+
+Bun serves an HTML import handed to it as a route by itself and offers no way to add a header (Bun 1.4.3). So the
+route is the server's own (`src/surfaces/ui.ts`), and it has two forms, for the two things an HTML import is:
+
+- **In the executable** the import lists the files that were built into it. The route serves them: the page
+  with `Cache-Control: no-cache`, the files it names (their names carry a hash of their content) to be kept for
+  a year. Nothing is bundled when the server runs and nothing else listens.
+- **From source** (`bun run start`, `bun run dev`, the tests) Bun bundles on request, as before, on a socket
+  file in a private temporary directory, and the route passes each reply on with the headers. With
+  `NODE_ENV=production` that is the same bundle and the same strict policy as the executable's. Without it, it
+  is Bun's development bundle with its reload socket, which the route relays. That bundle needs three things
+  more, each measured in a browser: the hash of the one inline script Bun writes into the page, read from the
+  page as it is served; `blob:` scripts, from which a changed module is run; and inline styles, with which Bun
+  lays out the error it shows in the page for a module that does not build. Scripts get no `'unsafe-inline'`
+  and nothing gets `'unsafe-eval'`. No executable serves this bundle. A process that is killed leaves its
+  socket directory behind (`mainworthy-ui-<pid>-…`); a start from source removes it once no process has
+  that id any more.
+
+  The reload socket is the one request the route does not simply pass on, because a socket the route opened
+  to the bundler would be judged as this process and always let in. Only `/_bun/hmr`, the path Bun's
+  development page asks for, is ever made a socket; an upgrade asked of any other path is answered as a plain
+  request for that path. Before it is opened the visitor passes two checks, and one who fails either is
+  answered 403 with the headers. First the HTTP surface's rule for a browser's request (`sameOrigin`): an
+  Origin, where one is sent, is this server, scheme and host, and `Sec-Fetch-Site`, where sent, says the same.
+  Then Bun's own: the route opens its socket to the bundler with the `Host` and `Origin` the visitor sent and
+  opens the visitor's only if the bundler accepted that one. Bun refuses a name that is not this machine's
+  or an address (a page reached through DNS rebinding) and an Origin on another site. The first rule is the
+  stricter one for an Origin: Bun's lets in a page on another port of this machine, and the route does not.
+
+The documentation site (`/docs`, `src/surfaces/docs/site.ts`) writes the policy of its own pages, and keeps it
+(`withHeadersKeepingPolicy`): a page of the documentation loads the site's script and style sheet and frames its
+diagrams, and a diagram is a sandboxed page with its script inside it, so neither is the app's page nor
+"everything else". Such a reply keeps the `Referrer-Policy` its route wrote too (`same-origin`, not the `no-referrer` of the table
+above), its `X-Frame-Options` follows its policy (`SAMEORIGIN` where the policy says `frame-ancestors 'self'`),
+and it gets the remaining headers like any reply.
+
+A route added to the HTTP surface gets the headers without knowing of them: the route table goes through
+`withHeadersOnEvery` (`src/surfaces/with-headers.ts`), which refuses, when the server starts, a route that Bun
+would answer by itself. One reply cannot say how the browser arrived: Bun hands its error handler no request,
+so a 500 carries every header but `Strict-Transport-Security` and `Cross-Origin-Opener-Policy`.
+
 ## Rules the code enforces on itself
 
 `test/architecture.test.ts` fails the check when: a module imports up the map (the suite reaching into
@@ -228,7 +293,7 @@ when a hot path gets slow.
 | `src/server/kernel/` | the database wrapper, migrations, the command context, the witness |
 | `src/server/{suite,evidence,runs,decisions,identity,policy}/` | one module per owner of tables |
 | `src/server/ops/` | the registry and the operations |
-| `src/surfaces/` | HTTP, MCP, the JUnit reader, CI environment detection, archive routes, the documentation site |
+| `src/surfaces/` | HTTP, MCP, the JUnit reader, CI environment detection, archive routes, the documentation site, the web UI's files, the headers on every reply |
 | `docs/guide/` | the user documentation, served at `/docs`; its table of contents is `src/core/docs.ts` |
 | `src/cli/` | the command line, generated from the registry plus a few adapters |
 | `src/web/` | the web UI |

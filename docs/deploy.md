@@ -44,6 +44,25 @@ keeps an idle connection by default (Traefik and Cloudflare's tunnel 90 seconds,
 so the proxy closes first; a proxy set to keep them longer than three minutes can lose a request it sends on a
 connection the server has just closed.
 
+Every HTTP reply carries its own security headers (`docs/architecture.md`, "What every reply carries"): a
+Content-Security-Policy, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+no-referrer` and `Cross-Origin-Resource-Policy: same-origin`. The documentation at `/docs` differs in three of
+them, on purpose: its replies keep the Content-Security-Policy and the `Referrer-Policy: same-origin` the
+documentation site writes, and its pages and diagrams say `X-Frame-Options: SAMEORIGIN`, because a page of the
+documentation frames its own diagrams. `Cross-Origin-Opener-Policy: same-origin` is on
+every reply but two kinds: one to a request that came over plain http to a network name (a browser honours the
+header only over https or on the machine itself, and logs an error otherwise), and the 500 reply, which is
+written without the request. One reply carries none of them: the 101 that opens the reload socket of Bun's
+development bundle, which only a start from source without `NODE_ENV=production` has, because a browser
+applies no such header to a socket. A proxy in front does not need to add any of them. Two things follow for whoever
+runs one:
+
+- `Strict-Transport-Security: max-age=31536000` is sent only when the proxy says the request came over https,
+  in `X-Forwarded-Proto`, the header the sign-in already needs. A proxy that does not send it gets no HSTS from
+  Mainworthy. The header names this host only; a policy for the whole domain is the domain's to set.
+- No page can show the app in a frame, on the same host or another. A dashboard or a tool that embeds
+  applications in a frame shows an empty one for Mainworthy.
+
 ## On Coolify
 
 How the instance on the home server was set up. It takes about five minutes through Coolify's API or its
