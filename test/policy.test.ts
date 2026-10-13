@@ -508,6 +508,29 @@ describe("unlinked tests", () => {
 		expect(queue().counts.open).toBe(0);
 	});
 
+	test("in the queue a test with no case comes after every question that wants a judgement, however new it is", () => {
+		use("standard", "ask");
+		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		h.call("propose", { edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90" }] });
+		h.call("report", ciReport({ commit: "bbbb0030", n: 1, file: "tests/first.spec.ts" }));
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon applies once" } }] }, agent);
+		h.call(
+			"claim",
+			{ lens: "review", findings: [{ on: "C-1", category: "ambiguous", note: "Say which total" }] },
+			agent,
+		);
+		h.call(
+			"report",
+			ciReport({ commit: "bbbb0031", n: 2, fail: { 0: "expected 90, got 100" }, file: "tests/second.spec.ts" }),
+		);
+		expect(queue().items.map((item) => item.kind)).toEqual(["failure", "finding", "adopt", "map", "map"]);
+		// Among themselves they are newest first, like the rest.
+		expect(queue({ kind: "map" }).items.map((item) => item.title)).toEqual([
+			"2 tests in tests/second.spec.ts have no case",
+			"1 test in tests/first.spec.ts has no case",
+		]);
+	});
+
 	test("create: a report makes a case for each test with none and links it; nobody is asked, and nothing is made twice", () => {
 		use("standard");
 		setUnlinked("create");

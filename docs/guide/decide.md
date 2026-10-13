@@ -12,6 +12,9 @@ Use the answer's stated consequence to decide what the gate needs next.
 3. Read its evidence and the text beside each available answer.
 4. Press the answer key.
 
+Questions are listed with what blocks most first, then the newest first. A test with no case
+comes after every other question, however new it is: it is worth resolving, and nothing waits for it.
+
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between questions.
 Press <kbd>Space</kbd> to expand the evidence.
 The "Open" view contains questions that need an answer. "Settled" contains decisions.

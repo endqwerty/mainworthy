@@ -137,6 +137,15 @@ const mintWitness = claimMint();
 
 const PRIORITY: Record<Blocks, number> = { all: 3, change: 2, release: 2, nothing: 1 };
 
+/**
+ * Where a new question stands in the queue: what it blocks first. Among the questions that block nothing, a
+ * test with no case comes last. A proposal or a finding is one judgement somebody is waiting for; a file of
+ * tests with no case arrives with every report, so by age alone it would always stand above them, and the
+ * owner's rule is that it is worth resolving, only not ahead of anything else (decision 0021).
+ */
+const priorityOf = (kind: Kind, blocks: Blocks): number =>
+	kind === "map" && blocks === "nothing" ? 0 : PRIORITY[blocks];
+
 function blockedRuns(blocks: Blocks, runs: Raise["runs"]): number[] {
 	return runs
 		.filter(
@@ -361,7 +370,7 @@ function open(
 		ask: clause.ask,
 		blocks: blockedRuns(clause.blocks, r.runs),
 		// Most blocking first, then newest first: one ascending range read is the queue.
-		rank: -(PRIORITY[clause.blocks] * 1_000_000_000_000 + ctx.seq * 1000 + (ctx.ord() % 1000)),
+		rank: -(priorityOf(r.kind, clause.blocks) * 1_000_000_000_000 + ctx.seq * 1000 + (ctx.ord() % 1000)),
 		refs: r.refs,
 	});
 	if (clause.ask.who === "rule") return settleByRule(ctx, question, clause.id, clause.answer);
