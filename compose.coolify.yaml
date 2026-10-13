@@ -1,0 +1,55 @@
+# The Coolify deployment: Casebook as its own node on the tailnet, https://casebook.owl-perch.ts.net, through a
+# Tailscale sidecar (the pattern in the home lab's services/coolify-tailnet-apps.md). Nothing is published on the
+# LAN. For a laptop or a plain server use compose.yaml instead.
+#
+# First deploy only: set TS_AUTHKEY in Coolify to a single-use auth key. The node's identity then persists in the
+# tailscale-state volume and the variable can be deleted. Never use the sign-in link the sidecar prints.
+services:
+  casebook:
+    build: .
+    restart: unless-stopped
+    ports:
+      # For debugging from the host only; the tailnet name is the way in.
+      - "127.0.0.1:7357:7357"
+    environment:
+      # A long random string. Leave unset to have one generated and printed once on first start.
+      CASEBOOK_OWNER_TOKEN: ${CASEBOOK_OWNER_TOKEN:-}
+      CASEBOOK_OWNER: ${CASEBOOK_OWNER:-owner}
+    volumes:
+      - casebook-data:/data
+
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: casebook
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: ${TS_HOSTNAME:-casebook}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "true"
+      TS_ENABLE_HEALTH_CHECK: "true"
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+    configs:
+      - source: tailscale-serve
+        target: /config/serve.json
+    mem_limit: 128m
+    restart: unless-stopped
+    exclude_from_hc: true
+
+configs:
+  tailscale-serve:
+    # The tailscale container substitutes ${TS_CERT_DOMAIN} at start; `$$` stops Compose and Coolify from doing it first.
+    content: |
+      {
+        "TCP": { "443": { "HTTPS": true } },
+        "Web": {
+          "$${TS_CERT_DOMAIN}:443": {
+            "Handlers": { "/": { "Proxy": "http://casebook:7357" } }
+          }
+        }
+      }
+
+volumes:
+  casebook-data:
+  tailscale-state:
