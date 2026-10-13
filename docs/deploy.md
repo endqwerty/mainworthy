@@ -7,7 +7,7 @@ database container to run, upgrade or back up separately (decision 0010).
 passes its health check on the development machine. It also runs on Daniel's Coolify (since 2026-10-12, the
 steps under "On Coolify" as they were done): `/healthz` answers, a request with no token gets 401, and a browser
 signed in with the owner token over plain HTTP and saved a case through the page.
-**What is not:** the Tailscale sidecar in `compose.coolify.yaml` on that instance (the file passes `docker compose config`; the node has not joined yet), a restore from a backup on that instance, and an upgrade of an instance that holds data.
+**What is not:** the Tailscale sidecar in `compose.coolify.yaml` on that instance (`docker compose config` accepts the file once Coolify's own `exclude_from_hc` line is removed; the node has not joined yet), a restore from a backup on that instance, and an upgrade of an instance that holds data.
 
 ## The container
 
