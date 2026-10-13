@@ -22,7 +22,7 @@ try {
 			await harness.page.goto(`${server.url}${item.path}`);
 			await harness.page.locator("#app").waitFor();
 			await harness.page.evaluate((value) => {
-				localStorage.setItem("casebook:theme", value);
+				localStorage.setItem("mainworthy:theme", value);
 				document.documentElement.dataset.theme = value;
 			}, theme);
 			await harness.page.waitForTimeout(300);

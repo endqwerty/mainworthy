@@ -1,4 +1,4 @@
-# Casebook engine review, round 8
+# Mainworthy engine review, round 8
 
 Revision: `0be06bbb7d78d44c49307b791b8ec431aae259fc`, branch `t3/mvp-product-delivery`.
 
@@ -29,7 +29,7 @@ The correctness fact being checked is that every counted excuse has a live decis
 
 The author-test runner temporarily assigns only ports 8050–8099 and puts budget data under `/tmp`; it restores those test files afterward. This is environmental configuration of the exported tests, not a change to their assertions. The sole excluded failure is `on-disk hot paths stay inside the design budgets`, with the deciding tmpfs rejection in `logs/author-tests.log`. No other out-of-scope compilation or test failure occurred. No performance figures or budget verdict are inferred from this run.
 
-The additional author sequence command was run in `tree`: `CASEBOOK_SEQUENCE_SEEDS=200 bun test test/sequences.test.ts`. It prints `3 pass, 0 fail`: 200 sequences each under loose, standard and strict, 48,000 steps total. The independent scripts also ran: `state-sequences.mjs 100` gives 10,000 audited steps and zero problems; `state-remaining.mjs 60` gives 9,000 and zero problems in its enabled assertions; `R7_CHECK_INHERITED=1 bun scripts/state-extended.mjs 60` gives 7,200 and zero problems, with the covered-question and inherited-fact checks enabled. The remaining script retains its two earlier disabled assertions; they are not claimed as evidence from that script. Extended output records 773 successful plans, 4,992 successful reports, including 971 naming a run, and 1,081 decisions.
+The additional author sequence command was run in `tree`: `MAINWORTHY_SEQUENCE_SEEDS=200 bun test test/sequences.test.ts`. It prints `3 pass, 0 fail`: 200 sequences each under loose, standard and strict, 48,000 steps total. The independent scripts also ran: `state-sequences.mjs 100` gives 10,000 audited steps and zero problems; `state-remaining.mjs 60` gives 9,000 and zero problems in its enabled assertions; `R7_CHECK_INHERITED=1 bun scripts/state-extended.mjs 60` gives 7,200 and zero problems, with the covered-question and inherited-fact checks enabled. The remaining script retains its two earlier disabled assertions; they are not claimed as evidence from that script. Extended output records 773 successful plans, 4,992 successful reports, including 971 naming a run, and 1,081 decisions.
 
 ## Status of round 7
 
@@ -208,6 +208,6 @@ No separate non-blocking product defect was confirmed in this round. Performance
 
 ## Cleanup
 
-All review servers and worker processes have stopped. The final audit found no review process, no listener on ports 8050–8099 and no remaining review `/tmp` data. The exported tree's `node_modules`, `.casebook` and `test-results` have been released. `logs/cleanup.json` records the audit. Temporary mutations have been restored: `logs/export-integrity.json` reports `trackedFiles:404`, `mismatches:[]`, `allExportedSourceRestored:true`. Reports, scripts and logs stay under `engine-r8`. No repository change or commit was made.
+All review servers and worker processes have stopped. The final audit found no review process, no listener on ports 8050–8099 and no remaining review `/tmp` data. The exported tree's `node_modules`, `.mainworthy` and `test-results` have been released. `logs/cleanup.json` records the audit. Temporary mutations have been restored: `logs/export-integrity.json` reports `trackedFiles:404`, `mismatches:[]`, `allExportedSourceRestored:true`. Reports, scripts and logs stay under `engine-r8`. No repository change or commit was made.
 
 ISSUES (4 blockers)

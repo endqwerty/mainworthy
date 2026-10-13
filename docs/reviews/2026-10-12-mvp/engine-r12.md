@@ -1,4 +1,4 @@
-# Casebook engine QA review, round 12
+# Mainworthy engine QA review, round 12
 
 Revision: **`de5702371f5e1a6881cb8748a5befdec9a1ca378`**, branch `t3/mvp-product-delivery`.
 
@@ -10,7 +10,7 @@ The correctness fact under review: every counted result belongs to the right cas
 
 All work ran locally in this revision's clean archive at `engine-r12/tree`. The shared checkout was read only by `git archive`; it was never changed, installed into or cleaned. [EARLIER.md](EARLIER.md) records all 146 inherited/original-hunt reproduction entries and the four additional hunt sequence runners, including their actual output and any unexecuted tail. [STANDING.md](STANDING.md) inventories the scoped standing writes and their callers. Raw logs and executable probes are retained in this review directory.
 
-Commands below run from `/home/endqwerty/.cache/casebook-arena/verify/engine-r12`. Install the exported tree's dependencies with `bun install --frozen-lockfile` there if they have been released. HTTP probes use only loopback, ports 8650–8699, and their own `/tmp` data. Each main blocker probe was reproduced twice through `invoke`; all three were also reproduced over HTTP with two reader threads. The standalone defect probes assert the promised behavior and fail on this revision; their failure is the reproduction. [HTTP confirmation](logs/r12-http.log).
+Commands below run from `/home/endqwerty/.cache/mainworthy-arena/verify/engine-r12`. Install the exported tree's dependencies with `bun install --frozen-lockfile` there if they have been released. HTTP probes use only loopback, ports 8650–8699, and their own `/tmp` data. Each main blocker probe was reproduced twice through `invoke`; all three were also reproduced over HTTP with two reader threads. The standalone defect probes assert the promised behavior and fail on this revision; their failure is the reproduction. [HTTP confirmation](logs/r12-http.log).
 
 ## Required checks
 
@@ -18,7 +18,7 @@ Commands below run from `/home/endqwerty/.cache/casebook-arena/verify/engine-r12
 
 Ran `bun test src test --path-ignore-patterns 'test/e2e/**'`, `bunx tsc --noEmit`, and `bunx biome check src test bench` via [author-checks.py](scripts/author-checks.py). Temporary test-port and budget-directory substitutions obeyed the brief and were restored. Deciding output: **`608 pass`, `1 fail`, `16664 expect() calls`**, 609 tests across 29 files. The sole failure is out of scope: the disk-budget test refuses the required `/tmp` data location because it is tmpfs. Typecheck exits 0; lint exits 0: **`Checked 186 files ... No fixes applied.`** [Tests](logs/author-tests.log), [check summary](logs/author-checks-progress.log).
 
-Reran the requested long suites: `CASEBOOK_SEQUENCE_SEEDS=300 bun test test/sequences.test.ts` and `CASEBOOK_SEQUENCE_SEEDS=150 bun test test/sequences-extended.test.ts`; **each reports `3 pass`, `0 fail`**, covering loose, standard and strict. My inherited current-state checker reports **`80` seeds, `12000` checks, `problems:0`**; independent lane enumeration reports **`4500` sequences, `13500` observations, `commitAndSlotAgree:true`**. [300 seeds](logs/sequences-300.log), [150 seeds](logs/sequences-extended-150.log), [current-state probe](logs/rerun-state-current.log), [lanes](logs/rerun-lane-matrix.log).
+Reran the requested long suites: `MAINWORTHY_SEQUENCE_SEEDS=300 bun test test/sequences.test.ts` and `MAINWORTHY_SEQUENCE_SEEDS=150 bun test test/sequences-extended.test.ts`; **each reports `3 pass`, `0 fail`**, covering loose, standard and strict. My inherited current-state checker reports **`80` seeds, `12000` checks, `problems:0`**; independent lane enumeration reports **`4500` sequences, `13500` observations, `commitAndSlotAgree:true`**. [300 seeds](logs/sequences-300.log), [150 seeds](logs/sequences-extended-150.log), [current-state probe](logs/rerun-state-current.log), [lanes](logs/rerun-lane-matrix.log).
 
 One-at-a-time architecture mutations fail the intended checks: upward import, second witness-mint import/call, foreign-table SQL, raw domain SQL, writer ignoring its witness, bad declared SQL, outside SQLite/undo callers, core I/O, web/server import, duplicate operation and a second operation path. A plain structural witness passes the architecture test alone, but TypeScript refuses it: **`TS2739 ... missing ... #decision, #kind, #signers, #expiresAt`**. Removing the runtime kind guard fails both the author regression and the independent wrong-kind probe. After restoration, architecture reports **`12 pass`, `0 fail`**. [Mutation summary](logs/architecture-summary.log), [additional mutations](logs/architecture-additional-summary.log), [runtime mutation](logs/test-strength.log), [final architecture](logs/architecture-final.log).
 

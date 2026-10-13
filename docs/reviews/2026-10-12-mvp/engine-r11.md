@@ -1,4 +1,4 @@
-# Casebook engine QA review, round 11
+# Mainworthy engine QA review, round 11
 
 Revision: **`77fc9a73df8244914aaebc2de36daa7a5003f086`**, branch `t3/mvp-product-delivery`.
 
@@ -12,7 +12,7 @@ The correctness fact under review: a gate must reflect all and only the evidence
 
 All 117 inherited/hunt/oracle probes were run first. Their individual dispositions, including old assertions that now fail as expected, are in [EARLIER.md](EARLIER.md). The current SQL/writer/caller inventory and the four stated exceptions are in [STANDING.md](STANDING.md). Raw outputs and executable reproductions are retained under `logs/` and `scripts/`.
 
-Reproduction commands in this report run from `/home/endqwerty/.cache/casebook-arena/verify/engine-r11`. After cleanup, install dependencies with `bun install --frozen-lockfile` in its `tree/` first. HTTP scripts own ports in 8450–8499 and remove their own temporary data. Each blocking scenario was repeated; B01/B02/B03/B05 were also reproduced over HTTP with two reader threads, and B04 was repeated using a real process stop between report acceptance and application. See [r11-findings-http.log](logs/r11-findings-http.log) and the `*-confirmed.log` files.
+Reproduction commands in this report run from `/home/endqwerty/.cache/mainworthy-arena/verify/engine-r11`. After cleanup, install dependencies with `bun install --frozen-lockfile` in its `tree/` first. HTTP scripts own ports in 8450–8499 and remove their own temporary data. Each blocking scenario was repeated; B01/B02/B03/B05 were also reproduced over HTTP with two reader threads, and B04 was repeated using a real process stop between report acceptance and application. See [r11-findings-http.log](logs/r11-findings-http.log) and the `*-confirmed.log` files.
 
 ## Required checks
 
@@ -20,7 +20,7 @@ Reproduction commands in this report run from `/home/endqwerty/.cache/casebook-a
 
 Ran `bun test src test --path-ignore-patterns 'test/e2e/**'`, `bunx tsc --noEmit` and `bunx biome check src test bench`, through [author-checks.py](scripts/author-checks.py). Only temporary test ports and the budget data directory were changed to obey the brief; they were restored. Deciding output: **`599 pass`, `1 fail`, `16530 expect() calls`**, across 600 tests/29 files. The failure is out of scope: the on-disk budget fixture rejects tmpfs. Typecheck exited 0. Lint exited 0: **`Checked 182 files ... No fixes applied.`** [Test log](logs/author-tests.log), [check summary](logs/author-checks-progress.log).
 
-Also ran exactly `CASEBOOK_SEQUENCE_SEEDS=300 bun test test/sequences.test.ts` and `CASEBOOK_SEQUENCE_SEEDS=200 bun test test/sequences-extended.test.ts`: each reports **`3 pass`, `0 fail`**, under loose, standard and strict. [300-seed log](logs/sequence-author-300.log), [200-seed log](logs/sequence-extended-200.log). My current-state checker independently reports **`80` seeds, `12000` checks, `problems:0`**; lane enumeration reports **`4500` sequences, `13500` observations, `commitAndSlotAgree:true`**.
+Also ran exactly `MAINWORTHY_SEQUENCE_SEEDS=300 bun test test/sequences.test.ts` and `MAINWORTHY_SEQUENCE_SEEDS=200 bun test test/sequences-extended.test.ts`: each reports **`3 pass`, `0 fail`**, under loose, standard and strict. [300-seed log](logs/sequence-author-300.log), [200-seed log](logs/sequence-extended-200.log). My current-state checker independently reports **`80` seeds, `12000` checks, `problems:0`**; lane enumeration reports **`4500` sequences, `13500` observations, `commitAndSlotAgree:true`**.
 
 Architecture mutations were tested one at a time: upward import, second mint import/call, foreign-table SQL, raw domain SQL, writer ignoring its witness, invalid declared SQL, outside SQLite/undo calls, core I/O, web/server import, duplicate operation and a second operation path. Each makes its intended check fail. A plain structural witness is **not** rejected by the architecture test alone (`12 pass`), but typecheck rejects it with **`TS2739 ... missing ... #decision, #kind, #signers, #expiresAt`**. Removing the runtime witness-kind guard fails both the author's regression and my independent standing probe; removing the mistaken-answer key fails the policy regression. [Mutation summary](logs/architecture-summary.log), [remaining boundaries](logs/rerun-architecture-last.log).
 
@@ -202,6 +202,6 @@ These observations do not add blockers.
 
 ## Export integrity and cleanup
 
-All **408** exported tracked files match the pre-test archive hashes; no temporary source mutations remain. The final clean architecture run passes **12 tests, 0 failures**. Review runtime processes and listeners on ports 8450–8499 are gone. The export's dependencies/test output and the review's remaining `/tmp` budget directory were removed; no `casebook-engine-r11*` temporary data remains. Source, scripts, logs and reports are retained. No cleanup or mutation was performed in the shared checkout. [Integrity evidence](logs/export-integrity.json), [cleanup evidence](logs/cleanup-r11.json).
+All **408** exported tracked files match the pre-test archive hashes; no temporary source mutations remain. The final clean architecture run passes **12 tests, 0 failures**. Review runtime processes and listeners on ports 8450–8499 are gone. The export's dependencies/test output and the review's remaining `/tmp` budget directory were removed; no `mainworthy-engine-r11*` temporary data remains. Source, scripts, logs and reports are retained. No cleanup or mutation was performed in the shared checkout. [Integrity evidence](logs/export-integrity.json), [cleanup evidence](logs/cleanup-r11.json).
 
 ISSUES (5 blockers)

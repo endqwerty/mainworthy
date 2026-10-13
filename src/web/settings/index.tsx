@@ -315,9 +315,9 @@ function SettingsWorkbench() {
 						<>
 							<h2>Connect a pipeline</h2>
 							<p>Report the runner's JUnit XML, then read the gate.</p>
-							<pre className="settings-command">{`CASEBOOK_URL=${location.origin}\nCASEBOOK_PROJECT=${project}\ncasebook report results/*.xml\ncasebook gate`}</pre>
+							<pre className="settings-command">{`MAINWORTHY_URL=${location.origin}\nMAINWORTHY_PROJECT=${project}\nmainworthy report results/*.xml\nmainworthy gate`}</pre>
 							<p className="dim">
-								Set CASEBOOK_TOKEN to a pipeline token in the runner's secret store. A pipeline token records results
+								Set MAINWORTHY_TOKEN to a pipeline token in the runner's secret store. A pipeline token records results
 								and reads the gate; it cannot read or change the suite.
 							</p>
 							<SectionHeading>Connect an agent</SectionHeading>

@@ -6,11 +6,10 @@
 // `checkpoint`: copies committed pages from the write-ahead log into the database file, so that no commit on the
 // main thread has to. SQLite otherwise checkpoints inside the commit that fills the log, and the server answers
 // nobody while it does.
-import { join } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
 import { z } from "zod";
 import { ActorKind, Capability } from "../core/kinds.ts";
-import { openApp } from "./kernel/app.ts";
+import { databasePath, openApp } from "./kernel/app.ts";
 import { Db } from "./kernel/db.ts";
 import { OPS } from "./ops/index.ts";
 import { invoke, type Reply } from "./ops/registry.ts";
@@ -25,12 +24,12 @@ else reads();
 function checkpoints(): void {
 	// An ordinary connection that never writes a row. A passive checkpoint makes nobody wait: it copies what no
 	// reader still needs and leaves the rest for the next round.
-	const db = new Db(join(data.dataDir, "casebook.db"));
+	const db = new Db(databasePath(data.dataDir));
 	const timer = setInterval(() => {
 		try {
 			db.checkpoint();
 		} catch (error) {
-			console.error("[casebook] checkpoint failed:", error);
+			console.error("[mainworthy] checkpoint failed:", error);
 		}
 	}, 500);
 	process.once("exit", () => {

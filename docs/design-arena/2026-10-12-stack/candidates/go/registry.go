@@ -93,7 +93,7 @@ func (r *Registry) OpenAPI() map[string]any {
 			"responses":   map[string]any{"200": map[string]any{"description": "Operation outcome", "content": map[string]any{"application/json": map[string]any{"schema": op.Output}}}},
 		}}
 	}
-	return map[string]any{"openapi": "3.1.0", "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema", "info": map[string]any{"title": "Casebook Go arena", "version": "1.0.0"}, "paths": paths}
+	return map[string]any{"openapi": "3.1.0", "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema", "info": map[string]any{"title": "Mainworthy Go arena", "version": "1.0.0"}, "paths": paths}
 }
 
 func jsonResponse(w http.ResponseWriter, out any, err error) {
@@ -155,7 +155,7 @@ func (r *Registry) Handler(service *Service) http.Handler {
 }
 
 func (r *Registry) MCP() *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "casebook-go", Version: "1.0.0"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "mainworthy-go", Version: "1.0.0"}, nil)
 	for _, op := range r.Operations {
 		op.AddMCP(server)
 	}
@@ -164,7 +164,7 @@ func (r *Registry) MCP() *mcp.Server {
 
 func (r *Registry) CLI(ctx context.Context, args []string) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "help" {
-		fmt.Println("Usage: casebook <operation> [--input JSON | generated flags]")
+		fmt.Println("Usage: mainworthy <operation> [--input JSON | generated flags]")
 		for _, op := range r.Operations {
 			fmt.Printf("  %-10s %s\n", op.Name, op.Description)
 		}
@@ -188,7 +188,7 @@ func (r *Registry) CLI(ctx context.Context, args []string) error {
 			fields[name] = fs.String(name, "", desc)
 		}
 		fs.Usage = func() {
-			fmt.Printf("Usage: casebook %s [flags]\n%s\n", op.Name, op.Description)
+			fmt.Printf("Usage: mainworthy %s [flags]\n%s\n", op.Name, op.Description)
 			fs.SetOutput(io.Discard)
 			fs.VisitAll(func(f *flag.Flag) { fmt.Printf("  --%-12s %s\n", f.Name, f.Usage) })
 		}

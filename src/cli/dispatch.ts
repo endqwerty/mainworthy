@@ -48,8 +48,8 @@ export const COMMAND_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 function printHelp(): void {
-	line("Casebook 0.1.0");
-	line("usage: casebook [serve] | <command> [--help]");
+	line("Mainworthy 0.1.0");
+	line("usage: mainworthy [serve] | <command> [--help]");
 	for (const command of GENERATED_COMMANDS.values()) line(`  ${command.name.padEnd(12)} ${command.summary}`);
 	for (const command of ADAPTER_COMMANDS.values()) line(`  ${command.name.padEnd(12)} ${command.summary}`);
 	line("  serve        Start the server and web UI. Also the default with no arguments.");
@@ -96,20 +96,20 @@ export async function runCli(argv: readonly string[], ui: unknown): Promise<numb
 	if (name === "serve") {
 		const args = parseArgs(tokens);
 		if (args.bool("help")) {
-			line("casebook serve: Start the server and web UI.");
+			line("mainworthy serve: Start the server and web UI.");
 			printFlags(GLOBAL_FLAGS);
 		} else serveCommand(args, ui);
 		return 0;
 	}
 	const generated = GENERATED_COMMANDS.get(name);
 	const adapter = ADAPTER_COMMANDS.get(name);
-	if (!generated && !adapter) throw new CliError("invalid", `unknown command ${name}; use casebook help`);
+	if (!generated && !adapter) throw new CliError("invalid", `unknown command ${name}; use mainworthy help`);
 	const flags = [...(generated?.flags ?? []), ...(adapter?.flags ?? [])];
 	const args = parseArgs(tokens, flags);
 	if (args.bool("help")) {
 		if (generated) generatedHelp(generated);
 		if (adapter) {
-			line(`adapter: casebook ${adapter.usage}`);
+			line(`adapter: mainworthy ${adapter.usage}`);
 			line(adapter.summary);
 			printFlags(adapter.flags);
 		}
@@ -122,7 +122,7 @@ export async function runCli(argv: readonly string[], ui: unknown): Promise<numb
 		const allowed = new Set([...GLOBAL_FLAGS, { name: "json" }, ...adapter.flags].map((flag) => flag.name));
 		for (const flag of args.flags.keys()) {
 			if (!allowed.has(flag))
-				throw new CliError("invalid", `--${flag} is an operation flag; use casebook ${name} --json '<input JSON>'`);
+				throw new CliError("invalid", `--${flag} is an operation flag; use mainworthy ${name} --json '<input JSON>'`);
 		}
 		return adapter.run(args, client);
 	}

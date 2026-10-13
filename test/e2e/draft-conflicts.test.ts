@@ -158,8 +158,8 @@ check(
 			]);
 			b.setDefaultTimeout(5000);
 			await title(b).waitFor();
-			expect(await a.evaluate(() => sessionStorage.getItem("casebook:draft-window"))).not.toBe(
-				await b.evaluate(() => sessionStorage.getItem("casebook:draft-window")),
+			expect(await a.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"))).not.toBe(
+				await b.evaluate(() => sessionStorage.getItem("mainworthy:draft-window")),
 			);
 			expect(await title(b).evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(true);
 			await title(b).press("X");

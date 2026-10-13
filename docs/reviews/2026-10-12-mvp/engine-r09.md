@@ -1,4 +1,4 @@
-# Casebook engine review, round 9
+# Mainworthy engine review, round 9
 
 Revision: `f088a5c28fd336c801b439dc47329c7a418ed851`, branch `t3/mvp-product-delivery`.
 
@@ -31,7 +31,7 @@ The test runner changes only exported test ports to 8100-8149 and the excluded b
 
 Architectural checks were challenged one at a time with an upward import, second mint import and call, foreign-table SQL, raw SQL, an unchecked witness parameter, and plain witness objects. Additional mutations cover direct SQLite use, undo outside a kind handler, core I/O, web/server imports, duplicate operations and a second operation path. Every relevant boundary rejects the mutation. For the exact witness shape, tsc reports `missing ... #decision, #kind, #signers, #expiresAt`. The architecture test alone reports `12 pass, 0 fail` for the structural witness, so its rejection is specifically a typecheck result. Logs are `architecture-*.log`, `witness-typecheck*.log`, and `test-strength-summary.log`. All mutations were restored.
 
-The requested sequence command, `CASEBOOK_SEQUENCE_SEEDS=300 bun test test/sequences.test.ts`, prints `3 pass, 0 fail`: 300 seeds per policy, 72,000 steps. The earlier independent scripts print `state-sequences: 8000 checked, 0 problems`, `state-remaining: 9000 checked, 0 problems`, and `state-extended: 7200 checked, 0 problems` with `R7_CHECK_INHERITED=1`. These results are limited to their assertions and generated inputs. `state-remaining` retains two disabled assertions. `state-extended` still has an obsolete fallback in its own expected-result calculation, so its green result does not prove fallback removal. The new `round9-scope-matrix.mjs` directly proves 29 combinations of line order, environment, answer timing, decision kind, and unavailable bases. No-base, unreported-base, self-base, foreign-base and agent-only-base cases all remain blocked.
+The requested sequence command, `MAINWORTHY_SEQUENCE_SEEDS=300 bun test test/sequences.test.ts`, prints `3 pass, 0 fail`: 300 seeds per policy, 72,000 steps. The earlier independent scripts print `state-sequences: 8000 checked, 0 problems`, `state-remaining: 9000 checked, 0 problems`, and `state-extended: 7200 checked, 0 problems` with `R7_CHECK_INHERITED=1`. These results are limited to their assertions and generated inputs. `state-remaining` retains two disabled assertions. `state-extended` still has an obsolete fallback in its own expected-result calculation, so its green result does not prove fallback removal. The new `round9-scope-matrix.mjs` directly proves 29 combinations of line order, environment, answer timing, decision kind, and unavailable bases. No-base, unreported-base, self-base, foreign-base and agent-only-base cases all remain blocked.
 
 ## Status of round 8
 

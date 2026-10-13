@@ -42,7 +42,7 @@ export function start(
 	options: { firstProject?: string; readers?: number } = {},
 ): Instance {
 	const count = readerCount({
-		CASEBOOK_READERS: options.readers === undefined ? process.env.CASEBOOK_READERS : String(options.readers),
+		MAINWORTHY_READERS: options.readers === undefined ? process.env.MAINWORTHY_READERS : String(options.readers),
 	});
 	const opened = open(config, options);
 	const { app, owner } = opened;
@@ -62,7 +62,7 @@ export function start(
 	}
 	// Through the gate, like every other writer, so it never lands inside another command's open transaction.
 	const timer = setInterval(() => {
-		app.gate.run(() => sweep(app, rule)).catch((error) => console.error("[casebook] sweep failed:", error));
+		app.gate.run(() => sweep(app, rule)).catch((error) => console.error("[mainworthy] sweep failed:", error));
 	}, 60_000);
 	const url = `http://${config.host === "0.0.0.0" || config.host === "::" ? "localhost" : config.host}:${server.port}`;
 	let stopping: Promise<void> | null = null;

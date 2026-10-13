@@ -15,8 +15,8 @@ export function draftOwner(): string {
 	try {
 		const navigation = performance.getEntriesByType("navigation")[0];
 		const reload = navigation instanceof PerformanceNavigationTiming && navigation.type === "reload";
-		windowOwner = (reload ? sessionStorage.getItem("casebook:draft-window") : null) ?? randomId();
-		sessionStorage.setItem("casebook:draft-window", windowOwner);
+		windowOwner = (reload ? sessionStorage.getItem("mainworthy:draft-window") : null) ?? randomId();
+		sessionStorage.setItem("mainworthy:draft-window", windowOwner);
 	} catch {
 		windowOwner = randomId();
 	}
@@ -34,7 +34,7 @@ export function draftOwnedElsewhere(draft: { owner: string }): boolean {
 export async function initializeDraftOwners(): Promise<void> {
 	if (typeof BroadcastChannel === "undefined") return;
 	const instance = randomId();
-	const channel = new BroadcastChannel("casebook:draft-windows");
+	const channel = new BroadcastChannel("mainworthy:draft-windows");
 	const send = (kind: z.infer<typeof WindowMessage>["kind"]) =>
 		channel.postMessage({ kind, id: draftOwner(), instance });
 	channel.onmessage = (event: MessageEvent<unknown>) => {
@@ -47,7 +47,7 @@ export async function initializeDraftOwners(): Promise<void> {
 		}
 		if (message.kind === "present" && message.id === draftOwner()) {
 			windowOwner = randomId();
-			sessionStorage.setItem("casebook:draft-window", windowOwner);
+			sessionStorage.setItem("mainworthy:draft-window", windowOwner);
 		}
 		liveOwners.add(message.id);
 		if (message.kind === "hello") send("present");

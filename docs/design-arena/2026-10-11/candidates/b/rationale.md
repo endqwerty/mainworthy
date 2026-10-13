@@ -27,7 +27,7 @@ The thesis is change-centric, but case authoring does not require a change. Name
 - We accept a narrower first product and earlier CI work in exchange for testing the integrated product idea before building a broad case editor.
 - We accept manual quarantine exit and limited flaky signals in the first slice in exchange for explainable state and a smaller implementation.
 - We accept more precise coverage labels in exchange for separating declared automation intent from active bindings and real evidence.
-- We accept external requirement and defect links first in exchange for keeping Casebook out of the issue-tracker business.
+- We accept external requirement and defect links first in exchange for keeping Mainworthy out of the issue-tracker business.
 - We accept a bounded operation vocabulary and generated MCP groups in exchange for one policy implementation, subject to actual tool-definition token measurement.
 
 ## Alternatives considered
@@ -40,11 +40,11 @@ The thesis is change-centric, but case authoring does not require a change. Name
 - **Synchronous ingestion and gate computation in the upload request.** This hides fewer crash and lifecycle details but couples a 10k-result write to interactive latency and timeout limits. Durable acceptance, bounded chunks, and explicit pending state hide the actual recovery machinery without hiding completeness.
 - **Fully dynamic gates over all history.** This avoids projections but leaks performance costs into every CI read. Incremental clause state and indexed witnesses keep the public gate request small.
 - **Every transport implements its own workflows.** This looks convenient in one adapter and creates repeated policy knowledge. Generated adapters and one domain operation layer keep correctness local to the owning rule.
-- **A workflow engine or execution service.** This might coordinate outside tools but changes the product into infrastructure. Casebook coordinates proof and records evidence; existing CI, browsers, and agent tools do the execution.
+- **A workflow engine or execution service.** This might coordinate outside tools but changes the product into infrastructure. Mainworthy coordinates proof and records evidence; existing CI, browsers, and agent tools do the execution.
 
 ## Open questions and risks
 
-These are questions for Daniel during synthesis, not requests blocking this candidate.
+These are questions for the owner during synthesis, not requests blocking this candidate.
 
 - Will teams tolerate an explicit case-version annotation or start-time manifest for automation that must satisfy a gate? Should unproven-version evidence be allowed by a clearly weaker loose-profile policy, or remain context-only as proposed?
 - Does the proof-plan screen fit teams that spend most of their time maintaining cases rather than releasing changes? Do named sessions solve that without making every task a forced planning exercise?
@@ -53,7 +53,7 @@ These are questions for Daniel during synthesis, not requests blocking this cand
 - Should direct human edits and reviewed agent edits be the new-project defaults, or should the first project start entirely loose until the first review job?
 - Is migration from TestRail or Qase essential for launch? If so, the narrower slice must replace another item with a verified importer rather than add unbounded scope.
 - Which build systems supply trusted deployment identity and case-version manifests first? What does a manual tester use when a staging environment cannot identify its artifact?
-- Must a release gate enforce only Casebook's recorded facts, or does a deployment system need a signed generation-bound decision token? The design offers the latter without claiming control of deployment.
+- Must a release gate enforce only Mainworthy's recorded facts, or does a deployment system need a signed generation-bound decision token? The design offers the latter without claiming control of deployment.
 - Are identity-and-time sign-off and immutable seals enough for the first strict-profile workflow? Qualified signatures and retention certification remain outside the slice.
 - Can embedded and server storage candidates meet atomic invalidation, reverse-link queries, and generation publication without divergent semantics? Benchmark this before choosing a stack.
 - Can the seven MCP tool groups stay legible and cheaper than exposing narrow operations? The fixed reference-agent measurements must decide, rather than tool-name count.

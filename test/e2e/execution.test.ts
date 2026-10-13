@@ -13,7 +13,7 @@ async function fixture({
 	preset?: string;
 	mode?: "local" | "server";
 } = {}): Promise<Server> {
-	const directory = await mkdtemp(join(tmpdir(), "casebook-builder2-"));
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-builder2-"));
 	let port = 7461;
 	for (; port <= 7499; port++) {
 		try {
@@ -33,10 +33,10 @@ async function fixture({
 		env: {
 			...process.env,
 			NODE_ENV: "production",
-			CASEBOOK_PORT: String(port),
-			CASEBOOK_DATA: directory,
-			CASEBOOK_MODE: mode,
-			CASEBOOK_OWNER_TOKEN: token,
+			MAINWORTHY_PORT: String(port),
+			MAINWORTHY_DATA: directory,
+			MAINWORTHY_MODE: mode,
+			MAINWORTHY_OWNER_TOKEN: token,
 		},
 		stdout: "ignore",
 		stderr: "pipe",
@@ -176,7 +176,7 @@ async function cases(server: Server, count: number) {
 				true,
 			);
 			expect(slots[8]?.fills[0]).toMatchObject({
-				by: "daniel",
+				by: "robin",
 				outcome: "fail",
 				note: "Total is 100",
 				admitted: "exact",
@@ -434,7 +434,7 @@ async function cases(server: Server, count: number) {
 			const first = unrecorded.find((slot) => slot.case === "C-1");
 			if (!first) throw new Error("First pinned slot missing");
 			// Kept on the device under the person's name and the slot, until the server has it.
-			const key = `casebook:executor:run-note:scratch:${planned.run}:${first.id}`;
+			const key = `mainworthy:executor:run-note:scratch:${planned.run}:${first.id}`;
 			expect(await view.page.evaluate((key) => localStorage.getItem(key), key)).toBe("Keep this failure note");
 			// The same person signs in again, with a new token.
 			const renewed = z.object({ token: z.string() }).parse(

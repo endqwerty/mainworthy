@@ -22,7 +22,7 @@ There are two callers. The successful `resolveConflict` path passes the merged b
 
 ## Existing tests and static checks
 
-PASS. Each browser file ran in its own process, one at a time, using `TMPDIR=/home/endqwerty/.cache/casebook-arena/verify/ui-r9-fix/tmp bun test test/e2e/<file>.test.ts`.
+PASS. Each browser file ran in its own process, one at a time, using `TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/ui-r9-fix/tmp bun test test/e2e/<file>.test.ts`.
 
 | File | Deciding lines |
 | --- | --- |
@@ -67,7 +67,7 @@ Probe `lost-reload`: ISSUE: Colleague step silently overwritten. Evidence: `logs
 
 ## Real-page checks adjacent to the change
 
-Command: `TMPDIR=/home/endqwerty/.cache/casebook-arena/verify/ui-r9-fix/tmp bun ../probe.ts delay delay-plain reject lost-retry lost-reload choice same-field later-editor`. The script and all output are retained under this review directory. Each scenario starts an isolated real server and Chromium context, then closes both. Logs: `logs/probe-run.log`, `logs/probes.jsonl`.
+Command: `TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/ui-r9-fix/tmp bun ../probe.ts delay delay-plain reject lost-retry lost-reload choice same-field later-editor`. The script and all output are retained under this review directory. Each scenario starts an isolated real server and Chromium context, then closes both. Logs: `logs/probe-run.log`, `logs/probes.jsonl`.
 
 | Requested check | Verdict and deciding observations |
 | --- | --- |

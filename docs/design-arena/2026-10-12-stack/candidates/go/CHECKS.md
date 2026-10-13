@@ -1,6 +1,6 @@
 # Checks defined before implementation
 
-The claim to test is that one Go operation path meets Casebook's read, save,
+The claim to test is that one Go operation path meets Mainworthy's read, save,
 ingest and mixed-load budgets using durable SQLite and PostgreSQL stores.
 Timings during the arena are provisional because other candidates share the host.
 
@@ -35,7 +35,7 @@ Timings during the arena are provisional because other candidates share the host
   ten minutes. Independent verification must be read-only and from another
   provider. Its absence is reported as unverified.
 
-All source and evidence stay in this directory. The Casebook repository is read-only.
+All source and evidence stay in this directory. The Mainworthy repository is read-only.
 
 Independent review regression checks, defined before the follow-up edits:
 

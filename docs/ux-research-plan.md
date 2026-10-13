@@ -1,17 +1,17 @@
 # UX research and review plan
 
-Casebook's third priority, UI and UX that get out of the way, is the one
+Mainworthy's third priority, UI and UX that get out of the way, is the one
 that most needs evidence before code. Competing tools are the baseline of
 friction; this plan finds where that friction is, what users intend when they
 hit it, and which interactions remove it. It runs before implementation
 (roadmap phase 0) and keeps running alongside it.
 
 **Audience (decision 0005):** software QA teams in general, not any one
-team. Daniel's experience across enterprise, large, small and startup teams
+team. The owner's experience across enterprise, large, small and startup teams
 is the main first-hand evidence, used as practitioner judgment and checked
 against public evidence.
 
-**Method constraint (Daniel, 2026-10-10):** no user interviews or recruited
+**Method constraint (the owner, 2026-10-10):** no user interviews or recruited
 usability sessions. The research is desk research, hands-on use of the
 incumbents, careful written reasoning, and mock-ups that test both the
 interaction and the architecture's feasibility. Where a claim would need
@@ -116,14 +116,14 @@ a scripted reference agent with a fixed model and tokenizer runs the job, and
 we count the tokens of tool definitions, requests and responses, and the
 number of calls. Budgets come from a baseline: the same job through each
 incumbent's MCP server (audit) and through a naive list-and-get-everything
-use of Casebook's own API.
+use of Mainworthy's own API.
 
 ### 3b. Flows
 
 The jobs are single tasks; flows are what people and agents do end to end
 across a day and a release, with triggers, handoffs and rough frequency.
 First draft: [ux/flows.md](ux/flows.md), all hypotheses. They are corrected
-by Daniel's comparison of the kinds of team he has worked in (open question 18), the
+by the owner's comparison of the kinds of team they have worked in (open question 18), the
 friction audit and the mocks, and they set the workload mix for the
 benchmark and the first operations of the MCP surface. Jobs are added or
 changed where flows expose a gap.
@@ -169,7 +169,7 @@ component inventory for the first usable version.
 
 ### 7. Mocks: interaction and architecture feasibility
 
-Two rounds, both reviewed by Daniel and by an independent model, not by
+Two rounds, both reviewed by the owner and by an independent model, not by
 recruited users:
 
 - **Round 1, static mocks.** Core screens for the jobs above and the three
@@ -202,7 +202,7 @@ recruited users:
 - At least two incumbents audited on every job, each job marked done or
   unsupported, with measured waits.
 - Profiles, intent model and interaction hypotheses written, reviewed by an
-  independent model and by Daniel, with review notes recorded.
+  independent model and by the owner, with review notes recorded.
 - Round 2 mock meets the input-to-paint budget in the product vision on 10k
   cases and completes J1 to J4 and J8 without lost input; the architectural
   requirements it surfaced are written into the stack criteria.

@@ -67,8 +67,14 @@ export type App = {
 	close: () => void;
 };
 
+/** The one database file of an instance. */
+export const databasePath = (dataDir: string): string => join(dataDir, "mainworthy.db");
+
+/** The data directory of an instance that names none. */
+export const defaultDataDir = (env: Record<string, string | undefined>): string => join(env.HOME ?? ".", ".mainworthy");
+
 export function openApp(config: Config, options: { memory?: boolean; now?: () => number; reader?: boolean } = {}): App {
-	const path = options.memory ? ":memory:" : join(config.dataDir, "casebook.db");
+	const path = options.memory ? ":memory:" : databasePath(config.dataDir);
 	if (options.reader && !existsSync(path)) throw new Error("a reader needs an existing database");
 	const db = new Db(path, options.reader ? { reader: true } : {});
 	if (!options.reader) migrate(db, path);
@@ -97,15 +103,14 @@ export function openApp(config: Config, options: { memory?: boolean; now?: () =>
 }
 
 export function defaultConfig(env: Record<string, string | undefined>): Config {
-	const host = env.CASEBOOK_HOST ?? "127.0.0.1";
+	const host = env.MAINWORTHY_HOST ?? "127.0.0.1";
 	const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
-	const home = env.HOME ?? ".";
 	return {
-		dataDir: env.CASEBOOK_DATA ?? join(home, ".casebook"),
+		dataDir: env.MAINWORTHY_DATA ?? defaultDataDir(env),
 		host,
-		port: Number(env.CASEBOOK_PORT ?? env.PORT ?? 7357),
-		mode: env.CASEBOOK_MODE === "server" || !loopback ? "server" : "local",
-		owner: env.CASEBOOK_OWNER ?? env.USER ?? "owner",
-		ownerToken: env.CASEBOOK_OWNER_TOKEN ?? null,
+		port: Number(env.MAINWORTHY_PORT ?? env.PORT ?? 7357),
+		mode: env.MAINWORTHY_MODE === "server" || !loopback ? "server" : "local",
+		owner: env.MAINWORTHY_OWNER ?? env.USER ?? "owner",
+		ownerToken: env.MAINWORTHY_OWNER_TOKEN ?? null,
 	};
 }

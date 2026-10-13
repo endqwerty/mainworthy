@@ -1,11 +1,13 @@
-# Casebook
+# <img src="src/web/icon.svg" alt="" width="32" height="32" align="top"> Mainworthy
 
 One place where manual, automated and agent testing land, and one queue of the decisions they leave for you.
+Then one answer for a change: is it worthy of `main`?
 
 A test case management system for software QA, built to fix what is annoying about TestRail, Qase, Jira
 (Xray, Zephyr) and Azure DevOps Test Plans. **Status: MVP (2026-10-12).** It runs, it is tested, and it is a
 preview: what is missing is listed in [decision 0012](docs/decisions/0012-mvp-scope-and-departures.md) and
 tracked in the GitHub milestone *Backlog to 1.0* (one page of it: issue #64).
+It was called Casebook until 2026-10-13 ([decision 0015](docs/decisions/0015-the-project-is-called-mainworthy.md)).
 
 ![The suite: cases on the left with their proof by person, pipeline and agent; the case as a document on the right](docs/ui/screenshots/suite-light.png)
 
@@ -19,8 +21,8 @@ The other screens, in both themes, are in [docs/ui/screenshots](docs/ui/screensh
 ```
 $ bun install
 $ bun run start
-Casebook 0.1.0 · local · data in ~/.casebook · http://127.0.0.1:7357
-project "scratch" · you are daniel@this-machine · policy: loose
+Mainworthy 0.1.0 · local · data in ~/.mainworthy · http://127.0.0.1:7357
+project "scratch" · you are robin@this-machine · policy: loose
 ```
 
 Open the URL. On your own machine you are signed in as the owner with no step.
@@ -40,15 +42,15 @@ Checkout applies a percentage coupon #checkout
 ## Send test results (any runner that writes JUnit XML)
 
 ```
-$ casebook report results/*.xml
-$ casebook gate            # exit 0 passed · 1 failed · 2 blocked · 3 pending
+$ mainworthy report results/*.xml
+$ mainworthy gate            # exit 0 passed · 1 failed · 2 blocked · 3 pending
 ```
 
 In CI it is the same two lines; the commit, branch, pull request and attempt come from the environment. This
 repository does it to itself in [.github/workflows/check.yml](.github/workflows/check.yml). Outside CI the commit
 comes from the Git checkout; with neither, pass `--commit`. An error exits 4.
 
-`casebook` here is `bun src/cli/main.ts`, or the single executable from `bun run build`.
+`mainworthy` here is `bun src/cli/main.ts`, or the single executable from `bun run build`.
 
 ## Decide
 
@@ -65,20 +67,20 @@ on the same commit fill the same run where the run allows it, so you only run wh
 ## Let an agent in
 
 ```
-$ casebook token new --agent reviewer --can read,produce
-$ casebook mcp                   # stdio; or point the client at http://127.0.0.1:7357/mcp
+$ mainworthy token new --agent reviewer --can read,produce
+$ mainworthy mcp                   # stdio; or point the client at http://127.0.0.1:7357/mcp
 ```
 
 Ten tools; start with `impact`. The skill that teaches an agent the case model is in
-[skill/casebook](skill/casebook/SKILL.md). An agent's answers are advice unless the policy says otherwise, and
+[skill/mainworthy](skill/mainworthy/SKILL.md). An agent's answers are advice unless the policy says otherwise, and
 what an agent reports is shown and asked about but never moves a commit's gate: it counts only in a run that
 asked for agents.
 
 ## Get stricter when you need to
 
 ```
-$ casebook policy use standard   # agent edits need a person; unlinked tests are a question
-$ casebook policy show           # the whole policy is one table
+$ mainworthy policy use standard   # agent edits need a person; unlinked tests are a question
+$ mainworthy policy show           # the whole policy is one table
 ```
 
 A policy says who answers each kind of question. Under `loose`, the default, edits to cases take effect at once,
@@ -98,7 +100,7 @@ Coolify on a home server: [docs/deploy.md](docs/deploy.md).
 ## Leave whenever you like
 
 ```
-$ casebook export --out casebook.ndjson.gz     # every fact, decision and document, as text
+$ mainworthy export --out mainworthy.ndjson.gz     # every fact, decision and document, as text
 ```
 
 ## Develop
@@ -119,7 +121,7 @@ Rules for contributors, people and agents: [AGENTS.md](AGENTS.md).
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | how it fits together, with diagrams |
 | [docs/product-design.md](docs/product-design.md) | the product design: thesis, domain model, operation layer, product surface |
-| [docs/decisions/](docs/decisions/) | decision records: 0009 the owner's answers, 0010 the stack, 0011 the UI, 0012 what the MVP builds and where it departs, 0013 asking what became of a command, 0014 a pipeline's token and which Casebook CI reports to |
+| [docs/decisions/](docs/decisions/) | decision records: 0009 the owner's answers, 0010 the stack, 0011 the UI, 0012 what the MVP builds and where it departs, 0013 asking what became of a command, 0014 a pipeline's token and which Mainworthy CI reports to |
 | [docs/compliance.md](docs/compliance.md) | what each legal regime needs, what is met, what is not |
 | [docs/deploy.md](docs/deploy.md) | running it on a server |
 | [docs/product-vision.md](docs/product-vision.md) | the problem and the priorities |

@@ -13,7 +13,7 @@ async function fixture({
 	preset?: string;
 	mode?: "local" | "server";
 } = {}): Promise<Server> {
-	const directory = await mkdtemp(join(tmpdir(), "casebook-builder2-"));
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-builder2-"));
 	let port = 7451;
 	for (; port <= 7499; port++) {
 		try {
@@ -33,10 +33,10 @@ async function fixture({
 		env: {
 			...process.env,
 			NODE_ENV: "production",
-			CASEBOOK_PORT: String(port),
-			CASEBOOK_DATA: directory,
-			CASEBOOK_MODE: mode,
-			CASEBOOK_OWNER_TOKEN: token,
+			MAINWORTHY_PORT: String(port),
+			MAINWORTHY_DATA: directory,
+			MAINWORTHY_MODE: mode,
+			MAINWORTHY_OWNER_TOKEN: token,
 		},
 		stdout: "ignore",
 		stderr: "pipe",
@@ -252,7 +252,7 @@ async function recordedDecisions(server: Server, ref: string) {
 			);
 			for (const question of inbox.items) {
 				const decision = settled.items.find((q) => q.q === question.q)?.decision;
-				expect(decision?.by).toEqual(["daniel"]);
+				expect(decision?.by).toEqual(["robin"]);
 				expect(decision?.answer.is).toBe(
 					question.kind === "failure"
 						? "infra"
@@ -596,7 +596,7 @@ async function recordedDecisions(server: Server, ref: string) {
 					document.querySelector("[data-current-question]")?.getAttribute("data-current-question") !== null &&
 					document.querySelector('.queue-state button[aria-pressed="true"]')?.textContent === "Settled",
 			);
-			expect(await view.page.locator(".queue-evidence").innerText()).toContain("Decided by daniel");
+			expect(await view.page.locator(".queue-evidence").innerText()).toContain("Decided by robin");
 			expect(view.errors).toEqual([]);
 		} finally {
 			await view?.close();

@@ -282,14 +282,14 @@ function override(env: Environment, name: string, fallback: string | undefined):
 }
 
 /**
- * Detects a commit target and report metadata from supplied CI variables, with CASEBOOK_* overrides first.
+ * Detects a commit target and report metadata from supplied CI variables, with MAINWORTHY_* overrides first.
  * Reads GitHub event JSON and local git only through supplied callbacks; never accesses process state or I/O.
  * Empty overrides count as unset; invalid non-empty overrides never fall back. PR/repo overrides that change
  * identity discard stale PR title/URL. Missing/invalid commits return null and ["commit"]. Unavailable counters
  * and job names return null.
  * PR event payloads identify the change by its head SHA, including pull_request_target. A caller testing the base
- * checkout must supply CASEBOOK_COMMIT for that checkout. Over-long base identifiers are omitted, never shortened.
- * A pull_request_target event without a readable head SHA needs CASEBOOK_COMMIT rather than using its base SHA.
+ * checkout must supply MAINWORTHY_COMMIT for that checkout. Over-long base identifiers are omitted, never shortened.
+ * A pull_request_target event without a readable head SHA needs MAINWORTHY_COMMIT rather than using its base SHA.
  */
 export function detectTarget(
 	env: Environment,
@@ -304,17 +304,17 @@ export function detectTarget(
 } {
 	const detected = source(env, options);
 	const fields = detected.fields;
-	const prOverride = text(env.CASEBOOK_PR);
+	const prOverride = text(env.MAINWORTHY_PR);
 	const pr = prOverride === undefined ? fields.pr : integer(prOverride);
-	const repo = text(override(env, "CASEBOOK_REPO", fields.repo), 200);
+	const repo = text(override(env, "MAINWORTHY_REPO", fields.repo), 200);
 	const changedPrIdentity = pr !== fields.pr || repo !== text(fields.repo, 200);
 	const values = {
-		commit: text(override(env, "CASEBOOK_COMMIT", fields.commit)),
-		branch: text(override(env, "CASEBOOK_BRANCH", fields.branch), 200),
+		commit: text(override(env, "MAINWORTHY_COMMIT", fields.commit)),
+		branch: text(override(env, "MAINWORTHY_BRANCH", fields.branch), 200),
 		repo,
 		pr,
-		base: baseCommit(override(env, "CASEBOOK_BASE", fields.base)),
-		env: text(override(env, "CASEBOOK_ENV", fields.env), 60),
+		base: baseCommit(override(env, "MAINWORTHY_BASE", fields.base)),
+		env: text(override(env, "MAINWORTHY_ENV", fields.env), 60),
 		title: changedPrIdentity ? undefined : text(fields.title, 300),
 		url: changedPrIdentity ? undefined : text(fields.url, 500),
 	};
@@ -323,9 +323,9 @@ export function detectTarget(
 	);
 	return {
 		target: target.success ? target.data : null,
-		job: text(override(env, "CASEBOOK_JOB", detected.job), 120) ?? null,
-		attempt: (text(env.CASEBOOK_ATTEMPT) === undefined ? detected.attempt : integer(env.CASEBOOK_ATTEMPT)) ?? null,
-		buildUrl: text(override(env, "CASEBOOK_BUILD_URL", detected.buildUrl), 500) ?? null,
+		job: text(override(env, "MAINWORTHY_JOB", detected.job), 120) ?? null,
+		attempt: (text(env.MAINWORTHY_ATTEMPT) === undefined ? detected.attempt : integer(env.MAINWORTHY_ATTEMPT)) ?? null,
+		buildUrl: text(override(env, "MAINWORTHY_BUILD_URL", detected.buildUrl), 500) ?? null,
 		provider: detected.provider,
 		missing: target.success ? [] : ["commit"],
 	};

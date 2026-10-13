@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 export type Screen = "suite" | "case" | "queue" | "runs" | "changes" | "settings";
 export type Route = { project: string; screen: Screen; ref: string | null; folder: string | null };
-const changed = "casebook:route";
+const changed = "mainworthy:route";
 let entry: "initial" | "navigation" | "history" = "initial";
 export const routeEntry = (): typeof entry => entry;
 function subscribe(listener: () => void): () => void {
@@ -74,7 +74,7 @@ export function refUrl({ project, ref }: { project: string; ref: string }): stri
 /** Changes selection without a document load. Editors receive a leave event before the URL changes. */
 export function navigate(path: string, options: { replace?: boolean; seal?: boolean } = {}): void {
 	if (path === location.pathname + location.search) return;
-	if (options.seal !== false) window.dispatchEvent(new Event("casebook:leave"));
+	if (options.seal !== false) window.dispatchEvent(new Event("mainworthy:leave"));
 	entry = "navigation";
 	if (options.replace) history.replaceState(null, "", path);
 	else history.pushState(null, "", path);

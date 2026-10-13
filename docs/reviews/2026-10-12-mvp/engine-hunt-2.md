@@ -1,4 +1,4 @@
-# Casebook engine hunt, round 2
+# Mainworthy engine hunt, round 2
 
 Revision `ee6401df39d2f6e08176ead93b4fa1e92bcd751a` (branch `t3/mvp-product-delivery`), exported with `git archive`
 into `hunt-r2/tree` and installed with `bun install --frozen-lockfile`. Nothing in the repository was touched.
@@ -124,7 +124,7 @@ withAgent=true  {"target":{"line":"change","change":1,"branch":"feature"},"quest
 ```
 
 The hunt's extended sequence test finds this class by itself (audit 16, below): with the audit armed
-(`CASEBOOK_SEQUENCE_PLACEMENT=audit`) it stops at seeds 3, 7, 8 and 10 of the first ten under every preset.
+(`MAINWORTHY_SEQUENCE_PLACEMENT=audit`) it stops at seeds 3, 7, 8 and 10 of the first ten under every preset.
 
 ## Observations, not counted as defects
 
@@ -154,13 +154,13 @@ The hunt's extended sequence test finds this class by itself (audit 16, below): 
 ready to copy into `test/` (type-checks with `bunx tsc --noEmit` in the export). New, written against the rows:
 
 - **Audit 13'**: a required job is met only by a batch holding a decisive result whose own `method` is `auto`
-  (not the batch's shown method). Catches H2-03. Armed with `CASEBOOK_SEQUENCE_JOBS=audit`; without it the audit
+  (not the batch's shown method). Catches H2-03. Armed with `MAINWORTHY_SEQUENCE_JOBS=audit`; without it the audit
   restates the engine's current rule, so the test passes on this revision.
 - **Audit 16**: a commit's `line`, `branch` and `change` are those of the first report a gate counts, compared with
   what the generator sent (recorded per repository and commit, including reports sent through `acceptReport` and
   recovery; a commit first met by a result typed into a run is skipped, as it says nothing about where the commit
   is). Catches H2-02. Commits an agent reported before anyone else are skipped unless
-  `CASEBOOK_SEQUENCE_PLACEMENT=audit`.
+  `MAINWORTHY_SEQUENCE_PLACEMENT=audit`.
 - **Actions**: an agent sometimes names a trunk commit as the change or a change commit as trunk, before or after
   the pipeline; a person's result typed into a run sometimes carries a job name and a skipped automated key.
 

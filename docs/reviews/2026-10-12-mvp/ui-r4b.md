@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 4, part B (the queue, running a suite, errors)
+# Mainworthy web UI: independent verification, round 4, part B (the queue, running a suite, errors)
 
 Revision judged: `ec98ba41d759e037b2ff7b4b6138f587ee2f15ca`, branch `t3/mvp-product-delivery`.
 
@@ -29,10 +29,10 @@ the one they left (R4B-4).
 
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, `/usr/bin/chromium` with
   `--headless=new --ozone-platform=headless`, real server processes on 127.0.0.1, ports 8550 to 8599, data under
-  `/tmp/casebook-ui-r4b`.
+  `/tmp/mainworthy-ui-r4b`.
 - The only files changed in the export are five test helpers (ports moved into 8550..8599, the Chromium flags):
   `test-environment.patch`. No application source and no assertion is changed.
-- Probes in `probes/`, run from `tree/` as `TMPDIR=/tmp/casebook-ui-r4b bun ../probes/<name>.ts [scenario]`;
+- Probes in `probes/`, run from `tree/` as `TMPDIR=/tmp/mainworthy-ui-r4b bun ../probes/<name>.ts [scenario]`;
   output in `logs/`, screenshots in `shots/`. Round 3's, reused unchanged but for the screenshot path:
   `races.ts`, `blind.ts`, `queue-tabs.ts`, `queue-b.ts`, `run-a.ts`, `run-b.ts`, `run-c.ts`, `misc.ts`,
   `extra.ts`. New: `new-queue.ts`, `new-run.ts`, `queue-d2.ts`, `dispute-blind.ts`, `dispute-hint.ts`,
@@ -56,7 +56,7 @@ the one they left (R4B-4).
 
 | # | Check | Verdict | What ran and the deciding lines |
 | --- | --- | --- | --- |
-| 4 | The queue (D2) | **issues** | Round 3's probes on this revision, then new ones. Twenty answers on mixed questions under `standard` at 1280x800 with `decide` held 500 ms, waiting only for each proposal's diff (`probes/queue-d2.ts fast`, `logs/queue-d2-fast.log`): `decide requests: 20`, `wrong or missing decisions: []`, `server open: ["Q-8:map:counts"]`, `UI open rows: ["Q-8"]`, `1 need an answer`; the four diffs were on screen 7 to 29 ms after their question became current. (Round 3's own `fast` probe, which does not wait, now gets 12 of 20: its `a` and `r` on a proposal are refused with `Still reading the proposal`, which is R3C-1's fix working, `logs/queue-fast.log`.) One key with its consequence beside it, none clipped, and the keys enabled equal the server's list for all 21 seeded questions, with nothing sent for an unlisted key (`logs/queue-offered.log`: `problems: []`, `decide requests after pressing unlisted keys: []`). `u` withdraws and both decisions remain (`logs/queue-uu.log`: ledger rows 3 `{"is":"flaky"}` and 4 `{"is":"withdrawn"}`, `"supersedes":3`). Forbidden: `You cannot settle this. Needs one member who is not an agent.`, both buttons off, `"requestsSent":0`. Advice only: `Your answer is advice. Needs one member.`, `"server":"open","advice":1`, `Advice recorded.`, and the person's Enter then records `infra` by `daniel` (`logs/queue-roles.log`). Changed evidence on a stale screen: `The evidence changed. C-1 changed after this proposal was made; redo the proposal on version 2`, the question returns and reads `version 2 → proposed version 3` (`logs/misc-conflict.log`). Bulk: one request `["Q-6:infra","Q-5:infra","Q-4:infra"]`, `u` reopens all three, another kind cannot join (`logs/queue-bulk.log`). Proposal: diff on screen before the key, adopted as `"version":2,"by":"reviewer","kind":"agent"` (`logs/queue-proposal.log`). (a) put back by a failed request, by undo and by a conflict, then answered again: decided and not listed, also after leaving and returning (`logs/queue-again.log`). (b) `f u u`: `"server":"open","rows":["Q-5","Q-4","Q-3"]`, one undo request, a third `u` sends nothing (`logs/queue-uu.log`). (c) see check 5. The Settled view: `u` then an answer at once, right at 0 and 400 ms (`logs/new-queue-settled-u.log`). A reference being typed when the question is settled elsewhere: refused, text kept (`logs/new-queue-inline.log`). **A failure question on a slot disputed now:** `m` is offered as soon as the server lists it, but the evidence and the dispute hint are not shown and who may answer is wrong: **R4B-1**. **Also fails:** R4B-3, R4B-4; R4B-5 and R4B-6 (not blocking). |
+| 4 | The queue (D2) | **issues** | Round 3's probes on this revision, then new ones. Twenty answers on mixed questions under `standard` at 1280x800 with `decide` held 500 ms, waiting only for each proposal's diff (`probes/queue-d2.ts fast`, `logs/queue-d2-fast.log`): `decide requests: 20`, `wrong or missing decisions: []`, `server open: ["Q-8:map:counts"]`, `UI open rows: ["Q-8"]`, `1 need an answer`; the four diffs were on screen 7 to 29 ms after their question became current. (Round 3's own `fast` probe, which does not wait, now gets 12 of 20: its `a` and `r` on a proposal are refused with `Still reading the proposal`, which is R3C-1's fix working, `logs/queue-fast.log`.) One key with its consequence beside it, none clipped, and the keys enabled equal the server's list for all 21 seeded questions, with nothing sent for an unlisted key (`logs/queue-offered.log`: `problems: []`, `decide requests after pressing unlisted keys: []`). `u` withdraws and both decisions remain (`logs/queue-uu.log`: ledger rows 3 `{"is":"flaky"}` and 4 `{"is":"withdrawn"}`, `"supersedes":3`). Forbidden: `You cannot settle this. Needs one member who is not an agent.`, both buttons off, `"requestsSent":0`. Advice only: `Your answer is advice. Needs one member.`, `"server":"open","advice":1`, `Advice recorded.`, and the person's Enter then records `infra` by `robin` (`logs/queue-roles.log`). Changed evidence on a stale screen: `The evidence changed. C-1 changed after this proposal was made; redo the proposal on version 2`, the question returns and reads `version 2 → proposed version 3` (`logs/misc-conflict.log`). Bulk: one request `["Q-6:infra","Q-5:infra","Q-4:infra"]`, `u` reopens all three, another kind cannot join (`logs/queue-bulk.log`). Proposal: diff on screen before the key, adopted as `"version":2,"by":"reviewer","kind":"agent"` (`logs/queue-proposal.log`). (a) put back by a failed request, by undo and by a conflict, then answered again: decided and not listed, also after leaving and returning (`logs/queue-again.log`). (b) `f u u`: `"server":"open","rows":["Q-5","Q-4","Q-3"]`, one undo request, a third `u` sends nothing (`logs/queue-uu.log`). (c) see check 5. The Settled view: `u` then an answer at once, right at 0 and 400 ms (`logs/new-queue-settled-u.log`). A reference being typed when the question is settled elsewhere: refused, text kept (`logs/new-queue-inline.log`). **A failure question on a slot disputed now:** `m` is offered as soon as the server lists it, but the evidence and the dispute hint are not shown and who may answer is wrong: **R4B-1**. **Also fails:** R4B-3, R4B-4; R4B-5 and R4B-6 (not blocking). |
 | 5 | Running a suite (J5) | **issues** | `logs/run-b-plan.log`: planned through `n` by folder (`C-1,C-2,C-3`), tag (`C-4,C-5`), text (`C-4,C-5`) and commit (`"accepts":{"commit":"abcdef1234567"}`), the count shown matching each. `logs/run-b-j5.log`: ten results in 26 keys with `report` held 500 ms: `report requests: 10`, all on the server, `C-3:failing:fail(total is wrong)` with `"atStep":"b2"`, `C-4:skipped:blocked`, `C-10:skipped:skip`; the node that was next became current (`{"ref":"C-2","probe":"was-next","ready":"true"}`), and with the case reads held 1200 ms and a key every 250 ms all nine cases were on screen when their key was pressed (`logs/new-run-slow-next.log`). At 1280x800: controls 609..772, note 666..701, buttons end at 656, viewport 800. UI verdict and tally equal the server's (`blocked: 1 failure unexplained, 1 question open`, `7 pass · 1 unexplained failures · 4 missing · 2 skipped`), again after `p p b u u s p` (`logs/run-fast-undo.log`) and after five other orders of results and `u` at 0 and 500 ms (`logs/new-run-orders.log`: all `"verdict":"ok"`, `uiReason` equal to `serverReason`). `u` appends a correction (`corrects 1`, the earlier result kept). Slots filled by a pipeline or an agent are shown, skipped and unchanged after every outcome key (`logs/run-b-external.log`, `logs/extra-agent-slot.log`). Two tabs and the acknowledgement rule still hold (`logs/run-two-tabs.log`, `logs/run-ack.log`). 4(c), writes and reads failing: `C-1 was not recorded: Failed to fetch. Its note is kept. Return to the slot to retry.`, dots all `missing`, the note on the slot and the device, the retry records it (`logs/run-reads-fail.log`). **Fails:** `2 f` has no way back from a wrong digit: **R4B-2**; R4B-7 and R4B-8 (not blocking). |
 | 10 | Errors | pass | No uncaught error and no console error in any journey above: every probe log that collects them ends `errors: []` (requests the probes themselves abort or refuse are excluded). Server process stopped while typing a case: the text is in the editor, the row says `draft`, the device holds title and step, status `Failed to fetch. Your draft is kept on this device.`, chip `Draft, saved on this device · Private, no version yet`. Stopped while recording a result: `C-1 was not recorded: Failed to fetch. Its note is kept. Return to the slot to retry.`, slot `missing`, `Seen before the server stopped` in the field and on the device (`logs/run-outage.log`, `shots/outage-case.png`, `shots/outage-result.png`). Only the network console errors the stop itself causes (`ERR_CONNECTION_REFUSED`, `ERR_INCOMPLETE_CHUNKED_ENCODING`). |
 
@@ -83,8 +83,8 @@ twice each):
 - The dispute hint (`A counted pass and fail disagree. A decision must settle the dispute.`) is not shown, because
   it is drawn inside the evidence that could not be read.
 - All seven answers stay enabled, `"keys":"dtefinm"`, under `Needs one member.` One key records:
-  `dispute-blind(m)`: `"requests":1,"server":"decided:mistaken by daniel","slot":["C-1:satisfied",…]`, last line
-  `Q-3 · The failure was a mistake · recorded`; `dispute-blind(f)`: `"server":"decided:flaky by daniel"`.
+  `dispute-blind(m)`: `"requests":1,"server":"decided:mistaken by robin","slot":["C-1:satisfied",…]`, last line
+  `Q-3 · The failure was a mistake · recorded`; `dispute-blind(f)`: `"server":"decided:flaky by robin"`.
   `m` throws out a person's failing result and the slot becomes `satisfied`, decided with nothing on screen but the
   question's title.
 
@@ -132,7 +132,7 @@ steps press `2`, then `3` (meaning step 3, not 2):
   message asks for fails the same way every time. There is no key, button or click that clears the mark, so a
   failure, with or without a step, cannot be recorded for that case by this person on this browser
   (`step-dead`, `logs/new-run-step-dead.log`: three tries, one after pressing `3` again, which gives `no step
-  233`, and one after a reload, all `C-1:missing`). `b` still records (`C-1:skipped:daniel/blocked(fails at step
+  233`, and one after a reload, all `C-1:missing`). `b` still records (`C-1:skipped:robin/blocked(fails at step
   three)`), and leaves the mark `233` on the device.
 - The same with one slip: `2` pressed where `3` was meant can only become `23`.
 - A mark also outlives the result it was typed for (`step-pass`, `logs/new-run-step-pass.log`): `2 p` records the
@@ -148,7 +148,7 @@ recorded for the slot, and "no such step" clears it too. The authors' test for R
 ### R4B-3: Queue: a second `u` on one question is dropped while the first withdrawal is still on its way; the next answer key lands on the next question
 
 Blocks: **yes, by the standard round 3 used for R3B-1** (a reply slower than the person's next key); say no if
-Casebook is judged for loopback only: with no injected delay it holds from 40 ms between keys and fails only at
+Mainworthy is judged for loopback only: with no injected delay it holds from 40 ms between keys and fails only at
 machine speed.
 
 `undo` drops any question already in `undoing` (the guard for check 4b, "`u` twice"), and a question stays there
@@ -185,7 +185,7 @@ Blocks: **yes**. No delay and no other producer is needed; it needs one click wh
 nothing naming Q-5. Type `23`, Enter:
 
 `"shownWhenEnterWasPressed":{"current":"Q-4","title":"expected 2, got 0","fieldOpen":1,"field":"BUG-1",…}`,
-`"decides":["Q-5:defect"]`, `"server":{"Q-5":"decided:defect(BUG-123) by daniel","Q-4":"open"}`.
+`"decides":["Q-5:defect"]`, `"server":{"Q-5":"decided:defect(BUG-123) by robin","Q-4":"open"}`.
 
 Second run of the same probe: Q-5 is first answered elsewhere (`flaky`) while the field is open. On Q-5 the pane
 says `This question was settled elsewhere. Your note is kept.` and Enter is refused, as it should be. After a click
@@ -235,8 +235,8 @@ run then stays on the device for good.
 ### R4B-8: Run: a correction to pass can carry the note of the failure it replaces, depending on reply time
 
 `probes/new-run.ts orders`, `logs/new-run-orders.log`: `f`, `wrong total`, Enter, `u`, `u`, `p` on one slot. With
-no delay the server ends `C-1:satisfied:daniel/pass`; with `report` delayed 500 ms it ends
-`C-1:satisfied:daniel/pass(wrong total)`, because the note is still on the device until the first reply. Both
+no delay the server ends `C-1:satisfied:robin/pass`; with `report` delayed 500 ms it ends
+`C-1:satisfied:robin/pass(wrong total)`, because the note is still on the device until the first reply. Both
 screens match their server. Every other order tried ends the same at both speeds.
 
 ## The session check before a write (R3-1, R3-2), as it shows in this part
@@ -251,7 +251,7 @@ screens match their server. Every other order tried ends the same at both speeds
 - **It cannot stop a change between the check and the write.** The server binds a write to whatever cookie
   arrives with it. With the cookie replaced after the check was answered and before the write left the browser:
   queue `"server":"decided:flaky by mallory"`, run `C-1:failing:mallory/fail(Typed by the first person)`, while
-  the screen still shows `daniel` and says `recorded`. The window is as long as the check takes to come back (a
+  the screen still shows `robin` and says `recorded`. The window is as long as the check takes to come back (a
   millisecond on loopback, a round trip on a real link), and a second tab has to sign in as somebody else inside
   it, so I do not count it as a blocker. Closing it needs the server: the write names the person it is for and is
   refused when the session is somebody else's. My probe opens the window by pausing the write in the browser;

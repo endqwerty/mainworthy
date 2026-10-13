@@ -10,7 +10,7 @@ import { OP_LIST, OPS } from "../server/ops/index.ts";
 import { invokeAsync, type Reply } from "../server/ops/registry.ts";
 
 export const VERSION = "0.1.0";
-const COOKIE = "casebook_session";
+const COOKIE = "mainworthy_session";
 
 const jsonResponse = (body: unknown, status = 200, headers: Record<string, string> = {}): Response =>
 	new Response(JSON.stringify(body), {
@@ -83,13 +83,13 @@ const unauthenticated = (): Response =>
 	jsonResponse({ ok: false, error: { code: "unauthenticated", message: "a token is required" } }, 401);
 
 /**
- * A page may say who it believes it is signed in as (`X-Casebook-As`, the actor's name, percent-encoded). When
+ * A page may say who it believes it is signed in as (`X-Mainworthy-As`, the actor's name, percent-encoded). When
  * the session has become somebody else's since the page was loaded (another tab signed in), the request is
  * refused here, in the request that would have written: text one person typed is never recorded under another
  * person's name, and a page never shows one person's view as another's. A caller that sends no name (a script,
  * the CLI, an agent) is whoever its token says.
  */
-export const AS_HEADER = "x-casebook-as";
+export const AS_HEADER = "x-mainworthy-as";
 function sameCaller(req: Request, session: Session): boolean {
 	const named = req.headers.get(AS_HEADER);
 	if (named === null) return true;
@@ -298,8 +298,8 @@ export function openApi(): Record<string, unknown> {
 				operationId: op.name,
 				summary: op.summary,
 				tags: [op.effect],
-				"x-casebook-needs": op.needs,
-				"x-casebook-agent-tool": op.mcp !== null,
+				"x-mainworthy-needs": op.needs,
+				"x-mainworthy-agent-tool": op.mcp !== null,
 				...(op.scope === "project"
 					? { parameters: [{ name: "project", in: "path", required: true, schema: { type: "string" } }] }
 					: {}),
@@ -325,7 +325,7 @@ export function openApi(): Record<string, unknown> {
 	return {
 		openapi: "3.1.0",
 		info: {
-			title: "Casebook",
+			title: "Mainworthy",
 			version: VERSION,
 			description:
 				"Every operation is a POST with a JSON body. The same operations are the CLI commands and, where marked, the MCP tools.",
@@ -424,7 +424,7 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }) {
 		routes: routes as any,
 		fetch: () => jsonResponse({ ok: false, error: { code: "not_found", message: "no such route" } }, 404),
 		error(error) {
-			console.error("[casebook] request failed:", error);
+			console.error("[mainworthy] request failed:", error);
 			return jsonResponse({ ok: false, error: { code: "internal", message: "internal error" } }, 500);
 		},
 	});

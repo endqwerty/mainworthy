@@ -1,16 +1,16 @@
 # 0007: Guiding principles, their order, and when they may bend
 
 - Date: 2026-10-11
-- Status: accepted with one amendment (Daniel, 2026-10-11: "probably"; F3
+- Status: accepted with one amendment (the owner, 2026-10-11: "probably"; F3
   applies to 1.0, see decision 0009, answer 28)
 
-Casebook needs principles that decide architecture and product questions,
+Mainworthy needs principles that decide architecture and product questions,
 with tie-breaks, so that a contributor (person or agent) who sees one file
 makes the choice the whole product would make. They replace the draft
 principles 1 to 7 in `docs/product-vision.md`, which they absorb, and refine
 the vision's ranking (fast backend > agents > UX) as described at the end.
 
-Daniel's guidance on the day: "the record is true above speed" is right, but
+The owner's guidance on the day: "the record is true above speed" is right, but
 speed stays a must-have priority, measured where it matters: observable,
 practical speed, where the user's brain is never forced to wait for the app
 before continuing. A large part of QA is getting the contents of a tester's
@@ -140,7 +140,7 @@ Cost: three kinds of budget to maintain instead of one.
 
 ## Bending a principle for deliverability
 
-Daniel's rule: be willing to adjust the principles to ship, but never ship a
+The owner's rule: be willing to adjust the principles to ship, but never ship a
 bad product. So:
 
 1. **Cut before you corrode.** First ship less: fewer question kinds,
@@ -196,8 +196,8 @@ works, do not ship.
 
 - **Keep the vision's ranking as is.** "Fast backend first" permitted trading
   the record for milliseconds and did not say where speed matters.
-- **Put speed first, integrity second.** Daniel rejected it: the record is
-  true above speed. But he also rejected integrity-only: speed stays a
+- **Put speed first, integrity second.** The owner rejected it: the record is
+  true above speed. But they also rejected integrity-only: speed stays a
   must-have. The floor-plus-rank shape expresses both.
 - **No bend rule.** Principles without a release valve get broken silently;
   a rule with an expiry and a visible failing check keeps bends honest.

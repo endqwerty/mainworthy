@@ -1,5 +1,5 @@
 // The last job of the check workflow (`scripts/ci-gate.ts`), run as the workflow runs it against a real
-// Casebook: the result is Casebook's gate, and a report that is missing or says less than happened is not a pass.
+// Mainworthy: the result is Mainworthy's gate, and a report that is missing or says less than happened is not a pass.
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -71,7 +71,7 @@ async function gate(
 		async (running) => {
 			const { instance } = running;
 			const configured = (await options.configure?.(running)) ?? {};
-			const root = await mkdtemp(join(tmpdir(), "casebook-ci-gate-"));
+			const root = await mkdtemp(join(tmpdir(), "mainworthy-ci-gate-"));
 			try {
 				const sources = options.repository ?? shards.flatMap((shard) => Object.keys(shard.files));
 				for (const file of sources) {
@@ -97,15 +97,15 @@ async function gate(
 							HOME: root,
 							// What the job leaves in the temporary directory is this test's to count.
 							TMPDIR: join(root, "tmp"),
-							CASEBOOK_URL: instance.url,
-							CASEBOOK_TOKEN: "",
-							CASEBOOK_PROJECT: "",
+							MAINWORTHY_URL: instance.url,
+							MAINWORTHY_TOKEN: "",
+							MAINWORTHY_PROJECT: "",
 							GITHUB_ACTIONS: "true",
 							GITHUB_EVENT_NAME: "pull_request",
 							GITHUB_REF: "refs/pull/77/merge",
 							GITHUB_HEAD_REF: "dx/fast-check",
 							GITHUB_SHA: "c0ffee0123456789012345678901234567890123",
-							GITHUB_REPOSITORY: "endqwerty/casebook",
+							GITHUB_REPOSITORY: "endqwerty/mainworthy",
 							GITHUB_RUN_ID: "1",
 							GITHUB_RUN_ATTEMPT: "1",
 							GITHUB_JOB: "gate",
@@ -134,7 +134,7 @@ async function gate(
 					code,
 					output: stdout + stderr,
 					summary: await readFile(join(root, "summary.md"), "utf8").catch(() => ""),
-					/** What the job left behind: files in its temporary directory, and its own Casebook if that still runs. */
+					/** What the job left behind: files in its temporary directory, and its own Mainworthy if that still runs. */
 					left: [...(await readdir(join(root, "tmp"))), ...(await stillRunning(stdout))],
 					/** How many reports the instance of the test holds. */
 					batches: instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n,
@@ -155,12 +155,12 @@ const green: Shard[] = [
 const withFailure = (message: string): Shard[] =>
 	green.map((shard) => (shard.name === "tests-2" ? { ...shard, files: { "test/c.test.ts": message } } : shard));
 
-// Which Casebook the job reports to is `scripts/ci-instance.ts`. The first three tests are each on one of its
+// Which Mainworthy the job reports to is `scripts/ci-instance.ts`. The first three tests are each on one of its
 // three ways through; the others use the instance of the test with no token, as a job on one machine does.
 
-/** The Casebook the job said it started, if its process is still there a moment after the job ended. */
+/** The Mainworthy the job said it started, if its process is still there a moment after the job ended. */
 async function stillRunning(output: string): Promise<string[]> {
-	const pid = Number(/^Started a Casebook for this job: \S+ \(process (\d+)\)$/m.exec(output)?.[1]);
+	const pid = Number(/^Started a Mainworthy for this job: \S+ \(process (\d+)\)$/m.exec(output)?.[1]);
 	if (!pid) return [];
 	for (let waited = 0; waited < 2000; waited += 50) {
 		try {
@@ -194,37 +194,37 @@ test("every shard passed: each is reported under its own job to the deployed ins
 			const token = await pipelineToken(running);
 			await running.client.call("admin", { do: "project.create", key: "other" });
 			await running.client.call("admin", { do: "grant.set", actor: "github-actions", project: "other", can: ["read"] });
-			return { CASEBOOK_TOKEN: token };
+			return { MAINWORTHY_TOKEN: token };
 		},
 	});
 	expect(result.output).toMatch(
-		/^::notice::Reported to the deployed Casebook: http:\/\/127\.0\.0\.1:\d+, project scratch\.$/m,
+		/^::notice::Reported to the deployed Mainworthy: http:\/\/127\.0\.0\.1:\d+, project scratch\.$/m,
 	);
-	expect(result.summary).toBe(`${/Reported to the deployed Casebook: .*\./.exec(result.output)?.[0]}\n`);
-	expect(result.output).toContain("$ casebook report test-results/tests-1.xml --job tests-1");
+	expect(result.summary).toBe(`${/Reported to the deployed Mainworthy: .*\./.exec(result.output)?.[0]}\n`);
+	expect(result.output).toContain("$ mainworthy report test-results/tests-1.xml --job tests-1");
 	expect(result.output).toContain("job tests-2");
 	expect(result.output).toContain("job quiet");
-	expect(result.output).toMatch(/casebook gate\s+passed/);
+	expect(result.output).toMatch(/mainworthy gate\s+passed/);
 	expect(result.output).not.toContain("::error::");
 	expect([result.code, result.batches]).toEqual([0, 3]);
 }, 20_000);
 
-test("a failing test in one shard ends in a blocked gate, also in the Casebook the job starts itself", async () => {
+test("a failing test in one shard ends in a blocked gate, also in the Mainworthy the job starts itself", async () => {
 	// The instance named is another version: it does not describe `report` and `gate` as this checkout does. The
 	// job starts its own and says so. That one knows no earlier decision, so the failure blocks.
 	const result = await gate(withFailure("expected 1, got 2"), {
 		routes: { "/api/openapi.json": () => Response.json({ ...openApi(), paths: {} }) },
-		configure: async () => ({ CASEBOOK_TOKEN: "cb_secret-of-the-deployed-one", CASEBOOK_PROJECT: "casebook" }),
+		configure: async () => ({ MAINWORTHY_TOKEN: "cb_secret-of-the-deployed-one", MAINWORTHY_PROJECT: "mainworthy" }),
 	});
 	expect(result.output).toMatch(
-		/^::warning::Reported to a Casebook started for this job: \S+ describes report and gate differently from this checkout \(another version\); the decisions kept at \S+ do not count in this run\.$/m,
+		/^::warning::Reported to a Mainworthy started for this job: \S+ describes report and gate differently from this checkout \(another version\); the decisions kept at \S+ do not count in this run\.$/m,
 	);
-	expect(result.summary).toContain("Reported to a Casebook started for this job");
-	// Nothing reached the instance that was not chosen, and its token went nowhere: the job's own Casebook would
+	expect(result.summary).toContain("Reported to a Mainworthy started for this job");
+	// Nothing reached the instance that was not chosen, and its token went nowhere: the job's own Mainworthy would
 	// have refused a token it does not know, and has no project of that name.
 	expect(result.batches).toBe(0);
 	expect(result.output).not.toContain("cb_secret-of-the-deployed-one");
-	expect(result.output).toMatch(/casebook gate\s+blocked/);
+	expect(result.output).toMatch(/mainworthy gate\s+blocked/);
 	expect(result.output).toContain("needs an answer");
 	expect(result.output).toContain("The gate did not pass (exit 2).");
 	expect(result.code).toBe(2);
@@ -232,15 +232,17 @@ test("a failing test in one shard ends in a blocked gate, also in the Casebook t
 
 test("a shard that left no report fails the job, though the gate passes on the others", async () => {
 	// With no instance named the job starts its own, and that is a notice, not a warning.
-	const result = await gate(green, { missing: ["tests-2"], configure: async () => ({ CASEBOOK_URL: "" }) });
-	expect(result.output).toMatch(/^::notice::Reported to a Casebook started for this job: CASEBOOK_URL is not set\.$/m);
+	const result = await gate(green, { missing: ["tests-2"], configure: async () => ({ MAINWORTHY_URL: "" }) });
+	expect(result.output).toMatch(
+		/^::notice::Reported to a Mainworthy started for this job: MAINWORTHY_URL is not set\.$/m,
+	);
 	expect(result.output).not.toContain("::warning::");
 	expect(result.batches).toBe(0);
-	// Its own Casebook is stopped and its data removed when the job ends.
-	expect(result.output).toMatch(/^Started a Casebook for this job: http:\/\/127\.0\.0\.1:\d+ \(process \d+\)$/m);
+	// Its own Mainworthy is stopped and its data removed when the job ends.
+	expect(result.output).toMatch(/^Started a Mainworthy for this job: http:\/\/127\.0\.0\.1:\d+ \(process \d+\)$/m);
 	expect(result.left).toEqual([]);
 	expect(result.output).toContain("job tests-1");
-	expect(result.output).toMatch(/casebook gate\s+passed/);
+	expect(result.output).toMatch(/mainworthy gate\s+passed/);
 	expect(result.output).toContain("::error::tests-2: no report (test-results/tests-2.xml is missing or empty)");
 	expect(result.output).toContain("::error::in no shard's report: test/c.test.ts");
 	expect(result.code).toBe(1);
@@ -253,7 +255,7 @@ test("a test file whose tests were all skipped fails the job, though the gate pa
 			shard.name === "tests-2" ? { ...shard, files: { "test/c.test.ts": SKIPPED }, exit: 0 } : shard,
 		),
 	);
-	expect(result.output).toMatch(/casebook gate\s+passed/);
+	expect(result.output).toMatch(/mainworthy gate\s+passed/);
 	expect(result.output).toContain("::error::tests-2: every test of test/c.test.ts was skipped");
 	expect(result.code).toBe(1);
 }, 20_000);
@@ -299,7 +301,7 @@ test("text inside a test's output is not counted as a test or as a skip", async 
 test("tests that exited with a failure the report does not show fail the job", async () => {
 	// A test file that does not load is an error for Bun and is absent from its JUnit file.
 	const result = await gate(green.map((shard) => (shard.name === "tests-1" ? { ...shard, exit: 1 } : shard)));
-	expect(result.output).toMatch(/casebook gate\s+passed/);
+	expect(result.output).toMatch(/mainworthy gate\s+passed/);
 	expect(result.output).toContain("::error::tests-1: the tests exited 1 and the report shows no failure");
 	expect(result.code).toBe(1);
 }, 20_000);
@@ -329,46 +331,46 @@ test("a slow shard is a warning above the budget and a failure above the limit",
 	expect(failed.code).toBe(1);
 }, 30_000);
 
-test("a job that breaks off leaves no Casebook running and nothing in the temporary directory", async () => {
+test("a job that breaks off leaves no Mainworthy running and nothing in the temporary directory", async () => {
 	// A report that cannot be read is an error nobody planned for: the job stops there, and still cleans up.
-	const result = await gate(green, { unreadable: ["tests-2"], configure: async () => ({ CASEBOOK_URL: "" }) });
-	expect(result.output).toMatch(/^Started a Casebook for this job: /m);
+	const result = await gate(green, { unreadable: ["tests-2"], configure: async () => ({ MAINWORTHY_URL: "" }) });
+	expect(result.output).toMatch(/^Started a Mainworthy for this job: /m);
 	expect(result.output).toContain("EISDIR");
 	expect(result.code).not.toBe(0);
 	expect(result.left).toEqual([]);
 }, 20_000);
 
 test("a job that is told to stop does so before its next command, exits as stopped, and leaves nothing", async () => {
-	// Told while its own Casebook is starting, and told once that one runs. A Casebook left behind would hold the
+	// Told while its own Mainworthy is starting, and told once that one runs. A Mainworthy left behind would hold the
 	// job's output open, and this test would not end.
 	for (const [send, after, exit] of [
-		["SIGTERM", "::notice::Reported to a Casebook started for this job", 143],
-		["SIGINT", "Started a Casebook for this job: ", 130],
+		["SIGTERM", "::notice::Reported to a Mainworthy started for this job", 143],
+		["SIGINT", "Started a Mainworthy for this job: ", 130],
 	] as const) {
-		const result = await gate(green, { signal: { send, after }, configure: async () => ({ CASEBOOK_URL: "" }) });
+		const result = await gate(green, { signal: { send, after }, configure: async () => ({ MAINWORTHY_URL: "" }) });
 		// It does not go on to the gate and exit with the verdict of a run that was called off.
-		expect(result.output).not.toContain("$ casebook gate");
+		expect(result.output).not.toContain("$ mainworthy gate");
 		expect([send, result.code, result.left]).toEqual([send, exit, []]);
 	}
 }, 20_000);
 
-// ── Which Casebook the job reports to: what is wrong with a deployed one, and what follows ─────────────────
+// ── Which Mainworthy the job reports to: what is wrong with a deployed one, and what follows ─────────────────
 
 test("a credential the instance refuses fails the job, and nothing is reported anywhere", async () => {
 	const wrong = await gate(green, {
 		mode: "server",
-		configure: async () => ({ CASEBOOK_TOKEN: "cb_not-a-token-of-this-instance" }),
+		configure: async () => ({ MAINWORTHY_TOKEN: "cb_not-a-token-of-this-instance" }),
 	});
 	expect(wrong.output).toMatch(
-		/^::error::Nothing was reported: \S+ refuses CASEBOOK_TOKEN \(revoked or mistyped\)\.$/m,
+		/^::error::Nothing was reported: \S+ refuses MAINWORTHY_TOKEN \(revoked or mistyped\)\.$/m,
 	);
-	expect(wrong.output).not.toContain("$ casebook report");
+	expect(wrong.output).not.toContain("$ mainworthy report");
 	expect([wrong.code, wrong.batches]).toEqual([4, 0]);
 }, 20_000);
 
 test("choosing the instance: each thing that can be wrong with a deployed one, and what follows", async () => {
 	const session = (projects: { key: string; can: string[] }[]) => Response.json({ ok: true, result: { projects } });
-	const recorder = () => session([{ key: "casebook", can: ["record"] }]);
+	const recorder = () => session([{ key: "mainworthy", can: ["record"] }]);
 	type Answers = Record<string, () => Response>;
 	const asked: string[] = [];
 	const probe = (answers: Answers): Probe => ({
@@ -388,23 +390,27 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 		"/api/openapi.json": () => Response.json(openApi()),
 		"/api/session": recorder,
 	};
-	const env = { CASEBOOK_URL: "https://casebook.example/", CASEBOOK_TOKEN: "cb_x", CASEBOOK_PROJECT: "casebook" };
+	const env = {
+		MAINWORTHY_URL: "https://mainworthy.example/",
+		MAINWORTHY_TOKEN: "cb_x",
+		MAINWORTHY_PROJECT: "mainworthy",
+	};
 	const choose = async (answers: Answers, changed: Partial<typeof env> = {}) => {
 		const choice = await chooseInstance({ ...env, ...changed }, probe(answers));
 		return `${choice.use}${choice.use === "own" && choice.warn ? " (warning)" : ""}: ${choice.why}`;
 	};
 
-	expect(await choose(healthy)).toBe("deployed: https://casebook.example, project casebook");
-	expect(await choose(healthy, { CASEBOOK_URL: "" })).toBe("own: CASEBOOK_URL is not set");
+	expect(await choose(healthy)).toBe("deployed: https://mainworthy.example, project mainworthy");
+	expect(await choose(healthy, { MAINWORTHY_URL: "" })).toBe("own: MAINWORTHY_URL is not set");
 
 	// Unreachable: asked three times, then the job's own.
 	asked.length = 0;
 	expect(await choose({})).toStartWith(
-		"own (warning): https://casebook.example cannot be reached (connection refused)",
+		"own (warning): https://mainworthy.example cannot be reached (connection refused)",
 	);
 	expect(asked).toEqual(["/healthz", "/healthz", "/healthz"]);
 	expect(await choose({ ...healthy, "/healthz": () => new Response("", { status: 502 }) })).toStartWith(
-		"own (warning): https://casebook.example cannot be reached (it answered 502)",
+		"own (warning): https://mainworthy.example cannot be reached (it answered 502)",
 	);
 	// A runner that has just joined the network: the first try fails and the second answers.
 	let tries = 0;
@@ -416,35 +422,37 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 
 	// Another version: it describes report or gate differently, or does not describe them.
 	const other = structuredClone(openApi()) as { paths: Record<string, Record<string, unknown>> };
-	(other.paths["/api/p/{project}/report"] ?? {}).post = { "x-casebook-needs": "produce" };
+	(other.paths["/api/p/{project}/report"] ?? {}).post = { "x-mainworthy-needs": "produce" };
 	expect(await choose({ ...healthy, "/api/openapi.json": () => Response.json(other) })).toStartWith(
-		"own (warning): https://casebook.example describes report differently from this checkout",
+		"own (warning): https://mainworthy.example describes report differently from this checkout",
 	);
 	expect(await choose({ ...healthy, "/api/openapi.json": () => new Response("not json") })).toStartWith(
-		"own (warning): https://casebook.example describes report and gate differently",
+		"own (warning): https://mainworthy.example describes report and gate differently",
 	);
 	expect(contractDifferences(openApi())).toEqual([]);
 	expect(contractDifferences({ paths: {} })).toEqual(["report", "gate"]);
 
 	// The credential: refused, or good and not for this project. Neither is a reason to look elsewhere.
 	const refused = { ...healthy, "/api/session": () => new Response("{}", { status: 401 }) };
-	expect(await choose(refused)).toBe("none: https://casebook.example refuses CASEBOOK_TOKEN (revoked or mistyped)");
-	expect(await choose(refused, { CASEBOOK_TOKEN: "" })).toBe(
-		"none: https://casebook.example refuses a job with no CASEBOOK_TOKEN",
+	expect(await choose(refused)).toBe("none: https://mainworthy.example refuses MAINWORTHY_TOKEN (revoked or mistyped)");
+	expect(await choose(refused, { MAINWORTHY_TOKEN: "" })).toBe(
+		"none: https://mainworthy.example refuses a job with no MAINWORTHY_TOKEN",
 	);
 	const reader = {
 		...healthy,
 		"/api/session": () =>
 			session([
-				{ key: "casebook", can: ["read"] },
+				{ key: "mainworthy", can: ["read"] },
 				{ key: "web", can: ["record"] },
 			]),
 	};
 	expect(await choose(reader)).toBe(
-		"none: the token may not record results on project casebook at https://casebook.example (it may on: web)",
+		"none: the token may not record results on project mainworthy at https://mainworthy.example (it may on: web)",
 	);
 	// With no project named, the CLI takes the only one: so there must be exactly one to record on.
-	expect(await choose(healthy, { CASEBOOK_PROJECT: "" })).toBe("deployed: https://casebook.example, project casebook");
+	expect(await choose(healthy, { MAINWORTHY_PROJECT: "" })).toBe(
+		"deployed: https://mainworthy.example, project mainworthy",
+	);
 	// Other projects it may read do not make that a choice: the job is told which one, and tells the CLI.
 	const mixed = {
 		...healthy,
@@ -454,7 +462,7 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 				{ key: "web", can: ["record"] },
 			]),
 	};
-	const taken = await chooseInstance({ ...env, CASEBOOK_PROJECT: "" }, probe(mixed));
+	const taken = await chooseInstance({ ...env, MAINWORTHY_PROJECT: "" }, probe(mixed));
 	expect(taken).toMatchObject({ use: "deployed", project: "web" });
 	const two = {
 		...healthy,
@@ -464,11 +472,11 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 				{ key: "b", can: ["read", "record"] },
 			]),
 	};
-	expect(await choose(two, { CASEBOOK_PROJECT: "" })).toBe(
-		"none: CASEBOOK_PROJECT is not set and the token may record on 2 projects at https://casebook.example (a, b)",
+	expect(await choose(two, { MAINWORTHY_PROJECT: "" })).toBe(
+		"none: MAINWORTHY_PROJECT is not set and the token may record on 2 projects at https://mainworthy.example (a, b)",
 	);
 	// An instance that answers and cannot say who is calling is not this change's fault.
 	expect(await choose({ ...healthy, "/api/session": () => new Response("", { status: 503 }) })).toStartWith(
-		"own (warning): https://casebook.example did not say who this job is",
+		"own (warning): https://mainworthy.example did not say who this job is",
 	);
 });

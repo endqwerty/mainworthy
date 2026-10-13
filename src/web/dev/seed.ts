@@ -243,7 +243,7 @@ if (import.meta.main) {
 		url,
 		cases: Number(value("--cases") ?? 2000),
 		project: value("--project") ?? "scratch",
-		...(process.env.CASEBOOK_TOKEN ? { token: process.env.CASEBOOK_TOKEN } : {}),
+		...(process.env.MAINWORTHY_TOKEN ? { token: process.env.MAINWORTHY_TOKEN } : {}),
 	});
 	console.info(
 		`Seeded ${result.cases.length} cases; run ${result.run ?? "none"}; ${result.questions.length} demo questions.`,

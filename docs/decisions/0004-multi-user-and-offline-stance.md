@@ -1,10 +1,10 @@
 # 0004: Multi-user by default, calm concurrency, online-first with a small offline allowance
 
 - Date: 2026-10-10
-- Status: direction accepted (Daniel); mechanisms proposed, to be tested in
+- Status: direction accepted (the owner); mechanisms proposed, to be tested in
   phase 0 mocks and the phase 1 benchmark
 
-Answers open questions 8 and 9. Daniel's position: modern products are
+Answers open questions 8 and 9. The owner's position: modern products are
 multi-user; real-time collaboration is wanted only where it helps the task,
 because badly done live co-editing is more nuisance than help. Offline work
 is welcome if it does not hurt the experience, but data is online unless a
@@ -19,7 +19,7 @@ git-like sync turns out to be cheap.
    character-level merge of one case body. Two people editing the same case
    is rare and should be handled calmly, not designed around.
 3. **Concurrency is detected, not hidden.** Every edit names the version it
-   started from (casebook versions are already immutable, with a parent).
+   started from (mainworthy versions are already immutable, with a parent).
    - Edits to different fields of the same case merge automatically.
    - Edits to the same field are a conflict: the later save is not lost and
      does not overwrite; the user sees both versions side by side and keeps
@@ -42,7 +42,7 @@ git-like sync turns out to be cheap.
 ## Offline
 
 1. **Online-first.** Data lives on the server (or the Local layer's own
-   store). The UI is not a replica; Casebook does not promise to work with no
+   store). The UI is not a replica; Mainworthy does not promise to work with no
    connection.
 2. **A small, honest offline allowance**, kept only where it costs the user
    nothing:

@@ -1,4 +1,4 @@
-# Casebook UI review, round 3
+# Mainworthy UI review, round 3
 
 Revision: `b11d2307959bd1ea7f5edea6351cd5cc7bbf077f`, branch `t3/mvp-product-delivery`.
 
@@ -36,11 +36,11 @@ The old editor resumes under Bob's session. It publishes Alice's newer text as B
 
 ```text
 beforeStore:
-  casebook:alice:draft:scratch:C-1 = ["Alice newer private unsubmitted text"]
-  casebook:bob:draft:scratch:C-1 = ["Bob private unsubmitted text"]
+  mainworthy:alice:draft:scratch:C-1 = ["Alice newer private unsubmitted text"]
+  mainworthy:bob:draft:scratch:C-1 = ["Bob private unsubmitted text"]
 after storage:
-  casebook:alice:draft:scratch:C-1 = ["Alice newer private unsubmitted text"]
-timeline: [{version:3,by:"bob"},{version:2,by:"alice"},{version:1,by:"daniel"}]
+  mainworthy:alice:draft:scratch:C-1 = ["Alice newer private unsubmitted text"]
+timeline: [{version:3,by:"bob"},{version:2,by:"alice"},{version:1,by:"robin"}]
 server step: "Alice newer private unsubmitted text"
 ```
 
@@ -70,7 +70,7 @@ This violates the same person-ownership and authorship promise. A change of pers
 ## Adjacent checks
 
 - **Notes:** [notes-matrix.mjs](notes-matrix.mjs) passes with three tabs, two repetitions, independent notes in three slots, and a tab opened after typing. When B records the same slot while A types a correction, A retains `"A is typing a correction"` and focus; the server records `"Recorded in B"`. The four same-slot/other-slot × success/failure cases each retain the newer text through reload and preserve selection and focus. A failed request keeps the original slot's note when the user is editing another slot. [Log](logs/notes-matrix.log).
-- **People and recovery:** [auth-matrix.mjs](auth-matrix.mjs) passes Alice/Bob/Alice/Bob/Alice for existing-case drafts, new-case drafts, and run notes. Every transition stays in the same document, `documentLoads:1`, and every person sees only their own input. Ending each cookie session causes a real 401, with no refused write recorded. [Log](logs/auth-matrix.log). Alice/Alice/Bob/Bob/Alice also passes on all three surfaces. [Same-person log](logs/same-person.log). Local mode keeps the owner identity without sign-in, and restores the run note and new-case draft after clearing cookies and reloading: `identity:"H\ndaniel",runNoteRestored:true,newDraftRestored:true`. These passing cases do not involve a pending response or a second still-open page.
+- **People and recovery:** [auth-matrix.mjs](auth-matrix.mjs) passes Alice/Bob/Alice/Bob/Alice for existing-case drafts, new-case drafts, and run notes. Every transition stays in the same document, `documentLoads:1`, and every person sees only their own input. Ending each cookie session causes a real 401, with no refused write recorded. [Log](logs/auth-matrix.log). Alice/Alice/Bob/Bob/Alice also passes on all three surfaces. [Same-person log](logs/same-person.log). Local mode keeps the owner identity without sign-in, and restores the run note and new-case draft after clearing cookies and reloading: `identity:"H\ndana",runNoteRestored:true,newDraftRestored:true`. These passing cases do not involve a pending response or a second still-open page.
 - **Proposal keyboard behavior:** The 40-case matrix covers both a/r, 1280x800 and 1440x900, two repetitions, a fitting card, a card below the pane, 35 and 200 changed steps, and two proposals on one case. A capture-phase keydown listener measures the card before the application handles each key. Every deciding key has the whole card and both buttons in the pane and the inner diff at its end. With two proposals, only the selected question is decided; the other stays open. The 200-step cases need 38 presses at 1280x800 and 33 at 1440x900, including reveal and answer. [Log](logs/proposal-matrix.log).
 - **Proposal boundaries and mouse:** All 12 cases in [proposal-edges.mjs](proposal-edges.mjs) pass. One remaining text line produces 14 px overflow at 1280x800 or 16 px at 1440x900, against an 18.125 px line height. The first key pages that line without deciding; the second decides. Both mouse buttons answer the intended proposal. A 500-character reason with a long diff also fits and pages correctly. [Log](logs/proposal-edges.log). I opened and inspected [the 1280x800 screenshot](screenshots/tall35-paged.png); the heading, reason, scrollable diff, and answer buttons are together in the pane.
 - **Queue:** [capabilities-queue.mjs](capabilities-queue.mjs) confirms that a/r still decide on their first key, with `answer:{is:"accept"}` and `answer:{is:"reject"}`. The same probe confirms a scoped human producer can record in their project. [Log](logs/capabilities-queue.log).
@@ -101,8 +101,8 @@ Original probes are retained in `original-probes/`. Re-checks preserve their act
 
 The [progress report](REPORT-progress.md) preserves results written during the run. All data is artificial. No repository file, branch, commit, or pull request was changed. No production, engine, migration, full browser-suite, non-Chromium, mobile, screen-reader, or pre-fix device-storage migration review was attempted. No claim of exhaustive concurrency coverage. The remaining UI outside the supplied fix scope was not signed off here.
 
-To reproduce, run `bun install --frozen-lockfile` in `tree/`, create `/tmp/casebook-ui-r3x`, and run `TMPDIR=/tmp/casebook-ui-r3x bun ../<probe>.mjs` from `tree/`. Run each requested browser file separately using the same `TMPDIR`. The mutation copy is recreated by `prepare-mutations.py`; `run-mutations.py` runs its targets and restores each source file afterward.
+To reproduce, run `bun install --frozen-lockfile` in `tree/`, create `/tmp/mainworthy-ui-r3x`, and run `TMPDIR=/tmp/mainworthy-ui-r3x bun ../<probe>.mjs` from `tree/`. Run each requested browser file separately using the same `TMPDIR`. The mutation copy is recreated by `prepare-mutations.py`; `run-mutations.py` runs its targets and restores each source file afterward.
 
-Cleanup verified: no owned server or browser remains, and no listener remains on ports 8250 through 8299. Removed all `/tmp/casebook-ui-r3x` data, exported dependencies, and review test artifacts. Source exports, probes, logs, and reports remain available. The shared repository checkout was never changed or cleaned. [Cleanup record](cleanup.json).
+Cleanup verified: no owned server or browser remains, and no listener remains on ports 8250 through 8299. Removed all `/tmp/mainworthy-ui-r3x` data, exported dependencies, and review test artifacts. Source exports, probes, logs, and reports remain available. The shared repository checkout was never changed or cleaned. [Cleanup record](cleanup.json).
 
 ISSUES (2 blockers)

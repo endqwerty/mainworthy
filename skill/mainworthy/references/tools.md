@@ -229,7 +229,7 @@ Start here for a review. Given a change (`pr:482`) or changed `files`, returns t
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `change` | `string` | no | A change key, for example pr:482. |
-| `files` | `array<string>` | no | Changed paths, when the change is not known to Casebook. |
+| `files` | `array<string>` | no | Changed paths, when the change is not known to Mainworthy. |
 | `since` | `string` | no | A cursor from an earlier call: only what moved since. |
 | `ledger` | `boolean` | no | False for fresh eyes: do not hide what was already reviewed. Default: `true`. |
 | `project` | `string` | no | Project key; omit only if there is one project. |

@@ -1,11 +1,11 @@
 # 0003: Software QA only, and one model across the process spectrum
 
 - Date: 2026-10-10
-- Status: scope accepted (Daniel); spectrum approach proposed, to be tested in phase 0. Generalised 2026-10-11: the five switches are rows of the policy clause table in [0008](0008-one-evidence-model.md) and `docs/product-design.md` section 6.5.
+- Status: scope accepted (the owner); spectrum approach proposed, to be tested in phase 0. Generalised 2026-10-11: the five switches are rows of the policy clause table in [0008](0008-one-evidence-model.md) and `docs/product-design.md` section 6.5.
 
 ## Scope: software QA
 
-Casebook manages tests for software: manual and automated cases, plans, runs,
+Mainworthy manages tests for software: manual and automated cases, plans, runs,
 results, CI/CD integration and traceability to requirements, issues and code.
 Hardware, laboratory, manufacturing and other forms of quality assurance are
 out of scope. Research, competitors and features are judged against software

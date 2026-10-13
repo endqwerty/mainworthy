@@ -1,11 +1,11 @@
 {
-	"name": "casebook",
+	"name": "mainworthy",
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
 	"license": "UNLICENSED",
 	"bin": {
-		"casebook": "src/cli/main.ts"
+		"mainworthy": "src/cli/main.ts"
 	},
 	"scripts": {
 		"dev": "bun --watch src/cli/main.ts serve",
@@ -15,7 +15,7 @@
 		"format": "biome check --write .",
 		"test": "bun scripts/check.ts test",
 		"check": "bun scripts/check.ts",
-		"build": "bun build --compile --minify --sourcemap src/cli/main.ts src/server/read-worker.ts --outfile dist/casebook"
+		"build": "bun build --compile --minify --sourcemap src/cli/main.ts src/server/read-worker.ts --outfile dist/mainworthy"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.32.1",

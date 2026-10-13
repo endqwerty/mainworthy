@@ -279,7 +279,7 @@ function applyDamage(results: ResultIn[], spans: DamageSpan[]): void {
  * and warnings with UTF-8 byte offsets. Nested suite names use `::`; `options.file` labels warnings only.
  * Incomplete/damaged cases cannot pass; damage outside a testcase invalidates recovered suite/report evidence.
  * Orphan failures are diagnosed; testcase failures retain their diagnostics. Suite setup errors mark affected cases
- * as errors. Casebook properties override name annotations. Warnings are capped at 1,000 plus an omitted count.
+ * as errors. Mainworthy properties override name annotations. Warnings are capped at 1,000 plus an omitted count.
  * Suite failures without testcases remain warnings; the parser never invents an execution to carry them.
  */
 export function parseJUnit(
@@ -536,7 +536,8 @@ export function parseJUnit(
 					)
 				: {};
 		let element: Element = { kind: "other", tag };
-		if (name === "property" && propertyCase !== null && attrs.name === "casebook") {
+		// `casebook` is the property's name from before the project was renamed (decision 0015).
+		if (name === "property" && propertyCase !== null && (attrs.name === "mainworthy" || attrs.name === "casebook")) {
 			const claim = annotation(attrs.value ?? "", true);
 			if (claim !== undefined) propertyCase.result.annotation = claim;
 		} else if (ignoredDepth === 0) {

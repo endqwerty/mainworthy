@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 3, part B (the queue, running a suite, errors)
+# Mainworthy web UI: independent verification, round 3, part B (the queue, running a suite, errors)
 
 Revision judged: `b11d2307959bd1ea7f5edea6351cd5cc7bbf077f`, branch `t3/mvp-product-delivery`.
 
@@ -28,13 +28,13 @@ when the reply arrives, in the middle of a note (R3B-3).
 
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, Bun 1.4.3, `/usr/bin/chromium` with
   `--headless=new --ozone-platform=headless`, real server processes on 127.0.0.1, ports 8350 to 8399, data under
-  `/tmp/casebook-ui-r3b`.
+  `/tmp/mainworthy-ui-r3b`.
 - The only files changed in the export are five test helpers (ports moved into 8350..8399, the Chromium flags):
   `test-environment.patch`. No application source and no assertion is changed.
 - Every probe drives the real UI with trusted key events and reads the server through its API (the decision rows
   for "both decisions remain" are read from the server's database file, read-only). Slow and failing requests are
   injected at the browser (`page.route`); the outage checks stop the real server process.
-- Probes: `probes/` (run from `tree/` as `TMPDIR=/tmp/casebook-ui-r3b bun ../probes/<name>.ts [scenario]`), output
+- Probes: `probes/` (run from `tree/` as `TMPDIR=/tmp/mainworthy-ui-r3b bun ../probes/<name>.ts [scenario]`), output
   in `logs/`, screenshots in `shots/`. Round-2 probes reused: `queue-a.ts`, `queue-steal.ts`, `run-a.ts`,
   `run-b.ts`, `extra.ts`. New: `queue-b.ts`, `run-c.ts`, `races.ts`, `misc.ts`, `queue-tabs.ts`, `api-already.ts`.
 - The repository checkout was read with `git archive` only. At the end of this review its working tree held
@@ -59,7 +59,7 @@ when the reply arrives, in the middle of a note (R3B-3).
 
 | # | Check | Verdict | What ran and the deciding lines |
 | --- | --- | --- | --- |
-| 4 | The queue (D2) | **issues** | Twenty answers on mixed questions (failures of a session, of a change with a failing base, of a disputed slot; proposals; findings; unlinked tests) under `standard`, at 1280x800, `decide` delayed 500 ms, no waiting between keys (`logs/queue-fast.log`): `keys: 20`, `decide requests: 20`, `wrong or missing decisions: []`, `server open: ["Q-8:map:counts"]`, `UI open rows: ["Q-8"]`, `1 need an answer`. Each key has its consequence beside it and no answer card is clipped (`logs/queue-offered.log`: `problems: []`). Keys offered equal the server's list (table above). `u` withdraws and both decisions remain (`logs/queue-uu.log`: decision row 3 `{"is":"flaky"}` and row 4 `{"is":"withdrawn"}`, `"supersedes":3`). Forbidden: `"needs":"You cannot settle this. Needs one member who is not an agent.","disabled":[true,true],"requestsSent":0`, question open, case still version 1. Advice only: `"needs":"Your answer is advice. Needs one member."`, one request, `"server":"open","advice":1`, `Advice recorded. Needs one member who is not an agent.`; the person then sees `reviewer suggests infra` and Enter records `infra` by `daniel` (`logs/queue-roles.log`). Changed evidence, with the screen made stale (`logs/misc-conflict.log`): `The evidence changed. C-1 changed after this proposal was made; redo the proposal on version 2`, the question returns, the cursor stays, and the evidence then reads `version 2 → proposed version 3 ~ My own → Agent retitles`; a change in another field is rebased and adopted as version 3 with both edits. Bulk: `"requests":1,"entries":[["Q-6:infra","Q-5:infra","Q-4:infra"]]`, `u` reopens all three; a question of another kind cannot join (`logs/queue-bulk.log`). Proposal: the diff is on screen before the key (`version 1 → proposed version 2 … + Open the checkout page > The total is shown − Open the page > Ready`), and the adopted version is `"version":2,"by":"reviewer","kind":"agent"` (`logs/queue-proposal.log`). (a) put back by a failed request, returned to and answered again: `"server":"decided","rows":["Q-4","Q-3","Q-6"]`; put back by undo and answered again: decided, not listed; nothing reappears after leaving and returning (`logs/queue-again.log`). (b) `f u u`: `"server":"open","rows":["Q-5","Q-4","Q-3"]`, one undo request, a third `u` sends nothing. (c) see check 5. **Fails:** R3B-1, R3B-2. |
+| 4 | The queue (D2) | **issues** | Twenty answers on mixed questions (failures of a session, of a change with a failing base, of a disputed slot; proposals; findings; unlinked tests) under `standard`, at 1280x800, `decide` delayed 500 ms, no waiting between keys (`logs/queue-fast.log`): `keys: 20`, `decide requests: 20`, `wrong or missing decisions: []`, `server open: ["Q-8:map:counts"]`, `UI open rows: ["Q-8"]`, `1 need an answer`. Each key has its consequence beside it and no answer card is clipped (`logs/queue-offered.log`: `problems: []`). Keys offered equal the server's list (table above). `u` withdraws and both decisions remain (`logs/queue-uu.log`: decision row 3 `{"is":"flaky"}` and row 4 `{"is":"withdrawn"}`, `"supersedes":3`). Forbidden: `"needs":"You cannot settle this. Needs one member who is not an agent.","disabled":[true,true],"requestsSent":0`, question open, case still version 1. Advice only: `"needs":"Your answer is advice. Needs one member."`, one request, `"server":"open","advice":1`, `Advice recorded. Needs one member who is not an agent.`; the person then sees `reviewer suggests infra` and Enter records `infra` by `robin` (`logs/queue-roles.log`). Changed evidence, with the screen made stale (`logs/misc-conflict.log`): `The evidence changed. C-1 changed after this proposal was made; redo the proposal on version 2`, the question returns, the cursor stays, and the evidence then reads `version 2 → proposed version 3 ~ My own → Agent retitles`; a change in another field is rebased and adopted as version 3 with both edits. Bulk: `"requests":1,"entries":[["Q-6:infra","Q-5:infra","Q-4:infra"]]`, `u` reopens all three; a question of another kind cannot join (`logs/queue-bulk.log`). Proposal: the diff is on screen before the key (`version 1 → proposed version 2 … + Open the checkout page > The total is shown − Open the page > Ready`), and the adopted version is `"version":2,"by":"reviewer","kind":"agent"` (`logs/queue-proposal.log`). (a) put back by a failed request, returned to and answered again: `"server":"decided","rows":["Q-4","Q-3","Q-6"]`; put back by undo and answered again: decided, not listed; nothing reappears after leaving and returning (`logs/queue-again.log`). (b) `f u u`: `"server":"open","rows":["Q-5","Q-4","Q-3"]`, one undo request, a third `u` sends nothing. (c) see check 5. **Fails:** R3B-1, R3B-2. |
 | 5 | Running a suite (J5) | **issues** | `logs/run-b.log`. Planned through `n` by folder (`C-1,C-2,C-3`), tag (`C-4,C-5`), text (`C-4,C-5`) and commit (`accepts {"commit":"abcdef1234567"}`), the count shown matching each. Ten results in 26 keys with `report` delayed 500 ms: 10 requests, all on the server, `C-3:failing:fail(total is wrong)` with `"atStep":"b2"`, `C-4:skipped:blocked`, `C-10:skipped:skip`. The node that was next became current (`{"ref":"C-2","probe":"was-next","ready":"true"}`). At 1280x800: controls 609..772, note 666..701, buttons end at 656, viewport 800 (`shots/run-j5-1280.png`). UI verdict and tally equal the server's (`blocked: 1 failure unexplained, 1 question open`, `7 pass · 1 unexplained failures · 4 missing · 2 skipped`); again after `p p b u u s p` (`logs/run-fast-undo.log`). `u` appends a correction (`"corrects":3`, a new result, the earlier one kept). Slots filled by a pipeline or an agent are shown, skipped by the cursor and unchanged after every outcome key (`logs/run-b.log` `external`, `logs/extra-agent-slot.log`). 4(c), writes and reads failing: `C-1 was not recorded: Failed to fetch. Its note is kept. Return to the slot to retry.`, dots all `missing`, note kept on the slot and on the device, the retry records it (`logs/run-reads-fail.log`). **Fails:** R3B-2, R3B-3; R3B-4 (not blocking). |
 | 10 | Errors | pass | No uncaught error and no console error in any journey above (`errors: []` in every log; aborted and refused requests that the probes themselves caused are excluded). Server process stopped while typing a case: the text is in the editor, the row says `draft`, the device holds title and step, status `Failed to fetch. Your draft is kept on this device.`, chip `Draft, saved on this device · Private, no version yet`. Stopped while recording a result: `C-1 was not recorded: Failed to fetch. Its note is kept. Return to the slot to retry.`, slot `missing`, note `Seen before the server stopped` in the field and on the device (`logs/run-outage.log`, `shots/outage-case.png`, `shots/outage-result.png`). Only network console errors (`ERR_CONNECTION_REFUSED`, `ERR_INCOMPLETE_CHUNKED_ENCODING`), which the stop itself causes. |
 | - | Authors' tests for this part | pass, with gaps | One run each of `bun test test/e2e/<file>`: `triage.test.ts` `8 pass, 0 fail`; `execution.test.ts` `7 pass, 0 fail`; `recovery.test.ts` `12 pass, 0 fail`; `followups.test.ts` `7 pass, 0 fail` (`logs/authors-*.log`). The whole suite was not run (reviewer A). Gaps below. |
@@ -68,7 +68,7 @@ when the reply arrives, in the middle of a note (R3B-3).
 
 ### R3B-1: Queue: answer, `u`, answer again before the first reply is back: the undo withdraws the second answer; the screen says "recorded" and the question is open
 
-Blocks: **yes**. It needs a reply slower than the person's next key. If Casebook is judged for loopback use only it
+Blocks: **yes**. It needs a reply slower than the person's next key. If Mainworthy is judged for loopback use only it
 needs keys under about 100 ms apart, and then it is arguable.
 
 `undo` waits for the first answer's reply before sending its request (`if (prior && !(await prior.confirmed))` in
@@ -115,15 +115,15 @@ first `j`, `k`, click or answer, and in the queue a question that leaves the lis
    with no message; `i` records Infrastructure on Q-5: `"reading":"Q-4 …","afterTheOtherAnswer":{"current":"Q-5",…},"decided":["Q-5:infra","Q-4:defect"]`.
 3. **Run, just opened or reloaded, a key** (`probes/run-c.ts derived`, `logs/run-derived.log`). The run opens on
    C-1; another producer fills C-1; the pane switches to C-2; `p` records a pass on C-2:
-   `"first":"C-1","shownWhenPPressed":"C-2","server":["C-1:satisfied:tester/pass","C-2:satisfied:daniel/pass",…]`.
+   `"first":"C-1","shownWhenPPressed":"C-2","server":["C-1:satisfied:tester/pass","C-2:satisfied:robin/pass",…]`.
 4. **Run, just opened, a note.** `f`, type `The total is wr`, the other producer fills C-1, type `ong by two cents`,
    Enter. The field empties in the middle of the sentence, the rest goes to C-2's note, and Enter records on C-1
-   while C-2 is shown: `"server":["C-1:disputed:tester/pass+daniel/fail(The total is wr)","C-2:missing:"]`,
+   while C-2 is shown: `"server":["C-1:disputed:tester/pass+robin/fail(The total is wr)","C-2:missing:"]`,
    device `{"R-1:2":"ong by two cents"}`.
 
 Related, with the run cursor set by a click (`logs/races-derived-control.log`): the screen stays on C-1 and says
 `Filled by person tester`, which is right, but the note field is disabled in the middle of the sentence. The keys
-typed after that are dropped, and Enter still records the first half (`daniel/fail(The total is wr)`).
+typed after that are dropped, and Enter still records the first half (`robin/fail(The total is wr)`).
 
 A wrong answer here can excuse a failure nobody read, or record a pass for a case nobody ran. `u` withdraws it if
 the person notices. Promise contradicted: no key applied to a different object than the one shown; nothing typed

@@ -36,7 +36,7 @@ All on my own seed copy in `ts/verification`, port 30457, against the built `dis
 | Cold start through `/health` | pass | Three runs each: binary 219–250 ms, Bun bundle 217–223 ms, Node 260–274 ms. |
 | Artifact size and build | pass | Binary 91,408,352 bytes; `server.js` + worker = 605,981; `node.js` + worker = 527,742; all three match `build-metrics.json`. |
 | Typecheck | pass | `bun run check` → `tsc --noEmit` clean in 0.6 s. |
-| OpenAPI `$id` | pass on source, file stale | Freshly generated from binary and bundle (identical): 6 unique `urn:casebook:<op>:<input\|output>` ids, 6 refs, 0 dangling. `openapi.json` on disk still differs by 30 diff lines because `registry-proof.ts` never ran. |
+| OpenAPI `$id` | pass on source, file stale | Freshly generated from binary and bundle (identical): 6 unique `urn:mainworthy:<op>:<input\|output>` ids, 6 refs, 0 dangling. `openapi.json` on disk still differs by 30 diff lines because `registry-proof.ts` never ran. |
 | MCP and CLI | pass | Stdio on the binary: tools `get, propose, report` with `readOnlyHint` true/false/false; `get` returns structured content; bad input → `isError`. CLI `get` matches. |
 | PGlite persistence | pass, limited | Through `src/db-pglite.ts` on disk: a committed row survives close and reopen, and survives SIGKILL right after commit; a thrown transaction rolls back. It reports `fsync=off`, `synchronous_commit=on`. |
 | PostgreSQL, all workloads and W9 | not checked | Precondition unmet, and the judge's run was resetting `cb_ts`. No PostgreSQL evidence exists for this revision. |

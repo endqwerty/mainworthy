@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 8 (re-check of round 7's four findings)
+# Mainworthy web UI: independent verification, round 8 (re-check of round 7's four findings)
 
 Revision judged: `5cc2b3a4c0768ba974d8a37d7b54278371db3600`, branch `t3/mvp-product-delivery`.
 
@@ -43,7 +43,7 @@ It holds on every other route I ran.
 
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, Bun 1.4.3, `/usr/bin/chromium`
   (`--headless=new --ozone-platform=headless`), real server processes on 127.0.0.1, ports 8950 to 8974, data under
-  `/tmp/casebook-ui-r8`. The authors' suite ran unpatched on its own ports.
+  `/tmp/mainworthy-ui-r8`. The authors' suite ran unpatched on its own ports.
 - Round 7's probes copied into `probes/a/` and `probes/b/` with only paths changed. New probes:
   `probes/a/r8.ts` (`fleet`, `both-resolve`, `instant`, `neighbours`, `card-text`, `race`). Run from `tree/` as
   `bun ../probes/a/<name>.ts <scenario> [variant]`. `probes/keys.py`, `probes/fleet.py` and `probes/cmp.py` print
@@ -365,7 +365,7 @@ No server or browser of this review is running: nothing listens on 8950 to 8999.
 agents' test runs were listening on ports in 7400 to 7499 (`bun test test/e2e/round8.test.ts` and others, started
 13:40 from other directories); they are not mine and I left them alone. The shared checkout also had uncommitted
 changes in `src/web` at that time, made by someone else; I judged the export of the commit only.
-`/tmp/casebook-ui-r8`, the scratch copy for the mutations (`mut/`), the export of round 7's revision (`r7tree/`)
+`/tmp/mainworthy-ui-r8`, the scratch copy for the mutations (`mut/`), the export of round 7's revision (`r7tree/`)
 and `tree/node_modules` are removed (run `bun install --frozen-lockfile` in `tree/` to rerun a probe; for a
 comparison run, export `1fb4c0e` into `r7tree/` and link its `node_modules` to `tree/`'s). Kept: `REPORT.md`,
 `probes/`, `logs/`, `shots/` and the export in `tree/`. The repository checkout was only read; no release or

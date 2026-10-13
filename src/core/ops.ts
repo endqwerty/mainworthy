@@ -412,7 +412,11 @@ export type HistoryInput = z.infer<typeof HistoryInput>;
 
 export const ImpactInput = z.object({
 	change: z.string().optional().describe("A change key, for example pr:482."),
-	files: z.array(z.string()).max(5000).optional().describe("Changed paths, when the change is not known to Casebook."),
+	files: z
+		.array(z.string())
+		.max(5000)
+		.optional()
+		.describe("Changed paths, when the change is not known to Mainworthy."),
 	since: z.string().optional().describe("A cursor from an earlier call: only what moved since."),
 	ledger: z.boolean().default(true).describe("False for fresh eyes: do not hide what was already reviewed."),
 });

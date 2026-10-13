@@ -10,11 +10,11 @@ import type { ReadCall, ReadPool } from "./kernel/app.ts";
  * continuous stream of large reports met their latency budget on the benchmark machine (`bench/README.md`).
  */
 export function readerCount(env: Record<string, string | undefined>, cores = availableParallelism()): number {
-	const value = env.CASEBOOK_READERS;
+	const value = env.MAINWORTHY_READERS;
 	if (value === undefined) return Math.min(8, Math.max(1, cores - 2));
 	const count = Number(value);
 	if (!/^\d+$/.test(value) || !Number.isSafeInteger(count))
-		throw new Error("CASEBOOK_READERS must be a non-negative integer");
+		throw new Error("MAINWORTHY_READERS must be a non-negative integer");
 	return count;
 }
 
@@ -65,13 +65,13 @@ export class Readers implements ReadPool {
 		try {
 			const worker = new Worker(workerUrl(), {
 				workerData: { dataDir: this.options.dataDir, role: "checkpoint" },
-				name: "casebook-checkpoint",
+				name: "mainworthy-checkpoint",
 			});
 			// If it stops, the writer's own high checkpoint limit takes over: slower commits, nothing lost.
-			worker.on("error", (error) => console.error("[casebook] the checkpoint thread failed:", error));
+			worker.on("error", (error) => console.error("[mainworthy] the checkpoint thread failed:", error));
 			this.checkpointer = worker;
 		} catch (error) {
-			console.error("[casebook] the checkpoint thread did not start:", error);
+			console.error("[mainworthy] the checkpoint thread did not start:", error);
 		}
 	}
 
@@ -136,7 +136,7 @@ export class Readers implements ReadPool {
 			const url = workerUrl();
 			const worker = this.options.spawn
 				? this.options.spawn(url, this.options.dataDir)
-				: new Worker(url, { workerData: { dataDir: this.options.dataDir }, name: "casebook-reader" });
+				: new Worker(url, { workerData: { dataDir: this.options.dataDir }, name: "mainworthy-reader" });
 			const slot: Slot = { worker, pending: new Map(), ready: false, failed: false };
 			this.slots.add(slot);
 			worker.on("message", (message: unknown) => {
@@ -158,7 +158,7 @@ export class Readers implements ReadPool {
 			worker.on("messageerror", (error) => this.failed(slot, error));
 			worker.on("exit", (code) => this.failed(slot, new Error(`reader exited with code ${code}`)));
 		} catch (error) {
-			console.error("[casebook] reader failed; reads will run inline:", error);
+			console.error("[mainworthy] reader failed; reads will run inline:", error);
 			this.replace();
 		}
 	}
@@ -167,7 +167,7 @@ export class Readers implements ReadPool {
 		if (slot.failed || this.stopped) return;
 		slot.failed = true;
 		this.slots.delete(slot);
-		console.error("[casebook] reader failed; replaying its reads inline:", error);
+		console.error("[mainworthy] reader failed; replaying its reads inline:", error);
 		this.replay(slot);
 		this.retire(slot.worker);
 		this.replace();

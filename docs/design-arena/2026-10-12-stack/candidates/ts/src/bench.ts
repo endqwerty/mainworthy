@@ -51,7 +51,7 @@ async function stop(child: ChildProcess): Promise<void> {
 }
 async function start(binary = false): Promise<{ child:ChildProcess; ms:number }> {
   const t = performance.now();
-  const executable = binary ? `${root}/dist/casebook` : runtime==='node' ? 'node' : 'bun';
+  const executable = binary ? `${root}/dist/mainworthy` : runtime==='node' ? 'node' : 'bun';
   const args = binary ? ['serve'] : [`${root}/dist/${runtime==='node'?'node':'server'}.js`,'serve'];
   const child = spawn(executable,args,{ cwd:root,env:{ ...process.env,MODE:mode,RUNTIME:runtime,PORT:String(port) },stdio:['ignore','ignore','pipe'] });
   let diagnostics = '';

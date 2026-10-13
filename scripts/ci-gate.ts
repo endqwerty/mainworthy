@@ -1,5 +1,5 @@
-// The last job of the check workflow: every shard's results go to one Casebook, and Casebook's gate is the
-// job's result. Casebook knows only what it was told, so this also refuses what a gate cannot see: a shard that
+// The last job of the check workflow: every shard's results go to one Mainworthy, and Mainworthy's gate is the
+// job's result. Mainworthy knows only what it was told, so this also refuses what a gate cannot see: a shard that
 // left no report, a shard whose tests exited with a failure its report does not show, a test file that is in no
 // shard's report (it did not load, or no shard was given it), and a test file whose tests were all skipped (a
 // runner with no browser skips every browser test, exits 0 and writes a complete report).
@@ -8,9 +8,9 @@
 //
 // For each shard the directory holds `<shard>.xml` (JUnit) and `<shard>.json` (what `scripts/check.ts test
 // --junit` wrote beside it). Each file is reported under the shard's name as its job, with the two commands a
-// pipeline would run: `casebook report` and `casebook gate`.
+// pipeline would run: `mainworthy report` and `mainworthy gate`.
 //
-// Which Casebook: the one CASEBOOK_URL names when it can be used, else one started here for this run
+// Which Mainworthy: the one MAINWORTHY_URL names when it can be used, else one started here for this run
 // (`scripts/ci-instance.ts`). The run's summary says which, also when the gate passes.
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -26,8 +26,8 @@ if (!directory || shards.length === 0) {
 }
 
 const CLI = join(import.meta.dir, "../src/cli/main.ts");
-// The job's own Casebook, once there is one. It is stopped on every way out of this script: its end, an error, a
-// signal. The signals are listened for before anything is started, so there is no moment at which a Casebook
+// The job's own Mainworthy, once there is one. It is stopped on every way out of this script: its end, an error, a
+// signal. The signals are listened for before anything is started, so there is no moment at which a Mainworthy
 // runs and nobody would stop it. Every command below blocks until it is done, so a signal waits; `heard` lets a
 // waiting one in, before the next command.
 let own: Own | null = null;
@@ -49,12 +49,12 @@ if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMM
 if (choice.use === "none") process.exit(4);
 
 const cli = (argv: string[]): number => {
-	console.log(`\n$ casebook ${argv.join(" ")}`);
+	console.log(`\n$ mainworthy ${argv.join(" ")}`);
 	return Bun.spawnSync([process.execPath, CLI, ...argv], {
 		env: {
 			...process.env,
 			// The project the choice settled on, also when none was named: the CLI is not left to pick one.
-			...(choice.use === "deployed" ? { CASEBOOK_PROJECT: choice.project } : {}),
+			...(choice.use === "deployed" ? { MAINWORTHY_PROJECT: choice.project } : {}),
 			...ownEnv,
 		},
 		stdio: ["ignore", "inherit", "inherit"],
@@ -88,7 +88,7 @@ try {
 		for (const suite of text.matchAll(/<testsuite\b[^>]*\bfile="([^"]+)"/g)) reported.add(suite[1] ?? "");
 		// A skipped test proves nothing, and one skipped test beside others that ran is somebody's decision. A file
 		// in which nothing ran is a file that was not tested.
-		// Counted from the results as Casebook's own reader understands the report, so the job and the gate read one
+		// Counted from the results as Mainworthy's own reader understands the report, so the job and the gate read one
 		// report one way: text inside a test's output is not a test, and a test takes its suite's file when it
 		// names none.
 		const ran = new Map<string, { tests: number; skipped: number }>();
@@ -106,7 +106,7 @@ try {
 		if (outcome.exit !== 0 && failed === 0)
 			problems.push(`${shard}: the tests exited ${outcome.exit} and the report shows no failure`);
 		const exit = cli(["report", file, "--job", shard]);
-		if (exit !== 0) problems.push(`${shard}: casebook report exited ${exit}`);
+		if (exit !== 0) problems.push(`${shard}: mainworthy report exited ${exit}`);
 	}
 
 	await heard();

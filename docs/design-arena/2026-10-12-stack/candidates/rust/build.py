@@ -3,7 +3,7 @@ import hashlib,json,os,subprocess,time,tomllib
 from pathlib import Path
 root=Path(__file__).resolve().parent
 os.chdir(root)
-before=(root/'target/release/casebook-rust-spike').exists()
+before=(root/'target/release/mainworthy-rust-spike').exists()
 started=time.perf_counter()
 with open('build.log','w') as f:
     proc=subprocess.run(['cargo','build','--release','--locked','-j','6'],stdout=f,stderr=subprocess.STDOUT)

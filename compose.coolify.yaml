@@ -1,6 +1,11 @@
-# The Coolify deployment: Casebook as its own node on the tailnet, https://casebook.owl-perch.ts.net, through a
+# The Coolify deployment: Mainworthy as its own node on the tailnet, https://casebook.owl-perch.ts.net, through a
 # Tailscale sidecar (the pattern in the home lab's services/coolify-tailnet-apps.md). Nothing is published on the
 # LAN. For a laptop or a plain server use compose.yaml instead.
+#
+# This deployment was created when the project was called Casebook. The names it stored then are kept, so that a
+# redeploy finds the same data, node and variables: the service `casebook`, the volume `casebook-data`, the
+# tailnet name `casebook` and the Coolify variables CASEBOOK_OWNER_TOKEN and CASEBOOK_OWNER. docs/deploy.md says
+# how to move each one.
 #
 # First deploy only: set TS_AUTHKEY in Coolify to a single-use auth key. The node's identity then persists in the
 # tailscale-state volume and the variable can be deleted. Never use the sign-in link the sidecar prints.
@@ -13,8 +18,8 @@ services:
       - "127.0.0.1:7357:7357"
     environment:
       # A long random string. Leave unset to have one generated and printed once on first start.
-      CASEBOOK_OWNER_TOKEN: ${CASEBOOK_OWNER_TOKEN:-}
-      CASEBOOK_OWNER: ${CASEBOOK_OWNER:-owner}
+      MAINWORTHY_OWNER_TOKEN: ${CASEBOOK_OWNER_TOKEN:-}
+      MAINWORTHY_OWNER: ${CASEBOOK_OWNER:-owner}
     volumes:
       - casebook-data:/data
 

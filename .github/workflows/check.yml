@@ -1,13 +1,13 @@
-# The check, and Casebook testing itself: the test results of this repository are reported to Casebook with the
-# two pipeline lines a user would add (`casebook report`, `casebook gate`), and the result is Casebook's gate.
+# The check, and Mainworthy testing itself: the test results of this repository are reported to Mainworthy with the
+# two pipeline lines a user would add (`mainworthy report`, `mainworthy gate`), and the result is Mainworthy's gate.
 #
 # The tests run in shards, each on its own runner, balanced by scripts/test-timings.json. The tests that measure
 # time (scripts/check-plan.ts, QUIET) have a runner to themselves. Every shard uploads its JUnit file; the `gate`
-# job reports them all to one Casebook, each under its shard's name, and runs the gate. A shard that left no
+# job reports them all to one Mainworthy, each under its shard's name, and runs the gate. A shard that left no
 # report fails the gate job: a missing report is not a pass (scripts/ci-gate.ts).
 #
-# Which Casebook: the deployed one, when the repository names it (variables CASEBOOK_URL and CASEBOOK_PROJECT,
-# secret CASEBOOK_TOKEN, a pipeline's token) and the job can use it. It keeps the decisions made about earlier
+# Which Mainworthy: the deployed one, when the repository names it (variables MAINWORTHY_URL and MAINWORTHY_PROJECT,
+# secret MAINWORTHY_TOKEN, a pipeline's token) and the job can use it. It keeps the decisions made about earlier
 # runs. Otherwise the job starts its own for this run and says so on the run's summary page
 # (scripts/ci-instance.ts; docs/deploy.md has the set-up). An instance on a tailnet is reached by joining it for
 # the length of the job (variables TS_OAUTH_CLIENT_ID and TS_AUDIENCE: a federated identity, so no Tailscale
@@ -78,7 +78,7 @@ jobs:
 
   gate:
     needs: [static, tests]
-    # Also when a shard or the lint failed: Casebook is told what ran, and this job is the one that fails.
+    # Also when a shard or the lint failed: Mainworthy is told what ran, and this job is the one that fails.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -99,8 +99,8 @@ jobs:
           pattern: results-*
           path: test-results
           merge-multiple: true
-      - name: Join the tailnet the deployed Casebook is on
-        if: ${{ vars.CASEBOOK_URL != '' && vars.TS_OAUTH_CLIENT_ID != '' }}
+      - name: Join the tailnet the deployed Mainworthy is on
+        if: ${{ vars.MAINWORTHY_URL != '' && vars.TS_OAUTH_CLIENT_ID != '' }}
         # A join that fails leaves the instance unreachable, and the next step then starts its own and says so.
         continue-on-error: true
         uses: tailscale/github-action@v4
@@ -109,13 +109,13 @@ jobs:
           audience: ${{ vars.TS_AUDIENCE }}
           # What this tag may reach is the tailnet's access rules: this instance's port 443 and nothing else.
           tags: tag:ci
-      - name: Report every shard to Casebook, then the gate
+      - name: Report every shard to Mainworthy, then the gate
         env:
-          # Set these in the repository to report to a deployed Casebook. Without them the job starts its own.
+          # Set these in the repository to report to a deployed Mainworthy. Without them the job starts its own.
           # The token is given to this step and no other: not to the install, not to another job.
-          CASEBOOK_URL: ${{ vars.CASEBOOK_URL }}
-          CASEBOOK_TOKEN: ${{ secrets.CASEBOOK_TOKEN }}
-          CASEBOOK_PROJECT: ${{ vars.CASEBOOK_PROJECT }}
+          MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}
+          MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}
+          MAINWORTHY_PROJECT: ${{ vars.MAINWORTHY_PROJECT }}
         run: bun scripts/ci-gate.ts test-results tests-1 tests-2 tests-3 tests-4 tests-5 quiet
       - name: The type-check and the lint passed
         if: always()

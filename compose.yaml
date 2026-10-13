@@ -1,17 +1,17 @@
 # One service, one volume. `docker compose up -d`, then open http://localhost:7357 and sign in with the owner
-# token: set CASEBOOK_OWNER_TOKEN below, or read the generated one from the first lines of `docker compose logs`.
+# token: set MAINWORTHY_OWNER_TOKEN below, or read the generated one from the first lines of `docker compose logs`.
 services:
-  casebook:
+  mainworthy:
     build: .
     restart: unless-stopped
     ports:
       - "7357:7357"
     environment:
       # A long random string. Leave unset to have one generated and printed once on first start.
-      CASEBOOK_OWNER_TOKEN: ${CASEBOOK_OWNER_TOKEN:-}
-      CASEBOOK_OWNER: ${CASEBOOK_OWNER:-owner}
+      MAINWORTHY_OWNER_TOKEN: ${MAINWORTHY_OWNER_TOKEN:-}
+      MAINWORTHY_OWNER: ${MAINWORTHY_OWNER:-owner}
     volumes:
-      - casebook-data:/data
+      - mainworthy-data:/data
 
 volumes:
-  casebook-data:
+  mainworthy-data:

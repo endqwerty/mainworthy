@@ -45,8 +45,8 @@ test("the workers fit the machine: the quiet phase is alone on a small one", () 
 	expect([testReaders(2), testReaders(4), testReaders(16)]).toEqual(["1", "2", "2"]);
 });
 
-test("the check's budget is the one Daniel set, and a warning comes first", () => {
-	// Raising this number is a decision about the project, like raising a hot-path budget: AGENTS.md. Daniel
+test("the check's budget is the one the owner set, and a warning comes first", () => {
+	// Raising this number is a decision about the project, like raising a hot-path budget: AGENTS.md. The owner
 	// raised it from 120 s on 2026-10-13 (scripts/check-plan.ts says why); two minutes is still the aim (#77).
 	expect(LIMITS.fail).toBeLessThanOrEqual(150);
 	expect(LIMITS.warn).toBeLessThan(LIMITS.fail);
@@ -69,7 +69,7 @@ test("the workflow runs every shard of the plan and its gate reads every one of 
 	expect(workflow).toContain(`run: bun scripts/ci-gate.ts test-results ${shards.join(" ")} quiet\n`);
 });
 
-test("the workflow gives the pipeline's token to the one step that reports, and that step chooses the Casebook", () => {
+test("the workflow gives the pipeline's token to the one step that reports, and that step chooses the Mainworthy", () => {
 	const Step = z.object({ name: z.string().optional(), env: z.record(z.string(), z.string()).optional() });
 	const Job = z.object({
 		permissions: z.record(z.string(), z.string()).optional(),
@@ -86,7 +86,7 @@ test("the workflow gives the pipeline's token to the one step that reports, and 
 	const holders = Object.entries(workflow.jobs).flatMap(([job, { steps }]) =>
 		steps.filter((step) => JSON.stringify(step.env ?? {}).includes("secrets.")).map((step) => `${job}: ${step.name}`),
 	);
-	expect(holders).toEqual(["gate: Report every shard to Casebook, then the gate"]);
+	expect(holders).toEqual(["gate: Report every shard to Mainworthy, then the gate"]);
 	// No secret in an environment every step of a job or of the workflow would share.
 	expect([workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)]).toEqual([
 		undefined,

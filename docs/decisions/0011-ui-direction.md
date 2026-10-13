@@ -1,9 +1,9 @@
 # 0011: UI direction: the workbench frame with the document as its case pane
 
 - Date: 2026-10-12
-- Status: proposed (Daniel reviews the screenshots and the running product)
+- Status: proposed (the owner reviews the screenshots and the running product)
 
-Daniel recommended several designs before building, so the work does not go far down the wrong one. Three
+The owner recommended several designs before building, so the work does not go far down the wrong one. Three
 candidates each built an interactive mock of the hot paths from one brief with a different starting lens. The
 material is in `docs/design-arena/2026-10-12-ui/`: the brief, the judge-only rubric, each mock with its
 rationale and screenshots, and the judge's verdict with its evidence.
@@ -70,10 +70,10 @@ The judge's other findings are taken as requirements, not opinions:
 
 ## Draft versus version (open question 23)
 
-Daniel pointed at Confluence. Its classic editor has an explicit Publish step: people forget it, and others
+The owner pointed at Confluence. Its classic editor has an explicit Publish step: people forget it, and others
 read a stale page. Its live docs publish every keystroke: half a sentence is live, and history is noise.
 
-Casebook does neither. Typing saves at once into a private draft on the author's device, and the pane says so
+Mainworthy does neither. Typing saves at once into a private draft on the author's device, and the pane says so
 in one line ("Draft, saved on this device. Others see version 3."). The draft becomes a version when the author
 leaves the case, presses Ctrl+Enter or Cmd+Enter, or stops typing for 30 seconds. There is no button to
 forget, and nobody sees half a sentence. An unchanged draft makes no version. In the timeline, consecutive

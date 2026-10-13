@@ -78,8 +78,8 @@ export function printFlags(flags: readonly Flag[]): void {
 }
 
 export function generatedHelp(command: GeneratedCommand): void {
-	line(`casebook ${command.name}: ${command.summary}`);
-	line(`usage: casebook ${command.name} --json '<input JSON>' | --flag value ...`);
+	line(`mainworthy ${command.name}: ${command.summary}`);
+	line(`usage: mainworthy ${command.name} --json '<input JSON>' | --flag value ...`);
 	printFlags([
 		...command.flags,
 		JSON_FLAG,

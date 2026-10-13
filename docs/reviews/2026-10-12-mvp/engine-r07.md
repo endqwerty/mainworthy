@@ -1,4 +1,4 @@
-# Casebook engine verification, round 7
+# Mainworthy engine verification, round 7
 
 Revision: `bdda0b1ba6eaec54b5778684559d8192cb19a0f6`, branch `t3/mvp-product-delivery`.
 
@@ -29,7 +29,7 @@ The verdicts describe each check within its stated scope. They do not approve th
 | 11 | Concurrency and readers | pass functionally | Each 100,000-result upload preserved 40 concurrent case writes, 41 distinct command sequences and 42 contiguous events while reads completed. `readers-live`: 128 read-after-write observations; all nine read operations agree inline/worker across 27 replies including ten refusals; denied reads never dispatched; worker writes refused; 80 requests survive a killed worker; `allWorkerExitsAwaited:true,remaining:0`. Twelve reads after forgetting contain only the pseudonym. Checkpoint test: 610 commits while present, 80 after termination, 690 persisted across restart. Inline=0 works; default for 16 cores is 8. No performance verdict or different-provider claim for the reader authorship. |
 | 12 | Documented departures | issues | Every numbered departure is assessed below. B01/B02 contradict inherited holds and exact gate promises; N01 contradicts the one-answer queue promise; N02 contradicts the description of withdrawal policy. Browser draft storage and archive correctness are outside scope and explicitly not checked. The listed cuts themselves are not defects. |
 
-The author-test runner temporarily assigned listeners to ports 7950 through 7999 and budget data to `/tmp/casebook-engine-r7-budgets`, then restored the files. No other out-of-scope compile or test failure occurred. The 600-seed author sequence run was also executed from `tree`: `CASEBOOK_SEQUENCE_SEEDS=600 bun test test/sequences.test.ts`, giving `2 pass, 0 fail`, 600 sequences under loose and 600 under standard, 96,000 audited steps. Its invariants do not establish that a stored excuse is justified by the base's effective evidence.
+The author-test runner temporarily assigned listeners to ports 7950 through 7999 and budget data to `/tmp/mainworthy-engine-r7-budgets`, then restored the files. No other out-of-scope compile or test failure occurred. The 600-seed author sequence run was also executed from `tree`: `MAINWORTHY_SEQUENCE_SEEDS=600 bun test test/sequences.test.ts`, giving `2 pass, 0 fail`, 600 sequences under loose and 600 under standard, 96,000 audited steps. Its invariants do not establish that a stored excuse is justified by the base's effective evidence.
 
 ## Status of round 6
 
@@ -205,6 +205,6 @@ An independent person records defect under strict. The producer cannot withdraw 
 
 ## Cleanup
 
-All review servers and worker processes stopped. The final audit found no review process and no listener on ports 7950 through 7999. All review `/tmp` data was removed. The exported tree's `node_modules`, `.casebook` and `test-results` were released; reports, scripts and logs remain under `engine-r7`. `logs/cleanup.json` records the audit. No repository change or commit was made by this review.
+All review servers and worker processes stopped. The final audit found no review process and no listener on ports 7950 through 7999. All review `/tmp` data was removed. The exported tree's `node_modules`, `.mainworthy` and `test-results` were released; reports, scripts and logs remain under `engine-r7`. `logs/cleanup.json` records the audit. No repository change or commit was made by this review.
 
 ISSUES (2 blockers)

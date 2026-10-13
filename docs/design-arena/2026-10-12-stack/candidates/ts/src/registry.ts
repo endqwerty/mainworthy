@@ -14,15 +14,15 @@ export const registry = [
   operation({ name: 'report', description: 'Ingest a normalized test report atomically. Repeating the batch key inserts nothing.', effect: 'write', input: reportInput, output: reportOutput, run: (ctx, input) => ctx.report(input) }),
 ];
 export const openapi = () => ({
-  openapi: '3.1.0', info: { title: 'Casebook TS spike', version: '0.1.0' },
+  openapi: '3.1.0', info: { title: 'Mainworthy TS spike', version: '0.1.0' },
   paths: Object.fromEntries(registry.map(op => [`/api/${op.name}`, { post: {
     operationId: op.name, summary: op.description,
-    requestBody: { required: true, content: { 'application/json': { schema: { ...z.toJSONSchema(op.input, { target: 'draft-2020-12' }), $id: `urn:casebook:${op.name}:input` } } } },
-    responses: { '200': { description: 'Operation result', content: { 'application/json': { schema: { ...z.toJSONSchema(op.output, { target: 'draft-2020-12' }), $id: `urn:casebook:${op.name}:output` } } } } },
+    requestBody: { required: true, content: { 'application/json': { schema: { ...z.toJSONSchema(op.input, { target: 'draft-2020-12' }), $id: `urn:mainworthy:${op.name}:input` } } } },
+    responses: { '200': { description: 'Operation result', content: { 'application/json': { schema: { ...z.toJSONSchema(op.output, { target: 'draft-2020-12' }), $id: `urn:mainworthy:${op.name}:output` } } } } },
   } }])),
 });
 export function help(name?: string): string {
   const ops = name ? registry.filter(op => op.name === name) : registry;
   if (!ops.length) throw new Error(`Unknown command ${name}`);
-  return ['casebook <operation> --json <input> | --file <path>', ...ops.map(op => `${op.name}: ${op.description}\nInput: ${JSON.stringify(z.toJSONSchema(op.input))}`)].join('\n');
+  return ['mainworthy <operation> --json <input> | --file <path>', ...ops.map(op => `${op.name}: ${op.description}\nInput: ${JSON.stringify(z.toJSONSchema(op.input))}`)].join('\n');
 }

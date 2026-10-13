@@ -13,7 +13,7 @@ async function fixture({
 	preset?: string;
 	mode?: "local" | "server";
 } = {}): Promise<Server> {
-	const directory = await mkdtemp(join(tmpdir(), "casebook-builder2-"));
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-builder2-"));
 	let port = 7481;
 	for (; port <= 7499; port++) {
 		try {
@@ -33,10 +33,10 @@ async function fixture({
 		env: {
 			...process.env,
 			NODE_ENV: "production",
-			CASEBOOK_PORT: String(port),
-			CASEBOOK_DATA: directory,
-			CASEBOOK_MODE: mode,
-			CASEBOOK_OWNER_TOKEN: token,
+			MAINWORTHY_PORT: String(port),
+			MAINWORTHY_DATA: directory,
+			MAINWORTHY_MODE: mode,
+			MAINWORTHY_OWNER_TOKEN: token,
 		},
 		stdout: "ignore",
 		stderr: "pipe",
@@ -127,10 +127,10 @@ import { PRESETS } from "../../src/core/presets.ts";
 			await page.getByText(PRESET_SUMMARY.standard, { exact: true }).waitFor();
 			await comparison.getByRole("columnheader", { name: "standard · in force", exact: true }).waitFor();
 			const adopted = (await server.api("inbox", { state: "decided", kind: "adopt" })).items.find(
-				(q) => q.evidence.author === "daniel",
+				(q) => q.evidence.author === "robin",
 			);
 			expect(adopted?.decision?.answer.is).toBe("accept");
-			expect(adopted?.decision?.by).toEqual(["daniel"]);
+			expect(adopted?.decision?.by).toEqual(["robin"]);
 			await page.getByLabel("Policy preset").selectOption("strict");
 			await eventually(
 				() => server.api("admin", { do: "policy.show", project: "scratch" }),

@@ -141,7 +141,7 @@ test.skipIf(!browserAvailable)(
 			await token.fill(server.token);
 			await page.keyboard.press("Enter");
 			await page.locator("#app").waitFor();
-			expect(await page.locator(".sfoot .me").textContent()).toContain("daniel");
+			expect(await page.locator(".sfoot .me").textContent()).toContain("robin");
 			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser.close();

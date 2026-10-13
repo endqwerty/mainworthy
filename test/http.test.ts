@@ -20,9 +20,9 @@ afterEach(async () => {
 });
 
 function boot(mode: Config["mode"], ownerToken: string | null = null, existing?: string): Instance {
-	const dataDir = existing ?? mkdtempSync(join(tmpdir(), "casebook-http-"));
+	const dataDir = existing ?? mkdtempSync(join(tmpdir(), "mainworthy-http-"));
 	if (!existing) dirs.push(dataDir);
-	const instance = start({ dataDir, host: "127.0.0.1", port: 0, mode, owner: "daniel", ownerToken }, () => ({
+	const instance = start({ dataDir, host: "127.0.0.1", port: 0, mode, owner: "robin", ownerToken }, () => ({
 		ui: null,
 	}));
 	running.push(instance);
@@ -49,10 +49,10 @@ async function post<T>(
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
 function bootReaders(count: number): Instance {
-	const dataDir = mkdtempSync(join(tmpdir(), "casebook-http-readers-"));
+	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-http-readers-"));
 	dirs.push(dataDir);
 	const instance = start(
-		{ dataDir, host: "127.0.0.1", port: 0, mode: "local", owner: "daniel", ownerToken: null },
+		{ dataDir, host: "127.0.0.1", port: 0, mode: "local", owner: "robin", ownerToken: null },
 		() => ({ ui: null }),
 		{ readers: count },
 	);
@@ -259,15 +259,15 @@ describe("reads on other cores through HTTP", () => {
 		},
 	);
 
-	test("CASEBOOK_READERS=0 uses the inline reader and stop awaits all worker exits", async () => {
-		const previous = process.env.CASEBOOK_READERS;
+	test("MAINWORTHY_READERS=0 uses the inline reader and stop awaits all worker exits", async () => {
+		const previous = process.env.MAINWORTHY_READERS;
 		let inline: Instance;
 		try {
-			process.env.CASEBOOK_READERS = "0";
+			process.env.MAINWORTHY_READERS = "0";
 			inline = boot("local");
 		} finally {
-			if (previous === undefined) delete process.env.CASEBOOK_READERS;
-			else process.env.CASEBOOK_READERS = previous;
+			if (previous === undefined) delete process.env.MAINWORTHY_READERS;
+			else process.env.MAINWORTHY_READERS = previous;
 		}
 		expect(inline.app.readers).toBeNull();
 		expect((await post(inline, "/api/p/scratch/find", {})).body).toMatchObject({ ok: true, result: { items: [] } });
@@ -286,7 +286,7 @@ describe("local mode", () => {
 	test("the browser on this machine is the owner with no step, and a first project exists", async () => {
 		const instance = boot("local");
 		const session = (await (await fetch(`${instance.url}/api/session`)).json()) as Envelope<SessionInfo>;
-		expect(session.ok && session.result).toMatchObject({ actor: "daniel", kind: "human", mode: "local", via: "local" });
+		expect(session.ok && session.result).toMatchObject({ actor: "robin", kind: "human", mode: "local", via: "local" });
 		expect(session.ok && session.result.projects.map((p) => p.key)).toEqual(["scratch"]);
 		const created = await post(instance, "/api/p/scratch/propose", {
 			edits: [{ op: "create", outline: "First case" }],
@@ -318,23 +318,25 @@ describe("server mode", () => {
 		const bob = bearer(made.body.ok ? made.body.result.token : "");
 		const create = { edits: [{ op: "create", outline: "Typed by Alice" }] };
 		// A page that was opened as Alice sends her text; the browser's session has become Bob's since.
-		const wrong = await post(instance, "/api/p/scratch/propose", create, { ...bob, "x-casebook-as": "alice" });
+		const wrong = await post(instance, "/api/p/scratch/propose", create, { ...bob, "x-mainworthy-as": "alice" });
 		expect(wrong.status).toBe(401);
 		expect(wrong.body).toMatchObject({ ok: false, error: { code: "unauthenticated" } });
 		const found = await post<{ count: number }>(instance, "/api/p/scratch/find", {}, bob);
 		expect(found.body.ok && found.body.result.count).toBe(0);
 		// Reads are refused the same way: the page would otherwise show Bob's view as Alice's.
-		expect((await post(instance, "/api/p/scratch/find", {}, { ...bob, "x-casebook-as": "alice" })).status).toBe(401);
+		expect((await post(instance, "/api/p/scratch/find", {}, { ...bob, "x-mainworthy-as": "alice" })).status).toBe(401);
 		// So is every other route that takes a session (who am I, the change stream), and a name that cannot be read.
-		const as = (name: string) => ({ headers: { ...bob, "x-casebook-as": name } });
+		const as = (name: string) => ({ headers: { ...bob, "x-mainworthy-as": name } });
 		expect((await fetch(`${instance.url}/api/session`, as("alice"))).status).toBe(401);
 		expect((await fetch(`${instance.url}/api/p/scratch/events`, as("alice"))).status).toBe(401);
 		expect((await fetch(`${instance.url}/api/session`, as("%E0%A4%A"))).status).toBe(401);
-		expect((await post(instance, "/api/p/scratch/find", {}, { ...bob, "x-casebook-as": "%E0%A4%A" })).status).toBe(401);
+		expect((await post(instance, "/api/p/scratch/find", {}, { ...bob, "x-mainworthy-as": "%E0%A4%A" })).status).toBe(
+			401,
+		);
 		expect((await fetch(`${instance.url}/api/session`, as("bob"))).status).toBe(200);
 		// The right name, and no name at all (a script, the CLI), go through. The name is percent-encoded, so one
 		// that a header could not carry as it is still matches.
-		expect((await post(instance, "/api/p/scratch/propose", create, { ...bob, "x-casebook-as": "bob" })).status).toBe(
+		expect((await post(instance, "/api/p/scratch/propose", create, { ...bob, "x-mainworthy-as": "bob" })).status).toBe(
 			200,
 		);
 		expect((await post(instance, "/api/p/scratch/find", {}, bob)).status).toBe(200);
@@ -347,7 +349,7 @@ describe("server mode", () => {
 		expect(zoe.body).toMatchObject({ ok: true });
 		const named = {
 			...bearer(zoe.body.ok ? zoe.body.result.token : ""),
-			"x-casebook-as": encodeURIComponent("zoe@qa"),
+			"x-mainworthy-as": encodeURIComponent("zoe@qa"),
 		};
 		expect((await post(instance, "/api/p/scratch/find", {}, named)).status).toBe(200);
 	});
@@ -368,7 +370,7 @@ describe("server mode", () => {
 		const session = (await (
 			await fetch(`${instance.url}/api/session`, { headers: { cookie } })
 		).json()) as Envelope<SessionInfo>;
-		expect(session.ok && session.result).toMatchObject({ actor: "daniel", via: "cookie", mode: "server" });
+		expect(session.ok && session.result).toMatchObject({ actor: "robin", via: "cookie", mode: "server" });
 		// the cookie does not travel with a request another site makes
 		expect((await post(instance, "/api/p/scratch/find", {}, { cookie, origin: "http://evil.example" })).status).toBe(
 			401,
@@ -532,7 +534,7 @@ describe("a pipeline's token", () => {
 		};
 		expect(await listed()).toEqual([
 			["policy", "rule", []],
-			["daniel", "human", [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"] }]],
+			["robin", "human", [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"] }]],
 			["github-actions", "ci", [{ project: "scratch", can: ["record"] }]],
 		]);
 
@@ -555,13 +557,13 @@ describe("a pipeline's token", () => {
 		expect((await listed())[2]).toEqual(["github-actions", "ci", [{ project: "other", can: ["record"] }]]);
 
 		// An admin does not change or drop their own grant: a slip there locks the instance.
-		expect((await admin(instance, { do: "grant.remove", actor: "daniel" })).body).toMatchObject(invalid);
-		expect((await admin(instance, { do: "grant.set", actor: "daniel", can: ["read"] })).body).toMatchObject(invalid);
+		expect((await admin(instance, { do: "grant.remove", actor: "robin" })).body).toMatchObject(invalid);
+		expect((await admin(instance, { do: "grant.set", actor: "robin", can: ["read"] })).body).toMatchObject(invalid);
 		// Nor does another admin change the owner's: it is written again on every start, and until then the
 		// instance could be left with nobody to administer it.
 		const second = await token(instance, { actor: "ops", kind: "human" });
-		expect((await admin(instance, { do: "grant.remove", actor: "daniel" }, second)).body).toMatchObject(invalid);
-		expect((await admin(instance, { do: "grant.set", actor: "daniel", can: ["read"] }, second)).body).toMatchObject(
+		expect((await admin(instance, { do: "grant.remove", actor: "robin" }, second)).body).toMatchObject(invalid);
+		expect((await admin(instance, { do: "grant.set", actor: "robin", can: ["read"] }, second)).body).toMatchObject(
 			invalid,
 		);
 		expect((await admin(instance, { do: "grant.set", actor: "ops", can: ["read"] })).body).toMatchObject({ ok: true });
@@ -598,7 +600,7 @@ describe("a pipeline's token", () => {
 		);
 		// The owner's own grant is not rewritten by a token made for the owner.
 		expect(
-			(await admin(instance, { do: "token.create", actor: "daniel", kind: "human", can: ["read"] })).body,
+			(await admin(instance, { do: "token.create", actor: "robin", kind: "human", can: ["read"] })).body,
 		).toMatchObject(invalid);
 		expect((await admin(instance, { do: "token.list" })).body).toMatchObject({ ok: true });
 	});

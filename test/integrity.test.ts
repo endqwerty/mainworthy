@@ -1057,7 +1057,7 @@ describe("what a run and a change may count", () => {
 			explorer(),
 		);
 		expect(gate({ change: "pr:7" })).toMatchObject({ run: null, verdict: "pending" });
-		// The pipeline's first report of the pull request is for a commit Casebook saw before the agent's.
+		// The pipeline's first report of the pull request is for a commit Mainworthy saw before the agent's.
 		report(
 			{
 				target: { ...older, pr: 7, branch: "feature", base: "realbase", title: "Pipeline", files: ["real.ts"] },

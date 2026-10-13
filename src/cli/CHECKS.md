@@ -59,7 +59,7 @@ Implementation notes for integration:
 - `archiveRoutes` accepts an optional owner reference from `start`'s callback.
   Local imports bootstrap the configured machine owner and refresh that live
   reference before another write, preserving attribution when the archive came
-  from a different owner. Server imports say to set `CASEBOOK_OWNER_TOKEN` and
+  from a different owner. Server imports say to set `MAINWORTHY_OWNER_TOKEN` and
   restart, since replay intentionally discards credentials.
 - Typed client calls validate replies against schemas checked against `Api`.
   No casts remain. Generated commands print every batch outcome even when one

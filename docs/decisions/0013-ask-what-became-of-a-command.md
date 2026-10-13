@@ -1,7 +1,7 @@
 # 0013: A client asks what became of a command, and a draft keeps the version it was written on
 
 - Date: 2026-10-12
-- Status: proposed (built in the pull request for issue #81; Daniel reviews)
+- Status: proposed (built in the pull request for issue #81; the owner reviews)
 
 The ninth review of the web UI found that a merge typed by hand in the conflict card could undo a colleague's
 newer change (R9-1, issue #81). Two fixes each closed the reported route and opened others

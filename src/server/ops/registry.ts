@@ -253,7 +253,7 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 	} catch (error) {
 		if (error instanceof OpError) return fail(error.code, error.message, error.details);
 		const message = error instanceof Error ? error.message : String(error);
-		console.error(`[casebook] ${op.name} failed:`, error);
+		console.error(`[mainworthy] ${op.name} failed:`, error);
 		return fail("internal", message);
 	}
 }

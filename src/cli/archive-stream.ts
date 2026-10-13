@@ -4,7 +4,7 @@ import { CliError } from "./errors.ts";
 
 /** Writes with backpressure and a fixed-size stream buffer; even a large archive is never read in full. */
 export async function writeFileStream(file: string, stream: ReadableStream<Uint8Array>): Promise<void> {
-	const directory = await mkdtemp(join(dirname(resolve(file)), ".casebook-export-"));
+	const directory = await mkdtemp(join(dirname(resolve(file)), ".mainworthy-export-"));
 	const path = join(directory, "archive");
 	try {
 		const handle = await open(path, "wx", 0o600);

@@ -12,7 +12,7 @@ function percentile(values: number[], fraction: number): number {
  * a test is half a minute of samples taken at the frame rate, and one file would be the longest of the check.
  */
 export function latency(cases: 2000 | 10000): void {
-	test.skipIf(!browserAvailable || (cases === 10000 && process.env.CASEBOOK_SKIP_10K === "1"))(
+	test.skipIf(!browserAvailable || (cases === 10000 && process.env.MAINWORTHY_SKIP_10K === "1"))(
 		`L1 input and virtual scrolling with ${cases.toLocaleString()} real cases`,
 		async () => {
 			const server = await startServer({ cases });
@@ -31,7 +31,7 @@ export function latency(cases: 2000 | 10000): void {
 					const next: number[] = [];
 					const previous: number[] = [];
 					const errors: string[] = [];
-					Reflect.set(window, "casebookLatency", { capture, typing, next, previous, errors });
+					Reflect.set(window, "mainworthyLatency", { capture, typing, next, previous, errors });
 					window.addEventListener(
 						"keydown",
 						(event) => {
@@ -98,7 +98,7 @@ export function latency(cases: 2000 | 10000): void {
 						await page.keyboard.press(key);
 						await page.waitForFunction(
 							({ key, count }) => {
-								const samples: unknown = Reflect.get(window, "casebookLatency");
+								const samples: unknown = Reflect.get(window, "mainworthyLatency");
 								if (!samples || typeof samples !== "object") return false;
 								const values =
 									key === "j" && "next" in samples ? samples.next : "previous" in samples ? samples.previous : null;
@@ -132,7 +132,7 @@ export function latency(cases: 2000 | 10000): void {
 						previous: z.array(z.number()),
 						errors: z.array(z.string()),
 					})
-					.parse(await page.evaluate(() => Reflect.get(window, "casebookLatency")));
+					.parse(await page.evaluate(() => Reflect.get(window, "mainworthyLatency")));
 				const capture = samples.capture.slice(0, 200);
 				const typing = samples.typing.slice(0, 200);
 				expect(capture).toHaveLength(200);

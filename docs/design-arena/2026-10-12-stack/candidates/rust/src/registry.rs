@@ -61,14 +61,14 @@ pub fn openapi() -> Value {
         }
         paths.insert(format!("/op/{}",op.name),json!({"post":{"operationId":op.name,"description":op.description,"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":format!("#/components/schemas/{}_input",op.name)}}}},"responses":{"200":{"description":"Operation result","content":{"application/json":{"schema":{"$ref":format!("#/components/schemas/{}_output",op.name)}}}},"400":{"description":"Invalid input"}}}}));
     }
-    json!({"openapi":"3.1.0","info":{"title":"Casebook Rust arena","version":"0.1.0"},"paths":paths,"components":{"schemas":schemas}})
+    json!({"openapi":"3.1.0","info":{"title":"Mainworthy Rust arena","version":"0.1.0"},"paths":paths,"components":{"schemas":schemas}})
 }
 pub fn tools() -> Vec<rmcp::model::Tool> {
     operations().into_iter().map(|op|serde_json::from_value(json!({"name":op.name,"description":op.description,"inputSchema":op.input,"outputSchema":op.output,"annotations":{"readOnlyHint":!op.write,"destructiveHint":false,"idempotentHint":true}})).unwrap()).collect()
 }
 pub fn help(name: Option<&str>) -> String {
     let mut out = String::from(
-        "Casebook Rust arena\nUsage: casebook-rust-spike <operation> [JSON input]\nConfigure CB_MODE=embedded|server and CB_DB=<file|connection string>.\nOther commands: serve <mode> <db> <port>, mcp <mode> <db>, openapi\n",
+        "Mainworthy Rust arena\nUsage: mainworthy-rust-spike <operation> [JSON input]\nConfigure CB_MODE=embedded|server and CB_DB=<file|connection string>.\nOther commands: serve <mode> <db> <port>, mcp <mode> <db>, openapi\n",
     );
     for op in operations() {
         if name.is_none() || name == Some(op.name) {

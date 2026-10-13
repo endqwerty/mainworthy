@@ -1,4 +1,4 @@
-# Casebook engine hunt, round 1
+# Mainworthy engine hunt, round 1
 
 Revision `a51da9f9853f4a2754fc8363fb08aeddcdf21049` (branch `t3/mvp-product-delivery`), exported with `git archive`
 into `hunt-r1/tree` and installed with `bun install --frozen-lockfile`. Nothing in the repository was touched.
@@ -7,7 +7,7 @@ reproduction is `bun scripts/<name>.mjs` from this directory; each asserts the d
 Logs of every run are in `logs/`. Each defect was confirmed on two separate runs (`logs/<name>-1.log`,
 `logs/<name>-2.log`).
 
-Baseline: the shipped `test/sequences.test.ts` with `CASEBOOK_SEQUENCE_SEEDS=150` passes for all three presets
+Baseline: the shipped `test/sequences.test.ts` with `MAINWORTHY_SEQUENCE_SEEDS=150` passes for all three presets
 (`logs/baseline-sequences-150.log`).
 
 Summary: five confirmed defects (H1-01 to H1-05), one lesser confirmed finding that is a design call (H1-06), four
@@ -145,7 +145,7 @@ correction "withdraws the result it names wherever that counted" and that a reop
 failure it still shows"; P3 says a later write never hides an earlier failure. Here the withdrawn pass hides the
 failure that replaced it.
 
-The extended sequence test finds the same gap by itself (`CASEBOOK_SEQUENCE_REOPENED=audit bun scripts/seq-one.mjs
+The extended sequence test finds the same gap by itself (`MAINWORTHY_SEQUENCE_REOPENED=audit bun scripts/seq-one.mjs
 31 loose`, and seeds 37, 41 and 88 under the other presets, `logs/extended-600x120.log`): at step 91 a run over
 `random02` reads `passed` on a slot last rebuilt at revision 53 while the run is at revision 133; a person's failure
 of that case, typed into another run on the same commit while this one was closed, was never admitted after the
@@ -236,7 +236,7 @@ until a person approves, or `heldOpen` should cover a person's rejection as it c
 
 ## What was tried that held
 
-- **The shipped sequence test**, `CASEBOOK_SEQUENCE_SEEDS=150` (150 seeds × 80 steps × 3 presets): passes
+- **The shipped sequence test**, `MAINWORTHY_SEQUENCE_SEEDS=150` (150 seeds × 80 steps × 3 presets): passes
   (`logs/baseline-sequences-150.log`).
 - **The raise limit under many runs** (`scripts/many-runs-raise.mjs`): 60 open planned runs over one commit, one
   failing report, then an `infra` answer for one environment and the same cause in a second environment. Both
@@ -259,7 +259,7 @@ until a person approves, or `heldOpen` should cover a person's rejection as it c
 written against the rows. Two things to know:
 
 - Audits 11 and 12 (admission soundness and completeness) skip runs whose sign-off approval is no longer in force
-  (withdrawn, or replaced by a `reject`), because of H1-04; `CASEBOOK_SEQUENCE_REOPENED=audit` turns that skip off
+  (withdrawn, or replaced by a `reject`), because of H1-04; `MAINWORTHY_SEQUENCE_REOPENED=audit` turns that skip off
   and the test then fails at seed 31 under `loose` (and 37, 41, 88, 147, 352, 387, 390 elsewhere). Remove the skip
   when H1-04 is fixed.
 - The P5 order-dependence of H1-03 is not an audit: the engine's own facts say the producer's answer was legitimate

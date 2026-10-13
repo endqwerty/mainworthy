@@ -482,8 +482,8 @@ test("stdio forwards calls to the running HTTP instance without owning its datab
 	const source = `
 		import { z } from "zod";
 		import { runStdio } from ${JSON.stringify(new URL("./mcp.ts", import.meta.url).pathname)};
-		const url = process.env.CASEBOOK_MCP_TEST_URL;
-		const headers = { authorization: "Bearer " + process.env.CASEBOOK_MCP_TEST_TOKEN, "content-type": "application/json" };
+		const url = process.env.MAINWORTHY_MCP_TEST_URL;
+		const headers = { authorization: "Bearer " + process.env.MAINWORTHY_MCP_TEST_TOKEN, "content-type": "application/json" };
 		const Reply = z.discriminatedUnion("ok", [
 			z.object({ ok: z.literal(true), result: z.unknown(), seq: z.number().nullable() }),
 			z.object({ ok: z.literal(false), error: z.object({ code: z.string(), message: z.string() }) })
@@ -500,7 +500,7 @@ test("stdio forwards calls to the running HTTP instance without owning its datab
 	const transport = new StdioClientTransport({
 		command: process.execPath,
 		args: ["-e", source],
-		env: { CASEBOOK_MCP_TEST_URL: `http://127.0.0.1:${http.port}`, CASEBOOK_MCP_TEST_TOKEN: secret },
+		env: { MAINWORTHY_MCP_TEST_URL: `http://127.0.0.1:${http.port}`, MAINWORTHY_MCP_TEST_TOKEN: secret },
 	});
 	const client = new Client({ name: "stdio-client", version: "1" });
 	try {
@@ -523,11 +523,11 @@ test("stdio forwards calls to the running HTTP instance without owning its datab
 });
 
 test("the shipped skill stays short and its tool reference matches the registry", async () => {
-	const skill = await Bun.file(new URL("../../skill/casebook/SKILL.md", import.meta.url)).text();
-	expect(skill).toStartWith("---\nname: casebook\ndescription:");
+	const skill = await Bun.file(new URL("../../skill/mainworthy/SKILL.md", import.meta.url)).text();
+	expect(skill).toStartWith("---\nname: mainworthy\ndescription:");
 	const body = skill.replace(/^---\n[\s\S]*?\n---\n/, "");
 	expect(encode(body).length, "Skill body token budget").toBeLessThanOrEqual(400);
 	expect(encode(skill).length, "Whole SKILL.md token budget").toBeLessThanOrEqual(400);
-	const committed = await Bun.file(new URL("../../skill/casebook/references/tools.md", import.meta.url)).text();
+	const committed = await Bun.file(new URL("../../skill/mainworthy/references/tools.md", import.meta.url)).text();
 	expect(committed, "Run bun scripts/gen-skill.ts after a registry change").toBe(generateToolReference());
 });

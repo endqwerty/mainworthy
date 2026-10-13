@@ -77,6 +77,6 @@ export const tokenCommand: AdapterCommand = {
 				);
 			return 0;
 		}
-		throw new CliError("invalid", `usage: casebook ${tokenCommand.usage}`);
+		throw new CliError("invalid", `usage: mainworthy ${tokenCommand.usage}`);
 	},
 };

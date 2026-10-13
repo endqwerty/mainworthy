@@ -63,7 +63,7 @@ const everyFile = phases.length === 2;
 // The budget is about the whole suite with its own number of workers.
 const whole = everyFile && workers === undefined;
 
-const scratch = mkdtempSync(join(tmpdir(), "casebook-check-"));
+const scratch = mkdtempSync(join(tmpdir(), "mainworthy-check-"));
 const timings = join(scratch, "timings.json");
 if (existsSync(TIMINGS)) copyFileSync(TIMINGS, timings);
 const children = new Set<Bun.Subprocess>();
@@ -97,7 +97,7 @@ async function run(name: string, command: string[], capture: boolean): Promise<P
 		stdin: "ignore",
 		stdout: out,
 		stderr: out,
-		env: { ...process.env, CASEBOOK_READERS: process.env.CASEBOOK_READERS ?? testReaders() },
+		env: { ...process.env, MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders() },
 	});
 	children.add(child);
 	const exit = await child.exited;
@@ -149,7 +149,7 @@ for (const part of parts) {
 	const text = readFileSync(part.log, "utf8").trimEnd();
 	// A passing part's output is not shown, and a machine with no browser passes with every browser test
 	// skipped: say so where it is read.
-	for (const line of text.split("\n")) if (line.startsWith("Skipping Casebook e2e")) notices.add(line.trim());
+	for (const line of text.split("\n")) if (line.startsWith("Skipping Mainworthy e2e")) notices.add(line.trim());
 	if (part.exit !== 0) console.log(`\n──── ${part.name}: FAILED (exit ${part.exit}) ────\n${text}`);
 	else if (part.name.startsWith("tests")) console.log(`${part.name}: ${text.split("\n").at(-1)?.trim() ?? ""}`);
 }

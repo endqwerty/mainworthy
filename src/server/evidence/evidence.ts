@@ -567,7 +567,7 @@ const countOutcomes = (results: readonly { outcome: Outcome }[]): Counts => {
  * - An agent's results are `agent`, whether it names a case or a test key: what an agent reports counts only where
  *   a run asked for agents and the case admits them, and an agent cannot change that by its choice of words.
  * - A person's result that names a case is their own doing, `human`. One that names an automated test by key is
- *   `auto`: a person who runs `casebook report results.xml` with their own token is passing on a pipeline's work.
+ *   `auto`: a person who runs `mainworthy report results.xml` with their own token is passing on a pipeline's work.
  */
 export function methodFor(actor: ActorKind, result: Pick<ResultIn, "test">): MethodKind {
 	switch (actor) {

@@ -4,9 +4,9 @@ export type FlagKind = "string" | "number" | "boolean" | "strings" | "json";
 export type Flag = { name: string; kind: FlagKind; description: string; required?: boolean };
 
 export const GLOBAL_FLAGS: readonly Flag[] = [
-	{ name: "url", kind: "string", description: "Server URL. Defaults to CASEBOOK_URL or http://127.0.0.1:7357." },
-	{ name: "token", kind: "string", description: "Bearer token. Defaults to CASEBOOK_TOKEN." },
-	{ name: "project", kind: "string", description: "Project key. Defaults to CASEBOOK_PROJECT or the only project." },
+	{ name: "url", kind: "string", description: "Server URL. Defaults to MAINWORTHY_URL or http://127.0.0.1:7357." },
+	{ name: "token", kind: "string", description: "Bearer token. Defaults to MAINWORTHY_TOKEN." },
+	{ name: "project", kind: "string", description: "Project key. Defaults to MAINWORTHY_PROJECT or the only project." },
 	{ name: "compact", kind: "boolean", description: "Print JSON on one line." },
 	{ name: "help", kind: "boolean", description: "Show command help." },
 ];
@@ -107,5 +107,5 @@ export function hasJsonInput(tokens: readonly string[]): boolean {
 
 export function assertPositionals(args: Args, min: number, max: number, usage: string): void {
 	if (args.positionals.length < min || args.positionals.length > max)
-		throw new CliError("invalid", `usage: casebook ${usage}`);
+		throw new CliError("invalid", `usage: mainworthy ${usage}`);
 }

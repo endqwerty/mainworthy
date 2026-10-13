@@ -1,7 +1,7 @@
 # 0012: What the MVP builds of the design, and where it departs
 
 - Date: 2026-10-12
-- Status: proposed (built in the MVP pull request; Daniel reviews)
+- Status: proposed (built in the MVP pull request; the owner reviews)
 
 `docs/product-design.md` and decision 0008 describe the product. The MVP is the thin slice "one red build, three
 producers" (design section 9), built in one night on the stack of decision 0010. This record lists what the slice
@@ -83,7 +83,7 @@ not the same things done worse.
    for such an answer to outlive its evidence (the base corrected, the change pointed at another base, an
    agent's failure with the same cause, a rule and an open run undoing each other). What is left is sound and
    small: a person may answer `inherited` on a change's failure; it covers the build it was given for, like an
-   infrastructure answer, and the next commit is asked about again. Casebook shows what it knows as a hint on
+   infrastructure answer, and the next commit is asked about again. Mainworthy shows what it knows as a hint on
    the question (`fails-on-base`: every failing test of the report also fails, with this cause, on the base
    commit the change names, by what that commit's gate counts when the report arrives). Nothing is excused by
    the hint and no answer stands on it. The automatic version, with what it has to get right, is #69.

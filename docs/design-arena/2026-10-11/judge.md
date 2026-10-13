@@ -1,4 +1,4 @@
-# Casebook design arena verdict
+# Mainworthy design arena verdict
 
 Recommend **A as the BASE**, with two ideas each from B, C, and D. A has the safest extension point: an observation preserves its actor, target, executed-version basis, and outcome; a manifest establishes what evidence is missing; review findings remain separate from execution. Its 17-operation contract is smaller than B's 22 without relying on C's ingest-time version guessing or D's automatic excuses.
 
@@ -149,7 +149,7 @@ Reject B's entire 22-operation/Proof-plan structure as a wholesale graft and rej
 
 ### C: graft two ideas
 
-1. **Deterministic suite checking.** Graft `casebook check` from §4.3, with dangling-link, duplicate-binding, missing-expected-result, and stale-binding checks generated from the same rules used by operation validation and attention queries. This gives humans and agents actionable errors without another editable status field.
+1. **Deterministic suite checking.** Graft `mainworthy check` from §4.3, with dangling-link, duplicate-binding, missing-expected-result, and stale-binding checks generated from the same rules used by operation validation and attention queries. This gives humans and agents actionable errors without another editable status field.
 2. **Canonical text interchange.** Graft `fmt` and stable step-ID-preserving Markdown parse/print from §§5.1 and 6.1 as import/export adapters with round-trip checks. They should call A's operations, rather than become another writable canonical store.
 
 Reject automatic claim-hash proof inheritance, `reaffirm` as a way to transfer execution authority, git-shaped branches as the universal proposal model, and future external-owner mounts in the base contract. Content hashes help reads and deduplication; they do not prove what a runner executed. Also reject its argument that versioned relational storage inherently cannot make history, hashes, or exports first-class.
@@ -214,4 +214,4 @@ Keep A's exact/unresolved provenance, manifests, per-actor observations, contrad
 
 Before treating the synthesis as ready for implementation, resolve these specific contracts: one canonical evidence constructor for direct and parsed reports; an explicit completed-review operation that works with zero findings; an exact target and binding acceptance rule; a gate horizon invalidated at durable upload acceptance; basis-checked triage/expiry; and a staged release plan distinguishing preview from first usable. Test missing shards, late uploads after green, changed shared steps, moved cases leaving scope, conflicting actors, zero-finding reviews, and expired exceptions against that contract.
 
-Only `/tmp/casebook-arena/judge.md` was written. The repository and candidate packages were left unchanged. Repository size at review was `144K`.
+Only `/tmp/mainworthy-arena/judge.md` was written. The repository and candidate packages were left unchanged. Repository size at review was `144K`.

@@ -43,7 +43,7 @@ Seventeen domain operations hide merge, provenance validation, idempotency, pars
 
 ## Open questions and risks
 
-- Daniel, does the evidence-first workspace fit the differences you saw across loose, standard, and strict teams, or do some require a plan hierarchy as their primary navigation?
+- Does the evidence-first workspace fit the differences you saw across loose, standard, and strict teams, or do some require a plan hierarchy as their primary navigation?
 - Is a preparation call before CI execution acceptable, and which existing report workflows can supply reliable version attestations during migration?
 - Which required bindings may substitute for one another, and must independent actors' conflicting outcomes always block a release by default?
 - Is a new-project or CSV-seeded first slice useful, or is a faithful TestRail or Qase import a launch requirement despite the added scope?

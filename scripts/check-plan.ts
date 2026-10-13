@@ -39,7 +39,7 @@ export const quietWorkers = (cores = availableParallelism()): number => (cores >
 export const parallelWorkers = (cores = availableParallelism()): number => Math.max(1, Math.floor(cores / 2));
 
 /**
- * The reader threads of a server a test starts, where CASEBOOK_READERS does not say. A server takes the cores
+ * The reader threads of a server a test starts, where MAINWORTHY_READERS does not say. A server takes the cores
  * less two, up to eight (`src/server/readers.ts`), and the browser tests start several hundred servers: on the
  * 16-thread desktop the eight threads were 38% of the CPU time of the longest browser file (121 CPU-seconds;
  * 76 with two). Two is still a pool, so a read still leaves the server's thread. A 2-core CI runner keeps the
@@ -56,8 +56,8 @@ export type Limits = { warn: number; fail: number };
  *
  * The limits were 115 and 120 s, the two minutes the check was promised to stay under (issue #77). By 2026-10-13
  * the tests took 120.1 to 122.3 s with nothing else running, on `main` and on every branch, so every check ended
- * in a failure that was not its change. Daniel raised them that day: the longer check is accepted for now and is
- * to be brought back down later (#77). They are his to raise, nobody else's: make the check faster (AGENTS.md).
+ * in a failure that was not its change. The owner raised them that day: the longer check is accepted for now and is
+ * to be brought back down later (#77). They are the owner's to raise, nobody else's: make the check faster (AGENTS.md).
  */
 export const LIMITS: Limits = { warn: 130, fail: 150 };
 

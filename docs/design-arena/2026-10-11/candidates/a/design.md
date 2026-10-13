@@ -1,8 +1,8 @@
-# Casebook candidate A: evidence first
+# Mainworthy candidate A: evidence first
 
 ## Thesis
 
-Casebook is a team's record of what its software promises and what evidence supports those promises at a particular build. Its central fact is an immutable observation against an addressable expectation, made by a person, a CI runner, or an agent. Cases define expectations; a run selects observations against a pinned set of obligations; a release decision evaluates whether that evidence meets the project's policy. Manual checks, automated tests, and agent explorations contribute to the same expectation and build without pretending their evidence is interchangeable. The structural idea is one evidence stream with explicit provenance and reproducible selection, plus a link graph that identifies what each observation actually supports.
+Mainworthy is a team's record of what its software promises and what evidence supports those promises at a particular build. Its central fact is an immutable observation against an addressable expectation, made by a person, a CI runner, or an agent. Cases define expectations; a run selects observations against a pinned set of obligations; a release decision evaluates whether that evidence meets the project's policy. Manual checks, automated tests, and agent explorations contribute to the same expectation and build without pretending their evidence is interchangeable. The structural idea is one evidence stream with explicit provenance and reproducible selection, plus a link graph that identifies what each observation actually supports.
 
 This is a proposed design, not implemented behavior. Command examples specify a future interface. No language, framework, database, or build tool is selected.
 
@@ -10,14 +10,14 @@ This is a proposed design, not implemented behavior. Command examples specify a 
 
 The cited facts below are the repository's verified research as of 2026-10-10, not new vendor research. Prices and plan limits need another check before a buying decision.
 
-| Structural cost | Evidence and its limits | Casebook's structural answer |
+| Structural cost | Evidence and its limits | Mainworthy's structural answer |
 | --- | --- | --- |
-| The organization pays extra to recover the meaning of its own old results. | TestRail and Xray gate case versioning to Enterprise; Qase limits history by tier; Testiny gates history on the free tier. [Competitive analysis, cross-cutting finding 1](/home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings). | Every result names an immutable expectation version. History is required to interpret results, so it belongs to the base model and every deployment. Retention is an explicit storage policy, never a commercial permission to inspect history. |
-| Sharing evidence expands the license bill. | Qase charges for collaborator seats, Testiny discounts viewers, and Xray prices against total Jira users. Testmo is a counterexample to universal per-seat pricing. [Competitive analysis, Qase, Testiny, Xray, Testmo](/home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#competitors). | Readers, agents, and runners are identities with scopes, not billable test authors. The self-hosted model has no seat counter. If hosting is sold later, charge for measured resources or service, with no reader tax. Pricing remains undecided. |
-| High-volume integrations consume scarce API calls and engineering time. | TestRail, Qase, and Xray have tier-dependent API limits. Their integration labor and total cost are hypotheses, not measured findings. [Competitive analysis, finding 4](/home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings). | One report is a resumable, idempotent append job. One bounded change read replaces repeated polling of individual cases. Limits protect resources by bytes and concurrent jobs, not by purchase of operations needed for correctness. |
-| The organization maintains separate explanations of the same failure. | Hypothesis: case documents, CI artifacts, exploratory notes, and agent conversations drift because no shared evidence identity connects them. Existing MCP availability is verified; its depth and this alleged gap are open. [Competitive analysis, finding 5 and unchecked items](/home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#what-is-not-checked). | Every accepted observation has one identity, version binding, build, environment, and actor. A finding points to those facts. A report and an agent response select the same evidence instead of copying its status. |
-| Administrative workflow interrupts the act of writing or executing tests. | Hypothesis: slow suites, rigid forms, and confusing run setup cost more than the subscription. Reviews report these problems, but no latency or job audit exists. [Competitive analysis, TestRail and Azure DevOps](/home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#testrail). | Capture and execution work in place. The data path supports a small page or a single pinned case without suite-wide loads. Browser job tests decide whether these interactions save time. |
-| Self-hosting requires an expensive edition or an operational burden. | The analysis verifies several Enterprise or priced on-prem offers and Kiwi's self-hosting; it does not prove that every self-hosted alternative is dated. [Competitive analysis, hosting table](/home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#landscape). | One artifact, identical operations in Local, Server, and Cloud, persisted work, optional cache, and portable evidence bundles. Storage and operating costs remain real and visible. |
+| The organization pays extra to recover the meaning of its own old results. | TestRail and Xray gate case versioning to Enterprise; Qase limits history by tier; Testiny gates history on the free tier. [Competitive analysis, cross-cutting finding 1](/home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings). | Every result names an immutable expectation version. History is required to interpret results, so it belongs to the base model and every deployment. Retention is an explicit storage policy, never a commercial permission to inspect history. |
+| Sharing evidence expands the license bill. | Qase charges for collaborator seats, Testiny discounts viewers, and Xray prices against total Jira users. Testmo is a counterexample to universal per-seat pricing. [Competitive analysis, Qase, Testiny, Xray, Testmo](/home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#competitors). | Readers, agents, and runners are identities with scopes, not billable test authors. The self-hosted model has no seat counter. If hosting is sold later, charge for measured resources or service, with no reader tax. Pricing remains undecided. |
+| High-volume integrations consume scarce API calls and engineering time. | TestRail, Qase, and Xray have tier-dependent API limits. Their integration labor and total cost are hypotheses, not measured findings. [Competitive analysis, finding 4](/home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings). | One report is a resumable, idempotent append job. One bounded change read replaces repeated polling of individual cases. Limits protect resources by bytes and concurrent jobs, not by purchase of operations needed for correctness. |
+| The organization maintains separate explanations of the same failure. | Hypothesis: case documents, CI artifacts, exploratory notes, and agent conversations drift because no shared evidence identity connects them. Existing MCP availability is verified; its depth and this alleged gap are open. [Competitive analysis, finding 5 and unchecked items](/home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#what-is-not-checked). | Every accepted observation has one identity, version binding, build, environment, and actor. A finding points to those facts. A report and an agent response select the same evidence instead of copying its status. |
+| Administrative workflow interrupts the act of writing or executing tests. | Hypothesis: slow suites, rigid forms, and confusing run setup cost more than the subscription. Reviews report these problems, but no latency or job audit exists. [Competitive analysis, TestRail and Azure DevOps](/home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#testrail). | Capture and execution work in place. The data path supports a small page or a single pinned case without suite-wide loads. Browser job tests decide whether these interactions save time. |
+| Self-hosting requires an expensive edition or an operational burden. | The analysis verifies several Enterprise or priced on-prem offers and Kiwi's self-hosting; it does not prove that every self-hosted alternative is dated. [Competitive analysis, hosting table](/home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#landscape). | One artifact, identical operations in Local, Server, and Cloud, persisted work, optional cache, and portable evidence bundles. Storage and operating costs remain real and visible. |
 
 The economic bet is lower coordination and integration work per defensible decision. Cheap storage alone does not prove it. Measure the human jobs and tokens served for A4 to A6 before claiming savings.
 
@@ -74,10 +74,10 @@ Check J15 in under five minutes on a clean machine. Run the same contract fixtur
 Create a small project and record evidence for checkout.
 
 ```sh
-casebook start
+mainworthy start
 # Opens the local workspace. The store binds to loopback.
-casebook project create shop
-casebook auth issue --project shop --actor agent --rights read,propose,observe
+mainworthy project create shop
+mainworthy auth issue --project shop --actor agent --rights read,propose,observe
 # Store the returned secret in your agent client's credential store.
 ```
 
@@ -91,16 +91,16 @@ Expect: only the last four digits are visible, including in the accessibility tr
 
 The draft survives a reload. When the observable expectation is present, autosave commits version 1. The title and steps stay editable. Your project uses review for agent proposals by default; human edits publish directly. Set stricter policies later without changing the case format.
 
-Select **Check this build**, enter a commit or an identified local build, and choose **Manual check**. Casebook pins version 1, shows its steps, and records pass, fail, block, or skip. Fail asks for what happened; block and skip ask for a reason. The expectation now shows the actor, version, environment, and observation. Attach a screenshot if it helps. A green badge describes this build and binding, not every future release.
+Select **Check this build**, enter a commit or an identified local build, and choose **Manual check**. Mainworthy pins version 1, shows its steps, and records pass, fail, block, or skip. Fail asks for what happened; block and skip ask for a reason. The expectation now shows the actor, version, environment, and observation. Attach a screenshot if it helps. A green badge describes this build and binding, not every future release.
 
-Add a stable Casebook ID to the matching automated test or link its runner identifier once. The next CI upload appears beside your manual observation. Connect the MCP URL and scoped credential from **Agent access**. Ask the agent to challenge checkout; proposals and findings appear on the same expectations. Casebook supplies context and records evidence; your agent's own tools run the software.
+Add a stable Mainworthy ID to the matching automated test or link its runner identifier once. The next CI upload appears beside your manual observation. Connect the MCP URL and scoped credential from **Agent access**. Ask the agent to challenge checkout; proposals and findings appear on the same expectations. Mainworthy supplies context and records evidence; your agent's own tools run the software.
 
 ### Call site A: CI reports automated results
 
 The CLI adapter obtains a scoped runner identity. None of these commands select a storage engine. Secrets are supplied by the CI credential store.
 
 ```sh
-casebook scope open \
+mainworthy scope open \
 	--project shop --purpose pr --commit "$COMMIT_SHA" \
 	--branch "$BRANCH" --pr "$PR_NUMBER" --build-url "$BUILD_URL" \
 	--environment staging-chromium --configuration-digest "$CONFIG_DIGEST" \
@@ -111,14 +111,14 @@ casebook scope open \
 
 run_existing_test_command --junit report.xml
 
-casebook report junit report.xml --scope-receipt scope.json \
+mainworthy report junit report.xml --scope-receipt scope.json \
 	--shard 0 --request-id "$BUILD_ID:checkout:$ATTEMPT:0"
 # Example receipt: 10000 accepted, 9948 bound, 52 unlinked, processing.
 
-casebook scope complete --scope-receipt scope.json --shard 0 \
+mainworthy scope complete --scope-receipt scope.json --shard 0 \
 	--executed-count 10000 --request-id "$BUILD_ID:checkout:$ATTEMPT:finish"
 
-casebook gate read --scope-receipt scope.json --wait --timeout 30s
+mainworthy gate read --scope-receipt scope.json --wait --timeout 30s
 # Either a terminal verdict, or pending with the exact missing producer/job.
 ```
 
@@ -160,7 +160,7 @@ For adversarial testing, the agent opens an exploration scope at the build, read
 
 ### Call site C: a human executes and an author captures cases
 
-A lead saves the question `checkout + required + not checked on build c81`. Select 30 expectations and **Start check**. Casebook resolves the published versions, expected bindings, environment, and required actors into manifest M8. The lead assigns work to Alex and Bea. Both see the same progress question, with their own work list first.
+A lead saves the question `checkout + required + not checked on build c81`. Select 30 expectations and **Start check**. Mainworthy resolves the published versions, expected bindings, environment, and required actors into manifest M8. The lead assigns work to Alex and Bea. Both see the same progress question, with their own work list first.
 
 Alex opens item 1. Its pinned steps and criterion appear without another edit mode. `P` records pass and advances; `F` records fail, retains focus for actual behavior and an attachment, then advances. The actor's attempt key is allocated before submission, so a network retry cannot double-count it. Bea recording the same obligation adds another observation. A disagreement shows both; no latest-writer rule makes the failure vanish. Assignment is a coordination hint, never evidence.
 
@@ -233,7 +233,7 @@ Outcome = Pass {actual?} | Fail {actual: NonEmptyText, category, signature?}
   | Blocked {reason: NonEmptyText} | Skipped {reason: NonEmptyText}
 Category = Assertion | Infrastructure | Environment | Unknown
 // Actor kind is provenance, not a confidence or pass multiplier.
-// Uploaded test failures need not know their eventual Casebook expectation.
+// Uploaded test failures need not know their eventual Mainworthy expectation.
 
 EvidenceAmendment = Invalidate {observation, by, reason}
   | Bind {observation, exact: Exact, basis: ManifestProof | VersionAttestation}
@@ -321,7 +321,7 @@ A derived structure's dependency revision is not just a timestamp. Projectors pu
 
 Evidence selection never uses received time as a truth ranking. CI has declared producer attempts, shards, and runner retries. A retry policy may accept a final pass while preserving the first failure and marking the test flaky. Manual and agent streams have actor-local attempt order. Cross-actor disagreement remains visible. If a person wants a retest to replace a result, they name the prior observation explicitly and append the replacement.
 
-The transport cannot declare its own trusted actor or executed version. Authentication establishes the actor. The operation checks scoped authority, validates the receipt and manifest, and stamps the accepted revision. CI evidence can still be dishonest; Casebook records producer claims and provenance, not a guarantee that the runner truly executed code.
+The transport cannot declare its own trusted actor or executed version. Authentication establishes the actor. The operation checks scoped authority, validates the receipt and manifest, and stamps the accepted revision. CI evidence can still be dishonest; Mainworthy records producer claims and provenance, not a guarantee that the runner truly executed code.
 
 Two proposals accepting against the same head compete in one version-checked transaction. A disjoint field patch can rebase by stable field IDs, including tag-set deltas. Step order edits share an order field and conflict. Publication recomputes the content hash after the merge. Assignment changes are version-checked Scope facts and do not lock execution. A manifest pins policy for reproducibility. Changing project policy applies to new scopes by default; applying it to an active check explicitly creates a new generation. Tightened authorization applies immediately. An emergency rule change can revoke existing eligibility rather than reinterpret an old certificate silently.
 

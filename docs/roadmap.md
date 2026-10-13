@@ -8,7 +8,7 @@ no design.
 Status is kept in this file. Change the plan freely and record why in a
 decision record.
 
-**Status, 2026-10-12.** Daniel asked for the MVP and answered the open questions
+**Status, 2026-10-12.** The owner asked for the MVP and answered the open questions
 (decision 0009), so phases 0 to 2 were compressed into one night:
 
 - Phase 1 is done: the stack was chosen from a measured three-candidate arena on
@@ -33,7 +33,7 @@ use of incumbents and reviewed mocks; no interviews or recruited sessions.
 - Desk research and a hands-on friction audit of incumbents on the core
   jobs, including their MCP servers.
 - User flows ([ux/flows.md](ux/flows.md)): what people and agents do end to
-  end, corrected first by Daniel's comparison of the kinds of team he has worked in
+  end, corrected first by the owner's comparison of the kinds of team they have worked in
   (decision 0005).
   They set the benchmark workload mix and the first MCP operations.
 - Three process-spectrum team profiles, written as walks through the flows.

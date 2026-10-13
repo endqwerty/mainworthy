@@ -262,7 +262,7 @@ export function ingestInput(metadata: Metadata, id: string, size = 10_000): Repo
 		};
 	});
 	return {
-		target: { commit: `bench-${id}`, repo: "example/casebook", branch: "main" },
+		target: { commit: `bench-${id}`, repo: "example/mainworthy", branch: "main" },
 		job: "e2e",
 		attempt: 1,
 		results,
@@ -293,7 +293,7 @@ export function buildDataset(options: {
 	const log = options.log ?? console.log;
 	requireDisk(dir);
 	const metadataPath = join(dir, "dataset.json");
-	if (existsSync(metadataPath) && existsSync(join(dir, "casebook.db"))) {
+	if (existsSync(metadataPath) && existsSync(join(dir, "mainworthy.db"))) {
 		const saved = Metadata.safeParse(JSON.parse(readFileSync(metadataPath, "utf8")));
 		if (
 			saved.success &&
@@ -307,7 +307,7 @@ export function buildDataset(options: {
 		}
 	}
 	ensure(
-		!existsSync(join(dir, "casebook.db")),
+		!existsSync(join(dir, "mainworthy.db")),
 		`incomplete or mismatched dataset at ${dir}; choose a new directory or remove this benchmark dataset`,
 	);
 	const { app, owner } = open(config(dir));
@@ -420,7 +420,7 @@ export function buildDataset(options: {
 		const send = (results: ResultIn[], target?: TargetIn) => {
 			lastCommit = `seed-${parameters.seed.toString(16)}-${(++command).toString(16).padStart(8, "0")}`;
 			const input: ReportInput = {
-				target: target ?? { commit: lastCommit, repo: "example/casebook", branch: "main" },
+				target: target ?? { commit: lastCommit, repo: "example/mainworthy", branch: "main" },
 				job: "e2e",
 				attempt: 1,
 				results,
@@ -528,7 +528,7 @@ export function buildDataset(options: {
 					);
 					const receipt = send(results, {
 						commit: `queue-${parameters.seed}-${scope.toString(16).padStart(8, "0")}`,
-						repo: "example/casebook",
+						repo: "example/mainworthy",
 						branch: `feature/journey-${scope}`,
 						pr: 10_000 + scope,
 						base,
@@ -635,7 +635,7 @@ export function buildDataset(options: {
 /** Clones the closed WAL baseline so every repeated run starts with identical history and removes its writes on close. */
 export function openDataset(dataset: Dataset, dir: string): DatasetInstance {
 	requireDisk(dir);
-	copyFileSync(join(dataset.dir, "casebook.db"), join(dir, "casebook.db"), constants.COPYFILE_FICLONE);
+	copyFileSync(join(dataset.dir, "mainworthy.db"), join(dir, "mainworthy.db"), constants.COPYFILE_FICLONE);
 	const { app, owner } = open(config(dir));
 	const ci = ciActor(app);
 	ensure(

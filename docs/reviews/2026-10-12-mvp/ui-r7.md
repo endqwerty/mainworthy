@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 7 (re-check of round 6's four findings)
+# Mainworthy web UI: independent verification, round 7 (re-check of round 6's four findings)
 
 Revision judged: `1fb4c0eb2e1958698c523e04d31724368d46a641`, branch `t3/mvp-product-delivery`.
 
@@ -39,7 +39,7 @@ under "Conflict resolved.", when another producer changed the same thing). It ho
 
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, Bun 1.4.3, `/usr/bin/chromium`
   (`--headless=new --ozone-platform=headless`), real server processes on 127.0.0.1, ports 8950 to 8999, data under
-  `/tmp/casebook-ui-r7`. The authors' suite ran unpatched on its own ports.
+  `/tmp/mainworthy-ui-r7`. The authors' suite ran unpatched on its own ports.
 - Round 6's probes copied into `probes/a/` and `probes/b/` with only paths changed. `probes/a/r6.ts
   choice-then-type` and `two-fields` were adapted: they also record the status line, the focus and the caret after
   the keys, because the right outcome is now a visible refusal. New probes: `probes/a/r7.ts`, `probes/a/r7b.ts`,
@@ -81,7 +81,7 @@ Each line ran twice with the same result.
 | The merge reply is lost (the server recorded it), "Resolve conflict" pressed again | nothing lost, a dead card until a reload: R7-4 |
 | Escape with a card open; away to another case and back; `c` and a new case; the editor of another case; the palette (`others`, `read-mode`) | hold: Escape keeps the card and the editor (`cards 1`, focus to the list); `C-3 Captured while a card is open`; `C-2 … edited under a card elsewhere v2`; back on C-1 `Draft kept on this device. Press e to continue.`, `e`: `cards 1, readOnly true`; the palette takes the keys (`focus INPUT[Jump to or run]`) and gives the focus back to the field, the card intact; a tag set with `t` goes to the server (`tags ["smoke"]`) and leaves the draft alone |
 | The session ends, the same person signs in again (`r7-person same`) | holds: `aliceBack {cards 1, readOnly true}`, the card's hand-merged title kept, `version 3, title "Coupon case, merged by Alice"`, `open []` |
-| Another person signs in on the device, edits the case, then the first comes back (`r7-person other`) | holds: Bob sees `cards 0`, his own fresh editor (`title "Coupon case theirs"`), `v3 by bob`; Alice's key `casebook:alice:draft:scratch:C-1 … Q-3` untouched; Alice back: `cards 1, readOnly true`, resolved to `v4 by alice`, title `Coupon case, merged by Alice`, Bob's step kept |
+| Another person signs in on the device, edits the case, then the first comes back (`r7-person other`) | holds: Bob sees `cards 0`, his own fresh editor (`title "Coupon case theirs"`), `v3 by bob`; Alice's key `mainworthy:alice:draft:scratch:C-1 … Q-3` untouched; Alice back: `cards 1, readOnly true`, resolved to `v4 by alice`, title `Coupon case, merged by Alice`, Bob's step kept |
 | **A second window that was open before the conflict** (`second-window`) | **fails: R7-1** |
 | **The question settled elsewhere while the page was opened on another case** (`route2`, `settled-while-closed … /c/2`) | **fails: R7-1** |
 | The question rejected while the page was closed, the page opened on the case (`settled-while-closed rejected … /c/1`) | the card is released and the editor takes text again, but the draft is replaced: R7-2 |
@@ -205,7 +205,7 @@ How it weighs, said plainly: both routes need more than round 6's "choose, then 
 window already on the Suite, and the person editing the conflicted case there. Route B needs an unresolved
 conflict, the app opened on another case, and the question rejected in between. I rate it a blocker because the
 text is taken by an ordinary editor under "Draft, saved on this device" and is then removed with a success
-message; if Daniel weighs both routes as unusual, the count drops to none.
+message; if the owner weighs both routes as unusual, the count drops to none.
 
 Smallest fix: let the draft that is being opened decide. Where a draft is loaded (`edit()`, `choose()`, the route
 effect, the initial state) take the conflict from `saved.conflict` as well as from the map, and put it in the
@@ -347,11 +347,11 @@ Gaps:
 ## Cleanup
 
 No server or browser of this review is running (nothing listens on 8950 to 8999 or 7400 to 7499).
-`/tmp/casebook-ui-r7`, the scratch copy for the mutations (`mut/`), the export of round 6's revision (`r6tree/`)
+`/tmp/mainworthy-ui-r7`, the scratch copy for the mutations (`mut/`), the export of round 6's revision (`r6tree/`)
 and `tree/node_modules` are removed (run `bun install --frozen-lockfile` in `tree/` to rerun a probe; for the
 comparison run, export `67ebacc` into `r6tree/` and link its `node_modules` to `tree/`'s). Kept: `REPORT.md`,
 `probes/`, `logs/`, `shots/` and the export in `tree/`. The repository checkout was only read; no release or
-clean-up command was run in it, its `node_modules` is in place, and the `/tmp/casebook-e2e-*` directories of
+clean-up command was run in it, its `node_modules` is in place, and the `/tmp/mainworthy-e2e-*` directories of
 other runs were not touched.
 
 ISSUES (1 blocker)

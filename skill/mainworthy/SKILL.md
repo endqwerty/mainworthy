@@ -1,9 +1,9 @@
 ---
-name: casebook
-description: Use when you review a change, write test cases, or record test results and advice in Casebook.
+name: mainworthy
+description: Use when you review a change, write test cases, or record test results and advice in Mainworthy.
 ---
 
-Casebook keeps versioned test cases, results, and the questions they raise. Manual tests, automated tests, and agent tests share one record.
+Mainworthy keeps versioned test cases, results, and the questions they raise. Manual tests, automated tests, and agent tests share one record.
 
 1. Start with `impact` for a change or changed `files`, or `inbox` for questions. Keep the hashes and cursor. Use `ledger: false` for a fresh review.
 2. Use `get` for only the cases you need, with `as: "md"`. Pass your saved hashes in `unless` to skip unchanged cases. Use `since` for changes after a cursor.

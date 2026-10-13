@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 5, re-check B (the queue and running a suite)
+# Mainworthy web UI: independent verification, round 5, re-check B (the queue and running a suite)
 
 Revision judged: `9611d6136f8486142e26d3835b1e07cd2c03e11c`, branch `t3/mvp-product-delivery`.
 
@@ -32,11 +32,11 @@ the result that stands lacks the note that was in the field when Enter was press
 
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, `/usr/bin/chromium` with
   `--headless=new --ozone-platform=headless`, real server processes on 127.0.0.1, ports 8800 to 8849, data under
-  `/tmp/casebook-ui-r5b`.
+  `/tmp/mainworthy-ui-r5b`.
 - The only files changed in the export are five test helpers (ports moved into 8800..8849, the Chromium flags):
   `test-environment.patch`. No application source and no assertion is changed.
 - Round 4's probes copied unchanged into `probes/` (only the screenshot path differs), run from `tree/` as
-  `TMPDIR=/tmp/casebook-ui-r5b bun ../probes/<name>.ts [scenario]`. First pass in `logs/`, second pass in
+  `TMPDIR=/tmp/mainworthy-ui-r5b bun ../probes/<name>.ts [scenario]`. First pass in `logs/`, second pass in
   `logs/run2/`. New probes: `probes/r5-queue.ts`, `probes/r5-run.ts` (`logs/r5-*.log`).
 - Every probe drives the real UI with trusted key events and reads the server through its API. Slow, failing and
   lost replies are injected at the browser (`page.route`).
@@ -44,7 +44,7 @@ the result that stands lacks the note that was in the field when Enter was press
   (`logs/mutations.log`).
 - One probe was also run against round 4's revision `ec98ba4` (export in `r4tree/`) to tell a new problem from an
   old one (`logs/r4-revision-refail-pace.log`).
-- At the end my servers and browsers are stopped and `/tmp/casebook-ui-r5b` and `tree/node_modules` are removed;
+- At the end my servers and browsers are stopped and `/tmp/mainworthy-ui-r5b` and `tree/node_modules` are removed;
   run `bun install --frozen-lockfile` in `tree/` to rerun a probe (`mut/tree` and `r4tree` link to it).
 - Other reviewers' processes were running on this machine at the same time; no probe result depended on it (every
   timing result was the same on both passes).
@@ -55,14 +55,14 @@ Each finding's probe ran twice on this revision (the two server-only `api-disput
 
 | Finding | Verdict | What ran and the deciding lines |
 | --- | --- | --- |
-| R4B-1 a failure disputed after it was asked showed no evidence and took every key | **fixed** | `probes/dispute-blind.ts`, `dispute-hint.ts`, `api-dispute.ts`, `api-dispute-evidence.ts`, `new-queue.ts dispute`. The pane now reads `Expected 10 Observed 12 expected 10, got 12 … A counted pass and fail disagree. A decision must settle the dispute.` with `Needs one member who did not produce the evidence who is not an agent.`; `m` by a member who did not produce the failing result records `decided:mistaken by daniel`, slot `C-1:satisfied` (one key, with the evidence and the hint on screen). To the producer of the failing result, live and after a reload: `You cannot settle this. Needs one member who did not produce the evidence who is not an agent.`, `"keys":""`, `f` sends nothing (`"decides":[]`). Server: `"message":"expected 10, got 12","sample":1,"hints":["disputed"]`, `"you":"forbidden"`. The UI half, which the engine fix no longer exercises, driven by rewriting the `inbox` reply (`r5-queue.ts evidence`): `message: null, sample: null` is readable (`Expected 3 Observed 0 …`, `"keys":"dtefi"`, `i` records); evidence the page cannot parse gives `The failure evidence could not be read. Refresh to try again.`, `"keys":""`, and `i`, `f`, `t`, Enter and a click each give `The evidence could not be read. Refresh before answering.` with `"decides":[]`; the same when the unreadable question is only selected, not shown. |
-| R4B-2 a step digit could not be taken back | **fixed** | `new-run.ts step-mark`, `step-dead`, `step-pass`. `2 3` gives `Step 23 marked.`; Escape: `2 f fails step 2.` (no mark), Backspace the same, `"stored":{}` after a reload; then `f`, note, Enter: `C-1:failing:daniel/fail(fails at step three)`. A wrong mark: `try 1: C-1 was not recorded: The pinned case has no step 23. The mark was cleared`, `try 2: C-1 fail recorded`. `2 p` leaves `"stored":{}`, and the later correction is `C-1:fail(Looked again, the total is wrong) corrects 1`, no step. Neighbours (`r5-run.ts marks`, `held`): a mark on C-1 does not go with a failure on C-2 (`C-2:fail(C-2 fails, no step)`) and is still there on return (`Step 2 marked.`); `1 2` quickly is `Step 12 marked.` and records `fail@s12`; `1`, a pause, `1` is `Step 1`; `1` held is `Step 1`. |
-| R4B-3 a second `u` was dropped while the first was on its way | **fixed** | `new-queue.ts seq` (15 key-order and delay pairs) and `seq2` (11): all 26 `"verdict":"ok"` on both passes, `0` wrong. `f u i u t` with every call +250 ms and 300 ms between keys, round 4's failing pair: `"server":"decided:test by daniel"`, `"decides":["Q-5:flaky","undo Q-5","Q-5:infra","undo Q-5","Q-5:test"]`; the same at 0/0 and +400/150. `f u f u f u`: `open`, six requests, all on Q-5. |
-| R4B-4 the reference field followed the person to another question | **fixed** | `new-queue.ts inline-click`, both variants: after the click `"current":"Q-4","fieldOpen":0`, typing and Enter send nothing (`"decides":[]`), `Q-5` stays `open` (or `decided:flaky by daniel` where it was answered elsewhere: not overwritten). The reason field under `strict`, not driven in round 4 (`r5-queue.ts strict`): closed by the click, Enter sends nothing, `"stored":["Q-7:flaky:reason=flaky on the runner"]`, offered again on return and recorded as `decided:flaky [flaky on the runner]`. Leaving through the palette or a route change also closes it with the text kept (`r5-queue.ts jump`: `"field":{"open":0}`, `"decides":[]`, `"stored":["Q-5:defect:ref=BUG-1"]`). |
-| R4B-5 a selected question settled elsewhere made every answer key dead | **fixed** | `new-queue.ts selected-gone`: no tick is left (`"ticks":["","",""]`), the pane says `Needs one member.`, and `i` answers the question that was read: `"decides":["Q-5:infra"]`, `decided:infra by daniel`. The status at the moment it is dropped: `Q-5 removed from the selection because it is no longer listed.` (`logs/r5-queue-bulk-inline-gone.log`). See R5B-3 for the same event with the reference field open. |
+| R4B-1 a failure disputed after it was asked showed no evidence and took every key | **fixed** | `probes/dispute-blind.ts`, `dispute-hint.ts`, `api-dispute.ts`, `api-dispute-evidence.ts`, `new-queue.ts dispute`. The pane now reads `Expected 10 Observed 12 expected 10, got 12 … A counted pass and fail disagree. A decision must settle the dispute.` with `Needs one member who did not produce the evidence who is not an agent.`; `m` by a member who did not produce the failing result records `decided:mistaken by robin`, slot `C-1:satisfied` (one key, with the evidence and the hint on screen). To the producer of the failing result, live and after a reload: `You cannot settle this. Needs one member who did not produce the evidence who is not an agent.`, `"keys":""`, `f` sends nothing (`"decides":[]`). Server: `"message":"expected 10, got 12","sample":1,"hints":["disputed"]`, `"you":"forbidden"`. The UI half, which the engine fix no longer exercises, driven by rewriting the `inbox` reply (`r5-queue.ts evidence`): `message: null, sample: null` is readable (`Expected 3 Observed 0 …`, `"keys":"dtefi"`, `i` records); evidence the page cannot parse gives `The failure evidence could not be read. Refresh to try again.`, `"keys":""`, and `i`, `f`, `t`, Enter and a click each give `The evidence could not be read. Refresh before answering.` with `"decides":[]`; the same when the unreadable question is only selected, not shown. |
+| R4B-2 a step digit could not be taken back | **fixed** | `new-run.ts step-mark`, `step-dead`, `step-pass`. `2 3` gives `Step 23 marked.`; Escape: `2 f fails step 2.` (no mark), Backspace the same, `"stored":{}` after a reload; then `f`, note, Enter: `C-1:failing:robin/fail(fails at step three)`. A wrong mark: `try 1: C-1 was not recorded: The pinned case has no step 23. The mark was cleared`, `try 2: C-1 fail recorded`. `2 p` leaves `"stored":{}`, and the later correction is `C-1:fail(Looked again, the total is wrong) corrects 1`, no step. Neighbours (`r5-run.ts marks`, `held`): a mark on C-1 does not go with a failure on C-2 (`C-2:fail(C-2 fails, no step)`) and is still there on return (`Step 2 marked.`); `1 2` quickly is `Step 12 marked.` and records `fail@s12`; `1`, a pause, `1` is `Step 1`; `1` held is `Step 1`. |
+| R4B-3 a second `u` was dropped while the first was on its way | **fixed** | `new-queue.ts seq` (15 key-order and delay pairs) and `seq2` (11): all 26 `"verdict":"ok"` on both passes, `0` wrong. `f u i u t` with every call +250 ms and 300 ms between keys, round 4's failing pair: `"server":"decided:test by robin"`, `"decides":["Q-5:flaky","undo Q-5","Q-5:infra","undo Q-5","Q-5:test"]`; the same at 0/0 and +400/150. `f u f u f u`: `open`, six requests, all on Q-5. |
+| R4B-4 the reference field followed the person to another question | **fixed** | `new-queue.ts inline-click`, both variants: after the click `"current":"Q-4","fieldOpen":0`, typing and Enter send nothing (`"decides":[]`), `Q-5` stays `open` (or `decided:flaky by robin` where it was answered elsewhere: not overwritten). The reason field under `strict`, not driven in round 4 (`r5-queue.ts strict`): closed by the click, Enter sends nothing, `"stored":["Q-7:flaky:reason=flaky on the runner"]`, offered again on return and recorded as `decided:flaky [flaky on the runner]`. Leaving through the palette or a route change also closes it with the text kept (`r5-queue.ts jump`: `"field":{"open":0}`, `"decides":[]`, `"stored":["Q-5:defect:ref=BUG-1"]`). |
+| R4B-5 a selected question settled elsewhere made every answer key dead | **fixed** | `new-queue.ts selected-gone`: no tick is left (`"ticks":["","",""]`), the pane says `Needs one member.`, and `i` answers the question that was read: `"decides":["Q-5:infra"]`, `decided:infra by robin`. The status at the moment it is dropped: `Q-5 removed from the selection because it is no longer listed.` (`logs/r5-queue-bulk-inline-gone.log`). See R5B-3 for the same event with the reference field open. |
 | R4B-6 a failed withdrawal could not be retried | **fixed** | `new-queue.ts undo-fail`: `Q-5 is still decided: the withdrawal failed. Failed to fetch Press u to retry.`, the question not listed while the server holds `decided`; `u` again: `Answer withdrawn. Both decisions stay in the ledger.`, `"server":"open"`, `"decides":["undo Q-5","undo Q-5"]`. Three answered at once, the second of three withdrawals failing (`r5-queue.ts bulk-undo-fail`): list and server agree in between (`["open","decided:infra","decided:infra"]`, rows `["Q-6","Q-3"]`), `u` again reopens all three. |
 | R4B-7 Enter on a note in a closed run said nothing | **fixed** | `new-run.ts closed-under-note`: `This run is closed. No result was recorded; your note is kept.`, `"statusChanged":true`, the note in the field and on the device, no request. |
-| R4B-8 a correction to pass could carry the note of the failure it replaced | **fixed with a new problem** | `new-run.ts orders`: `fail, u, u, p` with `report` +0 and +500 ms both end `C-1:satisfied:daniel/pass`, requests `C-1:fail(wrong total)`, `C-1:skip(Withdrawn by the author) corrects 1`, `C-1:pass corrects 2`; all ten order and delay pairs `"verdict":"ok"`, UI reason equal to the server's. The new problem is R5B-1. |
+| R4B-8 a correction to pass could carry the note of the failure it replaced | **fixed with a new problem** | `new-run.ts orders`: `fail, u, u, p` with `report` +0 and +500 ms both end `C-1:satisfied:robin/pass`, requests `C-1:fail(wrong total)`, `C-1:skip(Withdrawn by the author) corrects 1`, `C-1:pass corrects 2`; all ten order and delay pairs `"verdict":"ok"`, UI reason equal to the server's. The new problem is R5B-1. |
 | R4C-2 `u` in the queue was refused under `strict` | **fixed** | `held3.ts undo`: `u` now opens a field (`"field":1`, focus `INPUT#answer-extra`). Driven to the end in `r5-queue.ts strict`, `strict-settled`, `strict-bulk`: label `Reason for withdrawing the answer`; Enter with nothing typed sends nothing; with a reason `"decides":[…,"undo Q-7 [answered the wrong one]"]`, `"server":"open"`, `Answer withdrawn. Both decisions stay in the ledger.` The reason is kept when the person clicks away (`"stored":["Q-7:withdraw:reason=answered the wrong one"]`, `u` still offered, the text back in the field). From Settled, with the request failing: `Q-7 is still decided: the withdrawal failed…`, reason kept, `u` and Enter withdraw it. Three at once: three `undo` requests with the one reason. At 1280x800 the field and its hint are inside the viewport (`shots/strict-withdraw-field.png`). |
 | R4C-3 a held key that opens a field typed its repeats into it | **fixed** | `held3.ts open` (one keydown, nine repeats): `c` held `TEXTAREA[Case title]=""`; `e` held: the title unchanged, and `e` held then Escape leaves `v1` at `v1`; run `f` `INPUT[Result note]=""`; runs `n` `INPUT#run-name[]=""`; queue `d` `INPUT#answer-extra[]=""`; settings `n` `INPUT#token-actor[]=""`. The new withdrawal field too: `u` held under `strict` opens it with `"value":""`. (The probe's `/` and `t` lines type into an editor the step before left open, as in round 4; they show nothing.) |
 
@@ -92,10 +92,10 @@ fails it again: `f`, `wrong total`, Enter, `k`, `2`, `f`, Enter. `probes/r5-run.
 | `report` delay | in the field at the second Enter | request sent | the result that stands |
 | --- | --- | --- | --- |
 | 300, 500 ms | (empty: the first reply is back and cleared it) | `C-1:fail@s2 corrects 1` | `fail@s2()` |
-| 800, 1200 ms | `wrong total` | `C-1:fail@s2 corrects 1` | `fail@s2()`, slot `C-1:failing:daniel/fail(no failure message (Run case 1))` |
+| 800, 1200 ms | `wrong total` | `C-1:fail@s2 corrects 1` | `fail@s2()`, slot `C-1:failing:robin/fail(no failure message (Run case 1))` |
 
 On `ec98ba4` the same keys at 800 and 1200 ms sent `C-1:fail@s2(wrong total) corrects 1` and ended
-`C-1:failing:daniel/fail(wrong total)` (`logs/r4-revision-refail-pace.log`). So where the note is on screen, this
+`C-1:failing:robin/fail(wrong total)` (`logs/r4-revision-refail-pace.log`). So where the note is on screen, this
 revision drops it and round 4's kept it. Afterwards the screen and the server agree (the field is empty, the row
 says fail), and the text is still in the ledger on the corrected first result; it is missing from the result that
 counts, and the question it raises is titled `no failure message`.
@@ -109,7 +109,7 @@ that is known (`r5-run.ts note-after-failed`, twice: `logs/r5-run.log`, `logs/r5
 The failure of the first request is never shown; the `u` records `C-1:skip(Withdrawn by the author)` on a slot
 that held nothing. The note is still in the field and on the device, which is right. The person presses `f`,
 Enter with `"fieldAtEnter":"wrong total"`: the request is `C-1:fail corrects 1`, the server holds
-`C-1:failing:daniel/fail(no failure message (Run case 1))`, the status says `C-1 fail recorded`, and the note
+`C-1:failing:robin/fail(no failure message (Run case 1))`, the status says `C-1 fail recorded`, and the note
 stays in the field and on the device (`"stored":{"run-note:scratch:R-1:1":"wrong total"}`). Every later Enter
 does the same until the text is edited. Here the typed text never reaches the server.
 
@@ -132,7 +132,7 @@ Blocks: **no**. Not new (the same code as `ec98ba4`; round 4 listed "a closed ru
 worth doing later). `r5-run.ts closed-u`, `logs/r5-run.log`, `shots/closed-u.png`: the person passes C-1, another
 person passes C-2, the run closes (`passed: 2 results proven`). `u`: the status reads `The result is corrected to
 skipped. A skipped slot counts as no proof.`, `"requests":["C-1:pass"]` (nothing new), the server holds
-`C-1:satisfied:daniel/pass`, and the rows still say pass. `undo` sets its message after `record` has already said
+`C-1:satisfied:robin/pass`, and the rows still say pass. `undo` sets its message after `record` has already said
 `This run is closed…`. The statement on screen is false; the list beside it is right. Fix: `undo` says what
 `record` returned.
 
@@ -181,7 +181,7 @@ it is sent, under a new command id (`randomId()` inside `submit`, `undo` and `re
 With the server recording and the reply dropped (`r5-queue.ts reply-lost`, `r5-run.ts reply-lost`):
 
 - Queue answer: the last line says only `Failed to fetch`; after the refresh the question is not listed, the
-  server holds `decided:defect(BUG-9) by daniel`, `u` is not offered (it can be withdrawn from Settled). The
+  server holds `decided:defect(BUG-9) by robin`, `u` is not offered (it can be withdrawn from Settled). The
   reference stays on the device (`Q-5:defect:ref=BUG-9`), harmless.
 - Queue withdrawal: `Q-5 is still decided: the withdrawal failed…` while the server and the list say open; `u`
   again sends a second `undo`, accepted, `Answer withdrawn.`
@@ -228,7 +228,7 @@ None new. The engine half of R4B-1 is fixed as far as the UI can see: `inbox` no
 ## Not checked
 
 - The whole browser suite, and the Suite, Case, Changes, Settings and sign-in screens, the duplicated-tab window
-  id, the draft resend and the `X-Casebook-As` refusal (the other reviewer); I ran only `round4.test.ts`.
+  id, the draft resend and the `X-Mainworthy-As` refusal (the other reviewer); I ran only `round4.test.ts`.
 - R5B-1 by hand at real network latency: delays and failures were injected at the browser on a loopback server.
 - Sign-off answers, the `l` (link) and `merge` answers, a queue longer than one page, a run longer than 200
   slots.

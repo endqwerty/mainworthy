@@ -6,7 +6,7 @@
 let person = "";
 let revision = 0;
 let active = false;
-export const sessionPersonKey = "casebook:session-person";
+export const sessionPersonKey = "mainworthy:session-person";
 export type DeviceSession = { person: string; revision: number };
 
 export function setDevicePerson(actor: string): void {
@@ -25,4 +25,4 @@ export const deviceSession = (): DeviceSession => ({ person, revision });
 export const sessionCurrent = (owner: DeviceSession): boolean =>
 	active && owner.person === person && owner.revision === revision;
 export const deviceKey = (kind: string, rest: string, actor = person): string =>
-	`casebook:${encodeURIComponent(actor)}:${kind}:${rest}`;
+	`mainworthy:${encodeURIComponent(actor)}:${kind}:${rest}`;

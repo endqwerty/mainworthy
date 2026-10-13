@@ -7,7 +7,7 @@
     "output": "docs/diagrams/red-build.html",
     "quality_profile": "showcase",
     "repository": {
-      "url": "git@github.com:endqwerty/casebook.git",
+      "url": "git@github.com:endqwerty/mainworthy.git",
       "revision": "de737a44d10e90ba00789642f160298f6f165bd3",
       "link_mode": "local-only"
     },
@@ -33,7 +33,7 @@
     {
       "id": "cli",
       "type": "external",
-      "label": "casebook",
+      "label": "mainworthy",
       "sublabel": "CI pipeline CLI",
       "sources": [
         {
@@ -73,7 +73,7 @@
     {
       "id": "db",
       "type": "database",
-      "label": "casebook.db",
+      "label": "mainworthy.db",
       "sublabel": "Writer + reader threads",
       "sources": [
         {
@@ -172,7 +172,7 @@
       "from": "pipeline",
       "to": "cli",
       "y": 273,
-      "label": "casebook report",
+      "label": "mainworthy report",
       "variant": "default",
       "note": "CLI: parseJUnit; detectTarget"
     },
@@ -285,7 +285,7 @@
       "from": "cli",
       "to": "ops",
       "y": 945,
-      "label": "casebook gate",
+      "label": "mainworthy gate",
       "variant": "default"
     },
     {
@@ -397,7 +397,7 @@
       "from": "cli",
       "to": "ops",
       "y": 1617,
-      "label": "casebook gate; same commit",
+      "label": "mainworthy gate; same commit",
       "variant": "emphasis"
     },
     {
@@ -484,7 +484,7 @@
       "title": "Why the gate becomes green",
       "items": [
         "The person chooses i: infra. settle records the decision and mints a Witness. setExcuse makes this cause excused for this target.",
-        "refold changes the tally and verdict in the same transaction. With no other failures or missing evidence, casebook gate exits 0.",
+        "refold changes the tally and verdict in the same transaction. With no other failures or missing evidence, mainworthy gate exits 0.",
         "The pipeline tests did not run again. The original failing results remain in the record.",
         "defect, test and expected are attributed and make the gate failed, exit 1. flaky, infra and inherited are excused. mistaken resolves a disputed planned slot."
       ]

@@ -258,15 +258,15 @@ REVISION_MATCH docs/product-vision.md True
 REVISION_MATCH docs/roadmap.md True
 LINK_SCAN_DONE CHECKED 47 BROKEN 0
 ABSOLUTE_LOCAL_LINKS 9
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:15 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:16 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#competitors
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:17 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:18 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#what-is-not-checked
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:19 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#testrail
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:20 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md#landscape
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:13 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/competitive-analysis.md
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:16 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/product-vision.md
-ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:16 /home/endqwerty/.t3/worktrees/casebook/t3-7f035a0d/docs/ux/flows.md
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:15 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:16 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#competitors
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:17 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#cross-cutting-findings
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:18 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#what-is-not-checked
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:19 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#testrail
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/a/design.md:20 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md#landscape
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:13 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/competitive-analysis.md
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:16 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/product-vision.md
+ABSOLUTE_LINK docs/design-arena/2026-10-11/candidates/b/design.md:16 /home/endqwerty/.t3/worktrees/mainworthy/t3-7f035a0d/docs/ux/flows.md
 OPS 18 ['propose', 'report', 'claim', 'announce', 'attach', 'plan', 'decide', 'inbox', 'get', 'find', 'impact', 'since', 'history', 'gate', 'trace', 'check', 'admin', 'transfer']
 MCP_TOOLS 10
 STATED_OPS ['Eighteen operations.', 'eighteen entries', 'eighteen operations']
@@ -314,7 +314,7 @@ Mechanical disposition: file equality, local link resolution, operation/tool cou
 
 ## 6. Attempts to break the final revision
 
-I executed small transcriptions of the stated branch logic, replacing storage lookups with fixed values. These are counterexamples to documentation, not tests against a Casebook binary. For allEqual I used pairwise equality, with empty and singleton sets agreeing.
+I executed small transcriptions of the stated branch logic, replacing storage lookups with fixed values. These are counterexamples to documentation, not tests against a Mainworthy binary. For allEqual I used pairwise equality, with empty and singleton sets agreeing.
 
 Exact output:
 
@@ -351,7 +351,7 @@ PREVIEW_STANDARD signoff(close) => rule:approve-when-passed clause=preview-1; ro
 
 **Issues on fd6188e.** R2-1, R2-4, R2-7 and R2-8 are resolved. R2-2, R2-3, R2-5 and R2-6 are partially repaired but still open for the reasons above. The blocking list is R3-1 through R3-7. Editorial nits and implementation limits are listed separately.
 
-This report and two supporting output files were written under `/tmp/casebook-arena/`. The repository remains unchanged. No commit, push, PR mutation or merge was performed.
+This report and two supporting output files were written under `/tmp/mainworthy-arena/`. The repository remains unchanged. No commit, push, PR mutation or merge was performed.
 
 Final read-only check:
 

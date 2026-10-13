@@ -19,7 +19,7 @@ if (command === '--help' || process.argv.includes('--help')) {
   if (command === 'mcp') {
     const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
     const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
-    const server = new McpServer({ name: 'casebook-ts-spike', version: '0.1.0' });
+    const server = new McpServer({ name: 'mainworthy-ts-spike', version: '0.1.0' });
     for (const op of registry) {
       server.registerTool(op.name, {
         description: op.description, inputSchema: op.input, outputSchema: op.output,

@@ -1,4 +1,4 @@
-# Casebook engine review, round 15
+# Mainworthy engine review, round 15
 
 Revision: `46c9222b03b91bc7fa9d7c51204b7e0e14736ce8`.
 Reviewer: Codex, GPT-6 Astra. Independent local QA of the specified revision.

@@ -4,7 +4,7 @@ Revision: `8168a5e407a0c9cea412e65ac2b37bf69e9fda48`, against parent `ed9e85e042
 
 B1-R3 is fixed. One new blocker remains: using the reader's truncated file name merges distinct files and can conceal a file whose tests all skipped. This was reproduced with Bun's own report.
 
-All execution used the clean export at `/home/endqwerty/.cache/casebook-arena/verify/dx-r4/tree`. The repository was read-only. `git archive 8168a5e` supplied the export, and `bun install --frozen-lockfile` succeeded with Bun 1.4.3. All review scripts, logs, fixtures and temporary directories are under `dx-r4`. Test commands set `TMPDIR` to `dx-r4/tmp`. No worktree release command ran.
+All execution used the clean export at `/home/endqwerty/.cache/mainworthy-arena/verify/dx-r4/tree`. The repository was read-only. `git archive 8168a5e` supplied the export, and `bun install --frozen-lockfile` succeeded with Bun 1.4.3. All review scripts, logs, fixtures and temporary directories are under `dx-r4`. Test commands set `TMPDIR` to `dx-r4/tmp`. No worktree release command ran.
 
 The safety fact is that counting parsed results must preserve each source file's identity, reject a wholly skipped file, and accept a file with an executed test. B1-R4 disproves the identity requirement. The `verify` skill shaped the full-gate probes and the comparison with the parent. TypeScript review and report writing also followed `typescript-best-practices`, `technical-writing` and `unslop`.
 
@@ -27,7 +27,7 @@ Both relative paths have 517 characters. Each directory component is valid on th
 Ran from `dx-r4/long-path-fixture`:
 
 ```sh
-TMPDIR=/home/endqwerty/.cache/casebook-arena/verify/dx-r4/tmp bun test --reporter=junit --reporter-outfile=/home/endqwerty/.cache/casebook-arena/verify/dx-r4/long-path.xml
+TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r4/tmp bun test --reporter=junit --reporter-outfile=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r4/long-path.xml
 ```
 
 Bun exits **0** and prints `1 pass`, `1 skip`, `0 fail`, `Ran 2 tests across 2 files.` The generated XML contains both full file paths.
@@ -39,11 +39,11 @@ bun long-path-probe.ts
 bun baseline-long-path-probe.ts
 ```
 
-Both run the complete gate against a fresh local Casebook with the two source paths present and outcome JSON `{"exit":0,"seconds":1}`. The baseline uses the exact parent gate script, with unchanged dependencies linked to the clean export.
+Both run the complete gate against a fresh local Mainworthy with the two source paths present and outcome JSON `{"exit":0,"seconds":1}`. The baseline uses the exact parent gate script, with unchanged dependencies linked to the clean export.
 
 Deciding evidence:
 
-- Head: one map entry with `{"tests":2,"skipped":1}`, `"problems":[]`, **exit 0**, and `casebook gate    passed: 1 result proven`.
+- Head: one map entry with `{"tests":2,"skipped":1}`, `"problems":[]`, **exit 0**, and `mainworthy gate    passed: 1 result proven`.
 - Head also prints two `Test file truncated to 500 characters` warnings. They do not change its exit code.
 - Parent: two map entries, **exit 1**, and `::error::tests-1: every test of test/.../skip.test.ts was skipped (1)`. The complete path is in the saved log.
 
@@ -64,7 +64,7 @@ Ran `TMPDIR=.../dx-r4/tmp bun reader-probes.ts`. Every ordinary edge below behav
 | `flakyFailure` or `rerunFailure` without a final failure | Exit 0. The reader records a passing result after retries. The counter follows that established interpretation. |
 | `rerunError` plus a final skip | Exit 1 with the skipped-file error. |
 | Name annotation `@C-1` plus skip | Exit 1 with the correct file's skipped error. |
-| Casebook property annotation on a pass | Exit 0. The reader keeps `test.key` and `test.file`; annotations do not replace them with `{ case: ... }`. |
+| Mainworthy property annotation on a pass | Exit 0. The reader keeps `test.key` and `test.file`; annotations do not replace them with `{ case: ... }`. |
 | Malformed skipped testcase | Exit 2, `blocked: 1 failure unexplained, 1 question open`. Damage becomes an error result, so treating it as non-skip does not make the gate pass. |
 
 The reader constructs keyed tests only. `{ case: ... }` is permitted by the broader input type but is not returned by this reader. The defensive branch in the new loop therefore does not discard files on reader-produced case annotations. Results with no file deliberately share the unnamed group, as requested. Empty results are rejected separately. An uncaught parsing exception would terminate the process unsuccessfully rather than yield a successful count; no exception was injected.
@@ -84,7 +84,7 @@ bun text-probes.ts
 bun ci-probes.ts
 ```
 
-Each probe starts a fresh local Casebook. Historical GitHub values in these scripts are fixture metadata; they do not access GitHub or select executable code.
+Each probe starts a fresh local Mainworthy. Historical GitHub values in these scripts are fixture metadata; they do not access GitHub or select executable code.
 
 | Fixture or group | Exit and deciding evidence |
 | --- | --- |
@@ -108,7 +108,7 @@ Each probe starts a fresh local Casebook. Historical GitHub values in these scri
 | Green shards | 0, `passed: 2 results proven` |
 | Missing XML | 1, `no report (test-results/tests-2.xml is missing or empty)` |
 | Missing outcome JSON | 1, `no report (its outcome file is missing)` |
-| Empty suite | 1, `its report holds no test` and `casebook report exited 4` |
+| Empty suite | 1, `its report holds no test` and `mainworthy report exited 4` |
 | Omitted source file | 1, `in no shard's report: test/b.test.ts` |
 | Crash outcome | 1, `the tests exited 1 and the report shows no failure` |
 | Timeout outcome | 1, `the tests exited 124 and the report shows no failure` |
@@ -123,7 +123,7 @@ Evidence: `neighbour-summary.log`, `extended-summary.log`, `text-summary.log`, `
 **Pass.** In the clean export:
 
 ```sh
-TMPDIR=/home/endqwerty/.cache/casebook-arena/verify/dx-r4/tmp bun test test/policy.test.ts test/e2e/round5.test.ts --reporter=junit --reporter-outfile=/home/endqwerty/.cache/casebook-arena/verify/dx-r4/real.xml
+TMPDIR=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r4/tmp bun test test/policy.test.ts test/e2e/round5.test.ts --reporter=junit --reporter-outfile=/home/endqwerty/.cache/mainworthy-arena/verify/dx-r4/real.xml
 ```
 
 Exit **0**, `29 pass`, `1 skip`, `0 fail`, `204 expect() calls`. Through the full gate: policy has 17 tests and zero skips; round5 has 13 tests and one skip. No file is flagged. Exit **0**, `passed: 29 results proven`.

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Casebook · The document</title>
+<title>Mainworthy · The document</title>
 <style>
 :root{--paper:#f8f7f3;--sheet:#fffefa;--ink:#292a27;--muted:#676b63;--line:#e4e3dc;--wash:#f0efe9;--accent:#8e483d;--accent-wash:#f4e9e4;--green:#346d54;--green-wash:#eaf2ec;--red:#9f463c;--red-wash:#f8eae5;--purple:#6e588f;--purple-wash:#eeeaf5;--gold:#806214;--gold-wash:#f5efdc;--blue:#426b7e;--shadow:0 24px 80px #24251f20;--mono:ui-monospace,SFMono-Regular,Consolas,monospace;--sans:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;--serif:Georgia,'Times New Roman',serif;color-scheme:light}
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]){--paper:#1c1e1d;--sheet:#222423;--ink:#e4e4dc;--muted:#9ca195;--line:#353935;--wash:#292d29;--accent:#d7937d;--accent-wash:#3a2d28;--green:#8cb99d;--green-wash:#293c30;--red:#df9281;--red-wash:#3d2b29;--purple:#b6a4d8;--purple-wash:#342d40;--gold:#c6aa68;--gold-wash:#3b3525;--blue:#8bb4c3;--shadow:0 24px 80px #0005;color-scheme:dark}}
@@ -29,7 +29,7 @@
 </defs></svg>
 <div class="app">
 <header class="topbar">
-<button class="brand" data-action="suite" aria-label="Casebook home"><span class="brandmark"><i></i><i></i></span>casebook</button>
+<button class="brand" data-action="suite" aria-label="Mainworthy home"><span class="brandmark"><i></i><i></i></span>mainworthy</button>
 <div class="workspace"><span>Acme</span><span>/</span><b>Web product</b></div>
 <nav class="topnav" aria-label="Main navigation"><button class="navitem active" data-action="suite" id="nav-suite">Suite</button><button class="navitem" data-action="queue" id="nav-queue">Queue <span class="navcount" id="queue-count">30</span></button><button class="navitem" data-action="run" id="nav-run">Run <span class="short-id">R-4</span></button></nav>
 <div class="toptools"><button class="search-trigger" data-action="palette"><svg><use href="#i-search"/></svg><span>Find anything</span><kbd>⌘ K</kbd></button><button class="iconbtn" id="theme-toggle" data-action="theme" aria-label="Switch color theme" title="Switch light and dark"><svg><use href="#i-sun"/></svg></button><span class="avatar" title="Dana · person">D</span></div>
@@ -176,7 +176,7 @@ window.addEventListener('hashchange',()=>{const [view,id]=location.hash.slice(1)
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',updateThemeIcon);
 const forcedTheme=new URLSearchParams(location.search).get('theme');if(['light','dark'].includes(forcedTheme))document.documentElement.dataset.theme=forcedTheme;
 const [initialView,initialId]=location.hash.slice(1).split('/');if(initialView==='case'&&initialId&&caseById(initialId))state.selectedCase=Number(initialId);if(['suite','queue','run','case'].includes(initialView))state.view=initialView;if(state.view==='run')state.runSlot=nextUnfilled();if(state.view==='queue'&&initialId)state.selectedQuestion=Number(initialId);render();
-window.CasebookMock={cases,folders,questions,run,state,decisionLedger,undoStack,markdownFor,contentOf,checks(){return {cases:cases.length,folders:folders.length,questions:questions.filter(q=>q.open).length,slots:run.slots.length,ciFilled:run.slots.filter(s=>s.result?.producer==='pipeline').length,agentFilled:run.slots.filter(s=>s.result?.producer==='agent').length,renderedRows:$$('.case-row').length,selectedCase:state.selectedCase,selectedQuestion:state.selectedQuestion,runSlot:state.runSlot+1,privateDraft:currentCase()?.dirty,captureTitleFocused:document.activeElement?.id==='case-title',networkRequests:performance.getEntriesByType('resource').filter(r=>/^https?:/.test(r.name)).length}}};
+window.MainworthyMock={cases,folders,questions,run,state,decisionLedger,undoStack,markdownFor,contentOf,checks(){return {cases:cases.length,folders:folders.length,questions:questions.filter(q=>q.open).length,slots:run.slots.length,ciFilled:run.slots.filter(s=>s.result?.producer==='pipeline').length,agentFilled:run.slots.filter(s=>s.result?.producer==='agent').length,renderedRows:$$('.case-row').length,selectedCase:state.selectedCase,selectedQuestion:state.selectedQuestion,runSlot:state.runSlot+1,privateDraft:currentCase()?.dirty,captureTitleFocused:document.activeElement?.id==='case-title',networkRequests:performance.getEntriesByType('resource').filter(r=>/^https?:/.test(r.name)).length}}};
 </script>
 </body>
 </html>

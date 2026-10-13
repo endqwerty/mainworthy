@@ -29,8 +29,8 @@ describe("capture grammar", () => {
 		expect(splitExpected("  untouched  ")).toEqual({ action: "  untouched  ", expected: null });
 	});
 	test("detects a title, tags and requirements only in the title", () => {
-		expect(parseOutline("Checkout #checkout @REQ-12 daniel@example.com\n  Open #123 > Ready\n  Reload")).toEqual({
-			title: "Checkout daniel@example.com",
+		expect(parseOutline("Checkout #checkout @REQ-12 robin@example.com\n  Open #123 > Ready\n  Reload")).toEqual({
+			title: "Checkout robin@example.com",
 			tags: ["checkout"],
 			covers: ["REQ-12"],
 			steps: [

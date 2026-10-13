@@ -101,7 +101,7 @@ func Diagnose(ctx context.Context, service *Service) error {
 	if err := writeJSON("diagnostics-"+store.Name()+"-"+sqliteDriver+".json", result); err != nil {
 		return err
 	}
-	if os.Getenv("CASEBOOK_CPU_PROFILE") != "1" {
+	if os.Getenv("MAINWORTHY_CPU_PROFILE") != "1" {
 		return nil
 	}
 	profile, err := os.Create("cpu-" + store.Name() + "-" + sqliteDriver + ".pprof")

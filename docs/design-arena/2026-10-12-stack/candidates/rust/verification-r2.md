@@ -79,4 +79,4 @@ By reading only, none blocking:
 - **My processes:** servers are stopped, port 18485 is free, my SQLite copy is deleted and the flock is released.
 - **Untouched:** no source was edited and `work.db` was not modified.
 
-The verdict is filed at `/home/endqwerty/.cache/casebook-arena/stack/rust/tmp/verifier2/verification-r2.md`, with `v2.py`, `extra.py` and their outputs beside it. Any further source change needs a new round.
+The verdict is filed at `/home/endqwerty/.cache/mainworthy-arena/stack/rust/tmp/verifier2/verification-r2.md`, with `v2.py`, `extra.py` and their outputs beside it. Any further source change needs a new round.

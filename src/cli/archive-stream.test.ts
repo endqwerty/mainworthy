@@ -6,7 +6,7 @@ import { withInstance } from "./test-support.ts";
 
 test("a failed download preserves an existing archive", async () => {
 	await withInstance(async ({ directory }) => {
-		const file = join(directory, "backup.casebook");
+		const file = join(directory, "backup.mainworthy");
 		await writeFile(file, "previous backup");
 		let chunks = 0;
 		const stream = new ReadableStream<Uint8Array>({

@@ -31,7 +31,7 @@ export function recoverAccepted(app: App): number {
 			});
 		} catch (error) {
 			console.error(
-				`casebook: report ${batch.id} could not be applied and stays pending: ${error instanceof Error ? error.message : String(error)}`,
+				`mainworthy: report ${batch.id} could not be applied and stays pending: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		}
 		if (!done) continue;

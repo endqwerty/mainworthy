@@ -2,7 +2,7 @@
 
 ## Direction, in three sentences
 
-Casebook is one fixed three-region workbench (sidebar, a windowed list, a pane that edits in place), and
+Mainworthy is one fixed three-region workbench (sidebar, a windowed list, a pane that edits in place), and
 every screen in the brief is a state of it: the case, the question's evidence and the run cockpit all live
 in the pane, so nothing ever navigates. Capture starts in the list row under the cursor (`c`, type, `⏎`)
 and continues in the pane as an outline, with no dialog, no save and no field to fill first. Who produced

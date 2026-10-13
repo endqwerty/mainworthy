@@ -140,7 +140,7 @@ idempotent receipts and a sequence change feed for workers and notifications. An
 while PostgreSQL keeps correctness. Multiple projects can write independently. One very busy project's commit-order row is still a
 throughput ceiling.
 
-I would choose cgo SQLite and pgx for a Go implementation of Casebook. Go has demonstrated the backend budgets, but this candidate
+I would choose cgo SQLite and pgx for a Go implementation of Mainworthy. Go has demonstrated the backend budgets, but this candidate
 alone cannot show that Go is better than the other languages. The overall choice needs the lead's serial reruns and a browser-
 editor probe that accounts for shared pure logic.
 
@@ -156,7 +156,7 @@ The browser logic-sharing extra below is a design sample, not a measured UI.
 Claude Opus 5.5 independently passed source 4cac9a7f468c with no blockers. It ran run.sh in 217 seconds, checked every workload and challenged races, rollback, glyphs, skips, orphan links, references and the CLI/MCP/HTTP contract. The source rebuild was byte-identical. Its contended W9 ingest reached 2,119.6 ms during a clean build, missing 2,000 ms; its rerun was 1,354.9 ms. Keep that miss in the comparison. Full verdicts are in verification-r1.md and verification-r2.md. The supplemental review passed the current-source driver comparison and confirmed WAL with synchronous=1 on both drivers' writer and all 16 reader connections. Three pgx connections confirmed synchronous_commit=on and fsync=on. Its scope was these probes; it did not reread the earlier specifications or reviews. See verification-r3.md.
 <!-- VERIFICATION_END -->
 
-This candidate did not change Casebook repository files. No commit or pull request is part of this spike.
+This candidate did not change Mainworthy repository files. No commit or pull request is part of this spike.
 
 ## TypeScript UI sharing extra
 

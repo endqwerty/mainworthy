@@ -12,7 +12,7 @@ I found no wrong fast answers, no omitted work, and no idempotency, atomicity or
 
 ## How I checked
 
-I ran the already-built `dist/server.js`, `dist/casebook` and `dist/node.js` on port 30457 against my own seed copy, and compared responses with independent SQL (`bun:sqlite`, `sqlite3`, `psql`). On `cb_ts` I used SELECTs, replays of existing commands and batches, and `/rollback` only.
+I ran the already-built `dist/server.js`, `dist/mainworthy` and `dist/node.js` on port 30457 against my own seed copy, and compared responses with independent SQL (`bun:sqlite`, `sqlite3`, `psql`). On `cb_ts` I used SELECTs, replays of existing commands and batches, and `/rollback` only.
 
 ## Check groups
 
@@ -47,7 +47,7 @@ I ran the already-built `dist/server.js`, `dist/casebook` and `dist/node.js` on 
 
    That is roughly 9–10 minutes under today's contention. Most of it is the 100 warm-up ingests per store. Reproduce with `time ./run.sh`. Either time one full run, or default `CB_EXTRAS=0`, or cut the warm-up ingests in the extras. Because of `set -e`, an extras failure also aborts before `aggregate.ts`, leaving `results.json` stale; `pglite-run.log` records one such abort.
 
-2. **`openapi.json` on disk is stale and has dangling refs.** `diff <(dist/casebook openapi) openapi.json` shows the file lacks the `$id` lines that current source emits (`registry.ts:20-21`). Without them, the six `#/$defs/__schema0` refs point at the document root, where no `$defs` exists. Re-running `registry-proof.ts` in the final pipeline fixes it. `REPORT.md` is likewise still marked interim.
+2. **`openapi.json` on disk is stale and has dangling refs.** `diff <(dist/mainworthy openapi) openapi.json` shows the file lacks the `$id` lines that current source emits (`registry.ts:20-21`). Without them, the six `#/$defs/__schema0` refs point at the document root, where no `$defs` exists. Re-running `registry-proof.ts` in the final pipeline fixes it. `REPORT.md` is likewise still marked interim.
 
 ## Low-severity notes (not blockers)
 

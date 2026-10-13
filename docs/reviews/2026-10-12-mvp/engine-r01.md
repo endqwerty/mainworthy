@@ -1,4 +1,4 @@
-# Casebook engine verification, round 1
+# Mainworthy engine verification, round 1
 
 Revision: **490aaf539c4ae39271ba0bcb9a9741d24db12650**, branch `t3/mvp-product-delivery`.
 
@@ -15,9 +15,9 @@ The complete brief was read, together with the project context, product-design s
 Everything needed to rerun the reproductions is retained here:
 
 ```sh
-cd /home/endqwerty/.cache/casebook-arena/verify/engine-r1/tree
+cd /home/endqwerty/.cache/mainworthy-arena/verify/engine-r1/tree
 bun install --frozen-lockfile
-cd /home/endqwerty/.cache/casebook-arena/verify/engine-r1
+cd /home/endqwerty/.cache/mainworthy-arena/verify/engine-r1
 bun scripts/probes.mjs
 bun scripts/policy-matrix.mjs
 bun scripts/support.mjs
@@ -250,7 +250,7 @@ Expected: reject the cycle before committing it. The ordinary API can create str
 bun scripts/probes.mjs repository-scope-collision
 ```
 
-In one Casebook project, report repo-a PR 1 failing and answer flaky. Report repo-b PR 1 with the same test key and message. Observed: both targets have `change:1`; the single change row keeps `repo:"repo-a"` but now has repo-b's head. Repo-b's failure inherits the decided question and its gate passes with `excused:1`.
+In one Mainworthy project, report repo-a PR 1 failing and answer flaky. Report repo-b PR 1 with the same test key and message. Observed: both targets have `change:1`; the single change row keeps `repo:"repo-a"` but now has repo-b's head. Repo-b's failure inherits the decided question and its gate passes with `excused:1`.
 
 Expected: repository-qualified targets and changes retain separate decision scopes. This violates P3/P4. It is an identity/scope collision, not the acknowledged deferred signature over-merge guard across files.
 

@@ -1,7 +1,7 @@
 # Compliance register
 
-What each legal or regulatory regime would need from Casebook, what the product already gives, what is missing,
-and what it would cost. Daniel's rule (decision 0009, answer 15): do what is very low cost now; plan what is
+What each legal or regulatory regime would need from Mainworthy, what the product already gives, what is missing,
+and what it would cost. The owner's rule (decision 0009, answer 15): do what is very low cost now; plan what is
 significant; where compliance would make the product worse to use, say so and document where the requirement is
 not met.
 
@@ -20,7 +20,7 @@ Read this first. These are the known gaps, in order of how soon they bite.
    (see row P3), which covers the common erasure request; a redaction of free text does not exist. A fix that
    keeps the record true is a redaction recorded as a decision, which replaces the text and keeps the fact that
    text was there. Cost: medium. Tracked in #40.
-2. **No retention limits.** Casebook keeps everything forever. Privacy law expects the operator to set how
+2. **No retention limits.** Mainworthy keeps everything forever. Privacy law expects the operator to set how
    long personal data is kept. Nothing enforces a limit. Cost: medium (it interacts with gap 1). Tracked in #40.
 3. **Sign-off is identity and time, not an electronic signature.** It does not re-authenticate the signer or
    record the meaning of the signature, so it does not satisfy 21 CFR Part 11 or EU Annex 11. Cost: medium,
@@ -32,19 +32,19 @@ Read this first. These are the known gaps, in order of how soon they bite.
 5. **Accessibility has not been audited.** The UI is keyboard-first, with visible focus and live status, but
    nobody has checked it against WCAG 2.2 AA. Public-sector and many enterprise buyers require a conformance
    report. Cost: medium. Tracked in #47.
-6. **No project licence.** The repository is private and `UNLICENSED`. Before a public release Daniel has to
+6. **No project licence.** The repository is private and `UNLICENSED`. Before a public release the owner has to
    choose one. Tracked in #34 with the name check.
 
 ## Privacy (GDPR, UK GDPR, CCPA)
 
-Self-hosted, the operator is the controller and Casebook is software they run; the product's duty is to make
-compliance possible. On a hosted tier Daniel would be a processor, with duties of his own (a data processing
+Self-hosted, the operator is the controller and Mainworthy is software they run; the product's duty is to make
+compliance possible. On a hosted tier the owner would be a processor, with duties of their own (a data processing
 agreement, a list of sub-processors, breach notification, data residency): planned with that tier (#31).
 
 | # | Requirement | Status | How, or what is missing |
 | --- | --- | --- | --- |
 | P1 | Know what personal data is held | met | Actor names, and whatever people type into text fields. No email, no IP addresses, no analytics, no telemetry. The only cookie is the session cookie, which is strictly necessary and needs no consent banner. |
-| P2 | Access and portability | met | `casebook export` writes every fact, decision and document in an open text format. Check: the export and import round-trip test. Tokens are not exported. |
+| P2 | Access and portability | met | `mainworthy export` writes every fact, decision and document in an open text format. Check: the export and import round-trip test. Tokens are not exported. |
 | P3 | Erasure of a person | partly | `admin { do: "actor.forget" }` replaces the actor's name with a pseudonym, disables the actor and revokes its tokens. History still says the same actor did each thing; it no longer says who that was. Text the person typed stays (gap 1). |
 | P4 | Storage limitation | not met | Gap 2. |
 | P5 | Security of processing | partly | Tokens are stored as SHA-256 hashes and shown once. Local mode accepts only same-origin loopback requests. Transport encryption is the reverse proxy's job (Coolify's Traefik), encryption at rest the disk's. No rate limiting on sign-in yet (#30). |
@@ -92,11 +92,11 @@ outcome); the audit and the fixes it finds are tracked in #47.
 
 Gap 4 and gap 6. Dependencies in the shipped executable: Bun (MIT), React (MIT), TanStack Query and Virtual
 (MIT), Zod (MIT), @noble/hashes (MIT), the MCP SDK (MIT), fractional-indexing (CC0), SQLite (public domain).
-None is copyleft, so none constrains Casebook's own licence.
+None is copyleft, so none constrains Mainworthy's own licence.
 
 ## Other regimes checked
 
-- **EU AI Act:** Casebook contains no model. Agents connect to it through MCP under their own identity, and
+- **EU AI Act:** Mainworthy contains no model. Agents connect to it through MCP under their own identity, and
   everything an agent writes is marked as an agent's. Not applicable as a provider of an AI system.
 - **Export controls on cryptography:** only standard hashing (SHA-256) is used; TLS is the proxy's. Nothing
   custom. Not a practical concern.

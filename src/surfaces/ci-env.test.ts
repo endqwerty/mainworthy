@@ -173,15 +173,15 @@ describe("detectTarget overrides and fallbacks", () => {
 		const actual = detectTarget(
 			{
 				...env,
-				CASEBOOK_COMMIT: "cccccccccccccccccccccccccccccccccccccccc",
-				CASEBOOK_BRANCH: "release/1.0",
-				CASEBOOK_PR: "93",
-				CASEBOOK_BASE: "dddddddddddddddddddddddddddddddddddddddd",
-				CASEBOOK_REPO: "other/repo",
-				CASEBOOK_ENV: "production",
-				CASEBOOK_JOB: "smoke",
-				CASEBOOK_ATTEMPT: "4",
-				CASEBOOK_BUILD_URL: "https://ci.example/build/4",
+				MAINWORTHY_COMMIT: "cccccccccccccccccccccccccccccccccccccccc",
+				MAINWORTHY_BRANCH: "release/1.0",
+				MAINWORTHY_PR: "93",
+				MAINWORTHY_BASE: "dddddddddddddddddddddddddddddddddddddddd",
+				MAINWORTHY_REPO: "other/repo",
+				MAINWORTHY_ENV: "production",
+				MAINWORTHY_JOB: "smoke",
+				MAINWORTHY_ATTEMPT: "4",
+				MAINWORTHY_BUILD_URL: "https://ci.example/build/4",
 			},
 			{ readFile: () => githubEvent },
 		);
@@ -248,7 +248,7 @@ describe("detectTarget overrides and fallbacks", () => {
 	test("overrides also beat local git", () => {
 		expect(
 			detectTarget(
-				{ CASEBOOK_BRANCH: "main", CASEBOOK_ATTEMPT: "2" },
+				{ MAINWORTHY_BRANCH: "main", MAINWORTHY_ATTEMPT: "2" },
 				{ git: () => ({ commit: head, branch: "feature/coupon", repo: "acme/web" }) },
 			),
 		).toEqual(detected("git", null, 2, null, { branch: "main" }));
@@ -289,8 +289,8 @@ describe("detectTarget overrides and fallbacks", () => {
 				GITHUB_ACTIONS: "true",
 				GITHUB_SHA: head,
 				GITHUB_RUN_ATTEMPT: "3",
-				CASEBOOK_COMMIT: "bad",
-				CASEBOOK_ATTEMPT: "-1",
+				MAINWORTHY_COMMIT: "bad",
+				MAINWORTHY_ATTEMPT: "-1",
 			}),
 		).toEqual({ target: null, job: null, attempt: null, buildUrl: null, provider: "github", missing: ["commit"] });
 	});
@@ -308,24 +308,24 @@ describe("detectTarget overrides and fallbacks", () => {
 		};
 		const actual = detectTarget({
 			...env,
-			CASEBOOK_COMMIT: "",
-			CASEBOOK_BRANCH: "  ",
-			CASEBOOK_PR: "",
-			CASEBOOK_BASE: "",
-			CASEBOOK_REPO: "",
-			CASEBOOK_ENV: "",
-			CASEBOOK_JOB: "",
-			CASEBOOK_ATTEMPT: "",
-			CASEBOOK_BUILD_URL: "",
+			MAINWORTHY_COMMIT: "",
+			MAINWORTHY_BRANCH: "  ",
+			MAINWORTHY_PR: "",
+			MAINWORTHY_BASE: "",
+			MAINWORTHY_REPO: "",
+			MAINWORTHY_ENV: "",
+			MAINWORTHY_JOB: "",
+			MAINWORTHY_ATTEMPT: "",
+			MAINWORTHY_BUILD_URL: "",
 		});
 		expect(actual).toEqual(detected("github", "e2e", 2, "https://github.com/acme/web/actions/runs/1", { pr: 482 }));
 	});
 
 	test("PR metadata follows its identity when overrides are applied", () => {
 		const env = { GITHUB_ACTIONS: "true", GITHUB_SHA: head, GITHUB_EVENT_PATH: "/event.json" };
-		const changed = detectTarget({ ...env, CASEBOOK_PR: "93" }, { readFile: () => githubEvent });
+		const changed = detectTarget({ ...env, MAINWORTHY_PR: "93" }, { readFile: () => githubEvent });
 		expect(changed.target).toEqual({ commit: head, branch: "feature/coupon", pr: 93, base });
-		const unchanged = detectTarget({ ...env, CASEBOOK_PR: "482" }, { readFile: () => githubEvent });
+		const unchanged = detectTarget({ ...env, MAINWORTHY_PR: "482" }, { readFile: () => githubEvent });
 		expect(unchanged.target).toEqual({
 			commit: head,
 			branch: "feature/coupon",
@@ -360,7 +360,7 @@ describe("detectTarget overrides and fallbacks", () => {
 
 	test("rejects partial, fractional, non-finite and unsafe integers", () => {
 		for (const value of ["2oops", "2.5", "Infinity", "9007199254740992", "0", "-1"]) {
-			const actual = detectTarget({ CASEBOOK_COMMIT: head, CASEBOOK_PR: value, CASEBOOK_ATTEMPT: value });
+			const actual = detectTarget({ MAINWORTHY_COMMIT: head, MAINWORTHY_PR: value, MAINWORTHY_ATTEMPT: value });
 			expect(actual.target).toEqual({ commit: head });
 			expect(actual.attempt).toBeNull();
 		}
@@ -408,13 +408,13 @@ describe("detectTarget overrides and fallbacks", () => {
 
 	test("keeps all returned strings within their wire-schema limits", () => {
 		const actual = detectTarget({
-			CASEBOOK_COMMIT: head,
-			CASEBOOK_BRANCH: "b".repeat(300),
-			CASEBOOK_REPO: "r".repeat(300),
-			CASEBOOK_ENV: "e".repeat(100),
-			CASEBOOK_BASE: "a".repeat(100),
-			CASEBOOK_JOB: "j".repeat(200),
-			CASEBOOK_BUILD_URL: "u".repeat(600),
+			MAINWORTHY_COMMIT: head,
+			MAINWORTHY_BRANCH: "b".repeat(300),
+			MAINWORTHY_REPO: "r".repeat(300),
+			MAINWORTHY_ENV: "e".repeat(100),
+			MAINWORTHY_BASE: "a".repeat(100),
+			MAINWORTHY_JOB: "j".repeat(200),
+			MAINWORTHY_BUILD_URL: "u".repeat(600),
 		});
 		expect(
 			ReportInput.safeParse({
@@ -427,7 +427,7 @@ describe("detectTarget overrides and fallbacks", () => {
 	});
 
 	test("never invents a base commit by truncating an over-long identifier", () => {
-		expect(detectTarget({ CASEBOOK_COMMIT: head, CASEBOOK_BASE: "a".repeat(70) }).target).toEqual({ commit: head });
+		expect(detectTarget({ MAINWORTHY_COMMIT: head, MAINWORTHY_BASE: "a".repeat(70) }).target).toEqual({ commit: head });
 		expect(
 			detectTarget({ GITLAB_CI: "true", CI_COMMIT_SHA: head, CI_COMMIT_BEFORE_SHA: "a".repeat(70) }).target,
 		).toEqual({ commit: head });
@@ -454,7 +454,7 @@ describe("detectTarget overrides and fallbacks", () => {
 			provider: "github",
 			missing: ["commit"],
 		});
-		expect(detectTarget({ ...env, CASEBOOK_COMMIT: base }, { readFile: () => null }).target).toEqual({
+		expect(detectTarget({ ...env, MAINWORTHY_COMMIT: base }, { readFile: () => null }).target).toEqual({
 			commit: base,
 			branch: "feature/coupon",
 		});

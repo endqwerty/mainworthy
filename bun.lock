@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "casebook",
+      "name": "mainworthy",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.32.1",
         "@noble/hashes": "^2.4.0",

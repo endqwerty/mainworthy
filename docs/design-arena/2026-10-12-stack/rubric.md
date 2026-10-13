@@ -11,7 +11,7 @@ Score each criterion 1 to 5 for each candidate (ts, go, rust) with one or two se
 
 Then answer, each with your reasons and what would change your mind:
 
-A. Which stack should Casebook be built on?
+A. Which stack should Mainworthy be built on?
 B. Store strategy, given the measurements: (1) SQLite only for now, for the Local and Server layers, with Postgres added only when one organisation needs several instances; (2) SQLite and Postgres both supported from the first version behind one store interface; (3) Postgres only, with an embedded Postgres (PGlite) for Local. Consider that domain code over an in-process SQLite can be synchronous and transactional with no connection pool, while Postgres makes every store call asynchronous.
 C. If TypeScript: Bun or Node as the runtime, on the evidence in the ts candidate's report?
 D. The single biggest risk in your recommendation and the cheapest test that would expose it early.

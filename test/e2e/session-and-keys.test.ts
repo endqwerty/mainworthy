@@ -109,7 +109,7 @@ for (const surface of ["case", "run", "queue"])
 					if (r.url().endsWith("/session")) sessions++;
 				});
 				await page.route(`**/${op}`, async (route) => {
-					actor = route.request().headers()["x-casebook-as"];
+					actor = route.request().headers()["x-mainworthy-as"];
 					await h.context.request.post(`${server.url}/api/login`, { data: { token: bob } });
 					await route.continue();
 				});
@@ -126,7 +126,7 @@ for (const surface of ["case", "run", "queue"])
 					expect(
 						await page.evaluate(() =>
 							Object.entries(localStorage)
-								.filter(([k]) => k.startsWith("casebook:alice:"))
+								.filter(([k]) => k.startsWith("mainworthy:alice:"))
 								.map(([, v]) => v)
 								.join(" "),
 						),

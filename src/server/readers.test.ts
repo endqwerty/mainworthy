@@ -19,13 +19,13 @@ afterEach(async () => {
 });
 
 function config(): Config {
-	const dataDir = mkdtempSync(join(tmpdir(), "casebook-reader-"));
+	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-reader-"));
 	dirs.push(dataDir);
-	return { dataDir, host: "127.0.0.1", port: 0, mode: "local", owner: "daniel", ownerToken: null };
+	return { dataDir, host: "127.0.0.1", port: 0, mode: "local", owner: "robin", ownerToken: null };
 }
 
 function workerUrl(source: string): string {
-	const dir = mkdtempSync(join(tmpdir(), "casebook-probe-worker-"));
+	const dir = mkdtempSync(join(tmpdir(), "mainworthy-probe-worker-"));
 	dirs.push(dir);
 	const path = join(dir, "worker.ts");
 	writeFileSync(path, source);
@@ -39,10 +39,10 @@ describe("reader threads", () => {
 		expect(readerCount({}, 4)).toBe(2);
 		expect(readerCount({}, 8)).toBe(6);
 		expect(readerCount({}, 16)).toBe(8);
-		expect(readerCount({ CASEBOOK_READERS: "0" }, 16)).toBe(0);
-		expect(readerCount({ CASEBOOK_READERS: "2" }, 16)).toBe(2);
+		expect(readerCount({ MAINWORTHY_READERS: "0" }, 16)).toBe(0);
+		expect(readerCount({ MAINWORTHY_READERS: "2" }, 16)).toBe(2);
 		for (const value of ["", "-1", "1.5", "2x", "Infinity", "9007199254740992"])
-			expect(() => readerCount({ CASEBOOK_READERS: value })).toThrow("CASEBOOK_READERS");
+			expect(() => readerCount({ MAINWORTHY_READERS: value })).toThrow("MAINWORTHY_READERS");
 	});
 
 	test("memory apps keep reads inline", () => {

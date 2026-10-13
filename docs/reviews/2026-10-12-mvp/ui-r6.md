@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 6 (re-check of round 5's six findings)
+# Mainworthy web UI: independent verification, round 6 (re-check of round 5's six findings)
 
 Revision judged: `67ebacc648445a03f2fcd3e6c479540a42c7070b`, branch `t3/mvp-product-delivery`.
 
@@ -38,7 +38,7 @@ line of R6-2 beside it.
 
 - Clean `git archive` export in `tree/`, `bun install --frozen-lockfile`, Bun 1.4.3, `/usr/bin/chromium`
   (`--headless=new --ozone-platform=headless`), real server processes on 127.0.0.1, ports 8950 to 8999, data under
-  `/tmp/casebook-ui-r6`. The authors' suite ran unpatched on its own ports (7400 to 7499). No file of the export
+  `/tmp/mainworthy-ui-r6`. The authors' suite ran unpatched on its own ports (7400 to 7499). No file of the export
   is changed; the probes use their own copy of the test helper (`probes/b/support.ts`, ports and flags only).
 - Round 5's probes copied into `probes/a/` (from `ui-r5a/probes/`) and `probes/b/` (from `ui-r5b/probes/`) with
   only paths and ports changed; run from `tree/` as `bun ../probes/<a|b>/<name>.ts <scenario>`. New probes for
@@ -60,9 +60,9 @@ line of R6-2 beside it.
 | N-1 a choice in the card thrown away by the next key in the editor | **fixed, with a new problem** (R6-1, blocks) | `a/r5.ts card-choice` twice (`logs/a-card-choice.{1,2}.log`, two rounds in each, 4 of 4 per variant): typed: `mergedFieldAfterTheChoice "Coupon case, merged by hand", mergedFieldAfterOneKeyInAStep "Coupon case, merged by hand", sentToServer ["Coupon case, merged by hand"], server {version 3, title "Coupon case, merged by hand", steps ["Open the cart","Apply the coupon!"]}, storage []`; use-current: `mergedFieldAfterOneKeyInAStep "Coupon case theirs" … server {version 3, title "Coupon case theirs", steps [… "Apply the coupon!"]}`. `card-edit` twice: `server {version 3, title "Coupon case, written by hand in the card", steps […,"Apply the coupon!"]}`. The new problem is the other order of the same two things: a choice, then typing in the field the choice was about (or anywhere, after a whole-body choice). |
 | N-2 every leave under a card proposes again; the earlier proposals stay open | **fixed** for the route reported; still reachable by a reload (R6-3, does not block) | `a/r5.ts orphans` twice (`logs/a-orphans.{1,2}.log`, 4 of 4 rounds): one request only, `cmd 0ccf453f base 1 "Coupon case mine" … reply "status":"conflict" "question":"Q-3"`; after resolving `server {version 3, title "Coupon case mine", steps […,"Apply the coupon SAVE10 and check the total"]}`, `questions open []`, `inbox []`, `proposalCards 0`, `storage []`. |
 | N-3 a closed tab leaves the person in conflict with their own half sentence | **fixed** | `a/r5.ts closed-edit-more` twice (`logs/a-closed-edit-more.{1,2}.log`): close: requests `cmd d41ab22a base 1 "Coupon case for returning cust"` → `adopted`, then `cmd 63149f97 base 2 "Coupon case for returning customers"` → `adopted`; `cards 0`, server `C-1 Coupon case for returning customers v3`, `storage []`, no open question; reload: the same. `a/r4.ts closed-tab-edit` twice (4 of 4 rounds): `conflict 0`, `version 3`, `"Open the order and ask for a refund to the card"`. (`closed-edit-resolve type-and-resolve` now times out waiting for a card that no longer comes: that is the fix.) |
-| R5B-1 a note in the field at Enter is not sent | **the note: fixed; the step mark: not fixed** (R6-4, does not block) | `b/r5-run.ts refail-pace` twice (`logs/b-refail-pace.{1,2}.log`): report +800 and +1200 ms: `fieldAtEnter "wrong total"`, requests `C-1:fail(wrong total)`, `C-1:fail@s2(wrong total) corrects 1`, server `C-1:failing:daniel/fail(wrong total)` (round 5: `fail@s2()`); +300 and +500 ms: the field is empty at Enter and nothing is sent as a note, as in round 5. `refail` twice: the same at +800 ms with and without the step. `note-after-failed` twice: the third request is `C-1:fail(wrong total) corrects 1`, server `fail(wrong total)`, `stored {}` (round 5: `C-1:fail corrects 1`, the note stuck on the device). `mark-after-pass` twice, +1500 ms: hint at Enter `Step 2 marked. …`, request `C-1:fail(meant to fail at two) corrects 1`: no step, as in round 5. |
-| R5B-2 `u` in a closed run says the result was corrected | **fixed** | `b/r5-run.ts closed-u` twice (`logs/b-closed-u.{1,2}.log`): after `u`: `status "This run is closed. No result was recorded; your note is kept."`, `requests ["C-1:pass"]` (nothing new), server `C-1:satisfied:daniel/pass`, rows unchanged. |
-| R5B-3 two selected, the reference field open, one answered elsewhere: Enter and Escape refused | **fixed** | `b/r5-queue.ts bulk-inline-gone` twice (`logs/b-bulk-inline-gone.{1,2}.log`): after the other person's answer `needs "1 selected questions will receive this answer."`, field `BUG-7` still open; Enter: `field {open 0}`, `decides ["Q-6:defect(BUG-7)"]`, server `decided:defect(BUG-7) by daniel`, `decided:flaky by daniel`. Escape (my `b/r6-queue.ts bulk`, variant `escape`, twice): `decides ["Q-7:defect"]`, the field closed, `j` moves on. |
+| R5B-1 a note in the field at Enter is not sent | **the note: fixed; the step mark: not fixed** (R6-4, does not block) | `b/r5-run.ts refail-pace` twice (`logs/b-refail-pace.{1,2}.log`): report +800 and +1200 ms: `fieldAtEnter "wrong total"`, requests `C-1:fail(wrong total)`, `C-1:fail@s2(wrong total) corrects 1`, server `C-1:failing:robin/fail(wrong total)` (round 5: `fail@s2()`); +300 and +500 ms: the field is empty at Enter and nothing is sent as a note, as in round 5. `refail` twice: the same at +800 ms with and without the step. `note-after-failed` twice: the third request is `C-1:fail(wrong total) corrects 1`, server `fail(wrong total)`, `stored {}` (round 5: `C-1:fail corrects 1`, the note stuck on the device). `mark-after-pass` twice, +1500 ms: hint at Enter `Step 2 marked. …`, request `C-1:fail(meant to fail at two) corrects 1`: no step, as in round 5. |
+| R5B-2 `u` in a closed run says the result was corrected | **fixed** | `b/r5-run.ts closed-u` twice (`logs/b-closed-u.{1,2}.log`): after `u`: `status "This run is closed. No result was recorded; your note is kept."`, `requests ["C-1:pass"]` (nothing new), server `C-1:satisfied:robin/pass`, rows unchanged. |
+| R5B-3 two selected, the reference field open, one answered elsewhere: Enter and Escape refused | **fixed** | `b/r5-queue.ts bulk-inline-gone` twice (`logs/b-bulk-inline-gone.{1,2}.log`): after the other person's answer `needs "1 selected questions will receive this answer."`, field `BUG-7` still open; Enter: `field {open 0}`, `decides ["Q-6:defect(BUG-7)"]`, server `decided:defect(BUG-7) by robin`, `decided:flaky by robin`. Escape (my `b/r6-queue.ts bulk`, variant `escape`, twice): `decides ["Q-7:defect"]`, the field closed, `j` moves on. |
 
 R5B-4 (`u` restores a failure without its step) is left by the authors (issue #72, its test is skipped). Not
 re-checked; it stands as round 5 reported it.
@@ -117,7 +117,7 @@ Each line ran twice with the same result unless it says otherwise.
 | `u` twice and `s` in a closed run | holds: nothing sent, the closed-run message |
 | Step marks (`new-run.ts step-mark`, `step-pass`; `r6-run.ts mark`) | hold where the mark is new: `2 f` note Enter `k 3 f` Enter with replies +1200 ms: `C-1:fail@s3(seen it) corrects 1`; `f` note Enter `k 2 f` Enter: `C-1:fail@s2(seen it) corrects 1`. Not where the mark was pressed before an earlier result on the slot: R6-4 |
 | R4B-4 the field follows the person (`new-queue.ts inline-click`, both variants) | holds: `fieldOpen 0`, `decides []`, the other question untouched |
-| R4B-5 a selected question settled elsewhere (`new-queue.ts selected-gone`) | holds: `ticks ["","",""]`, `decides ["Q-5:infra"]`, `decided:infra by daniel` |
+| R4B-5 a selected question settled elsewhere (`new-queue.ts selected-gone`) | holds: `ticks ["","",""]`, `decides ["Q-5:infra"]`, `decided:infra by robin` |
 | Both selected answered elsewhere with the field open | holds: the field closes, `decides []`, the reference kept on the device, `j` moves on |
 | The selected question under the cursor answered elsewhere, the other still selected | holds: the field closes (`1 selected questions will receive this answer.`), Enter sends nothing, `j` moves to the other |
 | Three selected, one answered elsewhere, Enter | holds: `decides ["Q-7:defect(BUG-7)+Q-5:defect(BUG-7)"]` |
@@ -194,7 +194,7 @@ field for a one-field choice; anywhere for the two whole-body buttons), then the
 fix one more word, "Resolve conflict" is an ordinary order. Someone who types first and chooses last, or who
 does not type after choosing, is not affected; typing in a field other than the one chosen is recorded. It is
 rated a blocker for the reason rounds 4 and 5 gave for R4A-1, R4A-3 and N-1: typed input is dropped without a
-message and the UI reports success. If Daniel weighs the order as unusual, the count drops to none.
+message and the UI reports success. If the owner weighs the order as unusual, the count drops to none.
 
 Promise contradicted: "nothing typed is lost … when another producer changed the same thing"; "no key press is
 lost". Smallest fix: store which **side** was chosen (`mine`, `current`, or text typed in the merged field) and
@@ -220,7 +220,7 @@ decide Q-3 merge title "Coupon case mine"
 reply {"q":"Q-3","status":"decided","effects":{"cases":[],"proposal":"P-5","adopt":"Q-5","status":"conflict"}}
 after: status "Conflict resolved. Both earlier versions remain in the timeline.", cards 0, storage [], editor closed
   server {version 3, title "Coupon case theirs, changed again"}
-  pane: "Q-5 · daniel Proposed, waiting for a person. Resolves the conflict in P-3 ~ Coupon case theirs, changed againmine … a Accept r Reject"
+  pane: "Q-5 · robin Proposed, waiting for a person. Resolves the conflict in P-3 ~ Coupon case theirs, changed againmine … a Accept r Reject"
 Q-5: "needs":"the author of the proposal who is not an agent","answers":["merge","reject"]
   accept → "C-1 has an unresolved conflict; its author must resolve it"
 ```
@@ -364,11 +364,11 @@ So each fix has a test that fails without it, with these gaps:
 
 ## Cleanup
 
-No server or browser of this review is running (nothing listens on 8950 to 8999). `/tmp/casebook-ui-r6`, my
+No server or browser of this review is running (nothing listens on 8950 to 8999). `/tmp/mainworthy-ui-r6`, my
 port locks, the scratch copy for the mutations (`mut/`), the export of round 5's revision (`r5tree/`) and
 `tree/node_modules` are removed (run `bun install --frozen-lockfile` in `tree/` to rerun a probe; for the
 comparison runs, export `9611d61` into `r5tree/` and link its `node_modules` to `tree/`'s). The repository
 checkout was read with `git archive`, `git diff` and `git log` only; no release or clean-up command was run
-in it, and the `/tmp/casebook-e2e-*` directories of other runs were not touched.
+in it, and the `/tmp/mainworthy-e2e-*` directories of other runs were not touched.
 
 ISSUES (1 blocker)

@@ -1,7 +1,9 @@
-# Casebook: rules for coding agents
+# Mainworthy: rules for coding agents
 
-A test case management system. Owner: Daniel (`endqwerty`). Personal project,
-but Daniel reviews every change on GitHub before it lands. Your global
+A test case management system, called Casebook until 2026-10-13
+(`docs/decisions/0015-the-project-is-called-mainworthy.md`). Owner: `endqwerty`,
+the person your global instructions name. Personal project, but the owner
+reviews every change on GitHub before it lands. Your global
 `~/.<agent>/AGENTS.md` applies too.
 
 Read [README.md](README.md) first, then `docs/product-vision.md`,
@@ -13,7 +15,7 @@ The MVP is built (2026-10-12): TypeScript on Bun, one SQLite file, a React web U
 (`docs/decisions/0010-stack.md`). What it contains and where it departs from the
 design: `docs/decisions/0012-mvp-scope-and-departures.md`. What is deferred: the
 GitHub milestone `Backlog to 1.0`. How it fits together: `docs/architecture.md`.
-It runs on Daniel's Coolify for his own use since 2026-10-12 (`docs/deploy.md`; the
+It runs on the owner's Coolify for their own use since 2026-10-12 (`docs/deploy.md`; the
 home lab's notes say where and how to redeploy). No blocking defect is known: issue
 #81, in the web UI's conflict card, is fixed (`docs/decisions/0013-ask-what-became-of-a-command.md`).
 
@@ -29,9 +31,9 @@ home lab's notes say where and how to redeploy). No blocking defect is known: is
   tests alone, printed as they run. One file: `bun test test/suite.test.ts`. One
   shard, as CI runs it: `bun run test --only=parallel --shard=2/5`; the quiet
   tests: `bun run test --only=quiet`. CI (`.github/workflows/check.yml`) runs five shards and the quiet
-  tests on a runner each, then one `gate` job reports every shard to Casebook and
+  tests on a runner each, then one `gate` job reports every shard to Mainworthy and
   its gate is the result (the deployed instance when the repository names one and
-  the job can use it, else a Casebook the job starts: `scripts/ci-instance.ts`,
+  the job can use it, else a Mainworthy the job starts: `scripts/ci-instance.ts`,
   decision 0014; switching it on is issue #92); a shard with no report fails it, and so does a test
   file in which every test was skipped. On GitHub the workflow takes about four
   minutes (2026-10-12, two runs: 4 min 24 s and 3 min 49 s; it was about 12 in one job).
@@ -58,11 +60,11 @@ home lab's notes say where and how to redeploy). No blocking defect is known: is
   hot-path budget does not merge; do not raise the number.
 - **The check's wall time is a budget** (`scripts/check-plan.ts`). The check warns
   when its tests take more than 130 s and fails above 150 s, unless other work
-  keeps the machine busy. Daniel raised the limit from 120 s on 2026-10-13, when
+  keeps the machine busy. The owner raised the limit from 120 s on 2026-10-13, when
   `main` itself took 120 to 122 s: the longer check is accepted for now, and two
   minutes is still the aim (issue #77). A change that makes the check slower says
   so and fixes it: split the file, share the set-up, do less in the browser. Do
-  not raise the limit; that is Daniel's to do. A file that takes a worker longer than half a minute is the next thing to
+  not raise the limit; that is the owner's to do. A file that takes a worker longer than half a minute is the next thing to
   split; after adding or splitting one, `bun run test --update-timings` (six
   minutes) and commit `scripts/test-timings.json`, which balances the CI shards.
 - **Tests run beside each other.** A test takes its ports, directories and browser
@@ -70,7 +72,7 @@ home lab's notes say where and how to redeploy). No blocking defect is known: is
   or a shared path. One that fails only beside others shares something: fix that,
   do not retry it. Only a test that compares a measured time with a limit goes in
   `QUIET` (`scripts/check-plan.ts`), where it runs after the others.
-- **Worktree release:** `rm -rf node_modules .casebook test-results` (also the
+- **Worktree release:** `rm -rf node_modules .mainworthy .casebook test-results` (also the
   `release worktree` script in `t3.json`, which runs when a thread settles).
 
 ## Working rules
@@ -79,6 +81,11 @@ home lab's notes say where and how to redeploy). No blocking defect is known: is
 - Record user-visible changes in `CHANGELOG.md`; record design decisions in
   `docs/decisions/NNNN-title.md`.
 - Secrets never enter the repo, logs or chat.
+- The owner's name is not written in the repository (their request, 2026-10-13):
+  not in docs, comments, tests, commit messages or pull requests. Write "the
+  owner"; an example person is `robin`.
+- The former name, Casebook, stays only in the files `test/architecture.test.ts`
+  lists, each with its reason.
 - Competitor claims in `docs/competitors.md` are hypotheses until verified;
   do not build on one without checking it.
 - A review is sized to the change. The independent verdict is a review of the
@@ -87,7 +94,7 @@ home lab's notes say where and how to redeploy). No blocking defect is known: is
   time, fifteen minutes for an ordinary change. A review of a whole area, with
   every earlier probe run again, is for a release or for a change that rewrites
   that area, and the brief says which. A finding becomes a test, so the suite
-  finds it from then on and the next review does not look for it again. Daniel's
+  finds it from then on and the next review does not look for it again. The owner's
   goal (2026-10-12, issue #77): landing a feature costs minutes of waiting, not
   most of an hour.
 - One agent at a time runs the whole browser suite on a machine. On 2026-10-12 an
@@ -113,28 +120,28 @@ home lab's notes say where and how to redeploy). No blocking defect is known: is
 
 ## Model profile
 
-**deep**, Daniel's standing choice for this project (named 2026-10-11). Every
+**deep**, the owner's standing choice for this project (named 2026-10-11). Every
 agent that delegates here takes models and effort from `homelab route models
 --profile deep` instead of the default `balanced`: higher effort for all
 classes, Opus on Claude verifiers and reviewers, Astra or Fable for `hard` and
-`lead`. It is not `max`; Daniel names that for a single thread or task. A model
-Daniel names in a thread still wins.
+`lead`. It is not `max`; the owner names that for a single thread or task. A model
+the owner names in a thread still wins.
 
 ## Delivery
 
-Delivery: **review-first**. Daniel merges; you do not.
+Delivery: **review-first**. The owner merges; you do not.
 
 Work on the T3 branch in your worktree and follow the `build` skill: check the
 change, get the independent verification `verify` asks for, open a non-draft PR
 with a standalone description (`gh pr create`), link it to the thread, and stop.
 Do not merge, arm auto-merge, close the PR or push to `main`, even when the
 checks are green. Opening the PR does not start a watcher; use `babysit` when
-Daniel asks you to get an open PR merge-ready. Only Daniel saying, in the
+the owner asks you to get an open PR merge-ready. Only the owner saying, in the
 current thread, to merge identified work lets you land it (the `ship` skill,
 with its gates; the merge method is rebase, `gh pr merge --rebase`, keeping the
 branch). "Keep going" or a budget request is not that.
 
-After Daniel has merged and you start new work on the same T3 branch, move the
+After the owner has merged and you start new work on the same T3 branch, move the
 branch onto the merge first, so T3 does not keep showing the merged commits as
 new changes (a rebase or squash merge leaves the branch's own commits outside
 `main`):

@@ -97,7 +97,7 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
 		if (app.config.ownerToken) {
 			const hash = hashToken(app.config.ownerToken);
 			if (!app.db.get(Q.tokenByHash, { hash })) {
-				app.db.run(Q.insertToken, { actor: owner.id, hash, label: "owner (from CASEBOOK_OWNER_TOKEN)", at });
+				app.db.run(Q.insertToken, { actor: owner.id, hash, label: "owner (from MAINWORTHY_OWNER_TOKEN)", at });
 			}
 		} else if (!existing && app.config.mode === "server") {
 			generatedToken = newSecret();
@@ -208,7 +208,7 @@ export function createToken(
 	if (existing && existing.disabled_at !== null) throw invalid(`actor ${input.actor} was forgotten and holds no token`);
 	if (existing && input.can.length > 0 && !sameGrant(db, existing.id, input.project, input.can)) {
 		throw invalid(
-			`actor ${input.actor} exists: a new token carries what it may already do. Change that with grant.set (casebook actor grant)`,
+			`actor ${input.actor} exists: a new token carries what it may already do. Change that with grant.set (mainworthy actor grant)`,
 		);
 	}
 	refuseGrant(input.kind, input.can);

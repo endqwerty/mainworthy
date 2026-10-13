@@ -9,7 +9,7 @@
 | Check | Verdict | Deciding output (mine) |
 |---|---|---|
 | Source hashes, start and end | PASS | `mismatches 0` both times, parent and scratch copies |
-| Binary built from this source | PASS | My rebuild is byte-identical to your `casebook-cgo` (`cmp -l`: 0 differing bytes, 16,917,256 bytes), statically linked |
+| Binary built from this source | PASS | My rebuild is byte-identical to your `mainworthy-cgo` (`cmp -l`: 0 differing bytes, 16,917,256 bytes), statically linked |
 | `run.sh` unattended, scratch copy | PASS | `PASS all workloads in both modes; zero errors; run.sh 217 seconds`, exit 0 |
 | Selfcheck, embedded and server | PASS | Both print `PASS mode=…` including `skip tally 9791/200/9; unique question refs/ranks; stored glyph oracle; orphan link rollback` |
 | Iteration counts and warmups | PASS | Every W1–W8 has the specified iterations and `warmup 100`, both modes |
@@ -69,4 +69,4 @@ No false benchmark result, missing workload or partial write found.
 - `cb_go` is in its post-benchmark and post-challenge state; I never connected to `cb_seed` and changed no server settings.
 - I deleted my scratch databases, the rebuilt binaries and the two clean compiler caches I created under `toolchains`.
 - Logs, JSON outputs, `challenge.py` and `mcpcli.py` remain in `go/verification-scratch-r2`.
-- No parent source, script, report, result or binary was changed, and nothing was written to the Casebook repository.
+- No parent source, script, report, result or binary was changed, and nothing was written to the Mainworthy repository.

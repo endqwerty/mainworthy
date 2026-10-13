@@ -90,7 +90,7 @@ Written by Claude Opus 5.5.
 | The parallel check, the split test files, the shared browser set-up and CI in shards | `6d7d12c` | GPT 6 Astra (Codex) | ISSUES (2 blockers) | [check-speed-r1.md](check-speed-r1.md) |
 | The fix for the first finding (a test file in which every test was skipped) | `4a4f1fa` | GPT 6 Astra (Codex) | ISSUES (1 blocker) | [check-speed-r2.md](check-speed-r2.md) |
 | The next fix (a test that takes its file from its suite) and the skipped-browser notice | `c824dce` | GPT 6 Astra (Codex) | ISSUES (1 blocker) | [check-speed-r3.md](check-speed-r3.md) |
-| The fix after that (skipped files counted from Casebook's own JUnit reader) | `8168a5e` | GPT 6 Astra (Codex) | ISSUES (1 blocker) | [check-speed-r4.md](check-speed-r4.md) |
+| The fix after that (skipped files counted from Mainworthy's own JUnit reader) | `8168a5e` | GPT 6 Astra (Codex) | ISSUES (1 blocker) | [check-speed-r4.md](check-speed-r4.md) |
 
 Both findings of the first check are dealt with: the gate job fails on a test file in which every test was
 skipped, and the pull request's description counts eight jobs, not nine. Each later check passed every report

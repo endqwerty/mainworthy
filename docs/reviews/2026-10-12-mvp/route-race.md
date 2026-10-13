@@ -1,7 +1,7 @@
 # Escape "sends no proposal": the page sends it, the test's route does not see it
 
 Investigated 2026-10-12 on commit `5cc2b3a`, in the scratch worktree
-`/home/endqwerty/.cache/casebook-arena/ci-repro`. Bun 1.4.3, playwright-core 1.64.0,
+`/home/endqwerty/.cache/mainworthy-arena/ci-repro`. Bun 1.4.3, playwright-core 1.64.0,
 Google Chrome 155.0.8059.39 and Chromium 152.0.7977.82, Linux, 16 cores.
 
 ## Verdict
@@ -27,7 +27,7 @@ Google Chrome 155.0.8059.39 and Chromium 152.0.7977.82, Linux, 16 cores.
 
 Three views of the same event. All files are under `traces/`.
 
-**1. The page's own account** (12 misses, `traces/casebook-race-*.json`; the product was instrumented
+**1. The page's own account** (12 misses, `traces/mainworthy-race-*.json`; the product was instrumented
 with trace points in `sealDraft`, `change`, `leaveEditor`, the editor's `keys` and the global key
 handler; times are ms since page load). One of them:
 
@@ -75,7 +75,7 @@ arrives (`_onRequestWillBeSent` in `coreBundle.js`), which is why there is no `r
 
 ## Why the browser does this, and the forced order
 
-Two scratch tests with no Casebook code in the page's path (`work/scratch-tests/`):
+Two scratch tests with no Mainworthy code in the page's path (`work/scratch-tests/`):
 
 - `zz-cdp-forced.test.ts` keeps the page's main thread busy for 300 ms, sends `Fetch.enable` meanwhile
   (acknowledged in 1 to 5 ms, while the page is still busy), then presses a key whose handler sends a
@@ -104,7 +104,7 @@ test; which queues are involved inside Chromium is my inference.
 Forced order, deterministic, about 7 s (fails 10 of 10 without a barrier):
 
 ```
-cd /home/endqwerty/.cache/casebook-arena/ci-repro
+cd /home/endqwerty/.cache/mainworthy-arena/ci-repro
 # zz-cdp-forced.test.ts is already in test/e2e/ (copy: race/work/scratch-tests/); it imports the helper from
 # the patched support.ts, which the scratch worktree has
 bun test test/e2e/zz-cdp-forced.test.ts                      # barrier none: 10 of 10 not intercepted
@@ -117,7 +117,7 @@ loops of `round7.test.ts` + `conflict.test.ts` in Google Chrome and one loop of 
 test files, each beside three busy loops):
 
 ```
-/home/endqwerty/.cache/casebook-arena/verify/race/work/recipe.sh <tag> 6
+/home/endqwerty/.cache/mainworthy-arena/verify/race/work/recipe.sh <tag> 6
 ```
 
 Result on the unfixed helper: **13 of 18 runs failed** (4/6, 4/6, 5/6), 16 failing tests, every one at
@@ -188,7 +188,7 @@ when the test timed out.
 | original helper timing + in-page trace points, same 4 loops, 18 runs | 13 failed, 12 traces captured |
 | the same with `DEBUG=pw:protocol`, 1 run | failed, browser-side trace captured |
 | `zz-route-window`: ordinary requests after `page.route()`, 52 installs under load | 0 unseen |
-| `zz-key-probe`: key right after `page.route()`, no Casebook code, under heavy load, 3 × 12 | 1, 2, 1 unseen |
+| `zz-key-probe`: key right after `page.route()`, no Mainworthy code, under heavy load, 3 × 12 | 1, 2, 1 unseen |
 | `zz-key-probe`, 3 × 60 under lighter load (no barrier, evaluate, probe) | 0, 0, 0: too little load to tell the barriers apart |
 | `zz-cdp-forced`: forced order, 10 rounds each | none 10/10 unseen, evaluate 0/10, helper 0/10 |
 | `interception.test.ts` without / with the helper call, Chromium and Chrome | fails / passes |
@@ -209,4 +209,4 @@ when the test timed out.
   with session cookies) is deleted; `traces/protocol-miss-raw-excerpt.txt` keeps the miss with cookie
   values redacted.
 - No process of mine is left running. I removed one temp directory my interrupted run left
-  (`/tmp/casebook-e2e-1764284-4HG6ma`) and touched no other.
+  (`/tmp/mainworthy-e2e-1764284-4HG6ma`) and touched no other.

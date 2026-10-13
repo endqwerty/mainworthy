@@ -165,7 +165,7 @@ check(
 			await takeover(a);
 			await eventually(() => readOnly(b), Boolean);
 			expect((await stored(a)).owner).toBe(
-				z.string().parse(await a.evaluate(() => sessionStorage.getItem("casebook:draft-window"))),
+				z.string().parse(await a.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"))),
 			);
 			expect(await title(a).inputValue()).toBe("Coupon case mine A B");
 			expect(await title(b).inputValue()).toBe("Coupon case mine A B");
@@ -245,7 +245,7 @@ check(
 			const { a, b } = w;
 			await a.keyboard.press("e");
 			await title(a).fill("Coupon case kept");
-			const bOwner = await b.evaluate(() => sessionStorage.getItem("casebook:draft-window"));
+			const bOwner = await b.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
 			await title(a).click();
 			await a.evaluate((owner) => {
 				const key = Object.keys(localStorage).find((key) => key.includes(":draft:") && key.endsWith(":C-1"));
@@ -333,7 +333,7 @@ check(
 			await Promise.all([title(a).press("End"), title(b).press("End")]);
 			await Promise.all([a.keyboard.type("A"), b.keyboard.type("B")]);
 			const draft = await stored(a);
-			const aId = await a.evaluate(() => sessionStorage.getItem("casebook:draft-window"));
+			const aId = await a.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
 			const winner = draft.owner === aId ? a : b;
 			const other = winner === a ? b : a;
 			await refused(other);
@@ -363,7 +363,7 @@ check(
 			await card(a).waitFor();
 			const merged = a.getByRole("textbox", { name: "Merged title", exact: true });
 			await merged.fill("Owner's merged choice");
-			const bId = await b.evaluate(() => sessionStorage.getItem("casebook:draft-window"));
+			const bId = await b.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
 			await merged.click();
 			await a.evaluate((owner) => {
 				const key = Object.keys(localStorage).find((key) => key.includes(":draft:") && key.endsWith(":C-1"));

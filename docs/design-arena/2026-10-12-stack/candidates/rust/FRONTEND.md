@@ -4,7 +4,7 @@ This is a concrete design example, written after the required spike and registry
 
 Generate the wire types from the existing operation registry. The binary's `openapi` command emits the same OpenAPI document as HTTP. For example, [openapi-typescript](https://openapi-ts.dev/introduction) can generate `ui/operations.d.ts` from that document. A typed client then uses `components['schemas']['propose_input']`, so a renamed input field changes the server and the generated client contract together. `methods`, `intent`, and `fields` are JSON values in this spike; the production domain types need to be narrower for the UI to benefit from precise types.
 
-Put the pure document functions and their types in `casebook-core`. It depends on Serde and the parsing/diff code, and has no axum, Tokio, database, clock or filesystem dependency. Both the server and a small `casebook-wasm` crate depend on it. The core owns these functions:
+Put the pure document functions and their types in `mainworthy-core`. It depends on Serde and the parsing/diff code, and has no axum, Tokio, database, clock or filesystem dependency. Both the server and a small `mainworthy-wasm` crate depend on it. The core owns these functions:
 
 ```rust
 pub fn parse_markdown(text: &str) -> Result<CaseBody, ParseError>;
@@ -20,7 +20,7 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub fn split_outline_json(paste: &str) -> Result<String, JsValue> {
-	let steps = casebook_core::split_outline(paste)
+	let steps = mainworthy_core::split_outline(paste)
 		.map_err(|e| JsValue::from_str(&e.to_string()))?;
 	serde_json::to_string(&steps)
 		.map_err(|e| JsValue::from_str(&e.to_string()))
@@ -30,7 +30,7 @@ pub fn split_outline_json(paste: &str) -> Result<String, JsValue> {
 The UI loads the WASM module once, then calls it locally. This sample uses the generated operation type for the returned steps:
 
 ```typescript
-import init, { split_outline_json } from './casebook-wasm.js';
+import init, { split_outline_json } from './mainworthy-wasm.js';
 import type { components } from './operations';
 
 type Body = components['schemas']['CaseBody'];

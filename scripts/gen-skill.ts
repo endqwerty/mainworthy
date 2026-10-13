@@ -87,5 +87,5 @@ export function generateToolReference(): string {
 }
 
 if (import.meta.main) {
-	await Bun.write(new URL("../skill/casebook/references/tools.md", import.meta.url), generateToolReference());
+	await Bun.write(new URL("../skill/mainworthy/references/tools.md", import.meta.url), generateToolReference());
 }

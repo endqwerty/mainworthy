@@ -1,4 +1,4 @@
-# Casebook, candidate C: the suite is a versioned tree of documents
+# Mainworthy, candidate C: the suite is a versioned tree of documents
 
 Seed lens: repository-centric, bun/deno-style tooling first. Stack-neutral: types
 below are a sketch in TypeScript-like notation, not a stack choice.
@@ -7,7 +7,7 @@ below are a sketch in TypeScript-like notation, not a stack choice.
 
 ## 1. Thesis
 
-Casebook is a **versioned knowledge repository for software checks**: a tree of
+Mainworthy is a **versioned knowledge repository for software checks**: a tree of
 plain-text documents (cases, shared steps, requirements, charters, gates, policy)
 plus an append-only log of evidence, owned by **one binary** that is CLI, server,
 editor UI and MCP server at once. The one structural idea: **a case is a claim, and
@@ -24,12 +24,12 @@ result recorded against a proposed edit counts the moment that edit merges.
    The tree holds *definitions*; evidence is an append-only log pinned to the tree
    by hash. "Runs record evidence against a tree revision" is kept; "everything is a
    file" is not.
-2. *Git is not the canonical store* (decided in §6.1). Casebook owns a git-*shaped*
+2. *Git is not the canonical store* (decided in §6.1). Mainworthy owns a git-*shaped*
    store (commits, branches as proposals, three-way merge, content hashes) and
    projects it to git byte-for-byte. Git is a mount and an export, not the database.
 3. *The CLI is not the primary surface for executors and readers.* Testers running
    a 30-case run and product owners reading a gate need a keyboard-first UI; the
-   CLI is primary for authors-who-code, CI and `casebook check`.
+   CLI is primary for authors-who-code, CI and `mainworthy check`.
 
 ---
 
@@ -64,7 +64,7 @@ use the same ops, and a feature that only one can use is not done.
 | # | Principle | Rules out | Tie-break |
 |---|---|---|---|
 | P1 | **One claim, many proofs.** A case states a claim; manual, code and agent are methods; all produce one `Evidence` shape stamped with the claim hash. | A "manual" model and an "automation" model; "agent test" as a separate feature; a result without a stamp. | Beats P6/P7 when a convenience would give one method a private result shape. |
-| P2 | **Text is the truth; everything else is a fold.** Authored state is canonical plain-text documents and an evidence log. Indexes, health, standing, links are pure folds computed in the same transaction and rebuildable (`casebook reindex` must reproduce them exactly). Export = storage format. | Hand-synced lists, a second source of truth, a cache carrying correctness, lock-in. | Integrity > P4: if a fold cannot be proven rebuildable it does not ship, even if it is fast. |
+| P2 | **Text is the truth; everything else is a fold.** Authored state is canonical plain-text documents and an evidence log. Indexes, health, standing, links are pure folds computed in the same transaction and rebuildable (`mainworthy reindex` must reproduce them exactly). Export = storage format. | Hand-synced lists, a second source of truth, a cache carrying correctness, lock-in. | Integrity > P4: if a fold cannot be proven rebuildable it does not ship, even if it is fast. |
 | P3 | **One operation surface.** UI, REST, MCP, CLI and CI ingest call the same ~14 ops; schemas defined once generate OpenAPI, MCP tools and CLI help. | UI-only features, a second path to one task, importable internals. | Beats P6: a "simple" shortcut that bypasses an op is rejected. |
 | P4 | **Fast by construction.** Each dominant access pattern has a named structure (§7). Latency and tokens-served have budgets enforced as failing tests. | "Add an index/cache later"; client-side filtering; unbounded responses. | Beats agents/UX when they conflict; but an agent token saving never costs correctness (P2/Integrity). |
 | P5 | **Policy routes authority; actors are equal.** A write names who and from which base. Policy (a document) decides whether it lands or becomes a proposal. People, agents and CI go through the same gate. | Agent-only or admin-only back doors; silent overwrite; pessimistic locks. | Beats P6: strictness is a switch, never a fork of the model. |
@@ -78,9 +78,9 @@ A principle may be bent only if all three hold: (1) the bend is written in a
 decision record that names the principle, the cost and an **expiry** (a date or a
 milestone); (2) it stays above the floor below; (3) the bend is local (one module or
 one release), never a silent default. Bends that remove a check (P8) need a second
-approver; Daniel merges anyway under review-first.
+approver; the owner merges anyway under review-first.
 
-**What "a bad product" means (the floor).** Casebook is bad if any of these is true:
+**What "a bad product" means (the floor).** Mainworthy is bad if any of these is true:
 it loses or silently overwrites a user's data; it shows a pass for something not
 proven on that claim; a hot-path read (open a case, save, ingest ack, gate read)
 exceeds **2x** its budget; a team cannot get its data out losslessly; a reader, CI
@@ -110,17 +110,17 @@ GitHub issues are flexible and slow; Linear is opinionated, instant and keyboard
 
 Jenkins needed plugins, a snowflake server and groovy; CircleCI gave a YAML file, hosted-grade defaults and built-in insights.
 
-- **C1. One line, no plugin, any CI.** `casebook report <files>` autodetects commit, branch, PR, build URL and attempt from the environment of GitHub Actions, GitLab, CircleCI, Buildkite, Jenkins. Check: fixture envs for each yield a complete `Ctx` with zero flags; a missing commit is an error unless `--local`.
+- **C1. One line, no plugin, any CI.** `mainworthy report <files>` autodetects commit, branch, PR, build URL and attempt from the environment of GitHub Actions, GitLab, CircleCI, Buildkite, Jenkins. Check: fixture envs for each yield a complete `Ctx` with zero flags; a missing commit is an error unless `--local`.
 - **C2. No settings table.** Every setting is a field of a document in the tree (policy, gates, sets), so it is diffable, reviewable and has history. Check: lint fails if a setting exists that is not a document field.
 - **C3. Insight on first ingest.** Flaky state, failure digests, durations and the unbound inbox exist after the *first* report, no setup. Check: integration test from empty project to populated digest in one `report` call.
 - **C4. The failing build explains itself.** The PR check text is generated from `status{gate}` (top reasons, counts, link). Check: golden-file test on the status text.
 
 ### 4.3 The bun/deno move (over npm/ts): one binary, batteries included, drop-in compatible, fast enough to be a feature
 
-- **B1. One artifact.** `casebook` = server + CLI + UI + MCP + importer; zero runtime dependencies; cold start <= 1 s on a laptop. Check: clean-container smoke test; start-time budget.
+- **B1. One artifact.** `mainworthy` = server + CLI + UI + MCP + importer; zero runtime dependencies; cold start <= 1 s on a laptop. Check: clean-container smoke test; start-time budget.
 - **B2. Drop-in.** It accepts what runners already emit (JUnit first) and what incumbents export (TestRail, CSV). No test code changes needed; the `@c_id` annotation is optional.
-- **B3. Built-in tooling for the tree.** `casebook fmt` (canonical document form), `casebook check` (a "type-checker" for the suite: dangling links, duplicate bindings, steps with no expected result, cases with no method, stale code methods). The same function backs `status{inbox}` structural items (decision 0006 item 4). Check: `check` runs in CI/pre-commit with a stable exit code; its rules are unit-tested.
-- **B4. `casebook bench`** ships in the binary and reproduces the budgets on the user's machine against a generated 100k-case / 1M-result dataset. Claims are re-runnable.
+- **B3. Built-in tooling for the tree.** `mainworthy fmt` (canonical document form), `mainworthy check` (a "type-checker" for the suite: dangling links, duplicate bindings, steps with no expected result, cases with no method, stale code methods). The same function backs `status{inbox}` structural items (decision 0006 item 4). Check: `check` runs in CI/pre-commit with a stable exit code; its rules are unit-tested.
+- **B4. `mainworthy bench`** ships in the binary and reproduces the budgets on the user's machine against a generated 100k-case / 1M-result dataset. Claims are re-runnable.
 
 ---
 
@@ -131,17 +131,17 @@ These are the spec. Types in §7 are derived from them.
 ### 5.1 Quickstart (as the user would read it)
 
 ```text
-# Casebook
+# Mainworthy
 
 Tests as a versioned tree of documents. One binary. No account to start.
 
 1. Install (single binary; install method follows the stack decision).
 2. In any folder:
 
-     $ casebook init
-     project "my-app" created (local store in ~/.casebook/my-app, tree rev 1)
+     $ mainworthy init
+     project "my-app" created (local store in ~/.mainworthy/my-app, tree rev 1)
 
-     $ casebook
+     $ mainworthy
      serving http://127.0.0.1:7117   ← opens the UI
 
 3. Write your first case. In the UI press  c  and type an outline:
@@ -161,20 +161,20 @@ Tests as a versioned tree of documents. One binary. No account to start.
 
 5. Send automated results (any CI, one line):
 
-     $ casebook report results.xml          # JUnit; commit/branch/PR from env
+     $ mainworthy report results.xml          # JUnit; commit/branch/PR from env
 
 6. Let an agent in (scoped, accountable):
 
-     $ casebook token new --agent claude-review --on-behalf-of me \
+     $ mainworthy token new --agent claude-review --on-behalf-of me \
          --can read,flag,record
-     $ claude mcp add casebook http://127.0.0.1:7117/mcp --header "Authorization: Bearer $T"
+     $ claude mcp add mainworthy http://127.0.0.1:7117/mcp --header "Authorization: Bearer $T"
 
 7. Leave any time:
 
-     $ casebook export ./suite     # plain-text tree + evidence JSONL; `import` restores it
+     $ mainworthy export ./suite     # plain-text tree + evidence JSONL; `import` restores it
 ```
 
-What step 3 stores (the canonical form `casebook fmt` always prints; ids are minted
+What step 3 stores (the canonical form `mainworthy fmt` always prints; ids are minted
 by the server and never reused):
 
 ```markdown
@@ -236,15 +236,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: npx playwright test --reporter=junit > results.xml || true   # what you already do
-      - run: casebook report results.xml --gate pr
+      - run: mainworthy report results.xml --gate pr
         if: always()
         env:
-          CASEBOOK_URL: ${{ vars.CASEBOOK_URL }}
-          CASEBOOK_TOKEN: ${{ secrets.CASEBOOK_TOKEN }}   # principal kind 'ci', scope: record+status
+          MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}
+          MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}   # principal kind 'ci', scope: record+status
 ```
 
 ```text
-$ casebook report results.xml --gate pr
+$ mainworthy report results.xml --gate pr
 run r_9ks2x  (github acme/shop#482 @ 3fa91c, attempt 1)
 10,000 results in 1.4 s  · 9,968 passed · 3 failed · 29 skipped
   failed: 2 new, 1 flaky (refund.spec.ts › refunds a paid order, flaky since #4102)
@@ -253,7 +253,7 @@ run r_9ks2x  (github acme/shop#482 @ 3fa91c, attempt 1)
 gate pr: HOLD
   2 selected cases have no result on this commit (c_3d8f1a, c_91xk4m)
   1 failing case is not quarantined (c_7k2m9q)
-https://casebook.example/r/r_9ks2x
+https://mainworthy.example/r/r_9ks2x
 exit 1        # exit 0 unless --gate or --fail-on is given and the gate is not PASS
 ```
 
@@ -342,9 +342,9 @@ Author capture (burst after a spec lands):
 
 ## 6. Where the tree lives, and the decision
 
-### 6.1 Decision: Casebook owns the store; git is a mount and a projection
+### 6.1 Decision: Mainworthy owns the store; git is a mount and a projection
 
-Question: should the suite tree live next to the code (in git) or in Casebook's
+Question: should the suite tree live next to the code (in git) or in Mainworthy's
 own store? Pushed as far as it goes, then decided.
 
 What git-canonical gives: tests change atomically with code in one PR; free review
@@ -358,7 +358,7 @@ What breaks it (each independently sufficient for a general audience, decision 0
    need a git host account to read or sign. That rebuilds the per-seat tax (reason #1).
 3. **Policy enforcement.** Decision 0003 says agents meet the same gates as people,
    enforced in the operation layer. In git, enforcement is the host's branch
-   protection, outside Casebook.
+   protection, outside Mainworthy.
 4. **Merge semantics.** 0004 wants field-level auto-merge and a side-by-side
    conflict, with a base hash on every write. Git merges lines, and has no notion of
    "this step was edited".
@@ -367,23 +367,23 @@ What breaks it (each independently sufficient for a general audience, decision 0
 6. **Evidence needs a revision with no repo.** Local layer, sandboxes, and imports
    have no git remote; stamps must not depend on one.
 
-**Decision.** The canonical tree is Casebook's own **content-addressed commit log**,
+**Decision.** The canonical tree is Mainworthy's own **content-addressed commit log**,
 git-shaped: `Commit(parent, changes, author, reason)` with a hash chain, branches (=
 proposals), tags (= releases), three-way field-level merge. Its working form is the
 canonical text documents of §5.1 and it exports to a git directory **byte-for-byte**
-(`casebook export`), which is also its backup format. A subtree can be **mounted** from
+(`mainworthy export`), which is also its backup format. A subtree can be **mounted** from
 elsewhere; every document has exactly one owner:
 
 ```ts
 type Owner =
-  | { t: 'native' }                                        // Casebook is the home (default)
+  | { t: 'native' }                                        // Mainworthy is the home (default)
   | { t: 'repo';     url: string; path: Path; sync: 'ci' } // files in a code repo are the home
   | { t: 'upstream'; project: ProjectId; path: Path }      // another project's subtree (org-shared standards)
 ```
 
 Writes to a document owned elsewhere are rejected with `RepoOwned{repo,path,patch}`
 (a ready unified diff to apply there): **one way to do each thing**. The `repo`
-owner is where "tests next to the code" lives: `casebook sync` in CI imports the repo's
+owner is where "tests next to the code" lives: `mainworthy sync` in CI imports the repo's
 documents as commits authored by CI. First slice implements only `native` (§12); the
 `Owner` type exists from day one so no model change is needed later.
 
@@ -497,7 +497,7 @@ type FieldOp =
 ```
 
 Heads, versions and the derived indexes (all written inside the commit transaction by
-the `tree` module only; `casebook reindex` rebuilds them from commits; the fold-
+the `tree` module only; `mainworthy reindex` rebuilds them from commits; the fold-
 equivalence test asserts `reindex(state) == state`):
 
 ```ts
@@ -529,7 +529,7 @@ type Proposal = {
 
 Rules enforced by the type and the `tree` module:
 - `claimOf(case, tree)` is a pure function of the case's claim and its shared steps' `claim` hashes at the same tree state. Committing a shared step re-derives `claim` for dependents via the `Link(uses)` reverse index in the same transaction, and records a `ChangeRow` per dependent with `cause: sharedStep`.
-- Moves keep `id`; `Path` is only a field of the version. Duplicate ids on import are rejected by `casebook check`.
+- Moves keep `id`; `Path` is only a field of the version. Duplicate ids on import are rejected by `mainworthy check`.
 - A `tag` is immutable; "the tree as released" is `Head` at that rev via `DocVersion`.
 
 ### 7.2 Evidence: one shape for all three methods
@@ -847,7 +847,7 @@ function judgeGate(g: GateDoc, rows: GateRow[], decisions: ActiveDecisions): Ver
     }
   }
   return { verdict: reasons.length ? 'hold' : 'pass', because: top(reasons, 20), total: reasons.length /* + counts */ }
-  // TODO: 'fail' vs 'hold': a failing required case is 'fail'; missing proof is 'hold'. Confirm with Daniel (open question 12 default).
+  // TODO: 'fail' vs 'hold': a failing required case is 'fail'; missing proof is 'hold'. Confirm with the owner (open question 12 default).
 }
 
 // impact(): ranking is pure and explainable
@@ -891,8 +891,8 @@ The command bar (`⌘K`) reaches every op; it is also how a new user discovers f
 
 An agentic test is a **charter** (a document) plus a **session run** (pinned scope +
 evidence). `record({ run:{kind:'session', charter}, results:[] })` freezes the selected cases at their
-claim hashes and returns the "map"; the agent works outside Casebook with its own
-tools (non-goal: Casebook does not run the software); it posts evidence in one
+claim hashes and returns the "map"; the agent works outside Mainworthy with its own
+tools (non-goal: Mainworthy does not run the software); it posts evidence in one
 `record` batch and findings in one `flag` batch. A finding that becomes a case is a
 `commit` linked to the finding. An agent method on a case (`{m:'agent', charter}`) lets
 coverage and gates count a session's pass as proof on equal terms with a human's or a
@@ -920,10 +920,10 @@ QA only; teams in general; token efficiency as a budgeted property.
 ## 12. First deliverable slice (not a bad product)
 
 In (Local first, same artifact runs Server):
-- `casebook` binary: serve, `init`, `new`, `find`, `report`, `check`, `fmt`, `export`, `import`, `token`, `mcp` (stdio), `bench`.
+- `mainworthy` binary: serve, `init`, `new`, `find`, `report`, `check`, `fmt`, `export`, `import`, `token`, `mcp` (stdio), `bench`.
 - Tree: `case`, `shared`, `req` (native + external stub), `set`, `gate`, `policy` documents; `commit` with base-check, field-level merge, proposals under `review: none|agents|all`; history, diff, restore, tags (releases).
 - Editor UI with outline capture, autosave, undo, command bar, Suite/Case/Runs/Release/Inbox.
-- Manual runs with the keyboard cockpit; `record` for manual and CI (JUnit; one JSON format after verification; CTRF only if verified alive); `@c_id` annotation hints; unbound inbox; flaky detection with evidence; quarantine; commit-status job for GitHub; `casebook-report` GitHub Action.
+- Manual runs with the keyboard cockpit; `record` for manual and CI (JUnit; one JSON format after verification; CTRF only if verified alive); `@c_id` annotation hints; unbound inbox; flaky detection with evidence; quarantine; commit-status job for GitHub; `mainworthy-report` GitHub Action.
 - `impact` (watch globs + req trailers + test-file adjacency), `changes`, `trace`, `status`, findings and ledger; MCP over HTTP with scoped tokens and a shipped `SKILL.md`.
 - Import: TestRail export and CSV. Export/import round-trip test.
 - Budgets as failing tests: latency set, ingest 10k, rebuildability, 5-minute start, MCP tool-list size.

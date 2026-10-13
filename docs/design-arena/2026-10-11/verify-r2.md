@@ -4,7 +4,7 @@
 
 Reviewer: Codex, GPT 6.1 Sol. The design attributes the synthesis to Claude Fable 5.1 at product-design.md:1063. This is an independent documentation review, not approval of an implementation.
 
-I read /tmp/casebook-arena/verify-r1.md first, ran the requested diff stat, read all eight changed files in full, and checked the relevant existing decisions, research jobs, competitive-analysis labels, original brief and judge requirements. All eight working files match the requested commit. The repository was clean before review and remains clean. I did not read the author's fix scripts or reasons.
+I read /tmp/mainworthy-arena/verify-r1.md first, ran the requested diff stat, read all eight changed files in full, and checked the relevant existing decisions, research jobs, competitive-analysis labels, original brief and judge requirements. All eight working files match the requested commit. The repository was clean before review and remains clean. I did not read the author's fix scripts or reasons.
 
 The safety fact is that a gate may qualify evidence only for the stated obligation, immutable basis and target, with all relevant accepted inputs applied and all depended-on decisions still current. The revision makes much of this explicit. It still leaves contradictory instructions and a faulty basis branch that an implementer could copy. Runtime correctness, latency, tokens, persistence, backup and restore are **not checked** because there is no implementation in this change.
 
@@ -214,7 +214,7 @@ Place the pre-first-usable Cloud proof and all required layer/job/backup/restore
 
 ## 5. Guidance, honesty and existing decisions
 
-- **Daniel's speed/capture guidance: resolved, remains passing as intent.** 0007:13-18 records practical speed, capture and "a better product"; :33-34 puts speed above the integrity admission floor; :40-41 makes capture first. :157 prohibits bending P0/P1 hot paths/P3; :171-173 requires measurable superiority. Product-design :99-100 provides input-to-paint and crash-recovery checks. Measurements remain not checked.
+- **The owner's speed/capture guidance: resolved, remains passing as intent.** 0007:13-18 records practical speed, capture and "a better product"; :33-34 puts speed above the integrity admission floor; :40-41 makes capture first. :157 prohibits bending P0/P1 hot paths/P3; :171-173 requires measurable superiority. Product-design :99-100 provides input-to-paint and crash-recovery checks. Measurements remain not checked.
 
 - **Draft numbers and implementation status: resolved.** Product-design :5-7 says "a sketch ... before any code" and "Numbers are draft budgets"; :906 explicitly says the pure functions are "not implemented". README:7-10 says stack undecided and nothing built. 0007:149-150 labels 2x a proposed limit, :159 labels three bends a proposed limit, and :177-178 labels five minutes draft until measured. These distinguish proposed normative limits from runtime measurements.
 
@@ -246,7 +246,7 @@ Place the pre-first-usable Cloud proof and all required layer/job/backup/restore
 
 - **Whitespace: resolved.** git diff --check a78b0ad..4d29392 exits 0 with no output.
 
-- **Secrets: resolved, remains passing within inspected scope.** The private-key, GitHub-token, AWS-access-key, OpenAI-key and credential-URL scan finds no matches. :231 uses "${{ secrets.CASEBOOK_TOKEN }}" as a CI reference, not a credential. This does not guarantee detection of every encoded secret.
+- **Secrets: resolved, remains passing within inspected scope.** The private-key, GitHub-token, AWS-access-key, OpenAI-key and credential-URL scan finds no matches. :231 uses "${{ secrets.MAINWORTHY_TOKEN }}" as a CI reference, not a credential. This does not guarantee detection of every encoded secret.
 
 ## 7. Exact mechanical outputs
 
@@ -291,7 +291,7 @@ HEAD was 4d29392495e3dd62da2b7b8aebb8fd00832653da. Clean status was checked befo
 
 ## 8. Attempts to break the revised contracts
 
-These are design counterexamples, not execution against a Casebook binary.
+These are design counterexamples, not execution against a Mainworthy binary.
 
 1. **qualifies, manual versus DOM.** A human-only requirement cannot be filled by auto, because :622-626 checks both requirement and case method kinds. A named auto binding excludes another test. These attacks are now rejected on paper. Distinct actors and uncorrected fail preservation are also explicit. A seventeenth fill and an unrelated agent charter still lack safe rules; see R2-6. Resolve/trust at :667 makes contradictory evidence a recorded decision rather than a later-write choice.
 
@@ -339,4 +339,4 @@ Editorial and nonblocking cleanup, separate from the verdict:
 
 **Disposition:** issues on 4d29392495e3dd62da2b7b8aebb8fd00832653da. The mechanical checks pass and many round-1 findings are resolved. Correct R2-1 through R2-8 before treating the documented contracts as ready for implementation. The blocking list above is limited to contradictory or unsafe instructions that could mislead a future implementer or violate the recorded decisions; editorial items do not determine the verdict.
 
-Only /tmp/casebook-arena/verify-r2.md was written as the review artifact. No repository files were changed.
+Only /tmp/mainworthy-arena/verify-r2.md was written as the review artifact. No repository files were changed.

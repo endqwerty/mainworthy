@@ -1,4 +1,4 @@
-# Casebook web UI round 2 re-check
+# Mainworthy web UI round 2 re-check
 
 Revision: `f1a2a2404153513892d0981035085a1acb250a17`, branch `t3/mvp-product-delivery`.
 
@@ -8,7 +8,7 @@ The six original reproductions are repaired. Adjacent checks found four blockers
 
 ## Method
 
-Judged a clean `git archive` of the exact revision, with `bun install --frozen-lockfile`, Bun 1.4.3 and system Chromium using `--headless=new --ozone-platform=headless`. All application code remained unchanged. Six exported test files have only port/Chromium environment changes, documented in [test-environment.patch](test-environment.patch). [Integrity comparison](integrity.json) checked 468 archived files. All servers used ports 7850–7899 and all database/browser temporary data used `/tmp/casebook-ui-r2a`.
+Judged a clean `git archive` of the exact revision, with `bun install --frozen-lockfile`, Bun 1.4.3 and system Chromium using `--headless=new --ozone-platform=headless`. All application code remained unchanged. Six exported test files have only port/Chromium environment changes, documented in [test-environment.patch](test-environment.patch). [Integrity comparison](integrity.json) checked 468 archived files. All servers used ports 7850–7899 and all database/browser temporary data used `/tmp/mainworthy-ui-r2a`.
 
 Checks ran against real local application servers. Independent probes seed through the API, drive Chromium, and compare the UI with server reads. Browser request delays or failure envelopes provide reproducible pending/failure cases. The report was updated as results arrived; [progress record](REPORT-progress.md) retains the earlier entries. No git state or repository file was changed.
 
@@ -80,6 +80,6 @@ UI-3's Back/Forward path hides an unfinished new case until reload. From `/suite
 
 No general engine, migration, deployment or non-UI review; no mobile, non-Chromium, screen-reader, IME, or physical-display timing checks. No claim of exhaustive concurrency testing. Scoped capabilities were checked for one-project writer behavior, not every possible role matrix. The view check covers the six requested screens, not every subpanel. I did not independently rerun the entire broader round-1 journey catalog because this is the bounded six-finding re-check.
 
-To reproduce, install dependencies in `tree/` with `bun install --frozen-lockfile`, create an owned `/tmp/casebook-ui-r2a` directory, then run `TMPDIR=/tmp/casebook-ui-r2a bun ../<probe>.mjs` from `tree/`. Set `RECHECK_NO_REPORT=1` to avoid appending to this report. The exported test helper confines servers to ports 7850–7899. [Environment patch](test-environment.patch), [mutation driver](mutation-audit.py), and all logs are retained. Final cleanup: no owned server/browser process and no listener on ports 7850–7899 remains. Removed all owned `/tmp` data, exported dependencies and test artifacts. The shared worktree was untouched. [Cleanup record](cleanup.json).
+To reproduce, install dependencies in `tree/` with `bun install --frozen-lockfile`, create an owned `/tmp/mainworthy-ui-r2a` directory, then run `TMPDIR=/tmp/mainworthy-ui-r2a bun ../<probe>.mjs` from `tree/`. Set `RECHECK_NO_REPORT=1` to avoid appending to this report. The exported test helper confines servers to ports 7850–7899. [Environment patch](test-environment.patch), [mutation driver](mutation-audit.py), and all logs are retained. Final cleanup: no owned server/browser process and no listener on ports 7850–7899 remains. Removed all owned `/tmp` data, exported dependencies and test artifacts. The shared worktree was untouched. [Cleanup record](cleanup.json).
 
 ISSUES (4 blockers)

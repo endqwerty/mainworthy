@@ -128,7 +128,10 @@ kbd {
 	color: var(--side);
 	display: grid;
 	place-items: center;
-	font: 700 12px var(--mono);
+}
+.brand .logo svg {
+	width: 100%;
+	height: 100%;
 }
 .brand .proj {
 	margin-left: auto;

@@ -1,18 +1,18 @@
 # 0006: Agent token cost is a measured product property
 
 - Date: 2026-10-10
-- Status: requirement accepted (Daniel); mechanisms proposed, to be measured
+- Status: requirement accepted (the owner); mechanisms proposed, to be measured
   in the phase 1 prototype and the phase 0 competitor MCP audit. Refined
   2026-10-11: mechanism 5's findings ledger becomes the ledger of all
   decisions, and review reuse is keyed by a basis that includes the relevant
   patch ([0008](0008-one-evidence-model.md)).
 
-Daniel's position: with agents doing review and testing, a test management
+The owner's position: with agents doing review and testing, a test management
 system should help reduce the tokens agents spend on adversarial review and
 adversarial testing, not add to them. This extends priority 2 (first-class
 agent access) in the product vision.
 
-## Terms (to be confirmed by Daniel, open question 19)
+## Terms (to be confirmed by the owner, open question 19)
 
 - **Adversarial review:** an agent challenges test artifacts or a change. It
   looks for missing or weak expected results, ambiguous steps, uncovered
@@ -20,7 +20,7 @@ agent access) in the product vision.
   adequately tested.
 - **Adversarial testing:** an agent tries to break the software, using the
   cases as a map, and records results and new findings with reproduction
-  steps. Casebook does not run the software or provide the agent's browser
+  steps. Mainworthy does not run the software or provide the agent's browser
   or API tooling (non-goal); it supplies context and records outcomes.
 
 ## Where tokens go (hypothesis, to be measured)
@@ -38,16 +38,16 @@ With a naive tool surface, an agent spends tokens on:
 
 ## Requirement
 
-The tokens an agent needs to finish a job through Casebook are measured and
+The tokens an agent needs to finish a job through Mainworthy are measured and
 budgeted like latency. A scripted reference agent with a fixed model and
 tokenizer runs the agent jobs (A1 to A6 in the research plan). We count every
 token of tool definitions, requests and responses, and the number of calls.
 Budgets are set from a baseline: the same jobs through incumbents' MCP
 servers (phase 0 audit) and through a naive "list and get everything" use of
-Casebook's own API. A change that breaks a budget does not merge, as with
+Mainworthy's own API. A change that breaks a budget does not merge, as with
 latency.
 
-Limit of the claim: Casebook controls what it serves, not the agent's own
+Limit of the claim: Mainworthy controls what it serves, not the agent's own
 reasoning or the client's context handling. Claims are stated as "tokens
 served to complete the job under the reference agent", never as total agent
 cost.

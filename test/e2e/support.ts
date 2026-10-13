@@ -10,13 +10,13 @@ import { type SeedResult, seed } from "../../src/web/dev/seed.ts";
 import { call } from "../../src/web/lib/api.ts";
 
 export const chromiumPath = [
-	process.env.CASEBOOK_CHROMIUM,
+	process.env.MAINWORTHY_CHROMIUM,
 	"/usr/bin/chromium",
 	"/usr/bin/google-chrome",
 	"/usr/bin/chromium-browser",
 ].find((path) => path && existsSync(path));
 export const browserAvailable = Boolean(chromiumPath);
-if (!browserAvailable) console.info("Skipping Casebook e2e: set CASEBOOK_CHROMIUM or install system Chromium.");
+if (!browserAvailable) console.info("Skipping Mainworthy e2e: set MAINWORTHY_CHROMIUM or install system Chromium.");
 export type Server = {
 	url: string;
 	project: string;
@@ -31,7 +31,7 @@ process.once("exit", () => {
 });
 /**
  * The ports of the servers the browser tests start. Any number of test processes share them (parallel workers,
- * a second checkout on the same machine): a port is held by the directory `casebook-e2e-port-<port>` in the
+ * a second checkout on the same machine): a port is held by the directory `mainworthy-e2e-port-<port>` in the
  * temporary directory, made with mkdir, which only one process can do. 7400 to 7449 is the range the protocol
  * began with and 7500 to 7599 was added for parallel workers; a process that knows only the first fifty takes
  * and frees the same directories. 7450 to 7499 stays out: four test files (agent, execution, settings and
@@ -87,7 +87,7 @@ export async function reservePort(
 ): Promise<{ port: number; release: () => Promise<void> }> {
 	for (let i = 0; i < ports.length; i++) {
 		const port = ports[nextPort++ % ports.length] ?? 0;
-		const lock = join(directory, `casebook-e2e-port-${port}`);
+		const lock = join(directory, `mainworthy-e2e-port-${port}`);
 		if (!(await made(lock)) && !((await reclaimed(lock)) && (await made(lock)))) continue;
 		ownedDirectories.add(lock);
 		await writeFile(join(lock, "pid"), String(process.pid));
@@ -103,7 +103,7 @@ export async function reservePort(
 			await release();
 		}
 	}
-	throw new Error("No free Casebook e2e port in 7400..7449 or 7500..7599");
+	throw new Error("No free Mainworthy e2e port in 7400..7449 or 7500..7599");
 }
 export async function startServer({
 	cases = 0,
@@ -116,7 +116,7 @@ export async function startServer({
 	preset?: string;
 	seed?: boolean;
 } = {}): Promise<Server> {
-	const dataDir = await mkdtemp(join(tmpdir(), `casebook-e2e-${process.pid}-`));
+	const dataDir = await mkdtemp(join(tmpdir(), `mainworthy-e2e-${process.pid}-`));
 	ownedDirectories.add(dataDir);
 	const reservation = await reservePort();
 	const port = reservation.port;
@@ -127,11 +127,11 @@ export async function startServer({
 		env: {
 			...process.env,
 			NODE_ENV: "production",
-			CASEBOOK_DATA: dataDir,
-			CASEBOOK_PORT: String(port),
-			CASEBOOK_MODE: mode,
-			CASEBOOK_OWNER_TOKEN: token,
-			CASEBOOK_READERS: process.env.CASEBOOK_READERS ?? testReaders(),
+			MAINWORTHY_DATA: dataDir,
+			MAINWORTHY_PORT: String(port),
+			MAINWORTHY_MODE: mode,
+			MAINWORTHY_OWNER_TOKEN: token,
+			MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
 		},
 		stdout: "ignore",
 		stderr: "pipe",
@@ -147,14 +147,14 @@ export async function startServer({
 		let ready = false;
 		for (let i = 0; i < 300; i++) {
 			if (child.exitCode !== null)
-				throw new Error(`Casebook failed to start: ${await new Response(child.stderr).text()}`);
+				throw new Error(`Mainworthy failed to start: ${await new Response(child.stderr).text()}`);
 			try {
 				ready = (await fetch(`${url}/healthz`)).ok;
 			} catch {}
 			if (ready) break;
 			await Bun.sleep(50);
 		}
-		if (!ready) throw new Error("Casebook e2e server did not become ready");
+		if (!ready) throw new Error("Mainworthy e2e server did not become ready");
 		const api = <O extends OpName>(op: O, input: Api[O]["input"], options: { token?: string } = {}) =>
 			call(op, input, { url, project: "scratch", token: options.token ?? token });
 		const seeded = seedData ? await seed({ url, cases, token }) : null;
@@ -246,7 +246,7 @@ export async function openPage(
 		window.addEventListener("keydown", (event) => {
 			if (!["Control", "Meta", "Shift", "Alt"].includes(event.key)) count++;
 		});
-		Object.defineProperty(window, "casebookKeyCount", { get: () => count });
+		Object.defineProperty(window, "mainworthyKeyCount", { get: () => count });
 	});
 	await page.goto(`${server.url}${path}`);
 	await page.waitForSelector(signedIn ? "#app" : "#token");
@@ -265,7 +265,7 @@ export async function openPage(
 }
 export async function keyCount(page: Page): Promise<number> {
 	return page.evaluate(() => {
-		const value: unknown = Reflect.get(window, "casebookKeyCount");
+		const value: unknown = Reflect.get(window, "mainworthyKeyCount");
 		return typeof value === "number" ? value : 0;
 	});
 }
@@ -290,13 +290,13 @@ export async function interceptionLive(page: Page): Promise<void> {
 	const route = unwrappedRoute.get(page) ?? page.route.bind(page);
 	const end = Date.now() + 10_000;
 	try {
-		await route(probe, (route) => route.fulfill({ status: 204, headers: { "x-casebook-e2e": "intercepted" } }));
+		await route(probe, (route) => route.fulfill({ status: 204, headers: { "x-mainworthy-e2e": "intercepted" } }));
 		while (Date.now() < end) {
 			const intercepted = await Promise.race([
 				page.evaluate(
 					(url) =>
 						fetch(url).then(
-							(reply) => reply.headers.get("x-casebook-e2e") === "intercepted",
+							(reply) => reply.headers.get("x-mainworthy-e2e") === "intercepted",
 							() => false,
 						),
 					`/healthz?interception=${id}`,

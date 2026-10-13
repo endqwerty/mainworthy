@@ -22,7 +22,7 @@ export function printReceipt(input: {
 }): void {
 	const { report, receipt } = input;
 	line(
-		`casebook report  ${input.project} @ ${identity(report.target, receipt)}${report.attempt !== undefined ? `  attempt ${report.attempt}` : ""}${report.job ? `  job ${report.job}` : ""}`,
+		`mainworthy report  ${input.project} @ ${identity(report.target, receipt)}${report.attempt !== undefined ? `  attempt ${report.attempt}` : ""}${report.job ? `  job ${report.job}` : ""}`,
 	);
 	const counts = receipt.counts;
 	line(
@@ -60,8 +60,8 @@ export function printReceipt(input: {
 	const reason = gate?.reason.replace(new RegExp(`^${gate.verdict}:\\s*`), "");
 	line(
 		gate
-			? `casebook gate    ${gate.verdict}: ${reason}${gate.url ? `  ${new URL(gate.url, `${input.url}/`).href}` : ""}`
-			: "casebook gate    pending: this session proves nothing about a build",
+			? `mainworthy gate    ${gate.verdict}: ${reason}${gate.url ? `  ${new URL(gate.url, `${input.url}/`).href}` : ""}`
+			: "mainworthy gate    pending: this session proves nothing about a build",
 	);
 	if (!receipt.fresh) line("  already received; nothing was written");
 }

@@ -1,6 +1,6 @@
 # Checks defined before implementation
 
-Expected claim: the same TypeScript operations can serve SQLite Local and PostgreSQL Server through HTTP, CLI, and MCP within Casebook's latency budgets. Treat timings as provisional while other candidates run. No runtime or driver winner is established without alternating repeated measurements.
+Expected claim: the same TypeScript operations can serve SQLite Local and PostgreSQL Server through HTTP, CLI, and MCP within Mainworthy's latency budgets. Treat timings as provisional while other candidates run. No runtime or driver winner is established without alternating repeated measurements.
 
 1. Run every W1 to W9 against a real loopback HTTP listener with persistent connections. Count HTTP, validation, and correctness errors. Return the measured operation's store duration independently of client elapsed time.
 2. W1 must return the requested reference and a parsed head version whose title agrees with the case.

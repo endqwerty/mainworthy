@@ -31,7 +31,7 @@
 //     failure; under `strict`, no failure is by somebody who reported it. Whatever came first.
 //
 // The tests are in `sequences-loose.test.ts`, `sequences-standard.test.ts` and `sequences-strict.test.ts`.
-// More seeds: CASEBOOK_SEQUENCE_SEEDS=500 bun test test/sequences-
+// More seeds: MAINWORTHY_SEQUENCE_SEEDS=500 bun test test/sequences-
 import { expect, test } from "bun:test";
 import {
 	aggregateSlot,
@@ -48,7 +48,7 @@ import { sweep } from "../src/server/jobs.ts";
 import type { Actor } from "../src/server/kernel/ctx.ts";
 import { harness } from "./helpers.ts";
 
-const SEEDS = Number(process.env.CASEBOOK_SEQUENCE_SEEDS ?? 40);
+const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
 const STEPS = 80;
 
 type Row = Record<string, string | number | null>;

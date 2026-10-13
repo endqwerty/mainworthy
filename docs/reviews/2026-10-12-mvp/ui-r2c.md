@@ -1,4 +1,4 @@
-# Casebook web UI: independent verification, round 2 (full review)
+# Mainworthy web UI: independent verification, round 2 (full review)
 
 Revision judged: `f1a2a2404153513892d0981035085a1acb250a17`, branch `t3/mvp-product-delivery`.
 
@@ -58,7 +58,7 @@ rest of the sentence into commands (R2-3). Typed text is also lost to view after
 | 3 | Editing and versions | **issues** (not blocking) | `logs/edit-a.log`. Step edit → v2 with a step-level diff on `v` (`v1 → v2 · b2.action … ~ Apply the coupon OLD10`); `u` restores as v3 (`["v3 b2.action","v2 b2.action","v1 created"]`). Badge and proof strip sampled on every frame behind 400 ms reads: `["v1|H✓now|✓","Draft|H✓now|✓","v2|H~now|~"]`, no stale tick. Two tabs, different fields: v3 holds `Coupon case from A` and `Open the cart from B`. Two tabs, same field: conflict card with both sides, resolved to v5, five versions kept. A draft is not replaced by an agent's proposal: the title stayed, focus stayed, my seal made the next version, the agent's adoption came after as `v3 by reviewer (agent)` with my title kept (`logs/proposal.log`). Defects found here: R2-8, R2-9, R2-10. |
 | 4 | Queue (D2) | **issues** | `logs/queue-a.log` `fast`, 1280x800, `decide` delayed 500 ms, twenty keys with no waiting: `keys 20`, `decide requests 20`, `server open []`, `wrong or missing decisions []`, keys offered equal to the server's list for all twenty, the help sentence beside each key, no answer card clipped. (a) put back by a failed request, answered again: `server ["Q-5 decided"], rows ["Q-4","Q-3"]`, still two rows later; put back by undo, answered again: `decided`, not visible (`logs/final-2.log`). (b) `f u u`: `server "Q-8 open", visible true`, one `undo` request. (c) `logs/run-a.log` `ui2`: writes and reads failing, both slots `missing`, both notes kept. Bulk: `requests 1, entries [3]`, three decided. Proposal: diff shown before the key, adopted version by the agent. Forbidden and advice-only: by the authors' tests only (3 of 3), not run independently. Fails: R2-2 (a late failure moves the cursor and the next key answers the wrong question), R2-7 (the typed reason is lost). Changed evidence: see R2-2 and "Worth doing later". |
 | 5 | Running a suite (J5) | **issues** | `logs/run-b.log`. Planned through `n` by folder (`C-1,C-2,C-3`), tag (`C-4,C-5`), text (`C-4,C-5`) and commit (`accepts {"commit":"abcdef1234567"}`). Ten results in 26 keys with `report` delayed 500 ms: all ten on the server, `C-3:failing:fail(total is wrong)` with `"atStep":"b2"`, `C-4 blocked`, `C-10 skip`; 10 requests. The node that was next became current (`{"ref":"C-2","probe":"was-next","ready":"true"}`). At 1280x800: controls 609..772, note 666..701, buttons end at 656, viewport 800. UI verdict and tally equal the server's (`blocked: 1 failure unexplained, 1 question open`, `7 pass · 1 unexplained failures · 4 missing · 2 skipped`). `u` appends a correction (result 11). Pipeline-filled and agent-filled slots are shown, skipped and unchanged after every outcome key (`logs/run-b.log` `external`, `logs/extra.log` `agent-slot`). Fails: R2-1. |
-| 6 | Changes and Settings | pass | `logs/session.log`. Gate, open and settled questions, impact and uncovered files shown; 16 fast switches behind unevenly delayed reads, 19 distinct frames, `frames pairing a header with another change's gate: []`. Policy: `standard is in force. Proposal P-2 and decision Q-2 are both recorded.`, on the server `Q-2 … accept by daniel`. New token: shown once, `local:false, session:false, cookie:false`, gone after dismiss and reload. Scoped token: sees `scratch` only, can record a result, cannot change Settings; revoking returns the sign-in. Note R2-11 (a refused project reads as an empty one). |
+| 6 | Changes and Settings | pass | `logs/session.log`. Gate, open and settled questions, impact and uncovered files shown; 16 fast switches behind unevenly delayed reads, 19 distinct frames, `frames pairing a header with another change's gate: []`. Policy: `standard is in force. Proposal P-2 and decision Q-2 are both recorded.`, on the server `Q-2 … accept by robin`. New token: shown once, `local:false, session:false, cookie:false`, gone after dismiss and reload. Scoped token: sees `scratch` only, can record a result, cannot change Settings; revoking returns the sign-in. Note R2-11 (a refused project reads as an empty one). |
 | 7 | Sign-in and session | **issues** | `logs/session.log`. Local mode: `app:1, token:0, cookies:0`. Server mode: asks for the token, wrong token `That token was not accepted. Try again.`, cookie `httpOnly:true, sameSite:"Strict"`, `document.cookie ""`. Second project created and in the switcher (`["scratch","second"]`). Refused session returns to sign-in and restores the note and the draft. Fails: R2-5 (opened over plain HTTP under any name but localhost, nothing can be written). |
 | 8 | Keyboard, layout, themes | **issues** | `logs/layout.log`. The `?` sheet lists 33 bindings; exercised from the keyboard: `c e Enter j k arrows / Escape Ctrl+Enter Shift+Enter x m t # u Space ] Alt+[ n f z [ v a r g s/q/r/c/, Ctrl+K ?`. Plain keys typed in the filter and the tag box fire nothing (`value "cejkxmt#u z", drafts 0`). Palette finds cases (`Password reset restores access C-3`) and commands (`Go to Queue`). No key-acted control clipped on seven screens at 1280x800 and 1440x900 in both themes (no `clipped` line), no page scroll. 28 screenshots taken; the 14 at 1280x800 were looked at as light/dark pairs and are legible in both themes; the 1440x900 set was checked by measurement only. Fails: `j`/`k` in a folder leave the folder (R2-6); a navigation key is typed into a stored draft (R2-9). |
 | 9 | Speed (P1) | pass | `logs/latency.log`, 10,000 real cases, 200 samples each, timed from the capturing keydown; "frame" is the next animation frame, where the state is checked, "painted" the frame after. `j` 16.1 / 17.3 ms and 31.5 / 35.4 ms (p50 / p95, frame and painted); `k` 17.5 / 19.1 and 32.7 / 32.9; `c` to a focused caret 16.4 / 18.4 and 32.7 / 33.6; a typed character 16.4 / 16.6 and 32.7 / 32.9. Budget 100 ms at p95. No wrong sample in the 200 of each action (one of the two extra title characters my script typed without waiting a frame was counted wrong; the 200 step characters all reached the server). A measurement on a shared machine (load 2.7 to 3.9), headless, not a guarantee. |
@@ -137,7 +137,7 @@ text lost.
 
 Blocks: **yes**.
 
-New-case drafts are stored one per key, but a single pointer (`casebook:active:<project>`) says which to restore.
+New-case drafts are stored one per key, but a single pointer (`mainworthy:active:<project>`) says which to restore.
 After two captures fail to save, a reload restores the last only. The first stays in `localStorage`; no screen
 shows it, and it is never sent.
 
@@ -152,13 +152,13 @@ Promise contradicted: "nothing typed is lost on reload, on a failed request". Th
 ### R2-5: Opened over plain HTTP under any name but localhost, the UI cannot write anything
 
 Blocks: **yes, if server mode is meant to be opened from another machine over HTTP**, which is what `Dockerfile`
-(`CASEBOOK_HOST=0.0.0.0`) and `compose.yaml` set up; no document says HTTPS is required.
+(`MAINWORTHY_HOST=0.0.0.0`) and `compose.yaml` set up; no document says HTTPS is required.
 
 `crypto.randomUUID` exists only in a secure context. The UI calls it for every draft id and command id (13 call
 sites in `src/web`). Chromium treats `http://localhost` and `http://127.0.0.1` as secure, so every test passes;
 `http://tower:7357` or `http://192.168.x.x:7357` is not.
 
-Reproduction (`probes/extra.ts http-name`, `logs/extra.log`; the same server opened as `http://casebook.test:<port>`
+Reproduction (`probes/extra.ts http-name`, `logs/extra.log`; the same server opened as `http://mainworthy.test:<port>`
 with the name mapped to 127.0.0.1 by a Chromium flag): `{"isSecureContext":false,"randomUUID":"undefined","clipboard":"undefined"}`.
 Sign-in works. `c`, type, Escape: no draft row, nothing on the server, uncaught
 `crypto.randomUUID is not a function`. `p` in a run: `C-1:missing`, status `crypto.randomUUID is not a function`.
@@ -180,7 +180,7 @@ Reproduction (`probes/suite-a.ts folder`, `logs/suite-a-1.log`, 30 seeded cases)
 is filed in it but sealing it also leaves the view on "All cases". The `?tag=` filter is dropped the same way.
 
 It blocks in my judgement because the folder tree is the reason decision 0011 kept the workbench frame, and a
-folder cannot be walked: every selection throws the person out of it. If Daniel judges it cosmetic, the count
+folder cannot be walked: every selection throws the person out of it. If the owner judges it cosmetic, the count
 drops by one.
 
 ### R2-7: A reason or defect reference typed in the queue is lost when the request fails, and on a reload

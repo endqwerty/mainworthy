@@ -63,9 +63,11 @@
     "test/e2e/ports.test.ts": 122,
     "src/cli/archive-stream.test.ts": 72,
     "test/architecture.test.ts": 60,
+    "src/server/kernel/former-name.test.ts": 45,
     "src/surfaces/ci-env.test.ts": 26,
     "test/check.test.ts": 26,
     "test/merges.test.ts": 25,
+    "src/web/lib/former-name.test.ts": 5,
     "src/core/text.test.ts": 0
   }
 }

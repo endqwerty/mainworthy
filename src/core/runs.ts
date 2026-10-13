@@ -39,7 +39,7 @@ export type ExerciseObligation = Extract<Obligation, { kind: "exercise" }>;
 export const Verdict = z.enum(["passed", "failed", "blocked", "pending"]);
 export type Verdict = z.infer<typeof Verdict>;
 
-/** The four verdicts are the four exit codes of `casebook gate` (commitment C2). */
+/** The four verdicts are the four exit codes of `mainworthy gate` (commitment C2). */
 export const EXIT_CODE: Record<Verdict, number> = { passed: 0, failed: 1, blocked: 2, pending: 3 };
 
 export const Tally = z.object({
@@ -87,7 +87,7 @@ export function verdict(input: { tally: Tally; blocking: number; outstanding: nu
 	return "passed";
 }
 
-/** One sentence for a person, and for the last line of `casebook gate`. */
+/** One sentence for a person, and for the last line of `mainworthy gate`. */
 export function explainVerdict(input: {
 	tally: Tally;
 	blocking: number;

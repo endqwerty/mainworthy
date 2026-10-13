@@ -40,7 +40,7 @@ export class ApiError extends Error {
 		this.name = "ApiError";
 	}
 }
-export const unauthenticatedEvent = "casebook:unauthenticated";
+export const unauthenticatedEvent = "mainworthy:unauthenticated";
 function refuse(error: Extract<Envelope<unknown>, { ok: false }>["error"], message = error.message): never {
 	if (error.code === "unauthenticated" && typeof window !== "undefined") {
 		suspendDeviceSession();
@@ -79,7 +79,7 @@ export async function call<O extends OpName>(
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
-			...(owner ? { "X-Casebook-As": encodeURIComponent(owner.person) } : {}),
+			...(owner ? { "X-Mainworthy-As": encodeURIComponent(owner.person) } : {}),
 			...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
 		},
 		body: JSON.stringify(input),

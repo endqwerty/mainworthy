@@ -7,7 +7,7 @@ import subprocess
 import time
 
 root = pathlib.Path.cwd()
-seed = "/home/endqwerty/.cache/casebook-arena/stack/seed.db"
+seed = "/home/endqwerty/.cache/mainworthy-arena/stack/seed.db"
 runs = {"cgo": [], "pure": []}
 for round_number in range(5):
     for driver in ("cgo", "pure"):
@@ -16,7 +16,7 @@ for round_number in range(5):
         subprocess.run(["cp", "--reflink=auto", seed, "probe.db"], check=True)
         path = f"driver-{driver}-{round_number+1}.json"
         begin = time.monotonic()
-        subprocess.run([f"./casebook-{driver}", "driver-probe", "--db", str(root / "probe.db"), "--out", path], check=True)
+        subprocess.run([f"./mainworthy-{driver}", "driver-probe", "--db", str(root / "probe.db"), "--out", path], check=True)
         with open(path) as file:
             measured = json.load(file)
         measured["wallSeconds"] = time.monotonic() - begin
@@ -27,7 +27,7 @@ for round_number in range(5):
 
 summary = {}
 for driver, measured in runs.items():
-    summary[driver] = {"artifactBytes": os.path.getsize(f"casebook-{driver}"), "static": "statically linked" in subprocess.check_output(["file", f"casebook-{driver}"], text=True), "runs": 5,
+    summary[driver] = {"artifactBytes": os.path.getsize(f"mainworthy-{driver}"), "static": "statically linked" in subprocess.check_output(["file", f"mainworthy-{driver}"], text=True), "runs": 5,
                        "residentMB": statistics.median(item["residentMB"] for item in measured), "workloads": {}}
     for name in measured[0]["results"]:
         values = [item["results"][name]["p50"] for item in measured]

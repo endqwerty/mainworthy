@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-export GOROOT=/home/endqwerty/.cache/casebook-arena/toolchains/go
-export GOPATH=/home/endqwerty/.cache/casebook-arena/toolchains/go-gopath
-export GOCACHE=/home/endqwerty/.cache/casebook-arena/toolchains/go-cache
-export GOMODCACHE=/home/endqwerty/.cache/casebook-arena/toolchains/go-modcache
-export GOTMPDIR=/home/endqwerty/.cache/casebook-arena/toolchains/go-tmp
-export TMPDIR=/home/endqwerty/.cache/casebook-arena/toolchains/go-tmp
+export GOROOT=/home/endqwerty/.cache/mainworthy-arena/toolchains/go
+export GOPATH=/home/endqwerty/.cache/mainworthy-arena/toolchains/go-gopath
+export GOCACHE=/home/endqwerty/.cache/mainworthy-arena/toolchains/go-cache
+export GOMODCACHE=/home/endqwerty/.cache/mainworthy-arena/toolchains/go-modcache
+export GOTMPDIR=/home/endqwerty/.cache/mainworthy-arena/toolchains/go-tmp
+export TMPDIR=/home/endqwerty/.cache/mainworthy-arena/toolchains/go-tmp
 export GOTOOLCHAIN=local
 export GOENV=off
 export PATH="$GOROOT/bin:$PATH"

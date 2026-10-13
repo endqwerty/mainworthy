@@ -1,6 +1,6 @@
 # Product design
 
-The overall shape of Casebook, synthesised on 2026-10-11 from four independent
+The overall shape of Mainworthy, synthesised on 2026-10-11 from four independent
 candidate designs (see [Synthesis decision](#synthesis-decision)) and the
 decisions in `docs/decisions/`. It is a sketch, stack-neutral, written before
 any code. Types are TypeScript-like notation, not a stack choice. Numbers are
@@ -18,7 +18,7 @@ slice · 10 What this changes in earlier docs · Synthesis decision · Rationale
 
 ## 1. Thesis
 
-Casebook keeps one true record of three things: what the software is expected
+Mainworthy keeps one true record of three things: what the software is expected
 to do (**expectations**: versioned cases, shared fragments, requirements), what
 was observed against those expectations (**evidence**: results and findings
 from people, pipelines and agents, in one shape, each saying exactly what it
@@ -90,7 +90,7 @@ toolchain.
 ### 4.1 The Linear move: capture-first, keyboard-first, one queue
 
 GitHub Issues gives a list and leaves the workflow to you; Linear made the
-workflow the product and made every action instant. Casebook's version: the
+workflow the product and made every action instant. Mainworthy's version: the
 tool opens where you write, every action has a key, and everything that needs
 a human answer is one queue.
 
@@ -108,24 +108,24 @@ a human answer is one queue.
 
 | Commitment | Check |
 | --- | --- |
-| C1. **One added line, no plugin, no required annotation in test code:** `casebook report <files>`. Commit, branch, PR, build URL and attempt come from the CI environment (GitHub Actions, GitLab, CircleCI, Buildkite, Jenkins fixtures). | Fixture environments yield a complete target with zero flags; a missing commit is an error unless `--session`. |
+| C1. **One added line, no plugin, no required annotation in test code:** `mainworthy report <files>`. Commit, branch, PR, build URL and attempt come from the CI environment (GitHub Actions, GitLab, CircleCI, Buildkite, Jenkins fixtures). | Fixture environments yield a complete target with zero flags; a missing commit is an error unless `--session`. |
 | C2. **Four verdicts, four exit codes:** `passed` 0, `failed` 1 (needs a fix), `blocked` 2 (needs a decision), `pending` 3 (needs evidence). | Unit test of the pure verdict function; CLI test. |
 | C3. **A decision changes the check without re-running the pipeline.** | Job test: ingest a red report, decide `infra` under a policy that lets a member excuse it, read the gate within seconds. |
 | C4. **One cause is one question.** A report with 500 failures sharing a signature opens at most 3 questions (draft); a failure already failing on the base of the change is shown as such and *suggested* as excused, never excused without a decision (which may be a rule's). | Fixture D1; the base-failure hint is visible and the excuse is a decision row. |
 | C5. **Accepting an upload turns a green gate pending before any processing**: the adapter parses, the operation stages the normalised results durably and marks matching runs outstanding in that acceptance transaction, so a stale green cannot be read while the evidence is being applied. | Job test: green gate, accept a report, read gate before processing completes → `pending`. |
-| C6. **Policy, gates and charters are text** (`casebook policy show`, `policy apply` is a proposal like any edit), diffable and reviewable. | Round-trip: export, apply, no diff. |
+| C6. **Policy, gates and charters are text** (`mainworthy policy show`, `policy apply` is a proposal like any edit), diffable and reviewable. | Round-trip: export, apply, no diff. |
 | C7. **Ingest of 10,000 results accepted in < 2 s, visible with questions raised in < 5 s** (draft). | Benchmark in the check. |
 
 ### 4.3 The bun/deno move: one artifact that runs what you already have
 
 | Commitment | Check |
 | --- | --- |
-| B1. `casebook` with no arguments starts Local, creates a project, signs you in as the machine user and opens the UI. First case within 5 minutes of download (J15). | Scripted install on a clean machine image. |
-| B2. The same executable is the server, the CLI, the MCP server (`casebook mcp` on stdio, `/mcp` over HTTP) and the importer. Zero runtime dependencies. | Artifact test. |
+| B1. `mainworthy` with no arguments starts Local, creates a project, signs you in as the machine user and opens the UI. First case within 5 minutes of download (J15). | Scripted install on a clean machine image. |
+| B2. The same executable is the server, the CLI, the MCP server (`mainworthy mcp` on stdio, `/mcp` over HTTP) and the importer. Zero runtime dependencies. | Artifact test. |
 | B3. **Drop-in inputs:** JUnit XML as runners emit it; a pasted list or Markdown file becomes a case; importers keep foreign IDs as aliases so `C1234` from TestRail still resolves. | Parser fixtures; alias lookup. |
-| B4. **Text in and out:** every case, policy, gate and charter has a canonical Markdown form (`casebook fmt`); `casebook get C-311 --md` and back. The export is the journal plus these documents. | `print ∘ parse = id`; export-import round trip equal on every head hash, decision and verdict. |
-| B5. **`casebook check`** is a type-checker for the suite: dangling links, duplicate bindings, steps with no expected result, cases with no method, stale bindings. The same rules back the structural items in the queue (decision 0006, mechanism 4). | Stable exit code; rules unit-tested. |
-| B6. **`casebook bench`** ships in the binary and reproduces the budgets on the user's machine against a generated dataset. | The benchmark is the check. |
+| B4. **Text in and out:** every case, policy, gate and charter has a canonical Markdown form (`mainworthy fmt`); `mainworthy get C-311 --md` and back. The export is the journal plus these documents. | `print ∘ parse = id`; export-import round trip equal on every head hash, decision and verdict. |
+| B5. **`mainworthy check`** is a type-checker for the suite: dangling links, duplicate bindings, steps with no expected result, cases with no method, stale bindings. The same rules back the structural items in the queue (decision 0006, mechanism 4). | Stable exit code; rules unit-tested. |
+| B6. **`mainworthy bench`** ships in the binary and reproduces the budgets on the user's machine against a generated dataset. | The benchmark is the check. |
 | B7. The agent surface is at most 10 tools and ≤ 1,500 tokens of definitions (draft); the shipped skill's main file ≤ 400 tokens. | Token count in the check (decision 0006). |
 
 ## 5. Usage first
@@ -135,16 +135,16 @@ These are the specification; the types in section 6 are derived from them.
 ### 5.1 Quickstart, as the user reads it
 
 ````markdown
-# Casebook
+# Mainworthy
 
 One place where manual, automated and agent testing land, and one queue of
 the decisions they leave for you.
 
 ## Start (no account, no configuration)
 
-    $ casebook
-    Casebook 0.1 · local · data in ~/.casebook · http://127.0.0.1:7357
-    project "scratch" · you are daniel@this-machine · policy: loose
+    $ mainworthy
+    Mainworthy 0.1 · local · data in ~/.mainworthy · http://127.0.0.1:7357
+    project "scratch" · you are robin@this-machine · policy: loose
 
 ## Write a case
 
@@ -162,14 +162,14 @@ It is `C-1`, version 1.
 
 ## Send test results (any runner that writes JUnit XML)
 
-    $ casebook report results/*.xml
+    $ mainworthy report results/*.xml
     4,812 results for scratch @ 9f3c2ab (main)  ·  4,790 pass  19 fail  3 skip
       16 failures already decided   not blocking
        3 failures are new           Q-12  "expected 90.00, got 100.00"  (3 tests)
        7 tests have no case         tracked (link them from the queue)
     gate: blocked by 1 open question   http://127.0.0.1:7357/q/12
 
-In CI it is the same line. Add `casebook gate` to fail the job on the verdict.
+In CI it is the same line. Add `mainworthy gate` to fail the job on the verdict.
 
 ## Decide
 
@@ -187,22 +187,22 @@ nothing else has shown.
 
 ## Let an agent in
 
-    $ casebook token new --agent reviewer --can read,produce
-    $ casebook mcp            # stdio; or point the client at /mcp
+    $ mainworthy token new --agent reviewer --can read,produce
+    $ mainworthy mcp            # stdio; or point the client at /mcp
 
 Ten tools. Start with `impact`.
 
 ## Get stricter when you need to
 
-    $ casebook policy use standard      # agent edits need a person; who may excuse a failure
-    $ casebook policy show              # the whole policy is one table
+    $ mainworthy policy use standard      # agent edits need a person; who may excuse a failure
+    $ mainworthy policy show              # the whole policy is one table
 
 ## Leave whenever you like
 
-    $ casebook export --out acme.casebook      # every fact, decision, document and attachment
+    $ mainworthy export --out acme.mainworthy      # every fact, decision, document and attachment
 ````
 
-What step "write a case" stores, in the canonical form `casebook fmt` prints
+What step "write a case" stores, in the canonical form `mainworthy fmt` prints
 (ids are minted by the server; step ids `^xx` are hidden by the editor and
 exist so merges, per-step results and findings can anchor to a step):
 
@@ -226,26 +226,26 @@ tags: [checkout]
 ### 5.2 Call site (a): a CI pipeline reports automated results
 
 ```yaml
-# .github/workflows/test.yml  (any CI works; this is the only Casebook-specific part)
+# .github/workflows/test.yml  (any CI works; this is the only Mainworthy-specific part)
 env:
-  CASEBOOK_URL: ${{ vars.CASEBOOK_URL }}
-  CASEBOOK_TOKEN: ${{ secrets.CASEBOOK_TOKEN }}   # actor kind "ci", capability "produce" on one project
+  MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}
+  MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}   # actor kind "ci", capability "produce" on one project
 steps:
   - run: npx playwright test --reporter=junit
     continue-on-error: true
-  - run: casebook report test-results/*.xml        # commit, branch, PR, build URL, attempt: from the CI env
-  - run: casebook gate --wait 120                  # exit 0 passed · 1 failed · 2 blocked · 3 pending
+  - run: mainworthy report test-results/*.xml        # commit, branch, PR, build URL, attempt: from the CI env
+  - run: mainworthy gate --wait 120                  # exit 0 passed · 1 failed · 2 blocked · 3 pending
 ```
 
 ```
-casebook report  acme/web @ 9f3c2ab  pr #482  attempt 2  job e2e
+mainworthy report  acme/web @ 9f3c2ab  pr #482  attempt 2  job e2e
   4,812 results   4,790 pass   19 fail   3 skip                         (R-507)
   11 excused   failing on base 41d07e1 (main), excused by rule          not this change
    5 excused   Q-2104 flaky, decided by mira 6 days ago, holds 8 more   not this change
    3 new       Q-2291 "expected 90.00, got 100.00" in coupon.ts:41      3 tests, C-311 C-314 C-318
    7 tests have no case (tracked)
    basis: assumed (cases at their current version; add a version manifest for exact)
-casebook gate    blocked: 1 question needs an answer    https://casebook.acme.example/acme/web/pr/482
+mainworthy gate    blocked: 1 question needs an answer    https://mainworthy.acme.example/acme/web/pr/482
 exit 2
 ```
 
@@ -261,7 +261,7 @@ Properties the call site relies on:
   `assumed`: the case's current version at ingest, recorded as an assumption,
   visible on the result and in the gate. A project policy says whether
   assumed results qualify for its gates (loose: yes; regulated: no). Exact
-  provenance comes from `casebook prepare` (writes a version manifest before
+  provenance comes from `mainworthy prepare` (writes a version manifest before
   the tests run) or from `@C-311@v7` annotations in test names. No path
   guesses silently (decision 0008).
 - The "failing on base" excuse is a decision row made by a rule clause of the
@@ -326,7 +326,7 @@ Fresh eyes is explicit and pays the full cost on purpose:
 
 For adversarial testing (F14) the same `impact` digest is the brief; the
 agent runs under a charter document (`h_checkout`, a `charter` edit in the
-suite), works outside Casebook with its own tools and posts results in one
+suite), works outside Mainworthy with its own tools and posts results in one
 `report({ run, method: 'agent', charter: 'h_checkout', results })` batch and
 findings in one `claim` batch, under its own identity. Whether an agent's result may satisfy a gate slot is a policy
 clause, not a code path.
@@ -524,7 +524,7 @@ type Batch = { id; project; key: Hash /* H(target, job, attempt, payload digest)
                manifest: VersionManifest | null; seq: Seq; stamp }
 // KEY (project, key) unique         → the same report twice is a no-op with the same receipt
 // KEY (project, state='accepted')   → the gate horizon (6.4)
-type VersionManifest = { test: TestKey; case: CaseId; version: VersionNo }[]   // written by `casebook prepare` before the tests run
+type VersionManifest = { test: TestKey; case: CaseId; version: VersionNo }[]   // written by `mainworthy prepare` before the tests run
 type ResultIn = { test: TestKey | { case: CaseId; run?: RunId /* the run whose pinned slot this manual result is for; never a SlotId */ }; outcome; attempt?; durationMs?; failure?: { message; at? }
                   steps?; note?; attachments?: BlobRef[]; annotation?: { case: CaseId; version: VersionNo }; corrects?: ResultId }
 // One canonical constructor, used for every result from every entry (manual keypress, agent batch, parsed CI file):
@@ -1099,7 +1099,7 @@ recorded); requirements coverage, `gap`, the role and freeze paths of
 `signoff`, regulated preset (runs close by the loose and standard rules;
 `Requirement` rows exist); fragments and
 custom fields (types present, no UI); posting checks to the code host and
-creating tracker issues (`casebook gate` exit code and URL; defects as pasted
+creating tracker issues (`mainworthy gate` exit code and URL; defects as pasted
 references); importers (Markdown and lists in, full export out); Cloud
 workers, SSO; formats beyond JUnit; dashboards (five counts on the queue
 header).
@@ -1108,7 +1108,7 @@ header).
 
 | Replaces | With | Why | Cost |
 | --- | --- | --- | --- |
-| Vision ranking: fast backend > agents > UX | P0 as a floor; speed defined where thought happens (P1) with budgets in ms, tokens and keystrokes; agents and UX follow from P2. Daniel, 2026-10-11: speed stays a must-have, measured as "the brain never waits", and capture is the job to make faster. | A fast tool with an untrustworthy record has no value; and "fast backend" alone does not say where speed matters | Three kinds of budget to maintain |
+| Vision ranking: fast backend > agents > UX | P0 as a floor; speed defined where thought happens (P1) with budgets in ms, tokens and keystrokes; agents and UX follow from P2. The owner, 2026-10-11: speed stays a must-have, measured as "the brain never waits", and capture is the job to make faster. | A fast tool with an untrustworthy record has no value; and "fast backend" alone does not say where speed matters | Three kinds of budget to maintain |
 | Vision principle 1: every edit is a version | Autosave into a private open proposal; a version exists when a proposal is sealed and adopted | Per-keystroke versions make history unreadable and give reviewers no unit; drafts are durable and visible as drafts | Others see an edit up to ~30 s later; abandoned drafts are sealed by a job |
 | Vision: execution type (manual/automated/both) is a versioned field | Declared `methods` (eligibility) plus derived activity; `intent.automate` is the only wish | A declared type drifts from what reports; eligibility and activity are different facts | Importers map the old field to methods and intent |
 | Vision: unlinked results inbox, optional auto-create | `Test` is a first-class evidence subject with or without a case; mapping is a `map` question | Automation-heavy teams get history, flakiness and gates without writing a case | Two nouns (case, test); coverage reports say "tests without a case" plainly |
@@ -1142,7 +1142,7 @@ the decision witness, and C's claim-hash proof inheritance and D's "never ask
 again" floor assume more than the data proves. The orchestrator was right on
 the surface: A's CI preparation step before tests run, its roster and
 certificate ceremony and its saved-question home do not deliver the DX the
-ask demands, and Daniel's note on the day (speed where thought happens;
+ask demands, and the owner's note on the day (speed where thought happens;
 capture is the job) weighs the surface heavily. The synthesis therefore uses
 **A's evidence semantics as the invariant layer and D's product shape as the
 surface**, and turns each place the judge called a guess into an explicit,
@@ -1168,7 +1168,7 @@ recorded basis under policy:
   a policy option, not automatic proof), canonical Markdown documents with
   step ids as the interchange and export form, policy/gates/charters as
   text, `check`, `fmt`, `bench`, the proof strip and the one-line
-  `casebook report` with environment autodetection.
+  `mainworthy report` with environment autodetection.
 - **Rejected:** A's `scope open` before tests run as the default path (kept
   as the optional `prepare` for exact basis); B's proof-plan hierarchy and 22
   operations; C's git-shaped branches as the proposal model and `reaffirm`
@@ -1260,7 +1260,7 @@ registry; one clock.
 
 ### Open questions and risks
 
-Questions for Daniel are recorded in `docs/open-questions.md` (20 to 28).
+Questions for the owner are recorded in `docs/open-questions.md` (20 to 28).
 Risks: fingerprint and hold quality (needs real failure data in phase 1); the
 Seq commit-order rule as a throughput ceiling; the queue drifting into a
 ticket tracker (the closed kind table is the defence); draft budgets are

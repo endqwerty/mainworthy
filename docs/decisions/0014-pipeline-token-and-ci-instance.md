@@ -1,10 +1,10 @@
-# 0014: A pipeline's token, and which Casebook this repository's CI reports to
+# 0014: A pipeline's token, and which Mainworthy this repository's CI reports to
 
 - Date: 2026-10-12
-- Status: proposed (built in the pull request that adds this file; Daniel reviews)
+- Status: proposed (built in the pull request that adds this file; the owner reviews)
 
-Daniel asked whether Casebook can test itself yet: its own CI reporting to the instance on his home server,
-`https://casebook.owl-perch.ts.net`, a name that resolves only inside his tailnet. He expected that tokens with
+The owner asked whether Mainworthy can test itself yet: its own CI reporting to the instance on their home server,
+`https://casebook.owl-perch.ts.net`, a name that resolves only inside their tailnet. They expected that tokens with
 roles had to come first. This record says what was missing, what was built and what was left.
 
 ## Problem
@@ -19,10 +19,10 @@ that lists capabilities; a token names an actor. Three things were wrong for a t
    `propose` by such a token returned `status: adopted` under both presets.
 2. **An admin could not see or take away a grant.** `actor.list` showed the grants on every project and hid a
    grant on one. The only way to change a grant was a side effect: `token.create` for an actor that existed
-   replaced its grant, so `casebook token new --human daniel --can read` cut the owner down to reading until the
+   replaced its grant, so `mainworthy token new --human robin --can read` cut the owner down to reading until the
    next restart.
 3. **CI could not reach the instance, and nothing said what happens when it cannot.** The workflow started a
-   throwaway Casebook in a shell step when `CASEBOOK_URL` was unset. With it set, a home server that is down
+   throwaway Mainworthy in a shell step when `MAINWORTHY_URL` was unset. With it set, a home server that is down
    would fail every pull request, and a pull request that changes `report` would talk to a server that does not
    know the change: nothing redeploys the instance by itself.
 
@@ -35,18 +35,18 @@ and landing a change should cost minutes.
 An operator, once, on the instance:
 
 ```
-casebook --project casebook token new --ci github-actions    # may record on casebook, and read its gate
-casebook actor list                                          # who may do what, on which project
-casebook --project casebook actor grant github-actions --can read,record
-casebook --project casebook actor ungrant github-actions     # its tokens then do nothing there
+mainworthy --project mainworthy token new --ci github-actions    # may record on mainworthy, and read its gate
+mainworthy actor list                                          # who may do what, on which project
+mainworthy --project mainworthy actor grant github-actions --can read,record
+mainworthy --project mainworthy actor ungrant github-actions     # its tokens then do nothing there
 ```
 
-The pipeline is unchanged: `casebook report results.xml --job tests-1`, then `casebook gate`. With a pipeline's
+The pipeline is unchanged: `mainworthy report results.xml --job tests-1`, then `mainworthy gate`. With a pipeline's
 token a blocked gate prints the verdict, the refs of the open questions and the address where a person answers
 them; the queue itself is the project's to read.
 
 In this repository's workflow the `gate` job joins the tailnet when the repository says how, and
-`scripts/ci-gate.ts` asks `chooseInstance` which Casebook to use. The run's summary page says which one decided,
+`scripts/ci-gate.ts` asks `chooseInstance` which Mainworthy to use. The run's summary page says which one decided,
 also when the gate passes.
 
 ## Shape
@@ -71,7 +71,7 @@ operation added later is in that loop the day it is added. `test/architecture.te
 accept `record`, so one more is a decision here and not a copy of `report`.
 
 **A grant has one writer.** `grant.set` replaces what an actor may do on a project and `grant.remove` takes it
-away (`admin` actions; `casebook actor grant|ungrant`). `token.create` gives a new actor its first grant and
+away (`admin` actions; `mainworthy actor grant|ungrant`). `token.create` gives a new actor its first grant and
 leaves an existing actor alone: naming the grant it already holds is accepted, anything else is refused and
 names `grant.set`. Nobody changes their own grant, and nobody changes the owner's, which is written again on
 every start. `actor.list` shows every grant with its project.
@@ -83,18 +83,18 @@ checks a pipeline's token before reporting. The web UI shows the projects the se
 
 | What it finds | What the job does |
 | --- | --- |
-| `CASEBOOK_URL` is not set | starts its own Casebook; a notice |
+| `MAINWORTHY_URL` is not set | starts its own Mainworthy; a notice |
 | the instance does not answer `/healthz` in three tries | starts its own; a warning |
 | the instance describes `report` or `gate` differently from this checkout (`/api/openapi.json`) | starts its own; a warning |
 | the instance refuses the token (401) | fails, exit 4, nothing reported |
-| the token may not record on `CASEBOOK_PROJECT`, or none is named and it may record on several or none | fails, exit 4, nothing reported |
+| the token may not record on `MAINWORTHY_PROJECT`, or none is named and it may record on several or none | fails, exit 4, nothing reported |
 | none of these | reports to the instance |
 
-With no `CASEBOOK_PROJECT` the job takes the one project the token may record on and names it to the CLI, which
-would otherwise count the projects the token may only read. The job's own Casebook is stopped and its data
+With no `MAINWORTHY_PROJECT` the job takes the one project the token may record on and names it to the CLI, which
+would otherwise count the projects the token may only read. The job's own Mainworthy is stopped and its data
 removed on every way out, an error included.
 
-A Casebook started for the job knows no earlier decision, so it blocks every failing test: it is never the
+A Mainworthy started for the job knows no earlier decision, so it blocks every failing test: it is never the
 looser of the two for a failure. It is looser in one way: it has not seen an earlier attempt's results.
 
 The secret is given to the one workflow step that reports. Only the `gate` job may ask GitHub for an identity
@@ -140,9 +140,9 @@ shapes to tell apart.
   actor, whose proposals `standard` holds for a person.
 - The contract check compares inputs and required capabilities, not replies (#52): a pull request that changes
   the shape of a reply fails against the deployed instance until that instance is redeployed. Clearing the
-  `CASEBOOK_URL` variable for the length of that pull request is the way round it. Any difference in the
-  description, a reworded summary included, sends the job to its own Casebook with a warning.
-- The check passes on the job's own Casebook when the home server is down. We accept losing the carried
+  `MAINWORTHY_URL` variable for the length of that pull request is the way round it. Any difference in the
+  description, a reworded summary included, sends the job to its own Mainworthy with a warning.
+- The check passes on the job's own Mainworthy when the home server is down. We accept losing the carried
   decisions for that run in exchange for a required check that does not depend on a home server.
 
 ## Alternatives considered
@@ -155,17 +155,17 @@ shapes to tell apart.
   `docs/deploy.md` rules out until accounts exist and sign-in is rate limited. A self-hosted runner on the home
   server runs every pull request's code on that server. Having the instance fetch reports from GitHub needs a
   GitHub App and is a product feature of its own (#89).
-- **Failing the check when the instance cannot be reached.** Honest about which Casebook decided, and it makes
+- **Failing the check when the instance cannot be reached.** Honest about which Mainworthy decided, and it makes
   every pull request wait for a home server.
 
 ## Not built here
 
-- The Tailscale side, which needs Daniel's admin console: the tag, the federated identity and the access rule.
-  `docs/deploy.md` has the steps. Until then the job runs as before, on its own Casebook.
+- The Tailscale side, which needs the owner's admin console: the tag, the federated identity and the access rule.
+  `docs/deploy.md` has the steps. Until then the job runs as before, on its own Mainworthy.
 - Sign-in hardening before the instance leaves the tailnet (#88), the instance redeploying itself (#90), agents
   on tokens of their own (#91), and switching self-testing on (#92).
 
 ## Answer to the question
 
-Yes, for his own use on the tailnet, once this is merged and deployed and the three Tailscale steps are done.
+Yes, for the owner's own use on the tailnet, once this is merged and deployed and the three Tailscale steps are done.
 Nothing else in the backlog stands between this repository and reporting to its own instance.

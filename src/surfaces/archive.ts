@@ -22,7 +22,7 @@ function failure(error: unknown): Response {
 }
 
 function scratch(): { path: string; remove: () => void } {
-	const directory = mkdtempSync(join(tmpdir(), "casebook-archive-"));
+	const directory = mkdtempSync(join(tmpdir(), "mainworthy-archive-"));
 	return { path: join(directory, "archive.ndjson"), remove: () => rmSync(directory, { recursive: true, force: true }) };
 }
 
@@ -163,7 +163,7 @@ export function archiveRoutes(
 					ok: true,
 					result: {
 						...result,
-						note: `Import replaced the bootstrap rows. Your previous session may no longer exist. ${app.config.mode === "server" ? "Set CASEBOOK_OWNER_TOKEN and restart the server to reconnect." : "The configured local owner was refreshed."}`,
+						note: `Import replaced the bootstrap rows. Your previous session may no longer exist. ${app.config.mode === "server" ? "Set MAINWORTHY_OWNER_TOKEN and restart the server to reconnect." : "The configured local owner was refreshed."}`,
 						callerSessionMayHaveChanged: true,
 					},
 					seq: null,
