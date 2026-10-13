@@ -101,8 +101,10 @@ test("a shard's artifact is named for its attempt and downloaded into its own di
 	// No `merge-multiple`: merged, two attempts of one shard are two files of one name in one directory.
 	expect(download).toEqual({ pattern: "results-*", path: "test-results" });
 
-	// A shard that ran again and left no artifact is read from its older attempt. Its job failed then, and the
-	// gate job's last step fails on that, with the type-check, the lint and the image.
+	// A shard that ran again and left no artifact is read from its older attempt. Its job failed then, also when
+	// its tests ended before they wrote a report, and the gate job's last step fails on that, with the type-check,
+	// the lint and the image.
+	expect(upload?.["if-no-files-found"]).toBe("error");
 	const last = jobs.gate.steps.at(-1)?.run ?? "";
 	for (const job of ["static", "image", "tests"])
 		expect(last).toContain(`test "${expression(`needs.${job}.result`)}" = success`);
