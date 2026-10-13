@@ -250,21 +250,24 @@ for (const suffix of [".mainworthy", ".mainworthy.gz"]) {
 	});
 }
 
+// One start of the command for each operation. Started one after another they took 3.6 to 4.2 s on a CI
+// runner, more with each operation added, and more than the default five twice on `main` on 2026-10-13
+// (issue #154). They are started side by side (2.3 s on a runner), and the test has 20 s for a busy one.
 test("all registry operations have generated commands, global help and --help", async () => {
 	await withInstance(async ({ cli }) => {
 		const help = await cli(["help"]);
 		expect(help.code).toBe(0);
-		for (const op of OP_LIST) {
+		const helps = await Promise.all(OP_LIST.map((op) => cli([op.name, "--help"])));
+		for (const [index, op] of OP_LIST.entries()) {
 			expect(COMMAND_NAMES.has(op.name)).toBe(true);
 			expect(GENERATED_COMMANDS.has(op.name)).toBe(true);
 			expect(help.stdout).toContain(op.summary);
-			const result = await cli([op.name, "--help"]);
-			expect(result.code).toBe(0);
-			expect(result.stdout).toContain(op.summary);
-			expect(result.stdout).toContain("--json");
+			const result = helps[index];
+			expect([op.name, result?.code]).toEqual([op.name, 0]);
+			expect(result?.stdout).toContain(op.summary);
+			expect(result?.stdout).toContain("--json");
 		}
 	});
-	// One start of the command for each operation: 3.6 to 4.2 s on a CI runner, and more with each operation added.
 }, 20_000);
 
 test("generated flags handle booleans, numbers, repeated arrays and union fields", async () => {
