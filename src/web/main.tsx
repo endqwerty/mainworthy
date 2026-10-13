@@ -1,3 +1,4 @@
+import "./lib/former-name.ts";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { App } from "./app.tsx";

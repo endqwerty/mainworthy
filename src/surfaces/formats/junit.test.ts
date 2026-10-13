@@ -401,6 +401,16 @@ describe("parseJUnit recovery and boundaries", () => {
 		}
 	});
 
+	test("a case named by the property is linked, under the current name and the former one", () => {
+		for (const name of ["mainworthy", "casebook"]) {
+			const report = parseJUnit(
+				`<testsuite name="s"><testcase name="adds @C-1"><properties><property name="${name}" value="C-7@v2"/></properties></testcase></testsuite>`,
+			);
+			expect(report.results.map((result) => result.annotation)).toEqual([{ case: "C-7", version: 2 }]);
+			expect(report.warnings).toEqual([]);
+		}
+	});
+
 	test("a missing property quote cannot swallow failure evidence", () => {
 		const parsed = parseJUnit(
 			'<testsuites><testsuite name="one"><properties><property name="broken" value="missing/></properties><testcase name="x"><failure message="bad"/></testcase></testsuite><testsuite name="two"><properties><property name="valid" value="/>"/></properties><testcase name="y"/></testsuite></testsuites>',

@@ -25,6 +25,25 @@ export const declaredSql = (): readonly string[] => [...DECLARED];
 
 export type RunResult = { changes: number; lastId: number };
 
+/**
+ * Folds the write-ahead log of a database nobody has open into the database file and removes the log, so the
+ * file alone is the whole database and can be renamed. SQLite does this only for the last connection to a
+ * file: false means another connection has it open, and nothing was changed.
+ */
+export function foldLog(path: string): boolean {
+	const raw = new Database(path, { strict: true });
+	try {
+		raw.exec("PRAGMA busy_timeout = 0");
+		const row = raw.query<{ journal_mode: string }, []>("PRAGMA journal_mode = DELETE").get();
+		return row?.journal_mode === "delete";
+	} catch (error) {
+		if (error instanceof Error && /database is locked/.test(error.message)) return false;
+		throw error;
+	} finally {
+		raw.close();
+	}
+}
+
 export class Db {
 	readonly raw: Database;
 	private depth = 0;

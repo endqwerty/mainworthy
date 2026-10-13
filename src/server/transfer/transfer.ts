@@ -16,13 +16,12 @@ function jsonMap<T extends z.ZodType>(values: T) {
 	);
 }
 
-const Header = z.strictObject({
-	mainworthy: z.literal("archive"),
-	format: Count,
-	schema: Count,
-	exportedAt: Count,
-	tables: jsonMap(Count),
-});
+const headerFields = { format: Count, schema: Count, exportedAt: Count, tables: jsonMap(Count) };
+/** The second shape is what an export wrote while the project was called Casebook (decision 0014). */
+const Header = z.union([
+	z.strictObject({ mainworthy: z.literal("archive"), ...headerFields }),
+	z.strictObject({ casebook: z.literal("archive"), ...headerFields }),
+]);
 const Value = z.union([
 	z.string(),
 	z.number().finite(),

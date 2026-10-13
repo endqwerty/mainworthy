@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { mkdtemp, rename, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CLI_ENTRY, COMMIT, withInstance } from "./test-support.ts";
 
@@ -14,7 +17,7 @@ for (const options of [
 				env: {
 					PATH: process.env.PATH ?? "",
 					HOME: directory,
-					USER: "daniel",
+					USER: "robin",
 					MAINWORTHY_PORT: "0",
 					MAINWORTHY_MODE: options.mode,
 				},
@@ -35,7 +38,7 @@ for (const options of [
 				expect(stdout).toMatch(
 					/^Mainworthy 0\.1\.0 · (local|server) · data in ~\/\.mainworthy · http:\/\/127\.0\.0\.1:\d+\n/,
 				);
-				expect(stdout).toContain('project "scratch" · you are daniel@this-machine · policy: loose');
+				expect(stdout).toContain('project "scratch" · you are robin@this-machine · policy: loose');
 				const url = /http:\/\/127\.0\.0\.1:\d+/.exec(stdout)?.[0];
 				if (!url) throw new Error("startup did not print the server URL");
 				const token = /owner token \(shown once\): (\S+)/.exec(stdout)?.[1];
@@ -77,6 +80,77 @@ for (const options of [
 	});
 }
 
+test("an install under the former name is carried over on the next start, and its owner token still works", async () => {
+	const home = await mkdtemp(join(tmpdir(), "mainworthy-former-cli-"));
+	/** Starts the server in `home`, waits for its two start lines, and returns how to stop it and read its output. */
+	const serve = async (): Promise<{
+		url: string;
+		stop: () => Promise<{ code: number; stdout: string; stderr: string }>;
+	}> => {
+		const child = Bun.spawn([process.execPath, CLI_ENTRY, "serve"], {
+			cwd: home,
+			env: {
+				PATH: process.env.PATH ?? "",
+				HOME: home,
+				USER: "robin",
+				MAINWORTHY_PORT: "0",
+				MAINWORTHY_MODE: "server",
+			},
+			stdout: "pipe",
+			stderr: "pipe",
+			stdin: "ignore",
+		});
+		const timeout = setTimeout(() => child.kill("SIGKILL"), 8000);
+		const reader = child.stdout.getReader();
+		const decoder = new TextDecoder();
+		let stdout = "";
+		const read = async (until: () => boolean): Promise<void> => {
+			while (!until()) {
+				const chunk = await reader.read();
+				if (chunk.done) break;
+				stdout += decoder.decode(chunk.value, { stream: true });
+			}
+		};
+		await read(() => stdout.includes("policy:"));
+		const url = /http:\/\/127\.0\.0\.1:\d+/.exec(stdout)?.[0];
+		if (!url) throw new Error(`startup did not print the server URL: ${stdout}`);
+		return {
+			url,
+			async stop() {
+				child.kill("SIGTERM");
+				const code = await child.exited;
+				clearTimeout(timeout);
+				await read(() => false);
+				const stderr = await new Response(child.stderr).text();
+				return { code, stdout, stderr: stderr.replace(/^Bundled page in [\d.]+(?:ms|s): .+\n/gm, "") };
+			},
+		};
+	};
+	try {
+		const first = await (await serve()).stop();
+		expect(first.code).toBe(0);
+		const token = /owner token \(shown once\): (\S+)/.exec(first.stdout)?.[1];
+		if (!token) throw new Error(`the first start printed no owner token: ${first.stdout}`);
+		// The same files under the names the project used before 2026-10-13.
+		await rename(join(home, ".mainworthy", "mainworthy.db"), join(home, ".mainworthy", "casebook.db"));
+		await rename(join(home, ".mainworthy"), join(home, ".casebook"));
+
+		const running = await serve();
+		const session = await fetch(`${running.url}/api/session`, { headers: { authorization: `Bearer ${token}` } });
+		const second = await running.stop();
+		expect(second.code).toBe(0);
+		expect(session.status).toBe(200);
+		expect(second.stdout).not.toContain("owner token");
+		expect(second.stderr.trim().split("\n")).toEqual([
+			`mainworthy: moved ${join(home, ".casebook")} to ${join(home, ".mainworthy")}`,
+			`mainworthy: moved ${join(home, ".mainworthy", "casebook.db")} to ${join(home, ".mainworthy", "mainworthy.db")}`,
+		]);
+		expect(existsSync(join(home, ".casebook"))).toBe(false);
+	} finally {
+		await rm(home, { recursive: true, force: true });
+	}
+});
+
 test("an occupied port exits 4 without keeping the failed server alive", async () => {
 	await withInstance(async ({ directory, instance }) => {
 		const child = Bun.spawn([process.execPath, CLI_ENTRY, "serve"], {
@@ -84,7 +158,7 @@ test("an occupied port exits 4 without keeping the failed server alive", async (
 			env: {
 				PATH: process.env.PATH ?? "",
 				HOME: directory,
-				USER: "daniel",
+				USER: "robin",
 				MAINWORTHY_PORT: new URL(instance.url).port,
 				MAINWORTHY_DATA: join(directory, "failed-start"),
 			},

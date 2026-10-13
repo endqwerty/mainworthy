@@ -557,6 +557,21 @@ describe("Mainworthy instance archives", () => {
 		expect(to.raw.query("SELECT * FROM tokens").all()).toEqual([]);
 	});
 
+	test("an archive exported under the former name replays the same rows", () => {
+		const from = source();
+		const to = target();
+		const former = rehash(archive(from).replace('{"mainworthy":"archive"', '{"casebook":"archive"'));
+		expect(former.startsWith('{"casebook":"archive"')).toBe(true);
+		importArchive(to, linesOf(former));
+		expect(dump(to)).toEqual(dump(from));
+	});
+
+	test("a header that names both the former and the current name, or neither, is refused", () => {
+		const text = archive(source());
+		refuse(rehash(text.replace('{"mainworthy":"archive"', '{"casebook":"archive","mainworthy":"archive"')), /header/);
+		refuse(rehash(text.replace('{"mainworthy":"archive"', '{"other":"archive"')), /header/);
+	});
+
 	test("exports are deterministic apart from exportedAt, with a verifiable footer", () => {
 		const db = source();
 		const first = archive(db, 100);

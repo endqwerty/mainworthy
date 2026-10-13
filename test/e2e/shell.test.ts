@@ -48,6 +48,35 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
+	"what a browser kept under the former name is read under the new one",
+	async () => {
+		const server = await startServer({ cases: 1 });
+		const browser = await openPage(server);
+		try {
+			const { page } = browser;
+			await page.goto(`${server.url}/p/scratch/suite`);
+			await page.locator("#app").waitFor();
+			expect(await page.locator("html").getAttribute("data-theme")).toBe("light");
+			await page.evaluate(() => {
+				localStorage.removeItem("mainworthy:theme");
+				localStorage.setItem("casebook:theme", "dark");
+			});
+			await page.reload();
+			await page.locator("#app").waitFor();
+			expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
+			expect(
+				await page.evaluate(() => [localStorage.getItem("casebook:theme"), localStorage.getItem("mainworthy:theme")]),
+			).toEqual([null, "dark"]);
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
 	"suite shortcuts navigate, filter, edit, select, tag, move, archive, undo and create a folder",
 	async () => {
 		const server = await startServer();
