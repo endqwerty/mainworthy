@@ -39,6 +39,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy report <files...> [--session <name>] [--run R-4] [--json]` | Upload JUnit files, detect the CI build, and print the receipt. Use gate to check the verdict. |
 | `mainworthy gate [--commit <sha> \| --run R-4 \| --change pr:482] [--wait <seconds>] [--json]` | Check a commit, change or run. Exit 0 passed, 1 failed, 2 blocked, 3 pending. |
 | `mainworthy token new --agent <name> \| --ci <name> \| --human <name> [--can read,produce] [--project <key>] [--expires 90d] \| token list \| token revoke <id>` | Issue, list and revoke actor tokens. A new secret is shown once. |
+| `mainworthy invite new <name> [--can read,answer] [--project <key>] [--expires 3d] \| invite list \| invite revoke <id>` | Invite a person with a link that is shown once, list invitations, and revoke one. |
 | `mainworthy actor list \| actor grant <name> --can read,record [--project <key>] \| actor ungrant <name> [--project <key>]` | List who may do what on which project, and change or take away a grant. |
 | `mainworthy policy show \| policy use <loose\|standard\|strict> [--json]` | Show policy clauses or propose and record an admin's choice of preset. |
 | `mainworthy new [file\|-] [--json]` | Create a case from a canonical Markdown file or an outline on stdin. |
@@ -80,6 +81,11 @@ Flags of `mainworthy token`:
 - `--can <a,b,...>`: What a new actor may do, comma-separated or repeated. Not for one that exists.
 - `--expires <string>`: How long the new token works: 90d, 12h, 2w. Without it the token has no end.
 
+Flags of `mainworthy invite`:
+
+- `--can <a,b,...>`: What a new person may do, comma-separated or repeated. Not for one who exists.
+- `--expires <string>`: How long the link works: 12h, 3d, 2w. At most 30d.
+
 Flags of `mainworthy actor`:
 
 - `--can <a,b,...>`: Capabilities, comma-separated or repeated.
@@ -118,6 +124,9 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy check` | Check the suite for structural problems: cases with no steps or no expected result, duplicate titles, dangling links. |
 | `mainworthy command` | What became of a command you sent under an idempotency key: not recorded, begun, or done with its reply. |
 | `mainworthy admin` | Projects, actors, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. |
+| `mainworthy session` | Your browser sessions: list them, and end one. An admin who is a person lists and ends anyone's. |
+| `mainworthy credential` | How you sign in: list your password and passkeys, register a passkey, remove one. A password is set in the web UI, never here. |
+| `mainworthy invitation` | Invite a person with a link, since there is no mail: make one, list them, revoke one. The link is shown once. |
 
 ### Flags every command takes
 

@@ -58,6 +58,10 @@ The answer to "is this tested?" for a commit, a change or a run. It has four ver
 
 The list of capabilities an actor holds on one project, or on every project. See [people, agents and pipelines](./access.md).
 
+## Invitation
+
+A link an admin hands a person so that they can choose a password or register a passkey. It works once and runs out. For a person who already exists it is a recovery: accepting it replaces every way they signed in. See [people, agents and pipelines](./access.md#sign-in-as-yourself).
+
 ## Job
 
 A named part of a pipeline, such as `e2e`. A planned run can require that named jobs have reported.
@@ -65,6 +69,10 @@ A named part of a pipeline, such as `e2e`. A planned run can require that named 
 ## Method
 
 How a case may be exercised: by a person, by an automated test, or by an agent. A case declares whether people and agents may exercise it, an automated test is admitted by its link to the case, and a run says which methods it asks for.
+
+## Passkey
+
+A key that a device or a password manager holds for one site and unlocks with a fingerprint, a face or a PIN. A person signs in with it in place of a password. It belongs to the host name of the instance.
 
 ## Pipeline
 
@@ -105,6 +113,10 @@ The policy acting by itself. Where a clause says a rule answers, the answer is g
 ## Run
 
 A request for evidence: which results count and what is needed before it is complete. A change run exists for each reported commit. A planned run is started by hand.
+
+## Session
+
+One browser that is signed in. It ends at sign-out, after 14 days without use, after 90 days, and when what it was opened with (a token, a password or a passkey) stops working. A person lists and ends their own.
 
 ## Slot
 

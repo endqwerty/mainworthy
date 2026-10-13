@@ -11,7 +11,7 @@ Everything in Mainworthy is done by an actor, and every record names the actor t
 - A pipeline. A CI job that reports results and reads the gate.
 - The policy. A rule that answers a question on a project's behalf. It holds no grant and no token, and you do not create it.
 
-An actor has a name, a kind and grants. There are no seats and no accounts, so an actor costs nothing, and a token proves who is calling. A name uses letters, digits, `.`, `_`, `@` and `-`, starts with a letter or digit, and runs up to 64 characters.
+An actor has a name, a kind and grants. There are no seats, so an actor costs nothing. A token proves who is calling, and a person can also [sign in as themselves](#sign-in-as-yourself) with a password or a passkey. A name uses letters, digits, `.`, `_`, `@` and `-`, starts with a letter or digit, and runs up to 64 characters.
 
 ## Capabilities
 
@@ -26,7 +26,7 @@ A grant lists capabilities, and a capability is permission to call a group of op
 | `produce` | `propose`, `claim`, `decide` | a person, an agent |
 | `answer` | none by itself; it makes an answer count where the policy asks a member | a person |
 | `plan` | `plan` | a person |
-| `admin` | `admin` | a person |
+| `admin` | `admin`, `invitation` | a person |
 
 A pipeline holds `read` and `record` at most, whatever its grant lists.
 
@@ -106,7 +106,7 @@ $ mainworthy token revoke 2
 token 2 revoked
 ```
 
-A token with no end works until somebody revokes it, so revoke one you no longer use. Revoking a token leaves the actor and its grants in place. To stop an actor on one project, use `actor ungrant`. To remove who a person was, forget the actor. Only a person who administers forgets an actor, and the owner is not forgotten. The name becomes a pseudonym, the tokens stop working, and the history keeps what the actor did.
+A token with no end works until somebody revokes it, so revoke one you no longer use. Revoking a token leaves the actor and its grants in place. To stop an actor on one project, use `actor ungrant`. To remove who a person was, forget the actor. Only a person who administers forgets an actor, and the owner is not forgotten. The name becomes a pseudonym, the tokens stop working, the person's passwords, passkeys and open invitations are revoked, and the history keeps what the actor did.
 
 ```
 $ mainworthy admin --json '{"do":"actor.forget","name":"dana"}'
@@ -115,13 +115,115 @@ $ mainworthy admin --json '{"do":"actor.forget","name":"dana"}'
 
 There is no shorter command for it. See [API](./api.md).
 
+## Sign in as yourself
+
+A person can sign in with their name and a password, or with a passkey, and needs no token for it. Mainworthy sends no mail and nobody chooses a password for somebody else, so a person gets their first way in through a link that an admin hands them.
+
+> The web UI does not show any of this yet. Its sign-in page takes a token, and it has no page for an invitation link and no list of your sessions. Those pages come with the next change to the web UI. Until then, do what this section describes from the command line and the API.
+
+### Invite a person
+
+```
+$ mainworthy invite new dana --can read,produce,answer --project checkout
+invitation 1 for "dana" (may read, record, produce, answer on checkout), until 2026-10-16 09:57 UTC
+https://mainworthy.example/invite#<code>
+This link is shown once. Hand it to dana: it works once.
+```
+
+- The link is printed once. Mainworthy keeps only a hash of the code in it, so it cannot print the link again. If it is lost, make another.
+- The link works once, for three days. `--expires` takes a whole number and `h`, `d` or `w`, up to `30d`. A new invitation for the same person replaces the one before it.
+- `--can` and `--project` say what a new person may do, as they do for a token. Without `--can` a new person may do everything.
+- The link starts with the address in `MAINWORTHY_PUBLIC_URL`. With that variable unset, the command prints `/invite#<code>` and tells you to put the address of the instance before it. See [configuration](./configuration.md#variables-the-server-reads).
+- Only a person who administers invites somebody. An agent that holds `admin` is refused.
+
+`mainworthy invite list` shows every invitation, who made it and whether it is open, used, revoked or expired. It never shows a link. `mainworthy invite revoke <id>` withdraws one that nobody has accepted.
+
+To accept, the person sends the code with a password, a passkey or both, to `POST /api/login`:
+
+```
+{"invitation": "<code>", "password": "<12 characters or more>"}
+```
+
+The reply signs that browser in. A password is 12 to 256 characters. Nothing else is asked of it: no digit, no capital letter, no symbol.
+
+### A name and a password, or a passkey
+
+After that the person signs in with `POST /api/login` and `{"name": "dana", "password": "..."}`. A sign-in that is refused gets one answer whatever was wrong, `unauthenticated: that did not sign you in`. The reply does not say whether the name exists or the password was wrong. The server's log has the reason as a code, and never the name or the password that was tried.
+
+A passkey is a key that a device or a password manager holds and unlocks with a fingerprint, a face or a PIN. It needs `MAINWORTHY_PUBLIC_URL`, because a passkey belongs to the host name people open the instance at. One made at `https://mainworthy.example` does not sign in at another name of the same instance. `GET /api/login/methods` says whether an instance has passkeys. [API](./api.md#sign-in-as-a-person) lists the requests a page makes to register and use one.
+
+To change a password, a signed-in browser sends `POST /api/account/password` with the current password and the new one. The other browsers that signed in with the old password are signed out. The one that made the change stays signed in. A token cannot change a password.
+
+Failed attempts are counted. The fifth wrong password for one name within 15 minutes blocks sign-in with a password for that name for one second, from every address, and each further one doubles the wait, up to 15 minutes. A blocked sign-in is answered `limited` and is not looked at, so the right password waits too. A name nobody has is counted the same way, so the count does not say which names exist. A passkey is not held up by a block on the name. [Troubleshooting](./troubleshooting.md#limited-too-many-failed-attempts) says what to do.
+
+### A lost password or passkey
+
+Invite the person again. For a person who exists, the link is a recovery:
+
+```
+$ mainworthy invite new dana
+invitation 2 for "dana" (a recovery: accepting it replaces every way dana signs in), until 2026-10-16 09:57 UTC
+https://mainworthy.example/invite#<code>
+This link is shown once. Hand it to dana: it works once. When it is accepted, every password and passkey dana had stops working and every session of theirs ends.
+```
+
+Nothing changes until the link is accepted, so a link nobody uses locks nobody out. A recovery is made by that person or by the owner. Another admin is refused, for the same reason as with a token: whoever accepts the link is that person from then on. A recovery does not touch the person's tokens. Revoke those with `mainworthy token revoke`.
+
+### Your sessions and your ways of signing in
+
+A session is one browser that is signed in. List yours, and end one you no longer use:
+
+```
+$ mainworthy session --do list
+[
+  {
+    "id": 2,
+    "openedWith": "password",
+    "label": "password",
+    "userAgent": "Mozilla/5.0 ...",
+    "createdAt": 1791885461648,
+    "createdFrom": "203.0.113.9",
+    "lastUsedAt": 1791885461648,
+    "lastUsedFrom": "203.0.113.9",
+    "expiresAt": 1799661461648,
+    "current": false
+  }
+]
+$ mainworthy session --do end --id 2
+{
+  "ended": true,
+  "current": false
+}
+```
+
+`openedWith` is `token`, `password` or `passkey`. `current` is true for the session the request itself came by, so from the command line, which uses a token, it is always false.
+
+`mainworthy credential --do list` shows your password and passkeys, each with an id, a label and when it was last used. It never shows a password, a hash or a key. `mainworthy credential --do remove --id <id>` removes one and ends the sessions that were opened with it. Your last way of signing in stays:
+
+```
+$ mainworthy credential --do remove --id 1
+invalid: this is the last way dana signs in, so it stays. Add a passkey or set a password first, then remove this one. If it is lost, an admin can make a recovery link (mainworthy invite new dana)
+```
+
+These two commands need no capability. Any person or agent that is signed in runs them for what is their own. A pipeline is refused.
+
+### What an admin can do for somebody else
+
+A person who holds `admin` on every project can:
+
+- list somebody's sessions with `mainworthy session --do list --actor dana`, and end any session by its id;
+- list somebody's password and passkeys with `mainworthy credential --do list --actor dana`, and remove one by its id, but not the last;
+- invite a new person, and list and revoke invitations.
+
+An admin cannot see or set anybody's password, and cannot register a passkey for somebody else. Only the owner makes a recovery link for another person. An agent that holds `admin` can do none of this.
+
 ## Sign in to the web UI
 
 In local mode you sign in as the owner, with no step. See [configuration](./configuration.md#local-mode-and-server-mode) for what local mode means.
 
 In server mode the page asks "Sign in with your token". Paste a token and choose "Sign in". The server opens a session for that browser, and the browser keeps a cookie that names the session. The cookie is not the token: the browser does not hold the token after that.
 
-A session ends after 14 days without use and after 90 days in any case. It also ends when the token you signed in with is revoked or reaches its end, and when your actor is forgotten. Each of these sends you back to the sign-in page. [Configuration](./configuration.md#variables-the-server-reads) says how to change the two lifetimes. The web UI has no sign-out button yet; `POST /api/logout` from the page's own origin ends the session.
+A session ends after 14 days without use and after 90 days in any case. It also ends when the token you signed in with is revoked or reaches its end, when the password or passkey you signed in with is removed or replaced, and when your actor is forgotten. Each of these sends you back to the sign-in page. [Configuration](./configuration.md#variables-the-server-reads) says how to change the two lifetimes. The web UI has no sign-out button yet; `POST /api/logout` from the page's own origin ends the session.
 
 The owner's token comes from the server. If you set `MAINWORTHY_OWNER_TOKEN`, that value is the token. If you did not, the server prints one on its first start:
 
@@ -159,4 +261,4 @@ Settings does not show grants. Use `mainworthy actor list` and `actor grant`.
 
 - [Let an agent in](./agents.md) for an agent's token and what its work counts for.
 - [Policy](./policy.md) for who answers each question.
-- [Command line](./cli.md) for every `token` and `actor` flag.
+- [Command line](./cli.md) for every `token`, `actor` and `invite` flag.

@@ -210,7 +210,13 @@ function operations(): string {
 				[
 					["HTTP", code(`POST ${path}`)],
 					["Command", code(`mainworthy ${op.name}`)],
-					["Needs", needs(op.needs).map(code).join(" or ")],
+					[
+						"Needs",
+						// `self` names no capability: the operation is about what is the caller's own.
+						op.needs === "self"
+							? "no capability: any person or agent that is signed in, for what is their own"
+							: needs(op.needs).map(code).join(" or "),
+					],
 					["Effect", op.effect === "write" ? "writes" : "reads"],
 					["Agent tool", op.mcp === null ? "no" : "yes"],
 				],

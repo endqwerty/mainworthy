@@ -145,7 +145,7 @@ so a copy of the cookie stops working with it. Signing in and out are routes of 
 operations: nobody is signed in yet, and the registry runs nothing for a caller it cannot name.
 
 A person signs in as themselves with a name and a password or with a passkey, and the first time with an
-invitation, the link an admin hands them since there is no mail (decision 0016). These are further bodies of
+invitation, the link an admin hands them since there is no mail (decision 0017). These are further bodies of
 `POST /api/login`, beside the token, in `src/surfaces/signin.ts`, with `POST /api/login/challenge` for a
 passkey's challenge and `POST /api/account/password` to set a password. They are routes and not operations for
 one more reason: the registry keeps a digest of each request that carries a command id, and a password must
@@ -156,7 +156,8 @@ refusal takes as long.
 
 What a person signs in with is a row of `credentials`: a password as an argon2id string (`Bun.password`), a
 passkey as its public key and counter. A row is one secret and is never changed into another, and a session
-rests on the row or the token that opened it, never on both. Removing a credential, or changing a password,
+rests on the row or the token that opened it, never on both, and says where it was opened and last used from
+whichever it is. Removing a credential, or changing a password,
 ends the sessions that rested on it; the session that changed the password moves to the new row. An
 invitation and a session cookie are stored as SHA-256 hashes, like a token. None of these tables is in an
 archive.
@@ -203,6 +204,13 @@ and never waits at the write gate. Every route that takes a session is under the
 the change stream included, because each takes its session in one place (`sessionFor` in `src/surfaces/http.ts`).
 A route that takes none (`/healthz`, the API description, the documentation) looks at no token, and a sign-in
 body the schema refuses is refused before it is counted.
+
+A person's sign-in is counted in the same limiter (`src/server/identity/attempts.ts` holds an instance's one).
+A name and a password, and the current password of a change, are counted under the address and under the name
+(`accountKey`, lower-cased), and are not looked at while either is blocked; a success clears the name and never
+the address, and a name nobody has is counted exactly as a wrong password is. A passkey's answer that is
+refused, and an invitation code that accepts nothing, are counted under the address alone, and a right one of
+either passes a blocked address as a right generated token does.
 
 The address a request came from is the address of its connection (`clientAddress` in `src/surfaces/http.ts`).
 Headers that claim another one are ignored, with one exception: when the connection comes from a proxy the

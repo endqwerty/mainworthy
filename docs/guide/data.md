@@ -65,7 +65,7 @@ A fresh instance is one that has only its first project, `scratch`, with no edit
 
 An archive imports only into a build with the same schema as the one that wrote it. A newer archive is refused with a message to upgrade. An older one is refused too, because Mainworthy cannot yet replay an archive across a schema change. Use the same version on both sides.
 
-After an import in server mode, the tokens are gone, because the archive carries none. The people, agents and pipelines are still there with their grants. Restart the server to sign in: with no owner token configured it prints a new one, and with `MAINWORTHY_OWNER_TOKEN` set it takes that value. Then make new tokens for the others with `mainworthy token new`. In local mode, Mainworthy refreshes the owner and you can carry on.
+After an import in server mode, the tokens are gone, because the archive carries none. It carries no password, passkey or invitation either: an archive holds nothing that signs somebody in. The people, agents and pipelines are still there with their grants. Restart the server to sign in: with no owner token configured it prints a new one, and with `MAINWORTHY_OWNER_TOKEN` set it takes that value. Then make new tokens for the others with `mainworthy token new`, and as the owner invite each person again with `mainworthy invite new <name>`, which for a person who exists prints a recovery link. In local mode, Mainworthy refreshes the owner and you can carry on.
 
 ## Back up
 

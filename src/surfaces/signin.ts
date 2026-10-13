@@ -1,5 +1,5 @@
 // The sign-in routes for people: a name and a password, a passkey, an invitation, and setting a password. They
-// are exchanges of the HTTP surface and not operations (decision 0016, 4): nobody is signed in yet, a password
+// are exchanges of the HTTP surface and not operations (decision 0017, 4): nobody is signed in yet, a password
 // is checked outside the write gate, and a password must never reach the registry, which keeps a digest of
 // each request that carries a command id.
 //

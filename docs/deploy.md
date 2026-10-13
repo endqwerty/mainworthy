@@ -95,6 +95,13 @@ wait. What it means for whoever runs an instance:
   Somebody who knows how your token begins can keep it blocked by guessing at it; a generated token cannot be
   blocked that way.
 - A browser that is signed in is never counted and never blocked.
+- A person's sign-in is counted in the same count. A wrong password is counted against the address and against
+  the name it was tried for, however the name is capitalised and whether or not anybody has it; so is a wrong
+  current password when somebody changes theirs. While either is blocked a password is not looked at, so the
+  right one waits too. Somebody who knows a person's name can keep that name's password sign-in blocked by
+  guessing at it, as with a token you chose; a passkey is not held up by that. A passkey's answer that is
+  refused and an invitation code that accepts nothing are counted against the address alone, and a right one
+  of either still works from a blocked address.
 - The count is in memory. A restart clears it.
 
 ### Behind a proxy
@@ -458,7 +465,7 @@ stored hash, so no start says so. Set a new value.
 ## People sign in as themselves
 
 Since 2026-10-13 a person signs in with a name and a password or with a passkey, and gets there through a link
-an admin hands them, because Mainworthy sends no mail (decision 0016). A token still signs a browser in, and the
+an admin hands them, because Mainworthy sends no mail (decision 0017). A token still signs a browser in, and the
 owner keeps theirs. What the first start of the new build does by itself:
 
 - It adds the tables `credentials`, `invitations` and `passkey_users` and a column to `sessions`, after writing

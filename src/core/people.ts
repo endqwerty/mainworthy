@@ -36,7 +36,11 @@ export type SessionRow = {
 	/** What the browser called itself at sign-in, cut to 256 characters. Not verified. */
 	userAgent: string | null;
 	createdAt: number;
+	/** The address it was opened from, as the server determined it; null when nothing said. */
+	createdFrom: string | null;
 	lastUsedAt: number;
+	/** The address of the last request that used it. */
+	lastUsedFrom: string | null;
 	/** When it ends however much it is used. */
 	expiresAt: number;
 	/** True for the session this very request came by. */
