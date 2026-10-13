@@ -79,5 +79,7 @@ each of them by hand.
 - The repository is still `endqwerty/casebook`; the owner renames it after this merges. Links in the diagrams
   already point at `endqwerty/mainworthy` and work from then on.
 - The trademark search.
+- A redeploy of the instance on Coolify. Until then this repository's CI reports to a Mainworthy of its own: the
+  gate job compares the instance's API description with its own (decision 0014), and the names in it changed.
 - `scripts/test-timings.json` has hand-written entries for the two new test files (both take milliseconds);
   the next `bun run test --update-timings` replaces them.
