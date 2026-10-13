@@ -15,7 +15,7 @@ decision record.
   100,000 cases and 1,000,000 results (decision 0010).
 - Phase 2 (Preview 1) is built as the MVP, with the departures and cuts listed in
   decision 0012. Its exit fixtures that pass are tests in `test/`; the ones that do
-  not exist yet are issues in the milestone `Backlog to 1.0`.
+  not exist yet are issues in the milestones M1 to M7 ("From the MVP to 1.0" below).
 - Phase 0 was not done as planned: no hands-on audit (decision 0009, answer 13: no
   trial accounts) and no measured baselines against the incumbents. That gap is the
   reason the MVP is a preview and not a first usable version (#39).
@@ -24,6 +24,54 @@ decision record.
 
 Scope is software QA across the process spectrum, loose to regulated, with
 the full CI/CD flow in every profile (decision 0003).
+
+## From the MVP to 1.0 (2026-10-13)
+
+The MVP left one milestone, `Backlog to 1.0`, with 71 open issues in no order. On
+2026-10-13 it became seven milestones, M1 to M7, numbered in the order they are
+meant to be worked. The seven make three phases. Every open issue is in exactly one
+milestone, and issue #64 lists them all on one page. A milestone has no date: it
+ends when what the table says is true.
+
+| Phase | Milestone | True when it ends |
+| --- | --- | --- |
+| 1: harden the preview | M1 Reliable checks and known defects | No test fails by chance, `bun run check` takes under 120 s, and no known defect in what the MVP built is open |
+| | M2 An instance to rely on | A backup leaves the host on a schedule and a restore was rehearsed, a deploy waits for the checks, the limits are set, and sign-in was tried on real devices |
+| 2: the first usable version | M3 An exact gate that reaches the pull request | The verdict is right after a branch reset, a run with no tests, a late upload and a test that flips, and a decision turns the pull request green with no re-run |
+| | M4 Agents | A team limits what an agent edits and answers, the record says who answered, and token cost is measured on two clients |
+| | M5 The rest of the workflow | Shared steps, custom fields, attachments, requirements with coverage, reports, the regulated preset, importers and tracker ports are built, and each of the three profiles runs its workflow end to end |
+| 3: 1.0 | M6 Teams and organisations | Teams, an identity provider, a second factor and mail are built, and PostgreSQL (#57) and a hosted tier (#31) each have a decision |
+| | M7 Before 1.0 | The friction audit against the incumbents (floor item F3, #39), the accessibility audit and the trademark search are done |
+
+The native iOS app the owner asked for on 2026-10-13 is a track beside the phases,
+in the milestone `iOS app` (#171).
+
+Why this order:
+
+- **M1 comes first because the check judges every later change.** A test that fails
+  by chance costs a pull request a re-run, and its failure stays a question on the
+  instance until a person answers it. Six issues about such tests were open on
+  2026-10-13.
+- **M2 comes before any new capability.** Since 2026-10-13 the instance holds this
+  repository's CI results and the owner's decisions on them, and nothing copies them
+  off the host (#59).
+- **M3 comes before M4 and M5.** The gate's verdict is what the product is for, so a
+  case where it is wrong costs more than a capability that is missing.
+- **M4 comes before M5.** Agent access is priority 2 of the vision. M4 is six issues,
+  and the owner already met one of them: an agent answered a failure with the owner's
+  token because the product had no way to delegate it (#118).
+- **Phase 3 holds what matters once an instance has more than a handful of people**,
+  and what the owner asked for before the name 1.0 is used.
+
+The order says which milestone gets the next agent when two compete. It does not stop
+an issue in M5 from starting while M3 is open: several threads work at once.
+
+This replaces phases 3 and 4 below. Their contents went to M3 and M5 (runs, ingest,
+traceability, gates, importers, reports) and M2 (deployment, backup and restore). One
+of the earlier conditions for the first usable version moved: the Server layer on a
+server database. Decision 0010 serves the Server layer from SQLite, so PostgreSQL
+(#57) is in M6 as a decision for the owner. Move it back to phase 2 if the first
+usable version should wait for it.
 
 ## Phase 0: UX research and design (now)
 
@@ -102,6 +150,9 @@ MCP with their token cost recorded; latency budgets hold on the benchmark data.
 
 ## Phase 3: Runs, CI ingest, traceability and gates
 
+**Replaced 2026-10-13 by M2, M3 and M5 above.** The text below is the earlier plan,
+kept for its exit criteria.
+
 Plans and runs pinned to case versions, attachments behind the storage
 interface, manual execution UI (J5), JUnit XML ingest through API, CLI and a
 GitHub Actions step, unlinked-results inbox, manual/automated/both tracking,
@@ -121,6 +172,9 @@ cache disabled. Only when these pass is the result called the first usable
 version.
 
 ## Phase 4: Scaling, storage, migration import, reports
+
+**Replaced 2026-10-13 by M2 and M5 above.** The text below is the earlier plan, kept
+for its exit criteria.
 
 (Revised 2026-10-11: the layer proofs, persisted jobs and backup/restore
 moved to phase 3 as first-usable prerequisites.) Deployment on the home
