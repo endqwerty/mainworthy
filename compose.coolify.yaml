@@ -2,6 +2,9 @@
 # Tailscale sidecar (the pattern in the home lab's services/coolify-tailnet-apps.md). Nothing is published on the
 # LAN. For a laptop or a plain server use compose.yaml instead.
 #
+# It is also public at https://mainworthy.com, through the server's Cloudflare tunnel and Coolify's proxy. That
+# needs nothing in this file: the domain is a setting of the service `casebook` in Coolify (docs/deploy.md).
+#
 # This deployment was created when the project was called Casebook. The names it stored then are kept, so that a
 # redeploy finds the same data, node and variables: the service `casebook`, the volume `casebook-data`, the
 # tailnet name `casebook` and the Coolify variables CASEBOOK_OWNER_TOKEN and CASEBOOK_OWNER. docs/deploy.md says

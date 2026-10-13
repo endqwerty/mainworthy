@@ -54,14 +54,30 @@ dashboard.
 5. **Network:** the `tailscale` service in `compose.coolify.yaml` is its own tailnet node, `casebook`, and serves
    the app at `https://casebook.owl-perch.ts.net` (Tailscale issues the certificate; the first request can take
    a few seconds). Nothing is published on the LAN; port 7357 is bound to `127.0.0.1` on the host for debugging
-   only. Anything on the tailnet can reach the name, and every request still needs a token. Mainworthy holds test
-   evidence and tokens: keep it off the public internet until accounts exist (#30) and sign-in is rate limited
-   (#88). The node's identity lives in the `tailscale-state` volume: deleting it registers a new node.
+   only. Anything on the tailnet can reach the name, and every request still needs a token. The node's identity
+   lives in the `tailscale-state` volume: deleting it registers a new node.
    Once the node is up, disable its key expiry in the Tailscale admin console (Machines → the node), and delete
    `TS_AUTHKEY` from Coolify. For a server without Tailscale, use `compose.yaml` (publishes 7357) or give the
    service a domain in Coolify.
 6. **Deploy**, then check: `curl https://casebook.owl-perch.ts.net/healthz` answers `{"ok":true,"version":"…"}`. Open the page
    and paste the owner token.
+7. **The public address** (since 2026-10-13): `https://mainworthy.com` serves this instance. Earlier this page
+   said to keep it off the public internet until accounts exist (#30) and sign-in is rate limited (#88). The
+   owner decided otherwise for the MVP: it is theirs to dogfood, its database will be wiped before 1.0, and they
+   can cut it off at any time. Every request still needs a token. The path is the one the server's other public
+   apps use: a proxied Cloudflare record for the name, a route in the server's Cloudflare tunnel, Coolify's
+   proxy, and a domain on the service in Coolify (`https://mainworthy.com:7357` on the service `casebook`, with
+   "connect to the predefined network" on and Coolify's own HTTPS redirect off). Two things differ from an
+   ordinary app behind that proxy:
+   - **The tunnel route goes to the proxy's HTTPS port** (`https://localhost:443`, certificate not verified,
+     server name `mainworthy.com`), not to port 80. Mainworthy accepts a browser's sign-in only when the proxy
+     says the page was served over https (`X-Forwarded-Proto`), and Coolify's proxy replaces that header with
+     its own: `http` on port 80, `https` on port 443. Measured on the server: the same sign-in request answers
+     401 through port 80 and 200 through port 443.
+   - **Cloudflare's "Always Use HTTPS" is on** for the zone, so nobody sends a token over plain HTTP.
+
+   To take the instance off the internet, delete the DNS record for the name or its route in the tunnel. A
+   firewall rule for incoming connections does not do it: the tunnel is a connection the server opens outward.
 
 Nothing redeploys by itself. After a change lands on the branch, press Redeploy in Coolify or call its API
 (`POST /api/v1/deploy?uuid=<application>`).
