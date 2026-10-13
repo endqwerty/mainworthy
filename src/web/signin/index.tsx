@@ -46,6 +46,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
 	}, []);
 
 	const attempt = (way: Way, notSignedIn: string, prove: () => Promise<void>): void => {
+		// The buttons stay focusable while a request runs (`aria-disabled`), so this is what stops a second one.
 		if (busy) return;
 		setBusy(way);
 		setRefused(null);
@@ -96,7 +97,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
 					<div className="signin-problem kept" role="status">
 						{said("password")}
 					</div>
-					<button type="submit" disabled={busy !== null}>
+					<button type="submit" aria-disabled={busy !== null}>
 						{busy === "password" ? "Signing in…" : "Sign in"}
 					</button>
 				</form>
@@ -105,7 +106,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
 						<button
 							type="button"
 							className="plain"
-							disabled={busy !== null}
+							aria-disabled={busy !== null}
 							onClick={() =>
 								attempt("passkey", "That passkey did not sign you in. Try again.", async () =>
 									// The challenge is asked for now and not when the page loaded: it lives five minutes.
@@ -142,7 +143,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
 					<div className="error signin-problem" role="status">
 						{said("token")}
 					</div>
-					<button type="submit" className="plain" disabled={busy !== null}>
+					<button type="submit" className="plain" aria-disabled={busy !== null}>
 						{busy === "token" ? "Signing in…" : "Sign in with the token"}
 					</button>
 				</form>

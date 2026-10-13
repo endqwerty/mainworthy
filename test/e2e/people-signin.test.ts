@@ -60,8 +60,13 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.type("sam");
 			await page.keyboard.press("Tab");
 			await page.keyboard.type("not the password");
+			// Sent from the button, by the keyboard. The button keeps the keys while the request runs and after
+			// the refusal, so somebody who works without a mouse is not left on nothing.
+			await page.keyboard.press("Tab");
+			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Sign in");
 			await page.keyboard.press("Enter");
 			await page.getByRole("status").filter({ hasText: "That name and password did not sign you in." }).waitFor();
+			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Sign in");
 			expect(await page.locator("#signin-name").inputValue()).toBe("sam");
 			expect(await page.locator("#app").count()).toBe(0);
 			// Nobody is told where a lost password goes but to an admin.

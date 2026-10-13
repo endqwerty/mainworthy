@@ -87,8 +87,12 @@ test.skipIf(!browserAvailable)(
 			expect(await page.locator("#password-next").inputValue()).toBe(NEW);
 			expect(await page.locator("#app").count()).toBe(1);
 			await page.unroute("**/api/account/password");
-			await page.locator("#password-again").press("Enter");
+			// This time from the button, by the keyboard. It keeps the keys through the request and the refusal.
+			await page.keyboard.press("Tab");
+			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Change password");
+			await page.keyboard.press("Enter");
 			await page.getByRole("status").filter({ hasText: "The current password is not right." }).waitFor();
+			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Change password");
 			expect(await page.locator("#password-next").inputValue()).toBe(NEW);
 			await page.locator("#password-current").fill(OLD);
 			await page.keyboard.press("Enter");
@@ -165,7 +169,11 @@ test.skipIf(!browserAvailable)(
 				}).then((reply) => reply.status);
 
 			await section(page, "People");
-			await page.locator("#invite-name").fill("kim");
+			// `n` goes to the name, as it goes to a new token or a new project in their sections.
+			await page.locator("#invite-name").waitFor();
+			await page.keyboard.press("n");
+			expect(await page.evaluate(() => document.activeElement?.id)).toBe("invite-name");
+			await page.keyboard.type("kim");
 			// What they may do starts as what a person needs to work. `admin` is not ticked, and a line under the
 			// boxes says what ticking it gives.
 			const may = page.locator(".settings-capabilities label");
@@ -180,28 +188,40 @@ test.skipIf(!browserAvailable)(
 			await page.getByText("admin lets a person change the policy", { exact: false }).waitFor();
 			await page.getByRole("checkbox", { name: "plan", exact: true }).uncheck();
 			await page.locator("#invite-project").selectOption("scratch");
+			// How long the link works is chosen by the keyboard: the select keeps the keys from one arrow to the
+			// next, from three days to a week to two weeks and back.
 			await page.locator("#invite-expires").focus();
-			await page.locator("#invite-expires").selectOption("1w");
-			// The select gave focus back, so the next plain key is the section's own: `n` goes to the name.
-			await page.keyboard.press("n");
-			expect(await page.evaluate(() => document.activeElement?.id)).toBe("invite-name");
-			expect(await page.locator("#invite-name").inputValue()).toBe("kim");
+			await page.keyboard.press("ArrowDown");
+			await page.keyboard.press("ArrowDown");
+			expect(await page.locator("#invite-expires").inputValue()).toBe("2w");
+			await page.keyboard.press("ArrowUp");
+			expect(await page.locator("#invite-expires").inputValue()).toBe("1w");
+			expect(await page.evaluate(() => document.activeElement?.id)).toBe("invite-expires");
+			await page.keyboard.press("Tab");
+			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Make invitation link");
 			await page.keyboard.press("Enter");
 
+			// The keys go to the link's "Copy link": the button that sent the form is for the next person.
 			const link = page.getByLabel("Invitation link");
 			await link.waitFor();
+			await page.getByRole("button", { name: "Copy link" }).waitFor();
+			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Copy link");
 			const address = await link.inputValue();
 			expect(address).toMatch(new RegExp(`^${server.url}/invite#[A-Za-z0-9_-]{20,}$`));
 			const code = address.split("#")[1] ?? "";
 			expect(await shows(code)).toBe(200);
 			await page.getByText("kim · read, record, produce, answer · scratch", { exact: false }).waitFor();
-			await page.getByRole("button", { name: "Copy link" }).click();
+			await page.keyboard.press("Enter");
 			await page.getByText("Link copied.", { exact: true }).waitFor();
 			expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(address);
 			// The name is empty for the next person; the link is gone when it is dismissed, and is not shown again.
+			// The keys go to the name then, for the next person.
 			expect(await page.locator("#invite-name").inputValue()).toBe("");
-			await page.getByRole("button", { name: "Dismiss link" }).click();
+			await page.keyboard.press("Tab");
+			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Dismiss link");
+			await page.keyboard.press("Enter");
 			expect(await link.count()).toBe(0);
+			expect(await page.evaluate(() => document.activeElement?.id)).toBe("invite-name");
 			expect(await page.content()).not.toContain(code);
 
 			// The open invitation, with who made it and when it runs out. Revoked, the link accepts nothing.
@@ -242,7 +262,30 @@ test.skipIf(!browserAvailable)(
 			await link.waitFor();
 			expect(await invitation("tess", "recover")).toMatchObject({ state: "open" });
 			expect(await shows((await link.inputValue()).split("#")[1] ?? "")).toBe(200);
-			expect(browser.errors).toEqual([]);
+			await page.getByRole("button", { name: "Dismiss link" }).click();
+
+			// A reply that is lost after the server acted: the invitation is made, and the page hears nothing. It
+			// does not say "try again", which would make a second link. It says what may have happened, reads
+			// the lists again, and they show it.
+			await page.route("**/api/invitation", async (route) => {
+				if (route.request().postDataJSON().do !== "create") return route.continue();
+				await route.fetch();
+				await route.abort();
+			});
+			await page.locator("#invite-name").fill("mia");
+			await page.locator("#invite-name").press("Enter");
+			await page
+				.getByRole("status")
+				.filter({ hasText: "No answer came back, so the page cannot tell whether mia was invited." })
+				.waitFor();
+			await rows(page).filter({ hasText: "mia" }).filter({ hasText: "to join" }).waitFor();
+			expect(await link.count()).toBe(0);
+			// The name is kept, and the form now knows that mia exists: it sends no second invitation.
+			expect(await page.locator("#invite-name").inputValue()).toBe("mia");
+			await page.getByText("mia signs in here already.", { exact: false }).waitFor();
+			expect(await page.getByRole("button", { name: "Make invitation link" }).isDisabled()).toBe(true);
+			expect(await invitation("mia", "join")).toMatchObject({ state: "open" });
+			expect(browser.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
 		} finally {
 			await browser?.close();
 		}

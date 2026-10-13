@@ -7,7 +7,7 @@ import { useQueryOp } from "../lib/data.ts";
 import { createInvitation, dateTime, listInvitations, revokeInvitation, until } from "../lib/people.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
-import { saidBy, useList, withId } from "./list.ts";
+import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
 import "./people.css";
 
 const Actor = z.object({
@@ -88,7 +88,15 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 				setCan((now) => now.filter((capability) => capability !== "admin"));
 				return made(link);
 			})
-			.catch((error: unknown) => setProblem(saidBy(error)))
+			.catch((error: unknown) => {
+				setProblem(
+					saidOfWrite(
+						error,
+						`No answer came back, so the page cannot tell whether ${wanted} was invited. The lists below are read again. If ${wanted} is in them, that link is lost: a recovery link is their way in.`,
+					),
+				);
+				void Promise.all([invitations.refetch(), actors.refetch()]);
+			})
 			.finally(() => setBusy(false));
 	}
 
@@ -102,7 +110,16 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 				return made(link);
 			})
 			// The button is not offered where the server would refuse; what it refuses all the same is said here.
-			.catch((error: unknown) => setRefusal({ about: person, message: saidBy(error) }))
+			.catch((error: unknown) => {
+				setRefusal({
+					about: person,
+					message: saidOfWrite(
+						error,
+						"No answer came back. If a link was made it is lost, and making another takes its place.",
+					),
+				});
+				void invitations.refetch();
+			})
 			.finally(() => setRecovering(null));
 	}
 
@@ -119,7 +136,11 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 				);
 				return invitations.refetch();
 			})
-			.catch((error: unknown) => setMessage(saidBy(error)))
+			.catch((error: unknown) => {
+				setMessage(saidBy(error));
+				// With no reply it may have been revoked all the same: the list says.
+				void invitations.refetch();
+			})
 			.finally(() => setRevoking((ids) => withId(ids, row.id, false)));
 	}
 
@@ -174,11 +195,9 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 					className="form-input"
 					id="invite-project"
 					value={onProject}
-					onChange={(event) => {
-						// A select that keeps focus takes the next plain key for itself.
-						event.currentTarget.blur();
-						setOnProject(event.target.value);
-					}}
+					// The select keeps the focus when it changes, unlike the selects of the shell: an arrow key changes
+					// it one step at a time, and Tab goes on down the form.
+					onChange={(event) => setOnProject(event.target.value)}
 				>
 					<option value="">Every project</option>
 					{session.projects.map((entry) => (
@@ -192,10 +211,7 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 					className="form-input"
 					id="invite-expires"
 					value={expires}
-					onChange={(event) => {
-						event.currentTarget.blur();
-						setExpires(event.target.value);
-					}}
+					onChange={(event) => setExpires(event.target.value)}
 				>
 					{LASTS.map(([value, text]) => (
 						<option key={value} value={value}>
@@ -206,7 +222,8 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 				<p className="settings-problem" role="status">
 					{problem}
 				</p>
-				<button className="out" type="submit" disabled={busy || !wanted || exists || can.length === 0}>
+				{/* Marked and never disabled, so it keeps the focus through a request: `invite` sends nothing it should not. */}
+				<button className="out" type="submit" aria-disabled={busy || !wanted || exists || can.length === 0}>
 					{busy ? "Making the link…" : "Make invitation link"}
 				</button>
 			</form>
@@ -214,7 +231,11 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 				<InvitationLink
 					key={link.id}
 					created={link}
-					dismiss={() => setCreated((links) => links.filter((shown) => shown.id !== link.id))}
+					dismiss={() => {
+						setCreated((links) => links.filter((shown) => shown.id !== link.id));
+						// The button that was pressed is gone with the link. The keys go to the name, for the next person.
+						nameRef.current?.focus();
+					}}
 				/>
 			))}
 
@@ -232,7 +253,7 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 					<button
 						className="out"
 						type="button"
-						disabled={revoking.has(row.id)}
+						aria-disabled={revoking.has(row.id)}
 						aria-label={`Revoke the invitation for ${row.name}`}
 						onClick={() => revoke(row)}
 					>
@@ -271,7 +292,12 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 					</span>
 					{!mayRecover(person.name) ? null : confirming === person.name ? (
 						<>
-							<button className="out" type="button" disabled={recovering !== null} onClick={() => recover(person.name)}>
+							<button
+								className="out"
+								type="button"
+								aria-disabled={recovering !== null}
+								onClick={() => recover(person.name)}
+							>
 								{recovering === person.name ? "Making the link…" : "Make the recovery link"}
 							</button>
 							<button type="button" className="dim" onClick={() => setConfirming(null)}>
@@ -337,6 +363,8 @@ function InvitationLink({ created, dismiss }: { created: InvitationCreated; dism
 				<button
 					className="out"
 					type="button"
+					// biome-ignore lint/a11y/noAutofocus: the link was just asked for and is shown once; copying it is what comes next.
+					autoFocus
 					onClick={() =>
 						void copySecret(field.current, address).then((done) =>
 							setCopied(done ? "Link copied." : "Copy failed. Try again."),

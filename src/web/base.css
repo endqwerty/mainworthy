@@ -1356,7 +1356,10 @@ select:focus-visible,
 	outline: 2px solid var(--acc);
 	outline-offset: 2px;
 }
-button:disabled {
+/* A button whose request is under way is marked and not disabled: disabled, it would drop the focus, and the
+   next key of somebody who works by keyboard would go nowhere. Its handler lets one request through. */
+button:disabled,
+button[aria-disabled="true"] {
 	cursor: default;
 	opacity: 0.5;
 }
