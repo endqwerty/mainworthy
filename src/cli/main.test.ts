@@ -7,6 +7,7 @@ import { OP_LIST } from "../server/ops/index.ts";
 import { Client } from "./client.ts";
 import { COMMAND_NAMES } from "./dispatch.ts";
 import { GENERATED_COMMANDS } from "./generated.ts";
+import { MAX_SEED_UNLINKED_FILES, seed, unitTests } from "./seed.ts";
 import { COMMIT, outputWith, RED_XML, withInstance } from "./test-support.ts";
 
 const Ref = z.object({ ref: z.string() });
@@ -712,8 +713,9 @@ test("seed fills a project it makes, and leaves its pipeline and agent nothing o
 		const result = await cli(["seed", "demo", "--cases", "12"]);
 		expect(result.stderr).toBe("");
 		expect(result.code).toBe(0);
-		// The failing test on `main` and on the pull request, the agent's finding and its edit, and a test with no case.
-		expect(result.stdout).toMatch(/^seeded demo: 12 cases, run R-\d+, 5 questions\n/);
+		// The failing test on `main` and on the pull request, the agent's finding and its edit, a test with no case,
+		// and the shop's unit tests: sixty files that no case names, one question each.
+		expect(result.stdout).toMatch(/^seeded demo: 12 cases, run R-\d+, 65 questions\n/);
 		expect(result.stdout).toEndWith(`${instance.url}/p/demo/suite\n`);
 		expect(await casesIn(client, "demo")).toBe(12);
 		expect((await projects(client)).find((project) => project.key === "demo")?.policy).toBe("standard");
@@ -727,6 +729,23 @@ test("seed fills a project it makes, and leaves its pipeline and agent nothing o
 			expect(token.expiresAt).toBeGreaterThan(started);
 			expect(token.expiresAt).toBeLessThanOrEqual(Date.now() + 3_600_000);
 		}
+		// The demo keeps the queue a first real project has: many rows that want one answer. They are distinct
+		// files in a believable tree, and one change of the project's choice answers them all.
+		const demo = new Client({ ...client.options, project: "demo" });
+		const unlinked = (await demo.call("inbox", { kind: "map", limit: 500 })).items;
+		expect(unlinked).toHaveLength(61);
+		const files = unlinked.map((item) => z.object({ file: z.string() }).parse(item.evidence).file);
+		expect(new Set(files).size).toBe(61);
+		expect(files.filter((file) => file.startsWith("tests/unit/"))).toHaveLength(60);
+		const choice = await demo.call("propose", { edits: [{ op: "policy", unlinked: "track" }] });
+		const asked = (await demo.call("inbox", { kind: "adopt", on: choice.proposal ?? "" })).items[0];
+		const tracked = await demo.call("decide", {
+			q: asked?.q ?? "",
+			onEvidence: asked?.evidenceHash ?? "",
+			answer: { is: "accept" },
+		});
+		expect(tracked[0]?.effects).toMatchObject({ ruled: 61 });
+		expect((await demo.call("inbox", {})).counts).toMatchObject({ open: 4, failure: 2 });
 	});
 });
 
@@ -745,9 +764,11 @@ test("seed sent again writes nothing twice, and a second project is seeded besid
 		expect(other.stderr).toContain("was seeded with another number of cases");
 		expect(await casesIn(client, "demo")).toBe(12);
 		// The command ids and the two actors of the first seed do not stand in the way of a second project.
-		const beside = await cli(["seed", "demo-2", "--cases", "3", "--json"]);
+		// It takes two files of unit tests where the first took sixty: the five questions and two more.
+		const beside = await cli(["seed", "demo-2", "--cases", "3", "--unlinked-files", "2", "--json"]);
 		expect(beside.stderr).toBe("");
 		expect(outputWith(Seeded, beside)).toMatchObject({ project: "demo-2", cases: 3 });
+		expect(outputWith(Seeded, beside).questions).toHaveLength(7);
 		expect((await grantsOf(client, "pipeline"))?.map((grant) => grant.project)).toEqual(["demo", "demo-2"]);
 		expect(await casesIn(client, "demo")).toBe(12);
 	});
@@ -769,6 +790,18 @@ test("seed leaves alone a project that holds work, a name it was not given, and 
 			expect(refused.code).toBe(4);
 			expect(refused.stderr).toContain("seed writes from 1 to 100000 cases");
 		}
+		// The same for the files of unit tests, asked of the function the command calls: it refuses before it
+		// writes, so no project is made. At the most it reports, every file is its own.
+		for (const unlinkedFiles of [-1, 1.5, MAX_SEED_UNLINKED_FILES + 1])
+			await expect(seed(client, { project: "refused", cases: 3, unlinkedFiles })).rejects.toThrow(
+				"seed reports from 0 to 500 files of tests with no case",
+			);
+		expect((await projects(client)).map((project) => project.key)).not.toContain("refused");
+		const most = unitTests(MAX_SEED_UNLINKED_FILES);
+		const perFile = Map.groupBy(most, (result) => ("file" in result.test ? result.test.file : undefined));
+		expect(perFile.size).toBe(MAX_SEED_UNLINKED_FILES);
+		expect([...perFile.values()].every((tests) => tests.length >= 1 && tests.length <= 9)).toBe(true);
+		expect(new Set(most.map((result) => ("key" in result.test ? result.test.key : ""))).size).toBe(most.length);
 		// A person of the name the demo's pipeline takes: refused before the project is made.
 		await client.call("admin", { do: "token.create", actor: "pipeline", kind: "human", can: ["read"] });
 		const taken = await cli(["seed", "demo", "--cases", "3"]);

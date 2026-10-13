@@ -12,6 +12,39 @@ export type SeedResult = { cases: string[]; run: string; proposal: string | null
 /** The most cases one seed writes: the size the benchmark measures (`bench/`). */
 export const MAX_SEED_CASES = 100_000;
 
+/** The most files of unit tests one seed reports: one open question each. */
+export const MAX_SEED_UNLINKED_FILES = 500;
+
+const AREAS = ["cart", "checkout", "accounts", "orders", "catalog", "shipping", "tax", "search", "notify", "api"];
+const UNITS = ["totals", "rounding", "validation", "limits", "retries", "locale", "cache", "permissions", "parse"];
+const CHECKS = [
+	"accepts a plain value",
+	"refuses an empty value",
+	"keeps the order",
+	"rounds half up",
+	"is idempotent",
+];
+
+/**
+ * The unit tests of the shop, which no case names: `files` files of one to nine tests each, the same every time.
+ * A real repository's pipeline reports hundreds of these beside the few tests that are linked to cases. The
+ * demo asks about tests with no case, so each file is one open question, and every one of them wants the same
+ * answer. That is the queue a person meets on their first real project, kept here so that answering many rows
+ * at once can be tried against it.
+ */
+export function unitTests(files: number): Api["report"]["input"]["results"] {
+	return Array.from({ length: files }, (_, f) => {
+		const area = AREAS[f % AREAS.length] ?? "cart";
+		const unit = UNITS[Math.floor(f / AREAS.length) % UNITS.length] ?? "totals";
+		const round = Math.floor(f / (AREAS.length * UNITS.length));
+		const file = `tests/unit/${area}/${unit}${round === 0 ? "" : `-${round + 1}`}.test.ts`;
+		return Array.from({ length: 1 + ((f * 7) % 9) }, (_, t) => {
+			const name = `${unit} ${CHECKS[t % CHECKS.length] ?? "works"}${t < CHECKS.length ? "" : ` (${t + 1})`}`;
+			return { test: { key: `${file}::${unit}::${name}`, name, file }, outcome: "pass" as const };
+		});
+	}).flat();
+}
+
 const Projects = z.array(z.object({ key: z.string() }));
 const Actors = z.array(z.object({ name: z.string(), kind: z.string() }));
 const Token = z.object({ token: z.string() });
@@ -37,10 +70,15 @@ const REVIEWER: Producer = {
  */
 export async function seed(
 	client: Client,
-	{ project, cases }: { project: string; cases: number },
+	{ project, cases, unlinkedFiles = 0 }: { project: string; cases: number; unlinkedFiles?: number },
 ): Promise<SeedResult> {
 	if (!Number.isInteger(cases) || cases < 1 || cases > MAX_SEED_CASES)
 		throw new CliError("invalid", `seed writes from 1 to ${MAX_SEED_CASES} cases, not ${cases}`);
+	if (!Number.isInteger(unlinkedFiles) || unlinkedFiles < 0 || unlinkedFiles > MAX_SEED_UNLINKED_FILES)
+		throw new CliError(
+			"invalid",
+			`seed reports from 0 to ${MAX_SEED_UNLINKED_FILES} files of tests with no case, not ${unlinkedFiles}`,
+		);
 	const as = (token: string | undefined) => new Client({ url: client.url, token, project });
 	const owner = as(client.options.token);
 	const id = (step: string) => `demo-${project}-${step}-v1`;
@@ -237,10 +275,25 @@ export async function seed(
 			},
 		],
 	});
+	// The shop's unit tests on the pull request, in a job of their own: one more open question for each file.
+	if (unlinkedFiles > 0) {
+		await ci.call("report", {
+			cmd: id(`unit-${unlinkedFiles}`),
+			target: { commit: change, repo: "demo/shop", branch: "coupon-total", pr: 482 },
+			job: "unit",
+			results: unitTests(unlinkedFiles),
+		});
+	}
 	// What the demo leaves to answer, read back: more than the replies above name. The failing test is a question
 	// on `main` and on the pull request, and the demo asks about a test with no case, so that one is too.
-	const open = await owner.call("inbox", { limit: 50 });
-	return { cases: refs, run: planned.run, proposal: proposal.proposal, questions: open.items.map((item) => item.q) };
+	const questions: string[] = [];
+	for (let cursor: string | undefined; ; ) {
+		const page = await owner.call("inbox", { limit: 500, ...(cursor ? { cursor } : {}) });
+		questions.push(...page.items.map((item) => item.q));
+		if (!page.cursor) break;
+		cursor = page.cursor;
+	}
+	return { cases: refs, run: planned.run, proposal: proposal.proposal, questions };
 }
 
 /** Whether the project holds anything a person, a pipeline or an agent put there. */

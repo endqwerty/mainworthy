@@ -64,11 +64,13 @@ To look around before you write a case of your own, fill a project with the demo
 
 ```
 $ mainworthy seed demo
-seeded demo: 2000 cases, run R-4, 5 questions
+seeded demo: 2000 cases, run R-4, 65 questions
 http://127.0.0.1:7357/p/demo/suite
 ```
 
-The demo is a shop's suite: checkout, accounts, orders and a catalog. A pipeline named `pipeline` has reported three commits, the last of them pull request 482, where one test fails. A run named "Checkout regression" is planned on that pull request. An agent named `reviewer` has left a finding and a proposed edit. The queue holds five questions for you: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The project ends on the `standard` preset, set to ask about tests with no case. `--cases` sets how many cases the demo writes, from 1 to 100000.
+The demo is a shop's suite: checkout, accounts, orders and a catalog. A pipeline named `pipeline` has reported three commits, the last of them pull request 482, where one test fails. A run named "Checkout regression" is planned on that pull request. An agent named `reviewer` has left a finding and a proposed edit. The queue holds five questions that each want a judgment: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The project ends on the `standard` preset, set to ask about tests with no case. `--cases` sets how many cases the demo writes, from 1 to 100000.
+
+The pipeline also reports the shop's unit tests, which no case names: 60 files under `tests/unit/`, one open question each. That is the queue a first real project has, with many rows that want the same answer. Answer them one at a time to see what that costs. Then answer them all at once: in Settings, Policy, set "Tests with no case" to "Track without a case", or run `mainworthy --project demo policy tests track`. `--unlinked-files` sets how many files there are, from 0 to 500.
 
 You name the project each time. `seed` makes it when the instance has none of that name, and it does not read `--project` or `MAINWORTHY_PROJECT`. It refuses a project that already holds cases, tests or runs, so it cannot add the demo to your own work. If a seed stops halfway, send the same command again: it finishes the rest and writes nothing twice.
 
