@@ -10,7 +10,7 @@ import type { Edit } from "../../core/ops.ts";
 import { cleanTitle, conflictEditorStatus, draftOwnershipStatus, firstStep } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
 import { ApiError, call } from "../lib/api.ts";
-import { invalidateProject, queryClient, useQueryOp } from "../lib/data.ts";
+import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { deviceSession, sessionCurrent } from "../lib/device.ts";
 import {
 	activeDraft,
@@ -29,6 +29,7 @@ import { draftOwner, randomId } from "../lib/ids.ts";
 import {
 	allRecorded,
 	cardText,
+	caseHeld,
 	draftAfterMerge,
 	type MergeFate,
 	mergeFate,
@@ -463,6 +464,20 @@ export function SuiteScreen() {
 		[cardDraft, storeConflict],
 	);
 	/**
+	 * The page holds these rows of a case from now on, unless it holds a later version already. A card that ends
+	 * calls this in the step in which its draft goes: from then on the pane shows the case the page holds, and
+	 * `e` opens the editor on it. What the page held until then was read before the card's question was answered.
+	 * The read that `invalidateProject` starts in the same step replaces any read still on its way.
+	 */
+	const holdCase = useCallback(
+		({ ref, rows }: { ref: string; rows: Api["get"]["reply"] }): void => {
+			queryClient.setQueryData<Api["get"]["reply"]>(queryKey({ project, op: "get", input: { refs: [ref] } }), (held) =>
+				caseHeld({ held, read: rows }),
+			);
+		},
+		[project],
+	);
+	/**
 	 * Ends a card whose merge the server recorded: as `version`, or with no version of its own (null). Text
 	 * later than that merge stays as a draft (`draftAfterMerge`); with none, the draft is done.
 	 */
@@ -482,14 +497,15 @@ export function SuiteScreen() {
 				const card = cardDraft(state);
 				return card && draftAfterMerge({ ...card, sent, recorded });
 			};
-			// The recorded version is read only when there is later text to carry onto it.
-			const view =
-				version !== null && left(null)
-					? CaseView.parse((await call("get", { refs: [state.ref], version }, { project, owner }))[0])
-					: null;
+			// The version the merge made is read before the card ends, with later text to carry onto it or without:
+			// the reply names the version and not its text, and the case the page holds is from before the merge
+			// (issue #94).
+			const rows = version !== null ? await call("get", { refs: [state.ref], version }, { project, owner }) : null;
+			const view = rows && CaseView.parse(rows[0]);
 			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
 			const next = left(view && { version: view.version, body: bodyOf(view), tags: view.tags, covers: view.covers });
 			if (next === undefined) return;
+			if (rows) holdCase({ ref: state.ref, rows });
 			if (next === null) dropDraft(state.draftId);
 			else if (!putDraft(next)) return;
 			uncertainMerges.current.delete(state.q);
@@ -502,7 +518,7 @@ export function SuiteScreen() {
 			);
 			void invalidateProject(project);
 		},
-		[project, owner, mayWrite, cardDraft, putDraft, dropDraft, setStatus],
+		[project, owner, mayWrite, cardDraft, holdCase, putDraft, dropDraft, setStatus],
 	);
 	/** Acts on what the server recorded for a merge this card sent. False when that merge settled nothing. */
 	const settleMerge = useCallback(
@@ -607,6 +623,7 @@ export function SuiteScreen() {
 			const head = CaseView.parse(rows[0]);
 			const typed = hasTypedMerge(card.conflict);
 			if (answer === "merge" && allRecorded({ ...card, head: bodyOf(head) })) {
+				holdCase({ ref: state.ref, rows });
 				dropDraft(state.draftId);
 				setStatus(`Conflict resolved elsewhere. Version ${head.version} holds your text.`);
 			} else {
@@ -618,7 +635,7 @@ export function SuiteScreen() {
 			uncertainMerges.current.delete(state.q);
 			void invalidateProject(project);
 		},
-		[project, owner, mayWrite, cardDraft, settleMerge, dropDraft, forgetRequest, setStatus],
+		[project, owner, mayWrite, cardDraft, settleMerge, holdCase, dropDraft, forgetRequest, setStatus],
 	);
 	useEffect(() => {
 		const read = CardQuestion.safeParse(conflictQuestion.data?.[0]);

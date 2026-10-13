@@ -82,6 +82,25 @@ export function mergeFate({ reply, ref }: { reply: unknown; ref: string }): Merg
 	}
 }
 
+const CaseStamp = z.object({ ref: z.string(), version: z.number() });
+
+/**
+ * The rows the page holds for a case once it has read `read`, a version the server recorded: `read`, unless the
+ * page already holds that version or a later one. What it held before is from before the write. Its own read of
+ * the case after the write can come back first, and may by then hold more than `read`.
+ */
+export function caseHeld<Row extends Record<string, unknown>>({
+	held,
+	read,
+}: {
+	held: Row[] | undefined;
+	read: Row[];
+}): Row[] {
+	const recorded = CaseStamp.parse(read[0]);
+	const now = CaseStamp.safeParse(held?.[0]);
+	return held && now.success && now.data.ref === recorded.ref && now.data.version >= recorded.version ? held : read;
+}
+
 /**
  * The text of a card as a draft on the version the draft was written on. The card's merged body also holds what
  * the version it was shown against had changed. Proposed on the draft's own base those fields would count as the
