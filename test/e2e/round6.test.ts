@@ -434,6 +434,58 @@ check(
 );
 
 check(
+	"R6-1 a draft another window opens while the read waits keeps its line when the read comes back",
+	async () => {
+		const server = await startServer();
+		await cases(server, 2);
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const a = h.page;
+			a.setDefaultTimeout(5000);
+			const b = await follower(server, h);
+			await conflict(server, a);
+			await b.locator(".conflict-card").waitFor();
+			const get = await unreadable(b);
+			await a.getByRole("textbox", { name: "Merged title", exact: true }).fill("Merged in the card");
+			await resolve(a);
+			await a.locator(".conflict-card").waitFor({ state: "detached" });
+			await b.getByText("could not be read", { exact: false }).first().waitFor();
+			await b.getByRole("option", { name: /Case 2/ }).click();
+			await b.getByRole("option", { name: /Merged in the card|Their title/ }).click();
+			await b.locator("#detail .cid").filter({ hasText: "C-1" }).waitFor();
+			// Two presses of `e` wait on one read. Meanwhile the first window, which is live, opens a draft of the case.
+			get.reads = "held";
+			get.asked = 0;
+			await leaveField(b);
+			await b.keyboard.press("e");
+			await b.keyboard.press("e");
+			await eventually(
+				async () => get.asked,
+				(asked) => asked === 1,
+			);
+			await leaveField(a);
+			await a.keyboard.press("e");
+			await title(a).fill("Typed in the first window");
+			get.release();
+			// The second window shows that draft, and its line says whose it is, not that the case is as recorded.
+			await eventually(
+				() => title(b).inputValue(),
+				(value) => value === "Typed in the first window",
+			);
+			await b.evaluate(() => new Promise((done) => setTimeout(done, 150)));
+			const line = await b.locator("#stat").innerText();
+			expect(line).not.toContain("as the server recorded it");
+			expect(line).toContain("being edited in another window");
+			expect(await title(b).evaluate((field) => field instanceof HTMLTextAreaElement && field.readOnly)).toBe(true);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+check(
 	"R6-1 a held conflict reply includes every character typed before it arrives",
 	async () => {
 		const server = await startServer();
