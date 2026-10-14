@@ -140,9 +140,11 @@ Each of these is as the screen says, and a test pins it.
   field should cancel the answer instead is the owner's to decide.
 - A queue question that is no longer listed refuses Enter in its answer field in one of two states: the page has
   read that it was settled ("This question was settled elsewhere. Your note is kept."), or it is still reading
-  ("Reading this question before answering. Your note is kept."). Both are true when shown, and when the read
-  ends the second message becomes the first (`round3-interactions.test.ts`, "R3B-2 a question settled
-  elsewhere while the queue first reads it").
+  ("Reading this question before answering. Your note is kept."). When the read comes back and says the
+  question was settled, the second message becomes the first, unless another line has replaced it by then
+  (`round3-interactions.test.ts`, "R3B-2 a question settled elsewhere while the queue first reads it"). A read
+  that fails, or that finds the question still open, leaves the line as it is, and so does moving to another
+  question: the status line is one line for the whole app and keeps its last message.
 
 ## Shared UI and styles
 
