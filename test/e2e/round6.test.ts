@@ -405,7 +405,8 @@ check(
 			expect(await editors(b)).toEqual([]);
 			expect(await drafts(b)).toHaveLength(0);
 			// Issue #135. While the read is on its way, a property changed in the read view and two presses of `e`
-			// wait for that one read. It opens one editor, on the case as read, with the property changed on it.
+			// wait for that one read. It opens one editor, on the case as read. The property change is not made: the
+			// person makes it again on the case as read (the issue's second limit, left as it is).
 			get.reads = "held";
 			get.asked = 0;
 			await b.locator("#detail .case-properties summary").click();
@@ -418,13 +419,12 @@ check(
 			get.release();
 			await title(b).waitFor();
 			expect(await editors(b)).toEqual(["Merged in the card"]);
-			expect(await b.getByRole("checkbox", { name: "Pipeline" }).isChecked()).toBe(true);
+			expect(await b.getByRole("checkbox", { name: "Pipeline" }).isChecked()).toBe(false);
 			await title(b).press("Escape");
-			const recorded = await eventually(
-				() => server.api("get", { refs: ["C-1"] }),
-				(rows) => z.array(z.string()).parse(rows[0]?.methods).includes("auto"),
+			await eventually(
+				() => drafts(b),
+				(rows) => rows.length === 0,
 			);
-			expect(recorded[0]).toMatchObject({ title: "Merged in the card", methods: ["human", "auto"] });
 		} finally {
 			await h.close();
 			await server.stop();
