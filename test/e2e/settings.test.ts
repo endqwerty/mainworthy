@@ -1,83 +1,20 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { call } from "../../src/web/lib/api.ts";
-import { browserAvailable, eventually, openPage, type Server } from "./support.ts";
+import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
 
-/** Builder 2 has its own port range while Builder 1 uses the shared fixture. */
-async function fixture({
+/** A server with the preset these tests ask for, on a port the helpers hand out. */
+function fixture({
 	preset = "standard",
 	mode = "local",
 }: {
 	preset?: string;
 	mode?: "local" | "server";
 } = {}): Promise<Server> {
-	const directory = await mkdtemp(join(tmpdir(), "mainworthy-builder2-"));
-	let port = 7481;
-	for (; port <= 7499; port++) {
-		try {
-			const probe = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response() });
-			await probe.stop(true);
-			break;
-		} catch {}
-	}
-	if (port > 7499) {
-		await rm(directory, { recursive: true, force: true });
-		throw new Error("No free Builder 2 port");
-	}
-	const token = crypto.randomUUID();
-	const url = `http://127.0.0.1:${port}`;
-	const child = Bun.spawn([process.execPath, "test/e2e/serve.ts"], {
-		cwd: process.cwd(),
-		env: {
-			...process.env,
-			NODE_ENV: "production",
-			MAINWORTHY_PORT: String(port),
-			MAINWORTHY_DATA: directory,
-			MAINWORTHY_MODE: mode,
-			MAINWORTHY_OWNER_TOKEN: token,
-		},
-		stdout: "ignore",
-		stderr: "pipe",
+	// These tests answer questions about tests with no case, so the project asks them, as `strict` does.
+	return startServer({
+		mode,
+		...(preset === "loose" ? {} : { preset, ...(preset === "strict" ? {} : { unlinked: "ask" as const }) }),
 	});
-	const stop = async () => {
-		child.kill("SIGTERM");
-		await child.exited;
-		await rm(directory, { recursive: true, force: true });
-	};
-	const api: Server["api"] = (op, input, options = {}) =>
-		call(op, input, { url, project: "scratch", token: options.token ?? token });
-	try {
-		await eventually(async () => {
-			if (child.exitCode !== null)
-				throw new Error(`Builder 2 server exited before readiness: ${await new Response(child.stderr).text()}`);
-			try {
-				return (await fetch(`${url}/healthz`)).ok;
-			} catch {
-				return false;
-			}
-		}, Boolean);
-		if (preset !== "loose") {
-			// These tests answer questions about tests with no case, so the project asks them, as `strict` does.
-			const proposed = await api("propose", {
-				edits: [{ op: "policy", preset, ...(preset === "strict" ? {} : { unlinked: "ask" as const }) }],
-			});
-			const q = (await api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
-			if (!q) throw new Error("Preset proposal question is missing");
-			const replies = await api("decide", {
-				q: q.q,
-				onEvidence: q.evidenceHash,
-				answer: { is: "accept" },
-				reason: "Configure the browser test preset",
-			});
-			if (replies[0]?.status !== "decided") throw new Error("Preset was not applied");
-		}
-		return { url, project: "scratch", token, api, seeded: null, stop };
-	} catch (error) {
-		await stop();
-		throw error;
-	}
 }
 
 import { z } from "zod";
