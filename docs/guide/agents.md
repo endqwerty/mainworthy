@@ -58,7 +58,14 @@ Start with `impact`. It tells the agent which few cases matter, so it does not r
 
 A skill is a short guide that an agent loads when it needs it. Mainworthy ships one, a directory named `mainworthy`. It has a `SKILL.md` and a `references` folder with pages on writing cases, reviewing a change, reporting results and the tool inputs. It teaches the case model and the order of work: start with `impact`, read only the cases you need, record findings in one `claim`, report outcomes in one `report`, and answer a question on the evidence hash it read.
 
-The instance does not serve the skill. It is in the Mainworthy source tree, as `skill/mainworthy`. Copy that directory into the skills directory your agent reads. For Claude Code, use `~/.claude/skills/mainworthy` for every project, or `.claude/skills/mainworthy` inside one. Other agents keep skills in a directory of their own.
+The instance serves the skill, as one archive of the `mainworthy` directory, at `/docs/skill/mainworthy.tar.gz`. Like the rest of the documentation it needs no token. One command unpacks it into the skills directory your agent reads. For Claude Code, use `~/.claude/skills` for every project, or `.claude/skills` inside one:
+
+```
+$ mkdir -p ~/.claude/skills
+$ curl -fsS "$MAINWORTHY_URL/docs/skill/mainworthy.tar.gz" | tar -xz -C ~/.claude/skills
+```
+
+The skill matches the version of the instance that served it, so unpack it again after an upgrade. Other agents keep skills in a directory of their own: give `tar` that one. The same files are in the Mainworthy source tree, as `skill/mainworthy`.
 
 ## What agent work is worth
 

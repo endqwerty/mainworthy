@@ -22,7 +22,7 @@ import { OP_LIST } from "../src/server/ops/index.ts";
 import { type Instance, start, VERSION } from "../src/server/start.ts";
 import { DIAGRAMS, PAGES, SCREENSHOTS } from "../src/surfaces/docs/content.ts";
 import { renderArticle } from "../src/surfaces/docs/render.ts";
-import { docsRoutes, withoutRepositoryAddress } from "../src/surfaces/docs/site.ts";
+import { docsRoutes, SKILL_URL, withoutRepositoryAddress } from "../src/surfaces/docs/site.ts";
 
 const GUIDE = "docs/guide";
 const files = readdirSync(GUIDE)
@@ -286,6 +286,23 @@ describe("the site", () => {
 		expect(withoutRepositoryAddress("<svg></svg>")).toBe("<svg></svg>");
 	});
 
+	test("the agent skill is served, without a session, as one archive that holds exactly the directory skill/mainworthy", async () => {
+		const response = await get(SKILL_URL);
+		expect(response.status).toBe(200);
+		expect(response.headers.get("content-type")).toBe("application/gzip");
+		// Already compressed: the server does not compress it again.
+		expect(response.headers.get("content-encoding")).toBeNull();
+		const served = await new Bun.Archive(await response.bytes()).files();
+		const tree = new Map<string, string>();
+		for (const path of new Glob("**/*").scanSync({ cwd: "skill", onlyFiles: true }))
+			tree.set(path, readFileSync(join("skill", path), "utf8"));
+		expect([...served.keys()].sort(), "skill/mainworthy and what the site serves list the same files").toEqual(
+			[...tree.keys()].sort(),
+		);
+		for (const [path, file] of served) expect(await file.text(), path).toBe(tree.get(path) ?? "");
+		expect(await get(`${SKILL_URL}x`)).toMatchObject({ status: 404 });
+	});
+
 	test("what a page shows is there: the style sheet, the script, the icon and each screenshot", async () => {
 		for (const [path, type] of [
 			["/docs/assets/site.css", "text/css; charset=utf-8"],
@@ -347,6 +364,12 @@ describe("the build", () => {
 		expect([...imported].sort()).toEqual(["docs/diagrams", "docs/guide", "docs/ui/screenshots"]);
 		const dockerfile = readFileSync("Dockerfile", "utf8");
 		const ignored = readFileSync(".dockerignore", "utf8").split("\n");
+		// The skill the site serves (`content.ts` imports it from `skill/mainworthy`) is copied the same way.
+		expect(dockerfile, "the Dockerfile copies skill").toContain("COPY skill ./skill");
+		expect(
+			ignored.filter((line) => /^!?skill\b/.test(line)),
+			".dockerignore keeps skill out",
+		).toEqual([]);
 		for (const directory of imported) {
 			expect(dockerfile, `the Dockerfile copies ${directory}`).toContain(`COPY ${directory} ./${directory}`);
 			expect(ignored, `.dockerignore lets ${directory} in`).toContain(`!${directory}`);
