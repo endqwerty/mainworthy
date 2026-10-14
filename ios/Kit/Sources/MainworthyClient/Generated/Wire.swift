@@ -416,6 +416,8 @@ enum Wire {
 		let head: String?
 		let base: String?
 		let title: String?
+		/// Open, merged or closed, as it is now: a change older than the list's newest is read here.
+		let state: String
 	}
 
 	/// The run counted for this head, if any.

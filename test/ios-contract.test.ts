@@ -324,6 +324,10 @@ describe("what Changes and Your sessions read", () => {
 		holds("ended changes", ChangeList, list);
 		expect(list).toMatchObject({ items: [{ state: "merged", verdict: "blocked" }] });
 		holds("ended change gate", ChangeGate, await op(key, "gate", { change: "pr:482" }));
+		// A change's own page reads its state from impact: it may be older than the newest the list holds.
+		const impact = await op(key, "impact", { change: "pr:482" });
+		holds("ended change impact", ChangeImpact, impact);
+		expect(impact).toMatchObject({ change: { key: "pr:482", state: "merged" } });
 	});
 
 	test("a cookie lists and ends its own session", async () => {

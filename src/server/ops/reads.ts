@@ -904,7 +904,14 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 		: [];
 	return {
 		change: change
-			? { key: change.key, head: change.head_sha, base: change.base_sha, files: files.length, title: change.title }
+			? {
+					key: change.key,
+					head: change.head_sha,
+					base: change.base_sha,
+					files: files.length,
+					title: change.title,
+					state: change.ended ?? "open",
+				}
 			: { files: files.length },
 		gate: run ? { verdict: run.verdict, reason: run.reason, run: run.run } : null,
 		counts: { cases: cases.length, unreviewed, failing, uncovered: uncovered.length },

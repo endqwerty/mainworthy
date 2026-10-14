@@ -22,7 +22,7 @@ struct ChangesScreenTests {
 		#expect(screen.changes.first?.verdict == .passed && screen.detail?.gate.verdict == .passed)
 	}
 
-	@Test("an open change remains readable outside the newest 500, including a new head")
+	@Test("a change remains readable outside the newest 500, with its new head and its end")
 	func capEvictsDetail() async throws {
 		let server = Live.server()
 		_ = try await server.signIn(.token(Live.token))
@@ -38,8 +38,9 @@ struct ChangesScreenTests {
 				"job": "review", "results": [["test": ["key": "review-pass"], "outcome": "pass"]]
 			])
 		}
-		// Move the open change first, then put enough others ahead of it to fill the list.
+		// Move the open change and end it, then put enough others ahead of it to fill the list.
 		try await report(4, pr: 482)
+		let _: JSONValue = try await server.write("change", in: client.key, ["change": "pr:482", "state": "merged"])
 		for number in 0..<501 { try await report(1000 + number, pr: 1000 + number) }
 		await screen.refresh()
 		let gate: JSONValue = try await server.read("gate", in: client.key, ["change": "pr:482"])
@@ -52,6 +53,10 @@ struct ChangesScreenTests {
 		#expect(screen.detailLoading == .done && screen.detail?.gate.verdict == .passed)
 		#expect(screen.detail?.change.head == String(format: "%040x", 4))
 		#expect(screen.detail?.change.branch == "coupon-total")
+		// Its end is read with it, not taken from the list it fell out of (the second review's finding).
+		#expect(screen.detail?.change.state == .merged)
+		await screen.refresh()
+		#expect(screen.detail?.change.state == .merged)
 	}
 
 	@Test("a change is read by key before its list has been loaded")
