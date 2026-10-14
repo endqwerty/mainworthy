@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
 import { writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { OP_LIST } from "../server/ops/index.ts";
@@ -87,37 +88,37 @@ test("red report, blocked gate, generated decision, passed gate without another 
 });
 
 test("repeated report returns the same receipt, writes one batch, and names the duplicate", async () => {
-	await withInstance(async ({ cli, instance }) => {
+	await withInstance(async ({ run, instance }) => {
 		const argv = ["report", RED_XML, "--commit", COMMIT, "--branch", "main"];
-		const first = await cli(argv);
-		const again = await cli(argv);
+		const first = await run(argv);
+		const again = await run(argv);
 		expect(first.code).toBe(0);
 		expect(again.code).toBe(0);
 		expect(again.stdout).toBe(`${first.stdout}  already received; nothing was written\n`);
 		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(1);
 		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM results").get()?.n).toBe(2);
-		const machine = outputWith(Receipt, await cli([...argv, "--json", "--compact"]));
+		const machine = outputWith(Receipt, await run([...argv, "--json", "--compact"]));
 		expect(machine.fresh).toBe(false);
 		expect(machine.counts.total).toBe(2);
 	});
 });
 
 test("missing commit names both ways out and an explicit session uploads", async () => {
-	await withInstance(async ({ cli }) => {
-		const missing = await cli(["report", RED_XML]);
+	await withInstance(async ({ run }) => {
+		const missing = await run(["report", RED_XML]);
 		expect(missing.code).toBe(4);
 		expect(missing.stdout).toBe("");
 		expect(missing.stderr).toContain("missing commit");
 		expect(missing.stderr).toContain("--commit");
 		expect(missing.stderr).toContain("--session");
-		const session = await cli(["report", RED_XML, "--session", "exploration"]);
+		const session = await run(["report", RED_XML, "--session", "exploration"]);
 		expect(session.code).toBe(0);
 		expect(session.stdout).toContain('session "exploration" (no build identity)');
 	});
 });
 
 test("CI environment supplies report identity and the default gate target", async () => {
-	await withInstance(async ({ cli }) => {
+	await withInstance(async ({ run }) => {
 		const env = {
 			GITHUB_ACTIONS: "true",
 			GITHUB_SHA: COMMIT,
@@ -128,31 +129,31 @@ test("CI environment supplies report identity and the default gate target", asyn
 			GITHUB_RUN_ATTEMPT: "2",
 			GITHUB_JOB: "e2e",
 		};
-		const report = await cli(["report", RED_XML], { env });
+		const report = await run(["report", RED_XML], { env });
 		expect(report.code).toBe(0);
 		expect(report.stdout).toContain("9f3c2ab  (main)  attempt 2  job e2e");
-		expect((await cli(["gate"], { env })).code).toBe(2);
+		expect((await run(["gate"], { env })).code).toBe(2);
 	});
 });
 
 test("a pipeline's token runs both pipeline lines and nothing else, and its secret is absent from token list", async () => {
-	await withInstance(async ({ cli }) => {
-		const issued = await cli(["--project", "scratch", "token", "new", "--ci", "pipeline", "--json"]);
+	await withInstance(async ({ run }) => {
+		const issued = await run(["--project", "scratch", "token", "new", "--ci", "pipeline", "--json"]);
 		expect(issued.code).toBe(0);
 		expect(issued.stdout).toContain("will not be shown again");
 		expect(outputWith(z.object({ can: z.array(z.string()) }), issued).can).toEqual(["record"]);
 		const { token } = outputWith(Token, issued);
 		const env = { MAINWORTHY_TOKEN: token, MAINWORTHY_PROJECT: "scratch" };
-		const report = await cli(["report", RED_XML, "--commit", COMMIT], { env });
+		const report = await run(["report", RED_XML, "--commit", COMMIT], { env });
 		expect(report.code).toBe(0);
 		// Blocked: the verdict and the open question, with a token that may not read the queue.
-		const gate = await cli(["gate", "--commit", COMMIT], { env });
+		const gate = await run(["gate", "--commit", COMMIT], { env });
 		expect([gate.code, gate.stderr]).toEqual([2, ""]);
 		expect(gate.stdout).toMatch(/mainworthy gate {4}blocked: .*\n {2}Q-\d+ needs an answer/);
-		const inbox = outputWith(Inbox, await cli(["inbox", "--kind", "failure"]));
+		const inbox = outputWith(Inbox, await run(["inbox", "--kind", "failure"]));
 		const question = inbox.items[0];
 		if (!question) throw new Error("no failure question");
-		const refused = await cli(
+		const refused = await run(
 			[
 				"decide",
 				"--json",
@@ -162,40 +163,40 @@ test("a pipeline's token runs both pipeline lines and nothing else, and its secr
 		);
 		expect(refused.code).toBe(4);
 		expect(refused.stderr).toContain("forbidden:");
-		const list = await cli(["token", "list"]);
+		const list = await run(["token", "list"]);
 		expect(list.stdout).toContain("pipeline");
 		expect(list.stdout).not.toContain(token);
 
 		// What it may do is listed with its project, changed by name, and taken away by name.
-		expect((await cli(["actor", "list"])).stdout).toContain("ci     pipeline  scratch  record");
-		const widened = await cli(["--project", "scratch", "actor", "grant", "pipeline", "--can", "read,record"]);
+		expect((await run(["actor", "list"])).stdout).toContain("ci     pipeline  scratch  record");
+		const widened = await run(["--project", "scratch", "actor", "grant", "pipeline", "--can", "read,record"]);
 		expect(widened.stdout).toBe("pipeline on scratch: read, record\n");
-		const beyond = await cli(["--project", "scratch", "actor", "grant", "pipeline", "--can", "produce"]);
+		const beyond = await run(["--project", "scratch", "actor", "grant", "pipeline", "--can", "produce"]);
 		expect([beyond.code, beyond.stderr]).toEqual([4, expect.stringContaining("a pipeline may hold read and record")]);
-		const dropped = await cli(["--project", "scratch", "actor", "ungrant", "pipeline"]);
+		const dropped = await run(["--project", "scratch", "actor", "ungrant", "pipeline"]);
 		expect(dropped.stdout).toBe("pipeline holds no grant on scratch any more\n");
 		// With no grant on the project, the token is told what it would be told of a project that does not exist:
 		// a refusal that named the capability would confirm the project's key to any token.
-		expect((await cli(["report", RED_XML, "--commit", COMMIT], { env })).stderr).toBe(
+		expect((await run(["report", RED_XML, "--commit", COMMIT], { env })).stderr).toBe(
 			"not_found: no project named scratch, or no grant on it\n",
 		);
 
-		const tokens = outputWith(z.array(z.object({ id: z.number() })), await cli(["token", "list", "--json"]));
+		const tokens = outputWith(z.array(z.object({ id: z.number() })), await run(["token", "list", "--json"]));
 		const id = tokens[0]?.id;
 		if (id === undefined) throw new Error("issued token is absent from list");
-		expect((await cli(["token", "revoke", String(id)])).code).toBe(0);
-		expect((await cli(["report", RED_XML, "--commit", COMMIT], { env })).stderr).toContain("unauthenticated:");
+		expect((await run(["token", "revoke", String(id)])).code).toBe(0);
+		expect((await run(["report", RED_XML, "--commit", COMMIT], { env })).stderr).toContain("unauthenticated:");
 	});
 });
 
 test("standard policy records both a proposal and a decision and prints its clause table", async () => {
-	await withInstance(async ({ cli, instance }) => {
-		const changed = await cli(["policy", "use", "standard"]);
+	await withInstance(async ({ run, instance }) => {
+		const changed = await run(["policy", "use", "standard"]);
 		expect(changed.code).toBe(0);
 		expect(changed.stdout).toContain("proposal P-");
 		expect(changed.stdout).toContain("decision");
 		expect(changed.stdout).toContain("both recorded");
-		const shown = await cli(["policy", "show"]);
+		const shown = await run(["policy", "show"]);
 		expect(shown.code).toBe(0);
 		expect(shown.stdout).toContain("policy: standard");
 		expect(shown.stdout).toContain("tests with no case: track");
@@ -208,7 +209,7 @@ test("standard policy records both a proposal and a decision and prints its clau
 });
 
 test("change says a pull request ended, and the questions about it are no longer asked", async () => {
-	await withInstance(async ({ cli, client }) => {
+	await withInstance(async ({ run, client }) => {
 		await client.call("report", {
 			target: { commit: "cafe0002", branch: "fix", pr: 482 },
 			results: [
@@ -222,7 +223,7 @@ test("change says a pull request ended, and the questions about it are no longer
 		const asked = (await client.call("inbox", { kind: "failure" })).items[0]?.q;
 		// The command is the operation, with its input as flags. One start of it is enough to hold that: what the
 		// operation does with every other input is held where it costs no process (test/evidence.test.ts).
-		const ended = await cli(["change", "--change", "pr:482", "--state", "merged", "--compact"]);
+		const ended = await run(["change", "--change", "pr:482", "--state", "merged", "--compact"]);
 		expect(ended.stderr).toBe("");
 		expect(ended.stdout).toBe(`{"change":"pr:482","state":"merged","questions":["${asked}"],"already":false}\n`);
 		expect((await client.call("inbox", {})).counts.open).toBe(0);
@@ -235,8 +236,8 @@ test("change says a pull request ended, and the questions about it are no longer
 });
 
 test("policy tests changes what happens to a test with no case, and says how many open questions the rule answered", async () => {
-	await withInstance(async ({ cli, client }) => {
-		const asking = await cli(["policy", "tests", "ask"]);
+	await withInstance(async ({ run, client }) => {
+		const asking = await run(["policy", "tests", "ask"]);
 		expect(asking.stdout).toMatch(/^tests with no case: ask; proposal P-1 and decision \d+ are both recorded\n$/);
 		for (const file of ["tests/a.spec.ts", "tests/b.spec.ts"])
 			await client.call("report", {
@@ -245,36 +246,36 @@ test("policy tests changes what happens to a test with no case, and says how man
 				results: [{ test: { key: `${file}::one`, file }, outcome: "pass" }],
 			});
 		expect((await client.call("inbox", {})).counts.map).toBe(2);
-		const tracking = await cli(["policy", "tests", "track"]);
+		const tracking = await run(["policy", "tests", "track"]);
 		expect(tracking.code).toBe(0);
 		expect(tracking.stdout).toContain("tests with no case: track;");
 		expect(tracking.stdout).toEndWith("; 2 open questions answered by the rule\n");
 		expect((await client.call("inbox", {})).counts.open).toBe(0);
 		// The choice is not the preset: the project is still `loose`.
 		expect(await client.call("admin", { do: "project.list" })).toMatchObject([{ policy: "loose", unlinked: "track" }]);
-		const wrong = await cli(["policy", "tests", "sometimes"]);
+		const wrong = await run(["policy", "tests", "sometimes"]);
 		expect(wrong.code).not.toBe(0);
 		expect(wrong.stderr).toContain("policy tests needs ask, track or create");
 	});
 });
 
 test("outline stdin, get --md, and fmt round trip the canonical case", async () => {
-	await withInstance(async ({ cli, directory }) => {
+	await withInstance(async ({ cli, run, directory }) => {
 		const created = await cli(["new", "-"], {
 			input: "Coupon applies\n  Open the cart > One item\n  Apply SAVE10 > Total is 90.00\n",
 		});
 		expect(created.code).toBe(0);
 		expect(created.stdout).toBe("C-1\n");
-		const got = await cli(["get", "C-1", "--md"]);
+		const got = await run(["get", "C-1", "--md"]);
 		expect(got.code).toBe(0);
 		expect(got.stdout).toContain("title: Coupon applies");
 		expect(got.stdout).toContain("id: C-1");
 		const file = join(directory, "case.md");
 		await writeFile(file, got.stdout);
-		const fmt = await cli(["fmt", file]);
+		const fmt = await run(["fmt", file]);
 		expect(fmt.code).toBe(0);
 		expect(fmt.stdout).toBe(got.stdout);
-		expect((await cli(["get", "--refs", "C-1", "--fields", "title", "--compact"])).stdout.trim()).not.toContain("\n");
+		expect((await run(["get", "--refs", "C-1", "--fields", "title", "--compact"])).stdout.trim()).not.toContain("\n");
 	});
 });
 
@@ -291,10 +292,10 @@ test("Markdown parse errors include source lines and exit 4", async () => {
 });
 
 test("check groups real suite problems by rule and exits 1", async () => {
-	await withInstance(async ({ cli }) => {
-		expect((await cli(["check"])).code).toBe(0);
-		await cli(["new"], { input: "An incomplete case\n  Do something\n" });
-		const result = await cli(["check"]);
+	await withInstance(async ({ run }) => {
+		expect((await run(["check"])).code).toBe(0);
+		await run(["new"], { input: "An incomplete case\n  Do something\n" });
+		const result = await run(["check"]);
 		expect(result.code).toBe(1);
 		expect(result.stdout).toContain("no-expected (1)");
 		expect(result.stdout).toContain("C-1");
@@ -304,33 +305,33 @@ test("check groups real suite problems by rule and exits 1", async () => {
 for (const suffix of [".mainworthy", ".mainworthy.gz"]) {
 	test(`export/import${suffix} preserves the case list in a fresh running instance`, async () => {
 		await withInstance(async (source) => {
-			const created = await source.cli(["new", "--json"], {
+			const created = await source.run(["new", "--json"], {
 				input: "Coupon applies\n  Apply SAVE10 > Total is 90.00\n",
 			});
 			expect(outputWith(Created, created).cases[0]?.ref).toBe("C-1");
 			const archive = join(source.directory, `export${suffix}`);
-			expect((await source.cli(["export", "--out", archive])).code).toBe(0);
+			expect((await source.run(["export", "--out", archive])).code).toBe(0);
 			await withInstance(async (target) => {
-				const imported = await target.cli(["import", archive]);
+				const imported = await target.run(["import", archive]);
 				expect(imported.stderr).toBe("");
 				expect(imported.code).toBe(0);
 				expect(imported.stdout).toContain("previous session may no longer exist");
-				expect(outputWith(Found, await target.cli(["find"]))).toEqual(outputWith(Found, await source.cli(["find"])));
-				const md = await target.cli(["get", "C-1", "--md"]);
-				expect(md.stdout).toBe((await source.cli(["get", "C-1", "--md"])).stdout);
+				expect(outputWith(Found, await target.run(["find"]))).toEqual(outputWith(Found, await source.run(["find"])));
+				const md = await target.run(["get", "C-1", "--md"]);
+				expect(md.stdout).toBe((await source.run(["get", "C-1", "--md"])).stdout);
 			});
 		});
 	});
 }
 
-// One start of the command for each operation. Started one after another they took 3.6 to 4.2 s on a CI
-// runner, more with each operation added, and more than the default five twice on `main` on 2026-10-13
-// (issue #154). They are started side by side (2.3 s on a runner), and the test has 20 s for a busy one.
+// The command's help for each operation is asked of `runCli` in this process: one real start for `help`, and the
+// hundred more a start for each operation took are 0.001 s each. Started one after another, as processes, they took
+// 3.6 to 4.2 s on a CI runner and ran into the default five seconds twice on `main` on 2026-10-13 (issue #154).
 test("all registry operations have generated commands, global help and --help", async () => {
-	await withInstance(async ({ cli }) => {
+	await withInstance(async ({ cli, run }) => {
 		const help = await cli(["help"]);
 		expect(help.code).toBe(0);
-		const helps = await Promise.all(OP_LIST.map((op) => cli([op.name, "--help"])));
+		const helps = await Promise.all(OP_LIST.map((op) => run([op.name, "--help"])));
 		for (const [index, op] of OP_LIST.entries()) {
 			expect(COMMAND_NAMES.has(op.name)).toBe(true);
 			expect(GENERATED_COMMANDS.has(op.name)).toBe(true);
@@ -341,12 +342,46 @@ test("all registry operations have generated commands, global help and --help", 
 			expect(result?.stdout).toContain("--json");
 		}
 	});
-}, 20_000);
+});
+
+// `run` stands in for `cli` in most of this file, so this is the test that holds the two together: the same
+// argument vectors, environments and standard input give the same output and exit code in the process and in
+// the executable. Each case is one that leaves the instance as it was, so the second run sees what the first did.
+test("run in the test's process gives what the executable gives", async () => {
+	await withInstance(async ({ cli, run, directory }) => {
+		const invalid = join(directory, "invalid.md");
+		await writeFile(invalid, "---\ntitle: Broken\n");
+		const ci = { GITHUB_ACTIONS: "true", GITHUB_SHA: COMMIT, GITHUB_REF_NAME: "main", GITHUB_JOB: "e2e" };
+		const cases: [string[], { input?: string; env?: Record<string, string>; cwd?: string }?][] = [
+			[["health"]],
+			[["policy", "show"]],
+			[["check"]],
+			[["find", "--limit", "oops"]],
+			[["get", "C-999"]],
+			[["fmt", invalid]],
+			[["new"], { input: "  \n" }],
+			[["report", RED_XML], { env: { MAINWORTHY_PROJECT: "scratch" }, cwd: tmpdir() }],
+			[["gate", "--wait", "0.02", "--json"], { env: ci }],
+			[["find", "--url", "http://127.0.0.1:1"]],
+			[["frobnicate"]],
+		];
+		const both = await Promise.all(
+			cases.map(async ([argv, options]) => ({
+				argv: argv.join(" "),
+				executable: await cli(argv, options),
+				here: await run(argv, options),
+			})),
+		);
+		for (const { argv, executable, here } of both) expect({ argv, ...here }).toEqual({ argv, ...executable });
+		expect(both.map((result) => result.here.code)).toEqual([0, 0, 0, 4, 4, 4, 4, 4, 3, 4, 4]);
+		expect(process.env.MAINWORTHY_URL).toBeUndefined();
+	});
+});
 
 test("generated flags handle booleans, numbers, repeated arrays and union fields", async () => {
-	await withInstance(async ({ cli }) => {
-		await cli(["new"], { input: "Coupon applies\n  Apply SAVE10 > Total is 90.00\n" });
-		const result = await cli([
+	await withInstance(async ({ run }) => {
+		await run(["new"], { input: "Coupon applies\n  Apply SAVE10 > Total is 90.00\n" });
+		const result = await run([
 			"find",
 			"--in",
 			"cases",
@@ -363,33 +398,33 @@ test("generated flags handle booleans, numbers, repeated arrays and union fields
 		expect(result.code).toBe(0);
 		expect(outputWith(Found, result).items).toEqual([]);
 		expect(result.stdout.trim()).not.toContain("\n");
-		const admin = await cli(["admin", "--do", "project.list"]);
+		const admin = await run(["admin", "--do", "project.list"]);
 		expect(admin.code).toBe(0);
 		expect(admin.stdout).toContain('"key": "scratch"');
-		const bad = await cli(["find", "--limit", "oops"]);
+		const bad = await run(["find", "--limit", "oops"]);
 		expect(bad.code).toBe(4);
 		expect(bad.stderr).toContain("--limit needs a number");
 	});
 });
 
 test("project ambiguity names the projects; command-line project overrides environment", async () => {
-	await withInstance(async ({ cli, client }) => {
+	await withInstance(async ({ run, client }) => {
 		await client.call("admin", { do: "project.create", key: "other" });
-		const ambiguous = await cli(["find"]);
+		const ambiguous = await run(["find"]);
 		expect(ambiguous.code).toBe(4);
 		expect(ambiguous.stderr).toContain("scratch, other");
-		const chosen = await cli(["--project", "scratch", "find"], { env: { MAINWORTHY_PROJECT: "absent" } });
+		const chosen = await run(["--project", "scratch", "find"], { env: { MAINWORTHY_PROJECT: "absent" } });
 		expect(chosen.code).toBe(0);
 	});
 });
 
 test("connection and operation errors are single-line diagnostics with exit 4", async () => {
-	await withInstance(async ({ cli }) => {
-		const unreachable = await cli(["find", "--url", "http://127.0.0.1:1"]);
+	await withInstance(async ({ run }) => {
+		const unreachable = await run(["find", "--url", "http://127.0.0.1:1"]);
 		expect(unreachable.code).toBe(4);
 		expect(unreachable.stderr).toContain("start the server with mainworthy serve");
 		expect(unreachable.stderr.trim().split("\n")).toHaveLength(1);
-		const missing = await cli(["get", "C-999"]);
+		const missing = await run(["get", "C-999"]);
 		expect(missing.code).toBe(4);
 		expect(missing.stderr).toContain("not_found:");
 		expect(missing.stderr.trim().split("\n")).toHaveLength(1);
@@ -397,27 +432,27 @@ test("connection and operation errors are single-line diagnostics with exit 4", 
 });
 
 test("passed/failed/blocked/pending gate exit codes stay distinct", async () => {
-	await withInstance(async ({ cli }) => {
-		const pending = await cli(["gate", "--commit", COMMIT, "--wait", "0.02", "--json"]);
+	await withInstance(async ({ run }) => {
+		const pending = await run(["gate", "--commit", COMMIT, "--wait", "0.02", "--json"]);
 		expect(pending.code).toBe(3);
 		expect(pending.stdout).toContain('"verdict": "pending"');
-		await cli(["report", RED_XML, "--commit", COMMIT]);
-		const question = outputWith(Inbox, await cli(["inbox", "--kind", "failure"])).items[0];
+		await run(["report", RED_XML, "--commit", COMMIT]);
+		const question = outputWith(Inbox, await run(["inbox", "--kind", "failure"])).items[0];
 		if (!question) throw new Error("no failure question");
-		await cli([
+		await run([
 			"decide",
 			"--json",
 			JSON.stringify({ q: question.q, onEvidence: question.evidenceHash, answer: { is: "defect" } }),
 		]);
-		const failed = await cli(["gate", "--commit", COMMIT]);
+		const failed = await run(["gate", "--commit", COMMIT]);
 		expect(failed.code).toBe(1);
 		expect(failed.stdout).toContain("failed:");
 	});
 });
 
 test("health exits 0 when the server answers and 1 when nothing does, with no token", async () => {
-	await withInstance(async ({ cli, instance }) => {
-		const up = await cli(["health"]);
+	await withInstance(async ({ cli, run, instance }) => {
+		const up = await run(["health"]);
 		expect(up.code).toBe(0);
 		expect(up.stdout).toBe(`healthy: Mainworthy 0.1.0 at ${instance.url}\n`);
 		const down = await cli(["health", "--url", "http://127.0.0.1:9"]);
@@ -429,11 +464,11 @@ test("health exits 0 when the server answers and 1 when nothing does, with no to
 test("health prints the first 12 characters of the commit the server reports, and all of it with --json", async () => {
 	const sha = "2f6b67e1ac063e6ac29c9fe45fdae07137b81c76";
 	await withInstance(
-		async ({ cli, instance }) => {
-			const text = await cli(["health"]);
+		async ({ run, instance }) => {
+			const text = await run(["health"]);
 			expect(text.code).toBe(0);
 			expect(text.stdout).toBe(`healthy: Mainworthy 0.1.0 (commit ${sha.slice(0, 12)}) at ${instance.url}\n`);
-			const json = await cli(["health", "--json"]);
+			const json = await run(["health", "--json"]);
 			expect(JSON.parse(json.stdout)).toEqual({ url: instance.url, healthy: true, version: "0.1.0", commit: sha });
 		},
 		{ env: { MAINWORTHY_COMMIT: sha } },
@@ -449,12 +484,12 @@ test("health stays compatible with a server that reports no commit", async () =>
 	for (const body of answers) {
 		const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => Response.json(body) });
 		try {
-			await withInstance(async ({ cli }) => {
+			await withInstance(async ({ run }) => {
 				const url = `http://127.0.0.1:${server.port}`;
-				const text = await cli(["health", "--url", url]);
+				const text = await run(["health", "--url", url]);
 				expect(text.code).toBe(0);
 				expect(text.stdout).toBe(`healthy: Mainworthy 0.1.0 at ${url}\n`);
-				const json = await cli(["health", "--url", url, "--json"]);
+				const json = await run(["health", "--url", url, "--json"]);
 				expect(JSON.parse(json.stdout)).toEqual({ url, healthy: true, version: "0.1.0", commit: null });
 			});
 		} finally {
@@ -464,16 +499,16 @@ test("health stays compatible with a server that reports no commit", async () =>
 }, 20_000);
 
 test("open prints the running web UI URL", async () => {
-	await withInstance(async ({ cli, instance }) => {
-		const result = await cli(["open"]);
+	await withInstance(async ({ run, instance }) => {
+		const result = await run(["open"]);
 		expect(result.code).toBe(0);
 		expect(result.stdout).toBe(`${instance.url}\n`);
 	});
 });
 
 test("gate --wait observes evidence that arrives while it is polling", async () => {
-	await withInstance(async ({ cli, client }) => {
-		const waiting = cli(["gate", "--commit", COMMIT, "--wait", "1.5"]);
+	await withInstance(async ({ run, client }) => {
+		const waiting = run(["gate", "--commit", COMMIT, "--wait", "1.5"]);
 		await Bun.sleep(300);
 		await client.call("report", {
 			target: { commit: COMMIT, branch: "main" },
@@ -486,15 +521,15 @@ test("gate --wait observes evidence that arrives while it is polling", async () 
 });
 
 test("the generated gate JSON input uses the same reserved verdict exit codes", async () => {
-	await withInstance(async ({ cli }) => {
-		const result = await cli(["gate", "--json", JSON.stringify({ commit: COMMIT }), "--compact"]);
+	await withInstance(async ({ run }) => {
+		const result = await run(["gate", "--json", JSON.stringify({ commit: COMMIT }), "--compact"]);
 		expect(result.code).toBe(3);
 		expect(result.stdout).toContain('"verdict":"pending"');
 	});
 });
 
 test("policy use checks the caller's project permission, including a scoped admin token", async () => {
-	await withInstance(async ({ cli, client }) => {
+	await withInstance(async ({ run, client }) => {
 		const token = Token.parse(
 			await client.call("admin", {
 				do: "token.create",
@@ -504,10 +539,10 @@ test("policy use checks the caller's project permission, including a scoped admi
 				project: "scratch",
 			}),
 		).token;
-		const changed = await cli(["policy", "use", "standard"], { env: { MAINWORTHY_TOKEN: token } });
+		const changed = await run(["policy", "use", "standard"], { env: { MAINWORTHY_TOKEN: token } });
 		expect(changed.code).toBe(0);
 		expect(changed.stdout).toContain("both recorded");
-		expect((await cli(["policy", "show"])).stdout).toContain("policy: standard");
+		expect((await run(["policy", "show"])).stdout).toContain("policy: standard");
 	});
 });
 
@@ -524,13 +559,13 @@ test("JUnit parser warnings go only to stderr", async () => {
 });
 
 test("an adapter rejects operation flags it cannot translate", async () => {
-	await withInstance(async ({ cli }) => {
-		await cli(["new"], { input: "Coupon applies\nApply SAVE10 > Total is 90.00" });
+	await withInstance(async ({ run }) => {
+		await run(["new"], { input: "Coupon applies\nApply SAVE10 > Total is 90.00" });
 		for (const argv of [
 			["get", "C-1", "--fields", "title"],
 			["report", RED_XML, "--commit", COMMIT, "--cmd", "explicit-key"],
 		]) {
-			const result = await cli(argv);
+			const result = await run(argv);
 			expect(result.code).toBe(4);
 			expect(result.stderr).toContain("operation flag");
 			expect(result.stderr).toContain("--json");
@@ -539,8 +574,8 @@ test("an adapter rejects operation flags it cannot translate", async () => {
 });
 
 test("empty case input exits 4 and writes no case", async () => {
-	await withInstance(async ({ cli, client }) => {
-		const result = await cli(["new"], { input: "  \n" });
+	await withInstance(async ({ run, client }) => {
+		const result = await run(["new"], { input: "  \n" });
 		expect(result.code).toBe(4);
 		expect(result.stderr).toContain("outline");
 		expect((await client.call("find", {})).items).toEqual([]);
@@ -548,8 +583,8 @@ test("empty case input exits 4 and writes no case", async () => {
 });
 
 test("schema errors are readable single-line diagnostics", async () => {
-	await withInstance(async ({ cli }) => {
-		const result = await cli(["token", "revoke", "abc"]);
+	await withInstance(async ({ run }) => {
+		const result = await run(["token", "revoke", "abc"]);
 		expect(result.code).toBe(4);
 		expect(result.stderr).toContain("id:");
 		expect(result.stderr).not.toContain("[;");
@@ -558,21 +593,21 @@ test("schema errors are readable single-line diagnostics", async () => {
 });
 
 test("corrupt gzip is an archive error while the server remains reachable", async () => {
-	await withInstance(async ({ cli, directory }) => {
+	await withInstance(async ({ run, directory }) => {
 		const file = join(directory, "invalid.mainworthy.gz");
 		await writeFile(file, "this is not gzip");
-		const result = await cli(["import", file]);
+		const result = await run(["import", file]);
 		expect(result.code).toBe(4);
 		expect(result.stderr).toContain("invalid gzip archive");
 		expect(result.stderr).not.toContain("start the server");
-		expect((await cli(["open"])).code).toBe(0);
+		expect((await run(["open"])).code).toBe(0);
 	});
 });
 
 test("malformed server data is refused before an adapter reads it", async () => {
 	await withInstance(
-		async ({ cli }) => {
-			const result = await cli(["report", RED_XML, "--commit", COMMIT]);
+		async ({ run }) => {
+			const result = await run(["report", RED_XML, "--commit", COMMIT]);
 			expect(result.code).toBe(4);
 			expect(result.stdout).toBe("");
 			expect(result.stderr).toContain("internal: the server returned invalid report data");
@@ -582,7 +617,7 @@ test("malformed server data is refused before an adapter reads it", async () => 
 });
 
 test("a generated decision batch prints its successful and refused items before exiting 4", async () => {
-	await withInstance(async ({ cli, client }) => {
+	await withInstance(async ({ run, client }) => {
 		await client.call("report", {
 			target: { commit: COMMIT },
 			results: [
@@ -594,7 +629,7 @@ test("a generated decision batch prints its successful and refused items before 
 		const first = questions[0];
 		const second = questions[1];
 		if (!first || !second) throw new Error("two causes were not opened");
-		const result = await cli([
+		const result = await run([
 			"decide",
 			"--json",
 			JSON.stringify({
@@ -611,8 +646,8 @@ test("a generated decision batch prints its successful and refused items before 
 });
 
 test("a JSON payload refuses flags that would otherwise be ignored", async () => {
-	await withInstance(async ({ cli }) => {
-		const result = await cli(["gate", "--json", JSON.stringify({ commit: COMMIT }), "--wait", "1"]);
+	await withInstance(async ({ run }) => {
+		const result = await run(["gate", "--json", JSON.stringify({ commit: COMMIT }), "--wait", "1"]);
 		expect(result.code).toBe(4);
 		expect(result.stderr).toContain("cannot be combined");
 	});
@@ -620,10 +655,10 @@ test("a JSON payload refuses flags that would otherwise be ignored", async () =>
 
 test("an HTTP 200 proxy page cannot replace an existing export", async () => {
 	await withInstance(
-		async ({ cli, directory }) => {
+		async ({ run, directory }) => {
 			const file = join(directory, "backup.mainworthy");
 			await writeFile(file, "previous backup");
-			const result = await cli(["export", "--out", file]);
+			const result = await run(["export", "--out", file]);
 			expect(result.code).toBe(4);
 			expect(await Bun.file(file).text()).toBe("previous backup");
 		},
@@ -636,24 +671,24 @@ test("an HTTP 200 proxy page cannot replace an existing export", async () => {
 });
 
 test("a declined case annotation is visible and its failure stays in the gate", async () => {
-	await withInstance(async ({ cli, directory }) => {
+	await withInstance(async ({ run, directory }) => {
 		const file = join(directory, "declined.xml");
 		await writeFile(
 			file,
 			'<testsuite name="unknown"><testcase name="test @C-999@v1"><failure message="failed"/></testcase></testsuite>',
 		);
-		const report = await cli(["report", file, "--commit", COMMIT]);
+		const report = await run(["report", file, "--commit", COMMIT]);
 		expect(report.code).toBe(0);
 		expect(report.stdout).toContain("1 case/version claims declined; results kept without a case");
 		expect(report.stderr).toContain("C-999");
 		expect(report.stderr.trim().split("\n")).toHaveLength(1);
-		expect((await cli(["gate", "--commit", COMMIT])).code).toBe(2);
+		expect((await run(["gate", "--commit", COMMIT])).code).toBe(2);
 	});
 });
 
 test("JSON input accepts leading whitespace and newlines", async () => {
-	await withInstance(async ({ cli }) => {
-		const result = await cli(["find", "--json", '\n  {"in":"cases","limit":1}\n']);
+	await withInstance(async ({ run }) => {
+		const result = await run(["find", "--json", '\n  {"in":"cases","limit":1}\n']);
 		expect(result.code).toBe(0);
 		expect(outputWith(Found, result).items).toEqual([]);
 	});
@@ -675,11 +710,11 @@ test("an early refusal of a large valid gzip reports authorization, not corrupt 
 			],
 		});
 		const file = join(source.directory, "valid.mainworthy.gz");
-		expect((await source.cli(["export", "--out", file])).code).toBe(0);
+		expect((await source.run(["export", "--out", file])).code).toBe(0);
 		await withInstance(
-			async ({ cli, client }) => {
+			async ({ run, client }) => {
 				for (const token of ["", "unknown-token"]) {
-					const result = await cli(["import", file], { env: { MAINWORTHY_TOKEN: token } });
+					const result = await run(["import", file], { env: { MAINWORTHY_TOKEN: token } });
 					expect(result.code).toBe(4);
 					expect(result.stderr).toContain("unauthenticated:");
 					expect(result.stderr).not.toContain("invalid gzip");
@@ -687,7 +722,7 @@ test("an early refusal of a large valid gzip reports authorization, not corrupt 
 				const token = Token.parse(
 					await client.call("admin", { do: "token.create", actor: "pipeline", kind: "ci", can: ["read", "record"] }),
 				).token;
-				const denied = await cli(["import", file], { env: { MAINWORTHY_TOKEN: token } });
+				const denied = await run(["import", file], { env: { MAINWORTHY_TOKEN: token } });
 				expect(denied.code).toBe(4);
 				expect(denied.stderr).toContain("forbidden:");
 				expect(denied.stderr).not.toContain("invalid gzip");
@@ -699,17 +734,17 @@ test("an early refusal of a large valid gzip reports authorization, not corrupt 
 
 test("an empty MAINWORTHY_URL, MAINWORTHY_TOKEN or MAINWORTHY_PROJECT is the same as none", async () => {
 	// A pipeline passes a setting that is not configured as an empty string, not as an absent variable.
-	await withInstance(async ({ cli, instance }) => {
+	await withInstance(async ({ run, instance }) => {
 		const empty = { MAINWORTHY_URL: "", MAINWORTHY_TOKEN: "", MAINWORTHY_PROJECT: "" };
 		// No address named: the server on this machine, at its port.
-		const health = await cli(["health", "--json"], { env: { ...empty, MAINWORTHY_PORT: new URL(instance.url).port } });
+		const health = await run(["health", "--json"], { env: { ...empty, MAINWORTHY_PORT: new URL(instance.url).port } });
 		expect(health.stderr).toBe("");
 		expect(JSON.parse(health.stdout)).toMatchObject({ healthy: true });
 		// An empty port is no port either: the built-in one, whether or not anything listens there.
-		const port = await cli(["health", "--json"], { env: { ...empty, MAINWORTHY_PORT: "" } });
+		const port = await run(["health", "--json"], { env: { ...empty, MAINWORTHY_PORT: "" } });
 		expect(JSON.parse(port.stdout)).toMatchObject({ url: "http://127.0.0.1:7357" });
 		// No token and no project named: the local session and the only project.
-		const inbox = await cli(["inbox", "--json", "{}", "--url", instance.url], { env: empty });
+		const inbox = await run(["inbox", "--json", "{}", "--url", instance.url], { env: empty });
 		expect(inbox.stderr).toBe("");
 		expect(inbox.code).toBe(0);
 	});
@@ -728,9 +763,9 @@ const casesIn = async (client: Client, project: string) =>
 	(await new Client({ ...client.options, project }).call("find", { limit: 500 })).items.length;
 
 test("seed fills a project it makes, and leaves its pipeline and agent nothing outside it or after an hour", async () => {
-	await withInstance(async ({ cli, client, instance }) => {
+	await withInstance(async ({ run, client, instance }) => {
 		const started = Date.now();
-		const result = await cli(["seed", "demo", "--cases", "12"]);
+		const result = await run(["seed", "demo", "--cases", "12"]);
 		expect(result.stderr).toBe("");
 		expect(result.code).toBe(0);
 		// The failing test on `main` and on the pull request, the agent's finding and its edit, a test with no case,
@@ -770,22 +805,22 @@ test("seed fills a project it makes, and leaves its pipeline and agent nothing o
 });
 
 test("seed sent again writes nothing twice, and a second project is seeded beside the first", async () => {
-	await withInstance(async ({ cli, client }) => {
-		const first = outputWith(Seeded, await cli(["seed", "demo", "--cases", "12", "--json"]));
+	await withInstance(async ({ run, client }) => {
+		const first = outputWith(Seeded, await run(["seed", "demo", "--cases", "12", "--json"]));
 		const seq = (await projects(client)).find((project) => project.key === "demo")?.seq;
-		const again = await cli(["seed", "demo", "--cases", "12", "--json"]);
+		const again = await run(["seed", "demo", "--cases", "12", "--json"]);
 		expect(again.code).toBe(0);
 		expect(outputWith(Seeded, again)).toEqual(first);
 		expect(await casesIn(client, "demo")).toBe(12);
 		expect((await projects(client)).find((project) => project.key === "demo")?.seq).toBe(seq);
 		// Another count is another request: it is refused in words about the seed, and adds no case.
-		const other = await cli(["seed", "demo", "--cases", "20"]);
+		const other = await run(["seed", "demo", "--cases", "20"]);
 		expect(other.code).toBe(4);
 		expect(other.stderr).toContain("was seeded with another number of cases");
 		expect(await casesIn(client, "demo")).toBe(12);
 		// The command ids and the two actors of the first seed do not stand in the way of a second project.
 		// It takes two files of unit tests where the first took sixty: the five questions and two more.
-		const beside = await cli(["seed", "demo-2", "--cases", "3", "--unlinked-files", "2", "--json"]);
+		const beside = await run(["seed", "demo-2", "--cases", "3", "--unlinked-files", "2", "--json"]);
 		expect(beside.stderr).toBe("");
 		expect(outputWith(Seeded, beside)).toMatchObject({ project: "demo-2", cases: 3 });
 		expect(outputWith(Seeded, beside).questions).toHaveLength(7);
@@ -795,18 +830,18 @@ test("seed sent again writes nothing twice, and a second project is seeded besid
 });
 
 test("seed leaves alone a project that holds work, a name it was not given, and a count it cannot write", async () => {
-	await withInstance(async ({ cli, client }) => {
-		await cli(["new"], { input: "Coupon applies\nApply SAVE10 > Total is 90.00" });
-		const held = await cli(["seed", "scratch"]);
+	await withInstance(async ({ run, client }) => {
+		await run(["new"], { input: "Coupon applies\nApply SAVE10 > Total is 90.00" });
+		const held = await run(["seed", "scratch"]);
 		expect(held.code).toBe(4);
 		expect(held.stderr).toContain("project scratch already holds cases, tests or runs");
 		// The project a pipeline reports to is in MAINWORTHY_PROJECT: seed does not read it, and refuses the flag.
-		const unnamed = await cli(["seed"], { env: { MAINWORTHY_PROJECT: "scratch" } });
+		const unnamed = await run(["seed"], { env: { MAINWORTHY_PROJECT: "scratch" } });
 		expect(unnamed.stderr).toContain("usage: mainworthy seed <project>");
-		const flagged = await cli(["seed", "demo", "--project", "scratch"]);
+		const flagged = await run(["seed", "demo", "--project", "scratch"]);
 		expect(flagged.stderr).toContain("seed takes the project as its argument");
 		for (const count of ["0", "1.5", "100001"]) {
-			const refused = await cli(["seed", "demo", "--cases", count]);
+			const refused = await run(["seed", "demo", "--cases", count]);
 			expect(refused.code).toBe(4);
 			expect(refused.stderr).toContain("seed writes from 1 to 100000 cases");
 		}
@@ -824,7 +859,7 @@ test("seed leaves alone a project that holds work, a name it was not given, and 
 		expect(new Set(most.map((result) => ("key" in result.test ? result.test.key : ""))).size).toBe(most.length);
 		// A person of the name the demo's pipeline takes: refused before the project is made.
 		await client.call("admin", { do: "token.create", actor: "pipeline", kind: "human", can: ["read"] });
-		const taken = await cli(["seed", "demo", "--cases", "3"]);
+		const taken = await run(["seed", "demo", "--cases", "3"]);
 		expect(taken.code).toBe(4);
 		expect(taken.stderr).toContain("actor pipeline exists and is a human, not a ci");
 		expect((await projects(client)).map((project) => project.key)).toEqual(["scratch"]);
@@ -835,7 +870,7 @@ test("seed leaves alone a project that holds work, a name it was not given, and 
 
 test("seed is refused to a caller who does not administer before anything is made, and the owner's token seeds", async () => {
 	await withInstance(
-		async ({ cli, client }) => {
+		async ({ run, client }) => {
 			const member = Token.parse(
 				await client.call("admin", {
 					do: "token.create",
@@ -845,14 +880,14 @@ test("seed is refused to a caller who does not administer before anything is mad
 				}),
 			).token;
 			for (const project of ["scratch", "demo"]) {
-				const refused = await cli(["seed", project, "--cases", "3"], { env: { MAINWORTHY_TOKEN: member } });
+				const refused = await run(["seed", project, "--cases", "3"], { env: { MAINWORTHY_TOKEN: member } });
 				expect(refused.code).toBe(4);
 				expect(refused.stderr).toContain("forbidden:");
 			}
 			expect((await projects(client)).map((project) => project.key)).toEqual(["scratch"]);
 			expect(await casesIn(client, "scratch")).toBe(0);
 			expect(await grantsOf(client, "pipeline")).toBeUndefined();
-			const seeded = await cli(["seed", "demo", "--cases", "3"]);
+			const seeded = await run(["seed", "demo", "--cases", "3"]);
 			expect(seeded.stderr).toBe("");
 			expect(seeded.code).toBe(0);
 			expect(await casesIn(client, "demo")).toBe(3);

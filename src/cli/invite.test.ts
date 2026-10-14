@@ -1,5 +1,6 @@
-// `mainworthy invite` through the real command, against a real server: the link is printed once, a list never
-// shows it, and a revoked invitation signs nobody in.
+// `mainworthy invite` against a real server: the link is printed once, a list never shows it, and a revoked
+// invitation signs nobody in. The first command of the long test is started as a process; the rest are run by
+// `runCli` in the test's own process (`run` in `test-support.ts`), so the test does not wait on sixteen starts.
 import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -26,7 +27,7 @@ const UNTIL = String.raw`until \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC`;
 
 test("invite new prints the link once, invite list never shows the code, and invite revoke withdraws it", async () => {
 	await withInstance(
-		async ({ cli, instance }) => {
+		async ({ cli, run, instance }) => {
 			const before = Date.now();
 			const made = await cli([
 				"invite",
@@ -50,12 +51,12 @@ test("invite new prints the link once, invite list never shows the code, and inv
 			const until = Date.parse(`${/until (.*) UTC/.exec(lines[0] ?? "")?.[1]?.replace(" ", "T")}:00Z`);
 			expect(Math.abs(until - (before + 7 * 86_400_000))).toBeLessThan(120_000);
 
-			const listed = await cli(["invite", "list"]);
+			const listed = await run(["invite", "list"]);
 			expect(listed.stdout).toMatch(
 				new RegExp(`^1 {2}sam {2}join {2}open {2}${UNTIL} {2}by robin {2}may read, answer on scratch\n$`),
 			);
 			expect(listed.stdout).not.toContain(code);
-			expect(outputWith(Listed, await cli(["invite", "list", "--json"]))).toMatchObject([
+			expect(outputWith(Listed, await run(["invite", "list", "--json"]))).toMatchObject([
 				{ id: 1, name: "sam", purpose: "join", state: "open" },
 			]);
 
@@ -66,25 +67,25 @@ test("invite new prints the link once, invite list never shows the code, and inv
 					headers: { "content-type": "application/json" },
 					body: JSON.stringify({ invitation, password: "correct horse battery staple" }),
 				});
-			const second = outputWith(Invited, await cli(["invite", "new", "pat", "--json"]));
+			const second = outputWith(Invited, await run(["invite", "new", "pat", "--json"]));
 			expect(second).toMatchObject({
 				id: 2,
 				name: "pat",
 				purpose: "join",
 				link: `https://mainworthy.example/invite#${second.code}`,
 			});
-			const revoked = await cli(["invite", "revoke", "2"]);
+			const revoked = await run(["invite", "revoke", "2"]);
 			expect(revoked.stdout).toBe("invitation 2 revoked\n");
-			expect((await cli(["invite", "revoke", "2"])).stdout).toBe(
+			expect((await run(["invite", "revoke", "2"])).stdout).toBe(
 				"invitation 2 was already used or revoked, or does not exist\n",
 			);
 			expect((await accept(second.code)).status).toBe(401);
 			expect((await accept(code)).status).toBe(200);
-			expect((await cli(["invite", "list"])).stdout).toMatch(
+			expect((await run(["invite", "list"])).stdout).toMatch(
 				/^1 {2}sam {2}join {2}used.*\n2 {2}pat {2}join {2}revoked/,
 			);
 			// A person who exists is sent a recovery, and the command says what accepting it does.
-			const recovery = await cli(["invite", "new", "sam"]);
+			const recovery = await run(["invite", "new", "sam"]);
 			expect(recovery.stdout).toMatch(
 				new RegExp(
 					`^invitation 3 for "sam" \\(a recovery: accepting it replaces every way sam signs in\\), ${UNTIL}\n`,
@@ -100,14 +101,14 @@ test("invite new prints the link once, invite list never shows the code, and inv
 				["invite", "revoke"],
 				["invite", "revoke", "x"],
 			]) {
-				const bad = await cli(argv);
+				const bad = await run(argv);
 				expect(`${argv.join(" ")}: ${bad.code}`).toBe(`${argv.join(" ")}: 4`);
 			}
-			const long = await cli(["invite", "new", "lee", "--expires", "31d"]);
+			const long = await run(["invite", "new", "lee", "--expires", "31d"]);
 			expect(long.code).toBe(4);
 			expect(long.stderr).toContain("30d");
-			expect((await cli(["invite", "new", "lee", "--expires", "soon"])).code).toBe(4);
-			expect(outputWith(Listed, await cli(["invite", "list", "--json"])).map((row) => row.name)).toEqual([
+			expect((await run(["invite", "new", "lee", "--expires", "soon"])).code).toBe(4);
+			expect(outputWith(Listed, await run(["invite", "list", "--json"])).map((row) => row.name)).toEqual([
 				"sam",
 				"pat",
 				"sam",
@@ -115,19 +116,18 @@ test("invite new prints the link once, invite list never shows the code, and inv
 		},
 		{ env: { MAINWORTHY_PUBLIC_URL: "https://mainworthy.example" } },
 	);
-	// It starts the command sixteen times, one after another: more than the default 5 s on a busy runner.
-}, 20_000);
+});
 
 test("with no public address the link is relative and the command says what to put before it", async () => {
-	await withInstance(async ({ cli }) => {
-		const made = await cli(["invite", "new", "sam"]);
+	await withInstance(async ({ run }) => {
+		const made = await run(["invite", "new", "sam"]);
 		expect(made.code).toBe(0);
 		expect(made.stdout).toMatch(/^\/invite#[A-Za-z0-9_-]{43}$/m);
 		expect(made.stdout).toContain("MAINWORTHY_PUBLIC_URL");
 		// With no grant named, a new person may do everything, as a new person's token may.
 		expect(made.stdout).toContain("(may read, record, produce, answer, plan, admin on *)");
 		// The operation is a command of its own too, as every operation is.
-		const listed = await cli(["invitation", "--do", "list"]);
+		const listed = await run(["invitation", "--do", "list"]);
 		expect(listed.code).toBe(0);
 		expect(listed.stdout).toContain('"name": "sam"');
 	});
