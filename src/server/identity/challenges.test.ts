@@ -8,6 +8,7 @@ import { CEREMONY_MS, challengeOf } from "./webauthn.ts";
 const PARTY = { id: "mainworthy.example", origin: "https://mainworthy.example" };
 /** A sign-in begun in some browser: the hash of its ceremony cookie stands in for it. */
 const SIGN_IN = { purpose: "sign-in", context: CONTEXT.browser("c".repeat(64)) } as const;
+const BASE64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const apps: App[] = [];
 afterEach(() => {
 	for (const app of apps.splice(0)) app.close();
@@ -57,6 +58,13 @@ test("a challenge is found for the purpose it was issued for, with the relying p
 	// Its last character changed: to `A`, unless it is `A`, which one challenge in 16 ends in (the last of the 43
 	// characters carries four bits of the 32 bytes).
 	expect(findChallenge(app, `${signIn.slice(0, -1)}${signIn.endsWith("A") ? "B" : "A"}`, "sign-in")).toBeNull();
+	// Or to the next character of the alphabet, which decodes to the same bytes (only the top four bits of the last
+	// character count, and the server writes the other two as zeros). A challenge is found by the exact text it
+	// was issued as, the text a browser sends back, so the same bytes spelled otherwise are not it.
+	const next = BASE64URL[(BASE64URL.indexOf(signIn.slice(-1)) + 1) % 64];
+	const spelledOtherwise = `${signIn.slice(0, -1)}${next}`;
+	expect(Buffer.from(spelledOtherwise, "base64url").equals(Buffer.from(signIn, "base64url"))).toBe(true);
+	expect(findChallenge(app, spelledOtherwise, "sign-in")).toBeNull();
 	expect(findChallenge(app, "", "sign-in")).toBeNull();
 	// Finding does not spend. One millisecond before the end it is there, at the end it is not.
 	advance(CEREMONY_MS - 1);
