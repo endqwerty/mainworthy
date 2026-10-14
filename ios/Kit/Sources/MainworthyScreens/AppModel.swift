@@ -23,6 +23,11 @@ public final class AppModel {
 	private let remembered: Remembered
 	private var server: Server?
 	private var watching: Task<Void, Never>?
+	/// The server whose ended sessions `watching` listens for.
+	private var watched: Server?
+	/// The workspace of a session the server ended. It is kept, with everything typed in its screens, until
+	/// somebody signs in again: the same person on the same instance gets it back, anybody else a new one.
+	private var suspended: Workspace?
 	/// Counts every time the app starts towards being signed in or gives that up, so that the reply to an
 	/// attempt that was given up meanwhile changes nothing.
 	private var attempt = 0
@@ -97,24 +102,48 @@ public final class AppModel {
 		attempt += 1
 		self.server = server
 		remembered.address = server.instance.name
-		let workspace = Workspace(
-			server: server, account: account, remembered: remembered,
-			onSignedOut: { [weak self] in self?.showSignIn(saying: nil) }
-		)
-		phase = .signedIn(workspace)
-		// The server can end the session at any request: it ran out, or was ended from another device.
+		if let kept = suspended, kept.isOn(server), kept.account.name == account.name {
+			// The session was renewed for the same person: their screens, and what they typed in them, come back.
+			phase = .signedIn(kept)
+			Task { await kept.refreshAccount() }
+		} else {
+			let workspace = Workspace(
+				server: server, account: account, remembered: remembered,
+				onSignedOut: { [weak self] in self?.showSignIn(saying: nil) }
+			)
+			phase = .signedIn(workspace)
+		}
+		suspended = nil
+		watch(server)
+	}
+
+	/// Listens for the server ending the session at any request: it ran out, or was ended from another device.
+	/// One listener for each server, for as long as the app holds it.
+	private func watch(_ server: Server) {
+		guard watched !== server else { return }
 		watching?.cancel()
+		watched = server
 		watching = Task { [weak self] in
-			for await _ in server.sessionEnded {
-				self?.showSignIn(saying: "Your session ended. Sign in again.")
-				return
-			}
+			for await _ in server.sessionEnded { self?.sessionEnded() }
 		}
 	}
 
+	/// The server ended the session. The person signs in again, and the workspace waits for them meanwhile: an
+	/// editor's draft or a run's notes are not thrown away because a session ran out.
+	private func sessionEnded() {
+		guard case .signedIn(let workspace) = phase else { return }
+		suspended = workspace
+		attempt += 1
+		phase = .signedOut(form(saying: "Your session ended. Sign in again."))
+	}
+
+	/// Signing out, or giving up a session that could not be used: nothing of it is kept.
 	private func showSignIn(saying notice: String?) {
 		attempt += 1
 		watching?.cancel()
+		watching = nil
+		watched = nil
+		suspended = nil
 		server = nil
 		phase = .signedOut(form(saying: notice))
 	}
@@ -122,8 +151,10 @@ public final class AppModel {
 	private func form(saying notice: String? = nil) -> SignInForm {
 		SignInForm(
 			address: remembered.address, notice: notice,
-			connect: { [secrets, transport, userAgent] instance in
-				Server(instance: instance, secrets: secrets, transport: transport, userAgent: userAgent)
+			connect: { [weak self, secrets, transport, userAgent] instance in
+				// A session that ended is renewed on the server the workspace that waits for it holds.
+				if let kept = self?.server, self?.suspended != nil, kept.instance == instance { return kept }
+				return Server(instance: instance, secrets: secrets, transport: transport, userAgent: userAgent)
 			},
 			onSignedIn: { [weak self] server, account in self?.open(server, as: account) }
 		)
