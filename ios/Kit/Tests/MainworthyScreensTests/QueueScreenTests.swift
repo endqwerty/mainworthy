@@ -96,6 +96,21 @@ struct QueueScreenTests {
 		#expect(screen.current(signoff.ref) != nil)
 	}
 
+	@Test("an open question opens from another screen while this list shows the decided ones, and can be answered")
+	func openedWhileShowingDecided() async throws {
+		let screen = try await screen()
+		let failure = try #require(screen.questions.first { $0.kind == .failure })
+		await screen.show(.decided, filter: nil)
+		#expect(screen.current(failure.ref) == nil)
+		// The page of a change opens the question, and the queue's tab is on its other list.
+		await screen.open(failure.ref)
+		let opened = try #require(screen.current(failure.ref))
+		#expect(opened.isOpen && opened.standing == .counts && screen.isShown(opened))
+		#expect(await screen.answer(opened, with: try #require(opened.choices.first { $0.answer == "flaky" })))
+		// Answered, its page shows it as decided, with who decided.
+		#expect(screen.current(failure.ref)?.decision?.label == "Flaky")
+	}
+
 	@Test("a change made elsewhere is on the screen after it is read again")
 	func refresh() async throws {
 		let server = try await Live.signedIn()
@@ -184,10 +199,11 @@ struct QueueScreenFailureTests {
 		#expect(screen.current("Q-3")?.isOpen == true)
 		await screen.refresh()
 		#expect(screen.questions.count == 2 && screen.current("Q-3") != nil)
-		// A question that was decided meanwhile is not shown as one that still waits.
+		// A page shows its question whatever the list shows: one that was decided is shown as decided.
 		await screen.open("Q-9")
-		#expect(screen.current("Q-9") == nil)
+		#expect(screen.current("Q-9")?.isOpen == false)
 		screen.close("Q-9")
+		#expect(screen.current("Q-9") == nil)
 	}
 
 	@Test("the first read that fails says why, in place of the list")

@@ -244,6 +244,11 @@ struct ServerTests {
 		#expect(questions.map { $0.choices.map(\.takes) } == [
 			[.nothing, .nothing], [.more, .more], [.more, .more], [.nothing, .nothing], [.more, .more],
 		])
+		// The page says which of the two reasons it is.
+		let why = questions.map { question -> ProposedEdit.NotShown? in
+			if case .proposal(let edit) = question.evidence { edit.notShown } else { nil }
+		}
+		#expect(why == [nil, .otherThanContent, .tooManyEdits, nil, .otherThanContent])
 	}
 
 	@Test("a proposal's reply that lacks a document is unreadable, not a smaller change")
@@ -256,7 +261,8 @@ struct ServerTests {
 			"seen":{"count":1,"carried":0},"needs":"one member","answers":["accept","reject"],"blocks":[],"about":[],
 			"openedAt":1800000000000,"advice":[],"decision":null,"you":"counts"}]}}
 			"""
-		let body = #"{"title":"A case","pre":"","steps":[],"methods":["human"],"automate":"none"}"#
+		let body = #"{"title":"A case","pre":"","steps":[],"methods":["human"],"automate":"none","fields":{}}"#
+		let partial = #"{"title":"A case","pre":"","steps":[],"methods":["human"],"automate":"none"}"#
 		let edited = #"{"op":"edit","case":"C-1","body":\#(body),"current":\#(body)}"#
 		let created = #"{"op":"create","body":\#(body),"folder":"Checkout","tags":["checkout"],"covers":[]}"#
 		func documents(_ edits: String) async throws -> [EditedCase] {
@@ -274,6 +280,7 @@ struct ServerTests {
 			#"\#(edited),{"op":"create","folder":"Checkout","tags":[],"covers":[]}"#,  // a new case without its content
 			#"{"op":"edit","case":"C-1","body":\#(body)},\#(created)"#,  // an edit without the case as it is
 			#"\#(edited),{"op":"create","body":\#(body)}"#,  // a new case without where it goes
+			#"\#(edited),{"op":"create","body":\#(partial),"folder":"Checkout","tags":[],"covers":[]}"#,  // content without its fields
 			"",
 		]
 		for edits in incomplete {

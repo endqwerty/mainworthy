@@ -243,8 +243,8 @@ enum Wire {
 		let methods: [String]
 		/// Whether an automated test is wanted: none, wanted or not-applicable.
 		let automate: String
-		/// Custom field values. A case that is read alone leaves them out.
-		let fields: [String: String]?
+		/// Custom field values. All of a case's content is here, so an edit is shown whole.
+		let fields: [String: String]
 	}
 
 	/// One edit of a proposal. Which fields it carries depends on `op`.

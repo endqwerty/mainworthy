@@ -48,7 +48,8 @@ public final class QueueScreen: ProjectScreen {
 	public private(set) var busy: Set<String> = []
 
 	/// The question whose page is open, and that question as it was read by itself when the list did not hold
-	/// it: it is further down than the list was read, or it was opened from another screen.
+	/// it: it is further down than the list was read, it is of the other list (open, decided), or it was
+	/// opened from another screen.
 	private var opened: (ref: String, alone: Question?)?
 	/// Whether the open question is being read by itself for the first time: its page has nothing to show yet.
 	public private(set) var isOpening = false
@@ -61,10 +62,11 @@ public final class QueueScreen: ProjectScreen {
 		self.project = project
 	}
 
-	/// The question as it is now, or nil once it is no longer what this list shows: an open question that was
-	/// answered, here or by somebody else, or that dissolved because the failure went away. A question whose
-	/// page is open is read by itself where the list does not hold it, so that a list which was read less far
-	/// down, or which another question was added to, does not make an open question look answered.
+	/// The question as it is now: as the list holds it, or, for the one whose page is open, as it was read by
+	/// itself where the list does not hold it. A page shows its question whatever the list shows: one that was
+	/// opened from another screen while this list shows the decided ones, one further down than the list was
+	/// read, one that was answered a moment ago and is now decided. Nil for a question the project does not
+	/// have, or has no more.
 	public func current(_ ref: String) -> Question? {
 		questions.first { $0.ref == ref } ?? (opened?.ref == ref ? opened?.alone : nil)
 	}
@@ -88,9 +90,8 @@ public final class QueueScreen: ProjectScreen {
 			opened = (ref, nil)
 			return
 		}
-		// Read alone, it is still this list's only while it is what the list shows: open, or decided.
 		guard let read = try? await project.question(ref), opened?.ref == ref else { return }
-		opened = (ref, read.isOpen == (showing == .open) ? read : nil)
+		opened = (ref, read)
 	}
 
 	/// Reads the list, the first time and whenever the person changes what it shows.

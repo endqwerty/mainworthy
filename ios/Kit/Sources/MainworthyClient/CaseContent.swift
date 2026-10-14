@@ -47,7 +47,7 @@ public struct CaseContent: Equatable, Sendable {
 	init(_ wire: Wire.CaseBody) {
 		self.init(
 			title: wire.title, pre: wire.pre, steps: wire.steps.map(Step.init), methods: wire.methods,
-			automate: wire.automate, fields: wire.fields ?? [:]
+			automate: wire.automate, fields: wire.fields
 		)
 	}
 }

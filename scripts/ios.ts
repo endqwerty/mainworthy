@@ -54,12 +54,20 @@ async function ran(
 			stdout: options.quiet ? "pipe" : "inherit",
 			stderr: options.quiet ? "pipe" : "inherit",
 		});
+		// Stopping this command stops the tool with it: a test run that outlived the command would still hold
+		// the simulator, and nothing would say so.
+		const stopTool = (): void => child.kill();
+		process.once("SIGINT", stopTool);
+		process.once("SIGTERM", stopTool);
 		const [printed = "", said = ""] = await Promise.all(
 			[child.stdout, child.stderr].map((stream) =>
 				stream instanceof ReadableStream ? new Response(stream).text() : Promise.resolve(""),
 			),
 		);
-		return { status: await child.exited, printed, output: printed + said };
+		const status = await child.exited;
+		process.off("SIGINT", stopTool);
+		process.off("SIGTERM", stopTool);
+		return { status, printed, output: printed + said };
 	} catch (error) {
 		return stop(`${tool} did not start: ${error instanceof Error ? error.message : String(error)}`);
 	}
