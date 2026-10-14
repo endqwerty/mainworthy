@@ -167,10 +167,16 @@ export function Select({ onChange, onKeyDown, ...rest }: ComponentProps<"select"
 export function ListRow({
 	children,
 	selected = false,
+	checked,
 	onClick,
 }: {
 	children: ReactNode;
 	selected?: boolean;
+	/**
+	 * In a list that selects several rows, whether this one is selected. `selected` then marks the row shown, and a
+	 * screen reader hears it as the current one.
+	 */
+	checked?: boolean;
 	/** The event says where the click landed and with which keys held, for a list that selects several rows. */
 	onClick: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
@@ -179,7 +185,8 @@ export function ListRow({
 			type="button"
 			className={`row ${selected ? "sel" : ""}`}
 			role="option"
-			aria-selected={selected}
+			aria-selected={checked ?? selected}
+			aria-current={checked === undefined || !selected ? undefined : "true"}
 			onClick={onClick}
 		>
 			{children}

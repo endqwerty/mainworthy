@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
+import { DECIDE_MAX } from "../../core/ops.ts";
 import { readOnScreen } from "./evidence.tsx";
-import { allOfKind, named, type Row, rangeOf, sharedAnswers, whyNotSelectable } from "./selection.ts";
+import { allOfKind, capped, named, type Row, rangeOf, sharedAnswers, whyNotSelectable } from "./selection.ts";
 
 const failure = (q: string, more: Partial<Row> = {}): Row => ({
 	q,
@@ -87,7 +88,7 @@ test("a question whose content is read on screen before an answer counts is answ
 	});
 });
 
-test("a proposal and a finding that suggests a new case are read on screen; others are not", () => {
+test("a proposal and a finding that suggests an edit are read on screen; others are not", () => {
 	expect(readOnScreen({ kind: "adopt", evidence: {} })).toBe(true);
 	expect(readOnScreen({ kind: "failure", evidence: {} })).toBe(false);
 	expect(readOnScreen({ kind: "map", evidence: {} })).toBe(false);
@@ -99,4 +100,12 @@ test("a proposal and a finding that suggests a new case are read on screen; othe
 		readOnScreen({ kind: "finding", evidence: { ...finding, suggest: { case: { title: "New", steps: [] } } } }),
 	).toBe(false);
 	expect(readOnScreen({ kind: "finding", evidence: { ...finding, suggest: null } })).toBe(false);
+});
+
+test("a selection holds at most what one decide request takes, in the order it was made", () => {
+	expect(DECIDE_MAX).toBe(500);
+	const refs = Array.from({ length: DECIDE_MAX + 2 }, (_, index) => `Q-${index + 1}`);
+	const { kept, left } = capped(refs);
+	expect([kept.length, kept[0], kept.at(-1), left]).toEqual([DECIDE_MAX, "Q-1", `Q-${DECIDE_MAX}`, 2]);
+	expect(capped(["Q-1", "Q-2"])).toEqual({ kept: ["Q-1", "Q-2"], left: 0 });
 });

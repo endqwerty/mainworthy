@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import type { Api } from "../../core/api.ts";
 import { ANSWER_HELP, ANSWER_KEYS, ANSWER_LABELS, ANSWERS, KINDS, type Kind } from "../../core/kinds.ts";
-import type { InboxReply, QuestionItem } from "../../core/ops.ts";
+import { DECIDE_MAX, type InboxReply, type QuestionItem } from "../../core/ops.ts";
 import { stakes, waitingPhrase } from "../../core/stakes.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
@@ -21,7 +21,17 @@ import {
 	questionReadMessage,
 	readOnScreen,
 } from "./evidence.tsx";
-import { allOfKind, countOf, named, type Row, rangeOf, sharedAnswers, takes, whyNotSelectable } from "./selection.ts";
+import {
+	allOfKind,
+	capped,
+	countOf,
+	named,
+	type Row,
+	rangeOf,
+	sharedAnswers,
+	takes,
+	whyNotSelectable,
+} from "./selection.ts";
 import "./queue.css";
 
 const kindLabels: Record<Kind, string> = {
@@ -413,8 +423,11 @@ function QueueWorkbench() {
 			setStatus("Record or cancel the answer before changing the selection.");
 			return;
 		}
-		setSelected(new Set(refs));
-		if (!refs.length) anchor.current = null;
+		const { kept, left } = capped(refs);
+		setSelected(new Set(kept));
+		if (!kept.length) anchor.current = null;
+		if (left)
+			setStatus(`A selection holds at most ${DECIDE_MAX} questions, the most one answer sends. ${left} left out.`);
 	}
 	function toggle(question: QuestionItem): void {
 		anchor.current = question.q;
@@ -438,19 +451,21 @@ function QueueWorkbench() {
 	function selectAll(): void {
 		const kind = selection[0]?.kind ?? current?.kind;
 		if (!kind || state !== "open") return;
-		const refs = allOfKind(items, kind, alone);
-		if (!refs.length) {
+		const all = allOfKind(items, kind, alone);
+		const { kept, left } = capped(all);
+		if (!kept.length) {
 			setStatus(
 				"No listed question of this kind can be selected: you cannot settle them, or each is answered on its own.",
 			);
 			return;
 		}
-		if (refs.every((ref) => selected.has(ref))) {
+		if (kept.every((ref) => selected.has(ref))) {
 			select([]);
 			return;
 		}
-		select(refs);
-		if (inbox.hasNextPage) setStatus(`${countOf(refs.length, kind)} selected. More questions are not listed yet.`);
+		select(all);
+		if (inbox.hasNextPage && !left)
+			setStatus(`${countOf(kept.length, kind)} selected. More questions are not listed yet.`);
 	}
 	function answer(is: string, suggested?: Record<string, unknown>): void {
 		if (state !== "open" || inline) return;
@@ -746,6 +761,8 @@ function QueueWorkbench() {
 	];
 	useBindings(keys);
 	const answerKind = bulk ? selection[0]?.kind : current?.kind;
+	/** What "Select all" in the bar would select: the listed questions of the selection's kind, as many as one answer sends. */
+	const selectable = bulk && selection[0] ? capped(allOfKind(items, selection[0].kind, alone)).kept : [];
 	const help: Readonly<Record<string, string>> = answerKind ? ANSWER_HELP[answerKind] : {};
 	return (
 		<>
@@ -825,10 +842,9 @@ function QueueWorkbench() {
 				{bulk && selection[0] && (
 					<div className="queue-bulk">
 						<span>{countOf(selection.length, selection[0].kind)} selected</span>
-						{allOfKind(items, selection[0].kind, alone).some((ref) => !selected.has(ref)) && (
+						{selectable.some((ref) => !selected.has(ref)) && (
 							<button type="button" onClick={selectAll}>
-								<KeyCap>*</KeyCap> Select all{" "}
-								{countOf(allOfKind(items, selection[0].kind, alone).length, selection[0].kind)}
+								<KeyCap>*</KeyCap> Select all {countOf(selectable.length, selection[0].kind)}
 							</button>
 						)}
 						<button type="button" onClick={() => select([])}>
@@ -841,6 +857,7 @@ function QueueWorkbench() {
 						<div data-question={question.q} key={question.q}>
 							<ListRow
 								selected={current?.q === question.q}
+								checked={selected.has(question.q)}
 								onClick={(event) => {
 									// The box selects, and so does a click with shift (a range) or with ⌘ or Ctrl held.
 									const box = event.target instanceof Element && event.target.closest(".queue-check");

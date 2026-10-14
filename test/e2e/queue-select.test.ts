@@ -68,8 +68,16 @@ test.skipIf(!browserAvailable)(
 			await box(f3).click();
 			await bar.getByText("2 failures selected").waitFor();
 			expect(await box(f1).getAttribute("data-checked")).toBe("true");
+			// A screen reader hears the selection: the option is selected, and the question shown is the current one.
+			const option = (ref: string) => page.locator(`[data-question="${ref}"] [role=option]`);
+			expect(await option(f1).getAttribute("aria-selected")).toBe("true");
+			expect(await option(f2).getAttribute("aria-selected")).toBe("false");
 			await page.locator(`[data-question="${u2}"] .queue-title`).click();
 			await page.locator(`[data-current-question="${u2}"]`).waitFor();
+			expect([await option(u2).getAttribute("aria-current"), await option(u2).getAttribute("aria-selected")]).toEqual([
+				"true",
+				"false",
+			]);
 			await bar.getByText("2 failures selected").waitFor();
 			// The answers are the selection's, and the pane says the question shown is not one of them.
 			await page.locator(".queue-needs").getByText("The question shown is not one of them").waitFor();

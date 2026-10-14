@@ -1,6 +1,6 @@
 // Which questions may be answered together. One answer is for one kind, and nobody selects what they cannot settle.
 import { ANSWER_KEYS, type Kind } from "../../core/kinds.ts";
-import type { QuestionItem } from "../../core/ops.ts";
+import { DECIDE_MAX, type QuestionItem } from "../../core/ops.ts";
 
 export type Row = Pick<QuestionItem, "q" | "kind" | "you" | "answers">;
 
@@ -25,6 +25,12 @@ const many: Record<Kind, string> = {
  */
 export function takes(question: Row, is: string): boolean {
 	return !Array.isArray(question.answers) || question.answers.includes(is);
+}
+
+/** The refs a selection keeps, the first `DECIDE_MAX` in the order given, and how many it leaves out. */
+export function capped(refs: readonly string[]): { kept: string[]; left: number } {
+	const kept = refs.slice(0, DECIDE_MAX);
+	return { kept, left: refs.length - kept.length };
 }
 
 /** "3 failures", "1 failure", "2 unlinked". */

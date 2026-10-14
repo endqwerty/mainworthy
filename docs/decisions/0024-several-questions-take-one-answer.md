@@ -51,7 +51,11 @@ selection" are in **Actions** once a question is open, as every key of the scree
 - **A selection of several kinds, answered kind by kind.** It saves nothing: each kind still needs its own answer,
   and a key would mean different things to different rows.
 - **Select all across pages.** "Select all" takes what is listed (a page holds 100). A question that is not listed
-  has not been seen, and the status line says when more are not listed yet.
+  has not been seen, and the status line says when more are not listed yet. A selection holds at most 500, the
+  most one `decide` request carries (`DECIDE_MAX`); the review bot on the pull request found that six loaded
+  pages made a selection the server refused whole.
+- **Splitting a larger selection into several requests.** A request that fails part way would leave some answered
+  and some not, under one undo. Five hundred is more than a person checks by eye.
 - **Answering several proposals at once.** It would need the queue to show every selected proposal's edits, or
   to trust that a person read them on another visit. Neither is built.
 - **Withdrawing several settled answers at once.** `u` already withdraws every question of the last answer.
