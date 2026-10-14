@@ -210,6 +210,12 @@
 :root[data-layout="phone"] .queue-answers .ans b {
 	font-size: 14px;
 }
+/* Selecting several questions is the palette's there (Select question, Select all of this kind, Clear selection),
+   as every key is: a tap on a row opens it, and the bar only says how many are selected. */
+:root[data-layout="phone"] .queue-check,
+:root[data-layout="phone"] .queue-bulk button {
+	display: none;
+}
 
 /* A run: the case scrolls, and the four results stay under it where a thumb reaches them. */
 :root[data-layout="phone"] #detail.run-pane {

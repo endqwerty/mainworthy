@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, MouseEvent, ReactNode } from "react";
 import { z } from "zod";
 import { diffBodies, diffWords } from "../../core/diff.ts";
 import { type DocSlug, docUrl } from "../../core/docs.ts";
@@ -171,7 +171,8 @@ export function ListRow({
 }: {
 	children: ReactNode;
 	selected?: boolean;
-	onClick: () => void;
+	/** The event says where the click landed and with which keys held, for a list that selects several rows. */
+	onClick: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
 	return (
 		<button

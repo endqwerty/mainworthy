@@ -124,6 +124,24 @@ submitting. The queue keeps unfinished reference and reason text on this device.
 If evidence changes while you answer, Mainworthy refuses the stale answer.
 Read the new evidence before trying again. A decision names the evidence you saw.
 
+## Answer several questions at once
+
+Select the questions, then give one answer. It goes to every selected question in one request.
+
+- Click the box at the start of a row, or press <kbd>x</kbd> on the question shown. Either adds the question to the selection, or takes it out. A click elsewhere on the row opens the question and keeps the selection.
+- Shift and a click on a row select every row from the last one you selected or cleared to it.
+- <kbd>⌘</kbd> or Ctrl and a click on a row does what a click on its box does.
+- <kbd>*</kbd> selects every listed question of the selection's kind, or of the question shown when nothing is selected. Pressed again, it clears the selection.
+- <kbd>Esc</kbd> clears the selection.
+
+A selection is of one kind: one answer means the same thing to every question in it. A question you cannot settle is not selected, and neither is a row of another kind; the status line says why. "Select all" takes the questions listed so far. Press "More questions" first to take the rest.
+
+The bar above the list counts the selection. The answers under the evidence are then the selection's, and the line above them says when the question shown is not one of them. An answer is offered only when every selected question takes it. "Link to a case" asks for a case for each test, so it is given to one question at a time. An answer that needs a defect reference or a reason asks once and gives the same text to all.
+
+Each question gets its own decision. Press <kbd>u</kbd> to withdraw them all. One that was refused, for example because its evidence changed while you were choosing, comes back to the list, and the others stay answered.
+
+On a phone, open a question and select from **Actions**: "Select question", "Select all of this kind" and "Clear selection". The rows have no box there.
+
 ## Review a proposal
 
 An adoption question asks whether a proposed edit becomes current.
@@ -148,7 +166,8 @@ answer with "Link to a case".
 
 Tests that came with neither a file nor a class name are asked about together, as the file "(no file)". The question lists them like any other, and every answer acts on them.
 
-To give every file the same answer, change the project's choice instead of answering each row.
+To answer several files now, [select them](#answer-several-questions-at-once) and give one answer.
+To give every file the same answer from now on, change the project's choice instead of answering each row.
 In Settings, Policy, choose "Track without a case" or "Create a case for each test" under
 "Tests with no case". The rule then answers every open question about a file at once.
 

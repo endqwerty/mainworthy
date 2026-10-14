@@ -14,6 +14,7 @@ import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, KeyCap, ListRow, ProducerGlyph } from "../ui/index.tsx";
 import { evidenceMessage, FindingEvidence, MapEvidence, QuestionEvidence, questionReadMessage } from "./evidence.tsx";
+import { allOfKind, countOf, named, rangeOf, sharedAnswers, takes, whyNotSelectable } from "./selection.ts";
 import "./queue.css";
 
 const kindLabels: Record<Kind, string> = {
@@ -67,6 +68,8 @@ function QueueWorkbench() {
 	const [kind, setKind] = useState<Kind | null>(null);
 	const [cursor, setCursor] = useState<string | null>(route.ref);
 	const [selected, setSelected] = useState<Set<string>>(new Set());
+	/** Where a range starts: the row whose box was clicked last. */
+	const anchor = useRef<string | null>(null);
 	const [hidden, setHidden] = useState<Set<string>>(new Set());
 	const [restored, setRestored] = useState<QuestionItem[]>([]);
 	const [rules, setRules] = useState(false);
@@ -138,6 +141,8 @@ function QueueWorkbench() {
 	for (const question of items) shown.current.set(question.q, question);
 	if (cursor === null && items[0]) setCursor(items[0].q);
 	const current = cursor === null ? items[0] : (items.find((item) => item.q === cursor) ?? shown.current.get(cursor));
+	const selection = items.filter((item) => selected.has(item.q));
+	const bulk = state === "open" && selection.length > 0;
 	const settledRead = useQueryOp({
 		project,
 		op: "get",
@@ -300,7 +305,7 @@ function QueueWorkbench() {
 		setInline(null);
 		void queryClient.cancelQueries({ queryKey: cacheKey });
 		patchRemoved(entries);
-		const text = `${entries.map((entry) => entry.question.q).join(", ")} · ${ANSWER_LABELS[String(entries[0]?.answer.is)] ?? entries[0]?.answer.is}`;
+		const text = `${named(entries.map((entry) => entry.question))} · ${ANSWER_LABELS[String(entries[0]?.answer.is)] ?? entries[0]?.answer.is}`;
 		setLastMessage(`${text} · recording`);
 		setStatus(
 			`${text}. ${entries.some((entry) => entry.question.kind === "adopt") ? "The adopted version stays in history." : "u withdraws the decision."}`,
@@ -383,8 +388,44 @@ function QueueWorkbench() {
 			});
 		setLast({ entries, confirmed });
 	}
+	function select(refs: string[]): void {
+		setSelected(new Set(refs));
+		if (!refs.length) anchor.current = null;
+	}
+	function toggle(question: QuestionItem): void {
+		anchor.current = question.q;
+		if (selected.has(question.q)) {
+			select([...selected].filter((ref) => ref !== question.q));
+			return;
+		}
+		const why = whyNotSelectable(question, selection);
+		if (why) setStatus(why);
+		else select([...selected, question.q]);
+	}
+	function selectRange(question: QuestionItem): void {
+		const { refs, skipped } = rangeOf(items, selection, anchor.current, question.q);
+		anchor.current = question.q;
+		select([...new Set([...selected, ...refs])]);
+		if (skipped) setStatus(`${skipped} in the range left out: another kind, or questions you cannot settle.`);
+	}
+	function selectAll(): void {
+		const kind = selection[0]?.kind ?? current?.kind;
+		if (!kind || state !== "open") return;
+		const refs = allOfKind(items, kind);
+		if (!refs.length) {
+			setStatus("You cannot settle any question of this kind.");
+			return;
+		}
+		if (refs.every((ref) => selected.has(ref))) {
+			select([]);
+			return;
+		}
+		select(refs);
+		if (inbox.hasNextPage) setStatus(`${countOf(refs.length, kind)} selected. More questions are not listed yet.`);
+	}
 	function answer(is: string, suggested?: Record<string, unknown>): void {
-		if (unavailable) {
+		if (state !== "open" || inline) return;
+		if (!bulk && unavailable) {
 			setStatus(
 				settled
 					? "This question was settled elsewhere. Your note is kept; choose another question to answer."
@@ -392,21 +433,27 @@ function QueueWorkbench() {
 			);
 			return;
 		}
-		if (!current || state !== "open" || current.you === "forbidden" || inline) return;
-		const readError = questionReadMessage(current);
-		if (readError) {
-			setStatus(readError);
-			return;
+		const questions = bulk ? selection : current ? [current] : [];
+		const first = questions[0];
+		if (!first) return;
+		if (!bulk && first.you === "forbidden") return;
+		for (const question of questions) {
+			const message = questionReadMessage(question);
+			if (message) {
+				setStatus(message);
+				return;
+			}
 		}
-		if (current.answers && !current.answers.includes(is)) {
+		if (!bulk && !takes(first, is)) {
 			setStatus("This answer does not apply to the current evidence.");
 			return;
 		}
-		const questions = selected.size ? items.filter((item) => selected.has(item.q)) : [current];
-		if (
-			questions.some((q) => q.kind !== current.kind || q.you === "forbidden" || (q.answers && !q.answers.includes(is)))
-		) {
-			setStatus("Select questions of one kind that you may answer.");
+		if (questions.some((q) => q.kind !== first.kind || q.you === "forbidden" || !takes(q, is))) {
+			setStatus(
+				questions.some((q) => q.kind !== first.kind)
+					? "Select questions of one kind that you may answer."
+					: "Not every selected question takes this answer.",
+			);
 			return;
 		}
 		if (is === "link" && !suggested) {
@@ -414,12 +461,12 @@ function QueueWorkbench() {
 				setStatus("Link one question at a time so each test can have its own case.");
 				return;
 			}
-			const parsed = MapEvidence.safeParse(current.evidence);
+			const parsed = MapEvidence.safeParse(first.evidence);
 			if (!parsed.success || !parsed.data.tests.length) {
 				setStatus("No tests can be linked from this evidence.");
 				return;
 			}
-			const question = current;
+			const question = first;
 			const tests = parsed.data.tests;
 			const pick = (index: number, pairs: [string, string][]) => {
 				const test = tests[index];
@@ -435,18 +482,11 @@ function QueueWorkbench() {
 			pick(0, []);
 			return;
 		}
-		for (const question of questions) {
-			const message = questionReadMessage(question);
-			if (message) {
-				setStatus(message);
-				return;
-			}
-		}
-		const finding = FindingEvidence.safeParse(current.evidence);
-		const parsed = ANSWERS[current.kind].safeParse(
+		const finding = FindingEvidence.safeParse(first.evidence);
+		const parsed = ANSWERS[first.kind].safeParse(
 			suggested ?? {
 				is,
-				...(current.kind === "finding" && is === "accept"
+				...(first.kind === "finding" && is === "accept"
 					? { apply: finding.success && finding.data.suggest !== null }
 					: {}),
 			},
@@ -518,7 +558,7 @@ function QueueWorkbench() {
 		const action = ++actionNo.current;
 		bringBack(questions.map((q) => ({ ...q, state: "open", decision: null })));
 		setState("open");
-		setLastMessage(`${questions.map((q) => q.q).join(", ")} · withdrawing the answer`);
+		setLastMessage(`${named(questions)} · withdrawing the answer`);
 		void ordered(
 			questions.map((q) => q.q),
 			async () => {
@@ -611,6 +651,21 @@ function QueueWorkbench() {
 		}
 	}
 	const active = () => !overlayOpen && !inline;
+	/** The answers on offer: to the selection when there is one, else to the question shown. */
+	const offered = bulk
+		? sharedAnswers(selection)
+		: current
+			? Object.entries(ANSWER_KEYS[current.kind]).map(([key, is]) => ({
+					key,
+					is,
+					why:
+						current.you === "forbidden"
+							? `You cannot settle this. Needs ${current.needs}.`
+							: takes(current, is)
+								? null
+								: "This answer does not apply to the current evidence.",
+				}))
+			: [];
 	const keys: Binding[] = [
 		{ key: "j", label: "Next question", handler: () => move(1), when: active },
 		{ key: "k", label: "Previous question", handler: () => move(-1), when: active },
@@ -622,26 +677,16 @@ function QueueWorkbench() {
 			label: "Select question",
 			when: () => active() && state === "open",
 			handler: () => {
-				if (!current) return;
-				setSelected((previous) => {
-					const next = new Set(previous);
-					if (next.has(current.q)) next.delete(current.q);
-					else if (items.some((q) => next.has(q.q) && q.kind !== current.kind))
-						setStatus("Bulk answers require one question kind.");
-					else next.add(current.q);
-					return next;
-				});
+				if (current) toggle(current);
 			},
 		},
-		...Object.entries(current ? ANSWER_KEYS[current.kind] : {}).map(([key, is]) => ({
+		{ key: "*", label: "Select all of this kind", handler: selectAll, when: () => active() && state === "open" },
+		{ key: "escape", label: "Clear selection", handler: () => select([]), when: () => active() && bulk },
+		...offered.map(({ key, is, why }) => ({
 			key,
 			label: ANSWER_LABELS[is] ?? is,
 			handler: () => answer(is),
-			when: () =>
-				active() &&
-				state === "open" &&
-				current?.you !== "forbidden" &&
-				(!current?.answers || current.answers.includes(is)),
+			when: () => active() && state === "open" && why === null,
 		})),
 		{
 			key: "enter",
@@ -667,7 +712,8 @@ function QueueWorkbench() {
 			: []),
 	];
 	useBindings(keys);
-	const help: Readonly<Record<string, string>> = current ? ANSWER_HELP[current.kind] : {};
+	const answerKind = bulk ? selection[0]?.kind : current?.kind;
+	const help: Readonly<Record<string, string>> = answerKind ? ANSWER_HELP[answerKind] : {};
 	return (
 		<>
 			<section className="pane queue-pane" id="list">
@@ -743,18 +789,45 @@ function QueueWorkbench() {
 						Show unlinked tests decided by rules
 					</label>
 				)}
+				{bulk && selection[0] && (
+					<div className="queue-bulk">
+						<span>{countOf(selection.length, selection[0].kind)} selected</span>
+						{allOfKind(items, selection[0].kind).some((ref) => !selected.has(ref)) && (
+							<button type="button" onClick={selectAll}>
+								<KeyCap>*</KeyCap> Select all {countOf(allOfKind(items, selection[0].kind).length, selection[0].kind)}
+							</button>
+						)}
+						<button type="button" onClick={() => select([])}>
+							<KeyCap>Esc</KeyCap> Clear
+						</button>
+					</div>
+				)}
 				<div className="pane-scroll" role="listbox" aria-label="Questions" aria-multiselectable="true">
 					{items.map((question) => (
 						<div data-question={question.q} key={question.q}>
 							<ListRow
-								selected={current?.q === question.q || selected.has(question.q)}
-								onClick={() => {
+								selected={current?.q === question.q}
+								onClick={(event) => {
+									// The box selects, and so does a click with shift (a range) or with ⌘ or Ctrl held.
+									const box = event.target instanceof Element && event.target.closest(".queue-check");
+									if (state === "open" && (box || event.shiftKey || event.metaKey || event.ctrlKey)) {
+										if (event.shiftKey) selectRange(question);
+										else toggle(question);
+										return;
+									}
 									setInline(null);
 									setCursor(question.q);
 									navigate(routeUrl({ project, screen: "queue", ref: question.q }), { replace: true });
 								}}
 							>
-								<span className="queue-select">{selected.has(question.q) ? "✓" : ""}</span>
+								<span
+									className="queue-check"
+									data-checked={selected.has(question.q)}
+									data-off={state !== "open" || undefined}
+									title="Select (x). Shift selects the rows between."
+								>
+									{selected.has(question.q) ? "✓" : ""}
+								</span>
 								<ProducerGlyph kind={question.producer} />
 								<span className="ref">{question.q}</span>
 								<span className={`kind k-${question.kind}`}>{kindNames[question.kind]}</span>
@@ -857,31 +930,27 @@ function QueueWorkbench() {
 							<div className="queue-answers">
 								<div className="queue-needs">
 									{settled && <p>This question was settled elsewhere. Your note is kept.</p>}
-									{current.you === "forbidden"
-										? `You cannot settle this. Needs ${current.needs}.`
-										: current.you === "advice"
-											? `Your answer is advice. Needs ${current.needs}.`
-											: selected.size
-												? `${selected.size} selected questions will receive this answer.`
+									{bulk && selection[0]
+										? `The answer you choose goes to the ${countOf(selection.length, selection[0].kind)} selected.${selected.has(current.q) ? "" : " The question shown is not one of them."}`
+										: current.you === "forbidden"
+											? `You cannot settle this. Needs ${current.needs}.`
+											: current.you === "advice"
+												? `Your answer is advice. Needs ${current.needs}.`
 												: `Needs ${current.needs}.`}
 								</div>
-								{Object.entries(ANSWER_KEYS[current.kind]).map(([key, is]) => (
+								{offered.map(({ key, is, why }) => (
 									<button
 										className="ans"
 										type="button"
 										key={key}
 										disabled={
-											Boolean(evidenceMessage(current)) ||
-											unavailable ||
-											current.you === "forbidden" ||
+											(bulk
+												? selection.some((question) => evidenceMessage(question))
+												: Boolean(evidenceMessage(current)) || unavailable) ||
 											Boolean(inline) ||
-											(current.answers && !current.answers.includes(is))
+											why !== null
 										}
-										title={
-											current.answers && !current.answers.includes(is)
-												? "This answer does not apply to the current evidence."
-												: undefined
-										}
+										title={why ?? undefined}
 										onClick={() => answer(is)}
 									>
 										<KeyCap>{key}</KeyCap>
