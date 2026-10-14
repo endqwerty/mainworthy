@@ -8,6 +8,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Glob } from "bun";
+import { z } from "zod";
 import { ChangeEvent, DecideReply, EVIDENCE, Inbox, Proposal, Question, SessionInfo } from "../scripts/ios/contract.ts";
 import { type TestInstance, testInstance } from "../scripts/ios/instance.ts";
 import { mismatches, type Shape } from "../scripts/ios/shape.ts";
@@ -196,4 +197,54 @@ describe("the Swift that is written from this repository", () => {
 			);
 		});
 	}
+});
+
+// Each Runs shape is held to replies of a project made for this test alone.
+describe("what Runs reads", () => {
+	test("planning, ordered slots, pinned cases, reports and corrections", async () => {
+		const { PlannedRun, RunPage, SlotPage, PinnedCase, RunFolders, RunPlanReply, RunReportReply } = await import(
+			"../scripts/ios/contract.ts"
+		);
+		const made = z
+			.object({ result: z.object({ project: z.string() }) })
+			.parse(await send("POST", "/test/project", { kind: "standard" }));
+		const key = made.result.project;
+		holds("find runs", RunPage, await op(key, "find", { in: "runs", limit: 1 }));
+		holds("find folders", RunFolders, await op(key, "find", { in: "folders" }));
+		const planned = await op(key, "plan", { name: "Manual check", select: { tags: ["regression"] } });
+		holds("plan", RunPlanReply, planned);
+		const run = z.object({ run: z.string() }).parse(planned).run;
+		const rows = z.array(z.unknown()).parse(await op(key, "get", { refs: [run] }));
+		holds("get run", PlannedRun, rows[0]);
+		const slots = await op(key, "find", { in: "slots", run, limit: 1 });
+		holds("find slots", SlotPage, slots);
+		const slot = z.object({ items: z.array(z.object({ case: z.string(), version: z.number() })) }).parse(slots)
+			.items[0];
+		if (!slot) throw new Error("the plan made no slot");
+		const cases = z.array(z.unknown()).parse(await op(key, "get", { refs: [slot.case], version: slot.version }));
+		holds("get pinned case", PinnedCase, cases[0]);
+		let corrects: number | undefined;
+		for (const outcome of ["pass", "fail", "skip", "blocked"]) {
+			const reply = await op(key, "report", {
+				run,
+				results: [
+					{
+						test: { case: slot.case },
+						outcome,
+						...(corrects ? { corrects } : {}),
+						...(outcome === "fail" ? { steps: [{ step: "s1", outcome: "fail" }], note: "Observed on phone" } : {}),
+					},
+				],
+			});
+			holds(`report ${outcome}`, RunReportReply, reply);
+			const receipt = z
+				.object({ results: z.array(z.number()), rejected: z.array(z.unknown()), declined: z.array(z.unknown()) })
+				.parse(reply);
+			expect(receipt.rejected).toEqual([]);
+			expect(receipt.declined).toEqual([]);
+			corrects = receipt.results[0];
+			expect(corrects).toBeNumber();
+		}
+		holds("slots after correction", SlotPage, await op(key, "find", { in: "slots", run }));
+	});
 });

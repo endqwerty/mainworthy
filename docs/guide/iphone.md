@@ -3,7 +3,7 @@
 Answer the queue from your phone in a native app.
 This page says how to install the app, how to sign in and what it does today.
 
-The app is new. It has the queue and nothing else yet: runs, the suite and changes follow (issue #171). For
+The app is new. It has the queue and planned runs. The suite and changes follow (issue #171). For
 those, open the instance in the phone's browser, which gets [a layout of its own](./keyboard.md#on-a-phone).
 
 ## Install the app
@@ -59,6 +59,25 @@ You cannot answer from the list. A question is answered from its page, where its
 The chips over the list show one kind of question. The name at the top left is the project that is open. Press
 it to open another.
 
+## Execute a planned run
+
+1. Open **Runs**, then open a run. Its page shows the server's verdict, the results it accepts and its cases in order.
+2. Press **Start** to open the first case with no result, or press any slot to open it.
+   The case is shown at the version pinned when the run was planned.
+3. Press the step that failed to mark it. Press it again to clear the mark. Add an optional note.
+4. Press **Pass**, **Fail**, **Blocked** or **Skip**. **Fail** records the marked step.
+   After the server confirms the result, the app opens the next slot with no result.
+5. **Undo** corrects the result to your earlier outcome, or to skipped if there was none. It does not delete it.
+   You can return to any slot and record again to correct your own earlier result.
+
+Recording needs the project's `produce` capability. Without it, slots are read-only.
+A closed run cannot receive results. Withdraw its sign-off in the **Queue** to reopen it.
+The app does not assign slots, set required jobs or close a run from this screen.
+
+To plan a run, press **+** in **Runs**. Give it a name and choose all cases, a folder, a tag or search text.
+Optionally enter a commit whose results it accepts. **Plan** opens the new run and says how many slots it made.
+Planning needs the project's `plan` capability. A selection with no cases is refused with the server's sentence.
+
 ## What the app does not do yet
 
 - **Link a test to a case**, and **resolve an edit that overlaps another**. The answer is listed and greyed.
@@ -67,7 +86,7 @@ it to open another.
   version, moves, tags or archives cases, makes a folder or changes the policy is answered in the web app: the
   app does not show all of what it changes. So is one with more than twenty edits. A new case and an edit to a
   case are shown step by step, and their answers stay off until that is on the screen.
-- **Runs, the suite and changes.**
+- **The suite and changes.**
 - **Notifications.** They need a paid Apple developer membership.
 - **Work without a connection.** An answer whose reply was lost is sent again by itself. The app does not keep
   an answer for later.

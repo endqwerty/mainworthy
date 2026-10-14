@@ -185,14 +185,15 @@ const Step = struct("Step", "One step of a case.", {
 	expected: [nullable(text), "What must be true afterwards. Null where the author has not said; never left out."],
 });
 
-export const CaseBody = struct("CaseBody", "The content of a case that has versions.", {
+const CaseBodyFields = {
 	title: text,
 	pre: [text, "Preconditions. Empty when there are none."],
 	steps: list(Step),
 	methods: [list(text), "Who may produce evidence for the case: human, auto, agent."],
 	automate: [text, "Whether an automated test is wanted: none, wanted or not-applicable."],
 	fields: [dictionary(text), "Custom field values. All of a case's content is here, so an edit is shown whole."],
-});
+} as const;
+export const CaseBody = struct("CaseBody", "The content of a case that has versions.", CaseBodyFields);
 
 export const Proposal = struct("Proposal", "`get` with a P- ref: a proposed edit with the documents it would change.", {
 	ref: text,
@@ -218,6 +219,66 @@ export const ChangeEvent = struct("ChangeEvent", "One event of `GET /api/p/<proj
 	touched: [list(text), "The refs the command touched. Empty does not mean nothing changed."],
 });
 
+// Planned runs, their pinned slots, and manual results.
+export const PlannedRun = struct("PlannedRun", "A planned run, with the server's verdict.", {
+	ref: text,
+	name: text,
+	state: text,
+	verdict: text,
+	reason: text,
+	slots: maybe(whole),
+	tally: dictionary(whole),
+	accepts: struct("RunTarget", "Only this run, or a commit's results.", {
+		self: maybe(flag),
+		commit: maybe(text),
+		repo: maybe(text),
+		env: maybe(text),
+	}),
+});
+export const RunPage = struct("RunPage", "A page of planned runs, newest first.", {
+	items: list(PlannedRun),
+	cursor: maybe(text),
+});
+const RunFill = struct("RunFill", "An admitted result that fills a slot.", {
+	result: whole,
+	by: text,
+	method: text,
+	outcome: text,
+	note: maybe(text),
+});
+export const RunSlot = struct("RunSlot", "One case pinned at a version in a run, in order.", {
+	id: whole,
+	case: maybe(text),
+	title: maybe(text),
+	version: whole,
+	state: text,
+	fills: list(RunFill),
+});
+export const SlotPage = struct("SlotPage", "A page of slots in their planned order.", {
+	items: list(RunSlot),
+	cursor: maybe(text),
+});
+export const PinnedCase = struct("PinnedCase", "The content at the slot's pinned version.", {
+	ref: text,
+	version: whole,
+	...CaseBodyFields,
+	fields: [maybe(dictionary(text)), "Custom field values. A case that is read alone leaves them out."],
+});
+export const RunFolders = struct("RunFolders", "The folders a run can select.", {
+	items: list(struct("RunFolder", "A folder path.", { path: text })),
+});
+export const RunPlanReply = struct("RunPlanReply", "The run made by a plan.", {
+	run: text,
+	slots: whole,
+	already: whole,
+});
+const ReportRefusal = struct("ReportRefusal", "Why one result was not recorded.", { reason: text });
+export const RunReportReply = struct("RunReportReply", "What became of a small manual report.", {
+	rejected: list(ReportRefusal),
+	declined: list(ReportRefusal),
+	results: list(whole),
+});
+
 /** Every shape the app decodes by name. `gen` writes one Swift type for each, and for each struct inside it. */
 export const SHAPES: readonly Shape[] = [
 	SessionInfo,
@@ -226,4 +287,12 @@ export const SHAPES: readonly Shape[] = [
 	DecideReply,
 	Proposal,
 	ChangeEvent,
+	PlannedRun,
+	RunPage,
+	RunSlot,
+	SlotPage,
+	PinnedCase,
+	RunFolders,
+	RunPlanReply,
+	RunReportReply,
 ];

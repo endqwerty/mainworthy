@@ -287,4 +287,100 @@ enum Wire {
 		/// The refs the command touched. Empty does not mean nothing changed.
 		let touched: [String]
 	}
+
+	/// Only this run, or a commit's results.
+	struct RunTarget: Decodable, Equatable, Sendable {
+		let `self`: Bool?
+		let commit: String?
+		let repo: String?
+		let env: String?
+	}
+
+	/// A planned run, with the server's verdict.
+	struct PlannedRun: Decodable, Equatable, Sendable {
+		let ref: String
+		let name: String
+		let state: String
+		let verdict: String
+		let reason: String
+		let slots: Int?
+		let tally: [String: Int]
+		let accepts: RunTarget
+	}
+
+	/// A page of planned runs, newest first.
+	struct RunPage: Decodable, Equatable, Sendable {
+		let items: [PlannedRun]
+		let cursor: String?
+	}
+
+	/// An admitted result that fills a slot.
+	struct RunFill: Decodable, Equatable, Sendable {
+		let result: Int
+		let by: String
+		let method: String
+		let outcome: String
+		let note: String?
+	}
+
+	/// One case pinned at a version in a run, in order.
+	struct RunSlot: Decodable, Equatable, Sendable {
+		let id: Int
+		let `case`: String?
+		let title: String?
+		let version: Int
+		let state: String
+		let fills: [RunFill]
+	}
+
+	/// A page of slots in their planned order.
+	struct SlotPage: Decodable, Equatable, Sendable {
+		let items: [RunSlot]
+		let cursor: String?
+	}
+
+	/// The content at the slot's pinned version.
+	struct PinnedCase: Decodable, Equatable, Sendable {
+		let ref: String
+		let version: Int
+		let title: String
+		/// Preconditions. Empty when there are none.
+		let pre: String
+		let steps: [Step]
+		/// Who may produce evidence for the case: human, auto, agent.
+		let methods: [String]
+		/// Whether an automated test is wanted: none, wanted or not-applicable.
+		let automate: String
+		/// Custom field values. A case that is read alone leaves them out.
+		let fields: [String: String]?
+	}
+
+	/// A folder path.
+	struct RunFolder: Decodable, Equatable, Sendable {
+		let path: String
+	}
+
+	/// The folders a run can select.
+	struct RunFolders: Decodable, Equatable, Sendable {
+		let items: [RunFolder]
+	}
+
+	/// The run made by a plan.
+	struct RunPlanReply: Decodable, Equatable, Sendable {
+		let run: String
+		let slots: Int
+		let already: Int
+	}
+
+	/// Why one result was not recorded.
+	struct ReportRefusal: Decodable, Equatable, Sendable {
+		let reason: String
+	}
+
+	/// What became of a small manual report.
+	struct RunReportReply: Decodable, Equatable, Sendable {
+		let rejected: [ReportRefusal]
+		let declined: [ReportRefusal]
+		let results: [Int]
+	}
 }

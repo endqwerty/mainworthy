@@ -20,6 +20,7 @@ public final class Workspace {
 	public let instanceName: String
 	public private(set) var project: Project?
 	public private(set) var queue: QueueScreen?
+	public private(set) var runs: RunsScreen?
 
 	/// Every screen of the open project. What the change stream tells of, each of them reads again.
 	private var screens: [any ProjectScreen] = []
@@ -43,7 +44,9 @@ public final class Workspace {
 		remembered.project = project.key
 		let queue = QueueScreen(project: server.project(project.key))
 		self.queue = queue
-		screens = [queue]
+		let runs = RunsScreen(project: server.project(project.key), permission: project, person: account.name)
+		self.runs = runs
+		screens = [queue, runs]
 	}
 
 	/// Reads who is signed in and what they may open again: when the app comes to the front. A project can be
@@ -53,11 +56,13 @@ public final class Workspace {
 		account = fresh
 		if let open = project, let now = fresh.projects.first(where: { $0.key == open.key }) {
 			project = now
+			runs?.updatePermission(now)
 		} else if let first = fresh.projects.first {
 			open(first)
 		} else {
 			project = nil
 			queue = nil
+			runs = nil
 			screens = []
 		}
 	}
