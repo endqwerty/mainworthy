@@ -1,7 +1,7 @@
 // The headers every reply carries: the policy by itself, then on a real listener for each kind of route, for the
 // web UI as the executable holds it (a list of built files) and as a start from source serves it (Bun's bundle).
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -773,14 +773,25 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			.parse(await Bun.file(new URL("../package.json", import.meta.url)).json());
 		const directory = scratch();
 		const executable = join(directory, "mainworthy");
-		const [, ...build] = manifest.scripts.build.replace("dist/mainworthy", executable).split(" ");
+		const words = manifest.scripts.build.replace("dist/mainworthy", executable).split(" ");
+		// `NODE_ENV=production bun build ...`: the assignments the script makes, then the command.
+		const assigned = words.filter((word) => /^[A-Z_]+=/.test(word));
+		const [, ...build] = words.slice(assigned.length);
 		expect(build).toContain(executable);
+		// `bun test` runs with NODE_ENV=test, which a build that does not set its own would inherit: this test builds
+		// the way a shell with some other NODE_ENV would, and the script must still make the production bundle.
 		const built = Bun.spawn([process.execPath, ...build], {
+			env: { ...process.env, ...Object.fromEntries(assigned.map((word) => word.split("="))) },
 			cwd: new URL("..", import.meta.url).pathname,
 			stdout: "ignore",
 			stderr: "pipe",
 		});
 		expect(await built.exited, await new Response(built.stderr).text()).toBe(0);
+
+		// The container is built by the same command, not by a copy of it that can drift.
+		expect(readFileSync(new URL("../Dockerfile", import.meta.url), "utf8")).toContain(
+			`RUN ${manifest.scripts.build.replace("dist/mainworthy", "/out/mainworthy")}\n`,
+		);
 
 		const data = scratch();
 		const child = Bun.spawn([executable, "serve"], {
@@ -830,7 +841,15 @@ describe("the executable, built the way `bun run build` builds it", () => {
 				expect(asset.headers.get("cache-control"), file).toBe("public, max-age=31536000, immutable");
 				// A name that carries a hash of the content is what makes "keep it for good" true.
 				expect(file).toMatch(/-[a-z0-9]{8}\.\w+$/);
-				expect((await asset.arrayBuffer()).byteLength, file).toBeGreaterThan(0);
+				const body = await asset.text();
+				expect(body.length, file).toBeGreaterThan(0);
+				if (file.endsWith(".js")) {
+					// The production bundle: 618 KB when measured (2026-10-13). A build that did not set NODE_ENV made the
+					// development bundle whatever else it was told (the JSX runtime's `jsxDEV` at every element, 882 KB),
+					// and nothing said so.
+					expect(body.includes("jsxDEV"), "the web script is a development build").toBe(false);
+					expect(new TextEncoder().encode(body).byteLength, "the web script outgrew its budget").toBeLessThan(700_000);
+				}
 				const again = await fetch(`${url}${file}`, { headers: { "if-none-match": asset.headers.get("etag") ?? "" } });
 				expect(again.status, file).toBe(304);
 				const any = await fetch(`${url}${file}`, { headers: { "if-none-match": "*" } });
