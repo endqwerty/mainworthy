@@ -58,6 +58,13 @@ There is no save button.
 A step is recorded once it has an action. A step with an expected result and no action yet
 is left out of the version and stays in your draft on this device, also after a reload.
 Type its action, or remove the step, and leave the editor again.
+A new case with neither a title nor a step that has an action is not kept when you leave it,
+whatever else it holds.
+
+Emptying the action of a recorded step removes the step from the next version.
+Its expected result, if it has one, stays in your draft in the same way.
+If someone else records that step again while yours still has no action, their step replaces
+what your draft held of it, and an expected result of yours that differs from theirs stays as a new step.
 
 The draft status says "Draft, saved on this device" when device storage works.
 If storage is unavailable, it says "Draft, kept in this tab". Keep that tab open

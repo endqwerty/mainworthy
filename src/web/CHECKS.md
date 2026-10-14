@@ -604,6 +604,42 @@ step's removal, as before, and the step now stays in the draft with its expected
 Not changed: a new case with no title and no step that has an action is still dropped on leaving, with an
 expected result or preconditions typed or not (`dropEmpty`).
 
+### The independent review's blocker (B1): what a draft held of a step removed a colleague's restored step
+
+The first version of this change kept a draft for what was left of a recorded step whose action the person
+had emptied: the step's removal is recorded, and the draft holds the step with no action. A colleague then
+restored the step. The person's next proposal was recorded beside it, and the draft was moved onto that
+version by a plain three-way merge, in which the draft's step counted as the colleague's with its action
+taken out. The draft stayed stored, so leaving again proposed the step's removal: version 5 without it, with
+nothing typed and no conflict card. Before this change the same body was in the editor and not stored, so it
+was not sent.
+
+A draft now moves onto a newer version through `carried` (`lib/merges.ts`), after its own proposal is recorded
+and when an editor with nothing to record reads a newer version. A step the draft holds with no action, which
+was not in the body last recorded, is text and never a change: where the version has a step under its id, that
+step stands, an expected result of the draft's own stays as a step under a new id, and a step with nothing of
+its own goes. An action the person emptied after the body went out is still their removal of the step. A card's
+draft was safe already: `draftAfterMerge` does not carry a draft that conflicts with the recorded version.
+
+| Route | Test | What the test requires |
+| --- | --- | --- |
+| The review's five steps: an action emptied, its removal recorded, the step restored by a colleague, the title changed, Escape twice | `drafts.test.ts` | Version 4 has the title and the restored step; the second Escape proposes nothing; the editor shows the restored step; no draft is left |
+| An editor with nothing to record still shows an emptied step; a colleague restores it; the title is changed | the same test, second half | The editor shows the restored step once the version is read, and version 7 still has it |
+| The rule: a restored step, a reworded one, an expected result typed on what was left, a step no version has, two kinds at once, an action emptied after the send | `test/merges.test.ts` | The recorded step stands; typed text stays under a new id; a new step stays; the person's own removal stays one; with no action typed since, nothing is left to record |
+| A card's draft holding such a step, and a recorded merge that has the step | `test/merges.test.ts` | The draft stays on its own base |
+
+The first row failed on `593f1eb` with three proposals where two are expected. With the rule taken out after a
+reply it fails the same way; taken out where a newer version is read, the second half fails waiting for the
+restored step in the editor. That second route was so before this change (the review calls it an older
+defect): the title change itself removed the restored step.
+
+Run once by hand in the browser, before and after: the colleague records the step again with another action
+(before: version 5 removes it; after: it stands and nothing more is sent); the colleague removes the step whose
+action the person has emptied (before: the same unchanged request at every Escape; after: one request);
+a new unfinished step beside what is left of a recorded one (after: the recorded step stands, the new one
+stays in the draft); a new expected result typed on what was left (after: it is step 3 under a new id, also
+after a reload, and the restored step stands); the review's route with the connection dropped.
+
 ## The documentation at `/docs` (decision 0016)
 
 The checks that decide this change, written before it. `test/docs.test.ts` and `test/e2e/docs.test.ts` hold them.

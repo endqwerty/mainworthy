@@ -6,11 +6,13 @@ import type { Draft, DraftConflict } from "../src/web/lib/drafts.ts";
 import {
 	allRecorded,
 	cardText,
+	carried,
 	caseHeld,
 	draftAfterMerge,
 	holdsUnfinishedStep,
 	mergeFate,
 	nextMine,
+	recordable,
 } from "../src/web/lib/merges.ts";
 
 const body = (title: string, first: string, second: string): CaseBody => ({
@@ -121,6 +123,22 @@ describe("the draft left after a recorded merge", () => {
 		).toBeNull();
 	});
 
+	// The same for a card's draft (the review of the change for issue #86, B1): a step the draft holds with no
+	// action, under an id the recorded version has a step for, would be carried as that step's removal. The two
+	// differ in one field, so the draft is not carried: it stays on its own base, where the step is only text.
+	test("a step the draft holds with no action is not carried onto a version that has the step", () => {
+		const unfinished = { id: "s3", action: "", expected: "Typed, and not recorded" };
+		const theirs = { id: "s3", action: "Recorded by a colleague", expected: null };
+		const left = after(
+			conflict(sent),
+			{ ...recorded, body: { ...v4, steps: [...v4.steps, theirs] } },
+			{ ...mine, steps: [...mine.steps, unfinished] },
+		);
+		expect(left).toMatchObject({ base: 1, original: v1 });
+		expect(left?.body.steps).toContainEqual(unfinished);
+		expect(left?.body.steps).not.toContainEqual(theirs);
+	});
+
 	// The first independent check of this change (V1): such a step cannot be recorded, and it is typed text.
 	test("a step with an expectation and no action yet stays, whatever the merge did", () => {
 		const unfinished = { id: "s3", action: "", expected: "Typed, and not recorded" };
@@ -152,6 +170,66 @@ test("a step is unfinished with an expectation and no action; an empty step and 
 	expect(holdsUnfinishedStep(mine)).toBe(false);
 	for (const expected of [null, "", "  "]) expect(holdsUnfinishedStep(withStep({ action: "", expected }))).toBe(false);
 	expect(holdsUnfinishedStep(withStep({ action: "Typed", expected: "" }))).toBe(false);
+});
+
+// The independent review of the change for issue #86 (B1). The person emptied the action of the second step, and
+// the step's removal is recorded. The draft still holds what is left of the step, and is then carried onto a
+// version in which a colleague has the step again. Nobody removed that step.
+describe("a draft carried onto a version the page has read", () => {
+	const newId = () => "s9";
+	const second = v1.steps.flatMap((step) => (step.id === "s2" ? [{ ...step, expected: "Total shows $90.00" }] : []));
+	const first = v1.steps.filter((step) => step.id === "s1");
+	// Version 2, without the second step, is what the draft last had recorded. In version 3 the step is back.
+	const removed = { ...v1, steps: first };
+	const restored = { ...v1, steps: [...first, ...second] };
+	const holding = (...more: Draft["body"]["steps"]): Draft["body"] => ({ ...removed, steps: [...first, ...more] });
+	const onto = (live: Draft["body"], recorded: CaseBody = restored, last: CaseBody = removed) =>
+		carried({ sent: last, live, recorded, newId });
+
+	test("what a draft still holds of a step is not the removal of that step when somebody recorded it again", () => {
+		expect(onto(holding({ id: "s2", action: "", expected: "Total shows $90.00" }))).toEqual(restored);
+		expect(onto(holding({ id: "s2", action: "  ", expected: null }))).toEqual(restored);
+		// The colleague recorded it with other words: those stand as well.
+		const reworded = { ...v1, steps: [...first, { id: "s2", action: "Apply the coupon SAVE20", expected: null }] };
+		expect(onto(holding({ id: "s2", action: "", expected: "" }), reworded)).toEqual(reworded);
+	});
+
+	test("an expected result typed on it is kept, as a step of its own beside the recorded one", () => {
+		expect(onto(holding({ id: "s2", action: "", expected: "Typed, and in no version" }))).toEqual({
+			...restored,
+			steps: [...restored.steps, { id: "s9", action: "", expected: "Typed, and in no version" }],
+		});
+	});
+
+	test("a step no version has stays as it is, with the colleague's version around it", () => {
+		const typing = { id: "s3", action: "", expected: "Typed, and in no version" };
+		const empty = { id: "s4", action: "", expected: null };
+		expect(onto(holding(typing, empty))).toEqual({ ...restored, steps: [...restored.steps, typing, empty] });
+		// Two of them, one of each kind: the recorded step stands and the new one stays.
+		expect(onto(holding({ id: "s2", action: "", expected: "Total shows $90.00" }, typing))).toEqual({
+			...restored,
+			steps: [...restored.steps, typing],
+		});
+	});
+
+	test("an action emptied after the body went out is the person's removal of the step, and stays one", () => {
+		// The draft last had version 3 recorded, with the step. The person empties it; a colleague changes the title.
+		const emptied = { ...restored, steps: [...first, { id: "s2", action: "", expected: "Total shows $90.00" }] };
+		const later = onto(emptied, { ...restored, title: "Coupon case theirs" }, restored);
+		expect(later.title).toBe("Coupon case theirs");
+		expect(recordable(later).steps).toEqual(first);
+	});
+
+	test("with no action typed since, nothing is left to record that the version does not hold", () => {
+		for (const live of [
+			holding(),
+			holding({ id: "s2", action: "", expected: "Total shows $90.00" }),
+			holding({ id: "s2", action: "", expected: "Typed, and in no version" }),
+			holding({ id: "s3", action: "", expected: "Typed, and in no version" }, { id: "s2", action: "", expected: null }),
+		])
+			for (const recorded of [restored, removed, { ...restored, title: "Coupon case theirs" }])
+				expect(recordable(onto(live, recorded))).toEqual(recorded);
+	});
 });
 
 describe("the text of a card that its own merge did not end", () => {
