@@ -26,6 +26,11 @@ on an ephemeral port and a separate temporary data directory per test.
 - Startup prints the quickstart lines and stops on SIGTERM. MCP stdio emits
   only protocol output.
 
+Starts of the command: `cli` in `test-support.ts` starts it as a process (about 0.13 s), `run` calls `runCli`
+in the test's process with the same environment, directory and standard input. A test uses `cli` for what only
+the executable does (exit status, standard output against standard error, standard input, signals, `serve`) and
+`run` for what the command does with its input; one test holds the two to the same answers.
+
 Required commands:
 
 ```sh
