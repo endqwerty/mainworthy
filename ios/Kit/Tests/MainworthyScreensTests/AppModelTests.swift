@@ -129,7 +129,7 @@ struct AppModelTests {
 		let workspace = try workspace(app)
 		// The session is ended from another place: here, by a second holder of the same cookie.
 		await Server.kept(in: device.secrets)?.signOut()
-		await workspace.refresh()
+		await workspace.refreshAccount()
 		try await Task.sleep(for: .milliseconds(50))
 		#expect(try self.form(app).notice == "Your session ended. Sign in again.")
 	}
@@ -147,5 +147,79 @@ struct AppModelTests {
 		form.address = "127.0.0.1:9"
 		await form.submit()
 		#expect(form.notice?.hasPrefix("The server could not be reached.") == true)
+	}
+}
+
+/// A transport that signs anybody in, and whose answer to "who am I" waits until the test lets it go.
+final class Held: Transport, @unchecked Sendable {
+	private let gate = AsyncStream.makeStream(of: Void.self)
+	private let asked = AsyncStream.makeStream(of: Void.self)
+	var holding = false
+
+	/// Returns once the app has asked who is signed in.
+	func wasAsked() async {
+		for await _ in asked.stream { return }
+	}
+
+	func release() {
+		gate.continuation.yield()
+	}
+
+	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+		func reply(_ body: String, headers: [String: String] = [:]) -> (Data, HTTPURLResponse) {
+			(Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!)
+		}
+		switch request.url?.path() {
+		case "/api/login":
+			let cookie = "mainworthy_sid=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ; Path=/; HttpOnly"
+			return reply(#"{"ok":true,"result":{"signedIn":true}}"#, headers: ["Set-Cookie": cookie])
+		case "/api/session":
+			if holding {
+				asked.continuation.yield()
+				for await _ in gate.stream { break }
+			}
+			return reply(
+				#"{"ok":true,"result":{"actor":"robin","kind":"human","can":[],"mode":"server","via":"cookie","session":1,"owner":true,"version":"0.1.0","projects":[]}}"#
+			)
+		default:
+			return reply(#"{"ok":true,"result":{}}"#)
+		}
+	}
+
+	func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+		throw URLError(.unsupportedURL)
+	}
+}
+
+@Suite("The app, when a reply comes late")
+@MainActor
+struct AppModelLateReplyTests {
+	@Test("the reply to a start that was given up does not sign the person back in")
+	func lateAccount() async throws {
+		let secrets = MemoryStore()
+		let transport = Held()
+		let instance = try #require(Instance(address: "mainworthy.example"))
+		_ = try await Server(instance: instance, secrets: secrets, transport: transport).signIn(.token("a token"))
+		let name = "mainworthy-tests-\(UUID().uuidString)"
+		let defaults = try #require(UserDefaults(suiteName: name))
+		defer { defaults.removePersistentDomain(forName: name) }
+		let app = AppModel(secrets: secrets, transport: transport, userAgent: "Mainworthy tests", defaults: defaults)
+
+		// The app starts and asks who is signed in. Before the server answers, the person gives up and signs out.
+		transport.holding = true
+		let starting = Task { await app.start() }
+		await transport.wasAsked()
+		await app.signOut()
+		guard case .signedOut = app.phase else {
+			Issue.record("signing out did not show the sign-in form")
+			return
+		}
+		transport.release()
+		await starting.value
+		guard case .signedOut = app.phase else {
+			Issue.record("the late reply signed the person back in: \(app.phase)")
+			return
+		}
+		#expect(secrets.load() == nil)
 	}
 }

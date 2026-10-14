@@ -374,8 +374,10 @@ async function install(args: string[]): Promise<void> {
 			destination,
 			"-derivedDataPath",
 			built,
-			// Lets Xcode register the phone and the bundle identifier with the team, and fetch the profile.
+			// Lets Xcode register the bundle identifier with the team and fetch the profile, and, with the second
+			// flag, register a phone the team has not seen.
 			"-allowProvisioningUpdates",
+			"-allowProvisioningDeviceRegistration",
 		]);
 	if (dryRun) {
 		// No phone is asked for: the app is built and signed for any iPhone the team has registered.

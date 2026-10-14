@@ -63,6 +63,9 @@ it to open another.
 
 - **Link a test to a case**, and **resolve an edit that overlaps another**. The answer is listed and greyed.
   The button at the top right of a question opens it in the web app.
+- **Answer a proposal that does more than change what a case says.** One that moves, tags or archives cases,
+  makes a folder or changes the policy is answered in the web app: the app does not show all of what it
+  changes. An edit to a case is shown step by step, and its answers stay off until that is on the screen.
 - **Runs, the suite and changes.**
 - **Notifications.** They need a paid Apple developer membership.
 - **Work without a connection.** An answer whose reply was lost is sent again by itself. The app does not keep

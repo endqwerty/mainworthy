@@ -144,6 +144,27 @@ struct ServerTests {
 		await told.next()
 	}
 
+	@Test("a late 401 for a session that was replaced does not take the new session with it")
+	func lateRefusalOfAnOldSession() async throws {
+		let secrets = MemoryStore()
+		let old = Script(
+			.json(signedIn, headers: ["Set-Cookie": "mainworthy_sid=\(cookie); Path=/; HttpOnly"]), .json(session),
+			.json(status: 401, unauthenticated)
+		)
+		let first = server(old, secrets: secrets)
+		_ = try await first.signIn(.token("a token"))
+		// The person signs in again, on a new connection that keeps its session in the same place.
+		let newer = String(cookie.reversed())
+		let second = server(
+			Script(.json(signedIn, headers: ["Set-Cookie": "mainworthy_sid=\(newer); Path=/; HttpOnly"]), .json(session)),
+			secrets: secrets
+		)
+		_ = try await second.signIn(.token("a token"))
+		// Now the old connection hears that its session is over.
+		await #expect(throws: ClientError.signedOut) { _ = try await first.account() }
+		#expect(String(decoding: secrets.load() ?? Data(), as: UTF8.self).contains(newer))
+	}
+
 	@Test("too many attempts says how long to wait")
 	func limited() async {
 		let body = #"{"ok":false,"error":{"code":"limited","message":"too many failed attempts; try again in 8 seconds"}}"#
@@ -163,6 +184,60 @@ struct ServerTests {
 		await #expect(throws: ClientError.unreadable) {
 			_ = try await server(Script(.json(body))).project("shop").questions(open: true)
 		}
+	}
+
+	@Test("a question whose evidence cannot be read, or whose kind is new, is listed and has no answer to give here")
+	func unreadableEvidence() async throws {
+		func question(_ ref: String, kind: String, evidence: String, answers: String) -> String {
+			"""
+			{"q":"\(ref)","kind":"\(kind)","title":"A question","producer":"ci","state":"open","evidence":\(evidence),
+			"evidenceHash":"abc","seen":{"count":1,"carried":0},"needs":"one member","answers":\(answers),"blocks":[],
+			"about":[],"openedAt":1800000000000,"advice":[],"decision":null,"you":"counts"}
+			"""
+		}
+		let inbox = """
+			{"ok":true,"seq":3,"result":{"counts":{"open":3,"failure":2},"cursor":null,"items":[
+			\(question("Q-1", kind: "failure", evidence: #"{"message":7}"#, answers: #"["flaky","infra"]"#)),
+			\(question("Q-2", kind: "waiver", evidence: #"{"until":"friday"}"#, answers: #"["grant"]"#)),
+			\(question("Q-3", kind: "failure", evidence: #"{"message":null,"scope":"trunk","tests":[],"count":0,"target":"abc","hints":[],"facts":[]}"#, answers: #"["flaky","quarantine"]"#))]}}
+			"""
+		let script = Script(.json(inbox))
+		let project = server(script).project("shop")
+		let questions = try await project.questions(open: true).questions
+		#expect(questions.map(\.evidence) == [.unreadable, .unreadable, questions[2].evidence])
+		#expect(questions[1].kind == .other("waiver") && questions[1].stakes.isEmpty)
+		#expect(questions[0].choices.map(\.takes) == [.more, .more])
+		#expect(questions[1].choices.map(\.takes) == [.more])
+		// A known question can be answered, but not with an answer this build has no words for.
+		#expect(questions[2].choices.map(\.takes) == [.nothing, .more])
+		for question in questions {
+			for choice in question.choices where choice.takes == .more {
+				#expect(try await project.answer(question, with: choice) == .notTaken("an answer this build can give; open the question in the web app"))
+			}
+		}
+		// Nothing was sent for any of them.
+		#expect(script.asked.count == 1)
+	}
+
+	@Test("a proposal that does more than change what a case says has no answer to give here")
+	func proposalNotShownWhole() async throws {
+		func adopt(_ ref: String, edits: String, count: Int) -> String {
+			"""
+			{"q":"\(ref)","kind":"adopt","title":"An edit","producer":"agent","state":"open","evidenceHash":"abc",
+			"evidence":{"proposal":"P-1","author":"reviewer","reason":null,"edits":\(edits),"count":\(count),"conflicts":[],"facts":[]},
+			"seen":{"count":1,"carried":0},"needs":"one member","answers":["accept","reject"],"blocks":[],"about":[],
+			"openedAt":1800000000000,"advice":[],"decision":null,"you":"counts"}
+			"""
+		}
+		let edit = #"{"op":"edit","case":"C-1","title":"A case","base":1,"conflicts":[]}"#
+		let inbox = """
+			{"ok":true,"seq":3,"result":{"counts":{"open":3,"adopt":3},"cursor":null,"items":[
+			\(adopt("Q-1", edits: "[\(edit)]", count: 1)),
+			\(adopt("Q-2", edits: #"[\#(edit),{"op":"place","cases":3}]"#, count: 2)),
+			\(adopt("Q-3", edits: "[\(edit)]", count: 40))]}}
+			"""
+		let questions = try await server(Script(.json(inbox))).project("shop").questions(open: true).questions
+		#expect(questions.map { $0.choices.map(\.takes) } == [[.nothing, .nothing], [.more, .more], [.more, .more]])
 	}
 
 	@Test("a refusal carries the server's sentence")

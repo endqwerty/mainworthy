@@ -187,19 +187,23 @@ struct LiveTests {
 		#expect(try await project.withdraw(decided, reason: "Closed too early.") == .withdrawn(nil))
 	}
 
-	@Test("the change stream says when something changed")
+	@Test("the change stream says that it is open, and then hears every write that follows")
 	func changes() async throws {
 		let project = try await Live.signedIn().project(try await Live.project())
-		let heard = Task { () -> Change? in
-			for try await change in project.changes() where change.operation == "decide" { return change }
-			return nil
-		}
-		// The stream is open once the server has answered it; an answer sent before that is not replayed.
-		try await Task.sleep(for: .milliseconds(300))
 		let finding = try #require(try await project.questions(open: true, kind: .finding).questions.first)
 		let deferred = try #require(finding.choices.first { $0.answer == "defer" })
-		#expect(try await project.answer(finding, with: deferred) == .decided)
-		let change = try #require(try await heard.value)
-		#expect(change.touched.contains(finding.ref))
+		var heard: [Change] = []
+		// Nothing waits for time to pass: the write is sent the moment the stream says it is open, which is
+		// when a screen reads what it shows. A write from then on is one the stream tells of.
+		for try await change in project.changes() {
+			heard.append(change)
+			if change == .opened {
+				#expect(try await project.answer(finding, with: deferred) == .decided)
+			} else if change.operation == "decide" {
+				break
+			}
+		}
+		#expect(heard.first == .opened)
+		#expect(heard.last?.touched.contains(finding.ref) == true)
 	}
 }

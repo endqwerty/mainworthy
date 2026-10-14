@@ -26,7 +26,8 @@ struct WorkspaceView: View {
 		// The change stream of the open project, for as long as the app is in front.
 		.task(id: FollowKey(project: workspace.project?.key, active: scenePhase == .active)) {
 			guard scenePhase == .active else { return }
-			await workspace.refresh()
+			// Who is signed in and what they may open is read first. The lists are read once the stream is open.
+			await workspace.refreshAccount()
 			await workspace.follow()
 		}
 	}

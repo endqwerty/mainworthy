@@ -35,9 +35,14 @@ export const SessionInfo = struct("SessionInfo", "`GET /api/session`: who the ca
 
 // ── The queue ──────────────────────────────────────────────────────────────────────────────────────────────
 
+const GivenAnswer = struct("GivenAnswer", "An answer as it was given. It carries more, by what it is.", {
+	is: [text, "The answer's word: flaky, accept. Or withdrawn, expired, outdated for a row the ledger wrote."],
+	ref: [maybe(text), "For a defect: where it is tracked."],
+});
+
 const Decision = struct("Decision", "The decision that stands on a question.", {
 	id: whole,
-	answer: [dictionary(anything), "The answer as it was given: `is`, and what that answer carries."],
+	answer: GivenAnswer,
 	by: [list(text), "Who signed it."],
 	rule: [maybe(text), "The policy clause that answered, when a rule did."],
 	reason: maybe(text),
@@ -47,7 +52,7 @@ const Decision = struct("Decision", "The decision that stands on a question.", {
 const Advice = struct("Advice", "An answer that was recorded as advice: somebody else decides.", {
 	by: text,
 	kind: text,
-	answer: dictionary(anything),
+	answer: GivenAnswer,
 	reason: maybe(text),
 });
 
@@ -111,7 +116,16 @@ export const EVIDENCE = {
 		category: text,
 		note: text,
 		repro: maybe(text),
-		suggest: [maybe(anything), "An edit the finder suggests. Accepting can turn it into a proposal."],
+		suggest: [
+			maybe(
+				struct("Suggestion", "An edit a finder suggests: to one step, or a new case.", {
+					action: maybe(text),
+					expected: maybe(text),
+					case: maybe(struct("SuggestedCase", "A case a finder suggests adding.", { title: text, steps: list(text) })),
+				}),
+			),
+			"Accepting the finding turns it into a proposal by the finder.",
+		],
 		finder: text,
 		lens: text,
 		facts: FACTS,
@@ -120,7 +134,19 @@ export const EVIDENCE = {
 		proposal: text,
 		author: text,
 		reason: maybe(text),
-		edits: [list(dictionary(anything)), "A summary of each edit, the first twenty: `op`, and what it changes."],
+		edits: [
+			list(
+				struct("EditSummary", "One edit of a proposal in short. Which fields it carries depends on `op`.", {
+					op: [text, "create, edit, restore, place, state, folder, cover or policy."],
+					case: maybe(text),
+					title: maybe(text),
+					cases: [maybe(whole), "For place and state: how many cases."],
+					name: [maybe(text), "For folder: its name."],
+					preset: [maybe(text), "For policy: the preset it changes to."],
+				}),
+			),
+			"The first twenty edits.",
+		],
 		count: whole,
 		conflicts: list(
 			struct("EditConflict", "A case the edit cannot be merged into.", { case: text, paths: list(text) }),
@@ -156,6 +182,9 @@ export const CaseBody = struct("CaseBody", "The content of a case that has versi
 	title: text,
 	pre: [text, "Preconditions. Empty when there are none."],
 	steps: list(Step),
+	methods: [list(text), "Who may produce evidence for the case: human, auto, agent."],
+	automate: [text, "Whether an automated test is wanted: none, wanted or not-applicable."],
+	fields: [maybe(dictionary(text)), "Custom field values. A case that is read alone leaves them out."],
 });
 
 export const Proposal = struct("Proposal", "`get` with a P- ref: a proposed edit with the documents it would change.", {

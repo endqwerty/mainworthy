@@ -7,7 +7,7 @@ import Observation
 /// The server is the record. An answer is sent, and the list is read again when the reply comes: nothing is
 /// shown as decided that the server has not said is decided.
 @MainActor @Observable
-public final class QueueScreen {
+public final class QueueScreen: ProjectScreen {
 	public enum Showing: Hashable, Sendable {
 		case open, decided
 	}
@@ -28,6 +28,13 @@ public final class QueueScreen {
 		public let undoes: Question?
 	}
 
+	/// What a proposed edit changes, as far as it was read.
+	public enum Documents: Equatable, Sendable {
+		case reading
+		case read([EditedCase])
+		case failed(String)
+	}
+
 	public private(set) var showing = Showing.open
 	public private(set) var filter: Kind?
 	public private(set) var questions: [Question] = []
@@ -35,6 +42,8 @@ public final class QueueScreen {
 	public private(set) var loading = Loading.first
 	public private(set) var hasMore = false
 	public private(set) var notice: Notice?
+	/// What each proposed edit changes, by its question and that question's evidence, once it was opened.
+	private var documents: [String: Documents] = [:]
 	/// The questions with an answer or a withdrawal on its way. A second one is not sent meanwhile.
 	public private(set) var busy: Set<String> = []
 
@@ -87,9 +96,17 @@ public final class QueueScreen {
 		reads += 1
 		let mine = reads
 		do {
-			let page = try await project.questions(open: showing == .open, kind: filter)
+			// As far down as the list was read before, so that a question further down than the first page,
+			// which may be the one that is open, stays in it.
+			let wanted = questions.count
+			var page = try await project.questions(open: showing == .open, kind: filter)
+			var read = page.questions
+			while let cursor = page.next, read.count < wanted {
+				page = try await project.questions(open: showing == .open, kind: filter, after: cursor)
+				read += page.questions
+			}
 			guard mine == reads else { return }
-			questions = page.questions
+			questions = read
 			counts = page.counts
 			next = page.next
 			hasMore = page.next != nil
@@ -110,6 +127,13 @@ public final class QueueScreen {
 	public func answer(
 		_ question: Question, with choice: Choice, reference: String = "", reason: String = ""
 	) async -> Bool {
+		guard isShown(question) else {
+			notice = Notice(
+				text: "Nothing was recorded for \(question.ref): what it asks about has not been shown yet.",
+				isProblem: true, undoes: nil
+			)
+			return false
+		}
 		guard busy.insert(question.ref).inserted else { return false }
 		defer { busy.remove(question.ref) }
 		do {
@@ -166,8 +190,38 @@ public final class QueueScreen {
 		notice = nil
 	}
 
-	/// The cases a proposed edit would change, for a question about one. Read when the question is opened.
-	public func documents(of edit: ProposedEdit) async throws -> [EditedCase] {
-		try await project.documents(of: edit.proposal)
+	/// Whether the person was shown what the question asks about, which is what lets them answer it. Evidence
+	/// this build cannot read was not shown, and neither was an edit whose documents have not been read.
+	public func isShown(_ question: Question) -> Bool {
+		switch question.evidence {
+		case .unreadable: false
+		case .proposal: if case .read = documents(of: question) { true } else { false }
+		case .failure, .unlinked, .finding, .signoff: true
+		}
+	}
+
+	/// What the edit a question asks about changes, as far as it was read for the evidence the question has
+	/// now. An edit whose case changed since is another piece of evidence, and is read again.
+	public func documents(of question: Question) -> Documents? {
+		documents[QueueScreen.key(question)]
+	}
+
+	/// Reads what a proposed edit changes, when a question about it is opened and when the person asks again.
+	public func readDocuments(of question: Question) async {
+		guard case .proposal(let edit) = question.evidence else { return }
+		let key = QueueScreen.key(question)
+		if case .read = documents[key] { return }
+		documents[key] = .reading
+		do {
+			documents[key] = .read(try await project.documents(of: edit.proposal))
+		} catch is CancellationError {
+			documents[key] = nil
+		} catch {
+			documents[key] = .failed(error.shown)
+		}
+	}
+
+	private static func key(_ question: Question) -> String {
+		"\(question.ref) \(question.evidenceHash)"
 	}
 }

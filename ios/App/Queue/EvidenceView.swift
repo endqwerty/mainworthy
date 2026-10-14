@@ -12,7 +12,7 @@ struct EvidenceView: View {
 		case .failure(let failed): FailureEvidence(failed: failed, timesSeen: question.timesSeen)
 		case .unlinked(let tests): UnlinkedEvidence(tests: tests)
 		case .finding(let finding): FindingEvidence(finding: finding)
-		case .proposal(let edit): ProposalEvidence(edit: edit, screen: screen)
+		case .proposal(let edit): ProposalEvidence(question: question, edit: edit, screen: screen)
 		case .signoff(let run): SignoffEvidence(run: run)
 		case .unreadable:
 			Panel {
@@ -149,11 +149,9 @@ private struct FindingEvidence: View {
 }
 
 private struct ProposalEvidence: View {
+	let question: Question
 	let edit: ProposedEdit
 	let screen: QueueScreen
-
-	@State private var documents: [EditedCase]?
-	@State private var problem: String?
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 12) {
@@ -175,21 +173,31 @@ private struct ProposalEvidence: View {
 				.font(.subheadline)
 				.foregroundStyle(Color.warn)
 			}
-			if let documents {
+			if !edit.isShownWhole {
+				Label(
+					"This proposal does more than change what a case says: it moves, tags, archives or re-covers cases, makes a folder or changes the policy. This build does not show all of that, so it is answered in the web app.",
+					systemImage: "info.circle"
+				)
+				.font(.subheadline)
+				.foregroundStyle(.secondary)
+			}
+			// The answers stay off until this is read: nobody accepts an edit they were not shown.
+			switch screen.documents(of: question) {
+			case .read(let documents):
 				ForEach(documents) { document in EditedCaseView(document: document) }
-			} else if let problem {
-				Label(problem, systemImage: "exclamationmark.triangle").font(.subheadline).foregroundStyle(Color.fail)
-			} else {
+			case .failed(let why):
+				Panel {
+					Label("What the edit changes could not be read. \(why)", systemImage: "exclamationmark.triangle")
+						.font(.subheadline)
+						.foregroundStyle(Color.fail)
+					Button("Try again") { Task { await screen.readDocuments(of: question) } }
+				}
+			case .reading, nil:
 				ProgressView().frame(maxWidth: .infinity)
 			}
 		}
-		.task(id: edit.proposal) {
-			do {
-				documents = try await screen.documents(of: edit)
-			} catch {
-				problem = "What the edit changes could not be read. \(error.shown)"
-			}
-		}
+		// Read again when the question's evidence changes: the edit's case may be another one by then.
+		.task(id: question) { await screen.readDocuments(of: question) }
 	}
 }
 
@@ -210,6 +218,15 @@ private struct EditedCaseView: View {
 				case .pre(let from, let to):
 					if !from.isEmpty { line("Before: \(from)", mark: "−", tint: .fail, struck: true) }
 					if !to.isEmpty { line("Before: \(to)", mark: "+", tint: .pass) }
+				case .methods(let from, let to):
+					line("Run by: \(from.joined(separator: ", "))", mark: "−", tint: .fail, struck: true)
+					line("Run by: \(to.joined(separator: ", "))", mark: "+", tint: .pass)
+				case .automate(let from, let to):
+					line("Automation: \(from)", mark: "−", tint: .fail, struck: true)
+					line("Automation: \(to)", mark: "+", tint: .pass)
+				case .fields(let from, let to):
+					line("Fields: \(fields(from))", mark: "−", tint: .fail, struck: true)
+					line("Fields: \(fields(to))", mark: "+", tint: .pass)
 				case .kept(let step):
 					line(text(step), mark: " ", tint: .secondary)
 				case .added(let step):
@@ -222,6 +239,10 @@ private struct EditedCaseView: View {
 				}
 			}
 		}
+	}
+
+	private func fields(_ fields: [String: String]) -> String {
+		fields.isEmpty ? "none" : fields.sorted { $0.key < $1.key }.map { "\($0.key) = \($0.value)" }.joined(separator: ", ")
 	}
 
 	private func text(_ step: Step) -> String {

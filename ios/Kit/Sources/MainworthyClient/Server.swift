@@ -75,7 +75,7 @@ package final class Server: Sendable {
 			case .token(let token): ["token": .string(token)]
 			}
 		let (_, response) = try await send("POST", "/api/login", body: body, attempts: 1, asSignedIn: false)
-		guard let given = Server.sessionCookie(in: response, for: instance.url) else { throw ClientError.unreadable }
+		guard let given = Server.sessionCookie(in: response) else { throw ClientError.unreadable }
 		cookie.withLock { $0 = given }
 		secrets.save(try? JSONEncoder().encode(Kept(instance: instance, cookie: given)))
 		return try await account()
@@ -90,23 +90,37 @@ package final class Server: Sendable {
 	/// Ends the session on the server and forgets its cookie. The cookie is forgotten even when the server
 	/// cannot be reached: the device is signed out either way, and the session then ends by itself.
 	package func signOut() async {
+		let mine = cookie.withLock { $0 }
 		_ = try? await send("POST", "/api/logout", body: [:], attempts: 1, asSignedIn: false)
-		forget()
+		if let mine { forget(mine) }
 	}
 
-	private func forget() {
-		cookie.withLock { $0 = nil }
-		secrets.save(nil)
-	}
-
-	/// The session cookie among the `Set-Cookie` headers of a reply: the one name of the two that carries a value.
-	private static func sessionCookie(in response: HTTPURLResponse, for url: URL) -> Cookie? {
-		let fields = response.allHeaderFields.reduce(into: [String: String]()) { fields, field in
-			if let name = field.key as? String, let value = field.value as? String { fields[name] = value }
+	/// Forgets one session: here, if it is still the one this server holds, and in the store, if it is still
+	/// the one kept there. A reply that comes late, to a request sent under a session that has since been
+	/// replaced by a new sign-in, must not take the new one with it. Returns whether it was this server's own.
+	@discardableResult
+	private func forget(_ session: Cookie) -> Bool {
+		let wasMine = cookie.withLock { held in
+			guard held == session else { return false }
+			held = nil
+			return true
 		}
-		return HTTPCookie.cookies(withResponseHeaderFields: fields, for: url)
-			.first { $0.name.hasSuffix("mainworthy_sid") && !$0.value.isEmpty }
-			.map { Cookie(name: $0.name, value: $0.value) }
+		if let data = secrets.load(), let kept = try? JSONDecoder().decode(Kept.self, from: data), kept.cookie == session {
+			secrets.save(nil)
+		}
+		return wasMine
+	}
+
+	/// The session cookie among the `Set-Cookie` headers of a reply: the one name of the two that carries a
+	/// value. The headers are read as text. Foundation's own cookie parser applies a browser's rules for the
+	/// `__Host-` prefix, which differ between versions of the system, and the app is not a browser: it sends
+	/// the cookie back to the one address it came from and nowhere else. A value is 32 bytes in base64url, as
+	/// the server writes one (`COOKIE_VALUE` in `src/surfaces/http.ts`); a cookie being expired has none.
+	private static func sessionCookie(in response: HTTPURLResponse) -> Cookie? {
+		guard let header = response.value(forHTTPHeaderField: "Set-Cookie"),
+			let found = header.firstMatch(of: /(?:^|[,\s])((?:__Host-)?mainworthy_sid)=([A-Za-z0-9_-]{43})(?:[;,\s]|$)/)
+		else { return nil }
+		return Cookie(name: String(found.1), value: String(found.2))
 	}
 
 	// MARK: Operations
@@ -125,15 +139,19 @@ package final class Server: Sendable {
 	}
 
 	/// What changes in a project, as it happens, until the reader stops or the connection is lost. Nothing is
-	/// replayed: whoever opens it reads what they show again first.
+	/// replayed, so the stream first says that it is open (a change with no operation, `Change.opened`): what a
+	/// reader shows is read after that, and a write that lands in between is then heard.
 	package func changes(in project: String) -> AsyncThrowingStream<Change, any Error> {
-		let request = self.request("GET", "/api/p/\(Server.escaped(project))/events", body: nil)
+		let request = self.request(
+			"GET", "/api/p/\(Server.escaped(project))/events", body: nil, as: cookie.withLock { $0 }
+		)
 		let transport = self.transport
 		return AsyncThrowingStream { continuation in
 			let reading = Task {
 				do {
 					let (lines, response) = try await transport.lines(request)
 					guard response.statusCode == 200 else { throw ClientError.unreachable("The change stream did not open.") }
+					continuation.yield(.opened)
 					for try await line in lines where line.hasPrefix("data:") {
 						let json = Data(line.dropFirst("data:".count).utf8)
 						guard let event = try? JSONDecoder().decode(Wire.ChangeEvent.self, from: json) else { continue }
@@ -172,13 +190,13 @@ package final class Server: Sendable {
 		var result: Result
 	}
 
-	private func request(_ method: String, _ path: String, body: JSONValue?) -> URLRequest {
+	private func request(_ method: String, _ path: String, body: JSONValue?, as session: Cookie?) -> URLRequest {
 		var request = URLRequest(url: instance.url.appending(path: path))
 		request.httpMethod = method
 		request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
 		request.setValue("application/json", forHTTPHeaderField: "Accept")
-		if let held = cookie.withLock({ $0 }) {
-			request.setValue("\(held.name)=\(held.value)", forHTTPHeaderField: "Cookie")
+		if let session {
+			request.setValue("\(session.name)=\(session.value)", forHTTPHeaderField: "Cookie")
 		}
 		if let body {
 			request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -202,7 +220,9 @@ package final class Server: Sendable {
 	private func send(
 		_ method: String, _ path: String, body: JSONValue?, attempts: Int, asSignedIn: Bool
 	) async throws -> (Data, HTTPURLResponse) {
-		let request = self.request(method, path, body: body)
+		// The session the request goes out under. A 401 that comes back ends that one, and no other.
+		let session = cookie.withLock { $0 }
+		let request = self.request(method, path, body: body, as: session)
 		var failure = ""
 		for attempt in 1...attempts {
 			let data: Data
@@ -221,8 +241,7 @@ package final class Server: Sendable {
 			let refusal = head.error ?? Refusal(code: "internal", message: "the server refused without saying why")
 			switch refusal.code {
 			case "unauthenticated" where asSignedIn:
-				forget()
-				ended.continuation.yield()
+				if let session, forget(session) { ended.continuation.yield() }
 				throw ClientError.signedOut
 			case "limited":
 				throw ClientError.limited(seconds: response.value(forHTTPHeaderField: "Retry-After").flatMap(Int.init))

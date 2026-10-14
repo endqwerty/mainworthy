@@ -13,22 +13,25 @@ public struct Instance: Hashable, Sendable, Codable {
 		guard !text.isEmpty, !text.contains(" ") else { return nil }
 		let hasScheme = text.range(of: #"^[A-Za-z][A-Za-z0-9+.-]*://"#, options: .regularExpression) != nil
 		guard let typed = URLComponents(string: hasScheme ? text : "placeholder://\(text)"),
-			let host = typed.host?.lowercased(), !host.isEmpty
+			// An IPv6 address is written between brackets in an address, and without them everywhere else.
+			let host = typed.host?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]")), !host.isEmpty
 		else { return nil }
 		let scheme = hasScheme ? typed.scheme?.lowercased() : (Instance.isLocal(host) ? "http" : "https")
 		guard scheme == "http" || scheme == "https" else { return nil }
 		var origin = URLComponents()
 		origin.scheme = scheme
-		origin.host = host
+		origin.host = host.contains(":") ? "[\(host)]" : host
 		origin.port = typed.port
 		guard let url = origin.url else { return nil }
 		self.url = url
 	}
 
-	/// The address without its scheme, as a person recognises it: `mainworthy.example`, `192.168.1.20:7357`.
+	/// The address as a person recognises it and can type it again: `mainworthy.example`, `192.168.1.20:7357`.
+	/// The scheme is left out where the address reads back to this instance without it, and kept where it would
+	/// not: `https://tower.local:7357`.
 	public var name: String {
-		let host = url.host() ?? url.absoluteString
-		return url.port.map { "\(host):\($0)" } ?? host
+		let bare = String(url.absoluteString.trimmingPrefix(/https?:\/\//))
+		return Instance(address: bare) == self ? bare : url.absoluteString
 	}
 
 	/// Whether a host is on this device's own network: itself, a private IPv4 address, or a `.local` name.

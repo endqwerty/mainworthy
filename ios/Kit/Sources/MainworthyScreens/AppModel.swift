@@ -23,6 +23,10 @@ public final class AppModel {
 	private let remembered: Remembered
 	private var server: Server?
 	private var watching: Task<Void, Never>?
+	/// Counts every time the app starts towards being signed in or gives that up, so that the reply to an
+	/// attempt that was given up meanwhile changes nothing.
+	private var attempt = 0
+	private var started = false
 
 	/// The app as it runs on a device: the session in the keychain, requests over the network.
 	///
@@ -50,7 +54,8 @@ public final class AppModel {
 
 	/// Called once, when the app opens: picks up the session the device holds, or shows the sign-in form.
 	public func start() async {
-		guard case .starting = phase else { return }
+		guard !started else { return }
+		started = true
 		guard let kept = Server.kept(in: secrets, transport: transport, userAgent: userAgent) else {
 			phase = .signedOut(form())
 			return
@@ -73,16 +78,23 @@ public final class AppModel {
 	}
 
 	private func enter(_ server: Server) async {
+		attempt += 1
+		let mine = attempt
 		do {
-			open(server, as: try await server.account())
+			let account = try await server.account()
+			guard mine == attempt else { return }
+			open(server, as: account)
 		} catch ClientError.signedOut {
+			guard mine == attempt else { return }
 			showSignIn(saying: "Your session ended. Sign in again.")
 		} catch {
+			guard mine == attempt else { return }
 			phase = .unreachable(error.shown)
 		}
 	}
 
 	private func open(_ server: Server, as account: Account) {
+		attempt += 1
 		self.server = server
 		remembered.address = server.instance.name
 		let workspace = Workspace(
@@ -101,6 +113,7 @@ public final class AppModel {
 	}
 
 	private func showSignIn(saying notice: String?) {
+		attempt += 1
 		watching?.cancel()
 		server = nil
 		phase = .signedOut(form(saying: notice))

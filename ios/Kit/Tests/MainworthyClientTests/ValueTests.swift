@@ -18,15 +18,23 @@ struct ValueTests {
 		("127.0.0.1:7357", "http://127.0.0.1:7357"),
 		("localhost:7357", "http://localhost:7357"),
 		("tower.local:7357", "http://tower.local:7357"),
+		("[::1]:7357", "http://[::1]:7357"),
+		("http://[::1]:7357", "http://[::1]:7357"),
+		("HTTPS://Mainworthy.Example", "https://mainworthy.example"),
+		("https://robin:secret@mainworthy.example/p/x", "https://mainworthy.example"),
+		("https://tower.local:7357", "https://tower.local:7357"),
 		// A public address that only looks private is not one.
 		("172.32.1.1", "https://172.32.1.1"),
 		("192.169.1.1", "https://192.169.1.1"),
 	])
-	func address(typed: String, becomes: String) {
-		#expect(Instance(address: typed)?.url.absoluteString == becomes)
+	func address(typed: String, becomes: String) throws {
+		let instance = try #require(Instance(address: typed))
+		#expect(instance.url.absoluteString == becomes)
+		// What the app remembers and shows of an instance is typed back as the same instance.
+		#expect(Instance(address: instance.name) == instance)
 	}
 
-	@Test("text that is no address", arguments: ["", "   ", "not an address", "ftp://mainworthy.example", "https://"])
+	@Test("text that is no address", arguments: ["", "   ", "not an address", "ftp://mainworthy.example", "https://", ":7357"])
 	func notAnAddress(typed: String) {
 		#expect(Instance(address: typed) == nil)
 	}
@@ -35,6 +43,9 @@ struct ValueTests {
 	func instanceName() {
 		#expect(Instance(address: "https://mainworthy.example")?.name == "mainworthy.example")
 		#expect(Instance(address: "192.168.1.20:7357")?.name == "192.168.1.20:7357")
+		// Where the scheme is not the one the address would get by itself, the name keeps it.
+		#expect(Instance(address: "https://tower.local:7357")?.name == "https://tower.local:7357")
+		#expect(Instance(address: "http://mainworthy.example")?.name == "http://mainworthy.example")
 	}
 
 	@Test("the stakes of a question are the sentences every other client prints")
@@ -109,6 +120,22 @@ struct ValueTests {
 			after: CaseContent(title: "T", steps: [second, first])
 		)
 		#expect(swapped.changes == [.kept(second), .kept(first)])
+	}
+
+	@Test("an edit that changes no step still shows what it changes")
+	func editedCaseBeyondSteps() {
+		let step = Step(id: "a1", action: "Open the cart", expected: nil)
+		let edit = EditedCase(
+			id: 0, caseRef: "C-1",
+			before: CaseContent(title: "T", steps: [step]),
+			after: CaseContent(title: "T", steps: [step], methods: ["agent"], automate: "wanted", fields: ["risk": "high"])
+		)
+		#expect(edit.changes == [
+			.methods(from: ["human"], to: ["agent"]),
+			.automate(from: "none", to: "wanted"),
+			.fields(from: [:], to: ["risk": "high"]),
+			.kept(step),
+		])
 	}
 
 	@Test("a whole number is written as one, and a value survives being written and read")

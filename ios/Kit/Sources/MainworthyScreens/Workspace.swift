@@ -2,6 +2,13 @@ import Foundation
 import MainworthyClient
 import Observation
 
+/// A screen of one project: what it shows can be read again, which the workspace asks for when the project's
+/// change stream opens and whenever it tells of a change.
+@MainActor
+public protocol ProjectScreen: AnyObject {
+	func refresh() async
+}
+
 /// What a signed-in person works in: their account, the project that is open, and that project's screens.
 ///
 /// A screen belongs to one project. Opening another project makes new screens, so nothing read in one project
@@ -14,6 +21,8 @@ public final class Workspace {
 	public private(set) var project: Project?
 	public private(set) var queue: QueueScreen?
 
+	/// Every screen of the open project. What the change stream tells of, each of them reads again.
+	private var screens: [any ProjectScreen] = []
 	private let server: Server
 	private let remembered: Remembered
 	private let onSignedOut: () -> Void
@@ -32,36 +41,40 @@ public final class Workspace {
 		guard project != self.project else { return }
 		self.project = project
 		remembered.project = project.key
-		queue = QueueScreen(project: server.project(project.key))
+		let queue = QueueScreen(project: server.project(project.key))
+		self.queue = queue
+		screens = [queue]
 	}
 
-	/// Reads everything that is shown again: when the app comes to the front, and when the person asks.
-	public func refresh() async {
-		if let fresh = try? await server.account() {
-			account = fresh
-			// A project can be taken away, or renamed, while the app was in the background.
-			if let open = project, let now = fresh.projects.first(where: { $0.key == open.key }) {
-				project = now
-			} else if let first = fresh.projects.first {
-				open(first)
-			} else {
-				project = nil
-				queue = nil
-			}
+	/// Reads who is signed in and what they may open again: when the app comes to the front. A project can be
+	/// taken away, or renamed, while the app was in the background.
+	public func refreshAccount() async {
+		guard let fresh = try? await server.account() else { return }
+		account = fresh
+		if let open = project, let now = fresh.projects.first(where: { $0.key == open.key }) {
+			project = now
+		} else if let first = fresh.projects.first {
+			open(first)
+		} else {
+			project = nil
+			queue = nil
+			screens = []
 		}
-		await queue?.refresh()
 	}
 
-	/// Follows the open project's change stream until the task is cancelled, reading the screens again at each
-	/// change. A stream that breaks is opened again, and what was missed meanwhile is read then.
+	/// Follows the open project's change stream until the task is cancelled, reading the screens again when
+	/// the stream opens and at each change. The read comes after the stream is open, never before: the stream
+	/// replays nothing, and a write between a read and the opening would be missed. A stream that breaks is
+	/// opened again, and its opening reads what was missed.
 	public func follow() async {
 		guard let key = project?.key else { return }
 		while !Task.isCancelled {
 			do {
-				for try await _ in server.project(key).changes() { await queue?.refresh() }
+				for try await _ in server.project(key).changes() {
+					for screen in screens { await screen.refresh() }
+				}
 			} catch {}
 			guard (try? await Task.sleep(for: .seconds(2))) != nil else { return }
-			await queue?.refresh()
 		}
 	}
 
