@@ -2,6 +2,7 @@
 // A browser worked with a mouse gets none of it, at any width.
 import { expect, test } from "bun:test";
 import type { Page } from "playwright-core";
+import { z } from "zod";
 import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
 
 /** What a person sees in the middle of the window: one of the two panes, the sidebar, or an overlay. */
@@ -761,6 +762,94 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Sign in with the token" }).tap();
 			await page.locator("#top").waitFor();
 			expect(await inView(page)).toBe("list");
+		} finally {
+			await phone.close();
+			await server.stop();
+		}
+	},
+	60_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"on a phone the palette lists Cancel for a form that closes only with Escape",
+	async () => {
+		const server = await startServer({ cases: 3, preset: "standard" });
+		const phone = await openPage(server, { device: "phone", path: "/p/scratch/suite" });
+		try {
+			const { page } = phone;
+			const palette = page.locator("[data-overlay=palette]");
+			const offered = async (name: RegExp) => {
+				await actions(page).tap();
+				const count = await palette.getByRole("option", { name }).count();
+				return count;
+			};
+			const choose = (name: RegExp) => palette.getByRole("option", { name }).tap();
+			const closePalette = () => palette.locator(".overlay-backdrop").tap({ position: { x: 4, y: 20 } });
+			await page.locator("#list [role=option]").first().waitFor();
+
+			// New folder. Closing the menu leaves the form open, and only Escape closed it: the palette has Cancel.
+			expect(await offered(/Cancel new folder/)).toBe(0);
+			await choose(/New folder/);
+			const folderField = page.getByRole("textbox", { name: "New folder name", exact: true });
+			await folderField.waitFor();
+			await page.keyboard.type("Never made");
+			await page.locator(".menu-backdrop").tap({ position: { x: 380, y: 400 } });
+			expect(await offered(/Cancel new folder/)).toBe(1);
+			await choose(/Cancel new folder/);
+			expect(await folderField.count()).toBe(0);
+			expect(await offered(/Cancel new folder/)).toBe(0);
+			await closePalette();
+
+			// Tag selected, from an open case.
+			await page.locator("#list [role=option]").first().tap();
+			await frames(page);
+			expect(await offered(/Cancel tag/)).toBe(0);
+			await choose(/Tag selected/);
+			const tagField = page.getByRole("textbox", { name: "Tag selected cases", exact: true });
+			await tagField.waitFor();
+			expect(await offered(/Cancel tag/)).toBe(1);
+			await choose(/Cancel tag/);
+			expect(await tagField.count()).toBe(0);
+
+			// The Queue's reason, which the strict policy asks for before a failure is excused.
+			const proposed = await server.api("propose", { edits: [{ op: "policy", preset: "strict" }] });
+			const adopt = (await server.api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
+			if (!adopt) throw new Error("No question to adopt the policy");
+			await server.api("decide", { q: adopt.q, onEvidence: adopt.evidenceHash, answer: { is: "accept" } });
+			const ci = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "pipeline",
+					kind: "ci",
+					can: ["read", "record"],
+					project: "scratch",
+				}),
+			);
+			await server.api(
+				"report",
+				{
+					target: { session: "phone-cancel" },
+					results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "Coupon failure" } }],
+				},
+				{ token: ci.token },
+			);
+			const writes: string[] = [];
+			page.on("request", (request) => {
+				if (new URL(request.url()).pathname.endsWith("/decide")) writes.push("decide");
+			});
+			await page.goto(`${server.url}/p/scratch/queue`);
+			await page.locator("#list [role=option]").first().tap();
+			await frames(page);
+			await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : null));
+			await page.keyboard.press("f");
+			const reason = page.locator("#answer-extra");
+			await reason.waitFor();
+			expect(await page.locator("label[for=answer-extra]").innerText()).toBe("Reason required by policy");
+			expect(await offered(/Cancel\b/)).toBe(1);
+			await choose(/Cancel\b/);
+			expect(await reason.count()).toBe(0);
+			expect(writes).toEqual([]);
+			expect(phone.errors).toEqual([]);
 		} finally {
 			await phone.close();
 			await server.stop();

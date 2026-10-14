@@ -658,6 +658,12 @@ function QueueWorkbench() {
 			handler: () => undo(state === "decided" && current ? [current] : undefined),
 			when: () => active() && Boolean(last || current?.decision),
 		},
+		// A reason the policy asks for, or one for a withdrawal, is left with Escape, which a phone has no key for:
+		// the palette lists it while the field is open (decision 0018). The reference's field needs none: Enter
+		// records the answer without one, as its Escape does.
+		...(inline && inline.field === "reason"
+			? [{ key: "escape", label: "Cancel", handler: () => setInline(null) }]
+			: []),
 	];
 	useBindings(keys);
 	const help: Readonly<Record<string, string>> = current ? ANSWER_HELP[current.kind] : {};

@@ -396,6 +396,9 @@ describe("the phone layout", () => {
 			"src/web/app.tsx: Sign out",
 			"src/web/app.tsx: Switch project",
 			"src/web/runs/index.tsx: Plan run",
+			// While its form is open: closing a form decides nothing, and a phone has no Escape key.
+			"src/web/suite/bindings.ts: Cancel new folder",
+			"src/web/suite/bindings.ts: Cancel tag",
 			"src/web/suite/bindings.ts: Filter",
 			"src/web/suite/bindings.ts: New case",
 			// It makes a folder, whose form the shell shows by opening the sidebar, and decides nothing about a case.

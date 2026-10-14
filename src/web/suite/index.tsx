@@ -1713,6 +1713,8 @@ export function SuiteScreen() {
 		},
 		newFolder: () => setCreatingFolder(true),
 		zoom: () => document.getElementById("app")?.classList.toggle("zoom"),
+		cancelTag: tagging ? () => setTagging(false) : null,
+		cancelFolder: creatingFolder ? () => setCreatingFolder(false) : null,
 	});
 	const visibleItems: { index: number; start: number }[] = virtual
 		.getVirtualItems()

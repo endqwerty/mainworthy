@@ -17,6 +17,8 @@ export function useSuiteBindings({
 	folder,
 	newFolder,
 	zoom,
+	cancelTag,
+	cancelFolder,
 }: {
 	enabled: boolean;
 	create: () => void;
@@ -35,7 +37,15 @@ export function useSuiteBindings({
 	folder: (direction: number) => void;
 	newFolder: () => void;
 	zoom: () => void;
+	/** Closes the open form, or null while it is closed. */
+	cancelTag: (() => void) | null;
+	cancelFolder: (() => void) | null;
 }): void {
+	// The tag and folder forms close with Escape, which a phone has no key for: while one is open, the palette lists
+	// what Escape does there (decision 0018). Escape in the form's field is the field's own. Escape in the case
+	// editor still leaves the editor.
+	const outsideEditor = () =>
+		!(document.activeElement instanceof Element && document.activeElement.closest(".body-editor"));
 	useBindings(
 		[
 			// The three marked `list` do not act on the case the detail shows (`Binding.list`).
@@ -70,6 +80,13 @@ export function useSuiteBindings({
 				},
 			},
 			{ key: "z", label: "Widen case pane", handler: zoom },
-		].map((binding) => ({ ...binding, when: () => enabled })),
+		]
+			.map((binding) => ({ ...binding, when: () => enabled }))
+			.concat(
+				cancelTag ? [{ key: "escape", label: "Cancel tag", list: true, handler: cancelTag, when: outsideEditor }] : [],
+				cancelFolder
+					? [{ key: "escape", label: "Cancel new folder", list: true, handler: cancelFolder, when: outsideEditor }]
+					: [],
+			),
 	);
 }

@@ -22,13 +22,14 @@ A phone, or a tablet held upright, is worked with a finger, so the app is laid o
 - With a keyboard attached, the keys follow the same rule. While a list is shown, the keys of the list work: <kbd>c</kbd>, <kbd>/</kbd>, <kbd>n</kbd> in Runs, <kbd>n</kbd> <kbd>f</kbd> in the Suite, and the keys under [Everywhere](#everywhere) but <kbd>[</kbd>. Once a row is open, every key of the screen works. <kbd>n</kbd> <kbd>f</kbd> opens the sidebar with the form for the folder's name, since the form is there. <kbd>Tab</kbd> into the detail shows it. While the sidebar is open, only the keys of the list work. While the palette is open, only <kbd>Esc</kbd> and <kbd>⌘</kbd> <kbd>K</kbd> do, as on the desktop, and the palette has its own <kbd>↑</kbd> <kbd>↓</kbd> to move and <kbd>↵</kbd> to run the choice. Its field does not take the focus on a phone, so the keyboard on the screen stays closed: tap the field to type in it, since a letter typed before that goes nowhere.
 - A button does what it does on a desktop: an answer in the Queue, Pass, Fail, Blocked and Skip in a run, Accept and Reject on a proposal.
 
-Three things need a keyboard and have another way without one:
+Four things need a keyboard and have another way without one:
 
 | On a desktop | On a phone |
 | --- | --- |
 | A digit marks the step a run failed at | Write the step in the note |
 | Drag a case onto a folder | **Actions**, then Move selected |
 | <kbd>Esc</kbd> leaves the case editor | **Back**, or **Actions**, then Seal and leave editor. Both record what you typed. A conflict that waits for your answer stays as it is. |
+| <kbd>Esc</kbd> closes the form for a tag, a new folder's name, or the reason the policy asks for | **Actions**, then Cancel tag, Cancel new folder, or Cancel. Nothing is recorded. |
 
 The layout follows the pointer, not the width of the window. A browser worked with a mouse keeps the desktop layout however narrow its window is. So does a tablet whose window is wider than 900 px and taller than 500 px, as most are on their side.
 
