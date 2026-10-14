@@ -157,8 +157,9 @@ public final class SuiteScreen: ProjectScreen {
 	}
 
 	public func more(_ query: CaseQuery) async {
-		guard let listing = listings[query], listing.loading == .done, firstReads[query] == nil,
-			pageReads[query] == nil, listing.hasMore, let cursor = listing.next else { return }
+		// A listing a change has made stale is read again whole, not paged with the cursor it had.
+		guard let listing = listings[query], listing.loading == .done, listing.generation == generation,
+			firstReads[query] == nil, pageReads[query] == nil, listing.hasMore, let cursor = listing.next else { return }
 		let mine = reads[query] ?? 0
 		pageReads[query] = mine
 		defer { if pageReads[query] == mine { pageReads[query] = nil } }
