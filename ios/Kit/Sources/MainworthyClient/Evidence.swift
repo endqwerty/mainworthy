@@ -122,8 +122,11 @@ public struct Finding: Equatable, Sendable {
 
 	/// The edit the finder suggests. Accepting the finding turns it into a proposal by the finder.
 	public enum Suggestion: Equatable, Sendable {
-		case step(action: String?, expected: String?)
-		case newCase(title: String, steps: [String])
+		/// A new action or expected result for one step. `step` is that step's id, which is not always the step
+		/// the finding is on: the edit is made where the suggestion says. Nil when neither names a step.
+		case step(String?, action: String?, expected: String?)
+		/// A case to add, with the folder it would go into where the finder named one.
+		case newCase(title: String, folder: String?, steps: [String])
 	}
 
 	init(_ wire: Wire.FindingEvidence) {
@@ -136,9 +139,9 @@ public struct Finding: Equatable, Sendable {
 		finder = wire.finder
 		lens = wire.lens
 		suggestion = wire.suggest.flatMap { suggest -> Suggestion? in
-			if let new = suggest.case { return .newCase(title: new.title, steps: new.steps) }
+			if let new = suggest.case { return .newCase(title: new.title, folder: new.folder, steps: new.steps) }
 			return suggest.action == nil && suggest.expected == nil
-				? nil : .step(action: suggest.action, expected: suggest.expected)
+				? nil : .step(suggest.step ?? wire.step, action: suggest.action, expected: suggest.expected)
 		}
 	}
 }

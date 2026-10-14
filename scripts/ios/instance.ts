@@ -30,22 +30,24 @@ export async function testInstance(): Promise<TestInstance> {
 	let instance: Instance | null = null;
 	// Another origin, which only counts what reaches it: a client that follows a redirect there is seen.
 	let reached = 0;
-	const elsewhere = Bun.serve({
-		hostname: "127.0.0.1",
-		port: 0,
-		fetch: () => {
-			reached += 1;
-			return Response.json({ ok: true, result: {} });
-		},
-	});
+	let elsewhere: ReturnType<typeof Bun.serve> | null = null;
 	const stop = async (): Promise<void> => {
-		await elsewhere.stop(true);
+		await elsewhere?.stop(true);
 		await instance?.stop();
 		rmSync(dataDir, { recursive: true, force: true });
 	};
 	// A server that could not be started or set up is handed to nobody, so nobody else would stop it or remove
 	// what it wrote: that is done here.
 	try {
+		const other = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch: () => {
+				reached += 1;
+				return Response.json({ ok: true, result: {} });
+			},
+		});
+		elsewhere = other;
 		const made = start(
 			{
 				dataDir,
@@ -74,7 +76,7 @@ export async function testInstance(): Promise<TestInstance> {
 								: await scenario(made.url, TOKEN, key);
 						return Response.json({ ok: true, result });
 					},
-					"/test/elsewhere": () => Response.redirect(`http://127.0.0.1:${elsewhere.port}/api/session`, 307),
+					"/test/elsewhere": () => Response.redirect(`http://127.0.0.1:${other.port}/api/session`, 307),
 					"/test/elsewhere-seen": () => Response.json({ ok: true, result: { requests: reached } }),
 				},
 			}),

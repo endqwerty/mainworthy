@@ -107,7 +107,8 @@ struct LiveTests {
 			return
 		}
 		#expect(finding.category == "ambiguous" && finding.caseTitle == "Expired coupon is rejected")
-		#expect(finding.suggestion == .step(action: nil, expected: #"Show "Coupon expired" and keep the $100.00 total."#))
+		// The suggestion says which step it changes, and that is what the page shows.
+		#expect(finding.suggestion == .step("s2", action: nil, expected: #"Show "Coupon expired" and keep the $100.00 total."#))
 
 		let adopt = try #require(byKind[.adopt]?.first)
 		guard case .proposal(let edit) = adopt.evidence else {
@@ -117,7 +118,7 @@ struct LiveTests {
 		#expect(edit.reason == "Check removing the coupon as well as adding it.")
 		#expect(edit.summaries.count == 1 && edit.summaries[0].hasPrefix("Edit C-"))
 		#expect(adopt.producer == .agent)
-		let documents = try await project.documents(of: edit.proposal)
+		let documents = try await project.documents(of: edit)
 		#expect(documents.count == 1)
 		let added = documents[0].changes.compactMap { change -> String? in
 			if case .added(let step) = change { step.action } else { nil }
@@ -158,7 +159,7 @@ struct LiveTests {
 			ref: read.ref, kind: read.kind, title: read.title, producer: read.producer, isOpen: true,
 			evidence: read.evidence, timesSeen: read.timesSeen, needs: read.needs, choices: read.choices,
 			blocks: read.blocks, openedAt: read.openedAt, advice: read.advice, standing: read.standing, decision: nil,
-			evidenceHash: "000000000000", facts: []
+			about: read.about, evidenceHash: "000000000000", facts: []
 		)
 		let flaky = try #require(read.choices.first { $0.answer == "flaky" })
 		let outcome = try await project.answer(stale, with: flaky)
@@ -234,6 +235,8 @@ struct LiveTests {
 		let alone = try #require(try await project.question(listed.ref))
 		#expect(alone.ref == listed.ref && alone.evidence == listed.evidence && alone.isOpen)
 		#expect(alone.choices == listed.choices)
+		// Read alone, it still says what this person's answer is worth, as the list says it.
+		#expect(alone.standing == listed.standing && alone.standing == .counts)
 		// What was read alone is answered like what was read in the list.
 		#expect(try await project.answer(alone, with: try #require(alone.choices.first { $0.answer == "infra" })) == .decided)
 		#expect(try await project.question(listed.ref)?.isOpen == false)

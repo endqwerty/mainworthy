@@ -140,11 +140,15 @@ enum Wire {
 	/// A case a finder suggests adding.
 	struct SuggestedCase: Decodable, Equatable, Sendable {
 		let title: String
+		/// The folder the case would go into.
+		let folder: String?
 		let steps: [String]
 	}
 
 	/// An edit a finder suggests: to one step, or a new case.
 	struct Suggestion: Decodable, Equatable, Sendable {
+		/// The step the edit is made to. Where absent, the step the finding is on.
+		let step: String?
 		let action: String?
 		let expected: String?
 		let `case`: SuggestedCase?
