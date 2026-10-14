@@ -9,7 +9,7 @@
 //   bun scripts/ios.ts install [--dry-run]    build, sign and install on the iPhone that is connected
 //
 // What is built goes to ~/.cache/mainworthy-ios, never into the repository: a test here reads every file in it.
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -186,6 +186,50 @@ async function build(): Promise<void> {
 }
 
 /**
+ * Runs one thing at a time on this machine, whichever checkout asks: there is one simulator. A second caller
+ * waits for the first. The lock is a directory that names the process holding it, and one whose process is gone
+ * is taken over.
+ */
+async function alone<T>(work: () => Promise<T>): Promise<T> {
+	const lock = join(homedir(), ".cache", "mainworthy-ios", "simulator.lock");
+	const holder = join(lock, "pid");
+	mkdirSync(dirname(lock), { recursive: true });
+	let said = false;
+	for (;;) {
+		try {
+			mkdirSync(lock);
+			break;
+		} catch {}
+		let pid = 0;
+		let age = 0;
+		try {
+			age = Date.now() - statSync(lock).mtimeMs;
+			pid = Number(readFileSync(holder, "utf8"));
+		} catch {}
+		let alive = pid > 0;
+		try {
+			if (alive) process.kill(pid, 0);
+		} catch {
+			alive = false;
+		}
+		// A lock with no name in it is one that is being taken this moment, unless it has stood for a while.
+		if (!alive && (pid > 0 || age > 10_000)) {
+			rmSync(lock, { recursive: true, force: true });
+			continue;
+		}
+		if (!said) console.log(`another run holds the simulator${pid ? ` (process ${pid})` : ""}; waiting for it`);
+		said = true;
+		await Bun.sleep(2000);
+	}
+	writeFileSync(holder, String(process.pid));
+	try {
+		return await work();
+	} finally {
+		rmSync(lock, { recursive: true, force: true });
+	}
+}
+
+/**
  * The app in a simulator, driven through its screens against a server started here. A test's screenshots are
  * written to the directory this prints.
  */
@@ -197,24 +241,26 @@ async function uitest(filter: string | undefined): Promise<void> {
 	mkdirSync(shots, { recursive: true });
 	const server = await testInstance();
 	try {
-		await xcodebuild(
-			[
-				"test",
-				"-destination",
-				`platform=iOS Simulator,id=${device}`,
-				"-derivedDataPath",
-				join(CACHE, "simulator"),
-				"CODE_SIGNING_ALLOWED=NO",
-				...(filter ? [`-only-testing:MainworthyUITests/${filter}`] : []),
-			],
-			{
-				// xcodebuild hands a variable named TEST_RUNNER_X to the tests as X.
-				TEST_RUNNER_MAINWORTHY_TEST_URL: server.url,
-				TEST_RUNNER_MAINWORTHY_TEST_TOKEN: server.token,
-				TEST_RUNNER_MAINWORTHY_TEST_NAME: server.person.name,
-				TEST_RUNNER_MAINWORTHY_TEST_PASSWORD: server.person.password,
-				TEST_RUNNER_MAINWORTHY_SCREENSHOTS: shots,
-			},
+		await alone(() =>
+			xcodebuild(
+				[
+					"test",
+					"-destination",
+					`platform=iOS Simulator,id=${device}`,
+					"-derivedDataPath",
+					join(CACHE, "simulator"),
+					"CODE_SIGNING_ALLOWED=NO",
+					...(filter ? [`-only-testing:MainworthyUITests/${filter}`] : []),
+				],
+				{
+					// xcodebuild hands a variable named TEST_RUNNER_X to the tests as X.
+					TEST_RUNNER_MAINWORTHY_TEST_URL: server.url,
+					TEST_RUNNER_MAINWORTHY_TEST_TOKEN: server.token,
+					TEST_RUNNER_MAINWORTHY_TEST_NAME: server.person.name,
+					TEST_RUNNER_MAINWORTHY_TEST_PASSWORD: server.person.password,
+					TEST_RUNNER_MAINWORTHY_SCREENSHOTS: shots,
+				},
+			),
 		);
 	} finally {
 		await server.stop();

@@ -109,7 +109,7 @@ An iPhone app is being built since 2026-10-13 (`ios/`, decision 0023, issue #171
   a change would stop the app reading a reply: `ios/README.md`, "When the contract test fails", says what to do,
   with or without a Mac. `bun scripts/ios.ts gen` writes the Swift in the two `Generated/` directories; never
   edit it. On a Mac, `bun scripts/ios.ts test` runs the app's tests against a real server in two seconds, and
-  `uitest` drives the screens in a simulator (one agent at a time: there is one simulator). A view in `ios/App`
+  `uitest` drives the screens in a simulator (there is one, so a second run waits for the first). A view in `ios/App`
   cannot send a request, by the package's access rules: a new screen copies the queue (`ios/README.md`). Builds
   go to `~/.cache/mainworthy-ios`, never into the worktree. The team that signs the app is in
   `ios/Config/Local.xcconfig`, which is not committed: never write a team id into the repository.
