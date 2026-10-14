@@ -16,8 +16,12 @@
 # `image` builds the container the way a deployment does and asks it for a page of the documentation: what the
 # image carries is decided by the Dockerfile and .dockerignore, which no test runs. Nothing reports to it.
 #
+# `ios` runs the tests of the iPhone app's Swift package on a Mac, against a Mainworthy started from this commit,
+# and builds the app (ios/README.md). Nothing reports to it either. What the app reads of a reply is checked
+# before that, in the shards (test/ios-contract.test.ts); this job is where the Swift is compiled.
+#
 # `gate` is the job to require on the branch. It fails when the gate does not pass, when a report is missing,
-# and when the type-check, the lint or the image failed.
+# and when the type-check, the lint, the image or the iPhone app failed.
 name: check
 
 on:
@@ -57,6 +61,21 @@ jobs:
           curl --fail --silent http://127.0.0.1:7357/docs/skill/mainworthy.tar.gz | tar -tz | grep --quiet "^mainworthy/SKILL.md$"
       - if: failure()
         run: docker logs mainworthy
+
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile
+      - name: The package's tests, against a Mainworthy started from this commit
+        run: bun scripts/ios.ts test
+      - run: brew install xcodegen
+      - name: The app builds for a simulator
+        run: bun scripts/ios.ts build
 
   tests:
     name: ${{ matrix.name }}
@@ -103,7 +122,7 @@ jobs:
           retention-days: 7
 
   gate:
-    needs: [static, tests, image]
+    needs: [static, tests, image, ios]
     # Also when a shard or the lint failed: Mainworthy is told what ran, and this job is the one that fails.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -144,8 +163,8 @@ jobs:
           MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}
           MAINWORTHY_PROJECT: ${{ vars.MAINWORTHY_PROJECT }}
         run: bun scripts/ci-gate.ts test-results tests-1 tests-2 tests-3 tests-4 tests-5 tests-6 quiet
-      - name: The type-check, the lint, the image and every shard's job passed
+      - name: The type-check, the lint, the image, the iPhone app and every shard's job passed
         # A shard's job succeeds with failing tests, which the gate judges. It fails when it could not be set up
         # or left nothing to upload, and after a re-run the gate above would then read its older attempt's.
         if: always()
-        run: test "${{ needs.static.result }}" = success && test "${{ needs.image.result }}" = success && test "${{ needs.tests.result }}" = success
+        run: test "${{ needs.static.result }}" = success && test "${{ needs.image.result }}" = success && test "${{ needs.ios.result }}" = success && test "${{ needs.tests.result }}" = success

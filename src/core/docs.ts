@@ -21,6 +21,7 @@ const SECTIONS = [
 			{ slug: "runs", title: "Planned runs" },
 			{ slug: "changes", title: "Changes and the gate" },
 			{ slug: "agents", title: "Let an agent in" },
+			{ slug: "iphone", title: "The iPhone app" },
 		],
 	},
 	{

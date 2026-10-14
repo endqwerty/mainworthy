@@ -133,6 +133,7 @@ Rules for contributors, people and agents: [AGENTS.md](AGENTS.md).
 | [docs/decisions/](docs/decisions/) | decision records: 0009 the owner's answers, 0010 the stack, 0011 the UI, 0012 what the MVP builds and where it departs, 0013 asking what became of a command, 0014 a pipeline's token and which Mainworthy CI reports to, 0016 the documentation at `/docs` |
 | [docs/compliance.md](docs/compliance.md) | what each legal regime needs, what is met, what is not |
 | [docs/deploy.md](docs/deploy.md) | running it on a server |
+| [ios/](ios/README.md) | the iPhone app: how to install it on your phone, and how to work on it |
 | [docs/product-vision.md](docs/product-vision.md) | the problem and the priorities |
 | [docs/competitive-analysis.md](docs/competitive-analysis.md) | 13 existing tools compared |
 | [docs/roadmap.md](docs/roadmap.md) | phases and where the project stands |

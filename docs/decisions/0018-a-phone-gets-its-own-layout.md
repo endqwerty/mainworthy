@@ -1,7 +1,8 @@
 # 0018: A phone gets its own layout, and the desktop does not change for it
 
 - Date: 2026-10-13
-- Status: proposed (built in the pull request that adds this file; the owner reviews)
+- Status: proposed (built in the pull request that adds this file; the owner reviews). Decision 0023 replaces
+  one part of it: there is a native app for iOS, and this layout is the backup for reading.
 
 On a phone the app could not be read. A 390 px window got a 120 px sidebar, and the list and the detail shared
 the 270 px that were left, one over the other, each half the height. The owner asked for a decision: make the

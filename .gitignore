@@ -12,3 +12,9 @@ dist
 test-results
 playwright-report
 bench/results-*.json
+# The iOS app: the Xcode project is written from ios/project.yml, and the team that signs is one person's.
+ios/Mainworthy.xcodeproj
+ios/Config/Local.xcconfig
+ios/Kit/.build
+ios/Kit/.swiftpm
+xcuserdata
