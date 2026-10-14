@@ -267,9 +267,11 @@ The owner's token comes from the server. If you set `MAINWORTHY_OWNER_TOKEN`, th
 
 ```
 Mainworthy 0.1.0 · server · data in /data · http://localhost:7357
-project "scratch" · you are robin@this-machine · policy: loose
+project "scratch" · owner robin · sign in with a token, a password or a passkey · policy: loose
 owner token (shown once): <token>
 ```
+
+The second line says who the owner is and how anybody signs in. A server signs nobody in on its own, so it does not say "you are": in local mode the line reads `you are robin@this-machine`, because there you are the owner.
 
 Copy it then. If you miss it, set `MAINWORTHY_OWNER_TOKEN` to a new value of 20 to 512 characters and restart, and that value becomes a token too. A new value there also retires every token that came from the variable before: the server revokes them and names them in one line when it starts. A value that is a token which was revoked, has reached its end, or is somebody else's is not accepted: the server says which in one line when it starts and leaves the token as it is. With no value set, a start on which the owner holds no token that works prints a new one, as the first start does. In the container, `docker compose logs` has the line.
 
