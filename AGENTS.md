@@ -24,6 +24,14 @@ Sign-in was rebuilt on 2026-10-13 (`docs/decisions/0017-sign-in-sessions-and-cre
 session that is not the token, token expiry, a limit on failed attempts, and people signing in as themselves
 with a password or a passkey after an invitation, in the web UI (the sign-in page, the page of an invitation,
 and "Your sign-in", "Your sessions" and "People" in Settings), through the API and on the command line.
+The queue was reworked on 2026-10-13, after the owner opened it on this project and could not tell what it
+wanted (decisions 0021 and 0022). What happens to a test with no case is a setting of the policy (`unlinked`:
+track, create a case for each, or ask), and `standard` tracks them. The queue's header says how many failures
+wait to be explained and how many questions can wait, each question says what leaving it costs, and a test
+with no case comes after every other question. A change ends (the operation `change`, which
+`.github/workflows/change.yml` sends when a pull request closes) and is then not asked about. One answer for
+several rows is not built: the owner is thinking about its form, and `mainworthy seed` keeps sixty such rows to
+try it against.
 
 ## Stack rules
 
@@ -33,7 +41,8 @@ and "Your sign-in", "Your sessions" and "People" in Settings), through the API a
   a message, on a machine with no Chromium); `bun run dev` (the server on
   `127.0.0.1:7357`, restarting on change). Bun 1.4; no other runtime or build tool.
   The check takes 120 to 122 s on the 16-thread desktop (2026-10-13, eight runs;
-  it was 403 s with the files one after another). `bun run test` is the
+  it was 403 s with the files one after another). By that evening `main` took 149 to 153 s there, with every
+  test passing: at its limit, so a run of `main` itself can exit 1 on time alone (issue #77 has the numbers). `bun run test` is the
   tests alone, printed as they run. One file: `bun test test/suite.test.ts`. One
   shard, as CI runs it: `bun run test --only=parallel --shard=2/6`; the quiet
   tests: `bun run test --only=quiet`. CI (`.github/workflows/check.yml`) runs six shards (five until 2026-10-13) and the quiet
@@ -189,6 +198,23 @@ and "Your sign-in", "Your sessions" and "People" in Settings), through the API a
   0.1 s, while `main` itself took about 140 s that day (#77). The verdict waited for a third round that compared
   the two. And `main` moves while a review runs: a change that passed and is then rebased gets a short round that
   compares the two revisions (`git range-diff`, the trees) and runs the tests next to it, not the whole review again.
+  While `main` is at the limit, one run says nothing about a change's time: ask for base and head alternately,
+  twice each, and judge whether the head is slower by more than the spread between runs of one revision (#167 and
+  #168 on 2026-10-13: the spread was 0.9 s in one hour and 3.6 s in the next). A rebase that leaves a change's tree
+  as it was verified (`git rev-parse <rev>^{tree}`, the same for both) needs no round at all.
+- A sentence on a screen that says what the server does is a claim, and a test holds it to the server
+  (`test/evidence.test.ts`, "what a failure question says leaving it costs"). Say only what the thing on the
+  screen can know. On 2026-10-13 the sentence under a failure question went through five rounds of verification
+  (#167): it named the gate that was blocked and how the block would end, and each round found a case where that
+  was false (a question lists a sample of its tests, keeps the runs of older commits, and cannot tell which
+  result replaces which). The sentence that stayed makes one claim, the one the system guarantees, and the
+  guide describes the rest.
+- A test of the command line starts the command once and asks the rest in-process (the server's operations
+  through the client, a function called directly). Each start is about 0.13 s, the file is the suite's
+  slowest that is not a browser test (`src/cli/main.test.ts`, 18 s), and on 2026-10-13 three new tests that
+  started it several times each added a second to the check, which tipped it over its limit (#168 to #170).
+- To stop a server you started, `pkill -f '[m]ain.ts serve'`, with the brackets: a pattern that is also in your
+  own command line stops your shell too, and the commands after it never run (three times on 2026-10-13).
 
 ## Model profile
 
