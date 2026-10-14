@@ -252,10 +252,14 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		);
 		const pinnedInput = { refs: [slot.case], version: slot.version };
 		const marked = steps[slot.id] ?? "";
+		// Undo records what was recorded before. A step marked since then is for the next failure: it is not
+		// used here and it stays, as a note typed since then does.
 		const failedStep =
-			outcome === "fail" && (visibleStep || consumedSteps.current.get(slot.id) !== marked) ? Number(marked) : 0;
+			!restores && outcome === "fail" && (visibleStep || consumedSteps.current.get(slot.id) !== marked)
+				? Number(marked)
+				: 0;
 		if (text && text === notes[slot.id]) consumedNotes.current.set(slot.id, text);
-		consumedSteps.current.set(slot.id, marked);
+		if (!restores) consumedSteps.current.set(slot.id, marked);
 		const priorWrite = writes.current.get(slot.id);
 		const rollback = confirmedSlots.current.get(slot.id) ?? slot;
 		queued.current.set(slot.id, fill.result);
@@ -314,7 +318,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			// The server has it: the device's copy of the note has done its work. A note typed for this slot while
 			// the request was on its way is newer than what was recorded, and stays.
 			if (storedNote(`${notePrefix}${slot.id}`) === text) setNoteOf(slot.id, "");
-			clearStep(slot.id, marked);
+			if (!restores) clearStep(slot.id, marked);
 			if (queued.current.get(slot.id) === fill.result)
 				setLocal((value) => new Map(value).set(slot.id, { fill: saved, questions: receipt.questions, pending: false }));
 			setStatus(

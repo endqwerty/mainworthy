@@ -223,7 +223,8 @@ server and SQLite database on the existing 7400..7449 fixture ports.
 R5B-4 was fixed after the server exposed the step (issue #72). `2 f`, note, Enter, `k p`, u restores the failure,
 its note and its step. The slot view carries `atStep` on each fill (`src/server/ops/reads.ts`), the web `Fill`
 parses it, and `runs/cockpit.tsx` sends it with the correction. A fill still in the cache under its sent id has no
-step until the slots are read again, so the cockpit remembers the step it sent for that id.
+step until the slots are read again, so the cockpit remembers the step it sent for that id. A step marked after the
+correction is not used by u and is not cleared by it: it is for the next failure, as a note typed since then is.
 
 Preflight checks passed: `bunx tsc --noEmit` exited 0;
 `bunx biome check src/web test/e2e` checked 60 files without changes;
