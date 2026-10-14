@@ -130,13 +130,13 @@ changes once, when a choice is made from its open list, and gives the focus back
 closed native select changes on every arrow key, so a key that would step or jump it (the arrows, Home, End,
 Page up and down) opens the list instead, with `showPicker()`, as macOS does; the choice is made in the list,
 with the pointer or with the arrows and Enter. Nothing is written on the way, which matters where a select
-writes on change (the policy). A letter typed on the closed select picks the first option that begins with it:
+writes on change (the policy). A letter typed on the closed select picks an option that begins with it, the next such one after the current:
 that is a choice, and a change. Enter on the closed select opens the list. Escape on it gives the focus back.
 Neither reaches the screen behind, so Escape does not close the pane and Enter does not open a row or send a
 form. While the list is open the page gets no key, and how it closes is the browser's: headless Chromium on
-Linux takes the highlighted option on Escape, Tab and a click outside, each one change like Enter. What closes
-the list with no change leaves the focus on the select. Where `showPicker` is missing or refuses, the key changes the select by one as it does
-natively, and that change gives the focus back; Enter then gives the focus back too. Tab moves on as it does
+Linux takes the highlighted option on Escape, Tab and a click outside, each one change like Enter. Escape or
+Tab that closes the list with no change leaves the focus on the select; a click outside takes it. Where `showPicker` is missing or refuses, the key changes the select as it does
+natively (an arrow by one, Home and End to the ends), and that change gives the focus back; Enter then gives the focus back too. Tab moves on as it does
 anywhere. Any other plain key is left to the select (type-ahead) and not run by the shell, as in any field.
 
 ## What a note and an Escape record (issue #73)
