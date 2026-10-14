@@ -26,10 +26,27 @@ on an ephemeral port and a separate temporary data directory per test.
 - Startup prints the quickstart lines and stops on SIGTERM. MCP stdio emits
   only protocol output.
 
-Starts of the command: `cli` in `test-support.ts` starts it as a process (about 0.13 s), `run` calls `runCli`
-in the test's process with the same environment, directory and standard input. A test uses `cli` for what only
-the executable does (exit status, standard output against standard error, standard input, signals, `serve`) and
-`run` for what the command does with its input; one test holds the two to the same answers.
+Starts of the command: `cli` in `test-support.ts` starts it as a process (about 0.13 s). `run` calls `runCli`
+in the test's process, with the environment, working directory and standard input a child would have while the
+command runs, and returns what it wrote through `process.stdout.write` and `process.stderr.write` until it
+ended. A test uses `cli` for what only the executable does (its exit status, its start, signals, `serve`,
+`mcp`) and `run` for what the command does with its input.
+
+What `run` cannot give as a process does, and what stands in for each:
+
+- **Other ways to write.** `run` reads the two write functions only. A test holds `src/cli` to them: no
+  `console`, no `Bun.stdout` or `Bun.stderr`.
+- **Output after the command ended.** A process prints it before it exits. Here the answer has gone back by
+  then, so the write is kept and fails the next command of the test, or the test when its instance closes. A
+  write later than that is not seen.
+- **Stopping a command.** A child that runs out of its ten seconds is killed. A command in the process cannot
+  be: its run is refused, and so is every run after it until it has ended.
+- **The server.** The test's server is in the same process and sees the command's environment and directory
+  while it runs. It reads its configuration at start. A test whose server must read either during a command
+  uses `cli`.
+
+One test holds the two to the same answers for twelve argument vectors: each exit code, standard input, a CI
+environment, a file named from another working directory. It is a sample, not every command.
 
 Required commands:
 
