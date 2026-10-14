@@ -242,8 +242,8 @@ const Q = {
 	unlinkedInFile: sql<{ project: number; file: string }, TestRow>(
 		"SELECT * FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' ORDER BY id LIMIT 500",
 	),
-	unlinkedWithoutFile: sql<{ project: number }, TestRow>(
-		"SELECT * FROM tests WHERE project = $project AND file IS NULL AND case_id IS NULL AND kind = 'auto' ORDER BY id LIMIT 500",
+	unlinkedWithoutFile: sql<{ project: number; file: string }, TestRow>(
+		"SELECT * FROM tests WHERE project = $project AND (file IS NULL OR file = $file) AND case_id IS NULL AND kind = 'auto' ORDER BY id LIMIT 500",
 	),
 	unlinkedCount: sql<{ project: number }, { n: number }>(
 		"SELECT count(*) AS n FROM tests WHERE project = $project AND case_id IS NULL AND kind = 'auto'",
@@ -1039,9 +1039,12 @@ export const testsOfCase = (db: Db, project: number, caseId: number): TestRow[] 
 	db.all(Q.testsOfCase, { project, id: caseId });
 /** What the question about tests that name no file calls their file. */
 export const NO_FILE = "(no file)";
-/** The tests with no case in a file; for `NO_FILE`, those that came with no file and no class name to take one from. */
+/**
+ * The tests with no case in a file. For `NO_FILE` they are those that came with no file and no class name to take
+ * one from, and with them the tests of a file that is really called that: the two share one question.
+ */
 export const unlinkedInFile = (db: Db, project: number, file: string): TestRow[] =>
-	file === NO_FILE ? db.all(Q.unlinkedWithoutFile, { project }) : db.all(Q.unlinkedInFile, { project, file });
+	db.all(file === NO_FILE ? Q.unlinkedWithoutFile : Q.unlinkedInFile, { project, file });
 export const unlinkedCount = (db: Db, project: number): number => db.get(Q.unlinkedCount, { project })?.n ?? 0;
 export const signatureById = (db: Db, id: number): SignatureRow | null => db.get(Q.signatureById, { id });
 export const resultById = (db: Db, id: number): ResultRow | null => db.get(Q.resultById, { id });

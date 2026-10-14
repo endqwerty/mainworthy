@@ -415,6 +415,27 @@ describe("unlinked tests", () => {
 		});
 		expect(decided[0]).toMatchObject({ status: "decided", effects: { created: ["C-1", "C-2", "C-3"] } });
 		expect(unlinkedTests()).toBe(0);
+		// A file that is really called "(no file)" shares the question, and its tests are answered with it.
+		h.call("report", {
+			...ciReport({ commit: "bbbb0005", n: 0 }),
+			results: [
+				bare(3),
+				{ test: { key: "literal", name: "literal", file: "(no file)" }, outcome: "pass" as const, durationMs: 10 },
+			],
+		});
+		const both = first(queue({ kind: "map" }).items);
+		expect((both.evidence as { tests: { name: string }[] }).tests.map((test) => test.name)).toEqual([
+			"bare 3",
+			"literal",
+		]);
+		expect(
+			h.call<{ effects: { created: string[] } }[]>("decide", {
+				q: both.q,
+				onEvidence: both.evidenceHash,
+				answer: { is: "create" },
+			})[0]?.effects.created,
+		).toEqual(["C-4", "C-5"]);
+		expect(unlinkedTests()).toBe(0);
 	});
 
 	test("a link stands when another test turns up in its file: only the new test is asked about", () => {
