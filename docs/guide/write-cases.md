@@ -87,7 +87,7 @@ read-only, with "This case is being edited in another window" and "Take over her
 Choose "Take over here" to move the draft to the window you are in. It opens there with its text,
 and with its conflict card when it has one. The first window becomes read-only.
 
-A window that comes to a case never takes a draft by itself. When the window that holds a draft does not
+Moving to a case from another case never takes its draft by itself. Opening the app straight on a case, as a link or a reload does, continues a draft whose window is not answering, as it always has. When the window that holds a draft does not
 answer, because it closed, crashed or is busy, another window that shows the draft says "This draft is held by
 a window that is not answering, or has closed". Press <kbd>e</kbd> or choose "Take over here" to continue it in
 the window you are in.
