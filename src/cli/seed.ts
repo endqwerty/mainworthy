@@ -4,7 +4,7 @@
 import { z } from "zod";
 import type { Api } from "../core/api.ts";
 import type { ActorKind, Capability } from "../core/kinds.ts";
-import { Client } from "./client.ts";
+import type { Client } from "./client.ts";
 import { CliError } from "./errors.ts";
 
 export type SeedResult = { cases: string[]; run: string; proposal: string | null; questions: string[] };
@@ -79,7 +79,7 @@ export async function seed(
 			"invalid",
 			`seed reports from 0 to ${MAX_SEED_UNLINKED_FILES} files of tests with no case, not ${unlinkedFiles}`,
 		);
-	const as = (token: string | undefined) => new Client({ url: client.url, token, project });
+	const as = (token: string | undefined) => client.with({ token, project });
 	const owner = as(client.options.token);
 	const id = (step: string) => `demo-${project}-${step}-v1`;
 	const actors = Actors.parse(await owner.call("admin", { do: "actor.list" }));

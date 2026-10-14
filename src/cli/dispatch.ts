@@ -54,6 +54,9 @@ export const COMMAND_NAMES: ReadonlySet<string> = new Set([
 function printHelp(): void {
 	line("Mainworthy 0.1.0");
 	line("usage: mainworthy [serve] | <command> [--help]");
+	line(
+		"A token: prefer MAINWORTHY_TOKEN or --token-file to --token, which the process list and the shell's history show.",
+	);
 	for (const command of GENERATED_COMMANDS.values()) line(`  ${command.name.padEnd(12)} ${command.summary}`);
 	for (const command of ADAPTER_COMMANDS.values()) line(`  ${command.name.padEnd(12)} ${command.summary}`);
 	line("  serve        Start the server and web UI. Also the default with no arguments.");

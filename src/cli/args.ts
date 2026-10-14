@@ -5,7 +5,18 @@ export type Flag = { name: string; kind: FlagKind; description: string; required
 
 export const GLOBAL_FLAGS: readonly Flag[] = [
 	{ name: "url", kind: "string", description: "Server URL. Defaults to MAINWORTHY_URL or http://127.0.0.1:7357." },
-	{ name: "token", kind: "string", description: "Bearer token. Defaults to MAINWORTHY_TOKEN." },
+	{
+		name: "token",
+		kind: "string",
+		description:
+			"Bearer token. Defaults to MAINWORTHY_TOKEN, which is safer: an argument is in the process list and the shell's history.",
+	},
+	{
+		name: "token-file",
+		kind: "string",
+		description:
+			"Read the bearer token from this file, so no argument holds it. Defaults to MAINWORTHY_TOKEN_FILE. Not with --token.",
+	},
 	{ name: "project", kind: "string", description: "Project key. Defaults to MAINWORTHY_PROJECT or the only project." },
 	{ name: "compact", kind: "boolean", description: "Print JSON on one line." },
 	{ name: "help", kind: "boolean", description: "Show command help." },

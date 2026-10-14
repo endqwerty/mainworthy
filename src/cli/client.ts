@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { type Api, type Envelope, ERROR_CODES, type OpName, type SessionInfo } from "../core/api.ts";
 import { Unlinked } from "../core/kinds.ts";
@@ -5,6 +6,7 @@ import { OPS } from "../server/ops/index.ts";
 import type { Reply } from "../server/ops/registry.ts";
 import type { Args } from "./args.ts";
 import { CliError } from "./errors.ts";
+import { warning } from "./output.ts";
 import { REPLY_SCHEMAS } from "./replies.ts";
 
 const ErrorSchema = z.object({
@@ -41,17 +43,52 @@ const SessionSchema = z.object({
 
 export type ClientOptions = { url: string; token: string | undefined; project: string | undefined };
 
+/** The token in a file: the content without the whitespace around it. The file is named in a refusal, never quoted. */
+function tokenFromFile(path: string): string {
+	let text: string;
+	try {
+		text = readFileSync(path, "utf8");
+	} catch {
+		throw new CliError("invalid", `cannot read the token file ${path}`);
+	}
+	const token = text.trim();
+	if (token === "") throw new CliError("invalid", `the token file ${path} is empty`);
+	if (/\s/.test(token)) throw new CliError("invalid", `the token file ${path} holds more than a token`);
+	return token;
+}
+
 /**
  * Command-line flags override the environment. An absent token lets the server authenticate loopback local mode.
  * An environment variable that is set and empty counts as absent: that is how a pipeline passes a setting nobody
- * configured (`MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}`).
+ * configured (`MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}`). The token comes from `--token` or `--token-file`, else
+ * from `MAINWORTHY_TOKEN` or `MAINWORTHY_TOKEN_FILE`; two ways at one level are refused, not chosen between.
  */
 export function clientOptions(args: Args, env: Record<string, string | undefined> = process.env): ClientOptions {
+	const flag = args.value("token");
+	const flagFile = args.value("token-file");
+	if (flag !== undefined && flagFile !== undefined)
+		throw new CliError("invalid", "give the token with --token or with --token-file, not both");
+	if (env.MAINWORTHY_TOKEN && env.MAINWORTHY_TOKEN_FILE && flag === undefined && flagFile === undefined)
+		throw new CliError("invalid", "MAINWORTHY_TOKEN and MAINWORTHY_TOKEN_FILE are both set; set one");
+	const file =
+		flagFile ?? (flag === undefined && !env.MAINWORTHY_TOKEN ? env.MAINWORTHY_TOKEN_FILE || undefined : undefined);
 	return {
 		url: args.value("url") ?? (env.MAINWORTHY_URL || "http://127.0.0.1:7357"),
-		token: args.value("token") ?? (env.MAINWORTHY_TOKEN || undefined),
+		token: file !== undefined ? tokenFromFile(file) : (flag ?? (env.MAINWORTHY_TOKEN || undefined)),
 		project: args.value("project") ?? (env.MAINWORTHY_PROJECT || undefined),
 	};
+}
+
+/**
+ * True for an `http:` address that names another machine: a token sent there travels in the clear. This machine is
+ * `localhost`, any `127.x.x.x` and `[::1]`, named as the server names them (`docs/guide/configuration.md`).
+ */
+export function plainHttpToAnotherMachine(address: string): boolean {
+	const url = new URL(address);
+	if (url.protocol !== "http:") return false;
+	const host = url.hostname.toLowerCase().replace(/\.$/, "");
+	const loopback = host === "localhost" || host === "[::1]" || /^127(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(host);
+	return !loopback;
 }
 
 /** Parses the HTTP envelope before its result is trusted under the shared Api contract. */
@@ -73,17 +110,42 @@ export class Client {
 	readonly url: string;
 	private sessionPromise: Promise<SessionInfo> | undefined;
 
-	constructor(readonly options: ClientOptions) {
+	/** `notice` is shared by the clients of one run, so what is said once is said once for the run. */
+	constructor(
+		readonly options: ClientOptions,
+		private readonly notice = { plainHttp: false },
+	) {
 		const parsed = z.url().safeParse(options.url);
 		if (!parsed.success || !/^https?:\/\//.test(parsed.data))
 			throw new CliError("invalid", "--url must be an HTTP or HTTPS URL");
 		this.url = parsed.data.replace(/\/+$/, "");
 	}
 
+	/** The same server and run with other options (`seed` acts as the actors it makes). */
+	with(changes: Partial<ClientOptions>): Client {
+		return new Client({ ...this.options, ...changes }, this.notice);
+	}
+
+	/**
+	 * Every request a command makes passes here, so this is the one place that says, before the first request that
+	 * carries a token to plain http on another machine, that the token travels unencrypted. It goes to standard error
+	 * and does not stop the request: a person on a network of their own may mean it. It names the address, not the token.
+	 */
+	private warnOfPlainHttp(): void {
+		if (this.notice.plainHttp || !plainHttpToAnotherMachine(this.url)) return;
+		this.notice.plainHttp = true;
+		warning(
+			`warning: the token is sent to ${new URL(this.url).origin} over plain http and travels unencrypted; use an https address`,
+		);
+	}
+
 	/** Request bodies and response bodies remain streams for archive transfer. */
 	async request(path: string, init: RequestInit = {}): Promise<Response> {
 		const headers = new Headers(init.headers);
-		if (this.options.token) headers.set("authorization", `Bearer ${this.options.token}`);
+		if (this.options.token) {
+			this.warnOfPlainHttp();
+			headers.set("authorization", `Bearer ${this.options.token}`);
+		}
 		try {
 			return await fetch(`${this.url}${path}`, { ...init, headers });
 		} catch {

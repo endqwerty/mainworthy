@@ -275,7 +275,7 @@ The second line says who the owner is and how anybody signs in. A server signs n
 
 Copy it then. If you miss it, set `MAINWORTHY_OWNER_TOKEN` to a new value of 20 to 512 characters and restart, and that value becomes a token too. A new value there also retires every token that came from the variable before: the server revokes them and names them in one line when it starts. A value that is a token which was revoked, has reached its end, or is somebody else's is not accepted: the server says which in one line when it starts and leaves the token as it is. With no value set, a start on which the owner holds no token that works prints a new one, as the first start does. In the container, `docker compose logs` has the line.
 
-The command line needs no token in local mode on the same machine. In server mode, give it one with `--token` or `MAINWORTHY_TOKEN`.
+The command line needs no token in local mode on the same machine. In server mode, give it one with `MAINWORTHY_TOKEN`, or `--token-file` for a token in a file. `--token` works too, but an argument is in the process list and the shell's history; prefer the variable. The command warns once on standard error if it is about to send a token to plain `http://` on another machine: [use an `https://` address](./cli.md#give-the-token-in-the-environment-or-in-a-file).
 
 ## What a pipeline can never do
 
