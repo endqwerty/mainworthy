@@ -24,6 +24,11 @@ struct WorkspaceView: View {
 					RunsView(screen: runs, workspace: workspace).id(workspace.project?.key)
 				} else { NoProjectView() }
 			}
+			Tab("Changes", systemImage: "arrow.triangle.branch") {
+				if let changes = workspace.changes {
+					ChangesView(screen: changes, workspace: workspace).id(workspace.project?.key)
+				} else { NoProjectView() }
+			}
 			Tab("You", systemImage: "person.crop.circle") {
 				AccountView(workspace: workspace)
 			}

@@ -15,6 +15,7 @@ struct AccountView: View {
 						Text(workspace.account.isOwner ? "\(workspace.account.name) · owner" : workspace.account.name)
 					}
 					LabeledContent("Instance", value: workspace.instanceName)
+					NavigationLink("Your sessions") { SessionsView(screen: workspace.sessions) }
 				}
 				Section("Project") {
 					ForEach(workspace.account.projects) { project in

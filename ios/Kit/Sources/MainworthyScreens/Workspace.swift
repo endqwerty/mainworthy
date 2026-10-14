@@ -21,6 +21,10 @@ public final class Workspace {
 	public private(set) var project: Project?
 	public private(set) var queue: QueueScreen?
 	public private(set) var runs: RunsScreen?
+	public private(set) var changes: ChangesScreen?
+	@ObservationIgnored public private(set) lazy var sessions = SessionsScreen(server: server) { [weak self] in
+		await self?.signOut()
+	}
 
 	/// Every screen of the open project. What the change stream tells of, each of them reads again.
 	private var screens: [any ProjectScreen] = []
@@ -46,7 +50,9 @@ public final class Workspace {
 		self.queue = queue
 		let runs = RunsScreen(project: server.project(project.key), permission: project, person: account.name)
 		self.runs = runs
-		screens = [queue, runs]
+		let changes = ChangesScreen(project: server.project(project.key))
+		self.changes = changes
+		screens = [queue, runs, changes]
 	}
 
 	/// Reads who is signed in and what they may open again: when the app comes to the front. A project can be
@@ -63,6 +69,7 @@ public final class Workspace {
 			project = nil
 			queue = nil
 			runs = nil
+			changes = nil
 			screens = []
 		}
 	}
