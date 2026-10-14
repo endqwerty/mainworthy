@@ -1488,8 +1488,15 @@ describe("what a run and a change may count", () => {
 		expect(asked).toHaveLength(1);
 		expect((first(asked).evidence as { targets: number[]; scope: string }).scope).toBe("pr:7");
 		expect((first(asked).evidence as { targets: number[] }).targets).toHaveLength(60);
-		expect(rows("SELECT count(*) AS n FROM decisions WHERE json_extract(answer, '$.is') = 'outdated'")).toEqual([
-			{ n: 60 },
+		// The two tests name no file, so the pipeline's test joins the agent's in one question about tests with no
+		// case, and the rule's answer to that question ends too. It is not one of the sixty.
+		expect(
+			rows(
+				"SELECT kind, count(*) AS n FROM decisions WHERE json_extract(answer, '$.is') = 'outdated' GROUP BY kind ORDER BY kind",
+			),
+		).toEqual([
+			{ kind: "failure", n: 60 },
+			{ kind: "map", n: 1 },
 		]);
 	});
 
