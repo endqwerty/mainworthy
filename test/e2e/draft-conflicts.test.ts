@@ -276,7 +276,9 @@ check(
 			page.setDefaultTimeout(5000);
 			await page.getByRole("button", { name: "Case 1", exact: true }).waitFor();
 			let fail = true;
+			const sent: { cmd: string; edits: unknown[] }[] = [];
 			await page.route("**/propose", async (route) => {
+				sent.push(z.object({ cmd: z.string(), edits: z.array(z.unknown()) }).parse(route.request().postDataJSON()));
 				if (fail) {
 					fail = false;
 					await route.abort();
@@ -290,6 +292,14 @@ check(
 			await title(page).fill("My complete current text");
 			await page.keyboard.press("Escape");
 			await page.locator(".conflict-card").waitFor();
+			// The first save never reached the server, so `command` says `none`. That can also mean a save still on its
+			// way, so the page sends the first request again, unchanged and under its own id, which the server records
+			// once at most (issue #71). Here it meets the colleague's title as a conflict, and the card is made of the
+			// current text, not of what that request carried. Nothing else is proposed: the rest is the card's to send.
+			expect(sent).toHaveLength(2);
+			expect(sent[1]?.cmd).toBe(sent[0]?.cmd ?? "");
+			expect(JSON.stringify(sent[1]?.edits)).toBe(JSON.stringify(sent[0]?.edits));
+			expect(JSON.stringify(sent[1]?.edits)).toContain("My first text");
 			expect(await page.locator(".conflict-side").first().innerText()).toContain("My complete current text");
 			await page.getByRole("button", { name: "Use my title", exact: true }).click();
 			await page.getByRole("button", { name: "Resolve conflict", exact: true }).click();

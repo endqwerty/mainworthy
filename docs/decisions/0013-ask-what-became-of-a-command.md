@@ -52,7 +52,44 @@ recorded without it, and the draft that holds it stays on the device and is not 
 - **Sending the same request again under the same id**, as `propose` does. A replay records a merge the person
   may have edited since. Asking records nothing.
 
+## The ordinary save asks too (issue #71)
+
+Added when issue #71 was built, and corrected after its review. The editor's save stores its request with the
+draft before it leaves, as the card does. When its reply never comes (a reload, a closed tab, a dropped
+connection), the page asks `command` about its id before it sends anything: as soon as the draft is in the
+pane, and again when the editor is left if that question had no answer.
+
+- `done`: the recorded reply is handled as if it had come in time. The request is not sent again, and later
+  text goes out under a new id on the version the reply names.
+- `none`: not recorded yet, which is not "never will be": the request may still be on its way. The one request
+  that is safe to send either way is that save itself, under its own id: the server records it once, however
+  many copies arrive, and gives each the first reply. So it goes again, unchanged, its reply is handled as any
+  reply, and later text follows it under a new id on the version that reply names.
+- `begun`, or no answer: nothing is sent, and the draft is kept.
+
+Asked as the draft comes into the pane, a save is only settled: taken as recorded, or sent again. Nothing typed
+since is sent until the editor is left.
+
+Turned down, in the first build of #71: on `none`, sending the draft's current text under a new id. Its review
+found that a save still on its way then lands after it and is recorded too: a new case's first save as a
+second case, an edit as a conflict with the person's own version. Turned down at that review: on `none` as the
+draft comes into the pane, keeping the save and sending nothing until the editor is left. A tab closed twice in
+one sentence whose first close never reached the server would then record nothing at the second close, because
+a closing page cannot wait for the answer.
+
+A page that is closing cannot wait for the answer, so it sends nothing more, and the next page that opens the
+draft asks. Turned down: sending the newer text under a new id from the closing page. It does not know whether
+the earlier save was recorded. If it was, the newer text meets it as a conflict with the person's own version,
+and the question waits for somebody to answer it. The text is kept either way; asking later costs one
+question and no conflict.
+
+The page sends under an id it has used only the request it first sent under it, unchanged. Nothing here relies
+on the server refusing a repeated id whose request differs; that rule stays as the backstop.
+
 ## What it does not do
 
-`propose` still replays a request whose reply was lost (issue #71 stays open for that). The operation it needs
-is now there.
+- A save sent again on `none` records the text it carried, which the person may have changed since. What they
+  typed later is the next version, so the history shows both.
+- "Take over here" drops the former owner's request instead of asking about it (the same person sent it). A new
+  owner whose former owner's last save was recorded meanwhile, or lands later, meets it as a conflict with
+  their own version; for a new case's first save, that can make a second case.

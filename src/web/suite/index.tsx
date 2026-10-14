@@ -62,6 +62,16 @@ const ResolvedEdit = z.object({
 	body: CaseBody,
 });
 
+/** The reply a save was given, as `command` returns it for a save whose reply the page never got. */
+const RecordedSave = z.object({
+	proposal: z.string().nullable(),
+	status: z.enum(["adopted", "open", "conflict", "rejected"]),
+	question: z.string().nullable(),
+	needs: z.string().nullable(),
+	cases: z.array(z.object({ ref: z.string(), version: z.number(), hash: z.string() })),
+	conflicts: z.array(z.object({ case: z.string(), paths: z.array(z.string()) })),
+});
+
 const CardQuestion = z.object({
 	q: z.string(),
 	state: z.string(),
@@ -843,7 +853,23 @@ export function SuiteScreen() {
 				newStepId(knownStepIds({ project, id, ids: [...taken] })),
 		[project],
 	);
-	async function sealDraft({ keepalive = false, saved }: { keepalive?: boolean; saved?: Draft } = {}): Promise<void> {
+	/**
+	 * Records a draft: sends what it holds, and carries what is typed later onto the version that makes. For a save
+	 * whose reply never came (a reload, a closed tab, a dropped connection) the server is asked what became of it
+	 * (`command`) first (issue #71). Recorded: its recorded reply is taken, and it is never sent again. Not recorded
+	 * (yet: it may still be on its way): that same request goes again under its own id, which the server records
+	 * once however many copies arrive. Either way, what was typed since goes out after it under a new id. With
+	 * `settleOnly`, only that save is settled, and nothing typed since is sent.
+	 */
+	async function sealDraft({
+		keepalive = false,
+		saved,
+		settleOnly = false,
+	}: {
+		keepalive?: boolean;
+		saved?: Draft;
+		settleOnly?: boolean;
+	} = {}): Promise<void> {
 		const snapshot = saved ?? draftRef.current;
 		if (!sessionCurrent(owner)) return;
 		if (snapshot && snapshot === endingDraft() && snapshot.owner !== windowId) return;
@@ -870,6 +896,7 @@ export function SuiteScreen() {
 				.map((step) => ({ ...step, expected: step.expected || null })),
 		};
 		const fingerprint = JSON.stringify({ body, tags: cleaned.tags, covers: cleaned.covers, folder: snapshot.folder });
+		if (settleOnly && !snapshot.sent) return;
 		if (snapshot.submission.kind === "waiting" && snapshot.submission.fingerprint === fingerprint) return;
 		// All the draft holds beyond its version is a step still without an action, which no version can take.
 		// Nothing is sent, and the draft stays on the device as it is (issue #86).
@@ -888,6 +915,10 @@ export function SuiteScreen() {
 			body = recovered.body;
 			cleaned = { ...cleaned, tags: recovered.tags, covers: recovered.covers };
 		}
+		// What the reply handled below was given for: the draft's text, or the save of unknown fate it is about.
+		const proposed = recovered
+			? JSON.stringify({ body, tags: cleaned.tags, covers: cleaned.covers, folder: snapshot.folder })
+			: fingerprint;
 		let moreToSend = false;
 		const task = (async () => {
 			try {
@@ -948,23 +979,54 @@ export function SuiteScreen() {
 										(requirement) => ({ op: "cover", case: source.ref ?? "", requirement, on: false }) satisfies Edit,
 									),
 							];
-				const request = recovered?.input ?? { cmd: source.cmd, edits };
-				if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
-				const sent = recovered ?? { input: request, body, tags: cleaned.tags, covers: cleaned.covers };
-				const outgoing = liveDrafts.current.get(source.id);
-				if (outgoing?.id === source.id) {
-					const sending = { ...outgoing, sent };
-					liveDrafts.current.set(sending.id, sending);
-					if (draftRef.current?.id === sending.id) {
-						draftRef.current = sending;
-						setDraftState(sending);
-					}
+				let reply: Api["propose"]["reply"] | null = null;
+				// The reply was given to the save of unknown fate, and is read now (`command`), not just received.
+				let recorded = false;
+				if (recovered) {
+					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
+					let fate: Api["command"]["reply"];
 					try {
-						if (!writeOwnedDraft(sending)) return;
-					} catch {}
+						fate = await call("command", { cmd: recovered.input.cmd ?? "" }, { project, owner });
+					} catch (error) {
+						// Nothing is known, so nothing is sent. The draft keeps the save, and the next leave asks again.
+						if (sessionCurrent(owner) && mayWrite(source.id, !draftStored))
+							setStatus(
+								`${error instanceof Error ? error.message : "Could not ask what became of the last save"}. Your draft is kept on this device.`,
+							);
+						return;
+					}
+					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
+					if (fate.state === "begun") {
+						setStatus("Your last save of this draft is still being recorded. Your draft is kept on this device.");
+						return;
+					}
+					if (fate.state === "done") {
+						reply = RecordedSave.parse(fate.reply);
+						recorded = true;
+					}
+					// `none` is "not recorded yet": the save may still be on its way. The one request that cannot be
+					// recorded twice is that save itself, under its own id, so it goes again unchanged, and what was
+					// typed since follows it under a new id (the review of the first fix for #71, B1).
 				}
-				const reply = await call("propose", request, { project, keepalive, owner });
-				if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
+				if (!reply) {
+					const request = recovered?.input ?? { cmd: source.cmd, edits };
+					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
+					const sent = recovered ?? { input: request, body, tags: cleaned.tags, covers: cleaned.covers };
+					const outgoing = liveDrafts.current.get(source.id);
+					if (outgoing?.id === source.id) {
+						const sending = { ...outgoing, sent };
+						liveDrafts.current.set(sending.id, sending);
+						if (draftRef.current?.id === sending.id) {
+							draftRef.current = sending;
+							setDraftState(sending);
+						}
+						try {
+							if (!writeOwnedDraft(sending)) return;
+						} catch {}
+					}
+					reply = await call("propose", request, { project, keepalive, owner });
+					if (!sessionCurrent(owner) || !mayWrite(source.id, !draftStored)) return;
+				}
 				if (reply.status === "conflict" || reply.status === "rejected") forgetRequest(snapshot.id);
 				if (reply.status === "conflict" && reply.question && snapshot.ref && reply.proposal) {
 					const proposal = (await call("get", { refs: [reply.proposal] }, { project, owner }))[0];
@@ -1002,7 +1064,7 @@ export function SuiteScreen() {
 							...latest,
 							cmd: randomId(),
 							sent: null,
-							submission: { kind: "waiting", question: reply.question, fingerprint },
+							submission: { kind: "waiting", question: reply.question, fingerprint: proposed },
 						};
 						draftRef.current = next;
 						setDraftState(next);
@@ -1148,8 +1210,15 @@ export function SuiteScreen() {
 					moreToSend = more;
 					if (next.dirty && !writeOwnedDraft(next)) return;
 				}
+				const held = unfinished
+					? ". A step with no action yet is not in it, and stays in your draft on this device."
+					: "";
 				setStatus(
-					`Version ${version}, by you, just now${unfinished ? ". A step with no action yet is not in it, and stays in your draft on this device." : ""}`,
+					!recorded
+						? `Version ${version}, by you, just now${held}`
+						: stamp
+							? `Your last save is recorded as version ${version}${held}`
+							: `Your last save changed nothing: the case already held it${held}`,
 				);
 				void invalidateProject(project);
 			} catch (error) {
@@ -1163,7 +1232,7 @@ export function SuiteScreen() {
 		pending.current.set(snapshot.id, task);
 		await task;
 		pending.current.delete(snapshot.id);
-		if (moreToSend && sessionCurrent(owner)) {
+		if (moreToSend && !settleOnly && sessionCurrent(owner)) {
 			const latest = liveDrafts.current.get(adoptedRefs.current.get(snapshot.id) ?? snapshot.id);
 			if (latest?.dirty) await sealDraft({ keepalive, saved: latest });
 		}
@@ -1197,6 +1266,21 @@ export function SuiteScreen() {
 	}, [view, stepIdFor]);
 	const sealRef = useRef(sealDraft);
 	sealRef.current = sealDraft;
+	/**
+	 * A save of the draft in the pane whose reply never came is asked about as soon as the draft is here, once for
+	 * each save: after a reload, or when a draft a closed tab left is opened (issue #73). It is settled (`settleOnly`):
+	 * a recorded save is taken as it was recorded, one not recorded goes again under its own id, and nothing typed
+	 * since is sent. The draft is then on the version that save made, so a tab closed again soon after sends the
+	 * person's newer text on the right version.
+	 */
+	const askedSaves = useRef(new Set<string>());
+	useEffect(() => {
+		const cmd = draft?.sent?.input.cmd;
+		if (!draft || !cmd || draft.owner !== windowId || pending.current.has(draft.id) || askedSaves.current.has(cmd))
+			return;
+		askedSaves.current.add(cmd);
+		void sealRef.current({ saved: draft, settleOnly: true });
+	}, [draft, windowId]);
 	useEffect(() => {
 		const leave = () => {
 			void sealRef.current();

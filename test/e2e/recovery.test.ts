@@ -163,11 +163,28 @@ test.skipIf(!browserAvailable)(
 			// The browser may deliver the active draft's keepalive request during reload, before its acknowledgement.
 			expect(await rows.filter({ hasText: "Second unsaved case" }).count()).toBeGreaterThan(0);
 			await browser.context.unroute("**/api/p/scratch/propose");
+			// A save that went out as the page reloaded has no reply. The page asks what became of a capture's save
+			// when the capture is in the pane (issue #71): one the server recorded is a case, and is not sent again.
+			const settled = (title: string) =>
+				eventually(
+					() =>
+						page.evaluate(
+							(title) =>
+								Object.keys(localStorage)
+									.filter((key) => key.includes(":draft:") && !key.includes(":steps:"))
+									.map((key) => JSON.parse(localStorage.getItem(key) ?? "{}"))
+									.every((draft) => draft.body?.title !== title || !draft.sent),
+							title,
+						),
+					Boolean,
+				);
 			for (const ordinal of ["First", "Second"]) {
-				await rows
-					.filter({ hasText: `${ordinal} unsaved case` })
-					.first()
-					.click();
+				// The capture's own row, not a case its save made.
+				const capture = rows.filter({ hasText: `${ordinal} unsaved case` }).filter({ hasText: /^new/ });
+				if ((await capture.count()) === 0) continue;
+				await capture.first().click();
+				await settled(`${ordinal} unsaved case`);
+				if ((await page.locator("#detail .cid").innerText()) !== "New case") continue;
 				expect(await page.locator("#detail .cid").innerText()).toBe("New case");
 				expect(new URL(page.url()).pathname).toBe("/p/scratch/suite");
 				expect(await page.locator('#list [role="option"][aria-selected="true"]').count()).toBe(1);

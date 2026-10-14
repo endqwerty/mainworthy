@@ -256,9 +256,11 @@ for (const action of ["close", "reload"])
 				if (action === "close") await returning.goto(`${server.url}/p/scratch/suite`);
 				await returning.locator("#app").waitFor();
 				await returning.keyboard.press("Control+Enter");
+				// The page asks what became of the save the closing page sent (issue #71): "Your last save is recorded
+				// as version 1", or, when it had not landed yet, "Version 1, by you" once it is sent again under its id.
 				await eventually(
 					async () => await returning.locator("#stat").textContent(),
-					(text) => Boolean(text?.includes("Version")),
+					(text) => /[Vv]ersion 1\b/.test(text ?? ""),
 				);
 				expect((await server.api("find", { in: "cases" })).items).toHaveLength(1);
 				expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({ title: "Closing capture", version: 1 });
