@@ -95,11 +95,12 @@ Every command except `serve`, `fmt` and `help` talks to a server. It finds the s
 | --- | --- | --- |
 | `MAINWORTHY_URL` | `--url` | `http://127.0.0.1:7357` |
 | `MAINWORTHY_TOKEN` | `--token` | none |
+| `MAINWORTHY_TOKEN_FILE` | `--token-file` | none |
 | `MAINWORTHY_PROJECT` | `--project` | the only project, if there is one |
 
 With more than one project and no choice, a command stops with `invalid: choose a project with --project or MAINWORTHY_PROJECT; projects: scratch, checkout`. The `mainworthy health` command, with no `--url` or `MAINWORTHY_URL`, asks the server on this machine at `MAINWORTHY_PORT`.
 
-For these three variables, a value that is set but empty counts as not set. [Command line](./cli.md) lists every command.
+Prefer `MAINWORTHY_TOKEN` or `--token-file` to `--token`, which the process list and the shell's history show. [Command line](./cli.md#give-the-token-in-the-environment-or-in-a-file) says more. For these variables, a value that is set but empty counts as not set. [Command line](./cli.md) lists every command.
 
 ## Variables that describe a CI build
 

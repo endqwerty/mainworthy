@@ -11,8 +11,14 @@ A command finds its server in this order: the flag, then the environment variabl
 | What | Flag | Variable | Default |
 | --- | --- | --- | --- |
 | Server address | `--url` | `MAINWORTHY_URL` | `http://127.0.0.1:7357` |
-| Token | `--token` | `MAINWORTHY_TOKEN` | none: a server in local mode on this machine asks for none |
+| Token | `--token`, or `--token-file` | `MAINWORTHY_TOKEN`, or `MAINWORTHY_TOKEN_FILE` | none: a server in local mode on this machine asks for none |
 | Project | `--project` | `MAINWORTHY_PROJECT` | the only project, when there is one |
+
+### Give the token in the environment or in a file
+
+Prefer `MAINWORTHY_TOKEN` to `--token`: an argument is in the process list of the machine while the command runs, and in the shell's history afterwards. `--token-file <path>` (or `MAINWORTHY_TOKEN_FILE`) reads the token from a file instead, which suits a pipeline that mounts a secret as a file. The file holds the token and nothing else; the whitespace around it, a final newline included, is dropped. An empty file, a file that cannot be read and a file with more than a token in it stop the command with exit code 4, naming the file and never quoting it. Giving the token two ways at once (`--token` with `--token-file`, or both variables) is refused. A flag wins over a variable.
+
+A command that is about to send a token to a plain `http://` address on another machine says so once on standard error, before the first request, and goes on: the token travels unencrypted, so use an `https://` address. The addresses of this machine (`localhost`, `127.0.0.1` and the rest of `127.0.0.0/8`, `[::1]`) and `https://` addresses get no warning, and neither does a command that sends no token. Standard output is not touched, so `--json` output stays clean.
 
 [Configuration](./configuration.md) explains local and server mode. [People, agents and pipelines](./access.md) explains tokens.
 
@@ -138,7 +144,8 @@ Every operation of the API is also a command with the same name. Give its input 
 ### Flags every command takes
 
 - `--url <string>`: Server URL. Defaults to MAINWORTHY_URL or http://127.0.0.1:7357.
-- `--token <string>`: Bearer token. Defaults to MAINWORTHY_TOKEN.
+- `--token <string>`: Bearer token. Defaults to MAINWORTHY_TOKEN, which is safer: an argument is in the process list and the shell's history.
+- `--token-file <string>`: Read the bearer token from this file, so no argument holds it. Defaults to MAINWORTHY_TOKEN_FILE. Not with --token.
 - `--project <string>`: Project key. Defaults to MAINWORTHY_PROJECT or the only project.
 - `--compact`: Print JSON on one line.
 - `--help`: Show command help.

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
 import { OP_LIST } from "../server/ops/index.ts";
-import { Client } from "./client.ts";
+import { Client, plainHttpToAnotherMachine } from "./client.ts";
 import { COMMAND_NAMES } from "./dispatch.ts";
 import { GENERATED_COMMANDS } from "./generated.ts";
 import { MAX_SEED_UNLINKED_FILES, seed, unitTests } from "./seed.ts";
@@ -980,4 +980,222 @@ test("seed is refused to a caller who does not administer before anything is mad
 		},
 		{ mode: "server" },
 	);
+});
+
+// Issue #119. A token reaches the server only through `Client.request`, so that is where a token bound for plain
+// http on another machine is said once. The addresses below are not real: `viaServer` answers them from the
+// instance, so no test depends on the network or on an address the machine has.
+const PLAIN = "http://files.example.test";
+
+/** Answers every `fetch` of the command from the running instance, whatever address it names, and notes it. */
+async function viaServer<T>(
+	instance: { url: string },
+	run: () => Promise<T>,
+	options: { refuse?: boolean } = {},
+): Promise<{ result: T; asked: { url: string; authorization: string | null }[] }> {
+	const asked: { url: string; authorization: string | null }[] = [];
+	const real = globalThis.fetch;
+	globalThis.fetch = Object.assign(
+		async (input: Request | string | URL, init?: RequestInit) => {
+			const url = String(input);
+			asked.push({ url, authorization: new Headers(init?.headers).get("authorization") });
+			process.stderr.write("[fetch]\n");
+			if (options.refuse) throw new TypeError("connection refused");
+			return real(url.replace(/^https?:\/\/[^/]+/, instance.url), init);
+		},
+		{ preconnect: real.preconnect },
+	);
+	try {
+		return { result: await run(), asked };
+	} finally {
+		globalThis.fetch = real;
+	}
+}
+
+const PLAIN_WARNING = `warning: the token is sent to ${PLAIN} over plain http and travels unencrypted; use an https address\n`;
+
+test("a token bound for plain http on another machine is warned of once, on stderr, before the first request", async () => {
+	await withInstance(
+		async ({ run, instance }) => {
+			const token = instance.generatedToken ?? "";
+			const { result, asked } = await viaServer(instance, () => run(["find", "--url", PLAIN, "--compact"]));
+			// `find` asks for the session and then for the cases: two requests, one warning, ahead of both.
+			expect(asked.map((request) => request.authorization)).toEqual([`Bearer ${token}`, `Bearer ${token}`]);
+			expect(result.code).toBe(0);
+			expect(result.stderr).toBe(`${PLAIN_WARNING}[fetch]\n[fetch]\n`);
+			expect(outputWith(Found, result).items).toEqual([]);
+			expect(result.stdout).not.toContain("warning");
+			expect(result.stdout).not.toContain(token);
+			expect(result.stderr).not.toContain(token);
+			// The next run is another run: it says it again.
+			const again = await viaServer(instance, () => run(["find", "--url", PLAIN, "--compact"]));
+			expect(again.result.stderr.split("warning:")).toHaveLength(2);
+		},
+		{ mode: "server" },
+	);
+});
+
+test("a token is not warned of for https, for this machine, or when none is sent", async () => {
+	await withInstance(
+		async ({ run, instance }) => {
+			for (const url of [
+				"https://files.example.test",
+				"http://localhost:7357",
+				"http://LOCALHOST",
+				"http://127.0.0.1:7357",
+				"http://127.200.3.4",
+				"http://[::1]:7357",
+				"http://robin:secret@localhost:7357",
+			]) {
+				const { result, asked } = await viaServer(instance, () => run(["find", "--url", url]));
+				expect([url, result.code, result.stderr]).toEqual([url, 0, "[fetch]\n[fetch]\n"]);
+				expect(asked).toHaveLength(2);
+			}
+			// No token, none sent, nothing to say: the health check sends none either.
+			const bare = await viaServer(instance, () => run(["find", "--url", PLAIN], { env: { MAINWORTHY_TOKEN: "" } }));
+			expect(bare.result.stderr).not.toContain("warning:");
+			// The server refuses the session at once, so one request is asked, and it carries no token.
+			expect(bare.asked.map((request) => request.authorization)).toEqual([null]);
+		},
+		{ mode: "server" },
+	);
+});
+
+test("the warning comes before a connection that fails, and the command goes on to fail as it did", async () => {
+	await withInstance(
+		async ({ run, instance }) => {
+			const { result, asked } = await viaServer(instance, () => run(["find", "--url", PLAIN]), { refuse: true });
+			expect(asked).toHaveLength(1);
+			expect(result.code).toBe(4);
+			expect(result.stdout).toBe("");
+			expect(result.stderr).toBe(
+				`${PLAIN_WARNING}[fetch]\nconnection: cannot connect to ${PLAIN}; start the server with mainworthy serve\n`,
+			);
+		},
+		{ mode: "server" },
+	);
+});
+
+test("the executable puts the warning on its standard error and nothing on its standard output", async () => {
+	// 0.0.0.0 is not this machine's address by the rule above, and a connection to it is refused at once on Linux
+	// and on macOS, so one real start sees the warning ahead of the failure with no network.
+	await withInstance(async ({ cli, run }) => {
+		const argv = ["find", "--url", "http://0.0.0.0:1", "--token", "abc"];
+		const real = await cli(argv);
+		expect(real.stdout).toBe("");
+		expect(real.code).toBe(4);
+		expect(real.stderr).toBe(
+			"warning: the token is sent to http://0.0.0.0:1 over plain http and travels unencrypted; use an https address\n" +
+				"connection: cannot connect to http://0.0.0.0:1; start the server with mainworthy serve\n",
+		);
+		expect(await run(argv)).toEqual(real);
+	});
+});
+
+test("plainHttpToAnotherMachine knows this machine from another by its address, not by how it starts", () => {
+	for (const url of [
+		"http://example.com",
+		"http://10.0.0.5:7357",
+		"http://192.168.1.20",
+		"http://0.0.0.0:7357",
+		"http://127.0.0.1.example.com",
+		"http://localhost.example.com",
+		"http://notlocalhost",
+		"http://[2001:db8::1]:7357",
+		"http://[::2]",
+		"http://128.0.0.1",
+	])
+		expect([url, plainHttpToAnotherMachine(url)]).toEqual([url, true]);
+	for (const url of [
+		"https://example.com",
+		"https://10.0.0.5",
+		"http://localhost",
+		"http://localhost:7357",
+		"http://LocalHost./",
+		"http://127.0.0.1",
+		"http://127.255.255.254:80",
+		"http://[::1]",
+		"http://[::1]:7357",
+	])
+		expect([url, plainHttpToAnotherMachine(url)]).toEqual([url, false]);
+});
+
+test("--token-file reads the token from a file, trims it, and refuses what cannot be a token", async () => {
+	await withInstance(
+		async ({ run, instance, directory }) => {
+			const token = instance.generatedToken ?? "";
+			const none = { MAINWORTHY_TOKEN: "" };
+			const write = async (name: string, content: string) => {
+				const file = join(directory, name);
+				await writeFile(file, content);
+				return file;
+			};
+			// Without a token the server refuses, so what follows is the file's doing.
+			expect((await run(["find"], { env: none })).stderr).toContain("unauthenticated:");
+			for (const content of [token, `${token}\n`, `${token}\r\n`, `  ${token}\n\n`, `\t${token} \n`]) {
+				const file = await write("token", content);
+				const found = await run(["find", "--token-file", file, "--compact"], { env: none });
+				expect([JSON.stringify(content), found.code, found.stderr]).toEqual([JSON.stringify(content), 0, ""]);
+				expect(outputWith(Found, found).items).toEqual([]);
+			}
+			const file = await write("token", token);
+			// The flag wins over the variable, as `--token` does.
+			expect((await run(["find", "--token-file", file], { env: { MAINWORTHY_TOKEN: "wrong" } })).code).toBe(0);
+			expect((await run(["find", "--token", "wrong"], { env: { MAINWORTHY_TOKEN_FILE: file, ...none } })).code).toBe(4);
+			// The variable names a file, as the flag does.
+			expect((await run(["find"], { env: { MAINWORTHY_TOKEN_FILE: file, ...none } })).code).toBe(0);
+			expect((await run(["find"], { env: { MAINWORTHY_TOKEN_FILE: "", ...none } })).stderr).toContain(
+				"unauthenticated:",
+			);
+
+			const secret = "s3cret-value that is not a token";
+			for (const [content, said] of [
+				["", "is empty"],
+				[" \n\n", "is empty"],
+				[`${secret}\nsecond line`, "holds more than a token"],
+			] as const) {
+				const bad = await write("bad", content);
+				const refused = await run(["find", "--token-file", bad], { env: none });
+				expect([refused.code, refused.stdout]).toEqual([4, ""]);
+				expect(refused.stderr).toBe(`invalid: the token file ${bad} ${said}\n`);
+				expect(refused.stderr).not.toContain("s3cret");
+			}
+			const missing = join(directory, "absent");
+			const unread = await run(["find", "--token-file", missing], { env: none });
+			expect([unread.code, unread.stdout, unread.stderr]).toEqual([
+				4,
+				"",
+				`invalid: cannot read the token file ${missing}\n`,
+			]);
+			// A directory is a file that cannot be read too.
+			expect((await run(["find", "--token-file", directory], { env: none })).stderr).toBe(
+				`invalid: cannot read the token file ${directory}\n`,
+			);
+			// Two ways to give the token are not one: refused before anything is read or asked.
+			const both = await run(["find", "--token", token, "--token-file", file]);
+			expect([both.code, both.stdout, both.stderr]).toEqual([
+				4,
+				"",
+				"invalid: give the token with --token or with --token-file, not both\n",
+			]);
+			const variables = await run(["find"], { env: { MAINWORTHY_TOKEN: token, MAINWORTHY_TOKEN_FILE: file } });
+			expect([variables.code, variables.stderr]).toEqual([
+				4,
+				"invalid: MAINWORTHY_TOKEN and MAINWORTHY_TOKEN_FILE are both set; set one\n",
+			]);
+		},
+		{ mode: "server" },
+	);
+});
+
+test("the help says to prefer the variable to --token, and offers a file", async () => {
+	await withInstance(async ({ run }) => {
+		for (const argv of [["help"], ["find", "--help"], ["serve", "--help"]]) {
+			const help = await run(argv);
+			expect([argv.join(" "), help.code]).toEqual([argv.join(" "), 0]);
+			expect(help.stdout).toContain("--token-file");
+			expect(help.stdout).toContain("MAINWORTHY_TOKEN");
+			expect(help.stdout).toMatch(/process list/);
+		}
+	});
 });
