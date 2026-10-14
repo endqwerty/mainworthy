@@ -30,7 +30,7 @@ Mainworthy keeps your test cases, the results that people, pipelines and agents 
 - [Planned runs](./runs.md). Choose cases for a run, record results against their pinned versions, and close with a verdict. Accept CI evidence so you do not repeat work already shown.
 - [Changes and the gate](./changes.md). Read a change's latest verdict and find what prevents it from passing. Use the same gate from the command line to decide whether CI can continue.
 - [Let an agent in](./agents.md). Give an AI agent its own token, connect it over MCP, and know what its edits, findings, results and answers are worth. An agent reads the suite, reviews a change, records what it found, and leaves the decisions to people.
-- [The iPhone app](./iphone.md). Answer the queue from your phone in a native app. This page says how to install the app, how to sign in and what it does today.
+- [The iPhone app](./iphone.md). Work with Mainworthy from your phone in a native app. This page says how to install the app, how to sign in and what it does today.
 
 ### Customize
 

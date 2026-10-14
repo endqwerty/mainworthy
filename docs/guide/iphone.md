@@ -1,10 +1,11 @@
 # The iPhone app
 
-Answer the queue from your phone in a native app.
+Work with Mainworthy from your phone in a native app.
 This page says how to install the app, how to sign in and what it does today.
 
-The app is new. It has the queue, planned runs, the suite, changes and your sessions (issue #171). For
-those, open the instance in the phone's browser, which gets [a layout of its own](./keyboard.md#on-a-phone).
+The app has the queue, planned runs, the suite, changes and your sessions (issue #171). What an admin does,
+inviting people, tokens and the project's policy, is not in the app: open the instance in the phone's browser,
+which gets [a layout of its own](./keyboard.md#on-a-phone).
 
 ## Install the app
 
