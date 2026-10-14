@@ -55,6 +55,10 @@ on macOS or <kbd>Ctrl</kbd> <kbd>Enter</kbd> elsewhere, or pause for 30 seconds.
 The policy then decides whether the proposal becomes current or waits for review.
 There is no save button.
 
+A step is recorded once it has an action. A step with an expected result and no action yet
+is left out of the version and stays in your draft on this device, also after a reload.
+Type its action, or remove the step, and leave the editor again.
+
 The draft status says "Draft, saved on this device" when device storage works.
 If storage is unavailable, it says "Draft, kept in this tab". Keep that tab open
 until a version is recorded. Drafts do not sync between devices.

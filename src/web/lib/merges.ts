@@ -31,6 +31,13 @@ function heldText(body: Draft["body"]): Draft["body"] {
 			.map((step) => ({ ...step, expected: step.expected || null })),
 	};
 }
+/**
+ * Whether a body holds text that no version can take yet: a step with an expectation and still no action. The
+ * draft that holds one stays on the device when everything else in it is recorded (issue #86).
+ */
+export function holdsUnfinishedStep(body: Draft["body"]): boolean {
+	return heldText(body).steps.some((step) => !step.action.trim());
+}
 /** Whether the draft holds text the card was not made of. The editor is closed while a card is open, so this is rare. */
 const beyondCard = ({ draft, conflict }: { draft: Draft; conflict: DraftConflict }): boolean =>
 	!sameBody(conflict.mine, heldText(draft.body));

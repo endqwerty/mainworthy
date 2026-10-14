@@ -574,6 +574,36 @@ were so before this change and are not fixed by it. Leaving the editor in the or
 that has an expected result and no action (issue #86). `R3B-2 the first queue cursor survives a new question and
 settlement elsewhere` times out now and then on a 10-thread Mac (issue #87).
 
+## Issue #86: leaving the editor keeps a step that has an expected result and no action
+
+`sealDraft` sends the body without the steps that have no action. When the version was recorded it removed the
+stored draft, and it decided whether a draft was left by comparing the same reduced body. A step with an
+expected result and no action was then in no version and in no stored draft, and a reload lost it.
+
+The draft that is left after a version is recorded now stays stored while it holds such a step
+(`holdsUnfinishedStep` in `lib/merges.ts`, on the rule a conflict card already had). It is kept, not sent:
+while all a draft of a recorded case holds beyond its version is that step, leaving the editor, the idle timer
+and a hidden tab propose nothing. A draft with nothing but empty steps is removed as before.
+
+| Route | Test | What the test requires |
+| --- | --- | --- |
+| On a case: a new step with an expected result and no action, another change, Escape, reload | `drafts.test.ts`, the issue's steps | Version 2 has the other change and not the step; the stored draft and, after the reload, the editor have it; Escape again proposes nothing; with an action the step is version 3 and no draft is left |
+| The step is in a draft a settled conflict card left (finding N1's own route), then Escape | `conflict-merge.test.ts`, the V1 test | Nothing is proposed, and the step is still stored |
+| The rule: an expectation with no action; an empty step; a recordable step | `test/merges.test.ts` | Only the first is unfinished |
+
+The first failed before the change with `Expected to contain: "Total shows $90.00"  Received: ""` on the stored
+drafts. With the change in and the check before sending taken out, it fails with two proposals where one is
+expected, and the second row fails with one where none is.
+
+Run once by hand in the browser, with no test of their own: a new case with a title and such a step keeps it
+under the new case's ref and shows it after a reload; removing the step and leaving ends the draft with a
+proposal that changes nothing; a stored draft older than 30 seconds, whose idle timer fires at once after a
+reload, proposes nothing. An action emptied on a recorded step that has an expected result is recorded as the
+step's removal, as before, and the step now stays in the draft with its expected result.
+
+Not changed: a new case with no title and no step that has an action is still dropped on leaving, with an
+expected result or preconditions typed or not (`dropEmpty`).
+
 ## The documentation at `/docs` (decision 0016)
 
 The checks that decide this change, written before it. `test/docs.test.ts` and `test/e2e/docs.test.ts` hold them.

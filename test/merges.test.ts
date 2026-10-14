@@ -3,7 +3,15 @@
 import { describe, expect, test } from "bun:test";
 import type { CaseBody } from "../src/core/model.ts";
 import type { Draft, DraftConflict } from "../src/web/lib/drafts.ts";
-import { allRecorded, cardText, caseHeld, draftAfterMerge, mergeFate, nextMine } from "../src/web/lib/merges.ts";
+import {
+	allRecorded,
+	cardText,
+	caseHeld,
+	draftAfterMerge,
+	holdsUnfinishedStep,
+	mergeFate,
+	nextMine,
+} from "../src/web/lib/merges.ts";
 
 const body = (title: string, first: string, second: string): CaseBody => ({
 	title,
@@ -131,6 +139,19 @@ describe("the draft left after a recorded merge", () => {
 			body: { ...v4, title: "Merged by hand, and later", steps: [...v4.steps, unfinished] },
 		});
 	});
+});
+
+// Issue #86: leaving the editor asks this of the draft once its version is recorded, and keeps the draft for it.
+test("a step is unfinished with an expectation and no action; an empty step and a recordable one are not", () => {
+	const withStep = (step: { action: string; expected: string | null }): Draft["body"] => ({
+		...mine,
+		steps: [...mine.steps, { id: "s3", ...step }],
+	});
+	expect(holdsUnfinishedStep(withStep({ action: "", expected: "Typed, and not recorded" }))).toBe(true);
+	expect(holdsUnfinishedStep(withStep({ action: "  ", expected: "Typed, and not recorded" }))).toBe(true);
+	expect(holdsUnfinishedStep(mine)).toBe(false);
+	for (const expected of [null, "", "  "]) expect(holdsUnfinishedStep(withStep({ action: "", expected }))).toBe(false);
+	expect(holdsUnfinishedStep(withStep({ action: "Typed", expected: "" }))).toBe(false);
 });
 
 describe("the text of a card that its own merge did not end", () => {

@@ -90,6 +90,78 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
+// Issue #86. A step with an expected result and no action yet cannot be recorded, so no version holds it. Its
+// draft stays on the device when the rest is recorded, and is not proposed again until the step can be.
+test.skipIf(!browserAvailable)(
+	"a step with an expected result and no action stays in the draft when the rest is recorded, and after a reload",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [{ op: "create", outline: "Coupon case\n  Open the cart\n  Apply the coupon" }],
+		});
+		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = browser;
+			page.setDefaultTimeout(5000);
+			const head = async () =>
+				z
+					.object({
+						version: z.number(),
+						title: z.string(),
+						steps: z.array(z.object({ action: z.string(), expected: z.string().nullable() })),
+					})
+					.parse((await server.api("get", { refs: ["C-1"] }))[0]);
+			const drafts = () =>
+				page.evaluate(() =>
+					Object.keys(localStorage)
+						.filter((key) => key.includes(":draft:"))
+						.map((key) => localStorage.getItem(key) ?? ""),
+				);
+			const expected = page.getByRole("textbox", { name: "Expected result 3", exact: true });
+			let proposals = 0;
+			page.on("request", (request) => {
+				if (request.url().endsWith("/propose")) proposals++;
+			});
+			await page.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
+			await page.keyboard.press("e");
+			await page.getByRole("textbox", { name: "Step 2", exact: true }).press("End");
+			await page.keyboard.press("Enter");
+			await page.keyboard.press("Tab");
+			await page.keyboard.type("Total shows $90.00");
+			await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Coupon case revised");
+			await page.keyboard.press("Escape");
+			await page.locator("#stat").filter({ hasText: "Version 2, by you" }).waitFor();
+			// The version has what can be recorded, and the draft still has the step that cannot.
+			expect(await head()).toMatchObject({
+				version: 2,
+				title: "Coupon case revised",
+				steps: [{ action: "Open the cart" }, { action: "Apply the coupon" }],
+			});
+			expect((await drafts()).join(" ")).toContain("Total shows $90.00");
+			await page.reload();
+			await expected.waitFor();
+			expect(await expected.inputValue()).toBe("Total shows $90.00");
+			// Leaving again records nothing and proposes nothing: all that is left cannot be sent.
+			await expected.press("Escape");
+			await page.evaluate(() => undefined);
+			expect(proposals).toBe(1);
+			expect((await drafts()).join(" ")).toContain("Total shows $90.00");
+			// With an action the step is recorded, and then no draft is left.
+			await page.getByRole("textbox", { name: "Step 3", exact: true }).fill("Reload the page");
+			await page.keyboard.press("Escape");
+			await eventually(head, (value) => value.version === 3);
+			expect((await head()).steps[2]).toEqual({ action: "Reload the page", expected: "Total shows $90.00" });
+			await eventually(drafts, (rows) => rows.length === 0);
+			expect(proposals).toBe(2);
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
 test.skipIf(!browserAvailable)(
 	"30 seconds idle records one version, preserves the caret and updates current proof",
 	async () => {

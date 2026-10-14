@@ -37,7 +37,8 @@ such as a step with an expected result and no action yet. It stays with the draf
 moves to a new question. A card and its draft are dropped in two cases only: the card's own merge was recorded
 and neither holds anything beyond it, or the recorded head holds everything the person typed in them. A side
 chosen in the card is text of a recorded version and does not count as typed. This is about settling a card.
-Leaving the editor in the ordinary way still drops a step with no action, as it did before (issue #86).
+Leaving the editor in the ordinary way keeps such a step by the same rule since issue #86: the version is
+recorded without it, and the draft that holds it stays on the device and is not proposed again for it.
 
 ## What was turned down
 
