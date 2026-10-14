@@ -65,8 +65,8 @@ it to open another.
   The button at the top right of a question opens it in the web app.
 - **Answer a proposal that does more than add a case or change what one says.** One that restores an earlier
   version, moves, tags or archives cases, makes a folder or changes the policy is answered in the web app: the
-  app does not show all of what it changes. A new case and an edit to a case are shown step by step, and their
-  answers stay off until that is on the screen.
+  app does not show all of what it changes. So is one with more than twenty edits. A new case and an edit to a
+  case are shown step by step, and their answers stay off until that is on the screen.
 - **Runs, the suite and changes.**
 - **Notifications.** They need a paid Apple developer membership.
 - **Work without a connection.** An answer whose reply was lost is sent again by itself. The app does not keep

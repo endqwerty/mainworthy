@@ -53,7 +53,7 @@ struct QuestionView: View {
 				ContentUnavailableView {
 					Label("This question is not in the list any more", systemImage: "tray")
 				} description: {
-					Text("It was answered, it no longer applies, or it could not be read.")
+					Text("It no longer applies, or it could not be read.")
 				} actions: {
 					Button("Read again") { Task { await screen.open(ref) } }
 				}
@@ -96,7 +96,7 @@ struct QuestionView: View {
 				header(question)
 				if isGone {
 					Label(
-						"This question left the list while it was open here: it was answered, or it no longer applies.",
+						"This question is gone: the failure it asked about went away, or what it was about was removed.",
 						systemImage: "info.circle"
 					)
 					.font(.subheadline)

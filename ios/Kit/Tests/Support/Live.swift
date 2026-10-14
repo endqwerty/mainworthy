@@ -23,11 +23,41 @@ package enum Live {
 		Server(instance: instance, secrets: secrets, userAgent: "Mainworthy tests")
 	}
 
-	/// A server the test's person is signed in to.
+	/// A server the test's person is signed in to, with a session of its own.
+	///
+	/// The tests run side by side, and each signs in. The server checks two passwords at a time and lets
+	/// thirty-two more wait: one over that is refused as a wrong password is. So the tests take turns here, a
+	/// few at a time, which a slower machine needs and a fast one does not notice.
 	package static func signedIn() async throws -> Server {
+		await turns.enter()
+		defer { Task { await turns.leave() } }
 		let server = server()
 		_ = try await server.signIn(.password(name: name, password: password))
 		return server
+	}
+
+	private static let turns = Turns(atOnce: 4)
+
+	/// Lets a few callers in at a time. The others wait in the order they came.
+	private actor Turns {
+		private var free: Int
+		private var waiting: [CheckedContinuation<Void, Never>] = []
+
+		init(atOnce: Int) {
+			free = atOnce
+		}
+
+		func enter() async {
+			if free > 0 {
+				free -= 1
+				return
+			}
+			await withCheckedContinuation { waiting.append($0) }
+		}
+
+		func leave() {
+			if waiting.isEmpty { free += 1 } else { waiting.removeFirst().resume() }
+		}
 	}
 
 	/// A project nobody else reads, filled with one of everything the app shows (`scripts/ios/scenario.ts`).

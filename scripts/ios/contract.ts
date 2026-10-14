@@ -191,7 +191,7 @@ export const CaseBody = struct("CaseBody", "The content of a case that has versi
 	steps: list(Step),
 	methods: [list(text), "Who may produce evidence for the case: human, auto, agent."],
 	automate: [text, "Whether an automated test is wanted: none, wanted or not-applicable."],
-	fields: [maybe(dictionary(text)), "Custom field values. A case that is read alone leaves them out."],
+	fields: [dictionary(text), "Custom field values. All of a case's content is here, so an edit is shown whole."],
 });
 
 export const Proposal = struct("Proposal", "`get` with a P- ref: a proposed edit with the documents it would change.", {

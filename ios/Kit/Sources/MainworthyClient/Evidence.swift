@@ -162,6 +162,16 @@ public struct ProposedEdit: Equatable, Sendable {
 	/// moves, tags, archives or re-covers cases, makes a folder or changes the policy is answered in the web
 	/// app.
 	public let isShownWhole: Bool
+	/// Why this build does not show the whole proposal, for the page to say. Nil when it does.
+	public let notShown: NotShown?
+
+	public enum NotShown: Equatable, Sendable {
+		/// It does something this build has no page for: it restores, moves, tags, archives or re-covers cases,
+		/// makes a folder or changes the policy.
+		case otherThanContent
+		/// It has more edits than a question lists (twenty).
+		case tooManyEdits
+	}
 
 	public struct Conflict: Equatable, Sendable {
 		public let caseRef: String
@@ -176,9 +186,14 @@ public struct ProposedEdit: Equatable, Sendable {
 		count = wire.count
 		conflicts = wire.conflicts.map { Conflict(caseRef: $0.case, fields: $0.paths) }
 		// The summaries are the first twenty edits. A longer proposal is not known to be shown whole.
-		isShownWhole =
-			wire.count == wire.edits.count
-			&& wire.edits.allSatisfy { ["create", "edit"].contains($0.op) }
+		if !wire.edits.allSatisfy({ ["create", "edit"].contains($0.op) }) {
+			notShown = .otherThanContent
+		} else if wire.count != wire.edits.count {
+			notShown = .tooManyEdits
+		} else {
+			notShown = nil
+		}
+		isShownWhole = notShown == nil
 	}
 
 	/// One edit in a line, from the summary the server gives of it.
