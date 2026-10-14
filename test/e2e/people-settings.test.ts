@@ -207,26 +207,20 @@ test.skipIf(!browserAvailable)(
 			await page.getByText("admin lets a person change the policy", { exact: false }).waitFor();
 			await page.getByRole("checkbox", { name: "plan", exact: true }).uncheck();
 			await page.locator("#invite-project").selectOption("scratch");
-			// How long the link works is chosen by the keyboard: the select keeps the keys from one to the next,
-			// through a change of its value and back to a week. An arrow steps a select everywhere but on macOS,
-			// where it opens the menu and the value stays (issue #103): there the key is an option's first
-			// character, which steps to the next option that starts with it (12 hours, 1 day, 1 week).
-			await page.locator("#invite-expires").focus();
-			const [away, back] =
-				process.platform === "darwin"
-					? [
-							{ keys: ["1", "1"], value: "12h" },
-							{ keys: ["1", "1"], value: "1w" },
-						]
-					: [
-							{ keys: ["ArrowDown", "ArrowDown"], value: "2w" },
-							{ keys: ["ArrowUp"], value: "1w" },
-						];
-			for (const step of [away, back]) {
+			// How long the link works is chosen by the keyboard: an arrow opens the list, the arrows and Enter in it
+			// choose, and the choice gives the focus back with the place it was, so Tab goes on to the button after
+			// the select (issue #130).
+			const expires = page.locator("#invite-expires");
+			await expires.focus();
+			for (const step of [
+				{ keys: ["ArrowDown", "ArrowDown", "ArrowDown", "Enter"], value: "2w" },
+				{ keys: ["ArrowUp", "ArrowUp", "Enter"], value: "1w" },
+			]) {
+				await expires.focus();
 				for (const key of step.keys) await page.keyboard.press(key);
-				expect(await page.locator("#invite-expires").inputValue()).toBe(step.value);
+				expect(await expires.inputValue()).toBe(step.value);
+				expect(await expires.evaluate((node) => node === document.activeElement)).toBe(false);
 			}
-			expect(await page.evaluate(() => document.activeElement?.id)).toBe("invite-expires");
 			await page.keyboard.press("Tab");
 			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Make invitation link");
 			await page.keyboard.press("Enter");

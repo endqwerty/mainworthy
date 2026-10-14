@@ -199,13 +199,17 @@ check(
 );
 
 check(
-	"R3C-5 a select keeps the focus while the keys choose, and gives it back when the choice is finished",
+	"R3C-5 a select changes once, when the choice is made from its open list, and gives the focus back then",
 	async () => {
 		const server = await startServer({ mode: "server", cases: 2 });
 		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
 			page.setDefaultTimeout(5000);
+			let policyWrites = 0;
+			page.on("request", (request) => {
+				if (request.method() === "POST" && request.postData()?.includes('"op":"policy"')) policyWrites++;
+			});
 			const has = (select: Locator) => select.evaluate((node) => node === document.activeElement);
 			// A plain key is the shell's when nothing holds the focus: `?` opens the list of keys, Escape closes it.
 			const shell = async () => {
@@ -214,36 +218,83 @@ check(
 				await page.keyboard.press("Escape");
 				await page.locator("[data-overlay]").waitFor({ state: "detached" });
 			};
-			// Chromium on macOS opens the list on an arrow key and changes nothing until Enter (issue #103), so
-			// the keys that choose on a closed select are tried where an arrow steps it. A pick with the pointer
-			// is a change that no key came before, which `selectOption` makes: the page cannot be given a real
-			// pick from the open list in headless Chromium, whose list is a window of its own.
-			const arrows = process.platform !== "darwin";
 			/**
-			 * One select, by the keys and by the pointer. The arrows step it and it keeps the focus; `finish` gives
-			 * the focus back, and neither it nor what follows reaches the screen behind. A pick gives the focus
-			 * back at once. `behind` is true while the screen's own state stands.
+			 * One select, by every way a person chooses. A key that would change a closed select opens its list
+			 * and changes nothing; the arrows and Enter in the list are one change, two options on, and the
+			 * focus is back with the screen at that change. A pick with the pointer is a change with no key
+			 * before it, which `selectOption` makes (headless Chromium cannot make a real pick from a native
+			 * list). `behind` is true while the screen's own state stands. `policy` is a select that records a
+			 * policy: it writes once for a choice, and never on the way to it.
 			 */
 			const rule = async (
 				select: Locator,
-				options: { first: string; third: string; finish: string; behind: () => Promise<boolean> },
+				options: { behind: () => Promise<boolean>; reset?: boolean; policy?: boolean },
 			) => {
-				await select.focus();
-				if (arrows) {
-					await page.keyboard.press("Home");
-					await page.keyboard.press("ArrowDown");
-					await page.keyboard.press("ArrowDown");
-					expect(await select.inputValue()).toBe(options.third);
-					expect(await has(select)).toBe(true);
-					await page.keyboard.press(options.finish);
+				const values = await select.evaluate((node) =>
+					Array.from((node as HTMLSelectElement).options, (option) => option.value),
+				);
+				await select.evaluate((node) => {
+					node.dataset.changes = "0";
+					node.addEventListener("change", () => {
+						node.dataset.changes = String(Number(node.dataset.changes) + 1);
+					});
+				});
+				const changes = async () => Number(await select.getAttribute("data-changes"));
+				const settled = async () =>
+					page.waitForFunction((node) => !node?.hasAttribute("disabled"), await select.elementHandle());
+				const first = values[0];
+				if (first === undefined) throw new Error("A select with no option");
+				// By the pointer: one change, and the focus is back with no key pressed.
+				const pick = async () => {
+					const seen = await changes();
+					await select.focus();
+					await select.selectOption(first);
+					expect(await changes()).toBe(seen + 1);
 					expect(await has(select)).toBe(false);
 					expect(await options.behind()).toBe(true);
 					await shell();
+					await settled();
+				};
+				if (options.reset) await pick();
+				// By the keyboard: a key that would change a closed select opens its list, and the list chooses.
+				for (const opener of options.policy ? ["ArrowDown"] : ["ArrowDown", "Space", "Alt+ArrowDown", "Enter"]) {
+					const from = await select.inputValue();
+					const start = values.indexOf(from);
+					const target = values[start + 2];
+					if (target === undefined) throw new Error(`${opener}: no option two on from ${start}`);
+					const seen = await changes();
+					const written = policyWrites;
 					await select.focus();
+					await page.keyboard.press(opener);
+					expect(await select.inputValue()).toBe(from);
+					expect(await changes()).toBe(seen);
+					expect(await has(select)).toBe(true);
+					await page.keyboard.press("ArrowDown");
+					await page.keyboard.press("ArrowDown");
+					await page.keyboard.press("Enter");
+					expect(await select.inputValue()).toBe(target);
+					expect(await changes()).toBe(seen + 1);
+					expect(await has(select)).toBe(false);
+					expect(await options.behind()).toBe(true);
+					await shell();
+					if (options.policy) {
+						await settled();
+						expect(policyWrites).toBe(written + 1);
+					} else if (opener !== "Enter") await pick();
 				}
-				await select.selectOption(options.first);
+				// Enter on the closed select opens the list; Escape closes it and leaves the select the focus, and
+				// Escape again gives it back. None of it reaches the screen behind, or changes anything.
+				const seen = await changes();
+				const value = await select.inputValue();
+				await select.focus();
+				await page.keyboard.press("Enter");
+				await page.keyboard.press("Escape");
+				expect(await has(select)).toBe(true);
+				await page.keyboard.press("Escape");
 				expect(await has(select)).toBe(false);
 				expect(await options.behind()).toBe(true);
+				expect(await changes()).toBe(seen);
+				expect(await select.inputValue()).toBe(value);
 				await shell();
 			};
 
@@ -254,43 +305,64 @@ check(
 			await page.locator(".body-editor").waitFor();
 			await page.getByText("Can be exercised by", { exact: false }).click();
 			await rule(page.getByLabel("Automation"), {
-				first: "wanted",
-				third: "not-applicable",
-				finish: "Escape",
+				reset: true,
 				behind: async () => (await version.innerText()) === "Draft",
 			});
 			await page.getByRole("textbox", { name: "Case title", exact: true }).focus();
 			await page.keyboard.press("Escape");
 			await page.waitForFunction(() => document.querySelector(".cstate .chip")?.textContent === "v2");
 
-			// A Settings select, and the invitation's expiry.
+			// A Settings select, the invitation's expiry, and the two that record a policy.
 			await page.goto(`${server.url}/p/scratch/settings`);
 			await page.getByRole("option", { name: "Tokens", exact: true }).click();
+			const section = async () => (await page.locator("#detail .phead").innerText()).trim();
 			await rule(page.locator("#token-kind"), {
-				first: "agent",
-				third: "human",
-				finish: "Enter",
-				behind: async () => (await page.locator("#detail .phead").innerText()).includes("Tokens"),
+				reset: true,
+				behind: async () => (await section()).includes("Tokens"),
 			});
+			// Where the browser cannot open the list (no `showPicker`, or one that throws), an arrow key changes the
+			// select by one as it does natively, and that change gives the focus back.
+			const kind = page.locator("#token-kind");
+			for (const picker of ["missing", "throws"]) {
+				await page.evaluate((how) => {
+					Reflect.set(
+						HTMLSelectElement.prototype,
+						"showPicker",
+						how === "missing"
+							? undefined
+							: () => {
+									throw new DOMException("no gesture", "NotAllowedError");
+								},
+					);
+				}, picker);
+				await kind.selectOption("agent");
+				await kind.focus();
+				await page.keyboard.press("ArrowDown");
+				expect(await kind.inputValue()).toBe("ci");
+				expect(await has(kind)).toBe(false);
+				await shell();
+			}
+			await page.reload();
 			await page.getByRole("option", { name: "People", exact: true }).click();
 			await rule(page.locator("#invite-expires"), {
-				first: "12h",
-				third: "3d",
-				finish: "Enter",
-				behind: async () => (await page.locator("#detail .phead").innerText()).includes("People"),
+				reset: true,
+				behind: async () => (await section()).includes("People"),
 			});
+			await page.getByRole("option", { name: "Policy", exact: true }).click();
+			const inPolicy = async () => (await section()).includes("Policy");
+			// Ask, track, create: the walk from ask to create passes track, which is not recorded.
+			await rule(page.getByLabel("Tests with no case"), { reset: true, behind: inPolicy, policy: true });
+			expect(await page.getByLabel("Tests with no case").inputValue()).toBe("create");
+			// Loose, standard, strict: the walk from loose to strict passes standard.
+			await rule(page.getByLabel("Policy preset"), { reset: true, behind: inPolicy, policy: true });
+			expect(await page.getByLabel("Policy preset").inputValue()).toBe("strict");
 
 			// The run planner. Escape on the select does not close the form; Escape in its name does.
 			await page.keyboard.type("gr");
 			await page.keyboard.press("n");
 			const name = page.locator("#run-name");
 			await name.waitFor();
-			await rule(page.locator("#run-selection"), {
-				first: "all",
-				third: "tag",
-				finish: "Escape",
-				behind: async () => (await name.count()) === 1,
-			});
+			await rule(page.locator("#run-selection"), { reset: true, behind: async () => (await name.count()) === 1 });
 			await name.focus();
 			await page.keyboard.press("Escape");
 			await name.waitFor({ state: "detached" });
@@ -300,7 +372,7 @@ check(
 			await server.stop();
 		}
 	},
-	45_000,
+	60_000,
 );
 
 check(
