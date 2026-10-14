@@ -221,6 +221,13 @@ is under the GitHub milestone `iOS app`.
   A test that fails by chance gets `flaky-test` and goes to M1. `decision` and `waiting-for-feedback` mark what
   an agent cannot finish alone. Add the issue to its list in #64; a milestone is renamed or added in
   `docs/roadmap.md` and #64 in the same change.
+- The board is the GitHub Project `https://github.com/users/endqwerty/projects/2` (2026-10-13). Its views read
+  the milestone and the labels, so an issue needs nothing set there, only to be on it:
+  `gh project item-add 2 --owner endqwerty --url <issue>` after filing one. A view filters on milestone titles:
+  a milestone that is renamed or added is changed in the view's filter too. `gh project` needs the `project`
+  scope on the token. The desktop's has it since 2026-10-13. On a machine whose token lacks it, run
+  `gh auth refresh -h github.com -s project` and give the owner the code it prints: only they can approve it,
+  at `github.com/login/device`. Milestones, labels and issues need `repo` alone.
 - Scratch files stay out of the worktree: a log, a draft of a pull request, screenshots. `test/architecture.test.ts`
   reads every file in it, tracked or not, and fails when one holds the former name. On 2026-10-13 an agent's
   decision log under `.audit/` failed a nine-minute `--update-timings` run that way. `~/.cache` is the place.
