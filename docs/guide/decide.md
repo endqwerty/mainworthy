@@ -146,6 +146,8 @@ under `standard`, the answer is refused. Propose the cases, have them adopted, t
 answer with "Link to a case".
 "Track without a case" keeps the test without a case. The test still gates the build.
 
+Tests that came with neither a file nor a class name are asked about together, as the file "(no file)". The question lists them like any other, and every answer acts on them.
+
 To give every file the same answer, change the project's choice instead of answering each row.
 In Settings, Policy, choose "Track without a case" or "Create a case for each test" under
 "Tests with no case". The rule then answers every open question about a file at once.
