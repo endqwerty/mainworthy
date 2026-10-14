@@ -1,15 +1,16 @@
 import { expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Glob } from "bun";
 import { z } from "zod";
 import { OP_LIST } from "../server/ops/index.ts";
 import { Client } from "./client.ts";
 import { COMMAND_NAMES } from "./dispatch.ts";
 import { GENERATED_COMMANDS } from "./generated.ts";
 import { MAX_SEED_UNLINKED_FILES, seed, unitTests } from "./seed.ts";
-import { COMMIT, outputWith, RED_XML, withInstance } from "./test-support.ts";
+import { COMMIT, inThisProcess, outputWith, RED_XML, withInstance } from "./test-support.ts";
 
 const Ref = z.object({ ref: z.string() });
 const Found = z.object({ items: z.array(Ref) });
@@ -329,8 +330,9 @@ test("all registry operations have generated commands, global help and --help", 
 // the executable. Each case is one that leaves the instance as it was, so the second run sees what the first did.
 test("run in the test's process gives what the executable gives", async () => {
 	await withInstance(async ({ cli, run, directory }) => {
-		const invalid = join(directory, "invalid.md");
-		await writeFile(invalid, "---\ntitle: Broken\n");
+		// A file named from the working directory: read from there by both, or the two answers differ.
+		await mkdir(join(directory, "cases"));
+		await writeFile(join(directory, "cases", "invalid.md"), "---\ntitle: Broken\n");
 		const ci = { GITHUB_ACTIONS: "true", GITHUB_SHA: COMMIT, GITHUB_REF_NAME: "main", GITHUB_JOB: "e2e" };
 		const cases: [string[], { input?: string; env?: Record<string, string>; cwd?: string }?][] = [
 			[["health"]],
@@ -338,7 +340,8 @@ test("run in the test's process gives what the executable gives", async () => {
 			[["check"]],
 			[["find", "--limit", "oops"]],
 			[["get", "C-999"]],
-			[["fmt", invalid]],
+			[["fmt", "invalid.md"], { cwd: join(directory, "cases") }],
+			[["open"]],
 			[["new"], { input: "  \n" }],
 			[["report", RED_XML], { env: { MAINWORTHY_PROJECT: "scratch" }, cwd: tmpdir() }],
 			[["gate", "--wait", "0.02", "--json"], { env: ci }],
@@ -353,9 +356,69 @@ test("run in the test's process gives what the executable gives", async () => {
 			})),
 		);
 		for (const { argv, executable, here } of both) expect({ argv, ...here }).toEqual({ argv, ...executable });
-		expect(both.map((result) => result.here.code)).toEqual([0, 0, 0, 4, 4, 4, 4, 4, 3, 4, 4]);
+		expect(both.map((result) => result.here.code)).toEqual([0, 0, 0, 4, 4, 4, 0, 4, 4, 3, 4, 4]);
 		expect(process.env.MAINWORTHY_URL).toBeUndefined();
 	});
+});
+
+// `run` returns what a command writes through `process.stdout.write` and `process.stderr.write`. That is every way
+// the command line writes, and this holds it to that: a `console.log` or a write to `Bun.stdout` in a command would
+// reach the executable's output and none of the tests that use `run`.
+test("the command line writes only through the two write functions that run reads", async () => {
+	const elsewhere: string[] = [];
+	for await (const file of new Glob("**/*.ts").scan({ cwd: import.meta.dir })) {
+		if (file.endsWith(".test.ts") || file === "test-support.ts") continue;
+		const lines = (await Bun.file(join(import.meta.dir, file)).text()).split("\n");
+		for (const [index, text] of lines.entries())
+			if (/\bconsole\.|\bBun\.(stdout|stderr)\b/.test(text)) elsewhere.push(`src/cli/${file}:${index + 1}`);
+	}
+	expect(elsewhere).toEqual([]);
+});
+
+// Two things a process gives and a call in the test's process cannot: its output is complete when it exits, and it
+// can be stopped. `inThisProcess` keeps each from passing silently.
+test("a command that writes after it ended, or outlives its time, fails where it was run in the process", async () => {
+	const given = { environment: { PATH: process.env.PATH ?? "" }, cwd: tmpdir(), input: "" };
+	const before = { home: process.env.HOME, cwd: process.cwd() };
+	const quiet = () => inThisProcess("quiet", async () => 0, given);
+	const untouched = () => expect({ home: process.env.HOME, cwd: process.cwd() }).toEqual(before);
+
+	// Written after the command ended. The executable would have printed it; the next command says so, once.
+	const answered = await inThisProcess(
+		"late",
+		async () => {
+			setTimeout(() => process.stderr.write("written late\n"), 5);
+			return 0;
+		},
+		given,
+	);
+	expect(answered).toEqual({ stdout: "", stderr: "", code: 0 });
+	await Bun.sleep(20);
+	await expect(quiet()).rejects.toThrow(
+		'a command wrote after it had ended, which run did not return: "written late\\n"',
+	);
+	expect(await quiet()).toEqual({ stdout: "", stderr: "", code: 0 });
+
+	// One that outlives its time cannot be stopped as a child is. It is refused, and so is the next, until it ends.
+	let end = (): void => {};
+	const slow = new Promise<number>((resolve) => {
+		end = () => resolve(0);
+	});
+	await expect(inThisProcess("slow", () => slow, { ...given, limitMs: 20 })).rejects.toThrow(
+		"slow did not finish in 0.02 s",
+	);
+	untouched();
+	await expect(quiet()).rejects.toThrow("slow ran out of its time earlier and is still running in this process");
+	end();
+	await slow;
+	expect(await quiet()).toEqual({ stdout: "", stderr: "", code: 0 });
+
+	// A directory that is not there fails before the command starts, and leaves the process as it was.
+	await expect(
+		quiet().then(() => inThisProcess("nowhere", async () => 0, { ...given, cwd: join(tmpdir(), "mainworthy-absent") })),
+	).rejects.toThrow();
+	untouched();
+	expect(await quiet()).toEqual({ stdout: "", stderr: "", code: 0 });
 });
 
 test("generated flags handle booleans, numbers, repeated arrays and union fields", async () => {
