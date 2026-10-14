@@ -137,34 +137,40 @@ struct SuiteScreenTests {
 		#expect(screen.saved?.version == 1 && document.version == 1 && document.content.title == "My saved title")
 	}
 
-	@Test("drilling into folders, searching and filtering")
+	@Test("drilling into folders, searching in one or everywhere, and listing a tag")
 	func browsing() async throws {
 		let screen = SuiteScreen(project: try await Live.signedIn().project(try await Live.project()))
-		await screen.show(.root)
-		#expect(screen.loading == .done && screen.children.map(\.name).contains("Checkout"))
-		#expect(!screen.showsCases)
-		let checkout = try #require(screen.children.first { $0.name == "Checkout" })
-		await screen.show(.folder(checkout))
-		#expect(screen.children.map(\.name) == ["Coupons", "Cart"])
-		let coupons = try #require(screen.children.first { $0.name == "Coupons" })
-		await screen.show(.folder(coupons))
-		#expect(screen.cases.count == 2 && screen.children.isEmpty)
-		await screen.up()
-		#expect(screen.place == .folder(checkout))
-		await screen.show(.all, text: "password")
-		#expect(screen.cases.map(\.title) == ["Password reset restores access"])
-		await screen.show(.all, tag: "regression")
-		#expect(screen.cases.count == 3)
+		await screen.loadTree()
+		#expect(screen.tree == .done && screen.children(of: nil).map(\.name).contains("Checkout"))
+		#expect(screen.tags.contains { $0.name == "regression" })
+		let checkout = try #require(screen.children(of: nil).first { $0.name == "Checkout" })
+		#expect(screen.children(of: checkout).map(\.name) == ["Coupons", "Cart"])
+		await screen.load(CaseQuery(folder: checkout.path))
+		#expect(screen.listing(CaseQuery(folder: checkout.path))?.cases.isEmpty == true)
+		let coupons = try #require(screen.children(of: checkout).first { $0.name == "Coupons" })
+		await screen.load(CaseQuery(folder: coupons.path))
+		#expect(screen.listing(CaseQuery(folder: coupons.path))?.cases.count == 2 && screen.children(of: coupons).isEmpty)
+		// A search in a folder is of everything under it.
+		let expired = CaseQuery(folder: checkout.path, deep: true, text: "expired")
+		await screen.load(expired)
+		#expect(screen.listing(expired)?.cases.map(\.title) == ["Expired coupon is rejected"])
+		await screen.load(CaseQuery(folder: checkout.path, deep: true, text: "password"))
+		#expect(screen.listing(CaseQuery(folder: checkout.path, deep: true, text: "password"))?.cases.isEmpty == true)
+		await screen.load(CaseQuery(text: "password"))
+		#expect(screen.listing(CaseQuery(text: "password"))?.cases.map(\.title) == ["Password reset restores access"])
+		await screen.load(CaseQuery(tag: "regression"))
+		#expect(screen.listing(CaseQuery(tag: "regression"))?.cases.count == 3)
 	}
 
 	@Test("drafts keep typing, reserve deleted ids, reorder, save, and read both versions")
 	func editor() async throws {
 		let client = try await Live.signedIn().project(try await Live.project())
 		let screen = SuiteScreen(project: client)
-		await screen.show(.root)
+		await screen.loadTree()
 		let folder = try #require(screen.folders.first { $0.path == "Checkout/Coupons" })
-		await screen.show(.folder(folder))
-		screen.newCase()
+		screen.appear(CaseQuery(folder: folder.path))
+		await screen.load(CaseQuery(folder: folder.path))
+		screen.newCase(in: folder.path)
 		let editor = try #require(screen.editor)
 		editor.content.title = "A native draft"
 		editor.addStep()
@@ -207,8 +213,8 @@ struct SuiteScreenTests {
 	func conflict() async throws {
 		let client = try await Live.signedIn().project(try await Live.project())
 		let screen = SuiteScreen(project: client)
-		await screen.show(.all)
-		let ref = try #require(screen.cases.first?.ref)
+		await screen.load(.all)
+		let ref = try #require(screen.listing(.all)?.cases.first?.ref)
 		await screen.openCase(ref)
 		guard case .read(let opened) = screen.document(ref) else { Issue.record("not opened"); return }
 		await screen.edit(opened)
@@ -255,8 +261,8 @@ struct SuiteScreenTests {
 		workspace.open(try #require(account.projects.first { $0.key == second }))
 		let current = try #require(workspace.suite)
 		#expect(current !== original && current.editor == nil)
-		await current.show(.all)
-		#expect(current.cases.count == 6)
+		await current.load(.all)
+		#expect(current.listing(.all)?.cases.count == 6)
 		#expect(original.editor?.content.title == "Only in the first project")
 	}
 
@@ -267,17 +273,18 @@ struct SuiteScreenTests {
 			["op": "create", "body": ["title": .string("Case \(n)")]]
 		})])
 		let screen = SuiteScreen(project: client)
-		await screen.show(.all)
-		#expect(screen.cases.count == 100 && screen.hasMore)
-		await screen.more()
-		#expect(screen.cases.count == 108 && !screen.hasMore)
-		let ref = try #require(screen.cases.last?.ref)
+		screen.appear(.all)
+		await screen.load(.all)
+		#expect(screen.listing(.all)?.cases.count == 100 && screen.listing(.all)?.hasMore == true)
+		await screen.more(.all)
+		#expect(screen.listing(.all)?.cases.count == 108 && screen.listing(.all)?.hasMore == false)
+		let ref = try #require(screen.listing(.all)?.cases.last?.ref)
 		await screen.openCase(ref)
 		let _: JSONValue = try await client.server.write("propose", in: client.key,
 			["edits": [["op": "edit", "case": .string(ref), "base": 1, "body": ["title": "Updated elsewhere"]]]])
 		await screen.refresh()
-		#expect(screen.cases.count == 108 && !screen.hasMore)
-		#expect(screen.cases.last?.title == "Updated elsewhere")
+		#expect(screen.listing(.all)?.cases.count == 108 && screen.listing(.all)?.hasMore == false)
+		#expect(screen.listing(.all)?.cases.last?.title == "Updated elsewhere")
 		guard case .read(let latest) = screen.document(ref) else { Issue.record("not opened"); return }
 		#expect(latest.version == 2 && latest.content.title == "Updated elsewhere")
 	}
@@ -290,19 +297,24 @@ struct SuiteReadOrderingTests {
 		private var held: CheckedContinuation<Void, Never>?
 		private var waiting: CheckedContinuation<Void, Never>?
 		private var arrived = false
+		private var renamed: String?
 
 		func waitForRead() async {
 			if arrived { return }
 			await withCheckedContinuation { waiting = $0 }
 		}
 		func release() { held?.resume(); held = nil }
+		/// Later reads of "old" are answered with this title, the first one is held.
+		func answer(old title: String) { renamed = title }
 
 		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
 			let input = try JSONDecoder().decode(JSONValue.self, from: request.httpBody ?? Data())
 			var result = #"{"items":[]}"#
 			if input["in"]?.string == "cases" {
-				let search = input["text"]?.string ?? ""
-				if search == "old" {
+				var search = input["text"]?.string ?? ""
+				if search == "old", let renamed {
+					search = renamed
+				} else if search == "old" {
 					await withCheckedContinuation { continuation in
 						held = continuation
 						arrived = true
@@ -361,20 +373,22 @@ struct SuiteReadOrderingTests {
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
 			secrets: MemoryStore(), transport: transport)
 		let screen = SuiteScreen(project: server.project("shop"))
-		await screen.show(.all)
-		#expect(screen.hasMore)
-		let folder = SuiteFolder(try JSONDecoder().decode(Wire.SuiteFolder.self,
-			from: Data(#"{"id":1,"parent":null,"name":"Folder","path":"Folder","cases":1,"state":"active"}"#.utf8)))
-		let selecting = Task {
-			await screen.show(selection == "folder" ? .folder(folder) : .all,
-				text: selection == "search" ? "match" : "", tag: selection == "tag" ? "regression" : nil)
+		await screen.load(.all)
+		#expect(screen.listing(.all)?.hasMore == true)
+		let query = switch selection {
+		case "folder": CaseQuery(folder: "Folder")
+		case "search": CaseQuery(text: "match")
+		default: CaseQuery(tag: "regression")
 		}
+		let selecting = Task { await screen.load(query) }
 		await transport.waitForRead()
-		await screen.more()
+		await screen.more(query)
 		await transport.release()
 		await selecting.value
 		#expect(await transport.cursors == 0)
-		#expect(screen.loading == .done && screen.cases.map(\.title) == ["match"])
+		#expect(screen.listing(query)?.loading == .done && screen.listing(query)?.cases.map(\.title) == ["match"])
+		// The listing it was opened over keeps its own cursor.
+		#expect(screen.listing(.all)?.hasMore == true)
 	}
 
 	@Test("one next-page read runs at a time and a refresh invalidates an older page", arguments: [false, true])
@@ -383,30 +397,159 @@ struct SuiteReadOrderingTests {
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
 			secrets: MemoryStore(), transport: transport)
 		let screen = SuiteScreen(project: server.project("shop"))
-		await screen.show(.all)
-		let page = Task { await screen.more() }
+		screen.appear(.all)
+		await screen.load(.all)
+		let page = Task { await screen.more(.all) }
 		await transport.waitForRead()
 		if refresh { await screen.refresh() }
-		await screen.more()
+		await screen.more(.all)
 		await transport.release()
 		await page.value
 		#expect(await transport.cursors == (refresh ? 2 : 1))
-		#expect(screen.loading == .done && screen.cases.map(\.title) == ["match"] && !screen.hasMore)
+		let listing = try #require(screen.listing(.all))
+		#expect(listing.loading == .done && listing.cases.map(\.title) == ["match"] && !listing.hasMore)
 	}
 
-	@Test("a slow search cannot replace a newer selection")
+	@Test("a slow read cannot replace a newer read of the same query")
 	func overtaken() async throws {
 		let transport = Delayed()
 		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
 			secrets: MemoryStore(), transport: transport)
 		let screen = SuiteScreen(project: server.project("shop"))
-		let old = Task { await screen.show(.all, text: "old") }
+		let query = CaseQuery(text: "old")
+		screen.appear(query)
+		let old = Task { await screen.load(query) }
 		await transport.waitForRead()
-		await screen.show(.all, text: "new")
-		#expect(screen.cases.map(\.title) == ["new"])
+		// A change is told of while the first read waits: the read that follows it is the one kept.
+		await transport.answer(old: "newer")
+		await screen.refresh()
+		#expect(screen.listing(query)?.cases.map(\.title) == ["newer"])
 		await transport.release()
 		await old.value
-		#expect(screen.text == "new" && screen.cases.map(\.title) == ["new"])
+		#expect(screen.listing(query)?.cases.map(\.title) == ["newer"])
+	}
+}
+
+@Suite("The Cases tab's kept listings")
+@MainActor
+struct SuiteCacheTests {
+	/// A project of one folder with ten subfolders of one case each, and one empty subfolder. Counts each read.
+	actor Counting: Transport {
+		private(set) var reads: [String] = []
+		private var held: CheckedContinuation<Void, Never>?
+		private var holding = false
+		func hold() { holding = true }
+		func release() { holding = false; held?.resume(); held = nil }
+		func count(_ prefix: String) -> Int { reads.filter { $0.hasPrefix(prefix) }.count }
+
+		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			let input = try JSONDecoder().decode(JSONValue.self, from: request.httpBody ?? Data())
+			let result: String
+			switch input["in"]?.string {
+			case "folders":
+				reads.append("folders")
+				let children = (1...11).map { n in
+					#"{"id":\#(n + 1),"parent":1,"name":"F\#(n)","path":"Top/F\#(n)","cases":\#(n == 11 ? 0 : 1),"state":"active"}"#
+				}
+				result = #"{"items":[{"id":1,"parent":null,"name":"Top","path":"Top","cases":0,"state":"active"},"# +
+					children.joined(separator: ",") + "]}"
+			case "tags":
+				reads.append("tags")
+				result = #"{"items":[{"tag":"smoke","n":1}]}"#
+			default:
+				let folder = input["folder"]?.string ?? ""
+				let text = input["text"]?.string ?? ""
+				reads.append("cases \(folder) \(text)")
+				if holding { await withCheckedContinuation { held = $0 } }
+				result = #"{"items":[{"ref":"C-\#(reads.count)","title":"\#(folder) \#(text)","tags":[],"proof":{"human":null,"auto":null,"agent":null}}],"cursor":null}"#
+			}
+			return (Data("{\"ok\":true,\"result\":\(result)}".utf8),
+				HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+		}
+		func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+			throw URLError(.unsupportedURL)
+		}
+	}
+
+	private func screen(_ transport: Counting) throws -> SuiteScreen {
+		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
+			secrets: MemoryStore(), transport: transport)
+		return SuiteScreen(project: server.project("shop"))
+	}
+
+	@Test("a folder opened again shows what was read without reading it, until a change is told of")
+	func revisit() async throws {
+		let transport = Counting()
+		let screen = try screen(transport)
+		let folder = CaseQuery(folder: "Top/F1")
+		screen.appear(folder)
+		await screen.load(folder)
+		screen.disappear(folder)
+		screen.appear(folder)
+		await screen.load(folder)
+		#expect(await transport.count("cases Top/F1") == 1)
+		#expect(screen.listing(folder)?.loading == .done)
+		// A change: the folder on screen is read again, one that was left is kept and read when it is opened.
+		let other = CaseQuery(folder: "Top/F2")
+		await screen.load(other)
+		await screen.refresh()
+		#expect(await transport.count("cases Top/F1") == 2)
+		#expect(await transport.count("cases Top/F2") == 1)
+		#expect(screen.listing(other)?.cases.count == 1)
+		await screen.load(other)
+		#expect(await transport.count("cases Top/F2") == 2)
+		// The refresh read the tree, which is current until the next change.
+		await screen.loadTree()
+		#expect(await transport.count("folders") == 1)
+	}
+
+	@Test("a page opened while its read is under way waits for that read and sends none of its own")
+	func shared() async throws {
+		let transport = Counting()
+		let screen = try screen(transport)
+		await transport.hold()
+		let folder = CaseQuery(folder: "Top/F1")
+		let first = Task { await screen.load(folder) }
+		while await transport.count("cases") == 0 { await Task.yield() }
+		let second = Task { await screen.load(folder) }
+		await Task.yield()
+		await transport.release()
+		await first.value
+		await second.value
+		#expect(await transport.count("cases Top/F1") == 1)
+		#expect(screen.listing(folder)?.loading == .done)
+	}
+
+	@Test("a folder's subfolders with cases are read ahead, a few of them, and an empty one is not")
+	func readAhead() async throws {
+		let transport = Counting()
+		let screen = try screen(transport)
+		await screen.loadTree()
+		let top = try #require(screen.children(of: nil).first)
+		let children = screen.children(of: top)
+		#expect(children.count == 11)
+		await screen.readAhead(children)?.value
+		#expect(await transport.count("cases") == SuiteScreen.readAhead)
+		#expect(screen.listing(CaseQuery(folder: "Top/F1"))?.loading == .done)
+		#expect(screen.listing(CaseQuery(folder: "Top/F11")) == nil)
+		// What was read ahead is not read again.
+		await screen.readAhead(children)?.value
+		await screen.load(CaseQuery(folder: "Top/F1"))
+		#expect(await transport.count("cases") == 10)
+	}
+
+	@Test("the listings kept are bounded, the least recently shown dropped first and one on screen never")
+	func bounded() async throws {
+		let transport = Counting()
+		let screen = try screen(transport)
+		let shown = CaseQuery(text: "shown")
+		screen.appear(shown)
+		await screen.load(shown)
+		for n in 0...SuiteScreen.kept { await screen.load(CaseQuery(text: "q\(n)")) }
+		#expect(screen.listing(shown) != nil)
+		#expect(screen.listing(CaseQuery(text: "q0")) == nil)
+		#expect(screen.listing(CaseQuery(text: "q1")) != nil)
+		#expect(screen.listing(CaseQuery(text: "q\(SuiteScreen.kept)")) != nil)
 	}
 }
 

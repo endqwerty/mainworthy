@@ -49,6 +49,12 @@ final class SuiteUITests: XCTestCase {
 		result.typeText(expected)
 	}
 
+	/// The system's back gesture: a drag that starts at the left edge of the screen.
+	@MainActor private func swipeBack(_ app: XCUIApplication) {
+		let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.5))
+		edge.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
+	}
+
 	@MainActor func testBrowseCreateEditAndHistory() async throws {
 		XCUIDevice.shared.orientation = .portrait
 		let project = try await makeProject()
@@ -58,34 +64,66 @@ final class SuiteUITests: XCTestCase {
 		try signIn(app)
 		app.buttons["project-menu"].tap()
 		app.buttons[project].tap()
-		app.tabBars.buttons["Suite"].tap()
+		app.tabBars.buttons["Cases"].tap()
 		XCTAssertTrue(app.buttons["folder-Checkout"].waitForExistence(timeout: 10))
 		shot("folders")
 		app.buttons["folder-Checkout"].tap()
+		XCTAssertTrue(app.navigationBars["Checkout"].waitForExistence(timeout: 5))
 		app.buttons["folder-Checkout/Coupons"].tap()
 		let expired = app.staticTexts["Expired coupon is rejected"]
 		XCTAssertTrue(expired.waitForExistence(timeout: 10))
+		shot("folder")
 		expired.tap()
 		XCTAssertTrue(app.staticTexts["2. Apply the coupon OLD10"].waitForExistence(timeout: 10))
 		XCTAssertTrue(app.staticTexts["Error \"Coupon expired\"; total unchanged"].exists)
 		shot("case")
-		app.navigationBars.buttons.firstMatch.tap()
-		let folderSearch = app.textFields["suite-search"]
-		folderSearch.tap()
-		folderSearch.typeText("expired")
+		// Back, as in Files: a swipe from the left edge, twice, to the folder above.
+		swipeBack(app)
+		XCTAssertTrue(app.navigationBars["Coupons"].waitForExistence(timeout: 5))
+		swipeBack(app)
+		XCTAssertTrue(app.navigationBars["Checkout"].waitForExistence(timeout: 5))
+		// A folder opened again shows its cases from what was read, with no spinner.
+		app.buttons["folder-Checkout/Coupons"].tap()
+		XCTAssertTrue(expired.waitForExistence(timeout: 2))
+		XCTAssertFalse(app.activityIndicators.firstMatch.exists)
+		// The magnifier searches the folder it was opened in, or everywhere.
+		app.buttons["suite-search"].tap()
+		let search = app.searchFields.firstMatch
+		XCTAssertTrue(search.waitForExistence(timeout: 5))
+		search.typeText("expired")
 		XCTAssertTrue(expired.waitForExistence(timeout: 10))
-		app.buttons["suite-up"].tap()
-		XCTAssertEqual(folderSearch.value as? String, "Search cases")
-		// Search the whole suite, then return to the folder where the new case belongs.
-		app.buttons["suite-up"].tap()
-		let search = app.textFields["suite-search"]
-		search.tap()
-		search.typeText("password")
+		shot("search")
+		search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 7) + "password")
+		XCTAssertTrue(app.staticTexts["No Results for \u{201C}password\u{201D}"].waitForExistence(timeout: 10))
+		app.buttons["Everywhere"].tap()
 		XCTAssertTrue(app.staticTexts["Password reset restores access"].waitForExistence(timeout: 10))
-		XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'suite-case-'" )).count, 1)
-		search.tap()
-		search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 8))
-		XCTAssertTrue(app.buttons["folder-Checkout"].waitForExistence(timeout: 10))
+		XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'suite-case-'")).count, 1)
+		// A result opens over the search, and going back finds the search as it was.
+		app.staticTexts["Password reset restores access"].tap()
+		XCTAssertTrue(app.staticTexts["case-version"].waitForExistence(timeout: 10))
+		swipeBack(app)
+		XCTAssertTrue(app.staticTexts["Password reset restores access"].waitForExistence(timeout: 5))
+		XCTAssertEqual(search.value as? String, "password")
+		// Closing the search goes back to the folder, and the next search starts empty.
+		app.buttons["Close"].tap()
+		XCTAssertTrue(app.buttons["suite-search"].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.navigationBars["Coupons"].exists)
+		app.buttons["suite-search"].tap()
+		XCTAssertTrue(search.waitForExistence(timeout: 5))
+		XCTAssertNotEqual(search.value as? String, "password")
+		app.buttons["Close"].tap()
+		XCTAssertTrue(app.buttons["suite-search"].waitForExistence(timeout: 5))
+		// A tag is browsed from the top of the tab.
+		swipeBack(app)
+		swipeBack(app)
+		XCTAssertTrue(app.buttons["tag-regression"].waitForExistence(timeout: 5))
+		app.buttons["tag-regression"].tap()
+		XCTAssertTrue(app.navigationBars["#regression"].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'suite-case-'")).element(boundBy: 2)
+			.waitForExistence(timeout: 10))
+		XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'suite-case-'")).count, 3)
+		shot("tag")
+		swipeBack(app)
 		app.buttons["folder-Checkout"].tap()
 		app.buttons["folder-Checkout/Coupons"].tap()
 		app.buttons["suite-new"].tap()

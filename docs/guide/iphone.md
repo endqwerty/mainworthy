@@ -3,7 +3,7 @@
 Work with Mainworthy from your phone in a native app.
 This page says how to install the app, how to sign in and what it does today.
 
-The app has the queue, planned runs, the suite, changes and your sessions (issue #171). What an admin does,
+The app has the queue, planned runs, the cases, changes and your sessions (issue #171). What an admin does,
 inviting people, tokens and the project's policy, is not in the app: open the instance in the phone's browser,
 which gets [a layout of its own](./keyboard.md#on-a-phone).
 
@@ -130,13 +130,21 @@ The list is yours on the instance, whichever project is open. Pull down to refre
 passwords and passkeys are managed in the web app.
 ## Browse and write cases
 
-1. Open **Suite**. Drill into a folder or choose **All cases**. Search asks the server for matching cases;
-   **Tag** filters them. Scroll to the end to read the next page. **Back to folders** clears the search and tag.
+1. Open **Cases**. It works like the Files app: **All cases**, the top folders, and the most used tags, with
+   **All tags** for the rest. A folder opens as its own page with its subfolders above its own cases. Swipe from
+   the left edge of the screen, or press the back button, to go up. Scroll to the end of a list to read the next
+   page. A mark at the end of a case's row shows its worst result on the current version: a cross for a failure
+   or an error, a triangle for blocked, a tick for a pass.
+   A list you opened before shows at once and is read again in the background after a change. Pull down to read
+   it now.
+   The magnifier at the top searches for words of a case or its number, such as `C-12`. Opened in a folder, it
+   searches that folder and its subfolders; in a tag, the cases with that tag. Press **Everywhere** to search the
+   whole project. Going back from the search clears it.
 2. Open a case to read its version, preconditions, steps and who may run it. **History** lists who wrote each
    version, when and why. Saved versions are read-only. **Open current case** opens the editable page.
    Folder and tags show the current placement.
 3. If you may produce evidence, press **+** to write a case in the folder you are in, or **Edit case** on its
-   page. Type a title, preconditions and steps. Each step has an action and an optional expected result.
+   page. A case written from the top of the tab, a tag or **All cases** goes to **Unsorted**. Type a title, preconditions and steps. Each step has an action and an optional expected result.
    **Add step** adds one; **Edit** lets you remove or reorder them. The title limit is 300 UTF-16 units and
    the optional reason limit is 500. An emoji may use two units. Save stays disabled until the limits and
    whitespace warnings are resolved. The server sets no separate limit on preconditions, step text or the

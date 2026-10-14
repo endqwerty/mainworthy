@@ -2,126 +2,243 @@ import Foundation
 import MainworthyClient
 import Observation
 
+/// One list of cases the Cases tab can show: a folder's own cases, every case, a tag's, or a search.
+public struct CaseQuery: Hashable, Sendable {
+	public let folder: String?
+	/// With a folder: its subfolders' cases too. A search in a folder is of everything under it.
+	public let deep: Bool
+	public let text: String
+	public let tag: String?
+
+	public init(folder: String? = nil, deep: Bool = false, text: String = "", tag: String? = nil) {
+		self.folder = folder
+		self.deep = deep && folder != nil
+		self.text = text
+		self.tag = tag
+	}
+
+	public static let all = CaseQuery()
+}
+
+/// What has been read of one query. A listing is kept after its page is left, so going back to it shows it at once.
+public struct CaseListing: Equatable, Sendable {
+	public internal(set) var cases: [SuiteCase] = []
+	public internal(set) var hasMore = false
+	public internal(set) var loading = SuiteScreen.Loading.first
+	var next: String?
+	/// The screen's generation when this was read. A change told of since makes it stale.
+	var generation = -1
+}
+
 @MainActor @Observable
 public final class SuiteScreen: ProjectScreen {
-	public enum Place: Equatable, Sendable {
-		case root, all, folder(SuiteFolder)
-		public var path: String? { if case .folder(let folder) = self { folder.path } else { nil } }
-	}
 	public enum Loading: Equatable, Sendable { case first, done, failed(String) }
 	public enum Document: Equatable, Sendable { case reading, read(CaseDocument), failed(String) }
 	public enum History: Equatable, Sendable { case reading, read([CaseVersion]), failed(String) }
-	public private(set) var place = Place.root
-	public private(set) var text = ""
-	public var searchText = ""
-	public private(set) var tag: String?
 	public private(set) var folders: [SuiteFolder] = []
 	public private(set) var tags: [SuiteTag] = []
-	public private(set) var cases: [SuiteCase] = []
-	public private(set) var loading = Loading.first
-	public private(set) var hasMore = false
+	/// The folder tree and the tags, which every page of the tab reads.
+	public private(set) var tree = Loading.first
+	/// What is typed in the search, kept here so that it outlives the view.
+	public var searchText = ""
+	public var searchEverywhere = false
 	public private(set) var notice: String?
 	public private(set) var editor: CaseEditorScreen?
 	public private(set) var saved: CaseStamp?
 	public private(set) var preparingEditor = false
 	private let project: ProjectClient
-	private var next: String?
-	private var reads = 0
-	private var firstRead: Int?
-	private var pageRead: Int?
+	private var listings: [CaseQuery: CaseListing] = [:]
+	/// Bumped by each change the stream tells of. A listing or tree read before it is stale.
+	private var generation = 0
+	private var treeGeneration = -1
+	private var treeReads = 0
+	private var treePending: (generation: Int, task: Task<Void, Never>)?
+	private var reads: [CaseQuery: Int] = [:]
+	private var firstReads: [CaseQuery: Int] = [:]
+	private var pageReads: [CaseQuery: Int] = [:]
+	private var pending: [CaseQuery: (generation: Int, task: Task<Void, Never>)] = [:]
+	/// The queries a page on screen shows, with how many pages show each.
+	private var visible: [CaseQuery: Int] = [:]
+	private var used: [CaseQuery: Int] = [:]
+	private var uses = 0
 	private var editorReads = 0
 	private var documentReads: [String: Int] = [:]
 	private var documents: [String: Document] = [:]
 	private var histories: [String: History] = [:]
 	private var historyReads: [String: Int] = [:]
 
+	/// How many listings are kept besides those on screen, the least recently shown dropped first.
+	static let kept = 40
+	/// How many of a folder's subfolders are read ahead, so that opening one shows its cases at once.
+	static let readAhead = 8
+
 	package init(project: ProjectClient) { self.project = project }
 
-	public var children: [SuiteFolder] {
-		let parent: Int? = if case .folder(let folder) = place { folder.id } else { nil }
-		return folders.filter { $0.parent == parent }
+	public func children(of folder: SuiteFolder?) -> [SuiteFolder] {
+		folders.filter { $0.parent == folder?.id }
 	}
-	public var nextPageID: String? {
-		firstRead == nil ? next.map { "\(reads):\($0)" } : nil
+	/// The folder as last read, or nil when it is no longer an active folder.
+	public func current(_ folder: SuiteFolder) -> SuiteFolder? {
+		folders.first { $0.id == folder.id }
 	}
-	public var showsCases: Bool { place != .root || !text.isEmpty || tag != nil }
-	public var showsFolders: Bool { place != .all && text.isEmpty && tag == nil }
-
-	public func show(_ place: Place, text: String = "", tag: String? = nil) async {
-		guard self.place != place || self.text != text || self.tag != tag || loading != .done else { return }
-		self.place = place
-		self.text = text
-		searchText = text
-		self.tag = tag
-		cases = []
-		next = nil
-		hasMore = false
-		notice = nil
-		loading = .first
-		await read()
+	public func listing(_ query: CaseQuery) -> CaseListing? { listings[query] }
+	public func nextPageID(_ query: CaseQuery) -> String? {
+		guard firstReads[query] == nil, let listing = listings[query] else { return nil }
+		return listing.next.map { "\(reads[query] ?? 0):\($0)" }
 	}
 
-	public func up() async {
-		if case .folder(let folder) = place, let parent = folders.first(where: { $0.id == folder.parent }) {
-			await show(.folder(parent))
-		} else { await show(.root) }
+	// MARK: Reading
+
+	/// A page shows this query: it is read now unless what is kept is current, and again at each change.
+	public func appear(_ query: CaseQuery) {
+		visible[query, default: 0] += 1
+		Task { await load(query) }
+	}
+	public func disappear(_ query: CaseQuery) {
+		let left = (visible[query] ?? 0) - 1
+		visible[query] = left == 0 ? nil : left
 	}
 
+	/// Reads the query unless what is kept is current. A read already under way is waited for, not repeated.
+	public func load(_ query: CaseQuery) async {
+		uses += 1
+		used[query] = uses
+		if let listing = listings[query], listing.generation == generation, listing.loading == .done { return }
+		if let under = pending[query], under.generation == generation {
+			await under.task.value
+			return
+		}
+		if case .failed = listings[query]?.loading { listings[query]?.loading = .first }
+		let task = Task { await read(query) }
+		pending[query] = (generation, task)
+		await task.value
+		if pending[query]?.task == task { pending[query] = nil }
+		forget()
+	}
+
+	/// Reads the folder tree and the tags unless they are current.
+	public func loadTree() async {
+		if tree == .done, treeGeneration == generation { return }
+		if let under = treePending, under.generation == generation {
+			await under.task.value
+			return
+		}
+		if case .failed = tree { tree = .first }
+		let task = Task { await readTree() }
+		treePending = (generation, task)
+		await task.value
+		if treePending?.task == task { treePending = nil }
+	}
+
+	/// Reads the first page of the folders' own cases ahead, a few at a time, so that opening one is instant.
+	@discardableResult public func readAhead(_ folders: [SuiteFolder]) -> Task<Void, Never>? {
+		let wanted = folders.filter { $0.cases > 0 && listings[CaseQuery(folder: $0.path)] == nil }
+			.prefix(Self.readAhead)
+		guard !wanted.isEmpty else { return nil }
+		return Task {
+			for folder in wanted where listings[CaseQuery(folder: folder.path)] == nil {
+				await load(CaseQuery(folder: folder.path))
+			}
+		}
+	}
+
+	/// What the change stream asks for: every listing becomes stale, and the ones on screen are read again.
 	public func refresh() async {
-		await read()
+		await rereadLists()
 		// Latest pages follow the stream. An explicit historic version, and an editor's source, stay as opened.
 		for key in Array(documents.keys) where !key.contains("@") { await openCase(key) }
 		for ref in Array(histories.keys) { await readHistory(ref) }
 	}
 
-	public func more() async {
-		guard loading == .done, firstRead == nil, pageRead == nil, hasMore, let cursor = next else { return }
-		let mine = reads
-		pageRead = mine
-		defer { if pageRead == mine { pageRead = nil } }
-		do {
-			let page = try await project.cases(folder: place.path, text: text, tag: tag, after: cursor)
-			guard mine == reads else { return }
-			let known = Set(cases.map(\.ref))
-			cases += page.items.filter { !known.contains($0.ref) }
-			next = page.next
-			hasMore = page.next != nil
-		} catch { if mine == reads { notice = error.shown } }
+	private func rereadLists() async {
+		generation += 1
+		await loadTree()
+		for query in Array(visible.keys) { await load(query) }
 	}
 
-	private func read() async {
-		reads += 1
-		let mine = reads
-		firstRead = mine
-		pageRead = nil
-		defer { if firstRead == mine { firstRead = nil } }
-		let selected = place
-		let search = text
-		let filter = tag
-		let wanted = cases.count
+	public func more(_ query: CaseQuery) async {
+		guard let listing = listings[query], listing.loading == .done, firstReads[query] == nil,
+			pageReads[query] == nil, listing.hasMore, let cursor = listing.next else { return }
+		let mine = reads[query] ?? 0
+		pageReads[query] = mine
+		defer { if pageReads[query] == mine { pageReads[query] = nil } }
 		do {
-			async let tree = project.folders()
-			async let labels = project.tags()
-			var page = try await project.cases(folder: selected.path, text: search, tag: filter)
+			let page = try await project.cases(folder: query.folder, deep: query.deep, text: query.text, tag: query.tag,
+				after: cursor)
+			guard mine == reads[query], var now = listings[query] else { return }
+			let known = Set(now.cases.map(\.ref))
+			now.cases += page.items.filter { !known.contains($0.ref) }
+			now.next = page.next
+			now.hasMore = page.next != nil
+			listings[query] = now
+		} catch { if mine == reads[query] { notice = error.shown } }
+	}
+
+	private func read(_ query: CaseQuery) async {
+		let mine = (reads[query] ?? 0) + 1
+		reads[query] = mine
+		firstReads[query] = mine
+		pageReads[query] = nil
+		defer { if firstReads[query] == mine { firstReads[query] = nil } }
+		let generation = generation
+		// A listing read past its first page is read as far again.
+		let wanted = listings[query]?.cases.count ?? 0
+		if listings[query] == nil { listings[query] = CaseListing() }
+		do {
+			var page = try await project.cases(folder: query.folder, deep: query.deep, text: query.text, tag: query.tag)
 			var items = page.items
 			while let cursor = page.next, items.count < wanted {
-				page = try await project.cases(folder: selected.path, text: search, tag: filter, after: cursor)
+				page = try await project.cases(folder: query.folder, deep: query.deep, text: query.text, tag: query.tag,
+					after: cursor)
 				items += page.items
 			}
-			let (newFolders, newTags) = try await (tree, labels)
-			guard mine == reads else { return }
-			folders = newFolders
-			tags = newTags
-			cases = items
-			next = page.next
-			hasMore = page.next != nil
-			loading = .done
+			guard mine == reads[query] else { return }
+			listings[query] = CaseListing(cases: items, hasMore: page.next != nil, loading: .done, next: page.next,
+				generation: generation)
 		} catch is CancellationError {
 		} catch {
-			guard mine == reads else { return }
-			if loading == .done { notice = error.shown } else { loading = .failed(error.shown) }
+			guard mine == reads[query] else { return }
+			if listings[query]?.loading == .done { notice = error.shown } else { listings[query]?.loading = .failed(error.shown) }
 		}
 	}
+
+	private func readTree() async {
+		treeReads += 1
+		let mine = treeReads
+		let generation = generation
+		do {
+			async let labels = project.tags()
+			let newFolders = try await project.folders()
+			let newTags = try await labels
+			guard mine == treeReads else { return }
+			folders = newFolders
+			tags = newTags
+			tree = .done
+			treeGeneration = generation
+		} catch is CancellationError {
+		} catch {
+			guard mine == treeReads else { return }
+			if tree == .done { notice = error.shown } else { tree = .failed(error.shown) }
+		}
+	}
+
+	/// Drops the least recently shown listings beyond what is kept. One on screen, or being read, stays.
+	private func forget() {
+		let spare = listings.keys.filter { visible[$0] == nil && pending[$0] == nil }
+		guard spare.count > Self.kept else { return }
+		for query in spare.sorted(by: { (used[$0] ?? 0) < (used[$1] ?? 0) }).prefix(spare.count - Self.kept) {
+			listings[query] = nil
+			used[query] = nil
+		}
+	}
+
+	/// The search is over: what was typed is cleared for the next one.
+	public func endSearch() {
+		searchText = ""
+		searchEverywhere = false
+	}
+
+	// MARK: Cases
 
 	private static func key(_ ref: String, _ version: Int?) -> String {
 		version.map { "\(ref)@\($0)" } ?? ref
@@ -159,12 +276,13 @@ public final class SuiteScreen: ProjectScreen {
 		}
 	}
 
-	public func newCase() {
+	/// A new case, in the folder given. Without one the server files it in Unsorted.
+	public func newCase(in folder: String? = nil) {
 		guard editor == nil else { return }
 		editorReads += 1
 		preparingEditor = false
 		saved = nil
-		editor = CaseEditorScreen(project: project, source: .create(folder: place.path))
+		editor = CaseEditorScreen(project: project, source: .create(folder: folder))
 	}
 	public func edit(_ opened: CaseDocument) async {
 		guard !opened.isHistorical, editor == nil, !preparingEditor else { return }
@@ -192,7 +310,7 @@ public final class SuiteScreen: ProjectScreen {
 			documents[Self.key(stamp.ref, stamp.version)] = .read(document)
 			saved = stamp
 			self.editor = nil
-			await read()
+			await rereadLists()
 		}
 	}
 }

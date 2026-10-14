@@ -50,7 +50,7 @@ public struct CaseProof: Equatable, Sendable {
 	public var sentence: String { "\(method): \(outcome.word)\(current ? "" : " on an earlier version")" }
 }
 
-public struct SuiteFolder: Identifiable, Equatable, Sendable {
+public struct SuiteFolder: Identifiable, Hashable, Sendable {
 	public let id: Int
 	public let parent: Int?
 	public let name: String
@@ -163,11 +163,12 @@ package struct SuiteSubmission: Sendable {
 }
 
 extension ProjectClient {
-	package func cases(folder: String? = nil, text: String = "", tag: String? = nil, after: String? = nil,
-		limit: Int = 100
+	package func cases(folder: String? = nil, deep: Bool = false, text: String = "", tag: String? = nil,
+		after: String? = nil, limit: Int = 100
 	) async throws -> (items: [SuiteCase], next: String?) {
 		var input: [String: JSONValue] = ["in": "cases", "limit": .number(Double(limit))]
 		if let folder { input["folder"] = .string(folder) }
+		if deep, folder != nil { input["deep"] = true }
 		if !text.isEmpty { input["text"] = .string(text) }
 		if let tag { input["tags"] = [.string(tag)] }
 		if let after { input["cursor"] = .string(after) }
