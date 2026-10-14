@@ -692,7 +692,7 @@ still be on its way, and the server records one id once. Then what was typed sin
 or no answer: nothing is sent, and the draft is kept. An effect asks as soon as a draft with such a save is in
 the pane, once for each save, and only settles that save (`settleOnly`): taken as recorded, or sent again;
 nothing typed since goes until the editor is left. So a second tab is on the version the first close made
-before the person types. A page that closes before an answer sends nothing more. Decision 0013, "The ordinary
+as soon as its answer comes, and what the person types meanwhile is kept for the next save. A page that closes before an answer sends nothing more. Decision 0013, "The ordinary
 save asks too", has the reasons and what was turned down.
 
 The first build sent the current text under a new id on `none`. Its review (B1) held the first save on its way,
