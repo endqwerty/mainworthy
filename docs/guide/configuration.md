@@ -77,7 +77,7 @@ The start is refused, and changes nothing, when `MAINWORTHY_OWNER_WAS` names nob
 
 The new name follows the rule for every name: letters, digits, `.`, `_`, `@` and `-`, starting with a letter or a digit, 64 characters at most. Another one stops the start.
 
-When the new name is already somebody's, the start renames nobody and says so. That person becomes an owner, as they do without the variable.
+When the new name is already somebody's, the start renames nobody and says so. That person becomes an owner, as they do without the variable. When the name is an agent's, a pipeline's or a forgotten person's, the start is refused instead, as it is without the variable.
 
 Nobody else's name can be changed.
 
