@@ -71,8 +71,13 @@ final class SuiteUITests: XCTestCase {
 		XCTAssertTrue(app.staticTexts["Error \"Coupon expired\"; total unchanged"].exists)
 		shot("case")
 		app.navigationBars.buttons.firstMatch.tap()
-		// Search the whole suite, then return to the folder where the new case belongs.
+		let folderSearch = app.textFields["suite-search"]
+		folderSearch.tap()
+		folderSearch.typeText("expired")
+		XCTAssertTrue(expired.waitForExistence(timeout: 10))
 		app.buttons["suite-up"].tap()
+		XCTAssertEqual(folderSearch.value as? String, "Search cases")
+		// Search the whole suite, then return to the folder where the new case belongs.
 		app.buttons["suite-up"].tap()
 		let search = app.textFields["suite-search"]
 		search.tap()
@@ -88,6 +93,11 @@ final class SuiteUITests: XCTestCase {
 		let title = app.textFields["editor-title"]
 		XCTAssertTrue(title.waitForExistence(timeout: 5))
 		title.tap()
+		title.typeText(String(repeating: "x", count: 301))
+		XCTAssertFalse(app.buttons["editor-save"].isEnabled)
+		XCTAssertTrue(app.staticTexts["301/300 UTF-16 units"].exists)
+		shot("title-limit")
+		title.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 301))
 		title.typeText("Coupon can be removed")
 		addStep(app, action: "Apply SAVE10", expected: "Total is lower")
 		addStep(app, action: "Remove SAVE10", expected: "Total returns")
@@ -104,14 +114,19 @@ final class SuiteUITests: XCTestCase {
 		XCTAssertTrue(app.staticTexts["case-version"].waitForExistence(timeout: 15))
 		XCTAssertEqual(app.staticTexts["case-version"].label, "Version 1")
 		XCTAssertTrue(app.staticTexts["Checkout/Coupons"].exists)
+		XCTAssertFalse(app.buttons["case-edit"].exists)
+		app.buttons["case-current"].tap()
+		XCTAssertTrue(app.buttons["case-edit"].waitForExistence(timeout: 10))
 		app.buttons["case-edit"].tap()
 		XCTAssertTrue(title.waitForExistence(timeout: 10))
-		title.tap()
-		title.typeText(" after reload")
+		let pre = app.textFields["editor-pre"]
+		pre.tap()
+		pre.typeText("Start with an empty cart")
 		addStep(app, action: "Reload the cart", expected: "The coupon stays removed")
+		XCTAssertTrue(app.buttons["editor-save"].isEnabled)
 		app.buttons["editor-save"].tap()
-		XCTAssertTrue(app.staticTexts["case-version"].waitForExistence(timeout: 15))
-		XCTAssertEqual(app.staticTexts["case-version"].label, "Version 2")
+		let savedVersion = app.staticTexts["case-version"]
+		XCTAssertTrue(savedVersion.wait(for: \.label, toEqual: "Version 2", timeout: 15))
 		app.buttons["case-history"].tap()
 		XCTAssertTrue(app.buttons["history-version-1"].waitForExistence(timeout: 10))
 		XCTAssertTrue(app.buttons["history-version-2"].exists)
@@ -119,5 +134,6 @@ final class SuiteUITests: XCTestCase {
 		app.buttons["history-version-1"].tap()
 		XCTAssertTrue(app.staticTexts["Coupon can be removed"].waitForExistence(timeout: 10))
 		XCTAssertEqual(app.staticTexts["case-version"].label, "Version 1")
+		XCTAssertFalse(app.buttons["case-edit"].exists)
 	}
 }

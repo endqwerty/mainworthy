@@ -78,6 +78,7 @@ public struct SuiteTag: Identifiable, Equatable, Sendable {
 public struct CaseDocument: Equatable, Sendable {
 	public let ref: String
 	public let version: Int
+	public let isHistorical: Bool
 	public let content: CaseContent
 	public let tags: [String]
 	/// Placement is current even when the document is an older version.
@@ -85,7 +86,8 @@ public struct CaseDocument: Equatable, Sendable {
 	/// Nil means the server did not expose the fields. An edit then omits them to keep the base's values.
 	let readFields: [String: String]?
 
-	init(_ wire: Wire.SuiteDocument) {
+	init(_ wire: Wire.SuiteDocument, isHistorical: Bool = false) {
+		self.isHistorical = isHistorical
 		ref = wire.ref
 		version = wire.version
 		content = CaseContent(
@@ -155,7 +157,7 @@ package struct SuiteSubmission: Sendable {
 			edit = ["op": "edit", "case": .string(opened.ref), "base": .number(Double(opened.version)), "body": .object(body)]
 		}
 		var input: [String: JSONValue] = ["edits": [.object(edit)], "cmd": .string(UUID().uuidString.lowercased())]
-		if !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { input["reason"] = .string(reason) }
+		if !reason.isEmpty { input["reason"] = .string(reason) }
 		self.input = .object(input)
 	}
 }
@@ -187,8 +189,10 @@ extension ProjectClient {
 		var input: [String: JSONValue] = ["refs": [.string(ref)]]
 		if let version { input["version"] = .number(Double(version)) }
 		let reply: [Wire.SuiteDocument] = try await server.read("get", in: key, .object(input))
-		guard let found = reply.first else { throw ClientError.unreadable }
-		return CaseDocument(found)
+		guard let found = reply.first, found.ref == ref, version == nil || found.version == version else {
+			throw ClientError.unreadable
+		}
+		return CaseDocument(found, isHistorical: version != nil)
 	}
 
 	package func caseHistory(_ ref: String) async throws -> [CaseVersion] {

@@ -13,6 +13,7 @@ public final class SuiteScreen: ProjectScreen {
 	public enum History: Equatable, Sendable { case reading, read([CaseVersion]), failed(String) }
 	public private(set) var place = Place.root
 	public private(set) var text = ""
+	public var searchText = ""
 	public private(set) var tag: String?
 	public private(set) var folders: [SuiteFolder] = []
 	public private(set) var tags: [SuiteTag] = []
@@ -26,6 +27,9 @@ public final class SuiteScreen: ProjectScreen {
 	private let project: ProjectClient
 	private var next: String?
 	private var reads = 0
+	private var firstRead: Int?
+	private var pageRead: Int?
+	private var editorReads = 0
 	private var documentReads: [String: Int] = [:]
 	private var documents: [String: Document] = [:]
 	private var histories: [String: History] = [:]
@@ -37,6 +41,9 @@ public final class SuiteScreen: ProjectScreen {
 		let parent: Int? = if case .folder(let folder) = place { folder.id } else { nil }
 		return folders.filter { $0.parent == parent }
 	}
+	public var nextPageID: String? {
+		firstRead == nil ? next.map { "\(reads):\($0)" } : nil
+	}
 	public var showsCases: Bool { place != .root || !text.isEmpty || tag != nil }
 	public var showsFolders: Bool { place != .all && text.isEmpty && tag == nil }
 
@@ -44,8 +51,12 @@ public final class SuiteScreen: ProjectScreen {
 		guard self.place != place || self.text != text || self.tag != tag || loading != .done else { return }
 		self.place = place
 		self.text = text
+		searchText = text
 		self.tag = tag
 		cases = []
+		next = nil
+		hasMore = false
+		notice = nil
 		loading = .first
 		await read()
 	}
@@ -64,9 +75,10 @@ public final class SuiteScreen: ProjectScreen {
 	}
 
 	public func more() async {
-		guard hasMore, let cursor = next else { return }
-		reads += 1
+		guard loading == .done, firstRead == nil, pageRead == nil, hasMore, let cursor = next else { return }
 		let mine = reads
+		pageRead = mine
+		defer { if pageRead == mine { pageRead = nil } }
 		do {
 			let page = try await project.cases(folder: place.path, text: text, tag: tag, after: cursor)
 			guard mine == reads else { return }
@@ -80,6 +92,9 @@ public final class SuiteScreen: ProjectScreen {
 	private func read() async {
 		reads += 1
 		let mine = reads
+		firstRead = mine
+		pageRead = nil
+		defer { if firstRead == mine { firstRead = nil } }
 		let selected = place
 		let search = text
 		let filter = tag
@@ -146,32 +161,36 @@ public final class SuiteScreen: ProjectScreen {
 
 	public func newCase() {
 		guard editor == nil else { return }
+		editorReads += 1
+		preparingEditor = false
 		saved = nil
 		editor = CaseEditorScreen(project: project, source: .create(folder: place.path))
 	}
 	public func edit(_ opened: CaseDocument) async {
-		guard editor == nil, !preparingEditor else { return }
+		guard !opened.isHistorical, editor == nil, !preparingEditor else { return }
+		editorReads += 1
+		let mine = editorReads
 		preparingEditor = true
-		defer { preparingEditor = false }
+		defer { if editorReads == mine { preparingEditor = false } }
 		do {
 			let used = try await project.usedStepIds(of: opened)
+			guard mine == editorReads else { return }
 			saved = nil
 			editor = CaseEditorScreen(project: project, source: .edit(opened), used: used)
-		} catch { notice = error.shown }
+		} catch { if mine == editorReads { notice = error.shown } }
 	}
-	public func closeEditor() { guard editor?.busy != true else { return }; editor = nil }
+	public func closeEditor() {
+		guard editor?.busy != true else { return }
+		editorReads += 1
+		preparingEditor = false
+		editor = nil
+	}
 	public func dismissNotice() { notice = nil }
 	public func saveEditor() async {
 		guard let editor, let outcome = await editor.save() else { return }
-		if case .adopted(let stamp) = outcome {
-			let adopted: CaseStamp?
-			if let stamp { adopted = stamp }
-			else if case .edit(let opened) = editor.source { adopted = CaseStamp(ref: opened.ref, version: opened.version) }
-			else { adopted = nil }
-			if let adopted {
-				await openCase(adopted.ref)
-				saved = adopted
-			}
+		if case .adopted(let stamp) = outcome, let stamp, let document = editor.savedDocument {
+			documents[Self.key(stamp.ref, stamp.version)] = .read(document)
+			saved = stamp
 			self.editor = nil
 			await read()
 		}
