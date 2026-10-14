@@ -46,7 +46,8 @@ struct AppModelTests {
 		let app = device.app()
 		await app.start()
 		let form = try form(app)
-		#expect(form.address.isEmpty && !form.canSubmit)
+		// It offers the hosted instance, and asks for a name and a password before it signs anybody in.
+		#expect(form.address == "mainworthy.com" && !form.canSubmit)
 		form.address = Live.address
 		form.name = Live.name
 		form.password = "not the password"
@@ -77,14 +78,14 @@ struct AppModelTests {
 		_ = try self.form(third)
 	}
 
-	@Test("a token signs the owner in")
-	func token() async throws {
+	@Test("the owner signs in with a password")
+	func owner() async throws {
 		let app = Device().app()
 		await app.start()
 		let form = try form(app)
 		form.address = Live.address
-		form.way = .token
-		form.token = "  \(Live.token)\n"
+		form.name = Live.ownerName
+		form.password = Live.ownerPassword
 		await form.submit()
 		#expect(try workspace(app).account.isOwner)
 	}
@@ -210,8 +211,8 @@ struct AppModelTests {
 		await workspace.refreshAccount()
 		try await Task.sleep(for: .milliseconds(50))
 		let again = try self.form(app)
-		again.way = .token
-		again.token = Live.token
+		again.name = Live.ownerName
+		again.password = Live.ownerPassword
 		await again.submit()
 		let other = try self.workspace(app)
 		#expect(other !== workspace && other.account.isOwner)
@@ -300,7 +301,7 @@ struct AppModelLateReplyTests {
 		let secrets = MemoryStore()
 		let transport = Held()
 		let instance = try #require(Instance(address: "mainworthy.example"))
-		_ = try await Server(instance: instance, secrets: secrets, transport: transport).signIn(.token("a token"))
+		_ = try await Server(instance: instance, secrets: secrets, transport: transport).signIn(.password(name: "robin", password: "a password"))
 		let name = "mainworthy-tests-\(UUID().uuidString)"
 		let defaults = try #require(UserDefaults(suiteName: name))
 		defer { defaults.removePersistentDomain(forName: name) }

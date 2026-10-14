@@ -29,8 +29,7 @@ final class ChangesUITests: XCTestCase {
 	@MainActor private func signIn(_ app: XCUIApplication) throws {
 		let address = app.textFields["address"]
 		XCTAssertTrue(address.waitForExistence(timeout: 20))
-		address.tap()
-		address.typeText(try XCTUnwrap(environment["MAINWORTHY_TEST_URL"]))
+		address.replaceText(try XCTUnwrap(environment["MAINWORTHY_TEST_URL"]))
 		app.textFields["name"].tap()
 		app.textFields["name"].typeText(environment["MAINWORTHY_TEST_NAME"] ?? "")
 		app.secureTextFields["password"].tap()

@@ -32,7 +32,7 @@ struct ChangesLiveTests {
 	@Test("a detail labels the new head whose gate was read after the list")
 	func headMoves() async throws {
 		let server = Live.server()
-		_ = try await server.signIn(.token(Live.token))
+		_ = try await server.signIn(Live.owner)
 		let client = server.project(try await Live.project())
 		let shown = try #require(try await client.reportedChanges().first)
 		let before = try await client.details(of: shown)
@@ -80,13 +80,13 @@ struct ChangesLiveTests {
 	@Test("a head moving between the gate and run is reread or reported, never combined", arguments: [1, 2])
 	func inFlightMoves(_ moves: Int) async throws {
 		let writer = Live.server()
-		_ = try await writer.signIn(.token(Live.token))
+		_ = try await writer.signIn(Live.owner)
 		let client = writer.project(try await Live.project())
 		let shown = try #require(try await client.reportedChanges().first)
 		let reader = Server(
 			instance: Live.instance, secrets: MemoryStore(), transport: MovingHead(client: client, moves: moves)
 		)
-		_ = try await reader.signIn(.token(Live.token))
+		_ = try await reader.signIn(Live.owner)
 		do {
 			let detail = try await reader.project(client.key).details(of: shown)
 			#expect(moves == 1, "two moving reads must say the change moved")

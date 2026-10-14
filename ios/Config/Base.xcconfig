@@ -12,6 +12,10 @@ CODE_SIGN_STYLE = Automatic
 // A bundle identifier is registered to one team, for good. The default is for a simulator; a phone gets the
 // one Local.xcconfig names, which ends in the team's own id so that no two people ask for the same one.
 MAINWORTHY_BUNDLE_ID = com.mainworthy.app.dev
+// The site the sign-in screen's saved logins are for (App/Mainworthy.entitlements). Apple signs an app that names
+// one only for a paid developer membership: a personal team's build fails with it. So it is off here, and a
+// paid team turns it on in Local.xcconfig with `CODE_SIGN_ENTITLEMENTS = App/Mainworthy.entitlements`.
+MAINWORTHY_WEBCREDENTIALS_DOMAIN = mainworthy.com
 // The commit the app was built from, for the About screen. The script passes it; Xcode's own Run leaves it so.
 MAINWORTHY_COMMIT = unknown
 

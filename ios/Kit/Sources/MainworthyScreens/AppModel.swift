@@ -164,6 +164,9 @@ public final class AppModel {
 /// What the device remembers that is no secret: the address last signed in to, and the project last open.
 @MainActor
 final class Remembered {
+	/// The address the form shows on a device that has signed in nowhere yet.
+	static let defaultAddress = "mainworthy.com"
+
 	private let defaults: UserDefaults
 
 	init(_ defaults: UserDefaults) {
@@ -171,7 +174,7 @@ final class Remembered {
 	}
 
 	var address: String {
-		get { defaults.string(forKey: "mainworthy.address") ?? "" }
+		get { defaults.string(forKey: "mainworthy.address") ?? Remembered.defaultAddress }
 		set { defaults.set(newValue, forKey: "mainworthy.address") }
 	}
 

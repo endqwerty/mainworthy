@@ -15,8 +15,9 @@ about the objection: how an app that nobody here compiles stays in step with a s
 
 **The app is one more client of the operations.** It calls what the web UI and the command line call
 (`src/server/ops/index.ts`), and the server did not change for it. It signs in the way a browser does: a name and
-a password, or a token, opens a session and the reply sets a cookie (decision 0017). The app keeps that cookie in
-the device's keychain and nothing else: not the password and not the token. It reads the cookie from the
+a password open a session and the reply sets a cookie (decision 0017). The app keeps that cookie in the device's
+keychain and nothing else, not the password. Until 2026-10-14 it also took a token; it takes none since, because a
+token is for a script or a pipeline. It reads the cookie from the
 reply's header as text, because the system's cookie parser applies a browser's rules for the `__Host-` prefix
 and they differ between versions of the system. The session is listed under "Your
 sessions" as "Mainworthy for iPhone" and can be ended from anywhere.

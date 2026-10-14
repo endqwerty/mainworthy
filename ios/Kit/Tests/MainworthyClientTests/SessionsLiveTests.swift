@@ -6,14 +6,14 @@ import Testing
 
 @Suite("Sessions against the server", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`"))
 struct SessionsLiveTests {
-	@Test("a password and a token open labelled sessions, and ending another leaves this device signed in")
+	@Test("each sign-in opens a labelled session, and ending another leaves this device signed in")
 	func listAndEnd() async throws {
 		let own = try await Live.signedIn()
 		let other = Live.server()
-		_ = try await other.signIn(.token(Live.token))
+		_ = try await other.signIn(Live.owner)
 		let others = try await other.sessions()
 		let theirs = try #require(others.first { $0.current })
-		#expect(theirs.proof == .token && !theirs.label.isEmpty)
+		#expect(theirs.proof == .password && !theirs.label.isEmpty)
 		let mine = try #require(try await own.sessions().first { $0.current })
 		#expect(mine.proof == .password && mine.label == "password")
 		#expect(mine.client == "Mainworthy tests" && mine.openedAt <= mine.lastUsedAt)

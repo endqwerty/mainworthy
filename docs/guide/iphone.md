@@ -28,18 +28,37 @@ until**. Run the command again before that day. You stay signed in.
 
 ## Sign in
 
-1. Type the address you open Mainworthy at in a browser, such as `mainworthy.example`. The app adds `https://`.
-   An instance on your own network is reached by its address and port, such as `192.168.1.20:7357`.
-2. Choose how to sign in:
-   - **Password.** Your name and your password. Set a password in the web app under Settings, **Your sign-in**.
-   - **Token.** A token, as you would paste it into the web app's sign-in page.
+1. The address is `mainworthy.com` until you change it. For another instance, type the address you open it at in
+   a browser, such as `mainworthy.example`; the app adds `https://`. An instance on your own network is reached by
+   its address and port, such as `192.168.1.20:7357`.
+2. Type your name and your password. Set a password in the web app under Settings, **Your sign-in**. The app
+   takes no token: a token is for a script or a pipeline.
 3. Press **Sign in**.
 
 The app opens a session, as a browser does, and keeps that session in the phone's keychain. It does not keep
-the password or the token. The session appears in the web app under Settings, **Your sessions**, as "Mainworthy
-for iPhone", and you can end it there.
+the password. The session appears in the web app under Settings, **Your sessions**, as "Mainworthy for
+iPhone", and you can end it there.
 
-A passkey does not work in the app. It needs a paid Apple developer membership.
+### Fill the password from 1Password or the phone's passwords
+
+The name and password fields take what the phone's AutoFill offers. The phone offers the login it keeps for
+`mainworthy.com` only when the app is tied to that site, and Apple allows that only for an app signed by a paid
+Apple developer membership. An app installed with a free Apple ID is not tied to it: press the key above the
+keyboard and search for the login yourself.
+
+With a paid membership:
+
+1. Add `CODE_SIGN_ENTITLEMENTS = App/Mainworthy.entitlements` to `ios/Config/Local.xcconfig` and run
+   `bun scripts/ios.ts install`. It prints the app's name as Apple knows it, such as
+   `ABCDE12345.com.mainworthy.app.ABCDE12345`.
+2. Whoever runs the instance at `mainworthy.com` adds that name to `MAINWORTHY_APPLE_APPS`
+   ([configuration](./configuration.md)) and starts it again.
+
+The phone then offers the login saved for `mainworthy.com` on the sign-in screen, and offers to save one after a
+sign-in. Apple reads the site's list when the app is installed, so install the app again after the instance
+lists it. An instance at another address is not tied to the app: the fields still take a login you pick by hand.
+
+A passkey does not work in the app.
 
 ## Answer a question
 

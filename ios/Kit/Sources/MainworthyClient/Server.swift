@@ -1,19 +1,19 @@
 import Foundation
 import Synchronization
 
-/// A way of proving who one is at sign-in.
+/// A way of proving who one is at sign-in. A passkey would be the second.
 package enum Proof: Sendable {
 	case password(name: String, password: String)
-	case token(String)
 }
 
 /// One Mainworthy, as this app talks to it. It is the only thing that sends a request, and it hides what a
 /// request takes: the address of an operation, the envelope around a reply, the session cookie and where it
 /// is kept, the id that makes a write safe to send twice, and what a refusal means.
 ///
-/// A person signs in with a name and a password, or with a token. Either opens a session on the server and
-/// the reply sets a cookie (`POST /api/login`). The app holds that cookie and nothing else: not the password,
-/// and not the token. The server lists the session under "Your sessions", where it can be ended from anywhere.
+/// A person signs in with a name and a password. That opens a session on the server and the reply sets a
+/// cookie (`POST /api/login`). The app holds that cookie and nothing else, not the password. A token is for a
+/// script or a pipeline, and the app takes none. The server lists the session under "Your sessions", where it
+/// can be ended from anywhere.
 package final class Server: Sendable {
 	package let instance: Instance
 	private let transport: any Transport
@@ -81,7 +81,6 @@ package final class Server: Sendable {
 		let body: JSONValue =
 			switch proof {
 			case .password(let name, let password): ["name": .string(name), "password": .string(password)]
-			case .token(let token): ["token": .string(token)]
 			}
 		let (_, response) = try await send("POST", "/api/login", body: body, attempts: 1, asSignedIn: false)
 		guard let given = Server.sessionCookie(in: response) else { throw ClientError.unreadable }

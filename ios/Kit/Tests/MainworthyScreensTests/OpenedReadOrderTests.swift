@@ -28,9 +28,9 @@ final class DelayedQuestion:Transport {
 struct ReviewReadRace {
  @Test func delayedOldQuestion() async throws {
   for n in 0..<2 {
-   let key=try await Live.project();let owner=Live.server();_=try await owner.signIn(.token(Live.token))
+   let key=try await Live.project();let owner=Live.server();_=try await owner.signIn(Live.owner)
    let project=owner.project(key);let q=try #require(try await project.questions(open:true,kind:.failure).questions.first)
-   let transport=DelayedQuestion();let server=Server(instance:Live.instance,secrets:MemoryStore(),transport:transport);_=try await server.signIn(.token(Live.token))
+   let transport=DelayedQuestion();let server=Server(instance:Live.instance,secrets:MemoryStore(),transport:transport);_=try await server.signIn(Live.owner)
    let screen=QueueScreen(project:server.project(key));await screen.show(.open,filter:.map)
    let opening=Task {await screen.open(q.ref)}
    while !(await transport.barrier.hasPaused()){await Task.yield()}

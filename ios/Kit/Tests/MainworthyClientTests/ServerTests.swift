@@ -121,7 +121,7 @@ struct ServerTests {
 		let refused = #"{"ok":false,"error":{"code":"unauthenticated","message":"that did not sign you in"}}"#
 		let script = Script(.json(status: 401, refused))
 		await #expect(throws: ClientError.refused(code: "unauthenticated", message: "that did not sign you in")) {
-			_ = try await server(script).signIn(.token("wrong"))
+			_ = try await server(script).signIn(.password(name: "robin", password: "wrong"))
 		}
 		#expect(script.asked.count == 1)
 	}
@@ -134,7 +134,7 @@ struct ServerTests {
 		)
 		let secrets = MemoryStore()
 		let server = server(script, secrets: secrets)
-		_ = try await server.signIn(.token("a token"))
+		_ = try await server.signIn(.password(name: "robin", password: "a password"))
 		#expect(secrets.load() != nil)
 		await #expect(throws: ClientError.signedOut) {
 			let _: JSONValue = try await server.read("inbox", in: "shop", [:])
@@ -152,14 +152,14 @@ struct ServerTests {
 			.json(status: 401, unauthenticated)
 		)
 		let first = server(old, secrets: secrets)
-		_ = try await first.signIn(.token("a token"))
+		_ = try await first.signIn(.password(name: "robin", password: "a password"))
 		// The person signs in again, on a new connection that keeps its session in the same place.
 		let newer = String(cookie.reversed())
 		let second = server(
 			Script(.json(signedIn, headers: ["Set-Cookie": "mainworthy_sid=\(newer); Path=/; HttpOnly"]), .json(session)),
 			secrets: secrets
 		)
-		_ = try await second.signIn(.token("a token"))
+		_ = try await second.signIn(.password(name: "robin", password: "a password"))
 		// Now the old connection hears that its session is over.
 		await #expect(throws: ClientError.signedOut) { _ = try await first.account() }
 		#expect(String(decoding: secrets.load() ?? Data(), as: UTF8.self).contains(newer))
@@ -170,7 +170,7 @@ struct ServerTests {
 		let body = #"{"ok":false,"error":{"code":"limited","message":"too many failed attempts; try again in 8 seconds"}}"#
 		let script = Script(.json(status: 429, body, headers: ["Retry-After": "8"]))
 		await #expect(throws: ClientError.limited(seconds: 8)) {
-			_ = try await server(script).signIn(.token("wrong"))
+			_ = try await server(script).signIn(.password(name: "robin", password: "wrong"))
 		}
 		#expect(ClientError.limited(seconds: 8).message == "Too many attempts. Try again in 8 seconds.")
 		#expect(ClientError.limited(seconds: 1).message == "Too many attempts. Try again in 1 second.")
