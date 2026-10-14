@@ -220,6 +220,8 @@ test.skipIf(!browserAvailable)(
 			expect([await offered(/Edit case/), await offered(/Archive selected/), await offered(/Accept proposal/)]).toEqual(
 				[0, 0, 0],
 			);
+			// The palette is already open, and a sheet of keys is no use without a keyboard: neither is offered.
+			expect([await offered(/Jump to or run/), await offered(/All keys/)]).toEqual([0, 0]);
 			// New case: the editor is in the detail, so the detail is shown and the title has the caret.
 			await page
 				.getByRole("option", { name: /New case/ })
@@ -247,6 +249,39 @@ test.skipIf(!browserAvailable)(
 				(titles) => titles.length === 1,
 			);
 			expect(written).toEqual(["Written on a phone"]);
+
+			// New folder: its form is in the sidebar, which the phone keeps closed. The sidebar opens with the form
+			// in it and the field has the focus, from Actions over the list and from the keys over an open case.
+			const folderField = page.getByRole("textbox", { name: "New folder name", exact: true });
+			const folders = async () => (await server.api("find", { in: "folders" })).items.map((item) => item.path);
+			await back(page).tap();
+			await frames(page);
+			expect([await side.isVisible(), await offered(/New folder/)]).toEqual([false, 0]);
+			await actions(page).tap();
+			expect(await offered(/New folder/)).toBe(1);
+			await page
+				.locator("[data-overlay=palette]")
+				.getByRole("option", { name: /New folder/ })
+				.tap();
+			await folderField.waitFor();
+			expect(await side.isVisible()).toBe(true);
+			await eventually(
+				() => page.evaluate(() => document.activeElement?.getAttribute("aria-label")),
+				(label) => label === "New folder name",
+			);
+			await page.keyboard.type("Made on a phone");
+			await page.keyboard.press("Enter");
+			await eventually(folders, (paths) => paths.includes("Made on a phone"));
+			await page.locator(".menu-backdrop").tap({ position: { x: 380, y: 400 } });
+			expect(await side.isVisible()).toBe(false);
+			// With a keyboard attached the key does the same, over the list as over an open case.
+			await page.keyboard.type("nf");
+			await folderField.waitFor();
+			expect(await side.isVisible()).toBe(true);
+			expect(await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))).toBe("New folder name");
+			await page.keyboard.press("Escape");
+			await page.locator(".menu-backdrop").tap({ position: { x: 380, y: 400 } });
+			expect(await folderField.count()).toBe(0);
 			expect(phone.errors).toEqual([]);
 		} finally {
 			await phone.close();
@@ -487,11 +522,7 @@ test.skipIf(!browserAvailable)(
 			await page.locator("[data-overlay=palette] .overlay-backdrop").tap({ position: { x: 4, y: 20 } });
 			expect(await inert()).toBe(false);
 			// The sheet of keys, the same.
-			await actions(page).tap();
-			await page
-				.locator("[data-overlay=palette]")
-				.getByRole("option", { name: /All keys/ })
-				.tap();
+			await page.keyboard.press("?");
 			await page.getByRole("region", { name: "Keyboard shortcuts" }).waitFor();
 			expect(await inert()).toBe(true);
 			expect(await tabThrough(45)).toEqual([]);

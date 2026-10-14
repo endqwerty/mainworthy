@@ -92,12 +92,16 @@ export function usePhoneShell(
 			show(to);
 			setMenuAt(null);
 		};
+		// Something that is in the sidebar asks to be seen: the form of a new folder.
+		const sidebar = () => setMenuAt(location.pathname + location.search);
+		window.addEventListener("mainworthy:sidebar", sidebar);
 		window.addEventListener(WENT, went);
 		window.addEventListener("popstate", went);
 		window.addEventListener("click", pressed);
 		window.addEventListener("keydown", key, true);
 		window.addEventListener("focusin", focused);
 		return () => {
+			window.removeEventListener("mainworthy:sidebar", sidebar);
 			window.removeEventListener(WENT, went);
 			window.removeEventListener("popstate", went);
 			window.removeEventListener("click", pressed);

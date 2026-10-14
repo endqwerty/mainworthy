@@ -347,6 +347,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				key: "mod+k",
 				label: "Jump to or run",
 				list: true,
+				desktopOnly: true,
 				handler: () => {
 					setHelp(false);
 					if (palette) closePalette();
@@ -363,6 +364,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				key: "?",
 				label: "All keys",
 				list: true,
+				desktopOnly: true,
 				handler: () => {
 					setPalette(null);
 					setHelp(true);
@@ -433,9 +435,10 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 					: sidebarCollapsed
 						? { "data-sidebar": "collapsed" }
 						: {})}
-				// On a phone the palette and the sheet of keys cover the whole app, and nothing under them takes
-				// the focus or a key. (On the desktop the field of the palette holds the focus.)
-				inert={phone && (palette !== null || help)}
+				// The palette and the sheet of keys cover the whole app, and nothing under them takes the focus or
+				// a key, on the desktop as on a phone: Tab would otherwise leave the sheet for the controls under
+				// it, and Enter would press what it reaches.
+				inert={palette !== null || help}
 			>
 				{phone && (
 					<PhoneBar
@@ -769,7 +772,7 @@ function Palette({
 	const actions =
 		options.items ??
 		registry
-			.filter((item) => !item.hidden && (!listOnly || item.list))
+			.filter((item) => !item.hidden && (!listOnly || item.list) && (typing || !item.desktopOnly))
 			.map((item) => ({ id: item.key, label: item.label, detail: item.key, handler: item.handler }));
 	const cases =
 		found.data?.items

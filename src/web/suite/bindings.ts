@@ -38,7 +38,7 @@ export function useSuiteBindings({
 }): void {
 	useBindings(
 		[
-			// The two marked `list` do not act on the case the detail shows (`Binding.list`).
+			// The three marked `list` do not act on the case the detail shows (`Binding.list`).
 			{ key: "c", label: "New case", list: true, handler: create },
 			{ key: "e", label: "Edit case", handler: edit },
 			{ key: "enter", label: "Edit case", handler: edit },
@@ -58,7 +58,17 @@ export function useSuiteBindings({
 			{ key: "space", label: "Peek timeline", handler: peek },
 			{ key: "alt+[", label: "Previous folder", handler: () => folder(-1) },
 			{ key: "]", label: "Next folder", handler: () => folder(1) },
-			{ key: "n f", label: "New folder", handler: newFolder },
+			// Its form is in the sidebar, which a phone keeps closed: the shell opens it (`mainworthy:sidebar`). It
+			// makes a folder and decides nothing about a case, so a phone offers it over the list too.
+			{
+				key: "n f",
+				label: "New folder",
+				list: true,
+				handler: () => {
+					newFolder();
+					window.dispatchEvent(new Event("mainworthy:sidebar"));
+				},
+			},
 			{ key: "z", label: "Widen case pane", handler: zoom },
 		].map((binding) => ({ ...binding, when: () => enabled })),
 	);
