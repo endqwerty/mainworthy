@@ -351,6 +351,17 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("region", { name: "Case diff" }).last().waitFor();
 			expect(await page.getByRole("region", { name: "Case diff" }).last().innerText()).toContain("updated");
 			await page.getByRole("button", { name: "Close", exact: true }).click();
+			// A diff belongs to the case it was opened on: C-2 has only a first version, so a diff that followed
+			// the selection would read versions of it that do not exist.
+			await page.keyboard.press("v");
+			await page.getByRole("region", { name: "Case diff" }).last().waitFor();
+			await page.keyboard.press("j");
+			await page.waitForFunction(() => document.querySelector("#detail .cid")?.textContent === "C-2");
+			expect(await page.locator("div.question-card").count()).toBe(0);
+			await page.keyboard.press("k");
+			await page.waitForFunction(() => document.querySelector("#detail .cid")?.textContent === "C-1");
+			expect(await page.locator("div.question-card").count()).toBe(0);
+			expect(browser.errors).toEqual([]);
 			await page.keyboard.press("t");
 			await page.getByLabel("Tag selected cases").fill("keyboard");
 			await page.keyboard.press("Enter");

@@ -120,6 +120,13 @@ export function CasePane({
 	const entries = useMemo(() => z.array(Entry).parse(timelineData?.entries ?? []), [timelineData]);
 	const groups = useMemo(() => grouped(entries), [entries]);
 	const [diffVersion, setDiffVersion] = useState<number | null>(null);
+	// A diff belongs to the case it was opened on. The pane stays mounted across a change of case, so it closes
+	// the diff while rendering the first frame of the next one, before the card could read that case's versions.
+	const [diffOf, setDiffOf] = useState(ref);
+	if (diffOf !== ref) {
+		setDiffOf(ref);
+		setDiffVersion(null);
+	}
 	const proposals = timelineData?.questions.filter((q) => q.kind === "adopt" && q.state === "open") ?? [];
 	async function answerProposal(answer: "accept" | "reject", question = proposals[0]): Promise<void> {
 		if (!question) return;
