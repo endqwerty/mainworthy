@@ -203,7 +203,8 @@ does, so an editor records what was typed (not a conflict that waits for an answ
 place (`navigate` with `replace`) leaves the pane as it is: use it when nobody goes anywhere. `navigate` sends
 `mainworthy:went` (`WENT` in `lib/router.ts`) for every other call, and the shell decides the pane from it.
 
-A binding that is an action of the list says `list: true`: New case, Filter, Plan run. While the detail is
+A binding that is an action of the list says `list: true`: New case, Filter, Plan run, and the Cancel of a form
+that closes only with Escape (the tag and folder forms), which a phone has no key for. While the detail is
 covered, by the list or by the sidebar (`listOnly`), only those run, from the palette and from a key of an
 attached keyboard (`useKeyboard(listOnly)`), because every other binding may act on the selected row. Mark a new binding `list` only
 if it records no answer, result or change about the selected row, and add it to the list of marked bindings in
