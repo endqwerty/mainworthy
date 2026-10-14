@@ -26,6 +26,7 @@ export const Fill = z.object({
 	admitted: z.string(),
 	at: z.number(),
 	note: z.string().nullable(),
+	atStep: z.string().nullable(),
 });
 export type Fill = z.infer<typeof Fill>;
 export const Slot = z.object({

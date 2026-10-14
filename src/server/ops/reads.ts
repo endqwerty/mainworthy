@@ -435,6 +435,7 @@ function slotRow(ctx: Ctx, slot: SlotRow): Record<string, unknown> {
 			admitted: fill.admitted,
 			at: fill.at,
 			note: fill.note ?? fill.message,
+			atStep: fill.atStep,
 		})),
 	};
 }

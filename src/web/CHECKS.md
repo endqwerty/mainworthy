@@ -220,16 +220,10 @@ server and SQLite database on the existing 7400..7449 fixture ports.
 | R5B-2 | Undo overwrote a refusal from `record` with a success message. `runs/cockpit.tsx` changes undo state and announces a correction only when `record` starts a request. | Another producer closes the run; u sends no report, says the run is closed and no result was recorded, and leaves the original pass intact. |
 | R5B-3 | The bulk selection dropped an answered question but its inline field retained it. `queue/index.tsx` prunes those field entries with the selection. | With two selected and the reference field open, settle the other selected question externally; Enter records the remaining defect with BUG-7, and Escape records it without a reference. Both close the field by keyboard. |
 
-R5B-4 is left for a server change. Its browser reproduction failed twice:
-`2 f`, note, Enter, `k p`, u restores the failure and note but `atStep` is null.
-`src/server/ops/reads.ts`'s `slotView` omits the result's `at_step` from each
-fill; the web `Fill` therefore cannot restore it. The smallest complete fix is
-to expose `atStep: fill.at_step` in that server response, parse it in
-`src/web/runs/models.ts`, and include that prior step in the correction sent by
-`runs/cockpit.tsx`. A timeline lookup would add an asynchronous read and depend
-on bounded history containing that result. No server or core edits were made.
-The reproduction is explicitly skipped, with the needed server field named in
-its test title, so the passing suite does not claim this defect is fixed.
+R5B-4 was fixed after the server exposed the step (issue #72). `2 f`, note, Enter, `k p`, u restores the failure,
+its note and its step. The slot view carries `atStep` on each fill (`src/server/ops/reads.ts`), the web `Fill`
+parses it, and `runs/cockpit.tsx` sends it with the correction. A fill still in the cache under its sent id has no
+step until the slots are read again, so the cockpit remembers the step it sent for that id.
 
 Preflight checks passed: `bunx tsc --noEmit` exited 0;
 `bunx biome check src/web test/e2e` checked 60 files without changes;
