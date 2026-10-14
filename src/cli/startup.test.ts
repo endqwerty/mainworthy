@@ -49,7 +49,11 @@ for (const options of [
 				expect(stdout).toMatch(
 					/^Mainworthy 0\.1\.0 · (local|server) · data in ~\/\.mainworthy · http:\/\/127\.0\.0\.1:\d+\n/,
 				);
-				expect(stdout).toContain('project "scratch" · you are robin@this-machine · policy: loose');
+				expect(stdout).toContain(
+					options.mode === "server"
+						? 'project "scratch" · owner robin · sign in with a token, a password or a passkey · policy: loose'
+						: 'project "scratch" · you are robin@this-machine · policy: loose',
+				);
 				const url = /http:\/\/127\.0\.0\.1:\d+/.exec(stdout)?.[0];
 				if (!url) throw new Error("startup did not print the server URL");
 				const token = /owner token \(shown once\): (\S+)/.exec(stdout)?.[1];
