@@ -73,6 +73,13 @@ function sentBody(draft: Draft): CaseBody {
 	return recordable(cleanTitle(draft).body);
 }
 
+/**
+ * Focuses a field once, when it is put on the page. A ref written inline is a new function on every render, and
+ * React calls each new one: a form that focused itself that way took the focus back from wherever the person was
+ * typing whenever the screen rendered again, for as long as the form was open.
+ */
+const focusOnce = (node: HTMLElement | null): void => node?.focus();
+
 export function SuiteScreen() {
 	const { project, route, setStatus, openPalette, overlayOpen } = useApp();
 	const owner = useRef(deviceSession()).current;
@@ -1646,9 +1653,7 @@ export function SuiteScreen() {
 							className="form-input"
 							aria-label="Tag selected cases"
 							placeholder="Tag, then Enter"
-							ref={(node) => {
-								node?.focus();
-							}}
+							ref={focusOnce}
 							value={tagText}
 							onChange={(event) => setTagText(event.target.value)}
 							onKeyDown={(event) => {
@@ -1843,9 +1848,7 @@ export function SuiteScreen() {
 						<input
 							aria-label="New folder name"
 							className="form-input"
-							ref={(node) => {
-								node?.focus();
-							}}
+							ref={focusOnce}
 							value={folderText}
 							onChange={(event) => setFolderText(event.target.value)}
 							placeholder="Folder, then Enter"

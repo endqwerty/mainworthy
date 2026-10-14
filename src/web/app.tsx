@@ -114,6 +114,12 @@ function theme(): void {
 }
 theme();
 
+/**
+ * Focuses an element once, when it is put on the page. A ref written inline is a new function on every render, and
+ * React calls each new one, so an element that focused itself that way took the focus back on every render.
+ */
+const focusOnce = (node: HTMLElement | null): void => node?.focus();
+
 export function App() {
 	const [auth, setAuth] = useState<
 		| { kind: "loading" }
@@ -706,14 +712,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				<div className="overlay" data-overlay="help">
 					<button type="button" className="overlay-backdrop" aria-label="Close keys" onClick={() => setHelp(false)} />
 					<section className="help" aria-label="Keyboard shortcuts">
-						<button
-							className="help-close"
-							type="button"
-							ref={(element) => {
-								element?.focus();
-							}}
-							onClick={() => setHelp(false)}
-						>
+						<button className="help-close" type="button" ref={focusOnce} onClick={() => setHelp(false)}>
 							Close <KeyCap>Esc</KeyCap>
 						</button>
 						<h2>Keys</h2>
@@ -870,9 +869,7 @@ function Palette({
 			>
 				<input
 					className="palette-input"
-					ref={(element) => {
-						if (typing) element?.focus();
-					}}
+					ref={typing ? focusOnce : undefined}
 					aria-label={options.title ?? "Jump to or run"}
 					placeholder={options.title ?? "Jump to a ref, search cases, or run an action…"}
 					value={text}
