@@ -41,6 +41,10 @@ check(
 		const held = new Promise<void>((resolve) => {
 			release = resolve;
 		});
+		let revoked = () => {};
+		const afterRevocation = new Promise<void>((resolve) => {
+			revoked = resolve;
+		});
 		try {
 			const { page } = h;
 			page.setDefaultTimeout(5000);
@@ -48,6 +52,13 @@ check(
 			await page.keyboard.press("e");
 			const step = page.getByRole("textbox", { name: "Step 1", exact: true });
 			await step.fill("Alice submitted text");
+			// The proposal sent below makes the page read again. Those reads are held until alice's token is revoked,
+			// so the server refuses them first: a slow machine can bring that about too, and then the sign-in page
+			// replaces the app before the click below can reach the link.
+			await page.route(/\/api\/p\/scratch\/(?!propose|events)/, async (route) => {
+				await afterRevocation;
+				await route.continue().catch(() => {});
+			});
 			let replies = 0;
 			await page.route("**/propose", async (route) => {
 				const response = await route.fetch();
@@ -62,7 +73,13 @@ check(
 			);
 			await step.fill("Alice newer private text");
 			await revoke(server, "alice");
-			await page.getByRole("link", { name: "Runs", exact: true }).click();
+			revoked();
+			// The page goes back to sign-in when a request of alice's is refused: the click's, or a read already on
+			// its way. Whichever is first, what a person sees is the sign-in page. The click is made in one step on
+			// the link if it is still there, and waits for nothing: a click that waited for a link could find
+			// the next person's "Runs" after they sign in.
+			await page.evaluate(() => document.querySelector<HTMLElement>('a[aria-label="Runs"]')?.click());
+			await page.locator("#token").waitFor();
 			await signIn(page, bob);
 			await page.getByRole("link", { name: "Suite", exact: true }).click();
 			await page.getByRole("option").filter({ hasText: "C-1" }).click();
@@ -84,6 +101,7 @@ check(
 			).toBe("Alice newer private text");
 			expect(await step.inputValue()).toBe("Bob private text");
 		} finally {
+			revoked();
 			release();
 			await h.close();
 			await server.stop();
