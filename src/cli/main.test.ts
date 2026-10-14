@@ -63,6 +63,26 @@ test("red report, blocked gate, generated decision, passed gate without another 
 		expect(passed.stdout).toContain("passed:");
 		expect(passed.stdout).not.toContain("needs an answer");
 		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(1);
+		// The same files again are answered with the first receipt, gate line included: it still says blocked, and
+		// the command says on stderr that it is the old one and where the verdict now is.
+		const again = await cli([
+			"report",
+			RED_XML,
+			"--commit",
+			COMMIT,
+			"--branch",
+			"main",
+			"--job",
+			"e2e",
+			"--attempt",
+			"2",
+		]);
+		expect(again.code).toBe(0);
+		expect(again.stdout).toContain("mainworthy gate    blocked:");
+		expect(again.stdout).toEndWith("  already received; nothing was written\n");
+		expect(again.stderr).toBe(
+			"mainworthy: this report was received before. Its receipt, and the gate line in it, are as they were then; `mainworthy gate` says what the verdict is now.\n",
+		);
 	});
 });
 
