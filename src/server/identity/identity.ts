@@ -182,7 +182,7 @@ const Q = {
 	tokensOf: sql<{ actor: number }, { id: number }>("SELECT id FROM tokens WHERE actor = $actor"),
 	forgetAddresses: sql<{ actor: number }>("UPDATE tokens SET last_used_addr = NULL WHERE actor = $actor"),
 	forget: sql<{ id: number; name: string; at: number }>(
-		"UPDATE actors SET name = $name, disabled_at = $at WHERE id = $id",
+		"UPDATE actors SET name = $name, disabled_at = coalesce(disabled_at, $at) WHERE id = $id",
 	),
 	rename: sql<{ id: number; name: string }>("UPDATE actors SET name = $name WHERE id = $id"),
 };
@@ -201,8 +201,8 @@ export const KIND_NOUN: Record<ActorKind, string> = {
 
 /**
  * `forgotten-<id>` is what history calls an actor that was forgotten. Nobody is given such a name, by a token or
- * as the owner at start-up: every view would read them as somebody who is gone, and the actor with that id could
- * then not be forgotten.
+ * as the owner at start-up: every view would read them as somebody who is gone. (An archive made before this rule
+ * can still hold one; `freePseudonym` makes forgetting an actor work all the same.)
  */
 const isForgottenName = (name: string): boolean => /^forgotten-/i.test(name);
 
@@ -277,6 +277,11 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
 		if (existing && existing.kind !== "human") {
 			throw invalid(
 				`MAINWORTHY_OWNER names ${existing.name}, which is ${KIND_NOUN[existing.kind]} on this instance and not a person. Set MAINWORTHY_OWNER to the owner's name and start again; ${START_REFUSED}`,
+			);
+		}
+		if (existing && existing.disabled_at !== null) {
+			throw invalid(
+				`MAINWORTHY_OWNER names ${existing.name}, who was forgotten. Set MAINWORTHY_OWNER to the owner's name and start again; ${START_REFUSED}`,
 			);
 		}
 		const owner = existing ?? ensureActor(app.db, { org, kind: "human", name: app.config.owner, at });
@@ -899,6 +904,22 @@ export function revokeToken(app: App, id: number): boolean {
 }
 
 /**
+ * What history calls an actor that is forgotten: `forgotten-<id>`, or that with `-2`, `-3` and so on when another
+ * actor holds the name already. An archive made before such names were refused can hold one, and a person is owed
+ * being forgotten whatever the archive holds. An actor that is forgotten already keeps its name, so forgetting
+ * twice changes nothing.
+ */
+function freePseudonym(db: Db, row: ActorRow): string {
+	if (row.disabled_at !== null && isForgottenName(row.name)) return row.name;
+	const base = `forgotten-${row.id}`;
+	for (let attempt = 1; ; attempt++) {
+		const name = attempt === 1 ? base : `${base}-${attempt}`;
+		const holder = db.get(Q.actorByName, { org: row.org, name });
+		if (!holder || holder.id === row.id) return name;
+	}
+}
+
+/**
  * Removes an actor's identity and keeps the record true: the name becomes a pseudonym, the actor is disabled, its
  * tokens are revoked and no longer say where they were used from, and its sessions are ended. Every fact still
  * points at the same actor row, so history says the same actor did each thing; it no longer says who that was.
@@ -909,7 +930,7 @@ export function forgetActor(app: App, name: string): { forgotten: string; tokens
 	const row = db.get(Q.actorByName, { org: orgId(db), name });
 	if (!row) throw notFound(`actor ${name}`);
 	if (row.kind === "rule") throw invalid("the policy's own actor cannot be forgotten");
-	const pseudonym = `forgotten-${row.id}`;
+	const pseudonym = freePseudonym(db, row);
 	const at = app.now();
 	db.run(Q.forget, { id: row.id, name: pseudonym, at });
 	const revoked = db.run(Q.revokeTokensOf, { actor: row.id, at }).changes;

@@ -781,6 +781,21 @@ describe("the owner's token from the environment", () => {
 		expect(() => boot({ dataDir, owner: "forgotten-9", ownerToken: FIXTURE.env })).toThrow(
 			`MAINWORTHY_OWNER names forgotten-9, and a name that starts with forgotten- is what a forgotten actor is called. Set MAINWORTHY_OWNER to the owner's name and start again${UNCHANGED}`,
 		);
+		// A person who was forgotten (a disabled row, as an archive can hold one) is not made the owner, and the
+		// start gives the row no grant.
+		const grantsOfSam =
+			"SELECT count(*) AS n FROM grants WHERE project = 0 AND actor = (SELECT id FROM actors WHERE name = 'sam')";
+		const forgetting = new Database(path);
+		let grantsBefore: number | undefined;
+		try {
+			forgetting.query("UPDATE actors SET disabled_at = ? WHERE name = 'sam'").run(T0);
+			grantsBefore = forgetting.query<{ n: number }, []>(grantsOfSam).get()?.n;
+		} finally {
+			forgetting.close();
+		}
+		expect(() => boot({ dataDir, owner: "sam", ownerToken: FIXTURE.env })).toThrow(
+			`MAINWORTHY_OWNER names sam, who was forgotten. Set MAINWORTHY_OWNER to the owner's name and start again${UNCHANGED}`,
+		);
 		// What the sentence says, read from the file: the schema is this build's, the copy from before is beside
 		// it, and the actors and the tokens are the ones the earlier build left.
 		const raw = new Database(path, { readonly: true });
@@ -793,6 +808,7 @@ describe("the owner's token from the environment", () => {
 			expect(column<string>("SELECT value FROM meta WHERE key = 'schema_version'")).toEqual([String(SCHEMA_VERSION)]);
 			expect(column<string>("SELECT name AS value FROM actors ORDER BY id")).toEqual(["policy", "robin", "sam"]);
 			expect(column<number>("SELECT count(*) AS value FROM tokens WHERE revoked_at IS NULL")).toEqual([3]);
+			expect(raw.query<{ n: number }, []>(grantsOfSam).get()?.n).toBe(grantsBefore);
 		} finally {
 			raw.close();
 		}

@@ -801,6 +801,35 @@ describe("what a signed-in caller sees and ends", () => {
 		expect((await me(w, { cookie: next })).actor).toBe("robin");
 		expect(await w.status({ cookie })).toBe(401);
 	});
+
+	test("a name that starts with forgotten- from an older build does not stop the actor with that id being forgotten", async () => {
+		const w = world();
+		await tokenFor(w, { actor: "dana", kind: "agent" });
+		const app = w.instance.app;
+		// An archive made before such names were refused: two actors hold the pseudonyms dana would be given.
+		for (const name of ["forgotten-3", "forgotten-3-2"])
+			await app.gate.run(() =>
+				app.db.raw.query("INSERT INTO actors (org, kind, name, created_at) VALUES (1, 'human', ?, 0)").run(name),
+			);
+		const names = (): string[] =>
+			w.rows<{ name: string }>("SELECT name FROM actors ORDER BY id").map((row) => row.name);
+		expect(await w.ok("admin", { do: "actor.forget", name: "dana" })).toMatchObject({ forgotten: "forgotten-3-3" });
+		expect(names()).toEqual(["policy", "kim", "forgotten-3-3", "forgotten-3", "forgotten-3-2"]);
+		// Forgetting the one named forgotten-3 (id 4) gives it forgotten-4, and forgetting dana again, by the name
+		// history calls her, keeps hers, though forgotten-3 is free by now.
+		expect(await w.ok("admin", { do: "actor.forget", name: "forgotten-3" })).toMatchObject({
+			forgotten: "forgotten-4",
+		});
+		w.clock.advance(HOUR);
+		expect(await w.ok("admin", { do: "actor.forget", name: "forgotten-3-3" })).toMatchObject({
+			forgotten: "forgotten-3-3",
+		});
+		expect(names()).toEqual(["policy", "kim", "forgotten-3-3", "forgotten-4", "forgotten-3-2"]);
+		// The second time is not a second forgetting: she was forgotten at the first.
+		expect(w.rows<{ disabled_at: number }>("SELECT disabled_at FROM actors WHERE id = 3")).toEqual([
+			{ disabled_at: T0 },
+		]);
+	});
 });
 
 describe("an upgrade and an import", () => {

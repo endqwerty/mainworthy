@@ -46,7 +46,7 @@ A value that is not a whole number for `MAINWORTHY_READERS` stops the start with
 
 The first start creates the data directory, one owner and a project named `scratch`. It does not need any variable.
 
-Every start gives the owner named by `MAINWORTHY_OWNER` every capability. The owner is a person: the server does not start when the name belongs to an agent or a pipeline on this instance, or starts with `forgotten-`. If you change the name later, you get a second owner, and the first one keeps its grant. Remove its grant with `mainworthy actor ungrant`. To give the same person a new name instead, [rename the owner](#rename-the-owner). The first one keeps its tokens too, except the one that came from `MAINWORTHY_OWNER_TOKEN` when you set that variable to a new value: see the next paragraph.
+Every start gives the owner named by `MAINWORTHY_OWNER` every capability. The owner is a person: the server does not start when the name belongs to an agent, a pipeline or a person who was forgotten on this instance, or starts with `forgotten-`. If you change the name later, you get a second owner, and the first one keeps its grant. Remove its grant with `mainworthy actor ungrant`. To give the same person a new name instead, [rename the owner](#rename-the-owner). The first one keeps its tokens too, except the one that came from `MAINWORTHY_OWNER_TOKEN` when you set that variable to a new value: see the next paragraph.
 
 ### Rename the owner
 

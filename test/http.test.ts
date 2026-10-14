@@ -1131,12 +1131,10 @@ describe("names and failures", () => {
 	test("a failure nobody foresaw is answered with one fixed sentence, and what failed goes to the log", async () => {
 		const instance = boot("server", OWNER);
 		await post(instance, "/api/admin", { do: "token.create", actor: "dana", kind: "human", can: ["read"] }, owner);
-		await post(instance, "/api/admin", { do: "token.create", actor: "squatter", kind: "human", can: ["read"] }, owner);
-		// An archive from before the rule above can hold the pseudonym as somebody's name. Forgetting dana then
-		// runs into the database's own constraint, which is not an answer for a caller.
+		// A failure of the database that nothing here foresaw, as a full disk is: forgetting dana runs into it.
 		instance.app.db.raw
 			.query(
-				"UPDATE actors SET name = 'forgotten-' || (SELECT id FROM actors WHERE name = 'dana') WHERE name = 'squatter'",
+				"CREATE TRIGGER forgetting_fails BEFORE UPDATE OF disabled_at ON actors BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END",
 			)
 			.run();
 		const logged = spyOn(console, "error").mockImplementation(() => {});
@@ -1147,7 +1145,7 @@ describe("names and failures", () => {
 				{ ok: false, error: { code: "internal", message: "internal error" } },
 			]);
 			expect(logged.mock.calls.map((call) => call.map(String).join(" ")).join("\n")).toContain(
-				"UNIQUE constraint failed",
+				"database or disk is full",
 			);
 		} finally {
 			logged.mockRestore();
