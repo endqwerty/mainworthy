@@ -31,7 +31,10 @@ The MVP left one milestone, `Backlog to 1.0`, with 71 open issues in no order. O
 2026-10-13 it became seven milestones, M1 to M7, numbered in the order they are
 meant to be worked. The seven make three phases. Every open issue is in exactly one
 milestone, and issue #64 lists them all on one page. A milestone has no date: it
-ends when what the table says is true.
+ends when what the table says is true. The GitHub Project
+`https://github.com/users/endqwerty/projects/2` shows the same plan as views: all
+of it, the milestone being worked as a board, each phase, and what waits for the
+owner.
 
 | Phase | Milestone | True when it ends |
 | --- | --- | --- |
