@@ -332,15 +332,28 @@ check(
 			expect(await readOnly(b)).toBe(false);
 			await Promise.all([title(a).press("End"), title(b).press("End")]);
 			await Promise.all([a.keyboard.type("A"), b.keyboard.type("B")]);
-			const draft = await stored(a);
+			// Each window writes the draft when it has not yet seen the other's write, so both can write more than
+			// once before the storage events arrive, and the last write wins. Who won is known only when every
+			// event has landed: the window that does not own the stored draft shows the refusal and is read-only.
 			const aId = await a.evaluate(() => sessionStorage.getItem("mainworthy:draft-window"));
-			const winner = draft.owner === aId ? a : b;
-			const other = winner === a ? b : a;
+			const settle = async () => {
+				const draft = await stored(a);
+				const winner = draft.owner === aId ? a : b;
+				const other = winner === a ? b : a;
+				const refusing =
+					(await other.locator("#bar").filter({ hasText: "being edited in another window" }).count()) > 0;
+				return { draft, winner, other, done: refusing && (await readOnly(other)) && !(await readOnly(winner)) };
+			};
+			const { draft, winner, other } = await eventually(settle, (state) => state.done);
 			await refused(other);
 			expect(await readOnly(winner)).toBe(false);
 			expect(await readOnly(other)).toBe(true);
 			expect(draft.body.title).toBe(`Coupon case${winner === a ? "A" : "B"}`);
 			expect(await title(other).inputValue()).toBe(draft.body.title);
+			// Nothing moves after that: the draft is still the winner's.
+			await Promise.all([a, b].map((page) => page.evaluate(() => new Promise((done) => setTimeout(done, 300)))));
+			expect((await stored(a)).owner).toBe(draft.owner);
+			expect(await readOnly(winner)).toBe(false);
 		} finally {
 			await w.close();
 		}
