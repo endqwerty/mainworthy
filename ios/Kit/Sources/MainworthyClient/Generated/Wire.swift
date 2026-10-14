@@ -384,4 +384,88 @@ enum Wire {
 		let declined: [ReportRefusal]
 		let results: [Int]
 	}
+
+	/// A reported branch or pull request.
+	struct ChangeSummary: Decodable, Equatable, Sendable {
+		let key: String
+		let title: String?
+		let branch: String?
+		let head: String?
+		let url: String?
+		let state: String
+		let verdict: String?
+	}
+
+	/// `find` in changes: newest first, with the head's gate.
+	struct ChangeList: Decodable, Equatable, Sendable {
+		let items: [ChangeSummary]
+	}
+
+	/// `gate` of a change's head commit.
+	struct ChangeGate: Decodable, Equatable, Sendable {
+		let run: String?
+		let verdict: String
+		let reason: String
+		let tally: [String: Int]
+		let stale: Bool
+	}
+
+	/// The base commit, where the change has one.
+	struct ChangeBasis: Decodable, Equatable, Sendable {
+		let base: String?
+	}
+
+	/// The complete number of affected cases.
+	struct ChangeImpactCounts: Decodable, Equatable, Sendable {
+		let cases: Int
+	}
+
+	/// An affected case and why it is in the set.
+	struct ChangedCase: Decodable, Equatable, Sendable {
+		let id: String
+		let title: String
+		let why: [String]
+		let last: String?
+	}
+
+	/// `impact` of a change: its base and the cases it touches.
+	struct ChangeImpact: Decodable, Equatable, Sendable {
+		let change: ChangeBasis
+		let counts: ChangeImpactCounts
+		let cases: [ChangedCase]
+	}
+
+	/// A failed test with its linked case, if any.
+	struct ChangeFailure: Decodable, Equatable, Sendable {
+		let test: String?
+		let name: String?
+		let file: String?
+		let `case`: String?
+		let cause: String?
+	}
+
+	/// `get` of the head's run: the first fifty failing tests.
+	struct ChangeRun: Decodable, Equatable, Sendable {
+		let failing: [ChangeFailure]?
+	}
+
+	/// `session` list: one of the caller's living sessions.
+	struct SessionRow: Decodable, Equatable, Sendable {
+		let id: Int
+		let openedWith: String
+		let label: String
+		let userAgent: String?
+		let createdAt: Double
+		let createdFrom: String?
+		let lastUsedAt: Double
+		let lastUsedFrom: String?
+		let expiresAt: Double
+		let current: Bool
+	}
+
+	/// `session` end: whether it ended, and whether it was this device's.
+	struct SessionEnd: Decodable, Equatable, Sendable {
+		let ended: Bool
+		let current: Bool
+	}
 }

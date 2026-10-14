@@ -9,7 +9,21 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Glob } from "bun";
 import { z } from "zod";
-import { ChangeEvent, DecideReply, EVIDENCE, Inbox, Proposal, Question, SessionInfo } from "../scripts/ios/contract.ts";
+import {
+	ChangeEvent,
+	ChangeGate,
+	ChangeImpact,
+	ChangeList,
+	ChangeRun,
+	DecideReply,
+	EVIDENCE,
+	Inbox,
+	Proposal,
+	Question,
+	SessionEnd,
+	SessionInfo,
+	SessionRow,
+} from "../scripts/ios/contract.ts";
 import { type TestInstance, testInstance } from "../scripts/ios/instance.ts";
 import { mismatches, type Shape } from "../scripts/ios/shape.ts";
 import { generated } from "../scripts/ios/swift.ts";
@@ -256,5 +270,55 @@ describe("what Runs reads", () => {
 			expect(result?.atStep).toBe(outcome === "fail" ? "s1" : null);
 		}
 		holds("slots after correction", SlotPage, await op(key, "find", { in: "slots", run }));
+	});
+});
+
+describe("what Changes and Your sessions read", () => {
+	test("the list, gate, affected cases and failing tests of a change", async () => {
+		const key = "pr:482";
+		holds("find changes", ChangeList, await op(project, "find", { in: "changes", limit: 500 }));
+		const gate = await op(project, "gate", { change: key });
+		holds("gate of a change", ChangeGate, gate);
+		const run = z.object({ run: z.string() }).parse(gate).run;
+		const rows = z.array(z.unknown()).parse(await op(project, "get", { refs: [run] }));
+		expect(rows).toHaveLength(1);
+		holds("get the head run", ChangeRun, rows[0]);
+		holds("impact", ChangeImpact, await op(project, "impact", { change: key }));
+		expect(rows[0]).toMatchObject({ failing: [{ name: "Shop check 1", case: expect.stringMatching(/^C-/) }] });
+	});
+
+	test("an ended change retains its last gate and reports its end", async () => {
+		const own = z.object({ result: z.object({ project: z.string() }) }).parse(await send("POST", "/test/project", {}));
+		const key = own.result.project;
+		await op(key, "change", { change: "pr:482", state: "merged" });
+		const list = await op(key, "find", { in: "changes" });
+		holds("ended changes", ChangeList, list);
+		expect(list).toMatchObject({ items: [{ state: "merged", verdict: "blocked" }] });
+		holds("ended change gate", ChangeGate, await op(key, "gate", { change: "pr:482" }));
+	});
+
+	test("a cookie lists and ends its own session", async () => {
+		const signed = await fetch(`${server.url}/api/login`, {
+			method: "POST",
+			headers: { "content-type": "application/json", "user-agent": "Mainworthy for iPhone tests" },
+			body: JSON.stringify(server.person),
+		});
+		const cookie = (signed.headers.getSetCookie()[0] ?? "").split(";")[0] ?? "";
+		const call = async (body: unknown) => {
+			const response = await fetch(`${server.url}/api/session`, {
+				method: "POST",
+				headers: { "content-type": "application/json", cookie },
+				body: JSON.stringify(body),
+			});
+			return z.object({ ok: z.literal(true), result: z.unknown() }).parse(await response.json()).result;
+		};
+		const rows = z.array(z.unknown()).parse(await call({ do: "list" }));
+		for (const row of rows) holds("a session", SessionRow, row);
+		const mine = z
+			.array(z.object({ id: z.number(), current: z.boolean() }))
+			.parse(rows)
+			.find((row) => row.current);
+		expect(mine).toBeDefined();
+		holds("end session", SessionEnd, await call({ do: "end", id: mine?.id }));
 	});
 });

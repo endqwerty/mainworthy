@@ -280,6 +280,75 @@ export const RunReportReply = struct("RunReportReply", "What became of a small m
 	results: list(whole),
 });
 
+// ── Changes and the person's sessions ──────────────────────────────────────────────────────────────────────
+
+export const ChangeList = struct("ChangeList", "`find` in changes: newest first, with the head's gate.", {
+	items: list(
+		struct("ChangeSummary", "A reported branch or pull request.", {
+			key: text,
+			title: maybe(text),
+			branch: maybe(text),
+			head: maybe(text),
+			url: maybe(text),
+			state: text,
+			verdict: maybe(text),
+		}),
+	),
+});
+
+export const ChangeGate = struct("ChangeGate", "`gate` of a change's head commit.", {
+	run: maybe(text),
+	verdict: text,
+	reason: text,
+	tally: dictionary(whole),
+	stale: flag,
+});
+
+export const ChangeImpact = struct("ChangeImpact", "`impact` of a change: its base and the cases it touches.", {
+	change: struct("ChangeBasis", "The base commit, where the change has one.", { base: maybe(text) }),
+	counts: struct("ChangeImpactCounts", "The complete number of affected cases.", { cases: whole }),
+	cases: list(
+		struct("ChangedCase", "An affected case and why it is in the set.", {
+			id: text,
+			title: text,
+			why: list(text),
+			last: maybe(text),
+		}),
+	),
+});
+
+export const ChangeRun = struct("ChangeRun", "`get` of the head's run: the first fifty failing tests.", {
+	failing: maybe(
+		list(
+			struct("ChangeFailure", "A failed test with its linked case, if any.", {
+				test: maybe(text),
+				name: maybe(text),
+				file: maybe(text),
+				case: maybe(text),
+				cause: maybe(text),
+			}),
+		),
+	),
+});
+
+export const SessionRow = struct("SessionRow", "`session` list: one of the caller's living sessions.", {
+	id: whole,
+	openedWith: text,
+	label: text,
+	userAgent: maybe(text),
+	createdAt: moment,
+	createdFrom: maybe(text),
+	lastUsedAt: moment,
+	lastUsedFrom: maybe(text),
+	expiresAt: moment,
+	current: flag,
+});
+
+export const SessionEnd = struct("SessionEnd", "`session` end: whether it ended, and whether it was this device's.", {
+	ended: flag,
+	current: flag,
+});
+
 /** Every shape the app decodes by name. `gen` writes one Swift type for each, and for each struct inside it. */
 export const SHAPES: readonly Shape[] = [
 	SessionInfo,
@@ -296,4 +365,10 @@ export const SHAPES: readonly Shape[] = [
 	RunFolders,
 	RunPlanReply,
 	RunReportReply,
+	ChangeList,
+	ChangeGate,
+	ChangeImpact,
+	ChangeRun,
+	SessionRow,
+	SessionEnd,
 ];

@@ -3,7 +3,7 @@
 Answer the queue from your phone in a native app.
 This page says how to install the app, how to sign in and what it does today.
 
-The app is new. It has the queue and planned runs. The suite and changes follow (issue #171). For
+The app is new. It has the queue, planned runs, changes and your sessions. The suite follows (issue #171). For
 those, open the instance in the phone's browser, which gets [a layout of its own](./keyboard.md#on-a-phone).
 
 ## Install the app
@@ -82,6 +82,28 @@ If the run was planned but cannot be read, the app keeps its reference and offer
 This reads the saved run without planning another.
 Planning needs the project's `plan` capability. A selection with no cases is refused with the server's sentence.
 
+## Read a change's gate
+
+1. Open **Changes**. A pipeline report with a branch or pull request makes a change appear, newest first.
+2. Press a change to read its head and base commits, the gate's verdict and reason, its failing tests and
+   linked cases, and the cases it touches. Pull down to refresh. The list and open page also follow the
+   project's change stream.
+3. Press an open question to read its evidence and answer it, as in Queue. When you answer, the change's
+   gate is read again.
+
+A merged or closed change is marked as ended. Its gate keeps the last verdict its head had. The app does not
+end a change or run tests again.
+
+## End a session
+
+1. Open **You**, then **Your sessions**. Each session says what opened it, what the client called itself,
+   when and where it opened and was last used. **This device** marks the app's own session.
+2. Press **End session** and confirm. Ending this device's session signs you out. Ending another leaves
+   this device signed in.
+
+The list is yours on the instance, whichever project is open. Pull down to refresh. Other people's sessions,
+passwords and passkeys are managed in the web app.
+
 ## What the app does not do yet
 
 - **Link a test to a case**, and **resolve an edit that overlaps another**. The answer is listed and greyed.
@@ -90,7 +112,7 @@ Planning needs the project's `plan` capability. A selection with no cases is ref
   version, moves, tags or archives cases, makes a folder or changes the policy is answered in the web app: the
   app does not show all of what it changes. So is one with more than twenty edits. A new case and an edit to a
   case are shown step by step, and their answers stay off until that is on the screen.
-- **The suite and changes.**
+- **The suite.**
 - **Notifications.** They need a paid Apple developer membership.
 - **Work without a connection.** An answer whose reply was lost is sent again by itself. The app does not keep
   an answer for later.
