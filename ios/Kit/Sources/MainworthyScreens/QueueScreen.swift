@@ -227,7 +227,7 @@ public final class QueueScreen: ProjectScreen {
 	public func isShown(_ question: Question) -> Bool {
 		switch question.evidence {
 		case .unreadable: false
-		case .proposal: if case .read = documents(of: question) { true } else { false }
+		case .proposal(let edit): if case .read = documents(of: question) { edit.isShownWhole } else { false }
 		case .failure, .unlinked, .finding, .signoff: true
 		}
 	}
@@ -245,7 +245,7 @@ public final class QueueScreen: ProjectScreen {
 		if case .read = documents[key] { return }
 		documents[key] = .reading
 		do {
-			documents[key] = .read(try await project.documents(of: edit.proposal))
+			documents[key] = .read(try await project.documents(of: edit))
 		} catch is CancellationError {
 			// The view that asked went away. What another read of the same documents brought stays.
 			if case .reading = documents[key] { documents[key] = nil }

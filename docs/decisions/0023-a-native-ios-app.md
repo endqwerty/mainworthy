@@ -73,7 +73,11 @@ on the question as it was when the person chose it: a sheet that asks for a reas
 that arrived behind it. What was not shown is not answered. A new case and an edit to what a case says are
 accepted only once their documents were read: the case as it is beside the case as it would be, with where a new
 one goes and who runs it. A proposal that does anything else (it restores an earlier version, moves or archives
-cases, or changes the policy) is answered in the web app, because the app does not show all of it.
+cases, or changes the policy) is answered in the web app, because the app does not show all of it. A reply
+that lacks a document the question counted is unreadable, not a smaller change. A finding's suggestion is shown
+with the step it would change, which need not be the step the finding is on. A question that is read by itself,
+because no list on the screen holds it, takes what the person's answer is worth from a listing of what it is
+about, and says nothing about it where there is none: the server decides when the answer is given.
 
 **A free Apple ID is enough.** That rules out what needs a paid membership: push notifications, passkeys (they
 need an associated domain) and TestFlight. An app signed that way opens for seven days, so installing is one

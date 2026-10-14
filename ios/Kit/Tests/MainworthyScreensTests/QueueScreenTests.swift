@@ -58,10 +58,6 @@ struct QueueScreenTests {
 	func acceptedEdit() async throws {
 		let screen = try await screen()
 		let adopt = try #require(screen.questions.first { $0.kind == .adopt })
-		guard case .proposal(let edit) = adopt.evidence else {
-			Issue.record("the proposal's evidence was not read")
-			return
-		}
 		// An edit nobody was shown is not accepted: the answer waits for what it changes to be read.
 		let accept = try #require(adopt.choices.first { $0.answer == "accept" })
 		#expect(!screen.isShown(adopt))

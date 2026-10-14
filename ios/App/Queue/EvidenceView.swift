@@ -130,10 +130,14 @@ private struct FindingEvidence: View {
 			if let suggestion = finding.suggestion {
 				Panel("Suggested edit") {
 					switch suggestion {
-					case .step(let action, let expected):
+					case .step(let step, let action, let expected):
+						// The edit is made to the step the suggestion names, which the finding may not be on.
+						Text(step.map { "To step \($0) of \(finding.caseRef ?? "the case")" } ?? "To the case")
+							.font(.subheadline.weight(.medium))
 						if let action { Text(action) }
 						if let expected { Text("> \(expected)").foregroundStyle(Color.pass) }
-					case .newCase(let title, let steps):
+					case .newCase(let title, let folder, let steps):
+						Text("A new case\(folder.map { " in \($0)" } ?? "")").font(.subheadline.weight(.medium))
 						Text(title).font(.body.weight(.medium))
 						ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
 							Text("\(index + 1). \(step)").font(.subheadline)

@@ -65,28 +65,50 @@ extension ProjectClient {
 	}
 
 	/// The cases a proposal would make or change, each as it is and as it would be. Only a proposal that is
-	/// shown whole (`ProposedEdit.isShownWhole`) is all here: another one's edits have no document.
-	package func documents(of proposal: String) async throws -> [EditedCase] {
-		let rows: [Wire.Proposal] = try await server.read("get", in: key, ["refs": [.string(proposal)]])
-		guard let found = rows.first else { return [] }
-		return found.edits.enumerated().compactMap { index, edit in
-			guard let body = edit.body else { return nil }
-			let placement = edit.op == "create"
-				? EditedCase.Placement(
-					folder: edit.folder ?? "", tags: edit.tags?.array?.compactMap(\.string) ?? [],
-					covers: edit.covers ?? []
-				) : nil
-			return EditedCase(
-				id: index, caseRef: edit.case, before: edit.current.map(CaseContent.init), after: CaseContent(body),
-				placement: placement
-			)
+	/// shown whole (`ProposedEdit.isShownWhole`) has all its documents: for such a one, a reply that lacks a
+	/// document, or the case an edit changes as it is now, is not read as fewer changes. It is unreadable,
+	/// and nothing of it is shown as the whole.
+	package func documents(of edit: ProposedEdit) async throws -> [EditedCase] {
+		let rows: [Wire.Proposal] = try await server.read("get", in: key, ["refs": [.string(edit.proposal)]])
+		guard let found = rows.first, found.ref == edit.proposal else { throw ClientError.unreadable }
+		let documents = try found.edits.enumerated().compactMap { index, part -> EditedCase? in
+			switch part.op {
+			case "create":
+				guard let body = part.body, let folder = part.folder, let tags = part.tags?.array, let covers = part.covers
+				else { throw ClientError.unreadable }
+				return EditedCase(
+					id: index, caseRef: nil, before: nil, after: CaseContent(body),
+					placement: .init(folder: folder, tags: tags.compactMap(\.string), covers: covers)
+				)
+			case "edit":
+				guard let body = part.body, let current = part.current, let ref = part.case
+				else { throw ClientError.unreadable }
+				return EditedCase(id: index, caseRef: ref, before: CaseContent(current), after: CaseContent(body))
+			default:
+				return nil
+			}
 		}
+		// What the question counted is what must be here.
+		guard !edit.isShownWhole || documents.count == edit.count else { throw ClientError.unreadable }
+		return documents
 	}
 
-	/// One question by its ref, open or decided, or nil when the project has none such. A question that is
-	/// read alone does not say what this person's answer is worth: the server decides when it is given.
+	/// One question by its ref, open or decided, or nil when the project has none such.
+	///
+	/// `get` reads it, and does not say what this person's answer is worth: only a listing does. So the
+	/// question is then looked for in the listing of what one of its subjects is about (a change, a run, a
+	/// case), which is one page however long the queue is. Where no such listing holds it, the question is
+	/// returned as `get` gave it, with a standing that is not known.
 	package func question(_ ref: String) async throws -> Question? {
 		let rows: [Wire.Question] = try await server.read("get", in: key, ["refs": [.string(ref)]])
-		return rows.first.map(Question.init)
+		guard let alone = rows.first else { return nil }
+		for subject in alone.about.prefix(3) {
+			let input: JSONValue = [
+				"state": alone.state == "open" ? "open" : "decided", "on": .string(subject), "limit": 500,
+			]
+			let listed: Wire.Inbox? = try? await server.read("inbox", in: key, input)
+			if let found = listed?.items.first(where: { $0.q == ref }) { return Question(found) }
+		}
+		return Question(alone)
 	}
 }

@@ -246,6 +246,67 @@ struct ServerTests {
 		])
 	}
 
+	@Test("a proposal's reply that lacks a document is unreadable, not a smaller change")
+	func incompleteDocuments() async throws {
+		let inbox = """
+			{"ok":true,"seq":3,"result":{"counts":{"open":1,"adopt":1},"cursor":null,"items":[
+			{"q":"Q-1","kind":"adopt","title":"An edit","producer":"agent","state":"open","evidenceHash":"abc",
+			"evidence":{"proposal":"P-1","author":"reviewer","reason":null,"count":2,"conflicts":[],"facts":[],
+			"edits":[{"op":"edit","case":"C-1","title":"A case"},{"op":"create","title":"A new case"}]},
+			"seen":{"count":1,"carried":0},"needs":"one member","answers":["accept","reject"],"blocks":[],"about":[],
+			"openedAt":1800000000000,"advice":[],"decision":null,"you":"counts"}]}}
+			"""
+		let body = #"{"title":"A case","pre":"","steps":[],"methods":["human"],"automate":"none"}"#
+		let edited = #"{"op":"edit","case":"C-1","body":\#(body),"current":\#(body)}"#
+		let created = #"{"op":"create","body":\#(body),"folder":"Checkout","tags":["checkout"],"covers":[]}"#
+		func documents(_ edits: String) async throws -> [EditedCase] {
+			let reply = #"{"ok":true,"seq":3,"result":[{"ref":"P-1","edits":[\#(edits)]}]}"#
+			let project = server(Script(.json(inbox), .json(reply))).project("shop")
+			let question = try #require(try await project.questions(open: true).questions.first)
+			guard case .proposal(let edit) = question.evidence else { throw ClientError.unreadable }
+			return try await project.documents(of: edit)
+		}
+		// The whole reply is read as the two cases the question counted.
+		#expect(try await documents("\(edited),\(created)").map(\.caseRef) == ["C-1", nil])
+		// One with a part missing is not read as what is left of it.
+		let incomplete = [
+			edited,  // one document of two
+			#"\#(edited),{"op":"create","folder":"Checkout","tags":[],"covers":[]}"#,  // a new case without its content
+			#"{"op":"edit","case":"C-1","body":\#(body)},\#(created)"#,  // an edit without the case as it is
+			#"\#(edited),{"op":"create","body":\#(body)}"#,  // a new case without where it goes
+			"",
+		]
+		for edits in incomplete {
+			await #expect(throws: ClientError.unreadable) { _ = try await documents(edits) }
+		}
+	}
+
+	@Test("a suggestion says which step it changes, which is not always the step the finding is on")
+	func suggestionTarget() async throws {
+		func finding(_ suggest: String) -> String {
+			"""
+			{"ok":true,"seq":3,"result":{"counts":{"open":1,"finding":1},"cursor":null,"items":[
+			{"q":"Q-1","kind":"finding","title":"A finding","producer":"agent","state":"open","evidenceHash":"abc",
+			"evidence":{"on":"C-1#s1","case":"C-1","caseTitle":"A case","step":"s1","category":"ambiguous","note":"Unclear.",
+			"repro":null,"suggest":\(suggest),"finder":"reviewer","lens":"review","facts":[]},
+			"seen":{"count":1,"carried":0},"needs":"one member","answers":["accept","reject"],"blocks":[],"about":[],
+			"openedAt":1800000000000,"advice":[],"decision":null,"you":"counts"}]}}
+			"""
+		}
+		func suggestion(_ suggest: String) async throws -> Finding.Suggestion? {
+			let questions = try await server(Script(.json(finding(suggest)))).project("shop").questions(open: true)
+			guard case .finding(let found) = questions.questions.first?.evidence else { throw ClientError.unreadable }
+			return found.suggestion
+		}
+		// The server edits the step the suggestion names. Where it names none, the step the finding is on.
+		#expect(try await suggestion(#"{"step":"s2","expected":"New"}"#) == .step("s2", action: nil, expected: "New"))
+		#expect(try await suggestion(#"{"expected":"New"}"#) == .step("s1", action: nil, expected: "New"))
+		#expect(try await suggestion("null") == nil)
+		#expect(
+			try await suggestion(#"{"case":{"title":"A new case","folder":"Checkout","steps":["Open the cart"]}}"#)
+				== .newCase(title: "A new case", folder: "Checkout", steps: ["Open the cart"]))
+	}
+
 	@Test("a refusal carries the server's sentence")
 	func refused() async {
 		let body = #"{"ok":false,"error":{"code":"forbidden","message":"inbox needs the read capability on shop"}}"#

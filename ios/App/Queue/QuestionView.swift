@@ -212,7 +212,7 @@ struct QuestionView: View {
 	private func needs(_ question: Question) -> String {
 		let waits = "Needs \(question.needs)."
 		return switch question.standing {
-		case .counts: waits
+		case .counts, .unknown: waits
 		case .advice: "\(waits) Your answer is recorded as advice."
 		case .forbidden: "\(waits) The policy does not let you answer this one."
 		}

@@ -96,6 +96,9 @@ public struct Question: Identifiable, Equatable, Sendable {
 	public let standing: Standing
 	/// The decision that stands, on a question that is decided.
 	public let decision: Decision?
+	/// What the question is about: runs, tests, cases, a change. A listing can be asked for the questions about
+	/// one of them.
+	let about: [String]
 	/// What an answer must say it was given on, so that an answer to evidence that has changed since is not
 	/// taken. Only `ProjectClient.answer` reads it: a screen cannot answer on evidence it was not handed.
 	package let evidenceHash: String
@@ -136,6 +139,7 @@ extension Question {
 		advice = wire.advice.map(Advice.init)
 		standing = Standing(wire.you)
 		decision = wire.decision.map(Decision.init)
+		about = wire.about
 		evidenceHash = wire.evidenceHash
 		facts = Set(wire.evidence["facts"]?.array?.compactMap(\.string) ?? [])
 	}
@@ -149,13 +153,16 @@ public enum Standing: Sendable {
 	case advice
 	/// The policy does not let this person answer.
 	case forbidden
+	/// The server did not say: a question that was read by itself, where no listing holds it. The answers are
+	/// offered, and the server says what one was worth when it is given.
+	case unknown
 
 	init(_ word: String?) {
 		switch word {
+		case "counts": self = .counts
 		case "advice": self = .advice
 		case "forbidden": self = .forbidden
-		// Absent outside a listing, and the server decides either way.
-		default: self = .counts
+		default: self = .unknown
 		}
 	}
 }

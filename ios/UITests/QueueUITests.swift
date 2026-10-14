@@ -93,8 +93,11 @@ final class QueueUITests: XCTestCase {
 		shot("6-decided")
 
 		app.tabBars.buttons["You"].tap()
-		XCTAssertTrue(app.buttons["sign-out"].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts["Signed in"].waitForExistence(timeout: 5))
 		shot("7-you")
+		// Signing out is the last row of a list that grows with the app: it is scrolled to.
+		if !app.buttons["sign-out"].waitForExistence(timeout: 2) { app.swipeUp() }
+		XCTAssertTrue(app.buttons["sign-out"].waitForExistence(timeout: 5))
 		app.buttons["sign-out"].tap()
 		app.buttons["Sign out"].firstMatch.tap()
 		XCTAssertTrue(app.textFields["address"].waitForExistence(timeout: 10))

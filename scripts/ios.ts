@@ -27,6 +27,8 @@ const CACHE = join(homedir(), ".cache", "mainworthy-ios", Bun.hash(ROOT).toStrin
 const SIMULATOR = "Mainworthy";
 /** The port whose holder has the simulator (`alone`). */
 const SIMULATOR_TURN = 47357;
+/** How long a run waits for its turn. Every test class together takes about five minutes. */
+const SIMULATOR_WAIT_MS = 30 * 60_000;
 
 class Stop extends Error {}
 const stop = (message: string): never => {
@@ -194,11 +196,17 @@ async function build(): Promise<void> {
  */
 async function alone<T>(work: () => Promise<T>): Promise<T> {
 	let held: { stop: (closeActiveConnections?: boolean) => void } | null = null;
+	const patience = Date.now() + SIMULATOR_WAIT_MS;
 	let said = false;
 	while (!held) {
 		try {
 			held = Bun.listen({ hostname: "127.0.0.1", port: SIMULATOR_TURN, socket: { data() {} } });
 		} catch {
+			// A port that something else took looks the same as another run's turn, so the wait has an end.
+			if (Date.now() > patience)
+				return stop(
+					`the simulator's turn did not come in ${SIMULATOR_WAIT_MS / 60_000} minutes: \`lsof -nP -iTCP:${SIMULATOR_TURN}\` says who holds port ${SIMULATOR_TURN}`,
+				);
 			if (!said) console.log(`another run holds the simulator (port ${SIMULATOR_TURN}); waiting for it`);
 			said = true;
 			await Bun.sleep(2000);
@@ -232,6 +240,9 @@ async function uitest(filter: string | undefined): Promise<void> {
 					"-derivedDataPath",
 					join(CACHE, "simulator"),
 					"CODE_SIGNING_ALLOWED=NO",
+					// After a failed test xcodebuild otherwise spends up to ten minutes gathering the simulator's logs.
+					"-collect-test-diagnostics",
+					"never",
 					...(filter ? [`-only-testing:MainworthyUITests/${filter}`] : []),
 				],
 				{

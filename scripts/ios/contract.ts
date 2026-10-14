@@ -119,9 +119,16 @@ export const EVIDENCE = {
 		suggest: [
 			maybe(
 				struct("Suggestion", "An edit a finder suggests: to one step, or a new case.", {
+					step: [maybe(text), "The step the edit is made to. Where absent, the step the finding is on."],
 					action: maybe(text),
 					expected: maybe(text),
-					case: maybe(struct("SuggestedCase", "A case a finder suggests adding.", { title: text, steps: list(text) })),
+					case: maybe(
+						struct("SuggestedCase", "A case a finder suggests adding.", {
+							title: text,
+							folder: [maybe(text), "The folder the case would go into."],
+							steps: list(text),
+						}),
+					),
 				}),
 			),
 			"Accepting the finding turns it into a proposal by the finder.",
