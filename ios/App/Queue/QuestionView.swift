@@ -47,8 +47,16 @@ struct QuestionView: View {
 		Group {
 			if let question = current ?? last {
 				page(question, isGone: current == nil)
+			} else if screen.isOpening {
+				ProgressView()
 			} else {
-				ContentUnavailableView("This question is not in the list any more", systemImage: "tray")
+				ContentUnavailableView {
+					Label("This question is not in the list any more", systemImage: "tray")
+				} description: {
+					Text("It was answered, it no longer applies, or it could not be read.")
+				} actions: {
+					Button("Read again") { Task { await screen.open(ref) } }
+				}
 			}
 		}
 		.navigationTitle(ref)
@@ -65,6 +73,9 @@ struct QuestionView: View {
 		.onChange(of: current, initial: true) { _, now in
 			if let now { last = now }
 		}
+		// The list may not hold this question: it is read by itself for as long as its page is open.
+		.task(id: ref) { await screen.open(ref) }
+		.onDisappear { screen.close(ref) }
 		.sheet(item: $asking) { asking in
 			sheet(for: asking)
 		}
@@ -125,10 +136,14 @@ struct QuestionView: View {
 				Label("from \(question.producer.name)", systemImage: question.producer.symbol)
 					.font(.caption)
 					.foregroundStyle(question.producer.tint)
-				Spacer()
+					.lineLimit(1)
+				Spacer(minLength: 4)
+				// The time keeps its width: a long name beside it is the one that gives way.
 				Text(question.openedAt, format: .relative(presentation: .named))
 					.font(.caption)
 					.foregroundStyle(.secondary)
+					.lineLimit(1)
+					.fixedSize()
 			}
 			Text(question.title)
 				.font(.title3.weight(.semibold))
@@ -155,7 +170,7 @@ struct QuestionView: View {
 
 	private func answers(_ question: Question) -> some View {
 		VStack(alignment: .leading, spacing: 8) {
-			Text(needs(question))
+			Text([needs(question), readOnlyNote].compactMap { $0 }.joined(separator: " "))
 				.font(.subheadline)
 				.foregroundStyle(.secondary)
 			ForEach(question.choices) { choice in
@@ -189,7 +204,8 @@ struct QuestionView: View {
 	/// Whether an answer is this person's to give here: the app can send it, the policy lets them, and they
 	/// were shown what the question asks about.
 	private func canGive(_ choice: Choice, to question: Question) -> Bool {
-		choice.takes != .more && question.standing != .forbidden && screen.isShown(question)
+		workspace.project?.may(.produce) == true && choice.takes != .more && question.standing != .forbidden
+			&& screen.isShown(question)
 	}
 
 	/// Who the question waits for, and what this person's answer is worth.
@@ -200,6 +216,11 @@ struct QuestionView: View {
 		case .advice: "\(waits) Your answer is recorded as advice."
 		case .forbidden: "\(waits) The policy does not let you answer this one."
 		}
+	}
+
+	/// What the page says where the person's grant on the project does not let them answer at all.
+	private var readOnlyNote: String? {
+		workspace.project?.may(.produce) == true ? nil : "Your grant on this project lets you read, not answer."
 	}
 
 	private func decided(_ decision: Decision, on question: Question) -> some View {
@@ -269,68 +290,5 @@ struct QuestionView: View {
 				withdraw(question, reason: reason)
 			}
 		}
-	}
-}
-
-/// What an answer takes beside itself: where a defect is tracked, and the reason the policy asks for.
-private struct AnswerSheet: View {
-	let title: String
-	let help: String
-	let action: String
-	let wantsReference: Bool
-	let wantsReason: Bool
-	let onSubmit: (_ reference: String, _ reason: String) -> Void
-
-	@State private var reference = ""
-	@State private var reason = ""
-	@Environment(\.dismiss) private var dismiss
-
-	var body: some View {
-		NavigationStack {
-			Form {
-				Section {
-					Text(help).foregroundStyle(.secondary)
-				}
-				if wantsReference {
-					Section {
-						TextField("SHOP-482, or a link", text: $reference)
-							.textInputAutocapitalization(.never)
-							.autocorrectionDisabled()
-							.accessibilityIdentifier("reference")
-					} header: {
-						Text("Where it is tracked")
-					} footer: {
-						Text("Optional.")
-					}
-				}
-				if wantsReason {
-					Section {
-						TextField("Why", text: $reason, axis: .vertical)
-							.lineLimit(3...8)
-							.accessibilityIdentifier("reason")
-					} header: {
-						Text("Reason")
-					} footer: {
-						Text("The policy of this project asks for one.")
-					}
-				}
-			}
-			.navigationTitle(title)
-			.navigationBarTitleDisplayMode(.inline)
-			.toolbar {
-				ToolbarItem(placement: .cancellationAction) {
-					Button("Cancel") { dismiss() }
-				}
-				ToolbarItem(placement: .confirmationAction) {
-					Button(action) {
-						onSubmit(reference, reason)
-						dismiss()
-					}
-					.disabled(wantsReason && reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-					.accessibilityIdentifier("submit-answer")
-				}
-			}
-		}
-		.presentationDetents([.medium, .large])
 	}
 }

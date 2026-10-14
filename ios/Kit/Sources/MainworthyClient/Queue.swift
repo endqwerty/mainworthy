@@ -64,17 +64,29 @@ extension ProjectClient {
 		return reply
 	}
 
-	/// The cases a proposed edit would change or make, each as it is and as it would be. An edit that changes
-	/// no case's content (a move, a folder, the policy) has none: its line in the question says what it does.
+	/// The cases a proposal would make or change, each as it is and as it would be. Only a proposal that is
+	/// shown whole (`ProposedEdit.isShownWhole`) is all here: another one's edits have no document.
 	package func documents(of proposal: String) async throws -> [EditedCase] {
 		let rows: [Wire.Proposal] = try await server.read("get", in: key, ["refs": [.string(proposal)]])
 		guard let found = rows.first else { return [] }
 		return found.edits.enumerated().compactMap { index, edit in
-			edit.body.map { body in
-				EditedCase(
-					id: index, caseRef: edit.case, before: edit.current.map(CaseContent.init), after: CaseContent(body)
-				)
-			}
+			guard let body = edit.body else { return nil }
+			let placement = edit.op == "create"
+				? EditedCase.Placement(
+					folder: edit.folder ?? "", tags: edit.tags?.array?.compactMap(\.string) ?? [],
+					covers: edit.covers ?? []
+				) : nil
+			return EditedCase(
+				id: index, caseRef: edit.case, before: edit.current.map(CaseContent.init), after: CaseContent(body),
+				placement: placement
+			)
 		}
+	}
+
+	/// One question by its ref, open or decided, or nil when the project has none such. A question that is
+	/// read alone does not say what this person's answer is worth: the server decides when it is given.
+	package func question(_ ref: String) async throws -> Question? {
+		let rows: [Wire.Question] = try await server.read("get", in: key, ["refs": [.string(ref)]])
+		return rows.first.map(Question.init)
 	}
 }

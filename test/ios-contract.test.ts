@@ -7,7 +7,8 @@
 // again and say so in the pull request: `ios/README.md`, "When the contract test fails".
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { ChangeEvent, DecideReply, EVIDENCE, Inbox, Proposal, SessionInfo } from "../scripts/ios/contract.ts";
+import { Glob } from "bun";
+import { ChangeEvent, DecideReply, EVIDENCE, Inbox, Proposal, Question, SessionInfo } from "../scripts/ios/contract.ts";
 import { type TestInstance, testInstance } from "../scripts/ios/instance.ts";
 import { mismatches, type Shape } from "../scripts/ios/shape.ts";
 import { generated } from "../scripts/ios/swift.ts";
@@ -102,6 +103,33 @@ describe("what the iOS app reads", () => {
 		expect(rows[0]).toMatchObject({ edits: [{ op: "edit", body: {}, current: {} }] });
 	});
 
+	test("one question read by its ref, and a proposal that makes a case", async () => {
+		const [first] = await open(project);
+		if (!first) throw new Error("the scenario has no open question");
+		const rows = (await op(project, "get", { refs: [first.q] })) as unknown[];
+		expect(rows).toHaveLength(1);
+		holds(`get ${first.q}`, Question, rows[0]);
+		// Under the strict policy a new case waits for a person, so its proposal can be read.
+		const proposed = (await op(strict, "propose", {
+			reason: "A second case.",
+			edits: [
+				{
+					op: "create",
+					outline: "The cart opens\n  Open the cart > The cart is shown",
+					folder: "Checkout",
+					tags: ["checkout"],
+					covers: ["WEB-290"],
+				},
+			],
+		})) as { proposal: string };
+		const [made] = (await op(strict, "get", { refs: [proposed.proposal] })) as unknown[];
+		holds(`get ${proposed.proposal}`, Proposal, made);
+		// The app says where a new case goes from these three.
+		expect(made).toMatchObject({
+			edits: [{ op: "create", folder: "Checkout", tags: ["checkout"], covers: ["WEB-290"] }],
+		});
+	});
+
 	test("every kind of question has an evidence shape", () => {
 		// A kind added to the server is one the app shows without its evidence until it is given a shape.
 		expect(Object.keys(EVIDENCE).sort(), WHAT_TO_DO).toEqual([...KINDS].sort());
@@ -141,6 +169,18 @@ describe("what the iOS app reads", () => {
 		await reader.cancel();
 		const line = text.split("\n").find((part) => part.startsWith("data: "));
 		holds("an event", ChangeEvent, JSON.parse((line ?? "").slice("data: ".length)));
+	});
+});
+
+describe("the app's screens", () => {
+	test("no view sends a request of its own", () => {
+		// The Swift package's access rules keep a view from the client (`package`). They cannot keep it from
+		// the system's own networking, so this does: a view asks a class of MainworthyScreens, and that class
+		// asks the client, which is the one place a request is made and the cookie is held.
+		const reaching = /\b(URLSession|URLRequest|NWConnection|CFNetwork|WKWebView)\b|^import (Network|WebKit)\b/m;
+		const views = [...new Glob("ios/App/**/*.swift").scanSync(".")];
+		expect(views.length).toBeGreaterThan(5);
+		expect(views.filter((file) => reaching.test(readFileSync(file, "utf8")))).toEqual([]);
 	});
 });
 

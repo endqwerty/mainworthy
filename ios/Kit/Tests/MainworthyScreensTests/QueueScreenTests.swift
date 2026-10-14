@@ -90,6 +90,14 @@ struct QueueScreenTests {
 		#expect(screen.current(signoff.ref) != nil)
 		#expect(await screen.answer(signoff, with: approve, reason: "Checked on the release build."))
 		#expect(screen.current(signoff.ref) == nil)
+		// Undo is offered, and withdrawing is a decision too: the policy asks it for a reason as well.
+		let undoes = try #require(screen.notice?.undoes)
+		#expect(undoes.wantsReason)
+		await screen.withdraw(undoes)
+		#expect(screen.notice?.text == "The decision on \(signoff.ref) stands. The server asks for a reason.")
+		await screen.withdraw(undoes, reason: "Closed too early.")
+		#expect(screen.notice?.text == "\(signoff.ref): the decision is withdrawn.")
+		#expect(screen.current(signoff.ref) != nil)
 	}
 
 	@Test("a change made elsewhere is on the screen after it is read again")
@@ -133,7 +141,18 @@ struct QueueScreenFailureTests {
 				"decision":null,"you":"counts"}
 				"""
 			}
-			let second = String(decoding: request.httpBody ?? Data(), as: UTF8.self).contains(#""cursor":"next""#)
+			let asked = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+			if request.url?.lastPathComponent == "get" {
+				// One question by its ref: Q-3 is open, and Q-9 was decided since.
+				let body = asked.contains("Q-9")
+					? question("Q-9").replacingOccurrences(of: #""state":"open""#, with: #""state":"decided""#)
+					: question("Q-3")
+				return (
+					Data(#"{"ok":true,"seq":1,"result":[\#(body)]}"#.utf8),
+					HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+				)
+			}
+			let second = asked.contains(#""cursor":"next""#)
 			let items = second ? question("Q-3") : "\(question("Q-1")),\(question("Q-2"))"
 			let body = #"{"ok":true,"seq":1,"result":{"counts":{"open":3,"map":3},"cursor":\#(second ? "null" : #""next""#),"items":[\#(items)]}}"#
 			return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
@@ -156,6 +175,23 @@ struct QueueScreenFailureTests {
 		await screen.refresh()
 		#expect(screen.current("Q-3") != nil)
 		#expect(screen.questions.count == 3 && !screen.hasMore)
+	}
+
+	@Test("a question whose page is open is read by itself where the list does not hold it")
+	func openedBeyondTheList() async throws {
+		let server = Server(instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(), transport: TwoPages())
+		let screen = QueueScreen(project: server.project("shop"))
+		await screen.show(.open, filter: nil)
+		// The list was read as far as Q-2. Q-3 is opened from another screen, or pushed down by a new question.
+		#expect(screen.current("Q-3") == nil)
+		await screen.open("Q-3")
+		#expect(screen.current("Q-3")?.isOpen == true)
+		await screen.refresh()
+		#expect(screen.questions.count == 2 && screen.current("Q-3") != nil)
+		// A question that was decided meanwhile is not shown as one that still waits.
+		await screen.open("Q-9")
+		#expect(screen.current("Q-9") == nil)
+		screen.close("Q-9")
 	}
 
 	@Test("the first read that fails says why, in place of the list")

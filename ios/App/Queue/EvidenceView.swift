@@ -175,7 +175,7 @@ private struct ProposalEvidence: View {
 			}
 			if !edit.isShownWhole {
 				Label(
-					"This proposal does more than change what a case says: it moves, tags, archives or re-covers cases, makes a folder or changes the policy. This build does not show all of that, so it is answered in the web app.",
+					"This proposal does more than add a case or change what one says: it restores an earlier version, moves, tags, archives or re-covers cases, makes a folder or changes the policy. This build does not show all of that, so it is answered in the web app.",
 					systemImage: "info.circle"
 				)
 				.font(.subheadline)
@@ -218,14 +218,22 @@ private struct EditedCaseView: View {
 				case .pre(let from, let to):
 					if !from.isEmpty { line("Before: \(from)", mark: "−", tint: .fail, struck: true) }
 					if !to.isEmpty { line("Before: \(to)", mark: "+", tint: .pass) }
+				case .placed(let placement):
+					line("In \(placement.folder.isEmpty ? "no folder" : placement.folder)", mark: "+", tint: .pass)
+					if !placement.tags.isEmpty {
+						line("Tags: \(placement.tags.joined(separator: ", "))", mark: "+", tint: .pass)
+					}
+					if !placement.covers.isEmpty {
+						line("Covers: \(placement.covers.joined(separator: ", "))", mark: "+", tint: .pass)
+					}
 				case .methods(let from, let to):
-					line("Run by: \(from.joined(separator: ", "))", mark: "−", tint: .fail, struck: true)
+					if !from.isEmpty { line("Run by: \(from.joined(separator: ", "))", mark: "−", tint: .fail, struck: true) }
 					line("Run by: \(to.joined(separator: ", "))", mark: "+", tint: .pass)
 				case .automate(let from, let to):
-					line("Automation: \(from)", mark: "−", tint: .fail, struck: true)
+					if !from.isEmpty { line("Automation: \(from)", mark: "−", tint: .fail, struck: true) }
 					line("Automation: \(to)", mark: "+", tint: .pass)
 				case .fields(let from, let to):
-					line("Fields: \(fields(from))", mark: "−", tint: .fail, struck: true)
+					if !from.isEmpty { line("Fields: \(fields(from))", mark: "−", tint: .fail, struck: true) }
 					line("Fields: \(fields(to))", mark: "+", tint: .pass)
 				case .kept(let step):
 					line(text(step), mark: " ", tint: .secondary)

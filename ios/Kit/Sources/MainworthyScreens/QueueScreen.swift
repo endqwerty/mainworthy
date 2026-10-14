@@ -47,6 +47,11 @@ public final class QueueScreen: ProjectScreen {
 	/// The questions with an answer or a withdrawal on its way. A second one is not sent meanwhile.
 	public private(set) var busy: Set<String> = []
 
+	/// The question whose page is open, and that question as it was read by itself when the list did not hold
+	/// it: it is further down than the list was read, or it was opened from another screen.
+	private var opened: (ref: String, alone: Question?)?
+	/// Whether the open question is being read by itself for the first time: its page has nothing to show yet.
+	public private(set) var isOpening = false
 	private let project: ProjectClient
 	private var next: String?
 	/// Counts every read that was started, so that a slow one that was overtaken does not replace a newer one.
@@ -56,10 +61,36 @@ public final class QueueScreen: ProjectScreen {
 		self.project = project
 	}
 
-	/// The question as the list holds it now, or nil once it left the list: answered here or by somebody else,
-	/// or dissolved because the failure went away.
+	/// The question as it is now, or nil once it is no longer what this list shows: an open question that was
+	/// answered, here or by somebody else, or that dissolved because the failure went away. A question whose
+	/// page is open is read by itself where the list does not hold it, so that a list which was read less far
+	/// down, or which another question was added to, does not make an open question look answered.
 	public func current(_ ref: String) -> Question? {
-		questions.first { $0.ref == ref }
+		questions.first { $0.ref == ref } ?? (opened?.ref == ref ? opened?.alone : nil)
+	}
+
+	/// Says which question's page is open, and reads that question where the list does not hold it.
+	public func open(_ ref: String) async {
+		if opened?.ref != ref { opened = (ref, nil) }
+		isOpening = current(ref) == nil
+		await readOpened()
+		isOpening = false
+	}
+
+	/// The page was left.
+	public func close(_ ref: String) {
+		if opened?.ref == ref { opened = nil }
+	}
+
+	private func readOpened() async {
+		guard let ref = opened?.ref else { return }
+		guard !questions.contains(where: { $0.ref == ref }) else {
+			opened = (ref, nil)
+			return
+		}
+		// Read alone, it is still this list's only while it is what the list shows: open, or decided.
+		guard let read = try? await project.question(ref), opened?.ref == ref else { return }
+		opened = (ref, read.isOpen == (showing == .open) ? read : nil)
 	}
 
 	/// Reads the list, the first time and whenever the person changes what it shows.
@@ -111,6 +142,7 @@ public final class QueueScreen: ProjectScreen {
 			next = page.next
 			hasMore = page.next != nil
 			loading = .done
+			await readOpened()
 		} catch is CancellationError {
 		} catch {
 			guard mine == reads else { return }
@@ -215,8 +247,10 @@ public final class QueueScreen: ProjectScreen {
 		do {
 			documents[key] = .read(try await project.documents(of: edit.proposal))
 		} catch is CancellationError {
-			documents[key] = nil
+			// The view that asked went away. What another read of the same documents brought stays.
+			if case .reading = documents[key] { documents[key] = nil }
 		} catch {
+			if case .read = documents[key] { return }
 			documents[key] = .failed(error.shown)
 		}
 	}

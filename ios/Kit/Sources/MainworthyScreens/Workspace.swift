@@ -63,18 +63,23 @@ public final class Workspace {
 	}
 
 	/// Follows the open project's change stream until the task is cancelled, reading the screens again when
-	/// the stream opens and at each change. The read comes after the stream is open, never before: the stream
-	/// replays nothing, and a write between a read and the opening would be missed. A stream that breaks is
-	/// opened again, and its opening reads what was missed.
+	/// the stream opens and at each change. The stream replays nothing, so the read that makes a screen
+	/// current is the one after the stream is open: a write between an earlier read and the opening is in it.
+	/// A stream that breaks, or does not open, is opened again after a pause that grows to half a minute, and
+	/// the screens are read at each try, so that a server whose stream does not work is still followed.
 	public func follow() async {
 		guard let key = project?.key else { return }
+		var failures = 0
 		while !Task.isCancelled {
 			do {
 				for try await _ in server.project(key).changes() {
+					failures = 0
 					for screen in screens { await screen.refresh() }
 				}
 			} catch {}
-			guard (try? await Task.sleep(for: .seconds(2))) != nil else { return }
+			failures += 1
+			guard (try? await Task.sleep(for: .seconds(min(30, 2 << min(failures, 4))))) != nil else { return }
+			for screen in screens { await screen.refresh() }
 		}
 	}
 
