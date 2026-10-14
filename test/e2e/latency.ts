@@ -1,6 +1,40 @@
 import { expect, test } from "bun:test";
+import { errors } from "playwright-core";
 import { z } from "zod";
-import { browserAvailable, openPage, startServer } from "./support.ts";
+import { browserAvailable, openPage, type PageHarness, startServer } from "./support.ts";
+
+/**
+ * Waits for the suite page to hold every case. A page that does not get there says what it showed: the number of
+ * cases loaded and the total it was told, and the errors it logged. The
+ * 30 s wait itself is the library's default (issue #146: one CI run timed out here and could not say why).
+ */
+async function waitForAllCases(browser: PageHarness, cases: number): Promise<void> {
+	try {
+		await browser.page.waitForFunction(
+			(expected) =>
+				Number(document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded")) >= expected,
+			cases,
+		);
+	} catch (error) {
+		if (!(error instanceof errors.TimeoutError)) throw error;
+		const shown = await Promise.race([
+			browser.page
+				.evaluate(() => {
+					const list = document.querySelector('[data-testid="case-list"]');
+					return `data-loaded=${list?.getAttribute("data-loaded")} data-total=${list?.getAttribute("data-total")}`;
+				})
+				.catch((failure: unknown) => `the page could not be read (${String(failure)})`),
+			Bun.sleep(5000).then(() => "the page did not answer for 5 s"),
+		]);
+		throw new Error(
+			[
+				`The suite page did not load ${cases} cases in 30 s: ${shown}.`,
+				`Page errors: ${browser.errors.length ? JSON.stringify(browser.errors) : "none"}.`,
+			].join("\n"),
+			{ cause: error },
+		);
+	}
+}
 
 /** Measures event-to-next-paint opportunity, with actual caret and changed input checks inside the frame. */
 function percentile(values: number[], fraction: number): number {
@@ -19,11 +53,7 @@ export function latency(cases: 2000 | 10000): void {
 			const browser = await openPage(server);
 			try {
 				const { page } = browser;
-				await page.waitForFunction(
-					(expected) =>
-						Number(document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded")) >= expected,
-					cases,
-				);
+				await waitForAllCases(browser, cases);
 				expect((await server.api("find", { in: "cases", limit: 1 })).count).toBe(cases);
 				await page.evaluate(() => {
 					const capture: number[] = [];
