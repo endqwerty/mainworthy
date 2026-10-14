@@ -42,6 +42,17 @@ public final class QueueScreen: ProjectScreen {
 	public private(set) var loading = Loading.first
 	public private(set) var hasMore = false
 	public private(set) var notice: Notice?
+	/// What was typed for an answer, by the question: where a defect is tracked, and the reason. It is kept
+	/// until an answer to that question is taken, so a sheet that closed on a refusal opens with it again.
+	public struct Typed: Equatable, Sendable {
+		public var reference = ""
+		public var reason = ""
+
+		public init() {}
+	}
+
+	public var typed: [String: Typed] = [:]
+
 	/// What each proposed edit changes, by its question and that question's evidence, once it was opened.
 	private var documents: [String: Documents] = [:]
 	/// The questions with an answer or a withdrawal on its way. A second one is not sent meanwhile.
@@ -51,6 +62,8 @@ public final class QueueScreen: ProjectScreen {
 	/// it: it is further down than the list was read, it is of the other list (open, decided), or it was
 	/// opened from another screen.
 	private var opened: (ref: String, alone: Question?)?
+	/// Counts the reads of the opened question, so that one which was overtaken does not replace a newer one.
+	private var openedReads = 0
 	/// Whether the open question is being read by itself for the first time: its page has nothing to show yet.
 	public private(set) var isOpening = false
 	private let project: ProjectClient
@@ -90,7 +103,9 @@ public final class QueueScreen: ProjectScreen {
 			opened = (ref, nil)
 			return
 		}
-		guard let read = try? await project.question(ref), opened?.ref == ref else { return }
+		openedReads += 1
+		let mine = openedReads
+		guard let read = try? await project.question(ref), opened?.ref == ref, mine == openedReads else { return }
 		opened = (ref, read)
 	}
 
@@ -160,6 +175,15 @@ public final class QueueScreen: ProjectScreen {
 	public func answer(
 		_ question: Question, with choice: Choice, reference: String = "", reason: String = ""
 	) async -> Bool {
+		// A question that is decided is not answered over from here, also when the copy the person acted on
+		// was read while it was open: the server would take the answer in place of the one that stands.
+		guard question.isOpen, current(question.ref)?.isOpen != false else {
+			notice = Notice(
+				text: "Nothing was recorded for \(question.ref): it was decided meanwhile. Read it again.", isProblem: true,
+				undoes: nil
+			)
+			return false
+		}
 		guard isShown(question) else {
 			notice = Notice(
 				text: "Nothing was recorded for \(question.ref): what it asks about has not been shown yet.",
@@ -173,6 +197,7 @@ public final class QueueScreen: ProjectScreen {
 			let outcome = try await project.answer(question, with: choice, reference: reference, reason: reason)
 			switch outcome {
 			case .decided:
+				typed[question.ref] = nil
 				// An accepted edit cannot be withdrawn: the case's history is where it is undone.
 				let undoable = question.kind == .adopt ? nil : question
 				notice = Notice(text: "\(question.ref): \(choice.label).", isProblem: false, undoes: undoable)
@@ -203,6 +228,7 @@ public final class QueueScreen: ProjectScreen {
 		do {
 			switch try await project.withdraw(question, reason: reason) {
 			case .withdrawn(let note):
+				typed[QueueScreen.withdrawing(question.ref)] = nil
 				notice = Notice(
 					text: "\(question.ref): the decision is withdrawn\(note.map { " (\($0))" } ?? "").", isProblem: false,
 					undoes: nil
@@ -217,6 +243,11 @@ public final class QueueScreen: ProjectScreen {
 		} catch {
 			notice = Notice(text: error.shown, isProblem: true, undoes: nil)
 		}
+	}
+
+	/// The key under which the reason for withdrawing a question's decision is kept in `typed`.
+	public static func withdrawing(_ ref: String) -> String {
+		"withdraw \(ref)"
 	}
 
 	public func dismissNotice() {

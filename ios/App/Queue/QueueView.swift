@@ -191,9 +191,10 @@ private struct NoticeBar: View {
 			.padding(.bottom, 6)
 			.transition(.move(edge: .bottom).combined(with: .opacity))
 			.sheet(item: $asking) { question in
+				let typing = screen.typing(QueueScreen.withdrawing(question.ref))
 				AnswerSheet(
 					title: "Withdraw this decision", help: "Both decisions stay in the ledger.", action: "Withdraw",
-					wantsReference: false, wantsReason: true
+					wantsReference: false, wantsReason: true, reference: typing.reference, reason: typing.reason
 				) { _, reason in
 					Task { await screen.withdraw(question, reason: reason) }
 				}

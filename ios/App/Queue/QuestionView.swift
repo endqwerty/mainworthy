@@ -238,7 +238,7 @@ struct QuestionView: View {
 				Button("Withdraw this decision", role: .destructive) {
 					if question.wantsReason { asking = .withdrawal(question) } else { withdraw(question) }
 				}
-				.disabled(screen.busy.contains(question.ref))
+				.disabled(screen.busy.contains(question.ref) || workspace.project?.may(.produce) != true)
 				.padding(.top, 4)
 				.accessibilityIdentifier("withdraw")
 			}
@@ -276,16 +276,19 @@ struct QuestionView: View {
 	@ViewBuilder private func sheet(for asking: Asking) -> some View {
 		switch asking {
 		case .answer(let chosen):
+			let typing = screen.typing(chosen.question.ref)
 			AnswerSheet(
 				title: chosen.choice.label, help: chosen.choice.help, action: "Record",
-				wantsReference: chosen.choice.takes == .reference, wantsReason: chosen.question.wantsReason
+				wantsReference: chosen.choice.takes == .reference, wantsReason: chosen.question.wantsReason,
+				reference: typing.reference, reason: typing.reason
 			) { reference, reason in
 				send(chosen, reference: reference, reason: reason)
 			}
 		case .withdrawal(let question):
+			let typing = screen.typing(QueueScreen.withdrawing(question.ref))
 			AnswerSheet(
 				title: "Withdraw this decision", help: "Both decisions stay in the ledger.", action: "Withdraw",
-				wantsReference: false, wantsReason: true
+				wantsReference: false, wantsReason: true, reference: typing.reference, reason: typing.reason
 			) { _, reason in
 				withdraw(question, reason: reason)
 			}

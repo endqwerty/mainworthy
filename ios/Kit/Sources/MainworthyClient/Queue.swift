@@ -76,9 +76,12 @@ extension ProjectClient {
 			case "create":
 				guard let body = part.body, let folder = part.folder, let tags = part.tags?.array, let covers = part.covers
 				else { throw ClientError.unreadable }
+				// Every tag is a word. One that is not is not dropped: what is shown must be all there is.
+				let words = tags.compactMap(\.string)
+				guard words.count == tags.count else { throw ClientError.unreadable }
 				return EditedCase(
 					id: index, caseRef: nil, before: nil, after: CaseContent(body),
-					placement: .init(folder: folder, tags: tags.compactMap(\.string), covers: covers)
+					placement: .init(folder: folder, tags: words, covers: covers)
 				)
 			case "edit":
 				guard let body = part.body, let current = part.current, let ref = part.case

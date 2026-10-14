@@ -229,8 +229,17 @@ enum Wire {
 		/// Short, unique within its case and never used again, so a result or an edit can name the step.
 		let id: String
 		let action: String
-		/// What must be true afterwards, where the author said.
+		/// What must be true afterwards. Null where the author has not said; never left out.
 		let expected: String?
+
+		private enum CodingKeys: String, CodingKey { case id, action, expected }
+
+		init(from decoder: any Decoder) throws {
+			let container = try decoder.container(keyedBy: CodingKeys.self)
+			id = try container.decode(String.self, forKey: .id)
+			action = try container.decode(String.self, forKey: .action)
+			expected = try container.decode(String?.self, forKey: .expected)
+		}
 	}
 
 	/// The content of a case that has versions.

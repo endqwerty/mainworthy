@@ -7,10 +7,12 @@ struct AnswerSheet: View {
 	let action: String
 	let wantsReference: Bool
 	let wantsReason: Bool
+	/// What is typed belongs to the screen's class, not to this sheet: the sheet closes before the server
+	/// answers, and an answer it refuses must find the text where it was left.
+	@Binding var reference: String
+	@Binding var reason: String
 	let onSubmit: (_ reference: String, _ reason: String) -> Void
 
-	@State private var reference = ""
-	@State private var reason = ""
 	@Environment(\.dismiss) private var dismiss
 
 	var body: some View {

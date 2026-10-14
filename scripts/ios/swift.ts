@@ -62,6 +62,31 @@ export function structsOf(): Struct[] {
 	return [...seen.values()];
 }
 
+/**
+ * The decoder of a struct with a field that must be there even when it is null. Swift's own decoder reads an
+ * absent key as nil, so such a struct decodes every field by hand, and that one with `decode`, which refuses
+ * an absent key, in place of `decodeIfPresent`. A struct with no such field keeps Swift's own.
+ */
+function decoder(struct: Struct): string {
+	if (!struct.fields.some((field) => field.shape.present)) return "";
+	const keys = struct.fields.map((field) => name(field.key)).join(", ");
+	const lines = struct.fields.map((field) => {
+		const optional = field.shape.swift.endsWith("?");
+		const how = optional && !field.shape.present ? "decodeIfPresent" : "decode";
+		const type = optional && !field.shape.present ? field.shape.swift.slice(0, -1) : field.shape.swift;
+		return `\t\t\t${name(field.key)} = try container.${how}(${type}.self, forKey: .${field.key})\n`;
+	});
+	return [
+		"\n",
+		`\t\tprivate enum CodingKeys: String, CodingKey { case ${keys} }\n`,
+		"\n",
+		"\t\tinit(from decoder: any Decoder) throws {\n",
+		"\t\t\tlet container = try decoder.container(keyedBy: CodingKeys.self)\n",
+		...lines,
+		"\t\t}\n",
+	].join("");
+}
+
 export function wire(): string {
 	const body = structsOf()
 		.map((struct) => {
@@ -70,7 +95,7 @@ export function wire(): string {
 					(field) => `${field.doc ? comment(field.doc, "\t\t") : ""}\t\tlet ${name(field.key)}: ${field.shape.swift}\n`,
 				)
 				.join("");
-			return `${comment(struct.doc, "\t")}\tstruct ${struct.name}: Decodable, Equatable, Sendable {\n${fields}\t}\n`;
+			return `${comment(struct.doc, "\t")}\tstruct ${struct.name}: Decodable, Equatable, Sendable {\n${fields}${decoder(struct)}\t}\n`;
 		})
 		.join("\n");
 	return [
