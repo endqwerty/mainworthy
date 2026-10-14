@@ -34,13 +34,22 @@ ended. A test uses `cli` for what only the executable does (its exit status, its
 
 What `run` cannot give as a process does, and what stands in for each:
 
-- **Other ways to write.** `run` reads the two write functions only. A test holds `src/cli` to them: no
-  `console`, no `Bun.stdout` or `Bun.stderr`.
-- **Output after the command ended.** A process prints it before it exits. Here the answer has gone back by
-  then, so the write is kept and fails the next command of the test, or the test when its instance closes. A
-  write later than that is not seen.
+- **Other ways to write.** `run` reads the two write functions only, so a test keeps the terminal behind them. In
+  `src/cli` only `output.ts`, `errors.ts` and the two commands that print a case as it is name the process's
+  streams. Nothing names `console`, Bun's streams, a device file, a write to a descriptor or a child that
+  inherits the streams, and only `target.ts` starts a process (git, with its output piped). The test reads the
+  source as text: a comment that names one of these fails it, and a way it does not list, such as a
+  dependency that logs, passes it. `run` is a sample of the executable. The tests that start it are the proof
+  of its output.
+- **Output after the command ended.** A command that ends well, run as a process, prints such output before
+  the process exits. Here the answer has gone back by then. The two write functions stay watched until the
+  next command of the test or the end of its instance, and a write seen in that time fails there. A write
+  later than that is not seen, and one that lands while a later command runs is taken for that command's.
 - **Stopping a command.** A child that runs out of its ten seconds is killed. A command in the process cannot
-  be: its run is refused, and so is every run after it until it has ended.
+  be: its run is refused, and so is every run after it until it has ended. A test that runs out of Bun's five
+  seconds while its command still runs fails, and the tests after it in the file wait for that command, so
+  they can fail for its reason. Each test file has its own copy of this state under `bun test --parallel`,
+  which is how the check runs.
 - **The server.** The test's server is in the same process and sees the command's environment and directory
   while it runs. It reads its configuration at start. A test whose server must read either during a command
   uses `cli`.

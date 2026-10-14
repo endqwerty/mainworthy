@@ -381,18 +381,41 @@ test("run in the test's process gives what the executable gives", async () => {
 	});
 });
 
-// `run` returns what a command writes through `process.stdout.write` and `process.stderr.write`. That is every way
-// the command line writes, and this holds it to that: a `console.log` or a write to `Bun.stdout` in a command would
-// reach the executable's output and none of the tests that use `run`.
-test("the command line writes only through the two write functions that run reads", async () => {
-	const elsewhere: string[] = [];
+// `run` returns what a command writes through `process.stdout.write` and `process.stderr.write`, so the command line
+// must reach the terminal through them and by no other way. This reads the source as text and holds it to that: only
+// the output module, the error printer and the two commands that print a case as it is name the process's streams;
+// nothing names another way to the terminal; and only the code that asks git for the commit starts a process. It is
+// strict (a comment that names one of these fails too) and it knows only the ways listed: the tests that start the
+// executable are what proves its output, and `run` is a sample of it.
+test("the command line reaches the terminal only through the two write functions that run reads", async () => {
+	const streams = ["output.ts", "errors.ts", "commands/fmt.ts", "commands/get.ts"];
+	const rules: { what: string; pattern: RegExp; allowed: string[] }[] = [
+		{ what: "the process's streams", pattern: /\bprocess\s*\.\s*std(out|err)\b/, allowed: streams },
+		{ what: "console", pattern: /\bconsole\b/, allowed: [] },
+		{ what: "Bun's streams", pattern: /\bBun\s*\.\s*std(out|err)\b/, allowed: [] },
+		{ what: "a device file", pattern: /\/dev\/(std(out|err)|fd\/|tty)/, allowed: [] },
+		{
+			what: "a write to a descriptor",
+			pattern: /\b(writev?Sync|createWriteStream)\b|\bfs\s*\.\s*writev?\b/,
+			allowed: [],
+		},
+		{
+			what: "a child process",
+			pattern: /\bchild_process\b|\bBun\s*\.\s*spawn|\bspawn(Sync)?\s*\(/,
+			allowed: ["target.ts"],
+		},
+		{ what: "a child that inherits the streams", pattern: /["'`]inherit["'`]/, allowed: [] },
+	];
+	const found: string[] = [];
 	for await (const file of new Glob("**/*.ts").scan({ cwd: import.meta.dir })) {
 		if (file.endsWith(".test.ts") || file === "test-support.ts") continue;
 		const lines = (await Bun.file(join(import.meta.dir, file)).text()).split("\n");
 		for (const [index, text] of lines.entries())
-			if (/\bconsole\.|\bBun\.(stdout|stderr)\b/.test(text)) elsewhere.push(`src/cli/${file}:${index + 1}`);
+			for (const rule of rules)
+				if (rule.pattern.test(text) && !rule.allowed.includes(file))
+					found.push(`src/cli/${file}:${index + 1} names ${rule.what}`);
 	}
-	expect(elsewhere).toEqual([]);
+	expect(found).toEqual([]);
 });
 
 // Two things a process gives and a call in the test's process cannot: its output is complete when it exits, and it
