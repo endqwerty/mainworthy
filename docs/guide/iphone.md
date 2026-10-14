@@ -126,7 +126,7 @@ passwords and passkeys are managed in the web app.
    the editor keeps your draft and says why. If another edit overlaps, the app names the fields and asks its author
    to resolve the proposal in the web app. An edit uses the version you opened.
 
-What you type stays while the app goes to the background. **Cancel** asks before discarding a changed draft.
+What you type stays while the app goes to the background, and when your session ends and you sign in again as yourself on the same server. **Cancel** asks before discarding a changed draft.
 A lost reply offers **Retry**, which sends the same command. Drafts do not survive closing the app.
 Moving, tagging, archiving and restoring cases, changing folders, version diffs and resolving overlaps still
 need the web app. The button on a case's page opens it there.
@@ -149,6 +149,6 @@ need the web app. The button on a case's page opens it there.
 | --- | --- |
 | "The reply could not be read." | Check the address. If it is right, the server is newer than the app: install the app again |
 | "This build cannot show what the question is about" | The same: install the app again, or answer in the web app |
-| "Your session ended. Sign in again." | The session ran out, or was ended under **Your sessions** |
+| "Your session ended. Sign in again." | The session ran out, or was ended under **Your sessions**. Sign in as yourself and the screens come back as you left them |
 | "Too many attempts." | Wait as long as it says. The server limits failed sign-ins |
 | The app does not open | Its signing ran out. Run `bun scripts/ios.ts install` again |

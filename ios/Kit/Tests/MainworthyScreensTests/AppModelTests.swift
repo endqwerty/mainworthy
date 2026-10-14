@@ -167,6 +167,34 @@ struct AppModelTests {
 		_ = try self.form(app)
 	}
 
+	@Test("a case being written when the session ends is still there after the same person signs in again")
+	func renewedSessionKeepsDraft() async throws {
+		let key = try await Live.project()
+		let device = Device()
+		let app = device.app()
+		await app.start()
+		let form = try form(app)
+		form.address = Live.address
+		form.name = Live.name
+		form.password = Live.password
+		await form.submit()
+		let workspace = try workspace(app)
+		workspace.open(try #require(workspace.account.projects.first { $0.key == key }))
+		let suite = try #require(workspace.suite)
+		suite.newCase()
+		suite.editor?.content.title = "Typed before the session ended"
+		await Server.kept(in: device.secrets)?.signOut()
+		await workspace.refreshAccount()
+		try await Task.sleep(for: .milliseconds(50))
+		let again = try self.form(app)
+		again.name = Live.name
+		again.password = Live.password
+		await again.submit()
+		// The suite's review found the draft gone here: the same screen comes back, with the case being written.
+		#expect(try self.workspace(app).suite === suite)
+		#expect(suite.editor?.content.title == "Typed before the session ended")
+	}
+
 	@Test("after a session ends, somebody else who signs in gets screens of their own")
 	func renewedByAnother() async throws {
 		let device = Device()
