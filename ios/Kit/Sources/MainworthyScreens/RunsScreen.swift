@@ -5,13 +5,23 @@ import Observation
 /// Planned runs of one project. Refresh keeps every page already read and every open run up to date.
 @MainActor @Observable
 public final class RunsScreen: ProjectScreen {
-	public enum Loading: Equatable { case first, done, failed(String) }
+	public enum Loading: Equatable {
+		case first, done
+		case failed(String)
+	}
+	public struct SavedPlan: Equatable {
+		public let ref: String
+		public let slots: Int
+		public let already: Int
+		public var sentence: String { "\(ref) planned with \(slots) slots; \(already) already filled." }
+	}
 	public private(set) var runs: [PlannedRun] = []
 	public private(set) var loading = Loading.first
 	public private(set) var hasMore = false
 	public private(set) var notice: String?
 	public private(set) var folders: [String] = []
 	public private(set) var planning = false
+	public private(set) var savedPlan: SavedPlan?
 	public private(set) var permission: Project
 	private let project: ProjectClient
 	private let person: String
@@ -80,20 +90,42 @@ public final class RunsScreen: ProjectScreen {
 	}
 
 	public func plan(name: String, selection: RunSelection, commit: String = "") async -> PlannedRun? {
+		if savedPlan != nil { return await readPlannedRun() }
 		guard permission.may(.plan), !planning else { return nil }
 		planning = true
 		defer { planning = false }
 		do {
 			switch try await project.planRun(name: name, selection: selection, commit: commit) {
 			case .planned(let ref, let slots, let already):
-				notice = "\(ref) planned with \(slots) slots; \(already) already filled."
-				let run = try await project.run(ref)
-				await refresh()
-				open(run).planned("\(ref) planned with \(slots) slots; \(already) already filled.")
-				return run
+				savedPlan = SavedPlan(ref: ref, slots: slots, already: already)
+				return await readSavedPlan()
 			case .refused(let why): notice = why
 			}
 		} catch { notice = error.shown }
 		return nil
+	}
+
+	public func readPlannedRun() async -> PlannedRun? {
+		guard !planning, savedPlan != nil else { return nil }
+		planning = true
+		defer { planning = false }
+		return await readSavedPlan()
+	}
+
+	private func readSavedPlan() async -> PlannedRun? {
+		guard let saved = savedPlan else { return nil }
+		do {
+			let run = try await project.run(saved.ref)
+			await refresh()
+			if !runs.contains(where: { $0.ref == run.ref }) { runs.insert(run, at: 0) }
+			loading = .done
+			notice = saved.sentence
+			open(run).planned(saved.sentence)
+			savedPlan = nil
+			return run
+		} catch {
+			notice = saved.sentence + " It could not be opened. Read the run again. " + error.shown
+			return nil
+		}
 	}
 }

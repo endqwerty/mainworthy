@@ -66,16 +66,20 @@ it to open another.
    The case is shown at the version pinned when the run was planned.
 3. Press the step that failed to mark it. Press it again to clear the mark. Add an optional note.
 4. Press **Pass**, **Fail**, **Blocked** or **Skip**. **Fail** records the marked step.
-   After the server confirms the result, the app opens the next slot with no result.
-5. **Undo** corrects the result to your earlier outcome, or to skipped if there was none. It does not delete it.
-   You can return to any slot and record again to correct your own earlier result.
+   After the server confirms the result and the app reads the slots again, it opens the next slot with no result.
+5. **Undo** corrects the result to your earlier outcome, including its note and failed step, or to skipped if there was none.
+   It does not delete the result. You can return to any slot and record again to correct your own earlier result.
+
+Notes and step marks you have not recorded stay with their slot while the run is open, including when you use **Undo**.
 
 Recording needs the project's `produce` capability. Without it, slots are read-only.
 A closed run cannot receive results. Withdraw its sign-off in the **Queue** to reopen it.
 The app does not assign slots, set required jobs or close a run from this screen.
 
 To plan a run, press **+** in **Runs**. Give it a name and choose all cases, a folder, a tag or search text.
-Optionally enter a commit whose results it accepts. **Plan** opens the new run and says how many slots it made.
+Optionally enter a commit whose results it accepts. **Plan** says how many slots it made and opens the new run.
+If the run was planned but cannot be read, the app keeps its reference and offers **Read run again**.
+This reads the saved run without planning another.
 Planning needs the project's `plan` capability. A selection with no cases is refused with the server's sentence.
 
 ## What the app does not do yet

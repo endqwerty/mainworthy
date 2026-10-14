@@ -245,6 +245,7 @@ const RunFill = struct("RunFill", "An admitted result that fills a slot.", {
 	method: text,
 	outcome: text,
 	note: maybe(text),
+	atStep: maybe(text),
 });
 export const RunSlot = struct("RunSlot", "One case pinned at a version in a run, in order.", {
 	id: whole,

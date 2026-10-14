@@ -244,6 +244,16 @@ describe("what Runs reads", () => {
 			expect(receipt.declined).toEqual([]);
 			corrects = receipt.results[0];
 			expect(corrects).toBeNumber();
+			const filled = await op(key, "find", { in: "slots", run });
+			holds(`slots after ${outcome}`, SlotPage, filled);
+			const result = z
+				.object({
+					items: z.array(z.object({ fills: z.array(z.object({ result: z.number(), atStep: z.string().nullable() })) })),
+				})
+				.parse(filled)
+				.items.flatMap((item) => item.fills)
+				.find((fill) => fill.result === corrects);
+			expect(result?.atStep).toBe(outcome === "fail" ? "s1" : null);
 		}
 		holds("slots after correction", SlotPage, await op(key, "find", { in: "slots", run }));
 	});
