@@ -325,43 +325,47 @@ for (const key of ["Enter", "Escape"])
 		30000,
 	);
 
-test.skip("R5B-4 needs slot-fill atStep from the server: undo restores the earlier failure's recorded step", async () => {
-	const server = await startServer({ preset: "standard" });
-	await cases(server);
-	const run = await server.api("plan", { name: "Restore step", select: {} });
-	const h = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
-	try {
-		const { page } = h;
-		page.setDefaultTimeout(5000);
-		await ready(page);
-		await page.keyboard.press("2");
-		await page.keyboard.press("f");
-		await page.keyboard.type("fails at two");
-		await page.keyboard.press("Enter");
-		await eventually(
-			() => server.api("timeline", { ref: "C-1" }),
-			(row) => row.entries.some((e) => e.t === "result" && e.atStep === "s2"),
-		);
-		await page.keyboard.press("k");
-		await page.keyboard.press("p");
-		await eventually(
-			() => server.api("find", { in: "slots", run: run.run }),
-			(rows) => Slot.array().parse(rows.items)[0]?.fills[0]?.outcome === "pass",
-		);
-		await page.keyboard.press("u");
-		const restored = await eventually(
-			() => server.api("timeline", { ref: "C-1" }),
-			(row) => row.entries.filter((e) => e.t === "result").length === 3,
-		);
-		const result = restored.entries.find((e) => e.t === "result");
-		expect(result?.outcome).toBe("fail");
-		expect(result?.note).toBe("fails at two");
-		expect(result?.atStep).toBe("s2");
-	} finally {
-		await h.close();
-		await server.stop();
-	}
-}, 30000);
+check(
+	"R5B-4 undo restores the earlier failure's recorded step",
+	async () => {
+		const server = await startServer({ preset: "standard" });
+		await cases(server);
+		const run = await server.api("plan", { name: "Restore step", select: {} });
+		const h = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
+		try {
+			const { page } = h;
+			page.setDefaultTimeout(5000);
+			await ready(page);
+			await page.keyboard.press("2");
+			await page.keyboard.press("f");
+			await page.keyboard.type("fails at two");
+			await page.keyboard.press("Enter");
+			await eventually(
+				() => server.api("timeline", { ref: "C-1" }),
+				(row) => row.entries.some((e) => e.t === "result" && e.atStep === "s2"),
+			);
+			await page.keyboard.press("k");
+			await page.keyboard.press("p");
+			await eventually(
+				() => server.api("find", { in: "slots", run: run.run }),
+				(rows) => Slot.array().parse(rows.items)[0]?.fills[0]?.outcome === "pass",
+			);
+			await page.keyboard.press("u");
+			const restored = await eventually(
+				() => server.api("timeline", { ref: "C-1" }),
+				(row) => row.entries.filter((e) => e.t === "result").length === 3,
+			);
+			const result = restored.entries.find((e) => e.t === "result");
+			expect(result?.outcome).toBe("fail");
+			expect(result?.note).toBe("fails at two");
+			expect(result?.atStep).toBe("s2");
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
 
 check(
 	"N-3 two live windows never share a pending existing-case request",

@@ -351,6 +351,7 @@ export type Fill = {
 	at: number;
 	note: string | null;
 	message: string | null;
+	atStep: string | null;
 };
 
 /** The uncorrected results admitted to a slot, oldest first. Results are read through their owner, evidence. */
@@ -384,6 +385,7 @@ export function fillsOf(db: Db, slot: number): Fill[] {
 			at: result.at,
 			note: result.note,
 			message: result.message,
+			atStep: result.at_step,
 		});
 	}
 	return fills.sort((a, b) => a.seq - b.seq || a.ord - b.ord);

@@ -11,7 +11,7 @@ type Slot = {
 	case: string;
 	version: number;
 	state: string;
-	fills: { by: string; method: string; outcome: string; admitted: string; result: number }[];
+	fills: { by: string; method: string; outcome: string; admitted: string; result: number; atStep: string | null }[];
 };
 type RunView = {
 	ref: string;
@@ -93,6 +93,7 @@ describe("a run typed by hand", () => {
 			steps: [{ step: "x1", outcome: "fail" }],
 		});
 		expect(run("R-1")).toMatchObject({ verdict: "blocked" });
+		expect(slots("R-1").map((slot) => slot.fills.map((fill) => fill.atStep))).toEqual([[null], ["x1"], []]);
 		const q = first(queue().items);
 		expect(q).toMatchObject({ kind: "failure", producer: "human", title: "Total shows $100.00 after SAVE10" });
 		expect(q.blocks).toEqual(["R-1"]);

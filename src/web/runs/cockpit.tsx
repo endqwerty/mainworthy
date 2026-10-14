@@ -103,6 +103,8 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const writes = useRef(new Map<number, Promise<ReportReceipt>>());
 	const withdrawn = useRef(new Set<Promise<ReportReceipt>>());
 	const latest = useRef(new Map<number, Fill>());
+	/** The step each result of this page was recorded at, by the id it had when sent: the cache holds that copy until the slots are read again. */
+	const recordedSteps = useRef(new Map<number, string | null>());
 	const queued = useRef(new Map<number, number>());
 	const method = session.kind === "agent" ? "agent" : "human";
 	const slots: Slot[] = storedSlots.map((slot) => {
@@ -201,6 +203,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		text = slot && consumedNotes.current.get(slot.id) !== notes[slot.id] ? (notes[slot.id] ?? "") : "",
 		advance = true,
 		visibleStep = false,
+		restores: Fill | null = null,
 	): Promise<ReportReceipt> | null {
 		if (!slot || !sessionCurrent(owner) || !session.can.includes("produce")) return null;
 		if (run?.state !== "open") {
@@ -224,6 +227,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			admitted: "exact",
 			at: Date.now(),
 			note: text || null,
+			atStep: outcome === "fail" ? (restores?.atStep ?? null) : null,
 		};
 		setLocal((value) => new Map(value).set(slot.id, { fill, pending: true, questions: [] }));
 		void queryClient.cancelQueries({ queryKey: cacheKey });
@@ -274,11 +278,14 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				throw new Error("The pinned case could not be read. Try again.");
 			if (!body.methods.includes(method))
 				throw new Error("This pinned case does not admit your method. Its slot needs another producer.");
-			const atStep = failedStep > 0 ? body.steps[failedStep - 1]?.id : undefined;
+			const restoredStep =
+				restores?.outcome === "fail" ? (restores.atStep ?? recordedSteps.current.get(restores.result) ?? null) : null;
+			const atStep = failedStep > 0 ? body.steps[failedStep - 1]?.id : (restoredStep ?? undefined);
 			if (failedStep > 0 && !atStep) {
 				clearStep(slot.id, marked);
 				throw new Error(`The pinned case has no step ${failedStep}. The mark was cleared; your note is kept`);
 			}
+			recordedSteps.current.set(fill.result, atStep ?? null);
 			const recent = latest.current.get(slot.id);
 			const corrects =
 				previous && previous.result > 0 && (!recent || previous.at > recent.at)
@@ -302,7 +309,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			if (!sessionCurrent(owner)) throw new Error("The session changed. Your note is kept.");
 			if (receipt.rejected.length || receipt.declined?.length || !receipt.results[0])
 				throw new Error(receipt.rejected[0]?.reason ?? receipt.declined?.[0]?.reason ?? "The result was not recorded.");
-			const saved = { ...fill, result: receipt.results[0] };
+			const saved = { ...fill, result: receipt.results[0], atStep: atStep ?? null };
 			latest.current.set(slot.id, saved);
 			// The server has it: the device's copy of the note has done its work. A note typed for this slot while
 			// the request was on its way is newer than what was recorded, and stays.
@@ -375,6 +382,8 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			last.slot,
 			last.previous?.note ?? "Withdrawn by the author",
 			false,
+			false,
+			last.previous,
 		);
 		if (!correction) return;
 		withdrawn.current.add(last.ready);
