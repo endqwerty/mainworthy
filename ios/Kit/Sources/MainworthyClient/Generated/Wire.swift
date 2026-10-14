@@ -495,4 +495,111 @@ enum Wire {
 		let ended: Bool
 		let current: Bool
 	}
+
+	/// The latest evidence of one method, not a gate verdict.
+	struct SuiteProof: Decodable, Equatable, Sendable {
+		let outcome: String
+		let current: Bool
+	}
+
+	/// The latest evidence by method.
+	struct SuiteProofs: Decodable, Equatable, Sendable {
+		let human: SuiteProof?
+		let auto: SuiteProof?
+		let agent: SuiteProof?
+	}
+
+	/// One case in the suite.
+	struct SuiteCase: Decodable, Equatable, Sendable {
+		let ref: String
+		let title: String
+		let tags: [String]
+		let proof: SuiteProofs
+	}
+
+	/// A page of cases from find.
+	struct SuiteCases: Decodable, Equatable, Sendable {
+		let items: [SuiteCase]
+		let cursor: String?
+	}
+
+	/// One folder and its direct case count.
+	struct SuiteFolder: Decodable, Equatable, Sendable {
+		let id: Int
+		let parent: Int?
+		let name: String
+		let path: String
+		let state: String
+		let cases: Int
+	}
+
+	/// The project's folders from find.
+	struct SuiteFolders: Decodable, Equatable, Sendable {
+		let items: [SuiteFolder]
+	}
+
+	/// One tag and its active case count.
+	struct SuiteTag: Decodable, Equatable, Sendable {
+		let tag: String
+		let n: Int
+	}
+
+	/// The project's tags from find.
+	struct SuiteTags: Decodable, Equatable, Sendable {
+		let items: [SuiteTag]
+	}
+
+	/// The current folder, even when reading an older version.
+	struct SuitePlace: Decodable, Equatable, Sendable {
+		let path: String
+	}
+
+	/// A case from get, at the version that was requested.
+	struct SuiteDocument: Decodable, Equatable, Sendable {
+		let ref: String
+		let version: Int
+		let title: String
+		let pre: String
+		let steps: [Step]
+		let methods: [String]
+		let automate: String
+		let fields: [String: String]?
+		let tags: [String]
+		let folder: SuitePlace
+	}
+
+	/// Who wrote a version, when, and why.
+	struct SuiteVersion: Decodable, Equatable, Sendable {
+		let version: Int
+		let by: String
+		let at: Double
+		let reason: String?
+		let summary: String
+	}
+
+	/// The versions of a case, newest first.
+	struct SuiteHistory: Decodable, Equatable, Sendable {
+		let versions: [SuiteVersion]
+	}
+
+	/// A case version the proposal made.
+	struct SuiteStamp: Decodable, Equatable, Sendable {
+		let ref: String
+		let version: Int
+	}
+
+	/// The fields where edits overlap.
+	struct SuiteConflict: Decodable, Equatable, Sendable {
+		let `case`: String
+		let paths: [String]
+	}
+
+	/// What came of creating or editing a case.
+	struct SuiteProposeReply: Decodable, Equatable, Sendable {
+		let status: String
+		let question: String?
+		let needs: String?
+		let cases: [SuiteStamp]
+		let conflicts: [SuiteConflict]
+	}
 }
