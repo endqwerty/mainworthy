@@ -366,3 +366,56 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+// Issue #146. The suite asks for the pages of its list one after another, and a change that arrives while it asks
+// for the next page reads the pages again. When that lands in the same task as the request, the page never shows
+// that it was waiting for one, and the list stopped where it was (500 of 1,001 here). The change is sent from the
+// page's own `fetch`, as the request for the second page leaves, so the order is the same every time.
+test.skipIf(!browserAvailable)(
+	"a change that arrives as the list asks for its next page does not stop the list",
+	async () => {
+		const server = await startServer({ cases: 1001 });
+		const h = await openPage(server, { path: "/p/scratch/queue" });
+		try {
+			const { page } = h;
+			page.setDefaultTimeout(10_000);
+			await page.addInitScript(() => {
+				const streams: EventSource[] = [];
+				const Native = window.EventSource;
+				window.EventSource = class extends Native {
+					constructor(url: string | URL, init?: EventSourceInit) {
+						super(url, init);
+						streams.push(this);
+					}
+				};
+				const send = window.fetch.bind(window);
+				let told = false;
+				const sending = (input: RequestInfo | URL, init?: RequestInit) => {
+					const asksForNextPage =
+						String(input).endsWith("/find") && typeof init?.body === "string" && init.body.includes('"cursor"');
+					if (asksForNextPage && !told) {
+						told = true;
+						for (const stream of streams)
+							stream.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ op: "propose", touched: [] }) }));
+					}
+					return send(input, init);
+				};
+				window.fetch = Object.assign(sending, { preconnect: window.fetch.preconnect });
+			});
+			await page.goto(`${server.url}/p/scratch/suite`);
+			await page.waitForFunction(
+				() => Number(document.querySelector('[data-testid="case-list"]')?.getAttribute("data-total")) > 0,
+			);
+			await page.waitForFunction(() => {
+				const list = document.querySelector('[data-testid="case-list"]');
+				return list?.getAttribute("data-loaded") === list?.getAttribute("data-total");
+			});
+			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-loaded")).toBe("1001");
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
