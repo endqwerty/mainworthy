@@ -29,6 +29,77 @@ struct ChangesLiveTests {
 		#expect(!now.questions.contains { $0.kind == .failure })
 	}
 
+	@Test("a detail labels the new head whose gate was read after the list")
+	func headMoves() async throws {
+		let server = Live.server()
+		_ = try await server.signIn(.token(Live.token))
+		let client = server.project(try await Live.project())
+		let shown = try #require(try await client.reportedChanges().first)
+		let before = try await client.details(of: shown)
+		let head = String(format: "%040x", 4)
+		let _: JSONValue = try await server.write("report", in: client.key, [
+			"target": ["commit": .string(head), "repo": "acme/shop", "branch": "new-coupon", "pr": 482],
+			"job": "review", "results": [["test": ["key": "review-pass"], "outcome": "pass"]]
+		])
+		let detail = try await client.details(of: shown)
+		print("HEAD_RACE old=\(shown.head ?? "nil") server=\(head) " +
+			"detail=\(detail.change.head ?? "nil") before=\(before.gate.verdict.name) " +
+			"detailGate=\(detail.gate.verdict.name)")
+		#expect(detail.change.head == head, "the newer gate must not be labelled with the older head")
+		#expect(detail.gate.verdict == .passed && detail.failing.isEmpty)
+		#expect(detail.change.branch == "coupon-total")
+	}
+
+	actor MovingHead: Transport {
+		let client: ProjectClient
+		private var left: Int
+		private var number = 3
+		private let network = URLSessionTransport()
+
+		init(client: ProjectClient, moves: Int) { self.client = client; left = moves }
+
+		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			// Move the change between the gate and its run row. Both replies still come from the real server.
+			if request.url?.lastPathComponent == "get", left > 0 {
+				left -= 1
+				number += 1
+				let _: JSONValue = try await client.server.write("report", in: client.key, [
+					"target": ["commit": .string(String(format: "%040x", number)), "repo": "acme/shop",
+						"branch": "coupon-total", "pr": 482],
+					"job": "review", "results": [["test": ["key": "review-pass"], "outcome": "pass"]]
+				])
+			}
+			return try await network.send(request)
+		}
+
+		func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+			try await network.lines(request)
+		}
+	}
+
+	@Test("a head moving between the gate and run is reread or reported, never combined", arguments: [1, 2])
+	func inFlightMoves(_ moves: Int) async throws {
+		let writer = Live.server()
+		_ = try await writer.signIn(.token(Live.token))
+		let client = writer.project(try await Live.project())
+		let shown = try #require(try await client.reportedChanges().first)
+		let reader = Server(
+			instance: Live.instance, secrets: MemoryStore(), transport: MovingHead(client: client, moves: moves)
+		)
+		_ = try await reader.signIn(.token(Live.token))
+		do {
+			let detail = try await reader.project(client.key).details(of: shown)
+			#expect(moves == 1, "two moving reads must say the change moved")
+			#expect(detail.change.head == String(format: "%040x", 4) && detail.gate.verdict == .passed)
+			#expect(detail.failing.isEmpty)
+			print("IN_FLIGHT moves=\(moves) head=\(detail.change.head ?? "nil") gate=\(detail.gate.verdict.name)")
+		} catch {
+			#expect(moves == 2)
+			#expect(error.localizedDescription == "This change moved while it was read. Pull down to read it again.")
+			print("IN_FLIGHT moves=\(moves) error=\(error.localizedDescription)")
+		}
+	}
+
 	@Test("merged and closed changes stay ended with their last gate")
 	func ended() async throws {
 		for state in ["merged", "closed"] {

@@ -283,8 +283,37 @@ describe("what Changes and Your sessions read", () => {
 		const rows = z.array(z.unknown()).parse(await op(project, "get", { refs: [run] }));
 		expect(rows).toHaveLength(1);
 		holds("get the head run", ChangeRun, rows[0]);
-		holds("impact", ChangeImpact, await op(project, "impact", { change: key }));
+		const impact = await op(project, "impact", { change: key });
+		holds("impact", ChangeImpact, impact);
+		const head = "3333333333333333333333333333333333333333";
+		expect(rows[0]).toMatchObject({ ref: run, accepts: { commit: head }, change: { key, head } });
+		expect(impact).toMatchObject({ change: { key, head }, gate: { run } });
 		expect(rows[0]).toMatchObject({ failing: [{ name: "Shop check 1", case: expect.stringMatching(/^C-/) }] });
+	});
+
+	test("a run's accepted commit stays its own when its change has a newer head", async () => {
+		const own = z.object({ result: z.object({ project: z.string() }) }).parse(await send("POST", "/test/project", {}));
+		const key = own.result.project;
+		const oldGate = z.object({ run: z.string() }).parse(await op(key, "gate", { change: "pr:482" }));
+		const head = "4444444444444444444444444444444444444444";
+		await op(key, "report", {
+			target: { commit: head, repo: "acme/shop", branch: "new-coupon", pr: 482 },
+			job: "contract",
+			results: [{ test: { key: "contract-pass" }, outcome: "pass" }],
+		});
+		const rows = z.array(z.unknown()).parse(await op(key, "get", { refs: [oldGate.run] }));
+		holds("the earlier run with the current change", ChangeRun, rows[0]);
+		expect(rows[0]).toMatchObject({
+			accepts: { commit: "3333333333333333333333333333333333333333" },
+			change: { key: "pr:482", head, branch: "coupon-total" },
+		});
+		const impact = await op(key, "impact", { change: "pr:482" });
+		holds("the newer impact", ChangeImpact, impact);
+		const gate = await op(key, "gate", { change: "pr:482" });
+		holds("the newer gate", ChangeGate, gate);
+		const run = z.object({ run: z.string() }).parse(gate).run;
+		expect(run).not.toBe(oldGate.run);
+		expect(impact).toMatchObject({ change: { key: "pr:482", head }, gate: { run } });
 	});
 
 	test("an ended change retains its last gate and reports its end", async () => {

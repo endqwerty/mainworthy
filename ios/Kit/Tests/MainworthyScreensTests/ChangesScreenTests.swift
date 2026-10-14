@@ -22,6 +22,49 @@ struct ChangesScreenTests {
 		#expect(screen.changes.first?.verdict == .passed && screen.detail?.gate.verdict == .passed)
 	}
 
+	@Test("an open change remains readable outside the newest 500, including a new head")
+	func capEvictsDetail() async throws {
+		let server = Live.server()
+		_ = try await server.signIn(.token(Live.token))
+		let client = server.project(try await Live.project())
+		let screen = ChangesScreen(project: client)
+		await screen.refresh()
+		await screen.open("pr:482")
+		#expect(screen.detail?.gate.verdict == .blocked)
+		func report(_ number: Int, pr: Int) async throws {
+			let _: JSONValue = try await server.write("report", in: client.key, [
+				"target": ["commit": .string(String(format: "%040x", number)), "repo": "acme/shop",
+					"branch": .string("review-\(pr)"), "pr": .number(Double(pr))],
+				"job": "review", "results": [["test": ["key": "review-pass"], "outcome": "pass"]]
+			])
+		}
+		// Move the open change first, then put enough others ahead of it to fill the list.
+		try await report(4, pr: 482)
+		for number in 0..<501 { try await report(1000 + number, pr: 1000 + number) }
+		await screen.refresh()
+		let gate: JSONValue = try await server.read("gate", in: client.key, ["change": "pr:482"])
+		print("CAP_EVICTION list=\(screen.changes.count) " +
+			"oldPresent=\(screen.changes.contains { $0.key == "pr:482" }) " +
+			"detail=\(screen.detail == nil ? "nil" : "present") " +
+			"loading=\(screen.detailLoading) oldGateStillExists=\(gate.object != nil)")
+		#expect(screen.changes.count == 500 && !screen.changes.contains { $0.key == "pr:482" })
+		#expect(screen.detail != nil, "the open page must not depend on membership in a capped list")
+		#expect(screen.detailLoading == .done && screen.detail?.gate.verdict == .passed)
+		#expect(screen.detail?.change.head == String(format: "%040x", 4))
+		#expect(screen.detail?.change.branch == "coupon-total")
+	}
+
+	@Test("a change is read by key before its list has been loaded")
+	func openWithoutList() async throws {
+		let client = try await Live.signedIn().project(try await Live.project())
+		let screen = ChangesScreen(project: client)
+		await screen.open("pr:482")
+		#expect(screen.changes.isEmpty && screen.detailLoading == .done)
+		#expect(screen.detail?.change.key == "pr:482" && screen.detail?.gate.verdict == .blocked)
+		#expect(screen.detail?.change.head == String(repeating: "3", count: 40))
+		#expect(screen.detail?.change.branch == "coupon-total")
+	}
+
 	@Test("a question reached from Changes opens outside a queue filter and refreshes after an answer")
 	func externalQuestion() async throws {
 		let client = try await Live.signedIn().project(try await Live.project())
@@ -32,8 +75,8 @@ struct ChangesScreenTests {
 		await queue.open(failure.ref)
 		#expect(queue.current(failure.ref) == failure && queue.questions.allSatisfy { $0.kind == .map })
 		#expect(await queue.answer(failure, with: try #require(failure.choices.first { $0.answer == "flaky" })))
-		// Answered, it is no longer one of the questions that wait, which is what this list shows.
-		#expect(queue.current(failure.ref) == nil)
+		// Answered, its page shows it as decided, whatever the queue's list shows.
+		#expect(queue.current(failure.ref)?.decision?.label == "Flaky")
 	}
 }
 
@@ -96,7 +139,10 @@ struct ChangesReadTests {
 		guard case .failed(let why) = screen.loading else { Issue.record("the failed read was not shown"); return }
 		#expect(why.hasPrefix("The server could not be reached."))
 		await screen.open("pr:missing")
-		#expect(screen.detailLoading == .failed("This change is no longer in the reported list."))
+		guard case .failed(let detailWhy) = screen.detailLoading else {
+			Issue.record("the failed detail read was not shown"); return
+		}
+		#expect(detailWhy.hasPrefix("The server could not be reached."))
 	}
 
 	@Test("a question beyond the queue's loaded page can be opened by ref")

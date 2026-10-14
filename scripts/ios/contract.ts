@@ -305,7 +305,13 @@ export const ChangeGate = struct("ChangeGate", "`gate` of a change's head commit
 });
 
 export const ChangeImpact = struct("ChangeImpact", "`impact` of a change: its base and the cases it touches.", {
-	change: struct("ChangeBasis", "The base commit, where the change has one.", { base: maybe(text) }),
+	change: struct("ChangeBasis", "The change and commits the affected cases were read for.", {
+		key: text,
+		head: maybe(text),
+		base: maybe(text),
+		title: maybe(text),
+	}),
+	gate: maybe(struct("ChangeImpactGate", "The run counted for this head, if any.", { run: maybe(text) })),
 	counts: struct("ChangeImpactCounts", "The complete number of affected cases.", { cases: whole }),
 	cases: list(
 		struct("ChangedCase", "An affected case and why it is in the set.", {
@@ -318,6 +324,18 @@ export const ChangeImpact = struct("ChangeImpact", "`impact` of a change: its ba
 });
 
 export const ChangeRun = struct("ChangeRun", "`get` of the head's run: the first fifty failing tests.", {
+	ref: text,
+	accepts: struct("ChangeRunTarget", "The commit this run actually counts, not the change's current head.", {
+		commit: text,
+	}),
+	change: maybe(
+		struct("ChangeRunHeader", "The change as it is now, which may have moved beyond this run.", {
+			key: text,
+			head: maybe(text),
+			branch: maybe(text),
+			url: maybe(text),
+		}),
+	),
 	failing: maybe(
 		list(
 			struct("ChangeFailure", "A failed test with its linked case, if any.", {
