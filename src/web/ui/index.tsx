@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, MouseEvent, ReactNode } from "react";
 import { z } from "zod";
 import { diffBodies, diffWords } from "../../core/diff.ts";
 import { type DocSlug, docUrl } from "../../core/docs.ts";
@@ -167,18 +167,26 @@ export function Select({ onChange, onKeyDown, ...rest }: ComponentProps<"select"
 export function ListRow({
 	children,
 	selected = false,
+	checked,
 	onClick,
 }: {
 	children: ReactNode;
 	selected?: boolean;
-	onClick: () => void;
+	/**
+	 * In a list that selects several rows, whether this one is selected. `selected` then marks the row shown, and a
+	 * screen reader hears it as the current one.
+	 */
+	checked?: boolean;
+	/** The event says where the click landed and with which keys held, for a list that selects several rows. */
+	onClick: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
 	return (
 		<button
 			type="button"
 			className={`row ${selected ? "sel" : ""}`}
 			role="option"
-			aria-selected={selected}
+			aria-selected={checked ?? selected}
+			aria-current={checked === undefined || !selected ? undefined : "true"}
 			onClick={onClick}
 		>
 			{children}

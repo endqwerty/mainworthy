@@ -29,9 +29,9 @@ wanted (decisions 0021 and 0022). What happens to a test with no case is a setti
 track, create a case for each, or ask), and `standard` tracks them. The queue's header says how many failures
 wait to be explained and how many questions can wait, each question says what leaving it costs, and a test
 with no case comes after every other question. A change ends (the operation `change`, which
-`.github/workflows/change.yml` sends when a pull request closes) and is then not asked about. One answer for
-several rows is not built: the owner is thinking about its form, and `mainworthy seed` keeps sixty such rows to
-try it against.
+`.github/workflows/change.yml` sends when a pull request closes) and is then not asked about. Several rows
+of one kind take one answer since 2026-10-14 (decision 0024): a box on each row, shift for a range, `*` for all
+of a kind. `mainworthy seed` keeps sixty unlinked rows to try it against.
 An iPhone app landed on 2026-10-13 (`ios/`, decision 0023, issue #171): sign-in, the queue, runs, the suite,
 changes and your sessions. It is installed from a Mac with `bun scripts/ios.ts install`; what it does not do yet
 is under the GitHub milestone `iOS app`.

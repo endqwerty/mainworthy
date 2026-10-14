@@ -289,9 +289,11 @@ const OneDecision = z.object({
 		.describe('The answer, for example {"is":"defect"}. The allowed answers depend on the question kind.'),
 	reason: z.string().max(1000).optional(),
 });
+/** The most answers one `decide` request carries, and so the most questions the Queue selects at once. */
+export const DECIDE_MAX = 500;
 export const DecideInput = z.union([
 	OneDecision.extend({ cmd }),
-	z.object({ all: z.array(OneDecision).min(1).max(500), reason: z.string().max(1000).optional(), cmd }),
+	z.object({ all: z.array(OneDecision).min(1).max(DECIDE_MAX), reason: z.string().max(1000).optional(), cmd }),
 	z.object({ undo: ref("The question whose decision to withdraw."), reason: z.string().max(1000).optional(), cmd }),
 ]);
 export type DecideInput = z.infer<typeof DecideInput>;

@@ -96,6 +96,8 @@ The layout follows the pointer, not the width of the window. A browser worked wi
 | <kbd>k</kbd> or <kbd>↑</kbd> | Previous question |
 | <kbd>Space</kbd> | All evidence of the question, or back to the short view |
 | <kbd>x</kbd> | Select question, to answer several of one kind at once |
+| <kbd>*</kbd> | Select all of this kind: every listed question of the selection's kind, or clears the selection when they are all selected |
+| <kbd>Esc</kbd> | Clear selection |
 | <kbd>↵</kbd> | Take advice: gives the answer an agent advised |
 | <kbd>u</kbd> | Undo answer |
 

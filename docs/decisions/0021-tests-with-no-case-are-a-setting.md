@@ -68,4 +68,4 @@ open.
 - Withdrawing a link made before its file gained tests leaves two open questions about that file, the old one
   with the tests it listed then. Either can be answered; the other is then answered with nothing left to do.
 - One answer for several rows in the queue ("answer all of these"). The owner is thinking about its form; the
-  demo data keeps enough of these rows to try it on.
+  demo data keeps enough of these rows to try it on. Built on 2026-10-14: decision 0024.

@@ -9,10 +9,46 @@
 	height: 38px;
 	gap: 9px;
 }
-.queue-select {
-	width: 8px;
+/* The box that selects a row. The row is a button, so the box is drawn, not a checkbox: a click on it selects
+   (src/web/queue/index.tsx), and a click anywhere else on the row opens it. */
+.queue-check {
+	width: 14px;
+	height: 14px;
 	flex: none;
+	display: grid;
+	place-items: center;
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	font-size: 10px;
+	line-height: 1;
+	color: var(--bg);
+}
+.queue-pane .row:hover .queue-check {
+	border-color: var(--dim);
+}
+.queue-check[data-checked="true"] {
+	background: var(--acc);
+	border-color: var(--acc);
+}
+.queue-check[data-off] {
+	visibility: hidden;
+}
+.queue-bulk {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	padding: 7px 14px;
+	border-bottom: 1px solid var(--line2);
+	background: var(--bg);
+	font-size: 12px;
+}
+.queue-bulk > span {
 	color: var(--acc);
+	margin-right: auto;
+}
+.queue-bulk button {
+	color: var(--dim);
+	white-space: nowrap;
 }
 .queue-title {
 	flex: 1;

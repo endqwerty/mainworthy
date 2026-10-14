@@ -298,6 +298,14 @@ export function evidenceMessage(question: QuestionItem): string | null {
 	return parsed.success ? null : "The evidence could not be read. Refresh before answering.";
 }
 
+/** Whether `questionReadMessage` waits for the question's content to be on screen, as only the question shown is. */
+export function readOnScreen(question: Pick<QuestionItem, "kind" | "evidence">): boolean {
+	if (question.kind === "adopt") return true;
+	if (question.kind !== "finding") return false;
+	const parsed = FindingEvidence.safeParse(question.evidence);
+	return Boolean(parsed.success && parsed.data.suggest && !("case" in parsed.data.suggest));
+}
+
 export function questionReadMessage(question: QuestionItem): string | null {
 	const error = evidenceMessage(question);
 	if (error) return error;
