@@ -61,6 +61,10 @@ public struct Change: Equatable, Sendable {
 	public let operation: String
 	/// The refs it touched. Empty does not mean nothing changed.
 	public let touched: [String]
+
+	/// What a change stream says first: it is open, and whatever changes from now on will be heard. Whoever
+	/// follows the stream reads what they show at this point, and not before.
+	package static let opened = Change(operation: "", touched: [])
 }
 
 extension Date {

@@ -62,8 +62,19 @@ struct QueueScreenTests {
 			Issue.record("the proposal's evidence was not read")
 			return
 		}
-		#expect(try await screen.documents(of: edit).count == 1)
-		#expect(await screen.answer(adopt, with: try #require(adopt.choices.first { $0.answer == "accept" })))
+		// An edit nobody was shown is not accepted: the answer waits for what it changes to be read.
+		let accept = try #require(adopt.choices.first { $0.answer == "accept" })
+		#expect(!screen.isShown(adopt))
+		#expect(await screen.answer(adopt, with: accept) == false)
+		#expect(screen.notice?.text == "Nothing was recorded for \(adopt.ref): what it asks about has not been shown yet.")
+		#expect(screen.current(adopt.ref) != nil)
+		await screen.readDocuments(of: adopt)
+		guard case .read(let documents) = screen.documents(of: adopt) else {
+			Issue.record("what the edit changes was not read")
+			return
+		}
+		#expect(documents.count == 1 && screen.isShown(adopt))
+		#expect(await screen.answer(adopt, with: accept))
 		#expect(screen.notice?.text == "\(adopt.ref): Accept.")
 		#expect(screen.notice?.undoes == nil)
 	}
@@ -109,6 +120,42 @@ struct QueueScreenFailureTests {
 		func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
 			throw URLError(.cannotConnectToHost)
 		}
+	}
+
+	/// A queue of three questions that the server hands out two at a time.
+	struct TwoPages: Transport {
+		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			func question(_ ref: String) -> String {
+				"""
+				{"q":"\(ref)","kind":"map","title":"Tests with no case","producer":"ci","state":"open","evidenceHash":"abc",
+				"evidence":{"file":"a.spec.ts","tests":[],"count":0,"facts":[]},"seen":{"count":1,"carried":0},
+				"needs":"one member","answers":["track"],"blocks":[],"about":[],"openedAt":1800000000000,"advice":[],
+				"decision":null,"you":"counts"}
+				"""
+			}
+			let second = String(decoding: request.httpBody ?? Data(), as: UTF8.self).contains(#""cursor":"next""#)
+			let items = second ? question("Q-3") : "\(question("Q-1")),\(question("Q-2"))"
+			let body = #"{"ok":true,"seq":1,"result":{"counts":{"open":3,"map":3},"cursor":\#(second ? "null" : #""next""#),"items":[\#(items)]}}"#
+			return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+		}
+
+		func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+			throw URLError(.unsupportedURL)
+		}
+	}
+
+	@Test("a list that was read past its first page is read as far again, so an open question stays in it")
+	func refreshKeepsPages() async throws {
+		let server = Server(instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(), transport: TwoPages())
+		let screen = QueueScreen(project: server.project("shop"))
+		await screen.show(.open, filter: nil)
+		#expect(screen.questions.map(\.ref) == ["Q-1", "Q-2"] && screen.hasMore)
+		await screen.more()
+		#expect(screen.questions.map(\.ref) == ["Q-1", "Q-2", "Q-3"] && !screen.hasMore)
+		// Somebody writes in the project, and the list is read again while Q-3 is open.
+		await screen.refresh()
+		#expect(screen.current("Q-3") != nil)
+		#expect(screen.questions.count == 3 && !screen.hasMore)
 	}
 
 	@Test("the first read that fails says why, in place of the list")

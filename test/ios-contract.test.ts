@@ -59,8 +59,22 @@ const open = async (key: string): Promise<Item[]> =>
 	((await op(key, "inbox", { state: "open", limit: 100 })) as { items: Item[] }).items;
 
 describe("what the iOS app reads", () => {
-	test("who is signed in", async () => {
+	test("who is signed in, with a token and with the session a password opens", async () => {
 		holds("GET /api/session", SessionInfo, await result("GET", "/api/session"));
+		// The app holds a session cookie, never a token, so this is the reply it reads.
+		const signedIn = await fetch(`${server.url}/api/login`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(server.person),
+		});
+		const cookie = (signedIn.headers.getSetCookie()[0] ?? "").split(";")[0] ?? "";
+		// The app reads the cookie from the header as text: this is the pattern it looks for (`Server.swift`).
+		expect(cookie).toMatch(/^mainworthy_sid=[A-Za-z0-9_-]{43}$/);
+		const mine = (await (await fetch(`${server.url}/api/session`, { headers: { cookie } })).json()) as {
+			result: { session: unknown };
+		};
+		holds("GET /api/session, with a cookie", SessionInfo, mine.result);
+		expect(mine.result.session).toBeNumber();
 	});
 
 	test("the queue, and the evidence of every kind of question", async () => {

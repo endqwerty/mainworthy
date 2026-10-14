@@ -13,22 +13,35 @@ struct QuestionView: View {
 	/// The question as it was last in the list. It stays on the page when the list lets go of it.
 	@State private var last: Question?
 	@State private var asking: Asking?
-	@State private var confirming: Choice?
+	@State private var confirming: Chosen?
+
+	/// An answer with the question as it was when the person chose it. What is sent later, from a sheet or a
+	/// dialog, is sent on that question: the list may have read newer evidence behind the sheet, and an answer
+	/// must not land on evidence its giver did not see. The server then says the evidence changed.
+	private struct Chosen: Equatable {
+		let choice: Choice
+		let question: Question
+	}
 
 	/// What a sheet asks before something is sent: an answer's reference and reason, or a withdrawal's reason.
 	private enum Asking: Identifiable {
-		case answer(Choice)
-		case withdrawal
+		case answer(Chosen)
+		case withdrawal(Question)
 
 		var id: String {
 			switch self {
-			case .answer(let choice): choice.answer
+			case .answer(let chosen): chosen.choice.answer
 			case .withdrawal: "withdraw"
 			}
 		}
 	}
 
 	private var current: Question? { screen.current(ref) }
+
+	/// Whether the dialog that confirms an accepted edit is up. Dismissed any way, it forgets the answer.
+	private var isConfirming: Binding<Bool> {
+		Binding(get: { confirming != nil }, set: { shown in if !shown { confirming = nil } })
+	}
 
 	var body: some View {
 		Group {
@@ -56,13 +69,13 @@ struct QuestionView: View {
 			sheet(for: asking)
 		}
 		.confirmationDialog(
-			"Accept this edit?", isPresented: .constant(confirming != nil), titleVisibility: .visible,
+			"Accept this edit?", isPresented: isConfirming, titleVisibility: .visible,
 			presenting: confirming
-		) { choice in
-			Button(choice.label) { send(choice) }
+		) { chosen in
+			Button(chosen.choice.label) { send(chosen) }
 			Button("Cancel", role: .cancel) { confirming = nil }
-		} message: { choice in
-			Text("\(choice.help) An accepted edit is not withdrawn: an earlier version is restored from the case's history.")
+		} message: { chosen in
+			Text("\(chosen.choice.help) An accepted edit is not withdrawn: an earlier version is restored from the case's history.")
 		}
 	}
 
@@ -161,8 +174,8 @@ struct QuestionView: View {
 					.background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 12))
 				}
 				.buttonStyle(.plain)
-				.disabled(choice.takes == .more || question.standing == .forbidden || screen.busy.contains(question.ref))
-				.opacity(choice.takes == .more || question.standing == .forbidden ? 0.5 : 1)
+				.disabled(!canGive(choice, to: question) || screen.busy.contains(question.ref))
+				.opacity(canGive(choice, to: question) ? 1 : 0.5)
 				.accessibilityIdentifier("answer-\(choice.answer)")
 			}
 			if case .unreadable = question.evidence {
@@ -171,6 +184,12 @@ struct QuestionView: View {
 					.foregroundStyle(.secondary)
 			}
 		}
+	}
+
+	/// Whether an answer is this person's to give here: the app can send it, the policy lets them, and they
+	/// were shown what the question asks about.
+	private func canGive(_ choice: Choice, to question: Question) -> Bool {
+		choice.takes != .more && question.standing != .forbidden && screen.isShown(question)
 	}
 
 	/// Who the question waits for, and what this person's answer is worth.
@@ -196,7 +215,7 @@ struct QuestionView: View {
 			// An accepted edit is undone in the case's history, not here.
 			if question.kind != .adopt {
 				Button("Withdraw this decision", role: .destructive) {
-					if question.wantsReason { asking = .withdrawal } else { withdraw(question) }
+					if question.wantsReason { asking = .withdrawal(question) } else { withdraw(question) }
 				}
 				.disabled(screen.busy.contains(question.ref))
 				.padding(.top, 4)
@@ -207,20 +226,22 @@ struct QuestionView: View {
 
 	private func choose(_ choice: Choice, for question: Question) {
 		screen.dismissNotice()
+		let chosen = Chosen(choice: choice, question: question)
 		if question.wantsReason || choice.takes == .reference {
-			asking = .answer(choice)
+			asking = .answer(chosen)
 		} else if question.kind == .adopt, choice.answer == "accept" {
-			confirming = choice
+			confirming = chosen
 		} else {
-			send(choice)
+			send(chosen)
 		}
 	}
 
-	private func send(_ choice: Choice, reference: String = "", reason: String = "") {
+	private func send(_ chosen: Chosen, reference: String = "", reason: String = "") {
 		confirming = nil
-		guard let question = current else { return }
 		Task {
-			if await screen.answer(question, with: choice, reference: reference, reason: reason) { onSettled() }
+			if await screen.answer(chosen.question, with: chosen.choice, reference: reference, reason: reason) {
+				onSettled()
+			}
 		}
 	}
 
@@ -232,21 +253,20 @@ struct QuestionView: View {
 	}
 
 	@ViewBuilder private func sheet(for asking: Asking) -> some View {
-		let wantsReason = (current ?? last)?.wantsReason ?? false
 		switch asking {
-		case .answer(let choice):
+		case .answer(let chosen):
 			AnswerSheet(
-				title: choice.label, help: choice.help, action: "Record", wantsReference: choice.takes == .reference,
-				wantsReason: wantsReason
+				title: chosen.choice.label, help: chosen.choice.help, action: "Record",
+				wantsReference: chosen.choice.takes == .reference, wantsReason: chosen.question.wantsReason
 			) { reference, reason in
-				send(choice, reference: reference, reason: reason)
+				send(chosen, reference: reference, reason: reason)
 			}
-		case .withdrawal:
+		case .withdrawal(let question):
 			AnswerSheet(
 				title: "Withdraw this decision", help: "Both decisions stay in the ledger.", action: "Withdraw",
 				wantsReference: false, wantsReason: true
 			) { _, reason in
-				if let question = current ?? last { withdraw(question, reason: reason) }
+				withdraw(question, reason: reason)
 			}
 		}
 	}

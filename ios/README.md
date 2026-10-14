@@ -82,10 +82,23 @@ The queue is the example to copy.
 
 1. **What it reads.** Add the reply's shape to `scripts/ios/contract.ts` and to `SHAPES`, a test of it against a
    real reply in `test/ios-contract.test.ts`, and run `gen`.
-2. **What can be asked.** Add a function to `ProjectClient.swift` for each thing a person does. It takes and
-   returns the app's own values and hides the operation, as `answer` hides `decide`. A value is built from its
-   `Wire` type where it is decoded (`Question.swift`). Test it against the server in `LiveTests.swift`.
+2. **What can be asked.** Add a file to `MainworthyClient` with the values the screen shows and an
+   `extension ProjectClient` with a function for each thing a person does, as `Queue.swift` has `answer`. A
+   function takes and returns the app's own values and hides the operation, as `answer` hides `decide`. A value
+   is built from its `Wire` type where it is decoded (`Question.swift`). Test it against the server in a file
+   beside `LiveTests.swift`.
 3. **What the screen holds.** Add a class to `MainworthyScreens`, as `QueueScreen`, and make it in
    `Workspace.open`, where a project's screens are made. Test it in `MainworthyScreensTests`.
 4. **The view.** Add it under `App/` and a tab in `WorkspaceView.swift`.
 5. **The whole way through.** Add a test to `UITests/` that does on the screen what a person would.
+
+Three things the queue does that a copy must keep:
+
+- **A screen is one project's.** `Workspace.open` makes every screen anew for the project that is opened and
+  lists them in `screens`, which is what the change stream reads again. A view takes its screen from the
+  workspace and is given `.id(workspace.project?.key)`, so nothing typed or opened in one project is shown in
+  another.
+- **A read that was overtaken is dropped** (`reads` in `QueueScreen`), and a list that was read past its first
+  page is read as far again, so that what is open stays in it.
+- **What is sent later is sent on what was shown.** A sheet or a dialog keeps the value the person acted on
+  (`Chosen` in `QuestionView`), not a ref to look up again when it is submitted.

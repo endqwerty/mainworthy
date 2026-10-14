@@ -136,12 +136,9 @@ public struct Finding: Equatable, Sendable {
 		finder = wire.finder
 		lens = wire.lens
 		suggestion = wire.suggest.flatMap { suggest -> Suggestion? in
-			if let new = suggest["case"], let title = new["title"]?.string {
-				return .newCase(title: title, steps: new["steps"]?.array?.compactMap(\.string) ?? [])
-			}
-			let action = suggest["action"]?.string
-			let expected = suggest["expected"]?.string
-			return action == nil && expected == nil ? nil : .step(action: action, expected: expected)
+			if let new = suggest.case { return .newCase(title: new.title, steps: new.steps) }
+			return suggest.action == nil && suggest.expected == nil
+				? nil : .step(action: suggest.action, expected: suggest.expected)
 		}
 	}
 }
@@ -157,6 +154,10 @@ public struct ProposedEdit: Equatable, Sendable {
 	public let count: Int
 	/// The cases the edit cannot be merged into, each with the fields that are in the way.
 	public let conflicts: [Conflict]
+	/// Whether this build shows everything the proposal changes: it does for edits to what a case says
+	/// (create, edit, restore), whose documents it sets side by side. A proposal that also moves, tags,
+	/// archives or re-covers cases, makes a folder or changes the policy is answered in the web app.
+	public let isShownWhole: Bool
 
 	public struct Conflict: Equatable, Sendable {
 		public let caseRef: String
@@ -170,27 +171,29 @@ public struct ProposedEdit: Equatable, Sendable {
 		summaries = wire.edits.map(ProposedEdit.summary)
 		count = wire.count
 		conflicts = wire.conflicts.map { Conflict(caseRef: $0.case, fields: $0.paths) }
+		// The summaries are the first twenty edits. A longer proposal is not known to be shown whole.
+		isShownWhole =
+			wire.count == wire.edits.count
+			&& wire.edits.allSatisfy { ["create", "edit", "restore"].contains($0.op) }
 	}
 
 	/// One edit in a line, from the summary the server gives of it.
-	private static func summary(_ edit: [String: JSONValue]) -> String {
-		let title = edit["title"]?.string
-		let ref = edit["case"]?.string
-		let named = [ref, title].compactMap { $0 }.joined(separator: " · ")
+	private static func summary(_ edit: Wire.EditSummary) -> String {
+		let named = [edit.case, edit.title].compactMap { $0 }.joined(separator: " · ")
 		func cases(_ verb: String) -> String {
-			let count = Int(edit["cases"]?.number ?? 0)
+			let count = edit.cases ?? 0
 			return "\(verb) \(count) \(count == 1 ? "case" : "cases")"
 		}
-		switch edit["op"]?.string {
-		case "create": return "New case: \(title ?? "untitled")"
+		switch edit.op {
+		case "create": return "New case: \(edit.title ?? "untitled")"
 		case "edit": return "Edit \(named)"
 		case "restore": return "Restore an earlier version of \(named)"
 		case "cover": return "Change what \(named) covers"
 		case "place": return cases("Move or tag")
 		case "state": return cases("Archive or restore")
-		case "folder": return edit["name"]?.string.map { "Folder \($0)" } ?? "Change a folder"
-		case "policy": return "Change the policy to \(edit["preset"]?.string ?? "another one")"
-		case let other: return other?.capitalized ?? "An edit"
+		case "folder": return edit.name.map { "Folder \($0)" } ?? "Change a folder"
+		case "policy": return "Change the policy to \(edit.preset ?? "another one")"
+		default: return edit.op.capitalized
 		}
 	}
 }

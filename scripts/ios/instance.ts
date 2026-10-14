@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { start } from "../../src/server/start.ts";
+import { type Instance, start } from "../../src/server/start.ts";
 import { passedRun, scenario } from "./scenario.ts";
 
 export const OWNER = "robin";
@@ -27,58 +27,61 @@ const Invited = z.object({ ok: z.literal(true), result: z.object({ code: z.strin
 
 export async function testInstance(): Promise<TestInstance> {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-ios-"));
-	let url = "";
-	const instance = start(
-		{
-			dataDir,
-			host: "127.0.0.1",
-			port: 0,
-			mode: "server",
-			owner: OWNER,
-			ownerToken: TOKEN,
-			commit: null,
-			sessionIdleMs: 14 * 86_400_000,
-			sessionMaxMs: 90 * 86_400_000,
-			proxy: null,
-			// A test signs in many times. The cost a real instance hashes a password at would be most of its run.
-			passwordCost: { memoryCost: 8, timeCost: 1 },
-		},
-		() => ({
-			ui: null,
-			routes: {
-				"/test/project": async (req) => {
-					const asked = Ask.safeParse(await req.json().catch(() => ({})));
-					if (!asked.success) return Response.json({ ok: false, error: { code: "invalid", message: "kind" } });
-					const key = `t-${randomBytes(5).toString("hex")}`;
-					const result =
-						asked.data.kind === "strict"
-							? { project: key, run: await passedRun(url, TOKEN, key) }
-							: await scenario(url, TOKEN, key);
-					return Response.json({ ok: true, result });
-				},
-			},
-		}),
-		{ readers: 0 },
-	);
-	url = instance.url;
-	const post = (path: string, body: unknown, token?: string) =>
-		fetch(`${url}${path}`, {
-			method: "POST",
-			headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
-			body: JSON.stringify(body),
-		});
-	const invited = Invited.parse(
-		await (await post("/api/invitation", { do: "create", name: PERSON.name }, TOKEN)).json(),
-	);
-	const joined = await post("/api/login", { invitation: invited.result.code, password: PERSON.password });
-	if (!joined.ok) throw new Error(`the test person could not join: ${joined.status} ${await joined.text()}`);
-	return {
-		url,
-		token: TOKEN,
-		person: PERSON,
-		async stop() {
-			await instance.stop();
-			rmSync(dataDir, { recursive: true, force: true });
-		},
+	let instance: Instance | null = null;
+	const stop = async (): Promise<void> => {
+		await instance?.stop();
+		rmSync(dataDir, { recursive: true, force: true });
 	};
+	// A server that could not be started or set up is handed to nobody, so nobody else would stop it or remove
+	// what it wrote: that is done here.
+	try {
+		const made = start(
+			{
+				dataDir,
+				host: "127.0.0.1",
+				port: 0,
+				mode: "server",
+				owner: OWNER,
+				ownerToken: TOKEN,
+				commit: null,
+				sessionIdleMs: 14 * 86_400_000,
+				sessionMaxMs: 90 * 86_400_000,
+				proxy: null,
+				// A test signs in many times. The cost a real instance hashes a password at would be most of its run.
+				passwordCost: { memoryCost: 8, timeCost: 1 },
+			},
+			() => ({
+				ui: null,
+				routes: {
+					"/test/project": async (req) => {
+						const asked = Ask.safeParse(await req.json().catch(() => ({})));
+						if (!asked.success) return Response.json({ ok: false, error: { code: "invalid", message: "kind" } });
+						const key = `t-${randomBytes(5).toString("hex")}`;
+						const result =
+							asked.data.kind === "strict"
+								? { project: key, run: await passedRun(made.url, TOKEN, key) }
+								: await scenario(made.url, TOKEN, key);
+						return Response.json({ ok: true, result });
+					},
+				},
+			}),
+			{ readers: 0 },
+		);
+		instance = made;
+		const post = (path: string, body: unknown, token?: string) =>
+			fetch(`${made.url}${path}`, {
+				method: "POST",
+				headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+				body: JSON.stringify(body),
+			});
+		const invited = Invited.parse(
+			await (await post("/api/invitation", { do: "create", name: PERSON.name }, TOKEN)).json(),
+		);
+		const joined = await post("/api/login", { invitation: invited.result.code, password: PERSON.password });
+		if (!joined.ok) throw new Error(`the test person could not join: ${joined.status} ${await joined.text()}`);
+		return { url: made.url, token: TOKEN, person: PERSON, stop };
+	} catch (error) {
+		await stop();
+		throw error;
+	}
 }

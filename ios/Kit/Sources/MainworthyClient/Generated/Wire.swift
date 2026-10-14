@@ -37,19 +37,26 @@ enum Wire {
 		let carried: Int
 	}
 
+	/// An answer as it was given. It carries more, by what it is.
+	struct GivenAnswer: Decodable, Equatable, Sendable {
+		/// The answer's word: flaky, accept. Or withdrawn, expired, outdated for a row the ledger wrote.
+		let `is`: String
+		/// For a defect: where it is tracked.
+		let ref: String?
+	}
+
 	/// An answer that was recorded as advice: somebody else decides.
 	struct Advice: Decodable, Equatable, Sendable {
 		let by: String
 		let kind: String
-		let answer: [String: JSONValue]
+		let answer: GivenAnswer
 		let reason: String?
 	}
 
 	/// The decision that stands on a question.
 	struct Decision: Decodable, Equatable, Sendable {
 		let id: Int
-		/// The answer as it was given: `is`, and what that answer carries.
-		let answer: [String: JSONValue]
+		let answer: GivenAnswer
 		/// Who signed it.
 		let by: [String]
 		/// The policy clause that answered, when a rule did.
@@ -130,6 +137,19 @@ enum Wire {
 		let facts: [String]
 	}
 
+	/// A case a finder suggests adding.
+	struct SuggestedCase: Decodable, Equatable, Sendable {
+		let title: String
+		let steps: [String]
+	}
+
+	/// An edit a finder suggests: to one step, or a new case.
+	struct Suggestion: Decodable, Equatable, Sendable {
+		let action: String?
+		let expected: String?
+		let `case`: SuggestedCase?
+	}
+
 	/// What a review found.
 	struct FindingEvidence: Decodable, Equatable, Sendable {
 		/// Where: a case (C-311), a step (C-311#b7), a requirement or a change.
@@ -140,11 +160,25 @@ enum Wire {
 		let category: String
 		let note: String
 		let repro: String?
-		/// An edit the finder suggests. Accepting can turn it into a proposal.
-		let suggest: JSONValue?
+		/// Accepting the finding turns it into a proposal by the finder.
+		let suggest: Suggestion?
 		let finder: String
 		let lens: String
 		let facts: [String]
+	}
+
+	/// One edit of a proposal in short. Which fields it carries depends on `op`.
+	struct EditSummary: Decodable, Equatable, Sendable {
+		/// create, edit, restore, place, state, folder, cover or policy.
+		let op: String
+		let `case`: String?
+		let title: String?
+		/// For place and state: how many cases.
+		let cases: Int?
+		/// For folder: its name.
+		let name: String?
+		/// For policy: the preset it changes to.
+		let preset: String?
 	}
 
 	/// A case the edit cannot be merged into.
@@ -158,8 +192,8 @@ enum Wire {
 		let proposal: String
 		let author: String
 		let reason: String?
-		/// A summary of each edit, the first twenty: `op`, and what it changes.
-		let edits: [[String: JSONValue]]
+		/// The first twenty edits.
+		let edits: [EditSummary]
 		let count: Int
 		let conflicts: [EditConflict]
 		let facts: [String]
@@ -201,6 +235,12 @@ enum Wire {
 		/// Preconditions. Empty when there are none.
 		let pre: String
 		let steps: [Step]
+		/// Who may produce evidence for the case: human, auto, agent.
+		let methods: [String]
+		/// Whether an automated test is wanted: none, wanted or not-applicable.
+		let automate: String
+		/// Custom field values. A case that is read alone leaves them out.
+		let fields: [String: String]?
 	}
 
 	/// One edit of a proposal. Which fields it carries depends on `op`.

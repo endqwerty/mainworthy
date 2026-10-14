@@ -16,7 +16,9 @@ about the objection: how an app that nobody here compiles stays in step with a s
 **The app is one more client of the operations.** It calls what the web UI and the command line call
 (`src/server/ops/index.ts`), and the server did not change for it. It signs in the way a browser does: a name and
 a password, or a token, opens a session and the reply sets a cookie (decision 0017). The app keeps that cookie in
-the device's keychain and nothing else: not the password and not the token. The session is listed under "Your
+the device's keychain and nothing else: not the password and not the token. It reads the cookie from the
+reply's header as text, because the system's cookie parser applies a browser's rules for the `__Host-` prefix
+and they differ between versions of the system. The session is listed under "Your
 sessions" as "Mainworthy for iPhone" and can be ended from anywhere.
 
 **What the app reads is written in TypeScript, once.** The server's rows have no schema (issue #52), and an agent
@@ -40,13 +42,14 @@ the server parses an outline, merges an edit and counts a verdict.
 
 **The app's tests talk to a real Mainworthy.** `bun scripts/ios.ts test` starts a server in the same process,
 fills a project for each test (`scripts/ios/scenario.ts`) and runs the package's tests on a Mac with no
-simulator: 41 tests in under a second once built. `bun scripts/ios.ts uitest` drives the app's screens in a
+simulator, in under a second once built. `bun scripts/ios.ts uitest` drives the app's screens in a
 simulator against the same kind of server. A job on a macOS runner runs the first and builds the app.
 
 **The server is ahead of the app.** The instance follows `main` within minutes (issue #90). The app on a phone is
 the build somebody last installed. So the app reads leniently and says what it cannot do:
 
-- a kind of question it does not know is shown by its title and is not offered an answer,
+- a kind of question it does not know, and evidence it cannot decode, is shown by its title and has no answer
+  to give in the app,
 - an answer it has no words for is listed and sent to the web app,
 - a reply it cannot decode is said to be that, with the advice to install a newer build.
 
@@ -62,7 +65,11 @@ second and a view, and the compiler refuses a view that skips the middle.
 **A question is answered from its own page.** Decision 0018 found, in three reviews, ways to record a decision
 about a question nobody had opened. The app has no answer in a list: no swipe, no menu. The page of a question
 shows its evidence, and the answers are under it, each with the sentence that says what it does. The evidence an
-answer was given on is kept inside the question's value, where a view cannot change it.
+answer was given on is kept inside the question's value, where a view cannot change it, and an answer goes out
+on the question as it was when the person chose it: a sheet that asks for a reason does not pick up evidence
+that arrived behind it. What was not shown is not answered. An edit is accepted only once the documents it
+changes were read and set side by side, and an edit that does more than change what a case says (it moves or
+archives cases, or changes the policy) is answered in the web app, because the app does not show all of it.
 
 **A free Apple ID is enough.** That rules out what needs a paid membership: push notifications, passkeys (they
 need an associated domain) and TestFlight. An app signed that way opens for seven days, so installing is one

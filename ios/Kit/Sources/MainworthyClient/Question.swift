@@ -119,10 +119,18 @@ extension Question {
 		title = wire.title
 		producer = Producer(wire.producer)
 		isOpen = wire.state == "open"
-		evidence = Evidence(kind: Kind(wire.kind), wire.evidence)
+		let evidence = Evidence(kind: Kind(wire.kind), wire.evidence)
+		self.evidence = evidence
 		timesSeen = wire.seen.count
 		needs = wire.needs
-		choices = wire.answers.map { Choice(answer: $0, for: Kind(wire.kind)) }
+		// What cannot be shown is not answered here: every answer of such a question is the web app's to give.
+		let shown: Bool =
+			switch evidence {
+			case .unreadable: false
+			case .proposal(let edit): edit.isShownWhole
+			case .failure, .unlinked, .finding, .signoff: true
+			}
+		choices = wire.answers.map { Choice(answer: $0, for: Kind(wire.kind), shown: shown) }
 		blocks = wire.blocks
 		openedAt = Date(milliseconds: wire.openedAt)
 		advice = wire.advice.map(Advice.init)
@@ -168,19 +176,20 @@ public struct Choice: Identifiable, Hashable, Sendable {
 		case nothing
 		/// A reference to where the defect is tracked, which may be left empty.
 		case reference
-		/// Something this build cannot give: the cases to link tests to, the text of a merge, or an answer the
-		/// app has no words for. The question is answered in the web app.
+		/// Something this build cannot give: the cases to link tests to, the text of a merge, an answer the app
+		/// has no words for, or any answer to a question whose evidence it cannot show. The question is answered
+		/// in the web app.
 		case more
 	}
 
-	init(answer: String, for kind: Kind) {
+	init(answer: String, for kind: Kind, shown: Bool) {
 		self.answer = answer
 		label = Vocabulary.answerLabels[answer] ?? answer.capitalized
 		let help = Vocabulary.answerHelp[kind.word]?[answer]
 		self.help = help ?? ""
 		takes =
 			switch answer {
-			case _ where help == nil: .more
+			case _ where help == nil || !shown: .more
 			case "link", "merge": .more
 			case "defect": .reference
 			default: .nothing
@@ -201,9 +210,8 @@ public struct Decision: Equatable, Sendable {
 	public let at: Date
 
 	init(_ wire: Wire.Decision) {
-		let answer = wire.answer["is"]?.string ?? ""
-		label = Vocabulary.answerLabels[answer] ?? answer.capitalized
-		reference = wire.answer["ref"]?.string
+		label = Vocabulary.answerLabels[wire.answer.is] ?? wire.answer.is.capitalized
+		reference = wire.answer.ref
 		by = wire.by
 		byRule = wire.rule != nil
 		reason = wire.reason
@@ -220,8 +228,7 @@ public struct Advice: Equatable, Sendable {
 	init(_ wire: Wire.Advice) {
 		by = wire.by
 		producer = Producer(wire.kind)
-		let answer = wire.answer["is"]?.string ?? ""
-		label = Vocabulary.answerLabels[answer] ?? answer.capitalized
+		label = Vocabulary.answerLabels[wire.answer.is] ?? wire.answer.is.capitalized
 		reason = wire.reason
 	}
 }

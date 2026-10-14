@@ -25,15 +25,30 @@ public struct CaseContent: Equatable, Sendable {
 	/// Preconditions. Empty when there are none.
 	public var pre: String
 	public var steps: [Step]
+	/// Who may produce evidence for the case: human, auto, agent.
+	public var methods: [String]
+	/// Whether an automated test is wanted: none, wanted or not-applicable.
+	public var automate: String
+	/// Custom field values.
+	public var fields: [String: String]
 
-	public init(title: String, pre: String = "", steps: [Step] = []) {
+	public init(
+		title: String, pre: String = "", steps: [Step] = [], methods: [String] = ["human"], automate: String = "none",
+		fields: [String: String] = [:]
+	) {
 		self.title = title
 		self.pre = pre
 		self.steps = steps
+		self.methods = methods
+		self.automate = automate
+		self.fields = fields
 	}
 
 	init(_ wire: Wire.CaseBody) {
-		self.init(title: wire.title, pre: wire.pre, steps: wire.steps.map(Step.init))
+		self.init(
+			title: wire.title, pre: wire.pre, steps: wire.steps.map(Step.init), methods: wire.methods,
+			automate: wire.automate, fields: wire.fields ?? [:]
+		)
 	}
 }
 
@@ -51,6 +66,12 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 		var changes: [Change] = []
 		if before?.title != after.title { changes.append(.title(from: before?.title, to: after.title)) }
 		if (before?.pre ?? "") != after.pre { changes.append(.pre(from: before?.pre ?? "", to: after.pre)) }
+		// What is not a step is part of the case too. An edit that changes only these must not look like none.
+		if let before {
+			if before.methods != after.methods { changes.append(.methods(from: before.methods, to: after.methods)) }
+			if before.automate != after.automate { changes.append(.automate(from: before.automate, to: after.automate)) }
+			if before.fields != after.fields { changes.append(.fields(from: before.fields, to: after.fields)) }
+		}
 		// A step keeps its id for good, so two versions are set side by side by id and nothing is guessed.
 		let old = before?.steps ?? []
 		let kept = Set(after.steps.map(\.id))
@@ -72,6 +93,9 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 	public enum Change: Equatable, Sendable {
 		case title(from: String?, to: String)
 		case pre(from: String, to: String)
+		case methods(from: [String], to: [String])
+		case automate(from: String, to: String)
+		case fields(from: [String: String], to: [String: String])
 		case kept(Step)
 		case added(Step)
 		case removed(Step)
