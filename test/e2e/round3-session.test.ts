@@ -211,6 +211,12 @@ check(
 				if (request.method() === "POST" && request.postData()?.includes('"op":"policy"')) policyWrites++;
 			});
 			const has = (select: Locator) => select.evaluate((node) => node === document.activeElement);
+			// Headless Chromium on macOS opens no list: `showPicker` returns and the next keys still go to the
+			// closed select, and an arrow does not step a closed select there (issue #202). On macOS the choice from
+			// the list is made with `selectOption`, as the pointer's is, the Escape that would close the list is not
+			// pressed, and the native step that stands in for a list is not asked for. Chrome on a Mac shows the
+			// system's menu, which takes the keys itself; this test cannot drive that menu.
+			const listTakesKeys = process.platform !== "darwin";
 			// A plain key is the shell's when nothing holds the focus: `?` opens the list of keys, Escape closes it.
 			const shell = async () => {
 				await page.keyboard.press("?");
@@ -269,9 +275,11 @@ check(
 					expect(await select.inputValue()).toBe(from);
 					expect(await changes()).toBe(seen);
 					expect(await has(select)).toBe(true);
-					await page.keyboard.press("ArrowDown");
-					await page.keyboard.press("ArrowDown");
-					await page.keyboard.press("Enter");
+					if (listTakesKeys) {
+						await page.keyboard.press("ArrowDown");
+						await page.keyboard.press("ArrowDown");
+						await page.keyboard.press("Enter");
+					} else await select.selectOption(target);
 					expect(await select.inputValue()).toBe(target);
 					expect(await changes()).toBe(seen + 1);
 					expect(await has(select)).toBe(false);
@@ -288,8 +296,10 @@ check(
 				const value = await select.inputValue();
 				await select.focus();
 				await page.keyboard.press("Enter");
-				await page.keyboard.press("Escape");
-				expect(await has(select)).toBe(true);
+				if (listTakesKeys) {
+					await page.keyboard.press("Escape");
+					expect(await has(select)).toBe(true);
+				}
 				await page.keyboard.press("Escape");
 				expect(await has(select)).toBe(false);
 				expect(await options.behind()).toBe(true);
@@ -323,7 +333,7 @@ check(
 			// Where the browser cannot open the list (no `showPicker`, or one that throws), an arrow key changes the
 			// select by one as it does natively, and that change gives the focus back.
 			const kind = page.locator("#token-kind");
-			for (const picker of ["missing", "throws"]) {
+			for (const picker of listTakesKeys ? ["missing", "throws"] : []) {
 				await page.evaluate((how) => {
 					Reflect.set(
 						HTMLSelectElement.prototype,
