@@ -93,9 +93,10 @@ struct QueueScreenTests {
 		// Undo is offered, and withdrawing is a decision too: the policy asks it for a reason as well.
 		let undoes = try #require(screen.notice?.undoes)
 		#expect(undoes.wantsReason)
-		await screen.withdraw(undoes)
+		// A withdrawal that was not taken says so, and the question's page stays to show why.
+		#expect(await screen.withdraw(undoes) == false)
 		#expect(screen.notice?.text == "The decision on \(signoff.ref) stands. The server asks for a reason.")
-		await screen.withdraw(undoes, reason: "Closed too early.")
+		#expect(await screen.withdraw(undoes, reason: "Closed too early."))
 		#expect(screen.notice?.text == "\(signoff.ref): the decision is withdrawn.")
 		#expect(screen.current(signoff.ref) != nil)
 	}

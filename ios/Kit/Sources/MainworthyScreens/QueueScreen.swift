@@ -222,10 +222,14 @@ public final class QueueScreen: ProjectScreen {
 	}
 
 	/// Withdraws the decision on a question: the answer just given ("Undo"), or one in the decided list.
-	public func withdraw(_ question: Question, reason: String = "") async {
-		guard busy.insert(question.ref).inserted else { return }
+	/// Withdraws a question's decision. Returns whether it was withdrawn, so the view leaves the question only
+	/// then: a refusal is shown where the person pressed.
+	@discardableResult
+	public func withdraw(_ question: Question, reason: String = "") async -> Bool {
+		guard busy.insert(question.ref).inserted else { return false }
 		defer { busy.remove(question.ref) }
 		do {
+			let withdrawn: Bool
 			switch try await project.withdraw(question, reason: reason) {
 			case .withdrawn(let note):
 				typed[QueueScreen.withdrawing(question.ref)] = nil
@@ -233,15 +237,19 @@ public final class QueueScreen: ProjectScreen {
 					text: "\(question.ref): the decision is withdrawn\(note.map { " (\($0))" } ?? "").", isProblem: false,
 					undoes: nil
 				)
+				withdrawn = true
 			case .notTaken(let asks):
 				notice = Notice(
 					text: "The decision on \(question.ref) stands. The server asks for \(asks).", isProblem: true,
 					undoes: nil
 				)
+				withdrawn = false
 			}
 			await read()
+			return withdrawn
 		} catch {
 			notice = Notice(text: error.shown, isProblem: true, undoes: nil)
+			return false
 		}
 	}
 
