@@ -43,6 +43,11 @@ import settingsDark from "../../../docs/ui/screenshots/settings-dark.png" with {
 import settingsLight from "../../../docs/ui/screenshots/settings-light.png" with { type: "file" };
 import suiteDark from "../../../docs/ui/screenshots/suite-dark.png" with { type: "file" };
 import suiteLight from "../../../docs/ui/screenshots/suite-light.png" with { type: "file" };
+import skillReporting from "../../../skill/mainworthy/references/reporting.md" with { type: "text" };
+import skillReviewing from "../../../skill/mainworthy/references/reviewing.md" with { type: "text" };
+import skillTools from "../../../skill/mainworthy/references/tools.md" with { type: "text" };
+import skillWritingCases from "../../../skill/mainworthy/references/writing-cases.md" with { type: "text" };
+import skillIndex from "../../../skill/mainworthy/SKILL.md" with { type: "text" };
 import type { DocSlug } from "../../core/docs.ts";
 import icon from "../../web/icon.svg" with { type: "text" };
 import script from "./client.js" with { type: "text" };
@@ -106,6 +111,18 @@ export const SCREENSHOTS: Readonly<Record<string, string>> = {
 	"settings-light": settingsLight,
 	"suite-dark": suiteDark,
 	"suite-light": suiteLight,
+};
+
+/**
+ * The agent skill (`skill/mainworthy`), by its path inside the directory. The site serves it as one archive
+ * (`/docs/skill/mainworthy.tar.gz`); `test/docs.test.ts` fails when this list and the directory differ.
+ */
+export const SKILL: Readonly<Record<string, string>> = {
+	"SKILL.md": text(skillIndex, "skill SKILL.md"),
+	"references/reporting.md": text(skillReporting, "skill references/reporting.md"),
+	"references/reviewing.md": text(skillReviewing, "skill references/reviewing.md"),
+	"references/tools.md": text(skillTools, "skill references/tools.md"),
+	"references/writing-cases.md": text(skillWritingCases, "skill references/writing-cases.md"),
 };
 
 export const STYLES: string = text(styles, "style sheet");

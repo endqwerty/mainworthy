@@ -85,7 +85,7 @@ function entry(input: {
 	status?: number;
 }): Entry {
 	const body = typeof input.body === "string" ? encoder.encode(input.body) : input.body;
-	const compressible = !input.type.startsWith("image/png") && body.byteLength > 1024;
+	const compressible = !input.type.startsWith("image/png") && input.type !== GZIP && body.byteLength > 1024;
 	return {
 		status: input.status ?? 200,
 		type: input.type,
@@ -97,6 +97,10 @@ function entry(input: {
 }
 
 const HTML = "text/html; charset=utf-8";
+const GZIP = "application/gzip";
+
+/** Where the agent skill is served: one archive of the directory `mainworthy`, which `tar -xz` unpacks. */
+export const SKILL_URL = `${DOCS_ROOT}/skill/mainworthy.tar.gz`;
 
 /** One line of the search: a heading of a page, the words under it, and where it is. */
 export type SearchEntry = { url: string; page: string; section: string; heading: string | null; text: string };
@@ -113,7 +117,7 @@ export type Site = {
  * starts: they are several megabytes, and most starts (every server a test makes) are never asked for a page.
  */
 export async function buildSite(version: string): Promise<Site> {
-	const { DIAGRAMS, ICON, PAGES, SCREENSHOTS, SCRIPT, STYLES } = await import("./content.ts");
+	const { DIAGRAMS, ICON, PAGES, SCREENSHOTS, SCRIPT, SKILL, STYLES } = await import("./content.ts");
 	const articles = new Map(DOC_PAGES.map((page) => [page, renderArticle(PAGES[page.slug])] as const));
 	const entries = new Map<string, Entry>();
 	const search: SearchEntry[] = [];
@@ -148,6 +152,11 @@ export async function buildSite(version: string): Promise<Site> {
 		entry({ body: SCRIPT, type: "text/javascript; charset=utf-8", policy: ASSET_POLICY }),
 	);
 	entries.set(`${DOCS_ROOT}/assets/icon.svg`, entry({ body: ICON, type: "image/svg+xml", policy: ASSET_POLICY }));
+	const skill = new Bun.Archive(
+		Object.fromEntries(Object.entries(SKILL).map(([path, text]) => [`mainworthy/${path}`, text])),
+		{ compress: "gzip" },
+	);
+	entries.set(SKILL_URL, entry({ body: await skill.bytes(), type: GZIP, policy: ASSET_POLICY }));
 	entries.set(
 		`${DOCS_ROOT}/search.json`,
 		entry({ body: JSON.stringify(search), type: "application/json; charset=utf-8", policy: ASSET_POLICY }),

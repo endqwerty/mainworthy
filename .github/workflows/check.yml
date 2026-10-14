@@ -54,6 +54,7 @@ jobs:
           curl --fail --silent http://127.0.0.1:7357/docs | grep --quiet "Mainworthy documentation"
           curl --fail --silent --output /dev/null http://127.0.0.1:7357/docs/diagrams/overview.html
           curl --fail --silent --output /dev/null http://127.0.0.1:7357/docs/screenshots/queue-light.png
+          curl --fail --silent http://127.0.0.1:7357/docs/skill/mainworthy.tar.gz | tar -tz | grep --quiet "^mainworthy/SKILL.md$"
       - if: failure()
         run: docker logs mainworthy
 
