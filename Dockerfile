@@ -12,7 +12,7 @@ COPY skill ./skill
 COPY docs/guide ./docs/guide
 COPY docs/diagrams ./docs/diagrams
 COPY docs/ui/screenshots ./docs/ui/screenshots
-RUN bun build --compile --minify --sourcemap src/cli/main.ts src/server/read-worker.ts --outfile /out/mainworthy
+RUN NODE_ENV=production bun build --compile --minify --sourcemap src/cli/main.ts src/server/read-worker.ts --outfile /out/mainworthy
 
 FROM debian:bookworm-slim
 RUN useradd --system --uid 10001 --home-dir /data mainworthy && mkdir -p /data && chown mainworthy:mainworthy /data

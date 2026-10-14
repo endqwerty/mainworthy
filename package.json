@@ -15,7 +15,7 @@
 		"format": "biome check --write .",
 		"test": "bun scripts/check.ts test",
 		"check": "bun scripts/check.ts",
-		"build": "bun build --compile --minify --sourcemap src/cli/main.ts src/server/read-worker.ts --outfile dist/mainworthy"
+		"build": "NODE_ENV=production bun build --compile --minify --sourcemap src/cli/main.ts src/server/read-worker.ts --outfile dist/mainworthy"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.32.1",
