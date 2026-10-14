@@ -851,6 +851,20 @@ function Palette({
 				aria-label={options.title ?? "Command palette"}
 				ref={sheet}
 				{...(typing ? {} : { tabIndex: -1 })}
+				// The arrows and Enter work from the field and from the sheet, which holds the focus where the field
+				// does not (a phone). A row that Tab reached keeps its own Enter.
+				onKeyDown={(event) => {
+					if (event.target !== event.currentTarget && !(event.target instanceof HTMLInputElement)) return;
+					if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+						event.preventDefault();
+						setCursor((old) => Math.max(0, Math.min(items.length - 1, old + (event.key === "ArrowDown" ? 1 : -1))));
+					}
+					if (event.key === "Enter") {
+						event.preventDefault();
+						if (event.repeat) return;
+						choose(cursor);
+					}
+				}}
 			>
 				<input
 					className="palette-input"
@@ -863,17 +877,6 @@ function Palette({
 					onChange={(event) => {
 						setText(event.target.value);
 						setCursor(0);
-					}}
-					onKeyDown={(event) => {
-						if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-							event.preventDefault();
-							setCursor((old) => Math.max(0, Math.min(items.length - 1, old + (event.key === "ArrowDown" ? 1 : -1))));
-						}
-						if (event.key === "Enter") {
-							event.preventDefault();
-							if (event.repeat) return;
-							choose(cursor);
-						}
 					}}
 				/>
 				<div className="palette-list" role="listbox">

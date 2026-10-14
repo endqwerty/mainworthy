@@ -54,7 +54,7 @@ The sidebar names the project you are in, under "Mainworthy". When you can read 
 
 You stay on the screen you were on: from Queue you arrive in the other project's Queue. A case, question or run that was open stays behind, because its ref belongs to one project, and Back returns to it. With the sidebar collapsed, the button shows the first letter of the project's name.
 
-On a phone the project's line is in the menu: tap **Menu**, then the project, then the one to go to. **Actions** offers "Switch project" as well.
+On a phone the project's line is in the menu: tap **Menu**, then the project, then the one to go to. **Actions** offers "Switch project" as well. With a keyboard attached, <kbd>g</kbd> <kbd>p</kbd> opens the list, and <kbd>↑</kbd> <kbd>↓</kbd> and <kbd>↵</kbd> choose from it, as on a desktop.
 
 The palette (<kbd>⌘</kbd> <kbd>K</kbd>) finds a project too, once you type a word of its name. Settings, Projects lists the same projects, and a press on one opens its Settings.
 
