@@ -368,6 +368,74 @@ export const SessionEnd = struct("SessionEnd", "`session` end: whether it ended,
 	current: flag,
 });
 
+// ── The suite ──────────────────────────────────────────────────────────────────────────────────────────────
+
+const SuiteProof = struct("SuiteProof", "The latest evidence of one method, not a gate verdict.", {
+	outcome: text,
+	current: flag,
+});
+const SuiteProofs = struct("SuiteProofs", "The latest evidence by method.", {
+	human: maybe(SuiteProof),
+	auto: maybe(SuiteProof),
+	agent: maybe(SuiteProof),
+});
+export const SuiteCases = struct("SuiteCases", "A page of cases from find.", {
+	items: list(
+		struct("SuiteCase", "One case in the suite.", {
+			ref: text,
+			title: text,
+			tags: list(text),
+			proof: SuiteProofs,
+		}),
+	),
+	cursor: maybe(text),
+});
+export const SuiteFolders = struct("SuiteFolders", "The project's folders from find.", {
+	items: list(
+		struct("SuiteFolder", "One folder and its direct case count.", {
+			id: whole,
+			parent: maybe(whole),
+			name: text,
+			path: text,
+			state: text,
+			cases: whole,
+		}),
+	),
+});
+export const SuiteTags = struct("SuiteTags", "The project's tags from find.", {
+	items: list(struct("SuiteTag", "One tag and its active case count.", { tag: text, n: whole })),
+});
+export const SuiteDocument = struct("SuiteDocument", "A case from get, at the version that was requested.", {
+	ref: text,
+	version: whole,
+	title: text,
+	pre: text,
+	steps: list(Step),
+	methods: list(text),
+	automate: text,
+	fields: maybe(dictionary(text)),
+	tags: list(text),
+	folder: struct("SuitePlace", "The current folder, even when reading an older version.", { path: text }),
+});
+export const SuiteHistory = struct("SuiteHistory", "The versions of a case, newest first.", {
+	versions: list(
+		struct("SuiteVersion", "Who wrote a version, when, and why.", {
+			version: whole,
+			by: text,
+			at: moment,
+			reason: maybe(text),
+			summary: text,
+		}),
+	),
+});
+export const SuiteProposeReply = struct("SuiteProposeReply", "What came of creating or editing a case.", {
+	status: text,
+	question: maybe(text),
+	needs: maybe(text),
+	cases: list(struct("SuiteStamp", "A case version the proposal made.", { ref: text, version: whole })),
+	conflicts: list(struct("SuiteConflict", "The fields where edits overlap.", { case: text, paths: list(text) })),
+});
+
 /** Every shape the app decodes by name. `gen` writes one Swift type for each, and for each struct inside it. */
 export const SHAPES: readonly Shape[] = [
 	SessionInfo,
@@ -390,4 +458,10 @@ export const SHAPES: readonly Shape[] = [
 	ChangeRun,
 	SessionRow,
 	SessionEnd,
+	SuiteCases,
+	SuiteFolders,
+	SuiteTags,
+	SuiteDocument,
+	SuiteHistory,
+	SuiteProposeReply,
 ];

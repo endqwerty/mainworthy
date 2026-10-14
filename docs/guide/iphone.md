@@ -3,7 +3,7 @@
 Answer the queue from your phone in a native app.
 This page says how to install the app, how to sign in and what it does today.
 
-The app is new. It has the queue, planned runs, changes and your sessions. The suite follows (issue #171). For
+The app is new. It has the queue, planned runs, the suite, changes and your sessions (issue #171). For
 those, open the instance in the phone's browser, which gets [a layout of its own](./keyboard.md#on-a-phone).
 
 ## Install the app
@@ -108,6 +108,23 @@ end a change or run tests again.
 
 The list is yours on the instance, whichever project is open. Pull down to refresh. Other people's sessions,
 passwords and passkeys are managed in the web app.
+## Browse and write cases
+
+1. Open **Suite**. Drill into a folder or choose **All cases**. Search asks the server for matching cases;
+   **Tag** filters them. Scroll to the end to read the next page.
+2. Open a case to read its version, preconditions, steps and who may run it. **History** lists who wrote each
+   version, when and why. Open a version to read its document. Folder and tags show the current placement.
+3. If you may produce evidence, press **+** to write a case in the folder you are in, or **Edit case** on its
+   page. Type a title, preconditions and steps. Each step has an action and an optional expected result.
+   **Add step** adds one; **Edit** lets you remove or reorder them.
+4. Press **Save**. An adopted proposal opens the saved version. Where the policy asks for acceptance, the app
+   says the proposal waits in the Queue. If another edit overlaps, the app names the fields and asks its author
+   to resolve the proposal in the web app. An edit uses the version you opened.
+
+What you type stays while the app goes to the background. **Cancel** asks before discarding a changed draft.
+A lost reply offers **Retry**, which sends the same command. Drafts do not survive closing the app.
+Moving, tagging, archiving and restoring cases, changing folders, version diffs and resolving overlaps still
+need the web app. The button on a case's page opens it there.
 
 ## What the app does not do yet
 
@@ -117,7 +134,6 @@ passwords and passkeys are managed in the web app.
   version, moves, tags or archives cases, makes a folder or changes the policy is answered in the web app: the
   app does not show all of what it changes. So is one with more than twenty edits. A new case and an edit to a
   case are shown step by step, and their answers stay off until that is on the screen.
-- **The suite.**
 - **Notifications.** They need a paid Apple developer membership.
 - **Work without a connection.** An answer whose reply was lost is sent again by itself. The app does not keep
   an answer for later.

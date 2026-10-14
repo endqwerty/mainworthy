@@ -355,3 +355,49 @@ describe("what Changes and Your sessions read", () => {
 		holds("end session", SessionEnd, await call({ do: "end", id: mine?.id }));
 	});
 });
+
+describe("what the iPhone Suite reads", () => {
+	test("cases, a cursor page, search, folders, tags and case versions", async () => {
+		const { SuiteCases, SuiteFolders, SuiteTags, SuiteDocument, SuiteHistory } = await import(
+			"../scripts/ios/contract.ts"
+		);
+		const key = z.object({ project: z.string() }).parse(await result("POST", "/test/project", {})).project;
+		const first = await op(key, "find", { in: "cases", limit: 2 });
+		holds("find cases", SuiteCases, first);
+		const page = z
+			.object({ items: z.array(z.object({ ref: z.string() })), cursor: z.string().nullable() })
+			.parse(first);
+		expect(page.cursor).toBeString();
+		holds("find cases, next page", SuiteCases, await op(key, "find", { in: "cases", limit: 2, cursor: page.cursor }));
+		holds("find cases, search", SuiteCases, await op(key, "find", { in: "cases", text: "password" }));
+		holds("find folders", SuiteFolders, await op(key, "find", { in: "folders" }));
+		holds("find tags", SuiteTags, await op(key, "find", { in: "tags" }));
+		const ref = page.items[0]?.ref;
+		const docs = z.array(z.unknown()).parse(await op(key, "get", { refs: [ref] }));
+		holds("get case", SuiteDocument, docs[0]);
+		const old = z.array(z.unknown()).parse(await op(key, "get", { refs: [ref], version: 1 }));
+		holds("get case version", SuiteDocument, old[0]);
+		holds("history", SuiteHistory, await op(key, "history", { ref }));
+	});
+
+	test("adopted, waiting and overlapping proposals", async () => {
+		const { SuiteProposeReply } = await import("../scripts/ios/contract.ts");
+		const create = {
+			edits: [
+				{ op: "create", body: { title: "A native case", steps: [{ id: "a0", action: "Open", expected: null }] } },
+			],
+		};
+		const made = await op(project, "propose", create);
+		holds("propose create", SuiteProposeReply, made);
+		const ref = z.object({ cases: z.array(z.object({ ref: z.string() })) }).parse(made).cases[0]?.ref;
+		expect(ref).toBeString();
+		const edit = (title: string) => ({ edits: [{ op: "edit", case: ref, base: 1, body: { title } }] });
+		holds("propose edit", SuiteProposeReply, await op(project, "propose", edit("First title")));
+		const overlap = await op(project, "propose", edit("Second title"));
+		holds("propose overlap", SuiteProposeReply, overlap);
+		expect(overlap).toMatchObject({ status: "conflict", conflicts: [{ paths: ["title"] }] });
+		const waiting = await op(strict, "propose", { ...create, reason: "Check it before adoption." });
+		holds("propose waiting", SuiteProposeReply, waiting);
+		expect(waiting).toMatchObject({ status: "open" });
+	});
+});

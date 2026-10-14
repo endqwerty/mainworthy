@@ -24,6 +24,14 @@ struct WorkspaceView: View {
 					RunsView(screen: runs, workspace: workspace).id(workspace.project?.key)
 				} else { NoProjectView() }
 			}
+			Tab("Suite", systemImage: "list.bullet.rectangle") {
+				if let suite = workspace.suite {
+					SuiteView(screen: suite, workspace: workspace)
+						.id(workspace.project?.key)
+				} else {
+					NoProjectView()
+				}
+			}
 			Tab("Changes", systemImage: "arrow.triangle.branch") {
 				if let changes = workspace.changes {
 					ChangesView(screen: changes, workspace: workspace).id(workspace.project?.key)
