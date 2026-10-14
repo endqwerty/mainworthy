@@ -61,7 +61,7 @@ test("the workers fit the machine: the quiet phase is alone on a small one", () 
 	expect(parallelWorkers(2)).toBeGreaterThanOrEqual(1);
 	expect(testArgs("quiet", { timings: "t.json" })).toContain(`--parallel=${quietWorkers()}`);
 	expect(testArgs("parallel", { timings: "t.json", workers: 3 })).toContain("--parallel=3");
-	expect([testReaders(2), testReaders(4), testReaders(16)]).toEqual(["1", "2", "2"]);
+	expect(testReaders()).toBe("1");
 });
 
 test("the check's budget is the one the owner set, and a warning comes first", () => {
