@@ -8,18 +8,16 @@
 // nobody while it does.
 import { parentPort, workerData } from "node:worker_threads";
 import { z } from "zod";
-import { ActorKind, Capability } from "../core/kinds.ts";
 import { databasePath, openApp } from "./kernel/app.ts";
 import { Db } from "./kernel/db.ts";
-import { OPS } from "./ops/index.ts";
-import { invoke, type Reply } from "./ops/registry.ts";
+import type { Reply } from "./ops/registry.ts";
 
 const data = z.object({ dataDir: z.string(), role: z.enum(["read", "checkpoint"]).default("read") }).parse(workerData);
 if (!parentPort) throw new Error("a worker needs its parent thread");
 const port = parentPort;
 
 if (data.role === "checkpoint") checkpoints();
-else reads();
+else await reads();
 
 function checkpoints(): void {
 	// An ordinary connection that never writes a row. A passive checkpoint makes nobody wait: it copies what no
@@ -39,7 +37,14 @@ function checkpoints(): void {
 	port.postMessage("ready");
 }
 
-function reads(): void {
+async function reads(): Promise<void> {
+	// Loaded here and not at the top: the checkpoint thread reads no operation and has no use for them, and the
+	// registry is most of what a thread costs to start (about 100 ms of CPU).
+	const [{ ActorKind, Capability }, { OPS }, { invoke }] = await Promise.all([
+		import("../core/kinds.ts"),
+		import("./ops/index.ts"),
+		import("./ops/registry.ts"),
+	]);
 	const config = {
 		dataDir: data.dataDir,
 		host: "127.0.0.1",
