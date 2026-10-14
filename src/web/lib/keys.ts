@@ -112,14 +112,14 @@ export function useKeyboard(listOnly = false): void {
 			// shows the focus. A screen's binding on either key does not take them from it, or a button reached
 			// with Tab could not be pressed at all (Sign out on the Suite, 2026-10-13). Two things keep the
 			// screens' own use of the keys: a control the pointer gave the focus to (`clicked`) leaves the next
-			// Enter to the screen, as it did before; and the rows of a screen's list are the screen's to act on,
-			// whichever of them has the focus.
+			// Enter to the screen, as it did before; and the rows of a screen's list (every row is an `option`) are
+			// the screen's to act on, whichever of them has the focus. A button beside the rows is a button.
 			if (
 				(key === "enter" || key === "space") &&
 				target instanceof HTMLElement &&
 				target.matches("button, a[href], summary") &&
 				target !== clicked &&
-				target.closest("#list") === null
+				target.closest("[role=option]") === null
 			) {
 				// A key held down presses once, as it does where a screen's binding takes it.
 				if (event.repeat) event.preventDefault();
