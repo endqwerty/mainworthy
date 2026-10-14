@@ -557,3 +557,37 @@ check(
 	},
 	30_000,
 );
+
+check(
+	"a button in a list pane that is not a row takes its own Enter and Space when Tab reached it",
+	async () => {
+		const server = await startServer({ cases: 2 });
+		await server.api("plan", { name: "Existing run", select: {} });
+		const h = await openPage(server, { path: "/p/scratch/runs" });
+		try {
+			const { page } = h;
+			page.setDefaultTimeout(5000);
+			await page.getByRole("option").first().waitFor();
+			const plan = page.locator(".run-plan-button");
+			const name = page.locator("#run-name");
+			// The screen's Enter opens the cockpit of the run that is selected, and a row has it from the key
+			// whether or not it holds the focus. The button beside the rows is a button: it opens the planner.
+			for (const key of ["Enter", "Space"]) {
+				await plan.focus();
+				await page.keyboard.press(key);
+				await name.waitFor();
+				expect(new URL(page.url()).pathname).toBe("/p/scratch/runs");
+				await page.keyboard.press("Escape");
+				await name.waitFor({ state: "detached" });
+			}
+			await page.getByRole("option").first().focus();
+			await page.keyboard.press("Enter");
+			await page.waitForURL(/\/p\/scratch\/runs\/\d+$/);
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
