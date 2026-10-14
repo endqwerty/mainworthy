@@ -42,7 +42,8 @@ until**. Run the command again before then. The sign-in is kept in the phone's k
 | `bun scripts/ios.ts project` | Writes `ios/Mainworthy.xcodeproj`, to open in Xcode | 1 s |
 
 Builds go to `~/.cache/mainworthy-ios`, never into the repository: `test/architecture.test.ts` reads every file
-here. One agent at a time runs `uitest` on a machine: there is one simulator, named Mainworthy.
+here. There is one simulator, named Mainworthy, so one `uitest` runs at a time on a machine: a second one,
+from any checkout, waits for the first.
 
 ## Where things are
 
