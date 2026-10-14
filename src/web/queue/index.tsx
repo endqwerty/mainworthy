@@ -13,8 +13,15 @@ import { type Binding, useBindings } from "../lib/keys.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, KeyCap, ListRow, ProducerGlyph } from "../ui/index.tsx";
-import { evidenceMessage, FindingEvidence, MapEvidence, QuestionEvidence, questionReadMessage } from "./evidence.tsx";
-import { allOfKind, countOf, named, rangeOf, sharedAnswers, takes, whyNotSelectable } from "./selection.ts";
+import {
+	evidenceMessage,
+	FindingEvidence,
+	MapEvidence,
+	QuestionEvidence,
+	questionReadMessage,
+	readOnScreen,
+} from "./evidence.tsx";
+import { allOfKind, countOf, named, type Row, rangeOf, sharedAnswers, takes, whyNotSelectable } from "./selection.ts";
 import "./queue.css";
 
 const kindLabels: Record<Kind, string> = {
@@ -142,6 +149,11 @@ function QueueWorkbench() {
 	if (cursor === null && items[0]) setCursor(items[0].q);
 	const current = cursor === null ? items[0] : (items.find((item) => item.q === cursor) ?? shown.current.get(cursor));
 	const selection = items.filter((item) => selected.has(item.q));
+	const byRef = new Map(items.map((item) => [item.q, item]));
+	const alone = (row: Row) => {
+		const item = byRef.get(row.q);
+		return item ? readOnScreen(item) : false;
+	};
 	const bulk = state === "open" && selection.length > 0;
 	const settledRead = useQueryOp({
 		project,
@@ -175,8 +187,15 @@ function QueueWorkbench() {
 	}, [settled, setStatus]);
 	const counts = inbox.data?.pages[0]?.counts ?? {};
 	useEffect(() => {
-		if (inline && !inline.entries.some((entry) => entry.question.q === current?.q)) setInline(null);
-	}, [current?.q, inline]);
+		// An answer for a selection is asked about while the question shown is outside it; any other is about the
+		// question shown, and leaving that question closes it.
+		if (
+			inline &&
+			!inline.entries.some((entry) => entry.question.q === current?.q) &&
+			!(inline.kind === "answer" && inline.entries.every((entry) => selected.has(entry.question.q)))
+		)
+			setInline(null);
+	}, [current?.q, inline, selected]);
 	const listed = items.map((item) => item.q).join(",");
 	useEffect(() => {
 		const listedRefs = new Set(listed.split(","));
@@ -398,22 +417,27 @@ function QueueWorkbench() {
 			select([...selected].filter((ref) => ref !== question.q));
 			return;
 		}
-		const why = whyNotSelectable(question, selection);
+		const why = whyNotSelectable(question, selection, alone);
 		if (why) setStatus(why);
 		else select([...selected, question.q]);
 	}
 	function selectRange(question: QuestionItem): void {
-		const { refs, skipped } = rangeOf(items, selection, anchor.current, question.q);
+		const { refs, skipped } = rangeOf(items, selection, anchor.current, question.q, alone);
 		anchor.current = question.q;
 		select([...new Set([...selected, ...refs])]);
-		if (skipped) setStatus(`${skipped} in the range left out: another kind, or questions you cannot settle.`);
+		if (skipped)
+			setStatus(
+				`${skipped} in the range left out: another kind, questions you cannot settle, or ones answered on their own.`,
+			);
 	}
 	function selectAll(): void {
 		const kind = selection[0]?.kind ?? current?.kind;
 		if (!kind || state !== "open") return;
-		const refs = allOfKind(items, kind);
+		const refs = allOfKind(items, kind, alone);
 		if (!refs.length) {
-			setStatus("You cannot settle any question of this kind.");
+			setStatus(
+				"No listed question of this kind can be selected: you cannot settle them, or each is answered on its own.",
+			);
 			return;
 		}
 		if (refs.every((ref) => selected.has(ref))) {
@@ -425,6 +449,10 @@ function QueueWorkbench() {
 	}
 	function answer(is: string, suggested?: Record<string, unknown>): void {
 		if (state !== "open" || inline) return;
+		if (bulk && suggested) {
+			setStatus("Advice is for the question shown. Clear the selection to take it.");
+			return;
+		}
 		if (!bulk && unavailable) {
 			setStatus(
 				settled
@@ -792,9 +820,10 @@ function QueueWorkbench() {
 				{bulk && selection[0] && (
 					<div className="queue-bulk">
 						<span>{countOf(selection.length, selection[0].kind)} selected</span>
-						{allOfKind(items, selection[0].kind).some((ref) => !selected.has(ref)) && (
+						{allOfKind(items, selection[0].kind, alone).some((ref) => !selected.has(ref)) && (
 							<button type="button" onClick={selectAll}>
-								<KeyCap>*</KeyCap> Select all {countOf(allOfKind(items, selection[0].kind).length, selection[0].kind)}
+								<KeyCap>*</KeyCap> Select all{" "}
+								{countOf(allOfKind(items, selection[0].kind, alone).length, selection[0].kind)}
 							</button>
 						)}
 						<button type="button" onClick={() => select([])}>

@@ -134,11 +134,11 @@ Select the questions, then give one answer. It goes to every selected question i
 - <kbd>*</kbd> selects every listed question of the selection's kind, or of the question shown when nothing is selected. Pressed again, it clears the selection.
 - <kbd>Esc</kbd> clears the selection.
 
-A selection is of one kind: one answer means the same thing to every question in it. A question you cannot settle is not selected, and neither is a row of another kind; the status line says why. "Select all" takes the questions listed so far. Press "More questions" first to take the rest.
+A selection is of one kind: one answer means the same thing to every question in it. A question you cannot settle is not selected, and neither is a row of another kind; the status line says why. Neither is a proposal, or a finding that suggests an edit: an answer to one counts only once its edits are on screen, and only the question shown has them there. Answer those one at a time. "Select all" takes the questions listed so far. Press "More questions" first to take the rest.
 
-The bar above the list counts the selection. The answers under the evidence are then the selection's, and the line above them says when the question shown is not one of them. An answer is offered only when every selected question takes it. "Link to a case" asks for a case for each test, so it is given to one question at a time. An answer that needs a defect reference or a reason asks once and gives the same text to all.
+The bar above the list counts the selection. The answers under the evidence are then the selection's, and the line above them says when the question shown is not one of them. An answer is offered only when every selected question takes it. "Link to a case" asks for a case for each test, so it is given to one question at a time. An answer that needs a defect reference or a reason asks once and gives the same text to all. Advice is about the question shown, so <kbd>↵</kbd> does not take it while a selection exists.
 
-Each question gets its own decision. Press <kbd>u</kbd> to withdraw them all. One that was refused, for example because its evidence changed while you were choosing, comes back to the list, and the others stay answered.
+Each question gets its own decision. Press <kbd>u</kbd> to withdraw them all, as you would one. One that was refused, for example because its evidence changed while you were choosing, comes back to the list, and the others stay answered.
 
 On a phone, open a question and select from **Actions**: "Select question", "Select all of this kind" and "Clear selection". The rows have no box there.
 

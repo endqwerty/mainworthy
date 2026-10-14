@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readOnScreen } from "./evidence.tsx";
 import { allOfKind, named, type Row, rangeOf, sharedAnswers, whyNotSelectable } from "./selection.ts";
 
 const failure = (q: string, more: Partial<Row> = {}): Row => ({
@@ -71,4 +72,31 @@ test("a status line names up to three questions and counts more", () => {
 	expect(named([failure("Q-1"), failure("Q-2"), failure("Q-3")])).toBe("Q-1, Q-2, Q-3");
 	expect(named(["Q-1", "Q-2", "Q-3", "Q-4"].map(unlinked))).toBe("4 unlinked");
 	expect(named([failure("Q-1"), failure("Q-2"), failure("Q-3"), failure("Q-4")])).toBe("4 failures");
+});
+
+test("a question whose content is read on screen before an answer counts is answered alone", () => {
+	const proposal = (q: string): Row => ({ q, kind: "adopt", you: "counts", answers: ["accept", "reject"] });
+	const alone = (row: Row) => row.kind === "adopt";
+	expect(whyNotSelectable(proposal("Q-1"), [], alone)).toBe(
+		"Q-1 is answered on its own: its edits are read on screen before an answer counts.",
+	);
+	expect(allOfKind([proposal("Q-1"), proposal("Q-2")], "adopt", alone)).toEqual([]);
+	expect(rangeOf([proposal("Q-1"), failure("Q-2"), proposal("Q-3")], [], "Q-1", "Q-3", alone)).toEqual({
+		refs: [],
+		skipped: 3,
+	});
+});
+
+test("a proposal and a finding that suggests a new case are read on screen; others are not", () => {
+	expect(readOnScreen({ kind: "adopt", evidence: {} })).toBe(true);
+	expect(readOnScreen({ kind: "failure", evidence: {} })).toBe(false);
+	expect(readOnScreen({ kind: "map", evidence: {} })).toBe(false);
+	const finding = { on: "C-1", case: "C-1", category: "gap", note: "", finder: "robin", step: null, repro: null };
+	expect(readOnScreen({ kind: "finding", evidence: { ...finding, suggest: { step: "1", expected: "Total" } } })).toBe(
+		true,
+	);
+	expect(
+		readOnScreen({ kind: "finding", evidence: { ...finding, suggest: { case: { title: "New", steps: [] } } } }),
+	).toBe(false);
+	expect(readOnScreen({ kind: "finding", evidence: { ...finding, suggest: null } })).toBe(false);
 });

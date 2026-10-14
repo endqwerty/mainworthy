@@ -22,13 +22,18 @@ clears it.
 **A selection is of one kind, and holds only questions you can settle.** One answer has to mean the same thing to
 each question it goes to, and the answers of two kinds share keys with different meanings (`a` accepts a
 proposal and approves a sign-off). A question the policy does not let you answer is refused when you select it,
-with the reason on the status line, instead of when you answer.
+with the reason on the status line, instead of when you answer. So is a proposal, and a finding that suggests an
+edit: an answer to one counts only once its edits have been read on screen (`questionReadMessage`), and only the
+question shown has them there. The first review of this change found that a selection of proposals could be made
+and then never answered.
 
 **The answers are the selection's.** While a selection exists, the answers under the evidence and their keys are
 those of the selection's kind, and each is offered only when every selected question takes it ("Already failing
 on base" is not offered for a selection that holds a failure on trunk). The question shown can be outside the
 selection, for reading one before adding it; the line above the answers says so. "Link to a case" asks for a case
-for each test of each question, so it is given to one question at a time.
+for each test of each question, so it is given to one question at a time. Advice is about the question shown, so
+`Enter` (take advice) does nothing while a selection exists and says so; before, it gave the shown question's
+advice, a link's pairs included, to every selected question.
 
 **Nothing changes on the server.** `decide` already took up to 500 answers in one command, and each question gets
 its own decision, so a withdrawal, a carried answer and the ledger work as they did. A question that is refused
@@ -47,5 +52,7 @@ selection" are in **Actions** once a question is open, as every key of the scree
   and a key would mean different things to different rows.
 - **Select all across pages.** "Select all" takes what is listed (a page holds 100). A question that is not listed
   has not been seen, and the status line says when more are not listed yet.
+- **Answering several proposals at once.** It would need the queue to show every selected proposal's edits, or
+  to trust that a person read them on another visit. Neither is built.
 - **Withdrawing several settled answers at once.** `u` already withdraws every question of the last answer.
   Withdrawing a selection in "Settled" can come later if it is wanted.

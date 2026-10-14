@@ -40,9 +40,19 @@ export function named(questions: readonly Row[]): string {
 		: questions.map((question) => question.q).join(", ");
 }
 
+/**
+ * Whether an answer to the question counts only once its content has been read on screen: a proposal's edits, a
+ * finding's suggested edit (`questionReadMessage`). Only the question shown has its content on screen, so such a
+ * question is answered alone.
+ */
+export type Alone = (question: Row) => boolean;
+const never: Alone = () => false;
+
 /** Why this question cannot join the selection, or null when it can. */
-export function whyNotSelectable(question: Row, selection: readonly Row[]): string | null {
+export function whyNotSelectable(question: Row, selection: readonly Row[], alone: Alone = never): string | null {
 	if (question.you === "forbidden") return `You cannot settle ${question.q}.`;
+	if (alone(question))
+		return `${question.q} is answered on its own: its ${question.kind === "adopt" ? "edits are" : "suggested edit is"} read on screen before an answer counts.`;
 	const kind = selection[0]?.kind;
 	if (kind && question.kind !== kind)
 		return `${question.q} is ${question.kind === "map" ? "unlinked" : `a ${one[question.kind]}`} and the selection is of ${many[kind]}: one answer is for one kind.`;
@@ -58,6 +68,7 @@ export function rangeOf(
 	selection: readonly Row[],
 	anchor: string | null,
 	target: string,
+	alone: Alone = never,
 ): { refs: string[]; skipped: number } {
 	const end = items.findIndex((item) => item.q === target);
 	const found = items.findIndex((item) => item.q === anchor);
@@ -65,13 +76,13 @@ export function rangeOf(
 	const rows = items.slice(Math.min(start, end), Math.max(start, end) + 1);
 	const first = items[end];
 	const basis = selection.length || !first ? selection : [first];
-	const refs = rows.filter((row) => whyNotSelectable(row, basis) === null).map((row) => row.q);
+	const refs = rows.filter((row) => whyNotSelectable(row, basis, alone) === null).map((row) => row.q);
 	return { refs, skipped: rows.length - refs.length };
 }
 
 /** Every listed question of this kind that you may answer. */
-export function allOfKind(items: readonly Row[], kind: Kind): string[] {
-	return items.filter((item) => item.kind === kind && item.you !== "forbidden").map((item) => item.q);
+export function allOfKind(items: readonly Row[], kind: Kind, alone: Alone = never): string[] {
+	return items.filter((item) => item.kind === kind && whyNotSelectable(item, [], alone) === null).map((item) => item.q);
 }
 
 /**

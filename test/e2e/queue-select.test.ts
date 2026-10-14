@@ -38,11 +38,24 @@ test.skipIf(!browserAvailable)(
 			const { page } = view;
 			page.setDefaultTimeout(8000);
 			const { failures, unlinked } = await questions(server);
+			const [f1, f2, f3] = failures;
+			const [u1, u2, u3] = unlinked;
+			if (!f1 || !f2 || !f3 || !u1 || !u2 || !u3) throw new Error("The questions are missing");
+			// An agent advises an answer to the failure that will not be selected.
+			const agent = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "reviewer",
+					kind: "agent",
+					can: ["read", "produce", "answer"],
+					project: "scratch",
+				}),
+			).token;
+			const advised = (await server.api("get", { refs: [f2] }))[0];
+			const hash = z.object({ evidenceHash: z.string() }).parse(advised).evidenceHash;
+			await server.api("decide", { q: f2, onEvidence: hash, answer: { is: "infra" } }, { token: agent });
 			await page.reload();
 			await page.locator("[data-current-question]").waitFor();
-			const [f1, , f3] = failures;
-			const [u1, u2, u3] = unlinked;
-			if (!f1 || !f3 || !u1 || !u2 || !u3) throw new Error("The questions are missing");
 			const box = (ref: string) => page.locator(`[data-question="${ref}"] .queue-check`);
 			const bar = page.locator(".queue-bulk");
 			const submissions: unknown[] = [];
@@ -66,19 +79,32 @@ test.skipIf(!browserAvailable)(
 			await page.getByText(`${u1} is unlinked and the selection is of failures`, { exact: false }).first().waitFor();
 			expect(await box(u1).getAttribute("data-checked")).toBe("false");
 
-			await page.keyboard.press("f");
+			// Advice is about the question shown, so Enter does not give it to a selection that does not hold it.
+			await page.locator(`[data-question="${f2}"] .queue-title`).click();
+			await page.getByText("reviewer suggests infra", { exact: false }).waitFor();
+			await page.keyboard.press("Enter");
+			await page.getByText("Advice is for the question shown", { exact: false }).first().waitFor();
+			expect(submissions).toHaveLength(0);
+
+			// A defect reference asked for a selection stays open while the question shown is not in it.
+			await page.keyboard.press("d");
+			await page.locator("#answer-extra").fill("BUG-7");
+			await page.waitForTimeout(100);
+			expect(await page.locator("#answer-extra").count()).toBe(1);
+			await page.keyboard.press("Enter");
 			await eventually(
 				() => server.api("get", { refs: [f1, f3] }),
 				(rows) => rows.every((row) => row.state === "decided"),
 			);
 			expect(submissions).toHaveLength(1);
-			expect(
-				z
-					.object({ all: z.array(z.object({ q: z.string() })) })
-					.parse(submissions[0])
-					.all.map((one) => one.q),
-			).toEqual([f1, f3]);
-			expect((await server.api("get", { refs: [u2] }))[0]?.state).toBe("open");
+			const sent = z
+				.object({ all: z.array(z.object({ q: z.string(), answer: z.object({ is: z.string(), ref: z.string() }) })) })
+				.parse(submissions[0]).all;
+			expect(sent.map((one) => [one.q, one.answer.is, one.answer.ref])).toEqual([
+				[f1, "defect", "BUG-7"],
+				[f3, "defect", "BUG-7"],
+			]);
+			expect((await server.api("get", { refs: [f2, u2] })).map((row) => row.state)).toEqual(["open", "open"]);
 			await bar.waitFor({ state: "detached" });
 
 			// Select all takes the kind of the question shown; Escape clears; pressing it twice clears too.
