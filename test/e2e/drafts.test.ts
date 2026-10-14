@@ -162,6 +162,82 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
+// The independent review of the change for issue #86 (B1). An action emptied on a recorded step is recorded as
+// the step's removal, and what the editor still holds of the step stays in the draft. When a colleague then
+// restores the step, the draft is carried onto a version that has it again. What is left of the step in the
+// draft is not a removal of the colleague's step: nobody removed that one.
+test.skipIf(!browserAvailable)(
+	"a step a colleague restored is not removed by what a draft still held of it, and leaving again sends nothing",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [{ op: "create", outline: "Coupon case\n  Open the cart\n  Apply the coupon > Total shows $90.00" }],
+		});
+		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = browser;
+			page.setDefaultTimeout(5000);
+			const head = async () =>
+				z
+					.object({ version: z.number(), title: z.string(), steps: z.array(z.object({ action: z.string() })) })
+					.parse((await server.api("get", { refs: ["C-1"] }))[0]);
+			const drafts = () => page.evaluate(() => Object.keys(localStorage).filter((key) => key.includes(":draft:")));
+			const title = page.getByRole("textbox", { name: "Case title", exact: true });
+			const second = page.getByRole("textbox", { name: "Step 2", exact: true });
+			let proposals = 0;
+			page.on("request", (request) => {
+				if (request.url().endsWith("/propose")) proposals++;
+			});
+			await page.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
+			await page.keyboard.press("e");
+			await second.fill("");
+			await page.keyboard.press("Escape");
+			await page.locator("#stat").filter({ hasText: "Version 2, by you" }).waitFor();
+			expect((await head()).steps).toEqual([{ action: "Open the cart" }]);
+			// A colleague restores version 1, as version 3. The person changes only the title.
+			await server.api("propose", { edits: [{ op: "restore", case: "C-1", to: 1 }] });
+			await title.fill("Coupon case revised");
+			await page.keyboard.press("Escape");
+			await page.locator("#stat").filter({ hasText: "Version 4, by you" }).waitFor();
+			const merged = { version: 4, title: "Coupon case revised", steps: ["Open the cart", "Apply the coupon"] };
+			const recorded = async () => {
+				const { steps, ...rest } = await head();
+				return { ...rest, steps: steps.map((step) => step.action) };
+			};
+			expect(await recorded()).toEqual(merged);
+			// Leaving again, with nothing typed, sends nothing: version 4 stands, with the colleague's step.
+			await title.press("Escape");
+			await page.evaluate(() => undefined);
+			expect(proposals).toBe(2);
+			expect(await recorded()).toEqual(merged);
+			// The editor shows the step as the colleague restored it, and no draft is left.
+			expect(await second.inputValue()).toBe("Apply the coupon");
+			expect(await drafts()).toEqual([]);
+			// The same for an editor with nothing to record, which follows the versions it reads. The first step
+			// has no expected result, so nothing of it keeps a draft once its removal is version 5. A colleague
+			// restores it as version 6, and the editor shows it again. The next change does not remove it.
+			const first = page.getByRole("textbox", { name: "Step 1", exact: true });
+			await first.fill("");
+			await page.keyboard.press("Escape");
+			await page.locator("#stat").filter({ hasText: "Version 5, by you" }).waitFor();
+			await server.api("propose", { edits: [{ op: "restore", case: "C-1", to: 4 }] });
+			await eventually(
+				() => first.inputValue(),
+				(value) => value === "Open the cart",
+			);
+			await title.fill("Coupon case revised again");
+			await page.keyboard.press("Escape");
+			await page.locator("#stat").filter({ hasText: "Version 7, by you" }).waitFor();
+			expect(await recorded()).toEqual({ ...merged, version: 7, title: "Coupon case revised again" });
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
 test.skipIf(!browserAvailable)(
 	"30 seconds idle records one version, preserves the caret and updates current proof",
 	async () => {

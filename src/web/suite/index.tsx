@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { z } from "zod";
 import type { Api } from "../../core/api.ts";
+import { newStepId } from "../../core/ids.ts";
 import { mergeBodies } from "../../core/merge3.ts";
 import { CaseBody, emptyBody, TAG } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
@@ -29,6 +30,7 @@ import { draftOwner, randomId } from "../lib/ids.ts";
 import {
 	allRecorded,
 	cardText,
+	carried,
 	caseHeld,
 	draftAfterMerge,
 	holdsUnfinishedStep,
@@ -804,6 +806,11 @@ export function SuiteScreen() {
 		}
 	}
 
+	/** A new id for a step of a draft of `id`, as the editor makes one: none this device has seen for the case. */
+	const stepIdFor =
+		(id: string) =>
+		(taken: ReadonlySet<string>): string =>
+			newStepId(knownStepIds({ project, id, ids: [...taken] }));
 	async function sealDraft({ keepalive = false, saved }: { keepalive?: boolean; saved?: Draft } = {}): Promise<void> {
 		const snapshot = saved ?? draftRef.current;
 		if (!sessionCurrent(owner)) return;
@@ -1051,7 +1058,7 @@ export function SuiteScreen() {
 					const more =
 						JSON.stringify({ body: normalizedBody, tags: normalized.tags, covers: normalized.covers }) !==
 						JSON.stringify({ body, tags: cleaned.tags, covers: cleaned.covers });
-					const merged = mergeBodies({ base: body, mine: normalized.body, theirs: adopted }).merged;
+					const merged = carried({ sent: body, live: normalized.body, recorded: adopted, newId: stepIdFor(ref) });
 					// A step with an expected result and no action yet is in no version. Its draft stays on the device,
 					// and is not sent again for it: `more` is only what a version can take.
 					unfinished = holdsUnfinishedStep(merged);
@@ -1143,7 +1150,7 @@ export function SuiteScreen() {
 			const next: Draft = {
 				...current,
 				base: view.version,
-				body: mergeBodies({ base: current.original, mine: current.body, theirs: original }).merged,
+				body: carried({ sent: current.original, live: current.body, recorded: original, newId: stepIdFor(view.ref) }),
 				original,
 				tags: view.tags,
 				covers: view.covers,

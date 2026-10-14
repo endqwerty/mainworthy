@@ -38,6 +38,41 @@ function heldText(body: Draft["body"]): Draft["body"] {
 export function holdsUnfinishedStep(body: Draft["body"]): boolean {
 	return heldText(body).steps.some((step) => !step.action.trim());
 }
+/**
+ * A draft's text carried onto `recorded`, a version the page has read: what was typed since `sent` (the body the
+ * draft last had recorded, or sent to be) merged with that version. A step of the draft that has no action and
+ * is not in `sent` is no change to any version. It is text still being typed, or what is left of a step whose
+ * removal is recorded already. `recorded` can hold a step under the same id: a colleague restored the step, or
+ * made one under an id this device picked too. Merged as it is, the draft's step would be that step with its
+ * action taken out, and the next proposal would remove a step that nobody removed (the review of the change for
+ * issue #86, B1). So the recorded step stands. An expected result the draft's step holds and the recorded one
+ * does not is kept as a step of its own, under a new id from `newId`; a step with nothing of its own goes. A
+ * step emptied after `sent` went out is in `sent`: that is the person's removal of it, and is left to the merge.
+ */
+export function carried({
+	sent,
+	live,
+	recorded,
+	newId,
+}: {
+	sent: CaseBody;
+	live: Draft["body"];
+	recorded: CaseBody;
+	newId: (taken: ReadonlySet<string>) => string;
+}): Draft["body"] {
+	const sentIds = new Set(sent.steps.map((step) => step.id));
+	const standing = new Map(recorded.steps.map((step) => [step.id, step]));
+	const taken = new Set([...sent.steps, ...live.steps, ...recorded.steps].map((step) => step.id));
+	const steps = live.steps.flatMap((step) => {
+		const theirs = standing.get(step.id);
+		if (step.action.trim() || sentIds.has(step.id) || !theirs) return [step];
+		if (!step.expected?.trim() || step.expected === theirs.expected) return [];
+		const id = newId(taken);
+		taken.add(id);
+		return [{ ...step, id }];
+	});
+	return mergeBodies({ base: sent, mine: { ...live, steps }, theirs: recorded }).merged;
+}
 /** Whether the draft holds text the card was not made of. The editor is closed while a card is open, so this is rare. */
 const beyondCard = ({ draft, conflict }: { draft: Draft; conflict: DraftConflict }): boolean =>
 	!sameBody(conflict.mine, heldText(draft.body));
