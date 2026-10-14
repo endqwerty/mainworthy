@@ -408,6 +408,11 @@ function QueueWorkbench() {
 		setLast({ entries, confirmed });
 	}
 	function select(refs: string[]): void {
+		// An answer waiting for its reference or reason goes to what it was asked for: the selection holds still.
+		if (inline?.kind === "answer") {
+			setStatus("Record or cancel the answer before changing the selection.");
+			return;
+		}
 		setSelected(new Set(refs));
 		if (!refs.length) anchor.current = null;
 	}

@@ -91,6 +91,16 @@ test.skipIf(!browserAvailable)(
 			await page.locator("#answer-extra").fill("BUG-7");
 			await page.waitForTimeout(100);
 			expect(await page.locator("#answer-extra").count()).toBe(1);
+			// While it is open the selection is what the answer goes to, so it does not change.
+			await box(f3).click();
+			await page
+				.getByText("Record or cancel the answer before changing the selection", { exact: false })
+				.first()
+				.waitFor();
+			expect(await box(f3).getAttribute("data-checked")).toBe("true");
+			await bar.getByRole("button", { name: /Clear/ }).click();
+			await bar.getByText("2 failures selected").waitFor();
+			await page.locator("#answer-extra").focus();
 			await page.keyboard.press("Enter");
 			await eventually(
 				() => server.api("get", { refs: [f1, f3] }),
