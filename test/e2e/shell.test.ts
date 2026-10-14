@@ -430,6 +430,14 @@ test.skipIf(!browserAvailable)(
 				() => server.api("find", { in: "folders" }),
 				(rows) => rows.items.some((row) => row.path === "Original/Keyboard folder"),
 			);
+			// An action of the palette that puts the caret in the app finds the app ready for it: the palette is
+			// gone, and the app with it no longer inert, before the action runs. What is typed next is the filter's.
+			await page.keyboard.press("Control+k");
+			await page.getByRole("textbox", { name: "Jump to or run" }).fill("Filter");
+			await page.keyboard.press("Enter");
+			await page.keyboard.type("cart");
+			expect(await page.getByRole("textbox", { name: "Filter cases" }).inputValue()).toBe("cart");
+			await page.keyboard.press("Escape");
 			await page.keyboard.press("Control+k");
 			await page.getByRole("textbox", { name: "Jump to or run" }).fill("Go to Queue");
 			await page.keyboard.press("Enter");

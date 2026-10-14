@@ -833,10 +833,9 @@ function Palette({
 	const choose = (index: number) => {
 		const item = items[index];
 		if (item) {
-			// On a phone the app under the palette is inert until the palette is gone from the page, so it is
-			// gone before the action runs: New case puts the caret in the editor.
-			if (typing) close(true);
-			else flushSync(() => close(true));
+			// The app under the palette is inert until the palette is gone from the page, so it is gone before
+			// the action runs: Filter puts the caret in its field, New case in the editor.
+			flushSync(() => close(true));
 			item.handler();
 		}
 	};
