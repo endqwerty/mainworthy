@@ -242,6 +242,9 @@ const Q = {
 	unlinkedInFile: sql<{ project: number; file: string }, TestRow>(
 		"SELECT * FROM tests WHERE project = $project AND file = $file AND case_id IS NULL AND kind = 'auto' ORDER BY id LIMIT 500",
 	),
+	unlinkedWithoutFile: sql<{ project: number }, TestRow>(
+		"SELECT * FROM tests WHERE project = $project AND file IS NULL AND case_id IS NULL AND kind = 'auto' ORDER BY id LIMIT 500",
+	),
 	unlinkedCount: sql<{ project: number }, { n: number }>(
 		"SELECT count(*) AS n FROM tests WHERE project = $project AND case_id IS NULL AND kind = 'auto'",
 	),
@@ -1034,8 +1037,11 @@ export function findTest(db: Db, project: number, text: string): TestRow | null 
 }
 export const testsOfCase = (db: Db, project: number, caseId: number): TestRow[] =>
 	db.all(Q.testsOfCase, { project, id: caseId });
+/** What the question about tests that name no file calls their file. */
+export const NO_FILE = "(no file)";
+/** The tests with no case in a file; for `NO_FILE`, those that came with no file and no class name to take one from. */
 export const unlinkedInFile = (db: Db, project: number, file: string): TestRow[] =>
-	db.all(Q.unlinkedInFile, { project, file });
+	file === NO_FILE ? db.all(Q.unlinkedWithoutFile, { project }) : db.all(Q.unlinkedInFile, { project, file });
 export const unlinkedCount = (db: Db, project: number): number => db.get(Q.unlinkedCount, { project })?.n ?? 0;
 export const signatureById = (db: Db, id: number): SignatureRow | null => db.get(Q.signatureById, { id });
 export const resultById = (db: Db, id: number): ResultRow | null => db.get(Q.resultById, { id });

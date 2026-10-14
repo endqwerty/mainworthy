@@ -391,6 +391,32 @@ describe("unlinked tests", () => {
 		expect(unlinkedTests()).toBe(3);
 	});
 
+	test("tests that name no file are asked about as a group, the question lists them, and `create` makes their cases", () => {
+		use("standard", "ask");
+		const bare = (i: number) => ({
+			test: { key: `bare ${i}`, name: `bare ${i}` },
+			outcome: "pass" as const,
+			durationMs: 10,
+		});
+		const { target, job, attempt } = ciReport({ commit: "bbbb0004", n: 0 });
+		h.call("report", { target, job, attempt, results: [bare(0), bare(1), bare(2)] });
+		const q = first(queue({ kind: "map" }).items);
+		expect(q.title).toBe("3 tests in (no file) have no case");
+		expect(q.evidence).toMatchObject({ file: "(no file)", count: 3 });
+		expect((q.evidence as { tests: { name: string }[] }).tests.map((test) => test.name)).toEqual([
+			"bare 0",
+			"bare 1",
+			"bare 2",
+		]);
+		const decided = h.call<{ status: string; effects: { created: string[] } }[]>("decide", {
+			q: q.q,
+			onEvidence: q.evidenceHash,
+			answer: { is: "create" },
+		});
+		expect(decided[0]).toMatchObject({ status: "decided", effects: { created: ["C-1", "C-2", "C-3"] } });
+		expect(unlinkedTests()).toBe(0);
+	});
+
 	test("a link stands when another test turns up in its file: only the new test is asked about", () => {
 		use("standard", "ask");
 		const file = "tests/checkout/coupon.spec.ts";

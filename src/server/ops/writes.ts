@@ -44,6 +44,7 @@ import {
 	keepReceipt,
 	markProcessed,
 	mustTarget,
+	NO_FILE,
 	scopeEnded,
 	setChangeEnded,
 	type TargetRow,
@@ -201,7 +202,7 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 	const files = new Set<string>();
 	for (const result of applied.results) {
 		if (result.fresh && result.test.kind === "auto" && result.test.case_id === null)
-			files.add(result.test.file ?? "(no file)");
+			files.add(result.test.file ?? NO_FILE);
 	}
 	for (const file of files) raiseMap(ctx, file, producer);
 
@@ -279,7 +280,7 @@ function brief(ctx: Ctx, raised: Raised, tests: number): QuestionBrief {
 
 /** Tests that arrived with no case, by file: one `map` question per file, which a loose project's rule answers. */
 function raiseMap(ctx: Ctx, file: string, producer: ActorKind): Raised {
-	const tests = file === "(no file)" ? [] : unlinkedInFile(ctx.db, ctx.project.id, file);
+	const tests = unlinkedInFile(ctx.db, ctx.project.id, file);
 	return raise(ctx, {
 		kind: "map",
 		key: `file:${file}`,
