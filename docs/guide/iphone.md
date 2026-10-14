@@ -111,14 +111,19 @@ passwords and passkeys are managed in the web app.
 ## Browse and write cases
 
 1. Open **Suite**. Drill into a folder or choose **All cases**. Search asks the server for matching cases;
-   **Tag** filters them. Scroll to the end to read the next page.
+   **Tag** filters them. Scroll to the end to read the next page. **Back to folders** clears the search and tag.
 2. Open a case to read its version, preconditions, steps and who may run it. **History** lists who wrote each
-   version, when and why. Open a version to read its document. Folder and tags show the current placement.
+   version, when and why. Saved versions are read-only. **Open current case** opens the editable page.
+   Folder and tags show the current placement.
 3. If you may produce evidence, press **+** to write a case in the folder you are in, or **Edit case** on its
    page. Type a title, preconditions and steps. Each step has an action and an optional expected result.
-   **Add step** adds one; **Edit** lets you remove or reorder them.
+   **Add step** adds one; **Edit** lets you remove or reorder them. The title limit is 300 UTF-16 units and
+   the optional reason limit is 500. An emoji may use two units. Save stays disabled until the limits and
+   whitespace warnings are resolved. The server sets no separate limit on preconditions, step text or the
+   number of steps.
 4. Press **Save**. An adopted proposal opens the saved version. Where the policy asks for acceptance, the app
-   says the proposal waits in the Queue. If another edit overlaps, the app names the fields and asks its author
+   says the proposal waits in the Queue. If the saved document differs from what you typed, or cannot be read,
+   the editor keeps your draft and says why. If another edit overlaps, the app names the fields and asks its author
    to resolve the proposal in the web app. An edit uses the version you opened.
 
 What you type stays while the app goes to the background. **Cancel** asks before discarding a changed draft.

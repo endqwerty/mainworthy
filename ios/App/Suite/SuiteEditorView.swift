@@ -13,6 +13,8 @@ struct SuiteEditorView: View {
 				Section("Title") {
 					TextField("Case title", text: $editor.content.title, axis: .vertical)
 						.accessibilityIdentifier("editor-title")
+					Text("\(editor.content.title.utf16.count)/300 UTF-16 units")
+						.font(.caption).foregroundStyle(editor.content.title.utf16.count > 300 ? Color.fail : .secondary)
 				}
 				Section("Preconditions") {
 					TextField("What must hold before", text: $editor.content.pre, axis: .vertical)
@@ -36,6 +38,14 @@ struct SuiteEditorView: View {
 				Section("Reason (optional)") {
 					TextField("Why this change", text: $editor.reason, axis: .vertical)
 						.accessibilityIdentifier("editor-reason")
+					Text("\(editor.reason.utf16.count)/500 UTF-16 units")
+						.font(.caption).foregroundStyle(editor.reason.utf16.count > 500 ? Color.fail : .secondary)
+				}
+				if !editor.validation.isEmpty {
+					Section("Before saving") {
+						ForEach(editor.validation, id: \.self) { Text($0).foregroundStyle(Color.fail) }
+					}
+					.accessibilityIdentifier("editor-validation")
 				}
 				if let notice = editor.notice {
 					Section { Text(notice).accessibilityIdentifier("editor-notice") }

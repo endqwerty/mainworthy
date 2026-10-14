@@ -41,7 +41,7 @@ struct SuiteCaseView: View {
 						.accessibilityIdentifier("case-version")
 					Text(document.folder).font(.subheadline).foregroundStyle(.secondary)
 					if route.version != nil {
-						Text("An earlier document. Folder and tags are the case's current placement.")
+						Text("A saved version. Folder and tags are the case's current placement.")
 							.font(.caption).foregroundStyle(.secondary)
 					}
 					if !document.tags.isEmpty {
@@ -79,7 +79,11 @@ struct SuiteCaseView: View {
 				}
 				.padding(12).background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 12))
 				.accessibilityIdentifier("case-history")
-				if workspace.project?.may(.produce) == true {
+				if document.isHistorical {
+					NavigationLink("Open current case", value: SuiteRoute(ref: document.ref))
+						.accessibilityIdentifier("case-current")
+				}
+				if !document.isHistorical, workspace.project?.may(.produce) == true {
 					Button("Edit case") { Task { await screen.edit(document) } }
 						.buttonStyle(.borderedProminent).disabled(screen.preparingEditor)
 						.accessibilityIdentifier("case-edit")

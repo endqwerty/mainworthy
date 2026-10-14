@@ -8,6 +8,135 @@ import Testing
 @Suite("The Suite screen", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`"))
 @MainActor
 struct SuiteScreenTests {
+	@Test("an overlong title keeps all typing and creates no truncated case")
+	func longTitle() async throws {
+		let client = try await Live.signedIn().project(try await Live.project())
+		let screen = SuiteScreen(project: client)
+		screen.newCase()
+		let editor = try #require(screen.editor)
+		editor.content.title = String(repeating: "x", count: 404)
+		#expect(!editor.maySave)
+		await screen.saveEditor()
+		#expect(screen.editor === editor && editor.content.title.utf16.count == 404)
+		#expect(try await client.cases().items.count == 6)
+	}
+
+	@Test("the reason limit counts UTF-16 units before sending")
+	func reasonLimit() async throws {
+		let client = try await Live.signedIn().project(try await Live.project())
+		let editor = CaseEditorScreen(project: client, source: .create(folder: nil))
+		editor.content.title = "Reason limit"
+		editor.reason = String(repeating: "😀", count: 251)
+		#expect(!editor.maySave)
+		#expect(await editor.save() == nil)
+		#expect(try await client.cases().items.count == 6)
+	}
+
+	@Test("whitespace that the server would remove is kept until the author corrects it",
+		arguments: ["title", "pre", "action", "expected"])
+	func whitespace(_ field: String) async throws {
+		let client = try await Live.signedIn().project(try await Live.project())
+		let editor = CaseEditorScreen(project: client, source: .create(folder: nil))
+		editor.content = CaseContent(title: "Valid", steps: [Step(id: "a0", action: "Open", expected: "Done")])
+		switch field {
+		case "title": editor.content.title = "Two  spaces"
+		case "pre": editor.content.pre = " pre "
+		case "action": editor.content.steps[0].action = " action "
+		default: editor.content.steps[0].expected = " expected "
+		}
+		let typed = editor.content
+		#expect(!editor.maySave)
+		#expect(await editor.save() == nil)
+		#expect(editor.content == typed && !editor.settled)
+	}
+
+	@Test("the server keeps the exact boundary lengths and has no text or step count cap")
+	func allowedLengths() async throws {
+		let client = try await Live.signedIn().project(try await Live.project())
+		let editor = CaseEditorScreen(project: client, source: .create(folder: nil))
+		let long = String(repeating: "text", count: 3000)
+		editor.content = CaseContent(title: String(repeating: "😀", count: 150), pre: long,
+			steps: (0..<1001).map { Step(id: String(format: "a%04d", $0),
+				action: $0 == 0 ? long : "Open", expected: $0 == 0 ? long : nil) })
+		editor.reason = String(repeating: "😀", count: 250)
+		#expect(editor.maySave)
+		guard case .adopted(let stamp) = await editor.save(), let stamp else {
+			Issue.record("the boundary content was not saved"); return
+		}
+		let stored = try await client.caseDocument(stamp.ref, version: stamp.version)
+		#expect(stored.content == editor.content)
+		#expect(try await client.caseHistory(stamp.ref).first?.reason == editor.reason)
+	}
+
+	@Test("even a whitespace-only reason is stored exactly as typed")
+	func reasonWhitespace() async throws {
+		let client = try await Live.signedIn().project(try await Live.project())
+		let editor = CaseEditorScreen(project: client, source: .create(folder: nil))
+		editor.content.title = "Exact reason"
+		editor.reason = "  "
+		guard case .adopted(let stamp) = await editor.save(), let stamp else {
+			Issue.record("not adopted"); return
+		}
+		#expect(try await client.caseHistory(stamp.ref).first?.reason == editor.reason)
+	}
+
+	@Test("a historical document cannot open an editor")
+	func historicalEditor() async throws {
+		let client = try await Live.signedIn().project(try await Live.project())
+		let ref = try #require(try await client.cases().items.first?.ref)
+		let screen = SuiteScreen(project: client)
+		await screen.openCase(ref, version: 1)
+		guard case .read(let old) = screen.document(ref, version: 1) else { Issue.record("not read"); return }
+		await screen.edit(old)
+		#expect(screen.editor == nil)
+	}
+
+	actor DelayedSavedRead: Transport {
+		let real = URLSessionTransport()
+		var held: CheckedContinuation<Void, Never>?
+		var waiting: CheckedContinuation<Void, Never>?
+		var arrived = false
+		func waitForRead() async {
+			if arrived { return }
+			await withCheckedContinuation { waiting = $0 }
+		}
+		func release() { held?.resume(); held = nil }
+		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			if request.url?.path.hasSuffix("/get") == true {
+				await withCheckedContinuation {
+					held = $0; arrived = true; waiting?.resume(); waiting = nil
+				}
+			}
+			return try await real.send(request)
+		}
+		func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+			try await real.lines(request)
+		}
+	}
+
+	@Test("adoption opens its saved version even after another author changes the case")
+	func adoptedVersion() async throws {
+		let key = try await Live.project()
+		let other = try await Live.signedIn().project(key)
+		let transport = DelayedSavedRead()
+		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
+		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let screen = SuiteScreen(project: server.project(key))
+		screen.newCase()
+		screen.editor?.content.title = "My saved title"
+		let saving = Task { await screen.saveEditor() }
+		await transport.waitForRead()
+		let ref = try #require(try await other.cases(text: "My saved title").items.first?.ref)
+		let _: JSONValue = try await other.server.write("propose", in: key,
+			["edits": [["op": "edit", "case": .string(ref), "base": 1, "body": ["title": "A later title"]]]])
+		await transport.release()
+		await saving.value
+		guard case .read(let document) = screen.document(ref, version: 1) else {
+			Issue.record("the saved version was not opened"); return
+		}
+		#expect(screen.saved?.version == 1 && document.version == 1 && document.content.title == "My saved title")
+	}
+
 	@Test("drilling into folders, searching and filtering")
 	func browsing() async throws {
 		let screen = SuiteScreen(project: try await Live.signedIn().project(try await Live.project()))
@@ -56,9 +185,11 @@ struct SuiteScreenTests {
 		#expect(screen.editor == nil)
 		let stamp = try #require(screen.saved)
 		#expect(stamp.version == 1)
-		guard case .read(let opened) = screen.document(stamp.ref) else { Issue.record("not opened"); return }
+		guard case .read(let opened) = screen.document(stamp.ref, version: stamp.version) else { Issue.record("not opened"); return }
 		#expect(opened.folder == folder.path)
-		await screen.edit(opened)
+		await screen.openCase(stamp.ref)
+		guard case .read(let current) = screen.document(stamp.ref) else { Issue.record("no current"); return }
+		await screen.edit(current)
 		let next = try #require(screen.editor)
 		next.content.title = "A changed draft"
 		next.addStep()
@@ -189,6 +320,80 @@ struct SuiteReadOrderingTests {
 		}
 	}
 
+	actor Paging: Transport {
+		var held: CheckedContinuation<Void, Never>?
+		var waiting: CheckedContinuation<Void, Never>?
+		var arrived = false
+		let holdCursor: Bool
+		init(holdCursor: Bool = false) { self.holdCursor = holdCursor }
+		private(set) var cursors = 0
+		func waitForRead() async {
+			if arrived { return }
+			await withCheckedContinuation { waiting = $0 }
+		}
+		func release() { held?.resume(); held = nil }
+		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			let input = try JSONDecoder().decode(JSONValue.self, from: request.httpBody ?? Data())
+			var result = #"{"items":[]}"#
+			if input["in"]?.string == "cases" {
+				let selected = input["text"] != nil || input["tags"] != nil || input["folder"] != nil
+				let cursor = input["cursor"] != nil
+				if cursor { cursors += 1 }
+				if !arrived && (holdCursor ? cursor : selected && !cursor) {
+					await withCheckedContinuation {
+						held = $0; arrived = true; waiting?.resume(); waiting = nil
+					}
+				}
+				let items = cursor ? "" : #"{"ref":"C-1","title":"match","tags":[],"proof":{"human":null,"auto":null,"agent":null}}"#
+				result = "{\"items\":[\(items)],\"cursor\":\(selected || cursor ? "null" : "\"old-cursor\"")}"
+			}
+			return (Data("{\"ok\":true,\"result\":\(result)}".utf8),
+				HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+		}
+		func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+			throw URLError(.unsupportedURL)
+		}
+	}
+
+	@Test("a new selection cannot page with the previous selection's cursor", arguments: ["search", "tag", "folder"])
+	func stalePaging(_ selection: String) async throws {
+		let transport = Paging()
+		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
+			secrets: MemoryStore(), transport: transport)
+		let screen = SuiteScreen(project: server.project("shop"))
+		await screen.show(.all)
+		#expect(screen.hasMore)
+		let folder = SuiteFolder(try JSONDecoder().decode(Wire.SuiteFolder.self,
+			from: Data(#"{"id":1,"parent":null,"name":"Folder","path":"Folder","cases":1,"state":"active"}"#.utf8)))
+		let selecting = Task {
+			await screen.show(selection == "folder" ? .folder(folder) : .all,
+				text: selection == "search" ? "match" : "", tag: selection == "tag" ? "regression" : nil)
+		}
+		await transport.waitForRead()
+		await screen.more()
+		await transport.release()
+		await selecting.value
+		#expect(await transport.cursors == 0)
+		#expect(screen.loading == .done && screen.cases.map(\.title) == ["match"])
+	}
+
+	@Test("one next-page read runs at a time and a refresh invalidates an older page", arguments: [false, true])
+	func pagingRefresh(_ refresh: Bool) async throws {
+		let transport = Paging(holdCursor: true)
+		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
+			secrets: MemoryStore(), transport: transport)
+		let screen = SuiteScreen(project: server.project("shop"))
+		await screen.show(.all)
+		let page = Task { await screen.more() }
+		await transport.waitForRead()
+		if refresh { await screen.refresh() }
+		await screen.more()
+		await transport.release()
+		await page.value
+		#expect(await transport.cursors == (refresh ? 2 : 1))
+		#expect(screen.loading == .done && screen.cases.map(\.title) == ["match"] && !screen.hasMore)
+	}
+
 	@Test("a slow search cannot replace a newer selection")
 	func overtaken() async throws {
 		let transport = Delayed()
@@ -211,6 +416,11 @@ struct SuiteEditorRetryTests {
 	actor Lost: Transport {
 		private(set) var bodies: [Data] = []
 		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			if request.url?.path.hasSuffix("/get") == true {
+				let reply = #"{"ok":true,"result":[{"ref":"C-7","version":1,"title":"One case","pre":"","steps":[],"methods":["human"],"automate":"none","tags":[],"folder":{"path":"Checkout/Coupons"}}]}"#
+				return (Data(reply.utf8), HTTPURLResponse(url: request.url!, statusCode: 200,
+					httpVersion: nil, headerFields: nil)!)
+			}
 			bodies.append(request.httpBody ?? Data())
 			if bodies.count <= 2 { throw URLError(.networkConnectionLost) }
 			let reply = #"{"ok":true,"result":{"status":"adopted","question":null,"needs":null,"cases":[{"ref":"C-7","version":1}],"conflicts":[]}}"#
@@ -238,5 +448,135 @@ struct SuiteEditorRetryTests {
 		#expect(inputs.count == 3 && Set(inputs).count == 1)
 		#expect(inputs.first?["cmd"]?.string?.count == 36)
 		#expect(editor.settled && !editor.maySave)
+	}
+}
+
+@Suite("The Suite's other reads")
+@MainActor
+struct SuiteOtherReadTests {
+	actor Ordered: Transport {
+		let path: String
+		var held: CheckedContinuation<Void, Never>?
+		var waiting: CheckedContinuation<Void, Never>?
+		var arrived = false
+		var count = 0
+		init(_ path: String) { self.path = path }
+		func waitForRead() async {
+			if arrived { return }
+			await withCheckedContinuation { waiting = $0 }
+		}
+		func release() { held?.resume(); held = nil }
+		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			let matching = request.url?.path.hasSuffix("/\(path)") == true
+			if matching { count += 1 }
+			let mine = count
+			if matching && mine == 1 {
+				await withCheckedContinuation {
+					held = $0; arrived = true; waiting?.resume(); waiting = nil
+				}
+			}
+			let title = mine == 1 ? "old" : "new"
+			let result: String
+			if request.url?.path.hasSuffix("/get") == true {
+				result = #"[{"ref":"C-1","version":1,"title":"\#(title)","pre":"","steps":[],"methods":["human"],"automate":"none","tags":[],"folder":{"path":""}}]"#
+			} else {
+				result = #"{"versions":[{"version":1,"by":"robin","at":0,"reason":null,"summary":"\#(title)"}]}"#
+			}
+			return (Data("{\"ok\":true,\"result\":\(result)}".utf8),
+				HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+		}
+		func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+			throw URLError(.unsupportedURL)
+		}
+	}
+
+	@Test("late document and history reads cannot replace a newer read", arguments: ["get", "history"])
+	func overtaken(_ path: String) async throws {
+		let transport = Ordered(path)
+		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
+			secrets: MemoryStore(), transport: transport)
+		let screen = SuiteScreen(project: server.project("shop"))
+		let first = Task {
+			if path == "get" { await screen.openCase("C-1") } else { await screen.readHistory("C-1") }
+		}
+		await transport.waitForRead()
+		if path == "get" { await screen.openCase("C-1") } else { await screen.readHistory("C-1") }
+		await transport.release()
+		await first.value
+		if path == "get" {
+			guard case .read(let document) = screen.document("C-1") else { Issue.record("not read"); return }
+			#expect(document.content.title == "new")
+		} else {
+			guard case .read(let versions) = screen.history("C-1") else { Issue.record("not read"); return }
+			#expect(versions.first?.summary == "new")
+		}
+	}
+
+	@Test("late editor preparation cannot replace a new draft")
+	func editorPreparation() async throws {
+		let transport = Ordered("history")
+		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
+			secrets: MemoryStore(), transport: transport)
+		let client = server.project("shop")
+		let screen = SuiteScreen(project: client)
+		let document = try await client.caseDocument("C-1")
+		let preparing = Task { await screen.edit(document) }
+		await transport.waitForRead()
+		screen.closeEditor()
+		screen.newCase()
+		let draft = try #require(screen.editor)
+		draft.content.title = "Keep my new draft"
+		await transport.release()
+		await preparing.value
+		#expect(screen.editor === draft && screen.editor?.content.title == "Keep my new draft")
+	}
+}
+
+@Suite("The case editor verifies adoption")
+@MainActor
+struct SuiteAcceptanceTests {
+	actor Replies: Transport {
+		let kind: String
+		private(set) var writes = 0
+		private(set) var gets = 0
+		init(_ kind: String) { self.kind = kind }
+		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			let result: String
+			if request.url?.path.hasSuffix("/propose") == true {
+				writes += 1
+				let cases = kind == "no version" ? "" : #"{"ref":"C-1","version":1}"#
+				result = "{\"status\":\"adopted\",\"question\":null,\"needs\":null,\"cases\":[\(cases)],\"conflicts\":[]}"
+			} else {
+				gets += 1
+				if kind == "read fails" && gets <= 2 { throw URLError(.networkConnectionLost) }
+				let title = kind == "different text" ? "Changed by server" : "Typed title"
+				result = #"[{"ref":"C-1","version":1,"title":"\#(title)","pre":"","steps":[],"methods":["human"],"automate":"none","tags":[],"folder":{"path":""}}]"#
+			}
+			return (Data("{\"ok\":true,\"result\":\(result)}".utf8),
+				HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+		}
+		func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+			throw URLError(.unsupportedURL)
+		}
+	}
+
+	@Test("unconfirmed adoption keeps the typed draft and explains why", arguments: ["different text", "no version", "read fails"])
+	func keepsDraft(_ kind: String) async throws {
+		let transport = Replies(kind)
+		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
+			secrets: MemoryStore(), transport: transport)
+		let screen = SuiteScreen(project: server.project("shop"))
+		screen.newCase()
+		let draft = try #require(screen.editor)
+		draft.content.title = "Typed title"
+		await screen.saveEditor()
+		#expect(screen.editor === draft && draft.content.title == "Typed title" && draft.notice != nil)
+		#expect(screen.saved == nil)
+		if kind == "read fails" {
+			#expect(draft.isRetrying && draft.maySave)
+			await screen.saveEditor()
+			#expect(screen.editor == nil && screen.saved?.version == 1)
+			#expect(await transport.writes == 1)
+		}
 	}
 }

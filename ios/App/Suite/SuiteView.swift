@@ -9,16 +9,15 @@ struct SuiteRoute: Hashable {
 }
 
 struct SuiteView: View {
-	let screen: SuiteScreen
+	@Bindable var screen: SuiteScreen
 	let workspace: Workspace
 	@State private var path: [SuiteRoute] = []
-	@State private var search = ""
 
 	var body: some View {
 		NavigationStack(path: $path) {
 			List {
 				Section {
-					TextField("Search cases", text: $search)
+					TextField("Search cases", text: $screen.searchText)
 						.textInputAutocapitalization(.never)
 						.autocorrectionDisabled()
 						.accessibilityIdentifier("suite-search")
@@ -55,7 +54,7 @@ struct SuiteView: View {
 						}
 					}
 				}
-				if screen.place == .root, search.isEmpty, screen.tag == nil {
+				if screen.place == .root, screen.searchText.isEmpty, screen.tag == nil {
 					Section {
 						Button { Task { await screen.show(.all) } } label: {
 							Label("All cases", systemImage: "list.bullet.rectangle")
@@ -69,7 +68,8 @@ struct SuiteView: View {
 								.accessibilityIdentifier("suite-case-\(item.ref)")
 						}
 						if screen.hasMore {
-							ProgressView().frame(maxWidth: .infinity).task { await screen.more() }
+							ProgressView().frame(maxWidth: .infinity)
+								.task(id: screen.nextPageID) { await screen.more() }
 						} else if screen.cases.isEmpty, screen.loading == .done {
 							Text("No cases found").foregroundStyle(.secondary)
 						}
@@ -114,22 +114,22 @@ struct SuiteView: View {
 			}
 		}
 		.task { await screen.show(screen.place, text: screen.text, tag: screen.tag) }
-		.task(id: search) {
-			guard search != screen.text else { return }
+		.task(id: screen.searchText) {
+			guard screen.searchText != screen.text else { return }
 			do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-			await screen.show(screen.place, text: search, tag: screen.tag)
+			await screen.show(screen.place, text: screen.searchText, tag: screen.tag)
 		}
 		.sheet(isPresented: editing) {
 			if let editor = screen.editor { SuiteEditorView(editor: editor, screen: screen) }
 		}
 		.onChange(of: screen.saved) { _, stamp in
-			if let stamp { path = [SuiteRoute(ref: stamp.ref)] }
+			if let stamp { path = [SuiteRoute(ref: stamp.ref, version: stamp.version)] }
 		}
 	}
 
 	private var tag: Binding<String?> {
 		Binding(get: { screen.tag }, set: { tag in
-			Task { await screen.show(screen.place, text: search, tag: tag) }
+			Task { await screen.show(screen.place, text: screen.searchText, tag: tag) }
 		})
 	}
 	private var editing: Binding<Bool> {
