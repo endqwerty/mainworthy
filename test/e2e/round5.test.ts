@@ -350,6 +350,9 @@ check(
 				() => server.api("find", { in: "slots", run: run.run }),
 				(rows) => Slot.array().parse(rows.items)[0]?.fills[0]?.outcome === "pass",
 			);
+			// A step marked after the correction is for the next failure. Undo restores the step that was recorded.
+			await page.keyboard.press("k");
+			await page.keyboard.press("1");
 			await page.keyboard.press("u");
 			const restored = await eventually(
 				() => server.api("timeline", { ref: "C-1" }),
@@ -359,6 +362,14 @@ check(
 			expect(result?.outcome).toBe("fail");
 			expect(result?.note).toBe("fails at two");
 			expect(result?.atStep).toBe("s2");
+			// The mark is still there for the next failure, which is recorded at it.
+			await page.keyboard.press("f");
+			await page.keyboard.press("Enter");
+			const next = await eventually(
+				() => server.api("timeline", { ref: "C-1" }),
+				(row) => row.entries.filter((e) => e.t === "result").length === 4,
+			);
+			expect(next.entries.find((e) => e.t === "result")?.atStep).toBe("s1");
 		} finally {
 			await h.close();
 			await server.stop();
