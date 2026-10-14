@@ -160,9 +160,16 @@ for (const editorOpen of [false, true])
 					await held;
 					await route.fulfill({ response });
 				});
+				// Only the window that owns the draft settles its conflict. The other one sees the question answered
+				// while the owner's reply is held, and does not ask what became of a merge it did not send.
+				let asked = 0;
+				b.on("request", (request) => {
+					if (request.url().endsWith("/command")) asked++;
+				});
 				await a.getByRole("button", { name: "Resolve conflict", exact: true }).click();
 				await eventually(async () => received, Boolean);
 				await a.waitForTimeout(1500);
+				expect(asked).toBe(0);
 				release();
 				await a.getByText("Nothing was adopted: the case changed again", { exact: false }).first().waitFor();
 				await a.unroute("**/decide");

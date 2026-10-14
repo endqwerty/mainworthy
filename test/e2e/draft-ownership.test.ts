@@ -237,6 +237,98 @@ check(
 	30000,
 );
 
+// The reviews of the change for issue #79 (F1 to F3). A window that comes to a case takes no draft by itself: an
+// owner that does not answer may be busy, and hold text the device could not store. Here A owns a conflicted
+// draft, holds text its storage refused (its storage refuses every write, as a full one does), and answers other
+// windows late. B comes to the case from another one: it takes nothing, says that the owner is not answering, and
+// A keeps its text and can still type.
+check(
+	"a window that answers late keeps its draft when another window comes to the case",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", outline: "Coupon case\n  Open the cart\n  Apply the coupon" },
+				{ op: "create", outline: "Other case\n  A step" },
+			],
+		});
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const a = h.page;
+			a.setDefaultTimeout(5000);
+			await a.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
+			await a.keyboard.press("e");
+			await title(a).fill("Coupon case mine");
+			await server.api("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon case theirs" } }],
+			});
+			await a.keyboard.press("Escape");
+			await card(a).waitFor();
+			const merged = a.getByRole("textbox", { name: "Merged title", exact: true });
+			await merged.fill("Stored merge");
+			const owner = (await stored(a)).owner;
+			await a.evaluate(() => {
+				Storage.prototype.setItem = () => {
+					throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+				};
+				const post = BroadcastChannel.prototype.postMessage;
+				BroadcastChannel.prototype.postMessage = function (message: unknown) {
+					if ((message as { kind?: string }).kind === "present") setTimeout(() => post.call(this, message), 60_000);
+					else post.call(this, message);
+				};
+			});
+			await merged.fill("Typed where nothing could store it");
+			await a.getByText("Device storage is full", { exact: false }).first().waitFor();
+			const b = await h.context.newPage();
+			b.setDefaultTimeout(5000);
+			await b.goto(`${server.url}/p/scratch/suite/c/2`);
+			await b.getByRole("button", { name: "Other case", exact: true }).waitFor();
+			await b.locator('[data-testid="case-list"] [role="option"]').filter({ hasText: "C-1" }).click();
+			await b.locator("#detail .cid").filter({ hasText: "C-1" }).waitFor();
+			expect((await stored(b)).owner).toBe(owner);
+			await b.getByRole("button", { name: "Take over here", exact: true }).waitFor();
+			expect(await merged.inputValue()).toBe("Typed where nothing could store it");
+			expect(await merged.evaluate((el) => el instanceof HTMLTextAreaElement && el.readOnly)).toBe(false);
+			expect(await b.locator("#detail").innerText()).toContain("held by a window that is not answering, or has closed");
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+// Review round 9, R9-3. A window that only shows the case has no card on its screen. Taking the draft over there
+// opens it, so the conflict the window now owns is where its status line says to resolve it.
+check(
+	"R9-3 taking over from a window that only shows the case puts the conflict card on its screen",
+	async () => {
+		const w = await windows();
+		try {
+			const { a, b, server } = w;
+			await a.keyboard.press("e");
+			await title(a).fill("Coupon case mine");
+			await server.api("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon case theirs" } }],
+			});
+			await a.keyboard.press("Escape");
+			await card(a).waitFor();
+			expect(await card(b).count()).toBe(0);
+			await takeover(b);
+			const merged = b.getByRole("textbox", { name: "Merged title", exact: true });
+			await merged.fill("Merged by the new owner");
+			await eventually(() => a.getByRole("button", { name: "Resolve conflict", exact: true }).isDisabled(), Boolean);
+			await b.getByRole("button", { name: "Resolve conflict", exact: true }).click();
+			await card(b).waitFor({ state: "detached" });
+			await card(a).waitFor({ state: "detached" });
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.title).toBe("Merged by the new owner");
+		} finally {
+			await w.close();
+		}
+	},
+	30000,
+);
+
 check(
 	"R8 a stored takeover before its event guards input and seal at execution time",
 	async () => {

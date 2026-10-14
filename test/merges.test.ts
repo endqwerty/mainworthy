@@ -13,6 +13,7 @@ import {
 	mergeFate,
 	nextMine,
 	recordable,
+	refusedStatus,
 } from "../src/web/lib/merges.ts";
 
 const body = (title: string, first: string, second: string): CaseBody => ({
@@ -323,6 +324,17 @@ describe("what a merge did, read from its reply", () => {
 			needs: "the evidence changed",
 		});
 		expect(fate(reply("invalid", null))).toEqual({ kind: "refused", needs: null });
+	});
+
+	// Review round 9, R9-4. The status line had the server's sentence alone. What the page knows is that its
+	// merge settled nothing and the question is open; the reason is the server's, and is named as the server's.
+	test("a refused merge is told in the page's words, with the server's reason given as the server's", () => {
+		expect(refusedStatus("one member who is not an agent")).toBe(
+			"Your merge was not adopted, and the conflict is still open. The server's reason: one member who is not an agent. Your draft and conflict card are kept.",
+		);
+		expect(refusedStatus(null)).toBe(
+			"Your merge was not adopted, and the conflict is still open. Your draft and conflict card are kept.",
+		);
 	});
 
 	test("a reply that is not one is an error, never a guess", () => {

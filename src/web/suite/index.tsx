@@ -8,7 +8,7 @@ import { newStepId } from "../../core/ids.ts";
 import { mergeBodies } from "../../core/merge3.ts";
 import { CaseBody, emptyBody, TAG } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
-import { cleanTitle, conflictEditorStatus, draftOwnershipStatus, firstStep } from "../case/editor.tsx";
+import { cleanTitle, conflictEditorStatus, firstStep, ownershipStatus } from "../case/editor.tsx";
 import { CasePane, type ConflictState } from "../case/pane.tsx";
 import { ApiError, call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
@@ -26,7 +26,7 @@ import {
 	removeDraft,
 	writeDraft,
 } from "../lib/drafts.ts";
-import { draftOwner, randomId } from "../lib/ids.ts";
+import { draftOwner, draftOwnerIsLive, randomId } from "../lib/ids.ts";
 import {
 	allRecorded,
 	cardText,
@@ -38,6 +38,7 @@ import {
 	mergeFate,
 	nextMine,
 	recordable,
+	refusedStatus,
 	sameBody,
 } from "../lib/merges.ts";
 import { navigate, readRoute, refUrl, routeEntry, routeUrl } from "../lib/router.ts";
@@ -134,7 +135,7 @@ export function SuiteScreen() {
 			if (!saved) return allowMissing;
 			if (saved.owner === windowId) return true;
 			followDraft(saved);
-			setStatus(draftOwnershipStatus);
+			setStatus(ownershipStatus(draftOwnerIsLive(saved.owner)));
 			return false;
 		},
 		[project, windowId, followDraft, setStatus],
@@ -308,7 +309,7 @@ export function SuiteScreen() {
 			else liveDrafts.current.delete(current.id);
 			draftRef.current = saved;
 			setDraftState(saved);
-			if (saved && saved.owner !== windowId) setStatus(draftOwnershipStatus);
+			if (saved && saved.owner !== windowId) setStatus(ownershipStatus(draftOwnerIsLive(saved.owner)));
 			else if (saved?.conflict) setStatus(conflictEditorStatus);
 			else if (saved && !current.conflict) return;
 			else {
@@ -833,7 +834,7 @@ export function SuiteScreen() {
 			if (!sessionCurrent(owner) || !mayWrite(state.draftId)) return;
 			if (now.state !== "open") return await settleAnswered(state, now.decision?.answer.is ?? "");
 			uncertainMerges.current.delete(state.q);
-			setStatus(fate.needs ?? "The evidence changed. Your draft and conflict card are kept.");
+			setStatus(refusedStatus(fate.needs));
 		} catch (error) {
 			if (!mayWrite(state.draftId)) return;
 			if (asked) uncertainMerges.current.add(state.q);
@@ -1442,6 +1443,9 @@ export function SuiteScreen() {
 			return;
 		}
 		const next = claimDraft({ project, draft: saved, takeOver: true });
+		// A window that only showed the case owns its draft now. The draft opens here, so the card this window is
+		// told to resolve is on its screen (review round 9, R9-3).
+		if (!draftRef.current) draftRef.current = next;
 		followDraft(next);
 		setStatus(next.conflict ? conflictEditorStatus : "Continue editing here. Your draft is kept on this device.");
 	}
@@ -1915,6 +1919,7 @@ export function SuiteScreen() {
 			</section>
 			<CasePane
 				ownedElsewhere={ownedElsewhere}
+				ownerLive={!displayedDraft || draftOwnerIsLive(displayedDraft.owner)}
 				ending={draft && gone.current?.draft === draft ? ending : null}
 				onTakeOver={takeOver}
 				view={view}

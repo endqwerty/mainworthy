@@ -150,7 +150,18 @@ check(
 			await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "reject" } });
 			await page.locator('[data-testid="case-list"] [role="option"]').filter({ hasText: "C-1" }).click();
 			await page.getByRole("button", { name: "Their title", exact: true }).waitFor();
+			// The window that left the card is gone (the page was opened again, under a new window id), and no
+			// other window exists. Coming to the case takes nothing, and the pane says only what this window can
+			// tell: the draft's window is not answering, or has closed (review round 9, R9-2; issue #79). `e` goes
+			// on with the draft here, and then the rejection is told.
+			await page.getByRole("button", { name: "Take over here", exact: true }).waitFor();
+			expect(await page.locator("#detail").innerText()).toContain(
+				"held by a window that is not answering, or has closed",
+			);
+			expect(await page.getByText("This case is being edited in another window").count()).toBe(0);
+			expect((await drafts(page))[0]?.conflict).toBeDefined();
 			await page.keyboard.press("e");
+			await page.locator("#stat").filter({ hasText: "The conflict proposal was rejected" }).waitFor();
 			await eventually(
 				() => drafts(page),
 				(rows) => rows[0]?.conflict === undefined,

@@ -124,6 +124,16 @@ export function mergeFate({ reply, ref }: { reply: unknown; ref: string }): Merg
 	}
 }
 
+/**
+ * What the card says of a merge the server refused while the card's question is still open. That much the page
+ * knows: the reply was not a decision, and the question, read after it, was open. Why the server refused is the
+ * server's to say, in `needs`, so it is given as the server's words and not as the page's (review round 9, R9-4).
+ */
+export function refusedStatus(needs: string | null): string {
+	const reason = needs ? ` The server's reason: ${needs}.` : "";
+	return `Your merge was not adopted, and the conflict is still open.${reason} Your draft and conflict card are kept.`;
+}
+
 const CaseStamp = z.object({ ref: z.string(), version: z.number() });
 
 /**

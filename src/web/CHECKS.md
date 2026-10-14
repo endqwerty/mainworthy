@@ -726,6 +726,78 @@ on `none` records the text it carried, which the person may have changed since; 
 version. "Take over here" still drops the former owner's request: if that request was recorded, or lands later,
 the new owner's save meets it.
 
+## Issue #79: one window, and the fixes of round 8 that no test held (review round 9)
+
+R9-2. A conflict left by a closed tab said "This case is being edited in another window", with "Take over
+here", to a person with one window. Nothing takes the draft on arrival (below: three versions did, and each
+was shown to lose text). The pane now says only what this window can tell. When the draft's window has not
+answered this one (`draftOwnerIsLive` is false), the line is "This draft is held by a window that is not
+answering, or has closed. Press e or choose "Take over here" to continue it here." (`ownerAwayStatus`). That is
+true of a closed window and of a busy one. The same sentence is the status of a key or a write refused for that
+reason (`mayWrite`, the storage listener, the read-only editor and card). With a window that answers, nothing
+changed. `e` and "Take over here" continue the draft, as before; the card's question is settled once this
+window owns the draft.
+
+R9-3. "Take over here" in a window that only showed the case claimed the draft and showed no card. It now opens
+the draft there, so the card is on the screen of the window that owns it.
+
+R9-4. A refused merge whose question is still open put the server's `needs` on the status line as its whole
+sentence. The route the review reported (another window merged first) no longer gets there: since #81 the page
+asks the question's state after a refusal, and reads it as decided. A merge of a proposal with more than one
+edit (a tag typed inline beside the title) still does. The status is now the page's sentence, which says only
+what the page knows (the reply was not a decision, and the question read after it was open), with the server's
+reason given as the server's (`refusedStatus`).
+
+| Route | Test | What the test requires |
+| --- | --- | --- |
+| R9-2: a card left by a page opened again elsewhere, the conflict rejected meanwhile, the case clicked | `round7.test.ts`, R7-1 route B | Nothing is taken; the line says the window is not answering or has closed, never that it is editing; `e` continues the draft, and then the rejection is told |
+| R9-3: a window that only shows the case takes the draft over | `draft-ownership.test.ts`, new | The card is on its screen and editable; its merge is recorded |
+| R9-4: a merge of a proposal that also places a tag | `conflict-merge.test.ts`, new | The page's sentence with the server's reason; the card and the draft stay; nothing recorded |
+| R9-4: the sentence | `test/merges.test.ts` | With and without a reason |
+| Only the owner settles a conflict | `merged-drafts.test.ts`, both R8-3 tests | The other window sends no `command` while the owner's reply is held |
+| `writeDraft`, `removeDraft` and `claimDraft` (`sent` dropped on "Take over here", kept for a closed owner) | `test/drafts.test.ts`, new | Each rule on a stored draft |
+
+The first three failed on `af6b61f` (waiting for the rejection's status; for the merged title in the second
+window; for the page's sentence). The others were each taken out of a copy of `593f1eb`, one at a time, and the
+draft files run against it; `af6b61f` adds `carried` and changes none of the code they touch. The settle effect
+was taken out again on this change, to see the new assertion fail. Against the review's table:
+
+| Fix taken out | Then | Pinned by |
+| --- | --- | --- |
+| The non-owner's settle effect stops at once (`ownedElsewhere`) | every file passed; with the new assertion, both R8-3 tests fail: the other window sent 417 and 315 `command` requests in 1.5 s | the R8-3 assertion |
+| The card's sent merges stored before the request (`sentMerges`, once `sentMerge`) | 11 fail across `conflict-merge`, `merged-drafts` and `round7` | those, since #81 |
+| A hand-typed merge counted as later text: in `draftAfterMerge` / `allRecorded` / on a rejection | 4 / 1 unit tests fail / 7 browser tests fail | those, since #81 |
+| `sent` kept on "Take over here" | `round3-capture` A-2 fails | that test, and `test/drafts.test.ts` |
+| `writeDraft` and `removeDraft` refuse another window's draft | every browser file passes | `test/drafts.test.ts` only |
+
+No route of the app reaches the checks in `writeDraft` and `removeDraft` alone: every caller asks `mayWrite`
+first, in the same synchronous run. Only a write by another window between those two reads can, which is the
+race of issue #196. They are kept and held by unit tests of the function.
+
+### Why a window coming to a case takes nothing by itself
+
+Three versions of this change took a conflicted draft automatically when a window came to its case, and each of
+three reviews found a way for that to lose text a live page held but the device could not store ("Device
+storage is full"). The page that lost the text kept its accepted characters on screen, and the claim's storage
+event replaced them with the stored copy and made the page read-only. The base, which needed `e` or "Take over
+here", never lost text this way.
+
+- F1: the claim trusted that no window answered within 40 ms. An owner that was busy, or whose `present` came
+  late, was taken for closed.
+- F2: a record written as a page left, under its window id, was trusted instead. A second page with the same
+  window id (a reload keeps it; so does a copied session storage) left and wrote it while the owner stayed.
+- F3: the record then named the page that last wrote the draft. That page left, while another page of the same
+  window, which had read the draft without writing it, held text storage refused.
+
+The claim saved one key press. It is gone, with its record (`mainworthy:window-closed:*`), `forgetClosedWindows`,
+`draftOwnerClosed`, `pageInstance` and the drafts' `ownerInstance`. What a window says of a draft whose owner does
+not answer is true in every one of those cases (R9-2 above), and taking the draft stays the person's act. Do not
+add a claim on arrival back without an answer to all three.
+
+| Route | Test | What the test requires |
+| --- | --- | --- |
+| The owner holds text its storage refused (its `setItem` throws, as a full storage does) and answers `present` late; another window comes to the case from another one | `draft-ownership.test.ts`, "a window that answers late keeps its draft when another window comes to the case" | The stored owner is unchanged; the newcomer shows "Take over here" and says the owner is not answering, or has closed; the owner keeps its text and can type |
+
 ## The documentation at `/docs` (decision 0016)
 
 The checks that decide this change, written before it. `test/docs.test.ts` and `test/e2e/docs.test.ts` hold them.
