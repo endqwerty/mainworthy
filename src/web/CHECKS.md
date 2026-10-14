@@ -640,6 +640,42 @@ a new unfinished step beside what is left of a recorded one (after: the recorded
 stays in the draft); a new expected result typed on what was left (after: it is step 3 under a new id, also
 after a reload, and the restored step stands); the review's route with the connection dropped.
 
+## Issue #135: one read of a case the page owes
+
+Since #129 the page reads a case first when an editor is asked for on a case whose draft another tab removed
+and whose read failed or was left (`owed`). Each request made its own read: two presses of `e` while the reply
+waited made two, and the two could come back in either order. A property changed in the read view of such a
+case was read and then dropped.
+
+Now `readCase` keeps the read of each owed case while it is on its way, and every request for it waits on that
+one: `endFollowed`, and `readOwed` for `e`, a click on a field and a property change. It holds what it read and
+takes the case out of `owed` once. A property change waits on it like the others, and what it changed of the
+case shown is made on the case as read (`mergeBodies`); if the same property was changed since the page last
+read the case, it is not made, and the status line says so. A request whose case is no longer the one in the pane gets nothing.
+
+What the shared read cannot hand to the wrong place: it is per screen, and the screen is made again for each
+person (the `Workbench` key) and each project (the screen's key). `call` refuses a reply that arrives in another
+session, and the read holds the case only in the session that made it. It is keyed by the case, and each waiter
+opens only if its case is still the one in the pane. What the read brings is the case as recorded. Whether this
+window may write a draft of it is asked after the read, as before: `e` and a click do not take a draft a live
+window owns (`claimDraft`), and a property change goes through `change`, which refuses one (`mayWrite`).
+
+| Route | Test | What the test requires |
+| --- | --- | --- |
+| The read held; a property ticked in the read view and `e` pressed twice | `round6.test.ts`, R6-1 a case left before the second tab could read it | One read of the case while it is held; then one editor, on the merged title, with the property ticked; the property is recorded with that title |
+
+It failed before the change with `Expected: 1  Received: 3` reads. With the sharing taken out it fails the same
+way; with the property no longer made after the read, at the property (`Expected: true  Received: false`).
+Run by hand, not a test: the same property changed through the API meanwhile (the change is not made, and the
+status says so); another case selected while the read waits (nothing is made or said there). Not tested:
+`endFollowed` and a press of `e` waiting on the same read (the read of a removed draft still on its way when
+the person leaves the case, comes back and presses `e`); by reading, both go through `readCase`.
+
+Left as it is: after a failed read and coming back to the case, the read view shows the case as the page last
+read it, which can be from before the other tab's change, until `e`, a click, a property change or the page's
+own refetch succeeds. Showing that would take the read view saying the case may be out of date, with a way to
+read it again, as the ending draft's pane does (`draftEndedStatus`), in `case/pane.tsx`.
+
 ## The documentation at `/docs` (decision 0016)
 
 The checks that decide this change, written before it. `test/docs.test.ts` and `test/e2e/docs.test.ts` hold them.
