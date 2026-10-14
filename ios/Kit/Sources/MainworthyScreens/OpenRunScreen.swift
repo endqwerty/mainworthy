@@ -236,9 +236,19 @@ public final class OpenRunScreen: ProjectScreen {
 					: "The earlier outcome is restored by a correction."
 				await refresh()
 				let slot = slots.first { $0.id == saved.execution.slot.id } ?? saved.execution.slot
+				// The page and its draft move to the corrected slot together, as `execute` moves them: a case on
+				// the screen is never paired with another case's note, also when its pinned case cannot be read.
 				documents += 1
+				let mine = documents
+				document = .reading(slot.id)
 				draftSlot = slot.id
-				document = .read(try await project.execution(of: slot, in: run.ref))
+				do {
+					let execution = try await project.execution(of: slot, in: run.ref)
+					if mine == documents { document = .read(execution) }
+				} catch is CancellationError {
+				} catch {
+					if mine == documents { document = .failed(slot, error.shown) }
+				}
 			}
 		} catch { notice = error.shown }
 	}
