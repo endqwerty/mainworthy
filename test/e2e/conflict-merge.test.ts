@@ -490,9 +490,17 @@ for (const outcome of ["is recorded", "meets a new conflict"])
 					expect(actions(merged)).toEqual(["Open the cart", MINE]);
 					// The step is in the editor again, on the recorded version, for the person to finish.
 					await card(page).waitFor({ state: "detached" });
-					expect(await page.getByRole("textbox", { name: "Expected result 3", exact: true }).inputValue()).toBe(
-						"UNRECORDED EXPECTATION",
-					);
+					const unfinished = page.getByRole("textbox", { name: "Expected result 3", exact: true });
+					expect(await unfinished.inputValue()).toBe("UNRECORDED EXPECTATION");
+					// Leaving the editor then proposes nothing, and the step is still on the device (issue #86).
+					let proposals = 0;
+					page.on("request", (request) => {
+						if (request.url().endsWith("/propose")) proposals++;
+					});
+					await unfinished.press("Escape");
+					await page.evaluate(() => undefined);
+					expect(proposals).toBe(0);
+					expect((await storedDrafts(page)).join(" ")).toContain("UNRECORDED EXPECTATION");
 				} else expect((await storedDrafts(page)).join(" ")).toContain(MINE);
 			} finally {
 				await close();

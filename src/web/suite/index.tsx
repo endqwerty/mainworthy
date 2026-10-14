@@ -31,6 +31,7 @@ import {
 	cardText,
 	caseHeld,
 	draftAfterMerge,
+	holdsUnfinishedStep,
 	type MergeFate,
 	mergeFate,
 	nextMine,
@@ -831,6 +832,17 @@ export function SuiteScreen() {
 		};
 		const fingerprint = JSON.stringify({ body, tags: cleaned.tags, covers: cleaned.covers, folder: snapshot.folder });
 		if (snapshot.submission.kind === "waiting" && snapshot.submission.fingerprint === fingerprint) return;
+		// All the draft holds beyond its version is a step still without an action, which no version can take.
+		// Nothing is sent, and the draft stays on the device as it is (issue #86).
+		if (
+			snapshot.ref !== null &&
+			!snapshot.sent &&
+			holdsUnfinishedStep(cleaned.body) &&
+			sameBody(body, snapshot.original) &&
+			JSON.stringify([cleaned.tags, cleaned.covers]) ===
+				JSON.stringify([snapshot.originalTags, snapshot.originalCovers])
+		)
+			return;
 		const source = snapshot;
 		const recovered = snapshot.sent;
 		if (recovered) {
@@ -1027,6 +1039,7 @@ export function SuiteScreen() {
 				}
 				removeDraft({ project, id: snapshot.id });
 				const latest = liveDrafts.current.get(snapshot.id);
+				let unfinished = false;
 				if (latest && ref) {
 					const normalized = cleanTitle(latest);
 					const normalizedBody = {
@@ -1038,6 +1051,10 @@ export function SuiteScreen() {
 					const more =
 						JSON.stringify({ body: normalizedBody, tags: normalized.tags, covers: normalized.covers }) !==
 						JSON.stringify({ body, tags: cleaned.tags, covers: cleaned.covers });
+					const merged = mergeBodies({ base: body, mine: normalized.body, theirs: adopted }).merged;
+					// A step with an expected result and no action yet is in no version. Its draft stays on the device,
+					// and is not sent again for it: `more` is only what a version can take.
+					unfinished = holdsUnfinishedStep(merged);
 					const keepTitleFocus =
 						document.activeElement instanceof HTMLElement && document.activeElement.dataset.field === "capture-title";
 					const next: Draft = {
@@ -1045,7 +1062,7 @@ export function SuiteScreen() {
 						id: ref,
 						ref,
 						base: version,
-						body: mergeBodies({ base: body, mine: normalized.body, theirs: adopted }).merged,
+						body: merged,
 						original: adopted,
 						submission: { kind: "none" },
 						tags: [
@@ -1063,7 +1080,7 @@ export function SuiteScreen() {
 						originalTags: adoptedTags,
 						originalCovers: adoptedCovers,
 						sent: null,
-						dirty: more,
+						dirty: more || unfinished,
 						cmd: randomId(),
 						caret: latest.caret.field === "capture-title" ? { ...latest.caret, field: "title" } : latest.caret,
 					};
@@ -1090,9 +1107,11 @@ export function SuiteScreen() {
 							navigate(`${refUrl({ project, ref })}${location.search}`, { replace: true, seal: false });
 					}
 					moreToSend = more;
-					if (more && !writeOwnedDraft(next)) return;
+					if (next.dirty && !writeOwnedDraft(next)) return;
 				}
-				setStatus(`Version ${version}, by you, just now`);
+				setStatus(
+					`Version ${version}, by you, just now${unfinished ? ". A step with no action yet is not in it, and stays in your draft on this device." : ""}`,
+				);
 				void invalidateProject(project);
 			} catch (error) {
 				if (!sessionCurrent(owner) || !mayWrite(snapshot.id, !draftStored)) return;
