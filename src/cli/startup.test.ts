@@ -140,6 +140,46 @@ test("bun run start serves the built bundle under the strict page policy, as the
 	}
 }, 10_000);
 
+// What `bun run dev` runs. Under `--watch` Bun's file watcher keeps the process alive after the server has stopped, so a
+// command that only waits for its event loop to empty never exits (SIGTERM or SIGINT alike).
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+	test(`serve under bun --watch exits on ${signal}, with an event stream open`, async () => {
+		const home = await mkdtemp(join(tmpdir(), "mainworthy-watch-"));
+		const child = Bun.spawn([process.execPath, "--watch", CLI_ENTRY, "serve"], {
+			cwd: home,
+			env: { PATH: process.env.PATH ?? "", HOME: home, USER: "robin", MAINWORTHY_PORT: "0" },
+			stdout: "pipe",
+			stderr: "ignore",
+			stdin: "ignore",
+		});
+		const reader = child.stdout.getReader();
+		const decoder = new TextDecoder();
+		let stdout = "";
+		try {
+			while (!stdout.includes("policy:")) {
+				const chunk = await reader.read();
+				if (chunk.done) break;
+				stdout += decoder.decode(chunk.value, { stream: true });
+			}
+			const url = /http:\/\/127\.0\.0\.1:\d+/.exec(stdout)?.[0];
+			if (!url) throw new Error(`startup did not print the server URL: ${stdout}`);
+			// An answered request proves the signal handlers are installed. The stream is left open: a stop that waits
+			// for open streams would never come.
+			const events = await fetch(`${url}/api/p/scratch/events`);
+			expect(events.status).toBe(200);
+			child.kill(signal);
+			const outcome = await Promise.race([child.exited, Bun.sleep(5000).then(() => "still running after 5 s")]);
+			expect(outcome).toBe(0);
+			await events.body?.cancel().catch(() => undefined);
+		} finally {
+			child.kill("SIGKILL");
+			await child.exited;
+			reader.releaseLock();
+			await rm(home, { recursive: true, force: true });
+		}
+	}, 15_000);
+}
+
 test("an install under the former name is carried over on the next start, and its owner token still works", async () => {
 	const home = await mkdtemp(join(tmpdir(), "mainworthy-former-cli-"));
 	/** Starts the server in `home`, waits for its two start lines, and returns how to stop it and read its output. */
