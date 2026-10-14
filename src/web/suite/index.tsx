@@ -807,10 +807,12 @@ export function SuiteScreen() {
 	}
 
 	/** A new id for a step of a draft of `id`, as the editor makes one: none this device has seen for the case. */
-	const stepIdFor =
+	const stepIdFor = useCallback(
 		(id: string) =>
-		(taken: ReadonlySet<string>): string =>
-			newStepId(knownStepIds({ project, id, ids: [...taken] }));
+			(taken: ReadonlySet<string>): string =>
+				newStepId(knownStepIds({ project, id, ids: [...taken] })),
+		[project],
+	);
 	async function sealDraft({ keepalive = false, saved }: { keepalive?: boolean; saved?: Draft } = {}): Promise<void> {
 		const snapshot = saved ?? draftRef.current;
 		if (!sessionCurrent(owner)) return;
@@ -1162,7 +1164,7 @@ export function SuiteScreen() {
 			draftRef.current = next;
 			setDraftState(next);
 		}
-	}, [view]);
+	}, [view, stepIdFor]);
 	const sealRef = useRef(sealDraft);
 	sealRef.current = sealDraft;
 	useEffect(() => {
