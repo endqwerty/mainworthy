@@ -215,19 +215,8 @@ is under the GitHub milestone `iOS app`.
   On the desktop `/tmp` is kept in memory and `test/budgets.test.ts` refuses it, so the export goes under
   `~/.cache`. To wait for another agent's test run: `pgrep -f '[t]est-worker'`; without the brackets pgrep
   finds the shell that runs it and the wait never ends (both on 2026-10-12, PR #97).
-- An issue has one milestone from the day it is filed (2026-10-13), and an `area:` label when it is about a
-  part of the product. The milestones M1 to M7 are in the order of `docs/roadmap.md`, and each one's
-  description says what belongs in it.
-  A test that fails by chance gets `flaky-test` and goes to M1. `decision` and `waiting-for-feedback` mark what
-  an agent cannot finish alone. Add the issue to its list in #64; a milestone is renamed or added in
-  `docs/roadmap.md` and #64 in the same change.
-- The board is the GitHub Project `https://github.com/users/endqwerty/projects/2` (2026-10-13). Its views read
-  the milestone and the labels, so an issue needs nothing set there, only to be on it:
-  `gh project item-add 2 --owner endqwerty --url <issue>` after filing one. A view filters on milestone titles:
-  a milestone that is renamed or added is changed in the view's filter too. `gh project` needs the `project`
-  scope on the token. The desktop's has it since 2026-10-13. On a machine whose token lacks it, run
-  `gh auth refresh -h github.com -s project` and give the owner the code it prints: only they can approve it,
-  at `github.com/login/device`. Milestones, labels and issues need `repo` alone.
+- Issues, pull requests and the board are kept in step by GitHub when a pull request names its issue the way
+  GitHub reads it. How: "Issues, pull requests and the board" below.
 - Scratch files stay out of the worktree: a log, a draft of a pull request, screenshots. `test/architecture.test.ts`
   reads every file in it, tracked or not, and fails when one holds the former name. On 2026-10-13 an agent's
   decision log under `.audit/` failed a nine-minute `--update-timings` run that way. `~/.cache` is the place.
@@ -254,6 +243,66 @@ is under the GitHub milestone `iOS app`.
 - To stop a server you started, `pkill -f '[m]ain.ts serve'`, with the brackets: a pattern that is also in your
   own command line stops your shell too, and the commands after it never run (three times on 2026-10-13).
 
+## Issues, pull requests and the board
+
+The owner reads progress on the board, `https://github.com/users/endqwerty/projects/2`, and wants it true
+(2026-10-13). GitHub does most of it when a pull request is linked to its issue. The issue then shows the pull
+request under Development, the board moves the issue to In Progress, and the merge closes the issue and moves
+both to Done. A closing keyword in the pull request's description makes that link. Nothing else you can write
+does. This is from GitHub's pages on linking a pull request to an issue and on a project's workflows, read on
+2026-10-13. The move to In Progress has not been seen on this board yet: the first agent whose pull request
+closes an issue says in it whether the issue moved.
+
+**Filing an issue.** It gets one milestone, and an `area:` label when it is about a part of the product. The
+milestones M1 to M7 are in the order of `docs/roadmap.md`, and each one's description says what belongs in it.
+A test that fails by chance gets `flaky-test` and goes to M1. `decision` and `waiting-for-feedback` mark what an
+agent cannot finish alone. Add the issue to its list in #64. The board adds a new issue or pull request by
+itself, as Todo (seen for pull requests on 2026-10-13).
+
+**Starting on an issue.** Set it In Progress before the first edit, so a second agent sees it is taken:
+
+```
+item=$(gh project item-add 2 --owner endqwerty --url <URL of the issue or pull request> --format json --jq .id)
+gh project item-edit --id "$item" --project-id PVT_kwHOAArmbc4Bm7Xt \
+  --field-id PVTSSF_lAHOAArmbc4Bm7XtzhliU7A --single-select-option-id 47fc9ee4
+```
+
+The last value is the status: `47fc9ee4` In Progress, `f75ad846` Todo, `98236657` Done. The first command adds
+nothing when the item is already on the board and prints its id either way.
+
+**Opening the pull request.**
+
+- Name each issue it finishes on a line of its own: `Closes #123`. Use it only when the merge makes everything
+  the issue asks for true. For part of an issue write `Part of #123`, which links nothing: the issue stays open
+  and its status is yours to set.
+- Give it the milestone of its issue (`gh pr create --milestone "<title>"`). GitHub copies nothing from the
+  issue. With no issue, use the milestone whose description fits, or none.
+- Set it In Progress with the two commands above. The board adds a new pull request as Todo.
+- Read back what GitHub linked: `gh pr view <n> --json closingIssuesReferences --jq
+  '[.closingIssuesReferences[].number]'`. It lists the issues you meant and no other. Any closing word before
+  an issue number links it: "the closed #88" in the description of #172 linked #88 (2026-10-13). Write "issue
+  #88, which is closed".
+- A keyword counts only while the pull request's base is `main`. In a stack GitHub ignores it and makes no link
+  until the pull request below has merged. Read the links again then, and set the issue In Progress by hand
+  meanwhile.
+- A task the owner gave in a thread needs no issue. The pull request is its card. Do not file an issue to
+  close it.
+
+**Stopping without finishing.** Set the issue back to Todo and say on it what is left. Do the same when a pull
+request is closed without a merge: what the board does with its issue then is not known.
+
+**After the merge.** The issue is closed and both cards are Done. If the issue is still open, close it with a
+comment that links the pull request. A problem found on the way gets its own issue; it is not a line in the pull
+request.
+
+**What only the owner can change.** A view filters on milestone titles, so a milestone that is renamed or added
+is changed in the view's filter, in `docs/roadmap.md` and in #64 in the same change. The board's workflows are
+set in the browser (the board's menu, Workflows), and the API neither reads nor changes them: "Auto-add to
+project" has been on since 2026-10-13, and "Pull request linked to issue" is what moves an issue to In Progress.
+`gh project` needs the `project` scope on the token. The desktop's has it since 2026-10-13. On a machine whose
+token lacks it, run `gh auth refresh -h github.com -s project` and give the owner the code it prints: only they
+can approve it, at `github.com/login/device`. Milestones, labels and issues need `repo` alone.
+
 ## Model profile
 
 **deep**, the owner's standing choice for this project (named 2026-10-11). Every
@@ -269,7 +318,8 @@ Delivery: **review-first**. The owner merges; you do not.
 
 Work on the T3 branch in your worktree and follow the `build` skill: check the
 change, get the independent verification `verify` asks for, open a non-draft PR
-with a standalone description (`gh pr create`), link it to the thread, and stop.
+with a standalone description (`gh pr create`) that names its issue ("Issues, pull
+requests and the board" above), link it to the thread, and stop.
 Do not merge, arm auto-merge, close the PR or push to `main`, even when the
 checks are green. Opening the PR does not start a watcher; use `babysit` when
 the owner asks you to get an open PR merge-ready. Only the owner saying, in the
