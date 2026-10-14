@@ -32,7 +32,9 @@ with no case comes after every other question. A change ends (the operation `cha
 `.github/workflows/change.yml` sends when a pull request closes) and is then not asked about. One answer for
 several rows is not built: the owner is thinking about its form, and `mainworthy seed` keeps sixty such rows to
 try it against.
-An iPhone app is being built since 2026-10-13 (`ios/`, decision 0023, issue #171): it has sign-in and the queue.
+An iPhone app landed on 2026-10-13 (`ios/`, decision 0023, issue #171): sign-in, the queue, runs, the suite,
+changes and your sessions. It is installed from a Mac with `bun scripts/ios.ts install`; what it does not do yet
+is under the GitHub milestone `iOS app`.
 
 ## Stack rules
 
