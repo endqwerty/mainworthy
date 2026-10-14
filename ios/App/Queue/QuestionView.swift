@@ -268,8 +268,7 @@ struct QuestionView: View {
 
 	private func withdraw(_ question: Question, reason: String = "") {
 		Task {
-			await screen.withdraw(question, reason: reason)
-			onSettled()
+			if await screen.withdraw(question, reason: reason) { onSettled() }
 		}
 	}
 
