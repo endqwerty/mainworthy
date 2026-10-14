@@ -9,7 +9,8 @@ export type AppContext = {
 	route: Route;
 	session: SessionInfo;
 	instanceCan: readonly string[];
-	setStatus: (text: string) => void;
+	/** The status line. A function gets the line as it is now, for a message that replaces only its own. */
+	setStatus: (text: string | ((shown: string) => string)) => void;
 	openPalette: (options?: PaletteOptions) => void;
 	refreshSession: () => Promise<void>;
 	overlayOpen: boolean;

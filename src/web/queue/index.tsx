@@ -42,6 +42,8 @@ export function QueueScreen() {
 	return <QueueWorkbench key={project} />;
 }
 
+const READING = "Reading this question before answering. Your note is kept.";
+
 function QueueWorkbench() {
 	const { project, route, overlayOpen, openPalette, setStatus } = useApp();
 	const owner = useRef(deviceSession()).current;
@@ -160,6 +162,12 @@ function QueueWorkbench() {
 			settledState.data.q === current.q &&
 			settledState.data.state !== "open",
 	);
+	// "Reading this question" is true until the read ends. Once the page knows the question was settled it says
+	// that instead, and leaves any other line alone.
+	useEffect(() => {
+		if (settled)
+			setStatus((shown) => (shown === READING ? "This question was settled elsewhere. Your note is kept." : shown));
+	}, [settled, setStatus]);
 	const counts = inbox.data?.pages[0]?.counts ?? {};
 	useEffect(() => {
 		if (inline && !inline.entries.some((entry) => entry.question.q === current?.q)) setInline(null);
@@ -267,11 +275,7 @@ function QueueWorkbench() {
 	function submit(entries: DecisionEntry[], reason?: string, extra?: InlineAnswer): void {
 		if (!entries.length || !sessionCurrent(owner)) return;
 		if (entries.some((entry) => !items.some((item) => item.q === entry.question.q))) {
-			setStatus(
-				settled
-					? "This question was settled elsewhere. Your note is kept."
-					: "Reading this question before answering. Your note is kept.",
-			);
+			setStatus(settled ? "This question was settled elsewhere. Your note is kept." : READING);
 			return;
 		}
 		for (const entry of entries) {
@@ -384,7 +388,7 @@ function QueueWorkbench() {
 			setStatus(
 				settled
 					? "This question was settled elsewhere. Your note is kept; choose another question to answer."
-					: "Reading this question before answering. Your note is kept.",
+					: READING,
 			);
 			return;
 		}

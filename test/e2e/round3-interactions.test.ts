@@ -157,8 +157,15 @@ check(
 			const inbox = page.waitForResponse((response) => response.url().endsWith("/api/p/scratch/inbox"));
 			await server.api("decide", { q, onEvidence: original.evidenceHash, answer: { is: "infra" } });
 			await inbox;
+			// Enter while the page is still reading says so, and says what it knows once the read comes back.
+			await page.locator(`[data-question="${q}"]`).waitFor({ state: "detached" });
+			await page.keyboard.press("Enter");
+			await page.getByText("Reading this question before answering. Your note is kept.").waitFor();
 			told.release();
 			await page.waitForFunction(() => document.querySelector("#detail")?.textContent?.includes("settled"));
+			await page.waitForFunction(() =>
+				document.querySelector("#stat")?.textContent?.includes("This question was settled elsewhere."),
+			);
 			expect(states).toEqual(["open", "decided"]);
 			expect(await page.locator("#answer-extra").inputValue()).toBe("BUG-12");
 			expect(h.errors).toEqual([]);

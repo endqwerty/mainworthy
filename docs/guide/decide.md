@@ -117,7 +117,8 @@ For example, "The failure was a mistake" applies to a disputed planned-run resul
 
 A key records the answer immediately unless the answer needs another field.
 "Link to a case" opens a case picker for each test. "Defect in the product" lets you
-enter an optional defect reference. If the policy requires a reason, enter it before
+enter an optional defect reference: <kbd>Enter</kbd> records the defect with it and
+<kbd>Escape</kbd> records the defect without one. If the policy requires a reason, enter it before
 submitting. The queue keeps unfinished reference and reason text on this device.
 
 If evidence changes while you answer, Mainworthy refuses the stale answer.

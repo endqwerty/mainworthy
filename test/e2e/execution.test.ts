@@ -530,6 +530,17 @@ async function cases(server: Server, count: number) {
 			);
 			await page.locator('[data-slot="1"]').click();
 			expect(await note.inputValue()).toBe("");
+
+			// The note on the slot goes with whatever is recorded next, as the field beside the keys shows (issue #73):
+			// a pass takes the note a failed request left there.
+			await page.locator('[data-slot="2"]').click();
+			expect(await note.inputValue()).toBe("Second failed note");
+			await page.keyboard.press("p");
+			const passed = await eventually(
+				async () => Slot.array().parse((await server.api("find", { in: "slots", run: planned.run })).items),
+				(slots) => slots[1]?.fills[0]?.outcome === "pass",
+			);
+			expect(passed[1]?.fills[0]?.note).toBe("Second failed note");
 		} finally {
 			await view?.close();
 			await server.stop();
