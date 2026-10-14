@@ -10,7 +10,7 @@
 //
 // To change what the app reads: change the shape here, run `bun scripts/ios.ts gen`, and fix what no longer
 // compiles in `ios/Kit` (`bun scripts/ios.ts test`, on a Mac). `ios/README.md` says the rest.
-import { anything, dictionary, flag, list, maybe, moment, type Shape, struct, text, whole } from "./shape.ts";
+import { anything, dictionary, flag, list, maybe, moment, nullable, type Shape, struct, text, whole } from "./shape.ts";
 
 // ── Who is signed in ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -182,7 +182,7 @@ export const DecideReply = struct("DecideReply", "`decide`: what became of one a
 const Step = struct("Step", "One step of a case.", {
 	id: [text, "Short, unique within its case and never used again, so a result or an edit can name the step."],
 	action: text,
-	expected: [maybe(text), "What must be true afterwards, where the author said."],
+	expected: [nullable(text), "What must be true afterwards. Null where the author has not said; never left out."],
 });
 
 export const CaseBody = struct("CaseBody", "The content of a case that has versions.", {

@@ -80,12 +80,16 @@ struct QueueScreenTests {
 		let screen = try await screen(strict: true)
 		let signoff = try #require(screen.questions.first { $0.kind == .signoff })
 		let approve = try #require(signoff.choices.first { $0.answer == "approve" })
+		// What is typed in the sheet is the screen's, and stays when the server does not take the answer.
+		screen.typed[signoff.ref, default: .init()].reference = "SHOP-1"
 		#expect(await screen.answer(signoff, with: approve) == false)
+		#expect(screen.typed[signoff.ref]?.reference == "SHOP-1")
 		#expect(screen.notice?.text == "Nothing was recorded for \(signoff.ref). The server asks for a reason.")
 		#expect(screen.notice?.isProblem == true)
 		#expect(screen.current(signoff.ref) != nil)
 		#expect(await screen.answer(signoff, with: approve, reason: "Checked on the release build."))
 		#expect(screen.current(signoff.ref) == nil)
+		#expect(screen.typed[signoff.ref] == nil)
 		// Undo is offered, and withdrawing is a decision too: the policy asks it for a reason as well.
 		let undoes = try #require(screen.notice?.undoes)
 		#expect(undoes.wantsReason)

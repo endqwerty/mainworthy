@@ -15,6 +15,8 @@ export type Shape = {
 	swift: string;
 	/** Every struct this shape names, itself included when it is one. */
 	structs: readonly Struct[];
+	/** Must the key be there even when its value is null (`nullable`)? Swift then refuses a reply without it. */
+	present?: true;
 };
 
 const plain = (zod: z.ZodType, swift: string): Shape => ({ zod, swift, structs: [] });
@@ -36,6 +38,17 @@ export const dictionary = (of: Shape): Shape => ({
 });
 /** A field the server may leave out or send as null. Swift reads both as nil. Everything else must be there. */
 export const maybe = (of: Shape): Shape => ({ zod: of.zod.nullish(), swift: `${of.swift}?`, structs: of.structs });
+/**
+ * A field that is always there and may be null: a step's expected result, which is null where the author has
+ * not said. A reply that leaves it out is not one where the author said nothing, so the check and the Swift
+ * that decodes it both refuse it.
+ */
+export const nullable = (of: Shape): Shape => ({
+	zod: of.zod.nullable(),
+	swift: `${of.swift}?`,
+	structs: of.structs,
+	present: true,
+});
 
 /**
  * An object the app reads these fields of. A field is a shape, or a shape with a sentence about it that
