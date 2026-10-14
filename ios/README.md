@@ -92,7 +92,7 @@ The queue is the example to copy.
 4. **The view.** Add it under `App/` and a tab in `WorkspaceView.swift`.
 5. **The whole way through.** Add a test to `UITests/` that does on the screen what a person would.
 
-Three things the queue does that a copy must keep:
+Four things the queue does that a copy must keep:
 
 - **A screen is one project's.** `Workspace.open` makes every screen anew for the project that is opened and
   lists them in `screens`, which is what the change stream reads again. A view takes its screen from the
@@ -101,5 +101,8 @@ Three things the queue does that a copy must keep:
 - **A read that was overtaken is dropped** (`reads` in `QueueScreen`), and a list that was read past its first
   page is read as far again. What a page shows does not depend on the list holding it: a question whose page
   is open is read by itself where the list does not have it (`open` in `QueueScreen`).
+- **What is typed is kept by the screen's class**, not by a view's state: the workspace, with its screens, is
+  kept while a session that the server ended is renewed by the same person (`AppModel.sessionEnded`), and a
+  view's own state is not.
 - **What is sent later is sent on what was shown.** A sheet or a dialog keeps the value the person acted on
   (`Chosen` in `QuestionView`), not a ref to look up again when it is submitted.

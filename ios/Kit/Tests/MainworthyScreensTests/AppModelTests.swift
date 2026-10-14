@@ -134,6 +134,79 @@ struct AppModelTests {
 		#expect(try self.form(app).notice == "Your session ended. Sign in again.")
 	}
 
+	@Test("when the server ends the session, signing in again as the same person gives back the same screens")
+	func renewedSession() async throws {
+		let device = Device()
+		let app = device.app()
+		await app.start()
+		let form = try form(app)
+		form.address = Live.address
+		form.name = Live.name
+		form.password = Live.password
+		await form.submit()
+		let workspace = try workspace(app)
+		let queue = try #require(workspace.queue)
+		// The session is ended elsewhere, and the app hears of it at its next request.
+		await Server.kept(in: device.secrets)?.signOut()
+		await workspace.refreshAccount()
+		try await Task.sleep(for: .milliseconds(50))
+		let again = try self.form(app)
+		#expect(again.notice == "Your session ended. Sign in again.")
+		again.name = Live.name
+		again.password = Live.password
+		await again.submit()
+		// The same workspace and the same screens, with whatever was typed in them.
+		#expect(try self.workspace(app) === workspace)
+		#expect(workspace.queue === queue)
+		// The renewed session works, and its end is heard again.
+		await workspace.refreshAccount()
+		#expect(try self.workspace(app) === workspace)
+		await Server.kept(in: device.secrets)?.signOut()
+		await workspace.refreshAccount()
+		try await Task.sleep(for: .milliseconds(50))
+		_ = try self.form(app)
+	}
+
+	@Test("after a session ends, somebody else who signs in gets screens of their own")
+	func renewedByAnother() async throws {
+		let device = Device()
+		let app = device.app()
+		await app.start()
+		let form = try form(app)
+		form.address = Live.address
+		form.name = Live.name
+		form.password = Live.password
+		await form.submit()
+		let workspace = try workspace(app)
+		await Server.kept(in: device.secrets)?.signOut()
+		await workspace.refreshAccount()
+		try await Task.sleep(for: .milliseconds(50))
+		let again = try self.form(app)
+		again.way = .token
+		again.token = Live.token
+		await again.submit()
+		let other = try self.workspace(app)
+		#expect(other !== workspace && other.account.isOwner)
+	}
+
+	@Test("signing out keeps nothing: signing in again gives new screens")
+	func signOutKeepsNothing() async throws {
+		let app = Device().app()
+		await app.start()
+		let form = try form(app)
+		form.address = Live.address
+		form.name = Live.name
+		form.password = Live.password
+		await form.submit()
+		let workspace = try workspace(app)
+		await workspace.signOut()
+		let again = try self.form(app)
+		again.name = Live.name
+		again.password = Live.password
+		await again.submit()
+		#expect(try self.workspace(app) !== workspace)
+	}
+
 	@Test("an address that is no address, and one that is no Mainworthy, are said so")
 	func badAddress() async throws {
 		let app = Device().app()
