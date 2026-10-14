@@ -509,6 +509,29 @@ for (const outcome of ["is recorded", "meets a new conflict"])
 		30_000,
 	);
 
+// Review round 9, R9-4. The server merges only a proposal that is one edit of one case. This one also places a
+// tag, so the merge is refused and the question stays open. The status is the page's sentence, not the server's.
+check(
+	"a merge the server refuses while the conflict stays open is told in the page's words, and the card stays",
+	async () => {
+		const { server, page, close } = await card1({
+			alsoTyped: (page) => caseTitle(page).fill("Coupon case mine #smoke"),
+		});
+		try {
+			await resolve(page);
+			const status = page.locator("#stat");
+			await status.filter({ hasText: "Your merge was not adopted, and the conflict is still open." }).waitFor();
+			expect(await status.textContent()).toMatch(/ The server's reason: .+\. Your draft and conflict card are kept\.$/);
+			expect(await card(page).count()).toBe(1);
+			expect((await storedDrafts(page)).join(" ")).toContain(MINE);
+			expect((await head(server)).version).toBe(2);
+		} finally {
+			await close();
+		}
+	},
+	30_000,
+);
+
 // The second independent check of this change (N2). The recorded version can hold a colleague's text in the
 // very field the person types in afterwards: they took the current title, and the colleague changed it again
 // before the merge arrived. The typed title was not written on that version, so it is not carried onto it.

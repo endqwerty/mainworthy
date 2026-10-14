@@ -80,6 +80,18 @@ until a version is recorded. Drafts do not sync between devices.
 
 [Diagram: the life of a case](../diagrams/case-lifecycle.html)
 
+## Edit in one window at a time
+
+A draft belongs to the window that is editing it. Another window that opens the same draft shows it
+read-only, with "This case is being edited in another window" and "Take over here".
+Choose "Take over here" to move the draft to the window you are in. It opens there with its text,
+and with its conflict card when it has one. The first window becomes read-only.
+
+A window that comes to a case never takes a draft by itself. When the window that holds a draft does not
+answer, because it closed, crashed or is busy, another window that shows the draft says "This draft is held by
+a window that is not answering, or has closed". Press <kbd>e</kbd> or choose "Take over here" to continue it in
+the window you are in.
+
 ## Read versions and restore earlier content
 
 Select a case to read its version, author, proof, and timeline.

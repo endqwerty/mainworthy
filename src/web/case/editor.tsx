@@ -11,6 +11,14 @@ export const conflictEditorStatus =
 	"Resolve the conflict first. Edit the merged fields in the conflict card; other fields can be edited after it is resolved.";
 
 export const draftOwnershipStatus = "This case is being edited in another window";
+/**
+ * What a window says of a draft that another window owns. When that window has not answered this one (it is busy,
+ * it crashed, or it closed), it is not said to be editing: this window cannot tell which. `e` and "Take over here"
+ * continue the draft here either way.
+ */
+export const ownerAwayStatus =
+	'This draft is held by a window that is not answering, or has closed. Press e or choose "Take over here" to continue it here.';
+export const ownershipStatus = (live: boolean): string => (live ? draftOwnershipStatus : ownerAwayStatus);
 /** A draft another window owned and has removed: what the pane says while this tab still shows it. */
 export const draftEndedStatus = {
 	reading: "Another window recorded or ended this draft. Reading the case as it is now…",
