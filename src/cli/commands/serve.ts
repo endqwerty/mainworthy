@@ -32,13 +32,13 @@ export function serveCommand(args: Args, ui: unknown): void {
 	const stop = (): void => {
 		if (stopping) return;
 		stopping = true;
+		// The process ends here and not when its event loop empties: under `bun --watch` (`bun run dev`) the file
+		// watcher keeps the loop alive for good, and a server that had stopped would sit there ignoring the signal.
 		void instance.stop().then(
-			() => {
-				process.exitCode = 0;
-			},
+			() => process.exit(0),
 			(error: unknown) => {
 				printError(error);
-				process.exitCode = 4;
+				process.exit(4);
 			},
 		);
 	};
