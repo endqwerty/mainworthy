@@ -183,12 +183,14 @@ public struct RunFill: Identifiable, Equatable, Sendable {
 	public let method: FillMethod
 	public let outcome: FilledOutcome
 	public let note: String?
+	public let atStep: String?
 	init(_ wire: Wire.RunFill) {
 		result = wire.result
 		by = wire.by
 		method = FillMethod(wire.method)
 		outcome = FilledOutcome(wire.outcome)
 		note = wire.note
+		atStep = wire.atStep
 	}
 }
 
@@ -285,7 +287,8 @@ extension ProjectClient {
 			content: CaseContent(
 				Wire.CaseBody(
 					title: row.title, pre: row.pre, steps: row.steps, methods: row.methods,
-					automate: row.automate, fields: row.fields
+					// A case that is read alone leaves its custom fields out. A run shows none of them.
+					automate: row.automate, fields: row.fields ?? [:]
 				)))
 	}
 

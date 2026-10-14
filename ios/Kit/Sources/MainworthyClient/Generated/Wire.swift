@@ -321,6 +321,7 @@ enum Wire {
 		let method: String
 		let outcome: String
 		let note: String?
+		let atStep: String?
 	}
 
 	/// One case pinned at a version in a run, in order.

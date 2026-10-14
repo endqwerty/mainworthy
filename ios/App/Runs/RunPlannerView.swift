@@ -15,54 +15,61 @@ struct RunPlannerView: View {
 	@FocusState private var typing: Field?
 	private enum Field { case name, filter, commit }
 	private enum Selection: String, CaseIterable {
-		case all = "All cases", folder = "Folder", tag = "Tag", text = "Search"
+		case all = "All cases"
+		case folder = "Folder"
+		case tag = "Tag"
+		case text = "Search"
 	}
 
 	var body: some View {
 		NavigationStack {
 			Form {
-				Section("Name") {
-					TextField("Run name", text: $name).focused($typing, equals: .name).accessibilityIdentifier(
-						"run-name")
-				}
-				Section("Cases") {
-					Picker("Select", selection: $mode) {
-						ForEach(Selection.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-					}.accessibilityIdentifier("run-selection")
-					if mode == .folder {
-						Picker("Folder", selection: $folder) {
-							Text("Choose a folder").tag(Optional<String>.none)
-							ForEach(screen.folders, id: \.self) { path in
-								Text(path.isEmpty ? "Root" : path).tag(Optional(path))
+				Group {
+					Section("Name") {
+						TextField("Run name", text: $name).focused($typing, equals: .name).accessibilityIdentifier(
+							"run-name")
+					}
+					Section("Cases") {
+						Picker("Select", selection: $mode) {
+							ForEach(Selection.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+						}.accessibilityIdentifier("run-selection")
+						if mode == .folder {
+							Picker("Folder", selection: $folder) {
+								Text("Choose a folder").tag(Optional<String>.none)
+								ForEach(screen.folders, id: \.self) { path in
+									Text(path.isEmpty ? "Root" : path).tag(Optional(path))
+								}
 							}
+						} else if mode == .tag || mode == .text {
+							TextField(mode == .tag ? "Tag" : "Search cases", text: $filter)
+								.accessibilityIdentifier("run-filter").textInputAutocapitalization(.never).focused(
+									$typing, equals: .filter)
 						}
-					} else if mode == .tag || mode == .text {
-						TextField(mode == .tag ? "Tag" : "Search cases", text: $filter)
-							.accessibilityIdentifier("run-filter").textInputAutocapitalization(.never).focused(
-								$typing, equals: .filter)
 					}
-				}
-				Section {
-					Toggle("Accept results for a commit", isOn: $acceptsCommit)
-					if acceptsCommit {
-						TextField("Commit SHA", text: $commit).textInputAutocapitalization(.never)
-							.autocorrectionDisabled()
-							.focused($typing, equals: .commit)
+					Section {
+						Toggle("Accept results for a commit", isOn: $acceptsCommit)
+						if acceptsCommit {
+							TextField("Commit SHA", text: $commit).textInputAutocapitalization(.never)
+								.autocorrectionDisabled()
+								.focused($typing, equals: .commit)
+						}
+					} footer: {
+						Text(
+							acceptsCommit
+								? "The server resolves an abbreviated commit."
+								: "Counts only results recorded in this run.")
 					}
-				} footer: {
-					Text(
-						acceptsCommit
-							? "The server resolves an abbreviated commit."
-							: "Counts only results recorded in this run.")
-				}
+				}.disabled(screen.savedPlan != nil || screen.planning)
 				if let notice = screen.notice { Section { Text(notice).accessibilityIdentifier("plan-notice") } }
 			}
-			.navigationTitle("Plan a run").navigationBarTitleDisplayMode(.inline)
+			.navigationTitle(screen.savedPlan == nil ? "Plan a run" : "Run planned").navigationBarTitleDisplayMode(
+				.inline
+			)
 			.toolbar {
 				ToolbarItem(placement: .keyboard) { Button("Done") { typing = nil } }
 				ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
 				ToolbarItem(placement: .confirmationAction) {
-					Button("Plan") {
+					Button(screen.savedPlan == nil ? "Plan" : "Read run again") {
 						let selection: RunSelection =
 							switch mode {
 							case .all: .all
@@ -71,14 +78,21 @@ struct RunPlannerView: View {
 							case .text: .text(filter.trimmingCharacters(in: .whitespacesAndNewlines))
 							}
 						Task {
-							if let run = await screen.plan(
-								name: name, selection: selection, commit: acceptsCommit ? commit : "")
-							{
+							let run =
+								if screen.savedPlan != nil {
+									await screen.readPlannedRun()
+								} else {
+									await screen.plan(
+										name: name, selection: selection, commit: acceptsCommit ? commit : "")
+								}
+							if let run {
 								planned(run)
 							}
 						}
 					}
-					.disabled(!valid || screen.planning || !screen.permission.may(.plan))
+					.disabled(
+						screen.planning || (screen.savedPlan == nil && (!valid || !screen.permission.may(.plan)))
+					)
 					.accessibilityIdentifier("submit-run-plan")
 				}
 			}
