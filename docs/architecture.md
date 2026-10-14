@@ -344,6 +344,16 @@ server reads: the new key as `getPublicKey()` gives it and the authenticator dat
 no CBOR. Which operations are the instance's, and so are sent to `/api/<op>`, is a list in `src/core/api.ts`
 that a test holds equal to the registry's.
 
+## The iPhone app
+
+`ios/` is a SwiftUI app that calls the same operations as every other client and that nothing on the server
+knows of (decision 0023). It signs in as a browser does and keeps the session cookie in the keychain. Nobody
+compiles Swift in the check that runs on Linux, so what the app reads of a reply is written in TypeScript,
+in `scripts/ios/contract.ts`. `test/ios-contract.test.ts` holds real replies to it, and the Swift types that
+decode a reply are written from it (`bun scripts/ios.ts gen`). A change that would stop the app reading a reply
+fails that test and names the field. The app's own tests run on a Mac against a server the test command starts
+(`ios/README.md`).
+
 ## What every reply carries
 
 Every reply of the server carries the same headers, whichever route wrote it: the API's JSON, the change
@@ -438,5 +448,7 @@ when a hot path gets slow.
 | `src/cli/` | the command line, generated from the registry plus a few adapters |
 | `src/web/` | the web UI |
 | `skill/mainworthy/` | the skill that teaches an agent the case model |
+| `ios/` | the iPhone app: SwiftUI views over a Swift package that knows the server (`ios/README.md`) |
+| `scripts/ios/` | what the iPhone app reads of the server, the Swift written from it, and the server its tests run against |
 | `test/` | behaviour tests by area, the architecture rules, the budgets, the browser tests |
 | `bench/` | the benchmark on 100,000 cases and 1,000,000 results |

@@ -1,0 +1,51 @@
+# The Xcode project, as XcodeGen reads it. `bun scripts/ios.ts project` writes Mainworthy.xcodeproj from this
+# file; the project itself is not committed, so nothing in it can drift from what is written here.
+#
+# Two targets and no code of their own beyond the screens: everything that knows the server or holds a
+# screen's state is in the Swift package beside this file (Kit), which builds and tests on a Mac without a
+# simulator.
+name: Mainworthy
+options:
+  deploymentTarget: { iOS: "18.0" }
+  createIntermediateGroups: true
+  developmentLanguage: en
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
+packages:
+  Kit: { path: Kit }
+targets:
+  Mainworthy:
+    type: application
+    platform: iOS
+    sources: [App]
+    dependencies:
+      - { package: Kit, product: MainworthyKit }
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MAINWORTHY_BUNDLE_ID)
+        INFOPLIST_FILE: App/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1"
+  MainworthyUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - { target: Mainworthy }
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MAINWORTHY_BUNDLE_ID).uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
+schemes:
+  Mainworthy:
+    build:
+      targets:
+        Mainworthy: all
+        MainworthyUITests: [test]
+    run: { config: Debug }
+    test:
+      config: Debug
+      targets: [MainworthyUITests]

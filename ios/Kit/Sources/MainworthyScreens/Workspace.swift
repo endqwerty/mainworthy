@@ -1,0 +1,90 @@
+import Foundation
+import MainworthyClient
+import Observation
+
+/// What a signed-in person works in: their account, the project that is open, and that project's screens.
+///
+/// A screen belongs to one project. Opening another project makes new screens, so nothing read in one project
+/// is ever shown, or answered, in another.
+@MainActor @Observable
+public final class Workspace {
+	public private(set) var account: Account
+	/// The address of the instance, as the person typed it.
+	public let instanceName: String
+	public private(set) var project: Project?
+	public private(set) var queue: QueueScreen?
+
+	private let server: Server
+	private let remembered: Remembered
+	private let onSignedOut: () -> Void
+
+	init(server: Server, account: Account, remembered: Remembered, onSignedOut: @escaping () -> Void) {
+		self.server = server
+		self.account = account
+		self.remembered = remembered
+		self.onSignedOut = onSignedOut
+		instanceName = server.instance.name
+		let last = account.projects.first { $0.key == remembered.project }
+		if let first = last ?? account.projects.first { open(first) }
+	}
+
+	public func open(_ project: Project) {
+		guard project != self.project else { return }
+		self.project = project
+		remembered.project = project.key
+		queue = QueueScreen(project: server.project(project.key))
+	}
+
+	/// Reads everything that is shown again: when the app comes to the front, and when the person asks.
+	public func refresh() async {
+		if let fresh = try? await server.account() {
+			account = fresh
+			// A project can be taken away, or renamed, while the app was in the background.
+			if let open = project, let now = fresh.projects.first(where: { $0.key == open.key }) {
+				project = now
+			} else if let first = fresh.projects.first {
+				open(first)
+			} else {
+				project = nil
+				queue = nil
+			}
+		}
+		await queue?.refresh()
+	}
+
+	/// Follows the open project's change stream until the task is cancelled, reading the screens again at each
+	/// change. A stream that breaks is opened again, and what was missed meanwhile is read then.
+	public func follow() async {
+		guard let key = project?.key else { return }
+		while !Task.isCancelled {
+			do {
+				for try await _ in server.project(key).changes() { await queue?.refresh() }
+			} catch {}
+			guard (try? await Task.sleep(for: .seconds(2))) != nil else { return }
+			await queue?.refresh()
+		}
+	}
+
+	/// Where the web app shows something, for what this build does not do: a question (Q-12), a run (R-4), a
+	/// case (C-311). Nil for a ref of another kind.
+	public func webAddress(of ref: String) -> URL? {
+		guard let key = project?.key, let dash = ref.firstIndex(of: "-") else { return nil }
+		let number = ref[ref.index(after: dash)...]
+		let page: String
+		switch ref[..<dash] {
+		case "Q": page = "queue/\(number)"
+		case "R": page = "runs/\(number)"
+		case "C": page = "suite/c/\(number)"
+		default: return nil
+		}
+		return server.instance.url.appending(path: "/p/\(key)/\(page)")
+	}
+
+	/// The documentation the instance serves.
+	public var docsAddress: URL { server.instance.url.appending(path: "/docs") }
+
+	public func signOut() async {
+		await server.signOut()
+		onSignedOut()
+	}
+}

@@ -1,0 +1,18 @@
+// Build settings of both targets. What is one person's (the team that signs, the bundle identifier that team
+// registered) is in Local.xcconfig, which is not committed: `bun scripts/ios.ts install` writes it from the
+// signing certificate on this Mac. Without that file the app still builds for the simulator, which signs
+// nothing.
+
+SWIFT_VERSION = 6.0
+SWIFT_STRICT_CONCURRENCY = complete
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+CODE_SIGN_STYLE = Automatic
+
+// A bundle identifier is registered to one team, for good. The default is for a simulator; a phone gets the
+// one Local.xcconfig names, which ends in the team's own id so that no two people ask for the same one.
+MAINWORTHY_BUNDLE_ID = com.mainworthy.app.dev
+// The commit the app was built from, for the About screen. The script passes it; Xcode's own Run leaves it so.
+MAINWORTHY_COMMIT = unknown
+
+#include? "Local.xcconfig"

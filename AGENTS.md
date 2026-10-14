@@ -32,6 +32,7 @@ with no case comes after every other question. A change ends (the operation `cha
 `.github/workflows/change.yml` sends when a pull request closes) and is then not asked about. One answer for
 several rows is not built: the owner is thinking about its form, and `mainworthy seed` keeps sixty such rows to
 try it against.
+An iPhone app is being built since 2026-10-13 (`ios/`, decision 0023, issue #171): it has sign-in and the queue.
 
 ## Stack rules
 
@@ -52,7 +53,8 @@ try it against.
   decision 0014; since 2026-10-13 that is `https://mainworthy.com`, project `mainworthy`: `docs/deploy.md`);
   a shard with no report fails it, and so does a test
   file in which every test was skipped. An `image` job builds the container and
-  asks it for `/docs`; the gate job fails with it. On GitHub the workflow takes about four
+  asks it for `/docs`; the gate job fails with it. An `ios` job on a macOS runner runs the
+  iPhone app's package tests and builds the app; the gate job fails with it too. On GitHub the workflow takes about four
   minutes (2026-10-12, two runs: 4 min 24 s and 3 min 49 s; it was about 12 in one job).
 - **A failure says what to do.** The suite passes on macOS as on Linux (issue #103, 2026-10-13), so a failure
   on either is the change's. A test that depends on the system (a key, a tool of the shell, what the browser
@@ -101,6 +103,16 @@ try it against.
   gate is not used after it: an import deletes every token and session, and the
   next row made takes the first id again. Carry the hash and look the row up
   again inside the write (`openSession`; the verifier's finding of 2026-10-13).
+- **The iPhone app reads the server through one contract** (decision 0023). `ios/` is a SwiftUI app that calls
+  the operations like any client. What it decodes of a reply is listed in `scripts/ios/contract.ts`, and
+  `test/ios-contract.test.ts` holds real replies to that list, in the check that runs everywhere. When it fails,
+  a change would stop the app reading a reply: `ios/README.md`, "When the contract test fails", says what to do,
+  with or without a Mac. `bun scripts/ios.ts gen` writes the Swift in the two `Generated/` directories; never
+  edit it. On a Mac, `bun scripts/ios.ts test` runs the app's tests against a real server in two seconds, and
+  `uitest` drives the screens in a simulator (one agent at a time: there is one simulator). A view in `ios/App`
+  cannot send a request, by the package's access rules: a new screen copies the queue (`ios/README.md`). Builds
+  go to `~/.cache/mainworthy-ios`, never into the worktree. The team that signs the app is in
+  `ios/Config/Local.xcconfig`, which is not committed: never write a team id into the repository.
 - **Budgets are tests** (`test/budgets.test.ts`, `bench/`). A change that misses a
   hot-path budget does not merge; do not raise the number.
 - **The check's wall time is a budget** (`scripts/check-plan.ts`). The check warns
