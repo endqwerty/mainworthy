@@ -1407,6 +1407,46 @@ describe("/healthz and the commit", () => {
 	});
 });
 
+describe("/.well-known/apple-app-site-association", () => {
+	const APP = "ABCDE12345.com.mainworthy.app.ABCDE12345";
+
+	/** Asks for the file of a server whose configuration was read from `env`, as `mainworthy serve` reads it. */
+	async function association(env: Record<string, string>): Promise<Response> {
+		const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-http-aasa-"));
+		dirs.push(dataDir);
+		const config = defaultConfig({ MAINWORTHY_DATA: dataDir, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin", ...env });
+		const instance = start(config, () => ({ ui: null }), { readers: 0 });
+		try {
+			const response = await fetch(`${instance.url}/.well-known/apple-app-site-association`, { redirect: "manual" });
+			await response.clone().arrayBuffer();
+			return response;
+		} finally {
+			await instance.stop();
+		}
+	}
+
+	test("it names the apps MAINWORTHY_APPLE_APPS lists for their saved logins, as JSON, with no sign-in", async () => {
+		const response = await association({
+			MAINWORTHY_MODE: "server",
+			MAINWORTHY_APPLE_APPS: ` ${APP}, AAAAA11111.example.app `,
+		});
+		expect(response.status).toBe(200);
+		expect(response.headers.get("content-type")).toStartWith("application/json");
+		expect(await response.json()).toEqual({ webcredentials: { apps: [APP, "AAAAA11111.example.app"] } });
+	});
+
+	test("it is not found when no app is listed", async () => {
+		expect((await association({})).status).toBe(404);
+		expect((await association({ MAINWORTHY_APPLE_APPS: "" })).status).toBe(404);
+	});
+
+	test("an entry that is not a team id and a bundle identifier stops the start with a line naming the variable", () => {
+		for (const value of ["com.mainworthy.app", "abcde12345.com.mainworthy.app", "ABCDE12345.", "ABCDE12345.a b", ","]) {
+			expect(() => defaultConfig({ MAINWORTHY_APPLE_APPS: value })).toThrow(/^MAINWORTHY_APPLE_APPS/);
+		}
+	});
+});
+
 describe("a large report on a live server", () => {
 	test("C5 and E2: from the moment it is accepted the gate reads pending, reads are answered while it is applied, and no stale green is served", async () => {
 		const instance = boot("local");

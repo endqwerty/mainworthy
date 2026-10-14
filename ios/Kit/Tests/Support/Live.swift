@@ -12,6 +12,10 @@ package enum Live {
 	package static var token: String { environment["MAINWORTHY_TEST_TOKEN"] ?? "" }
 	package static var name: String { environment["MAINWORTHY_TEST_NAME"] ?? "" }
 	package static var password: String { environment["MAINWORTHY_TEST_PASSWORD"] ?? "" }
+	/// The owner signs in as any person does. `token` is the owner's too, for what a test sets up through the API.
+	package static var ownerName: String { environment["MAINWORTHY_TEST_OWNER_NAME"] ?? "" }
+	package static var ownerPassword: String { environment["MAINWORTHY_TEST_OWNER_PASSWORD"] ?? "" }
+	package static var owner: Proof { .password(name: ownerName, password: ownerPassword) }
 
 	package static var instance: Instance {
 		guard let instance = Instance(address: address) else { fatalError("MAINWORTHY_TEST_URL is not an address") }

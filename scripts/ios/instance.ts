@@ -1,5 +1,6 @@
 // A Mainworthy for the iOS app's tests: a real server on this machine, in server mode, so the app signs in as it
-// does on a phone. The owner signs in with a token and one more person with a name and a password.
+// does on a phone. The owner and one more person sign in with a name and a password. The owner's token is for
+// what a test sets up through the API, as a script would: the app takes no token.
 //
 // A test asks it for a project of its own (`POST /test/project`), filled by `scenario.ts`, so no test reads what
 // another one answered. That route exists here and nowhere in the product.
@@ -14,11 +15,13 @@ import { passedRun, scenario } from "./scenario.ts";
 export const OWNER = "robin";
 export const TOKEN = "ios-test-owner-0123456789abcdef";
 export const PERSON = { name: "sam", password: "a password for the tests" } as const;
+const OWNER_PASSWORD = "the owner's password for the tests";
 
 export type TestInstance = {
 	url: string;
 	token: string;
 	person: typeof PERSON;
+	owner: { name: string; password: string };
 	stop: () => Promise<void>;
 };
 
@@ -89,12 +92,17 @@ export async function testInstance(): Promise<TestInstance> {
 				headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
 				body: JSON.stringify(body),
 			});
-		const invited = Invited.parse(
-			await (await post("/api/invitation", { do: "create", name: PERSON.name }, TOKEN)).json(),
-		);
-		const joined = await post("/api/login", { invitation: invited.result.code, password: PERSON.password });
-		if (!joined.ok) throw new Error(`the test person could not join: ${joined.status} ${await joined.text()}`);
-		return { url: made.url, token: TOKEN, person: PERSON, stop };
+		// Each is given a password by an invitation: the owner's, to an existing person, is a recovery link, which
+		// leaves the owner's token as it was.
+		for (const [name, password] of [
+			[PERSON.name, PERSON.password],
+			[OWNER, OWNER_PASSWORD],
+		]) {
+			const invited = Invited.parse(await (await post("/api/invitation", { do: "create", name }, TOKEN)).json());
+			const joined = await post("/api/login", { invitation: invited.result.code, password });
+			if (!joined.ok) throw new Error(`${name} could not join: ${joined.status} ${await joined.text()}`);
+		}
+		return { url: made.url, token: TOKEN, person: PERSON, owner: { name: OWNER, password: OWNER_PASSWORD }, stop };
 	} catch (error) {
 		await stop();
 		throw error;

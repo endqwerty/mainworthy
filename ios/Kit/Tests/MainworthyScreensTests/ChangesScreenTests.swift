@@ -25,7 +25,7 @@ struct ChangesScreenTests {
 	@Test("a change remains readable outside the newest 500, with its new head and its end")
 	func capEvictsDetail() async throws {
 		let server = Live.server()
-		_ = try await server.signIn(.token(Live.token))
+		_ = try await server.signIn(Live.owner)
 		let client = server.project(try await Live.project())
 		let screen = ChangesScreen(project: client)
 		await screen.refresh()

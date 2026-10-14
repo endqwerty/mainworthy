@@ -35,8 +35,10 @@ final class QueueUITests: XCTestCase {
 	@MainActor private func signIn(_ app: XCUIApplication) throws {
 		let address = app.textFields["address"]
 		XCTAssertTrue(address.waitForExistence(timeout: 20))
-		address.tap()
-		address.typeText(try XCTUnwrap(environment["MAINWORTHY_TEST_URL"]))
+		// A device that has signed in nowhere offers the hosted instance, and asks for no token.
+		XCTAssertEqual(address.value as? String, "mainworthy.com")
+		XCTAssertFalse(app.secureTextFields["token"].exists || app.buttons["Token"].exists)
+		address.replaceText(try XCTUnwrap(environment["MAINWORTHY_TEST_URL"]))
 		app.textFields["name"].tap()
 		app.textFields["name"].typeText(environment["MAINWORTHY_TEST_NAME"] ?? "")
 		app.secureTextFields["password"].tap()

@@ -40,12 +40,12 @@ struct LiveTests {
 		await #expect(throws: ClientError.signedOut) { _ = try await kept.account() }
 	}
 
-	@Test("the owner signs in with a token, and the app keeps the session and not the token")
-	func token() async throws {
+	@Test("the owner signs in with a password, and the app keeps the session and not the password")
+	func owner() async throws {
 		let secrets = MemoryStore()
-		let account = try await Live.server(secrets: secrets).signIn(.token(Live.token))
+		let account = try await Live.server(secrets: secrets).signIn(Live.owner)
 		#expect(account.isOwner)
-		#expect(!String(decoding: secrets.load() ?? Data(), as: UTF8.self).contains(Live.token))
+		#expect(!String(decoding: secrets.load() ?? Data(), as: UTF8.self).contains(Live.ownerPassword))
 	}
 
 	@Test("the session works where the server sets its cookie under the https name")

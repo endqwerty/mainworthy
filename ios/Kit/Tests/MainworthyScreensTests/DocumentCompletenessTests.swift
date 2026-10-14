@@ -40,13 +40,13 @@ struct ReviewFifth {
    for (section,fields) in [("body",["fields","steps","methods","automate","pre","title"]),("current",["fields","steps","methods","automate","pre","title"]),("placement",["folder","tags","covers","badTags"])] {
     for field in fields {
      let key=try await Live.project(strict:true)
-     let owner=Live.server();_=try await owner.signIn(.token(Live.token))
+     let owner=Live.server();_=try await owner.signIn(Live.owner)
      let title="Completeness \(section) \(field)"
      let edit:JSONValue=section=="current"
        ? ["op":"edit","case":"C-1","base":1,"body":["title":.string(title),"fields":["risk":"high"]]]
        : ["op":"create","folder":"Review/Folder","tags":["hidden-tag"],"covers":["REQ-1"],"body":["title":.string(title),"pre":"Signed in","methods":["human","auto"],"automate":"wanted","fields":["risk":"high"],"steps":[["id":"probe","action":"Do it","expected":"Works"]]]]
      let made:JSONValue=try await owner.write("propose",in:key,["reason":"Review fixture","edits":[edit]])
-     let server=Server(instance:Live.instance,secrets:MemoryStore(),transport:IncompletePart(field,section:section));_=try await server.signIn(.token(Live.token))
+     let server=Server(instance:Live.instance,secrets:MemoryStore(),transport:IncompletePart(field,section:section));_=try await server.signIn(Live.owner)
      let screen=QueueScreen(project:server.project(key));await screen.show(.open,filter:nil)
      let q=try #require(screen.questions.first {$0.ref==made["question"]?.string});await screen.readDocuments(of:q)
      let wasShown=screen.isShown(q)
@@ -71,9 +71,9 @@ struct ReviewFifth {
  @Test func stepParts() async throws {
   for n in 0..<2 {
    for field in ["step.id","step.action","step.expected"] {
-    let key=try await Live.project(strict:true);let owner=Live.server();_=try await owner.signIn(.token(Live.token))
+    let key=try await Live.project(strict:true);let owner=Live.server();_=try await owner.signIn(Live.owner)
     let made:JSONValue=try await owner.write("propose",in:key,["reason":"Review fixture","edits":[["op":"create","body":["title":"Step completeness","steps":[["id":"probe","action":"Do it","expected":"Hidden expected result"]]]]]])
-    let server=Server(instance:Live.instance,secrets:MemoryStore(),transport:IncompletePart(field));_=try await server.signIn(.token(Live.token))
+    let server=Server(instance:Live.instance,secrets:MemoryStore(),transport:IncompletePart(field));_=try await server.signIn(Live.owner)
     let screen=QueueScreen(project:server.project(key));await screen.show(.open,filter:nil)
     let q=try #require(screen.questions.first {$0.ref==made["question"]?.string});await screen.readDocuments(of:q)
     let shown=screen.isShown(q);var expected:String?=nil
@@ -93,7 +93,7 @@ struct ReviewFifth {
  }
  @Test func longProposal() async throws {
   for n in 0..<2 {
-   let key=try await Live.project(strict:true);let owner=Live.server();_=try await owner.signIn(.token(Live.token))
+   let key=try await Live.project(strict:true);let owner=Live.server();_=try await owner.signIn(Live.owner)
    let edits:[JSONValue]=(0..<21).map {i in ["op":"create","outline":.string("Long case \(i)")]}
    let made:JSONValue=try await owner.write("propose",in:key,["reason":"Review fixture","edits":.array(edits)])
    let screen=QueueScreen(project:owner.project(key));await screen.show(.open,filter:nil)
@@ -105,7 +105,7 @@ struct ReviewFifth {
  }
  @Test func standaloneState() async throws {
   for n in 0..<2 {
-   let key=try await Live.project();let owner=Live.server();_=try await owner.signIn(.token(Live.token))
+   let key=try await Live.project();let owner=Live.server();_=try await owner.signIn(Live.owner)
    let screen=QueueScreen(project:owner.project(key));await screen.show(.open,filter:nil)
    let original=try #require(screen.questions.first {$0.kind == .failure});await screen.open(original.ref)
    await screen.show(.decided,filter:nil);let open=try #require(screen.current(original.ref))

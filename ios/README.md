@@ -25,6 +25,12 @@ Accounts. A free Apple ID will do.
 The command reads the team from the development certificate on the Mac and writes it to
 `ios/Config/Local.xcconfig`, which is not committed. To sign with another team, edit that file.
 
+A paid team can tie the app to `mainworthy.com`, so the phone's AutoFill (and 1Password through it) offers the
+login saved for that site on the sign-in screen: uncomment `CODE_SIGN_ENTITLEMENTS` in that file
+(`App/Mainworthy.entitlements`), install, and have the instance list the name the command prints in
+`MAINWORTHY_APPLE_APPS` (`docs/deploy.md`). A personal team's build fails with that line: Apple signs an associated
+domain for a paid membership only.
+
 An app signed with a free Apple ID opens for seven days. The app says until when under **You**, **Works
 until**. Run the command again before then. The sign-in is kept in the phone's keychain and survives it.
 

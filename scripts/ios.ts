@@ -107,9 +107,9 @@ function gen(): void {
 async function serve(): Promise<void> {
 	const server = await testInstance();
 	console.log(`Mainworthy for the iOS tests · ${server.url}`);
-	console.log(`sign in as ${server.person.name} with the password "${server.person.password}", or with the token`);
-	console.log(server.token);
-	console.log("POST /test/project with that token makes a filled project. Ctrl-C stops it.");
+	console.log(`sign in as ${server.person.name} with the password "${server.person.password}"`);
+	console.log(`or as the owner, ${server.owner.name}, with the password "${server.owner.password}"`);
+	console.log(`POST /test/project with the token ${server.token} makes a filled project. Ctrl-C stops it.`);
 	await new Promise<void>((resolve) => process.once("SIGINT", resolve));
 	await server.stop();
 }
@@ -127,6 +127,8 @@ async function test(filter: string | undefined): Promise<void> {
 				MAINWORTHY_TEST_TOKEN: server.token,
 				MAINWORTHY_TEST_NAME: server.person.name,
 				MAINWORTHY_TEST_PASSWORD: server.person.password,
+				MAINWORTHY_TEST_OWNER_NAME: server.owner.name,
+				MAINWORTHY_TEST_OWNER_PASSWORD: server.owner.password,
 			},
 		);
 	} finally {
@@ -259,6 +261,8 @@ async function uitest(filter: string | undefined): Promise<void> {
 					TEST_RUNNER_MAINWORTHY_TEST_TOKEN: server.token,
 					TEST_RUNNER_MAINWORTHY_TEST_NAME: server.person.name,
 					TEST_RUNNER_MAINWORTHY_TEST_PASSWORD: server.person.password,
+					TEST_RUNNER_MAINWORTHY_TEST_OWNER_NAME: server.owner.name,
+					TEST_RUNNER_MAINWORTHY_TEST_OWNER_PASSWORD: server.owner.password,
 					TEST_RUNNER_MAINWORTHY_SCREENSHOTS: shots,
 				},
 			),
@@ -343,6 +347,23 @@ async function phone(named: string | undefined): Promise<Phone> {
 }
 
 /**
+ * The app as Apple names it, `<team>.<bundle identifier>`, from Local.xcconfig, where that file signs it with the
+ * entitlements that tie it to mainworthy.com (a paid team only, `ios/Config/Base.xcconfig`). Null otherwise.
+ */
+function appleApp(): string | null {
+	const text = readFileSync(LOCAL, "utf8");
+	const setting = (name: string) => text.match(new RegExp(`^${name}\\s*=\\s*(\\S+)`, "m"))?.[1];
+	if (!setting("CODE_SIGN_ENTITLEMENTS")) return null;
+	const team = setting("DEVELOPMENT_TEAM");
+	const bundle = setting("MAINWORTHY_BUNDLE_ID");
+	return team && bundle ? `${team}.${bundle}` : null;
+}
+
+/** What the instance must list for the sign-in screen to be offered its saved logins (`docs/deploy.md`). */
+const associate = (appId: string): string =>
+	`For the sign-in screen to be offered the logins saved for mainworthy.com, that instance lists this app in MAINWORTHY_APPLE_APPS: ${appId}`;
+
+/**
  * Builds the app for a phone, signs it with the team of this Mac's development certificate, and installs it.
  * A free Apple ID will do. Its signing lasts seven days, so this is then run again each week: the app keeps
  * its sign-in across it.
@@ -360,12 +381,15 @@ async function install(args: string[]): Promise<void> {
 				`DEVELOPMENT_TEAM = ${id}`,
 				"// A bundle identifier belongs to one team for good, so this one ends in the team's own id.",
 				`MAINWORTHY_BUNDLE_ID = com.mainworthy.app.${id}`,
+				"// A paid team can tie the app to mainworthy.com, so the sign-in screen is offered its saved logins:",
+				"// CODE_SIGN_ENTITLEMENTS = App/Mainworthy.entitlements",
 				"",
 			].join("\n"),
 		);
 		console.log("wrote ios/Config/Local.xcconfig with the team of this Mac's development certificate");
 	}
 	await project();
+	const appId = appleApp();
 	const built = join(CACHE, "phone");
 	const app = join(built, "Build", "Products", "Debug-iphoneos", "Mainworthy.app");
 	const build = (destination: string): Promise<void> =>
@@ -384,6 +408,7 @@ async function install(args: string[]): Promise<void> {
 		// No phone is asked for: the app is built and signed for any iPhone the team has registered.
 		await build("generic/platform=iOS");
 		console.log(`built and signed: ${app}\nnothing was installed (--dry-run)`);
+		if (appId) console.log(associate(appId));
 		return;
 	}
 	const target = await phone(named);
@@ -397,6 +422,7 @@ async function install(args: string[]): Promise<void> {
 			`installed on ${target.name}.`,
 			"The first time, the phone asks you to trust the developer: Settings, General, VPN & Device Management.",
 			"The app says under You until when its signing lasts: seven days with a free Apple ID. Run this again before then; the sign-in is kept.",
+			...(appId ? [associate(appId)] : []),
 		].join("\n"),
 	);
 }

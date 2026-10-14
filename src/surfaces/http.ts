@@ -701,6 +701,8 @@ export type Extra = {
 /**
  * The routes. Everything that reads or changes a project needs a session. These answer without one, on purpose:
  * `/healthz` (is the process up, and which version and commit: the container's health check),
+ * `/.well-known/apple-app-site-association` (the iPhone apps that may be offered this site's saved logins, which
+ * Apple reads without a sign-in; not found when the instance lists none),
  * `/api/openapi.json` (the description of the API, the same for every instance of a version), `/api/login` and
  * `/api/logout` (which open and end a browser's session and set or clear its cookie, same-origin only),
  * `/api/login/methods` and `/api/login/challenge` (what a sign-in page is told before anybody is signed in, in
@@ -750,6 +752,10 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patie
 	});
 	const routes: Record<string, unknown> = {
 		"/healthz": () => jsonResponse({ ok: true, version: VERSION, commit: app.config.commit }),
+		"/.well-known/apple-app-site-association": () =>
+			app.config.appleApps?.length
+				? jsonResponse({ webcredentials: { apps: app.config.appleApps } })
+				: jsonResponse({ ok: false, error: { code: "not_found", message: "no such route" } }, 404),
 		"/api/openapi.json": () => jsonResponse(openApi()),
 		"/api/session": { GET: guarded((_req, session) => sessionInfo(app, session)) },
 		"/api/login": { POST: (req: Request, server: Listener) => login(app, req, server, patience, people.signIn) },
