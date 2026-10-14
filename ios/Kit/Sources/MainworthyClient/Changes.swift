@@ -78,7 +78,7 @@ public struct ChangeSummary: Identifiable, Equatable, Sendable {
 		self.init(Wire.ChangeSummary(
 			key: key, title: basis.title, branch: header?.branch ?? known?.branch, head: basis.head,
 			url: header?.url ?? known?.address?.absoluteString,
-			state: known?.state.name ?? "unknown", verdict: gate.verdict
+			state: basis.state, verdict: gate.verdict
 		))
 	}
 }
@@ -194,7 +194,8 @@ extension ProjectClient {
 		// Keep questions and gate reads between two replies that name the same head and run.
 		let confirmed: Wire.ChangeImpact = try await server.read("impact", in: key, ["change": .string(change)])
 		guard confirmed.change.key == change, confirmed.change.head == affected.change.head,
-			confirmed.change.base == affected.change.base, confirmed.gate?.run == status.run else { return nil }
+			confirmed.change.base == affected.change.base, confirmed.change.state == affected.change.state,
+			confirmed.gate?.run == status.run else { return nil }
 		return ChangeDetails(
 			change: ChangeSummary(key: change, basis: affected.change, gate: status, header: header, known: known),
 			base: affected.change.base, gate: ChangeGate(status),
