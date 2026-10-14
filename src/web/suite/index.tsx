@@ -387,8 +387,8 @@ export function SuiteScreen() {
 		return () => clearTimeout(timer);
 	}, [text]);
 	useEffect(() => {
-		if (list.hasNextPage && !list.isFetchingNextPage) void list.fetchNextPage();
-	}, [list.hasNextPage, list.isFetchingNextPage, list.fetchNextPage]);
+		if (list.hasNextPage && !list.isFetching) void list.fetchNextPage();
+	}, [list.hasNextPage, list.isFetching, list.fetchNextPage]);
 	const previousRoute = useRef({ ref: route.ref, folder: route.folder });
 	useEffect(() => {
 		const previous = previousRoute.current;
