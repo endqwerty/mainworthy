@@ -19,6 +19,10 @@ import { z } from "zod";
 	async () => {
 		const server = await fixture();
 		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		let release = () => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
 		try {
 			await server.api("propose", {
 				edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total updates" }],
@@ -56,6 +60,13 @@ import { z } from "zod";
 			await view.page.locator(".prop .diff").waitFor();
 			expect(await view.page.locator(".prop .diff").innerText()).toContain("$90.00");
 			expect(await view.page.locator(".prop").innerText()).toContain("writer proposes");
+			// The reply to the answer is held, so the server has the adopted version while the page has not yet
+			// recorded its answer: the order in which a fast person presses u.
+			await view.page.route("**/decide", async (route) => {
+				const response = await route.fetch();
+				await held;
+				await route.fulfill({ response }).catch(() => {});
+			});
 			await view.page.keyboard.press("a");
 			const current = await eventually(
 				() => server.api("get", { refs: ["C-1"] }),
@@ -69,12 +80,22 @@ import { z } from "zod";
 				by: "writer",
 				kind: "agent",
 			});
+			// Pressed before the page has its reply, u already says that an adopted edit stays. The pane's own
+			// line is replaced by "recorded" when the reply lands, so this is read from the status bar, which stays.
+			await view.page.keyboard.press("u");
+			const status = view.page.locator("#bar").filter({ hasText: "An adopted edit stays in history." });
+			await status.waitFor();
+			release();
+			await view.page.getByText(`${proposed.question} · Accept · recorded`, { exact: false }).waitFor();
+			// Pressed once the page has recorded the answer, the pane says it too, and keeps saying it.
 			await view.page.keyboard.press("u");
 			await view.page.getByText("Proposal decisions cannot be withdrawn.", { exact: false }).waitFor();
+			await status.waitFor();
 			expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(2);
 			expect(view.errors).toEqual([]);
 			expect(view.dialogs).toEqual([]);
 		} finally {
+			release();
 			await view?.close();
 			await server.stop();
 		}
