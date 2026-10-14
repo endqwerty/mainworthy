@@ -42,10 +42,11 @@ export function useSuiteBindings({
 	cancelFolder: (() => void) | null;
 }): void {
 	// The tag and folder forms close with Escape, which a phone has no key for: while one is open, the palette lists
-	// what Escape does there (decision 0018). Escape in the form's field is the field's own. Escape in the case
-	// editor still leaves the editor.
-	const outsideEditor = () =>
-		!(document.activeElement instanceof Element && document.activeElement.closest(".body-editor"));
+	// what Escape does there (decision 0018), and runs it when chosen. Escape in the form's field is the field's own.
+	// The key stands aside while the palette or the sheet of keys is open (`enabled`), whose Escape closes it, and
+	// while the focus is in the case editor, whose Escape leaves the editor.
+	const cancelling = () =>
+		enabled && !(document.activeElement instanceof Element && document.activeElement.closest(".body-editor"));
 	useBindings(
 		[
 			// The three marked `list` do not act on the case the detail shows (`Binding.list`).
@@ -83,9 +84,9 @@ export function useSuiteBindings({
 		]
 			.map((binding) => ({ ...binding, when: () => enabled }))
 			.concat(
-				cancelTag ? [{ key: "escape", label: "Cancel tag", list: true, handler: cancelTag, when: outsideEditor }] : [],
+				cancelTag ? [{ key: "escape", label: "Cancel tag", list: true, handler: cancelTag, when: cancelling }] : [],
 				cancelFolder
-					? [{ key: "escape", label: "Cancel new folder", list: true, handler: cancelFolder, when: outsideEditor }]
+					? [{ key: "escape", label: "Cancel new folder", list: true, handler: cancelFolder, when: cancelling }]
 					: [],
 			),
 	);
