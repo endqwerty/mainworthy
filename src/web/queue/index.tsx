@@ -659,10 +659,11 @@ function QueueWorkbench() {
 			when: () => active() && Boolean(last || current?.decision),
 		},
 		// A reason the policy asks for, or one for a withdrawal, is left with Escape, which a phone has no key for:
-		// the palette lists it while the field is open (decision 0018). The reference's field needs none: Enter
-		// records the answer without one, as its Escape does.
+		// the palette lists it while the field is open (decision 0018), and runs it when chosen. The key stands aside
+		// while the palette or the sheet of keys is open, whose Escape closes it. The reference's field needs none:
+		// Enter records the answer without one, as its Escape does.
 		...(inline && inline.field === "reason"
-			? [{ key: "escape", label: "Cancel", handler: () => setInline(null) }]
+			? [{ key: "escape", label: "Cancel", handler: () => setInline(null), when: () => !overlayOpen }]
 			: []),
 	];
 	useBindings(keys);

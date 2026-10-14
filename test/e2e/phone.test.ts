@@ -774,10 +774,23 @@ test.skipIf(!browserAvailable)(
 	"on a phone the palette lists Cancel for a form that closes only with Escape",
 	async () => {
 		const server = await startServer({ cases: 3, preset: "standard" });
-		const phone = await openPage(server, { device: "phone", path: "/p/scratch/suite" });
+		// The page starts on another screen: a screen reached by navigation registers its keys after the shell's,
+		// and its Escape must still not take the palette's (review of #218).
+		const phone = await openPage(server, { device: "phone", path: "/p/scratch/runs" });
 		try {
 			const { page } = phone;
+			await page.locator("#list").waitFor();
+			await page.keyboard.type("gs");
+			await page.waitForURL("**/p/scratch/suite");
 			const palette = page.locator("[data-overlay=palette]");
+			/** With a keyboard attached: ⌘K over the open form, then Escape closes the palette and keeps the form. */
+			const escapeClosesPaletteOnly = async (field: ReturnType<typeof page.locator>) => {
+				await page.keyboard.press("ControlOrMeta+k");
+				await palette.waitFor();
+				await page.keyboard.press("Escape");
+				await palette.waitFor({ state: "detached" });
+				expect(await field.count()).toBe(1);
+			};
 			const offered = async (name: RegExp) => {
 				await actions(page).tap();
 				const count = await palette.getByRole("option", { name }).count();
@@ -807,6 +820,7 @@ test.skipIf(!browserAvailable)(
 			await choose(/Tag selected/);
 			const tagField = page.getByRole("textbox", { name: "Tag selected cases", exact: true });
 			await tagField.waitFor();
+			await escapeClosesPaletteOnly(tagField);
 			expect(await offered(/Cancel tag/)).toBe(1);
 			await choose(/Cancel tag/);
 			expect(await tagField.count()).toBe(0);
@@ -837,7 +851,10 @@ test.skipIf(!browserAvailable)(
 			page.on("request", (request) => {
 				if (new URL(request.url()).pathname.endsWith("/decide")) writes.push("decide");
 			});
-			await page.goto(`${server.url}/p/scratch/queue`);
+			await page.goto(`${server.url}/p/scratch/runs`);
+			await page.locator("#list").waitFor();
+			await page.keyboard.type("gq");
+			await page.waitForURL("**/p/scratch/queue**");
 			await page.locator("#list [role=option]").first().tap();
 			await frames(page);
 			await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : null));
@@ -845,6 +862,7 @@ test.skipIf(!browserAvailable)(
 			const reason = page.locator("#answer-extra");
 			await reason.waitFor();
 			expect(await page.locator("label[for=answer-extra]").innerText()).toBe("Reason required by policy");
+			await escapeClosesPaletteOnly(reason);
 			expect(await offered(/Cancel\b/)).toBe(1);
 			await choose(/Cancel\b/);
 			expect(await reason.count()).toBe(0);
