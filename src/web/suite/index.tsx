@@ -457,25 +457,10 @@ export function SuiteScreen() {
 		// Another window's draft that it removed is not stored again from here. The person's own text still is.
 		if (endingDraft()?.id === next.id && next.owner !== windowId) return;
 		// No draft is made of a case the page owes a read of. `edit` and `begin` read first and open on what comes
-		// back. A property changed from the read view comes here: what it changed of the case shown is made on the
-		// case as read, unless that changed the same property too (issue #135).
+		// back. A property changed from the read view comes here: the case is read, and the change is to be made again
+		// on the case as read (issue #135 leaves it so: making it after the read raced the person's later choices).
 		if (next.ref !== null && owes(next.ref)) {
-			const ref = next.ref;
-			void readOwed(ref, (read) => {
-				const current = draftRef.current?.ref === ref ? draftRef.current : editDraft(read);
-				const made = mergeBodies({ base: next.original, mine: next.body, theirs: current.body });
-				if (made.conflicts.length > 0) {
-					setStatus(
-						"The case is shown as the server recorded it. The same property was changed since this page last read the case, so your change was not made.",
-					);
-					return;
-				}
-				change({ ...current, body: made.merged, dirty: true, caret: next.caret });
-				// `change` may refuse it (another window has a draft of the case now) and says why itself.
-				const after = draftRef.current;
-				if (after?.ref === ref && after.owner === windowId && sameBody(after.body, made.merged))
-					setStatus("The case is shown as the server recorded it, with your change made on it.");
-			});
+			void readOwed(next.ref, () => {});
 			return;
 		}
 		const prior = draftRef.current;

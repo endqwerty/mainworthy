@@ -649,25 +649,27 @@ case was read and then dropped.
 
 Now `readCase` keeps the read of each owed case while it is on its way, and every request for it waits on that
 one: `endFollowed`, and `readOwed` for `e`, a click on a field and a property change. It holds what it read and
-takes the case out of `owed` once. A property change waits on it like the others, and what it changed of the
-case shown is made on the case as read (`mergeBodies`); if the same property was changed since the page last
-read the case, it is not made, and the status line says so. A request whose case is no longer the one in the pane gets nothing.
+takes the case out of `owed` once. A property change waits on it like the others, and is not made: the person
+makes it again on the case as read, as before. A request whose case is no longer the one in the pane gets nothing.
 
 What the shared read cannot hand to the wrong place: it is per screen, and the screen is made again for each
 person (the `Workbench` key) and each project (the screen's key). `call` refuses a reply that arrives in another
 session, and the read holds the case only in the session that made it. It is keyed by the case, and each waiter
 opens only if its case is still the one in the pane. What the read brings is the case as recorded. Whether this
 window may write a draft of it is asked after the read, as before: `e` and a click do not take a draft a live
-window owns (`claimDraft`), and a property change goes through `change`, which refuses one (`mayWrite`).
+window owns (`claimDraft`).
 
 | Route | Test | What the test requires |
 | --- | --- | --- |
-| The read held; a property ticked in the read view and `e` pressed twice | `round6.test.ts`, R6-1 a case left before the second tab could read it | One read of the case while it is held; then one editor, on the merged title, with the property ticked; the property is recorded with that title |
+| The read held; a property ticked in the read view and `e` pressed twice | `round6.test.ts`, R6-1 a case left before the second tab could read it | One read of the case while it is held; then one editor, on the merged title, with the property not ticked; leaving it stores no draft |
 
 It failed before the change with `Expected: 1  Received: 3` reads. With the sharing taken out it fails the same
-way; with the property no longer made after the read, at the property (`Expected: true  Received: false`).
-Run by hand, not a test: the same property changed through the API meanwhile (the change is not made, and the
-status says so); another case selected while the read waits (nothing is made or said there). Not tested:
+way. Run by hand, not a test: another case selected while the read waits (nothing is made or said there).
+
+A first version also made the property change on the case as read. Its review found three ways that went wrong:
+a second choice made while the read waited lost to the first, the "not made" line was overwritten by the line of
+the `e` waiting beside it, and a screen left for another project made the change when the read came back. That
+part was taken out; the issue lists the dropped change as a known limit, and it stays one. Not tested:
 `endFollowed` and a press of `e` waiting on the same read (the read of a removed draft still on its way when
 the person leaves the case, comes back and presses `e`); by reading, both go through `readCase`.
 

@@ -136,9 +136,9 @@ The card stays until the page has read the case as the server recorded it, in a 
 That is your merge or a later version. A merge that waits for approval under a stricter policy has not changed the case yet.
 If the read fails, the card stays and the page says so: choose "Resolve conflict" again, or "Read the case again" in a second tab.
 If you leave the case in that second tab before it is read, `e` reads it first when you come back,
-and so does a click on a field or a change to a property. A property you change is changed on the case
-as read, unless that property was changed elsewhere too: then the status line says your change was not made.
-Until that read, the case is shown as that tab last read it.
+and so does a click on a field or a change to a property. A property you change before that read is not
+kept: change it again once the case is shown as recorded. Until that read, the case is shown as that tab
+last read it.
 
 ## Review under a stricter policy
 
