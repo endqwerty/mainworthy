@@ -6,7 +6,7 @@ import { invalidateProject, useQueryOp } from "../lib/data.ts";
 import { randomId } from "../lib/ids.ts";
 import { navigate, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
-import { KeyCap } from "../ui/index.tsx";
+import { KeyCap, Select } from "../ui/index.tsx";
 
 export function RunPlanner({ close }: { close: () => void }) {
 	const { project, setStatus } = useApp();
@@ -96,12 +96,11 @@ export function RunPlanner({ close }: { close: () => void }) {
 				maxLength={200}
 			/>
 			<label htmlFor="run-selection">Cases</label>
-			<select
+			<Select
 				className="form-input"
 				id="run-selection"
 				value={mode}
 				onChange={(event) => {
-					event.currentTarget.blur();
 					const value = z.enum(["all", "folder", "tag", "text"]).parse(event.target.value);
 					setMode(value);
 					setFilter("");
@@ -111,14 +110,13 @@ export function RunPlanner({ close }: { close: () => void }) {
 				<option value="folder">By folder</option>
 				<option value="tag">By tag</option>
 				<option value="text">By search</option>
-			</select>
+			</Select>
 			{mode === "folder" ? (
-				<select
+				<Select
 					className="form-input"
 					aria-label="Folder"
 					value={filter}
 					onChange={(event) => {
-						event.currentTarget.blur();
 						setFilter(event.target.value);
 					}}
 				>
@@ -129,7 +127,7 @@ export function RunPlanner({ close }: { close: () => void }) {
 								{folder.path || "Root"}
 							</option>
 						))}
-				</select>
+				</Select>
 			) : (
 				mode !== "all" && (
 					<input

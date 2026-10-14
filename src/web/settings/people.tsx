@@ -6,7 +6,7 @@ import { copySecret } from "../lib/clipboard.ts";
 import { useQueryOp } from "../lib/data.ts";
 import { createInvitation, dateTime, listInvitations, revokeInvitation, until } from "../lib/people.ts";
 import { useApp } from "../ui/context.tsx";
-import { age, DocLink, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
+import { age, DocLink, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
 import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
 import "./people.css";
 
@@ -191,12 +191,10 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 					change what others may do. It starts unticked.
 				</p>
 				<label htmlFor="invite-project">On</label>
-				<select
+				<Select
 					className="form-input"
 					id="invite-project"
 					value={onProject}
-					// The select keeps the focus when it changes, unlike the selects of the shell: an arrow key changes
-					// it one step at a time, and Tab goes on down the form.
 					onChange={(event) => setOnProject(event.target.value)}
 				>
 					<option value="">Every project</option>
@@ -205,9 +203,9 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 							{entry.name}
 						</option>
 					))}
-				</select>
+				</Select>
 				<label htmlFor="invite-expires">The link works for</label>
-				<select
+				<Select
 					className="form-input"
 					id="invite-expires"
 					value={expires}
@@ -218,7 +216,7 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 							{text}
 						</option>
 					))}
-				</select>
+				</Select>
 				<p className="settings-problem" role="status">
 					{problem}
 				</p>

@@ -18,7 +18,7 @@ import { randomId } from "../lib/ids.ts";
 import { useBindings } from "../lib/keys.ts";
 import { navigate, projectUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
-import { age, DocLink, EmptyState, KeyCap, ListRow, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
+import { age, DocLink, EmptyState, KeyCap, ListRow, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
 import { People } from "./people.tsx";
 import { YourSessions } from "./sessions.tsx";
 import { YourSignIn } from "./signin.tsx";
@@ -295,13 +295,12 @@ function SettingsWorkbench() {
 								</div>
 								<label>
 									Preset{" "}
-									<select
+									<Select
 										className="form-input"
 										aria-label="Policy preset"
 										value={switchingPreset ?? preset}
 										disabled={!admin || Boolean(switching)}
 										onChange={(event) => {
-											event.currentTarget.blur();
 											void changePolicy({ preset: event.target.value });
 										}}
 									>
@@ -315,7 +314,7 @@ function SettingsWorkbench() {
 												{name}
 											</option>
 										))}
-									</select>
+									</Select>
 								</label>
 							</div>
 							<PresetGuide marked={inForce} as="in force" />
@@ -346,13 +345,12 @@ function SettingsWorkbench() {
 										<b>Tests with no case</b>
 										<small>{UNLINKED_HELP[switchingUnlinked ?? unlinked]}</small>
 									</span>
-									<select
+									<Select
 										className="form-input"
 										aria-label="Tests with no case"
 										value={switchingUnlinked ?? unlinked}
 										disabled={!admin || Boolean(switching)}
 										onChange={(event) => {
-											event.currentTarget.blur();
 											const chosen = Unlinked.safeParse(event.target.value);
 											if (chosen.success) void changePolicy({ unlinked: chosen.data });
 										}}
@@ -363,7 +361,7 @@ function SettingsWorkbench() {
 												{UNLINKED_LABELS[value]}
 											</option>
 										))}
-									</select>
+									</Select>
 								</label>
 							)}
 							<p className="settings-message" role="status">
@@ -517,12 +515,11 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 					required
 				/>
 				<label htmlFor="token-kind">Producer</label>
-				<select
+				<Select
 					className="form-input"
 					id="token-kind"
 					value={kind}
 					onChange={(event) => {
-						event.currentTarget.blur();
 						const chosen = z.enum(["human", "agent", "ci"]).parse(event.target.value);
 						setKind(chosen);
 						// Each producer starts from what its kind is for; a pipeline records and nothing else.
@@ -532,7 +529,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 					<option value="agent">Agent</option>
 					<option value="ci">Pipeline</option>
 					<option value="human">Person</option>
-				</select>
+				</Select>
 				<fieldset className="settings-capabilities">
 					<legend>Permissions</legend>
 					{(kind === "ci" ? CI_CAPABILITIES : Capability.options).map((can) => (
@@ -551,12 +548,11 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 					))}
 				</fieldset>
 				<label htmlFor="token-expires">Expires</label>
-				<select
+				<Select
 					className="form-input"
 					id="token-expires"
 					value={expires}
 					onChange={(event) => {
-						event.currentTarget.blur();
 						const chosen = LIFETIMES.find((lifetime) => lifetime.value === event.target.value);
 						if (chosen) setExpires(chosen.value);
 					}}
@@ -566,7 +562,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 							{lifetime.label}
 						</option>
 					))}
-				</select>
+				</Select>
 				<button className="out" type="submit" disabled={busy || !actor.trim() || !capabilities.length}>
 					Create token
 				</button>
@@ -742,13 +738,12 @@ function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElem
 							maxLength={120}
 						/>
 						<label htmlFor="project-preset">Initial policy</label>
-						<select
+						<Select
 							className="form-input"
 							id="project-preset"
 							aria-describedby="project-preset-help"
 							value={preset}
 							onChange={(event) => {
-								event.currentTarget.blur();
 								setPreset(Preset.parse(event.target.value));
 							}}
 						>
@@ -757,7 +752,7 @@ function ProjectSettings({ inputRef }: { inputRef: React.RefObject<HTMLInputElem
 									{p}
 								</option>
 							))}
-						</select>
+						</Select>
 						<p className="settings-preset-summary" id="project-preset-help">
 							{PRESET_SUMMARY[preset]}
 						</p>
