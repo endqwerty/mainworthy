@@ -85,7 +85,21 @@ test.skipIf(!browserAvailable)(
 			await page.waitForURL("**/suite/c/1");
 			await page.keyboard.press("?");
 			expect(await page.getByRole("region", { name: "Keyboard shortcuts" }).count()).toBe(1);
+			// The app under the sheet is inert, as it is on a phone: Tab, many times over,
+			// never reaches a control of the app.
+			expect(await page.locator("#app").evaluate((node) => node.hasAttribute("inert"))).toBe(true);
+			const under: string[] = [];
+			for (let tabs = 0; tabs < 45; tabs++) {
+				await page.keyboard.press("Tab");
+				const where = await page.evaluate(() => {
+					const node = document.activeElement;
+					return node?.closest("#app") ? `${node.tagName.toLowerCase()} ${node.textContent?.slice(0, 20)}` : null;
+				});
+				if (where) under.push(where);
+			}
+			expect(under).toEqual([]);
 			await page.keyboard.press("Escape");
+			expect(await page.locator("#app").evaluate((node) => node.hasAttribute("inert"))).toBe(false);
 			await page.getByRole("button", { name: "Toggle theme" }).click();
 			expect(await page.locator("html").getAttribute("data-theme")).toBe("dark");
 			expect(browser.loads()).toBe(1);

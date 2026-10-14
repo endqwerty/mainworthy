@@ -9,6 +9,11 @@ export type Binding = {
 	allowInInput?: boolean;
 	hidden?: boolean;
 	/**
+	 * A phone's palette does not list it: it opens the palette or the sheet of keys, which a finger reaches by
+	 * a button, and a sheet of keys is no use without a keyboard. The key still works where there is one.
+	 */
+	desktopOnly?: boolean;
+	/**
 	 * An action of the list: it runs on a phone while the list is shown, from the palette and from a key of a
 	 * keyboard attached to it. Every other action runs there only while the detail is shown, because it may act
 	 * on what the detail shows (an answer, a result, an accepted proposal) and nobody decides about what they

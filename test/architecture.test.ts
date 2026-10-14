@@ -398,6 +398,8 @@ describe("the phone layout", () => {
 			"src/web/runs/index.tsx: Plan run",
 			"src/web/suite/bindings.ts: Filter",
 			"src/web/suite/bindings.ts: New case",
+			// It makes a folder, whose form the shell shows by opening the sidebar, and decides nothing about a case.
+			"src/web/suite/bindings.ts: New folder",
 		]);
 		// Every `list` property in the source is one of those: written `true`, and where the pattern above reads it.
 		const values = sources.flatMap(({ file, text }) =>
