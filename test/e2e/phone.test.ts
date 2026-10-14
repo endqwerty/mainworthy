@@ -650,6 +650,68 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
+	"on a phone with a keyboard the palette takes the arrows and Enter without the field having the focus",
+	async () => {
+		const server = await startServer({ cases: 2 });
+		await server.api("admin", { do: "project.create", key: "checkout", name: "Checkout", preset: "standard" });
+		await server.api("admin", { do: "project.create", key: "payments", name: "Payments", preset: "loose" });
+		const phone = await openPage(server, { device: "phone", path: "/p/checkout/suite" });
+		try {
+			const { page } = phone;
+			page.setDefaultTimeout(5000);
+			const palette = page.locator("[data-overlay=palette]");
+			const fieldHasFocus = () => page.evaluate(() => document.activeElement?.className === "palette-input");
+			// g p lists the projects and starts on the first other one: scratch, from checkout.
+			await page.keyboard.type("gp");
+			await palette.waitFor();
+			expect(await fieldHasFocus()).toBe(false);
+			await page.keyboard.press("Enter");
+			await page.waitForURL("**/p/scratch/suite");
+			// From scratch the choice starts on checkout; one ArrowDown moves it to payments.
+			await page.locator("#app").waitFor();
+			await page.keyboard.type("gp");
+			await palette.waitFor();
+			await page.keyboard.press("ArrowDown");
+			expect(await palette.getByRole("option", { selected: true }).innerText()).toContain("payments");
+			expect(await fieldHasFocus()).toBe(false);
+			await page.keyboard.press("Enter");
+			await page.waitForURL("**/p/payments/suite");
+
+			// The palette that the key and the Actions button open: the arrows move the choice, Enter runs it,
+			// Escape closes it. A letter typed there changes nothing, and the field keeps the keyboard off.
+			await page.locator("#app").waitFor();
+			await page.keyboard.press("Control+k");
+			await palette.waitFor();
+			const names = await palette.getByRole("option").allInnerTexts();
+			const queue = names.findIndex((name) => name.includes("Go to Queue"));
+			expect(queue).toBeGreaterThan(0);
+			await page.keyboard.type("zz");
+			expect(await palette.locator(".palette-input").inputValue()).toBe("");
+			for (let i = 0; i < queue; i++) await page.keyboard.press("ArrowDown");
+			expect(await palette.getByRole("option", { selected: true }).innerText()).toContain("Go to Queue");
+			expect(await fieldHasFocus()).toBe(false);
+			await page.keyboard.press("Enter");
+			await page.waitForURL("**/p/payments/queue");
+			expect(await palette.count()).toBe(0);
+
+			await actions(page).tap();
+			await palette.waitFor();
+			await page.keyboard.press("ArrowDown");
+			expect(
+				await palette.getByRole("option").evaluateAll((rows) => rows.findIndex((row) => row.ariaSelected === "true")),
+			).toBe(1);
+			await page.keyboard.press("Escape");
+			expect(await palette.count()).toBe(0);
+			expect(phone.errors).toEqual([]);
+		} finally {
+			await phone.close();
+			await server.stop();
+		}
+	},
+	60_000,
+);
+
+test.skipIf(!browserAvailable)(
 	"the sign-in page fits a phone",
 	async () => {
 		const server = await startServer({ mode: "server" });
