@@ -306,6 +306,7 @@ for (const key of ["Enter", "Escape"])
 				if (!question) throw Error("Missing other question");
 				await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "infra" } });
 				await page.getByText(`${second} removed from the selection`, { exact: false }).waitFor();
+				expect(await page.locator(".queue-inline").innerText()).toContain("Escape skips the reference");
 				await page.keyboard.press(key);
 				await page.locator(".queue-inline").waitFor({ state: "detached" });
 				const answered = await eventually(

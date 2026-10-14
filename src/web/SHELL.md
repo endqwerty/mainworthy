@@ -126,6 +126,24 @@ The palette closes before invoking the choice callback, and each opening starts 
 nothing typed, also one made from a choice. No native dialogs: a list to pick from is the
 palette, not a `<select>` in the shell or a menu of its own.
 
+## What a note and an Escape record (issue #73)
+
+Each of these is as the screen says, and a test pins it.
+
+- A run slot's note is the person's text about the slot, shown in the one field "Result note" beside the keys. It
+  is not labelled as belonging to a failure. Whatever is recorded next on that slot takes the note that is in the
+  field, so a `p` after a failure whose request failed records the pass with the note the screen shows
+  (`execution.test.ts`, "a failure note is kept on the device"). Dropping it on `p` would lose input.
+- In the queue's defect reference field Escape records the defect without a reference. The field says so
+  ("Defect reference, optional", "Enter records · Escape skips the reference") and the hint is checked in R5B-3
+  (`round5.test.ts`). The reason field, which is required, is cancelled by Escape. Whether Escape in the reference
+  field should cancel the answer instead is the owner's to decide.
+- A queue question that is no longer listed refuses Enter in its answer field in one of two states: the page has
+  read that it was settled ("This question was settled elsewhere. Your note is kept."), or it is still reading
+  ("Reading this question before answering. Your note is kept."). Both are true when shown, and when the read
+  ends the second message becomes the first (`round3-interactions.test.ts`, "R3B-2 a question settled
+  elsewhere while the queue first reads it").
+
 ## Shared UI and styles
 
 `ui/index.tsx` exports `KeyCap({children})`, `ProducerGlyph({kind})`,
