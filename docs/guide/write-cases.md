@@ -66,6 +66,14 @@ Its expected result, if it has one, stays in your draft in the same way.
 If someone else records that step again while yours still has no action, their step replaces
 what your draft held of it, and an expected result of yours that differs from theirs stays as a new step.
 
+When the page does not hear back about a save (a reload, a closed tab, a lost connection), it asks the
+server what became of that save the next time the draft is open. If the save made a version, the status line
+says "Your last save is recorded as version N", and the save is not sent again. If it is not recorded yet, it
+may still be on its way, so the page sends that same save again: the server records it once, however many
+copies of it arrive. Either way, anything you typed after it is sent when you leave.
+A tab closed before it hears back sends nothing more: the draft stays on this device, and the page asks when
+you open it again.
+
 The draft status says "Draft, saved on this device" when device storage works.
 If storage is unavailable, it says "Draft, kept in this tab". Keep that tab open
 until a version is recorded. Drafts do not sync between devices.

@@ -678,6 +678,54 @@ read it, which can be from before the other tab's change, until `e`, a click, a 
 own refetch succeeds. Showing that would take the read view saying the case may be out of date, with a way to
 read it again, as the ending draft's pane does (`draftEndedStatus`), in `case/pane.tsx`.
 
+## Issue #71: a save whose reply was lost is asked about before anything is sent (and #73, item 1)
+
+The editor's save stores its request with the draft (`sent`). When the reply was lost, the next leave sent the
+same request again under the same id, and sent what was typed since only after that reply. Rounds 3 and 4
+(A-1, A-2, R4A-1, R4A-2) found routes on which the remembered request went out when it should not. A tab closed
+twice in one sentence (#73) sent the first tab's request again as it closed, and the newer text never went out,
+because a closing page gets no reply.
+
+Now `sealDraft` asks `command` about the remembered save first. `done`: the recorded reply is handled as a live
+one, and the request is not sent again. `none`: the same request goes again, unchanged, under its own id: it may
+still be on its way, and the server records one id once. Then what was typed since goes under a new id. `begun`
+or no answer: nothing is sent, and the draft is kept. An effect asks as soon as a draft with such a save is in
+the pane, once for each save, and only settles that save (`settleOnly`): taken as recorded, or sent again;
+nothing typed since goes until the editor is left. So a second tab is on the version the first close made
+before the person types. A page that closes before an answer sends nothing more. Decision 0013, "The ordinary
+save asks too", has the reasons and what was turned down.
+
+The first build sent the current text under a new id on `none`. Its review (B1) held the first save on its way,
+reloaded, and let the page's `none` stand: the held save then landed after the current text, as a second case
+for a capture and as a conflict question for an edit. The answer is the rule above: on `none` the one request
+sent is the one that cannot be recorded twice.
+
+| Route | Test | What the test requires |
+| --- | --- | --- |
+| A tab closed in a sentence; a second tab opens the draft, the person types on and closes it | `round3-capture.test.ts`, "a tab closed twice in one sentence" | The second tab says "Your last save is recorded as version 2"; version 3 has the whole sentence |
+| The server recorded the save, its reply was lost, and the page's first question about it got no answer either; more is typed; Escape | `round3-capture.test.ts`, A-1 (new and edit) | Two proposals in all, under two ids, and two `command` questions |
+| A save is held on its way; more is typed; the page reloads, and its question is answered `none`; Escape; the held save then lands | `round3-capture.test.ts`, "a save still on its way when the page reloads is recorded once" (new and edit) | One case, no question; the held save's version has the first phrase and the next has the rest; the held copy gets the reply of the copy sent again; two ids, each with one request body |
+| The save never reached the server; a colleague changes the title; more is typed; Escape | `draft-conflicts.test.ts`, R4A-1 | The first request goes again under its own id, unchanged; it meets the colleague's title as a conflict, and the card shows the current text |
+| A capture's save goes out as the page reloads | `recovery.test.ts`, "reload offers every unsaved new case and each can be sent once" | A capture with a save of unknown fate is a case once it is opened (recorded, or sent again under its id); the other is sent once |
+| A capture's save goes out as the page closes or reloads | `session-and-keys.test.ts`, R4C-4 (close and reload) | The returning page says version 1 (recorded, or sent again); one case, at version 1 |
+
+On `d5623a3` (the first build): B1's two tests fail with two cases for the capture and one open question for
+the edit; R4A-1 with the second request under a new id; R4C-4 at its status wait, which looked for "Version"
+where the page said "Your last save is recorded as version 1". The double close, A-1 and R4A-1 had failed on
+`2a56c24`, before any of it. Taken out one at a time from the corrected change: without the question on
+opening, the double close fails (and A-1, which counts two questions); with the question on leaving taken out
+(the remembered request sent again unasked), both A-1 tests fail with three proposals.
+
+The recovery test sent a capture whose save the browser had delivered as the page reloaded, and the replay
+answered it with the case the server had made. The reloaded page now settles that save as soon as the capture
+is in the pane, and shows the case. The test opens each capture, waits for its save to be settled, and sends
+the ones that are still captures.
+
+Left: a page that closes before the answer sends nothing; the draft waits for the next page. A save sent again
+on `none` records the text it carried, which the person may have changed since; the later text is the next
+version. "Take over here" still drops the former owner's request: if that request was recorded, or lands later,
+the new owner's save meets it.
+
 ## The documentation at `/docs` (decision 0016)
 
 The checks that decide this change, written before it. `test/docs.test.ts` and `test/e2e/docs.test.ts` hold them.

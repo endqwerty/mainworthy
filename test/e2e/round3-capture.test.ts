@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
-import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
+import { browserAvailable, eventually, fetched, openPage, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
 const titleOf = (page: Awaited<ReturnType<typeof openPage>>["page"]) =>
@@ -29,6 +29,13 @@ for (const kind of ["new", "edit"]) {
 						await route.abort("failed");
 					} else await route.continue();
 				});
+				// The page's first question about that save gets no answer either, so the save is decided when the
+				// person leaves the editor (issue #71).
+				let asked = 0;
+				await page.route("**/command", async (route) => {
+					if (asked++ === 0) await route.abort("failed");
+					else await route.continue();
+				});
 				await page.keyboard.press(kind === "new" ? "c" : "e");
 				await titleOf(page).fill("Refund to the original pay");
 				await page.keyboard.press("Escape");
@@ -54,7 +61,136 @@ for (const kind of ["new", "edit"]) {
 							.filter((other) => other.cmd === request.cmd)
 							.every((other) => JSON.stringify(other.edits) === JSON.stringify(request.edits)),
 					).toBe(true);
+				// The page asks the server what became of the first save (issue #71) and does not send it again.
+				expect(requests).toHaveLength(2);
+				expect(asked).toBe(2);
 			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
+
+// Issue #73, item 1, and issue #71. A tab is closed in the middle of a sentence: its save goes out as it closes
+// and is recorded, but a closed tab gets no reply, so the draft keeps that save's request. A second tab opens the
+// draft and learns from the server what became of the save. The person goes on with the sentence and closes this
+// tab too. The second close records the whole sentence. (A closing page's requests are not seen by the test's
+// listeners; A-1 above counts them on a page that stays open.)
+check(
+	"a tab closed twice in one sentence records the whole sentence",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", outline: "Case 1\n  Open cart" }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const a = h.page;
+			a.setDefaultTimeout(5000);
+			await a.getByRole("button", { name: "Case 1", exact: true }).waitFor();
+			await a.keyboard.press("e");
+			await titleOf(a).fill("Case 1 for return");
+			await a.close({ runBeforeUnload: true });
+			await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.title === "Case 1 for return",
+			);
+			const b = await h.context.newPage();
+			b.setDefaultTimeout(5000);
+			await b.goto(`${server.url}/p/scratch/suite/c/1`);
+			await b.locator("#stat").filter({ hasText: "Your last save is recorded as version 2" }).waitFor();
+			await titleOf(b).press("End");
+			await b.keyboard.type("ing custom");
+			await b.close({ runBeforeUnload: true });
+			const saved = await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.title === "Case 1 for returning custom",
+			);
+			expect(saved[0]?.version).toBe(3);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+// Issue #71, the review of its first fix (B1). A save is held on its way to the server, the person types on, and
+// the page reloads. `command` says `none` for a request still on its way, so the page sends that same request
+// again under its own id, which the server records once however many copies of it arrive, and sends what was
+// typed since under a new id. When the held copy lands, it is given the first reply. (Sending the current text
+// under a new id on `none` recorded the first phrase a second time when the held copy landed: a second case, or
+// a conflict with the person's own version.)
+for (const kind of ["new", "edit"]) {
+	check(
+		`${kind}: a save still on its way when the page reloads is recorded once`,
+		async () => {
+			const server = await startServer();
+			if (kind === "edit") await server.api("propose", { edits: [{ op: "create", outline: "Original\n  Open cart" }] });
+			const h = await openPage(server, { path: kind === "new" ? "/p/scratch/suite" : "/p/scratch/suite/c/1" });
+			let release = () => {};
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			try {
+				const { page } = h;
+				page.setDefaultTimeout(5000);
+				await page.locator("#list").waitFor();
+				if (kind === "edit") await page.getByRole("button", { name: "Original", exact: true }).waitFor();
+				const requests: { cmd: string; edits: unknown[] }[] = [];
+				let late: unknown;
+				await h.context.route("**/propose", async (route) => {
+					requests.push(
+						z.object({ cmd: z.string(), edits: z.array(z.unknown()) }).parse(route.request().postDataJSON()),
+					);
+					if (requests.length > 1) return await route.continue();
+					await held;
+					late = (await fetched(route))?.json ?? null;
+					await route.abort().catch(() => {});
+				});
+				await page.keyboard.press(kind === "new" ? "c" : "e");
+				await titleOf(page).fill("First phrase");
+				await page.keyboard.press("Escape");
+				await eventually(
+					async () => requests.length,
+					(count) => count === 1,
+				);
+				await titleOf(page).fill("First phrase with the rest");
+				await page.reload();
+				await titleOf(page).click();
+				await page.keyboard.press("Escape");
+				await eventually(
+					() => server.api("get", { refs: ["C-1"] }).catch(() => []),
+					(rows) => rows[0]?.title === "First phrase with the rest",
+				);
+				release();
+				await eventually(
+					async () => late,
+					(reply) => reply !== undefined,
+				);
+				const first = kind === "new" ? 1 : 2;
+				expect((await server.api("find", { in: "cases" })).items).toHaveLength(1);
+				expect((await server.api("inbox", { kind: "adopt" })).items).toHaveLength(0);
+				expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+					title: "First phrase with the rest",
+					version: first + 1,
+				});
+				expect((await server.api("get", { refs: ["C-1"], version: first }))[0]?.title).toBe("First phrase");
+				// The held copy lands last and is given the reply of a copy the page sent again under its id. (That copy
+				// is the reloaded page's, seen here; a request of the page being unloaded would not be.)
+				expect(
+					z
+						.object({ result: z.object({ cases: z.array(z.object({ ref: z.string(), version: z.number() })) }) })
+						.parse(late).result,
+				).toMatchObject({ cases: [{ ref: "C-1", version: first }] });
+				expect(new Set(requests.map((request) => request.cmd)).size).toBe(2);
+				for (const request of requests.filter((other) => other.cmd === requests[0]?.cmd))
+					expect(JSON.stringify(request.edits)).toBe(JSON.stringify(requests[0]?.edits));
+				expect(requests.at(-1)?.cmd).not.toBe(requests[0]?.cmd ?? "");
+				expect(JSON.stringify(requests.at(-1)?.edits)).toContain("First phrase with the rest");
+				expect(await titleOf(page).inputValue()).toBe("First phrase with the rest");
+			} finally {
+				release();
 				await h.close();
 				await server.stop();
 			}
