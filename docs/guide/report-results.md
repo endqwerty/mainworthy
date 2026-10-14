@@ -19,7 +19,10 @@ and the gate at the time of the upload.
 A successful `report` exits `0` even when tests fail. Use `gate` for the verdict.
 An invalid input or refused command exits `4`. See [changes](./changes.md).
 Sending an identical report again returns the original receipt and says
-"already received; nothing was written".
+"already received; nothing was written". The gate line in it is the gate as
+it was at the first upload, so a repeat can show "blocked" for a commit that
+has passed since. The command says so on stderr and points at `mainworthy gate`,
+which reads the verdict now.
 
 [Diagram: one red build, from upload to a green gate](../diagrams/red-build.html)
 

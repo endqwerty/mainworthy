@@ -98,6 +98,13 @@ export const reportCommand: AdapterCommand = {
 			results,
 		});
 		const receipt = await client.call("report", report);
+		// A repeat is answered with the receipt of the first upload, gate line included. That is how a lost reply is
+		// recovered; the gate may have moved since, and the receipt cannot know.
+		if (!receipt.fresh) {
+			warning(
+				"mainworthy: this report was received before. Its receipt, and the gate line in it, are as they were then; `mainworthy gate` says what the verdict is now.",
+			);
+		}
 		if (args.has("json")) printJson(receipt, args.bool("compact"));
 		else printReceipt({ project: await client.project(), report, receipt, url: client.url });
 		return 0;
