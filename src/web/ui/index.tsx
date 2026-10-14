@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ComponentProps, type ReactNode, useRef } from "react";
 import { z } from "zod";
 import { diffBodies, diffWords } from "../../core/diff.ts";
 import { type DocSlug, docUrl } from "../../core/docs.ts";
@@ -117,6 +117,50 @@ export function PasswordCount({ id, text, className }: { id: string; text: strin
 					? `${length} characters, and ${PASSWORD_LENGTH.max} is the most`
 					: `${length} characters`}
 		</div>
+	);
+}
+/**
+ * The one native select of the app. It gives the focus back when the choice is finished, not on every change: a
+ * closed select changes on each arrow key, so one that let go at the first change would take one key and lose the
+ * keyboard. A change that no key on the select came before is a pick from the open list, or the commit of one,
+ * and is finished at once. A change by a key (arrows, Home, End, a typed letter) is not: the select keeps the focus
+ * until Enter or Escape, which are the select's own and reach nothing behind it, or until Tab moves on.
+ * `src/web/SHELL.md`, "Keyboard and palette".
+ */
+export function Select({ onChange, onKeyDown, onKeyUp, onBlur, onPointerDown, ...rest }: ComponentProps<"select">) {
+	const keyed = useRef(false);
+	return (
+		<select
+			{...rest}
+			onPointerDown={(event) => {
+				keyed.current = false;
+				onPointerDown?.(event);
+			}}
+			onKeyDown={(event) => {
+				onKeyDown?.(event);
+				if (event.defaultPrevented) return;
+				if ((event.key === "Enter" || event.key === "Escape") && !(event.ctrlKey || event.metaKey || event.altKey)) {
+					// Not the screen's: Escape must not close the pane behind, nor Enter open a row.
+					event.preventDefault();
+					event.stopPropagation();
+					keyed.current = false;
+					event.currentTarget.blur();
+				} else keyed.current = true;
+			}}
+			onKeyUp={(event) => {
+				keyed.current = false;
+				onKeyUp?.(event);
+			}}
+			onBlur={(event) => {
+				keyed.current = false;
+				onBlur?.(event);
+			}}
+			onChange={(event) => {
+				const select = event.currentTarget;
+				onChange?.(event);
+				if (!keyed.current) select.blur();
+			}}
+		/>
 	);
 }
 export function ListRow({

@@ -11,7 +11,7 @@ import { proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { bodyOf, CaseView, editDraft } from "../suite/model.ts";
 import { useApp } from "../ui/context.tsx";
-import { age, DiffView, EmptyState, KeyCap, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
+import { age, DiffView, EmptyState, KeyCap, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
 import { useCaseBindings } from "./bindings.ts";
 import {
 	BodyEditor,
@@ -918,18 +918,17 @@ function CaseProperties({
 			</div>
 			<label className="automation-intent">
 				Automation{" "}
-				<select
+				<Select
 					value={body.automate}
 					disabled={readOnly}
 					onChange={(event) => {
-						event.currentTarget.blur();
 						change({ ...body, automate: Automate.parse(event.target.value) });
 					}}
 				>
 					<option value="none">Not requested</option>
 					<option value="wanted">Wanted</option>
 					<option value="not-applicable">Not applicable</option>
-				</select>
+				</Select>
 			</label>
 			<div className="hintl">An agent's evidence counts only when the run admits it too.</div>
 		</details>

@@ -7,6 +7,7 @@ Every key of the web UI, by screen. In the app, <kbd>?</kbd> lists the keys of t
 - Two keys in a row, such as <kbd>g</kbd> <kbd>q</kbd>, are pressed one after the other, not together. You have a little under a second for the second key.
 - <kbd>⌘</kbd> is Command on macOS and Ctrl everywhere else.
 - While you type in a field, only <kbd>⌘</kbd> combinations, <kbd>Esc</kbd> and the keys of the case editor work. <kbd>Esc</kbd> leaves the case editor, the filter and a run's note. A field in Settings keeps the focus: click outside it first.
+- A list you choose from, such as a case's automation, a token's producer or a run's cases, keeps the focus while the arrow keys step through it. <kbd>↵</kbd> or <kbd>Esc</kbd> gives the keys back to the screen, and so does <kbd>Tab</kbd>. Picking from the open list gives them back at once.
 - While the palette or the list of keys is open, only <kbd>Esc</kbd> and <kbd>⌘</kbd> <kbd>K</kbd> work.
 - <kbd>↵</kbd> and <kbd>Space</kbd> press a button that you reached with <kbd>Tab</kbd>, and <kbd>↵</kbd> follows a link you reached that way. Everywhere else they are the screen's keys. That includes a button you clicked with the mouse, until the focus moves on, and the rows of a screen's list.
 

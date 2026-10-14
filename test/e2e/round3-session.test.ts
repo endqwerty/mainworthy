@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import type { Locator } from "playwright-core";
 import { z } from "zod";
 import { Slot } from "../../src/web/runs/models.ts";
 import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
@@ -198,31 +199,108 @@ check(
 );
 
 check(
-	"R3C-5 the project picker and the preset select give focus back so the next shortcut works",
+	"R3C-5 a select keeps the focus while the keys choose, and gives it back when the choice is finished",
 	async () => {
-		const server = await startServer();
-		await server.api("admin", { do: "project.create", key: "second", name: "Second", preset: "loose" });
-		const h = await openPage(server);
+		const server = await startServer({ mode: "server", cases: 2 });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			const { page } = h;
 			page.setDefaultTimeout(5000);
-			await page.getByRole("button", { name: "Project: scratch. Switch project", exact: true }).click();
-			await page.getByRole("option", { name: /Second/ }).click();
-			await page.waitForURL("**/p/second/suite");
-			await page.keyboard.press("c");
-			expect(await page.getByRole("textbox", { name: "Case title", exact: true }).count()).toBe(1);
-			await page.getByRole("link", { name: "Settings", exact: true }).click();
-			await page.getByLabel("Policy preset").focus();
-			await page.getByLabel("Policy preset").selectOption("standard");
-			await page.getByText("standard is in force.", { exact: false }).waitFor();
-			await page.keyboard.press("j");
-			expect(await page.locator("#detail .phead").innerText()).toContain("Tokens");
+			const has = (select: Locator) => select.evaluate((node) => node === document.activeElement);
+			// A plain key is the shell's when nothing holds the focus: `?` opens the list of keys, Escape closes it.
+			const shell = async () => {
+				await page.keyboard.press("?");
+				await page.locator("[data-overlay]").waitFor();
+				await page.keyboard.press("Escape");
+				await page.locator("[data-overlay]").waitFor({ state: "detached" });
+			};
+			// Chromium on macOS opens the list on an arrow key and changes nothing until Enter (issue #103), so
+			// the keys that choose on a closed select are tried where an arrow steps it. A pick with the pointer
+			// is a change that no key came before, which `selectOption` makes: the page cannot be given a real
+			// pick from the open list in headless Chromium, whose list is a window of its own.
+			const arrows = process.platform !== "darwin";
+			/**
+			 * One select, by the keys and by the pointer. The arrows step it and it keeps the focus; `finish` gives
+			 * the focus back, and neither it nor what follows reaches the screen behind. A pick gives the focus
+			 * back at once. `behind` is true while the screen's own state stands.
+			 */
+			const rule = async (
+				select: Locator,
+				options: { first: string; third: string; finish: string; behind: () => Promise<boolean> },
+			) => {
+				await select.focus();
+				if (arrows) {
+					await page.keyboard.press("Home");
+					await page.keyboard.press("ArrowDown");
+					await page.keyboard.press("ArrowDown");
+					expect(await select.inputValue()).toBe(options.third);
+					expect(await has(select)).toBe(true);
+					await page.keyboard.press(options.finish);
+					expect(await has(select)).toBe(false);
+					expect(await options.behind()).toBe(true);
+					await shell();
+					await select.focus();
+				}
+				await select.selectOption(options.first);
+				expect(await has(select)).toBe(false);
+				expect(await options.behind()).toBe(true);
+				await shell();
+			};
+
+			// The case pane. Escape on the select does not leave the editor, which would record a version; Escape in the title does.
+			await page.locator("#detail .cid", { hasText: "C-1" }).waitFor();
+			await page.keyboard.press("e");
+			const version = page.locator(".cstate .chip");
+			await page.locator(".body-editor").waitFor();
+			await page.getByText("Can be exercised by", { exact: false }).click();
+			await rule(page.getByLabel("Automation"), {
+				first: "wanted",
+				third: "not-applicable",
+				finish: "Escape",
+				behind: async () => (await version.innerText()) === "Draft",
+			});
+			await page.getByRole("textbox", { name: "Case title", exact: true }).focus();
+			await page.keyboard.press("Escape");
+			await page.waitForFunction(() => document.querySelector(".cstate .chip")?.textContent === "v2");
+
+			// A Settings select, and the invitation's expiry.
+			await page.goto(`${server.url}/p/scratch/settings`);
+			await page.getByRole("option", { name: "Tokens", exact: true }).click();
+			await rule(page.locator("#token-kind"), {
+				first: "agent",
+				third: "human",
+				finish: "Enter",
+				behind: async () => (await page.locator("#detail .phead").innerText()).includes("Tokens"),
+			});
+			await page.getByRole("option", { name: "People", exact: true }).click();
+			await rule(page.locator("#invite-expires"), {
+				first: "12h",
+				third: "3d",
+				finish: "Enter",
+				behind: async () => (await page.locator("#detail .phead").innerText()).includes("People"),
+			});
+
+			// The run planner. Escape on the select does not close the form; Escape in its name does.
+			await page.keyboard.type("gr");
+			await page.keyboard.press("n");
+			const name = page.locator("#run-name");
+			await name.waitFor();
+			await rule(page.locator("#run-selection"), {
+				first: "all",
+				third: "tag",
+				finish: "Escape",
+				behind: async () => (await name.count()) === 1,
+			});
+			await name.focus();
+			await page.keyboard.press("Escape");
+			await name.waitFor({ state: "detached" });
+			expect(h.errors).toEqual([]);
 		} finally {
 			await h.close();
 			await server.stop();
 		}
 	},
-	30_000,
+	45_000,
 );
 
 check(

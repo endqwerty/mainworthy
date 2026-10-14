@@ -89,8 +89,7 @@ section's first field: the new password, the invited person's name. A section's 
 registered only for a caller who has the section.
 
 On these pages and sections a control whose request is under way is marked `aria-disabled`
-and not disabled, so it keeps the focus; its handler lets one request through. The selects
-of the invitation form keep the focus when they change. A proof (a password, a token, a
+and not disabled, so it keeps the focus; its handler lets one request through. A proof (a password, a token, a
 passkey's answer, an invitation) and a change are sent once for each press and never again
 by the page itself. What the page does ask again by itself is what only reads: a list after
 something in it may have changed, and `/api/session` after a sign-out that got no reply.
@@ -125,6 +124,17 @@ open project): it shows a check, and the choice starts on the first item without
 The palette closes before invoking the choice callback, and each opening starts with
 nothing typed, also one made from a choice. No native dialogs: a list to pick from is the
 palette, not a `<select>` in the shell or a menu of its own.
+
+A native `<select>` is always the `Select` of `ui/index.tsx`, and no select calls `blur()` itself. A select
+gives the focus back when the choice is finished, not on every change: a closed select changes on every
+arrow key, so one that let go at the first change would take one key and lose the keyboard. A choice made
+with the pointer (a pick from the open list) is finished at the change. A choice made with the keyboard on a
+closed select (arrows, Home, End, Page keys, a typed letter) is finished at Enter, Escape or Tab: until then
+the select keeps the focus and the arrows keep working. `Select` tells the two apart by a key on the select
+before the change (a pick from the list, and Enter in the open list, send no `keydown` to the page). Enter
+and Escape on a focused select give the focus back and stop there: they are the select's own, so Escape does
+not close the pane behind it and Enter does not open a row. Tab moves on as it does anywhere. A plain key
+that is not one of those is left to the select (type-ahead) and not run by the shell, as in any field.
 
 ## What a note and an Escape record (issue #73)
 
