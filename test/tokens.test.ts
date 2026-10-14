@@ -954,18 +954,18 @@ describe("the command line", () => {
 	});
 
 	test("token new --expires gives a token an end, and token list shows it with who made the token", async () => {
-		await withInstance(async ({ cli, instance }) => {
+		await withInstance(async ({ cli, run, instance }) => {
 			const before = Date.now();
-			const made = await cli(["token", "new", "--ci", "pipeline", "--expires", "90d"]);
+			const made = await run(["token", "new", "--ci", "pipeline", "--expires", "90d"]);
 			expect([made.code, made.stderr]).toEqual([0, ""]);
 			const [heading, secret, ...rest] = made.stdout.trim().split("\n");
 			expect(heading).toBe('token for ci "pipeline" (record), expires in 90 days');
 			expect(secret).toMatch(/^cb_[0-9A-Za-z]{32}$/);
 			expect(rest).toEqual(["Shown once. It will not be shown again."]);
-			const forever = await cli(["token", "new", "--agent", "helper"]);
+			const forever = await run(["token", "new", "--agent", "helper"]);
 			expect(forever.stdout.split("\n")[0]).toBe('token for agent "helper" (read, record, produce)');
 
-			const rows = outputWith(z.array(Row), await cli(["token", "list", "--json"]));
+			const rows = outputWith(z.array(Row), await run(["token", "list", "--json"]));
 			expect(rows).toMatchObject([
 				{ actor: "pipeline", expired: false, createdBy: "robin", lastUsedFrom: null },
 				{ actor: "helper", expiresAt: null, expired: false, createdBy: "robin", lastUsedFrom: null },
@@ -974,12 +974,12 @@ describe("the command line", () => {
 			expect(ends).toBeGreaterThanOrEqual(before + 90 * DAY);
 			expect(ends).toBeLessThanOrEqual(Date.now() + 90 * DAY);
 
-			// Used once, so the list knows where from.
+			// Used once, by the executable with the token in its environment, so the list knows where from.
 			const used = await cli(["report", RED_XML, "--commit", COMMIT], {
 				env: { MAINWORTHY_TOKEN: secret ?? "" },
 			});
 			expect(used.code).toBe(0);
-			const list = await cli(["token", "list"]);
+			const list = await run(["token", "list"]);
 			expect(list.stdout.trim().split("\n")).toEqual([
 				"1  ci pipeline  ci token  active, expires in 90 days  made by robin  last used from 127.0.0.1",
 				"2  agent helper  agent token  active  made by robin",
@@ -990,11 +990,11 @@ describe("the command line", () => {
 			await instance.app.gate.run(() =>
 				instance.app.db.raw.query("UPDATE tokens SET expires_at = ? WHERE id = 1").run(Date.now() - 1),
 			);
-			const after = await cli(["token", "list"]);
+			const after = await run(["token", "list"]);
 			expect(after.stdout.split("\n")[0]).toBe(
 				"1  ci pipeline  ci token  expired  made by robin  last used from 127.0.0.1",
 			);
-			const refused = await cli(["report", RED_XML, "--commit", COMMIT], {
+			const refused = await run(["report", RED_XML, "--commit", COMMIT], {
 				env: { MAINWORTHY_TOKEN: secret ?? "" },
 			});
 			expect([refused.code, refused.stderr]).toEqual([4, expect.stringContaining("unauthenticated:")]);
@@ -1003,34 +1003,34 @@ describe("the command line", () => {
 
 	test("a token is replaced with no gap: the second works beside the first, and the first is then revoked", async () => {
 		// The steps of "Replacing a token" in docs/deploy.md.
-		await withInstance(async ({ cli }) => {
+		await withInstance(async ({ run }) => {
 			const secretOf = (made: { stdout: string }): string => made.stdout.split("\n")[1] ?? "";
 			const reports = async (secret: string): Promise<number> =>
-				(await cli(["report", RED_XML, "--commit", COMMIT], { env: { MAINWORTHY_TOKEN: secret } })).code;
-			const first = secretOf(await cli(["token", "new", "--ci", "pipeline"]));
+				(await run(["report", RED_XML, "--commit", COMMIT], { env: { MAINWORTHY_TOKEN: secret } })).code;
+			const first = secretOf(await run(["token", "new", "--ci", "pipeline"]));
 			// The actor exists, so the second token carries the grant the actor already holds.
-			const made = await cli(["token", "new", "--ci", "pipeline", "--expires", "90d"]);
+			const made = await run(["token", "new", "--ci", "pipeline", "--expires", "90d"]);
 			expect(made.stdout.split("\n")[0]).toBe('token for ci "pipeline" (record), expires in 90 days');
 			const second = secretOf(made);
 			expect([await reports(first), await reports(second)]).toEqual([0, 0]);
-			expect((await cli(["token", "list"])).stdout.trim().split("\n")).toEqual([
+			expect((await run(["token", "list"])).stdout.trim().split("\n")).toEqual([
 				"1  ci pipeline  ci token  active  made by robin  last used from 127.0.0.1",
 				"2  ci pipeline  ci token  active, expires in 90 days  made by robin  last used from 127.0.0.1",
 			]);
-			expect((await cli(["token", "revoke", "1"])).stdout).toBe("token 1 revoked\n");
+			expect((await run(["token", "revoke", "1"])).stdout).toBe("token 1 revoked\n");
 			expect([await reports(first), await reports(second)]).toEqual([4, 0]);
 		});
 	});
 
 	test("token new refuses an --expires that is not a duration, and says what one is", async () => {
-		await withInstance(async ({ cli }) => {
+		await withInstance(async ({ run }) => {
 			for (const expires of ["90m", "1y", "0d", "90"]) {
-				const refused = await cli(["token", "new", "--agent", "helper", "--expires", expires]);
+				const refused = await run(["token", "new", "--agent", "helper", "--expires", expires]);
 				expect([refused.code, refused.stdout]).toEqual([4, ""]);
 				expect(refused.stderr).toContain("12h, 14d or 2w");
 			}
-			expect((await cli(["token", "list"])).stdout).toBe("No tokens.\n");
-			expect((await cli(["token", "--help"])).stdout).toContain("--expires");
+			expect((await run(["token", "list"])).stdout).toBe("No tokens.\n");
+			expect((await run(["token", "--help"])).stdout).toContain("--expires");
 		});
 	});
 });

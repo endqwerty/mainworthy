@@ -545,6 +545,8 @@ test("health exits 0 when the server answers and 1 when nothing does, with no to
 		expect(down.code).toBe(1);
 		expect(down.stdout).toBe("not answering: http://127.0.0.1:9\n");
 	});
+	// Loopback refuses port 9 at once, but `health` gives an address that does not answer 2.5 s (its own limit in
+	// `commands/health.ts`) before it says so, and a network that drops the packet instead would use all of it.
 }, 20_000);
 
 test("health prints the first 12 characters of the commit the server reports, and all of it with --json", async () => {
@@ -559,7 +561,7 @@ test("health prints the first 12 characters of the commit the server reports, an
 		},
 		{ env: { MAINWORTHY_COMMIT: sha } },
 	);
-}, 20_000);
+});
 
 test("health stays compatible with a server that reports no commit", async () => {
 	// An older server answers `{"ok":true,"version":"0.1.0"}`; a newer one with no commit answers `"commit":null`.
@@ -582,7 +584,7 @@ test("health stays compatible with a server that reports no commit", async () =>
 			await server.stop(true);
 		}
 	}
-}, 20_000);
+});
 
 test("open prints the running web UI URL", async () => {
 	await withInstance(async ({ run, instance }) => {
