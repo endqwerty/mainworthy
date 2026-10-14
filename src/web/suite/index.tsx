@@ -202,6 +202,37 @@ export function SuiteScreen() {
 	 */
 	const owed = useRef(new Set<string>());
 	/**
+	 * The read of each case the page owes, while it is on its way. Every request for it in that time waits on
+	 * the same read (issue #135): `endFollowed`, and `readOwed` for `e`, a click on a field and a property changed
+	 * in the read view. A read that comes back holds the case and takes it out of `owed`, once, in the session
+	 * that made it; the screen is made again for each person and each project, so no other one waits on it.
+	 */
+	const owedReads = useRef(new Map<string, Promise<{ rows: Api["get"]["reply"] } | { failure: string }>>());
+	const readCase = useCallback(
+		(ref: string): Promise<{ rows: Api["get"]["reply"] } | { failure: string }> => {
+			const pending = owedReads.current.get(ref);
+			if (pending) return pending;
+			const reading = (async () => {
+				try {
+					const rows = await call("get", { refs: [ref] }, { project, owner });
+					if (sessionCurrent(owner)) {
+						holdCase({ ref, rows });
+						owed.current.delete(ref);
+						void invalidateProject(project);
+					}
+					return { rows };
+				} catch (error) {
+					return { failure: error instanceof Error ? error.message : "no reply" };
+				} finally {
+					owedReads.current.delete(ref);
+				}
+			})();
+			owedReads.current.set(ref, reading);
+			return reading;
+		},
+		[project, owner, holdCase],
+	);
+	/**
 	 * Another window removed the draft this tab shows: it recorded it, settled its conflict or dropped it. This
 	 * tab has no reply that names a version, so it reads the case as it is now. That read began after the draft
 	 * was removed, so it holds what was recorded or something later. Until the page holds it the draft stays in
@@ -222,19 +253,11 @@ export function SuiteScreen() {
 				? "Conflict resolved in another window."
 				: "The draft was recorded or ended in another window.";
 			setStatus(`${what} Reading the case as it is now…`);
-			let rows: Api["get"]["reply"] | null = null;
-			let failure = "";
-			try {
-				rows = await call("get", { refs: [ref] }, { project, owner });
-			} catch (error) {
-				failure = error instanceof Error ? error.message : "no reply";
-			}
+			const read = await readCase(ref);
+			const rows = "rows" in read ? read.rows : null;
+			const failure = "failure" in read ? read.failure : "";
 			state.reading = false;
 			if (!sessionCurrent(owner)) return;
-			if (rows) {
-				holdCase({ ref, rows });
-				owed.current.delete(ref);
-			}
 			// The tab moved on meanwhile: to another case, or to a draft of this one that was stored again.
 			if (draftRef.current !== ended || readDraft({ project, id: ended.id })) {
 				if (gone.current === state) {
@@ -256,9 +279,8 @@ export function SuiteScreen() {
 			draftRef.current = null;
 			setDraftState(null);
 			setStatus(`${what} The case is shown as the server recorded it.`);
-			void invalidateProject(project);
 		},
-		[project, owner, holdCase, setStatus],
+		[project, owner, readCase, setStatus],
 	);
 	useEffect(() => {
 		const changed = (event: StorageEvent): void => {
@@ -435,9 +457,25 @@ export function SuiteScreen() {
 		// Another window's draft that it removed is not stored again from here. The person's own text still is.
 		if (endingDraft()?.id === next.id && next.owner !== windowId) return;
 		// No draft is made of a case the page owes a read of. `edit` and `begin` read first and open on what comes
-		// back. A property changed from the read view comes here: the case is read, and the change is to be made again.
+		// back. A property changed from the read view comes here: what it changed of the case shown is made on the
+		// case as read, unless that changed the same property too (issue #135).
 		if (next.ref !== null && owes(next.ref)) {
-			void readOwed(next.ref, () => {});
+			const ref = next.ref;
+			void readOwed(ref, (read) => {
+				const current = draftRef.current?.ref === ref ? draftRef.current : editDraft(read);
+				const made = mergeBodies({ base: next.original, mine: next.body, theirs: current.body });
+				if (made.conflicts.length > 0) {
+					setStatus(
+						"The case is shown as the server recorded it. The same property was changed since this page last read the case, so your change was not made.",
+					);
+					return;
+				}
+				change({ ...current, body: made.merged, dirty: true, caret: next.caret });
+				// `change` may refuse it (another window has a draft of the case now) and says why itself.
+				const after = draftRef.current;
+				if (after?.ref === ref && after.owner === windowId && sameBody(after.body, made.merged))
+					setStatus("The case is shown as the server recorded it, with your change made on it.");
+			});
 			return;
 		}
 		const prior = draftRef.current;
@@ -1258,28 +1296,23 @@ export function SuiteScreen() {
 		return owed.current.has(ref) && draftRef.current?.ref !== ref && !readDraft({ project, id: ref });
 	}
 	/**
-	 * Makes the read the page owes of a case and holds it, then runs `open` with the case as read if it is still
-	 * the one in the pane. A read that fails opens nothing and says so; the next press or click reads again.
+	 * Waits for the read the page owes of a case (`readCase`, one at a time for a case), then runs `open` with the
+	 * case as read if it is still the one in the pane. A read that fails opens nothing and says so; the next press
+	 * or click reads again.
 	 */
 	async function readOwed(ref: string, open: (read: CaseView) => void): Promise<void> {
 		setStatus("This case changed in another window. Reading it before the editor opens…");
-		let rows: Api["get"]["reply"];
-		try {
-			rows = await call("get", { refs: [ref] }, { project, owner });
-		} catch (error) {
-			if (sessionCurrent(owner))
-				setStatus(
-					`This case changed in another window and could not be read (${error instanceof Error ? error.message : "no reply"}), so no editor opens on it. Press e to read it again.`,
-				);
+		const read = await readCase(ref);
+		// The person may have gone to another case meanwhile: nothing is said or opened there for this one.
+		if (!sessionCurrent(owner) || selectedRef.current !== ref) return;
+		if ("failure" in read) {
+			setStatus(
+				`This case changed in another window and could not be read (${read.failure}), so no editor opens on it. Press e to read it again.`,
+			);
 			return;
 		}
-		if (!sessionCurrent(owner)) return;
-		const read = CaseView.parse(rows[0]);
-		holdCase({ ref, rows });
-		owed.current.delete(ref);
 		setStatus("The case is shown as the server recorded it.");
-		void invalidateProject(project);
-		if (selectedRef.current === ref && draftRef.current === null) open(read);
+		open(CaseView.parse(read.rows[0]));
 	}
 	/** Opens the editor on the case in the pane, or on `read`, the same case as `readOwed` has just read it. */
 	function edit(read: CaseView | null = null): void {
@@ -1295,7 +1328,9 @@ export function SuiteScreen() {
 		const shown = read ?? view;
 		if (!shown) return;
 		if (owes(shown.ref)) {
-			void readOwed(shown.ref, edit);
+			void readOwed(shown.ref, (fresh) => {
+				if (draftRef.current === null) edit(fresh);
+			});
 			return;
 		}
 		const saved = readDraft({ project, id: shown.ref });
@@ -1310,7 +1345,9 @@ export function SuiteScreen() {
 		const shown = read ?? view;
 		if (!shown) return;
 		if (owes(shown.ref)) {
-			void readOwed(shown.ref, (fresh) => begin(field, fresh));
+			void readOwed(shown.ref, (fresh) => {
+				if (draftRef.current === null) begin(field, fresh);
+			});
 			return;
 		}
 		const next = ownedDraft(readDraft({ project, id: shown.ref }) ?? editDraft(shown));

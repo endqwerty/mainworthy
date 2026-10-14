@@ -311,11 +311,14 @@ for (const first of ["resolves the conflict", "records the edit"])
  * What the page's reads of C-1 get from here on: no reply ("lost"), the server's answer ("answered"), or a
  * refusal that carries any other text as its message, so a test can tell one refused read from the next.
  */
-async function unreadable(page: Page): Promise<{ reads: string }> {
-	const state = { reads: "lost" };
+async function unreadable(page: Page): Promise<{ reads: string; asked: number; release: () => void }> {
+	const gate = latch();
+	const state = { reads: "lost", asked: 0, release: gate.release };
 	await page.route("**/get", async (route) => {
 		const read = caseReads.parse(route.request().postDataJSON()).refs.includes("C-1");
-		if (!read || state.reads === "answered") await route.continue().catch(() => {});
+		if (read) state.asked++;
+		if (read && state.reads === "held") await gate.held;
+		if (!read || state.reads === "answered" || state.reads === "held") await route.continue().catch(() => {});
 		else if (state.reads === "lost") await route.abort("failed");
 		else await route.fulfill({ json: { ok: false, error: { code: "internal", message: state.reads } } });
 	});
@@ -401,12 +404,27 @@ check(
 			await b.getByText("Refused the click", { exact: false }).first().waitFor();
 			expect(await editors(b)).toEqual([]);
 			expect(await drafts(b)).toHaveLength(0);
-			get.reads = "answered";
+			// Issue #135. While the read is on its way, a property changed in the read view and two presses of `e`
+			// wait for that one read. It opens one editor, on the case as read, with the property changed on it.
+			get.reads = "held";
+			get.asked = 0;
+			await b.locator("#detail .case-properties summary").click();
+			await b.getByRole("checkbox", { name: "Pipeline" }).click();
 			await leaveField(b);
 			await b.keyboard.press("e");
+			await b.keyboard.press("e");
+			await b.evaluate(() => undefined);
+			expect(get.asked).toBe(1);
+			get.release();
 			await title(b).waitFor();
-			expect(await title(b).inputValue()).toBe("Merged in the card");
-			expect(await drafts(b)).toHaveLength(0);
+			expect(await editors(b)).toEqual(["Merged in the card"]);
+			expect(await b.getByRole("checkbox", { name: "Pipeline" }).isChecked()).toBe(true);
+			await title(b).press("Escape");
+			const recorded = await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => z.array(z.string()).parse(rows[0]?.methods).includes("auto"),
+			);
+			expect(recorded[0]).toMatchObject({ title: "Merged in the card", methods: ["human", "auto"] });
 		} finally {
 			await h.close();
 			await server.stop();
