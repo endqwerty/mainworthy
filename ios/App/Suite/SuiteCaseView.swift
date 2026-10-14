@@ -3,33 +3,34 @@ import MainworthyScreens
 import SwiftUI
 
 struct SuiteCaseView: View {
-	let route: SuiteRoute
+	let ref: String
+	let version: Int?
 	let screen: SuiteScreen
 	let workspace: Workspace
 
 	var body: some View {
 		Group {
-			switch screen.document(route.ref, version: route.version) {
+			switch screen.document(ref, version: version) {
 			case .read(let document): page(document)
 			case .failed(let why):
 				ContentUnavailableView {
 					Label("The case could not be read", systemImage: "exclamationmark.triangle")
 				} description: { Text(why) } actions: {
-					Button("Try again") { Task { await screen.openCase(route.ref, version: route.version) } }
+					Button("Try again") { Task { await screen.openCase(ref, version: version) } }
 				}
 			case .reading, nil: ProgressView()
 			}
 		}
-		.navigationTitle(route.ref)
+		.navigationTitle(ref)
 		.navigationBarTitleDisplayMode(.inline)
 		.toolbar {
-			if let address = workspace.webAddress(of: route.ref) {
+			if let address = workspace.webAddress(of: ref) {
 				ToolbarItem(placement: .topBarTrailing) {
 					Link(destination: address) { Label("Open in the web app", systemImage: "safari") }
 				}
 			}
 		}
-		.task { await screen.openCase(route.ref, version: route.version) }
+		.task { await screen.openCase(ref, version: version) }
 	}
 
 	private func page(_ document: CaseDocument) -> some View {
@@ -40,7 +41,7 @@ struct SuiteCaseView: View {
 					Text("Version \(document.version)").font(.subheadline).foregroundStyle(.secondary)
 						.accessibilityIdentifier("case-version")
 					Text(document.folder).font(.subheadline).foregroundStyle(.secondary)
-					if route.version != nil {
+					if self.version != nil {
 						Text("A saved version. Folder and tags are the case's current placement.")
 							.font(.caption).foregroundStyle(.secondary)
 					}
@@ -74,13 +75,13 @@ struct SuiteCaseView: View {
 						}
 					}.joined(separator: ", "))
 				}
-				NavigationLink(value: SuiteRoute(ref: document.ref, history: true)) {
+				NavigationLink(value: SuiteRoute.history(document.ref)) {
 					Label("History", systemImage: "clock.arrow.circlepath").frame(maxWidth: .infinity, alignment: .leading)
 				}
 				.padding(12).background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 12))
 				.accessibilityIdentifier("case-history")
 				if document.isHistorical {
-					NavigationLink("Open current case", value: SuiteRoute(ref: document.ref))
+					NavigationLink("Open current case", value: SuiteRoute.document(ref: document.ref))
 						.accessibilityIdentifier("case-current")
 				}
 				if !document.isHistorical, workspace.project?.may(.produce) == true {
@@ -104,7 +105,7 @@ struct SuiteHistoryView: View {
 			switch screen.history(ref) {
 			case .read(let versions):
 				ForEach(versions) { version in
-					NavigationLink(value: SuiteRoute(ref: ref, version: version.version)) {
+					NavigationLink(value: SuiteRoute.document(ref: ref, version: version.version)) {
 						VStack(alignment: .leading, spacing: 6) {
 							Text("Version \(version.version)").font(.headline)
 							Text("\(version.by) · \(version.at.formatted(date: .abbreviated, time: .shortened))")
