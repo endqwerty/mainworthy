@@ -84,12 +84,17 @@ Planning needs the project's `plan` capability. A selection with no cases is ref
 
 ## Read a change's gate
 
-1. Open **Changes**. A pipeline report with a branch or pull request makes a change appear, newest first.
+1. Open **Changes**. A pipeline report with a branch or pull request makes a change appear. The list shows the
+   newest 500 changes.
 2. Press a change to read its head and base commits, the gate's verdict and reason, its failing tests and
    linked cases, and the cases it touches. Pull down to refresh. The list and open page also follow the
-   project's change stream.
+   project's change stream. An open page stays readable when its change leaves the list.
 3. Press an open question to read its evidence and answer it, as in Queue. When you answer, the change's
    gate is read again.
+
+The head, gate, failing tests and affected cases are checked against the commits named in the replies. If the
+head moves during a read, the app tries again once. If it moves again, the app says so and keeps the previous
+page, if one was read. Pull down to try again.
 
 A merged or closed change is marked as ended. Its gate keeps the last verdict its head had. The app does not
 end a change or run tests again.

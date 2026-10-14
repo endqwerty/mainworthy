@@ -30,6 +30,9 @@ struct ChangesView: View {
 			}
 		case .done:
 			List {
+				if screen.changes.count == 500 {
+					Text("Showing the newest 500 changes. A change already open stays available.").font(.footnote)
+				}
 				if let notice = screen.notice { Text(notice).foregroundStyle(Color.fail) }
 				ForEach(screen.changes) { change in
 					NavigationLink(value: change.key) {

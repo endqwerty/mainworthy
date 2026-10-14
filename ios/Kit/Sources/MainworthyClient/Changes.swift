@@ -70,6 +70,17 @@ public struct ChangeSummary: Identifiable, Equatable, Sendable {
 		state = ChangeState(wire.state)
 		verdict = ChangeVerdict(wire.verdict ?? "pending")
 	}
+
+	init(
+		key: String, basis: Wire.ChangeBasis, gate: Wire.ChangeGate,
+		header: Wire.ChangeRunHeader?, known: ChangeSummary?
+	) {
+		self.init(Wire.ChangeSummary(
+			key: key, title: basis.title, branch: header?.branch ?? known?.branch, head: basis.head,
+			url: header?.url ?? known?.address?.absoluteString,
+			state: known?.state.name ?? "unknown", verdict: gate.verdict
+		))
+	}
 }
 
 public struct ChangeGate: Equatable, Sendable {
@@ -149,22 +160,54 @@ extension ProjectClient {
 	}
 
 	package func details(of change: ChangeSummary) async throws -> ChangeDetails {
-		async let gate: Wire.ChangeGate = server.read("gate", in: key, ["change": .string(change.key)])
+		try await details(of: change.key, known: change)
+	}
+
+	package func details(of change: String, known: ChangeSummary? = nil) async throws -> ChangeDetails {
+		for _ in 0..<2 {
+			if let detail = try await readChange(change, known: known) { return detail }
+		}
+		throw ChangeReadError.moved
+	}
+
+	private func readChange(_ change: String, known: ChangeSummary?) async throws -> ChangeDetails? {
+		let affected: Wire.ChangeImpact = try await server.read("impact", in: key, ["change": .string(change)])
+		async let gate: Wire.ChangeGate = server.read("gate", in: key, ["change": .string(change)])
 		async let inbox: Wire.Inbox = server.read(
-			"inbox", in: key, ["state": "open", "on": .string(change.key), "limit": 500]
+			"inbox", in: key, ["state": "open", "on": .string(change), "limit": 500]
 		)
-		async let impact: Wire.ChangeImpact = server.read("impact", in: key, ["change": .string(change.key)])
-		let (status, questions, affected) = try await (gate, inbox, impact)
+		let (status, questions) = try await (gate, inbox)
+		guard affected.change.key == change, affected.gate?.run == status.run else { return nil }
 		var failing: [ChangeFailure] = []
+		var header: Wire.ChangeRunHeader?
 		if let run = status.run {
 			let rows: [Wire.ChangeRun] = try await server.read("get", in: key, ["refs": [.string(run)]])
-			guard let row = rows.first else { throw ClientError.unreadable }
+			guard let row = rows.first, rows.count == 1, row.ref == run else { throw ClientError.unreadable }
+			// The run's change may already name a later head. Its accepted commit owns these failures.
+			guard row.accepts.commit == affected.change.head else { return nil }
+			if let current = row.change, current.key == change {
+				guard current.head == affected.change.head else { return nil }
+				header = current
+			}
 			failing = (row.failing ?? []).map(ChangeFailure.init)
 		}
+		// Keep questions and gate reads between two replies that name the same head and run.
+		let confirmed: Wire.ChangeImpact = try await server.read("impact", in: key, ["change": .string(change)])
+		guard confirmed.change.key == change, confirmed.change.head == affected.change.head,
+			confirmed.change.base == affected.change.base, confirmed.gate?.run == status.run else { return nil }
 		return ChangeDetails(
-			change: change, base: affected.change.base, gate: ChangeGate(status),
+			change: ChangeSummary(key: change, basis: affected.change, gate: status, header: header, known: known),
+			base: affected.change.base, gate: ChangeGate(status),
 			questions: questions.items.map(Question.init), failing: failing,
 			cases: affected.cases.map(ChangedCase.init), caseCount: affected.counts.cases
 		)
+	}
+}
+
+package enum ChangeReadError: Error, LocalizedError {
+	case moved
+
+	package var errorDescription: String? {
+		"This change moved while it was read. Pull down to read it again."
 	}
 }

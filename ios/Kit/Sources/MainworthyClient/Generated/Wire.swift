@@ -410,9 +410,17 @@ enum Wire {
 		let stale: Bool
 	}
 
-	/// The base commit, where the change has one.
+	/// The change and commits the affected cases were read for.
 	struct ChangeBasis: Decodable, Equatable, Sendable {
+		let key: String
+		let head: String?
 		let base: String?
+		let title: String?
+	}
+
+	/// The run counted for this head, if any.
+	struct ChangeImpactGate: Decodable, Equatable, Sendable {
+		let run: String?
 	}
 
 	/// The complete number of affected cases.
@@ -431,8 +439,22 @@ enum Wire {
 	/// `impact` of a change: its base and the cases it touches.
 	struct ChangeImpact: Decodable, Equatable, Sendable {
 		let change: ChangeBasis
+		let gate: ChangeImpactGate?
 		let counts: ChangeImpactCounts
 		let cases: [ChangedCase]
+	}
+
+	/// The commit this run actually counts, not the change's current head.
+	struct ChangeRunTarget: Decodable, Equatable, Sendable {
+		let commit: String
+	}
+
+	/// The change as it is now, which may have moved beyond this run.
+	struct ChangeRunHeader: Decodable, Equatable, Sendable {
+		let key: String
+		let head: String?
+		let branch: String?
+		let url: String?
 	}
 
 	/// A failed test with its linked case, if any.
@@ -446,6 +468,9 @@ enum Wire {
 
 	/// `get` of the head's run: the first fifty failing tests.
 	struct ChangeRun: Decodable, Equatable, Sendable {
+		let ref: String
+		let accepts: ChangeRunTarget
+		let change: ChangeRunHeader?
 		let failing: [ChangeFailure]?
 	}
 

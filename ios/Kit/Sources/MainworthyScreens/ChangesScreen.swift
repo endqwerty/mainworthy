@@ -14,6 +14,7 @@ public final class ChangesScreen: ProjectScreen {
 	public private(set) var detailLoading = Loading.first
 	public private(set) var notice: String?
 	private var selected: String?
+	private var selectedChange: ChangeSummary?
 	private var reads = 0
 	private var detailReads = 0
 	private let project: ProjectClient
@@ -22,6 +23,7 @@ public final class ChangesScreen: ProjectScreen {
 
 	public func open(_ key: String) async {
 		guard key != selected || detailLoading != .done else { return }
+		selectedChange = changes.first { $0.key == key } ?? (selected == key ? selectedChange : nil)
 		selected = key
 		detail = nil
 		detailLoading = .first
@@ -38,27 +40,25 @@ public final class ChangesScreen: ProjectScreen {
 			changes = fresh
 			loading = .done
 			notice = nil
-			if selected != nil { await readDetail() }
 		} catch is CancellationError {
 		} catch {
 			guard mine == reads else { return }
 			if loading == .done { notice = error.shown } else { loading = .failed(error.shown) }
-			if selected != nil, detail == nil { detailLoading = .failed(error.shown) }
 		}
+		guard mine == reads else { return }
+		if selected != nil { await readDetail() }
 	}
 
 	private func readDetail() async {
 		detailReads += 1
 		let mine = detailReads
-		guard let key = selected, let change = changes.first(where: { $0.key == key }) else {
-			detail = nil
-			detailLoading = .failed("This change is no longer in the reported list.")
-			return
-		}
+		guard let key = selected else { return }
+		let known = changes.first { $0.key == key } ?? selectedChange
 		do {
-			let fresh = try await project.details(of: change)
+			let fresh = try await project.details(of: key, known: known)
 			guard mine == detailReads else { return }
 			detail = fresh
+			selectedChange = fresh.change
 			detailLoading = .done
 		} catch is CancellationError {
 		} catch {

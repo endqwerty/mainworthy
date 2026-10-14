@@ -25,6 +25,25 @@ struct SessionsScreenTests {
 		#expect(signedOut)
 	}
 
+	@Test("a confirmation keeps its session when a refresh no longer lists it")
+	func missingConfirmedSession() async throws {
+		let server = try await Live.signedIn()
+		let other = try await Live.signedIn()
+		let theirs = try #require(try await other.sessions().first { $0.current })
+		var signedOut = false
+		let screen = SessionsScreen(server: server) { signedOut = true }
+		await screen.refresh()
+		let confirmed = try #require(screen.sessions.first { $0.id == theirs.id })
+		// The other device ends the session while its confirmation is still open here.
+		await other.signOut()
+		await screen.refresh()
+		#expect(!screen.sessions.contains { $0.id == confirmed.id })
+		await screen.end(confirmed)
+		#expect(screen.notice == "That session has already ended." && !signedOut)
+		#expect(try await server.account().name == Live.name)
+		print("SESSION_CONFIRMATION absent=true notice=\(screen.notice ?? "nil") signedOut=\(signedOut)")
+	}
+
 	@Test("sessions survives project switches, and its sign out clears the workspace's remembered proof")
 	func workspaceOwnsSessions() async throws {
 		let secrets = MemoryStore()
