@@ -798,6 +798,21 @@ add a claim on arrival back without an answer to all three.
 | --- | --- | --- |
 | The owner holds text its storage refused (its `setItem` throws, as a full storage does) and answers `present` late; another window comes to the case from another one | `draft-ownership.test.ts`, "a window that answers late keeps its draft when another window comes to the case" | The stored owner is unchanged; the newcomer shows "Take over here" and says the owner is not answering, or has closed; the owner keeps its text and can type |
 
+### Review round 5: the owed read and a draft that came while it waited
+
+The rebase onto #135 put this change beside `readOwed`. Two presses of `e` waited on one read of an owed case,
+and a live window opened a draft of it meanwhile. The first press opened that draft read-only, with the line
+that another window is editing it; the second replaced the line with "The case is shown as the server recorded
+it", over a draft that was not recorded. `readOwed` now says and opens nothing when a draft is in the pane by the
+time the read comes back: whichever request opened it, or the window that made it, has said what it is.
+
+| Route | Test | What the test requires |
+| --- | --- | --- |
+| Two `e` on a held read of an owed case; the first window opens a draft of it before the read comes back | `round6.test.ts`, "a draft another window opens while the read waits keeps its line when the read comes back" | The second window shows that draft read-only, and its line says another window is editing the case, not that it is as recorded |
+
+It failed before the fix with `Received: "The case is shown as the server recorded it."` The test adds about
+2.5 s to `round6.test.ts`, one of eight workers.
+
 ## The documentation at `/docs` (decision 0016)
 
 The checks that decide this change, written before it. `test/docs.test.ts` and `test/e2e/docs.test.ts` hold them.

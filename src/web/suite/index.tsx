@@ -1381,6 +1381,9 @@ export function SuiteScreen() {
 			);
 			return;
 		}
+		// A draft in the pane came while the read was on its way: another request for it opened it, or another
+		// window made it. It is not the case as recorded, and its own line stands.
+		if (draftRef.current !== null) return;
 		setStatus("The case is shown as the server recorded it.");
 		open(CaseView.parse(read.rows[0]));
 	}
