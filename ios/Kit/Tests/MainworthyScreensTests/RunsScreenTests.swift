@@ -1,0 +1,259 @@
+import Foundation
+import MainworthyClient
+import TestSupport
+import Testing
+
+@testable import MainworthyScreens
+
+@Suite("The Runs screen", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`"))
+@MainActor
+struct RunsScreenTests {
+	func screen(can: [String] = ["read", "produce", "plan"]) async throws -> RunsScreen {
+		let key = try await Live.project()
+		let screen = RunsScreen(
+			project: try await Live.signedIn().project(key),
+			permission: Project(key: key, name: key, can: can), person: Live.name)
+		await screen.refresh()
+		return screen
+	}
+
+	@Test("recording advances, marks a failed step, and Undo corrects it before recording blocked")
+	func execute() async throws {
+		let screen = try await screen()
+		#expect(screen.loading == .done && screen.runs.count == 1)
+		let run = screen.open(try #require(screen.runs.first))
+		await run.refresh()
+		let first = try #require(run.firstUnfilled)
+		await run.execute(first)
+		guard case .read(let execution) = run.document else {
+			Issue.record("pinned case not read")
+			return
+		}
+		#expect(await run.record(execution, outcome: .pass))
+		guard case .read(let second) = run.document else {
+			Issue.record("did not advance")
+			return
+		}
+		#expect(second.slot.id != first.id)
+		let step = try #require(second.content.steps.first)
+		run.mark(step)
+		#expect(run.failedStep == step.id)
+		run.mark(step)
+		#expect(run.failedStep == nil)
+		run.mark(step)
+		run.note = "The category vanished"
+		#expect(await run.record(second, outcome: .fail))
+		#expect(run.document == .none && run.canUndo)
+		#expect(
+			run.slots.first { $0.id == second.slot.id }?.ownFill(by: Live.name)?.note == "The category vanished")
+		await run.undo()
+		#expect(!run.canUndo)
+		#expect(run.notice == "The result is corrected to skipped. A skipped slot counts as no proof.")
+		guard case .read(let restored) = run.document else {
+			Issue.record("Undo did not open the slot")
+			return
+		}
+		#expect(restored.slot.id == second.slot.id)
+		#expect(await run.record(restored, outcome: .blocked))
+		await screen.refresh()
+		#expect(run.slots.first { $0.id == second.slot.id }?.ownFill(by: Live.name)?.outcome == .manual(.blocked))
+		#expect(run.slots.first { $0.id == first.id }?.ownFill(by: Live.name)?.outcome == .manual(.pass))
+	}
+
+	@Test("a result moves on to the next case even while the list is being read again for it")
+	func advancesWhileRefreshing() async throws {
+		let screen = try await screen()
+		let run = screen.open(try #require(screen.runs.first))
+		await run.refresh()
+		let first = try #require(run.firstUnfilled)
+		await run.execute(first)
+		guard case .read(let execution) = run.document else {
+			Issue.record("pinned case not read")
+			return
+		}
+		// The change stream tells of the report as soon as it is recorded, and the workspace reads every
+		// screen again. Here that happens over and over while the result is recorded.
+		let refreshing = Task { @MainActor in
+			while !Task.isCancelled { await run.refresh() }
+		}
+		let recorded = await run.record(execution, outcome: .pass)
+		refreshing.cancel()
+		await refreshing.value
+		#expect(recorded)
+		guard case .read(let next) = run.document else {
+			Issue.record("the page stayed on the case that was just recorded: \(run.document)")
+			return
+		}
+		#expect(next.slot.id != first.id && next.slot.fills.isEmpty)
+	}
+
+	@Test("Undo restores a person's prior result, and a report from another screen appears on refresh")
+	func correctionAndRefresh() async throws {
+		let screen = try await screen()
+		let run = screen.open(try #require(screen.runs.first))
+		await run.refresh()
+		let slot = try #require(run.firstUnfilled)
+		await run.execute(slot)
+		guard case .read(let first) = run.document else {
+			Issue.record("case not read")
+			return
+		}
+		#expect(await run.record(first, outcome: .skip))
+		await run.execute(try #require(run.slots.first { $0.id == slot.id }))
+		guard case .read(let again) = run.document else {
+			Issue.record("case not read again")
+			return
+		}
+		#expect(await run.record(again, outcome: .blocked))
+		await run.undo()
+		#expect(run.slots.first { $0.id == slot.id }?.ownFill(by: Live.name)?.outcome == .manual(.skip))
+		#expect(run.notice == "The earlier outcome is restored by a correction.")
+		let other = try await Live.signedIn().project(screen.permission.key)
+		let external = try #require(run.firstUnfilled)
+		let externallyShown = try await other.execution(of: external, in: run.run.ref)
+		_ = try await other.report(externallyShown, outcome: .skip)
+		#expect(run.slots.first { $0.id == external.id }?.fills.isEmpty == true)
+		await screen.refresh()
+		#expect(run.slots.first { $0.id == external.id }?.ownFill(by: Live.name)?.outcome == .manual(.skip))
+		#expect(screen.open(screen.runs[0]) === run)
+	}
+
+	@Test("Undo uses the result that was shown, even when the slot refreshed behind a typed note")
+	func undoUsesShownSlot() async throws {
+		let screen = try await screen()
+		let run = screen.open(try #require(screen.runs.first))
+		await run.refresh()
+		await run.execute(try #require(run.firstUnfilled))
+		guard case .read(let shown) = run.document else {
+			Issue.record("case not read")
+			return
+		}
+		let other = try await Live.signedIn().project(screen.permission.key)
+		_ = try await other.report(shown, outcome: .skip, note: "From another device")
+		await run.refresh()
+		run.note = "My own observation"
+		#expect(await run.record(shown, outcome: .blocked))
+		await run.undo()
+		#expect(run.notice == "The result is corrected to skipped. A skipped slot counts as no proof.")
+	}
+
+	@Test("without produce slots are read-only, and without plan a plan is not sent")
+	func permissions() async throws {
+		let screen = try await screen(can: ["read", "record"])
+		let run = screen.open(try #require(screen.runs.first))
+		await run.refresh()
+		await run.execute(try #require(run.firstUnfilled))
+		guard case .read(let execution) = run.document else {
+			Issue.record("case not read")
+			return
+		}
+		#expect(run.isReadOnly && !run.mayRecord(execution))
+		#expect(await run.record(execution, outcome: .pass) == false)
+		#expect(await screen.plan(name: "Forbidden", selection: .all) == nil)
+		#expect(run.firstUnfilled?.id == execution.slot.id)
+	}
+
+	@Test("a closed run stays readable and rejects recording until its sign-off is withdrawn")
+	func closed() async throws {
+		let key = try await Live.project(strict: true)
+		let client = try await Live.signedIn().project(key)
+		let screen = RunsScreen(
+			project: client, permission: Project(key: key, name: key, can: ["read", "produce"]), person: Live.name)
+		await screen.refresh()
+		let run = screen.open(try #require(screen.runs.first))
+		await run.refresh()
+		let signoff = try #require(try await client.questions(open: true, kind: .signoff).questions.first)
+		_ = try await client.answer(
+			signoff, with: try #require(signoff.choices.first { $0.answer == "approve" }), reason: "Checked")
+		await screen.refresh()
+		#expect(run.run.state == .closed)
+		await run.execute(try #require(run.slots.first))
+		guard case .read(let execution) = run.document else {
+			Issue.record("closed case not read")
+			return
+		}
+		#expect(!run.mayRecord(execution))
+		#expect(await run.record(execution, outcome: .blocked) == false)
+		_ = try await client.withdraw(signoff, reason: "Check again")
+		await screen.refresh()
+		#expect(run.run.state == .open && run.mayRecord(execution))
+	}
+
+	@Test("planning shows the slot count and opens the new run, while an empty selection keeps its sentence")
+	func plans() async throws {
+		let screen = try await screen()
+		await screen.readFolders()
+		#expect(screen.folders.contains("Checkout"))
+		let planned = try #require(await screen.plan(name: "Regression on phone", selection: .tag("regression")))
+		#expect(screen.notice == "\(planned.ref) planned with 3 slots; 0 already filled.")
+		#expect(screen.runs.first?.ref == planned.ref)
+		#expect(await screen.plan(name: "Nobody", selection: .text("nonexistent selection")) == nil)
+		#expect(screen.notice?.lowercased().contains("no active case") == true)
+	}
+}
+
+/// Pages with one run each, with the first read optionally held until a newer one has completed.
+actor RunPages: Transport {
+	private let gate = AsyncStream.makeStream(of: Void.self)
+	private let asked = AsyncStream.makeStream(of: Void.self)
+	private var holdFirst: Bool
+	private var calls = 0
+	init(holdFirst: Bool = false) { self.holdFirst = holdFirst }
+	func wasAsked() async { for await _ in asked.stream { return } }
+	func release() { gate.continuation.yield() }
+	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+		calls += 1
+		let old = calls == 1 && holdFirst
+		if old {
+			asked.continuation.yield()
+			for await _ in gate.stream { break }
+		}
+		let input = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+		let second = input.contains(#""cursor":"next""#)
+		let ref = old ? "R-0" : second ? "R-1" : "R-2"
+		let cursor = second ? "null" : #""next""#
+		let row =
+			#"{"ref":"\#(ref)","name":"Run","state":"open","verdict":"pending","reason":"missing","tally":{"missing":1},"accepts":{"self":true}}"#
+		let body = #"{"ok":true,"result":{"items":[\#(row)],"cursor":\#(cursor)}}"#
+		return (
+			Data(body.utf8),
+			HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+		)
+	}
+	func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+		throw URLError(.unsupportedURL)
+	}
+}
+
+@Suite("Runs when reads overlap")
+@MainActor
+struct RunsReadTests {
+	func screen(_ transport: RunPages) throws -> RunsScreen {
+		let server = Server(
+			instance: try #require(Instance(address: "mainworthy.example")), secrets: MemoryStore(),
+			transport: transport)
+		return RunsScreen(
+			project: server.project("shop"), permission: Project(key: "shop", name: "Shop"), person: "robin")
+	}
+	@Test("refresh rereads as many pages as the list already showed")
+	func pagination() async throws {
+		let screen = try screen(RunPages())
+		await screen.refresh()
+		#expect(screen.runs.map(\.ref) == ["R-2"] && screen.hasMore)
+		await screen.more()
+		#expect(screen.runs.map(\.ref) == ["R-2", "R-1"] && !screen.hasMore)
+		await screen.refresh()
+		#expect(screen.runs.map(\.ref) == ["R-2", "R-1"] && !screen.hasMore)
+	}
+	@Test("an older read cannot replace a newer list")
+	func overtaken() async throws {
+		let transport = RunPages(holdFirst: true)
+		let screen = try screen(transport)
+		let first = Task { await screen.refresh() }
+		await transport.wasAsked()
+		await screen.refresh()
+		await transport.release()
+		await first.value
+		#expect(screen.runs.map(\.ref) == ["R-2"])
+	}
+}

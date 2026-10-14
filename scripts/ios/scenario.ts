@@ -76,7 +76,13 @@ const CASES: { folder: string; tags: string[]; title: string; pre: string; steps
 		pre: "",
 		steps: [["Place an order to another country", "The total is the items plus shipping"]],
 	},
-	{ folder: "Catalog", tags: [], title: "Catalog keeps the selected filters", pre: "", steps: [] },
+	{
+		folder: "Catalog",
+		tags: [],
+		title: "Catalog keeps the selected filters",
+		pre: "",
+		steps: [["Select a category and reload", "The selected category is kept"]],
+	},
 ];
 
 /**

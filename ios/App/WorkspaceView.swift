@@ -19,6 +19,11 @@ struct WorkspaceView: View {
 				}
 			}
 			.badge(workspace.queue?.counts.open ?? 0)
+			Tab("Runs", systemImage: "play.rectangle") {
+				if let runs = workspace.runs {
+					RunsView(screen: runs, workspace: workspace).id(workspace.project?.key)
+				} else { NoProjectView() }
+			}
 			Tab("You", systemImage: "person.crop.circle") {
 				AccountView(workspace: workspace)
 			}
