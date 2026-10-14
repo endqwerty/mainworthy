@@ -49,8 +49,8 @@ A passkey does not work in the app. It needs a paid Apple developer membership.
 3. Press an answer. Each has the sentence that says what it does.
    - Where the project's policy asks for a reason, the app asks for it before it records the answer.
    - **Defect in the product** asks where the defect is tracked. You can leave that empty.
-4. Back in the list, a bar says what was recorded. **Undo** withdraws the answer. Both decisions stay in the
-   ledger.
+4. Back in the list, a bar says what was recorded. **Undo** withdraws the answer, with a reason where the policy
+   asks for one. Both decisions stay in the ledger.
 
 You cannot answer from the list. A question is answered from its page, where its evidence is.
 
@@ -63,9 +63,10 @@ it to open another.
 
 - **Link a test to a case**, and **resolve an edit that overlaps another**. The answer is listed and greyed.
   The button at the top right of a question opens it in the web app.
-- **Answer a proposal that does more than change what a case says.** One that moves, tags or archives cases,
-  makes a folder or changes the policy is answered in the web app: the app does not show all of what it
-  changes. An edit to a case is shown step by step, and its answers stay off until that is on the screen.
+- **Answer a proposal that does more than add a case or change what one says.** One that restores an earlier
+  version, moves, tags or archives cases, makes a folder or changes the policy is answered in the web app: the
+  app does not show all of what it changes. A new case and an edit to a case are shown step by step, and their
+  answers stay off until that is on the screen.
 - **Runs, the suite and changes.**
 - **Notifications.** They need a paid Apple developer membership.
 - **Work without a connection.** An answer whose reply was lost is sent again by itself. The app does not keep

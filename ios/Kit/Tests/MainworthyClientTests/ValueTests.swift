@@ -17,12 +17,12 @@ struct ValueTests {
 		("172.20.1.1:7357", "http://172.20.1.1:7357"),
 		("127.0.0.1:7357", "http://127.0.0.1:7357"),
 		("localhost:7357", "http://localhost:7357"),
-		("tower.local:7357", "http://tower.local:7357"),
+		("printer.local:7357", "http://printer.local:7357"),
 		("[::1]:7357", "http://[::1]:7357"),
 		("http://[::1]:7357", "http://[::1]:7357"),
 		("HTTPS://Mainworthy.Example", "https://mainworthy.example"),
 		("https://robin:secret@mainworthy.example/p/x", "https://mainworthy.example"),
-		("https://tower.local:7357", "https://tower.local:7357"),
+		("https://printer.local:7357", "https://printer.local:7357"),
 		// A public address that only looks private is not one.
 		("172.32.1.1", "https://172.32.1.1"),
 		("192.169.1.1", "https://192.169.1.1"),
@@ -44,7 +44,7 @@ struct ValueTests {
 		#expect(Instance(address: "https://mainworthy.example")?.name == "mainworthy.example")
 		#expect(Instance(address: "192.168.1.20:7357")?.name == "192.168.1.20:7357")
 		// Where the scheme is not the one the address would get by itself, the name keeps it.
-		#expect(Instance(address: "https://tower.local:7357")?.name == "https://tower.local:7357")
+		#expect(Instance(address: "https://printer.local:7357")?.name == "https://printer.local:7357")
 		#expect(Instance(address: "http://mainworthy.example")?.name == "http://mainworthy.example")
 	}
 
@@ -112,8 +112,21 @@ struct ValueTests {
 			after: CaseContent(title: "T", steps: [first, third])
 		)
 		#expect(shortened.changes == [.kept(first), .removed(second), .kept(third)])
-		let created = EditedCase(id: 0, caseRef: nil, before: nil, after: CaseContent(title: "New", steps: [first]))
-		#expect(created.changes == [.title(from: nil, to: "New"), .added(first)])
+		// Everything of a new case is said: where it goes, who runs it, and each step.
+		let placement = EditedCase.Placement(folder: "Checkout/Coupons", tags: ["checkout"], covers: ["WEB-290"])
+		let created = EditedCase(
+			id: 0, caseRef: nil, before: nil,
+			after: CaseContent(title: "New", steps: [first], methods: ["agent"], automate: "wanted", fields: ["risk": "high"]),
+			placement: placement
+		)
+		#expect(created.changes == [
+			.title(from: nil, to: "New"),
+			.placed(placement),
+			.methods(from: [], to: ["agent"]),
+			.automate(from: "", to: "wanted"),
+			.fields(from: [:], to: ["risk": "high"]),
+			.added(first),
+		])
 		// Steps that changed places are each shown once, in the new order.
 		let swapped = EditedCase(
 			id: 0, caseRef: "C-1", before: CaseContent(title: "T", steps: [first, second]),

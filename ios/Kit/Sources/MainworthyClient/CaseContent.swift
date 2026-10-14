@@ -60,6 +60,29 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 	/// The case as it is. Nil for a new case.
 	public let before: CaseContent?
 	public let after: CaseContent
+	/// Where a new case goes: its folder's path, its tags and the requirements it covers. An edit to a case
+	/// that exists changes none of them.
+	public let placement: Placement?
+
+	public struct Placement: Equatable, Sendable {
+		public let folder: String
+		public let tags: [String]
+		public let covers: [String]
+
+		public init(folder: String, tags: [String], covers: [String]) {
+			self.folder = folder
+			self.tags = tags
+			self.covers = covers
+		}
+	}
+
+	public init(id: Int, caseRef: String?, before: CaseContent?, after: CaseContent, placement: Placement? = nil) {
+		self.id = id
+		self.caseRef = caseRef
+		self.before = before
+		self.after = after
+		self.placement = placement
+	}
 
 	/// What the edit changes, part by part, in the order of the case as it would be.
 	public var changes: [Change] {
@@ -71,6 +94,12 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 			if before.methods != after.methods { changes.append(.methods(from: before.methods, to: after.methods)) }
 			if before.automate != after.automate { changes.append(.automate(from: before.automate, to: after.automate)) }
 			if before.fields != after.fields { changes.append(.fields(from: before.fields, to: after.fields)) }
+		} else {
+			// Everything of a new case is new, and all of it is said.
+			if let placement { changes.append(.placed(placement)) }
+			changes.append(.methods(from: [], to: after.methods))
+			changes.append(.automate(from: "", to: after.automate))
+			if !after.fields.isEmpty { changes.append(.fields(from: [:], to: after.fields)) }
 		}
 		// A step keeps its id for good, so two versions are set side by side by id and nothing is guessed.
 		let old = before?.steps ?? []
@@ -96,6 +125,8 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 		case methods(from: [String], to: [String])
 		case automate(from: String, to: String)
 		case fields(from: [String: String], to: [String: String])
+		/// Where a new case goes.
+		case placed(Placement)
 		case kept(Step)
 		case added(Step)
 		case removed(Step)

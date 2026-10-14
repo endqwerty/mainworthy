@@ -56,20 +56,24 @@ the build somebody last installed. So the app reads leniently and says what it c
 Nothing has to stay compatible before 1.0 (the working rules), and that holds for the app too: a change may
 break the installed build. The contract test makes sure that is known in the pull request that does it.
 
-**A screen never holds a connection.** The Swift package has two modules. `MainworthyClient` knows the server and
+**A view never holds the connection.** The Swift package has two modules. `MainworthyClient` knows the server and
 hands out values (a question, an answer). Everything in it that sends a request is `package`, a Swift access level
 that the app target, being outside the package, cannot reach. `MainworthyScreens` holds what each screen shows
 and does. A SwiftUI view binds to one of its classes. A new screen is a function in the first, a class in the
-second and a view, and the compiler refuses a view that skips the middle.
+second and a view, and the compiler refuses a view that reaches past the middle for the client. It cannot refuse
+a view that uses the system's own networking, so a test does (`test/ios-contract.test.ts`, "no view sends a
+request of its own"). The one place that sends follows no redirect: it sets the cookie on each request by hand,
+and the system would carry it to wherever a reply pointed.
 
 **A question is answered from its own page.** Decision 0018 found, in three reviews, ways to record a decision
 about a question nobody had opened. The app has no answer in a list: no swipe, no menu. The page of a question
 shows its evidence, and the answers are under it, each with the sentence that says what it does. The evidence an
 answer was given on is kept inside the question's value, where a view cannot change it, and an answer goes out
 on the question as it was when the person chose it: a sheet that asks for a reason does not pick up evidence
-that arrived behind it. What was not shown is not answered. An edit is accepted only once the documents it
-changes were read and set side by side, and an edit that does more than change what a case says (it moves or
-archives cases, or changes the policy) is answered in the web app, because the app does not show all of it.
+that arrived behind it. What was not shown is not answered. A new case and an edit to what a case says are
+accepted only once their documents were read: the case as it is beside the case as it would be, with where a new
+one goes and who runs it. A proposal that does anything else (it restores an earlier version, moves or archives
+cases, or changes the policy) is answered in the web app, because the app does not show all of it.
 
 **A free Apple ID is enough.** That rules out what needs a paid membership: push notifications, passkeys (they
 need an associated domain) and TestFlight. An app signed that way opens for seven days, so installing is one

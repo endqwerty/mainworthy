@@ -158,6 +158,8 @@ private struct QuestionRow: View {
 /// What the last action came to, with Undo where an answer can be withdrawn.
 private struct NoticeBar: View {
 	let screen: QueueScreen
+	/// The question whose withdrawal waits for a reason, where the policy asks for one.
+	@State private var asking: Question?
 
 	var body: some View {
 		if let notice = screen.notice {
@@ -168,9 +170,12 @@ private struct NoticeBar: View {
 					.frame(maxWidth: .infinity, alignment: .leading)
 					.accessibilityIdentifier("notice")
 				if let question = notice.undoes {
-					Button("Undo") { Task { await screen.withdraw(question) } }
-						.fontWeight(.semibold)
-						.disabled(screen.busy.contains(question.ref))
+					Button("Undo") {
+						// Withdrawing is a decision too. Where the policy asks for a reason, so does this.
+						if question.wantsReason { asking = question } else { Task { await screen.withdraw(question) } }
+					}
+					.fontWeight(.semibold)
+					.disabled(screen.busy.contains(question.ref))
 				}
 				Button {
 					screen.dismissNotice()
@@ -185,6 +190,14 @@ private struct NoticeBar: View {
 			.padding(.horizontal, 12)
 			.padding(.bottom, 6)
 			.transition(.move(edge: .bottom).combined(with: .opacity))
+			.sheet(item: $asking) { question in
+				AnswerSheet(
+					title: "Withdraw this decision", help: "Both decisions stay in the ledger.", action: "Withdraw",
+					wantsReference: false, wantsReason: true
+				) { _, reason in
+					Task { await screen.withdraw(question, reason: reason) }
+				}
+			}
 		}
 	}
 }

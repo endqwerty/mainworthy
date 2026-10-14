@@ -252,6 +252,12 @@ enum Wire {
 		let body: CaseBody?
 		/// For edit: the case as it is now.
 		let current: CaseBody?
+		/// For create: the path of the folder the case goes into.
+		let folder: String?
+		/// For create: the case's tags, a list of words. Another edit writes it otherwise.
+		let tags: JSONValue?
+		/// For create: the requirements the case covers.
+		let covers: [String]?
 	}
 
 	/// `get` with a P- ref: a proposed edit with the documents it would change.

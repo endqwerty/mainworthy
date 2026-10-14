@@ -21,6 +21,10 @@ package final class Server: Sendable {
 	private let userAgent: String
 	private let cookie: Mutex<Cookie?>
 	private let ended: (stream: AsyncStream<Void>, continuation: AsyncStream<Void>.Continuation)
+	/// Held while the store is compared and changed. Two servers can share one store (the one the device was
+	/// signed in to, and the one a new sign-in is made on), and a session that is being forgotten must not be
+	/// compared, then replaced by the other's new one, then removed.
+	private static let store = Mutex(())
 
 	/// The cookie as the server set it. Its name depends on the scheme (`__Host-` over https), so it is kept.
 	private struct Cookie: Codable, Equatable {
@@ -64,6 +68,11 @@ package final class Server: Sendable {
 	/// removed. Signing out here does not yield. One reader.
 	package var sessionEnded: AsyncStream<Void> { ended.stream }
 
+	/// The `Cookie` header requests go out with, for a test of where it is sent.
+	var cookieHeader: String? {
+		cookie.withLock { $0 }.map { "\($0.name)=\($0.value)" }
+	}
+
 	// MARK: Signing in and out
 
 	/// Opens a session and keeps its cookie. A proof that is refused throws `.refused` with the server's one
@@ -77,7 +86,9 @@ package final class Server: Sendable {
 		let (_, response) = try await send("POST", "/api/login", body: body, attempts: 1, asSignedIn: false)
 		guard let given = Server.sessionCookie(in: response) else { throw ClientError.unreadable }
 		cookie.withLock { $0 = given }
-		secrets.save(try? JSONEncoder().encode(Kept(instance: instance, cookie: given)))
+		Server.store.withLock { _ in
+			secrets.save(try? JSONEncoder().encode(Kept(instance: instance, cookie: given)))
+		}
 		return try await account()
 	}
 
@@ -105,8 +116,12 @@ package final class Server: Sendable {
 			held = nil
 			return true
 		}
-		if let data = secrets.load(), let kept = try? JSONDecoder().decode(Kept.self, from: data), kept.cookie == session {
-			secrets.save(nil)
+		Server.store.withLock { _ in
+			if let data = secrets.load(), let kept = try? JSONDecoder().decode(Kept.self, from: data),
+				kept.cookie == session
+			{
+				secrets.save(nil)
+			}
 		}
 		return wasMine
 	}

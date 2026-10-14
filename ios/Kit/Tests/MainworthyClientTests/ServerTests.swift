@@ -234,10 +234,16 @@ struct ServerTests {
 			{"ok":true,"seq":3,"result":{"counts":{"open":3,"adopt":3},"cursor":null,"items":[
 			\(adopt("Q-1", edits: "[\(edit)]", count: 1)),
 			\(adopt("Q-2", edits: #"[\#(edit),{"op":"place","cases":3}]"#, count: 2)),
-			\(adopt("Q-3", edits: "[\(edit)]", count: 40))]}}
+			\(adopt("Q-3", edits: "[\(edit)]", count: 40)),
+			\(adopt("Q-4", edits: #"[{"op":"create","title":"A new case","steps":2}]"#, count: 1)),
+			\(adopt("Q-5", edits: #"[{"op":"restore","case":"C-1","title":"A case"}]"#, count: 1))]}}
 			"""
 		let questions = try await server(Script(.json(inbox))).project("shop").questions(open: true).questions
-		#expect(questions.map { $0.choices.map(\.takes) } == [[.nothing, .nothing], [.more, .more], [.more, .more]])
+		// An edit and a new case are shown whole. A move beside the edit, more edits than the question lists,
+		// and a restore (whose reply does not say what the case is now) are not.
+		#expect(questions.map { $0.choices.map(\.takes) } == [
+			[.nothing, .nothing], [.more, .more], [.more, .more], [.nothing, .nothing], [.more, .more],
+		])
 	}
 
 	@Test("a refusal carries the server's sentence")

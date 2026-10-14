@@ -50,7 +50,7 @@ from any checkout, waits for the first.
 | Path | What |
 | --- | --- |
 | `project.yml`, `Config/` | The Xcode project as XcodeGen reads it, and its build settings |
-| `App/` | The SwiftUI views. They bind to a class of `MainworthyScreens` and cannot send a request |
+| `App/` | The SwiftUI views. They bind to a class of `MainworthyScreens`. The client is out of their reach, and a test keeps them from the system's networking |
 | `Kit/Sources/MainworthyClient/` | Everything that knows the server. `Server.swift` sends; the other files are the values it hands out |
 | `Kit/Sources/MainworthyClient/Generated/` | Written by `gen`: the reply types and the queue's words. Never edited |
 | `Kit/Sources/MainworthyScreens/` | What each screen shows and does: one class for each |
@@ -99,6 +99,7 @@ Three things the queue does that a copy must keep:
   workspace and is given `.id(workspace.project?.key)`, so nothing typed or opened in one project is shown in
   another.
 - **A read that was overtaken is dropped** (`reads` in `QueueScreen`), and a list that was read past its first
-  page is read as far again, so that what is open stays in it.
+  page is read as far again. What a page shows does not depend on the list holding it: a question whose page
+  is open is read by itself where the list does not have it (`open` in `QueueScreen`).
 - **What is sent later is sent on what was shown.** A sheet or a dialog keeps the value the person acted on
   (`Chosen` in `QuestionView`), not a ref to look up again when it is submitted.

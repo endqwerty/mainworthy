@@ -9,7 +9,7 @@
 //   bun scripts/ios.ts install [--dry-run]    build, sign and install on the iPhone that is connected
 //
 // What is built goes to ~/.cache/mainworthy-ios, never into the repository: a test here reads every file in it.
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -25,6 +25,8 @@ const LOCAL = join(IOS, "Config", "Local.xcconfig");
 const CACHE = join(homedir(), ".cache", "mainworthy-ios", Bun.hash(ROOT).toString(16));
 /** The simulator the screens are tested in. It is this project's own, so no other project's test finds it busy. */
 const SIMULATOR = "Mainworthy";
+/** The port whose holder has the simulator (`alone`). */
+const SIMULATOR_TURN = 47357;
 
 class Stop extends Error {}
 const stop = (message: string): never => {
@@ -187,45 +189,25 @@ async function build(): Promise<void> {
 
 /**
  * Runs one thing at a time on this machine, whichever checkout asks: there is one simulator. A second caller
- * waits for the first. The lock is a directory that names the process holding it, and one whose process is gone
- * is taken over.
+ * waits for the first. What is held is a port on this machine's own address. The system gives a port to one
+ * process and takes it back when that process ends, however it ends, so there is nothing to find stale.
  */
 async function alone<T>(work: () => Promise<T>): Promise<T> {
-	const lock = join(homedir(), ".cache", "mainworthy-ios", "simulator.lock");
-	const holder = join(lock, "pid");
-	mkdirSync(dirname(lock), { recursive: true });
+	let held: { stop: (closeActiveConnections?: boolean) => void } | null = null;
 	let said = false;
-	for (;;) {
+	while (!held) {
 		try {
-			mkdirSync(lock);
-			break;
-		} catch {}
-		let pid = 0;
-		let age = 0;
-		try {
-			age = Date.now() - statSync(lock).mtimeMs;
-			pid = Number(readFileSync(holder, "utf8"));
-		} catch {}
-		let alive = pid > 0;
-		try {
-			if (alive) process.kill(pid, 0);
+			held = Bun.listen({ hostname: "127.0.0.1", port: SIMULATOR_TURN, socket: { data() {} } });
 		} catch {
-			alive = false;
+			if (!said) console.log(`another run holds the simulator (port ${SIMULATOR_TURN}); waiting for it`);
+			said = true;
+			await Bun.sleep(2000);
 		}
-		// A lock with no name in it is one that is being taken this moment, unless it has stood for a while.
-		if (!alive && (pid > 0 || age > 10_000)) {
-			rmSync(lock, { recursive: true, force: true });
-			continue;
-		}
-		if (!said) console.log(`another run holds the simulator${pid ? ` (process ${pid})` : ""}; waiting for it`);
-		said = true;
-		await Bun.sleep(2000);
 	}
-	writeFileSync(holder, String(process.pid));
 	try {
 		return await work();
 	} finally {
-		rmSync(lock, { recursive: true, force: true });
+		held.stop(true);
 	}
 }
 

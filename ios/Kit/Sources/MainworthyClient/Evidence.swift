@@ -154,9 +154,10 @@ public struct ProposedEdit: Equatable, Sendable {
 	public let count: Int
 	/// The cases the edit cannot be merged into, each with the fields that are in the way.
 	public let conflicts: [Conflict]
-	/// Whether this build shows everything the proposal changes: it does for edits to what a case says
-	/// (create, edit, restore), whose documents it sets side by side. A proposal that also moves, tags,
-	/// archives or re-covers cases, makes a folder or changes the policy is answered in the web app.
+	/// Whether this build shows everything the proposal changes: it does for a new case and for an edit to
+	/// what a case says, whose documents it sets side by side. A proposal that restores an earlier version,
+	/// moves, tags, archives or re-covers cases, makes a folder or changes the policy is answered in the web
+	/// app.
 	public let isShownWhole: Bool
 
 	public struct Conflict: Equatable, Sendable {
@@ -174,7 +175,7 @@ public struct ProposedEdit: Equatable, Sendable {
 		// The summaries are the first twenty edits. A longer proposal is not known to be shown whole.
 		isShownWhole =
 			wire.count == wire.edits.count
-			&& wire.edits.allSatisfy { ["create", "edit", "restore"].contains($0.op) }
+			&& wire.edits.allSatisfy { ["create", "edit"].contains($0.op) }
 	}
 
 	/// One edit in a line, from the summary the server gives of it.

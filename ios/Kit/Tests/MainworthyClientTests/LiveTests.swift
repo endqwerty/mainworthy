@@ -206,4 +206,36 @@ struct LiveTests {
 		#expect(heard.first == .opened)
 		#expect(heard.last?.touched.contains(finding.ref) == true)
 	}
+
+	@Test("a redirect is not followed, so the session cookie goes nowhere but where it came from")
+	func redirect() async throws {
+		let server = try await Live.signedIn()
+		let kept = server.cookieHeader ?? ""
+		#expect(kept.contains("mainworthy_sid="))
+		// The tests' server answers this address with a redirect to another origin, which counts what reaches it.
+		var request = URLRequest(url: Live.instance.url.appending(path: "/test/elsewhere"))
+		request.setValue(kept, forHTTPHeaderField: "Cookie")
+		let (_, response) = try await URLSessionTransport().send(request)
+		#expect(response.statusCode == 307)
+		struct Seen: Decodable {
+			struct Count: Decodable { var requests: Int }
+			var result: Count
+		}
+		var asking = URLRequest(url: Live.instance.url.appending(path: "/test/elsewhere-seen"))
+		asking.setValue(kept, forHTTPHeaderField: "Cookie")
+		let (data, _) = try await URLSessionTransport().send(asking)
+		#expect(try JSONDecoder().decode(Seen.self, from: data).result.requests == 0)
+	}
+
+	@Test("one question is read by its ref, and a ref the project does not have is none")
+	func oneQuestion() async throws {
+		let project = try await Live.signedIn().project(try await Live.project())
+		let listed = try #require(try await project.questions(open: true, kind: .failure).questions.first)
+		let alone = try #require(try await project.question(listed.ref))
+		#expect(alone.ref == listed.ref && alone.evidence == listed.evidence && alone.isOpen)
+		#expect(alone.choices == listed.choices)
+		// What was read alone is answered like what was read in the list.
+		#expect(try await project.answer(alone, with: try #require(alone.choices.first { $0.answer == "infra" })) == .decided)
+		#expect(try await project.question(listed.ref)?.isOpen == false)
+	}
 }

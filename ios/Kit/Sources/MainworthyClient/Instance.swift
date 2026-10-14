@@ -28,7 +28,7 @@ public struct Instance: Hashable, Sendable, Codable {
 
 	/// The address as a person recognises it and can type it again: `mainworthy.example`, `192.168.1.20:7357`.
 	/// The scheme is left out where the address reads back to this instance without it, and kept where it would
-	/// not: `https://tower.local:7357`.
+	/// not: `https://printer.local:7357`.
 	public var name: String {
 		let bare = String(url.absoluteString.trimmingPrefix(/https?:\/\//))
 		return Instance(address: bare) == self ? bare : url.absoluteString

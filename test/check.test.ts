@@ -158,13 +158,9 @@ test("the workflow gives the pipeline's token to the one step that reports, and 
 	expect(holders).toEqual(["gate: Report every shard to Mainworthy, then the gate"]);
 	// No secret in an environment every step of a job or of the workflow would share.
 	expect(Object.keys(workflow.jobs)).toEqual(["static", "image", "ios", "tests", "gate"]);
-	expect([workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)]).toEqual([
-		undefined,
-		undefined,
-		undefined,
-		undefined,
-		undefined,
-	]);
+	expect(
+		[workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)].filter((env) => env !== undefined),
+	).toEqual([]);
 	// Only the gate job may ask GitHub who it is (to join the tailnet); the jobs that run the tests may not.
 	expect(workflow.permissions).toEqual({ contents: "read" });
 	expect(
