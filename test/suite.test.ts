@@ -200,6 +200,24 @@ describe("organising", () => {
 		expect(h.call<{ items: unknown[] }>("find", { text: '"*) OR 1=1 --' }).items).toEqual([]);
 	});
 
+	test("a search by ref keeps to the folder, the tags and the state it is narrowed by", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", folder: "Checkout", tags: ["checkout"], outline: "Coupon applies\n  Apply > Lower" },
+				{ op: "create", folder: "Accounts", outline: "Password resets\n  Reset > Access" },
+			],
+		});
+		const refs = (input: Record<string, unknown>) =>
+			h.call<{ items: { ref: string }[] }>("find", input).items.map((c) => c.ref);
+		expect(refs({ text: "C-1", folder: "Checkout" })).toEqual(["C-1"]);
+		expect(refs({ text: "C-2", folder: "Checkout" })).toEqual([]);
+		expect(refs({ text: "2", folder: "Checkout", deep: true })).toEqual([]);
+		expect(refs({ text: "C-2", tags: ["checkout"] })).toEqual([]);
+		expect(refs({ text: "C-1", tags: ["checkout"] })).toEqual(["C-1"]);
+		expect(refs({ text: "C-2", state: "archived" })).toEqual([]);
+		expect(refs({ text: "C-2" })).toEqual(["C-2"]);
+	});
+
 	test("a search too broad to rank is bounded: newest first, title matches first, and it says the count is unknown", () => {
 		const batch = (from: number, n: number) =>
 			Array.from({ length: n }, (_, i) => ({ op: "create", outline: `Common thing ${from + i}\n  Step > Result` }));

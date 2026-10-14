@@ -9,7 +9,6 @@ import { invalid, notFound } from "../kernel/errors.ts";
 import { type CaseRow, type FolderIndex, type FolderRow, folderIndex, mustCase, type VersionRow } from "./suite.ts";
 
 const Q = {
-	caseByNo: sql<{ project: number; no: number }, CaseRow>("SELECT * FROM cases WHERE project = $project AND no = $no"),
 	searchAny: sql<{ match: string; project: number; limit: number }, { rowid: number }>(
 		"SELECT rowid FROM search_docs WHERE search_docs MATCH $match AND project = $project LIMIT $limit",
 	),
@@ -172,8 +171,12 @@ export function listCases(
 		const direct = /^(?:c-)?(\d+)$/i.exec(query.text.trim());
 		const match = ftsQuery(query.text);
 		const found: CaseRow[] = [];
+		// A ref is found like any match: only where the folder, the tags and the state let it be.
 		if (direct) {
-			const row = ctx.db.get(Q.caseByNo, { project, no: Number(direct[1]) });
+			const [row] = ctx.db.allDynamic<CaseRow>(`SELECT c.* FROM cases c WHERE c.no = ? AND ${where.join(" AND ")}`, [
+				Number(direct[1]),
+				...params,
+			]);
 			if (row) found.push(row);
 		}
 		let broad = false;

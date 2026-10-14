@@ -135,11 +135,12 @@ passwords and passkeys are managed in the web app.
    the left edge of the screen, or press the back button, to go up. Scroll to the end of a list to read the next
    page. A mark at the end of a case's row shows its worst result on the current version: a cross for a failure
    or an error, a triangle for blocked, a tick for a pass.
-   A list you opened before shows at once and is read again in the background after a change. Pull down to read
-   it now.
+   A list you opened recently shows at once and is read again in the background after a change. The app keeps the
+   last forty lists you left; an older one is read again with a spinner. Pull down to read a list now.
    The magnifier at the top searches for words of a case or its number, such as `C-12`. Opened in a folder, it
    searches that folder and its subfolders; in a tag, the cases with that tag. Press **Everywhere** to search the
-   whole project. Going back from the search clears it.
+   whole project. A case number finds that case only inside the folder or tag you search. Closing the search
+   clears it.
 2. Open a case to read its version, preconditions, steps and who may run it. **History** lists who wrote each
    version, when and why. Saved versions are read-only. **Open current case** opens the editable page.
    Folder and tags show the current placement.

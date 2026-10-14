@@ -538,6 +538,55 @@ struct SuiteCacheTests {
 		#expect(await transport.count("cases") == 10)
 	}
 
+	/// Every case read has a next page; the tree's read is held when asked.
+	actor HeldTree: Transport {
+		private(set) var cursors = 0
+		private var held: CheckedContinuation<Void, Never>?
+		private var holding = false
+		private var waiting: CheckedContinuation<Void, Never>?
+		func hold() { holding = true }
+		func release() { holding = false; held?.resume(); held = nil }
+		func waitForHold() async {
+			if held != nil { return }
+			await withCheckedContinuation { waiting = $0 }
+		}
+		func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+			let input = try JSONDecoder().decode(JSONValue.self, from: request.httpBody ?? Data())
+			var result = #"{"items":[]}"#
+			if input["in"]?.string == "folders", holding {
+				await withCheckedContinuation { held = $0; waiting?.resume(); waiting = nil }
+			}
+			if input["in"]?.string == "cases" {
+				if input["cursor"] != nil { cursors += 1 }
+				result = #"{"items":[{"ref":"C-1","title":"one","tags":[],"proof":{"human":null,"auto":null,"agent":null}}],"cursor":"next"}"#
+			}
+			return (Data("{\"ok\":true,\"result\":\(result)}".utf8),
+				HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+		}
+		func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+			throw URLError(.unsupportedURL)
+		}
+	}
+
+	@Test("a listing a change made stale is not paged with its old cursor while the change is read")
+	func stalePage() async throws {
+		let transport = HeldTree()
+		let server = Server(instance: try #require(Instance(address: "mainworthy.example")),
+			secrets: MemoryStore(), transport: transport)
+		let screen = SuiteScreen(project: server.project("shop"))
+		screen.appear(.all)
+		await screen.load(.all)
+		await transport.hold()
+		let refreshing = Task { await screen.refresh() }
+		await transport.waitForHold()
+		await screen.more(.all)
+		#expect(await transport.cursors == 0)
+		await transport.release()
+		await refreshing.value
+		await screen.more(.all)
+		#expect(await transport.cursors == 1)
+	}
+
 	@Test("the listings kept are bounded, the least recently shown dropped first and one on screen never")
 	func bounded() async throws {
 		let transport = Counting()
