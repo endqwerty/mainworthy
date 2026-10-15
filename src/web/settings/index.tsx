@@ -21,12 +21,13 @@ import { DocLink, EmptyState, KeyCap, ListRow, SectionHeading, Select } from "..
 import { CustomFields } from "./fields.tsx";
 import { YourHome } from "./home.tsx";
 import { People } from "./people.tsx";
+import { type ClauseChange, PolicyEditor } from "./policy.tsx";
 import { YourSessions } from "./sessions.tsx";
 import { YourSignIn } from "./signin.tsx";
 import { IssuedTokens } from "./tokens.tsx";
 import "./settings.css";
 
-type PolicyChange = { preset: string } | { unlinked: Unlinked } | { settings: Policy["settings"] };
+type PolicyChange = { preset: string } | { unlinked: Unlinked } | { settings: Policy["settings"] } | ClauseChange;
 
 /**
  * The sections a caller is shown, in the order of the list. "People" is for an admin of the instance who is a
@@ -115,10 +116,12 @@ export function SettingsScreen() {
 function SettingsWorkbench() {
 	const { project, session, instanceCan, overlayOpen, refreshSession, setStatus } = useApp();
 	const [section, setSection] = useState("Policy");
-	// The policy change whose proposal and decision are on their way.
+	// The policy edit on its way to a proposal and accepting decision.
 	const [switching, setSwitching] = useState<PolicyChange | null>(null);
+	const policyAttempt = useRef<{ key: string; propose: string; decide: string } | null>(null);
 	const [policyMessage, setPolicyMessage] = useState("");
 	const admin = session.can.includes("admin");
+	const mayChangePolicy = admin && session.kind === "human" && session.can.includes("produce");
 	const instanceAdmin = instanceCan.includes("admin");
 	const currentProject = session.projects.find((p) => p.key === project);
 	const mayRead = session.can.includes("read");
@@ -186,28 +189,35 @@ function SettingsWorkbench() {
 				]
 			: []),
 	]);
-	async function changePolicy(change: PolicyChange): Promise<boolean> {
-		if (!admin || switching) return false;
-		if ("preset" in change ? change.preset === preset : "unlinked" in change && change.unlinked === unlinked)
+	async function changePolicy(
+		change: PolicyChange,
+		changeReason?: string,
+	): Promise<boolean> {
+		if (!mayChangePolicy || switching) return false;
+		if (("preset" in change && change.preset === preset) || ("unlinked" in change && change.unlinked === unlinked))
 			return false;
 		const name =
-			"settings" in change
-				? "custom field definitions"
-				: "preset" in change
-					? `${change.preset} policy`
-					: `"${UNLINKED_LABELS[change.unlinked]}"`;
+			"preset" in change
+				? `${change.preset} policy`
+				: "unlinked" in change
+					? `"${UNLINKED_LABELS[change.unlinked]}"`
+					: "clauses" in change ? "custom policy" : "custom field definitions";
 		const reason =
-			"settings" in change
-				? "Change custom field definitions in Settings."
-				: "preset" in change
-					? `Use the ${change.preset} preset, selected in Settings.`
-					: `Tests with no case: ${change.unlinked}, selected in Settings.`;
+			changeReason ??
+			("preset" in change
+				? `Use the ${change.preset} preset, selected in Settings.`
+				: "unlinked" in change
+					? `Tests with no case: ${change.unlinked}, selected in Settings.`
+					: "clauses" in change ? "Custom policy, edited in Settings." : "Change custom field definitions in Settings.");
+		const key = JSON.stringify({ change, reason });
+		if (policyAttempt.current?.key !== key) policyAttempt.current = { key, propose: randomId(), decide: randomId() };
+		const attempt = policyAttempt.current;
 		setSwitching(change);
 		setPolicyMessage(`Recording the ${name} proposal and decision…`);
 		try {
 			const proposed = await call(
 				"propose",
-				{ edits: [{ op: "policy", ...change }], reason, cmd: randomId() },
+				{ edits: [{ op: "policy", ...change }], reason, cmd: attempt.propose },
 				{ project },
 			);
 			if (!proposed.question) throw new Error("The policy proposal did not return a review question.");
@@ -216,7 +226,7 @@ function SettingsWorkbench() {
 				.parse((await call("get", { refs: [proposed.question] }, { project }))[0]);
 			const replies = await call(
 				"decide",
-				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" }, reason, cmd: randomId() },
+				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" }, reason, cmd: attempt.decide },
 				{ project },
 			);
 			if (replies[0]?.status !== "decided" && replies[0]?.status !== "already")
@@ -225,11 +235,12 @@ function SettingsWorkbench() {
 			const answered =
 				ruled > 0 ? ` The rule answered ${ruled} open question${ruled === 1 ? "" : "s"} about tests with no case.` : "";
 			setPolicyMessage(
-				`${"settings" in change ? "Custom field definitions are in force." : "preset" in change ? `${change.preset} is in force.` : `Tests with no case: ${UNLINKED_LABELS[change.unlinked]}.`}${answered} Proposal ${proposed.proposal} and decision ${question.q} are both recorded.`,
+				`${"preset" in change ? `${change.preset} is in force.` : "unlinked" in change ? `Tests with no case: ${UNLINKED_LABELS[change.unlinked]}.` : "clauses" in change ? "Custom policy is in force." : "Custom field definitions are in force."}${answered} Proposal ${proposed.proposal} and decision ${question.q} are both recorded.`,
 			);
 			setStatus(`${name} recorded through ${proposed.proposal} and ${question.q}.`);
 			await invalidateProject(project);
 			await refreshSession();
+			policyAttempt.current = null;
 			return true;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "The policy could not be changed.";
@@ -282,7 +293,7 @@ function SettingsWorkbench() {
 										className="form-input"
 										aria-label="Policy preset"
 										value={switchingPreset ?? preset}
-										disabled={!admin || Boolean(switching)}
+										disabled={!mayChangePolicy || Boolean(switching)}
 										onChange={(event) => {
 											void changePolicy({ preset: event.target.value });
 										}}
@@ -309,7 +320,7 @@ function SettingsWorkbench() {
 										role="switch"
 										aria-checked={(switchingPreset ?? preset) !== "loose"}
 										checked={(switchingPreset ?? preset) !== "loose"}
-										disabled={!admin || Boolean(switching)}
+										disabled={!mayChangePolicy || Boolean(switching)}
 										onChange={(event) => void changePolicy({ preset: event.target.checked ? "standard" : "loose" })}
 									/>
 									<span>
@@ -332,7 +343,7 @@ function SettingsWorkbench() {
 										className="form-input"
 										aria-label="Tests with no case"
 										value={switchingUnlinked ?? unlinked}
-										disabled={!admin || Boolean(switching)}
+										disabled={!mayChangePolicy || Boolean(switching)}
 										onChange={(event) => {
 											const chosen = Unlinked.safeParse(event.target.value);
 											if (chosen.success) void changePolicy({ unlinked: chosen.data });
@@ -347,6 +358,10 @@ function SettingsWorkbench() {
 									</Select>
 								</label>
 							)}
+							<p className="dim">
+								Changing policy here needs a person with produce and admin on this project. Editing clauses also needs
+								instance admin to read the full policy. Applying records a proposal and an accepting decision.
+							</p>
 							<p className="settings-message" role="status">
 								{policyMessage}
 							</p>
@@ -363,6 +378,13 @@ function SettingsWorkbench() {
 										definitions={policy.settings.fields ?? {}}
 										disabled={!admin || !session.can.includes("produce") || Boolean(switching)}
 										onSave={(fields) => changePolicy({ settings: { ...policy.settings, fields } })}
+									/>
+									<PolicyEditor
+										policy={policy}
+										project={project}
+										mayChange={mayChangePolicy}
+										busy={Boolean(switching)}
+										onApply={changePolicy}
 									/>
 									<SectionHeading>Clause table · first match wins</SectionHeading>
 									<div className="settings-table-scroll">

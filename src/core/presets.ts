@@ -2,7 +2,7 @@
 // force. `strict` is a fixture that proves the same data works under a policy where a person answers everything;
 // the regulated preset proper needs the `gap` kind and role sign-off, which are not built yet.
 import { FlakyDetectionSettings } from "./flaky.ts";
-import { type Ask, Clause, KINDS, type Kind, type Policy, type PolicySettings } from "./kinds.ts";
+import { type Ask, Clause, clauseOf, KINDS, type Kind, type Policy, type PolicySettings } from "./kinds.ts";
 
 const rule: Ask = { who: "rule", agents: "none", notProducer: false, reason: "optional" };
 const member: Ask = { who: "member", agents: "advise", notProducer: false, reason: "optional" };
@@ -134,4 +134,19 @@ export function missingCatchAll(clauses: readonly Clause[]): Kind[] {
 		const last = clauses.filter((c) => c.kind === kind).at(-1);
 		return !(last?.when.length === 1 && last.when[0] === "always");
 	});
+}
+
+/** The policy checks shared by proposal validation and the clause editor. */
+export function policyProblem(policy: Policy): string | null {
+	const missing = missingCatchAll(policy.clauses);
+	if (missing.length > 0)
+		return `every kind must end with a clause that always matches; missing for: ${missing.join(", ")}`;
+	if (policy.settings.unlinked === "create") {
+		if (Object.values(policy.settings.fields ?? {}).some((field) => field.required))
+			return "required custom fields need values when a case is proposed, so tests with no case cannot create cases automatically: choose ask or track";
+		const adoption = clauseOf(policy, { kind: "adopt", facts: new Set(["author:ci"]) });
+		if (adoption?.ask.who !== "rule")
+			return "under this policy a person adopts every new case, so a rule cannot create cases for tests: choose ask or track";
+	}
+	return null;
 }

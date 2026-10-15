@@ -25,7 +25,7 @@ A failure that nobody has explained blocks every run that shows it, under all th
 
 ## Read the policy
 
-In Settings, open Policy (<kbd>g</kbd> <kbd>,</kbd>). It shows the preset in force, a short summary, and "Compare the policies". An instance admin also sees the clause table and the numbers below it.
+In Settings, open Policy (<kbd>g</kbd> <kbd>,</kbd>). It shows the preset in force, a short summary, and "Compare the policies". An instance admin also sees the clause table, its settings, and "Edit clauses".
 
 From the command line:
 
@@ -193,7 +193,19 @@ A policy change rewrites nothing that is recorded. Results, decisions and cases 
 
 ## Change single clauses
 
-Settings has no control for one clause. To change one, send a policy edit to `mainworthy propose`. The edit carries the whole clause list, so start from what `mainworthy policy show --json` prints, change a clause, and send it back. This example, with the clauses cut to `[...]`, makes a reason mandatory for findings and shortens the flaky hold to 7 days:
+In Settings, open Policy and choose "Edit clauses". This needs a person with instance `admin`, to read the full policy, and `produce` on the project. A project admin can still use the existing preset and tests-with-no-case controls.
+
+1. Edit the clause's conditions, who may answer, agent permissions, reason requirement, producer restriction, or which runs list it. Write conditions one per line. For a rule, write its answer as JSON, for example `{"is":"accept"}`.
+2. Add, remove, or move clauses with the row controls. The first matching clause wins. Each kind must end with a clause whose only condition is `always`.
+3. Set the flaky hold, evidence basis, and infrastructure hold below the table. The draft keeps the current choice for tests with no case.
+4. Choose "Preview recent questions" to compare the draft with the policy in force when you opened the editor. The sample contains up to 20 open questions in queue order and 20 most recently settled questions. Each question shows matching for its current facts and its applicable answer choices.
+5. Give a policy change reason, then choose "Apply policy". Mainworthy records the proposal and its accepting decision through the same operations as a preset switch.
+
+Invalid conditions, duplicate clause ids, invalid rule answers, missing final `always` clauses, and holds outside 1 to 365 days prevent preview and apply. Preview reads questions without changing the policy or recording decisions. It shows clause matching, who may answer, rule answers, and which runs list the question. It does not replay decisions, check a particular person's permissions, execute rules, or predict a gate result. Existing decisions stay recorded. Hold and basis changes affect future decisions and runs.
+
+A refused request keeps your draft in the open editor. If the policy changed while you edited, applying asks you to cancel and reopen from the current policy. Cancel discards the draft. Leaving Settings or reloading also discards it.
+
+From the command line, send a policy edit to `mainworthy propose`. The edit carries the whole clause list, so start from what `mainworthy policy show --json` prints, change a clause, and send it back. This example, with the clauses cut to `[...]`, makes a reason mandatory for findings and shortens the flaky hold to 7 days:
 
 ```
 $ mainworthy propose --json '{"edits":[{"op":"policy","preset":"standard","clauses":[...],"settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":7,"infraThisTargetOnly":true}}}]}'

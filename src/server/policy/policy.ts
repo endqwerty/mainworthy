@@ -1,8 +1,8 @@
 // The project's policy: a versioned clause table. Owns the table `policies`.
 // Reading is open to every module; the only writer is the effect of an `adopt` decision (see suite/adopt).
 import { FlakyDetectionSettings } from "../../core/flaky.ts";
-import { type Clause, clauseOf, type Facts, type Kind, Policy, type Unlinked } from "../../core/kinds.ts";
-import { missingCatchAll, PRESETS, type PresetName, presetOf } from "../../core/presets.ts";
+import { type Clause, clauseOf, type Facts, Policy, type Unlinked } from "../../core/kinds.ts";
+import { PRESETS, type PresetName, policyProblem, presetOf } from "../../core/presets.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { invalid } from "../kernel/errors.ts";
@@ -120,23 +120,8 @@ export function resolvePolicy(
 		next = { ...next, settings: { ...next.settings, emptyReports: change.emptyReports } };
 	const parsed = Policy.safeParse(next);
 	if (!parsed.success) throw invalid("policy is not valid", { issues: parsed.error.issues });
-	const missing: Kind[] = missingCatchAll(parsed.data.clauses);
-	if (missing.length > 0) {
-		throw invalid(`every kind must end with a clause that always matches; missing for: ${missing.join(", ")}`);
-	}
-	// A rule that makes cases proposes them like anyone else. Where a person adopts every new case, it would
-	// make none, and say nothing.
-	if (parsed.data.settings.unlinked === "create") {
-		if (Object.values(parsed.data.settings.fields ?? {}).some((field) => field.required))
-			throw invalid(
-				"required custom fields need values when a case is proposed, so tests with no case cannot create cases automatically: choose ask or track",
-			);
-		const adoption = clauseOf(parsed.data, { kind: "adopt", facts: new Set(["author:ci"]) });
-		if (adoption?.ask.who !== "rule")
-			throw invalid(
-				"under this policy a person adopts every new case, so a rule cannot create cases for tests: choose ask or track",
-			);
-	}
+	const problem = policyProblem(parsed.data);
+	if (problem) throw invalid(problem);
 	return parsed.data;
 }
 
