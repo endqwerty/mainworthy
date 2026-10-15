@@ -22,6 +22,11 @@ function gitValue(args: string[]): string | undefined {
 	}
 }
 
+/** Source paths are relative to the checkout, including when report runs in a subdirectory. */
+export function reportRoot(): string {
+	return gitValue(["rev-parse", "--show-toplevel"]) ?? process.cwd();
+}
+
 /** Converts SSH and HTTP remotes to the owner/repository identity used in targets. */
 export function repoOf(remote: string | undefined): string | undefined {
 	if (!remote) return undefined;

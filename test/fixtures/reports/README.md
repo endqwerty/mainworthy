@@ -12,6 +12,41 @@ also construct small variants for malformed data, retries, and runner errors.
 | `pytest.json` | Written from the `pytest-json-report` plugin's documented report, test, and stage schema. Neither pytest nor the plugin was installed or cached. This is plugin output, not a format built into pytest. |
 | `sample.trx` | Written from Microsoft's TRX field mapping and VSTest result/definition serializers. No .NET SDK was available. Includes results before definitions, a namespaced root, entity text, CDATA, and a seven-digit fractional duration. |
 
+## Real runner regression fixtures
+
+The `real-*.json` fixtures were generated on 2026-10-14 with Node 26.11.1,
+Jest 30.5.2, Vitest 5.0.4, Playwright 1.64.1, Python 3.9.6,
+pytest 8.4.2, and pytest-json-report 1.5.0. These supplement the older small
+schema fixtures above. The adapter regressions and CLI upload tests read them.
+
+Each runner project is preserved under `sources/<runner>/`. Copy the files to
+an isolated directory and remove the `.txt` suffix. Install the JavaScript
+runners in a parent directory, and pytest plus pytest-json-report in a virtual
+environment. Run the corresponding command from each project directory:
+
+```sh
+jest --runInBand --json --outputFile=out.json
+vitest run --reporter=json --outputFile=out.json
+FORCE_COLOR=1 playwright test
+pytest --json-report --json-report-file=out.json
+```
+
+All four commands exit 1 because the samples deliberately include failures.
+Jest, Vitest, and Playwright include pass, fail, skip, todo or fixme,
+parameterized cases, and a test that passes after a retry. Their JSON exports
+only retain retry history for Playwright. Pytest includes two different failing
+assertions in one class, parameterized tests, skip, expected failure, and a
+fixture setup error. Playwright uses no browser fixtures and launches no browser.
+
+Only whitespace and path prefixes in the captured JSON were changed. The
+project's absolute path becomes `/home/robin/project`, the tools directory
+becomes `/runner/cache`, and any remaining home path becomes `/home/robin`.
+Absolute `testResults[].name` fields remain absolute in both real Jest and
+Vitest fixtures. No `rootDir` was added. Tests supply the source root separately,
+just as the CLI obtains it from Git or its working directory. Pytest's class
+instance lines, memory addresses, crash messages, and Playwright's ANSI colour
+escapes remain in the fixtures so regressions exercise real reporter output.
+
 Official format references:
 
 - [Playwright JSON types](https://github.com/microsoft/playwright/blob/main/packages/playwright/types/testReporter.d.ts)

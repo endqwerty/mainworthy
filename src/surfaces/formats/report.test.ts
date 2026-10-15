@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { ReportInput } from "../../core/ops.ts";
+import { normaliseFailure, signatureHash } from "../../core/signature.ts";
 import { parseJUnit } from "./junit.ts";
 import { parseReport, type ReportFormat } from "./report.ts";
 
@@ -125,7 +126,7 @@ test("pytest-json-report keeps setup/call/teardown duration and fixture errors",
 		],
 	]);
 	expect(results[1]?.failure).toEqual({
-		message: "test_sample.py:8: AssertionError: assert 1 == 2",
+		message: "assert 1 == 2",
 		detail: "test_sample.py:8: AssertionError: assert 1 == 2",
 	});
 	expect(results[3]?.failure?.detail).toContain("fixture unavailable");
@@ -356,5 +357,112 @@ test("TRX handles namespace prefixes, missing definitions and long TimeSpan dura
 		test: { key: "unknown test", name: "unknown test" },
 		outcome: "pass",
 		durationMs: 93784123,
+	});
+});
+
+test.each(["jest", "vitest"] as const)("real %s absolute paths are relative to the checkout root", async (format) => {
+	const text = await fixture(`real-${format}.json`);
+	const { results } = parseReport(text, { file: "report.json", rootDir: "/home/robin/project" });
+	expect(results.map((result) => ["key" in result.test ? result.test.key : result.test.case, result.outcome])).toEqual([
+		["tests/sample.test.js::checkout::passes @C-1@v1", "pass"],
+		["tests/sample.test.js::checkout::fails", "fail"],
+		["tests/sample.test.js::checkout::skipped", "skip"],
+		["tests/sample.test.js::checkout::todo", "skip"],
+		["tests/sample.test.js::checkout::parameter 1", "pass"],
+		["tests/sample.test.js::checkout::parameter 2", "pass"],
+		["tests/sample.test.js::checkout::retry", "pass"],
+	]);
+	expect(results.map((result) => ("key" in result.test ? result.test.file : result.test.case))).toEqual(
+		Array(7).fill("tests/sample.test.js"),
+	);
+	const report = { ...JSON.parse(text), rootDir: "/home/robin/project" };
+	expect(parseReport(JSON.stringify(report), { file: "report.json", rootDir: "/elsewhere" }).results).toEqual(results);
+});
+
+test("real pytest class assertions have distinct signatures and fixture errors name the crash", async () => {
+	const { results } = parseReport(await fixture("real-pytest.json"), { file: "report.json" });
+	const assertions = results.filter((result) => result.outcome === "fail");
+	const signatures = assertions.map((result) => {
+		if (!result.failure) throw new Error("missing assertion diagnostic");
+		return signatureHash(
+			normaliseFailure({
+				message: result.failure.message,
+				...(result.failure.detail === undefined ? {} : { detail: result.failure.detail }),
+			}),
+		);
+	});
+	expect(new Set(signatures).size).toBe(2);
+	expect(assertions.map((result) => result.failure?.message)).toEqual([
+		"assert 1 == 2",
+		"AssertionError: assert 'robin' == 'sam'\n  \n  - sam\n  + robin",
+	]);
+	expect(assertions[0]?.failure?.detail).toContain("self = <test_sample.TestCart object at");
+	expect(results.find((result) => result.outcome === "error")?.failure?.message).toBe("RuntimeError: fixture boom");
+	expect(results.map((result) => result.outcome)).toEqual([
+		"pass",
+		"fail",
+		"fail",
+		"skip",
+		"skip",
+		"pass",
+		"pass",
+		"error",
+	]);
+});
+
+test("real Playwright diagnostics remove colours while preserving retries and parameterized tests", async () => {
+	const { results } = parseReport(await fixture("real-playwright.json"), { file: "report.json" });
+	const failure = results.find((result) => result.outcome === "fail")?.failure;
+	expect(failure?.message).toContain("Error: expect(received).toBe(expected)");
+	expect(failure?.detail).toContain("Expected: 2");
+	expect(failure?.detail).toContain("Received: 1");
+	expect(JSON.stringify(failure)).not.toContain("\\u001b");
+	expect(results.find((result) => "key" in result.test && result.test.name === "retry")?.note).toBe(
+		"passed after 1 retries",
+	);
+	expect(results.map((result) => result.outcome)).toEqual(["pass", "fail", "skip", "skip", "pass", "pass", "pass"]);
+});
+
+test("TRX refuses XML deeper than 32 elements", () => {
+	const xml = `<TestRun>${"<a>".repeat(40)}${"</a>".repeat(40)}</TestRun>`;
+	expect(() => parseReport(xml, { file: "deep.trx" })).toThrow("deep.trx: TRX nesting exceeds 32 elements");
+});
+
+test("invalid JSON root diagnostics name the report", () => {
+	expect(() => parseReport("[1,2]", { file: "array.json" })).toThrow(
+		"array.json: report: Invalid input: expected object, received array",
+	);
+});
+
+test("pytest without crash metadata uses the final diagnostic line and keeps the traceback", () => {
+	const { results } = parse({
+		exitcode: 1,
+		tests: [
+			{
+				nodeid: "tests/test.py::TestCart::test_total",
+				outcome: "failed",
+				call: { duration: 0, outcome: "failed", longrepr: "self = <TestCart object>\n\nE assert 3 == 4" },
+			},
+		],
+	});
+	expect(results[0]?.failure).toEqual({
+		message: "E assert 3 == 4",
+		detail: "self = <TestCart object>\n\nE assert 3 == 4",
+	});
+});
+
+test("Jest Windows paths use the report root before the CLI root", () => {
+	const report = jestReport();
+	const suite = report.testResults[0];
+	if (!suite) throw new Error("missing suite");
+	suite.name = "C:\\Users\\robin\\project\\tests\\sample.js";
+	const { results } = parseReport(JSON.stringify({ ...report, rootDir: "C:/Users/robin/project" }), {
+		file: "report.json",
+		rootDir: "/elsewhere",
+	});
+	expect(results[0]?.test).toEqual({
+		key: "tests/sample.js::math::adds @C-1@v2",
+		file: "tests/sample.js",
+		name: "adds @C-1@v2",
 	});
 });

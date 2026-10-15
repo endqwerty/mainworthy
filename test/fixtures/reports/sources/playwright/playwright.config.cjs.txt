@@ -1,0 +1,1 @@
+module.exports = {testDir: './tests', workers: 1, retries: 1, reporter: [['json', { outputFile: 'out.json' }]], projects: [{name: 'chromium'}]};

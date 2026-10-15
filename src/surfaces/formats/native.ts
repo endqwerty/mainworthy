@@ -13,6 +13,7 @@ export function nativeResult(input: {
 	outcome: ResultIn["outcome"];
 	durationMs?: number | undefined;
 	detail?: string | undefined;
+	message?: string | undefined;
 	retries?: number;
 }): ResultIn {
 	const withoutRetry = input.name.replace(/(?:\s*\(retry\s*#?\s*\d+\)|\s*\[retry\s*#?\s*\d+\])+\s*$/i, "");
@@ -42,7 +43,10 @@ export function nativeResult(input: {
 	}
 	if (input.outcome === "fail" || input.outcome === "error") {
 		const detail = input.detail?.trim() || `Test ${input.outcome === "fail" ? "failed" : "errored"}`;
-		result.failure = { message: (detail.split(/\r?\n/)[0] ?? detail).slice(0, 4000), detail: detail.slice(0, 20_000) };
+		result.failure = {
+			message: (input.message?.trim() || detail.split(/\r?\n/)[0] || detail).slice(0, 4000),
+			detail: detail.slice(0, 20_000),
+		};
 	}
 	const claim = /@(C-\d+)(?:@v(\d+))?(?![\w@-])/.exec(input.name.trim());
 	if (claim?.[1] !== undefined) {

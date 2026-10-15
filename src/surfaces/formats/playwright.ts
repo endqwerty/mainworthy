@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import { z } from "zod";
 import type { Outcome } from "../../core/ops.ts";
 import { nativeResult, type ParsedReport } from "./native.ts";
@@ -76,7 +77,7 @@ export function parsePlaywright(value: unknown): ParsedReport {
 						outcome: unexpectedPass ? "fail" : expectedFailure ? "pass" : outcomes[final.status],
 						durationMs: test.results.reduce((sum, attempt) => sum + attempt.duration, 0),
 						retries: final.retry,
-						detail: unexpectedPass ? "Expected test to fail, but it passed" : detail,
+						detail: unexpectedPass ? "Expected test to fail, but it passed" : stripVTControlCharacters(detail),
 					}),
 				);
 			}

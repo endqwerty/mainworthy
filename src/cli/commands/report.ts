@@ -2,7 +2,7 @@ import { ReportInput, type ReportReceipt, type TargetIn } from "../../core/ops.t
 import { parseReport, ReportFormat } from "../../surfaces/formats/report.ts";
 import { assertPositionals } from "../args.ts";
 import { line, printJson, warning } from "../output.ts";
-import { detectedTarget, reportTarget, TARGET_FLAGS } from "../target.ts";
+import { detectedTarget, reportRoot, reportTarget, TARGET_FLAGS } from "../target.ts";
 import type { AdapterCommand } from "./types.ts";
 
 const count = (value: number): string => value.toLocaleString("en-US");
@@ -88,8 +88,9 @@ export const reportCommand: AdapterCommand = {
 		const target = reportTarget(args, detected);
 		const results: ReportInput["results"] = [];
 		const format = ReportFormat.parse(args.value("format") ?? "auto");
+		const rootDir = reportRoot();
 		for (const file of args.positionals) {
-			const parsed = parseReport(await Bun.file(file).text(), { file, format });
+			const parsed = parseReport(await Bun.file(file).text(), { file, format, rootDir });
 			results.push(...parsed.results);
 			for (const message of parsed.warnings) warning(message);
 		}
