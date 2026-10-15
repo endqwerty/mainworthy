@@ -124,8 +124,7 @@ const ANNOTATIONS = new Set(["description", "default", "title", "examples"]);
 /**
  * A union whose hidden choices leave one is that choice, under the union's own annotations. Only a union that
  * carries nothing but annotations is replaced: a keyword beside it (additionalProperties, if, properties...) could
- * apply to the choice differently once merged, and a `$ref` inside the choice could point through the union. Any
- * other union keeps its one choice, which says the same thing.
+ * apply to the choice differently once merged. Any other union keeps its one choice, which says the same thing.
  */
 function collapseHiddenUnion(schema: Exclude<SchemaNode, boolean>): SchemaNode | undefined {
 	for (const key of ["anyOf", "oneOf"] satisfies ("anyOf" | "oneOf")[]) {
@@ -137,7 +136,6 @@ function collapseHiddenUnion(schema: Exclude<SchemaNode, boolean>): SchemaNode |
 			continue;
 		const { [key]: _, ...parent } = schema;
 		if (Object.keys(parent).some((name) => !ANNOTATIONS.has(name))) continue;
-		if (JSON.stringify(only).includes('"$ref"')) continue;
 		const merged: Exclude<SchemaNode, boolean> = { ...parent, ...only };
 		for (const name of ANNOTATIONS) if (name in parent) Object.assign(merged, { [name]: parent[name] });
 		return merged;
@@ -145,10 +143,18 @@ function collapseHiddenUnion(schema: Exclude<SchemaNode, boolean>): SchemaNode |
 	return undefined;
 }
 
-export function compactSchema(schema: SchemaNode, envelope = false): SchemaNode {
+/**
+ * `collapse` is decided once for the whole document: a `$ref` anywhere in it could point into a union by path, so a
+ * document with one keeps every union.
+ */
+export function compactSchema(
+	schema: SchemaNode,
+	envelope = false,
+	collapse = !JSON.stringify(schema).includes('"$ref"'),
+): SchemaNode {
 	if (typeof schema === "boolean") return schema;
-	const collapsed = collapseHiddenUnion(schema);
-	if (collapsed !== undefined) return compactSchema(collapsed, envelope);
+	const collapsed = collapse ? collapseHiddenUnion(schema) : undefined;
+	if (collapsed !== undefined) return compactSchema(collapsed, envelope, collapse);
 	const visible = { ...schema };
 	if (schema.properties)
 		visible.properties = Object.fromEntries(
@@ -161,7 +167,7 @@ export function compactSchema(schema: SchemaNode, envelope = false): SchemaNode 
 		const choices = schema[key];
 		if (choices) visible[key] = choices.filter((child) => child["x-mcp-hidden"] !== true);
 	}
-	const result = mapSchemas(visible, (child) => compactSchema(child));
+	const result = mapSchemas(visible, (child) => compactSchema(child, false, collapse));
 	delete result["x-mcp-hidden"];
 	delete result.$schema;
 	if (result.description) {
@@ -200,7 +206,7 @@ export function compactSchema(schema: SchemaNode, envelope = false): SchemaNode 
 		if (result.required?.includes("cmd")) result.required = result.required.filter((name) => name !== "cmd");
 		for (const key of ["allOf", "anyOf", "oneOf"] satisfies ("allOf" | "anyOf" | "oneOf")[]) {
 			const choices = visible[key];
-			if (choices) result[key] = choices.map((choice) => objectSchema(compactSchema(choice, true)));
+			if (choices) result[key] = choices.map((choice) => objectSchema(compactSchema(choice, true, collapse)));
 		}
 	}
 	return result;

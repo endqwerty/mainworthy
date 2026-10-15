@@ -133,6 +133,19 @@ test("a union left with one choice after hiding is that choice, still compacted"
 			anyOf: [{ required: ["q"] }],
 		});
 	}
+	// A reference from outside the union that points into it stays valid: a document with a reference keeps its unions.
+	const outside = node({
+		$defs: {
+			a: {
+				anyOf: [
+					{ $defs: { s: { type: "string" } }, type: "string" },
+					{ type: "null", ...hidden },
+				],
+			},
+		},
+		$ref: "#/$defs/a/anyOf/0/$defs/s",
+	});
+	expect(outside).toMatchObject({ $defs: { a: { anyOf: [{ $defs: { s: { type: "string" } } }] } } });
 	// A reference that points through the union stays valid because the union stays.
 	const pointed = { $defs: { s: { type: "string" } }, $ref: "#/anyOf/0/$defs/s" };
 	expect(node({ anyOf: [pointed, { type: "null", ...hidden }] })).toMatchObject({
