@@ -178,8 +178,8 @@ not the same things done worse.
     `timeline` was added so the case page's one timeline is reachable from every surface. `transfer` is two
     streaming HTTP routes and two CLI commands instead of an operation, because an archive does not fit in a
     JSON reply.
-12. **The API description covers inputs only.** Replies are typed in TypeScript (`src/core/api.ts`) but not yet
-    as schemas in the OpenAPI document (#52).
+12. **Reply schemas were deferred.** Resolved by decision 0035 and issue #52: the registry now declares outputs,
+    and the OpenAPI document describes successful replies.
 13. **Resolving a conflict adopts nothing.** The design let a conflict's author resolve it and the resolution
     land. Here the resolved body becomes a new proposal by that author, made on the version the conflict was
     shown against, and it meets the adopt policy like any other edit. So a conflict is never a way around a

@@ -10,6 +10,7 @@ import {
 	InvitationInput,
 	SessionInput,
 } from "../../core/people.ts";
+import { REPLIES } from "../../core/replies.ts";
 import {
 	actorByName,
 	addPasskey,
@@ -64,6 +65,7 @@ function signedInAt(env: InstanceCtx): string {
 
 export const sessionOp = defineInstanceOp({
 	name: "session",
+	output: REPLIES.session,
 	summary: "Your browser sessions: list them, and end one. An admin who is a person lists and ends anyone's.",
 	input: SessionInput,
 	needs: "self",
@@ -96,6 +98,7 @@ export const sessionOp = defineInstanceOp({
 
 export const credentialOp = defineInstanceOp({
 	name: "credential",
+	output: REPLIES.credential,
 	summary:
 		"How a person signs in: list your password and passkeys, register a passkey, remove one. An agent is refused: it signs in with a token only. A password is set in the web UI, never here.",
 	input: CredentialInput,
@@ -139,6 +142,7 @@ export const credentialOp = defineInstanceOp({
 
 export const invitationOp = defineInstanceOp({
 	name: "invitation",
+	output: REPLIES.invitation,
 	summary:
 		"Invite a person with a link, since there is no mail: make one, list them, revoke one. The link is shown once.",
 	input: InvitationInput,

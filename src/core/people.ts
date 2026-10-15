@@ -46,25 +46,26 @@ export const SessionInput = z.discriminatedUnion("do", [
 export type SessionInput = z.infer<typeof SessionInput>;
 
 /** One browser session that is alive. Never the cookie, nor its hash. */
-export type SessionRow = {
-	id: number;
+export const SessionRow = z.object({
+	id: z.number(),
 	/** What proved who the person was when it was opened. */
-	openedWith: "token" | "password" | "passkey";
+	openedWith: z.enum(["token", "password", "passkey"]),
 	/** The label of that token or credential. */
-	label: string;
+	label: z.string(),
 	/** What the browser called itself at sign-in, cut to 256 characters. Not verified. */
-	userAgent: string | null;
-	createdAt: number;
+	userAgent: z.string().nullable(),
+	createdAt: z.number(),
 	/** The address it was opened from, as the server determined it; null when nothing said. */
-	createdFrom: string | null;
-	lastUsedAt: number;
+	createdFrom: z.string().nullable(),
+	lastUsedAt: z.number(),
 	/** The address of the last request that used it. */
-	lastUsedFrom: string | null;
+	lastUsedFrom: z.string().nullable(),
 	/** When it ends however much it is used. */
-	expiresAt: number;
+	expiresAt: z.number(),
 	/** True for the session this very request came by. */
-	current: boolean;
-};
+	current: z.boolean(),
+});
+export type SessionRow = z.infer<typeof SessionRow>;
 
 export const CredentialInput = z.discriminatedUnion("do", [
 	z.object({
@@ -90,13 +91,14 @@ export const CredentialInput = z.discriminatedUnion("do", [
 export type CredentialInput = z.infer<typeof CredentialInput>;
 
 /** One way a person signs in. Never the hash, the key or the passkey's credential id. */
-export type CredentialRow = {
-	id: number;
-	kind: "password" | "passkey";
-	label: string;
-	createdAt: number;
-	lastUsedAt: number | null;
-};
+export const CredentialRow = z.object({
+	id: z.number(),
+	kind: z.enum(["password", "passkey"]),
+	label: z.string(),
+	createdAt: z.number(),
+	lastUsedAt: z.number().nullable(),
+});
+export type CredentialRow = z.infer<typeof CredentialRow>;
 
 /** The longest an invitation may last, and how long one lasts when nobody says. */
 export const INVITATION_LASTS = { default: "3d", mostMs: 30 * 86_400_000 } as const;
@@ -125,37 +127,48 @@ export const InvitationInput = z.discriminatedUnion("do", [
 export type InvitationInput = z.infer<typeof InvitationInput>;
 
 /** What `invitation create` replies. The one reply that holds the code; it is not stored and not repeated. */
-export type InvitationCreated = {
-	id: number;
-	name: string;
-	purpose: "join" | "recover";
+export const InvitationCreated = z.object({
+	id: z.number(),
+	name: z.string(),
+	purpose: z.enum(["join", "recover"]),
 	/** What the person may do on `project` (`*`: every project), as they will hold it. */
-	can: string[];
-	project: string;
-	expiresAt: number;
-	code: string;
+	can: z.array(z.string()),
+	project: z.string(),
+	expiresAt: z.number(),
+	code: z.string(),
 	/** `<public address>/invite#<code>`, or `/invite#<code>` on an instance that was given no public address. */
-	link: string;
-	note: string;
-};
+	link: z.string(),
+	note: z.string(),
+});
+export type InvitationCreated = z.infer<typeof InvitationCreated>;
 
-export type InvitationRow = {
-	id: number;
-	name: string;
-	purpose: "join" | "recover";
-	createdBy: string;
-	createdAt: number;
-	expiresAt: number;
-	state: "open" | "used" | "revoked" | "expired";
+export const InvitationRow = z.object({
+	id: z.number(),
+	name: z.string(),
+	purpose: z.enum(["join", "recover"]),
+	createdBy: z.string(),
+	createdAt: z.number(),
+	expiresAt: z.number(),
+	state: z.enum(["open", "used", "revoked", "expired"]),
 	/**
 	 * What the person holds now, as `actor.list` shows it: each grant with its project's key, or `*` for every
 	 * project. It is the person's and not the link's: a grant changed after the invitation was made shows here.
 	 */
-	grants: { project: string; can: string[] }[];
-};
+	grants: z.array(
+		z.object({
+			project: z.string(),
+			can: z.array(z.string()),
+		}),
+	),
+});
+export type InvitationRow = z.infer<typeof InvitationRow>;
 
 /**
  * What a signed-in page is told about how its person signs in: whether they have a password, and how many
  * passkeys. Null for a caller that is not a person.
  */
-export type CredentialSummary = { password: boolean; passkeys: number };
+export const CredentialSummary = z.object({
+	password: z.boolean(),
+	passkeys: z.number(),
+});
+export type CredentialSummary = z.infer<typeof CredentialSummary>;

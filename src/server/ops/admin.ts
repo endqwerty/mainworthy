@@ -2,6 +2,7 @@
 import { durationMs } from "../../core/duration.ts";
 import { type ActorKind, defaultCapabilities, type Unlinked } from "../../core/kinds.ts";
 import { AdminInput } from "../../core/ops.ts";
+import { REPLIES } from "../../core/replies.ts";
 import { forgetQuestionNames } from "../decisions/questions.ts";
 import { rewriteReportReceipts } from "../evidence/evidence.ts";
 import {
@@ -245,6 +246,7 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 
 export const adminOp = defineInstanceOp({
 	name: "admin",
+	output: REPLIES.admin,
 	summary:
 		"Projects, actors, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do.",
 	input: AdminInput,

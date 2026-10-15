@@ -1,87 +1,56 @@
 // The operations as a client sees them: each name with its input and its reply. The web client and the CLI are
 // typed from this map, so a call site that sends the wrong shape does not compile.
+
 import type { z } from "zod";
 import type { Unlinked } from "./kinds.ts";
 import type {
 	AdminInput,
 	ChangeInput,
-	ChangeReply,
 	CheckInput,
 	ClaimInput,
-	ClaimReply,
-	CommandFate,
 	CommandInput,
 	DecideInput,
-	DecideReply,
 	FindInput,
 	GateInput,
-	GateStatus,
 	GetInput,
 	HistoryInput,
 	ImpactInput,
 	InboxInput,
-	InboxReply,
 	PlanInput,
-	PlanReply,
-	Problem,
 	ProposeInput,
-	ProposeReply,
 	ReportInput,
-	ReportReceipt,
 	SinceInput,
 	TimelineInput,
 } from "./ops.ts";
-import type {
-	CredentialInput,
-	CredentialRow,
-	CredentialSummary,
-	InvitationCreated,
-	InvitationInput,
-	InvitationRow,
-	SessionInput,
-	SessionRow,
-} from "./people.ts";
+import type { CredentialInput, CredentialSummary, InvitationInput, SessionInput } from "./people.ts";
+import type { REPLIES } from "./replies.ts";
 
 type In<S extends z.ZodType> = z.input<S>;
-type Rows = Record<string, unknown>[];
 
+type Inputs = {
+	propose: In<typeof ProposeInput>;
+	report: In<typeof ReportInput>;
+	claim: In<typeof ClaimInput>;
+	plan: In<typeof PlanInput>;
+	change: In<typeof ChangeInput>;
+	decide: In<typeof DecideInput>;
+	inbox: In<typeof InboxInput>;
+	get: In<typeof GetInput>;
+	find: In<typeof FindInput>;
+	impact: In<typeof ImpactInput>;
+	since: In<typeof SinceInput>;
+	gate: In<typeof GateInput>;
+	history: In<typeof HistoryInput>;
+	timeline: In<typeof TimelineInput>;
+	check: In<typeof CheckInput>;
+	command: In<typeof CommandInput>;
+	admin: In<typeof AdminInput>;
+	session: In<typeof SessionInput>;
+	credential: In<typeof CredentialInput>;
+	invitation: In<typeof InvitationInput>;
+};
 export type Api = {
-	propose: { input: In<typeof ProposeInput>; reply: ProposeReply };
-	report: { input: In<typeof ReportInput>; reply: ReportReceipt };
-	claim: { input: In<typeof ClaimInput>; reply: ClaimReply };
-	plan: { input: In<typeof PlanInput>; reply: PlanReply };
-	change: { input: In<typeof ChangeInput>; reply: ChangeReply };
-	decide: { input: In<typeof DecideInput>; reply: DecideReply[] };
-	inbox: { input: In<typeof InboxInput>; reply: InboxReply };
-	get: { input: In<typeof GetInput>; reply: Rows };
-	find: {
-		input: In<typeof FindInput>;
-		/** `count` is null when it is not known: a page of a list, or a search too broad to count. */
-		reply: { count: number | null; items: Rows; cursor: string | null };
-	};
-	impact: { input: In<typeof ImpactInput>; reply: Record<string, unknown> };
-	since: { input: In<typeof SinceInput>; reply: { changed: Rows; settled: Rows; cursor: string } };
-	gate: { input: In<typeof GateInput>; reply: GateStatus };
-	history: { input: In<typeof HistoryInput>; reply: Record<string, unknown> };
-	timeline: {
-		input: In<typeof TimelineInput>;
-		reply: { ref: string; head: number; entries: Rows; questions: InboxReply["items"] };
-	};
-	check: { input: In<typeof CheckInput>; reply: { problems: Problem[]; counts: Record<string, number> } };
-	command: { input: In<typeof CommandInput>; reply: CommandFate };
-	admin: { input: In<typeof AdminInput>; reply: unknown };
-	/** `list`: `SessionRow[]`. `end`: `{ ended: true, current }`, where `current` says it was the caller's own. */
-	session: { input: In<typeof SessionInput>; reply: SessionRow[] | { ended: true; current: boolean } };
-	/**
-	 * `list`: `CredentialRow[]`. `passkey.begin`: the options for `navigator.credentials.create`. `passkey.add`:
-	 * `{ id, label }`. `remove`: `{ removed: true, sessionsEnded }`.
-	 */
-	credential: { input: In<typeof CredentialInput>; reply: CredentialRow[] | Record<string, unknown> };
-	/** `create`: `InvitationCreated`. `list`: `InvitationRow[]`. `revoke`: `{ revoked }`. */
-	invitation: {
-		input: In<typeof InvitationInput>;
-		reply: InvitationCreated | InvitationRow[] | { revoked: boolean };
-	};
+	[K in keyof Inputs]: { input: Inputs[K]; reply: z.output<(typeof REPLIES)[K]> };
 };
 export type OpName = keyof Api;
 

@@ -17,6 +17,7 @@ import {
 	ReportInput,
 	type ReportReceipt,
 } from "../../core/ops.ts";
+import { REPLIES } from "../../core/replies.ts";
 import { clip } from "../../core/text.ts";
 import {
 	answer,
@@ -111,6 +112,7 @@ export function propose(ctx: Ctx, input: ProposeInput): ProposeReply {
 
 export const proposeOp = defineOp({
 	name: "propose",
+	output: REPLIES.propose,
 	summary:
 		"Create or change cases, folders, links or the policy. Saving and proposing are the same call; policy decides what happens next.",
 	input: ProposeInput,
@@ -320,13 +322,14 @@ export function* reportSteps(ctx: Ctx, input: ReportInput): Generator<Pause, Rep
 
 export const reportOp = defineOp({
 	name: "report",
+	output: REPLIES.report,
 	summary:
 		"Record results: a parsed CI report, one manual result, or an agent's batch. The producer is the token's actor.",
 	input: ReportInput,
 	needs: "record",
 	scope: "project",
 	effect: "write",
-	mcp: "Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref. Reply: counts, the questions raised per cause of failure, and the gate.",
+	mcp: "Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref.",
 	steps: reportSteps,
 });
 
@@ -410,6 +413,7 @@ function knownOf(ctx: Ctx, question: QuestionRow): ClaimReply["known"][number] {
 
 export const claimOp = defineOp({
 	name: "claim",
+	output: REPLIES.claim,
 	summary: "Record a review and what it found. A review with no findings is still recorded.",
 	input: ClaimInput,
 	needs: "produce",
@@ -437,6 +441,7 @@ export function changeEnds(ctx: Ctx, input: ChangeInput): ChangeReply {
 
 export const changeOp = defineOp({
 	name: "change",
+	output: REPLIES.change,
 	summary:
 		"Say that a change ended (merged, or closed without merging) or is open again. An ended change is not asked about.",
 	input: ChangeInput,
@@ -481,6 +486,7 @@ export function planRun(ctx: Ctx, input: PlanInput): PlanReply {
 
 export const planOp = defineOp({
 	name: "plan",
+	output: REPLIES.plan,
 	summary:
 		"Start a run: choose cases, say which results count and what completes it. Evidence already recorded fills it at once.",
 	input: PlanInput,
@@ -501,6 +507,7 @@ export function decide(ctx: Ctx, input: DecideInput): DecideReply[] {
 
 export const decideOp = defineOp({
 	name: "decide",
+	output: REPLIES.decide,
 	summary:
 		"Answer a question, or withdraw a decision. Policy says whether your answer settles it, is advice, or is refused.",
 	input: DecideInput,

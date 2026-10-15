@@ -92,11 +92,11 @@ Propose cases; edits need base version. Status: adopted=current, open=needs acce
 | `edits[][policy].settings.holds.infraThisTargetOnly` | `boolean` | yes |  |
 | `edits[][policy].unlinked` | `"ask" \| "track" \| "create"` | no |  |
 | `reason` | `string` | no | Why. Shown in the case history. |
-| `project` | `string` | no | Project key; omit only if there is one project. |
+| `project` | `string` | no | Omit only for a single project. |
 
 ## report
 
-Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref. Reply: counts, the questions raised per cause of failure, and the gate.
+Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -135,7 +135,7 @@ Record test results in one batch. Give `target` (the commit tested) or `run` (a 
 | `results[].annotation.case` | `string` | yes |  |
 | `results[].annotation.version` | `integer` | no |  |
 | `results[].corrects` | `integer` | no | The id of an earlier result of yours that this one replaces. |
-| `project` | `string` | no | Project key; omit only if there is one project. |
+| `project` | `string` | no | Omit only for a single project. |
 
 ## claim
 
@@ -160,7 +160,7 @@ Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Reco
 | `findings[].suggest[2].step` | `string` | no |  |
 | `findings[].suggest[2].action` | `string` | no |  |
 | `findings[].suggest[2].expected` | `string` | no |  |
-| `project` | `string` | no | Project key; omit only if there is one project. |
+| `project` | `string` | no | Omit only for a single project. |
 
 ## decide
 
@@ -168,7 +168,7 @@ Answer an inbox question with its evidenceHash as onEvidence. Replies: decided, 
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `project` | `string` | no | Project key; omit only if there is one project. |
+| `project` | `string` | no | Omit only for a single project. |
 | `[1].q` | `string` | yes | The question, for example Q-12. |
 | `[1].onEvidence` | `string` | yes | The evidence hash you saw. If the evidence changed since, the reply is a conflict with the new evidence. |
 | `[1].answer` | `record<unknown>` | yes | The answer, for example {"is":"defect"}. The allowed answers depend on the question kind. |
@@ -185,7 +185,7 @@ Answer an inbox question with its evidenceHash as onEvidence. Replies: decided, 
 
 ## inbox
 
-List open questions (failures, proposals, findings, unlinked tests) with their evidence and `evidenceHash`, counts first. `on` narrows to one case, run or change.
+List open questions with evidence and `evidenceHash`, counts first. `on` selects a case, run or change.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -194,7 +194,7 @@ List open questions (failures, proposals, findings, unlinked tests) with their e
 | `on` | `string` | no | Only questions about this case, run, test or change. |
 | `limit` | `integer` | no |  |
 | `cursor` | `string` | no | The cursor from the previous page. |
-| `project` | `string` | no | Project key; omit only if there is one project. |
+| `project` | `string` | no | Omit only for a single project. |
 
 ## get
 
@@ -207,11 +207,11 @@ Read things by ref (C-, Q-, R-, T-, P-). For cases use `as: "md"` and `fields` t
 | `as` | `"data" \| "md"` | no | `md` returns a case as canonical Markdown: fewer tokens than JSON. Default: `"data"`. |
 | `unless` | `record<string>` | no | Ref to the hash you already hold. An unchanged case comes back as {ref, unchanged: true}. |
 | `version` | `integer` | no | For one case: this version instead of the current one. |
-| `project` | `string` | no | Project key; omit only if there is one project. |
+| `project` | `string` | no | Omit only for a single project. |
 
 ## find
 
-Search cases by text, folder or tag (rows carry ref, title, hash, proof), or list tests (`unlinked: true`), runs, or the slots of a run. Paged by `cursor`.
+Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slots. Page with `cursor`.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -225,11 +225,11 @@ Search cases by text, folder or tag (rows carry ref, title, hash, proof), or lis
 | `unlinked` | `boolean` | no | For tests: only those with no case. |
 | `limit` | `integer` | no |  |
 | `cursor` | `string` | no | The cursor from the previous page. |
-| `project` | `string` | no | Project key; omit only if there is one project. |
+| `project` | `string` | no | Omit only for a single project. |
 
 ## impact
 
-Start here for a review. Given a change (`pr:482`) or changed `files`, returns the cases it touches, why, their hashes, what you already reviewed, open questions and uncovered files. Pass the returned `cursor` as `since` next time.
+Start a review with a change (`pr:482`) or changed `files`. Returns affected cases, hashes, prior reviews, questions and uncovered files. Reuse `cursor` as `since`.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -237,7 +237,7 @@ Start here for a review. Given a change (`pr:482`) or changed `files`, returns t
 | `files` | `array<string>` | no | Changed paths, when the change is not known to Mainworthy. |
 | `since` | `string` | no | A cursor from an earlier call: only what moved since. |
 | `ledger` | `boolean` | no | False for fresh eyes: do not hide what was already reviewed. Default: `true`. |
-| `project` | `string` | no | Project key; omit only if there is one project. |
+| `project` | `string` | no | Omit only for a single project. |
 
 ## since
 
@@ -247,7 +247,7 @@ What changed since an earlier `cursor`: changed cases (one-line diff, no bodies)
 | --- | --- | --- | --- |
 | `cursor` | `string` | yes | A cursor from any earlier read. |
 | `limit` | `integer` | no |  |
-| `project` | `string` | no | Project key; omit only if there is one project. |
+| `project` | `string` | no | Omit only for a single project. |
 
 ## gate
 
@@ -259,4 +259,4 @@ Is this commit, change or run tested? Returns passed, failed, blocked or pending
 | `run` | `string` | no |  |
 | `change` | `string` | no | A change key, for example pr:482: the gate of its latest commit. |
 | `repo` | `string` | no |  |
-| `project` | `string` | no | Project key; omit only if there is one project. |
+| `project` | `string` | no | Omit only for a single project. |

@@ -1,4 +1,4 @@
-// The wire contract of every operation: one input schema and one output type each. The HTTP API, the OpenAPI
+// The wire contract of every operation: one input schema and one output schema each. The HTTP API, the OpenAPI
 // document, the MCP tools, the CLI and the web client are all derived from these, so a shape is declared once.
 import { z } from "zod";
 import { DURATION_FORMAT, DURATION_PATTERN } from "./duration.ts";
@@ -16,7 +16,7 @@ import {
 	Unlinked,
 } from "./kinds.ts";
 import { Automate, CaseBody, MethodKind } from "./model.ts";
-import { Obligation, TargetMatch, type Verdict } from "./runs.ts";
+import { Obligation, TargetMatch, Verdict } from "./runs.ts";
 
 /**
  * A client-generated id that names one request. Sent again unchanged, it returns the first reply and writes
@@ -117,17 +117,28 @@ export const ProposeInput = z.object({
 });
 export type ProposeInput = z.infer<typeof ProposeInput>;
 
-export type CaseStamp = { ref: string; version: number; hash: string };
-export type ProposeReply = {
+export const CaseStamp = z.object({
+	ref: z.string(),
+	version: z.number(),
+	hash: z.string(),
+});
+export type CaseStamp = z.infer<typeof CaseStamp>;
+export const ProposeReply = z.object({
 	/** Null when the edits changed nothing, so nothing was proposed. */
-	proposal: string | null;
+	proposal: z.string().nullable(),
 	/** `adopted`: it is the current version. `open`: a person must accept it. `conflict`: the author must resolve it. */
-	status: "adopted" | "open" | "conflict" | "rejected";
-	question: string | null;
-	needs: string | null;
-	cases: CaseStamp[];
-	conflicts: { case: string; paths: string[] }[];
-};
+	status: z.enum(["adopted", "open", "conflict", "rejected"]),
+	question: z.string().nullable(),
+	needs: z.string().nullable(),
+	cases: z.array(CaseStamp),
+	conflicts: z.array(
+		z.object({
+			case: z.string(),
+			paths: z.array(z.string()),
+		}),
+	),
+});
+export type ProposeReply = z.infer<typeof ProposeReply>;
 
 // ── report ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -187,49 +198,73 @@ export const ReportInput = z.object({
 });
 export type ReportInput = z.infer<typeof ReportInput>;
 
-export type QuestionBrief = {
-	q: string;
-	kind: Kind;
-	title: string;
-	state: "open" | "decided";
+export const QuestionBrief = z.object({
+	q: z.string(),
+	kind: Kind,
+	title: z.string(),
+	state: z.enum(["open", "decided"]),
 	/** Why this cause did or did not become a new question for a person. */
-	how: "new" | "already open" | "already decided" | "decided by rule";
-	answer: string | null;
-	by: string | null;
-	tests: number;
-};
-export type GateStatus = {
-	run: string | null;
-	verdict: Verdict;
-	reason: string;
-	tally: Record<string, number>;
-	open: string[];
-	url: string | null;
+	how: z.enum(["new", "already open", "already decided", "decided by rule"]),
+	answer: z.string().nullable(),
+	by: z.string().nullable(),
+	tests: z.number(),
+});
+export type QuestionBrief = z.infer<typeof QuestionBrief>;
+export const GateStatus = z.object({
+	run: z.string().nullable(),
+	verdict: Verdict,
+	reason: z.string(),
+	tally: z.record(z.string(), z.number()),
+	open: z.array(z.string()),
+	url: z.string().nullable(),
 	/** True when the stored verdict was overridden because an upload is unapplied or a hold expired. */
-	stale: boolean;
-};
-export type ReportReceipt = {
-	batch: number;
+	stale: z.boolean(),
+});
+export type GateStatus = z.infer<typeof GateStatus>;
+export const ReportReceipt = z.object({
+	batch: z.number(),
 	/** False when this exact report was already received: nothing was written. */
-	fresh: boolean;
-	target: string;
-	counts: { total: number; pass: number; fail: number; skip: number; error: number; blocked: number };
-	basis: { exact: number; assumed: number; unresolved: number };
+	fresh: z.boolean(),
+	target: z.string(),
+	counts: z.object({
+		total: z.number(),
+		pass: z.number(),
+		fail: z.number(),
+		skip: z.number(),
+		error: z.number(),
+		blocked: z.number(),
+	}),
+	basis: z.object({
+		exact: z.number(),
+		assumed: z.number(),
+		unresolved: z.number(),
+	}),
 	/** Failures by cause: new questions, questions already decided, and those a rule settled. */
-	questions: QuestionBrief[];
-	unlinked: number;
-	flips: number;
+	questions: z.array(QuestionBrief),
+	unlinked: z.number(),
+	flips: z.number(),
 	/** Results that were refused, by position in the report, with the reason. Nothing is relabelled to make it fit. */
-	rejected: { index: number; reason: string }[];
+	rejected: z.array(
+		z.object({
+			index: z.number(),
+			reason: z.string(),
+		}),
+	),
 	/**
 	 * Automated results kept with no case because their claim about a case or a version was refused, with the
 	 * reason. Their outcome still counts for the commit: a failure is not dropped from the gate.
 	 */
-	declined: { index: number; reason: string }[];
+	declined: z.array(
+		z.object({
+			index: z.number(),
+			reason: z.string(),
+		}),
+	),
 	/** Ids of the results written, for a small report (a person's keypress), so a correction can name one. */
-	results: number[];
-	gate: GateStatus | null;
-};
+	results: z.array(z.number()),
+	gate: z.union([GateStatus, z.null()]),
+});
+export type ReportReceipt = z.infer<typeof ReportReceipt>;
 
 // ── claim ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -279,11 +314,19 @@ export const ClaimInput = z.object({
 	cmd,
 });
 export type ClaimInput = z.infer<typeof ClaimInput>;
-export type ClaimReply = {
-	opened: string[];
-	known: { q: string; state: string; answer: string | null; by: string | null }[];
-	reviewed: number;
-};
+export const ClaimReply = z.object({
+	opened: z.array(z.string()),
+	known: z.array(
+		z.object({
+			q: z.string(),
+			state: z.string(),
+			answer: z.string().nullable(),
+			by: z.string().nullable(),
+		}),
+	),
+	reviewed: z.number(),
+});
+export type ClaimReply = z.infer<typeof ClaimReply>;
 
 // ── decide ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -315,20 +358,21 @@ export const DecideInput = z.union([
 ]);
 export type DecideInput = z.infer<typeof DecideInput>;
 
-export type DecideReply = {
-	q: string;
+export const DecideReply = z.object({
+	q: z.string(),
 	/**
 	 * `decided`: your answer settled it. `advised`: recorded as advice; someone else decides. `conflict`: the
 	 * evidence changed, it was already decided differently, or the decision to undo changed. `forbidden`: policy
 	 * does not let you answer.
 	 */
-	status: "decided" | "advised" | "conflict" | "forbidden" | "invalid" | "already" | "reopened";
-	needs: string | null;
-	decision: number | null;
-	effects: Record<string, unknown> | null;
+	status: z.enum(["decided", "advised", "conflict", "forbidden", "invalid", "already", "reopened"]),
+	needs: z.string().nullable(),
+	decision: z.number().nullable(),
+	effects: z.union([z.record(z.string(), z.unknown()), z.null()]),
 	/** On a conflict: the evidence hash to answer on now. */
-	evidence: string | null;
-};
+	evidence: z.string().nullable(),
+});
+export type DecideReply = z.infer<typeof DecideReply>;
 
 // ── change ─────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -340,14 +384,15 @@ export const ChangeInput = z.object({
 	cmd,
 });
 export type ChangeInput = z.infer<typeof ChangeInput>;
-export type ChangeReply = {
-	change: string;
-	state: "merged" | "closed" | "open";
+export const ChangeReply = z.object({
+	change: z.string(),
+	state: z.enum(["merged", "closed", "open"]),
 	/** The failure questions this ended (no longer asked) or, for a change that is open again, the ones asked now. */
-	questions: string[];
+	questions: z.array(z.string()),
 	/** True when the change was already as the caller says: its end and its questions are as they were. */
-	already: boolean;
-};
+	already: z.boolean(),
+});
+export type ChangeReply = z.infer<typeof ChangeReply>;
 
 // ── plan ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -368,7 +413,12 @@ export const PlanInput = z.object({
 	cmd,
 });
 export type PlanInput = z.infer<typeof PlanInput>;
-export type PlanReply = { run: string; slots: number; already: number };
+export const PlanReply = z.object({
+	run: z.string(),
+	slots: z.number(),
+	already: z.number(),
+});
+export type PlanReply = z.infer<typeof PlanReply>;
 
 // ── reads ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -381,34 +431,53 @@ export const InboxInput = z.object({
 });
 export type InboxInput = z.infer<typeof InboxInput>;
 
-export type QuestionItem = {
-	q: string;
-	kind: Kind;
-	title: string;
-	producer: ActorKind;
-	state: "open" | "decided" | "dissolved";
-	evidence: Record<string, unknown>;
-	evidenceHash: string;
-	seen: { count: number; carried: number };
-	needs: string;
+export const QuestionItem = z.object({
+	q: z.string(),
+	kind: Kind,
+	title: z.string(),
+	producer: ActorKind,
+	state: z.enum(["open", "decided", "dissolved"]),
+	evidence: z.record(z.string(), z.unknown()),
+	evidenceHash: z.string(),
+	seen: z.object({
+		count: z.number(),
+		carried: z.number(),
+	}),
+	needs: z.string(),
 	/** The answers that apply to this question, in key order. The keys and labels are in `ANSWER_KEYS`. */
-	answers: string[];
-	blocks: string[];
-	about: string[];
-	openedAt: number;
-	advice: { by: string; kind: ActorKind; answer: Record<string, unknown>; reason: string | null }[];
+	answers: z.array(z.string()),
+	blocks: z.array(z.string()),
+	about: z.array(z.string()),
+	openedAt: z.number(),
+	advice: z.array(
+		z.object({
+			by: z.string(),
+			kind: ActorKind,
+			answer: z.record(z.string(), z.unknown()),
+			reason: z.string().nullable(),
+		}),
+	),
 	/** In a listing: what the caller's own answer would be worth under the policy. */
-	you?: "counts" | "advice" | "forbidden";
-	decision: {
-		id: number;
-		answer: Record<string, unknown>;
-		by: string[];
-		rule: string | null;
-		reason: string | null;
-		at: number;
-	} | null;
-};
-export type InboxReply = { counts: Record<string, number>; items: QuestionItem[]; cursor: string | null };
+	you: z.enum(["counts", "advice", "forbidden"]).optional(),
+	decision: z.union([
+		z.object({
+			id: z.number(),
+			answer: z.record(z.string(), z.unknown()),
+			by: z.array(z.string()),
+			rule: z.string().nullable(),
+			reason: z.string().nullable(),
+			at: z.number(),
+		}),
+		z.null(),
+	]),
+});
+export type QuestionItem = z.infer<typeof QuestionItem>;
+export const InboxReply = z.object({
+	counts: z.record(z.string(), z.number()),
+	items: z.array(QuestionItem),
+	cursor: z.string().nullable(),
+});
+export type InboxReply = z.infer<typeof InboxReply>;
 
 export const GetInput = z.object({
 	refs: z
@@ -477,7 +546,12 @@ export const GateInput = z.object({
 export type GateInput = z.infer<typeof GateInput>;
 
 export const CheckInput = z.object({ limit });
-export type Problem = { rule: string; ref: string; message: string };
+export const Problem = z.object({
+	rule: z.string(),
+	ref: z.string(),
+	message: z.string(),
+});
+export type Problem = z.infer<typeof Problem>;
 
 export const TimelineInput = z.object({ ref: ref("The case."), limit });
 
@@ -491,10 +565,22 @@ export type CommandInput = z.infer<typeof CommandInput>;
  * did not arrive, has not run yet, or was refused with an error. `begun`: accepted and not finished (a report
  * accepted and not yet applied). `done`: it ran, and `reply` is the reply it was given, at sequence `seq`.
  */
-export type CommandFate =
-	| { state: "none" }
-	| { state: "begun"; op: string }
-	| { state: "done"; op: string; seq: number; reply: unknown };
+export const CommandFate = z.union([
+	z.object({
+		state: z.literal("none"),
+	}),
+	z.object({
+		state: z.literal("begun"),
+		op: z.string(),
+	}),
+	z.object({
+		state: z.literal("done"),
+		op: z.string(),
+		seq: z.number(),
+		reply: z.unknown(),
+	}),
+]);
+export type CommandFate = z.infer<typeof CommandFate>;
 
 // ── administer ─────────────────────────────────────────────────────────────────────────────────────────────
 

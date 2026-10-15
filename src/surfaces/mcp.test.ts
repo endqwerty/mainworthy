@@ -22,16 +22,16 @@ import { mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from "./mcp.ts";
 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
-	propose: 1257,
-	report: 713,
-	claim: 414,
-	decide: 315,
-	inbox: 190,
-	get: 284,
-	find: 281,
-	impact: 208,
-	since: 141,
-	gate: 143,
+	propose: 1245,
+	report: 698,
+	claim: 401,
+	decide: 319,
+	inbox: 192,
+	get: 242,
+	find: 274,
+	impact: 211,
+	since: 169,
+	gate: 171,
 };
 
 function resultOf<S extends z.ZodType>(reply: unknown, schema: S): z.output<S> {
@@ -133,6 +133,35 @@ test("schema trims preserve the registry's constraints and union choices", () =>
 			expect(compact(input).valid, `${tool.name}: ${JSON.stringify(input)}`).toBe(original(input).valid);
 		}
 	}
+});
+
+test("compact output schemas describe structured results from the registry", () => {
+	const validator = new AjvJsonSchemaValidator();
+	const compile = (schema: NonNullable<ReturnType<typeof mcpTools>[number]["outputSchema"]>) => {
+		const { properties, required, ...base } = schema;
+		return validator.getValidator({
+			...base,
+			...(properties ? { properties } : {}),
+			...(required ? { required } : {}),
+		});
+	};
+	for (const tool of mcpTools()) {
+		if (!tool.outputSchema) throw new Error(`${tool.name}: missing output schema`);
+		const validate = compile(tool.outputSchema);
+		expect(validate({ seq: 1 }).valid, `${tool.name}: missing result`).toBe(false);
+		expect(validate({ result: null, seq: 1 }).valid, `${tool.name}: wrong result type`).toBe(false);
+		expect(validate({ result: {}, seq: "one" }).valid, `${tool.name}: wrong sequence`).toBe(false);
+	}
+	const gate = mcpTools().find((tool) => tool.name === "gate");
+	if (!gate?.outputSchema) throw new Error("No gate output");
+	const validate = compile(gate.outputSchema);
+	expect(validate({ result: {}, seq: 1 }).valid).toBe(false);
+	expect(
+		validate({
+			result: { run: null, verdict: "pending", reason: "No run", tally: {}, open: [], url: null, stale: false },
+			seq: 1,
+		}).valid,
+	).toBe(true);
 });
 
 test("an agent completes a real session, with hashes, advice, and compact reads", async () => {

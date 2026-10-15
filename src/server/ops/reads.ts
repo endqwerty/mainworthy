@@ -20,6 +20,7 @@ import {
 	SinceInput,
 	TimelineInput,
 } from "../../core/ops.ts";
+import { REPLIES } from "../../core/replies.ts";
 import type { Tally } from "../../core/runs.ts";
 import { toItem, toItemFor } from "../decisions/decisions.ts";
 import {
@@ -140,12 +141,13 @@ export function inbox(ctx: Ctx, input: InboxInput): InboxReply {
 
 export const inboxOp = defineOp({
 	name: "inbox",
+	output: REPLIES.inbox,
 	summary: "The queue: every question that needs an answer, most blocking first. With state=decided: the ledger.",
 	input: InboxInput,
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "List open questions (failures, proposals, findings, unlinked tests) with their evidence and `evidenceHash`, counts first. `on` narrows to one case, run or change.",
+	mcp: "List open questions with evidence and `evidenceHash`, counts first. `on` selects a case, run or change.",
 	run: inbox,
 });
 
@@ -380,6 +382,7 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 
 export const getOp = defineOp({
 	name: "get",
+	output: REPLIES.get,
 	summary: "Read cases, questions, runs, tests or proposals by ref.",
 	input: GetInput,
 	needs: "read",
@@ -539,13 +542,14 @@ export function find(ctx: Ctx, input: FindInput): Found {
 
 export const findOp = defineOp({
 	name: "find",
+	output: REPLIES.find,
 	summary:
 		"Search and list: cases (by text, folder, tag), tests, runs, slots of a run, folders, requirements, changes.",
 	input: FindInput,
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Search cases by text, folder or tag (rows carry ref, title, hash, proof), or list tests (`unlinked: true`), runs, or the slots of a run. Paged by `cursor`.",
+	mcp: "Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slots. Page with `cursor`.",
 	run: find,
 });
 
@@ -576,6 +580,7 @@ export function history(ctx: Ctx, input: HistoryInput): Record<string, unknown> 
 
 export const historyOp = defineOp({
 	name: "history",
+	output: REPLIES.history,
 	summary: "The versions of a case, or the step-level diff between two of them.",
 	input: HistoryInput,
 	needs: "read",
@@ -657,6 +662,7 @@ export function timeline(ctx: Ctx, input: z.infer<typeof TimelineInput>): Record
 
 export const timelineOp = defineOp({
 	name: "timeline",
+	output: REPLIES.timeline,
 	summary:
 		"One timeline for a case: versions, moves, results from every producer, findings, reviews and its questions.",
 	input: TimelineInput,
@@ -671,6 +677,7 @@ export const timelineOp = defineOp({
 
 export const gateOp = defineOp({
 	name: "gate",
+	output: REPLIES.gate,
 	summary:
 		"The verdict for a commit, a change or a run: passed, failed (needs a fix), blocked (needs a decision), pending (needs evidence).",
 	input: GateInput,
@@ -763,6 +770,7 @@ export function since(ctx: Ctx, input: SinceInput): Record<string, unknown> {
 
 export const sinceOp = defineOp({
 	name: "since",
+	output: REPLIES.since,
 	summary: "What changed since a cursor: cases with what changed in each, and questions that were settled.",
 	input: SinceInput,
 	needs: "read",
@@ -801,6 +809,7 @@ export function check(
 
 export const checkOp = defineOp({
 	name: "check",
+	output: REPLIES.check,
 	summary:
 		"Check the suite for structural problems: cases with no steps or no expected result, duplicate titles, dangling links.",
 	input: CheckInput,
@@ -931,13 +940,14 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 
 export const impactOp = defineOp({
 	name: "impact",
+	output: REPLIES.impact,
 	summary:
 		"The cases a change touches and why, with what was already reviewed or decided. Where to look, instead of the whole suite.",
 	input: ImpactInput,
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "Start here for a review. Given a change (`pr:482`) or changed `files`, returns the cases it touches, why, their hashes, what you already reviewed, open questions and uncovered files. Pass the returned `cursor` as `since` next time.",
+	mcp: "Start a review with a change (`pr:482`) or changed `files`. Returns affected cases, hashes, prior reviews, questions and uncovered files. Reuse `cursor` as `since`.",
 	run: impact,
 });
 
@@ -958,6 +968,7 @@ export function commandFate(ctx: Ctx, input: CommandInput): CommandFate {
 
 export const commandOp = defineOp({
 	name: "command",
+	output: REPLIES.command,
 	summary: "What became of a command you sent under an idempotency key: not recorded, begun, or done with its reply.",
 	input: CommandInput,
 	needs: "read",
