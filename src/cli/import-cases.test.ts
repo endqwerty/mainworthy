@@ -93,14 +93,14 @@ test("vendor CSV imports keep aliases, folders, source metadata and proposal his
 		const reportFile = join(directory, "results.xml");
 		await Bun.write(
 			reportFile,
-			'<testsuite><testcase name="signs in @C1234"/><testcase name="property"><properties><property name="mainworthy" value="C1234@v1"/></properties></testcase><testcase name="unknown @Missing123"/></testsuite>',
+			'<testsuite><testcase name="signs in @C1234"/><testcase name="property"><properties><property name="mainworthy" value="C1234@v1"/></properties></testcase><testcase name="unknown @Missing123"/><testcase name="explicit unknown @C-1"><properties><property name="mainworthy" value="Missing123"/></properties></testcase></testsuite>',
 		);
 		const reported = await run(["report", reportFile, "--session", "imported-aliases", "--json"]);
 		expect(reported).toMatchObject({ code: 0, stderr: "" });
 		expect(ReportReceipt.parse(JSON.parse(reported.stdout))).toMatchObject({
-			counts: { total: 3, pass: 3 },
-			basis: { exact: 1, assumed: 1, unresolved: 1 },
-			declined: [{ index: 2, reason: "the annotation names Missing123, which does not exist: recorded with no case" }],
+			counts: { total: 4, pass: 4 },
+			basis: { exact: 1, assumed: 1, unresolved: 2 },
+			declined: [{ index: 3, reason: "the annotation names Missing123, which does not exist: recorded with no case" }],
 		});
 		const qase = join(directory, "qase.csv");
 		await Bun.write(

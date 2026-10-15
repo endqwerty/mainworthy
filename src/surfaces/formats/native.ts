@@ -1,4 +1,3 @@
-import { caseAnnotation } from "../../core/case-annotation.ts";
 import type { ResultIn } from "../../core/ops.ts";
 
 export type ParsedReport = { results: ResultIn[]; warnings: string[] };
@@ -50,7 +49,7 @@ export function nativeResult(input: {
 			detail: detail.slice(0, 20_000),
 		};
 	}
-	const claim = input.annotation ?? caseAnnotation(input.name);
+	const claim = input.annotation;
 	if (claim !== undefined) result.annotation = claim;
 	if (input.retries && input.outcome === "pass") result.note = `passed after ${input.retries} retries`;
 	return result;

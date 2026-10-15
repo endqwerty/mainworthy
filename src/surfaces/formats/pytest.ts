@@ -68,7 +68,7 @@ export function parsePytest(value: unknown): ParsedReport {
 				suites: names,
 				outcome,
 				annotation: test.user_properties
-					?.map((item) => caseAnnotation(item.mainworthy ?? "", true))
+					?.map((item) => caseAnnotation(item.mainworthy ?? ""))
 					.findLast((claim) => claim !== undefined),
 				durationMs: stages.reduce((sum, stage) => sum + stage.duration, 0) * 1000,
 				message: failures

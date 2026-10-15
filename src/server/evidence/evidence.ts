@@ -4,7 +4,7 @@
 // report twice is a no-op and a crash loses nothing. `apply` turns the staged results into result rows, each with an
 // explicit basis. Between the two, every run the report matters to reads `pending` (see runs.ts).
 import { createHash } from "node:crypto";
-import { caseAnnotation } from "../../core/case-annotation.ts";
+import { caseNameAnnotation } from "../../core/case-annotation.ts";
 import { contentHash } from "../../core/hash.ts";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { MethodKind } from "../../core/model.ts";
@@ -816,7 +816,11 @@ export function* applySteps(
 		// The basis: every claim about the case and the version, then the assumption, then nothing.
 		let refused: string | null = null;
 		const annotation =
-			input.annotation ?? caseAnnotation("key" in input.test ? (input.test.name ?? input.test.key) : "");
+			input.annotation ??
+			caseNameAnnotation(
+				"key" in input.test ? (input.test.name ?? input.test.key) : "",
+				(alias) => findCase(ctx.db, project, alias) !== null,
+			);
 		const annotated = annotation ? findCase(ctx.db, project, annotation.case) : null;
 		const linked = test.case_id !== null ? head(test.case_id) : null;
 		if (annotation && !annotated) refused = `the annotation names ${annotation.case}, which does not exist`;

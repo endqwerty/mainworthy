@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import type { ProposeReply, ReportReceipt } from "../src/core/ops.ts";
+import { z } from "zod";
+import type { InboxReply, ProposeReply, ReportReceipt, ResultIn } from "../src/core/ops.ts";
 import { parseCaseImport } from "../src/surfaces/formats/cases.ts";
 import { parseReport, type ReportFormat } from "../src/surfaces/formats/report.ts";
 import { harness } from "./helpers.ts";
@@ -16,98 +17,314 @@ const reportCases = [
 	["trx", "name"],
 ] satisfies [ReportFormat, "name" | "property"][];
 
-test.each(reportCases)("%s %s claims resolve imported aliases and keep unknown aliases unlinked", (format, source) => {
+const nameFormats = ["junit", "playwright", "jest", "vitest", "pytest", "trx", "typed"] as const;
+
+function namedResults(format: (typeof nameFormats)[number], names: string[]): ResultIn[] {
+	if (format === "typed") return names.map((name) => ({ test: { key: name, name }, outcome: "pass" }));
+	let report: string;
+	if (format === "junit")
+		report = `<testsuite>${names.map((name) => `<testcase name="${name}"/>`).join("")}</testsuite>`;
+	else if (format === "trx")
+		report = `<TestRun><Results>${names.map((name, i) => `<UnitTestResult testId="${i}" testName="${name}" outcome="Passed"/>`).join("")}</Results></TestRun>`;
+	else if (format === "playwright")
+		report = JSON.stringify({
+			suites: [
+				{
+					title: "tests.js",
+					file: "tests.js",
+					specs: names.map((title) => ({
+						title,
+						file: "tests.js",
+						tests: [
+							{
+								projectName: "chromium",
+								expectedStatus: "passed",
+								results: [{ status: "passed", duration: 0, retry: 0 }],
+							},
+						],
+					})),
+				},
+			],
+		});
+	else if (format === "pytest")
+		report = JSON.stringify({
+			exitcode: 0,
+			tests: names.map((name) => ({
+				nodeid: `test.py::test[${name}]`,
+				outcome: "passed",
+				call: { outcome: "passed", duration: 0 },
+			})),
+		});
+	else
+		report = JSON.stringify({
+			testResults: [
+				{
+					name: "tests.js",
+					status: "passed",
+					assertionResults: names.map((title) => ({ title, ancestorTitles: [], status: "passed" })),
+				},
+			],
+		});
+	return parseReport(report, { file: `report.${format}`, format }).results;
+}
+
+const nameProbes = [
+	["login @smoke", null],
+	["login @smoke @C-2", 2],
+	["mail user@example.com @C-2", 2],
+	["renders @media queries", null],
+	["checkout @C1234 then @C-2", 2],
+	["checkout @C-2 then @C1234", 1],
+	["checkout @C1234 then @unknown", 1],
+	["login @C1234.", 1],
+	["login @C1234@v1.", 1],
+	["login @C1234,", 1],
+	["login @C1234:", 1],
+	["login @C1234!", 1],
+	["login @C1234?", 1],
+	["login @c-2", null],
+	["plain @C-2", 2],
+] satisfies [string, number | null][];
+
+test.each(nameFormats.flatMap((format) => nameProbes.map(([name, caseId]) => [format, name, caseId] as const)))(
+	"%s name claim: %s",
+	(format, name, caseId) => {
+		const h = harness();
+		try {
+			h.call("propose", {
+				edits: [
+					{ op: "create", body: { title: "Imported" }, aliases: ["C1234"] },
+					{ op: "create", body: { title: "Other" } },
+				],
+			});
+			const receipt = h.call<ReportReceipt>("report", {
+				target: { session: name },
+				results: namedResults(format, [name]),
+			});
+			expect({ name, basis: receipt.basis, declined: receipt.declined }).toEqual({
+				name,
+				basis: {
+					exact: name.includes("@v1") ? 1 : 0,
+					assumed: caseId !== null && !name.includes("@v1") ? 1 : 0,
+					unresolved: caseId === null ? 1 : 0,
+				},
+				declined: [],
+			});
+			expect(h.app.db.raw.query("SELECT basis_case FROM results ORDER BY id DESC LIMIT 1").get()).toEqual({
+				basis_case: caseId,
+			});
+		} finally {
+			h.close();
+		}
+	},
+);
+
+test.each([...nameFormats])("%s Apply quartet preserves native refs and ignores tags and emails", (format) => {
 	const h = harness();
 	try {
-		const edits = parseCaseImport("ID,Title\nC1234,Imported\n", "testrail");
-		h.call("propose", { edits });
-		h.call("propose", { edits: [{ op: "create", body: { title: "Other case" } }] });
-		const claims = ["C1234", "C1234@v1", "Missing123", "C-1@v1"];
-		const names = claims.map((claim, i) => `test ${i} @${source === "property" ? "C-2" : claim}`);
-		let report: string;
-		if (format === "junit") {
-			report = `<testsuite>${claims.map((claim, i) => `<testcase name="${names[i]}">${source === "property" ? `<properties><property name="mainworthy" value="C-2"/><property name="mainworthy" value="${claim}"/><property name="mainworthy" value="bad alias"/></properties>` : ""}</testcase>`).join("")}</testsuite>`;
-		} else if (format === "trx") {
-			report = `<TestRun><Results>${names.map((name, i) => `<UnitTestResult testId="${i}" testName="${name}" outcome="Passed"/>`).join("")}</Results></TestRun>`;
-		} else if (format === "playwright") {
-			report = JSON.stringify({
-				suites: [
-					{
-						title: "tests.js",
-						file: "tests.js",
-						specs: names.map((title, i) => ({
-							title,
+		h.call("propose", {
+			edits: [
+				{ op: "create", body: { title: "One" } },
+				{ op: "create", body: { title: "Two" } },
+			],
+		});
+		const receipt = h.call<ReportReceipt>("report", {
+			target: { session: "apply-quartet" },
+			results: namedResults(format, ["login @smoke", "login @smoke @C-2", "mail user@example.com @C-2", "plain @C-2"]),
+		});
+		expect(receipt.basis).toEqual({ exact: 0, assumed: 3, unresolved: 1 });
+		expect(receipt.declined).toEqual([]);
+	} finally {
+		h.close();
+	}
+});
+
+test.each([...nameFormats])("%s ordinary tags preserve a test's queue-decided link", (format) => {
+	const h = harness({ preset: "standard", unlinked: "ask" });
+	try {
+		h.call("propose", { edits: [{ op: "create", body: { title: "Linked case" } }] });
+		const results = namedResults(format, ["login @smoke"]);
+		h.call("report", { target: { session: "before-link" }, results });
+		const question = h.call<InboxReply>("inbox", { kind: "map" }).items[0];
+		if (!question) throw new Error("missing map question");
+		const tests = z.object({ tests: z.array(z.object({ t: z.string() })) }).parse(question.evidence).tests;
+		const t = tests[0]?.t;
+		if (!t) throw new Error("missing test");
+		expect(
+			h.call<{ status: string }[]>("decide", {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "link", pairs: [[t, "C-1"]] },
+			})[0]?.status,
+		).toBe("decided");
+		const receipt = h.call<ReportReceipt>("report", { target: { session: "after-link" }, results });
+		expect(receipt.basis).toEqual({ exact: 0, assumed: 1, unresolved: 0 });
+		expect(receipt.declined).toEqual([]);
+		expect(h.app.db.raw.query("SELECT basis_case FROM results ORDER BY id DESC LIMIT 1").get()).toEqual({
+			basis_case: 1,
+		});
+	} finally {
+		h.close();
+	}
+});
+
+test.each(reportCases)(
+	"%s %s claims resolve imported aliases and distinguish names from explicit metadata",
+	(format, source) => {
+		const h = harness();
+		try {
+			const edits = parseCaseImport("ID,Title\nC1234,Imported\n", "testrail");
+			h.call("propose", { edits });
+			h.call("propose", { edits: [{ op: "create", body: { title: "Other case" } }] });
+			const claims = ["C1234", "C1234@v1", "Missing123", "C-1@v1"];
+			const names = claims.map((claim, i) => `test ${i} @${source === "property" ? "C-2" : claim}`);
+			let report: string;
+			if (format === "junit") {
+				report = `<testsuite>${claims.map((claim, i) => `<testcase name="${names[i]}">${source === "property" ? `<properties><property name="mainworthy" value="C-2"/><property name="mainworthy" value="${claim}"/><property name="mainworthy" value="bad alias"/></properties>` : ""}</testcase>`).join("")}</testsuite>`;
+			} else if (format === "trx") {
+				report = `<TestRun><Results>${names.map((name, i) => `<UnitTestResult testId="${i}" testName="${name}" outcome="Passed"/>`).join("")}</Results></TestRun>`;
+			} else if (format === "playwright") {
+				report = JSON.stringify({
+					suites: [
+						{
+							title: "tests.js",
 							file: "tests.js",
-							tests: [
+							specs: names.map((title, i) => ({
+								title,
+								file: "tests.js",
+								tests: [
+									{
+										projectName: "chromium",
+										expectedStatus: "passed",
+										annotations:
+											source === "property"
+												? [
+														{ type: "mainworthy", description: "C-2" },
+														{ type: "mainworthy", description: claims[i] },
+														{ type: "mainworthy", description: "bad alias" },
+														{ type: "skip" },
+													]
+												: [],
+										results: [{ status: "passed", duration: 0, retry: 0 }],
+									},
+								],
+							})),
+						},
+					],
+				});
+			} else if (format === "pytest") {
+				report = JSON.stringify({
+					exitcode: 0,
+					tests: names.map((name, i) => ({
+						nodeid: `test.py::test_alias[${name}]`,
+						outcome: "passed",
+						call: { outcome: "passed", duration: 0 },
+						...(source === "property"
+							? {
+									user_properties: [
+										{ mainworthy: "C-2" },
+										{ mainworthy: claims[i] },
+										{ mainworthy: "bad alias" },
+										{ unrelated: 42 },
+									],
+								}
+							: {}),
+					})),
+				});
+			} else {
+				report = JSON.stringify({
+					testResults: [
+						{
+							name: "tests.js",
+							status: "passed",
+							assertionResults: names.map((title) => ({ title, ancestorTitles: [], status: "passed" })),
+						},
+					],
+				});
+			}
+			const parsed = parseReport(report, { file: `report.${format}`, format });
+			if (source === "property")
+				expect(parsed.results.map((result) => result.annotation)).toEqual([
+					{ case: "C1234" },
+					{ case: "C1234", version: 1 },
+					{ case: "Missing123" },
+					{ case: "C-1", version: 1 },
+				]);
+			const receipt = h.call<ReportReceipt>("report", { target: { session: "aliases" }, results: parsed.results });
+			expect(receipt).toMatchObject({
+				counts: { total: 4, pass: 4 },
+				rejected: [],
+				basis: { exact: 2, assumed: 1, unresolved: 1 },
+				declined:
+					source === "property"
+						? [{ index: 2, reason: "the annotation names Missing123, which does not exist: recorded with no case" }]
+						: [],
+			});
+			expect(h.app.db.raw.query("SELECT basis, basis_case, basis_version FROM results ORDER BY id").all()).toEqual([
+				{ basis: "assumed", basis_case: 1, basis_version: 1 },
+				{ basis: "exact", basis_case: 1, basis_version: 1 },
+				{ basis: "unresolved", basis_case: null, basis_version: null },
+				{ basis: "exact", basis_case: 1, basis_version: 1 },
+			]);
+		} finally {
+			h.close();
+		}
+	},
+);
+
+test.each(["junit", "playwright", "pytest"] as const)("%s metadata keeps native refs uppercase-only", (format) => {
+	const h = harness();
+	try {
+		h.call("propose", {
+			edits: [
+				{ op: "create", body: { title: "One" } },
+				{ op: "create", body: { title: "Two" } },
+			],
+		});
+		const report =
+			format === "junit"
+				? '<testsuite><testcase name="login @C-1"><properties><property name="mainworthy" value="c-2"/></properties></testcase></testsuite>'
+				: format === "playwright"
+					? JSON.stringify({
+							suites: [
 								{
-									projectName: "chromium",
-									expectedStatus: "passed",
-									annotations:
-										source === "property"
-											? [
-													{ type: "mainworthy", description: "C-2" },
-													{ type: "mainworthy", description: claims[i] },
-													{ type: "mainworthy", description: "bad alias" },
-													{ type: "skip" },
-												]
-											: [],
-									results: [{ status: "passed", duration: 0, retry: 0 }],
+									title: "tests.js",
+									file: "tests.js",
+									specs: [
+										{
+											title: "login @C-1",
+											file: "tests.js",
+											tests: [
+												{
+													projectName: "chromium",
+													expectedStatus: "passed",
+													annotations: [{ type: "mainworthy", description: "c-2" }],
+													results: [{ status: "passed", duration: 0, retry: 0 }],
+												},
+											],
+										},
+									],
 								},
 							],
-						})),
-					},
-				],
-			});
-		} else if (format === "pytest") {
-			report = JSON.stringify({
-				exitcode: 0,
-				tests: names.map((name, i) => ({
-					nodeid: `test.py::test_alias[${name}]`,
-					outcome: "passed",
-					call: { outcome: "passed", duration: 0 },
-					...(source === "property"
-						? {
-								user_properties: [
-									{ mainworthy: "C-2" },
-									{ mainworthy: claims[i] },
-									{ mainworthy: "bad alias" },
-									{ unrelated: 42 },
-								],
-							}
-						: {}),
-				})),
-			});
-		} else {
-			report = JSON.stringify({
-				testResults: [
-					{
-						name: "tests.js",
-						status: "passed",
-						assertionResults: names.map((title) => ({ title, ancestorTitles: [], status: "passed" })),
-					},
-				],
-			});
-		}
-		const parsed = parseReport(report, { file: `report.${format}`, format });
-		expect(parsed.results.map((result) => result.annotation)).toEqual([
-			{ case: "C1234" },
-			{ case: "C1234", version: 1 },
-			{ case: "Missing123" },
-			{ case: "C-1", version: 1 },
-		]);
-		const receipt = h.call<ReportReceipt>("report", { target: { session: "aliases" }, results: parsed.results });
-		expect(receipt).toMatchObject({
-			counts: { total: 4, pass: 4 },
-			rejected: [],
-			basis: { exact: 2, assumed: 1, unresolved: 1 },
-			declined: [{ index: 2, reason: "the annotation names Missing123, which does not exist: recorded with no case" }],
+						})
+					: JSON.stringify({
+							exitcode: 0,
+							tests: [
+								{
+									nodeid: "test.py::login @C-1",
+									outcome: "passed",
+									call: { outcome: "passed", duration: 0 },
+									user_properties: [{ mainworthy: "c-2" }],
+								},
+							],
+						});
+		const receipt = h.call<ReportReceipt>("report", {
+			target: { session: "lowercase-metadata" },
+			results: parseReport(report, { file: `report.${format}`, format }).results,
 		});
-		expect(h.app.db.raw.query("SELECT basis, basis_case, basis_version FROM results ORDER BY id").all()).toEqual([
-			{ basis: "assumed", basis_case: 1, basis_version: 1 },
-			{ basis: "exact", basis_case: 1, basis_version: 1 },
-			{ basis: "unresolved", basis_case: null, basis_version: null },
-			{ basis: "exact", basis_case: 1, basis_version: 1 },
-		]);
+		expect(receipt.basis).toEqual({ exact: 0, assumed: 1, unresolved: 0 });
+		expect(receipt.declined).toEqual([]);
+		expect(h.app.db.raw.query("SELECT basis_case FROM results").get()).toEqual({ basis_case: 1 });
 	} finally {
 		h.close();
 	}
@@ -125,9 +342,7 @@ test("typed test names use the same alias claims as parsed reports", () => {
 			],
 		});
 		expect(receipt.basis).toEqual({ exact: 1, assumed: 0, unresolved: 1 });
-		expect(receipt.declined).toEqual([
-			{ index: 1, reason: "the annotation names Missing123, which does not exist: recorded with no case" },
-		]);
+		expect(receipt.declined).toEqual([]);
 	} finally {
 		h.close();
 	}

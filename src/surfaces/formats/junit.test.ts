@@ -22,7 +22,6 @@ const fixtures: { file: string; suites: number; results: ResultIn[] }[] = [
 			result("tests/checkout.spec.ts::chromium::applies coupon @C-311@v7", "applies coupon @C-311@v7", "pass", {
 				file: "tests/checkout.spec.ts",
 				durationMs: 123,
-				annotation: { case: "C-311", version: 7 },
 			}),
 			result("tests/checkout.spec.ts::chromium::rejects expired coupon", "rejects expired coupon", "fail", {
 				file: "tests/checkout.spec.ts",
@@ -64,7 +63,6 @@ const fixtures: { file: string; suites: number; results: ResultIn[] }[] = [
 			result("tests/test_cart.py::pytest::test_x[param] @C-42", "test_x[param] @C-42", "pass", {
 				file: "tests/test_cart.py",
 				durationMs: 15,
-				annotation: { case: "C-42" },
 			}),
 			result("tests/test_cart.py::pytest::test_optional", "test_optional", "skip", {
 				file: "tests/test_cart.py",
