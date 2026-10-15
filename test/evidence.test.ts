@@ -133,6 +133,125 @@ describe("a red report", () => {
 		expect(receipt.gate?.tally.unexplained).toBe(500);
 	});
 
+	const genericReport = (n = 60, files = 6, message = "assertion failed") => ({
+		...ciReport({ commit: "broad001", n: 0 }),
+		results: Array.from({ length: n }, (_, i) => ({
+			test: { key: `file-${i % files}.test.ts::test ${i}`, file: `file-${i % files}.test.ts` },
+			outcome: "fail" as const,
+			failure: { message },
+		})),
+	});
+
+	test("a broad assertion is split by file, and one answer excuses only that file", () => {
+		const report = genericReport();
+		const receipt = h.call<ReportReceipt>("report", report);
+		expect(receipt.questions).toHaveLength(6);
+		expect(receipt.questions.map((q) => q.tests)).toEqual([10, 10, 10, 10, 10, 10]);
+		const questions = queue().items.filter((q) => q.kind === "failure");
+		expect(questions.map((q) => q.title).sort()).toEqual(
+			Array.from({ length: 6 }, (_, i) => `Split by file (file-${i}.test.ts): assertion failed`),
+		);
+		const fileZero = questions.find((q) => q.title === "Split by file (file-0.test.ts): assertion failed");
+		if (!fileZero) throw new Error("the first file's question was not raised");
+		expect(decide(fileZero, { is: "flaky", reason: "known in this file" })?.status).toBe("decided");
+		expect(gate("broad001").tally).toMatchObject({ excused: 10, unexplained: 50 });
+		expect(gate("broad001").verdict).toBe("blocked");
+		const retry = h.call<ReportReceipt>("report", { ...report, attempt: 2 });
+		expect(retry.questions.filter((q) => q.state === "open")).toHaveLength(5);
+		expect(gate("broad001").tally).toMatchObject({ excused: 10, unexplained: 50 });
+		const later = h.call<ReportReceipt>("report", {
+			...report,
+			target: { ...report.target, commit: "broad002" },
+			results: [first(report.results)],
+		});
+		expect(later.questions[0]?.title).toBe("Split by file (file-0.test.ts): assertion failed");
+		expect(later.gate?.tally).toMatchObject({ excused: 1, unexplained: 0 });
+		expect(h.call<ReportReceipt>("report", report)).toMatchObject({ fresh: false, questions: receipt.questions });
+	});
+
+	test.each([
+		[50, 6, "assertion failed"],
+		[51, 5, "assertion failed"],
+		[60, 5, "assertion failed"],
+		[60, 6, "Timeout 5000ms exceeded"],
+		[60, 6, "connect ECONNREFUSED localhost:5432"],
+	])("the guard keeps %i tests in %i files with %s together", (n, files, message) => {
+		const receipt = h.call<ReportReceipt>("report", genericReport(n, files, message));
+		expect(receipt.questions).toHaveLength(1);
+		expect(receipt.questions[0]?.tests).toBe(n);
+	});
+
+	test("51 tests across six files split even when one file already has a split signature", () => {
+		const report = genericReport();
+		h.call("report", report);
+		const later = genericReport(51);
+		later.results = later.results.map((result, i) => ({
+			...result,
+			test: i % 6 === 0 ? result.test : { key: `new-${i % 6}.ts::test ${i}`, file: `new-${i % 6}.ts` },
+		}));
+		const receipt = h.call<ReportReceipt>("report", { ...later, target: { ...later.target, commit: "mixed001" } });
+		expect(receipt.questions).toHaveLength(6);
+		expect(receipt.questions.map((q) => q.tests).sort()).toEqual([8, 8, 8, 9, 9, 9]);
+		expect(receipt.questions.every((q) => q.title.startsWith("Split by file ("))).toBe(true);
+	});
+
+	test("a missing file stays separate from a file named no file reported", () => {
+		const report = genericReport();
+		const receipt = h.call<ReportReceipt>("report", {
+			...report,
+			results: [
+				...report.results,
+				{ test: { key: "without-file" }, outcome: "fail", failure: { message: "assertion failed" } },
+				{
+					test: { key: "named-file", file: "no file reported" },
+					outcome: "fail",
+					failure: { message: "assertion failed" },
+				},
+			],
+		});
+		expect(receipt.questions).toHaveLength(8);
+		expect(new Set(receipt.questions.map((q) => q.q)).size).toBe(8);
+		expect(receipt.questions.filter((q) => q.tests === 1)).toHaveLength(2);
+	});
+
+	test("the guard sees the whole report across application slices", () => {
+		const receipt = h.call<ReportReceipt>("report", genericReport(600));
+		expect(receipt.questions).toHaveLength(6);
+		expect(receipt.questions.map((q) => q.tests)).toEqual([100, 100, 100, 100, 100, 100]);
+		expect(receipt.gate?.tally.unexplained).toBe(600);
+	});
+
+	test("each normalised assertion has its own thresholds", () => {
+		const report = genericReport();
+		const receipt = h.call<ReportReceipt>("report", {
+			...report,
+			results: report.results.map((result, i) => ({
+				...result,
+				failure: { message: i < 30 ? "expected 5, got 7" : "expected 8, got 9" },
+			})),
+		});
+		expect(receipt.questions).toHaveLength(2);
+		expect(receipt.questions.map((q) => q.tests)).toEqual([30, 30]);
+		expect(receipt.questions.map((q) => q.title)).toEqual(["expected 5, got 7", "expected 8, got 9"]);
+	});
+
+	test("the guard counts distinct tests, not repeated results", () => {
+		const report = genericReport(6);
+		const receipt = h.call<ReportReceipt>("report", { ...report, results: Array(10).fill(report.results).flat() });
+		expect(receipt.questions).toHaveLength(1);
+		expect(queue().items.find((q) => q.kind === "failure")?.title).toBe("assertion failed");
+	});
+
+	test("a prior answer for the generic cause cannot excuse a broad report", () => {
+		const report = genericReport();
+		h.call("report", { ...report, target: { ...report.target, commit: "prior001" }, results: [first(report.results)] });
+		decide(first(queue().items), { is: "flaky", reason: "known earlier" });
+		const receipt = h.call<ReportReceipt>("report", report);
+		expect(receipt.questions).toHaveLength(6);
+		expect(receipt.gate?.tally).toMatchObject({ excused: 0, unexplained: 60 });
+		expect(gate("prior001").tally).toMatchObject({ excused: 1, unexplained: 0 });
+	});
+
 	test("volatile parts of a message do not split a cause, different assertions do", () => {
 		const receipt = h.call<ReportReceipt>(
 			"report",

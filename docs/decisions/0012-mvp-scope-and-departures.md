@@ -241,7 +241,7 @@ Flaky detector and quarantine (#38). Requirements coverage, the matrix, the gap 
 Role sign-off, quorum of two, freeze, the regulated preset (#53). Fragments and custom fields (types reserved,
 no UI) (#54). Attachments (#51). Posting the gate to the code host as a check (#55). Importers (#33). Accounts
 and SSO (#30). Reports and dashboards (#56). PostgreSQL (#57, see decision 0010). Over-merge guard for one
-signature across many files (#58).
+signature across many files (#58), added on 2026-10-14 in [decision 0036](0036-split-broad-assertions-by-file.md).
 
 ## What would end each departure
 

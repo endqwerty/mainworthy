@@ -4,6 +4,7 @@
 // report twice is a no-op and a crash loses nothing. `apply` turns the staged results into result rows, each with an
 // explicit basis. Between the two, every run the report matters to reads `pending` (see runs.ts).
 import { createHash } from "node:crypto";
+import { contentHash } from "../../core/hash.ts";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { MethodKind } from "../../core/model.ts";
 import type { Outcome, ReportInput, ResultIn, TargetIn } from "../../core/ops.ts";
@@ -258,6 +259,7 @@ const Q = {
 	insertSignature: sql<{ project: number; hash: string; class: string; text: string; seq: number }>(
 		"INSERT INTO signatures (project, hash, class, text, first_seq) VALUES ($project, $hash, $class, $text, $seq)",
 	),
+	splitResult: sql<{ id: number; signature: number }>("UPDATE results SET signature = $signature WHERE id = $id"),
 	insertResult: sql<{
 		project: number;
 		test: number;
@@ -943,6 +945,7 @@ export function* applySteps(
 			fresh,
 		});
 	}
+	yield* splitBroadAssertions(ctx, out.results);
 	out.counts = countOutcomes(out.results);
 	return out;
 }
@@ -1021,19 +1024,69 @@ function insertTest(
 	};
 }
 
+function fileSignature(signature: Pick<SignatureRow, "hash" | "class" | "text">, file: string | null) {
+	return {
+		hash: contentHash({ signature: signature.hash, file }),
+		class: signature.class,
+		text: `Split by file (${file ?? "no file reported"}): ${signature.text}`,
+	};
+}
+
+/** The report is still being applied: assign its final causes before any run or decision sees the results. */
+function* splitBroadAssertions(ctx: Ctx, results: Applied[]): Generator<undefined, void, void> {
+	const groups = new Map<
+		number,
+		{ signature: SignatureRow; tests: Set<number>; files: Set<string>; results: Applied[] }
+	>();
+	for (const result of results) {
+		if (result.signature?.class !== "assertion") continue;
+		let group = groups.get(result.signature.id);
+		if (!group) {
+			group = { signature: result.signature, tests: new Set(), files: new Set(), results: [] };
+			groups.set(result.signature.id, group);
+		}
+		group.tests.add(result.test.id);
+		if (result.test.file !== null) group.files.add(result.test.file);
+		group.results.push(result);
+	}
+	let changed = 0;
+	for (const group of groups.values()) {
+		const broad = group.tests.size > 50 && group.files.size > 5;
+		const byFile = new Map<string | null, SignatureRow | null>();
+		for (const result of group.results) {
+			if (changed++ > 0 && changed % SLICE === 0) yield;
+			const file = result.test.file;
+			if (!byFile.has(file)) {
+				const signature = fileSignature(group.signature, file);
+				byFile.set(
+					file,
+					broad
+						? storeSignature(ctx, signature)
+						: ctx.db.get(Q.signature, { project: ctx.project.id, hash: signature.hash }),
+				);
+			}
+			const split = byFile.get(file);
+			if (!split) continue;
+			result.signature = split;
+			ctx.db.run(Q.splitResult, { id: result.id, signature: split.id });
+		}
+	}
+}
+
 function ensureSignature(ctx: Ctx, failure: { message: string; detail?: string }): SignatureRow {
 	const normal = normaliseFailure(failure);
-	const hash = signatureHash(normal);
-	const found = ctx.db.get(Q.signature, { project: ctx.project.id, hash });
+	return storeSignature(ctx, { ...normal, hash: signatureHash(normal) });
+}
+
+function storeSignature(ctx: Ctx, signature: Pick<SignatureRow, "hash" | "class" | "text">): SignatureRow {
+	const found = ctx.db.get(Q.signature, { project: ctx.project.id, hash: signature.hash });
 	if (found) return found;
 	const { lastId } = ctx.db.run(Q.insertSignature, {
 		project: ctx.project.id,
-		hash,
-		class: normal.class,
-		text: normal.text,
+		...signature,
 		seq: ctx.seq,
 	});
-	return { id: lastId, project: ctx.project.id, hash, class: normal.class, text: normal.text, first_seq: ctx.seq };
+	return { id: lastId, project: ctx.project.id, ...signature, first_seq: ctx.seq };
 }
 
 // ── Reads ──────────────────────────────────────────────────────────────────────────────────────────────────
