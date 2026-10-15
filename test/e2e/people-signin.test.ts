@@ -436,11 +436,17 @@ for (const storage of ["available", "unavailable"] as const)
 			let browser: PageHarness | null = null;
 			try {
 				browser = await openPage(server, { path: "/p/scratch/settings" });
-				const { page } = browser;
+				const { page, context } = browser;
 				page.setDefaultTimeout(8000);
+				const other = await context.newPage();
+				other.setDefaultTimeout(5000);
+				await other.goto(`${server.url}/p/scratch/settings`);
+				await other.locator("#app").waitFor();
 				await page.evaluate((refuseRemoval) => {
 					localStorage.setItem("mainworthy:robin:queue-input:scratch:pending", "Private answer");
+					localStorage.setItem("mainworthy:robin:draft-copy:scratch:C-1", "Private copy");
 					localStorage.setItem("mainworthy:someone-else:draft:scratch:C-2", "Their draft");
+					localStorage.setItem("mainworthy:someone-else:draft-copy:scratch:C-2", "Their copy");
 					if (refuseRemoval)
 						Storage.prototype.removeItem = () => {
 							throw new DOMException("Storage unavailable", "SecurityError");
@@ -465,6 +471,14 @@ for (const storage of ["available", "unavailable"] as const)
 							),
 						),
 					).toEqual([]);
+					for (const tab of [page, other]) {
+						await tab.locator("#signin-name").waitFor();
+						await tab.reload();
+						await tab.locator("#signin-name").waitFor();
+						expect(
+							await tab.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("mainworthy:robin:"))),
+						).toEqual([]);
+					}
 					expect(browser.dialogs).toEqual([]);
 				} else {
 					expect(browser.dialogs).toEqual([
@@ -477,12 +491,132 @@ for (const storage of ["available", "unavailable"] as const)
 				expect(await page.evaluate(() => localStorage.getItem("mainworthy:someone-else:draft:scratch:C-2"))).toBe(
 					"Their draft",
 				);
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:someone-else:draft-copy:scratch:C-2"))).toBe(
+					"Their copy",
+				);
 				expect(browser.errors).toEqual([
 					"Failed to load resource: net::ERR_FAILED",
 					"Failed to load resource: net::ERR_FAILED",
 				]);
 			} finally {
 				await browser?.close();
+			}
+		},
+		30_000,
+	);
+
+for (const recovery of ["first check", "fallback check", "no answer"] as const)
+	test.skipIf(!browserAvailable)(
+		`a failed clear with ${recovery} keeps a draft typed afterwards when the session expires (Q1)`,
+		async () => {
+			const local = await startServer({ mode: "server" });
+			let browser: PageHarness | null = null;
+			try {
+				await local.api("propose", { edits: [{ op: "create", outline: "Kept case\n  Original step" }] });
+				browser = await openPage(local, { path: "/p/scratch/suite/c/1" });
+				const { page } = browser;
+				page.setDefaultTimeout(5000);
+				await page.getByRole("button", { name: "Kept case", exact: true }).waitFor();
+				await page.route("**/api/logout", (route) => route.abort());
+				let checks = 0;
+				await page.route("**/api/session", (route) => {
+					checks++;
+					return recovery === "no answer" || (recovery === "fallback check" && checks === 1)
+						? route.abort()
+						: route.continue();
+				});
+				await page.getByRole("button", { name: "Sign out", exact: true }).click();
+				await page.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
+				await page
+					.getByText(recovery === "no answer" ? "the page cannot tell" : "this browser is still signed in", {
+						exact: false,
+					})
+					.waitFor();
+				expect(checks).toBe(recovery === "first check" ? 1 : 2);
+				if (recovery === "no answer") {
+					expect(await page.getByRole("status").filter({ hasText: "the page cannot tell" }).textContent()).toContain(
+						"Your browser data was kept. Press Sign out again",
+					);
+				}
+				await page.unroute("**/api/session");
+				await page.keyboard.press("e");
+				const step = page.getByRole("textbox", { name: "Step 1", exact: true });
+				await step.fill("Draft after failed clear");
+				const stored = () => page.evaluate(() => localStorage.getItem("mainworthy:robin:draft:scratch:C-1") ?? "");
+				expect(await stored()).toContain("Draft after failed clear");
+				await advanceClock(local, 366 * 24 * 60 * 60 * 1000);
+				await page.keyboard.press("Tab");
+				await page.keyboard.press("g");
+				await page.keyboard.press("q");
+				await page.locator("#signin-name").waitFor();
+				expect(await stored()).toContain("Draft after failed clear");
+				expect(browser.dialogs).toEqual([]);
+				await page.locator("#token").fill(local.token);
+				await page.keyboard.press("Enter");
+				await page.locator("#app").waitFor();
+				await page.getByRole("link", { name: "Suite", exact: true }).click();
+				await page.getByRole("option").filter({ hasText: "C-1" }).click();
+				await page.keyboard.press("e");
+				expect(await step.inputValue()).toBe("Draft after failed clear");
+			} finally {
+				await browser?.close();
+				await local.stop();
+			}
+		},
+		30_000,
+	);
+
+for (const tab of ["same tab (Q2)", "another tab (Q4)"] as const)
+	test.skipIf(!browserAvailable)(
+		`a failed clear cannot override a later keep in ${tab}`,
+		async () => {
+			const local = await startServer({ mode: "server" });
+			let browser: PageHarness | null = null;
+			try {
+				browser = await openPage(local, { path: "/p/scratch/settings" });
+				const { page, context } = browser;
+				page.setDefaultTimeout(5000);
+				await page.evaluate(() =>
+					localStorage.setItem("mainworthy:robin:queue-input:scratch:pending", "Kept after failed clear"),
+				);
+				await page.route("**/api/logout", (route) => route.abort());
+				await page.getByRole("button", { name: "Sign out", exact: true }).click();
+				await page.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
+				await page.getByText("this browser is still signed in", { exact: false }).waitFor();
+				await page.unroute("**/api/logout");
+				const keeping = tab === "same tab (Q2)" ? page : await context.newPage();
+				if (keeping !== page) {
+					keeping.setDefaultTimeout(5000);
+					await keeping.goto(`${local.url}/p/scratch/settings`);
+					await keeping.locator("#app").waitFor();
+				}
+				await keeping.getByRole("button", { name: "Sign out", exact: true }).click();
+				await keeping.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
+				await keeping.locator("#signin-name").waitFor();
+				if (keeping !== page) {
+					await page.keyboard.press("g");
+					await page.keyboard.press("q");
+					await page.locator("#signin-name").waitFor();
+				}
+				await page.reload();
+				await page.locator("#signin-name").waitFor();
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending"))).toBe(
+					"Kept after failed clear",
+				);
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:session-person"))).toBe("robin");
+				await page.locator("#token").fill(local.token);
+				await page.keyboard.press("Enter");
+				await page.locator("#app").waitFor();
+				await advanceClock(local, 366 * 24 * 60 * 60 * 1000);
+				await page.reload();
+				await page.locator("#signin-name").waitFor();
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending"))).toBe(
+					"Kept after failed clear",
+				);
+				expect(browser.dialogs).toEqual([]);
+			} finally {
+				await browser?.close();
+				await local.stop();
 			}
 		},
 		30_000,

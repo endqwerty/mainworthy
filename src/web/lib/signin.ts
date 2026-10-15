@@ -105,13 +105,7 @@ export async function setPassword(input: { current: string | null; next: string 
 	);
 }
 
-let pendingClear: DeviceSession | null = null;
-
-/** The app has learned that the session ended, possibly through a later request after a lost logout reply. */
-export function clearSignedOutData(): void {
-	const owner = pendingClear;
-	pendingClear = null;
-	if (!owner) return;
+function clearSignedOutData(owner: DeviceSession): void {
 	try {
 		clearDevicePerson(owner);
 	} catch {
@@ -121,22 +115,28 @@ export function clearSignedOutData(): void {
 	}
 }
 
-/** Ends this browser's session on the server and clears its cookie. It answers the same whatever it ended. */
-export const signOut = async ({ clear }: { clear: boolean }): Promise<void> => {
-	pendingClear = clear ? deviceSession() : null;
+/** The choice to clear belongs only to this attempt, including its two checks after a lost reply. */
+export const signOut = async ({ clear }: { clear: boolean }): Promise<"signed-out" | "signed-in" | "unknown"> => {
+	const owner = clear ? deviceSession() : null;
 	try {
 		await exchange("/api/logout", { body: {} });
-	} catch (error) {
-		if (!clear) throw error;
-		try {
-			await session();
-		} catch (check) {
-			if (check instanceof ApiError && check.code === "unauthenticated") {
-				return;
+	} catch {
+		let ended = false;
+		for (let check = 0; check < 2; check++) {
+			try {
+				await session();
+				return "signed-in";
+			} catch (error) {
+				if (error instanceof ApiError && error.code === "unauthenticated") {
+					ended = true;
+					break;
+				}
 			}
 		}
-		throw error;
+		if (!ended) return "unknown";
 	}
+	if (owner) clearSignedOutData(owner);
+	return "signed-out";
 };
 
 /** What to show for a failure that is not the server's refusal: the request did not get there, or no reply came back. */

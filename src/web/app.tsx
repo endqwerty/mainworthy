@@ -18,7 +18,7 @@ import {
 } from "./lib/device.ts";
 import { useBindings, useKeyboard, useKeyRegistry } from "./lib/keys.ts";
 import { navigate, projectUrl, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
-import { clearSignedOutData, signOut } from "./lib/signin.ts";
+import { signOut } from "./lib/signin.ts";
 import { PhoneBar, usePhoneShell } from "./phone.tsx";
 import { QueueScreen } from "./queue/index.tsx";
 import { RunsScreen } from "./runs/index.tsx";
@@ -158,7 +158,6 @@ export function App() {
 	}, []);
 	useEffect(() => {
 		const refused = () => {
-			clearSignedOutData();
 			suspendDeviceSession();
 			queryClient.clear();
 			setAuth({ kind: "signin" });
@@ -284,21 +283,15 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 	const confirmSignOut = (clear: boolean): void => {
 		if (!signOutOpen) return;
 		setSignOutState("ending");
-		void signOut({ clear }).then(signedOut, () =>
-			// No reply. The server may have ended the session all the same, so the page does not guess: it asks
-			// who is signed in. A 401 there shows the sign-in page (`session` sees to that).
-			session().then(
-				() => {
-					setSignOutState("closed");
-					setStatus("No answer came back to the sign-out, and this browser is still signed in. Press Sign out again.");
-				},
-				(error: unknown) => {
-					if (error instanceof ApiError && error.code === "unauthenticated") return;
-					setSignOutState("closed");
-					setStatus("Mainworthy did not answer, so the page cannot tell whether you are signed out. Try again.");
-				},
-			),
-		);
+		void signOut({ clear }).then((result) => {
+			if (result === "signed-out") return signedOut();
+			setSignOutState("closed");
+			setStatus(
+				result === "signed-in"
+					? "No answer came back to the sign-out, and this browser is still signed in. Press Sign out again."
+					: "Mainworthy did not answer, so the page cannot tell whether you are signed out. Your browser data was kept. Press Sign out again to retry, or clear this site's data in your browser settings before leaving a shared computer.",
+			);
+		});
 	};
 	const [inInput, setInInput] = useState(false);
 	// Collapsed or open is this browser's choice, as the theme is: a reload and the next visit find it as it was.
