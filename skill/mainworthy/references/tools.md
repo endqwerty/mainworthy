@@ -10,7 +10,7 @@ Choice labels such as `[create]` or `[1]` show which input shape a field belongs
 
 ## propose
 
-Propose cases; edits need base version. Status: adopted=current, open=needs acceptance, conflict=resolve.
+Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -164,7 +164,7 @@ Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Reco
 
 ## decide
 
-Answer an inbox question with its evidenceHash as onEvidence. Replies: decided, advised (a person decides), forbidden, conflict (evidence or decision changed). Choose from the question's answers. To withdraw, send undo with ifDecision set to the reply's decision.
+Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person decides, forbidden, invalid, already, reopened, conflict=evidence or decision changed. Choose from answers. Withdraw with undo and ifDecision=reply.decision.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -198,7 +198,7 @@ List open questions with evidence and `evidenceHash`, counts first. `on` selects
 
 ## get
 
-Read things by ref (C-, Q-, R-, T-, P-). For cases use `as: "md"` and `fields` to read less, and `unless: {ref: hash}` to skip what you already hold.
+Read refs (C-, Q-, R-, T-, P-). For cases, `as: "md"` and `fields` read less; `unless: {ref: hash}` skips unchanged cases.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |

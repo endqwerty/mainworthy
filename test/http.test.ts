@@ -7,13 +7,18 @@ import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { z } from "zod";
+import { Client } from "../src/cli/client.ts";
+import { seed } from "../src/cli/seed.ts";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
+import { ERROR_CODES, type ErrorCode } from "../src/core/api.ts";
+import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { OP_LIST, OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { Readers } from "../src/server/readers.ts";
 import { type Instance, open, start } from "../src/server/start.ts";
 import { PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
+import { authenticator } from "./people-support.ts";
 
 const dirs: string[] = [];
 const running: Instance[] = [];
@@ -26,7 +31,7 @@ function boot(
 	mode: Config["mode"],
 	ownerToken: string | null = null,
 	existing?: string,
-	options: { owner?: string; host?: string; patience?: Patience } = {},
+	options: { owner?: string; host?: string; patience?: Patience; publicUrl?: string } = {},
 ): Instance {
 	const dataDir = existing ?? mkdtempSync(join(tmpdir(), "mainworthy-http-"));
 	if (!existing) dirs.push(dataDir);
@@ -38,6 +43,7 @@ function boot(
 			mode,
 			owner: options.owner ?? "robin",
 			ownerToken,
+			...(options.publicUrl ? { publicUrl: options.publicUrl } : {}),
 			commit: null,
 			...SESSION_LIFETIMES,
 			proxy: null,
@@ -149,6 +155,74 @@ async function post<T>(
 	};
 }
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+
+/** Validate the actual wire reply, including fields Zod would strip, against the served document. */
+async function replySweep(instance: Instance, project: string) {
+	const schema = z.object({
+		content: z.object({ "application/json": z.object({ schema: z.record(z.string(), z.unknown()) }) }),
+	});
+	const api = z
+		.object({
+			paths: z.record(z.string(), z.object({ post: z.object({ responses: z.record(z.string(), schema) }) })),
+			components: z.record(z.string(), z.unknown()),
+		})
+		.parse(await (await fetch(`${instance.url}/api/openapi.json`)).json());
+	const ajv = new AjvJsonSchemaValidator();
+	const validators = new Map(
+		OP_LIST.map((op) => {
+			const path = op.scope === "project" ? `/api/p/{project}/${op.name}` : `/api/${op.name}`;
+			const responses = api.paths[path]?.post.responses;
+			const compile = (code: string) => {
+				const described = responses?.[code]?.content["application/json"].schema;
+				if (!described) throw new Error(`No ${code} reply schema: ${op.name}`);
+				return ajv.getValidator(
+					z
+						.looseObject({ type: z.literal("object").default("object") })
+						.parse({ ...described, components: api.components }),
+				);
+			};
+			return [op.name, { ok: compile("200"), error: compile("default") }];
+		}),
+	);
+	const failure = z.object({
+		ok: z.literal(false),
+		error: z.object({
+			code: z.enum(ERROR_CODES),
+			message: z.string(),
+			details: z.record(z.string(), z.unknown()).optional(),
+		}),
+	});
+	const seen = new Set<string>();
+	const counts = { success: 0, error: 0 };
+	const checked = async (
+		name: string,
+		input: unknown = {},
+		headers: Record<string, string> = {},
+		error?: ErrorCode,
+	): Promise<unknown> => {
+		const op = OPS[name];
+		const validate = validators.get(name);
+		if (!op || !validate) throw new Error(name);
+		const path = op.scope === "project" ? `/api/p/${project}/${name}` : `/api/${name}`;
+		const { body: reply } = await post(instance, path, input, headers);
+		const result = (reply.ok ? validate.ok : validate.error)(reply);
+		expect(result.valid, `${name} ${JSON.stringify(input)}: ${result.errorMessage}`).toBe(true);
+		if (!reply.ok) {
+			if (error === undefined) throw new Error(`${name}: ${JSON.stringify(input)}: ${reply.error.message}`);
+			expect(failure.parse(reply).error.code, `${name}: ${JSON.stringify(input)}: ${reply.error.message}`).toBe(error);
+			counts.error++;
+			return reply.error;
+		}
+		expect(error, `${name}: expected an error`).toBeUndefined();
+		const parsed = op.output.safeParse(reply.result);
+		expect(parsed.success ? [] : parsed.error.issues, `${name}: ${JSON.stringify(input)}`).toEqual([]);
+		if (parsed.success) expect(parsed.data).toEqual(reply.result);
+		seen.add(name);
+		counts.success++;
+		return reply.result;
+	};
+	return { checked, seen, counts };
+}
 
 /** A plain socket to the instance: what the server sent on it, and whether the server has closed it. */
 function wire(instance: Instance, payload: string) {
@@ -1561,20 +1635,10 @@ describe("the surface", () => {
 		}
 	});
 
-	test("every operation validates real replies against its registered output", async () => {
+	test("every operation validates real replies against Zod and the served OpenAPI schema", async () => {
 		const instance = boot("local");
-		const seen = new Set<string>();
-		const checked = async (name: string, input: unknown = {}): Promise<unknown> => {
-			const definition = OPS[name];
-			if (!definition) throw new Error(name);
-			const path = definition.scope === "project" ? `/api/p/scratch/${name}` : `/api/${name}`;
-			const reply = (await post(instance, path, input)).body;
-			if (!reply.ok) throw new Error(`${name}: ${JSON.stringify(reply)}`);
-			const parsed = definition.output.safeParse(reply.result);
-			expect(parsed.success ? [] : parsed.error.issues, `${name}: ${JSON.stringify(input)}`).toEqual([]);
-			seen.add(name);
-			return reply.result;
-		};
+		const sweep = await replySweep(instance, "scratch");
+		const { checked } = sweep;
 		await checked("propose", {
 			cmd: "schema-create",
 			edits: [
@@ -1625,6 +1689,19 @@ describe("the surface", () => {
 		await checked("command", { cmd: "schema-absent" });
 		await checked("change", { change: "pr:52", state: "closed" });
 		for (const action of ["project.list", "token.list", "actor.list"]) await checked("admin", { do: action });
+		await checked("propose", { edits: [{ op: "folder", name: "Archive me" }] });
+		const folders = z
+			.object({ items: z.array(z.object({ id: z.number(), name: z.string() })) })
+			.parse(await checked("find", { in: "folders" }));
+		const folder = folders.items.find((row) => row.name === "Archive me");
+		if (!folder) throw new Error("No folder");
+		const archived = z
+			.object({ proposal: z.string() })
+			.parse(await checked("propose", { edits: [{ op: "folder", folder: folder.id, archive: true }] }));
+		const placed = z
+			.object({ proposal: z.string() })
+			.parse(await checked("propose", { edits: [{ op: "place", cases: ["C-1"], folder: "Moved" }] }));
+		await checked("get", { refs: [archived.proposal, placed.proposal] });
 		await checked("admin", { do: "policy.show", project: "scratch" });
 		await checked("admin", { do: "token.create", actor: "schema-agent", kind: "agent" });
 		await checked("admin", { do: "token.list" });
@@ -1633,7 +1710,214 @@ describe("the surface", () => {
 		await checked("invitation", { do: "create", name: "schema-person" });
 		await checked("invitation", { do: "list" });
 		await checked("invitation", { do: "revoke", id: 1 });
-		expect([...seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());
+		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());
+		console.log(`all-operation sweep: ${sweep.counts.success} real HTTP replies; Zod and Ajv`);
+	});
+
+	test("seeded reply sweep covers variants, empty results, paging and errors in Zod and served OpenAPI", async () => {
+		const instance = boot("local", "schema-owner-token-0123456789", undefined, {
+			publicUrl: "https://mainworthy.example",
+		});
+		const client = new Client({ url: instance.url, token: undefined, project: "demo" });
+		const seeded = await seed(client, { project: "demo", cases: 24, unlinkedFiles: 8 });
+		const sweep = await replySweep(instance, "demo");
+		const { checked } = sweep;
+		const rows = z.object({ items: z.array(z.record(z.string(), z.unknown())), cursor: z.string().nullable() });
+		for (const ref of seeded.cases) {
+			const doc = z.array(z.object({ hash: z.string() })).parse(await checked("get", { refs: [ref] }))[0];
+			if (!doc) throw new Error(ref);
+			await checked("get", { refs: [ref], as: "md" });
+			await checked("get", { refs: [ref], unless: { [ref]: doc.hash } });
+			await checked("get", { refs: [ref], fields: ["title"] });
+			await checked("get", { refs: [ref], version: 1 });
+			await checked("history", { ref });
+			await checked("history", { ref, from: 1, to: 1 });
+			await checked("timeline", { ref });
+		}
+		for (const area of ["cases", "tests", "runs", "slots", "folders", "tags", "requirements", "changes"]) {
+			for (const state of ["active", "archived", "change"]) {
+				const input = { in: area, state, run: seeded.run, limit: 2 };
+				let page = rows.parse(await checked("find", input));
+				while (page.cursor) page = rows.parse(await checked("find", { ...input, cursor: page.cursor }));
+			}
+		}
+		for (const area of ["cases", "tests"]) {
+			expect(rows.parse(await checked("find", { in: area, text: "absent-unique-text" })).items).toEqual([]);
+		}
+		for (const area of ["tests", "runs"]) {
+			const found = rows.parse(await checked("find", { in: area, limit: 500 }));
+			for (const row of found.items) await checked("get", { refs: [z.string().parse(row.ref)] });
+		}
+		for (const state of ["open", "decided"]) {
+			let page = rows.parse(await checked("inbox", { state, limit: 2 }));
+			for (;;) {
+				for (const row of page.items) await checked("get", { refs: [z.string().parse(row.q)] });
+				if (!page.cursor) break;
+				page = rows.parse(await checked("inbox", { state, limit: 2, cursor: page.cursor }));
+			}
+		}
+		if (seeded.proposal) await checked("get", { refs: [seeded.proposal] });
+		for (const edit of [
+			{ op: "edit", case: "C-1", base: 1, body: { title: "Changed once" } },
+			{ op: "edit", case: "C-1", base: 1, body: { title: "Conflicting title" } },
+			{ op: "restore", case: "C-1", to: 1 },
+			{ op: "place", cases: ["C-1"], folder: "Moved" },
+			{ op: "place", cases: ["C-1"], tags: { add: ["checked"] } },
+			{ op: "state", cases: ["C-2"], to: "archived" },
+			{ op: "cover", case: "C-1", requirement: "SWEEP-1", on: true },
+			{ op: "folder", name: "Empty" },
+			{ op: "folder", folder: "Empty", parent: "Moved" },
+			{ op: "folder", folder: "Moved/Empty", name: "Renamed" },
+			{ op: "folder", folder: "Moved/Renamed", archive: true },
+			{ op: "policy", unlinked: "ask" },
+		]) {
+			const result = z.object({ proposal: z.string().nullable() }).parse(await checked("propose", { edits: [edit] }));
+			if (result.proposal) {
+				await checked("get", { refs: [result.proposal] });
+				// The CLI uses this same validator before printing the proposal.
+				expect(await client.call("get", { refs: [result.proposal] })).toEqual(
+					z.array(z.record(z.string(), z.unknown())).parse(await checked("get", { refs: [result.proposal] })),
+				);
+			}
+		}
+		await checked("history", { ref: "C-1", from: 1, to: 2 });
+		await checked("plan", { name: "Sweep plan", select: { cases: ["C-1"] } });
+		const report = {
+			cmd: "reply-sweep-report",
+			target: { session: "sweep" },
+			results: [{ test: { case: "C-1" }, outcome: "pass" }],
+		};
+		await checked("report", report);
+		await checked("report", report);
+		expect(await checked("command", { cmd: report.cmd })).toMatchObject({ state: "done", op: "report" });
+		const op = OPS.report;
+		if (!op || !("steps" in op)) throw new Error("No report steps");
+		const steps = op.steps;
+		let held = true;
+		const accepted = Promise.withResolvers<void>();
+		const unsubscribe = instance.app.subscribe((event) => {
+			if (event.op === "report") accepted.resolve();
+		});
+		const pause = spyOn(op, "steps").mockImplementation(function* (ctx, input) {
+			const run = steps(ctx, input);
+			const first = run.next();
+			if (first.done) return first.value;
+			yield first.value;
+			while (held) yield;
+			return yield* run;
+		});
+		const pending = checked("report", { ...report, cmd: "reply-sweep-begun" });
+		try {
+			await accepted.promise;
+			expect(await checked("command", { cmd: "reply-sweep-begun" })).toEqual({ state: "begun", op: "report" });
+		} finally {
+			held = false;
+			await pending;
+			pause.mockRestore();
+			unsubscribe();
+		}
+		await checked("impact", { files: ["unknown.ts"] });
+		await checked("impact", { change: "pr:482", ledger: false });
+		await checked("since", { cursor: "s:0", limit: 1 });
+		await checked("gate", { commit: "abcdef0" });
+		await checked("gate", { run: seeded.run });
+		await checked("check");
+		await checked("command", { cmd: "demo-demo-cases-0-v1" });
+		await checked("command", { cmd: "never-sent-command" });
+		for (const state of ["closed", "closed", "open", "merged"]) await checked("change", { change: "pr:482", state });
+		await checked("admin", { do: "project.create", key: "empty", preset: "standard" });
+		await checked("admin", { do: "policy.show", project: "demo" });
+		const agent = z
+			.object({ token: z.string() })
+			.parse(await checked("admin", { do: "token.create", actor: "sweep-agent", kind: "agent", expires: "1h" }));
+		const asAgent = bearer(agent.token);
+		await checked("propose", { edits: [{ op: "policy", preset: "loose" }] }, asAgent);
+		await checked("propose", { edits: [{ op: "create", outline: "An agent proposal" }] }, asAgent);
+		const finding = { lens: "reply-sweep", findings: [{ on: "C-1", category: "other", note: "Check the result" }] };
+		const claimed = z.object({ opened: z.array(z.string()) }).parse(await checked("claim", finding));
+		await checked("claim", finding);
+		const q = claimed.opened[0];
+		if (!q) throw new Error("No finding question");
+		const item = z.array(z.object({ evidenceHash: z.string() })).parse(await checked("get", { refs: [q] }))[0];
+		if (!item) throw new Error("No question reply");
+		const decision = { q, onEvidence: item.evidenceHash, answer: { is: "defer" } };
+		const status = async (input: unknown, expected: string, headers: Record<string, string> = {}) => {
+			const results = z
+				.array(z.object({ status: z.string(), decision: z.number().nullable() }))
+				.parse(await checked("decide", input, headers));
+			expect(results.map((row) => row.status)).toEqual([expected]);
+			return results[0]?.decision;
+		};
+		await status({ ...decision, answer: { is: "not-an-answer" } }, "invalid");
+		await status({ ...decision, onEvidence: "stale-evidence" }, "conflict");
+		await status(decision, "advised", asAgent);
+		const id = await status(decision, "decided");
+		await status({ all: [decision] }, "already");
+		await status({ undo: q, ifDecision: 999999 }, "conflict");
+		await status({ undo: q, ifDecision: id }, "forbidden", asAgent);
+		await status({ undo: q, ifDecision: id }, "reopened");
+		await status({ undo: q }, "invalid");
+		await checked("claim", { ...finding, findings: [] });
+		await checked("get", { refs: [q] });
+
+		await checked("admin", { do: "grant.set", actor: "sweep-agent", can: ["read"], project: "demo" });
+		await checked("admin", { do: "grant.remove", actor: "sweep-agent", project: "demo" });
+		const tokens = z.array(z.object({ id: z.number() })).parse(await checked("admin", { do: "token.list" }));
+		const last = tokens.at(-1);
+		if (!last) throw new Error("No token");
+		await checked("admin", { do: "token.revoke", id: last.id });
+		await checked("admin", { do: "actor.forget", name: "sweep-agent" });
+		await checked("admin", { do: "actor.list" });
+		const login = await post(instance, "/api/login", { token: "schema-owner-token-0123456789" });
+		const cookie = login.cookie?.split(";")[0];
+		if (!cookie) throw new Error("No session cookie");
+		const headers = { cookie, origin: instance.url };
+		// The authenticator uses the configured public origin without sending a request there.
+		const options = await checked("credential", { do: "passkey.begin" }, headers);
+		const device = authenticator();
+		const registration = options as RegistrationOptions;
+		const credential = z
+			.object({ id: z.number() })
+			.parse(
+				await checked(
+					"credential",
+					{ do: "passkey.add", passkey: device.register(registration), label: "Sweep key" },
+					headers,
+				),
+			);
+		await checked("credential", { do: "list" }, headers);
+		// Keep a second key so removing the first is allowed.
+		const second = (await checked("credential", { do: "passkey.begin" }, headers)) as RegistrationOptions;
+		await checked(
+			"credential",
+			{ do: "passkey.add", passkey: authenticator().register(second), label: "Second key" },
+			headers,
+		);
+		await checked("credential", { do: "remove", id: credential.id }, headers);
+		const sessions = z.array(z.object({ id: z.number() })).parse(await checked("session", { do: "list" }));
+		const session = sessions.at(-1);
+		if (!session) throw new Error("No session");
+		await checked("session", { do: "end", id: session.id }, headers);
+		const invitation = z
+			.object({ id: z.number() })
+			.parse(await checked("invitation", { do: "create", name: "sweep-person" }));
+		await checked("invitation", { do: "create", name: "sweep-person" });
+		await checked("invitation", { do: "list" });
+		await checked("invitation", { do: "revoke", id: invitation.id });
+		const empty = await replySweep(instance, "empty");
+		for (const area of ["cases", "tests", "runs", "folders", "tags", "requirements", "changes"])
+			await empty.checked("find", { in: area });
+		await empty.checked("get", { refs: [] }, {}, "invalid");
+		await empty.checked("inbox");
+		for (const op of OP_LIST) await checked(op.name, [], {}, "invalid");
+		await checked("get", { refs: ["C-99999"] }, {}, "not_found");
+		await checked("get", { refs: ["C-1"] }, bearer("wrong-token"), "unauthenticated");
+		const total = sweep.counts.success + sweep.counts.error + empty.counts.success + empty.counts.error;
+		expect(total).toBeGreaterThanOrEqual(236);
+		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());
+		console.log(
+			`reply sweep: ${total} real HTTP replies; ${sweep.counts.error + empty.counts.error} errors; Zod and Ajv`,
+		);
 	});
 
 	test("a body that is not JSON and an input that is not valid are refused with the field named", async () => {

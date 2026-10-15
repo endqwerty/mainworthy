@@ -725,12 +725,12 @@ An agent that connects over MCP gets these operations as tools, with the same in
 
 | Tool | What the agent is told it is for |
 | --- | --- |
-| `propose` | Propose cases; edits need base version. Status: adopted=current, open=needs acceptance, conflict=resolve. |
+| `propose` | Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected. |
 | `report` | Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref. |
 | `claim` | Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers. |
-| `decide` | Answer an inbox question with its evidenceHash as onEvidence. Replies: decided, advised (a person decides), forbidden, conflict (evidence or decision changed). Choose from the question's answers. To withdraw, send undo with ifDecision set to the reply's decision. |
+| `decide` | Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person decides, forbidden, invalid, already, reopened, conflict=evidence or decision changed. Choose from answers. Withdraw with undo and ifDecision=reply.decision. |
 | `inbox` | List open questions with evidence and `evidenceHash`, counts first. `on` selects a case, run or change. |
-| `get` | Read things by ref (C-, Q-, R-, T-, P-). For cases use `as: "md"` and `fields` to read less, and `unless: {ref: hash}` to skip what you already hold. |
+| `get` | Read refs (C-, Q-, R-, T-, P-). For cases, `as: "md"` and `fields` read less; `unless: {ref: hash}` skips unchanged cases. |
 | `find` | Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slots. Page with `cursor`. |
 | `impact` | Start a review with a change (`pr:482`) or changed `files`. Returns affected cases, hashes, prior reviews, questions and uncovered files. Reuse `cursor` as `since`. |
 | `since` | What changed since an earlier `cursor`: changed cases (one-line diff, no bodies) and settled questions. If `more`, call again with the new cursor. |

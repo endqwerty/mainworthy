@@ -119,7 +119,7 @@ export const proposeOp = defineOp({
 	needs: "produce",
 	scope: "project",
 	effect: "write",
-	mcp: "Propose cases; edits need base version. Status: adopted=current, open=needs acceptance, conflict=resolve.",
+	mcp: "Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected.",
 	run: propose,
 });
 
@@ -514,7 +514,7 @@ export const decideOp = defineOp({
 	needs: "produce",
 	scope: "project",
 	effect: "write",
-	mcp: "Answer an inbox question with its evidenceHash as onEvidence. Replies: decided, advised (a person decides), forbidden, conflict (evidence or decision changed). Choose from the question's answers. To withdraw, send undo with ifDecision set to the reply's decision.",
+	mcp: "Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person decides, forbidden, invalid, already, reopened, conflict=evidence or decision changed. Choose from answers. Withdraw with undo and ifDecision=reply.decision.",
 	run: decide,
 });
 

@@ -640,7 +640,15 @@ export function openApi(): Record<string, unknown> {
 						content: {
 							"application/json": {
 								schema: z.toJSONSchema(
-									z.object({ ok: z.literal(true), result: op.output, seq: z.number().int().nullable() }),
+									z.object({
+										ok: z.literal(true),
+										result: op.output,
+										seq: z
+											.number()
+											.int()
+											.nullable()
+											.describe("The project's sequence number after a write; a cursor for `since`"),
+									}),
 								),
 							},
 						},

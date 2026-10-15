@@ -14,6 +14,7 @@ import { encode } from "gpt-tokenizer/encoding/o200k_base";
 import { z } from "zod";
 import { generateToolReference } from "../../scripts/gen-skill.ts";
 import { harness } from "../../test/helpers.ts";
+import { REPLIES } from "../core/replies.ts";
 import { createToken, listTokens } from "../server/identity/identity.ts";
 import { MCP_OPS, OPS } from "../server/ops/index.ts";
 import { invoke, invokeAsync } from "../server/ops/registry.ts";
@@ -22,12 +23,12 @@ import { mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from "./mcp.ts";
 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
-	propose: 1245,
+	propose: 1264,
 	report: 698,
 	claim: 401,
-	decide: 319,
+	decide: 329,
 	inbox: 192,
-	get: 242,
+	get: 235,
 	find: 274,
 	impact: 211,
 	since: 169,
@@ -44,6 +45,18 @@ function resultOf<S extends z.ZodType>(reply: unknown, schema: S): z.output<S> {
 	expect(result.structuredContent).toEqual(envelope);
 	return schema.parse(envelope.result);
 }
+
+test("tools/list names every proposal and decision reply status", () => {
+	const tools = mcpTools();
+	for (const [name, statuses] of [
+		["propose", REPLIES.propose.shape.status.options],
+		["decide", REPLIES.decide.element.shape.status.options],
+	] as const) {
+		const tool = tools.find((entry) => entry.name === name);
+		if (!tool) throw new Error(name);
+		for (const status of statuses) expect(tool.description).toContain(status);
+	}
+});
 
 test("tools come from the registry and stay within their measured token limits", () => {
 	const tools = mcpTools();

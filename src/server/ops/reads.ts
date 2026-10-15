@@ -388,7 +388,7 @@ export const getOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: 'Read things by ref (C-, Q-, R-, T-, P-). For cases use `as: "md"` and `fields` to read less, and `unless: {ref: hash}` to skip what you already hold.',
+	mcp: 'Read refs (C-, Q-, R-, T-, P-). For cases, `as: "md"` and `fields` read less; `unless: {ref: hash}` skips unchanged cases.',
 	run: get,
 });
 
