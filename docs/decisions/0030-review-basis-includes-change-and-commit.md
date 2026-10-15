@@ -26,7 +26,7 @@ No schema migration is needed. A review is still evidence of reading, never a ru
 Finding decisions retain their existing basis and are separate from review completion.
 
 With `since`, a newer change revision includes all affected cases, even if the case versions did not move.
-This also includes cases after a title or file-list change. With an unchanged change, the existing case revision
+This also includes cases after a title or file-list change, and after the change is closed or reopened; those come back still marked reviewed when the head is the same. With an unchanged change, the existing case revision
 and failing-case filters apply. A files-only request cannot reuse reviews because it has no known commit basis.
 
 ## Alternatives and limits
