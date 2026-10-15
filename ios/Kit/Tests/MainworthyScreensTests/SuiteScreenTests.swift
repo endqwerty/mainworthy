@@ -240,7 +240,7 @@ struct SuiteScreenTests {
 		#expect(old.content.title == "A native draft")
 	}
 
-	@Test("an editor stays on the version opened, and a concurrent overlapping edit waits in the web app")
+	@Test("an editor stays on the version opened, and a concurrent overlapping edit resolves on the phone")
 	func conflict() async throws {
 		let client = try await Live.signedIn().project(try await Live.project())
 		let screen = SuiteScreen(project: client)
@@ -257,10 +257,14 @@ struct SuiteScreenTests {
 		await screen.refresh()
 		#expect(editor.source == .edit(opened))
 		await screen.saveEditor()
-		#expect(screen.editor === editor && editor.settled)
-		#expect(editor.notice?.contains("title") == true)
-		#expect(editor.notice?.contains("waits for its author in the web app") == true)
+		#expect(screen.editor === editor && !editor.settled)
+		#expect(editor.conflict?.paths == ["title"])
+		#expect(editor.conflict?.mine.title == "Mine" && editor.conflict?.current.title == "Another author")
 		#expect(!editor.maySave)
+		editor.chooseConflict("title", side: .mine)
+		await screen.saveEditor()
+		#expect(screen.editor == nil && screen.saved?.version == 3)
+		#expect(try await client.caseDocument(ref).content.title == "Mine")
 	}
 
 	@Test("a stricter policy says the proposal waits in the Queue")

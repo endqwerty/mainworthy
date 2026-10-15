@@ -10,49 +10,54 @@ struct SuiteEditorView: View {
 	var body: some View {
 		NavigationStack {
 			Form {
-				Section("Title") {
-					TextField("Case title", text: $editor.content.title, axis: .vertical)
-						.accessibilityIdentifier("editor-title")
-					Text("\(editor.content.title.utf16.count)/300 UTF-16 units")
-						.font(.caption).foregroundStyle(editor.content.title.utf16.count > 300 ? Color.fail : .secondary)
-				}
-				Section("Preconditions") {
-					TextField("What must hold before", text: $editor.content.pre, axis: .vertical)
-						.lineLimit(2...6).accessibilityIdentifier("editor-pre")
-				}
-				Section("Steps") {
-					ForEach($editor.content.steps) { $step in
-						VStack(alignment: .leading, spacing: 8) {
-							TextField("Action", text: $step.action, axis: .vertical)
-								.accessibilityIdentifier("editor-action-\(step.id)")
-							TextField("Expected result (optional)", text: expected($step), axis: .vertical)
-								.font(.subheadline).accessibilityIdentifier("editor-expected-\(step.id)")
+				if let conflict = editor.conflict {
+					CaseConflictView(editor: editor, conflict: conflict)
+				} else {
+					Group {
+						Section("Title") {
+							TextField("Case title", text: $editor.content.title, axis: .vertical)
+								.accessibilityIdentifier("editor-title")
+							Text("\(editor.content.title.utf16.count)/300 UTF-16 units")
+								.font(.caption).foregroundStyle(editor.content.title.utf16.count > 300 ? Color.fail : .secondary)
 						}
-						.padding(.vertical, 4)
-					}
-					.onDelete { editor.removeSteps(at: $0) }
-					.onMove { editor.moveSteps(from: $0, to: $1) }
-					Button { editor.addStep() } label: { Label("Add step", systemImage: "plus") }
-						.accessibilityIdentifier("editor-add-step")
-				}
-				Section("Reason (optional)") {
-					TextField("Why this change", text: $editor.reason, axis: .vertical)
-						.accessibilityIdentifier("editor-reason")
-					Text("\(editor.reason.utf16.count)/500 UTF-16 units")
-						.font(.caption).foregroundStyle(editor.reason.utf16.count > 500 ? Color.fail : .secondary)
-				}
-				if !editor.validation.isEmpty {
-					Section("Before saving") {
-						ForEach(editor.validation, id: \.self) { Text($0).foregroundStyle(Color.fail) }
-					}
-					.accessibilityIdentifier("editor-validation")
+						Section("Preconditions") {
+							TextField("What must hold before", text: $editor.content.pre, axis: .vertical)
+								.lineLimit(2...6).accessibilityIdentifier("editor-pre")
+						}
+						Section("Steps") {
+							ForEach($editor.content.steps) { $step in
+								VStack(alignment: .leading, spacing: 8) {
+									TextField("Action", text: $step.action, axis: .vertical)
+										.accessibilityIdentifier("editor-action-\(step.id)")
+									TextField("Expected result (optional)", text: expected($step), axis: .vertical)
+										.font(.subheadline).accessibilityIdentifier("editor-expected-\(step.id)")
+								}
+								.padding(.vertical, 4)
+							}
+							.onDelete { editor.removeSteps(at: $0) }
+							.onMove { editor.moveSteps(from: $0, to: $1) }
+							Button { editor.addStep() } label: { Label("Add step", systemImage: "plus") }
+								.accessibilityIdentifier("editor-add-step")
+						}
+						Section("Reason (optional)") {
+							TextField("Why this change", text: $editor.reason, axis: .vertical)
+								.accessibilityIdentifier("editor-reason")
+							Text("\(editor.reason.utf16.count)/500 UTF-16 units")
+								.font(.caption).foregroundStyle(editor.reason.utf16.count > 500 ? Color.fail : .secondary)
+						}
+						if !editor.validation.isEmpty {
+							Section("Before saving") {
+								ForEach(editor.validation, id: \.self) { Text($0).foregroundStyle(Color.fail) }
+							}
+							.accessibilityIdentifier("editor-validation")
+						}
+					}.disabled(editor.locked)
 				}
 				if let notice = editor.notice {
 					Section { Text(notice).accessibilityIdentifier("editor-notice") }
 				}
 			}
 			.scrollDismissesKeyboard(.interactively)
-			.disabled(editor.locked)
 			.navigationTitle(title)
 			.navigationBarTitleDisplayMode(.inline)
 			.toolbar {
@@ -65,7 +70,7 @@ struct SuiteEditorView: View {
 				ToolbarItemGroup(placement: .confirmationAction) {
 					if !editor.locked { EditButton().accessibilityIdentifier("editor-reorder") }
 					if !editor.settled {
-						Button(editor.isRetrying ? "Retry" : "Save") { Task { await screen.saveEditor() } }
+						Button(editor.isRetrying ? "Retry" : editor.conflict != nil ? "Record merge" : "Save") { Task { await screen.saveEditor() } }
 							.disabled(!editor.maySave).accessibilityIdentifier("editor-save")
 					}
 				}

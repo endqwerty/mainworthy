@@ -7,6 +7,7 @@
 //   inputs. The app's tests hold its own functions to it, so a sentence changed here fails there.
 //
 // `bun scripts/ios.ts gen` writes the files; `test/ios-contract.test.ts` fails when one is not what this prints.
+import { execFileSync } from "node:child_process";
 import { ANSWER_HELP, ANSWER_LABELS, KINDS } from "../../src/core/kinds.ts";
 import { stakes, waitingPhrase } from "../../src/core/stakes.ts";
 import { SHAPES } from "./contract.ts";
@@ -185,10 +186,26 @@ export function parity(): string {
 	].join("\n");
 }
 
+/** The pure merge algorithm, bundled for the phone's JavaScriptCore. */
+export function mergeRuntime(): string {
+	const source = execFileSync(
+		process.execPath,
+		["build", "./scripts/ios/merge.ts", "--target=browser", "--format=iife", "--minify"],
+		{ encoding: "utf8" },
+	);
+	return (
+		HEADER("src/core/merge3.ts and scripts/ios/merge.ts") +
+		"enum MergeRuntime {\n\tstatic let source = " +
+		literal(source) +
+		"\n}\n"
+	);
+}
+
 /** Every generated file, by its path in the repository. */
 export function generated(): Record<string, string> {
 	return {
 		"ios/Kit/Sources/MainworthyClient/Generated/Wire.swift": wire(),
+		"ios/Kit/Sources/MainworthyClient/Generated/MergeRuntime.swift": mergeRuntime(),
 		"ios/Kit/Sources/MainworthyClient/Generated/Vocabulary.swift": vocabulary(),
 		"ios/Kit/Tests/MainworthyClientTests/Generated/Parity.swift": parity(),
 	};

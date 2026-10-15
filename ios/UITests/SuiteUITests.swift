@@ -20,8 +20,13 @@ final class SuiteUITests: XCTestCase {
 	}
 
 	@MainActor private func shot(_ name: String) {
+		let screenshot = XCUIScreen.main.screenshot()
+		let attachment = XCTAttachment(screenshot: screenshot)
+		attachment.name = "suite-\(name)"
+		attachment.lifetime = .keepAlways
+		add(attachment)
 		guard let directory = environment["MAINWORTHY_SCREENSHOTS"] else { return }
-		try? XCUIScreen.main.screenshot().pngRepresentation.write(
+		try? screenshot.pngRepresentation.write(
 			to: URL(fileURLWithPath: directory).appendingPathComponent("suite-\(name).png"))
 	}
 
@@ -171,4 +176,85 @@ final class SuiteUITests: XCTestCase {
 		XCTAssertEqual(app.staticTexts["case-version"].label, "Version 1")
 		XCTAssertFalse(app.buttons["case-edit"].exists)
 	}
+	@MainActor private func operation(_ project: String, _ name: String, _ input: [String: Any]) async throws -> Any {
+		let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+		var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/api/p/\(project)/\(name)")))
+		request.httpMethod = "POST"
+		request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+		request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+		request.httpBody = try JSONSerialization.data(withJSONObject: input)
+		let (data, _) = try await URLSession.shared.data(for: request)
+		let reply = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+		XCTAssertEqual(reply["ok"] as? Bool, true)
+		return try XCTUnwrap(reply["result"])
+	}
+
+	@MainActor private func replaceParagraph(_ field: XCUIElement, with text: String) {
+		field.tap(withNumberOfTaps: 3, numberOfTouches: 1)
+		field.typeText(text)
+		XCTAssertEqual(field.value as? String, text)
+	}
+
+	@MainActor func testResolveOverlappingEdit() async throws {
+		XCUIDevice.shared.orientation = .portrait
+		let project = try await makeProject()
+		let rawFound = try await operation(project, "find", ["in": "cases", "text": "Expired coupon"])
+		let found = try XCTUnwrap(rawFound as? [String: Any])
+		let item = try XCTUnwrap((found["items"] as? [[String: Any]])?.first)
+		let ref = try XCTUnwrap(item["ref"] as? String)
+		let rawRows = try await operation(project, "get", ["refs": [ref]])
+		let rows = try XCTUnwrap(rawRows as? [[String: Any]])
+		let document = try XCTUnwrap(rows.first)
+		var steps = try XCTUnwrap(document["steps"] as? [[String: Any]])
+		let step = try XCTUnwrap(steps.first?["id"] as? String)
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
+		app.launch()
+		try signIn(app)
+		let projectMenu = app.buttons["project-menu"]
+		projectMenu.tap()
+		let projectOption = app.buttons[project]
+		XCTAssertTrue(projectOption.wait(for: \.isHittable, toEqual: true, timeout: 5))
+		projectOption.tap()
+		XCTAssertTrue(projectMenu.wait(for: \.label, toEqual: project, timeout: 10))
+		let casesTab = app.tabBars.buttons["Cases"]
+		XCTAssertTrue(casesTab.wait(for: \.isHittable, toEqual: true, timeout: 5))
+		casesTab.tap()
+		XCTAssertTrue(casesTab.wait(for: \.isSelected, toEqual: true, timeout: 5))
+		XCTAssertTrue(app.buttons["folder-Checkout"].waitForExistence(timeout: 10))
+		app.buttons["folder-Checkout"].tap(); app.buttons["folder-Checkout/Coupons"].tap()
+		XCTAssertTrue(app.staticTexts["Expired coupon is rejected"].waitForExistence(timeout: 10))
+		app.staticTexts["Expired coupon is rejected"].tap()
+		XCTAssertTrue(app.buttons["case-edit"].waitForExistence(timeout: 10))
+		app.buttons["case-edit"].tap()
+		let title = app.textFields["editor-title"]
+		XCTAssertTrue(title.waitForExistence(timeout: 10))
+		replaceParagraph(title, with: "My phone title")
+		let action = app.textFields["editor-action-\(step)"]
+		replaceParagraph(action, with: "My phone action")
+		steps[0]["action"] = "Their phone action"
+		_ = try await operation(project, "propose", ["edits": [["op": "edit", "case": ref, "base": 1,
+			"body": ["title": "Current phone title", "pre": "Concurrent precondition", "steps": steps]]]])
+		app.buttons["editor-save"].tap()
+		let myTitle = app.buttons["conflict-mine-title"]
+		XCTAssertTrue(myTitle.waitForExistence(timeout: 10))
+		XCTAssertFalse(app.buttons["editor-save"].isEnabled)
+		shot("conflict")
+		myTitle.tap()
+		let theirAction = app.buttons["conflict-current-steps.\(step).action"]
+		for _ in 0..<5 where !theirAction.isHittable { app.swipeUp() }
+		XCTAssertTrue(theirAction.exists)
+		theirAction.tap()
+		XCUIDevice.shared.press(.home); app.activate()
+		XCTAssertTrue(app.buttons["editor-save"].isEnabled)
+		shot("conflict-chosen")
+		app.buttons["editor-save"].tap()
+		XCTAssertTrue(app.staticTexts["case-version"].waitForExistence(timeout: 15))
+		XCTAssertEqual(app.staticTexts["case-version"].label, "Version 3")
+		XCTAssertTrue(app.staticTexts["My phone title"].exists)
+		XCTAssertTrue(app.staticTexts["1. Their phone action"].exists)
+		XCTAssertTrue(app.staticTexts["Concurrent precondition"].exists)
+		shot("conflict-saved")
+	}
+
 }

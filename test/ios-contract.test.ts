@@ -414,3 +414,46 @@ describe("what the iPhone Suite reads", () => {
 		expect(waiting).toMatchObject({ status: "open" });
 	});
 });
+
+describe("what the iPhone conflict resolver reads", () => {
+	test("a full conflict, its merge effects and its recorded command reply", async () => {
+		const { ConflictProposal, ConflictBaseFields, MergeReply, MergeCommand } = await import(
+			"../scripts/ios/contract.ts"
+		);
+		const key = z.object({ project: z.string() }).parse(await result("POST", "/test/project", {})).project;
+		const made = z
+			.object({ cases: z.array(z.object({ ref: z.string() })) })
+			.parse(await op(key, "propose", { edits: [{ op: "create", body: { title: "Base" } }] }));
+		const ref = made.cases[0]?.ref;
+		const edit = (title: string) => ({ edits: [{ op: "edit", case: ref, base: 1, body: { title } }] });
+		await op(key, "propose", edit("Current"));
+		const overlap = z
+			.object({ question: z.string(), proposal: z.string() })
+			.parse(await op(key, "propose", edit("Mine")));
+		const [proposal] = z.array(z.unknown()).parse(await op(key, "get", { refs: [overlap.proposal] }));
+		holds("get conflict proposal", ConflictProposal, proposal);
+		holds("base custom fields", ConflictBaseFields, await op(key, "history", { ref, from: 1, to: 1 }));
+		expect(proposal).toMatchObject({ edits: [{ base: 1, mine: { title: "Mine" }, current: { title: "Current" } }] });
+		const [q] = z
+			.array(z.object({ evidenceHash: z.string() }))
+			.parse(await op(key, "get", { refs: [overlap.question] }));
+		const cmd = "ios-conflict-contract";
+		holds("command before sending", MergeCommand, await op(key, "command", { cmd }));
+		const [reply] = z.array(z.unknown()).parse(
+			await op(key, "decide", {
+				q: overlap.question,
+				onEvidence: q?.evidenceHash,
+				answer: {
+					is: "merge",
+					body: { title: "Resolved", pre: "", steps: [], methods: ["human"], automate: "none", fields: {} },
+				},
+				cmd,
+			}),
+		);
+		holds("merge effects", MergeReply, reply);
+		expect(reply).toMatchObject({ status: "decided", effects: { status: "adopted", cases: [{ ref, version: 3 }] } });
+		const recorded = await op(key, "command", { cmd });
+		holds("recorded merge", MergeCommand, recorded);
+		expect(recorded).toMatchObject({ state: "done", reply: [reply] });
+	});
+});

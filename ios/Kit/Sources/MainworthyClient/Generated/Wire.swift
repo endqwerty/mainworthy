@@ -279,6 +279,67 @@ enum Wire {
 		let edits: [ProposalEdit]
 	}
 
+	/// The complete edit and the current document.
+	struct ConflictEdit: Decodable, Equatable, Sendable {
+		let op: String
+		let `case`: String?
+		let base: Int
+		let mine: CaseBody
+		let current: CaseBody
+	}
+
+	/// One edit that the author resolves.
+	struct ConflictProposal: Decodable, Equatable, Sendable {
+		let ref: String
+		let edits: [ConflictEdit]
+	}
+
+	/// The fields before this comparison.
+	struct ConflictCustomFields: Decodable, Equatable, Sendable {
+		let before: [String: String]
+	}
+
+	/// The complete custom fields, including when unchanged.
+	struct ConflictBaseDiff: Decodable, Equatable, Sendable {
+		let fields: ConflictCustomFields
+	}
+
+	/// Custom fields at the exact base version, from history.
+	struct ConflictBaseFields: Decodable, Equatable, Sendable {
+		let ref: String
+		let from: Int
+		let to: Int
+		let diff: ConflictBaseDiff
+	}
+
+	/// An adopted version.
+	struct MergeStamp: Decodable, Equatable, Sendable {
+		let ref: String
+		let version: Int
+	}
+
+	/// The server's result of the resolved proposal.
+	struct MergeEffects: Decodable, Equatable, Sendable {
+		let status: String
+		let cases: [MergeStamp]
+		let adopt: String?
+		let proposal: String?
+	}
+
+	/// One decide reply, with the effect of a merge.
+	struct MergeReply: Decodable, Equatable, Sendable {
+		let q: String
+		let status: String
+		let needs: String?
+		let effects: MergeEffects?
+	}
+
+	/// The recorded reply of a merge command.
+	struct MergeCommand: Decodable, Equatable, Sendable {
+		let state: String
+		let reply: [MergeReply]?
+	}
+
 	/// One event of `GET /api/p/<project>/events`: something changed.
 	struct ChangeEvent: Decodable, Equatable, Sendable {
 		let project: String

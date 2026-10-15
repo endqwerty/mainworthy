@@ -165,21 +165,29 @@ which opens the page [Licence](./licence.md) on the instance, and the copyright 
    number of steps.
 4. Press **Save**. An adopted proposal opens the saved version. Where the policy asks for acceptance, the app
    says the proposal waits in the Queue. If the saved document differs from what you typed, or cannot be read,
-   the editor keeps your draft and says why. If another edit overlaps, the app names the fields and asks its author
-   to resolve the proposal in the web app. An edit uses the version you opened.
+   the editor keeps your draft and says why. If another edit overlaps, **Both edits are kept** shows each
+   overlapping field with **Your draft** above **Current version**. Choose **Use my version** or
+   **Use current version** for each field, then review **Merged case** and press **Record merge**.
+   You can keep an action from one side and its expected result from the other, keep or remove a step, and
+   choose the order when both sides reordered steps. Changes that do not overlap are combined automatically.
+   If the case changes again, a new conflict keeps your merge for another choice. The policy can leave the
+   merge waiting for acceptance in the Queue. A refused answer keeps your draft and choices.
+   An edit uses the version you opened.
 
 What you type stays while the app goes to the background, and when your session ends and you sign in again as yourself on the same server. **Cancel** asks before discarding a changed draft.
-A lost reply offers **Retry**, which sends the same command. Drafts do not survive closing the app.
+A lost save reply offers **Retry**, which sends the same command. For a merge, **Retry** first asks what the
+server recorded for that command. Choices stay locked until its outcome is known. Drafts do not survive closing the app.
 
 The editor keeps custom field values without editing them. A newly required field does not block edits to an older case that leaves that value unchanged. New cases must supply required values through [Markdown or a content proposal](./policy.md#custom-fields).
 
-Moving, tagging, archiving and restoring cases, changing folders, version diffs and resolving overlaps still
+Moving, tagging, archiving and restoring cases, changing folders and version diffs still
 need the web app. The button on a case's page opens it there.
 
 ## What the app does not do yet
 
-- **Link a test to a case**, and **resolve an edit that overlaps another**. The answer is listed and greyed.
-  The button at the top right of a question opens it in the web app.
+- **Link a test to a case**, and **resolve a conflict opened from the Queue**. The answer is listed and greyed.
+  Resolve an overlapping save in the open case editor, or use the button at the top right of a question to
+  open it in the web app.
 - **Answer a proposal that does more than add a case or change what one says.** One that restores an earlier
   version, moves, tags or archives cases, makes a folder or changes the policy is answered in the web app: the
   app does not show all of what it changes. So is one with more than twenty edits. A new case and an edit to a
