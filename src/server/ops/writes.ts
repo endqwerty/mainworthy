@@ -371,7 +371,6 @@ export function claim(ctx: Ctx, input: ClaimInput): ClaimReply {
 				note: finding.note,
 				repro: finding.repro ?? null,
 				suggest: finding.suggest ?? null,
-				finder: ctx.actor.name,
 				finderId: ctx.actor.id,
 				lens: input.lens,
 				about: input.about ?? null,

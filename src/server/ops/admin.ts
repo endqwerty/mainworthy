@@ -2,6 +2,7 @@
 import { durationMs } from "../../core/duration.ts";
 import { type ActorKind, defaultCapabilities, type Unlinked } from "../../core/kinds.ts";
 import { AdminInput } from "../../core/ops.ts";
+import { forgetQuestionNames } from "../decisions/questions.ts";
 import { rewriteReportReceipts } from "../evidence/evidence.ts";
 import {
 	actorByName,
@@ -214,6 +215,7 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 				);
 			}
 			const forgotten = forgetActor(env.app, input.name);
+			forgetQuestionNames(db, input.name, forgotten.forgotten);
 			// These write replies name people in grant.actor, report.questions[].by and claim.known[].by.
 			// Requests are digests; their binding to a command id must survive forgetting, as must free text.
 			const rewrite = (op: string, reply: string): string => {

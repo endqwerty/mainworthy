@@ -5,6 +5,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SessionInfo } from "../src/core/api.ts";
+import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
 import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { databasePath } from "../src/server/kernel/app.ts";
 import { SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
@@ -804,79 +805,147 @@ describe("what a signed-in caller sees and ends", () => {
 		expect(await w.status({ cookie })).toBe(401);
 	});
 
-	test("forgetting erases names from stored grant replies and all token and credential labels without losing replay protection", async () => {
-		const w = world();
-		const name = "erasure-person";
-		const cookie = await joined(w, name, FIRST);
-		await tokenFor(w, { actor: name, kind: "human", label: `${name}'s script`, cmd: "create-secret-01" });
-		await w.ok("admin", { do: "token.revoke", id: 2 });
-		await tokenFor(w, { actor: name, kind: "human", label: `${name}'s active script` });
-		const devices = [authenticator(), authenticator()];
-		for (const device of devices) {
-			const options = await w.ok<RegistrationOptions>("credential", { do: "passkey.begin" }, { cookie });
-			await w.ok(
-				"credential",
-				{ do: "passkey.add", passkey: device.register(options), label: `${name}'s key` },
+	test.each([false, true])(
+		"forgetting erases stored attribution and access labels without losing replay protection, legacy evidence: %s",
+		async (legacy) => {
+			const w = world();
+			const name = "erasure-person";
+			const cookie = await joined(w, name, FIRST);
+			await tokenFor(w, { actor: name, kind: "human", label: `${name}'s script`, cmd: "create-secret-01" });
+			await w.ok("admin", { do: "token.revoke", id: 2 });
+			await tokenFor(w, { actor: name, kind: "human", label: `${name}'s active script` });
+			const devices = [authenticator(), authenticator()];
+			for (const device of devices) {
+				const options = await w.ok<RegistrationOptions>("credential", { do: "passkey.begin" }, { cookie });
+				await w.ok(
+					"credential",
+					{ do: "passkey.add", passkey: device.register(options), label: `${name}'s key` },
+					{ cookie },
+				);
+			}
+			await w.ok("credential", { do: "remove", id: 2 }, { cookie });
+			const grant = {
+				do: "grant.set",
+				actor: name,
+				project: "scratch",
+				can: ["read", "produce"],
+				cmd: "grant-person-01",
+			};
+			expect(await w.ok<unknown>("admin", grant)).toEqual({
+				actor: name,
+				project: "scratch",
+				can: ["read", "produce"],
+			});
+			await w.ok("admin", { do: "project.create", key: "review", preset: "strict" });
+			await w.ok("admin", { do: "grant.set", actor: name, project: "review", can: ["read", "produce"] });
+			const proposed = await w.post<ProposeReply>(
+				"/api/p/review/propose",
+				{ edits: [{ op: "create", outline: "Check total" }], cmd: "person-proposal-01" },
 				{ cookie },
 			);
-		}
-		await w.ok("credential", { do: "remove", id: 2 }, { cookie });
-		const grant = {
-			do: "grant.set",
-			actor: name,
-			project: "scratch",
-			can: ["read", "produce"],
-			cmd: "grant-person-01",
-		};
-		expect(await w.ok<unknown>("admin", grant)).toEqual({ actor: name, project: "scratch", can: ["read", "produce"] });
-		const ledger = () =>
-			w.rows<{ id: string; actor: number; op: string; request: string }>(
-				"SELECT id, actor, op, request FROM commands ORDER BY id",
+			expect(proposed.body).toMatchObject({ ok: true, result: { status: "open", question: "Q-1" } });
+			const finding = await w.post(
+				"/api/p/review/claim",
+				{
+					lens: "review",
+					findings: [{ on: "pr:17", category: "ambiguous", note: "Say which total" }],
+					cmd: "person-claim-01",
+				},
+				{ cookie },
 			);
-		const before = ledger();
-		w.clock.advance(HOUR);
-		const forgotten = await w.ok<{ forgotten: string; tokensRevoked: number }>("admin", {
-			do: "actor.forget",
-			name,
-			cmd: "forget-person-01",
-		});
-		expect(forgotten).toEqual({ forgotten: "forgotten-3", tokensRevoked: 1 });
-		expect(ledger().filter((row) => row.id !== "forget-person-01")).toEqual(before);
-		const tables = w.rows<{ name: string }>(
-			"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
-		);
-		for (const table of tables) {
-			const rows = w.rows(`SELECT * FROM "${table.name.replaceAll('"', '""')}"`);
-			expect(JSON.stringify(rows), table.name).not.toContain(name);
-		}
-		expect(w.rows("SELECT label, revoked_at FROM tokens WHERE actor = 3 ORDER BY id")).toEqual([
-			{ label: "", revoked_at: T0 },
-			{ label: "", revoked_at: T0 + HOUR },
-		]);
-		expect(w.rows("SELECT handle, data, label, revoked_at FROM credentials WHERE actor = 3 ORDER BY id")).toEqual([
-			{ handle: null, data: "", label: "", revoked_at: T0 + HOUR },
-			{ handle: devices[0]?.id, data: "", label: "", revoked_at: T0 },
-			{ handle: devices[1]?.id, data: "", label: "", revoked_at: T0 + HOUR },
-		]);
-		expect(await w.ok<unknown>("admin", grant)).toEqual({
-			actor: "forgotten-3",
-			project: "scratch",
-			can: ["read", "produce"],
-		});
-		expect((await w.op("admin", { ...grant, can: ["read"] })).status).toBe(409);
-		expect(await w.ok<unknown>("admin", { do: "actor.forget", name, cmd: "forget-person-01" })).toEqual(forgotten);
-		expect(
-			(
-				await w.op("admin", {
-					do: "token.create",
-					actor: name,
-					kind: "human",
-					label: `${name}'s script`,
-					cmd: "create-secret-01",
-				})
-			).status,
-		).toBe(409);
-	});
+			expect(finding.body).toMatchObject({ ok: true, result: { opened: ["Q-2"] } });
+			const inbox = async () => {
+				const reply = await w.post<InboxReply>("/api/p/review/inbox", {}, bearer(TOKEN));
+				if (!reply.body.ok) throw new Error(reply.text);
+				return reply.body.result.items.sort((a, b) => a.q.localeCompare(b.q));
+			};
+			const questions = await inbox();
+			expect(questions.map((q) => [q.kind, q.evidence.author ?? q.evidence.finder])).toEqual([
+				["adopt", name],
+				["finding", name],
+			]);
+			const storedEvidence = w.rows<{ evidence: string }>("SELECT evidence FROM questions ORDER BY id");
+			expect(storedEvidence.map((row) => JSON.parse(row.evidence))).toMatchObject([{ authorId: 3 }, { finderId: 3 }]);
+			expect(JSON.stringify(storedEvidence)).not.toContain(name);
+			if (legacy) {
+				await w.instance.app.gate.run(() => {
+					w.instance.app.db.raw
+						.query(
+							"UPDATE questions SET evidence = json_set(json_remove(evidence, '$.authorId'), '$.author', ?) WHERE kind = 'adopt'",
+						)
+						.run(name);
+					w.instance.app.db.raw
+						.query("UPDATE questions SET evidence = json_set(evidence, '$.finder', ?) WHERE kind = 'finding'")
+						.run(name);
+				});
+			}
+			const questionBindings = () => w.rows("SELECT id, evidence_hash, basis, rev FROM questions ORDER BY id");
+			const bindings = questionBindings();
+			const ledger = () =>
+				w.rows<{ id: string; actor: number; op: string; request: string }>(
+					"SELECT id, actor, op, request FROM commands ORDER BY id",
+				);
+			const before = ledger();
+			w.clock.advance(HOUR);
+			const forgotten = await w.ok<{ forgotten: string; tokensRevoked: number }>("admin", {
+				do: "actor.forget",
+				name,
+				cmd: "forget-person-01",
+			});
+			expect(forgotten).toEqual({ forgotten: "forgotten-3", tokensRevoked: 1 });
+			expect(ledger().filter((row) => row.id !== "forget-person-01")).toEqual(before);
+			const tables = w.rows<{ name: string }>(
+				"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+			);
+			for (const table of tables) {
+				const rows = w.rows(`SELECT * FROM "${table.name.replaceAll('"', '""')}"`);
+				expect(JSON.stringify(rows), table.name).not.toContain(name);
+			}
+			expect(questionBindings()).toEqual(bindings);
+			expect((await inbox()).map((q) => [q.kind, q.evidence.author ?? q.evidence.finder])).toEqual([
+				["adopt", "forgotten-3"],
+				["finding", "forgotten-3"],
+			]);
+			const archive = await fetch(`${w.instance.url}/api/export`, { headers: bearer(TOKEN) });
+			expect(archive.status).toBe(200);
+			expect(await archive.text()).not.toContain(name);
+			for (const q of questions) {
+				const answered = await w.post(
+					"/api/p/review/decide",
+					{ q: q.q, onEvidence: q.evidenceHash, answer: { is: "reject" }, reason: "Keep the original" },
+					bearer(TOKEN),
+				);
+				expect(answered.body).toMatchObject({ ok: true, result: [{ status: "decided" }] });
+			}
+			expect(w.rows("SELECT label, revoked_at FROM tokens WHERE actor = 3 ORDER BY id")).toEqual([
+				{ label: "", revoked_at: T0 },
+				{ label: "", revoked_at: T0 + HOUR },
+			]);
+			expect(w.rows("SELECT handle, data, label, revoked_at FROM credentials WHERE actor = 3 ORDER BY id")).toEqual([
+				{ handle: null, data: "", label: "", revoked_at: T0 + HOUR },
+				{ handle: devices[0]?.id, data: "", label: "", revoked_at: T0 },
+				{ handle: devices[1]?.id, data: "", label: "", revoked_at: T0 + HOUR },
+			]);
+			expect(await w.ok<unknown>("admin", grant)).toEqual({
+				actor: "forgotten-3",
+				project: "scratch",
+				can: ["read", "produce"],
+			});
+			expect((await w.op("admin", { ...grant, can: ["read"] })).status).toBe(409);
+			expect(await w.ok<unknown>("admin", { do: "actor.forget", name, cmd: "forget-person-01" })).toEqual(forgotten);
+			expect(
+				(
+					await w.op("admin", {
+						do: "token.create",
+						actor: name,
+						kind: "human",
+						label: `${name}'s script`,
+						cmd: "create-secret-01",
+					})
+				).status,
+			).toBe(409);
+		},
+	);
 
 	test("a name that starts with forgotten- from an older build does not stop the actor with that id being forgotten", async () => {
 		const w = world();

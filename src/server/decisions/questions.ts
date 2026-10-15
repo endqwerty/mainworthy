@@ -137,6 +137,14 @@ const Q = {
 		"UPDATE questions SET state = $state, decision = $decision, rev = $seq WHERE id = $id",
 	),
 	setAsk: sql<{ id: number; ask: string }>("UPDATE questions SET ask = $ask WHERE id = $id"),
+	forgetAuthor: sql<{ name: string; pseudonym: string }>(
+		`UPDATE questions SET evidence = json_set(evidence, '$.author', $pseudonym)
+		 WHERE kind = 'adopt' AND json_extract(evidence, '$.author') = $name`,
+	),
+	forgetFinder: sql<{ name: string; pseudonym: string }>(
+		`UPDATE questions SET evidence = json_set(evidence, '$.finder', $pseudonym)
+		 WHERE kind = 'finding' AND json_extract(evidence, '$.finder') = $name`,
+	),
 	setParties: sql<{ id: number; parties: string }>(
 		"UPDATE questions SET evidence = json_set(evidence, '$.parties', json($parties)) WHERE id = $id",
 	),
@@ -239,6 +247,12 @@ const Q = {
 		 WHERE d.project = $project AND d.expires_at IS NOT NULL AND d.expires_at <= $now AND q.state = 'decided'`,
 	),
 };
+
+/** Old evidence kept display names. Attribution is outside the material basis and target hashed by raise. */
+export function forgetQuestionNames(db: Db, name: string, pseudonym: string): void {
+	db.run(Q.forgetAuthor, { name, pseudonym });
+	db.run(Q.forgetFinder, { name, pseudonym });
+}
 
 export const questionRef = (row: { no: number }): string => ref("question", row.no);
 
