@@ -88,6 +88,24 @@ An unconfirmed withdrawal shows the server's response without claiming that the 
 The chips over the list show one kind of question. The name at the top left is the project that is open. Press
 it to open another.
 
+## Link tests to cases
+
+1. Open an unlinked question in **Queue**, then press **Link to a case**.
+2. Press **Choose a case** for each test. Search by title or case number and choose its case.
+3. Review every test and its selected case, including their references and names. Add a reason if the policy asks for one.
+4. Press **Record**. The sheet shows the server's result. Press **Done** to return to the question.
+
+To make cases instead, press **Create cases** on the question. Review the test names before recording.
+The server makes one automated case per test, with that test's name, and links it. It chooses the folder from the test file.
+If the policy requires somebody to adopt new cases first, the server refuses this answer. Create and adopt the cases in **Cases**, then link them here.
+
+Closing the sheet keeps your case choices, search and reason in the current workspace. A refusal or changed question keeps them too.
+If the evidence changed, press **Review current tests** before answering on the new evidence.
+If somebody else answered, the sheet shows their current answer and preserves your choices.
+Your own confirmed answer shows the recorded result without a **Question changed** warning while that decision still stands on the reviewed evidence.
+When a reply is uncertain, editing pauses. **Retry** sends the same command to learn its result without making cases twice.
+A question with more tests than this build can show still needs the web app.
+
 ## Execute a planned run
 
 1. Open **Runs**, then open a run. Its page shows the server's verdict, the results it accepts and its cases in order.
@@ -188,7 +206,7 @@ need the web app. The button on a case's page opens it there.
 
 ## What the app does not do yet
 
-- **Link a test to a case**, and **resolve a conflict opened from the Queue**. The answer is listed and greyed.
+- **Resolve a conflict opened from the Queue**. The answer is listed and greyed.
   Resolve an overlapping save in the open case editor, or use the button at the top right of a question to
   open it in the web app.
 - **Answer a proposal that does more than add a case or change what one says.** One that restores an earlier

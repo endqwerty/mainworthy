@@ -82,6 +82,27 @@ const open = async (key: string): Promise<Item[]> =>
 	((await op(key, "inbox", { state: "open", limit: 100 })) as { items: Item[] }).items;
 
 describe("what the iOS app reads", () => {
+	test("a native map answer cannot replace an answer recorded while its sheet was open", async () => {
+		const made = z.object({ project: z.string() }).parse(await result("POST", "/test/project", {}));
+		const question = (await open(made.project)).find((item) => item.kind === "map");
+		if (!question) throw new Error("the scenario has no map question");
+		const input = { q: question.q, onEvidence: question.evidenceHash };
+		const tracked = await op(made.project, "decide", { ...input, answer: { is: "track" } });
+		expect(tracked).toMatchObject([{ status: "decided" }]);
+		for (const batch of [false, true]) {
+			const one = { ...input, ifOpen: true, answer: { is: "create" } };
+			const reply = await op(made.project, "decide", batch ? { all: [one] } : one);
+			expect(reply).toMatchObject([
+				{ status: "conflict", needs: "the question is no longer open; read it again before answering" },
+			]);
+			const [refused] = z.array(z.unknown()).parse(reply);
+			holds("decide, competing map answer", DecideReply, refused);
+		}
+		expect(await op(made.project, "find", { in: "cases", text: "Shipping accepts an address" })).toMatchObject({
+			items: [],
+		});
+	});
+
 	test("who is signed in, with a token and with the session a password opens", async () => {
 		holds("GET /api/session", SessionInfo, await result("GET", "/api/session"));
 		// The app holds a session cookie, never a token, so this is the reply it reads.

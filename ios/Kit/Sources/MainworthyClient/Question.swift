@@ -186,7 +186,9 @@ public struct Choice: Identifiable, Hashable, Sendable {
 		case nothing
 		/// A reference to where the defect is tracked, which may be left empty.
 		case reference
-		/// Something this build cannot give: the cases to link tests to, the text of a merge, an answer the app
+		/// A case for each shown test.
+		case mapping
+		/// Something this build cannot give: the text of a merge, an answer the app
 		/// has no words for, or any answer to a question whose evidence it cannot show. The question is answered
 		/// in the web app.
 		case more
@@ -200,7 +202,8 @@ public struct Choice: Identifiable, Hashable, Sendable {
 		takes =
 			switch answer {
 			case _ where help == nil || !shown: .more
-			case "link", "merge": .more
+			case "link" where kind == .map: .mapping
+			case "merge", "link": .more
 			case "defect": .reference
 			default: .nothing
 			}

@@ -27,11 +27,13 @@ struct QuestionView: View {
 	private enum Asking: Identifiable {
 		case answer(Chosen)
 		case withdrawal(Question)
+		case mapping(Question, creating: Bool)
 
 		var id: String {
 			switch self {
 			case .answer(let chosen): chosen.choice.answer
 			case .withdrawal: "withdraw"
+			case .mapping(_, let creating): creating ? "create" : "link"
 			}
 		}
 	}
@@ -248,7 +250,10 @@ struct QuestionView: View {
 	private func choose(_ choice: Choice, for question: Question) {
 		screen.dismissNotice()
 		let chosen = Chosen(choice: choice, question: question)
-		if question.wantsReason || choice.takes == .reference {
+		if question.kind == .map, choice.answer == "link" || choice.answer == "create" {
+			screen.beginMapping(question, creating: choice.answer == "create")
+			asking = .mapping(question, creating: choice.answer == "create")
+		} else if question.wantsReason || choice.takes == .reference {
 			asking = .answer(chosen)
 		} else if question.kind == .adopt, choice.answer == "accept" {
 			confirming = chosen
@@ -274,6 +279,8 @@ struct QuestionView: View {
 
 	@ViewBuilder private func sheet(for asking: Asking) -> some View {
 		switch asking {
+		case .mapping(let question, let creating):
+			MappingSheet(screen: screen.mapping(question, creating: creating), queue: screen)
 		case .answer(let chosen):
 			let typing = screen.typing(chosen.question.ref)
 			AnswerSheet(

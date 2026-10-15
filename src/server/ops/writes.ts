@@ -528,7 +528,7 @@ export const planOp = defineOp({
 export function decide(ctx: Ctx, input: DecideInput): DecideReply[] {
 	if ("undo" in input) return [undo(ctx, { q: input.undo, ifDecision: input.ifDecision, reason: input.reason })];
 	if ("all" in input) return input.all.map((one) => answer(ctx, { ...one, reason: one.reason ?? input.reason }));
-	return [answer(ctx, { q: input.q, onEvidence: input.onEvidence, answer: input.answer, reason: input.reason })];
+	return [answer(ctx, input)];
 }
 
 export const decideOp = defineOp({

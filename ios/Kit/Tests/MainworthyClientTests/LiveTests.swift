@@ -99,8 +99,7 @@ struct LiveTests {
 			return
 		}
 		#expect(unlinked.file == "tests/shipping.spec.ts" && unlinked.count == 1)
-		// Linking a test to a case needs a case to be chosen, which this build does not do.
-		#expect(byKind[.map]?.first?.choices.first { $0.answer == "link" }?.takes == .more)
+		#expect(byKind[.map]?.first?.choices.first { $0.answer == "link" }?.takes == .mapping)
 
 		guard case .finding(let finding) = try #require(byKind[.finding]?.first).evidence else {
 			Issue.record("the finding's evidence was not read")
