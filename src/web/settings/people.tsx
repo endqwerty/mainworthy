@@ -8,7 +8,9 @@ import { createInvitation, dateTime, listInvitations, revokeInvitation, until } 
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
 import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
+import { PersonAccess } from "./people-access.tsx";
 import { ForgetPerson } from "./people-forget.tsx";
+import { IssuedTokens } from "./tokens.tsx";
 import "./people.css";
 
 const Actor = z.object({
@@ -64,6 +66,7 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 	const [recovering, setRecovering] = useState<string | null>(null);
 	const [refusal, setRefusal] = useState<{ about: string; message: string } | null>(null);
 	const [message, setMessage] = useState("");
+	const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 	// A recovery link makes whoever accepts it that person. The server lets a person make their own, and the
 	// owner of the instance anybody's; the button is where the server will say yes.
 	const mayRecover = (person: string): boolean => session.owner || person === session.actor;
@@ -274,50 +277,70 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 			)}
 			{actors.error && <p role="status">{saidBy(actors.error)}</p>}
 			{people.map((person) => (
-				<div className="settings-row" key={person.name}>
-					<ProducerGlyph kind="human" />
-					<span>
-						<b>{person.name}</b>
-						<small>{held(person.grants)}</small>
-						{confirming === person.name && (
-							<small>
-								A recovery link is for somebody who lost their password or passkey. Once {person.name} accepts it, it
-								replaces every way {person.name} signs in and ends their sessions.
+				<div key={person.name}>
+					<div className="settings-row">
+						<ProducerGlyph kind="human" />
+						<span>
+							<b>{person.name}</b>
+							<small>{held(person.grants)}</small>
+							{confirming === person.name && (
+								<small>
+									A recovery link is for somebody who lost their password or passkey. Once {person.name} accepts it, it
+									replaces every way {person.name} signs in and ends their sessions.
+								</small>
+							)}
+							<small className="settings-refusal" role="status">
+								{refusal?.about === person.name ? refusal.message : ""}
 							</small>
-						)}
-						<small className="settings-refusal" role="status">
-							{refusal?.about === person.name ? refusal.message : ""}
-						</small>
-					</span>
-					{!mayRecover(person.name) ? null : confirming === person.name ? (
-						<>
-							<button
-								className="out"
-								type="button"
-								aria-disabled={recovering !== null}
-								onClick={() => recover(person.name)}
-							>
-								{recovering === person.name ? "Making the link…" : "Make the recovery link"}
-							</button>
-							<button type="button" className="dim" onClick={() => setConfirming(null)}>
-								Cancel
-							</button>
-						</>
-					) : (
+						</span>
 						<button
 							className="out"
 							type="button"
-							aria-label={`Recovery link for ${person.name}`}
-							onClick={() => {
-								setRefusal(null);
-								setConfirming(person.name);
-							}}
+							aria-label={`Sign-in details for ${person.name}`}
+							aria-expanded={expanded.has(person.name)}
+							onClick={() =>
+								setExpanded((now) => {
+									const next = new Set(now);
+									if (next.has(person.name)) next.delete(person.name);
+									else next.add(person.name);
+									return next;
+								})
+							}
 						>
-							Recovery link
+							Sign-in details
 						</button>
-					)}
+						{!mayRecover(person.name) ? null : confirming === person.name ? (
+							<>
+								<button
+									className="out"
+									type="button"
+									aria-disabled={recovering !== null}
+									onClick={() => recover(person.name)}
+								>
+									{recovering === person.name ? "Making the link…" : "Make the recovery link"}
+								</button>
+								<button type="button" className="dim" onClick={() => setConfirming(null)}>
+									Cancel
+								</button>
+							</>
+						) : (
+							<button
+								className="out"
+								type="button"
+								aria-label={`Recovery link for ${person.name}`}
+								onClick={() => {
+									setRefusal(null);
+									setConfirming(person.name);
+								}}
+							>
+								Recovery link
+							</button>
+						)}
+					</div>
+					{expanded.has(person.name) && <PersonAccess actor={person.name} />}
 				</div>
 			))}
+			<IssuedTokens />
 			<ForgetPerson
 				people={people.map((person) => person.name)}
 				changed={async (forgotten) => {

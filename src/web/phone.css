@@ -257,3 +257,27 @@
 	min-height: 44px;
 	font-size: 15px;
 }
+
+:root[data-layout="phone"] .settings-row {
+	flex-wrap: wrap;
+}
+:root[data-layout="phone"] .settings-row > span:first-of-type {
+	flex-basis: calc(100% - 40px);
+}
+:root[data-layout="phone"] .settings-person-access {
+	padding: 0 8px;
+}
+
+:root[data-layout="phone"] .settings-token {
+	flex-wrap: wrap;
+}
+:root[data-layout="phone"] .settings-token > span:first-of-type {
+	min-width: 0;
+	flex-basis: calc(100% - 40px);
+	overflow-wrap: anywhere;
+}
+:root[data-layout="phone"] .settings-row .out,
+:root[data-layout="phone"] .settings-token .out {
+	min-width: 44px;
+	min-height: 44px;
+}

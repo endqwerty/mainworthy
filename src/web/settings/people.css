@@ -67,3 +67,15 @@
 	margin: 0;
 	font-size: 12px;
 }
+
+.settings-person-access {
+	margin: 12px 0 20px;
+	padding: 0 16px;
+	border-left: 2px solid var(--line2);
+}
+.settings-person-access h4 {
+	margin: 16px 0 8px;
+}
+.settings-person-access .settings-row b {
+	overflow-wrap: anywhere;
+}

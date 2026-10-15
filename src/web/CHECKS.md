@@ -875,6 +875,8 @@ on Chromium's virtual authenticator, with the page at `localhost`.
 | People | A new invitation starts with read, record, produce, answer and plan ticked and `admin` not, with a line under the boxes saying what `admin` gives. After an invitation that had it ticked, it is unticked again. | the same test |
 | People | Open invitations show what each person may do, who made each and when it runs out; "Revoke" removes one and the link accepts nothing. A name that signs in already is not invited as new. | the same test |
 | People | "Recovery link" asks first and says that it replaces every way the person signs in. The owner has it beside every person. Anybody else has it beside their own name only, with a sentence saying the owner makes the others, so no button is answered 403. | the same test; `people-settings.test.ts`: a person who is not an admin |
+| People | Sign-in details reads each person's own sessions and credentials, keeps the current browser marked only for its person, ends sessions and removes credentials while keeping the last one. A lost removal reply rereads both lists and keeps the uncertainty visible. Password removal ends sessions that used it. Phone rows fit the screen. | `people-access.test.ts` |
+| People | Issued tokens shows each token's number, label, actor, creation and last-use address, without its secret. Revoke stops it. The same list is shown under Tokens. | `people-access.test.ts`; `settings.test.ts` |
 | People | A person who does not administer the instance has no "People" section. | `people-settings.test.ts`: a person who is not an admin |
 
 Every test asserts what the browser logged. For most that is nothing, which under the page's

@@ -35,8 +35,22 @@ function proof(row: SessionRow): string {
  * signing out here.
  */
 export function YourSessions() {
+	const { session } = useApp();
+	return (
+		<>
+			<h2>Your sessions</h2>
+			<p className="dim">
+				Each browser {session.actor} is signed in on. A session ends by itself after a time without use.{" "}
+				<DocLink page="access">Sessions and signing in</DocLink>
+			</p>
+			<SessionList />
+		</>
+	);
+}
+
+export function SessionList({ actor }: { actor?: string }) {
 	const { session, requestSignOut } = useApp();
-	const sessions = useList("session", listSessions);
+	const sessions = useList("session", (options) => listSessions(options, actor), actor);
 	const [ending, setEnding] = useState<ReadonlySet<number>>(new Set());
 	const [refusal, setRefusal] = useState<{ id: number; message: string } | null>(null);
 	const [message, setMessage] = useState("");
@@ -70,11 +84,6 @@ export function YourSessions() {
 
 	return (
 		<>
-			<h2>Your sessions</h2>
-			<p className="dim">
-				Each browser {session.actor} is signed in on. A session ends by itself after a time without use.{" "}
-				<DocLink page="access">Sessions and signing in</DocLink>
-			</p>
 			{sessions.error && <p role="status">{saidBy(sessions.error)}</p>}
 			{sessions.data?.map((row) => (
 				<div className="settings-row" key={row.id}>
@@ -109,7 +118,7 @@ export function YourSessions() {
 			))}
 			{sessions.data?.length === 0 && (
 				<p className="dim">
-					{session.via === "local"
+					{actor === undefined && session.via === "local"
 						? "No browser is signed in. On this machine the owner needs no sign-in."
 						: "No browser is signed in."}
 				</p>
