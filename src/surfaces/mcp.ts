@@ -143,14 +143,17 @@ function collapseHiddenUnion(schema: Exclude<SchemaNode, boolean>): SchemaNode |
 	return undefined;
 }
 
+/** A keyword that can name a place in the document; a union could be that place. */
+const REFERENCE = /"\$(ref|dynamicRef|recursiveRef|id|anchor|dynamicAnchor|recursiveAnchor)"/;
+
 /**
- * `collapse` is decided once for the whole document: a `$ref` anywhere in it could point into a union by path, so a
- * document with one keeps every union.
+ * `collapse` is decided once for the whole document: a reference anywhere in it could point into a union by path or
+ * by anchor, so a document with one keeps every union.
  */
 export function compactSchema(
 	schema: SchemaNode,
 	envelope = false,
-	collapse = !JSON.stringify(schema).includes('"$ref"'),
+	collapse = !REFERENCE.test(JSON.stringify(schema)),
 ): SchemaNode {
 	if (typeof schema === "boolean") return schema;
 	const collapsed = collapse ? collapseHiddenUnion(schema) : undefined;
