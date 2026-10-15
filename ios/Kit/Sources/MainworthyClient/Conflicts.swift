@@ -17,19 +17,13 @@ public struct CaseConflict: Equatable, Sendable {
 		mine: CaseContent, current: CaseContent) throws {
 		self.question = question; self.evidence = evidence; self.ref = ref
 		self.current = current; self.mine = mine
-		guard let context = JSContext() else { throw ClientError.unreadable }
-		context.evaluateScript(MergeRuntime.source)
 		let input: JSONValue = ["base": base.json, "mine": mine.json, "theirs": current.json]
-		let data = try JSONEncoder().encode(input)
-		guard let text = String(data: data, encoding: .utf8),
-			let result = context.objectForKeyedSubscript("mergeCase")?.call(withArguments: [text])?.toString(),
-			context.exception == nil else { throw ClientError.unreadable }
 		struct Result: Decodable {
 			struct Conflict: Decodable { let path: String }
 			let merged: Wire.CaseBody
 			let conflicts: [Conflict]
 		}
-		let decoded = try JSONDecoder().decode(Result.self, from: Data(result.utf8))
+		let decoded: Result = try Self.evaluate("mergeCase", input: input)
 		merged = CaseContent(decoded.merged)
 		paths = decoded.conflicts.map(\.path)
 	}
@@ -37,47 +31,25 @@ public struct CaseConflict: Equatable, Sendable {
 	public var complete: Bool { Set(paths).isSubset(of: chosen) }
 	public enum Side: Equatable, Sendable { case mine, current }
 
-	public mutating func choose(_ path: String, side: Side) {
+	private static func evaluate<T: Decodable>(_ function: String, input: JSONValue) throws -> T {
+		guard let context = JSContext() else { throw ClientError.unreadable }
+		context.evaluateScript(MergeRuntime.source)
+		let data = try JSONEncoder().encode(input)
+		guard let text = String(data: data, encoding: .utf8),
+			let result = context.objectForKeyedSubscript(function)?.call(withArguments: [text])?.toString(),
+			context.exception == nil else { throw ClientError.unreadable }
+		return try JSONDecoder().decode(T.self, from: Data(result.utf8))
+	}
+
+	public mutating func choose(_ path: String, side: Side) throws {
 		guard paths.contains(path) else { return }
 		let body = side == .mine ? mine : current
-		switch path {
-		case "title": merged.title = body.title
-		case "pre": merged.pre = body.pre
-		case "methods": merged.methods = body.methods
-		case "automate": merged.automate = body.automate
-		case "steps.order":
-			let ordered = body.steps.compactMap { step in merged.steps.first { $0.id == step.id } }
-			let ids = Set(ordered.map(\.id))
-			merged.steps = ordered + merged.steps.filter { !ids.contains($0.id) }
-		default:
-			if path.hasPrefix("fields.") {
-				let key = String(path.dropFirst(7))
-				merged.fields[key] = body.fields[key]
-			} else {
-				let parts = path.split(separator: ".").map(String.init)
-				guard parts.count >= 2, parts[0] == "steps" else { return }
-				let id = parts[1]
-				let step = body.steps.first { $0.id == id }
-				if parts.count == 2 {
-					if let step {
-						if let index = merged.steps.firstIndex(where: { $0.id == id }) { merged.steps[index] = step }
-						else {
-							let following = body.steps.drop(while: { $0.id != id }).dropFirst()
-								.compactMap { item in merged.steps.firstIndex { $0.id == item.id } }.first
-							let preceding = body.steps.prefix(while: { $0.id != id }).reversed()
-								.compactMap { item in merged.steps.firstIndex { $0.id == item.id } }.first
-							merged.steps.insert(step, at: following ?? preceding.map { $0 + 1 } ?? merged.steps.count)
-						}
-					} else { merged.steps.removeAll { $0.id == id } }
-				} else if let index = merged.steps.firstIndex(where: { $0.id == id }), let step {
-					if parts[2] == "action" { merged.steps[index].action = step.action }
-					else if parts[2] == "expected" { merged.steps[index].expected = step.expected }
-					else { return }
-				} else { return }
-			}
-		}
+		let order = path == "steps.order" ? side : selections["steps.order"]
+		var input: [String: JSONValue] = ["merged": merged.json, "source": body.json, "path": .string(path)]
+		if let order { input["order"] = (order == .mine ? mine : current).json["steps"] }
+		let decoded: Wire.CaseBody = try Self.evaluate("chooseCase", input: .object(input))
+		merged = CaseContent(decoded)
 		selections[path] = side
-		if path != "steps.order", let order = selections["steps.order"] { choose("steps.order", side: order) }
 	}
 
 	public func label(_ path: String) -> String {
@@ -137,7 +109,7 @@ package struct MergeSubmission: Sendable {
 }
 
 package enum MergeOutcome: Sendable {
-	case adopted(CaseStamp), unchanged, waiting(String), moved(String), refused(String)
+	case adopted(CaseStamp), unchanged, waiting(String), moved(String), refused(String), closed(String)
 }
 
 extension ProjectClient {
@@ -175,7 +147,15 @@ extension ProjectClient {
 			}
 		} else { replies = try await server.read("decide", in: key, submission.input) }
 		guard replies.count == 1, let reply = replies.first, reply.q == submission.input["q"]?.string else { throw ClientError.unreadable }
-		guard reply.status == "decided" else { return .refused(reply.needs ?? "The merge was not adopted (\(reply.status)). Your choices are kept.") }
+		guard reply.status == "decided" else {
+			let questions: [Wire.Question] = try await server.read("get", in: key, ["refs": [.string(reply.q)]])
+			guard let question = questions.first, question.q == reply.q else { throw ClientError.unreadable }
+			if question.state != "open" {
+				let reason = question.state == "decided" ? "was answered elsewhere" : "is no longer open"
+				return .closed("This question \(reason). Your draft and choices are kept here. Choose Cancel to leave this editor.")
+			}
+			return .refused(reply.needs ?? "The merge was not adopted (\(reply.status)). Your choices are kept.")
+		}
 		guard let effects = reply.effects else { throw ClientError.unreadable }
 		switch effects.status {
 		case "adopted":

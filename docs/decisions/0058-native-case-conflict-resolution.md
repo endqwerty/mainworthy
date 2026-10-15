@@ -16,9 +16,21 @@ case read omits. A replacement keeps the proposed merge as its draft. The origin
 until completion.
 
 The phone runs `src/core/merge3.ts` in JavaScriptCore. The existing Swift generator bundles that pure function
-and its used helpers as a string. This keeps step identity, ordering and field merging identical across
-clients without a second Swift algorithm and a separate parity fixture collection. The bundle contains no
-third-party code or I/O. The contract test requires it to be regenerated when its source changes.
+and `applyMergeChoice`, including their used helpers, as a string. The web card calls the same choice
+function. This keeps step identity, ordering and field merging identical across clients without a second
+Swift algorithm. One JSON scenario table runs through both the browser card and Swift package tests.
+The bundle contains no third-party code or I/O. The contract test requires it to be regenerated when its source changes.
+
+A kept step that the draft removed returns beside its surviving neighbours from the chosen side. This
+preserves its context instead of moving it to the end. Both ordinary merging and choice application use
+the same insertion rule. If its neighbours now appear in reverse order, it follows the preceding neighbour.
+An explicit `steps.order` choice takes precedence, including after later step choices. Steps absent from
+that order stay at the end, so concurrent additions are kept. The web stores that order choice with its
+card; the phone keeps it with its selections.
+
+A refused merge reads the question again. If it was answered elsewhere or no longer applies, the phone
+keeps the draft and choices, disables recording, and tells the person to choose Cancel. A refusal of an
+open question still permits another choice.
 
 A lost reply is recovered by asking `command`, as decision 0013 requires. A completed command's own effects
 settle the editor. An unknown command can be sent again only with its unchanged body and id. A begun command

@@ -15,6 +15,7 @@ export const DraftConflict = z.object({
 	mine: CaseBody,
 	current: CaseBody,
 	merged: DraftBody,
+	stepOrder: z.enum(["mine", "current"]).optional(),
 	/**
 	 * Every merge this card sent for its question, oldest first, each under its own command id. Until the server
 	 * says what became of one, the page does not know: the reply can be lost after the merge was recorded.

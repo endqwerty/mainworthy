@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { printCase } from "../../core/markdown.ts";
-import { mergeBodies } from "../../core/merge3.ts";
+import { applyMergeChoice, mergeBodies } from "../../core/merge3.ts";
 import { Automate, CaseBody } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
@@ -710,25 +710,30 @@ function ConflictCard({
 	const [resolving, setResolving] = useState(false);
 	const refusal = readOnlyStatus ?? (resolving ? pendingStatus : null);
 	const body = state.merged;
-	function choose(_path: string, update: (body: CaseBody) => CaseBody): void {
+	function choose(path: string, source: CaseBody, side?: "mine" | "current"): void {
 		if (refusal) {
 			setStatus(refusal);
 			return;
 		}
-		changed({ ...state, merged: update(body) });
+		const stepOrder = path === "steps.order" ? side : state.stepOrder;
+		changed({
+			...state,
+			stepOrder,
+			merged: applyMergeChoice({ merged: body, source, path, order: stepOrder ? state[stepOrder].steps : undefined }),
+		});
 	}
 	const fields: { key: string; mine: string; current: string; set: (text: string) => void }[] = [
 		{
 			key: "title",
 			mine: state.mine.title,
 			current: state.current.title,
-			set: (title: string) => choose("title", (previous) => ({ ...previous, title })),
+			set: (title: string) => choose("title", { ...state.mine, title }),
 		},
 		{
 			key: "pre",
 			mine: state.mine.pre,
 			current: state.current.pre,
-			set: (pre: string) => choose("pre", (previous) => ({ ...previous, pre })),
+			set: (pre: string) => choose("pre", { ...state.mine, pre }),
 		},
 	].filter((field) => state.paths.includes(field.key));
 	for (const mine of state.mine.steps) {
@@ -742,34 +747,20 @@ function ConflictCard({
 					mine: a,
 					current: b,
 					set: (text) =>
-						choose(`steps.${mine.id}.${part}`, (previous) => ({
-							...previous,
-							steps: current
-								? previous.steps.map((step) =>
-										step.id === mine.id
-											? part === "action"
-												? { ...step, action: text }
-												: { ...step, expected: text || null }
-											: step,
-									)
-								: [...previous.steps.filter((step) => step.id !== mine.id), { ...mine, [part]: text }],
-						})),
+						choose(`steps.${mine.id}.${part}`, {
+							...state.mine,
+							steps: state.mine.steps.map((step) =>
+								step.id === mine.id
+									? part === "action"
+										? { ...step, action: text }
+										: { ...step, expected: text || null }
+									: step,
+							),
+						}),
 				});
 		}
 	}
-	const membership = state.paths.filter((path) => /^steps\.[a-z0-9]+$/.test(path));
-	function chooseStep(path: string, side: CaseBody): void {
-		const id = path.split(".")[1];
-		const step = side.steps.find((item) => item.id === id);
-		choose(path, (previous) => ({
-			...previous,
-			steps: step
-				? previous.steps.some((item) => item.id === id)
-					? previous.steps.map((item) => (item.id === id ? step : item))
-					: [...previous.steps, step]
-				: previous.steps.filter((item) => item.id !== id),
-		}));
-	}
+	const membership = state.paths.filter((path) => path === "steps.order" || /^steps\.[a-z0-9]+$/.test(path));
 
 	async function resolve(): Promise<void> {
 		if (refusal) {
@@ -870,14 +861,18 @@ function ConflictCard({
 						].map(({ label, side }) => (
 							<div className="conflict-side" key={label}>
 								<h4>{label}</h4>
-								<p>{side.steps.find((step) => `steps.${step.id}` === path)?.action ?? "Step removed"}</p>
+								<p>
+									{path === "steps.order"
+										? side.steps.map((step) => step.action).join(" → ")
+										: (side.steps.find((step) => `steps.${step.id}` === path)?.action ?? "Step removed")}
+								</p>
 								<button
 									type="button"
 									className="out"
 									disabled={Boolean(refusal)}
-									onClick={() => chooseStep(path, side)}
+									onClick={() => choose(path, side, label === "Your draft" ? "mine" : "current")}
 								>
-									Use {label.toLowerCase()} step
+									Use {label.toLowerCase()} {path === "steps.order" ? "order" : "step"}
 								</button>
 							</div>
 						))}
@@ -886,10 +881,18 @@ function ConflictCard({
 			))}
 
 			<div className="conflict-actions">
-				<button type="button" disabled={Boolean(refusal)} onClick={() => changed({ ...state, merged: state.mine })}>
+				<button
+					type="button"
+					disabled={Boolean(refusal)}
+					onClick={() => changed({ ...state, merged: state.mine, stepOrder: undefined })}
+				>
 					Use all my changes
 				</button>
-				<button type="button" disabled={Boolean(refusal)} onClick={() => changed({ ...state, merged: state.current })}>
+				<button
+					type="button"
+					disabled={Boolean(refusal)}
+					onClick={() => changed({ ...state, merged: state.current, stepOrder: undefined })}
+				>
 					Keep current version
 				</button>
 				<button

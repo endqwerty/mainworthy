@@ -678,11 +678,11 @@ export function SuiteScreen() {
 		},
 		[project],
 	);
-	/** A choice or a key in the card changes its merged body, and nothing else of the stored conflict. */
+	/** A choice or a key changes the merged body and selected order of the stored conflict. */
 	const changeCard = useCallback(
 		(state: ConflictState): void => {
 			const card = cardDraft(state);
-			storeConflict(card ? { ...card.conflict, merged: state.merged } : state);
+			storeConflict(card ? { ...card.conflict, merged: state.merged, stepOrder: state.stepOrder } : state);
 		},
 		[cardDraft, storeConflict],
 	);

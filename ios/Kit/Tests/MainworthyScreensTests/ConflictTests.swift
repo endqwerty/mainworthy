@@ -36,6 +36,30 @@ struct NativeConflictTests {
 
 @Suite("Conflict choices")
 struct ConflictChoiceTests {
+	@Test("the shared web choice scenarios produce the same complete body in JavaScriptCore")
+	func sharedChoices() throws {
+		struct Scenario: Decodable {
+			struct Choice: Decodable { let path: String; let side: String }
+			let name: String
+			let base: Wire.CaseBody
+			let mine: Wire.CaseBody
+			let current: Wire.CaseBody
+			let choices: [Choice]
+			let expected: Wire.CaseBody
+			let paths: [String]
+		}
+		let url = try #require(Bundle.module.url(forResource: "conflict-choices", withExtension: "json", subdirectory: "Fixtures"))
+		let scenarios = try JSONDecoder().decode([Scenario].self, from: Data(contentsOf: url))
+		for row in scenarios {
+			var conflict = try CaseConflict(question: "Q-1", evidence: "read", ref: "C-1",
+				base: CaseContent(row.base), mine: CaseContent(row.mine), current: CaseContent(row.current))
+			#expect(conflict.paths == row.paths, "\(row.name)")
+			for choice in row.choices { try conflict.choose(choice.path, side: choice.side == "mine" ? .mine : .current) }
+			#expect(conflict.complete, "\(row.name)")
+			#expect(conflict.merged == CaseContent(row.expected), "\(row.name)")
+		}
+	}
+
 	@Test("independent step parts, deletion and custom fields keep the whole document")
 	func choices() throws {
 		let base = CaseContent(title: "Base", steps: [
@@ -52,16 +76,16 @@ struct ConflictChoiceTests {
 		current.fields["priority"] = "normal"
 		var conflict = try CaseConflict(question: "Q-1", evidence: "read", ref: "C-1", base: base, mine: mine, current: current)
 		#expect(Set(conflict.paths) == ["steps.a0.action", "steps.a0.expected", "steps.a1", "fields.priority"])
-		conflict.choose("steps.a0.action", side: .mine)
-		conflict.choose("steps.a0.expected", side: .current)
-		conflict.choose("steps.a1", side: .current)
-		conflict.choose("fields.priority", side: .mine)
+		try conflict.choose("steps.a0.action", side: .mine)
+		try conflict.choose("steps.a0.expected", side: .current)
+		try conflict.choose("steps.a1", side: .current)
+		try conflict.choose("fields.priority", side: .mine)
 		#expect(conflict.complete)
 		#expect(conflict.merged == CaseContent(title: "Base", pre: "Concurrent precondition", steps: [
 			Step(id: "a0", action: "My action", expected: "Their expectation"),
 			Step(id: "a1", action: "Remove", expected: "Their removal expectation"),
 		], fields: ["priority": "low", "keep": "yes"]))
-		conflict.choose("steps.a1", side: .mine)
+		try conflict.choose("steps.a1", side: .mine)
 		#expect(conflict.merged.steps.map(\.id) == ["a0"])
 	}
 
@@ -72,7 +96,7 @@ struct ConflictChoiceTests {
 		var mine = base; mine.steps.remove(at: 1)
 		var current = base; current.steps[1].expected = "Keep this expected result"
 		var conflict = try CaseConflict(question: "Q-1", evidence: "read", ref: "C-1", base: base, mine: mine, current: current)
-		conflict.choose("steps.a1", side: .current)
+		try conflict.choose("steps.a1", side: .current)
 		#expect(conflict.merged.steps.map(\.id) == ["a0", "a1", "a2"])
 		#expect(conflict.merged.steps[1].expected == "Keep this expected result")
 	}
@@ -85,7 +109,7 @@ struct ConflictChoiceTests {
 		var current = base; current.steps = [steps[0], steps[2], steps[1], Step(id: "b0", action: "Added", expected: nil)]
 		var conflict = try CaseConflict(question: "Q-1", evidence: "read", ref: "C-1", base: base, mine: mine, current: current)
 		#expect(conflict.paths == ["steps.order"])
-		conflict.choose("steps.order", side: .current)
+		try conflict.choose("steps.order", side: .current)
 		#expect(conflict.merged.steps.map(\.id) == ["a0", "a2", "a1", "b0"])
 	}
 }
@@ -211,7 +235,12 @@ struct ConflictRecoveryTests {
 		_ = try await project.answer(q, with: choice)
 		#expect(await editor.save() == nil)
 		#expect(!editor.settled && editor.content.title == "My title" && editor.conflict?.merged.title == "My title")
-		#expect(editor.conflict?.complete == true && editor.notice != nil)
+		#expect(editor.conflict?.complete == true)
+		#expect(editor.notice?.contains("answered elsewhere") == true)
+		#expect(editor.notice?.contains("Cancel") == true)
+		#expect(!editor.maySave)
+		#expect(await editor.save() == nil)
+		#expect(try await project.caseHistory(opened.ref).map(\.version) == [2, 1])
 		#expect(try await project.caseDocument(opened.ref).content.title == "Their title")
 	}
 }

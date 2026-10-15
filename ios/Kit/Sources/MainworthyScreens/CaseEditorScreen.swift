@@ -13,6 +13,7 @@ public final class CaseEditorScreen {
 	public private(set) var settled = false
 	public private(set) var savedDocument: CaseDocument?
 	public private(set) var conflict: CaseConflict?
+	public private(set) var conflictClosed = false
 	private var overlapQuestion: String?
 	private var mergeSent: MergeSubmission?
 	private let original: CaseContent
@@ -64,13 +65,13 @@ public final class CaseEditorScreen {
 		return issues
 	}
 	public var maySave: Bool {
-		!busy && !settled && (mergeSent != nil || (conflict.map(\.complete) ?? (sent != nil || validation.isEmpty)))
+		!busy && !settled && !conflictClosed && (mergeSent != nil || (conflict.map(\.complete) ?? (sent != nil || validation.isEmpty)))
 	}
 	public var isRetrying: Bool { (sent != nil || mergeSent != nil || (overlapQuestion != nil && conflict == nil)) && !busy }
 
 	public func chooseConflict(_ path: String, side: CaseConflict.Side) {
-		guard !busy, mergeSent == nil, !settled else { return }
-		conflict?.choose(path, side: side)
+		guard !busy, mergeSent == nil, !settled, !conflictClosed else { return }
+		do { try conflict?.choose(path, side: side) } catch { notice = error.shown }
 	}
 
 	public func addStep() {
@@ -178,6 +179,9 @@ public final class CaseEditorScreen {
 				let next = try await project.conflict(question, ref: conflict.ref)
 				self.conflict = next; overlapQuestion = question; mergeSent = nil
 				notice = "Nothing was adopted. The case changed again. Your merge is kept in this new conflict."
+			case .closed(let sentence):
+				mergeSent = nil; conflictClosed = true
+				notice = sentence
 			case .refused(let sentence):
 				mergeSent = nil
 				notice = sentence
