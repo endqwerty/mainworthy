@@ -101,10 +101,10 @@ until pull request 4 gives it a credential to depend on.
 What a crash loses is what was noted since the last flush that committed: normally a minute, longer behind a long
 write. It can make somebody sign in again early. It cannot make a session live longer.
 
-**No reply leaves after standing ended.** A read goes to a reader thread with the actor as it stood when the call
-was dispatched. A reader that was busy can start the read after a sign-out. So `invokeAsync` asks the caller
-again when the reader has answered, and answers `unauthenticated` when it stands no more. A write already asked
-after its wait at the gate.
+**No reply leaves after standing ended.** A read goes to a reader thread with a credential reference and resolves
+the actor in its own snapshot. The credential may end while the reader answers, so `invokeAsync` asks the caller
+again when the reader has answered and returns `unauthenticated` when it stands no more. A write resolves its
+caller inside its transaction after waiting at the gate.
 
 **Cookies.** One function gives the scheme the browser used; the cookie's name, `Secure` and every deletion use
 it. A reply carries each cookie in a `Set-Cookie` header of its own. Sign-in and sign-out also expire
@@ -573,6 +573,11 @@ and still checks absolute expiry and the token or credential the session rests o
 offset from wall time travels with the call so time spent waiting counts toward expiry. A reader failure
 replays the call inline with fresh credential resolution. The final reply check still refuses a credential
 that ended while a reader was answering.
+
+A local reference carries the configured owner's name, never an actor id captured before a wait. Identity
+resolves that name on the operation's connection inside its snapshot or transaction. An import can replace
+every actor row and reuse the former owner's id for somebody else. Queued writes and reader calls still run
+as the configured local owner after that import.
 
 This keeps identity in charge of the checks and avoids copying grants into worker memory. The in-process
 harness and startup callers keep their actor callbacks and run inline. No raw secret crosses the worker
