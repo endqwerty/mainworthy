@@ -72,6 +72,16 @@ describe("the third-party notices", () => {
 		expect(await unapproved(), `accept each in LICENCES (scripts/licences.ts) or drop it`).toEqual([]);
 	});
 
+	test("a bundled npm package whose archive omits its licence keeps the saved upstream text", async () => {
+		const saxes = (await bundledPackages()).find((pkg) => pkg.name === "saxes");
+		expect(saxes?.version).toBe("6.0.0");
+		expect(saxes?.dir).toEndWith("licences/npm/saxes@6.0.0");
+		expect(saxes?.texts).toEqual(["LICENSE"]);
+		expect(createHash("sha256").update(read("licences/npm/saxes@6.0.0/LICENSE")).digest("hex")).toBe(
+			"0fac2374380621b22e6b50451057721a9c52935b02d16d106a9f04897f061d0e",
+		);
+	});
+
 	test("every licence text the notices name is in licences/", () => {
 		expect(missingTexts()).toEqual([]);
 	});

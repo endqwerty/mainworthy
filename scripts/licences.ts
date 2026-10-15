@@ -110,11 +110,17 @@ export async function bundledPackages(): Promise<Package[]> {
 		const manifest = z
 			.object({ name: z.string(), version: z.string(), license: z.string() })
 			.parse(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")));
-		const texts = readdirSync(dir)
+		let texts = readdirSync(dir)
 			.filter((file) => LICENCE_FILE.test(file))
 			.sort();
+		const saved = join(VENDORED, "npm", `${manifest.name}@${manifest.version}`);
+		const textDir = texts.length === 0 && existsSync(saved) ? saved : dir;
+		if (textDir !== dir)
+			texts = readdirSync(textDir)
+				.filter((file) => LICENCE_FILE.test(file))
+				.sort();
 		if (texts.length === 0) throw new Error(`${manifest.name} ships no licence file: find its text before shipping it`);
-		return { name: manifest.name, version: manifest.version, licence: manifest.license, dir, texts };
+		return { name: manifest.name, version: manifest.version, licence: manifest.license, dir: textDir, texts };
 	});
 	return packages.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
 }

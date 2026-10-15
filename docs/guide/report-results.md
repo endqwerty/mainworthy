@@ -1,6 +1,6 @@
 # Report results
 
-Send JUnit XML from a test runner or CI, then read the gate for the tested commit.
+Send a test report from a runner or CI, then read the gate for the tested commit.
 Keep the pipeline's identity, retries, and case links with its results.
 
 ## Upload JUnit XML
@@ -25,6 +25,51 @@ has passed since. The command says so on stderr and points at `mainworthy gate`,
 which reads the verdict now.
 
 [Diagram: one red build, from upload to a green gate](../diagrams/red-build.html)
+
+## Upload a native report
+
+The same command reads Playwright JSON, Jest JSON, Vitest JSON,
+`pytest-json-report` JSON, and Visual Studio Test TRX. It detects each file
+independently, so one upload can include different formats:
+
+```sh
+$ mainworthy report playwright.json unit-results.json results.trx
+```
+
+Use `--format junit|playwright|jest|vitest|pytest|trx` to select one format for
+every file in the command. The default is `--format auto`. Jest and Vitest use
+the same JSON structure. Detection reads the content; a `.trx` extension also
+selects TRX, and a `.json` extension makes invalid JSON an input error.
+
+| Runner | Produce the report | Upload |
+| --- | --- | --- |
+| Playwright | `PLAYWRIGHT_JSON_OUTPUT_FILE=results.json playwright test --reporter=json` | `mainworthy report results.json` |
+| Jest | `jest --json --outputFile=results.json` | `mainworthy report results.json` |
+| Vitest | `vitest run --reporter=json --outputFile=results.json` | `mainworthy report results.json` |
+| pytest with `pytest-json-report` installed | `pytest --json-report --json-report-file=results.json` | `mainworthy report results.json --format pytest` |
+| .NET | `dotnet test --logger "trx;LogFileName=results.trx"` | `mainworthy report TestResults/results.trx` |
+
+Pytest's built-in report export is JUnit XML (`pytest --junitxml=results.xml`).
+Its JSON adapter requires the separate
+[`pytest-json-report` plugin](https://github.com/numirias/pytest-json-report),
+with test details enabled. A summary-only report has no executions to upload.
+CTRF is not supported.
+
+Native adapters keep the file, suite path, test name, case annotations in the
+name, duration, and failure diagnostics. Playwright includes the project name
+in the test key, so Chromium and Firefox results stay separate. TRX uses the
+class in `TestDefinitions` when present and the test name; its assembly path
+is not a source file. A TRX test without a definition keeps its name as its key.
+The report's filename and TRX execution IDs do not enter test keys.
+
+Keep source paths and suite names stable. Switching exporters can change those
+values, so compare their keys before switching an existing pipeline. An
+unlinked native test follows the same project policy as an unlinked JUnit test.
+
+Native reports with unknown statuses, malformed test details, or errors outside
+test executions stop the upload with exit `4`. No files in that command are
+sent. Keep the runner's exit status as a CI check too, since a report cannot
+prove work that the runner omitted. JUnit keeps its existing parser and warnings.
 
 ## Identify the tested build
 
@@ -66,7 +111,7 @@ an unrelated commit from the local checkout.
 
 ## Link tests to cases
 
-Put a case annotation in the JUnit test name:
+Put a case annotation in the test name, in JUnit or a native report:
 
 ```xml
 <testcase name="percentage coupon @C-1@v1" classname="checkout" />
@@ -83,7 +128,7 @@ You can instead put a property inside the test case:
 </testcase>
 ```
 
-The property takes precedence over an annotation in the name.
+The JUnit property takes precedence over an annotation in the name.
 A test can also use a link previously decided in [Queue](./decide.md).
 
 Mainworthy identifies a test using its file, or its class name when there is no file,
@@ -122,6 +167,18 @@ A skip or blocked result does not replace an existing pass or failure.
 A pass from one job or environment does not clear another job's failure.
 Mainworthy records same-commit changes between pass and fail. It does not yet provide
 a flaky score or automatic quarantine. A person decides whether a failure is flaky.
+
+Playwright retries become one logical test result. The highest numbered decisive
+execution supplies its outcome and failure; a skipped retry does not erase an
+earlier failure. Its duration sums all executions, and a pass after retries has
+the same `passed after N retries` note as JUnit. An expected Playwright failure
+counts as a pass; an unexpected pass counts as a failure.
+
+Jest and Vitest JSON contain the final assertion outcome and duration, but their
+standard JSON reporters do not export a retry count. Mainworthy does not invent
+one. The pytest adapter sums setup, call, and teardown durations and keeps setup
+or teardown failures as errors. Expected pytest failures are skipped. TRX keeps
+each execution and its duration; ambiguous or unfinished outcomes count as errors.
 
 ## Give a pipeline its own token
 
