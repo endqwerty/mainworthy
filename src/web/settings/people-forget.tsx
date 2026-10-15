@@ -79,8 +79,8 @@ export function ForgetPerson({
 				{FORGET_NOTICE} <DocLink page="privacy">What stays after forgetting</DocLink>
 			</p>
 			<p className="dim">
-				You cannot forget yourself or the current owner. To forget a former owner, first hand the instance to somebody
-				else.
+				You cannot forget yourself or the current owner. To forget the current owner, first hand the instance to
+				somebody else.
 			</p>
 			<div className="settings-form">
 				<label htmlFor={`${id}-person`}>Person to forget</label>

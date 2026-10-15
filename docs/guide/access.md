@@ -220,7 +220,7 @@ $ mainworthy actor forget dana --confirm dana
 Forgotten as forgotten-5. 0 tokens revoked. History and typed text stay.
 ```
 
-Add `--json` for the pseudonym and the number of revoked tokens as JSON. Both the page and the command use the same admin operation. `actor list --json` identifies the current owner with `owner: true`. If an older server does not identify the owner, the page keeps forgetting unavailable. You must be a person who administers the instance. You cannot forget yourself or the current owner. To forget a former owner, first [hand the instance to somebody else](./configuration.md).
+Add `--json` for the pseudonym and the number of revoked tokens as JSON. Both the page and the command use the same admin operation. `actor list --json` identifies the current owner with `owner: true`. If an older server does not identify the owner, the page keeps forgetting unavailable. You must be a person who administers the instance. You cannot forget yourself or the current owner. To forget the current owner, first [hand the instance to somebody else](./configuration.md).
 
 A person cannot yet request forgetting inside Mainworthy or delete their own account. Ask the person who runs your instance. For `mainworthy.com`, follow [Privacy, changes and questions](./privacy.md#changes-and-questions). See [Privacy](./privacy.md#your-rights-with-respect-to-your-information) for retained records and typed text.
 
