@@ -281,7 +281,7 @@ const Q = {
 		"INSERT OR IGNORE INTO slot_results (slot, result, run, admitted) VALUES ($slot, $result, $run, $admitted)",
 	),
 	correctInSlot: sql<{ slot: number; result: number }>(
-		"UPDATE slot_results SET corrected = 1 WHERE slot = $slot AND result = $result",
+		"UPDATE slot_results SET corrected = 1 WHERE slot = $slot AND result = $result AND corrected = 0",
 	),
 	discount: sql<{ slot: number; result: number; decision: number }>(
 		"UPDATE slot_results SET discounted_by = $decision WHERE slot = $slot AND result = $result",
@@ -510,9 +510,11 @@ export const plannedCounting = (db: Db, project: number, commit: string): number
 /**
  * Marks a report applied for runs it did not fold into: the runs that waited for it only because it says where
  * their commit is (see `noteAccepted`). The other half of the horizon for them.
+ * A closed run keeps its approved evidence sequence.
  */
-export function noteApplied(ctx: Ctx, runs: readonly number[], batchSeq: number): void {
-	for (const id of runs) ctx.db.run(Q.applied, { id, seq: batchSeq, rev: ctx.seq });
+export function noteApplied(ctx: Ctx, runs: readonly RunRow[], batchSeq: number): void {
+	for (const run of runs)
+		ctx.db.run(Q.applied, { id: run.id, seq: run.state === "closed" ? run.applied_seq : batchSeq, rev: ctx.seq });
 }
 
 /** Acceptance: the report is durable but not applied, so each run it matters to reads `pending` until it is. */
@@ -608,8 +610,7 @@ export function* applyBatchSteps(
 			for (const { slot } of ctx.db.all(Q.slotsOfResult, { result: result.corrects })) {
 				const row = slotById(ctx.db, slot);
 				if (!row || !plannedIds.has(row.run)) continue;
-				ctx.db.run(Q.correctInSlot, { slot, result: result.corrects });
-				touchedSlots.set(slot, row);
+				if (ctx.db.run(Q.correctInSlot, { slot, result: result.corrects }).changes > 0) touchedSlots.set(slot, row);
 			}
 		}
 		if (result.basisCase !== null && planned.length > 0) {
@@ -631,8 +632,8 @@ export function* applyBatchSteps(
 					caseMethods: methodsOf(ctx.db, slot, result, declared),
 				});
 				if (!admitted) continue;
-				ctx.db.run(Q.admit, { slot: slot.id, result: result.id, run: run.id, admitted });
-				touchedSlots.set(slot.id, slot);
+				if (ctx.db.run(Q.admit, { slot: slot.id, result: result.id, run: run.id, admitted }).changes > 0)
+					touchedSlots.set(slot.id, slot);
 			}
 		}
 		if (result.signature && (result.outcome === "fail" || result.outcome === "error")) {
@@ -671,8 +672,10 @@ export function* applyBatchSteps(
 			if (g.counted && !g.runs.some((r) => r.id === changeRun.id)) g.runs.push(changeRun);
 		}
 	}
+	const contributed = new Set([...touchedSlots.values()].map((slot) => slot.run));
 	for (const run of runs) {
-		ctx.db.run(Q.applied, { id: run.id, seq: batch.seq, rev: ctx.seq });
+		const seq = run.state === "closed" && !contributed.has(run.id) ? run.applied_seq : batch.seq;
+		ctx.db.run(Q.applied, { id: run.id, seq, rev: ctx.seq });
 		ctx.touched.add(runRef(run));
 	}
 	return [...groups.values()].filter((g) => g.runs.length > 0 || g.results.length > 0);

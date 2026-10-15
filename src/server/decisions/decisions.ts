@@ -1203,6 +1203,16 @@ export function askWhereCommitIs(ctx: Ctx, target: TargetRow): void {
 	}
 }
 
+/** Whether this question replaces an approval that stopped holding, rather than a rejection or dissolved ask. */
+function renewedApproval(ctx: Ctx, asked: QuestionRow | null): boolean {
+	if (asked?.prior === undefined || asked.prior === null) return false;
+	const prior = questionById(ctx.db, asked.prior);
+	const ended = prior?.decision ? decisionById(ctx.db, prior.decision) : null;
+	if (!ended || json<{ is: string }>(ended.answer).is !== "outdated" || ended.supersedes === null) return false;
+	const approval = decisionById(ctx.db, ended.supersedes);
+	return approval !== null && json<{ closed?: string }>(approval.effects).closed !== undefined;
+}
+
 /**
  * Recomputes the given runs and acts on what follows: a planned run that has just passed gets its sign-off
  * question (which a rule may answer and so close the run).
@@ -1225,11 +1235,13 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 				: null;
 		// A commit run's late report changes the basis of its approval even when it no longer passes. Keep
 		// that new question current while the failure is resolved; approving still requires a passing gate.
+		const material = { tally: json(run.tally), applied: run.applied_seq };
+		const approval = run.signoff !== null ? decisionById(ctx.db, run.signoff) : null;
 		const reconsider =
 			run.origin === "planned" &&
 			json<{ commit?: string }>(run.accepts).commit !== undefined &&
 			run.outstanding === 0 &&
-			(run.state === "closed" || (asked !== null && asked.prior !== null));
+			((run.state === "closed" && approval?.basis !== contentHash(material)) || renewedApproval(ctx, asked));
 		if (!result.wantsSignoff && !reconsider) {
 			// A first sign-off was asked while the run passed. It no longer does, so nobody can approve it on
 			// what it showed then. A late report to an approved commit run is reconsidered above instead.
@@ -1244,7 +1256,7 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 			title: `Close ${runRef(run)} ${run.name}`,
 			producer: "rule",
 			evidence: { run: runRef(run), name: run.name, verdict: run.verdict, tally: json(run.tally) },
-			material: { tally: json(run.tally), applied: run.applied_seq },
+			material,
 			facts: [`verdict:${run.verdict}`],
 			refs: [runRef(run)],
 			runs: [],
