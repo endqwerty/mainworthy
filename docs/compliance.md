@@ -30,10 +30,12 @@ Read this first. These are the known gaps, in order of how soon they bite.
    libraries linked statically (JavaScriptCore, WTF, copied WebCore files, TinyCC), which a recipient may ask
    the source of and link again; MPL-2.0 files whose source must stay available; TinyCC's runtime source under
    the GPL with a linking exception; a package under Artistic-2.0; and two ports in Bun that name no licence. The
-   notices travel with every copy and point at the public source of each part at its exact revision. Harmless
+   notices are in the image beside the executable, and point at the public source of each part at its exact
+   revision. Harmless
    while the only copy runs on the owner's server; before anyone else is given the image or the executable,
    the owner decides how the source is offered (hosted beside the image, or a written offer) and whether the
-   open items are acceptable. Cost: low to medium. Decision 0025.
+   open items are acceptable. Cost: low to medium. Decision 0025; tracked in
+   [#234](https://github.com/endqwerty/mainworthy/issues/234).
 5. **Accessibility has not been audited.** The UI is keyboard-first, with visible focus and live status, but
    nobody has checked it against WCAG 2.2 AA. Public-sector and many enterprise buyers require a conformance
    report. Cost: medium. Tracked in #47.
@@ -121,8 +123,9 @@ outcome); the audit and the fixes it finds are tracked in #47.
 
 Mainworthy is under the Apache License 2.0, copyright held by the owner (decision 0025). What it ships from others,
 with the full text of each licence, is in `THIRD-PARTY-NOTICES.md`, which `bun scripts/licences.ts` writes from the
-build. Every instance serves it at `/docs/licence/THIRD-PARTY-NOTICES.md`, and the container image has it in
-`/usr/share/doc/mainworthy/`. `test/licences.test.ts` fails on a dependency under a licence nobody has accepted.
+build. It is at the root of the repository, and the container image has it in `/usr/share/doc/mainworthy/`. The
+apps do not show it yet, by the owner's decision of 2026-10-14: the web UI a browser loads carries some of the npm
+packages without their notices until [#234](https://github.com/endqwerty/mainworthy/issues/234) puts them there. `test/licences.test.ts` fails on a dependency under a licence nobody has accepted.
 
 | Ships in | What | Licences |
 | --- | --- | --- |

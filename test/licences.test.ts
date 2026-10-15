@@ -16,9 +16,6 @@ import {
 	unapproved,
 } from "../scripts/licences.ts";
 import { importAudit } from "../scripts/licences-import-bun.ts";
-import { LICENCE_FILES, licenceFileUrl } from "../src/core/docs.ts";
-import { VERSION } from "../src/server/start.ts";
-import { docsHandler } from "../src/surfaces/docs/site.ts";
 
 const read = (path: string): string => readFileSync(path, "utf8");
 const HOLDER = "Copyright 2026 Daniel Yang";
@@ -45,19 +42,13 @@ describe("Mainworthy's licence", () => {
 				return entry.isFile() ? [path] : [];
 			});
 		const naming = files(".").filter((file) => read(file).includes(name));
-		expect(naming.sort()).toEqual([
-			"NOTICE",
-			"ios/App/Info.plist",
-			"ios/UITests/QueueUITests.swift",
-			"test/licences.test.ts",
-		]);
+		expect(naming.sort()).toEqual(["NOTICE", "ios/App/Info.plist", "test/licences.test.ts"]);
 	});
 
-	test("the package, the NOTICE file and the iPhone app name the same licence and copyright holder", () => {
+	test("the package, the NOTICE file and the iPhone app's Info.plist name the same licence and copyright holder", () => {
 		expect(JSON.parse(read("package.json")).license).toBe("Apache-2.0");
 		expect(read("NOTICE").split("\n").slice(0, 2)).toEqual(["Mainworthy", HOLDER]);
 		expect(read("ios/App/Info.plist")).toContain(`<key>NSHumanReadableCopyright</key>\n\t<string>${HOLDER}</string>`);
-		expect(read("ios/UITests/QueueUITests.swift")).toContain(`"${HOLDER}"`);
 	});
 });
 
@@ -98,14 +89,10 @@ describe("the third-party notices", () => {
 		expect(new Set(ci)).toEqual(new Set([bun?.version]));
 	});
 
-	test("an instance serves each licence file as it is in the repository", async () => {
-		const handler = docsHandler(VERSION);
-		for (const name of LICENCE_FILES) {
-			const reply = await handler(new Request(`http://localhost${licenceFileUrl(name)}`));
-			expect(reply.status, name).toBe(200);
-			expect(reply.headers.get("content-type")).toBe("text/plain; charset=utf-8");
-			expect(await reply.text()).toBe(read(name));
-		}
+	test("the container image carries the licence files", () => {
+		// The image is a copy given to whoever runs it: its licence and the notices go with it.
+		expect(read("Dockerfile")).toContain("COPY LICENSE NOTICE THIRD-PARTY-NOTICES.md /usr/share/doc/mainworthy/");
+		expect(read(".dockerignore")).not.toMatch(/^(LICENSE|NOTICE|THIRD-PARTY-NOTICES\.md|\*)$/m);
 	});
 });
 

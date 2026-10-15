@@ -49,7 +49,6 @@ Mainworthy keeps your test cases, the results that people, pipelines and agents 
 - [Glossary](./glossary.md). The words Mainworthy uses, each in a sentence or two, with the page that says more. The words are the ones you see in the app and in command output.
 - [Troubleshooting](./troubleshooting.md). What the common messages mean and what to do about each. Find the message or the symptom you have, then follow the link for the background.
 - [How it is built](./architecture.md). A short look under the hood for people who run or extend Mainworthy: the parts, how a request travels through them, and the rules the design holds itself to. You do not need this page to use the product.
-- [Licence](./licence.md). Mainworthy is open source under the Apache License 2.0. This page says what the licence lets you do, what it asks of you when you pass Mainworthy on, and which software from others Mainworthy carries, with the licence of each.
 
 <!-- /generated -->
 

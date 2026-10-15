@@ -173,7 +173,7 @@ is under the GitHub milestone `iOS app`.
 - The owner's name is not written in the repository (their request, 2026-10-13):
   not in docs, comments, tests, commit messages or pull requests. Write "the
   owner"; an example person is `robin`. The one exception is the copyright line, `Copyright 2026` and their
-  legal name, in the licence files, the iPhone app's About section and the checks of those (decision 0025,
+  legal name, in the licence files, the iPhone app's `Info.plist` and the test that checks them (decision 0025,
   their request of 2026-10-14). Do not add it anywhere else.
 - The former name, Casebook, stays only in the files `test/architecture.test.ts`
   lists, each with its reason.
