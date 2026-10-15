@@ -1,9 +1,13 @@
 // Policy is data over one model (principle P5): the same operations and the same rows under loose, standard and
 // strict; only who answers changes. Also: what an agent may and may not do, and what agents read.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { ANSWER_KEYS, ANSWERS, type Ask, Clause, KINDS, standingOf } from "../src/core/kinds.ts";
+import { ANSWER_KEYS, ANSWERS, type Ask, Clause, KINDS, type Policy, standingOf } from "../src/core/kinds.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { missingCatchAll, PRESET_NAMES, PRESETS } from "../src/core/presets.ts";
+import { Db } from "../src/server/kernel/db.ts";
+import { migrate } from "../src/server/kernel/migrate.ts";
+import { type CurrentPolicy, currentPolicy, policyAt } from "../src/server/policy/policy.ts";
+import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -989,5 +993,160 @@ describe("a conflicted proposal", () => {
 			agent,
 		);
 		expect(retry.status).toBe("adopted");
+	});
+});
+
+describe("project custom field definitions", () => {
+	const policy = () => h.call<CurrentPolicy>("admin", { do: "policy.show", project: "scratch" });
+	const accept = (proposal: Proposed) => {
+		const q = first(queue({ kind: "adopt" }).items.filter((q) => q.q === proposal.question));
+		return h.call<{ status: string; needs?: string }[]>("decide", {
+			q: q.q,
+			onEvidence: q.evidenceHash,
+			answer: { is: "accept" },
+		});
+	};
+	const define = () => {
+		const settings = {
+			...policy().settings,
+			fields: {
+				risk: { kind: "choice", label: "Risk", required: true, choices: ["low", "high"] },
+				notes: { kind: "text", label: "Notes", required: false },
+			},
+		};
+		const proposed = h.call<Proposed>("propose", { edits: [{ op: "policy", settings }] });
+		expect(proposed.status).toBe("open");
+		expect(policy().settings).not.toHaveProperty("fields");
+		expect(accept(proposed)[0]?.status).toBe("decided");
+		expect(policy().settings).toHaveProperty("fields", settings.fields);
+	};
+
+	test("definitions are decided, validate content, preserve free fields and survive preset changes", () => {
+		define();
+		for (const fields of [{}, { risk: "medium" }, { risk: " " }]) {
+			const refused = h.raw("propose", { edits: [{ op: "create", body: { title: "Invalid", fields } }] });
+			expect(refused.ok).toBe(false);
+			if (!refused.ok) expect(refused.error.message).toContain("risk");
+		}
+		const fields = { risk: "high", notes: "Free text", legacy: "Keep me" };
+		expect(h.call<Proposed>("propose", { edits: [{ op: "create", body: { title: "Valid", fields } }] }).status).toBe(
+			"adopted",
+		);
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Edited" } }] });
+		const md = h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" })[0]?.md;
+		expect(md).toContain("legacy: Keep me");
+		expect(md).toContain("risk: high");
+		const definitions = policy().settings;
+		accept(h.call<Proposed>("propose", { edits: [{ op: "policy", preset: "standard" }] }));
+		expect(policy().settings).toHaveProperty("fields", definitions.fields);
+	});
+
+	test("a pending content proposal is revalidated against definitions at adoption", () => {
+		accept(h.call<Proposed>("propose", { edits: [{ op: "policy", preset: "standard" }] }));
+		const agent = h.actor("field-writer", "agent", ["read", "produce"]);
+		const pending = h.call<Proposed>(
+			"propose",
+			{ edits: [{ op: "create", body: { title: "Waiting", fields: { risk: "medium" } } }] },
+			agent,
+		);
+		define();
+		expect(accept(pending)[0]).toMatchObject({ status: "invalid", needs: expect.stringContaining("risk") });
+		expect(h.call<{ items: unknown[] }>("find", { in: "cases" }).items).toHaveLength(0);
+	});
+
+	test("definitions never rewrite history, and Markdown, policy history and decisions survive an archive", () => {
+		h.call("propose", {
+			edits: [{ op: "create", body: { title: "Before definitions", fields: { risk: "obsolete", legacy: "Keep me" } } }],
+		});
+		define();
+		const before = h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md", version: 1 });
+		expect(before[0]?.md).toContain("risk: obsolete");
+		expect(
+			h.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Still invalid" } }] }).ok,
+		).toBe(false);
+		h.call("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 1, body: { fields: { risk: "low", legacy: "Keep me" } } }],
+		});
+		expect(h.raw("propose", { edits: [{ op: "restore", case: "C-1", to: 1 }] }).ok).toBe(false);
+		const md = first(h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" })).md;
+		h.call("propose", { edits: [{ op: "create", md }] });
+		expect(first(h.call<{ md: string }[]>("get", { refs: ["C-2"], as: "md" })).md).toContain("legacy: Keep me");
+		const chunks: string[] = [];
+		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
+		const restored = new Db(":memory:");
+		try {
+			migrate(restored, ":memory:");
+			importArchive(restored, linesOf(chunks.join("")));
+			expect(currentPolicy(restored, 1)).toEqual(policy());
+			expect(policyAt(restored, 1, 1)?.settings.fields).toBeUndefined();
+			expect(policyAt(restored, 1, 2)?.settings.fields).toEqual(policy().settings.fields);
+			for (const table of ["versions", "policies", "proposals", "decisions"]) {
+				expect(restored.raw.query(`SELECT * FROM ${table}`).all()).toEqual(
+					h.app.db.raw.query(`SELECT * FROM ${table}`).all(),
+				);
+			}
+		} finally {
+			restored.close();
+		}
+	});
+
+	test("definitions reject invalid choices and validate every content edit against a batch's final policy", () => {
+		for (const choices of [[], ["low", "low"], [" "], ["low\nhigh"]]) {
+			expect(
+				h.raw("propose", {
+					edits: [
+						{
+							op: "policy",
+							settings: {
+								...policy().settings,
+								fields: {
+									risk: { kind: "choice", label: "Risk", required: false, choices },
+								},
+							},
+						},
+					],
+				}).ok,
+			).toBe(false);
+		}
+		const settings = { ...policy().settings, fields: { risk: { kind: "text", label: "Risk", required: true } } };
+		for (const edits of [
+			[
+				{ op: "policy", settings },
+				{ op: "create", body: { title: "Missing" } },
+			],
+			[
+				{ op: "create", body: { title: "Missing" } },
+				{ op: "policy", settings },
+			],
+		])
+			expect(h.raw("propose", { edits }).ok).toBe(false);
+		expect(h.call<{ items: unknown[] }>("find", { in: "cases" }).items).toHaveLength(0);
+		expect(policy().settings.fields).toBeUndefined();
+		const proposed = h.call<Proposed>("propose", {
+			edits: [
+				{ op: "create", body: { title: "With value", fields: { risk: "high" } } },
+				{ op: "policy", settings },
+			],
+		});
+		expect(accept(proposed)[0]?.status).toBe("decided");
+		h.call("admin", { do: "project.create", key: "other" });
+		expect(h.call<Policy>("admin", { do: "policy.show", project: "other" }).settings.fields).toBeUndefined();
+	});
+
+	test("required fields cannot make automatic case creation fail during report processing", () => {
+		define();
+		const refused = h.raw("propose", { edits: [{ op: "policy", unlinked: "create" }] });
+		expect(refused.ok).toBe(false);
+		if (!refused.ok) expect(refused.error.message).toContain("required custom fields");
+		const fields = { notes: { kind: "text", label: "Notes", required: false } };
+		accept(
+			h.call<Proposed>("propose", {
+				edits: [{ op: "policy", settings: { ...policy().settings, fields }, unlinked: "create" }],
+			}),
+		);
+		h.call("report", ciReport({ commit: "fields-auto-create", n: 1 }));
+		expect(h.call<{ items: unknown[] }>("find", { in: "cases" }).items).toHaveLength(1);
+		const settings = { ...policy().settings, fields: { risk: { kind: "text", label: "Risk", required: true } } };
+		expect(h.raw("propose", { edits: [{ op: "policy", settings }] }).ok).toBe(false);
 	});
 });

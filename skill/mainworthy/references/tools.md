@@ -85,6 +85,7 @@ Propose cases at their base version. Status: adopted=current, open=needs accepta
 | `edits[][policy].clauses[].answer` | `unknown` | no |  |
 | `edits[][policy].clauses[].blocks` | `"nothing" \| "change" \| "release" \| "all"` | yes |  |
 | `edits[][policy].settings` | `object` | no |  |
+| `edits[][policy].settings.fields` | `record<object>` | no |  |
 | `edits[][policy].settings.unlinked` | `"ask" \| "track" \| "create"` | yes |  |
 | `edits[][policy].settings.basis` | `"exact" \| "exact-or-assumed"` | yes |  |
 | `edits[][policy].settings.holds` | `object` | yes |  |

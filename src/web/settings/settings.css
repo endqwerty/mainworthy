@@ -247,3 +247,45 @@
 #app:has(.queue-pane, .run-pane, .changes-pane, .settings-pane) .sfoot {
 	margin-top: auto;
 }
+
+.settings-fields h3,
+.settings-fields p {
+	margin: 0;
+}
+.settings-field-list {
+	border: 0;
+	padding: 0;
+	min-width: 0;
+}
+.settings-field-list > legend {
+	padding: 8px 0;
+	color: var(--dim);
+}
+.settings-field {
+	display: grid;
+	gap: 10px;
+	min-width: 0;
+	margin-bottom: 12px;
+	padding: 12px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+}
+.settings-field legend {
+	color: var(--dim);
+}
+.settings-field label {
+	display: grid;
+	gap: 4px;
+	color: var(--dim);
+}
+.settings-field .form-input {
+	width: 100%;
+}
+.settings-field .settings-field-required {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+.settings-field .out {
+	justify-self: start;
+}

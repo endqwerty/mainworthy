@@ -119,7 +119,19 @@ function mapSchemas(schema: Schema, visit: (child: SchemaNode) => SchemaNode): S
 
 function compactSchema(schema: SchemaNode, envelope = false): SchemaNode {
 	if (typeof schema === "boolean") return schema;
-	const result = mapSchemas(schema, (child) => compactSchema(child));
+	const visible = schema.properties
+		? {
+				...schema,
+				properties: Object.fromEntries(
+					Object.entries(schema.properties).filter(
+						([name, child]) =>
+							typeof child === "boolean" || child["x-mcp-hidden"] !== true || schema.required?.includes(name),
+					),
+				),
+			}
+		: schema;
+	const result = mapSchemas(visible, (child) => compactSchema(child));
+	delete result["x-mcp-hidden"];
 	delete result.$schema;
 	if (result.description) {
 		const shorter = DESCRIPTIONS.get(result.description);

@@ -195,3 +195,9 @@ $ mainworthy fmt coupon.md
 `fmt` parses canonical Markdown and prints its standard form without changing the server.
 It needs no running instance. Parse errors name the source line.
 See [the CLI guide](./cli.md) for command forms and flags.
+
+## Custom field values
+
+Canonical Markdown can carry a `fields` map in its header. Values are strings, and they survive Markdown round trips and edits that omit `fields`. A proposal that supplies the map replaces all its values, so include keys you want to keep. The web and iPhone case editors preserve these values but do not edit them.
+
+A project can define text or choice fields and require values. [Custom fields](./policy.md#custom-fields) explains how to define them. New content, including a restore, must meet the definitions in force when it is proposed and adopted. Older versions remain readable as recorded.

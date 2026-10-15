@@ -19,10 +19,13 @@ import { useBindings } from "../lib/keys.ts";
 import { navigate, projectUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, EmptyState, KeyCap, ListRow, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
+import { CustomFields } from "./fields.tsx";
 import { People } from "./people.tsx";
 import { YourSessions } from "./sessions.tsx";
 import { YourSignIn } from "./signin.tsx";
 import "./settings.css";
+
+type PolicyChange = { preset: string } | { unlinked: Unlinked } | { settings: Policy["settings"] };
 
 /**
  * The sections a caller is shown, in the order of the list. "People" is for an admin of the instance who is a
@@ -143,8 +146,8 @@ export function SettingsScreen() {
 function SettingsWorkbench() {
 	const { project, session, instanceCan, overlayOpen, refreshSession, setStatus } = useApp();
 	const [section, setSection] = useState("Policy");
-	// The change on its way: a preset, or what happens to a test with no case.
-	const [switching, setSwitching] = useState<{ preset: string } | { unlinked: Unlinked } | null>(null);
+	// The policy change whose proposal and decision are on their way.
+	const [switching, setSwitching] = useState<PolicyChange | null>(null);
 	const [policyMessage, setPolicyMessage] = useState("");
 	const admin = session.can.includes("admin");
 	const instanceAdmin = instanceCan.includes("admin");
@@ -214,14 +217,22 @@ function SettingsWorkbench() {
 				]
 			: []),
 	]);
-	async function changePolicy(change: { preset: string } | { unlinked: Unlinked }): Promise<void> {
-		if (!admin || switching) return;
-		if ("preset" in change ? change.preset === preset : change.unlinked === unlinked) return;
-		const name = "preset" in change ? `${change.preset} policy` : `"${UNLINKED_LABELS[change.unlinked]}"`;
+	async function changePolicy(change: PolicyChange): Promise<boolean> {
+		if (!admin || switching) return false;
+		if ("preset" in change ? change.preset === preset : "unlinked" in change && change.unlinked === unlinked)
+			return false;
+		const name =
+			"settings" in change
+				? "custom field definitions"
+				: "preset" in change
+					? `${change.preset} policy`
+					: `"${UNLINKED_LABELS[change.unlinked]}"`;
 		const reason =
-			"preset" in change
-				? `Use the ${change.preset} preset, selected in Settings.`
-				: `Tests with no case: ${change.unlinked}, selected in Settings.`;
+			"settings" in change
+				? "Change custom field definitions in Settings."
+				: "preset" in change
+					? `Use the ${change.preset} preset, selected in Settings.`
+					: `Tests with no case: ${change.unlinked}, selected in Settings.`;
 		setSwitching(change);
 		setPolicyMessage(`Recording the ${name} proposal and decision…`);
 		try {
@@ -245,15 +256,17 @@ function SettingsWorkbench() {
 			const answered =
 				ruled > 0 ? ` The rule answered ${ruled} open question${ruled === 1 ? "" : "s"} about tests with no case.` : "";
 			setPolicyMessage(
-				`${"preset" in change ? `${change.preset} is in force.` : `Tests with no case: ${UNLINKED_LABELS[change.unlinked]}.`}${answered} Proposal ${proposed.proposal} and decision ${question.q} are both recorded.`,
+				`${"settings" in change ? "Custom field definitions are in force." : "preset" in change ? `${change.preset} is in force.` : `Tests with no case: ${UNLINKED_LABELS[change.unlinked]}.`}${answered} Proposal ${proposed.proposal} and decision ${question.q} are both recorded.`,
 			);
 			setStatus(`${name} recorded through ${proposed.proposal} and ${question.q}.`);
 			await invalidateProject(project);
 			await refreshSession();
+			return true;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "The policy could not be changed.";
 			setPolicyMessage(message);
 			setStatus(message);
+			return false;
 		} finally {
 			setSwitching(null);
 		}
@@ -375,6 +388,12 @@ function SettingsWorkbench() {
 							)}
 							{policy && (
 								<>
+									<CustomFields
+										key={project}
+										definitions={policy.settings.fields ?? {}}
+										disabled={!admin || !session.can.includes("produce") || Boolean(switching)}
+										onSave={(fields) => changePolicy({ settings: { ...policy.settings, fields } })}
+									/>
 									<SectionHeading>Clause table · first match wins</SectionHeading>
 									<div className="settings-table-scroll">
 										<table className="settings-table">

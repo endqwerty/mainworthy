@@ -79,6 +79,7 @@ test("tools come from the registry and stay within their measured token limits",
 		if (op.effect === "read") expect(tool.annotations.idempotentHint).toBe(true);
 		expect(JSON.stringify(tool.inputSchema)).not.toContain('"cmd"');
 		expect(JSON.stringify(tool.inputSchema)).not.toContain('"$schema"');
+		expect(JSON.stringify(tool.inputSchema)).not.toContain('"x-mcp-hidden"');
 		expect(tool.inputSchema.properties?.project).toMatchObject({ type: "string", minLength: 1 });
 	}
 	console.log(`tool definitions: ${total} tokens; budget ${TOOL_TOKEN_BUDGET}; o200k_base`);

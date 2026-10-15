@@ -47,6 +47,34 @@ basis: exact-or-assumed; flaky hold: 14 days; tests with no case: track
 
 The last line holds the settings. The basis is which evidence a planned run accepts for a slot by default, and `strict` raises it to `exact`. The flaky hold is how many days a "Flaky" answer carries forward. The third says what happens to a test with no case.
 
+## Custom fields
+
+An instance admin can define a project's fields in **Settings**, **Policy**, under **Custom fields**. Add a field, give it a key and label, choose **Text** or **Choice**, and mark **Required** if it needs a value. For a choice, enter one allowed value per line. Keys must be unique. Choices must be nonblank, unique, and fit on one line.
+
+Press **Save field definitions** to propose and accept the change. Both the proposal and the admin's decision stay in the record. Definitions belong to the project and survive a switch of preset. If another edit changes the definitions while you type, **Reload field definitions** replaces your unsaved form with the current definitions before you can save.
+
+Field values remain strings in a case's `fields` map. A required value cannot be missing or blank. A nonblank choice value must match an allowed value exactly. An optional field can be absent or blank. Keys without definitions remain free text. Removing a definition leaves all its values in place.
+
+Definitions constrain new content when it is proposed and when it is adopted, including Markdown edits, restores, and merged edits. Changing a definition does not rewrite existing versions. An existing case with an invalid value stays readable, but its next content edit must supply valid values. A pending proposal that no longer meets the definitions is refused at adoption; reject it and propose valid content again.
+
+Required fields cannot be combined with **Create a case for each test**. Automatic creation has no values for those fields. Choose **Ask in the queue** or **Track without a case** first. Optional definitions work with automatic creation.
+
+The case editor does not edit field values yet. Use canonical Markdown or a `propose` body:
+
+```
+$ mainworthy propose --json '{"edits":[{"op":"edit","case":"C-1","base":1,"body":{"fields":{"risk":"high","legacy":"keep this value"}}}]}'
+```
+
+A supplied `fields` map replaces that map. Include every value you want to keep; omitting `fields` preserves the base version's values. Use `mainworthy get --json '{"refs":["C-1"],"as":"md"}'` to read them. The ordinary JSON case reply omits custom field values.
+
+To define fields through the CLI or HTTP API, start with `mainworthy policy show --json`. Keep its settings and add a `fields` map, then propose the whole settings object:
+
+```
+$ mainworthy propose --json '{"edits":[{"op":"policy","settings":{"unlinked":"track","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"fields":{"risk":{"kind":"choice","label":"Risk","required":true,"choices":["low","high"]},"notes":{"kind":"text","label":"Notes","required":false}}}}]}'
+```
+
+An admin who is a person accepts the resulting question in Queue or with `decide`. Sending the whole settings object without `fields` removes all definitions. The MCP tool listing omits field definitions to keep its token limit; use the CLI, HTTP API, or Settings for definition changes. Archives include the policy versions, values, proposals, and decisions.
+
 ## The three presets
 
 `loose` is the default. Edits take effect at once, a test needs no case, and a person answers failures and findings. A run that passed closes by itself.
