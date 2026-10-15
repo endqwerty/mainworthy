@@ -43,7 +43,7 @@ export const auditCommand: AdapterCommand = {
 			const file = Bun.file(args.positionals[1] ?? "");
 			try {
 				const bytes = await file.bytes();
-				const summary = verifyAudit(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+				const summary = verifyAudit(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes));
 				if (args.has("json")) printJson(summary, args.bool("compact"));
 				else
 					line(

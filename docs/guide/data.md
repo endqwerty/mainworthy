@@ -112,14 +112,18 @@ references, and number of decisions without a recorded historical evidence hash.
 ### Audit format 1
 
 Each line is canonical JSON with lexically sorted object keys and one LF. The file
-uses UTF-8 and ends with an LF. The header has `mainworthy: "audit"`, `format: 1`,
+uses UTF-8 without a byte-order mark and ends with an LF. The header has
+`mainworthy: "audit"`, `format: 1`,
 `project`, `from`, `to`, `exportedAt`, and the snapshot's project `seq`. It also
 states `grantChanges: "team-history-only"`, `teamState: "at-export"`,
 `evidencePayloads: "not-retained"`, and
 `actorNames: "at-export"`.
 
-Context records come first, sorted by id. Events follow, ordered by time, sequence,
-and id. Each record has a `type` and a unique `id`:
+Context records come first, sorted by id using English collation. Events follow,
+ordered by time, sequence, and id using the same collation. Events without a
+sequence sort as sequence zero. Verification refuses records outside this order.
+This file order does not imply that timestamps follow reference dependencies.
+Each record has a `type` and a unique `id`:
 
 | Type | Content |
 | --- | --- |
@@ -128,7 +132,8 @@ and id. Each record has a `type` and a unique `id`:
 | `result` | `result:<id>`, immutable test, target, commit, repository, environment, job, method, producer, outcome, signature, time and sequence for inherited head and base results. These context records can precede `from`. |
 | `team` | `team:<id>`, name, creation time, current members and current grants on this project or every project. This is state at export time, including for a historical range. |
 | `team-event` | `team-event:<id>`, time, team reference, actor, action, affected person, project and capabilities. Includes scoped grant changes and membership history in the range; these instance events have no project sequence. |
-| `decision` | `decision:<id>`, time, sequence, kind, answer, basis hash, holds, effects, expiry, question, prior decision, evidence, signers, and typed `inherited` result and base references. Each signer retains its actor, clause, policy version, and reason. Withdrawals and automatic endings are included. |
+| `change-end` | `change-end:<change-id>`, change id, key, repository, ending time, and state, either `merged` or `closed`. Includes the retained ending for this project's changes when its time is in the range. No ending actor or sequence is retained. Reopening deletes the ending, and a later close replaces it. This is not a full change-state history. |
+| `decision` | `decision:<id>`, time, sequence, kind, answer, basis hash, holds, effects, expiry, question, prior decision, evidence, signers, and typed `inherited` result and base references. Each signer retains its actor, clause, policy version, and reason. Withdrawals, expirations, and outdated decisions are included. |
 | `answer` | `answer:<id>`, time, sequence, actor, question, answer, reason, whether it counted, and the exact evidence hash seen. Advice is included. |
 | `policy` | `policy:<version>`, time, sequence, actor, preset, clauses, settings, previous policy, and adopting decision. The initial policy has no adopting decision. |
 | `case-version` | `version:<case-id>:<version>`, public case ref, time, sequence, author, reason, full body, body and claim hashes, parent version, and adopting decision. |
@@ -147,12 +152,14 @@ reaches its evidence through the adopting decision. The initial policy has none.
 
 The footer is `{ end: true, records, sha256 }`. `records` counts context and event
 records, excluding the header and footer. `sha256` covers every preceding UTF-8 byte,
-including LFs. Verification rejects unsupported formats, unknown keys, noncanonical
-lines, duplicate ids, unresolved or wrongly typed references, invalid range markers,
+including LFs. Verification refuses a leading byte-order mark and rejects unsupported
+formats, unknown keys, noncanonical lines, records out of order, duplicate ids,
+unresolved or wrongly typed references, invalid range markers,
 reference cycles, skipped case or policy predecessors, decisions or answers before
 their question's opening sequence, inconsistent evidence hashes, and changed case
-body hashes. Demo projects can date writes out of order, so timestamp order is not
-an invariant. If a time range excludes a required demo predecessor that has a later
+body hashes. Record errors name the line and record id when it can be read.
+Demo projects can date writes out of order, so a predecessor can appear later in
+the event list. If a time range excludes a required demo predecessor that has a later
 date, export fails and asks you to widen `--to`.
 
 Verification checks the file's integrity and internal references. The checksum does
@@ -160,8 +167,12 @@ not authenticate its source or prove that every database record was exported. An
 offline verifier cannot confirm old events outside the file or reconstruct original
 evidence payloads. Team history covers teams with current or historical grants on
 this project or every project. Other project grants and their events stay out.
-Personal grant changes and membership removal by forgetting have no retained event
-history. Current team state cannot prove who was eligible to sign in the past.
+Personal grant changes have no complete event history. An admin request sent with
+a command id can leave a receipt with the actor, time, and outcome. These optional
+receipts retain a request digest rather than the action and cannot reconstruct all
+grant changes. They are not exported. Membership removal by forgetting has no
+retained event history. Current team state cannot prove who was eligible to sign
+in the past.
 Signatures with
 re-authentication and meaning, retention, legal hold, and recorded text redaction
 remain absent. A passing file check is not a regulated conformance claim.

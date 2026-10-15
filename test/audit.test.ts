@@ -38,6 +38,141 @@ function fixture() {
 	return { h, first, cutoff };
 }
 
+test("audit refuses reordered context and event records even after rehashing", () => {
+	const { h } = fixture();
+	try {
+		const file = AuditReply.parse(h.call("audit", {})).ndjson;
+		const changes: ((lines: Record<string, unknown>[]) => void)[] = [
+			(lines) => {
+				const first = lines[1];
+				const second = lines[2];
+				if (first && second) [lines[1], lines[2]] = [second, first];
+			},
+			(lines) => {
+				const context = lines.splice(1, 1)[0];
+				if (context) lines.push(context);
+			},
+			(lines) => {
+				const indices = lines.flatMap((row, index) => (row.type === "decision" ? [index] : []));
+				const [a = 0, b = 0] = indices;
+				const first = lines[a];
+				const second = lines[b];
+				if (first && second) [lines[a], lines[b]] = [second, first];
+			},
+		];
+		for (const change of changes)
+			expect(() => verifyAudit(rehash(file, change))).toThrow(/line \d+ record \S+: records out of order/);
+	} finally {
+		h.close();
+	}
+});
+
+test("audit event order breaks equal-time ties by sequence and then id", () => {
+	const { h } = fixture();
+	try {
+		const file = AuditReply.parse(h.call("audit", {})).ndjson;
+		for (const bySequence of [true, false]) {
+			const ordered = rehash(file, (lines) => {
+				const events = lines.filter((row) => ["decision", "policy", "case-version"].includes(String(row.type)));
+				for (const row of events) {
+					row.at = 0;
+					if (!bySequence) row.seq = 99;
+				}
+				if (lines[0]) lines[0].seq = 99;
+				events.sort((a, b) => Number(a.seq) - Number(b.seq) || String(a.id).localeCompare(String(b.id), "en"));
+				lines.splice(lines.length - events.length, events.length, ...events);
+			});
+			expect(verifyAudit(ordered)).toMatchObject({ project: "scratch", records: 9 });
+			const swapped = rehash(ordered, (lines) => {
+				const a = lines.at(-2);
+				const b = lines.at(-1);
+				if (a && b) lines.splice(-2, 2, b, a);
+			});
+			expect(() => verifyAudit(swapped)).toThrow(/line \d+ record \S+: records out of order/);
+		}
+	} finally {
+		h.close();
+	}
+});
+
+test("audit errors name the line and record once without raw schema output", () => {
+	const { h } = fixture();
+	try {
+		const file = AuditReply.parse(h.call("audit", {})).ndjson;
+		const line = file.split("\n").findIndex((row) => row.includes('"id":"version:1:1"')) + 1;
+		const invalidSchema = rehash(file, (lines) => {
+			const row = lines.find((item) => item.id === "version:1:1");
+			if (row) row.body = {};
+		});
+		expect(() => verifyAudit(invalidSchema)).toThrow(
+			new RegExp(`^invalid audit: line ${line} record version:1:1: body.title: [^\\n]+$`),
+		);
+		const noncanonical = file.replace('"id":"version:1:1"', '"id": "version:1:1"');
+		const lines = noncanonical.trimEnd().split("\n");
+		lines.pop();
+		const body = `${lines.join("\n")}\n`;
+		const rechecked = `${body}${canonicalJson({ end: true, records: lines.length - 1, sha256: auditChecksum(body) })}\n`;
+		expect(() => verifyAudit(rechecked)).toThrow(
+			new RegExp(`^invalid audit: line ${line} record version:1:1: each line must be canonical JSON$`),
+		);
+		const wrongHash = rehash(file, (rows) => {
+			const row = rows.find((item) => item.id === "version:1:1");
+			if (row) row.hash = "000000000000";
+		});
+		expect(() => verifyAudit(wrongHash)).toThrow(
+			new RegExp(`^invalid audit: line ${line} record version:1:1: case body hash mismatch$`),
+		);
+	} finally {
+		h.close();
+	}
+});
+
+test("audit exports retained change endings in range and only for its project", () => {
+	const h = harness();
+	try {
+		h.call("report", ciReport({ commit: "ended-change", pr: 326, n: 1, fail: { 0: "failure" } }));
+		expect(h.call<{ items: unknown[] }>("inbox", { kind: "failure" }).items).toHaveLength(1);
+		h.advance(100);
+		h.call("change", { change: "pr:326", state: "closed" });
+		const from = h.app.now();
+		expect(h.call<{ items: unknown[] }>("inbox", { kind: "failure" }).items).toHaveLength(0);
+		const file = AuditReply.parse(h.call("audit", {})).ndjson;
+		const ending = rowsOfType(file, "change-end");
+		expect(ending).toEqual([
+			{ type: "change-end", id: "change-end:1", change: 1, key: "pr:326", repo: "acme/web", state: "closed", at: from },
+		]);
+		expect(rowsOfType(AuditReply.parse(h.call("audit", { from })).ndjson, "change-end")).toEqual(ending);
+		expect(rowsOfType(AuditReply.parse(h.call("audit", { to: from })).ndjson, "change-end")).toEqual([]);
+		h.call("admin", { do: "project.create", key: "other" });
+		const other = invoke(h.app, OPS, { op: "audit", project: "other", input: {}, actor: () => h.owner });
+		if (!other.ok) throw new Error(other.error.message);
+		expect(rowsOfType(AuditReply.parse(other.result).ndjson, "change-end")).toEqual([]);
+		expect(verifyAudit(file)).toMatchObject({ project: "scratch", records: 5 });
+		for (const [key, value] of [
+			["state", "open"],
+			["change", 999],
+			["at", from + 999],
+		] as const)
+			expect(() =>
+				verifyAudit(
+					rehash(file, (lines) => {
+						const row = lines.find((item) => item.type === "change-end");
+						if (row) row[key] = value;
+					}),
+				),
+			).toThrow();
+		h.call("change", { change: "pr:326", state: "open" });
+		expect(rowsOfType(AuditReply.parse(h.call("audit", {})).ndjson, "change-end")).toEqual([]);
+		h.advance(100);
+		h.call("change", { change: "pr:326", state: "merged" });
+		expect(rowsOfType(AuditReply.parse(h.call("audit", {})).ndjson, "change-end")[0]).toMatchObject({
+			state: "merged",
+		});
+	} finally {
+		h.close();
+	}
+});
+
 test("an admin can export a validated project audit without writing a command", () => {
 	const h = harness();
 	try {
