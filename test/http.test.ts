@@ -14,6 +14,7 @@ import { ERROR_CODES, type ErrorCode } from "../src/core/api.ts";
 import { AuditReply, verifyAudit } from "../src/core/audit.ts";
 import { Policy } from "../src/core/kinds.ts";
 import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
+import { InboxReply as InboxSchema, ReportReceipt } from "../src/core/ops.ts";
 import { PRESETS } from "../src/core/presets.ts";
 import { TrackerReceipt } from "../src/core/tracker.ts";
 import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
@@ -22,6 +23,7 @@ import { OP_LIST, OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { Readers } from "../src/server/readers.ts";
 import { type Instance, open, start } from "../src/server/start.ts";
+import { pollDefectHolds } from "../src/server/tracker-holds.ts";
 import type { TrackerPort } from "../src/server/trackers/port.ts";
 import { deliverTrackerRequests } from "../src/server/trackers/requests.ts";
 import { PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
@@ -321,10 +323,12 @@ async function sweepTrackerReplies(
 	project: string,
 ) {
 	instance.app.config.github = { project, repository: "example/schema", token: "schema-test-credential" };
-	const report = z.object({ results: z.array(z.number()).min(1) }).parse(
+	const report = ReportReceipt.parse(
 		await checked("report", {
 			target: { session: "tracker-schema" },
-			results: [{ test: { key: "tracker-schema" }, outcome: "fail" }],
+			results: [
+				{ test: { key: "tracker-schema" }, outcome: "fail", failure: { message: "Tracker diagnostic schema failure" } },
+			],
 		}),
 	);
 	const result = report.results[0];
@@ -380,6 +384,27 @@ async function sweepTrackerReplies(
 		error: "The tracker request failed; check the tracker before creating another issue.",
 	});
 	await checked("tracker-status", { id: "schema-tracker-absent" }, {}, "not_found");
+	const question = report.questions[0];
+	if (!question) throw new Error("No tracker-schema failure question");
+	const [failure] = z.array(InboxSchema.shape.items.element).parse(await checked("get", { refs: [question.q] }));
+	if (!failure) throw new Error("No tracker-schema question detail");
+	await checked("decide", { q: failure.q, onEvidence: failure.evidenceHash, answer: { is: "defect", ref: issue.url } });
+	const logged = spyOn(console, "warn").mockImplementation(() => undefined);
+	try {
+		await pollDefectHolds(instance.app, {
+			createDefect: async () => issue,
+			getItem: async () => {
+				throw new Error("schema-test-credential");
+			},
+		});
+		const [detail] = z.array(InboxSchema.shape.items.element).parse(await checked("get", { refs: [failure.q] }));
+		expect(detail?.decision?.trackerError).toContain("The tracker could not be read since");
+		const queue = InboxSchema.parse(await checked("inbox", { state: "decided", kind: "failure" }));
+		expect(queue.items.find((row) => row.q === failure.q)?.decision?.trackerError).toBe(detail?.decision?.trackerError);
+		expect(JSON.stringify(detail)).not.toContain("schema-test-credential");
+	} finally {
+		logged.mockRestore();
+	}
 }
 test("scoped agent edits wait for a person through HTTP", async () => {
 	const instance = boot("local");

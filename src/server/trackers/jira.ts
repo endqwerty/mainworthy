@@ -1,13 +1,13 @@
 import { z } from "zod";
 import type { TrackerItem } from "../../core/tracker.ts";
 import type { Config } from "../kernel/app.ts";
-import { type DefectDraft, TrackerError, type TrackerPort } from "./port.ts";
+import { type DefectDraft, TrackerError, type TrackerPort, trackerHttpFailure } from "./port.ts";
 
 const Key = z.string().regex(/^[A-Z][A-Z0-9_]+-[1-9]\d{0,14}$/);
 const Created = z.object({ key: Key });
 const Issue = Created.extend({
 	fields: z.object({
-		status: z.object({ statusCategory: z.object({ key: z.enum(["new", "indeterminate", "done"]) }) }),
+		status: z.object({ statusCategory: z.object({ key: z.enum(["new", "indeterminate", "done", "undefined"]) }) }),
 	}),
 });
 
@@ -47,6 +47,7 @@ export function jiraPort(config: NonNullable<Config["jira"]>, request: typeof fe
 				await response.body?.cancel();
 				throw new TrackerError(
 					`Jira returned HTTP ${response.status}; check the site, project, issue type and account permissions before creating another issue.`,
+					trackerHttpFailure(response.status),
 				);
 			}
 			return await response.json();
@@ -64,9 +65,21 @@ export function jiraPort(config: NonNullable<Config["jira"]>, request: typeof fe
 	}
 	async function getItem(key: string): Promise<TrackerItem> {
 		checkedKey(key);
-		const parsed = Issue.safeParse(await call(`/${key}?fields=status`));
+		const body = await call(`/${key}?fields=status`);
+		const returnedKey = Created.safeParse(body);
+		if (returnedKey.success && returnedKey.data.key !== key)
+			throw new TrackerError(
+				"Jira did not return the requested issue and status category. Answer the failure again with the new issue key.",
+				"moved",
+			);
+		const parsed = Issue.safeParse(body);
 		if (!parsed.success || parsed.data.key !== key)
 			throw new TrackerError("Jira did not return the requested issue and status category.");
+		if (parsed.data.fields.status.statusCategory.key === "undefined")
+			throw new TrackerError(
+				"Jira returned an undefined status category. Set a Jira status category of new, indeterminate or done.",
+				"undefinedCategory",
+			);
 		return {
 			ref: `jira:${config.site}#${key}`,
 			url: `${config.site}/browse/${key}`,

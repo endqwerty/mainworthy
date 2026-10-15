@@ -379,6 +379,112 @@ function heldDefect(ref: string = item.url) {
 	return { question, decision: answer[0]?.decision };
 }
 
+for (const scenario of ["401", "404", "network", "undefined", "moved"] as const) {
+	test(`unreadable Jira hold exposes a safe actionable diagnostic in get, queue and history: ${scenario}`, async () => {
+		const { question, decision } = heldDefect(jiraItem.url);
+		h.app.config.jira = jira;
+		const logged = spyOn(console, "warn").mockImplementation(() => undefined);
+		const since = new Date(h.app.now()).toISOString();
+		const adapter = jiraPort(
+			jira,
+			transport(() => {
+				if (scenario === "network") throw new Error(credential);
+				if (scenario === "401" || scenario === "404") return new Response(credential, { status: Number(scenario) });
+				return Response.json({
+					key: scenario === "moved" ? "QA-43" : "QA-42",
+					fields: { status: { statusCategory: { key: scenario === "undefined" ? "undefined" : "done" } } },
+					detail: credential,
+				});
+			}),
+		);
+		try {
+			expect(await pollDefectHolds(h.app, adapter)).toBe(0);
+			const detail = h.call<{ decision: { id: number; trackerError?: string } }[]>("get", { refs: [question.q] })[0];
+			const text = detail?.decision.trackerError;
+			expect(text).toContain(`The tracker could not be read since ${since}:`);
+			const action = {
+				"401": "Renew the tracker token",
+				"404": "Check the issue key and account permissions",
+				network: "Check the tracker connection",
+				undefined: "Set a Jira status category",
+				moved: "Answer the failure again with the new issue key",
+			}[scenario];
+			expect(text).toContain(action);
+			expect(
+				h.call<InboxReply>("inbox", { state: "decided" }).items.find((row) => row.q === question.q)?.decision,
+			).toMatchObject({ id: decision, trackerError: text });
+			expect(h.call<{ questions: { decision: unknown }[] }>("timeline", { ref: "C-1" }).questions).toContainEqual(
+				expect.objectContaining({ decision: expect.objectContaining({ trackerError: text }) }),
+			);
+			expect(logged.mock.calls).toHaveLength(1);
+			expect(JSON.stringify(logged.mock.calls)).toContain(text ?? "missing diagnostic");
+			h.advance(60_000);
+			expect(await pollDefectHolds(h.app, adapter)).toBe(0);
+			expect(logged.mock.calls).toHaveLength(1);
+			expect(
+				h.call<{ decision: { trackerError?: string } }[]>("get", { refs: [question.q] })[0]?.decision.trackerError,
+			).toBe(text);
+			for (const secret of [credential, jira.email, Buffer.from(`${jira.email}:${credential}`).toString("base64")]) {
+				expect(JSON.stringify(logged.mock.calls)).not.toContain(secret);
+				expect(JSON.stringify(detail)).not.toContain(secret);
+			}
+			expect(h.app.db.raw.query("SELECT count(*) AS n FROM excuses").get()).toEqual({ n: 1 });
+			h.advance(120_000);
+			expect(await pollDefectHolds(h.app, { ...port, getItem: async () => jiraItem })).toBe(0);
+			expect(
+				h.call<{ decision: { trackerError?: string } }[]>("get", { refs: [question.q] })[0]?.decision.trackerError,
+			).toBeUndefined();
+			h.advance(60_000);
+			await pollDefectHolds(h.app, adapter);
+			expect(logged.mock.calls).toHaveLength(2);
+		} finally {
+			logged.mockRestore();
+		}
+	});
+}
+
+test("several holds on one failing issue log once, while a different failing issue has its own log", async () => {
+	h = harness();
+	h.app.config.github = github;
+	h.call("report", {
+		target: { session: "shared-issue" },
+		results: ["Alpha failure", "Beta failure", "Gamma failure"].map((message, i) => ({
+			test: { key: `test-${i}` },
+			outcome: "fail",
+			failure: { message },
+		})),
+	});
+	const questions = h.call<InboxReply>("inbox", { kind: "failure" }).items;
+	expect(questions).toHaveLength(3);
+	for (const [i, q] of questions.entries())
+		h.call("decide", {
+			q: q.q,
+			onEvidence: q.evidenceHash,
+			answer: { is: "defect", ref: i === 2 ? "github:example/shop#43" : item.url },
+		});
+	const logged = spyOn(console, "warn").mockImplementation(() => undefined);
+	try {
+		const adapter = githubPort(
+			github,
+			transport(() => new Response(credential, { status: 401 })),
+		);
+		await pollDefectHolds(h.app, adapter);
+		expect(logged.mock.calls.map((call) => call[1])).toEqual([
+			{ project: "scratch", issue: "42", diagnostic: expect.stringContaining("HTTP 401. Renew the tracker token") },
+			{ project: "scratch", issue: "43", diagnostic: expect.stringContaining("HTTP 401. Renew the tracker token") },
+		]);
+		h.advance(60_000);
+		await pollDefectHolds(h.app, adapter);
+		expect(logged.mock.calls).toHaveLength(2);
+		expect(
+			h.call<InboxReply>("inbox", { state: "decided" }).items.filter((q) => q.decision?.trackerError),
+		).toHaveLength(3);
+		expect(JSON.stringify(logged.mock.calls)).not.toContain(credential);
+	} finally {
+		logged.mockRestore();
+	}
+});
+
 test("open issues and failed reads keep holds, back off persistently, and a later closure changes the gate", async () => {
 	heldDefect();
 	let calls = 0;
@@ -523,52 +629,66 @@ test("stopping polling waits for its in-flight reply and never starts another re
 
 test("polling back-off survives an instance restart", async () => {
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-poll-restart-"));
-	let now = 1_800_000_000_000;
-	let calls = 0;
-	let closed = false;
-	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
-	const options = {
-		readers: 0,
-		now: () => now,
-		trackerPort: {
-			...port,
-			getItem: async () => {
-				calls++;
-				if (!closed) throw new Error("Tracker temporarily unavailable");
-				return { ...item, state: "closed" as const };
+	const logged = spyOn(console, "warn").mockImplementation(() => undefined);
+	try {
+		let now = 1_800_000_000_000;
+		let calls = 0;
+		let closed = false;
+		const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
+		const options = {
+			readers: 0,
+			now: () => now,
+			trackerPort: {
+				...port,
+				getItem: async () => {
+					calls++;
+					if (!closed) throw new Error("Tracker temporarily unavailable");
+					return { ...item, state: "closed" as const };
+				},
 			},
-		},
-	};
-	instance = start(config, () => ({ ui: null }), options);
-	const post = async (operation: string, input: unknown = {}) => {
-		const response = await fetch(`${instance?.url}/api/p/scratch/${operation}`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(input),
+		};
+		instance = start(config, () => ({ ui: null }), options);
+		const post = async (operation: string, input: unknown = {}) => {
+			const response = await fetch(`${instance?.url}/api/p/scratch/${operation}`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(input),
+			});
+			const body = await response.json();
+			expect(body.ok).toBe(true);
+			return body.result;
+		};
+		await post("report", {
+			target: { session: "poll-restart" },
+			results: [{ test: { key: "checkout" }, outcome: "fail", failure: { message: "Expected 90, got 100" } }],
 		});
-		const body = await response.json();
-		expect(body.ok).toBe(true);
-		return body.result;
-	};
-	await post("report", {
-		target: { session: "poll-restart" },
-		results: [{ test: { key: "checkout" }, outcome: "fail", failure: { message: "Expected 90, got 100" } }],
-	});
-	const q = (await post("inbox")).items.find((row: { kind: string }) => row.kind === "failure");
-	await post("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "defect", ref: item.url } });
-	await instance.minute();
-	expect(calls).toBe(1);
-	await instance.stop();
-	instance = start(config, () => ({ ui: null }), options);
-	now += 59_999;
-	closed = true;
-	await instance.minute();
-	expect(calls).toBe(1);
-	expect((await post("inbox")).items.filter((row: { kind: string }) => row.kind === "failure")).toHaveLength(0);
-	now++;
-	await instance.minute();
-	expect(calls).toBe(2);
-	expect((await post("inbox")).items.filter((row: { kind: string }) => row.kind === "failure")).toHaveLength(1);
+		const q = (await post("inbox")).items.find((row: { kind: string }) => row.kind === "failure");
+		await post("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "defect", ref: item.url } });
+		await instance.minute();
+		expect(calls).toBe(1);
+		const diagnostic = (await post("get", { refs: [q.q] }))[0].decision.trackerError;
+		expect(diagnostic).toContain(`The tracker could not be read since ${new Date(now).toISOString()}`);
+		expect(logged.mock.calls).toHaveLength(1);
+		await instance.stop();
+		instance = start(config, () => ({ ui: null }), options);
+		now += 59_999;
+		await instance.minute();
+		expect(calls).toBe(1);
+		expect((await post("inbox")).items.filter((row: { kind: string }) => row.kind === "failure")).toHaveLength(0);
+		expect((await post("get", { refs: [q.q] }))[0].decision.trackerError).toBe(diagnostic);
+		now++;
+		await instance.minute();
+		expect(calls).toBe(2);
+		expect(logged.mock.calls).toHaveLength(1);
+		expect((await post("get", { refs: [q.q] }))[0].decision.trackerError).toBe(diagnostic);
+		closed = true;
+		now += 120_000;
+		await instance.minute();
+		expect(calls).toBe(3);
+		expect((await post("inbox")).items.filter((row: { kind: string }) => row.kind === "failure")).toHaveLength(1);
+	} finally {
+		logged.mockRestore();
+	}
 });
 
 test("ending a defect whose failure has been replaced by a pass does not reopen an obsolete question", async () => {

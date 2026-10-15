@@ -554,6 +554,7 @@ export const QuestionItem = z.object({
 			by: z.array(z.string()),
 			rule: z.string().nullable(),
 			reason: z.string().nullable(),
+			trackerError: z.string().optional(),
 			at: z.number(),
 		}),
 		z.null(),

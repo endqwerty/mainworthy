@@ -103,6 +103,7 @@ import {
 	resolvedOf,
 	versionOf,
 } from "../suite/suite.ts";
+import { withTrackerPollError } from "../trackers/polls.ts";
 import { defineOp } from "./registry.ts";
 
 const who = (ctx: Ctx, id: number) => actorLabel(ctx.db, id);
@@ -121,7 +122,7 @@ export function inbox(ctx: Ctx, input: InboxInput): InboxReply {
 		)
 			.filter((row) => row.state === input.state && (!input.kind || row.kind === input.kind))
 			.slice(0, limit);
-		return { counts, items: rows.map((row) => toItemFor(ctx, row)), cursor: null };
+		return { counts, items: rows.map((row) => withTrackerPollError(ctx.db, toItemFor(ctx, row))), cursor: null };
 	}
 	if (input.state === "decided") {
 		// The ledger's cursor is the revision and the id of the last row: many questions are decided at one revision.
@@ -138,7 +139,7 @@ export function inbox(ctx: Ctx, input: InboxInput): InboxReply {
 	const last = page.at(-1);
 	const cursor =
 		rows.length > limit && last ? (input.state === "open" ? String(last.rank) : `${last.rev}.${last.id}`) : null;
-	return { counts, items: page.map((row) => toItemFor(ctx, row)), cursor };
+	return { counts, items: page.map((row) => withTrackerPollError(ctx.db, toItemFor(ctx, row))), cursor };
 }
 
 export const inboxOp = defineOp({
@@ -341,7 +342,10 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 	return input.refs.map((text) => {
 		const kind = text.trim().slice(0, 2).toUpperCase();
 		if (kind === "Q-")
-			return toItem(ctx.db, mustQuestion(ctx.db, ctx.project.id, text)) as unknown as Record<string, unknown>;
+			return withTrackerPollError(
+				ctx.db,
+				toItem(ctx.db, mustQuestion(ctx.db, ctx.project.id, text)),
+			) as unknown as Record<string, unknown>;
 		if (kind === "R-") return runView(ctx, mustRun(ctx.db, ctx.project.id, text));
 		if (kind === "T-") {
 			const test = findTest(ctx.db, ctx.project.id, text);
@@ -681,7 +685,9 @@ export function timeline(ctx: Ctx, input: z.infer<typeof TimelineInput>): Record
 			about: r.about,
 		});
 	}
-	const questions = questionsOn(ctx.db, row.project, caseRef(row)).map((q) => toItem(ctx.db, q));
+	const questions = questionsOn(ctx.db, row.project, caseRef(row)).map((q) =>
+		withTrackerPollError(ctx.db, toItem(ctx.db, q)),
+	);
 	entries.sort((a, b) => b.seq - a.seq || Number(b.ord ?? 0) - Number(a.ord ?? 0));
 	return { ref: caseRef(row), head: row.head, entries: entries.slice(0, limit), questions };
 }

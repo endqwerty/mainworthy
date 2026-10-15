@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import type { QuestionItem } from "../../core/ops.ts";
 import { type Db, sql } from "../kernel/db.ts";
+import { TRACKER_READ_FAILURES, TrackerReadFailure } from "./port.ts";
 
 type Poll = { decision: number; nonce: string; next_at: number; attempts: number; error: string | null };
 const Q = {
@@ -12,14 +15,44 @@ const Q = {
 	),
 };
 
-export function trackerPoll(db: Db, decision: number): Poll {
+export function trackerPoll(db: Db, decision: number): Poll & { diagnosed: boolean } {
 	db.run(Q.ensure, { decision, nonce: randomUUID() });
 	const row = db.get(Q.one, { decision });
 	if (!row) throw new Error("tracker poll was not stored");
-	return row;
+	return { ...row, diagnosed: failureOf(row.error) !== null };
 }
 
-export function finishTrackerPoll(db: Db, poll: Poll, now: number, failed: boolean): boolean {
+const Failure = z.object({
+	since: z.number().int().nonnegative().max(8_640_000_000_000_000),
+	reason: TrackerReadFailure,
+});
+
+function failureOf(error: string | null): z.infer<typeof Failure> | null {
+	if (error === null) return null;
+	try {
+		return Failure.safeParse(JSON.parse(error)).data ?? null;
+	} catch {
+		return null;
+	}
+}
+
+export function trackerPollError(db: Db, decision: number): string | null {
+	const poll = db.get(Q.one, { decision });
+	if (!poll?.error) return null;
+	const failure = failureOf(poll.error);
+	return failure
+		? `The tracker could not be read since ${new Date(failure.since).toISOString()}: ${TRACKER_READ_FAILURES[failure.reason]}`
+		: "The tracker could not be read. Check the tracker connection and account permissions; the hold remains.";
+}
+
+export function withTrackerPollError<T extends QuestionItem>(db: Db, item: T): T {
+	if (item.decision?.answer.is !== "defect") return item;
+	const trackerError = trackerPollError(db, item.decision.id);
+	return trackerError ? { ...item, decision: { ...item.decision, trackerError } } : item;
+}
+
+export function finishTrackerPoll(db: Db, poll: Poll, now: number, reason: TrackerReadFailure | null): boolean {
+	const failed = reason !== null;
 	const attempts = failed ? Math.min(poll.attempts + 1, 16) : 0;
 	const delay = failed ? Math.min(60_000 * 2 ** Math.min(attempts - 1, 6), 3_600_000) : 60_000;
 	return (
@@ -27,9 +60,7 @@ export function finishTrackerPoll(db: Db, poll: Poll, now: number, failed: boole
 			nonce: poll.nonce,
 			next: now + delay,
 			attempts,
-			error: failed
-				? "Tracker status could not be read; the defect hold remains and will be checked again with back-off."
-				: null,
+			error: reason === null ? null : JSON.stringify({ since: failureOf(poll.error)?.since ?? now, reason }),
 		}).changes === 1
 	);
 }

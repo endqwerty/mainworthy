@@ -447,6 +447,11 @@ export function CasePane({
 											? `· ${String(q.decision.answer.is)} by ${q.decision.rule ? `rule ${q.decision.rule}` : q.decision.by.join(", ")}`
 											: "· open"}
 									</span>
+									{q.decision?.trackerError && (
+										<p role="status" className="hintbox">
+											{q.decision.trackerError}
+										</p>
+									)}
 								</a>
 							))}
 						{entries.length === 0 && (

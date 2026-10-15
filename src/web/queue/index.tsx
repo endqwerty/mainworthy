@@ -1024,6 +1024,11 @@ function QueueWorkbench() {
 										· {age(current.decision.at)}
 									</p>
 									{current.decision.reason && <p>{current.decision.reason}</p>}
+									{current.decision.trackerError && (
+										<p role="status" className="hintbox">
+											{current.decision.trackerError}
+										</p>
+									)}
 									<button className="out" type="button" onClick={() => undo([current])}>
 										<KeyCap>u</KeyCap> Withdraw answer
 									</button>

@@ -1,6 +1,15 @@
 // The queue and runs: the findings of the fourth review (R4B).
 import { expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
+import type { Api, OpName } from "../../src/core/api.ts";
+import { defaultConfig } from "../../src/server/kernel/app.ts";
+import { start } from "../../src/server/start.ts";
+import { jiraPort } from "../../src/server/trackers/jira.ts";
+import ui from "../../src/web/index.html";
+import { call } from "../../src/web/lib/api.ts";
 import { Slot } from "../../src/web/runs/models.ts";
 import { answer, browserAvailable, eventually, fetched, openPage, type Server, startServer } from "./support.ts";
 
@@ -841,3 +850,74 @@ check("a broad assertion shows its file split in the queue", async () => {
 		await server.stop();
 	}
 });
+
+check(
+	"unreadable defect holds appear on the queue decision and the failure's case history",
+	async () => {
+		const dataDir = await mkdtemp(join(tmpdir(), "mainworthy-tracker-ui-"));
+		const token = "tracker-browser-owner-token-1234";
+		const jira = {
+			project: "scratch",
+			site: "https://example.atlassian.net",
+			projectKey: "QA",
+			issueType: "Bug",
+			email: "robin@example.com",
+			token: "tracker-private-test-token",
+		};
+		const request: typeof fetch = Object.assign(async () => new Response(jira.token, { status: 401 }), {
+			preconnect: fetch.preconnect,
+		});
+		const instance = start(
+			{ ...defaultConfig({}), owner: "robin", dataDir, port: 0, ownerToken: token, jira },
+			() => ({ ui }),
+			{ readers: 0, trackerPort: jiraPort(jira, request) },
+		);
+		const server: Server = {
+			url: instance.url,
+			project: "scratch",
+			token,
+			seeded: null,
+			stop: instance.stop,
+			api: <O extends OpName>(op: O, input: Api[O]["input"]) =>
+				call(op, input, { url: instance.url, project: "scratch", token }),
+		};
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Tracker failure" }] });
+			await server.api("report", {
+				target: { session: "tracker-ui" },
+				results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "Expected ready" } }],
+			});
+			const question = (await server.api("inbox", { kind: "failure" })).items[0];
+			if (!question) throw new Error("No failure question");
+			await server.api("decide", {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "defect", ref: `${jira.site}/browse/QA-42` },
+			});
+			const h = await openPage(server, { path: `/p/scratch/queue/${question.q.replace(/^Q-/, "")}` });
+			try {
+				h.page.setDefaultTimeout(5000);
+				await h.page.locator(".queue-decision").waitFor();
+				await instance.minute();
+				await h.page
+					.locator(".queue-decision")
+					.getByText(/The tracker could not be read since .*Renew the tracker token/)
+					.waitFor();
+				expect(await h.page.locator("body").innerText()).not.toContain(jira.token);
+				await h.page.goto(`${server.url}/p/scratch/suite/c/1`);
+				await h.page
+					.locator(".question-card")
+					.getByText(/The tracker could not be read since .*Renew the tracker token/)
+					.waitFor();
+				expect(await h.page.locator("body").innerText()).not.toContain(jira.token);
+				expect(h.errors).toEqual([]);
+			} finally {
+				await h.close();
+			}
+		} finally {
+			await instance.stop();
+			await rm(dataDir, { recursive: true, force: true });
+		}
+	},
+	20_000,
+);

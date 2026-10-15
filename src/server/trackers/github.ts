@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { TrackerItem } from "../../core/tracker.ts";
-import { TrackerError, type TrackerPort } from "./port.ts";
+import { TrackerError, type TrackerPort, trackerHttpFailure } from "./port.ts";
 
 const Issue = z.object({
 	number: z.number().int().positive(),
@@ -26,11 +26,18 @@ export function githubPort(config: { repository: string; token: string }, reques
 			});
 			if (response.status !== (draft ? 201 : 200)) {
 				await response.body?.cancel();
-				throw new TrackerError(`GitHub returned HTTP ${response.status}; check the repository and token permissions.`);
+				throw new TrackerError(
+					`GitHub returned HTTP ${response.status}; check the repository and token permissions.`,
+					trackerHttpFailure(response.status),
+				);
 			}
 			const parsed = Issue.safeParse(await response.json());
 			if (!parsed.success) throw new TrackerError("GitHub did not return an issue.");
-			if (path && path !== `/${parsed.data.number}`) throw new TrackerError("GitHub returned another issue.");
+			if (path && path !== `/${parsed.data.number}`)
+				throw new TrackerError(
+					"GitHub returned another issue. Answer the failure again with the new issue key.",
+					"moved",
+				);
 			return {
 				ref: `github:${config.repository}#${parsed.data.number}`,
 				url: `https://github.com/${config.repository}/issues/${parsed.data.number}`,
