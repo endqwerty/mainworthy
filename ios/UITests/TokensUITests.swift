@@ -49,7 +49,12 @@ final class TokensUITests: XCTestCase {
 		revoke.tap()
 		XCTAssertTrue(app.staticTexts["Revoke \"Phone revoke check\" (#\(id))?"].waitForExistence(timeout: 5))
 		shot("tokens-confirmation")
-		app.buttons["Revoke token"].tap()
+		// Each row's button has the same label; the dialog's has no row identifier.
+		let confirm = app.buttons.matching(
+			NSPredicate(format: "label == %@ AND NOT (identifier BEGINSWITH %@)", "Revoke token", "revoke-token-")
+		).firstMatch
+		XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+		confirm.tap()
 		let notice = app.staticTexts["tokens-notice"]
 		XCTAssertTrue(notice.waitForExistence(timeout: 10))
 		XCTAssertEqual(notice.label, "Revoked \"Phone revoke check\" (#\(id)).")
