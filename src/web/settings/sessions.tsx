@@ -54,9 +54,11 @@ export function SessionList({ actor }: { actor?: string }) {
 	const [ending, setEnding] = useState<ReadonlySet<number>>(new Set());
 	const [refusal, setRefusal] = useState<{ id: number; message: string } | null>(null);
 	const [message, setMessage] = useState("");
+	const [confirming, setConfirming] = useState<number | null>(null);
 
 	function end(row: SessionRow): void {
 		if (ending.has(row.id)) return;
+		setConfirming(null);
 		if (row.current) {
 			requestSignOut();
 			return;
@@ -104,16 +106,31 @@ export function SessionList({ actor }: { actor?: string }) {
 						<small className="settings-refusal" role="status">
 							{refusal?.id === row.id ? refusal.message : ""}
 						</small>
+						{confirming === row.id && <small>{actor} must sign in again in that browser.</small>}
 					</span>
-					<button
-						className="out"
-						type="button"
-						aria-disabled={ending.has(row.id)}
-						aria-label={`End the session of ${browserName(row.userAgent)}, opened ${age(row.createdAt)}${row.current ? ", this browser" : ""}`}
-						onClick={() => end(row)}
-					>
-						{ending.has(row.id) ? "Ending…" : "End"}
-					</button>
+					{confirming === row.id ? (
+						<>
+							<button className="out" type="button" onClick={() => end(row)}>
+								End this session
+							</button>
+							<button type="button" className="dim" onClick={() => setConfirming(null)}>
+								Cancel
+							</button>
+						</>
+					) : (
+						<button
+							className="out"
+							type="button"
+							aria-disabled={ending.has(row.id)}
+							aria-label={`End the session of ${browserName(row.userAgent)}, opened ${age(row.createdAt)}${row.current ? ", this browser" : ""}`}
+							onClick={() => {
+								if (actor === undefined || actor === session.actor) end(row);
+								else if (!ending.has(row.id)) setConfirming(row.id);
+							}}
+						>
+							{ending.has(row.id) ? "Ending…" : "End"}
+						</button>
+					)}
 				</div>
 			))}
 			{sessions.data?.length === 0 && (

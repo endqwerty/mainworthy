@@ -92,6 +92,12 @@ test.skipIf(!browserAvailable)(
 			expect(await ada.innerText()).not.toContain("Sam security key");
 			expect(await ada.getByRole("button", { name: "Remove the password", exact: true }).isDisabled()).toBe(true);
 			await sessions.getByRole("button", { name: /^End the session/ }).click();
+			await sessions.getByText("sam must sign in again in that browser.", { exact: true }).waitFor();
+			expect(await server.api("session", { do: "list", actor: "sam" })).toHaveLength(1);
+			await sessions.getByRole("button", { name: "Cancel", exact: true }).click();
+			expect(await server.api("session", { do: "list", actor: "sam" })).toHaveLength(1);
+			await sessions.getByRole("button", { name: /^End the session/ }).click();
+			await sessions.getByRole("button", { name: "End this session", exact: true }).click();
 			await sessions.getByText("No browser is signed in.", { exact: true }).waitFor();
 			await sam.page.reload();
 			await sam.page.locator("#signin-name").waitFor();
@@ -102,6 +108,12 @@ test.skipIf(!browserAvailable)(
 				await route.abort();
 			});
 			await key.getByRole("button", { name: "Remove Sam security key", exact: true }).click();
+			await key.getByText("sam cannot use this passkey again. Sessions opened with it end.", { exact: true }).waitFor();
+			expect(await server.api("credential", { do: "list", actor: "sam" })).toHaveLength(2);
+			await key.getByRole("button", { name: "Cancel", exact: true }).click();
+			expect(await server.api("credential", { do: "list", actor: "sam" })).toHaveLength(2);
+			await key.getByRole("button", { name: "Remove Sam security key", exact: true }).click();
+			await key.getByRole("button", { name: "Remove this sign-in method", exact: true }).click();
 			await details.getByRole("status").filter({ hasText: "cannot tell whether the credential was removed" }).waitFor();
 			await key.waitFor({ state: "detached" });
 			await page.unroute("**/api/credential");
@@ -158,6 +170,11 @@ test.skipIf(!browserAvailable)(
 				(await details.getByRole("button", { name: "Remove the password", exact: true }).boundingBox())?.height,
 			).toBeGreaterThanOrEqual(44);
 			await details.getByRole("button", { name: "Remove the password", exact: true }).tap();
+			await details
+				.getByText("phone-person cannot use this password again. Sessions opened with it end.", { exact: true })
+				.waitFor();
+			expect(await server.api("credential", { do: "list", actor: "phone-person" })).toHaveLength(2);
+			await details.getByRole("button", { name: "Remove this sign-in method", exact: true }).tap();
 			await details.getByText("No password set", { exact: true }).waitFor();
 			await eventually(
 				() => server.api("session", { do: "list", actor: "phone-person" }),

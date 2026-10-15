@@ -136,7 +136,7 @@ To replace a token without a gap, make a second one for the same actor, put it w
 
 ## See and revoke tokens
 
-Settings, Tokens, and Settings, People, list "Issued tokens" with each token's number, label, actor, who made it, when it was made, when and from which address it was last used, and when it ends. A token with no recorded use says "never used". The actor is who the token identifies; the list cannot tell which person held a shared token. "Revoke" next to a token stops it at once. In server mode the last token the owner can sign in with is not revoked: make the owner another one first.
+Settings, Tokens, and Settings, People, list "Issued tokens" with each token's number, label, actor, who made it, when it was made, when and from which address it was last used, and when it ends. A token with no recorded use says "never used". Forgetting a person reads this list again, so their tokens show the forgotten name and revoked state. The actor is who the token identifies; the list cannot tell which person held a shared token. "Revoke" next to a token stops it at once. In server mode the last token the owner can sign in with is not revoked: make the owner another one first.
 
 ```
 $ mainworthy token list
@@ -267,9 +267,9 @@ Nothing changes until the link is accepted, so a link nobody uses locks nobody o
 
 A session is one browser that is signed in. Settings, "Your sessions" lists yours: what opened each one and from which address, the browser as it named itself, when and from where it was last used, and when it ends at the latest. "this browser" marks the one you are looking at. "End" signs that browser out. On your own it is the same as signing out.
 
-A person who administers the instance can inspect another person in Settings, **People**. Beside their name, open **Sign-in details**. It lists their sessions with the same details and **End** button as your own sessions. Ending this browser's session opens the sign-out dialog.
+A person who administers the instance can inspect another person in Settings, **People**. Beside their name, open **Sign-in details**. It lists their sessions with the same details and **End** button as your own sessions. For another person, **End** asks you to confirm with **End this session** or **Cancel**. Ending this browser's session opens the sign-out dialog.
 
-The details also say whether the person has a password and list their passkeys, with their names, when they were added, and their last use. **Remove** removes a password or passkey and ends the sessions that used it. The person's last password or passkey stays; they must add another before you can remove it. You cannot set their password or add a passkey for them. Recovery links keep the rules described above.
+The details also say whether the person has a password and list their passkeys, with their names, when they were added, and their last use. **Remove** removes a password or passkey and ends the sessions that used it. For another person, it first asks you to confirm with **Remove this sign-in method** or **Cancel**. The person's last password or passkey stays; they must add another before you can remove it. You cannot set their password or add a passkey for them. Recovery links keep the rules described above.
 
 A script lists them and ends one:
 
@@ -315,7 +315,7 @@ A person who holds `admin` on every project can:
 - list somebody's password and passkeys with `mainworthy credential --do list --actor dana`, and remove one by its id, but not the last;
 - invite a new person, and list and revoke invitations.
 
-An admin cannot see or set anybody's password, and cannot register a passkey for somebody else. Only the owner makes a recovery link for another person. An agent that holds `admin` can do none of this. The first two are commands only: Settings shows your own sessions and ways of signing in, not somebody else's.
+An admin cannot see or set anybody's password, and cannot register a passkey for somebody else. Only the owner makes a recovery link for another person. An agent that holds `admin` can do none of this. Settings, **People**, offers the first two under each person's **Sign-in details**.
 
 ## Sign in to the web UI
 

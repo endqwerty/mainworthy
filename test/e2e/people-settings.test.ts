@@ -41,13 +41,19 @@ test.skipIf(!browserAvailable)(
 	"People forgets a person only after confirmation and ends their access",
 	async () => {
 		await person("forget-web", ["read"]);
-		await server.api("admin", { do: "token.create", actor: "forget-web", kind: "human" });
+		await server.api("admin", { do: "token.create", actor: "forget-web", kind: "human", label: "forget-web-token" });
 		const admin = await openPage(server, { path: "/p/scratch/settings" });
 		const other = await openPage(server, { as: { name: "forget-web", password: OLD } });
 		try {
 			const { page } = admin;
 			page.setDefaultTimeout(3000);
 			await section(page, "People");
+			const issued = page.locator(".settings-token").filter({ hasText: "forget-web-token" });
+			await issued.getByText("Active", { exact: true }).waitFor();
+			const tokenNumber = (await issued.locator("small").innerText()).split(" · ")[0];
+			expect(tokenNumber).toMatch(/^token \d+$/);
+			const refreshed = page.locator(".settings-token").filter({ hasText: `${tokenNumber} ·` });
+			await issued.getByRole("button", { name: "Revoke forget-web", exact: true }).waitFor();
 			await page.getByLabel("Person to forget", { exact: true }).selectOption("forget-web");
 			await page.getByText("text the person typed in cases and notes stay", { exact: false }).waitFor();
 			const confirm = page.getByRole("button", { name: "Forget this person", exact: true });
@@ -87,6 +93,9 @@ test.skipIf(!browserAvailable)(
 				.waitFor();
 			// The status is shown before the lists are read again, so the row goes a moment later.
 			await rows(page).filter({ hasText: "forget-web" }).waitFor({ state: "detached" });
+			await refreshed.getByText("Revoked", { exact: true }).waitFor();
+			expect(await refreshed.locator("b").innerText()).toBe("forgotten-3");
+			expect(await refreshed.getByRole("button", { name: /^Revoke / }).count()).toBe(0);
 			await other.page.reload();
 			await other.page.locator("#signin-name").waitFor();
 			expect(admin.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
@@ -102,11 +111,22 @@ test.skipIf(!browserAvailable)(
 	"People clears the confirmation when a lost reply is followed by a list without the person",
 	async () => {
 		await person("forget-lost-reply", ["read"]);
+		await server.api("admin", {
+			do: "token.create",
+			actor: "forget-lost-reply",
+			kind: "human",
+			label: "lost-reply-token",
+		});
 		const admin = await openPage(server, { path: "/p/scratch/settings" });
 		try {
 			const { page } = admin;
 			page.setDefaultTimeout(3000);
 			await section(page, "People");
+			const issued = page.locator(".settings-token").filter({ hasText: "lost-reply-token" });
+			await issued.getByText("Active", { exact: true }).waitFor();
+			const tokenNumber = (await issued.locator("small").innerText()).split(" · ")[0];
+			expect(tokenNumber).toMatch(/^token \d+$/);
+			const refreshed = page.locator(".settings-token").filter({ hasText: `${tokenNumber} ·` });
 			await page.getByLabel("Person to forget", { exact: true }).selectOption("forget-lost-reply");
 			await page.getByLabel("Type the name to confirm", { exact: true }).fill("forget-lost-reply");
 			await page.route("**/api/admin", async (route) => {
@@ -122,6 +142,9 @@ test.skipIf(!browserAvailable)(
 			expect(await page.getByLabel("Person to forget", { exact: true }).inputValue()).toBe("");
 			expect(await page.getByLabel("Type the name to confirm", { exact: true }).inputValue()).toBe("");
 			expect(await rows(page).filter({ hasText: "forget-lost-reply" }).count()).toBe(0);
+			await refreshed.getByText("Revoked", { exact: true }).waitFor();
+			expect(await refreshed.locator("b").innerText()).toMatch(/^forgotten-\d+$/);
+			expect(await refreshed.getByRole("button", { name: /^Revoke / }).count()).toBe(0);
 			expect(
 				await page.getByRole("button", { name: "Forget this person", exact: true }).getAttribute("aria-disabled"),
 			).toBe("true");

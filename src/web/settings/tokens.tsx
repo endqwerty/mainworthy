@@ -41,7 +41,7 @@ function tokenFacts(token: Token): string {
 			: [`last used ${age(token.lastUsedAt)}${token.lastUsedFrom === null ? "" : ` from ${token.lastUsedFrom}`}`]),
 	].join(" · ");
 }
-export function IssuedTokens() {
+export function IssuedTokens({ canCreate = false }: { canCreate?: boolean }) {
 	const { project, setStatus } = useApp();
 	const input = { do: "token.list" } as const;
 	const read = useQuery({
@@ -92,7 +92,9 @@ export function IssuedTokens() {
 						)}
 					</div>
 				))}
-			{parsed.success && !parsed.data.length && <p className="dim">No tokens yet.</p>}
+			{parsed.success && !parsed.data.length && (
+				<p className="dim">No tokens yet.{canCreate && " Press n to create one."}</p>
+			)}
 		</>
 	);
 }

@@ -23,6 +23,16 @@ test.skipIf(!browserAvailable)(
 			const { page } = view;
 			page.setDefaultTimeout(8000);
 			await page.getByRole("option", { name: "Tokens", exact: true }).click();
+			await page.route("**/api/admin", async (route) => {
+				if (route.request().postDataJSON().do !== "token.list") return route.continue();
+				await route.fulfill({ json: { ok: true, result: [] } });
+			});
+			await page.getByRole("option", { name: "Policy", exact: true }).click();
+			await page.getByRole("option", { name: "Tokens", exact: true }).click();
+			await page.getByText("No tokens yet. Press n to create one.", { exact: true }).waitFor();
+			await page.keyboard.press("n");
+			expect(await page.getByLabel("Token actor").evaluate((input) => input === document.activeElement)).toBe(true);
+			await page.unroute("**/api/admin");
 			// The form offers four lifetimes and starts from none.
 			const expires = page.getByLabel("Expires", { exact: true });
 			expect(await expires.locator("option").allInnerTexts()).toEqual(["Never", "30 days", "90 days", "1 year"]);
@@ -38,7 +48,7 @@ test.skipIf(!browserAvailable)(
 			const row = page.locator(".settings-token", { hasText: "nightly" });
 			await row.getByText("expires in 90 days", { exact: false }).waitFor();
 			const facts = await row.locator("small").innerText();
-			expect(facts).toMatch(/^agent for scratch · created now by robin · expires in 90 days$/);
+			expect(facts).toMatch(/^token \d+ · agent for scratch · created now by robin · expires in 90 days · never used$/);
 			expect(await row.locator("span.dim").innerText()).toBe("Active");
 			expect(facts).not.toContain(secret);
 			// What the page says is what the server holds.
@@ -57,11 +67,13 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Create token", exact: true }).click();
 			await row.getByText("last used", { exact: false }).waitFor();
 			expect(await row.locator("small").innerText()).toMatch(
-				/^agent for scratch · created (now|1m) by robin · expires in 90 days · last used (now|1m) from 127\.0\.0\.1$/,
+				/^token \d+ · agent for scratch · created (now|1m) by robin · expires in 90 days · last used (now|1m) from 127\.0\.0\.1$/,
 			);
 			// A token with no end says nothing of one.
 			const endless = page.locator(".settings-token", { hasText: "forever" });
-			expect(await endless.locator("small").innerText()).toMatch(/^agent for scratch · created now by robin$/);
+			expect(await endless.locator("small").innerText()).toMatch(
+				/^token \d+ · agent for scratch · created now by robin · never used$/,
+			);
 
 			// Past its end it reads "Expired", and there is nothing left to revoke. This server's clock cannot be
 			// moved, so the list the page is given next says of one token what the server says once the end has
