@@ -10,7 +10,7 @@ Choice labels such as `[create]` or `[1]` show which input shape a field belongs
 
 ## propose
 
-Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected.
+Propose at base version. Status: adopted=current, open=review, conflict, rejected.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -91,11 +91,13 @@ Propose cases at their base version. Status: adopted=current, open=needs accepta
 | `edits[][policy].settings.flakyDetection.windowDays` | `integer` | yes |  |
 | `edits[][policy].settings.flakyDetection.minFlips` | `integer` | yes |  |
 | `edits[][policy].settings.unlinked` | `"ask" \| "track" \| "create"` | yes |  |
+| `edits[][policy].settings.emptyReports` | `"pending" \| "nothing-required"` | no |  Default: `"pending"`. |
 | `edits[][policy].settings.basis` | `"exact" \| "exact-or-assumed"` | yes |  |
 | `edits[][policy].settings.holds` | `object` | yes |  |
 | `edits[][policy].settings.holds.flakyDays` | `integer` | yes |  |
 | `edits[][policy].settings.holds.infraThisTargetOnly` | `boolean` | yes |  |
 | `edits[][policy].unlinked` | `"ask" \| "track" \| "create"` | no |  |
+| `edits[][policy].emptyReports` | `"pending" \| "nothing-required"` | no |  |
 | `reason` | `string` | no | Why. Shown in the case history. |
 | `project` | `string` | no | Omit only for a single project. |
 
@@ -140,6 +142,7 @@ Record results for target or run.
 | `results[].annotation.case` | `string` | yes |  |
 | `results[].annotation.version` | `integer` | no |  |
 | `results[].corrects` | `integer` | no | The id of an earlier result of yours that this one replaces. |
+| `nothingRequired` | `true` | no | CI-only empty declaration; requires policy permission. |
 | `project` | `string` | no | Omit only for a single project. |
 
 ## claim

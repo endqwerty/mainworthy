@@ -129,6 +129,122 @@ describe("who may change the suite and the policy", () => {
 });
 
 describe("what a result may prove", () => {
+	const emptyPolicy = (emptyReports: "pending" | "nothing-required") => {
+		h.call("propose", { edits: [{ op: "policy", emptyReports }] });
+		return decide(open("adopt"), { is: "accept" }, h.owner, { reason: "Path filters can require no tests" });
+	};
+	const nothingRequired = (commit: string, extra: Record<string, unknown> = {}) => ({
+		target: { commit, branch: "main" },
+		results: [],
+		nothingRequired: true,
+		...extra,
+	});
+
+	test("a CI declaration of nothing required passes only under a recorded policy choice", () => {
+		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
+		const input = nothingRequired("empty0001");
+		expect(report(input, pipeline).gate?.verdict).toBe("pending");
+		expect(gate({ commit: "empty0001" }).verdict).toBe("pending");
+		h.call("propose", { edits: [{ op: "policy", emptyReports: "nothing-required" }] });
+		expect(gate({ commit: "empty0001" }).verdict).toBe("pending");
+		expect(decide(open("adopt"), { is: "accept" })).toMatchObject({ status: "decided", effects: { policyVersion: 2 } });
+		expect(h.call("admin", { do: "policy.show", project: "scratch" })).toMatchObject({
+			settings: { emptyReports: "nothing-required" },
+		});
+		expect(gate({ commit: "empty0001" })).toMatchObject({
+			verdict: "passed",
+			reason: "passed: the pipeline declared nothing required under the project's policy",
+			tally: { pass: 0 },
+			stale: false,
+		});
+		expect(gate({ commit: "unknown01" }).verdict).toBe("pending");
+		expect(report(input, pipeline).fresh).toBe(false);
+		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 1 }]);
+		emptyPolicy("pending");
+		expect(gate({ commit: "empty0001" })).toMatchObject({ verdict: "pending", stale: false });
+	});
+
+	test("nothing required is explicit, only from CI, and only about a commit", () => {
+		emptyPolicy("nothing-required");
+		const pipeline = h.actor("pipeline", "ci", ["record"]);
+		const agent = h.actor("explorer", "agent", ["produce"]);
+		for (const actor of [h.owner, agent]) expect(h.raw("report", nothingRequired("empty0002"), actor).ok).toBe(false);
+		for (const input of [
+			{ target: { commit: "empty0002" }, results: [] },
+			nothingRequired("empty0002", { target: { session: "exploration" } }),
+			nothingRequired("empty0002", { results: [{ test: { key: "a::t" }, outcome: "skip" }] }),
+		])
+			expect(h.raw("report", input, pipeline).ok).toBe(false);
+		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
+	});
+
+	test("a nothing-required declaration waits for application and survives accepted-batch recovery", () => {
+		emptyPolicy("nothing-required");
+		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
+		const project = findProject(h.app.db, "scratch");
+		if (!project) throw new Error("no project");
+		h.app.db.transaction(() => {
+			const ctx = makeCtx(h.app, project, pipeline, true);
+			acceptReport(ctx, { target: { commit: "empty0008" }, results: [], nothingRequired: true });
+			stampSeq(ctx);
+		});
+		expect(gate({ commit: "empty0008" }).verdict).toBe("pending");
+		recoverAccepted(h.app);
+		expect(gate({ commit: "empty0008" }).verdict).toBe("passed");
+		expect(rows("SELECT nothing_required, state FROM batches")).toEqual([{ nothing_required: 1, state: "processed" }]);
+	});
+
+	test("nothing required cannot hide skips, refused results, agent results or a skipped failure", () => {
+		emptyPolicy("nothing-required");
+		const pipeline = h.actor("pipeline", "ci", ["record"]);
+		const agent = h.actor("explorer", "agent", ["produce"]);
+		report(nothingRequired("empty0003"), pipeline);
+		report(
+			{
+				target: { commit: "empty0003", env: "other" },
+				job: "another-job",
+				results: [{ test: { key: "a::t" }, outcome: "skip" }],
+			},
+			pipeline,
+		);
+		expect(gate({ commit: "empty0003" }).verdict).toBe("pending");
+		report({ target: { commit: "empty0004" }, results: [{ test: { case: "C-99" }, outcome: "pass" }] });
+		report(nothingRequired("empty0004"), pipeline);
+		expect(gate({ commit: "empty0004" }).verdict).toBe("pending");
+		report({ target: { commit: "empty0005" }, results: [{ test: { key: "a::t" }, outcome: "pass" }] }, agent);
+		report(nothingRequired("empty0005"), pipeline);
+		expect(gate({ commit: "empty0005" }).verdict).toBe("pending");
+		const failed = (outcome: string, attempt: number) => ({
+			target: { commit: "empty0006", branch: "main" },
+			attempt,
+			results: [{ test: { key: "a::t" }, outcome, failure: { message: "bug" } }],
+		});
+		report(failed("fail", 1), pipeline);
+		expect(gate({ commit: "empty0006" }).verdict).toBe("blocked");
+		report(nothingRequired("empty0006"), pipeline);
+		expect(gate({ commit: "empty0006" }).verdict).toBe("blocked");
+		decide(open("failure"), { is: "defect" });
+		report(failed("skip", 2), pipeline);
+		report(nothingRequired("empty0006", { attempt: 3 }), pipeline);
+		expect(gate({ commit: "empty0006" }).verdict).toBe("failed");
+	});
+
+	test("nothing required is scoped to its repository and never fills a planned run or a job", () => {
+		emptyPolicy("nothing-required");
+		seed();
+		const pipeline = h.actor("pipeline", "ci", ["record"]);
+		const planned = plan({
+			name: "the build must run tests",
+			select: {},
+			accepts: { commit: "empty0007", repo: "app" },
+			require: [...exercise(), { id: "jobs", kind: "jobs", jobs: ["tests"] }],
+		});
+		report(nothingRequired("empty0007", { target: { commit: "empty0007", repo: "app" }, job: "tests" }), pipeline);
+		expect(gate({ commit: "empty0007", repo: "app" }).verdict).toBe("passed");
+		expect(gate({ commit: "empty0007", repo: "other" }).verdict).toBe("pending");
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "pending", tally: { missing: 2 } });
+	});
+
 	test("an agent's result stays an agent's result when it travels with an automated one", () => {
 		seed(2);
 		const agent = h.actor("explorer", "agent", ["read", "produce"]);

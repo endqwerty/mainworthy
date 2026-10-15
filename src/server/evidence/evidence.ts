@@ -64,6 +64,7 @@ export type BatchRow = {
 	key: string;
 	target: number;
 	job: string;
+	nothing_required: number;
 	attempt: number;
 	method: MethodKind;
 	actor: number;
@@ -192,6 +193,7 @@ const Q = {
 		key: string;
 		target: number;
 		job: string;
+		nothingRequired: number;
 		attempt: number;
 		method: string;
 		actor: number;
@@ -202,8 +204,12 @@ const Q = {
 		at: number;
 		seq: number;
 	}>(
-		`INSERT INTO batches (project, key, target, job, attempt, method, actor, run, build_url, state, counts, staged, at, seq)
-		 VALUES ($project, $key, $target, $job, $attempt, $method, $actor, $run, $url, 'accepted', $counts, $staged, $at, $seq)`,
+		`INSERT INTO batches (project, key, target, job, nothing_required, attempt, method, actor, run, build_url, state, counts, staged, at, seq)
+		 VALUES ($project, $key, $target, $job, $nothingRequired, $attempt, $method, $actor, $run, $url, 'accepted', $counts, $staged, $at, $seq)`,
+	),
+	emptyReports: sql<{ target: number }, { declared: number; ordinary: number }>(
+		`SELECT coalesce(max(nothing_required = 1 AND method = 'auto'), 0) AS declared,
+		 coalesce(max(nothing_required = 0), 0) AS ordinary FROM batches WHERE target = $target AND state = 'processed'`,
 	),
 	markProcessed: sql<{ id: number; counts: string }>(
 		"UPDATE batches SET state = 'processed', counts = $counts, staged = NULL WHERE id = $id",
@@ -651,7 +657,7 @@ export function accept(
 	input: {
 		target: TargetRow;
 		run: number | null;
-		report: Pick<ReportInput, "job" | "attempt" | "buildUrl" | "results">;
+		report: Pick<ReportInput, "job" | "attempt" | "buildUrl" | "results" | "nothingRequired">;
 		/**
 		 * For results recorded against a case: the command id, so recording the same outcome again later is a new
 		 * fact. A report of automated tests only has no nonce: the same files sent twice are the same batch.
@@ -692,6 +698,7 @@ export function accept(
 		method,
 		actor: ctx.actor.id,
 		run: input.run,
+		nothingRequired: report.nothingRequired ? 1 : 0,
 		url: report.buildUrl ?? null,
 		counts: JSON.stringify(countOutcomes(report.results)),
 		staged: JSON.stringify(report.results),
@@ -705,6 +712,17 @@ export function accept(
 
 export const batchById = (db: Db, id: number): BatchRow | null => db.get(Q.batchById, { id });
 export const acceptedBatches = (db: Db): BatchRow[] => db.all(Q.accepted);
+
+/** A declaration proves nothing once any ordinary report exists on any target the commit counts. */
+export function nothingRequiredOn(db: Db, targets: readonly TargetRow[]): boolean {
+	let declared = false;
+	for (const target of targets) {
+		const reports = db.get(Q.emptyReports, { target: target.id });
+		if (reports?.ordinary) return false;
+		if (reports?.declared) declared = true;
+	}
+	return declared;
+}
 /**
  * The jobs that have reported for a target, for a run that requires a job: a pipeline's report (or a person
  * passing one on) that ran something. What counts is a decisive automated result in the batch, each result by

@@ -362,6 +362,8 @@ export const PolicySettings = z.object({
 	fields: FieldDefinitions.optional().meta({ "x-mcp-hidden": true }),
 	flakyDetection: FlakyDetectionSettings,
 	unlinked: Unlinked,
+	/** An explicit CI declaration may pass a commit with no ordinary reports. */
+	emptyReports: z.enum(["pending", "nothing-required"]).default("pending"),
 	/** Which bases a planned run's slots accept by default. */
 	basis: z.enum(["exact", "exact-or-assumed"]),
 	holds: z.object({

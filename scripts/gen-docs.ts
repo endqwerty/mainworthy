@@ -107,6 +107,7 @@ function policyPresets(): string {
 				...PRESET_GUIDE.map((row) => [row.question, ...PRESET_NAMES.map((name) => row.answeredBy[name])]),
 				["How long a `flaky` answer carries forward", ...PRESET_NAMES.map(holds)],
 				["What fills a slot of a planned run", ...PRESET_NAMES.map(basis)],
+				["An empty report", ...PRESET_NAMES.map((name) => code(PRESETS[name].settings.emptyReports))],
 			],
 		),
 	].join("\n");

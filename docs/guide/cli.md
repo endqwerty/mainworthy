@@ -44,12 +44,12 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | Command | What it does |
 | --- | --- |
 | `mainworthy serve` | Start the server and web UI. Also the default with no arguments. |
-| `mainworthy report <files...> [--format <format>] [--session <name>] [--run R-4] [--json]` | Upload test reports, detect the CI build, and print the receipt. Use gate to check the verdict. |
+| `mainworthy report <files...> [--format <format>] [--session <name>] [--run R-4] \| report --nothing-required [--commit <sha>] [--json]` | Upload test reports or declare no tests required, detect the CI build, and print the receipt. Use gate to check the verdict. |
 | `mainworthy gate [--commit <sha> \| --run R-4 \| --change pr:482] [--wait <seconds>] [--json]` | Check a commit, change or run. Exit 0 passed, 1 failed, 2 blocked, 3 pending. |
 | `mainworthy token new --agent <name> \| --ci <name> \| --human <name> [--can read,produce] [--project <key>] [--expires 90d] \| token list \| token revoke <id>` | Issue, list and revoke actor tokens. A new secret is shown once. |
 | `mainworthy invite new <name> [--can read,answer] [--project <key>] [--expires 3d] \| invite list \| invite revoke <id>` | Invite a person with a link that is shown once, list invitations, and revoke one. |
 | `mainworthy actor list \| actor grant <name> --can read,record [--project <key>] \| actor ungrant <name> [--project <key>] \| actor forget <name> --confirm <name>` | List who may do what, change grants, and forget an actor's identity while keeping history. |
-| `mainworthy policy show \| policy use <loose\|standard\|strict> \| policy tests <ask\|track\|create> [--json]` | Show policy clauses, or propose and record an admin's choice of preset or of what happens to a test with no case. |
+| `mainworthy policy show \| policy use <loose\|standard\|strict> \| policy tests <ask\|track\|create> \| policy empty <pending\|nothing-required> [--json]` | Show policy clauses, or record an admin's choice of preset, tests with no case, or empty reports. |
 | `mainworthy new [file\|-] [--json]` | Create a case from a canonical Markdown file or an outline on stdin. |
 | `mainworthy seed <project> [--cases 2000] [--unlinked-files 60] [--json]` | Fill a new or empty project with demo data: a shop's cases, results, a run and questions to answer. |
 | `mainworthy get <ref> [--md] [--json]` | Read a ref, or print a case's canonical Markdown with --md. |
@@ -74,6 +74,7 @@ Flags of `mainworthy report`:
 - `--run <string>`: Planned run these results are for.
 - `--job <string>`: CI job name. Overrides detection.
 - `--attempt <number>`: Build attempt. Overrides detection.
+- `--nothing-required`: CI declares this commit requires no tests, if its policy allows. No files.
 
 Flags of `mainworthy gate`:
 

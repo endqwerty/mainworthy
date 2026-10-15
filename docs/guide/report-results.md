@@ -85,6 +85,21 @@ test executions stop the upload with exit `4`. No files in that command are
 sent. Keep the runner's exit status as a CI check too, since a report cannot
 prove work that the runner omitted. JUnit keeps its existing parser and warnings.
 
+## Report that no tests are required
+
+When path filters require no tests for a commit, a pipeline can explicitly declare that fact:
+
+```sh
+$ mainworthy report --nothing-required --commit 1111111111111111111111111111111111111111
+$ mainworthy gate --commit 1111111111111111111111111111111111111111
+```
+
+The report needs a CI token. It accepts no files or results. CI detection can supply the commit, job, and other build metadata as for an ordinary report.
+
+All presets keep this gate pending by default. A project admin must first record `mainworthy policy empty nothing-required`. See [reports with no tests](./policy.md#reports-with-no-tests) for the policy choice and its record.
+
+The declaration passes only a commit with no ordinary reports. It cannot turn skips, refused results, agent results, or an existing failure into a pass. It never satisfies a planned run or a required CI job. An empty JUnit file without the explicit declaration is refused.
+
 ## Identify the tested build
 
 Mainworthy detects GitHub Actions, GitLab CI, CircleCI, Buildkite, Jenkins,

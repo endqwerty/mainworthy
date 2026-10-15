@@ -1235,9 +1235,19 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 	for (const id of ids) {
 		const existing = runById(ctx.db, id);
 		if (!existing) continue;
-		let result = retally(ctx, id, blockersOf(ctx, existing));
+		let result = retally(
+			ctx,
+			id,
+			blockersOf(ctx, existing),
+			currentPolicy(ctx.db, ctx.project.id).settings.emptyReports,
+		);
 		if (result.failing.size > 0 && askUnexplained(ctx, result.run))
-			result = retally(ctx, id, blockersOf(ctx, result.run));
+			result = retally(
+				ctx,
+				id,
+				blockersOf(ctx, result.run),
+				currentPolicy(ctx.db, ctx.project.id).settings.emptyReports,
+			);
 		if (options.dissolveStale) dissolveStale(ctx, result.run);
 		const run = result.run;
 		const asked =
@@ -1310,7 +1320,8 @@ function dissolveStale(ctx: Ctx, run: RunRow): void {
 	}
 	for (const id of waited) {
 		const named = runById(ctx.db, id);
-		if (named) retally(ctx, named.id, blockersOf(ctx, named));
+		if (named)
+			retally(ctx, named.id, blockersOf(ctx, named), currentPolicy(ctx.db, ctx.project.id).settings.emptyReports);
 	}
 }
 
@@ -1325,7 +1336,7 @@ function dissolve(ctx: Ctx, question: QuestionRow, later?: Set<number>): void {
 		const named = runById(ctx.db, about);
 		if (!named || !json<string[]>(named.blocking).includes(questionRef(question))) continue;
 		if (later) later.add(named.id);
-		else retally(ctx, named.id, blockersOf(ctx, named));
+		else retally(ctx, named.id, blockersOf(ctx, named), currentPolicy(ctx.db, ctx.project.id).settings.emptyReports);
 	}
 }
 

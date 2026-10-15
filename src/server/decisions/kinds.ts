@@ -31,6 +31,7 @@ import {
 	findRun,
 	gateOf,
 	type RunRow,
+	reconsiderEmptyReports,
 	reopenRun,
 	restoreFailures,
 	runById,
@@ -148,6 +149,7 @@ const adoptHandler: Handler<"adopt"> = {
 		const adopted = adopt(ctx, witness, proposal);
 		const effects = { cases: adopted.cases, created: adopted.created, policyVersion: adopted.policyVersion };
 		if (adopted.policyVersion === null) return effects;
+		reconsiderEmptyReports(ctx);
 		const ruled = tools.ruleTakesUnlinked(ctx);
 		return ruled > 0 ? { ...effects, ruled } : effects;
 	},

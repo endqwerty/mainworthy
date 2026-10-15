@@ -26,12 +26,14 @@ nonzero counts, followed by "Open questions", "Settled and excused", "Impact",
 and "Uncovered files" when there are uncovered paths.
 Impact lists related cases and review information. It is not a code coverage measurement.
 
+The diagram follows the default policy, which requires counted evidence. A project can separately allow an explicit [CI declaration that no tests are required](./policy.md#reports-with-no-tests).
+
 [Diagram: how a gate reaches its verdict](../diagrams/gate-verdict.html)
 
 ## Act on the verdict
 
-`passed` means counted evidence exists and no current failure, dispute, missing
-requirement, or blocking question prevents passage. Read "Settled and excused"
+`passed` means counted evidence exists, or the project's policy accepts an applied CI declaration that no tests are required.
+No current failure, dispute, missing requirement, or blocking question prevents passage. Read "Settled and excused"
 to see whether a decision excused a failure. Passed does not mean every test passed.
 
 `failed` means a decision attributes a failure to the target.

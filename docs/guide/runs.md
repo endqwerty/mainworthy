@@ -97,6 +97,7 @@ Add named jobs when the run must receive reports from all parts of a pipeline.
 Each required job needs an applied pipeline report that ran something.
 A report made only of skipped or blocked results does not meet the requirement.
 An agent's report under the same job name does not meet it either.
+A `nothingRequired` declaration never satisfies a required job or a case slot, even when the project's policy allows an empty commit gate to pass.
 A run that counts only its own results cannot require CI jobs.
 
 Use this CLI form for one case, one commit, and a required `tests` job:

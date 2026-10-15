@@ -21,7 +21,7 @@ The `when` column holds the conditions a clause tests. `always` matches every qu
 
 An agent's answer is one of three things. It counts as a decision, it is shown as advice and a person decides, or it is refused. The table also says whether a person who produced the evidence may answer, and whether the answer needs a reason.
 
-A policy never decides a verdict. A failure that nobody has explained blocks every run that shows it, under all three presets. The policy decides who may explain it. The `blocks` column only says which runs list a question.
+A failure that nobody has explained blocks every run that shows it, under all three presets. The policy decides who may explain it. The `blocks` column only says which runs list a question. A separate setting says whether an explicit CI declaration that no tests are required may pass an empty commit gate.
 
 ## Read the policy
 
@@ -42,10 +42,10 @@ map      always                    member       counts          nothing
 failure  scope:change              member       advice          change
 failure  always                    member       advice          release
 signoff  verdict:passed            rule         refused         nothing  {"is":"approve"}
-basis: exact-or-assumed; flaky hold: 14 days; tests with no case: track
+basis: exact-or-assumed; flaky hold: 14 days; tests with no case: track; empty reports: pending
 ```
 
-The last line holds the settings. The basis is which evidence a planned run accepts for a slot by default, and `strict` raises it to `exact`. The flaky hold is how many days a "Flaky" answer carries forward. The third says what happens to a test with no case.
+The last line holds the settings. The basis is which evidence a planned run accepts for a slot by default, and `strict` raises it to `exact`. The flaky hold is how many days a "Flaky" answer carries forward. The other settings describe tests with no case and empty reports.
 
 ## Custom fields
 
@@ -108,6 +108,7 @@ Who answers each question:
 | A change to the policy | An admin, not an agent | An admin, not an agent | An admin, not an agent |
 | How long a `flaky` answer carries forward | 14 days | 14 days | 14 days |
 | What fills a slot of a planned run | Also a result assumed to be for the current version | Also a result assumed to be for the current version | Only a result that names the pinned version |
+| An empty report | `pending` | `pending` | `pending` |
 
 <!-- /generated -->
 
@@ -142,6 +143,27 @@ A link holds for the tests it names. When another test turns up in the same file
 
 A custom policy reads the choice only if its clauses test `unlinked:track` or `unlinked:create`. Settings offers the choice under a preset.
 
+## Reports with no tests
+
+Every preset starts with `emptyReports: "pending"`. A commit without counted evidence stays pending, even when CI says no tests are required.
+
+For a pipeline that legitimately runs no tests, such as a docs-only change, an admin can enable an explicit declaration:
+
+```sh
+$ mainworthy policy empty nothing-required
+empty reports: nothing-required; proposal P-4 and decision 5 are both recorded
+```
+
+This uses the same proposal and admin decision as other policy changes. It requires `produce` and `admin` on the project. Settings has no control for this setting. To restore the default, run `mainworthy policy empty pending`. Choosing any preset also restores `pending`.
+
+With the setting enabled, a CI actor sends `mainworthy report --nothing-required`, with the tested commit supplied or detected. The declaration stays in the report record. A human or agent token cannot send it. An empty JUnit file alone is not a declaration.
+
+The exception passes only a commit gate with an applied declaration and no ordinary reports for that commit and repository. A skipped, blocked, refused, or agent-only report prevents the exception, in any job or environment. An empty declaration cannot hide an existing failure. It never fills a planned run's case slot or required job. Missing reports stay pending.
+
+The setting applies to recorded declarations too. Disabling it returns an otherwise empty gate to pending. An upload receipt remains the verdict at upload time. Use `mainworthy gate` to read the current verdict.
+
+The API policy edit is `{"op":"policy","emptyReports":"nothing-required"}`. The report is `{"target":{"commit":"1111111111111111111111111111111111111111"},"results":[],"nothingRequired":true}`.
+
 ## Switch the policy
 
 1. Open Settings, then Policy.
@@ -167,14 +189,14 @@ policy proposal P-2: open Q-2 needs an admin
 
 An admin finds it in Queue under "Proposals". Reading the clause table needs `admin` on every project, which is more than switching needs.
 
-A policy change rewrites nothing that is recorded. Results, decisions and cases stay as they were. What changes is who may answer, and whether a reason is needed. That holds for the next question and for every question that is still open: an open question now waits for whoever the new policy names. One kind of question is answered at the change: where the new policy has a rule for [tests with no case](#tests-with-no-case), the rule answers the open questions about them, and under `create` that makes their cases.
+A policy change rewrites nothing that is recorded. Results, decisions and cases stay as they were. What changes is who may answer, whether a reason is needed, and whether an empty declaration passes. That holds for the next question and for every question that is still open: an open question now waits for whoever the new policy names. One kind of question is answered at the change: where the new policy has a rule for [tests with no case](#tests-with-no-case), the rule answers the open questions about them, and under `create` that makes their cases.
 
 ## Change single clauses
 
 Settings has no control for one clause. To change one, send a policy edit to `mainworthy propose`. The edit carries the whole clause list, so start from what `mainworthy policy show --json` prints, change a clause, and send it back. This example, with the clauses cut to `[...]`, makes a reason mandatory for findings and shortens the flaky hold to 7 days:
 
 ```
-$ mainworthy propose --json '{"edits":[{"op":"policy","preset":"standard","clauses":[...],"settings":{"unlinked":"track","basis":"exact-or-assumed","holds":{"flakyDays":7,"infraThisTargetOnly":true}}}]}'
+$ mainworthy propose --json '{"edits":[{"op":"policy","preset":"standard","clauses":[...],"settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":7,"infraThisTargetOnly":true}}}]}'
 {"proposal":"P-9","question":"Q-9","conflicts":[],"status":"open","needs":"an admin","cases":[]}
 ```
 
@@ -184,8 +206,8 @@ An admin accepts it like any policy change. Mainworthy refuses a policy in which
 invalid: every kind must end with a clause that always matches; missing for: finding
 ```
 
-The settings are sent whole: `unlinked`, the basis, the holds, custom field definitions in `fields`, and `flakyDetection`.
-Omitting `fields` clears the definitions. Omitting `flakyDetection` selects its defaults.
+The settings are sent whole: `unlinked`, `emptyReports`, the basis, the holds, custom field definitions in `fields`, and `flakyDetection`.
+Omitting `emptyReports` selects `pending`. Omitting `fields` clears the definitions. Omitting `flakyDetection` selects its defaults.
 The flaky hold takes 1 to 365 days. `infraThisTargetOnly` is true when an "Infrastructure" answer covers only the build it was given for.
 
 ## Same-code detector settings

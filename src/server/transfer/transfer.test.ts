@@ -175,6 +175,7 @@ const fixtures: Record<string, Row[]> = {
 			id: 504,
 			project: 23,
 			key: "upload-one",
+			nothing_required: 1,
 			target: 502,
 			job: "",
 			attempt: 1,

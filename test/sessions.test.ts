@@ -10,9 +10,10 @@ import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import { flushUses, removeGrant, revokeToken, sweepSessions } from "../src/server/identity/identity.ts";
 import { openSession } from "../src/server/identity/sessions.ts";
 import { type Config, databasePath, defaultConfig, type ReadCall, type ReadPool } from "../src/server/kernel/app.ts";
-import { SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
+import { ARCHIVE_VERSION, SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
 import { Readers } from "../src/server/readers.ts";
 import { type Instance, start } from "../src/server/start.ts";
+import { exportArchive } from "../src/server/transfer/transfer.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 
 const TOKEN = "owner-secret-0123456789";
@@ -229,12 +230,15 @@ async function ownToken(instance: Instance): Promise<string> {
 	if (!made.body.ok) throw new Error("no token");
 	return made.body.result.token;
 }
-/** The fixture archive sent to a local-mode instance by the owner of the machine. */
-const importFixture = (instance: Instance): Promise<Response> =>
-	fetch(`${instance.url}/api/import`, {
+/** Replays a current-format snapshot, which removes tokens and sessions while retaining actor ids. */
+const importCurrent = (instance: Instance): Promise<Response> => {
+	const chunks: string[] = [];
+	exportArchive(instance.app.db, (chunk) => chunks.push(chunk));
+	return fetch(`${instance.url}/api/import`, {
 		method: "POST",
-		body: readFileSync(join(FIXTURES, "archive-v1.ndjson"), "utf8"),
+		body: chunks.join(""),
 	});
+};
 /** A header a proxy adds: the request is then not the local owner's, and a caller that is refused stays refused. */
 const ELSEWHERE: Sent = { "x-real-ip": "192.0.2.1" };
 
@@ -984,7 +988,7 @@ describe("an upgrade and an archive", () => {
 	test("a successful import forgets the uses that were noted: a token made afterwards under an old id was never used", async () => {
 		const instance = boot({ mode: "local" });
 		expect(await statusOf(instance, bearer(await ownToken(instance)))).toBe(200);
-		expect((await importFixture(instance)).status).toBe(200);
+		expect((await importCurrent(instance)).status).toBe(200);
 		// The import deleted every token, so the next one takes the first id again.
 		await ownToken(instance);
 		const listed = await admin<{ id: number; lastUsedAt: number | null }[]>(instance, { do: "token.list" }, {});
@@ -998,7 +1002,7 @@ describe("an upgrade and an archive", () => {
 		const queue = gateQueue(instance);
 		try {
 			// Three callers wait at the gate in this order: the import, a new token for the same actor, the sign-in.
-			const importing = importFixture(instance);
+			const importing = importCurrent(instance);
 			await queue.reaches(1);
 			const replacing = admin<{ token: string }>(instance, { do: "token.create", actor: "robin", kind: "human" }, {});
 			await queue.reaches(2);
@@ -1115,7 +1119,7 @@ describe("an upgrade and an archive", () => {
 		const gate = holdGate(instance);
 		const queue = gateQueue(instance);
 		try {
-			const importing = importFixture(instance);
+			const importing = importCurrent(instance);
 			await queue.reaches(1);
 			const replacing = ownToken(instance);
 			await queue.reaches(2);
@@ -1137,30 +1141,21 @@ describe("an upgrade and an archive", () => {
 		}
 	});
 
-	test("an archive exported by the build before sessions imports on this one", async () => {
+	test("an archive from before explicit empty reports is refused without changing the instance", async () => {
 		const archive = readFileSync(join(FIXTURES, "archive-v1.ndjson"), "utf8");
 		expect(archive.split("\n")[0]).toContain('"schema":1');
-		const dataDir = scratch();
-		const first = boot({ dataDir });
-		const imported = await fetch(`${first.url}/api/import`, { method: "POST", headers: bearer(TOKEN), body: archive });
-		expect(`${imported.status} ${await imported.text()}`).toContain('200 {"ok":true,"result":{"rows":21,');
-		// An import leaves no token behind; the next start takes the owner's from the configuration again.
-		await first.stop();
-		const second = boot({ dataDir });
-		const found = await post<{ count: number; items: { title: string }[] }>(
-			second,
-			"/api/p/scratch/find",
-			{},
-			bearer(TOKEN),
-		);
-		expect(found.body.ok && found.body.result).toMatchObject({ count: 1, items: [{ title: "Coupon applies" }] });
-		const run = await post<{ ref: string }[]>(second, "/api/p/scratch/get", { refs: ["R-1"] }, bearer(TOKEN));
-		expect(run.body.ok && run.body.result).toMatchObject([{ ref: "R-1" }]);
-		const actors = await admin<{ name: string }[]>(second, { do: "actor.list" });
-		expect(actors.body.ok && actors.body.result.map((actor) => actor.name)).toEqual(["policy", "robin", "sam"]);
-		// What this build exports names the same archive version, so the old build's reader would take it too.
-		const again = await (await fetch(`${second.url}/api/export`, { headers: bearer(TOKEN) })).text();
-		expect(again.split("\n")[0]).toContain('"schema":1');
+		const instance = boot();
+		const imported = await fetch(`${instance.url}/api/import`, {
+			method: "POST",
+			headers: bearer(TOKEN),
+			body: archive,
+		});
+		expect(imported.status).toBe(400);
+		expect(await imported.text()).toContain("older");
+		const found = await post<{ count: number }>(instance, "/api/p/scratch/find", {}, bearer(TOKEN));
+		expect(found.body.ok && found.body.result).toMatchObject({ count: 0 });
+		const again = await (await fetch(`${instance.url}/api/export`, { headers: bearer(TOKEN) })).text();
+		expect(again.split("\n")[0]).toContain(`"schema":${ARCHIVE_VERSION}`);
 	});
 });
 
