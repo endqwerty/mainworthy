@@ -441,10 +441,17 @@ test.skipIf(!browserAvailable)(
 			await page.getByLabel("Home screen", { exact: true }).selectOption("queue");
 			await page.getByRole("button", { name: "Save home", exact: true }).click();
 			await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
-			for (const path of ["/", "/p/scratch"]) {
+			for (const path of ["/", "/p/scratch", "/p/scratch/"]) {
 				await page.goto(`${server.url}${path}`);
 				await page.waitForURL("**/p/scratch/queue");
 			}
+			await page.goto(`${server.url}/p/scratch?folder=HomeFolder`);
+			await page.locator("#app").waitFor();
+			expect(page.url()).toBe(`${server.url}/p/scratch?folder=HomeFolder`);
+			await eventually(
+				() => page.locator("#lcount").innerText(),
+				(text) => text === "2 cases",
+			);
 			await page.goto(`${server.url}/p/scratch/suite/c/1`);
 			await page.locator(".ctitle").waitFor();
 			await page.keyboard.press("e");
@@ -464,6 +471,7 @@ test.skipIf(!browserAvailable)(
 			await page.keyboard.type("g,");
 			await page.getByRole("option", { name: "Your home", exact: true }).click();
 			const planned = await server.api("plan", { name: "Home run", select: { cases: ["C-1"] } });
+			await server.api("plan", { name: "Newer run", select: { cases: ["C-1"] } });
 			await page.getByLabel("Home screen", { exact: true }).selectOption("run");
 			await page.getByLabel("Home run", { exact: true }).fill(planned.run);
 			await page.keyboard.press("Tab");
@@ -473,6 +481,40 @@ test.skipIf(!browserAvailable)(
 			await page.goto(`${server.url}/`);
 			await page.waitForURL(`**/p/scratch/runs/${planned.run.slice(2)}`);
 			await page.getByText("Home run", { exact: true }).first().waitFor();
+			await page.keyboard.type("gq");
+			await page.waitForURL("**/p/scratch/queue");
+			let release = (): void => {};
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			let finish = (): void => {};
+			const completed = new Promise<void>((resolve) => {
+				finish = resolve;
+			});
+			await page.route("**/api/p/scratch/find", async (route) => {
+				if (route.request().postDataJSON().in === "runs") {
+					await held;
+					await route.continue();
+					finish();
+				} else await route.continue();
+			});
+			const asked = page.waitForRequest(
+				(request) => request.url().endsWith("/find") && request.postDataJSON().in === "runs",
+			);
+			await page.keyboard.type("gh");
+			await asked;
+			await page.keyboard.type("g,");
+			await page.waitForURL("**/p/scratch/settings");
+			const answered = page.waitForResponse(
+				(response) => response.url().endsWith("/find") && response.request().postDataJSON().in === "runs",
+			);
+			release();
+			await (await answered).finished();
+			await completed;
+			await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+			await page.unroute("**/api/p/scratch/find");
+			await page.getByRole("option", { name: "Your home", exact: true }).waitFor();
+			expect(page.url()).toBe(`${server.url}/p/scratch/settings`);
 			await page.goto(`${server.url}/p/scratch/settings`);
 			await page.getByRole("option", { name: "Your home", exact: true }).click();
 			await page.getByLabel("Home screen", { exact: true }).selectOption("search");
@@ -537,7 +579,10 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Back to the list", exact: true }).tap();
 			await page.getByRole("button", { name: "Actions", exact: true }).tap();
 			await page.getByRole("option").filter({ hasText: "Go home" }).tap();
-			expect(await page.locator("#app").getAttribute("data-pane")).toBe("detail");
+			await eventually(
+				() => page.locator("#app").getAttribute("data-pane"),
+				(pane) => pane === "detail",
+			);
 			expect(phone.errors).toEqual([]);
 		} finally {
 			await phone.close();
@@ -646,6 +691,108 @@ test.skipIf(!browserAvailable)(
 			const step = page.getByRole("textbox", { name: "Step 1", exact: true });
 			await step.waitFor();
 			expect(await step.inputValue()).toBe("An unfinished step");
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+for (const home of [
+	{ kind: "run", ref: "R-999" },
+	{ kind: "search", text: "alpha", folder: "Gone", tag: "missing-tag" },
+])
+	test.skipIf(!browserAvailable)(
+		`a missing ${home.kind} home opens Suite once with an explanation and no failed requests`,
+		async () => {
+			const server = await startServer({ cases: 1 });
+			const browser = await openPage(server, { path: "/p/scratch/settings" });
+			try {
+				const { page } = browser;
+				page.setDefaultTimeout(4000);
+				await page.getByRole("option", { name: "Your home", exact: true }).click();
+				await page.getByRole("button", { name: "Save home", exact: true }).click();
+				await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
+				const key = await page.evaluate(() => Object.keys(localStorage).find((key) => key.includes(":home:")));
+				if (!key) throw new Error("Missing home preference");
+				await page.evaluate(({ key, home }) => localStorage.setItem(key, JSON.stringify(home)), { key, home });
+				await page.goto(`${server.url}/`);
+				await page.waitForURL("**/p/scratch/suite");
+				await eventually(
+					() => page.locator("#lcount").innerText(),
+					(text) => text === "1 cases",
+				);
+				const notice = page
+					.locator("#bar")
+					.getByRole("status")
+					.filter({ hasText: "Your home was not found. Opened Suite." });
+				await notice.waitFor();
+				expect(await notice.count()).toBe(1);
+				await page.keyboard.type("gq");
+				await page.waitForURL("**/p/scratch/queue");
+				await page.keyboard.type("gh");
+				await page.waitForURL("**/p/scratch/suite");
+				await notice.waitFor();
+				expect(await notice.count()).toBe(1);
+				expect(await page.getByRole("textbox", { name: "Filter cases", exact: true }).inputValue()).toBe("");
+				expect(browser.errors).toEqual([]);
+			} finally {
+				await browser.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
+
+test.skipIf(!browserAvailable)(
+	"sidebar folder and tag filters keep the Suite search text",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "folder", name: "Filtered" },
+				{ op: "create", folder: "Filtered", tags: ["one"], outline: "alpha inside" },
+				{ op: "create", folder: "Filtered", tags: ["two"], outline: "beta inside" },
+				{ op: "create", tags: ["two"], outline: "alpha outside" },
+			],
+		});
+		const browser = await openPage(server);
+		try {
+			const { page } = browser;
+			page.setDefaultTimeout(4000);
+			const filter = page.getByRole("textbox", { name: "Filter cases", exact: true });
+			await filter.fill("alpha");
+			await page.waitForURL("**/suite?text=alpha");
+			await page.locator("#tree button").filter({ hasText: "Filtered" }).click();
+			expect(await filter.inputValue()).toBe("alpha");
+			expect(new URL(page.url()).searchParams.get("text")).toBe("alpha");
+			await eventually(
+				() => page.locator("#lcount").innerText(),
+				(text) => text === "1 cases",
+			);
+			await page.locator(".sidebar-tags button").filter({ hasText: "#two" }).click();
+			expect(await filter.inputValue()).toBe("alpha");
+			expect(new URL(page.url()).searchParams.get("text")).toBe("alpha");
+			await eventually(
+				() => page.locator("#lcount").innerText(),
+				(text) => text === "0 cases",
+			);
+			await page.getByRole("button", { name: "All tags", exact: true }).click();
+			expect(await filter.inputValue()).toBe("alpha");
+			expect(new URL(page.url()).searchParams.get("text")).toBe("alpha");
+			await eventually(
+				() => page.locator("#lcount").innerText(),
+				(text) => text === "1 cases",
+			);
+			await page.locator("#tree button").filter({ hasText: "All cases" }).click();
+			expect(await filter.inputValue()).toBe("alpha");
+			expect(new URL(page.url()).searchParams.get("text")).toBe("alpha");
+			await eventually(
+				() => page.locator("#lcount").innerText(),
+				(text) => text === "2 cases",
+			);
 			expect(browser.errors).toEqual([]);
 		} finally {
 			await browser.close();

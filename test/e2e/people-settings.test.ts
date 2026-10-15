@@ -435,6 +435,7 @@ test.skipIf(!browserAvailable)(
 				"Tokens",
 				"Projects",
 				"Connect",
+				"Your home",
 				"Your sign-in",
 				"Your sessions",
 			]);

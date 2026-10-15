@@ -15,8 +15,10 @@ preference, not a change to the suite, a run, or the project's policy.
 Settings has a Your home section for each project. Its choice is Suite, Queue, a
 run reference, or one saved Suite search with text, folder, and tag filters.
 The search reads current cases, not a saved result set. Suite remains the default.
-The shell uses the home when a person opens `/` or `/p/<project>`. Explicit screen
-and item links keep their destinations. `g h`, also Go home in the palette, uses
+The shell uses the home when a person opens `/`, `/p/<project>`, or
+`/p/<project>/` without a query. Other addresses, including invitations, explicit
+screen and item links, and roots with filters, keep their destinations.
+`g h`, also Go home in the palette, uses
 the current project's choice through `navigate`, so leaving an editor still seals it.
 
 The browser stores the validated preference in localStorage through `deviceKey`,
@@ -25,16 +27,24 @@ a browser and projects sharing a person. A fresh browser has no choice. The
 preference stays after sign-out, and clearing site data removes it. It does not
 follow the person to another browser or the iPhone app.
 
-`src/web/lib/home.ts` owns the schema, storage, and destination URL. Settings owns
+`src/web/lib/home.ts` owns the schema, storage, and destination resolution.
+Settings owns
 the form. The shell resolves the initial destination after identifying the person
 and before mounting its panes, so a phone opens a run on its detail. Suite's text
 filter is in the URL alongside its folder and tag filters. Changing text replaces
 the current URL without sealing the editor or adding history entries.
 
 Malformed or unreadable storage falls back to Suite. A refused write reports
-failure and leaves the previous stored choice. A missing run or folder uses the
-existing screen's unavailable or empty state; Settings remains reachable to change
-home. Setting home performs no server write and changes no access rights.
+failure and leaves the previous stored choice. Before opening a run or a search
+with a folder, the resolver checks that the target exists through the existing
+read operations. A run lookup uses a cursor just above its id and a limit of one
+for each run origin, so an older run is not mistaken for a missing one. A folder
+lookup reads the complete folder tree. A missing target opens Suite without the
+saved filters and reports once in the status line that the home was not found.
+The saved preference stays available to change in Settings. A search with no
+matching cases is still a valid home. A failed read reports a connection error
+rather than treating the target as missing. Later Go home checks leave a newer
+navigation alone. Setting home performs no server write and changes no access rights.
 
 ## Alternatives and limits
 
