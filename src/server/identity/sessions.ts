@@ -2,9 +2,10 @@
 //
 // The cookie carries 32 random bytes and this file never sees them: it is given their SHA-256 and stores that.
 // A session is opened by a token or by a credential (a password, a passkey) and lives only while that one works
-// and its actor stands. That is read each time, by a join, so revoking a token or a credential ends the
-// sessions it opened without a second write, and so does a token's own end (`expires_at`) when the clock
-// reaches it. A session rests on exactly one of the two: the table refuses a row with both, nothing here makes
+// and its actor stands. That is read each time, by a join, so a revoked token or credential refuses the
+// sessions it opened, and so does a token's own end (`expires_at`) when the clock reaches it. Revocation also
+// records their end, so deletion need not wait for a session's lifetime. A session rests on exactly one of
+// the two: the table refuses a row with both, nothing here makes
 // a row with neither, and one with neither is alive to no reader.
 import { randomBytes } from "@noble/hashes/utils.js";
 import type { ActorKind } from "../../core/kinds.ts";
@@ -121,6 +122,11 @@ const Q = {
 	endOf: sql<{ actor: number; at: number; why: EndedWhy }>(
 		"UPDATE sessions SET ended_at = $at, ended_why = $why WHERE actor = $actor AND ended_at IS NULL",
 	),
+	endOnToken: sql<{ token: number; at: number }>(
+		`UPDATE sessions SET ended_at = min($at, coalesce(t.expires_at, $at)),
+			ended_why = CASE WHEN t.expires_at < $at THEN 'expired' ELSE 'ended' END
+		 FROM tokens t WHERE t.id = $token AND sessions.token = t.id AND sessions.ended_at IS NULL`,
+	),
 	endOn: sql<{ credential: number; at: number; why: EndedWhy }>(
 		"UPDATE sessions SET ended_at = $at, ended_why = $why WHERE credential = $credential AND ended_at IS NULL",
 	),
@@ -131,6 +137,15 @@ const Q = {
 	overdue: sql<{ now: number; idleBefore: number }, Times>(
 		`SELECT id, last_seen_at, expires_at FROM sessions
 		 WHERE ended_at IS NULL AND (expires_at <= $now OR last_seen_at <= $idleBefore)`,
+	),
+	retiredTokens: sql<{ now: number }, { id: number; at: number; why: EndedWhy }>(
+		`SELECT s.id,
+			CASE WHEN t.revoked_at IS NOT NULL AND (t.expires_at IS NULL OR t.revoked_at <= t.expires_at)
+				THEN t.revoked_at ELSE t.expires_at END AS at,
+			CASE WHEN t.revoked_at IS NOT NULL AND (t.expires_at IS NULL OR t.revoked_at <= t.expires_at)
+				THEN 'ended' ELSE 'expired' END AS why
+		 FROM sessions s JOIN tokens t ON t.id = s.token
+		 WHERE s.ended_at IS NULL AND (t.revoked_at <= $now OR t.expires_at <= $now)`,
 	),
 	drop: sql<{ before: number }>("DELETE FROM sessions WHERE ended_at IS NOT NULL AND ended_at <= $before"),
 };
@@ -251,6 +266,11 @@ export function endSessionsOn(db: Db, credential: number, at: number): number {
 	return db.run(Q.endOn, { credential, at, why: "ended" }).changes;
 }
 
+/** Records a token's revocation in its sessions, inside the transaction that revokes it. */
+export function endSessionsOnToken(db: Db, token: number, at: number): number {
+	return db.run(Q.endOnToken, { token, at }).changes;
+}
+
 /**
  * Puts a session on the password (`to`) that replaced the one it rested on (`from`), so that revoking the old
  * one does not end the session whose own request changed it. False when the session did not rest on `from`.
@@ -293,7 +313,8 @@ export function listSessions(app: App, db: Db, actor: number) {
 /**
  * What the minute timer does to sessions. Under the gate, after what was noted has been written.
  *
- * It ends, in the database, every session that is past its idle or its absolute lifetime. Until then such a
+ * It records the end of a token in its sessions, including revocations from earlier builds, at the token's
+ * original end. It also ends every session that is past its idle or its absolute lifetime. Until then such a
  * session is refused because the clock says so; afterwards it is refused whatever the clock says, so one that
  * is set back does not revive a session that had expired. Rows that ended more than thirty days ago are deleted.
  */
@@ -301,6 +322,10 @@ export function sweepSessions(app: App): { expired: number; deleted: number } {
 	const now = app.now();
 	return app.db.transaction(() => {
 		let expired = 0;
+		for (const row of app.db.all(Q.retiredTokens, { now })) {
+			const ended = app.db.run(Q.endById, row).changes;
+			if (row.why === "expired") expired += ended;
+		}
 		for (const row of app.db.all(Q.overdue, { now, idleBefore: now - app.config.sessionIdleMs })) {
 			// The row says idle, and a use noted since the last flush says otherwise.
 			if (inLifetime(app, row, now)) continue;

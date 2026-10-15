@@ -2,7 +2,14 @@
 // then listen. The same function is the Local layer on a laptop and the Server layer in a container; only the
 // configuration differs (decision 0002).
 import { type Extra, type Patience, serve, VERSION } from "../surfaces/http.ts";
-import { bootstrap, flushUses, publicAddress, ruleActor, sweepSessions } from "./identity/identity.ts";
+import {
+	bootstrap,
+	flushUses,
+	publicAddress,
+	ruleActor,
+	sweepSessions,
+	sweepSignInRecords,
+} from "./identity/identity.ts";
 import { recoverAccepted, sweep } from "./jobs.ts";
 import { type App, type Config, openApp } from "./kernel/app.ts";
 import { type Actor, allProjects } from "./kernel/ctx.ts";
@@ -80,9 +87,9 @@ export function start(
 		app.db.deferCheckpoints();
 	}
 	// Through the gate, like every other writer, so it never lands inside another command's open transaction.
-	// Three jobs, each its own turn at the gate and in this order, so one that fails does not stop the next:
+	// Each job has its own turn at the gate and runs in this order, so one that fails does not stop the next:
 	// questions whose decisions ran out are reopened, what was noted of the use of tokens and sessions is written,
-	// and then, with the rows current, sessions past a lifetime are ended and old ones deleted.
+	// and then, with the rows current, sessions past a lifetime are ended and old sign-in records cleaned up.
 	// The policy's own actor is looked up inside the gate, each time: an import replaces the actors, and the id
 	// it had when the server started may then be somebody else's (issue #123).
 	const minute = async (): Promise<void> => {
@@ -90,6 +97,7 @@ export function start(
 			["sweep", app.gate.run(() => sweep(app, ruleActor(app.db).id))],
 			["writing last uses", flushUses(app)],
 			["ending expired sessions", app.gate.run(() => sweepSessions(app))],
+			["deleting old sign-in records", app.gate.run(() => sweepSignInRecords(app))],
 		] as const;
 		for (const [name, job] of jobs) {
 			await job.catch((error: unknown) => console.error(`[mainworthy] ${name} failed:`, error));

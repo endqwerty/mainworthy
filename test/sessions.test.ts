@@ -473,7 +473,8 @@ describe("what ends a session", () => {
 	});
 
 	test("revoking the token that opened a session ends it, forgetting the actor ends it, and its change stream stops", async () => {
-		const instance = boot();
+		const clock = clockAt();
+		const instance = boot({ clock });
 		const sam = await person(instance, "sam");
 		const { cookie } = await signIn(instance, sam.token);
 		const stream = await fetch(`${instance.url}/api/p/scratch/events`, { headers: { cookie } });
@@ -484,6 +485,7 @@ describe("what ends a session", () => {
 		await create(instance, "Seen");
 		let text = "";
 		while (!text.includes("data:")) text += decoder.decode((await reader.read()).value);
+		clock.advance(HOUR);
 		await admin(instance, { do: "token.revoke", id: sam.id });
 		expect(await statusOf(instance, { cookie })).toBe(401);
 		await create(instance, "Not for a session whose token is gone");
@@ -494,8 +496,7 @@ describe("what ends a session", () => {
 			after += decoder.decode(value);
 		}
 		expect(after).not.toContain("data:");
-		// The session ended by being read with its token, not by a second write: its own row was not touched.
-		expect(stored(instance)).toMatchObject([{ ended_at: null }]);
+		expect(stored(instance)).toMatchObject([{ ended_at: T0 + HOUR, ended_why: "ended" }]);
 		// A new token for the same person does not bring the old session back.
 		const again = await person(instance, "sam");
 		expect(await statusOf(instance, bearer(again.token))).toBe(200);

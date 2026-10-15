@@ -35,6 +35,10 @@ const Q = {
 	revokeOf: sql<{ actor: number; at: number }>(
 		"UPDATE invitations SET revoked_at = $at WHERE actor = $actor AND used_at IS NULL AND revoked_at IS NULL",
 	),
+	dropEnded: sql<{ before: number }>(
+		`DELETE FROM invitations
+		 WHERE used_at <= $before OR revoked_at <= $before OR expires_at <= $before`,
+	),
 	list: sql<readonly [], Omit<InvitationRow, "hash" | "actor" | "created_by"> & { name: string; inviter: string }>(
 		`SELECT i.id, i.purpose, i.created_at, i.expires_at, i.used_at, i.revoked_at, a.name, b.name AS inviter
 		 FROM invitations i JOIN actors a ON a.id = i.actor JOIN actors b ON b.id = i.created_by
@@ -73,6 +77,11 @@ export const revokeInvitation = (db: Db, id: number, at: number): boolean => db.
 /** Revokes every invitation of a person that nobody has accepted. Returns how many. */
 export const revokeInvitationsOf = (db: Db, actor: number, at: number): number =>
 	db.run(Q.revokeOf, { actor, at }).changes;
+
+/** Deletes invitations thirty days after their first end. Under the write gate. */
+export function sweepInvitations(db: Db, now: number): number {
+	return db.run(Q.dropEnded, { before: now - 30 * 86_400_000 }).changes;
+}
 
 /** Every invitation, with who it is for and who made it. Never the hash: nothing outside this file needs it. */
 export function listInvitations(db: Db, now: number) {
