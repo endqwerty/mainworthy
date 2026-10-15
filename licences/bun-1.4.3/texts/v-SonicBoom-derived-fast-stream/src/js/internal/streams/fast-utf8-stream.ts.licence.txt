@@ -1,0 +1,2 @@
+// Ported from Node.js lib/internal/streams/fast-utf8-stream.js, which is itself
+// derived from the SonicBoom module (MIT, Copyright (c) 2017 Matteo Collina).

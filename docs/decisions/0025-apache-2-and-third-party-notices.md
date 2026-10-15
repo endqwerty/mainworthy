@@ -17,7 +17,7 @@ Mainworthy. Apache 2.0 adds a patent licence from each contributor, which ends f
 in the work, and it says outright that a contribution comes in under the same licence. The cost is a longer
 text and a NOTICE file that whoever passes Mainworthy on must keep.
 
-**The copyright holder is Daniel Yang, the owner, by their legal name.** It is written in `NOTICE`, in the
+**The copyright holder is the owner, by their legal name.** It is written in `NOTICE`, in the
 iPhone app's `Info.plist` (`NSHumanReadableCopyright`, which the app shows under You, About) and in the files
 and tests that check those lines (`docs/guide/licence.md`, `README.md`, `test/licences.test.ts`, the app's UI
 test). This is the one exception to the rule that the owner's name is not written in the repository, at the
@@ -43,8 +43,8 @@ with its name, so adding one is a decision made in review and not found later.
 
 **Bun is audited from its source, not taken at its word.** Bun's `LICENSE.md` names about 30 libraries and 23 polyfills. The
 audit of Bun 1.4.3 found 266 parts that are or may be linked into its Linux binary: C and C++ libraries at their
-pinned commits, WebKit and ICU, 65 Rust crates, code ported or copied into Bun, 111 npm packages it embeds for its
-Node.js fallbacks, and the compilers' runtime libraries. Each keeps its licence files as its project publishes
+pinned commits, WebKit and ICU, 65 Rust crates, code ported or copied into Bun, 84 npm packages and 27 files built
+from them that it embeds for its Node.js fallbacks and its REPL, and the compilers' runtime libraries. Each keeps its licence files as its project publishes
 them; `licences/README.md` says how the list was made and what it left open. The licences that came with Bun and
 with nothing else (LGPL, MPL-2.0, Artistic-2.0, GPL with runtime exceptions, and two ports that name none) are in
 `LICENCES` because Bun is the stack (decision 0010), and this pull request asks the owner to accept them.
@@ -71,7 +71,7 @@ and the notices to the same version, so upgrading Bun means reading its librarie
 - Giving anyone else the executable or the image needs a decision first: how the source of the LGPL and MPL
   parts is offered, and whether the items the audit left open are acceptable (`docs/compliance.md`, gap 4).
   Running it for others on the owner's server, and publishing the source, need none.
-- The notices are about 1.2 MB, and `licences/` about 2 MB: the price of keeping every text as published.
+- The notices are about 1.4 MB, and `licences/` about 2.6 MB: the price of keeping every text as published.
 - A Bun upgrade fails `test/licences.test.ts` until `licences/` is brought up to the new release.
-- The App Store listing uses Apple's standard licence agreement and the copyright line `2026 Daniel Yang`
+- The App Store listing uses Apple's standard licence agreement and the copyright line of `Info.plist`
   (`ios/README.md`).

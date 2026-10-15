@@ -104,22 +104,23 @@ export function readmeLicence(readme: string): string | null {
 		.trim();
 }
 
-const normal = (text: string): string => text.replace(/\s+/g, " ").trim();
-
-function run(auditDir: string, version: string): void {
-	const root = new URL("../licences/", import.meta.url).pathname;
+/** Writes `bun-<version>/` under `root` (the repository's `licences/`) from the audit in `auditDir`. */
+export function importAudit(auditDir: string, version: string, root: string): string {
 	const out = join(root, `bun-${version}`);
 	rmSync(out, { recursive: true, force: true });
 	const audited = z.array(Audited).parse(JSON.parse(readFileSync(join(auditDir, "manifest.json"), "utf8")));
 	const kept = new Map<string, string>();
-	/** Keeps a text once, under the path it had in the audit; returns that path relative to `licences/`. */
+	/**
+	 * Keeps a text once, under the path it had in the audit; returns that path relative to `licences/`. Two texts are
+	 * one only when their bytes are the same: a licence file is kept exactly as its project publishes it.
+	 */
 	const keep = (path: string, text: string): string => {
-		const earlier = kept.get(normal(text));
+		const earlier = kept.get(text);
 		if (earlier) return earlier;
 		const relative = join(`bun-${version}`, "texts", path);
 		mkdirSync(dirname(join(root, relative)), { recursive: true });
 		writeFileSync(join(root, relative), text);
-		kept.set(normal(text), relative);
+		kept.set(text, relative);
 		return relative;
 	};
 	const component = (c: Audited): Component => {
@@ -127,13 +128,17 @@ function run(auditDir: string, version: string): void {
 		// A licence is a few pages; a file of a megabyte is data that states its licence in its first lines.
 		const whole = (path: string): boolean =>
 			isLicenceFile(auditDir, path) && statSync(join(auditDir, "texts", path)).size < 200_000;
-		let texts = c.texts.filter(whole).map((path) => keep(path, read(path)));
-		if (texts.length === 0)
-			texts = c.texts.flatMap((path) => {
+		// The licence files, and the notice at the head of every other file the audit kept: a source file can carry
+		// a copyright and conditions of its own (WTF's FastMalloc.cpp) or the exception that applies to it (TinyCC's
+		// libtcc1.c), beside the licence file of its project.
+		const files = c.texts.filter(whole).map((path) => keep(path, read(path)));
+		const excerpts = c.texts
+			.filter((path) => !whole(path))
+			.flatMap((path) => {
 				const excerpt = /readme/i.test(path) ? readmeLicence(read(path)) : headerComment(read(path));
 				return excerpt ? [keep(`${path}.licence.txt`, `${excerpt}\n`)] : [];
 			});
-		texts = [...new Set(texts)];
+		const texts = [...new Set([...files, ...excerpts])];
 		const unstated =
 			c.kind === "polyfill"
 				? "Bun's own file, which loads the package of the same name in this list. It states no licence of its own."
@@ -170,7 +175,7 @@ function run(auditDir: string, version: string): void {
 		.map((c) => [c.linked, c.kind, c.name, c.version ?? c.commit, c.license, c.relyOn, c.why].map(cell).join("\t"));
 	const head = ["linked", "kind", "name", "version", "declared", "relied on", "why"].join("\t");
 	writeFileSync(join(out, "audit.tsv"), `${[head, ...decisions].join("\n")}\n`);
-	console.info(`kept ${shipped.length} of ${audited.length} components and ${kept.size} texts in ${out}`);
+	return `kept ${shipped.length} of ${audited.length} components and ${kept.size} texts in ${out}`;
 }
 
 /** The licences an SPDX expression relies on: `(MIT AND Zlib)` is MIT and Zlib; a `WITH` stays with its licence. */
@@ -187,5 +192,5 @@ if (import.meta.main) {
 		console.error("usage: bun scripts/licences-import-bun.ts <audit directory> <bun version>");
 		process.exit(2);
 	}
-	run(auditDir, version);
+	console.info(importAudit(auditDir, version, new URL("../licences/", import.meta.url).pathname));
 }

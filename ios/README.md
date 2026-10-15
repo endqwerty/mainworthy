@@ -77,7 +77,7 @@ What App Store Connect asks about the licence, and what to answer:
 
 | Field | Answer |
 | --- | --- |
-| App Information, Copyright | `2026 Daniel Yang` (Apple adds the ©), the line in `Info.plist` |
+| Copyright, in the version's information | The line in `Info.plist` without the word `Copyright`: the year and the name (Apple adds the ©) |
 | App Information, License Agreement | Apple's standard licence agreement. The Apache licence covers the source; the App Store build is delivered under Apple's agreement, which the copyright holder may choose for their own build |
 
 `test/licences.test.ts` fails when `Info.plist`, `NOTICE` and the UI test name different holders.

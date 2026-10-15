@@ -11,9 +11,12 @@ build bundles and from this directory (decision 0025). The directory holds what 
 | `bun-1.4.3/texts/` | Those licence files, exactly as each project publishes them, each text once |
 | `bun-1.4.3/audit.tsv` | The audit's decision for each of 444 parts it looked at, linked or not, and why |
 
-Every text is a file as its project publishes it, at the revision named. A part that publishes no licence file is
-represented by the licence where it states one: the comment at the head of a source file, or the licence section
-of its README, copied line for line into a file whose name ends in `.licence.txt`.
+Every text is a file as its project publishes it, at the revision named, byte for byte; two parts share a text only
+when the bytes are the same. Where the audit kept a source file or a README rather than a licence file, the notice
+it states is copied line for line into a file whose name ends in `.licence.txt`: the comment at the head of the
+source file, or the licence section of the README. That is kept beside the project's licence file, because a
+source file can carry a copyright and conditions of its own (WTF's `FastMalloc.cpp`) or the exception that applies
+to it (TinyCC's `libtcc1.c`).
 
 ## The Bun audit
 
@@ -35,7 +38,10 @@ and not all the code it copied or ported. So the list was made from Bun's source
 
 A part is listed as linked when the build reaches it, even if the linker might drop it. Eight parts could not be
 settled either way and are listed with "Possibly linked" and the reason. The audit was made by a GPT-6.1 Sol
-worker and reviewed by Claude Opus 5.5, which found four faults in its first result; all four were fixed.
+worker and reviewed by Claude Opus 5.5, which found four faults in its first result; all four were fixed. The
+verifier of the pull request that brought it in (Codex GPT-6.1 Sol) found that the import dropped the notices of
+source files whose project also has a licence file, and joined texts that differed only in whitespace; both are
+fixed, and `test/licences.test.ts` holds the import to it.
 
 What the audit did not settle, and what Mainworthy must do about each before anyone else is given the executable
 or the container image (`docs/compliance.md`, gap 4):

@@ -142,6 +142,6 @@ Rules for contributors, people and agents: [AGENTS.md](AGENTS.md).
 
 ## Licence
 
-Mainworthy is licensed under the [Apache License 2.0](LICENSE). Copyright 2026 Daniel Yang ([NOTICE](NOTICE)).
+Mainworthy is licensed under the [Apache License 2.0](LICENSE); its copyright notice is in [NOTICE](NOTICE).
 The software it bundles from others, and their licences, are in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md); an instance serves all three at `/docs/licence`.
