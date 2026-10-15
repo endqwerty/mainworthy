@@ -121,7 +121,7 @@ export const proposeOp = defineOp({
 	needs: "produce",
 	scope: "project",
 	effect: "write",
-	mcp: "Propose edits: adopted=current, open=review, conflict=resolve, rejected.",
+	mcp: "Propose edits: adopted, open, conflict, rejected.",
 	run: propose,
 });
 

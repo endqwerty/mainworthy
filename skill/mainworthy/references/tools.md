@@ -10,7 +10,7 @@ Choice labels such as `[create]` or `[1]` show which input shape a field belongs
 
 ## propose
 
-Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected.
+Propose edits: adopted, open, conflict, rejected.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |

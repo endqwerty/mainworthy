@@ -1142,7 +1142,7 @@ describe("project custom field definitions", () => {
 				notes: { kind: "text", label: "Notes", required: false },
 			},
 		};
-		const proposed = h.call<Proposed>("propose", { edits: [{ op: "policy", settings }] });
+		const proposed = h.call<Proposed>("propose", { edits: [{ op: "policy", base: policy().version, settings }] });
 		expect(proposed.status).toBe("open");
 		expect(policy().settings).not.toHaveProperty("fields");
 		expect(accept(proposed)[0]?.status).toBe("decided");
@@ -1225,6 +1225,7 @@ describe("project custom field definitions", () => {
 					edits: [
 						{
 							op: "policy",
+							base: policy().version,
 							settings: {
 								...policy().settings,
 								fields: {
@@ -1239,12 +1240,12 @@ describe("project custom field definitions", () => {
 		const settings = { ...policy().settings, fields: { risk: { kind: "text", label: "Risk", required: true } } };
 		for (const edits of [
 			[
-				{ op: "policy", settings },
+				{ op: "policy", base: policy().version, settings },
 				{ op: "create", body: { title: "Missing" } },
 			],
 			[
 				{ op: "create", body: { title: "Missing" } },
-				{ op: "policy", settings },
+				{ op: "policy", base: policy().version, settings },
 			],
 		])
 			expect(h.raw("propose", { edits }).ok).toBe(false);
@@ -1253,7 +1254,7 @@ describe("project custom field definitions", () => {
 		const proposed = h.call<Proposed>("propose", {
 			edits: [
 				{ op: "create", body: { title: "With value", fields: { risk: "high" } } },
-				{ op: "policy", settings },
+				{ op: "policy", base: policy().version, settings },
 			],
 		});
 		expect(accept(proposed)[0]?.status).toBe("decided");
@@ -1269,12 +1270,14 @@ describe("project custom field definitions", () => {
 		const fields = { notes: { kind: "text", label: "Notes", required: false } };
 		accept(
 			h.call<Proposed>("propose", {
-				edits: [{ op: "policy", settings: { ...policy().settings, fields }, unlinked: "create" }],
+				edits: [
+					{ op: "policy", base: policy().version, settings: { ...policy().settings, fields }, unlinked: "create" },
+				],
 			}),
 		);
 		h.call("report", ciReport({ commit: "fields-auto-create", n: 1 }));
 		expect(h.call<{ items: unknown[] }>("find", { in: "cases" }).items).toHaveLength(1);
 		const settings = { ...policy().settings, fields: { risk: { kind: "text", label: "Risk", required: true } } };
-		expect(h.raw("propose", { edits: [{ op: "policy", settings }] }).ok).toBe(false);
+		expect(h.raw("propose", { edits: [{ op: "policy", base: policy().version, settings }] }).ok).toBe(false);
 	});
 });

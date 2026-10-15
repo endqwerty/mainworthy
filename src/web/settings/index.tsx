@@ -26,7 +26,11 @@ import { YourSignIn } from "./signin.tsx";
 import { IssuedTokens } from "./tokens.tsx";
 import "./settings.css";
 
-type PolicyChange = { preset: string } | { unlinked: Unlinked } | { settings: Policy["settings"] } | ClauseChange;
+type PolicyChange =
+	| { preset: string }
+	| { unlinked: Unlinked }
+	| { settings: PolicySnapshot["settings"]; base: number }
+	| ClauseChange;
 
 /**
  * The sections a caller is shown, in the order of the list. "People" is for an admin of the instance who is a
@@ -188,10 +192,7 @@ function SettingsWorkbench() {
 				]
 			: []),
 	]);
-	async function changePolicy(
-		change: PolicyChange,
-		changeReason?: string,
-	): Promise<boolean> {
+	async function changePolicy(change: PolicyChange, changeReason?: string): Promise<boolean> {
 		if (!mayChangePolicy || switching) return false;
 		if (("preset" in change && change.preset === preset) || ("unlinked" in change && change.unlinked === unlinked))
 			return false;
@@ -200,15 +201,20 @@ function SettingsWorkbench() {
 				? `${change.preset} policy`
 				: "unlinked" in change
 					? `"${UNLINKED_LABELS[change.unlinked]}"`
-					: "clauses" in change ? "custom policy" : "custom field definitions";
+					: "clauses" in change
+						? "custom policy"
+						: "custom field definitions";
 		const reason =
 			changeReason ??
 			("preset" in change
 				? `Use the ${change.preset} preset, selected in Settings.`
 				: "unlinked" in change
 					? `Tests with no case: ${change.unlinked}, selected in Settings.`
-					: "clauses" in change ? "Custom policy, edited in Settings." : "Change custom field definitions in Settings.");
-		const key = JSON.stringify({ change, reason });
+					: "clauses" in change
+						? "Custom policy, edited in Settings."
+						: "Change custom field definitions in Settings.");
+		const basedChange = { ...(policy ? { base: policy.version } : {}), ...change };
+		const key = JSON.stringify({ change: basedChange, reason });
 		if (policyAttempt.current?.key !== key) policyAttempt.current = { key, propose: randomId(), decide: randomId() };
 		const attempt = policyAttempt.current;
 		setSwitching(change);
@@ -216,7 +222,11 @@ function SettingsWorkbench() {
 		try {
 			const proposed = await call(
 				"propose",
-				{ edits: [{ op: "policy", ...change }], reason, cmd: attempt.propose },
+				{
+					edits: [{ op: "policy", ...basedChange }],
+					reason,
+					cmd: attempt.propose,
+				},
 				{ project },
 			);
 			if (!proposed.question) throw new Error("The policy proposal did not return a review question.");
@@ -228,7 +238,12 @@ function SettingsWorkbench() {
 				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" }, reason, cmd: attempt.decide },
 				{ project },
 			);
-			if (replies[0]?.status === "conflict") throw new Error(policyConflictMessage);
+			if (replies[0]?.status === "conflict")
+				throw new Error(
+					"settings" in change && !("clauses" in change)
+						? "The policy changed while you edited. Your field draft is kept. Review the current policy and try saving again."
+						: policyConflictMessage,
+				);
 			if (replies[0]?.status !== "decided" && replies[0]?.status !== "already")
 				throw new Error(`Policy is awaiting ${replies[0]?.needs ?? "review"}. Open ${question.q} in Queue.`);
 			const ruled = z.object({ ruled: z.number() }).safeParse(replies[0]?.effects).data?.ruled ?? 0;
@@ -245,7 +260,9 @@ function SettingsWorkbench() {
 		} catch (error) {
 			const message =
 				error instanceof ApiError && error.code === "conflict"
-					? policyConflictMessage
+					? "settings" in change && !("clauses" in change)
+						? "The policy changed while you edited. Your field draft is kept. Review the current policy and try saving again."
+						: policyConflictMessage
 					: error instanceof Error
 						? error.message
 						: "The policy could not be changed.";
@@ -377,8 +394,10 @@ function SettingsWorkbench() {
 									<CustomFields
 										key={project}
 										definitions={policy.settings.fields ?? {}}
-										disabled={!admin || !session.can.includes("produce") || Boolean(switching)}
-										onSave={(fields) => changePolicy({ settings: { ...policy.settings, fields } })}
+										disabled={!mayChangePolicy || Boolean(switching)}
+										onSave={(fields) =>
+											changePolicy({ base: policy.version, settings: { ...policy.settings, fields } })
+										}
 									/>
 									<PolicyEditor
 										policy={policy}
