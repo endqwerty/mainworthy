@@ -17,7 +17,7 @@ A personal token carries every current grant of its person, as an admin-issued t
 It does not claim to be an agent or a pipeline.
 
 Creation requires a browser session opened with a password or a passkey, or local-owner access.
-A bearer or a browser opened with a token cannot use this action to extend that token's lifetime.
+A bearer or a browser opened with a token cannot use this action to extend that token's lifetime. Such a browser can still set a password for a person who has none, sign in with it and then make a token; that gives nothing a password does not already give, since a password signs in again for as long as it stands.
 The default lifetime is 30 days, and the maximum is 365 days. There is no unlimited personal-token option.
 
 Reuse the `tokens` table, secret hashing, expiry, use tracking, and revocation.
