@@ -234,6 +234,18 @@ describe("the module map", () => {
 		expect(UNEXPORTED.filter((table) => other.includes(table))).toEqual(other);
 	});
 
+	test("migration versions are contiguous and in order, with exactly one matching file per entry", () => {
+		expect(MIGRATIONS.map((migration) => migration.version)).toEqual(MIGRATIONS.map((_, index) => index + 1));
+		const directory = "src/server/kernel/migrations";
+		const filenames = MIGRATIONS.map(
+			(migration) => `${String(migration.version).padStart(4, "0")}_${migration.name}.sql`,
+		);
+		expect(readdirSync(directory).sort()).toEqual([...filenames].sort());
+		for (const [index, migration] of MIGRATIONS.entries()) {
+			expect(readFileSync(`${directory}/${filenames[index]}`, "utf8")).toBe(migration.sql);
+		}
+	});
+
 	test("each migration says truly whether it changes what an archive holds", () => {
 		// An import requires the archive version, which is the last migration marked `archive`. A migration that
 		// changes an exported table and is not marked would let an older archive in with a column missing; one
