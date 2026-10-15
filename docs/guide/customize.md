@@ -107,13 +107,13 @@ A phone has no strip. There, **Menu** opens the sidebar over the pane ([Keyboard
 
 Open Settings with <kbd>g</kbd> <kbd>,</kbd>, then choose **Your home**. Pick Suite, Queue, a run, or a saved search, and press **Save home**. Suite is the default.
 
-For a run, enter its ref, such as `R-12`. For a saved search, enter the search text, folder path, tag, or any combination. The search applies all the filters you enter and reads the current cases each time. Leave a field empty to leave that filter out. This saves one home search per project, not a named search library.
+For a run, enter its ref in this project, such as `R-12`. For a saved search, enter the search text, folder path, tag, or any combination. The search applies all the filters you enter and reads the current cases each time. Leave a field empty to leave that filter out. This saves one home search per project, not a named search library.
 
 Press <kbd>g</kbd> <kbd>h</kbd>, or choose **Go home** in the palette, to open your home. On a phone, **Actions** offers Go home while either pane is shown. Opening the instance at `/` uses your first accessible project's home. Opening `/p/<project>` or `/p/<project>/` without a query uses that project's home. An address with filters or a link to an invitation, screen, case, question, or run keeps its own destination.
 
-The preference is stored in this site's localStorage, separately for your signed-in name and each project. It stays after sign-out and follows you when you sign back into the same browser. It does not follow you across browsers or into the iPhone app. Clearing the site's browser data removes it. Nobody else's home or project data changes when you save yours.
+The preference is stored in this site's localStorage, separately for your signed-in name and each project. **Sign out and keep drafts** keeps it for when you sign back into the same browser. **Sign out and clear browser data** removes it. It does not follow you across browsers or into the iPhone app. Clearing the site's browser data removes it. Nobody else's home or project data changes when you save yours.
 
-A browser that cannot read the preference opens Suite. If saving fails, the form says so and keeps your previous home. If the saved run or search folder no longer exists, Mainworthy opens Suite and tells you that your home was not found. Open Settings to choose another home. A search that matches no cases still opens with its saved filters.
+A browser that cannot read the preference opens Suite. If saving fails, the form says so and keeps your previous home. If the saved run or search folder no longer exists, Mainworthy opens Suite and tells you that your home was not found. Open Settings to choose another home. If the lookup fails on entry, Mainworthy opens Suite with a notice and keeps your saved home so you can try **Go home** again. A search that matches no cases still opens with its saved filters.
 
 ## What is fixed today
 

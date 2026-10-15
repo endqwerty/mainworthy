@@ -163,7 +163,11 @@ export function App() {
 			let homeStatus: string | null = null;
 			if (entryProject) {
 				const owner = deviceSession();
-				const home = await resolveHome(entryProject.key);
+				const home = await resolveHome(entryProject.key).catch((error: unknown) => {
+					if (error instanceof ApiError && error.code === "unauthenticated") throw error;
+					if (location.href === address) homeStatus = "Could not read your home. Opened Suite.";
+					return { url: routeUrl({ project: entryProject.key, screen: "suite" }), missing: false };
+				});
 				if (!sessionCurrent(owner)) return;
 				if (location.href === address) {
 					history.replaceState(null, "", home.url);
