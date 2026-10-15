@@ -1,0 +1,176 @@
+// What a seeded project holds, read back through the operations: the suite, the days before today, and today.
+import { expect, test } from "bun:test";
+import { z } from "zod";
+import { Client } from "./client.ts";
+import { seed } from "./seed.ts";
+import { withInstance } from "./test-support.ts";
+
+const DAY = 86_400_000;
+const Run = z.object({
+	ref: z.string(),
+	name: z.string(),
+	state: z.string(),
+	verdict: z.string(),
+	slots: z.number(),
+	createdAt: z.number(),
+});
+const Case = z.object({ ref: z.string(), title: z.string() });
+const Entry = z.object({
+	t: z.string(),
+	at: z.number(),
+	method: z.string().optional(),
+	outcome: z.string().optional(),
+});
+const Checked = z.object({ counts: z.object({ "unlinked-tests": z.number(), "duplicate-title": z.number() }) });
+const Since = z.object({ since: z.number() });
+const Project = z.array(z.object({ key: z.string(), policy: z.string() }));
+
+const on = (client: Client, project: string) => new Client({ ...client.options, project });
+const dayOf = (at: number) => Math.floor(at / DAY);
+const titlesOf = async (client: Client) =>
+	z
+		.array(Case)
+		.parse((await client.call("find", { limit: 500 })).items)
+		.map((item) => item.title);
+
+test("a seeded project holds a suite in folders, a fortnight of history and five questions for today", async () => {
+	await withInstance(async ({ client }) => {
+		const before = Date.now();
+		const seeded = await seed(client, { project: "demo", cases: 120 });
+		const demo = on(client, "demo");
+		// The day the project became a demo, which the server keeps: asked again, it is the same moment.
+		const { since } = Since.parse(await client.call("admin", { do: "project.demo", key: "demo" }));
+		expect(since).toBeGreaterThanOrEqual(before);
+		const today = dayOf(since);
+
+		// The suite: 120 cases with titles of their own, in the shop's folders.
+		expect(seeded.cases).toHaveLength(120);
+		expect(new Set(await titlesOf(demo)).size).toBe(120);
+		const folders = z.array(z.object({ path: z.string() })).parse((await demo.call("find", { in: "folders" })).items);
+		expect(folders.map((folder) => folder.path)).toEqual(
+			expect.arrayContaining(["Checkout", "Checkout/Coupons", "Accounts/Sign-in", "Orders/Returns", "API/Webhooks"]),
+		);
+		expect(Checked.parse(await demo.call("check", {})).counts).toMatchObject({
+			// The one test with no case is today's question; every other test was linked on the first day.
+			"unlinked-tests": 1,
+			"duplicate-title": 0,
+		});
+
+		// Today: the failing test on `main` and on the pull request, the finding, the agent's edit, the test with no case.
+		const open = await demo.call("inbox", { limit: 50 });
+		expect(open.items.map((item) => item.kind).sort()).toEqual(["adopt", "failure", "failure", "finding", "map"]);
+		expect(seeded.questions.toSorted()).toEqual(open.items.map((item) => item.q).sort());
+		for (const item of open.items) expect(dayOf(item.openedAt)).toBeGreaterThanOrEqual(today - 1);
+
+		// The days before: the automated test of the first case has a result on each of the fourteen days and today.
+		const timeline = z.array(Entry).parse((await demo.call("timeline", { ref: "C-1", limit: 500 })).entries);
+		const automated = timeline.filter((entry) => entry.t === "result" && entry.method === "auto");
+		const days = new Set(automated.map((entry) => dayOf(entry.at)));
+		for (let ago = 1; ago <= 14; ago++) expect([ago, days.has(today - ago)]).toEqual([ago, true]);
+		expect(timeline.find((entry) => entry.t === "version")?.at).toBeLessThan((today - 13) * DAY);
+		// Nothing is dated after the moment the project became a demo.
+		for (const entry of timeline) expect(entry.at).toBeLessThanOrEqual(since);
+
+		// The runs: one every other day, the old ones closed as passed, one failed, one not finished, today's open.
+		const runs = z.array(Run).parse((await demo.call("find", { in: "runs", limit: 100 })).items);
+		expect(runs.find((run) => run.ref === seeded.run)).toMatchObject({ name: "Checkout regression", state: "open" });
+		const past = runs.filter((run) => run.ref !== seeded.run);
+		expect(past.length).toBeGreaterThanOrEqual(7);
+		expect(new Set(past.map((run) => dayOf(run.createdAt))).size).toBe(past.length);
+		expect(Math.min(...past.map((run) => dayOf(run.createdAt)))).toBe(today - 13);
+		const tally = (state: string, verdict: string) =>
+			past.filter((run) => run.state === state && run.verdict === verdict).length;
+		expect(tally("closed", "passed")).toBe(past.length - 2);
+		expect(tally("open", "failed")).toBe(1);
+		expect(tally("open", "pending")).toBe(1);
+
+		// What was asked in those days was answered in them: by a person, a day or less after it was asked.
+		const decided = await demo.call("inbox", { state: "decided", limit: 500 });
+		const answered = decided.items.filter((item) => item.kind === "failure" || item.kind === "finding");
+		expect(answered.length).toBeGreaterThan(5);
+		for (const item of answered) {
+			expect(item.decision?.by).toEqual(["robin"]);
+			expect(item.decision?.at).toBeGreaterThan(item.openedAt);
+			expect((item.decision?.at ?? 0) - item.openedAt).toBeLessThan(DAY);
+			expect(item.decision?.at).toBeLessThan(before);
+		}
+		expect(new Set(answered.map((item) => dayOf(item.openedAt))).size).toBeGreaterThan(3);
+
+		expect(Project.parse(await client.call("admin", { do: "project.list" })).find((row) => row.key === "demo")).toEqual(
+			{
+				key: "demo",
+				policy: "standard",
+			},
+		);
+	});
+});
+
+test("the same seed writes the same suite, another seed another, and no days leave today alone", async () => {
+	await withInstance(async ({ client }) => {
+		await seed(client, { project: "one", cases: 60, seed: 42, days: 2 });
+		await seed(client, { project: "two", cases: 60, seed: 42, days: 0 });
+		await seed(client, { project: "three", cases: 60, seed: 43, days: 0 });
+		const one = await titlesOf(on(client, "one"));
+		expect(await titlesOf(on(client, "two"))).toEqual(one);
+		expect(await titlesOf(on(client, "three"))).not.toEqual(one);
+
+		// With no days there is today's run and no other, and the five questions all the same.
+		const today = on(client, "two");
+		const runs = z.array(Run).parse((await today.call("find", { in: "runs", limit: 100 })).items);
+		expect(runs.map((run) => run.name)).toEqual(["Checkout regression"]);
+		expect((await today.call("inbox", { limit: 50 })).items).toHaveLength(5);
+		expect(Checked.parse(await today.call("check", {})).counts["unlinked-tests"]).toBe(1);
+	});
+});
+
+test("a seed sent again with another seed or other days is refused, and the project it began in is as it was", async () => {
+	await withInstance(async ({ client, cli }) => {
+		await seed(client, { project: "demo", cases: 30, seed: 5, days: 3 });
+		const demo = on(client, "demo");
+		const runs = (await demo.call("find", { in: "runs", limit: 100 })).items.length;
+		for (const other of [
+			["--seed", "6", "--days", "3"],
+			["--seed", "5", "--days", "4"],
+		]) {
+			const refused = await cli(["seed", "demo", "--cases", "30", ...other]);
+			expect(refused.code).toBe(4);
+			expect(refused.stderr).toContain("another seed or other days");
+		}
+		expect((await demo.call("find", { in: "runs", limit: 100 })).items).toHaveLength(runs);
+		expect(await titlesOf(demo)).toHaveLength(30);
+		const again = await cli(["seed", "demo", "--cases", "30", "--seed", "5", "--days", "3"]);
+		expect(again.stderr).toBe("");
+		expect(again.code).toBe(0);
+		for (const [flag, value, words] of [
+			["--days", "91", "from 0 to 90 days"],
+			["--days", "-1", "from 0 to 90 days"],
+			["--days", "1.5", "from 0 to 90 days"],
+			["--seed", "-3", "the seed is a whole number"],
+			["--seed", "4294967296", "the seed is a whole number"],
+		] as const) {
+			const refused = await cli(["seed", "other", "--cases", "3", flag, value]);
+			expect([flag, value, refused.code]).toEqual([flag, value, 4]);
+			expect(refused.stderr).toContain(words);
+		}
+		expect(Project.parse(await client.call("admin", { do: "project.list" })).map((row) => row.key)).toEqual([
+			"scratch",
+			"demo",
+		]);
+	});
+});
+
+test("seed fills the project an instance starts with while nothing was written to it, and not after", async () => {
+	await withInstance(async ({ client }) => {
+		// A policy change is no case, test or run, and it is something written: the project keeps the server's clock.
+		const touched = on(client, "scratch");
+		const proposed = await touched.call("propose", { edits: [{ op: "policy", preset: "strict" }] });
+		const asked = (await touched.call("inbox", { kind: "adopt" })).items.find((item) => item.q === proposed.question);
+		if (asked) await touched.call("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "accept" } });
+		await expect(seed(client, { project: "scratch", cases: 3 })).rejects.toThrow("already holds");
+		expect(await titlesOf(touched)).toEqual([]);
+	});
+	await withInstance(async ({ client }) => {
+		const seeded = await seed(client, { project: "scratch", cases: 3 });
+		expect(seeded.questions).toHaveLength(5);
+	});
+});

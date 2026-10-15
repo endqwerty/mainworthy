@@ -24,7 +24,9 @@ export function recoverAccepted(app: App): number {
 			done = app.db.transaction(() => {
 				const project = projectById(app.db, batch.project);
 				if (!project) return null;
-				const ctx = makeCtx(app, project, actorById(app.db, batch.actor, project.id), true);
+				// A report applied here keeps the time it was accepted at, as one applied by its own request does:
+				// its results are not dated by the restart, and a demo's history stays where the seed put it.
+				const ctx = makeCtx(app, project, actorById(app.db, batch.actor, project.id), true, batch.at);
 				processBatch(ctx, batch.id);
 				stampSeq(ctx);
 				return { key: project.key, seq: ctx.seq, touched: [...ctx.touched], actor: ctx.actor.name };

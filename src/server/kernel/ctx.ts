@@ -55,6 +55,10 @@ const Q = {
 	insertProject: sql<{ org: number; key: string; name: string; at: number }>(
 		"INSERT INTO projects (org, key, name, created_at) VALUES ($org, $key, $name, $at)",
 	),
+	demoSince: sql<{ project: number }, { since: number }>("SELECT since FROM demo_projects WHERE project = $project"),
+	markDemo: sql<{ project: number; since: number }>(
+		"INSERT INTO demo_projects (project, since) VALUES ($project, $since)",
+	),
 	command: sql<
 		{ id: string },
 		{ outcome: string; op: string; actor: number; project: number; seq: number; request: string }
@@ -91,6 +95,28 @@ export function insertProject(db: Db, input: { org: number; key: string; name: s
 	const row = db.get(Q.project, { key: input.key });
 	if (!row) throw new Error("project was not stored");
 	return row;
+}
+
+/** The sequence number a project has when nothing was written to it since it was made (`createProject`). */
+const UNTOUCHED_SEQ = 1;
+
+/**
+ * When the project became a demo, or null when it is none. A write to a demo may say when it happened
+ * (`makeCtx`); no other project takes a time from a caller.
+ */
+export const demoSince = (db: Db, project: number): number | null => db.get(Q.demoSince, { project })?.since ?? null;
+
+/**
+ * Makes a project a demo and returns when it became one. Only a project nothing was written to: one that holds
+ * work keeps the server's clock for good, so what it records is never dated by a caller. Null when it is refused.
+ * A project that is a demo already keeps the moment it has.
+ */
+export function markDemo(db: Db, project: ProjectRow, at: number): number | null {
+	const since = demoSince(db, project.id);
+	if (since !== null) return since;
+	if (project.seq !== UNTOUCHED_SEQ) return null;
+	db.run(Q.markDemo, { project: project.id, since: at });
+	return at;
 }
 
 /**
@@ -175,7 +201,11 @@ export function recordCommand(ctx: Ctx, input: { id: string; op: string; outcome
 	});
 }
 
-export function makeCtx(app: App, project: ProjectRow, actor: Actor, write: boolean): Ctx {
+/**
+ * `at` is the time the command's rows carry, when it is not the clock's: a write to a demo project that says
+ * when it happened, and a report applied after a restart, which keeps the time it was accepted at.
+ */
+export function makeCtx(app: App, project: ProjectRow, actor: Actor, write: boolean, at?: number): Ctx {
 	let ord = 0;
 	return {
 		app,
@@ -183,7 +213,7 @@ export function makeCtx(app: App, project: ProjectRow, actor: Actor, write: bool
 		db: write ? app.db : app.reader,
 		project,
 		actor,
-		now: app.now(),
+		now: at ?? app.now(),
 		seq: write ? project.seq + 1 : project.seq,
 		write,
 		touched: new Set(),

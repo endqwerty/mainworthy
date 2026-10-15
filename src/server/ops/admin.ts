@@ -20,9 +20,11 @@ import {
 import {
 	type Actor,
 	allProjects,
+	demoSince,
 	findProject,
 	insertProject,
 	makeCtx,
+	markDemo,
 	rewriteCommandReplies,
 	stampSeq,
 } from "../kernel/ctx.ts";
@@ -34,13 +36,14 @@ import { defineInstanceOp, type InstanceCtx } from "./registry.ts";
 /** Every project with the policy in force. A plain read, so the session endpoint can call it during a long write. */
 export function listProjects(
 	db: Db,
-): { key: string; name: string; seq: number; createdAt: number; policy: string; unlinked: Unlinked }[] {
+): { key: string; name: string; seq: number; createdAt: number; policy: string; unlinked: Unlinked; demo: boolean }[] {
 	return allProjects(db).map((row) => ({
 		key: row.key,
 		name: row.name,
 		seq: row.seq,
 		createdAt: row.created_at,
 		...policySummary(currentPolicy(db, row.id)),
+		demo: demoSince(db, row.id) !== null,
 	}));
 }
 
@@ -135,6 +138,16 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 			return createProject(env, input);
 		case "project.list":
 			return listProjects(db);
+		case "project.demo": {
+			const project = findProject(db, input.key);
+			if (!project) throw notFound(`project ${input.key}`);
+			const since = markDemo(db, project, env.now);
+			if (since === null)
+				throw conflict(
+					`project ${input.key} holds work, and what it records keeps the server's clock; a demo is a project nothing was written to`,
+				);
+			return { key: project.key, since };
+		}
 		case "token.create": {
 			const project = projectOf(db, input.project);
 			const existing = actorByName(db, input.actor, project);

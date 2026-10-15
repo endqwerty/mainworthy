@@ -338,8 +338,10 @@ const Project = z.looseObject({
 	createdAt: number,
 	policy: text,
 	unlinked: Unlinked,
+	demo: flag,
 });
 export const AdminReply = z.union([
+	z.looseObject({ key: text, since: number }),
 	z.looseObject({ key: text, name: text, policy: text }),
 	z.array(Project),
 	z.looseObject({ actor: text, token: text, can: texts, expiresAt: number.nullable(), note: text }),

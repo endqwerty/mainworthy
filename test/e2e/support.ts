@@ -109,10 +109,13 @@ export async function startServer({
 	preset,
 	unlinked,
 	seed: seedData = cases > 0,
+	days = 0,
 	passkeys = false,
 }: {
 	cases?: number;
 	firstProject?: string;
+	/** How many days of history the seed writes. Absent: no history. */
+	days?: number;
 	mode?: "local" | "server";
 	preset?: string;
 	/** What happens to a test with no case, when it is not what the preset starts with. */
@@ -168,7 +171,11 @@ export async function startServer({
 		const api = <O extends OpName>(op: O, input: Api[O]["input"], options: { token?: string } = {}) =>
 			call(op, input, { url, project: firstProject, token: options.token ?? token });
 		const seeded = seedData
-			? await seed(new Client({ url, token, project: firstProject }), { project: firstProject, cases })
+			? await seed(new Client({ url, token, project: firstProject }), {
+					project: firstProject,
+					cases,
+					days,
+				})
 			: null;
 		if (preset || unlinked) {
 			const proposed = await api("propose", {

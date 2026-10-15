@@ -63,6 +63,18 @@ The same operation manages personal CLI tokens with `token.create`, `token.list`
 
 A write takes `cmd`, an id you choose for that one request. Sent again unchanged, the server returns the first reply and writes nothing. Sent again with other content, it is refused with `conflict`. If you lost the reply, ask the `command` operation what became of the id.
 
+## Say when a write happened
+
+Every write is recorded with the server's clock. A caller cannot give another time, with one exception: a demo project. `mainworthy seed` uses it to write the days before today.
+
+`admin` with `{"do": "project.demo", "key": "<project>"}` makes a project a demo. It works only on a project nothing was written to since it was made, and it cannot be undone. The reply holds `key` and `since`, the moment the project became a demo. Both fields are required by the API reply schema. Asked again, it returns the same moment. `project.list` and the session name each project with `demo: true` or `false`, so a client can tell whose dates it is reading.
+
+A write to a demo project may carry the header `X-Mainworthy-At` with a time in milliseconds since 1970. The server records the write at that time. It refuses a time in the future, a value that is not a whole number, the header on a read or on an operation of the instance, and the header on any project that is not a demo. The time is part of what `cmd` names: the same request at another time is another request.
+
+Nothing checks that the times of a demo's writes are in order. Send them oldest first. Avoid the answer `flaky` in the past: it holds for a number of days from the time it was given, and one that has already run out reopens its question within a minute.
+
+An archive does not say which project is a demo. After an import every project records the server's clock.
+
 ## The machine-readable description
 
 `GET /api/openapi.json` returns an OpenAPI 3.1 document of every operation. The server builds it from the same list as this page on each call. It needs no token.
@@ -669,28 +681,30 @@ Projects, actors, grants and tokens. There are no seats: an actor is free, and a
 | `[1].preset` | `string` | no |  |
 | `[1].unlinked` | `"ask" \| "track" \| "create"` | no | What happens to a test with no case: ask, track or create. Absent: what the preset starts with. |
 | `[2].do` | `"project.list"` | yes |  |
-| `[3].do` | `"token.create"` | yes |  |
-| `[3].actor` | `string` | yes |  |
-| `[3].kind` | `"human" \| "agent" \| "ci"` | yes |  |
-| `[3].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | no | What a new actor may do. Absent: a person everything, an agent read and produce, a pipeline record. Not for an actor that exists: use grant.set. Default: `[]`. |
-| `[3].project` | `string` | no | Limit the grant to one project. Absent: every project. |
-| `[3].label` | `string` | no |  |
-| `[3].expires` | `string` | no | How long the token works from now: 90d, 12h, 2w. After that it is refused as a revoked one is. Absent: it has no end. |
-| `[4].do` | `"token.list"` | yes |  |
-| `[5].do` | `"token.revoke"` | yes |  |
-| `[5].id` | `integer` | yes |  |
-| `[6].do` | `"actor.list"` | yes |  |
-| `[7].do` | `"grant.set"` | yes |  |
-| `[7].actor` | `string` | yes |  |
-| `[7].project` | `string` | no | The project the grant is for. Absent: every project. |
-| `[7].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | yes | What the actor may do there from now on, in place of what it could. |
-| `[8].do` | `"grant.remove"` | yes |  |
+| `[3].do` | `"project.demo"` | yes |  |
+| `[3].key` | `string` | yes | Makes the project a demo: a write to it may say when it happened. Only a project nothing was written to, and it is not undone. |
+| `[4].do` | `"token.create"` | yes |  |
+| `[4].actor` | `string` | yes |  |
+| `[4].kind` | `"human" \| "agent" \| "ci"` | yes |  |
+| `[4].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | no | What a new actor may do. Absent: a person everything, an agent read and produce, a pipeline record. Not for an actor that exists: use grant.set. Default: `[]`. |
+| `[4].project` | `string` | no | Limit the grant to one project. Absent: every project. |
+| `[4].label` | `string` | no |  |
+| `[4].expires` | `string` | no | How long the token works from now: 90d, 12h, 2w. After that it is refused as a revoked one is. Absent: it has no end. |
+| `[5].do` | `"token.list"` | yes |  |
+| `[6].do` | `"token.revoke"` | yes |  |
+| `[6].id` | `integer` | yes |  |
+| `[7].do` | `"actor.list"` | yes |  |
+| `[8].do` | `"grant.set"` | yes |  |
 | `[8].actor` | `string` | yes |  |
-| `[8].project` | `string` | no | The project the grant is for. Absent: the grant on every project. |
-| `[9].do` | `"actor.forget"` | yes |  |
-| `[9].name` | `string` | yes | Removes who this actor was: a pseudonym replaces the name and its tokens stop working. History keeps what was done. |
-| `[10].do` | `"policy.show"` | yes |  |
-| `[10].project` | `string` | yes |  |
+| `[8].project` | `string` | no | The project the grant is for. Absent: every project. |
+| `[8].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | yes | What the actor may do there from now on, in place of what it could. |
+| `[9].do` | `"grant.remove"` | yes |  |
+| `[9].actor` | `string` | yes |  |
+| `[9].project` | `string` | no | The project the grant is for. Absent: the grant on every project. |
+| `[10].do` | `"actor.forget"` | yes |  |
+| `[10].name` | `string` | yes | Removes who this actor was: a pseudonym replaces the name and its tokens stop working. History keeps what was done. |
+| `[11].do` | `"policy.show"` | yes |  |
+| `[11].project` | `string` | yes |  |
 
 </details>
 

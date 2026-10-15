@@ -128,6 +128,7 @@ export type SessionInfo = {
 	 */
 	owner: boolean;
 	version: string;
+	/** `demo`: the project's dates were given by whoever wrote them, not read from the server's clock (decision 0020). */
 	projects: {
 		key: string;
 		name: string;
@@ -136,6 +137,7 @@ export type SessionInfo = {
 		policy: string;
 		/** What happens to a test with no case. Absent only in the reply of a server older than the setting. */
 		unlinked?: Unlinked | undefined;
+		demo: boolean;
 		can?: string[];
 	}[];
 };

@@ -1,16 +1,25 @@
-// The demo: a shop's suite, a pipeline's results on three commits, a planned run, and an agent's finding and
-// proposal. It is written through the operations a person, a pipeline and an agent would use, so a project
-// filled here holds nothing those three could not have left.
+// The demo: a shop's suite, the days of pipeline reports, runs, edits and reviews that came before today, and
+// today's open questions. It is written through the operations a person, a pipeline and an agent would use, so
+// a project filled here holds nothing those three could not have left. What it writes is decided in
+// `src/cli/demo/` from a seed; this file sends it, each request with the time it happened at.
 import { z } from "zod";
 import type { Api } from "../core/api.ts";
 import type { ActorKind, Capability } from "../core/kinds.ts";
 import type { Client } from "./client.ts";
+import { type DemoCase, demoCases, random } from "./demo/cases.ts";
+import { dayStart, demoHistory, type Failure, hex, REPO } from "./demo/history.ts";
 import { CliError } from "./errors.ts";
 
 export type SeedResult = { cases: string[]; run: string; proposal: string | null; questions: string[] };
 
 /** The most cases one seed writes: the size the benchmark measures (`bench/`). */
 export const MAX_SEED_CASES = 100_000;
+export const DEFAULT_SEED_CASES = 2000;
+/** The seed a demo is made from when none is given: the same demo for everybody who does not ask for another. */
+export const DEFAULT_SEED = 1;
+/** How many days of history a demo holds before today, and the most it can be asked for. */
+export const DEFAULT_SEED_DAYS = 14;
+export const MAX_SEED_DAYS = 90;
 
 /** The most files of unit tests one seed reports: one open question each. */
 export const MAX_SEED_UNLINKED_FILES = 500;
@@ -48,6 +57,10 @@ export function unitTests(files: number): Api["report"]["input"]["results"] {
 const Projects = z.array(z.object({ key: z.string() }));
 const Actors = z.array(z.object({ name: z.string(), kind: z.string() }));
 const Token = z.object({ token: z.string() });
+const Demo = z.object({ since: z.number() });
+const Question = z.object({ q: z.string(), state: z.string(), evidenceHash: z.string() });
+const UnlinkedTest = z.object({ ref: z.string(), key: z.string(), file: z.string() });
+const MapEvidence = z.object({ file: z.string() });
 
 type Producer = { actor: string; kind: Exclude<ActorKind, "rule">; can: Capability[]; label: string };
 const PIPELINE: Producer = { actor: "pipeline", kind: "ci", can: ["read", "record"], label: "Demo pipeline" };
@@ -58,11 +71,17 @@ const REVIEWER: Producer = {
 	label: "Demo reviewer",
 };
 
+const HOUR = 3_600_000;
+const MINUTE = 60_000;
+type Result = Api["report"]["input"]["results"][number];
+
 /**
  * Fills `project` with the demo, as whoever `client` signs in as: a person who administers the instance. The
- * project is made when the instance has none of that name. One that holds cases, tests or runs is left alone,
- * unless this caller's seed began there: every write to the project carries a command id, so sending the same
- * seed again finishes one that stopped and writes nothing in the project twice. It does make the two tokens again.
+ * project is made when the instance has none of that name, and made a demo (decision 0020): its history is dated
+ * in the days before the moment it became one. One that holds cases, tests or runs is left alone, unless this
+ * caller's seed began there: every write to the project carries a command id and the same time as before, so
+ * sending the same seed again finishes one that stopped and writes nothing in the project twice. It does make
+ * the two tokens again.
  *
  * What can refuse the caller comes first, so nothing is made for a seed that cannot be finished. The pipeline
  * and the agent are given a grant on this project alone, and their tokens end after an hour: the secrets are
@@ -70,8 +89,11 @@ const REVIEWER: Producer = {
  */
 export async function seed(
 	client: Client,
-	{ project, cases, unlinkedFiles = 0 }: { project: string; cases: number; unlinkedFiles?: number },
+	options: { project: string; cases: number; seed?: number; days?: number; unlinkedFiles?: number },
 ): Promise<SeedResult> {
+	const { project, cases, unlinkedFiles = 0 } = options;
+	const seedNumber = options.seed ?? DEFAULT_SEED;
+	const days = options.days ?? DEFAULT_SEED_DAYS;
 	if (!Number.isInteger(cases) || cases < 1 || cases > MAX_SEED_CASES)
 		throw new CliError("invalid", `seed writes from 1 to ${MAX_SEED_CASES} cases, not ${cases}`);
 	if (!Number.isInteger(unlinkedFiles) || unlinkedFiles < 0 || unlinkedFiles > MAX_SEED_UNLINKED_FILES)
@@ -79,9 +101,13 @@ export async function seed(
 			"invalid",
 			`seed reports from 0 to ${MAX_SEED_UNLINKED_FILES} files of tests with no case, not ${unlinkedFiles}`,
 		);
+	if (!Number.isInteger(seedNumber) || seedNumber < 0 || seedNumber > 0xffff_ffff)
+		throw new CliError("invalid", `the seed is a whole number from 0 to ${0xffff_ffff}, not ${seedNumber}`);
+	if (!Number.isInteger(days) || days < 0 || days > MAX_SEED_DAYS)
+		throw new CliError("invalid", `seed writes from 0 to ${MAX_SEED_DAYS} days of history, not ${days}`);
 	const as = (token: string | undefined) => client.with({ token, project });
 	const owner = as(client.options.token);
-	const id = (step: string) => `demo-${project}-${step}-v1`;
+	const id = (step: string) => `demo-${project}-${step}-v2`;
 	const actors = Actors.parse(await owner.call("admin", { do: "actor.list" }));
 	const known = (producer: Producer) => actors.find((row) => row.name === producer.actor);
 	for (const producer of [PIPELINE, REVIEWER]) {
@@ -95,11 +121,18 @@ export async function seed(
 	const exists = Projects.parse(await owner.call("admin", { do: "project.list" })).some((row) => row.key === project);
 	if (!exists) await owner.call("admin", { do: "project.create", key: project });
 	const begun = exists && (await owner.call("command", { cmd: id("folders") })).state !== "none";
-	if (exists && !begun && (await holdsWork(owner)))
-		throw new CliError(
-			"conflict",
-			`project ${project} already holds cases, tests or runs; seed fills a new project or an empty one`,
-		);
+	const taken = new CliError(
+		"conflict",
+		`project ${project} already holds cases, tests or runs; seed fills a new project or an empty one`,
+	);
+	if (exists && !begun && (await holdsWork(owner))) throw taken;
+	// The moment the project became a demo, by the server's clock: today, for this demo, however often it is sent.
+	const { since } = Demo.parse(
+		await owner.call("admin", { do: "project.demo", key: project }).catch((error: unknown) => {
+			// It holds no case, test or run, and something was written to it all the same: a folder, a policy.
+			throw error instanceof CliError && error.code === "conflict" ? taken : error;
+		}),
+	);
 	const signIn = async (producer: Producer) => {
 		const { actor, kind, can, label } = producer;
 		// A new token names the grant its actor holds. An actor from an earlier seed is given this project's first.
@@ -109,101 +142,257 @@ export async function seed(
 	};
 	const ci = await signIn(PIPELINE);
 	const agent = await signIn(REVIEWER);
-	await owner.call("propose", {
-		cmd: id("folders"),
-		edits: [
-			{ op: "folder", name: "Checkout" },
-			{ op: "folder", name: "Coupons", parent: "Checkout" },
-			{ op: "folder", name: "Cart", parent: "Checkout" },
-			{ op: "folder", name: "Accounts" },
-			{ op: "folder", name: "Orders" },
-			{ op: "folder", name: "Catalog" },
-		],
-	});
-	const refs: string[] = [];
-	const paths = ["Checkout/Coupons", "Checkout/Cart", "Accounts", "Orders", "Catalog"];
-	const titles = [
-		"Expired coupon is rejected",
-		"Cart preserves the quantity",
-		"Password reset restores access",
-		"Order total includes shipping",
-		"Catalog keeps the selected filters",
-	];
-	for (let offset = 0; offset < cases; offset += 250) {
-		const edits: Api["propose"]["input"]["edits"] = Array.from({ length: Math.min(250, cases - offset) }, (_, n) => {
-			const i = offset + n;
-			return {
-				op: "create",
-				folder: paths[i % paths.length] ?? "Checkout",
-				tags: i % 3 === 0 ? ["checkout", "regression"] : ["regression"],
-				body: {
-					title: `${titles[i % titles.length] ?? "Checkout is correct"}${i < 5 ? "" : ` · ${String(i + 1).padStart(5, "0")}`}`,
-					pre: "Open the shop with a signed-in account.",
-					methods: ["human", "auto", "agent"],
-					automate: "none",
-					fields: {},
-					steps: [
-						{ id: "a1", action: "Open the cart with one $100.00 item", expected: null },
-						{ id: "b2", action: "Apply the coupon OLD10", expected: 'Error "Coupon expired"; total unchanged' },
-						{ id: "c3", action: "Reload the page", expected: "The cart keeps the item and total" },
-					],
-				},
-			};
-		});
-		const reply = await owner.call("propose", { cmd: id(`cases-${offset}`), edits }).catch((error: unknown) => {
-			// The command id of a batch is bound to its cases: a seed sent again with another count is another request.
+
+	/**
+	 * One write of the demo: under its own command id, at the time it happened. The id is bound to the request, so
+	 * a seed sent again with other cases, another seed or other days is another request, and is refused here in
+	 * words about the seed.
+	 */
+	const write = async <N extends "propose" | "report" | "claim" | "plan" | "decide">(
+		who: Client,
+		op: N,
+		step: string,
+		at: number,
+		input: Api[N]["input"],
+	): Promise<Api[N]["reply"]> =>
+		who.call(op, { ...input, cmd: id(step) }, at).catch((error: unknown) => {
 			if (begun && error instanceof CliError && error.code === "conflict")
 				throw new CliError(
 					"conflict",
-					`project ${project} was seeded with another number of cases; send that number again, or seed another project`,
+					`project ${project} was seeded with another number of cases, another seed or other days; send those again, or seed another project`,
 				);
 			throw error;
 		});
+
+	/** A person's answer to each of these questions. One answered by an earlier attempt of this seed is left as it is. */
+	const answer = async (
+		questions: readonly string[],
+		step: string,
+		at: number,
+		given: { answer: Record<string, unknown>; reason?: string },
+	) => {
+		for (const [n, q] of questions.entries()) {
+			const name = questions.length > 1 ? `${step}${n}` : step;
+			if ((await owner.call("command", { cmd: id(name) })).state === "done") continue;
+			const [question] = z.array(Question).parse(await owner.call("get", { refs: [q] }));
+			if (question?.state !== "open") continue;
+			await write(owner, "decide", name, at, { q, onEvidence: question.evidenceHash, ...given });
+		}
+	};
+
+	// ── The suite, written on the first morning of the history, under the policy the project keeps. ──
+	const suite = demoCases(seedNumber, cases);
+	const suiteAt = days > 0 ? dayStart(since, days) + 8 * HOUR : since - 6 * HOUR;
+	// `standard` asks a person which case a new test covers, and asks one before an agent's edit is adopted.
+	const policy = await write(owner, "propose", "standard", suiteAt - MINUTE, {
+		edits: [{ op: "policy", preset: "standard", unlinked: "ask" }],
+	});
+	if (policy.question) await answer([policy.question], "standard-yes", suiteAt - MINUTE, { answer: { is: "accept" } });
+	const folders = [...new Set(suite.map((item) => item.folder))];
+	const made = new Set<string>();
+	const folderEdits: Api["propose"]["input"]["edits"] = [];
+	for (const path of folders) {
+		const parts = path.split("/");
+		parts.forEach((name, depth) => {
+			const whole = parts.slice(0, depth + 1).join("/");
+			if (made.has(whole)) return;
+			made.add(whole);
+			folderEdits.push({ op: "folder", name, ...(depth > 0 ? { parent: parts.slice(0, depth).join("/") } : {}) });
+		});
+	}
+	await write(owner, "propose", "folders", suiteAt, { edits: folderEdits });
+	const refs: string[] = [];
+	for (let offset = 0; offset < cases; offset += 250) {
+		const edits: Api["propose"]["input"]["edits"] = suite.slice(offset, offset + 250).map((item) => ({
+			op: "create",
+			folder: item.folder,
+			tags: item.tags,
+			body: {
+				title: item.title,
+				pre: item.pre,
+				methods: ["human", "auto", "agent"],
+				automate: "none",
+				fields: {},
+				steps: item.steps,
+			},
+		}));
+		const at = suiteAt + Math.min((offset / 250) * 5_000, 25 * MINUTE);
+		const reply = await write(owner, "propose", `cases-${offset}`, at, { edits });
 		refs.push(...reply.cases.map((item) => item.ref));
 	}
 	const first = refs[0];
 	if (!first) throw new CliError("internal", "the server created no case");
-	const green = "1111111111111111111111111111111111111111";
-	const red = "2222222222222222222222222222222222222222";
-	const change = "3333333333333333333333333333333333333333";
-	const results = refs.slice(0, 8).map(
-		(ref, i) =>
-			({
-				test: {
-					key: `tests/shop.spec.ts::shop::check-${i + 1}`,
-					name: `Shop check ${i + 1}`,
-					file: "tests/shop.spec.ts",
-				},
-				outcome: "pass",
-				annotation: { case: ref, version: 1 },
-			}) satisfies Api["report"]["input"]["results"][number],
-	);
-	await ci.call("report", {
-		cmd: id("green"),
-		target: { commit: green, repo: "demo/shop", branch: "main" },
+	const refOf = (index: number): string => {
+		const ref = refs[index];
+		if (!ref) throw new CliError("internal", `the demo names case ${index}, which the server did not create`);
+		return ref;
+	};
+	const caseOf = (index: number): DemoCase => {
+		const item = suite[index];
+		if (!item) throw new CliError("internal", `the demo names case ${index}, which it did not plan`);
+		return item;
+	};
+
+	// ── What a pipeline reports: every automated case, each as the test that covers it. ──
+	const tests = suite.flatMap((item, index) => (item.test ? [{ index, test: item.test }] : []));
+	const pipelineResults = (failures: readonly Failure[], jitter: number): Result[] =>
+		tests.map(({ index, test }, n) => {
+			const failure = failures.find((item) => item.case === index);
+			return {
+				test,
+				outcome: failure ? "fail" : "pass",
+				durationMs: Math.round((300 + ((n * 7919) % 4200)) * (0.85 + jitter * 0.3)),
+				...(failure ? { failure: { message: failure.message } } : {}),
+				annotation: { case: refOf(index), version: 1 },
+			} satisfies Result;
+		});
+
+	/**
+	 * Links the tests the pipeline has reported to the cases they cover, as a person does on the day a pipeline
+	 * first reports: one answer for each file of tests the queue asks about.
+	 */
+	const linkTests = async (at: number) => {
+		const caseByKey = new Map(tests.map(({ index, test }) => [test.key, refOf(index)]));
+		const byFile = new Map<string, [string, string][]>();
+		for (let cursor: string | null | undefined; cursor !== null; ) {
+			const page = await owner.call("find", { in: "tests", unlinked: true, limit: 500, ...(cursor ? { cursor } : {}) });
+			for (const row of z.array(UnlinkedTest).parse(page.items)) {
+				const covers = caseByKey.get(row.key);
+				if (covers) byFile.set(row.file, [...(byFile.get(row.file) ?? []), [row.ref, covers]]);
+			}
+			cursor = page.cursor;
+		}
+		const asked = await owner.call("inbox", { kind: "map", limit: 500 });
+		for (const question of asked.items) {
+			const pairs = byFile.get(MapEvidence.parse(question.evidence).file);
+			if (!pairs) continue;
+			await write(owner, "decide", `l-${question.q}`, at, {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "link", pairs },
+			});
+		}
+	};
+
+	// ── The history, in the order it happened. ──
+	const opened = new Map<string, string[]>();
+	const runs = new Map<string, string>();
+	const stillOpen = (questions: Api["report"]["reply"]["questions"]) =>
+		questions.filter((item) => item.state === "open").map((item) => item.q);
+	for (const event of demoHistory({ seed: seedNumber, cases: suite, days, since })) {
+		switch (event.kind) {
+			case "pipeline": {
+				const receipt = await write(ci, "report", event.step, event.at, {
+					target: { ...event.target, repo: REPO },
+					job: "shop",
+					results: pipelineResults(event.failures, event.jitter),
+				});
+				opened.set(event.step, stillOpen(receipt.questions));
+				break;
+			}
+			case "link":
+				await linkTests(event.at);
+				break;
+			case "answer":
+				await answer(opened.get(event.of) ?? [], event.step, event.at, {
+					answer: event.answer,
+					reason: event.reason,
+				});
+				break;
+			case "plan": {
+				const planned = await write(owner, "plan", event.step, event.at, {
+					name: event.name,
+					select: { cases: event.cases.map(refOf) },
+				});
+				runs.set(event.name, planned.run);
+				break;
+			}
+			case "execute": {
+				const run = runs.get(event.run);
+				if (!run) throw new CliError("internal", `the demo works through ${event.run} before planning it`);
+				const receipt = await write(owner, "report", event.step, event.at, {
+					run,
+					results: event.results.map((result) => {
+						const steps = caseOf(result.case).steps;
+						const last = steps.at(-1)?.id;
+						return {
+							test: { case: refOf(result.case) },
+							outcome: result.failed ? "fail" : "pass",
+							steps: steps.map((step) => ({
+								step: step.id,
+								outcome: result.failed && step.id === last ? "fail" : "pass",
+							})),
+							...(result.failed
+								? {
+										failure: { message: result.failed.message, ...(last ? { at: last } : {}) },
+										note: result.failed.note,
+									}
+								: {}),
+						} satisfies Result;
+					}),
+				});
+				opened.set(event.step, stillOpen(receipt.questions));
+				break;
+			}
+			case "edit": {
+				const steps = caseOf(event.case).steps;
+				const n = steps.length;
+				await write(owner, "propose", event.step, event.at, {
+					reason: event.reason,
+					edits: [
+						{
+							op: "edit",
+							case: refOf(event.case),
+							base: 1,
+							body: { steps: [...steps, { id: `${String.fromCharCode(97 + n)}${n + 1}`, ...event.add }] },
+						},
+					],
+				});
+				break;
+			}
+			case "review": {
+				const on = caseOf(event.finding.case).steps[0]?.id;
+				const claimed = await write(agent, "claim", event.step, event.at, {
+					lens: "adversarial-review",
+					about: `pr:${event.about}`,
+					findings: [
+						{
+							on: on ? `${refOf(event.finding.case)}#${on}` : refOf(event.finding.case),
+							category: event.finding.category,
+							note: event.finding.note,
+						},
+					],
+				});
+				opened.set(event.step, claimed.opened);
+				break;
+			}
+			default: {
+				const _exhaustive: never = event;
+				throw new CliError("internal", `the demo holds an event it cannot write: ${JSON.stringify(_exhaustive)}`);
+			}
+		}
+	}
+
+	// ── Today: `main` went red an hour and a half after it was green, and a pull request inherits the failure. ──
+	const today = random(seedNumber ^ 0x5bd1e995);
+	const [green, red, change] = [hex(today), hex(today), hex(today)];
+	const broken: Failure[] = [{ case: 0, message: "expected $90.00, got $100.00" }];
+	await write(ci, "report", "green", since - 4.5 * HOUR, {
+		target: { commit: green, repo: REPO, branch: "main" },
 		job: "shop",
-		results,
+		results: pipelineResults([], 0.5),
 	});
-	const failures = results.map((result, i) =>
-		i === 0
-			? ({
-					...result,
-					outcome: "fail",
-					failure: { message: "expected $90.00, got $100.00" },
-				} satisfies Api["report"]["input"]["results"][number])
-			: result,
-	);
-	await ci.call("report", {
-		cmd: id("red"),
-		target: { commit: red, repo: "demo/shop", branch: "main" },
+	// A demo with no history links its tests now, on the first report there is.
+	if (days === 0) await linkTests(since - 4 * HOUR);
+	await write(ci, "report", "red", since - 3 * HOUR, {
+		target: { commit: red, repo: REPO, branch: "main" },
 		job: "shop",
-		results: failures,
+		results: pipelineResults(broken, 0.4),
 	});
-	await ci.call("report", {
-		cmd: id("pr"),
+	await write(ci, "report", "pr", since - 2 * HOUR, {
 		target: {
 			commit: change,
-			repo: "demo/shop",
+			repo: REPO,
 			branch: "coupon-total",
 			pr: 482,
 			base: red,
@@ -211,25 +400,16 @@ export async function seed(
 			files: ["src/checkout.ts", "src/shipping.ts"],
 		},
 		job: "shop",
-		results: failures,
+		results: pipelineResults(broken, 0.6),
 	});
-	const planned = await owner.call("plan", {
-		cmd: id("run"),
+	const checkout = suite.flatMap((item, index) => (item.folder.startsWith("Checkout") ? [refOf(index)] : []));
+	const planned = await write(owner, "plan", "run", since - 90 * MINUTE, {
 		name: "Checkout regression",
-		select: { cases: refs.slice(0, 40) },
-		accepts: { commit: change, repo: "demo/shop" },
+		select: { cases: checkout.slice(0, 40) },
+		accepts: { commit: change, repo: REPO },
 	});
-	const policy = await owner.call("propose", {
-		cmd: id("standard"),
-		edits: [{ op: "policy", preset: "standard", unlinked: "ask" }],
-	});
-	if (policy.question) {
-		const question = (await owner.call("inbox", { kind: "adopt" })).items.find((q) => q.q === policy.question);
-		if (question)
-			await owner.call("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } });
-	}
-	await agent.call("claim", {
-		cmd: id("finding"),
+	const featured = caseOf(0).steps;
+	await write(agent, "claim", "finding", since - 40 * MINUTE, {
 		lens: "adversarial-review",
 		about: "pr:482",
 		findings: [
@@ -241,8 +421,7 @@ export async function seed(
 			},
 		],
 	});
-	const proposal = await agent.call("propose", {
-		cmd: id("agent"),
+	const proposal = await write(agent, "propose", "agent", since - 30 * MINUTE, {
 		reason: "Check removing the coupon as well as adding it.",
 		edits: [
 			{
@@ -250,19 +429,13 @@ export async function seed(
 				case: first,
 				base: 1,
 				body: {
-					steps: [
-						{ id: "a1", action: "Open the cart with one $100.00 item", expected: null },
-						{ id: "b2", action: "Apply the coupon OLD10", expected: 'Error "Coupon expired"; total unchanged' },
-						{ id: "c3", action: "Reload the page", expected: "The cart keeps the item and total" },
-						{ id: "d4", action: "Remove the coupon", expected: "Total returns to $100.00" },
-					],
+					steps: [...featured, { id: "d4", action: "Remove the coupon", expected: "Total returns to $100.00" }],
 				},
 			},
 		],
 	});
-	await ci.call("report", {
-		cmd: id("unlinked"),
-		target: { commit: change, repo: "demo/shop", branch: "coupon-total", pr: 482 },
+	await write(ci, "report", "unlinked", since - 20 * MINUTE, {
+		target: { commit: change, repo: REPO, branch: "coupon-total", pr: 482 },
 		job: "misc",
 		results: [
 			{
@@ -277,9 +450,8 @@ export async function seed(
 	});
 	// The shop's unit tests on the pull request, in a job of their own: one more open question for each file.
 	if (unlinkedFiles > 0) {
-		await ci.call("report", {
-			cmd: id(`unit-${unlinkedFiles}`),
-			target: { commit: change, repo: "demo/shop", branch: "coupon-total", pr: 482 },
+		await write(ci, "report", `unit-${unlinkedFiles}`, since - 10 * MINUTE, {
+			target: { commit: change, repo: REPO, branch: "coupon-total", pr: 482 },
 			job: "unit",
 			results: unitTests(unlinkedFiles),
 		});

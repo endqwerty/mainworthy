@@ -49,7 +49,9 @@ export function latency(cases: 2000 | 10000): void {
 	test.skipIf(!browserAvailable || (cases === 10000 && process.env.MAINWORTHY_SKIP_10K === "1"))(
 		`L1 input and virtual scrolling with ${cases.toLocaleString()} real cases`,
 		async () => {
-			const server = await startServer({ cases });
+			// No history: this measures typing and scrolling in a long list, and the days before today would add
+			// two seconds of seeding to a check whose time is a budget.
+			const server = await startServer({ cases, days: 0 });
 			const browser = await openPage(server);
 			try {
 				const { page } = browser;

@@ -253,6 +253,10 @@ connection open, as before there was a timeout.
 - **One clock per project.** Every command gets the next sequence number, in commit order, and stamps its rows
   with it (a report gets two, one for each of its transactions). "What changed since I last looked" is one range
   read; the cursor an agent passes back is that number.
+- **The time is the server's.** A row carries the clock of the server at the command that wrote it, and a caller
+  cannot give another. The one exception is a demo project (decision 0020): a project marked as one while it was
+  empty accepts a write that says when it happened, which is how `mainworthy seed` writes the days before today.
+  A report applied after a restart keeps the time it was accepted at.
 
 ## What happens when a pipeline reports (the red build)
 
@@ -446,6 +450,7 @@ when a hot path gets slow.
 | `src/surfaces/` | HTTP, MCP, the JUnit reader, CI environment detection, archive routes, the documentation site, the web UI's files, the headers on every reply |
 | `docs/guide/` | the user documentation, served at `/docs`; its table of contents is `src/core/docs.ts` |
 | `src/cli/` | the command line, generated from the registry plus a few adapters |
+| `src/cli/demo/` | what `mainworthy seed` writes: the shop's catalog, the cases made from it and the history, all pure |
 | `src/web/` | the web UI |
 | `skill/mainworthy/` | the skill that teaches an agent the case model |
 | `ios/` | the iPhone app: SwiftUI views over a Swift package that knows the server (`ios/README.md`) |

@@ -5,7 +5,7 @@ if (!browserAvailable) {
 	console.info("Screenshots skipped: system Chromium is missing.");
 	process.exit(0);
 }
-const server = await startServer({ cases: 2000 });
+const server = await startServer({ cases: 2000, days: 14 });
 const harness = await openPage(server);
 try {
 	const run = server.seeded?.run ?? "R-1";

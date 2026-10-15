@@ -293,6 +293,18 @@ const changedSession = (): Response =>
 		401,
 	);
 
+/**
+ * A write to a demo project may say when it happened (`X-Mainworthy-At`, milliseconds since 1970; decision
+ * 0020). The registry decides whether the call may carry one; here it is only read, and one that is not a
+ * number is refused instead of dropped.
+ */
+export const AT_HEADER = "x-mainworthy-at";
+function timeOf(req: Request): number | null | undefined {
+	const text = req.headers.get(AT_HEADER);
+	if (text === null) return undefined;
+	return /^\d{1,16}$/.test(text) ? Number(text) : null;
+}
+
 /** The largest body an operation accepts. A 100,000-result report is about 30 MB. */
 export const OP_BODY_LIMIT = 64 * 1024 * 1024;
 /**
@@ -423,6 +435,12 @@ export async function handleOp(
 ): Promise<Response> {
 	const session = sessionFor(app, owner, req, server);
 	if (session instanceof Response) return session;
+	const at = timeOf(req);
+	if (at === null)
+		return jsonResponse(
+			{ ok: false, error: { code: "invalid", message: `${AT_HEADER} is a whole number of milliseconds since 1970` } },
+			400,
+		);
 	let input: unknown;
 	try {
 		input = await readJson(req);
@@ -441,6 +459,7 @@ export async function handleOp(
 			...(session.id ? { session: session.id } : {}),
 			// Where the caller is signed in, for an operation that another request finishes (a passkey registration).
 			...(session.context ? { context: session.context } : {}),
+			...(at === undefined ? {} : { at }),
 		}),
 	);
 }
