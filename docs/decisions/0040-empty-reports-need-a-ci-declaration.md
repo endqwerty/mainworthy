@@ -28,7 +28,7 @@ The policy proposal still needs an admin's acceptance. The declaration needs a C
 
 `PolicySettings.emptyReports` is `"pending" | "nothing-required"`. Every preset defaults to `pending`, as do older stored policies that lack the setting. A top-level policy edit changes this setting without replacing the others.
 
-`ReportInput` accepts either nonempty results or an empty array with the literal `nothingRequired: true`. Validation rejects a declaration with results. The report operation checks the actor and explicit commit before creating a target or batch.
+`ReportInput` accepts either nonempty results or an empty array with the literal `nothingRequired: true`. Validation rejects a declaration with results. The report operation checks the actor and explicit commit and refuses a planned run before creating a target or batch. The CI-only declaration is hidden from MCP tool definitions.
 
 Migration 0007 adds `batches.nothing_required`. This retains the declaration after its staged input is cleared and distinguishes it from a report whose results were all refused. Existing batches get 0. Archives include this column, so their schema becomes 7. Older archives must be imported with an older build before upgrading the database.
 

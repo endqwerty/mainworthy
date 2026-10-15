@@ -196,7 +196,11 @@ export const ReportInput = z
 		attempt: z.number().int().min(1).optional(),
 		buildUrl: z.string().max(500).optional(),
 		results: z.array(ResultIn).max(100_000),
-		nothingRequired: z.literal(true).optional().describe("CI-only empty declaration; requires policy permission."),
+		nothingRequired: z
+			.literal(true)
+			.optional()
+			.meta({ "x-mcp-hidden": true })
+			.describe("CI-only empty declaration; requires policy permission."),
 		cmd,
 	})
 	.refine((report) => (report.nothingRequired ? report.results.length === 0 : report.results.length > 0), {

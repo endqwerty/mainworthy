@@ -10,7 +10,7 @@ Choice labels such as `[create]` or `[1]` show which input shape a field belongs
 
 ## propose
 
-Propose at base version. Status: adopted=current, open=review, conflict, rejected.
+Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -99,11 +99,11 @@ Propose at base version. Status: adopted=current, open=review, conflict, rejecte
 | `edits[][policy].unlinked` | `"ask" \| "track" \| "create"` | no |  |
 | `edits[][policy].emptyReports` | `"pending" \| "nothing-required"` | no |  |
 | `reason` | `string` | no | Why. Shown in the case history. |
-| `project` | `string` | no | Omit only for a single project. |
+| `project` | `string` | no | Optional. |
 
 ## report
 
-Record results for target or run.
+Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -143,7 +143,7 @@ Record results for target or run.
 | `results[].annotation.version` | `integer` | no |  |
 | `results[].corrects` | `integer` | no | The id of an earlier result of yours that this one replaces. |
 | `nothingRequired` | `true` | no | CI-only empty declaration; requires policy permission. |
-| `project` | `string` | no | Omit only for a single project. |
+| `project` | `string` | no | Optional. |
 
 ## claim
 
@@ -168,7 +168,7 @@ Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Reco
 | `findings[].suggest[2].step` | `string` | no |  |
 | `findings[].suggest[2].action` | `string` | no |  |
 | `findings[].suggest[2].expected` | `string` | no |  |
-| `project` | `string` | no | Omit only for a single project. |
+| `project` | `string` | no | Optional. |
 
 ## decide
 
@@ -176,7 +176,7 @@ Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person d
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `project` | `string` | no | Omit only for a single project. |
+| `project` | `string` | no | Optional. |
 | `[1].q` | `string` | yes | The question, for example Q-12. |
 | `[1].onEvidence` | `string` | yes | The evidence hash you saw. If the evidence changed since, the reply is a conflict with the new evidence. |
 | `[1].answer` | `record<unknown>` | yes | The answer, for example {"is":"defect"}. The allowed answers depend on the question kind. |
@@ -202,7 +202,7 @@ Open questions and evidenceHash; filter with on.
 | `on` | `string` | no | Only questions about this case, run, test or change. |
 | `limit` | `integer` | no |  |
 | `cursor` | `string` | no | The cursor from the previous page. |
-| `project` | `string` | no | Omit only for a single project. |
+| `project` | `string` | no | Optional. |
 
 ## get
 
@@ -215,7 +215,7 @@ Read refs. For cases: as, fields, unless.
 | `as` | `"data" \| "md"` | no | `md` returns a case as canonical Markdown: fewer tokens than JSON. Default: `"data"`. |
 | `unless` | `record<string>` | no | Ref to the hash you already hold. An unchanged case comes back as {ref, unchanged: true}. |
 | `version` | `integer` | no | For one case: this version instead of the current one. |
-| `project` | `string` | no | Omit only for a single project. |
+| `project` | `string` | no | Optional. |
 
 ## find
 
@@ -233,7 +233,7 @@ Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slot
 | `unlinked` | `boolean` | no | For tests: only those with no case. |
 | `limit` | `integer` | no |  |
 | `cursor` | `string` | no | The cursor from the previous page. |
-| `project` | `string` | no | Omit only for a single project. |
+| `project` | `string` | no | Optional. |
 
 ## impact
 
@@ -245,7 +245,7 @@ Start a review with a change (`pr:482`) or changed `files`. Returns affected cas
 | `files` | `array<string>` | no | Changed paths, when the change is not known to Mainworthy. |
 | `since` | `string` | no | A cursor from an earlier call: only what moved since. |
 | `ledger` | `boolean` | no | False for fresh eyes: do not hide what was already reviewed. Default: `true`. |
-| `project` | `string` | no | Omit only for a single project. |
+| `project` | `string` | no | Optional. |
 
 ## since
 
@@ -255,7 +255,7 @@ What changed since an earlier `cursor`: changed cases (one-line diff, no bodies)
 | --- | --- | --- | --- |
 | `cursor` | `string` | yes | A cursor from any earlier read. |
 | `limit` | `integer` | no |  |
-| `project` | `string` | no | Omit only for a single project. |
+| `project` | `string` | no | Optional. |
 
 ## gate
 
@@ -267,4 +267,4 @@ Is this commit, change or run tested? Returns passed, failed, blocked or pending
 | `run` | `string` | no |  |
 | `change` | `string` | no | A change key, for example pr:482: the gate of its latest commit. |
 | `repo` | `string` | no |  |
-| `project` | `string` | no | Omit only for a single project. |
+| `project` | `string` | no | Optional. |

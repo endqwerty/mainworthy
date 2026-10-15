@@ -178,6 +178,19 @@ describe("what a result may prove", () => {
 		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
 	});
 
+	test("nothing required refuses a planned run even with an explicit commit", () => {
+		emptyPolicy("nothing-required");
+		seed();
+		const pipeline = h.actor("pipeline", "ci", ["record"]);
+		const planned = plan({ name: "tests required", select: {}, accepts: { commit: "empty0009" } });
+		expect(h.raw("report", nothingRequired("empty0009", { run: planned.run }), pipeline)).toMatchObject({
+			ok: false,
+			error: { code: "invalid", message: "nothing required is a declaration about a commit, not a planned run" },
+		});
+		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "pending", tally: { missing: 1 } });
+	});
+
 	test("a nothing-required declaration waits for application and survives accepted-batch recovery", () => {
 		emptyPolicy("nothing-required");
 		const pipeline = h.actor("pipeline", "ci", ["read", "record"]);
