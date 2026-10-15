@@ -568,3 +568,33 @@ for (const read of ["held", "failed"])
 		},
 		30000,
 	);
+
+check("a broad assertion shows its file split in the queue", async () => {
+	const server = await startServer({ unlinked: "track" });
+	try {
+		const receipt = await server.api("report", {
+			target: { commit: "broad-ui-01", branch: "main" },
+			results: Array.from({ length: 60 }, (_, i) => ({
+				test: { key: `file-${i % 6}.test.ts::test ${i}`, file: `file-${i % 6}.test.ts` },
+				outcome: "fail",
+				failure: { message: "assertion failed" },
+			})),
+		});
+		expect(receipt.questions).toHaveLength(6);
+		const h = await openPage(server, { path: "/p/scratch/queue" });
+		try {
+			h.page.setDefaultTimeout(5000);
+			await h.page.locator("[data-current-question]").waitFor();
+			expect(await h.page.locator(".queue-pane h2").textContent()).toMatch(
+				/^Split by file \(file-[0-5]\.test\.ts\): assertion failed$/,
+			);
+			expect(await h.page.locator(".queue-title").allTextContents()).toHaveLength(6);
+			expect(await h.page.locator(".queue-log").textContent()).toBe("assertion failed");
+			expect(await h.page.locator("#detail").textContent()).toContain("10 tests share this cause");
+		} finally {
+			await h.close();
+		}
+	} finally {
+		await server.stop();
+	}
+});
