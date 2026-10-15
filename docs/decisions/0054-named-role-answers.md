@@ -54,7 +54,7 @@ No new operation, alternate decision writer or witness path is added.
 ## Storage and limits
 
 Migration 0019 adds `grants.roles TEXT NOT NULL DEFAULT '[]'`.
-It changes an exported table and advances the archive version from 17 to 18. Older archives are refused; this release requires an export from the new schema.
+It changes an exported table and advances the archive version from 17 to 19. Older archives are refused; this release requires an export from the new schema.
 MCP's tool listing hides the role selector to keep the existing token ceiling and tool descriptions.
 HTTP, the CLI and the web accept it through the core schema, as does an MCP call that supplies it.
 
