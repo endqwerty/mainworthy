@@ -260,19 +260,25 @@ describe("reader threads", () => {
 			await pool.ready();
 			let retried = 0;
 			const requests = Array.from({ length: 32 }, () =>
-				pool.run({ op: "find", project: "scratch", input: {}, actor: null }, () => {
-					retried++;
-					return { ok: true, result: "replayed", seq: null };
-				}),
+				pool.run(
+					{ op: "find", project: "scratch", input: {}, caller: { via: "local", actor: 0 }, clockOffset: 0 },
+					() => {
+						retried++;
+						return { ok: true, result: "replayed", seq: null };
+					},
+				),
 			);
 			expect((await Promise.all(requests)).every((reply) => reply.ok && reply.result === "replayed")).toBe(true);
 			expect(retried).toBe(32);
 			await pool.ready();
 			expect(pool.threads).toHaveLength(1);
 			expect(log).toHaveBeenCalledTimes(1);
-			const reply = await pool.run({ op: "find", project: "missing", input: {}, actor: null }, () => {
-				throw new Error("the replacement must answer");
-			});
+			const reply = await pool.run(
+				{ op: "find", project: "missing", input: {}, caller: { via: "local", actor: 0 }, clockOffset: 0 },
+				() => {
+					throw new Error("the replacement must answer");
+				},
+			);
 			expect(reply).toMatchObject({ ok: false, error: { code: "not_found" } });
 			expect(pool.completed).toBe(1);
 		} finally {
@@ -292,11 +298,14 @@ describe("reader threads", () => {
 		const threads = pool.threads;
 		const exits = threads.map((worker) => new Promise<void>((resolve) => worker.once("exit", () => resolve())));
 		const requests = Array.from({ length: 12 }, () =>
-			pool.run({ op: "find", project: "scratch", input: {}, actor: null }, () => ({
-				ok: true,
-				result: "shutdown fallback",
-				seq: null,
-			})),
+			pool.run(
+				{ op: "find", project: "scratch", input: {}, caller: { via: "local", actor: 0 }, clockOffset: 0 },
+				() => ({
+					ok: true,
+					result: "shutdown fallback",
+					seq: null,
+				}),
+			),
 		);
 		await pool.stop();
 		await Promise.all(exits);

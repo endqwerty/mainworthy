@@ -420,6 +420,7 @@ export async function handleOp(
 			project,
 			input,
 			actor: session.actor,
+			...(session.reference ? { reference: session.reference() } : {}),
 			// Which of the caller's browser sessions this is, for an operation that lists or ends them.
 			...(session.id ? { session: session.id } : {}),
 			// Where the caller is signed in, for an operation that another request finishes (a passkey registration).

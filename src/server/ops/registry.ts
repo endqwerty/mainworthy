@@ -5,7 +5,9 @@ import { createHash } from "node:crypto";
 import type { z } from "zod";
 import { mayRun, type Need, needs } from "../../core/kinds.ts";
 import { malformedText } from "../../core/text.ts";
+import { resolveCaller } from "../identity/identity.ts";
 import type { App } from "../kernel/app.ts";
+import type { CallerReference } from "../kernel/caller.ts";
 import {
 	type Actor,
 	beginCommand,
@@ -127,6 +129,8 @@ export type Call = {
 	input: unknown;
 	/** Resolves the caller for a project (0 for the instance). Null when the caller is not signed in. */
 	actor: (project: number) => Actor | null;
+	/** Admitted requests carry this instead of sending resolved authority to a reader. */
+	reference?: CallerReference;
 	/**
 	 * The caller's browser session as it stands when it is asked, or null (see `InstanceCtx`). Asked where the
 	 * operation runs, after its wait at the gate, as `actor` is: an id is given to another row after an import.
@@ -143,6 +147,23 @@ export type Call = {
  * operation says other requests may be served.
  */
 function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Generator<void, Reply, void> {
+	if (ops[call.op]?.effect !== "write") return yield* executeInSnapshot(app, ops, call);
+	if (app.db.inTransaction)
+		return fail("internal", "a write is in progress; writes go through invokeAsync, which queues them");
+	app.db.begin();
+	try {
+		const reply = yield* executeInSnapshot(app, ops, call);
+		if (app.db.inTransaction) {
+			if (reply.ok) app.db.commit();
+			else app.db.rollback();
+		}
+		return reply;
+	} finally {
+		app.db.rollback();
+	}
+}
+
+function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Generator<void, Reply, void> {
 	const op = ops[call.op];
 	if (!op) return fail("not_found", `no operation named ${call.op}`);
 	// An operation of the instance has one address. Named under a project it is refused, whichever project and
@@ -152,7 +173,8 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 		return fail("not_found", `${op.name} is an operation of the instance and of no project: POST /api/${op.name}`);
 	// Who may call is settled before the operation's input is checked: a caller that may not run the operation
 	// learns that and nothing about what it sent. (A surface has read the body by then: HTTP wants it to be JSON.)
-	const found = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
+	const db = op.effect === "write" ? app.db : app.reader;
+	const found = op.scope === "project" && call.project ? findProject(db, call.project) : null;
 	const noSuchProject = (): Reply => {
 		const { code, message } = noProject(call.project);
 		return fail(code, message);
@@ -161,7 +183,8 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 		if (!call.project) return fail("invalid", `${op.name} needs a project`);
 		if (!found) return noSuchProject();
 	}
-	const actor = call.actor(found?.id ?? 0);
+	const caller = call.reference ? resolveCaller(app, db, call.reference, found?.id ?? 0) : null;
+	const actor = call.reference ? caller?.actor : call.actor(found?.id ?? 0);
 	if (!actor) return fail("unauthenticated", "a token is required");
 	// A caller that holds no grant on a project is told what it would be told of a project that does not exist,
 	// word for word. A refusal that named the capability it lacks would confirm the key to any token, a
@@ -192,8 +215,6 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 		typeof input === "object" && input !== null && "cmd" in input && typeof input.cmd === "string" ? input.cmd : null;
 	const writing = op.effect === "write";
 	const request = cmd && writing ? digest(input) : "";
-	if (writing && app.db.inTransaction)
-		return fail("internal", "a write is in progress; writes go through invokeAsync, which queues them");
 
 	try {
 		if (op.scope === "instance") {
@@ -201,10 +222,10 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 				app,
 				actor,
 				now: app.now(),
-				session: call.session?.() ?? null,
-				context: call.context?.() ?? null,
+				session: call.reference ? (caller?.session ?? null) : (call.session?.() ?? null),
+				context: call.reference ? (caller?.context ?? null) : (call.context?.() ?? null),
 			};
-			if (!writing) return { ok: true, result: app.reader.snapshot(() => op.run(env, input)), seq: null };
+			if (!writing) return { ok: true, result: op.run(env, input), seq: null };
 			const result = app.db.transaction(() => {
 				const prior = cmd ? findCommand(app.db, cmd) : null;
 				if (prior) {
@@ -233,13 +254,9 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
 
 		if (!writing) {
 			if (!("run" in op)) throw new Error(`${op.name}: a read is one function`);
-			return app.reader.snapshot(() => {
-				const project = findProject(app.reader, found.key) ?? found;
-				return { ok: true, result: op.run(makeCtx(app, project, actor, false), input), seq: project.seq };
-			});
+			return { ok: true, result: op.run(makeCtx(app, found, actor, false), input), seq: found.seq };
 		}
 
-		app.db.begin();
 		try {
 			// True once the command id is bound to this request: by an earlier attempt that committed its first
 			// transaction and never finished (the server stopped), or by this one when it commits its own.
@@ -314,8 +331,11 @@ function* execute(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): G
  * server uses `invokeAsync`, which runs the same code and lets other requests in between an operation's steps.
  */
 export function invoke(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Reply {
-	const running = execute(app, ops, call);
-	for (let step = running.next(); ; step = running.next()) if (step.done) return step.value;
+	const run = (): Reply => {
+		const running = execute(app, ops, call);
+		for (let step = running.next(); ; step = running.next()) if (step.done) return step.value;
+	};
+	return ops[call.op]?.effect === "read" ? app.reader.snapshot(run) : run();
 }
 
 const nextTick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
@@ -328,7 +348,7 @@ const nextTick = (): Promise<void> => new Promise((resolve) => setImmediate(reso
  */
 export function invokeAsync(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
 	const op = ops[call.op];
-	if (op?.effect === "read" && app.readers) {
+	if (op?.effect === "read" && app.readers && call.reference) {
 		const project = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
 		if (op.scope === "project" && !project) return Promise.resolve(invoke(app, ops, call));
 		const actor = call.actor(project?.id ?? 0);
@@ -337,14 +357,19 @@ export function invokeAsync(app: App, ops: Readonly<Record<string, AnyOp>>, call
 		// inline and never reaches one.
 		if (!actor || !mayRun(actor, op.needs)) return Promise.resolve(invoke(app, ops, call));
 		return app.readers
-			.run({ op: call.op, project: call.project, input: call.input, actor }, () =>
-				invoke(app, ops, { ...call, actor: () => actor }),
+			.run(
+				{
+					op: call.op,
+					project: call.project,
+					input: call.input,
+					caller: call.reference,
+					clockOffset: app.now() - Date.now(),
+				},
+				() => invoke(app, ops, call),
 			)
 			.then((reply) => {
-				// The reader was handed the actor as it stood when the call was dispatched, and may have started the
-				// read much later: it was busy, or it failed and the read was replayed here. So the caller is asked
-				// once more before the reply leaves. A session that ended meanwhile, a token that was revoked and an
-				// actor that was forgotten get no data, which is what a write gets by asking after its wait at the gate.
+				// Also refuse a credential that ended while the reader was answering. The read itself resolved the
+				// caller and grants in its own snapshot; an inline replay does the same.
 				if (!call.actor(project?.id ?? 0)) return fail("unauthenticated", "a token is required");
 				return reply.ok ? reply : fail(reply.error.code, reply.error.message, reply.error.details);
 			});

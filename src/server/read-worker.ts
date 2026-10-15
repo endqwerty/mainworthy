@@ -1,7 +1,7 @@
 // A worker thread of the server.
 //
 // `read` (the default): answers read operations on its own read-only connection, so a read never waits for the
-// thread that writes. It is handed a call only after the main thread has decided the caller may make it.
+// thread that writes. It resolves the credential and grants inside the snapshot that answers the call.
 //
 // `checkpoint`: copies committed pages from the write-ahead log into the database file, so that no commit on the
 // main thread has to. SQLite otherwise checkpoints inside the commit that fills the log, and the server answers
@@ -12,6 +12,7 @@ import { parentPort, workerData } from "node:worker_threads";
 import { z } from "zod";
 import { type ArchiveReply, ArchiveTask } from "./archives.ts";
 import { databasePath, openApp } from "./kernel/app.ts";
+import { CallerReference } from "./kernel/caller.ts";
 import { Db } from "./kernel/db.ts";
 import type { Reply } from "./ops/registry.ts";
 
@@ -122,11 +123,7 @@ function checkpoints(): void {
 async function reads(): Promise<void> {
 	// Loaded here and not at the top: the checkpoint thread reads no operation and has no use for them, and the
 	// registry is most of what a thread costs to start (about 100 ms of CPU).
-	const [{ ActorKind, Capability }, { OPS }, { invoke }] = await Promise.all([
-		import("../core/kinds.ts"),
-		import("./ops/index.ts"),
-		import("./ops/registry.ts"),
-	]);
+	const [{ OPS }, { invoke }] = await Promise.all([import("./ops/index.ts"), import("./ops/registry.ts")]);
 	const config = {
 		dataDir: data.dataDir,
 		host: "127.0.0.1",
@@ -135,8 +132,8 @@ async function reads(): Promise<void> {
 		owner: "",
 		ownerToken: null,
 		commit: null,
-		// A reader admits nobody: the main thread decides who may read, before the call and again before the reply
-		// leaves (`invokeAsync`). Zero, so that a reader which ever did look at a session would find it ended.
+		// A cookie reference carries the instance's idle lifetime and latest admitted activity. Absolute expiry
+		// is read from the session row. This worker admits no requests and notes no activity itself.
 		sessionIdleMs: 0,
 		sessionMaxMs: 0,
 		// Nor does it ask where a request came from: no request reaches a reader.
@@ -149,7 +146,8 @@ async function reads(): Promise<void> {
 		op: z.string(),
 		project: z.string().nullable(),
 		input: z.unknown(),
-		actor: z.object({ id: z.number().int(), kind: ActorKind, name: z.string(), can: z.array(Capability) }).nullable(),
+		caller: CallerReference,
+		clockOffset: z.number().finite(),
 	});
 	const Message = z.discriminatedUnion("type", [ReadMessage, z.object({ type: z.literal("refresh") })]);
 
@@ -161,10 +159,11 @@ async function reads(): Promise<void> {
 			app = openApp(config, { reader: true });
 			return;
 		}
+		app.now = () => Date.now() + call.clockOffset;
 		const reply: Reply =
 			OPS[call.op]?.effect === "write"
 				? { ok: false, error: { code: "forbidden", message: "reader threads cannot write" } }
-				: invoke(app, OPS, { ...call, actor: () => call.actor });
+				: invoke(app, OPS, { ...call, reference: call.caller, actor: () => null });
 		port.postMessage({ type: "reply", id: call.id, reply });
 	});
 	port.postMessage("ready");

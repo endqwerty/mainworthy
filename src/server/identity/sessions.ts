@@ -155,10 +155,18 @@ const Q = {
  * lifetime ago. "Used" is the newer of the row and what is noted in memory and not yet written (`uses.ts`). A
  * use dated after `now` (the clock was set back) counts as a use now, not as time still to come.
  */
-function inLifetime(app: App, session: Times, now: number): boolean {
+function inLifetime(
+	app: App,
+	session: Times,
+	now: number,
+	options: { activity?: number; idleMs?: number } = {},
+): boolean {
 	if (now >= session.expires_at) return false;
-	const seen = Math.min(now, Math.max(session.last_seen_at, notedUse(app, "session", session.id) ?? 0));
-	return now - seen < app.config.sessionIdleMs;
+	const seen = Math.min(
+		now,
+		Math.max(session.last_seen_at, notedUse(app, "session", session.id) ?? 0, options.activity ?? 0),
+	);
+	return now - seen < (options.idleMs ?? app.config.sessionIdleMs);
 }
 
 /**
@@ -232,10 +240,12 @@ export function openSessionOnCredential(
 export function findSession(
 	app: App,
 	hash: string,
+	options: { db?: Db; activity?: number; idleMs?: number } = {},
 ): { id: number; actor: { id: number; org: number; kind: ActorKind; name: string; disabled_at: null } } | null {
 	const now = app.now();
-	const row = app.reader.get(Q.standing, { hash, now }) ?? app.reader.get(Q.standingOnCredential, { hash });
-	if (!row || !inLifetime(app, row, now)) return null;
+	const db = options.db ?? app.reader;
+	const row = db.get(Q.standing, { hash, now }) ?? db.get(Q.standingOnCredential, { hash });
+	if (!row || !inLifetime(app, row, now, options)) return null;
 	return { id: row.id, actor: { id: row.actor, org: row.org, kind: row.kind, name: row.name, disabled_at: null } };
 }
 

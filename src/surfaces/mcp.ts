@@ -372,7 +372,14 @@ export function mcpRoute(app: App): (req: Request, session: Session) => Promise<
 		}
 		const buildServer = () =>
 			mcpServer(
-				(op, project, input) => invokeAsync(app, OPS, { op, project, input, actor: session.actor }),
+				(op, project, input) =>
+					invokeAsync(app, OPS, {
+						op,
+						project,
+						input,
+						actor: session.actor,
+						...(session.reference ? { reference: session.reference() } : {}),
+					}),
 				async () => grantedProjects(app, session).map((row) => row.key),
 				req.headers.get("mcp-protocol-version") ?? DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
 			);
