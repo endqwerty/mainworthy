@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { z } from "zod";
 import { Policy } from "../../src/core/kinds.ts";
 import { parseCase } from "../../src/core/markdown.ts";
 import { browserAvailable, eventually, keyCount, openPage, paste, startServer } from "./support.ts";
@@ -240,11 +241,14 @@ test.skipIf(!browserAvailable)(
 		await server.api("propose", {
 			edits: [{ op: "create", body: { title: "Field-bearing case", fields: { priority: "P1" } } }],
 		});
-		const policy = Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" }));
+		const policy = Policy.extend({ version: z.number() }).parse(
+			await server.api("admin", { do: "policy.show", project: "scratch" }),
+		);
 		const proposed = await server.api("propose", {
 			edits: [
 				{
 					op: "policy",
+					base: policy.version,
 					settings: {
 						...policy.settings,
 						fields: { risk: { kind: "choice", label: "Risk", required: true, choices: ["low", "high"] } },

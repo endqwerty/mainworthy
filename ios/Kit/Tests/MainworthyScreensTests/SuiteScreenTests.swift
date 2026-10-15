@@ -19,7 +19,7 @@ struct SuiteScreenTests {
 		var settings = try #require(policy["settings"]?.object)
 		settings["fields"] = ["risk": ["kind": "choice", "label": "Risk", "required": true, "choices": ["low", "high"]]]
 		let proposed: JSONValue = try await server.write("propose", in: key, [
-			"edits": [["op": "policy", "settings": .object(settings)]],
+			"edits": [["op": "policy", "base": try #require(policy["version"]), "settings": .object(settings)]],
 		])
 		let inbox: JSONValue = try await server.read("inbox", in: key, ["kind": "adopt"])
 		let question = try #require(inbox["items"]?.array?.first { $0["q"] == proposed["question"] })

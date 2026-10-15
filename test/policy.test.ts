@@ -1209,13 +1209,15 @@ describe("project custom field definitions", () => {
 		define();
 		const { fields, ...settings } = policy().settings;
 		settings.holds.flakyDays = 7;
-		expect(accept(h.call<Proposed>("propose", { edits: [{ op: "policy", settings }] }))[0]?.status).toBe("decided");
+		expect(
+			accept(h.call<Proposed>("propose", { edits: [{ op: "policy", base: policy().version, settings }] }))[0]?.status,
+		).toBe("decided");
 		expect(policy().settings.fields).toEqual(fields);
 		expect(policy().settings.holds.flakyDays).toBe(7);
 		expect(
 			accept(
 				h.call<Proposed>("propose", {
-					edits: [{ op: "policy", settings: { ...settings, fields: {} } }],
+					edits: [{ op: "policy", base: policy().version, settings: { ...settings, fields: {} } }],
 				}),
 			)[0]?.status,
 		).toBe("decided");
