@@ -122,6 +122,9 @@ states `grantChanges: "team-history-only"`, `teamState: "at-export"`,
 Context records come first, sorted by id using English collation. Events follow,
 ordered by time, sequence, and id using the same collation. Events without a
 sequence sort as sequence zero. Verification refuses records outside this order.
+English collation is JavaScript's `a.localeCompare(b, "en")`, not character order: it compares the digit runs
+in an id as text but puts `:` before digits, so `version:1:2` comes before `version:12:1`. A verifier in
+another language needs the same Unicode collation (ICU, locale `en`, default strength).
 This file order does not imply that timestamps follow reference dependencies.
 Each record has a `type` and a unique `id`:
 
