@@ -91,30 +91,15 @@ not the same things done worse.
    the hint and no answer stands on it. The automatic version, with what it has to get right, is #69.
    `mistaken` is a judgement on the results it named. They stop counting in the run and in their commit's gate;
    the same failure reported again later is a new result and is asked about again; and the decision is not
-   withdrawn because the cause turns up again. Where a clause keeps a decision from the producers of the evidence, a producer is
-   anyone who reported a failure with that cause in that scope, and anyone with a result in a slot that disputes
-   it. That is read from the results when the answer is given, so it does not depend on how the question came
-   to be asked (carried from an earlier answer, or asked again). It is judged when the answer is given, like the
-   policy version the answer is signed under: an answer a person gave to their own failure, where the policy let
-   them, stands when somebody else's pass later makes the slot a dispute, although that policy would keep the
-   dispute itself from them. The order of the answer and the second result therefore matters; ending such an
-   answer when the dispute arises needs a question per slot rather than per cause, and without it would let an
-   agent's result end a person's answer (#70). What is done about the failure from the moment it is disputed is
-   another matter: a new answer, a changed answer and a withdrawal are each held to the clause for disputes,
-   because whether a slot disputes the cause is read from the runs when the answer is given, changed or
-   withdrawn, and when the question is shown. Three kinds of run say there is a dispute: an open run; a closed
-   run that shows the dispute with nothing excusing it; and, for an answer in force, a closed run that rests on
-   that answer, so a run closing on an answer does not hand the dispute back. A dispute settled long ago does
-   not cling to a later failure with the same cause: that is asked about as a plain failure. An answer given to a dispute stays an answer to a dispute while
-   it is in force, also after it has set the disputed result aside or the run has closed on it: the people the
-   clause kept it from cannot take it back or put their own in its place. Who they are (whoever failed and
-   whoever passed in the disputed slot) is kept on the question from the moment the dispute is raised or
-   answered, and from one question about the cause to the next, because the runs stop showing it once the
-   dispute is settled. Nor can they overturn it through another question: an answer for the whole cause, given
-   to a later failure by somebody a dispute's answer is kept from, leaves that answer standing for its build
-   (an answer for a build takes precedence there over an answer for the whole cause). Withdrawing an answer is held to the clause
-   the policy in force now has for that answer: who may, and whether a reason is owed. (The policy in force,
-   not the one the answer was given under: an administrator who relaxes the policy relaxes withdrawals too.)
+   withdrawn because the cause turns up again.
+   Decision [0078](0078-settle-disputes-per-slot.md) replaces the MVP's arrival-order limit in issue #70.
+   A dispute has a separate failure question for each slot, cause and scope. The cause answer stays in force
+   elsewhere. A slot requires its own settlement even when the failure was explained before the contradictory pass.
+   Under standard and strict, neither side's producers may settle, replace or withdraw that slot's answer.
+   Its parties remain recorded after the result is discounted or the run closes. Ordinary cause answers keep
+   their own policy, and cannot replace a slot settlement. A later effective result renews only the slot's
+   settlement. The former integrity test, "a failure already explained is not asked about again because somebody
+   else then passed", now checks both arrival orders against this rule.
 5. **Drafts live in the browser.** The design autosaves into a server-side open proposal that others see as
    "draft by Dana". With one user that buys nothing; the draft is kept on the device and survives reload and
    crash (commitment L2), and a sealed proposal goes through the same path as designed. So do the notes typed

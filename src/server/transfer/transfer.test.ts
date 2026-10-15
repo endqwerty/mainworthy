@@ -743,6 +743,50 @@ describe("Mainworthy instance archives", () => {
 		}
 	});
 
+	test("slot settlements travel with their slot and do not settle another slot after restore", () => {
+		const from = harness();
+		const to = harness();
+		try {
+			from.call("propose", {
+				edits: [
+					{ op: "create", outline: "One" },
+					{ op: "create", outline: "Keep open" },
+				],
+			});
+			const target = { commit: "archiveslot", branch: "main" };
+			const one = from.call<{ run: string }>("plan", { name: "One", select: {}, accepts: { commit: target.commit } });
+			const two = from.call<{ run: string }>("plan", { name: "Two", select: {}, accepts: { commit: target.commit } });
+			const passer = from.actor("passer", "human", ["read", "produce"]);
+			const result = (outcome: string) => ({
+				test: { key: "one" },
+				annotation: { case: "C-1" },
+				outcome,
+				...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
+			});
+			from.call("report", { target, results: [result("fail")] });
+			from.call("report", { target, results: [result("pass")] }, passer);
+			const questions = from.call<{ items: { q: string; evidenceHash: string; evidence: { run?: string } }[] }>(
+				"inbox",
+				{ kind: "failure" },
+			).items;
+			const chosen = questions.find((question) => question.evidence.run === one.run);
+			if (!chosen) throw new Error("missing slot dispute");
+			from.call("decide", { q: chosen.q, onEvidence: chosen.evidenceHash, answer: { is: "flaky" } });
+			const chunks: string[] = [];
+			exportArchive(from.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
+			to.app.db.transaction(() => {
+				to.app.db.raw.exec("DELETE FROM commands");
+				removeBootstrap(to.app.db);
+				importArchive(to.app.db, linesOf(chunks.join("")));
+			});
+			expect(to.call("gate", { run: one.run })).toMatchObject({ tally: { pass: 1, disputed: 0 } });
+			expect(to.call("gate", { run: two.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
+		} finally {
+			from.close();
+			to.close();
+		}
+	});
+
 	test("an unknown project refuses export before the writer receives a byte", () => {
 		const chunks: string[] = [];
 		expect(() => exportArchive(source(), (chunk) => chunks.push(chunk), { project: "missing' OR 1=1 --" })).toThrow(

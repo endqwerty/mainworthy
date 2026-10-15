@@ -30,6 +30,7 @@ import {
 	changeByKey,
 	changesBasedOn,
 	codeWhat,
+	excuseForDisputedSlot,
 	excuseForResult,
 	firstCountedReport,
 	isWithdrawn,
@@ -204,23 +205,6 @@ const Q = {
 		 WHERE r.project = $project AND r.origin = 'planned'
 		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
 	),
-	// Starts from the disputed slots, by their partial index, and only then looks at each one's run: there are
-	// few disputed slots however many runs there are, and this is read for every failure question a queue page
-	// shows. (Left to itself the planner starts from the project's open runs, which is every commit ever reported.)
-	disputedSlots: sql<{ project: number; signature: number }, { id: number; run: number; causes: string }>(
-		`SELECT s.id AS id, s.run AS run, s.causes AS causes
-		 FROM slots s INDEXED BY slots_disputed CROSS JOIN runs r ON r.id = s.run
-		 WHERE s.state = 'disputed' AND r.project = $project AND r.origin = 'planned'
-		   AND (r.state = 'open' OR json_extract(r.tally, '$.disputed') > 0)
-		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
-	),
-	// The disputed slots of the planned runs that count a failure as excused by one decision.
-	restingDisputes: sql<{ decision: number; signature: number }, { id: number; run: number; causes: string }>(
-		`SELECT s.id AS id, s.run AS run, s.causes AS causes FROM depends_on d
-		 JOIN runs r ON r.id = d.run AND r.origin = 'planned' JOIN slots s ON s.run = r.id AND s.state = 'disputed'
-		 WHERE d.decision = $decision
-		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
-	),
 	failingOfCause: sql<{ run: number; signature: number; target: number }, { test: number; result: number }>(
 		`SELECT test, result FROM run_tests
 		 WHERE run = $run AND signature = $signature AND target = $target AND outcome IN ('fail', 'error') LIMIT 200`,
@@ -313,6 +297,10 @@ const Q = {
 	failingSlotRows: sql<{ run: number }, SlotRow>(
 		"SELECT * FROM slots WHERE run = $run AND state IN ('failing', 'disputed') ORDER BY rank",
 	),
+	disputedRuns: sql<{ project: number }, { id: number }>(
+		`SELECT DISTINCT r.id FROM slots s JOIN runs r ON r.id = s.run
+		 WHERE s.state = 'disputed' AND r.project = $project`,
+	),
 	slotsBySignature: sql<{ run: number; signature: number }, SlotRow>(
 		`SELECT * FROM slots WHERE run = $run AND state IN ('failing', 'disputed')
 		 AND EXISTS (SELECT 1 FROM json_each(slots.causes) WHERE json_extract(value, '$[0]') = $signature)`,
@@ -326,6 +314,8 @@ const Q = {
 
 export const runRef = (row: { no: number }): string => ref("run", row.no);
 export const runById = (db: Db, id: number): RunRow | null => db.get(Q.byId, { id });
+export const disputedRuns = (db: Db, project: number): number[] =>
+	db.all(Q.disputedRuns, { project }).map((run) => run.id);
 export function findRun(db: Db, project: number, text: string): RunRow | null {
 	const match = /^(?:R-)?(\d+)$/i.exec(text.trim());
 	return match ? db.get(Q.byNo, { project, no: Number(match[1]) }) : null;
@@ -774,63 +764,6 @@ export function runsShowing(db: Db, project: number, signature: number): number[
 }
 
 /**
- * Is this cause in dispute: does a planned run have a slot where one producer's failure with it stands beside
- * another's pass? Three kinds of run say so. An open run. A closed run that shows the dispute with nothing
- * excusing it (the answer it was closed on was withdrawn or ran out). And, for an answer in force (`decision`),
- * a closed run that rests on that answer: a run closing on an answer does not hand the dispute back to the
- * people it is kept from. A closed run whose dispute rests on another answer says nothing about a failure that
- * is asked about afresh: a dispute settled long ago does not cling to every later failure with the same cause.
- * Read from the slots as they are, not from the report that happens to be arriving: a report that touches no
- * slot does not make a dispute go away.
- */
-export function inDispute(
-	db: Db,
-	project: number,
-	signature: number,
-	scope: string,
-	decision: number | null = null,
-): boolean {
-	return disputingSlots(db, project, signature, scope, decision).length > 0;
-}
-
-function disputingSlots(db: Db, project: number, signature: number, scope: string, decision: number | null): number[] {
-	const slots = new Set<number>();
-	const rows = [
-		...db.all(Q.disputedSlots, { project, signature }),
-		...(decision !== null ? db.all(Q.restingDisputes, { decision, signature }) : []),
-	];
-	for (const slot of rows) {
-		const run = runById(db, slot.run);
-		if (!run || run.project !== project) continue;
-		const here = json<Cause[]>(slot.causes).some(
-			([cause, target]) => cause === signature && scopeIn(db, run, target) === scope,
-		);
-		if (here) slots.add(slot.id);
-	}
-	return [...slots];
-}
-
-/**
- * The parties to a dispute about a cause: everybody with a result in a slot that disputes it, whoever reported
- * the failure and whoever reported otherwise. Read from the same slots that say there is a dispute (see
- * `inDispute`), so the rule that keeps a dispute from its parties knows all of them, whichever run the question
- * happens to name.
- */
-export function disputants(
-	db: Db,
-	project: number,
-	signature: number,
-	scope: string,
-	decision: number | null = null,
-): Set<number> {
-	const parties = new Set<number>();
-	for (const slot of disputingSlots(db, project, signature, scope, decision)) {
-		for (const fill of fillsOf(db, slot)) parties.add(fill.actor);
-	}
-	return parties;
-}
-
-/**
  * The result that counts in a lane (one producer's results for one test from one job on one target): its
  * uncorrected history, less what a decision has judged a mistake, folded by `replacesInLane`.
  */
@@ -867,7 +800,8 @@ export function unexplainedShown(db: Db, run: RunRow): Unexplained[] {
 			if (row.outcome === "fail" || row.outcome === "error") note({ ...row, id: row.result });
 	} else {
 		for (const slot of db.all(Q.failingSlots, { run: run.id }))
-			for (const fill of failingFillsOf(db, slot.id)) note(fill);
+			for (const fill of failingFillsOf(db, slot.id))
+				if (slot.state !== "disputed" || !excuseForDisputedSlot(db, slot.id, fill.id)) note(fill);
 	}
 	return [...shown.values()];
 }
@@ -1008,6 +942,42 @@ export function failingFillsOf(db: Db, slot: number): Fill[] {
 	return fills.filter((fill) => failing.has(fill.id));
 }
 
+export type SlotDispute = {
+	slot: SlotRow;
+	signature: number;
+	scope: string;
+	effective: Fill[];
+	failures: Fill[];
+};
+
+/** Each conflicting cause is settled only in the slot that counts it, using its complete effective evidence. */
+export function disputesOf(db: Db, run: RunRow): SlotDispute[] {
+	if (run.origin !== "planned") return [];
+	const disputes: SlotDispute[] = [];
+	for (const slot of db.all(Q.failingSlotRows, { run: run.id })) {
+		if (slot.state !== "disputed") continue;
+		const fills = fillsOf(db, slot.id);
+		const folded = aggregateFills(fills);
+		const effectiveIds = new Set(folded.effective);
+		const failingIds = new Set(folded.failing);
+		const effective = fills.filter((fill) => effectiveIds.has(fill.id));
+		const groups = new Map<string, SlotDispute>();
+		for (const fill of effective) {
+			if (!failingIds.has(fill.id) || fill.signature === null) continue;
+			const scope = scopeIn(db, run, fill.target);
+			const key = causeKey(fill.signature, scope);
+			let dispute = groups.get(key);
+			if (!dispute) {
+				dispute = { slot, signature: fill.signature, scope, effective, failures: [] };
+				groups.set(key, dispute);
+			}
+			dispute.failures.push(fill);
+		}
+		disputes.push(...groups.values());
+	}
+	return disputes;
+}
+
 /** A failure signature and the target it was seen on. */
 type Cause = [signature: number, target: number];
 
@@ -1044,11 +1014,13 @@ export type Blocker = {
 	signature: number | null;
 	/** For a failure question: the scope it is answered in. */
 	scope: string | null;
+	slot?: number | undefined;
 	blocks: readonly number[];
 };
 
 /** A cause in the scope it is answered in: the identity of a failure question. */
-export const causeKey = (signature: number, scope: string): string => `${signature}|${scope}`;
+export const causeKey = (signature: number, scope: string, slot?: number): string =>
+	`${slot === undefined ? "" : `slot:${slot}|`}${signature}|${scope}`;
 
 function comparisonLane(db: Db, result: ResultRow): string {
 	return JSON.stringify([
@@ -1221,13 +1193,20 @@ function count(db: Db, run: RunRow): { tally: Tally; failing: Set<string>; depen
 			const disputed = slot.state === "disputed";
 			const causes = failingFillsOf(db, slot.id);
 			const excuses = causes.map((fill) =>
-				excuseForResult(db, { ...fill, project: run.project }, scopeFor(fill.target)),
+				disputed
+					? excuseForDisputedSlot(db, slot.id, fill.id)
+					: excuseForResult(db, { ...fill, project: run.project }, scopeFor(fill.target)),
 			);
 			const open = causes.filter((_, i) => !excuses[i]);
-			for (const { signature, target } of open)
-				if (signature !== null) failing.add(causeKey(signature, scopeFor(target)));
+			for (const fill of open) {
+				if (fill.signature === null) continue;
+				failing.add(causeKey(fill.signature, scopeFor(fill.target), disputed ? slot.id : undefined));
+				if (disputed && !excuseForResult(db, { ...fill, project: run.project }, scopeFor(fill.target)))
+					failing.add(causeKey(fill.signature, scopeFor(fill.target)));
+			}
 			for (const excuse of excuses) if (excuse) depends.set(excuse.decision, excuse.expires_at);
-			if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed += 1;
+			if (disputed && (open.length > 0 || causes.length === 0)) tally.disputed += 1;
+			else if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed += 1;
 			else if (open.length > 0 || causes.length === 0) {
 				if (disputed) tally.disputed += 1;
 				else tally.unexplained += 1;
@@ -1278,7 +1257,7 @@ export function retally(
 	const blocking = blockers
 		.filter((q) =>
 			q.kind === "failure"
-				? q.signature !== null && q.scope !== null && failing.has(causeKey(q.signature, q.scope))
+				? q.signature !== null && q.scope !== null && failing.has(causeKey(q.signature, q.scope, q.slot))
 				: q.blocks.includes(run.id),
 		)
 		.map((q) => q.ref);
@@ -1505,42 +1484,25 @@ function catchUp(ctx: Ctx, run: RunRow): void {
 	ctx.recompute.add(run.id);
 }
 
-/**
- * A `mistaken` answer on a disputed slot: the failing results it names (those with the cause, on the targets the
- * question had seen) stop counting. Not only in that slot: a
- * result judged a mistake is discounted in every open run that admitted it and leaves its commit's gate, so the
- * same evidence never counts in one place and not in another. Standing: only by a decision, which each
- * discounted result records. Returns the slot and result pairs.
- */
-export function discountFailures(
-	ctx: Ctx,
-	witness: Witness,
-	run: RunRow,
-	signature: number,
-	scope: string,
-	targets: readonly number[],
-): [number, number][] {
+/** Judging a result mistaken retains its global meaning, while the caller names the exact evidence judged. */
+export function discountResults(ctx: Ctx, witness: Witness, results: readonly number[]): [number, number][] {
 	const decision = decisionOf(witness, "failure");
 	const corrected: [number, number][] = [];
 	const touched = new Set<number>();
-	for (const slot of ctx.db.all(Q.slotsBySignature, { run: run.id, signature })) {
-		for (const fill of fillsOf(ctx.db, slot.id)) {
-			// Only the failures the question is about: the same cause seen in another repository, or on a target
-			// the question never saw (another environment, asked about on its own), is another question.
-			if (fill.signature !== signature || scopeIn(ctx.db, run, fill.target) !== scope) continue;
-			if (!targets.includes(fill.target)) continue;
-			for (const held of ctx.db.all(Q.slotsOfResult, { result: fill.id })) {
-				const where = slotById(ctx.db, held.slot);
-				const of = where ? runById(ctx.db, where.run) : null;
-				// A closed run keeps what it was closed on.
-				if (!where || of?.state !== "open") continue;
-				ctx.db.run(Q.discount, { slot: where.id, result: fill.id, decision });
-				corrected.push([where.id, fill.id]);
-				touched.add(where.id);
-			}
-			const commit = commitRunOf(ctx.db, run.project, fill.target);
-			if (commit) refoldLaneOf(ctx, commit, fill.id);
+	for (const id of new Set(results)) {
+		const result = resultById(ctx.db, id);
+		if (!result) continue;
+		for (const held of ctx.db.all(Q.slotsOfResult, { result: id })) {
+			const where = slotById(ctx.db, held.slot);
+			const of = where ? runById(ctx.db, where.run) : null;
+			// A closed run keeps what it was closed on.
+			if (!where || of?.state !== "open") continue;
+			ctx.db.run(Q.discount, { slot: where.id, result: id, decision });
+			corrected.push([where.id, id]);
+			touched.add(where.id);
 		}
+		const commit = commitRunOf(ctx.db, result.project, result.target);
+		if (commit) refoldLaneOf(ctx, commit, id);
 	}
 	for (const id of touched) refreshSlotById(ctx, id);
 	return corrected;

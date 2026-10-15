@@ -122,10 +122,20 @@ const Q = {
 	resultExcuse: sql<
 		{ result: number },
 		{ decision: number; class: "attributed" | "excused"; expires_at: number | null }
-	>("SELECT decision, class, expires_at FROM result_excuses WHERE result = $result"),
-	setResultExcuse: sql<{ result: number; decision: number; class: string; expires: number | null }>(
-		`INSERT INTO result_excuses (result, decision, class, expires_at) VALUES ($result, $decision, $class, $expires)
-   ON CONFLICT (result) DO UPDATE SET decision = excluded.decision, class = excluded.class, expires_at = excluded.expires_at`,
+	>("SELECT decision, class, expires_at FROM result_excuses WHERE result = $result AND slot IS NULL"),
+	slotExcuse: sql<
+		{ result: number; slot: number },
+		{ decision: number; class: "attributed" | "excused"; expires_at: number | null }
+	>("SELECT decision, class, expires_at FROM result_excuses WHERE result = $result AND slot = $slot"),
+	setResultExcuse: sql<{
+		result: number;
+		slot: number | null;
+		decision: number;
+		class: string;
+		expires: number | null;
+	}>(
+		`INSERT INTO result_excuses (result, slot, decision, class, expires_at) VALUES ($result, $slot, $decision, $class, $expires)
+   ON CONFLICT DO UPDATE SET decision = excluded.decision, class = excluded.class, expires_at = excluded.expires_at`,
 	),
 	dropResultExcuses: sql<{ decision: number }>("DELETE FROM result_excuses WHERE decision = $decision"),
 	changesBasedOn: sql<{ project: number; base: string; repo: string | null }, { id: number }>(
@@ -1545,16 +1555,26 @@ export function excuseForResult(
 	return exact && (!broad || exact.decision > broad.decision) ? exact : broad;
 }
 
+/** A disputed slot needs its own judgement; a cause or another slot's answer cannot settle it. */
+export const excuseForDisputedSlot = (db: Db, slot: number, result: number) => db.get(Q.slotExcuse, { result, slot });
+
 /** Standing for precisely the results named by a failure decision. */
 export function setResultExcuses(
 	ctx: Ctx,
 	witness: Witness,
 	results: readonly number[],
 	klass: "attributed" | "excused",
+	scope: { kind: "result" } | { kind: "slot"; slot: number } = { kind: "result" },
 ): void {
 	const decision = decisionOf(witness, "failure");
 	for (const result of results)
-		ctx.db.run(Q.setResultExcuse, { result, decision, class: klass, expires: witness.expiresAt });
+		ctx.db.run(Q.setResultExcuse, {
+			result,
+			slot: scope.kind === "slot" ? scope.slot : null,
+			decision,
+			class: klass,
+			expires: witness.expiresAt,
+		});
 }
 export function dropResultExcuses(ctx: Ctx, decision: number): void {
 	ctx.db.run(Q.dropResultExcuses, { decision });

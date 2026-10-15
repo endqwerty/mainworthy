@@ -1,9 +1,9 @@
 // Work the server does without being asked: finishing reports a crash interrupted, and reopening questions
 // whose decisions ran out of time. Both are idempotent and run inside ordinary write transactions.
-import { sweepExpired } from "./decisions/decisions.ts";
+import { recoverDisputes as reconcileDisputes, sweepExpired } from "./decisions/decisions.ts";
 import { expiredDecisions } from "./decisions/questions.ts";
 import { acceptedBatches } from "./evidence/evidence.ts";
-import { actorById } from "./identity/identity.ts";
+import { actorById, ruleActor } from "./identity/identity.ts";
 import type { App } from "./kernel/app.ts";
 import { allProjects, makeCtx, projectById, stampSeq } from "./kernel/ctx.ts";
 import { processBatch } from "./ops/writes.ts";
@@ -41,6 +41,22 @@ export function recoverAccepted(app: App): number {
 		app.publish({ project: done.key, seq: done.seq, op: "report", actor: done.actor, touched: done.touched });
 	}
 	return applied;
+}
+
+/** Give disputes stored before slot settlements their own questions without ending cause answers. */
+export function recoverDisputes(app: App): number {
+	let repaired = 0;
+	for (const { id } of allProjects(app.db)) {
+		repaired += app.db.transaction(() => {
+			const project = projectById(app.db, id);
+			if (!project) return 0;
+			const ctx = makeCtx(app, project, actorById(app.db, ruleActor(app.db).id, id), true);
+			const n = reconcileDisputes(ctx);
+			if (n > 0) stampSeq(ctx);
+			return n;
+		});
+	}
+	return repaired;
 }
 
 /** Reopens questions whose decisions have expired, in every project. Returns the number reopened. */

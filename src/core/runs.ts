@@ -184,7 +184,7 @@ export function replacesInLane(
  * a fail, whatever else passed. `failing` holds the result of every test that fails, from every producer, because
  * each may have its own cause and each cause needs its own answer.
  */
-export function aggregateSlot(fills: readonly SlotFill[]): { agg: SlotAgg; failing: number[] } {
+export function aggregateSlot(fills: readonly SlotFill[]): { agg: SlotAgg; failing: number[]; effective: number[] } {
 	const weight = { fail: 3, pass: 2, blocked: 1, skip: 0 } as const;
 	const ordered = [...fills].sort((a, b) => a.seq - b.seq || a.ord - b.ord);
 	const latest = new Map<string, SlotFill>();
@@ -202,7 +202,7 @@ export function aggregateSlot(fills: readonly SlotFill[]): { agg: SlotAgg; faili
 		if (held && weight[held.outcome] >= weight[fill.outcome]) continue;
 		agg[key] = { actor: fill.actor, outcome: fill.outcome, result: fill.id, seq: fill.seq };
 	}
-	return { agg, failing };
+	return { agg, failing, effective: [...latest.values()].map((fill) => fill.id) };
 }
 
 /**

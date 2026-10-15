@@ -55,6 +55,11 @@ gate. It is still a failure to explain.
 
 A question asks for a judgment about recorded evidence. It is not a test result.
 Several occurrences of the same failure cause can share one question.
+A planned run's disputed slot has a separate "Disputed" question for each cause
+and scope. Explaining the cause leaves that dispute waiting for its own answer,
+even when the cause was explained first. Under standard and strict, someone who
+reported neither side settles it. The cause answer still applies in other slots,
+runs and scopes where that answer already held. See [disputed slots](./runs.md#resolve-a-disputed-slot).
 An assertion cause shared by more than 50 distinct tests across more than five files in one commit's
 applied reports gets a question per file, starting with the report that crosses those limits.
 Reports for the same repository and commit count together, including different environments.
@@ -234,8 +239,10 @@ Choose "Already failing on base" when the same cause already failed where the ch
 started. It excuses this target only. The next commit is judged separately.
 The evidence can show a hint that the same cause fails on the base.
 
-For a disputed slot, "The failure was a mistake" excuses the named failing results
-so the passing result can stand. It does not excuse a new failure reported later.
+A normal answer to a "Disputed" question classifies its named failures only in that
+slot. It cannot replace the cause's answer or another slot's settlement.
+"The failure was a mistake" instead sets the named results aside everywhere they
+count in an open run and in their commit gate. It does not judge a new failure reported later.
 See [runs](./runs.md#resolve-a-disputed-slot).
 
 An excuse removes that failure's block. The gate passes only if nothing else prevents

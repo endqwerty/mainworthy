@@ -120,8 +120,19 @@ A required job is separate from the evidence each case slot needs.
 
 A counted pass and fail from different producers make a slot disputed.
 A later write from another producer does not silently replace the disagreement.
-Read the evidence in Queue and choose the appropriate failure answer.
-"The failure was a mistake" lets the named passing evidence stand.
+Open its separate "Disputed" question in Queue and choose the appropriate failure answer.
+Each slot, cause and scope has its own question. An earlier answer about the cause
+continues to apply elsewhere, but does not settle this slot. The order of that
+answer and the contradictory result makes no difference.
+
+A settlement applies to the named failures in this slot. Another run that counts
+the same results needs its own settlement. A later effective result renews the
+question, and withdrawing or expiring its answer leaves this slot disputed again.
+Neither action withdraws the cause's answer or changes an unrelated commit gate.
+
+"The failure was a mistake" judges the named results themselves. They stop counting
+in their commit gate and every open run that admitted them. This answer therefore
+has effects beyond the selected slot. A new failure reported later needs a new answer.
 
 Under `standard` and `strict`, a person who produced the disputed evidence cannot
 settle that dispute. See [policy](./policy.md).
