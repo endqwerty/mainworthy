@@ -548,11 +548,13 @@ for (const recovery of ["first check", "fallback check", "no answer"] as const)
 				const stored = () => page.evaluate(() => localStorage.getItem("mainworthy:robin:draft:scratch:C-1") ?? "");
 				expect(await stored()).toContain("Draft after failed clear");
 				await advanceClock(local, 366 * 24 * 60 * 60 * 1000);
-				await step.press("Escape");
+				// Leave the editor without saving, so the draft on the device is all that holds the text.
+				await step.evaluate((node) => (node as HTMLElement).blur());
 				await page.keyboard.press("g");
 				await page.keyboard.press("q");
 				await page.locator("#signin-name").waitFor();
 				expect(await stored()).toContain("Draft after failed clear");
+				expect((await local.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
 				expect(browser.dialogs).toEqual([]);
 				await page.locator("#token").fill(local.token);
 				await page.keyboard.press("Enter");
