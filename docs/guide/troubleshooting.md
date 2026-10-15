@@ -109,7 +109,7 @@ In server mode the last token the owner can sign in with is kept, whoever asks, 
 
 Suite keeps loading the remaining cases while changes arrive. The web app lets a page or refresh finish before reading the list again, and combines changes during that read into one refresh. The newest changes can appear after the current load finishes. Queue and Runs use the same behaviour.
 
-Your own saved edits, tags and moves appear in the list without waiting for that refresh. A reply from before your change cannot replace that update.
+Your own saved edits, tags and moves appear in an already loaded list without waiting for that refresh. A reply from before your change cannot replace that update. Saving while the list has nothing loaded lets its first read finish, then refreshes it for the saved change.
 
 ### A key does nothing
 

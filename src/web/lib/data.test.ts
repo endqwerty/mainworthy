@@ -8,6 +8,20 @@ afterEach(() => {
 	queryClient.clear();
 });
 
+/** Waits for the query client's observable result, including its deferred notifications. */
+async function until(check: () => void): Promise<void> {
+	const end = Date.now() + 2000;
+	for (;;) {
+		try {
+			check();
+			return;
+		} catch (error) {
+			if (Date.now() >= end) throw error;
+		}
+		await Bun.sleep(1);
+	}
+}
+
 /** A read of `Q-3` that the test answers when it chooses, as a screen holds it. */
 function question() {
 	const replies: ((state: string) => void)[] = [];
@@ -18,8 +32,7 @@ function question() {
 	const stop = observer.subscribe(() => {});
 	const answer = async (index: number, state: string): Promise<void> => {
 		replies[index]?.(state);
-		// The reply reaches the query, and whatever it starts is started, a few turns later.
-		await Bun.sleep(5);
+		await until(() => expect(observer.getCurrentResult().data?.[0]?.state).toBe(state));
 	};
 	return { replies, answer, stop, shown: () => observer.getCurrentResult().data?.[0]?.state };
 }
@@ -38,10 +51,10 @@ for (const [name, tell] of [
 			// The read that is on its way is not thrown away: until it lands the screen has nothing to show.
 			expect(read.replies).toHaveLength(1);
 			await read.answer(0, "open");
-			expect(read.replies).toHaveLength(2);
+			await until(() => expect(read.replies).toHaveLength(2));
 			await read.answer(1, "decided");
 			expect(read.shown()).toBe("decided");
-			expect(read.replies).toHaveLength(2);
+			await until(() => expect(read.replies).toHaveLength(2));
 		} finally {
 			read.stop();
 		}
@@ -52,10 +65,10 @@ test("a first read is asked again once, however many changes are told while it i
 	try {
 		for (let i = 0; i < 5; i++) changed("scratch", { op: "decide", touched: ["Q-3"] });
 		await read.answer(0, "open");
-		expect(read.replies).toHaveLength(2);
+		await until(() => expect(read.replies).toHaveLength(2));
 		await read.answer(1, "decided");
 		expect(read.shown()).toBe("decided");
-		expect(read.replies).toHaveLength(2);
+		await until(() => expect(read.replies).toHaveLength(2));
 	} finally {
 		read.stop();
 	}
@@ -67,11 +80,9 @@ test("a read that has landed is asked again at once, and a change to something e
 		await read.answer(0, "open");
 		changed("scratch", { op: "decide", touched: ["Q-9"] });
 		changed("other", { op: "decide", touched: ["Q-3"] });
-		await Bun.sleep(5);
 		expect(read.replies).toHaveLength(1);
 		changed("scratch", { op: "decide", touched: ["Q-3"] });
-		await Bun.sleep(5);
-		expect(read.replies).toHaveLength(2);
+		await until(() => expect(read.replies).toHaveLength(2));
 		await read.answer(1, "decided");
 		expect(read.shown()).toBe("decided");
 	} finally {
@@ -102,36 +113,40 @@ for (const [screen, key] of [
 				else void invalidateProject("scratch");
 			}
 		};
-		const answer = async (index: number, value: string, next: number | undefined) => {
+		const answer = (index: number, value: string, next: number | undefined) => {
 			const request = requests[index];
 			if (!request) throw new Error(`Missing request ${index}`);
 			request.reply({ value, next });
-			await Bun.sleep(5);
 		};
 		const shown = () => observer.getCurrentResult().data?.pages.map((page) => page.value);
 		try {
 			tell();
-			await answer(0, "first, old", 1);
-			await answer(1, "first, current", 1);
-			expect(shown()).toEqual(["first, current"]);
+			answer(0, "first, old", 1);
+			await until(() => expect(requests).toHaveLength(2));
+			answer(1, "first, current", 1);
+			await until(() => expect(shown()).toEqual(["first, current"]));
 			expect(requests).toHaveLength(2);
 
 			void observer.fetchNextPage();
 			tell();
 			expect(requests[2]?.signal.aborted).toBe(false);
 			expect(requests).toHaveLength(3);
-			await answer(2, "second, old", undefined);
-			expect(shown()).toEqual(["first, current", "second, old"]);
+			answer(2, "second, old", undefined);
+			await until(() => expect(shown()).toEqual(["first, current", "second, old"]));
+			await until(() => expect(requests).toHaveLength(4));
 			expect(requests[3]?.page).toBe(0);
-			await answer(3, "first, refreshed", 1);
+			answer(3, "first, refreshed", 1);
+			await until(() => expect(requests).toHaveLength(5));
 			tell();
 			expect(requests[4]?.signal.aborted).toBe(false);
 			expect(requests).toHaveLength(5);
-			await answer(4, "second, refreshed", undefined);
-			expect(shown()).toEqual(["first, refreshed", "second, refreshed"]);
-			await answer(5, "first, latest", 1);
-			await answer(6, "second, latest", undefined);
-			expect(shown()).toEqual(["first, latest", "second, latest"]);
+			answer(4, "second, refreshed", undefined);
+			await until(() => expect(shown()).toEqual(["first, refreshed", "second, refreshed"]));
+			await until(() => expect(requests).toHaveLength(6));
+			answer(5, "first, latest", 1);
+			await until(() => expect(requests).toHaveLength(7));
+			answer(6, "second, latest", undefined);
+			await until(() => expect(shown()).toEqual(["first, latest", "second, latest"]));
 			expect(requests).toHaveLength(7);
 		} finally {
 			stop();
@@ -158,13 +173,14 @@ test("automatic paging finishes before its one pending refresh starts", async ()
 			expect(requests[page]?.page).toBe(page);
 			for (let event = 0; event < 5; event++) changed("scratch", { op: "propose", touched: [] });
 			requests[page]?.reply({ value: `page ${page}`, next: page < 2 ? page + 1 : undefined });
-			await Bun.sleep(10);
+			await until(() => expect(requests).toHaveLength(page + 2));
 		}
 		expect(observer.getCurrentResult().data?.pages.map((page) => page.value)).toEqual(["page 0", "page 1", "page 2"]);
 		expect(requests.map((request) => request.page)).toEqual([0, 1, 2, 0]);
 		for (let page = 0; page < 3; page++) {
 			requests[page + 3]?.reply({ value: `fresh ${page}`, next: page < 2 ? page + 1 : undefined });
-			await Bun.sleep(5);
+			if (page < 2) await until(() => expect(requests).toHaveLength(page + 5));
+			else await until(() => expect(observer.getCurrentResult().isFetching).toBe(false));
 		}
 		expect(observer.getCurrentResult().data?.pages.map((page) => page.value)).toEqual([
 			"fresh 0",
@@ -190,25 +206,24 @@ test("cancelling a page for an optimistic update preserves its pending refresh",
 	const stop = observer.subscribe(() => {});
 	try {
 		requests[0]?.reply({ value: "old" });
-		await Bun.sleep(5);
+		await until(() => expect(observer.getCurrentResult().isFetching).toBe(false));
 		void observer.refetch();
 		changed("scratch", { op: "propose", touched: [] });
 		void queryClient.cancelQueries({ queryKey: key });
 		queryClient.setQueryData(key, { pages: [{ value: "optimistic" }], pageParams: [""] });
 		requests[1]?.reply({ value: "old" });
-		await Bun.sleep(5);
+		await until(() => expect(requests).toHaveLength(3));
 		expect(requests[1]?.signal.aborted).toBe(true);
 		expect(observer.getCurrentResult().data?.pages[0]?.value).toBe("optimistic");
 		expect(requests).toHaveLength(3);
 		for (let event = 0; event < 5; event++) changed("scratch", { op: "propose", touched: [] });
 		expect(requests[2]?.signal.aborted).toBe(false);
 		requests[2]?.reply({ value: "saved" });
-		await Bun.sleep(5);
-		expect(observer.getCurrentResult().data?.pages[0]?.value).toBe("saved");
+		await until(() => expect(observer.getCurrentResult().data?.pages[0]?.value).toBe("saved"));
+		await until(() => expect(requests).toHaveLength(4));
 		expect(requests).toHaveLength(4);
 		requests[3]?.reply({ value: "latest" });
-		await Bun.sleep(5);
-		expect(observer.getCurrentResult().data?.pages[0]?.value).toBe("latest");
+		await until(() => expect(observer.getCurrentResult().data?.pages[0]?.value).toBe("latest"));
 		expect(requests).toHaveLength(4);
 	} finally {
 		stop();
@@ -226,16 +241,16 @@ test("invalidateProject waits for the coalesced refresh before an answer handler
 	const stop = observer.subscribe(() => {});
 	try {
 		replies[0]?.({ state: "open" });
-		await Bun.sleep(5);
+		await until(() => expect(observer.getCurrentResult().isFetching).toBe(false));
 		void observer.refetch();
 		let resumed = false;
 		const refreshed = invalidateProject("scratch").then(() => {
 			resumed = true;
 		});
-		await Bun.sleep(5);
+		expect(replies).toHaveLength(2);
 		expect(resumed).toBe(false);
 		replies[1]?.({ state: "open" });
-		await Bun.sleep(5);
+		await until(() => expect(replies).toHaveLength(3));
 		expect(resumed).toBe(false);
 		replies[2]?.({ state: "decided" });
 		await refreshed;
