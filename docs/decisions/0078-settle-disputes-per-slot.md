@@ -61,7 +61,12 @@ After every cause has a local settlement, the existing classification rule appli
 otherwise the disputed slot counts as passed. This preserves the existing treatment of exercise requirements and `minActors`.
 Settlement does not waive missing slots or required jobs.
 
-A changed complete effective result set renews the slot's settlement. Duplicate reports and ineffective attempts do not.
+A changed effective result from a person or pipeline renews the slot's settlement.
+An agent's report never renews or ends a person's settlement, even when its attempt or outcome changes.
+While the non-agent evidence and scope stay the same, that classification also covers later agent failures
+of the same cause in this slot and scope. A different cause still needs its own settlement.
+The complete result set remains recorded as the evidence the person answered.
+Duplicate reports and ineffective attempts do not renew a settlement.
 Expiry or withdrawal removes only the local rows written by that decision. Flaky settlements retain their timed hold.
 Other local classifications hold on this exact slot evidence, including infrastructure answers.
 Cause answers retain their usual holds and continue to cover every occurrence they covered before.

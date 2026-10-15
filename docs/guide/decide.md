@@ -240,7 +240,8 @@ started. It excuses this target only. The next commit is judged separately.
 The evidence can show a hint that the same cause fails on the base.
 
 A normal answer to a "Disputed" question classifies its named failures only in that
-slot. It cannot replace the cause's answer or another slot's settlement.
+slot. It cannot replace the cause's answer or another slot's settlement. Later agent
+reports of that cause keep a person's settlement while the non-agent evidence and scope stay the same.
 "The failure was a mistake" instead sets the named results aside everywhere they
 count in an open run and in their commit gate. It does not judge a new failure reported later.
 See [runs](./runs.md#resolve-a-disputed-slot).

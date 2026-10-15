@@ -48,6 +48,7 @@ import {
 	countedTestsOf,
 	disputedRuns,
 	disputesOf,
+	effectiveFillsOf,
 	type FailingGroup,
 	failsOnBase,
 	inheritanceAffected,
@@ -1387,6 +1388,30 @@ function refreshInherited(ctx: Ctx, run: RunRow): Raised[] {
 	return raised;
 }
 
+function unchangedSlotSettlement(ctx: Ctx, question: QuestionRow, run: RunRow): boolean {
+	if (question.state !== "decided" || question.decision === null) return false;
+	const decision = decisionById(ctx.db, question.decision);
+	if (!decision || ["withdrawn", "expired", "outdated", "mistaken"].includes(json<{ is: string }>(decision.answer).is))
+		return false;
+	if (decision.expires_at !== null && decision.expires_at <= ctx.now) return false;
+	if (!json<Signer[]>(decision.signers).some((signer) => actorLabel(ctx.db, signer.by).kind === "human")) return false;
+	const subject = json<{ slot: number; scope: string }>(question.subject);
+	const evidence = json<{ effective: number[]; results: number[] }>(question.evidence);
+	if (
+		evidence.results.some((id) => {
+			const result = resultById(ctx.db, id);
+			return !result || scopeOf(mustTarget(ctx.db, result.target), run.id) !== subject.scope;
+		})
+	)
+		return false;
+	const before = evidence.effective.filter((id) => resultById(ctx.db, id)?.method !== "agent").sort((a, b) => a - b);
+	const now = effectiveFillsOf(ctx.db, subject.slot)
+		.filter((fill) => fill.method !== "agent")
+		.map((fill) => fill.id)
+		.sort((a, b) => a - b);
+	return contentHash(before) === contentHash(now);
+}
+
 /** Slot settlements have their own question and basis; changing them never withdraws a cause answer. */
 function refreshDisputes(ctx: Ctx, run: RunRow): void {
 	if (run.origin !== "planned") return;
@@ -1401,6 +1426,7 @@ function refreshDisputes(ctx: Ctx, run: RunRow): void {
 		const material = { results: effective.map((fill) => fill.id).sort((a, b) => a - b) };
 		const prior = latestByFingerprint(ctx.db, ctx.project.id, fingerprint);
 		if (prior?.basis === contentHash(material) && (prior.state === "open" || prior.state === "decided")) continue;
+		if (prior && unchangedSlotSettlement(ctx, prior, run)) continue;
 		const cause = signatureById(ctx.db, signature);
 		const latest = failures.at(-1);
 		if (!cause || !latest) continue;
@@ -1433,6 +1459,7 @@ function refreshDisputes(ctx: Ctx, run: RunRow): void {
 				count: tests.length,
 				targets: [...new Set(failures.map((fill) => fill.target))],
 				target: target.commit_sha ?? target.what,
+				branch: target.branch,
 				hints: ["disputed"],
 				sample: latest.id,
 			},
@@ -1444,6 +1471,7 @@ function refreshDisputes(ctx: Ctx, run: RunRow): void {
 	}
 	for (const question of previous) {
 		if (active.has(question.fingerprint)) continue;
+		if (unchangedSlotSettlement(ctx, question, run)) continue;
 		if (question.state === "decided" && question.decision !== null) {
 			const decision = decisionById(ctx.db, question.decision);
 			if (!decision || json<{ is: string }>(decision.answer).is === "mistaken") continue;

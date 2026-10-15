@@ -1506,10 +1506,21 @@ describe("a change that ends", () => {
 			},
 			ci,
 		);
-		const disputed = first(queue().items.filter((q) => q.kind === "failure"));
-		expect(disputed).toMatchObject({ q: asked.q, evidence: { hints: ["disputed"], message: "expected 10, got 12" } });
-		expect(disputed.answers).toEqual(["defect", "test", "expected", "flaky", "infra", "inherited", "mistaken"]);
-		expect(h.call<GateStatus>("gate", { run: run.run })).toMatchObject({ verdict: "blocked", open: [asked.q] });
+		const questions = queue().items.filter((q) => q.kind === "failure");
+		const cause = first(questions.filter((q) => q.q === asked.q));
+		const disputed = first(questions.filter((q) => q.title.startsWith(`Disputed C-1 in ${run.run}:`)));
+		expect(cause).toMatchObject({ state: "open", evidence: { message: "expected 10, got 12" } });
+		expect(cause.evidence.hints).not.toContain("disputed");
+		expect(cause.answers).not.toContain("mistaken");
+		expect(disputed).toMatchObject({
+			state: "open",
+			evidence: { hints: ["disputed"], message: "expected 10, got 12" },
+		});
+		expect(disputed.q).not.toBe(asked.q);
+		expect(disputed.answers).toEqual(["defect", "test", "expected", "flaky", "infra", "mistaken"]);
+		const status = h.call<GateStatus>("gate", { run: run.run });
+		expect(status.verdict).toBe("blocked");
+		expect(status.open.toSorted()).toEqual([asked.q, disputed.q].toSorted());
 		expect(count("scope_moves")).toBe(0);
 	});
 

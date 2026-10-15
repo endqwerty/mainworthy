@@ -126,8 +126,12 @@ continues to apply elsewhere, but does not settle this slot. The order of that
 answer and the contradictory result makes no difference.
 
 A settlement applies to the named failures in this slot. Another run that counts
-the same results needs its own settlement. A later effective result renews the
-question, and withdrawing or expiring its answer leaves this slot disputed again.
+the same results needs its own settlement. A later effective result from a person
+or pipeline renews the question. An agent's report never renews or ends a person's
+settlement, even if its attempt or outcome changes. With the same non-agent evidence
+and scope, the classification covers later agent failures of that cause in this slot.
+A different cause needs its own settlement. Withdrawing or expiring an answer leaves
+this slot disputed again.
 Neither action withdraws the cause's answer or changes an unrelated commit gate.
 
 "The failure was a mistake" judges the named results themselves. They stop counting

@@ -595,7 +595,7 @@ check(
 	"R4B-1 late dispute preserves evidence and shows fresh permissions",
 	async () => {
 		const server = await startServer({ preset: "standard" });
-		await cases(server, 2);
+		await cases(server, 1);
 		const tester = await grant(server, "tester"),
 			ci = await grant(server, "pipeline", "ci");
 		const run = await server.api("plan", { name: "Dispute", select: {}, accepts: { commit: "rc4000010000" } });
@@ -626,12 +626,30 @@ check(
 				},
 				{ token: ci },
 			);
+			const dispute = (await server.api("inbox", { kind: "failure" })).items.find((q) =>
+				q.title.startsWith(`Disputed C-1 in ${run.run}:`),
+			);
+			if (!dispute) throw new Error("No slot dispute");
+			await page.locator(`[data-question="${dispute.q}"]`).click();
 			await page.getByText("A counted pass and fail disagree.", { exact: false }).waitFor();
 			expect(await page.locator(".queue-log").textContent()).toContain("expected 10, got 12");
 			await h.context.request.post(`${server.url}/api/login`, { data: { token: tester } });
 			await page.reload();
 			await page.getByText("You cannot settle this.", { exact: false }).waitFor();
 			expect(await page.locator(".queue-answers button:enabled").count()).toBe(0);
+			await h.context.request.post(`${server.url}/api/login`, { data: { token: server.token } });
+			await page.reload();
+			await page.locator(".queue-answers button:enabled").first().waitFor();
+			await page.keyboard.press("f");
+			await eventually(
+				() => server.api("get", { refs: [dispute.q] }),
+				(rows) => rows[0]?.state === "decided",
+			);
+			expect(await server.api("gate", { run: run.run })).toMatchObject({
+				verdict: "passed",
+				tally: { pass: 1, disputed: 0 },
+			});
+			expect(h.errors).toEqual([]);
 		} finally {
 			await h.close();
 			await server.stop();
