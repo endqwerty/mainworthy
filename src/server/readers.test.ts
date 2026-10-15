@@ -130,11 +130,14 @@ describe("reader threads", () => {
 			expect(outcome).toBe("reader threads were not ready within 300 ms; reads will run inline");
 			expect(attempts).toBeGreaterThanOrEqual(2);
 			expect(
-				await pool.run({ op: "find", project: "scratch", input: {}, actor: null }, () => ({
-					ok: true,
-					result: "inline",
-					seq: null,
-				})),
+				await pool.run(
+					{ op: "find", project: "scratch", input: {}, caller: { via: "local", owner: "robin" }, clockOffset: 0 },
+					() => ({
+						ok: true,
+						result: "inline",
+						seq: null,
+					}),
+				),
 			).toEqual({ ok: true, result: "inline", seq: null });
 		} finally {
 			await pool.stop();
@@ -180,11 +183,14 @@ describe("reader threads", () => {
 		const pool = new Readers({ dataDir: config().dataDir, count: 1, spawn: () => new Worker(silent) });
 		pools.push(pool);
 		expect(
-			await pool.run({ op: "find", project: "scratch", input: {}, actor: null }, () => ({
-				ok: true,
-				result: "inline during startup",
-				seq: null,
-			})),
+			await pool.run(
+				{ op: "find", project: "scratch", input: {}, caller: { via: "local", owner: "robin" }, clockOffset: 0 },
+				() => ({
+					ok: true,
+					result: "inline during startup",
+					seq: null,
+				}),
+			),
 		).toEqual({ ok: true, result: "inline during startup", seq: null });
 		await expect(pool.ready(20)).rejects.toThrow("were not ready within 20 ms");
 	});
