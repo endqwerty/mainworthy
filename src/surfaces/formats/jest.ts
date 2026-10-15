@@ -28,14 +28,24 @@ const Report = z.object({
 export function parseJest(value: unknown, rootDir: string): ParsedReport {
 	const report = Report.parse(value);
 	const root = (report.rootDir ?? rootDir).replace(/\\/g, "/");
+	const rootPath = /^[a-z]:/i.test(root) || root.startsWith("//") ? win32 : posix;
+	if (!rootPath.isAbsolute(root)) throw new Error(`Jest/Vitest root must be absolute: ${root}`);
+	const normalizedRoot = rootPath.normalize(root);
+	if (normalizedRoot === rootPath.parse(normalizedRoot).root)
+		throw new Error(`Jest/Vitest filesystem root: ${root}; use the source checkout root`);
 	if (report.wasInterrupted || report.runExecError != null)
 		throw new Error("Jest/Vitest did not finish; fix the runner before uploading");
 	const results: ParsedReport["results"] = [];
 	for (const suite of report.testResults) {
 		const name = suite.name.replace(/\\/g, "/");
 		const path = /^[a-z]:\//i.test(name) || name.startsWith("//") ? win32 : posix;
-		const file = path.isAbsolute(name) ? path.relative(root, name).replace(/\\/g, "/") : name;
-		if (path.isAbsolute(file)) throw new Error("Jest/Vitest source path and root must be on the same drive");
+		if (path.isAbsolute(name) && path !== rootPath)
+			throw new Error(`Jest/Vitest source path and root must be on the same drive: ${root}; source: ${suite.name}`);
+		const file = path.normalize(path.isAbsolute(name) ? path.relative(root, name) : name).replace(/\\/g, "/");
+		if (path.isAbsolute(file))
+			throw new Error(`Jest/Vitest source path and root must be on the same drive: ${root}; source: ${suite.name}`);
+		if (file === ".." || file.startsWith("../"))
+			throw new Error(`Jest/Vitest outside root: ${root}; source: ${suite.name}`);
 		if (suite.status === "failed" && !suite.assertionResults.length)
 			throw new Error(`Jest/Vitest suite ${suite.name} reported an execution error; fix the runner before uploading`);
 		if (suite.status === "failed" && !suite.assertionResults.some((test) => test.status === "failed"))

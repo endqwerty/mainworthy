@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
-import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
@@ -1384,12 +1384,14 @@ test("real report outputs use git top level or cwd for stable Jest and Vitest ke
 		const expected = ["passes @C-1@v1", "fails", "skipped", "todo", "parameter 1", "parameter 2", "retry"].map(
 			(name) => ({ key: `tests/sample.test.js::checkout::${name}`, file: "tests/sample.test.js" }),
 		);
-		for (const checkout of ["git", "plain"]) {
+		for (const checkout of ["git", "second-git", "plain"]) {
 			const folder = join(directory, checkout);
 			await mkdir(join(folder, "nested"), { recursive: true });
 			const root = await realpath(folder);
 			const nested = join(root, "nested");
-			if (checkout === "git") expect(Bun.spawnSync(["git", "init", "--quiet", root]).exitCode).toBe(0);
+			if (checkout !== "plain") expect(Bun.spawnSync(["git", "init", "--quiet", root]).exitCode).toBe(0);
+			const alias = join(directory, `${checkout}-link`);
+			await symlink(root, alias, "dir");
 			for (const format of ["jest", "vitest"]) {
 				const fixture = new URL(`../../test/fixtures/reports/real-${format}.json`, import.meta.url);
 				const file = join(directory, `${checkout}-${format}.json`);
@@ -1398,17 +1400,45 @@ test("real report outputs use git top level or cwd for stable Jest and Vitest ke
 				const result = await command(
 					["report", file, "--session", "real-tools", "--job", `${checkout}-${format}`, "--json"],
 					{
-						cwd: checkout === "git" ? nested : root,
+						cwd: checkout !== "plain" ? nested : root,
 					},
 				);
 				expect(result.stderr).toBe("");
 				expect(result.code).toBe(0);
 				expect(JSON.parse(result.stdout).counts).toEqual({ total: 7, pass: 4, fail: 1, skip: 2, error: 0, blocked: 0 });
+				const linked = await run(
+					["report", file, "--session", "real-tools", "--job", `${checkout}-${format}`, "--json"],
+					{ cwd: alias },
+				);
+				expect(linked.code).toBe(0);
+				expect(JSON.parse(linked.stdout).fresh).toBe(false);
 				expect(
 					instance.app.db.raw.query<{ key: string; file: string }, []>("SELECT key, file FROM tests ORDER BY id").all(),
 				).toEqual(expected);
 			}
 		}
+		const other = join(await realpath(directory), "other-checkout");
+		await mkdir(other);
+		expect(Bun.spawnSync(["git", "init", "--quiet", other]).exitCode).toBe(0);
+		for (const format of ["jest", "vitest"]) {
+			const file = join(directory, `git-${format}.json`);
+			for (const cwd of [other, "/"]) {
+				const refused = await run(["report", file, "--session", "real-tools", "--job", "refused"], { cwd });
+				expect(refused.code).toBe(4);
+				expect(refused.stderr).toContain(
+					`${file}: Jest/Vitest ${cwd === "/" ? "filesystem root" : "outside root"}: ${cwd}`,
+				);
+			}
+			const relativeRootFile = join(directory, `relative-root-${format}.json`);
+			await writeFile(
+				relativeRootFile,
+				JSON.stringify({ ...JSON.parse(await Bun.file(file).text()), rootDir: "relative/root" }),
+			);
+			const refused = await run(["report", relativeRootFile, "--session", "real-tools"], { cwd: other });
+			expect(refused.code).toBe(4);
+			expect(refused.stderr).toContain(`${relativeRootFile}: Jest/Vitest root must be absolute: relative/root`);
+		}
+		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(6);
 		for (const [format, counts] of [
 			["pytest", { total: 8, pass: 3, fail: 2, skip: 2, error: 1, blocked: 0 }],
 			["playwright", { total: 7, pass: 4, fail: 1, skip: 2, error: 0, blocked: 0 }],
