@@ -61,6 +61,7 @@ export type Config = {
 	 * test hashes hundreds of passwords; nothing reads it from the environment.
 	 */
 	passwordCost?: { memoryCost: number; timeCost: number };
+	github?: { project: string; repository: string; token: string };
 };
 
 /**
@@ -268,5 +269,26 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		proxy: proxyOf(env),
 		...(env.MAINWORTHY_PUBLIC_URL ? { publicUrl: env.MAINWORTHY_PUBLIC_URL } : {}),
 		appleApps: appleAppsOf(env),
+		...githubOf(env),
 	};
+}
+
+function githubOf(env: Record<string, string | undefined>): Pick<Config, "github"> {
+	const project = env.MAINWORTHY_GITHUB_PROJECT?.trim();
+	const repository = env.MAINWORTHY_GITHUB_REPOSITORY?.trim();
+	const token = env.MAINWORTHY_GITHUB_TOKEN?.trim();
+	if (!project && !repository && !token) return {};
+	if (!project || !repository || !token)
+		throw new Error(
+			"Set MAINWORTHY_GITHUB_PROJECT, MAINWORTHY_GITHUB_REPOSITORY and MAINWORTHY_GITHUB_TOKEN together.",
+		);
+	if (!/^[A-Za-z0-9_-]{1,80}$/.test(project)) throw new Error("MAINWORTHY_GITHUB_PROJECT must be a project key.");
+	if (
+		!/^[A-Za-z0-9-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/.test(repository) ||
+		repository.endsWith("/.") ||
+		repository.endsWith("/..")
+	)
+		throw new Error("MAINWORTHY_GITHUB_REPOSITORY must be owner/repository on github.com.");
+	if (!/^[!-~]{1,512}$/.test(token)) throw new Error("MAINWORTHY_GITHUB_TOKEN must be a token without whitespace.");
+	return { github: { project, repository, token } };
 }

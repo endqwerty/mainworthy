@@ -1,6 +1,6 @@
 # API and agent tools
 
-Every operation Mainworthy has, with its address, the capability it needs and its input. The web UI, the command line and an agent's tools all call these same operations. The command line and the HTTP API reach all nineteen. An agent's tools are ten of them.
+Every operation Mainworthy has, with its address, the capability it needs and its input. The web UI, the command line and an agent's tools all call these same operations. The command line and the HTTP API reach every operation. An agent's tools are ten of them.
 
 ## Call an operation
 
@@ -283,6 +283,31 @@ Say that a change ended (merged, or closed without merging) or is open again. An
 | --- | --- | --- | --- |
 | `change` | `string` | yes | The change, for example pr:482. |
 | `state` | `"merged" \| "closed" \| "open"` | yes | How the change ended: merged, or closed without merging. open: it is open again. |
+
+</details>
+
+### tracker
+
+Queue a defect from a failed result: create a tracker issue or validate an existing issue for linking.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/p/<project>/tracker` |
+| Command | `mainworthy tracker` |
+| Needs | `produce` |
+| Effect | writes |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>tracker</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `[1].do` | `"create"` | yes |  |
+| `[1].result` | `integer` | yes |  |
+| `[2].do` | `"link"` | yes |  |
+| `[2].result` | `integer` | yes |  |
+| `[2].key` | `string` | yes |  |
 
 </details>
 
@@ -587,6 +612,27 @@ What became of a command you sent under an idempotency key: not recorded, begun,
 | Needs | `read` |
 | Effect | reads |
 | Agent tool | no |
+
+### tracker-status
+
+Read a tracker request's delivery state and its verified issue reference.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/p/<project>/tracker-status` |
+| Command | `mainworthy tracker-status` |
+| Needs | `read` |
+| Effect | reads |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>tracker-status</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | yes |  |
+
+</details>
 
 ### admin
 
