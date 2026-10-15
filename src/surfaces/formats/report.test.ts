@@ -43,8 +43,10 @@ test.each([
 	["C1234", { case: "C1234" }],
 	["Old.Id/123:case@v2", { case: "Old.Id/123:case", version: 2 }],
 	["PAY-7@v1", { case: "PAY-7", version: 1 }],
-	["C-1.", { case: "C-1" }],
-	["C-1@v2.", { case: "C-1", version: 2 }],
+	["C-1.", undefined],
+	["C-1@v2.", undefined],
+	["C1234.", { case: "C1234." }],
+	["c-2", undefined],
 	["a".repeat(120), { case: "a".repeat(120) }],
 	["a".repeat(121), undefined],
 	["123", undefined],
@@ -53,10 +55,24 @@ test.each([
 	["C1234@v1bad", undefined],
 	["C1234@v9007199254740992", undefined],
 	["C-1@v9007199254740992", undefined],
-])("JUnit and native names agree on the complete claim %s", (claim, expected) => {
-	const name = `checks @${claim}`;
-	const junit = parseJUnit(`<testsuite><testcase name="${name}"/></testsuite>`).results[0];
-	const native = parse(jestReport("passed", { title: name })).results[0];
+])("JUnit and native metadata agree on the complete claim %s", (claim, expected) => {
+	const junit = parseJUnit(
+		`<testsuite><testcase name="checks"><properties><property name="mainworthy" value="${claim}"/></properties></testcase></testsuite>`,
+	).results[0];
+	const native = parse(
+		{
+			exitcode: 0,
+			tests: [
+				{
+					nodeid: "test.py::checks",
+					outcome: "passed",
+					call: { outcome: "passed", duration: 0 },
+					user_properties: [{ mainworthy: claim }],
+				},
+			],
+		},
+		"pytest",
+	).results[0];
 	expect([junit?.annotation, native?.annotation]).toEqual([expected, expected]);
 });
 
@@ -72,7 +88,7 @@ test("generated Playwright JSON keeps project, nesting, annotations, failures an
 			"pass",
 			4,
 			undefined,
-			{ case: "C-1", version: 1 },
+			undefined,
 		],
 		[
 			{ key: "sample.spec.cjs::chromium::checkout::fails", name: "fails", file: "sample.spec.cjs" },
@@ -111,7 +127,6 @@ test.each(["jest", "vitest"] as const)("%s JSON normalizes matching assertions i
 			},
 			outcome: "pass",
 			durationMs: 13,
-			annotation: { case: "C-1", version: 1 },
 		},
 		{
 			test: { key: "tests/sample.test.js::checkout::fails", name: "fails", file: "tests/sample.test.js" },
@@ -160,7 +175,6 @@ test("TRX joins definitions by id after results and decodes entities and CDATA",
 			test: { key: "Shop.Checkout::Pass @C-1@v1", name: "Pass @C-1@v1" },
 			outcome: "pass",
 			durationMs: 13,
-			annotation: { case: "C-1", version: 1 },
 		},
 		{
 			test: { key: "Shop.Checkout::Fail", name: "Fail" },
@@ -316,7 +330,6 @@ test("Jest focused and skipped suites keep each assertion's own outcome", () => 
 			test: { key: "tests/sample.js::math::adds @C-1@v2", name: "adds @C-1@v2", file: "tests/sample.js" },
 			outcome: "skip",
 			durationMs: 13,
-			annotation: { case: "C-1", version: 2 },
 		});
 	}
 });

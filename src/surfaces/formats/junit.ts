@@ -532,7 +532,7 @@ export function parseJUnit(
 		let element: Element = { kind: "other", tag };
 		// `casebook` is the property's name from before the project was renamed (decision 0015).
 		if (name === "property" && propertyCase !== null && (attrs.name === "mainworthy" || attrs.name === "casebook")) {
-			const claim = caseAnnotation(attrs.value ?? "", true);
+			const claim = caseAnnotation(attrs.value ?? "");
 			if (claim !== undefined) propertyCase.result.annotation = claim;
 		} else if (ignoredDepth === 0) {
 			const retry =
@@ -590,8 +590,6 @@ export function parseJUnit(
 						result.durationMs = milliseconds;
 					else warn("Invalid testcase duration", start);
 				}
-				const claim = caseAnnotation(nameText);
-				if (claim !== undefined) result.annotation = claim;
 				element = {
 					kind: "case",
 					tag,

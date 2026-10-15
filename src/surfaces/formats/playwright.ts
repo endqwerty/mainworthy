@@ -81,7 +81,7 @@ export function parsePlaywright(value: unknown): ParsedReport {
 						retries: final.retry,
 						annotation: test.annotations
 							?.filter((item) => item.type === "mainworthy")
-							.map((item) => caseAnnotation(item.description ?? "", true))
+							.map((item) => caseAnnotation(item.description ?? ""))
 							.findLast((claim) => claim !== undefined),
 						detail: unexpectedPass ? "Expected test to fail, but it passed" : stripVTControlCharacters(detail),
 					}),
