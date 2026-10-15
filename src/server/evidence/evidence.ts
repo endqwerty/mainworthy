@@ -4,6 +4,7 @@
 // report twice is a no-op and a crash loses nothing. `apply` turns the staged results into result rows, each with an
 // explicit basis. Between the two, every run the report matters to reads `pending` (see runs.ts).
 import { createHash } from "node:crypto";
+import { caseAnnotation } from "../../core/case-annotation.ts";
 import { contentHash } from "../../core/hash.ts";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { MethodKind } from "../../core/model.ts";
@@ -747,7 +748,6 @@ export type ApplyResult = {
 	declined: { index: number; reason: string }[];
 };
 
-const ANNOTATION = /@(C-\d+)(?:@v(\d+))?/i;
 /**
  * Results applied between two pauses. About 7 ms of work: the longest the server's main thread is held by one
  * step of a large report, and so the longest a finished read waits to be sent. Smaller slices do not make a report
@@ -815,7 +815,8 @@ export function* applySteps(
 
 		// The basis: every claim about the case and the version, then the assumption, then nothing.
 		let refused: string | null = null;
-		const annotation = input.annotation ?? annotationIn("key" in input.test ? (input.test.name ?? input.test.key) : "");
+		const annotation =
+			input.annotation ?? caseAnnotation("key" in input.test ? (input.test.name ?? input.test.key) : "");
 		const annotated = annotation ? findCase(ctx.db, project, annotation.case) : null;
 		const linked = test.case_id !== null ? head(test.case_id) : null;
 		if (annotation && !annotated) refused = `the annotation names ${annotation.case}, which does not exist`;
@@ -994,12 +995,6 @@ export function rewriteReportReceipts(db: Db, rewrite: (receipt: string) => stri
 		const receipt = rewrite(row.receipt);
 		if (receipt !== row.receipt) db.run(Q.setReceipt, { id: row.id, receipt });
 	}
-}
-
-function annotationIn(name: string): { case: string; version?: number } | null {
-	const match = ANNOTATION.exec(name);
-	if (!match?.[1]) return null;
-	return match[2] ? { case: match[1].toUpperCase(), version: Number(match[2]) } : { case: match[1].toUpperCase() };
 }
 
 function resolveTest(ctx: Ctx, input: ResultIn): { test: TestRow; fresh: boolean } | { reject: string } {

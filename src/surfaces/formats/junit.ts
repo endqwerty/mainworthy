@@ -1,3 +1,4 @@
+import { caseAnnotation } from "../../core/case-annotation.ts";
 import type { ResultIn } from "../../core/ops.ts";
 
 type Attributes = Partial<Record<"name" | "file" | "classname" | "time" | "status" | "message" | "value", string>>;
@@ -108,16 +109,6 @@ function normalisePath(value: string): string {
 
 function keyPart(value: string): string {
 	return value.trim() ? value : "";
-}
-
-function annotation(value: string, property = false): ResultIn["annotation"] {
-	const match = (property ? /^@?(C-\d+)(?:@v(\d+))?$/ : /@(C-\d+)(?:@v(\d+))?(?![\w@-])/).exec(value.trim());
-	const caseRef = match?.[1];
-	if (caseRef === undefined) return undefined;
-	const versionText = match?.[2];
-	if (versionText === undefined) return { case: caseRef };
-	const version = Number(versionText);
-	return Number.isSafeInteger(version) ? { case: caseRef, version } : undefined;
 }
 
 function decode(value: string, offset: number, warn: Warn): string {
@@ -541,7 +532,7 @@ export function parseJUnit(
 		let element: Element = { kind: "other", tag };
 		// `casebook` is the property's name from before the project was renamed (decision 0015).
 		if (name === "property" && propertyCase !== null && (attrs.name === "mainworthy" || attrs.name === "casebook")) {
-			const claim = annotation(attrs.value ?? "", true);
+			const claim = caseAnnotation(attrs.value ?? "", true);
 			if (claim !== undefined) propertyCase.result.annotation = claim;
 		} else if (ignoredDepth === 0) {
 			const retry =
@@ -599,7 +590,7 @@ export function parseJUnit(
 						result.durationMs = milliseconds;
 					else warn("Invalid testcase duration", start);
 				}
-				const claim = annotation(nameText);
+				const claim = caseAnnotation(nameText);
 				if (claim !== undefined) result.annotation = claim;
 				element = {
 					kind: "case",

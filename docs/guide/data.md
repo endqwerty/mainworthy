@@ -136,7 +136,11 @@ ASCII letters, digits, `_`, `.`, `:`, `/`, or `-`, and start with a letter or di
 An alias cannot be a bare number or start with `C-`, `Q-`, `R-`, `T-`, or `P-`,
 in either letter case, because those names belong to Mainworthy.
 
-An alias names the case to `get`, `history` and a typed result (`report` with `test: {case: "C1234"}`). A JUnit report does not read it yet: a test named `… @C1234` or with the property `mainworthy=C1234` stays unlinked, while `@C-2` links. Link such tests to the case once, or rename the annotation to the case's ref.
+An alias names the case to `get`, `history` and a typed result (`report` with `test: {case: "C1234"}`).
+Report annotations and properties accept it too. For example, a JUnit test named
+`signs in @C1234` or with the property `mainworthy=C1234` identifies the imported case.
+Aliases keep their original letter case and resolve within the report's project.
+See [Link tests to cases](./report-results.md#link-tests-to-cases) for the other formats and version claims.
 
 Every source case column, including dates, descriptions, custom fields and any history
 column, stays in the case body's `fields` as JSON under `import.<format>.row.<record>`.

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { Policy } from "../core/kinds.ts";
 import { parseCase } from "../core/markdown.ts";
+import { ReportReceipt } from "../core/ops.ts";
 import { withInstance } from "./test-support.ts";
 
 const Case = z.object({ ref: z.string(), title: z.string(), methods: z.array(z.string()), automate: z.string() });
@@ -88,6 +89,18 @@ test("vendor CSV imports keep aliases, folders, source metadata and proposal his
 		expect(parsed.doc.body.fields["import.testrail.row.2"]).toContain('"Updated On":"2020-01-02"');
 		expect(await client.call("history", { ref: "C1234" })).toMatchObject({
 			versions: [{ version: 1, reason: "Import testrail CSV" }],
+		});
+		const reportFile = join(directory, "results.xml");
+		await Bun.write(
+			reportFile,
+			'<testsuite><testcase name="signs in @C1234"/><testcase name="property"><properties><property name="mainworthy" value="C1234@v1"/></properties></testcase><testcase name="unknown @Missing123"/></testsuite>',
+		);
+		const reported = await run(["report", reportFile, "--session", "imported-aliases", "--json"]);
+		expect(reported).toMatchObject({ code: 0, stderr: "" });
+		expect(ReportReceipt.parse(JSON.parse(reported.stdout))).toMatchObject({
+			counts: { total: 3, pass: 3 },
+			basis: { exact: 1, assumed: 1, unresolved: 1 },
+			declined: [{ index: 2, reason: "the annotation names Missing123, which does not exist: recorded with no case" }],
 		});
 		const qase = join(directory, "qase.csv");
 		await Bun.write(
