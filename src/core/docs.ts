@@ -16,6 +16,7 @@ const SECTIONS = [
 		title: "Use it",
 		pages: [
 			{ slug: "write-cases", title: "Write cases" },
+			{ slug: "import-cases", title: "Import cases from CSV" },
 			{ slug: "report-results", title: "Report results" },
 			{ slug: "decide", title: "Decide in the queue" },
 			{ slug: "runs", title: "Planned runs" },

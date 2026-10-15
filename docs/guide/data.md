@@ -93,6 +93,10 @@ to an existing project. Each file becomes one proposal under the project's polic
 Exit code 0 means adopted. Exit code 2 means the proposal needs attention; its reply
 names the proposal and question. Accept it through the queue when the policy asks.
 
+For custom column mappings and a server-side dry run, use
+[Import cases from a mapped CSV](./import-cases.md). The snapshot commands below
+keep their existing fixed-column behavior.
+
 ```sh
 mainworthy import cases.csv --format csv --project checkout
 mainworthy import testrail.csv --format testrail --project checkout

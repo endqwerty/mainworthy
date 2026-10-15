@@ -245,6 +245,38 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 
 </details>
 
+### import-csv
+
+Preview mapped CSV cases, then confirm one import proposal. Existing foreign aliases are refused.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/p/<project>/import-csv` |
+| Command | `mainworthy import-csv` |
+| Needs | `produce` |
+| Effect | writes |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>import-csv</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `csv` | `string` | yes | UTF-8 CSV file content, with headers. |
+| `mapping` | `object` | no |  |
+| `mapping.id` | `string` | yes |  |
+| `mapping.title` | `string` | yes |  |
+| `mapping.steps` | `string` | no |  |
+| `mapping.expected` | `string` | no |  |
+| `mapping.folder` | `string` | no |  |
+| `mapping.pre` | `string` | no |  |
+| `mapping.execution` | `string` | no |  |
+| `mapping.fields` | `record<string>` | no |  |
+| `preset` | `"testrail"` | no |  |
+| `confirm` | `string` | no | The confirmation from the dry run. Omit to preview. |
+
+</details>
+
 ### report
 
 Record results: a parsed CI report, one manual result, or an agent's batch. The producer is the token's actor.
