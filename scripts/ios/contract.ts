@@ -182,6 +182,11 @@ export const DecideReply = struct("DecideReply", "`decide`: what became of one a
 	evidence: [maybe(text), "On a conflict: the evidence the question has now."],
 });
 
+export const AnswerCommand = struct("AnswerCommand", "The recorded reply of a saved answer's command.", {
+	state: text,
+	reply: maybe(list(DecideReply)),
+});
+
 // ── A case's content, and an edit somebody proposes ────────────────────────────────────────────────────────
 
 const Step = struct("Step", "One step of a case.", {
@@ -509,6 +514,7 @@ export const SHAPES: readonly Shape[] = [
 	Inbox,
 	...Object.values(EVIDENCE),
 	DecideReply,
+	AnswerCommand,
 	Proposal,
 	ConflictProposal,
 	ConflictBaseFields,

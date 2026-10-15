@@ -95,7 +95,11 @@ export async function testInstance(): Promise<TestInstance> {
 							port: 0,
 							fetch: (request) => {
 								const url = new URL(request.url);
-								if (unavailable.has(url.pathname)) return new Response(null, { status: 503 });
+								if (unavailable.has(url.pathname))
+									return Response.json(
+										{ ok: false, error: { code: "internal", message: "The answer could not be recorded." } },
+										{ status: 500 },
+									);
 								return fetch(new Request(`${made.url}${url.pathname}${url.search}`, request), { redirect: "manual" });
 							},
 						});

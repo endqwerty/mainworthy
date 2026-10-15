@@ -52,6 +52,20 @@ extension ProjectClient {
 		return try AnswerOutcome(reply)
 	}
 
+	/// Asks what became of this exact command without sending the saved answer again.
+	package func answerCommand(_ answer: PreparedAnswer) async throws -> AnswerCommand {
+		let command: Wire.AnswerCommand = try await server.read("command", in: key, ["cmd": .string(answer.command)])
+		switch command.state {
+		case "none": return .notRecorded
+		case "begun": return .recording
+		case "done":
+			guard let replies = command.reply, replies.count == 1, let reply = replies.first,
+				reply.q == answer.question else { throw ClientError.unreadable }
+			return .recorded(try AnswerOutcome(reply))
+		default: throw ClientError.unreadable
+		}
+	}
+
 	/// Withdraws the decision that stands on a question. Both decisions stay in the ledger. The policy can ask
 	/// for a reason here too.
 	package func withdraw(_ question: Question, reason: String = "") async throws -> WithdrawOutcome {
@@ -122,6 +136,12 @@ extension ProjectClient {
 		}
 		return Question(alone)
 	}
+}
+
+package enum AnswerCommand {
+	case notRecorded
+	case recording
+	case recorded(AnswerOutcome)
 }
 
 extension AnswerOutcome {

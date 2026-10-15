@@ -113,8 +113,14 @@ final class QueueUITests: XCTestCase {
 		app.launchArguments = ["-forget", "-instance", proxy]
 		app.launch()
 		try signIn(app)
-		app.buttons["project-menu"].tap()
-		app.buttons[project].tap()
+		let projectMenu = app.buttons["project-menu"]
+		projectMenu.tap()
+		let projectOption = app.collectionViews.buttons[project]
+		let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: projectOption)
+		XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed)
+		projectOption.tap()
+		let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", project), object: projectMenu)
+		XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed)
 		let failure = app.staticTexts["expected $90.00, got $100.00"]
 		XCTAssertTrue(failure.waitForExistence(timeout: 10))
 		failure.tap()
@@ -134,6 +140,27 @@ final class QueueUITests: XCTestCase {
 		// Signed device builds keep their session. This test proves answer persistence, not keychain persistence.
 		if app.textFields["name"].waitForExistence(timeout: 3) { try signIn(app) }
 		XCTAssertTrue(app.navigationBars["Queue"].waitForExistence(timeout: 20))
+		app.buttons["unsent-answers"].tap()
+		XCTAssertTrue(app.staticTexts["Waiting to send"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.staticTexts["The answer could not be recorded. The saved answer is waiting to send."].exists)
+		XCTAssertTrue(app.buttons["retry-saved-answer"].exists)
+		XCTAssertTrue(app.buttons["drop-saved-answer"].exists)
+		shot("321-stuck-answer")
+		app.buttons["retry-saved-answer"].tap()
+		let canDrop = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["drop-saved-answer"])
+		XCTAssertEqual(XCTWaiter.wait(for: [canDrop], timeout: 10), .completed)
+		XCTAssertTrue(app.staticTexts["Waiting to send"].exists)
+		app.buttons["drop-saved-answer"].tap()
+		let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.staticTexts["Waiting to send"])
+		XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 10), .completed)
+		shot("321-dropped-answer")
+		// Dropping the unrecorded answer leaves its question available for a new answer.
+		app.navigationBars.buttons.element(boundBy: 0).tap()
+		XCTAssertTrue(failure.waitForExistence(timeout: 10))
+		failure.tap()
+		app.buttons["answer-flaky"].tap()
+		XCTAssertTrue(pending.waitForExistence(timeout: 15))
+		app.navigationBars.buttons.element(boundBy: 0).tap()
 		app.buttons["unsent-answers"].tap()
 		XCTAssertTrue(app.staticTexts["Waiting to send"].waitForExistence(timeout: 10))
 		_ = try await connection(unavailable: false)
