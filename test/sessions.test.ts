@@ -11,6 +11,7 @@ import { flushUses, removeGrant, revokeToken, sweepSessions } from "../src/serve
 import { openSession } from "../src/server/identity/sessions.ts";
 import { type Config, databasePath, defaultConfig, type ReadCall, type ReadPool } from "../src/server/kernel/app.ts";
 import { SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
+import { Readers } from "../src/server/readers.ts";
 import { type Instance, start } from "../src/server/start.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
 
@@ -550,7 +551,8 @@ describe("what ends a session", () => {
 			const clock = clockAt();
 			const instance = boot({ clock, readers: 1 });
 			const pool = instance.app.readers;
-			if (!pool) throw new Error("the reader pool did not start");
+			if (!(pool instanceof Readers)) throw new Error("the reader pool did not start");
+			await pool.ready();
 			let dispatched: ReadCall | undefined;
 			instance.app.readers = {
 				run: (call, fallback) => {
@@ -629,7 +631,8 @@ describe("what ends a session", () => {
 	test("a read that a busy reader starts after its session ended is answered 401 and carries no data", async () => {
 		const instance = boot({ readers: 1 });
 		const pool = instance.app.readers;
-		if (!pool) throw new Error("the reader pool did not start");
+		if (!(pool instanceof Readers)) throw new Error("the reader pool did not start");
+		await pool.ready();
 		await create(instance, "Only for whoever is signed in");
 		// The one reader is busy: a call handed to the pool reaches it only after `release`. Nothing else is
 		// changed, and the call then resolves its credential in the real reader thread.
@@ -1060,7 +1063,8 @@ describe("an upgrade and an archive", () => {
 		const archive = await (await fetch(`${source.url}/api/export`)).text();
 		const instance = boot({ mode: "local", readers: 1 });
 		const pool = instance.app.readers;
-		if (!pool) throw new Error("the reader pool did not start");
+		if (!(pool instanceof Readers)) throw new Error("the reader pool did not start");
+		await pool.ready();
 		let release = (): void => {};
 		const busy = new Promise<void>((resolve) => {
 			release = resolve;
