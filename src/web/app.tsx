@@ -8,7 +8,14 @@ import { CaseScreen } from "./case/index.tsx";
 import { ChangesScreen } from "./changes/index.tsx";
 import { ApiError, session, signedOut, unauthenticatedEvent } from "./lib/api.ts";
 import { queryClient, useEvents, useQueryOp } from "./lib/data.ts";
-import { deviceSession, sessionPersonKey, setDevicePerson, suspendDeviceSession } from "./lib/device.ts";
+import {
+	deviceClearKey,
+	deviceSession,
+	sessionPersonKey,
+	sessionUnchanged,
+	setDevicePerson,
+	suspendDeviceSession,
+} from "./lib/device.ts";
 import { useBindings, useKeyboard, useKeyRegistry } from "./lib/keys.ts";
 import { navigate, projectUrl, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
 import { signOut } from "./lib/signin.ts";
@@ -130,8 +137,10 @@ export function App() {
 	const [inviting, setInviting] = useState(() => location.pathname === INVITE_PATH);
 	const person = useRef<string | null>(null);
 	const refreshSession = useCallback(async (): Promise<void> => {
+		const owner = deviceSession();
 		try {
 			const info = await session();
+			if (!sessionUnchanged(owner)) return;
 			// What the device keeps is kept per person. A different person from the one before starts with nothing
 			// of theirs: not their drafts, not their notes, not what the app had read for them.
 			if (person.current !== null && person.current !== info.actor) queryClient.clear();
@@ -139,6 +148,7 @@ export function App() {
 			setDevicePerson(info.actor);
 			setAuth({ kind: "ready", session: info });
 		} catch (error) {
+			if (!sessionUnchanged(owner)) return;
 			setAuth(
 				error instanceof ApiError && error.code === "unauthenticated"
 					? { kind: "signin" }
@@ -153,7 +163,11 @@ export function App() {
 			setAuth({ kind: "signin" });
 		};
 		const changed = (event: StorageEvent) => {
-			if (event.key === sessionPersonKey && event.newValue !== deviceSession().person) refused();
+			if (
+				(event.key === deviceClearKey && !sessionUnchanged(deviceSession())) ||
+				(event.key === sessionPersonKey && localStorage.getItem(sessionPersonKey) !== deviceSession().person)
+			)
+				refused();
 		};
 		window.addEventListener("storage", changed);
 		window.addEventListener(unauthenticatedEvent, refused);
@@ -247,34 +261,53 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 	// A browser session is what there is to sign out of. In local mode the owner of the machine has none, and
 	// neither the button nor its key is there.
 	const account = info.via === "cookie";
-	const [signingOut, setSigningOut] = useState(false);
+	const [signOutState, setSignOutState] = useState<"closed" | "choosing" | "ending">("closed");
+	const signingOut = signOutState === "ending";
+	const signOutOpen = signOutState === "choosing";
+	const signOutOrigin = useRef<HTMLElement | null>(null);
 	const leave = useCallback((): void => {
-		if (signingOut) return;
-		setSigningOut(true);
-		// The server ends the session and clears the cookie; only then does the page show the sign-in page. What
-		// is typed and not yet recorded stays on this device, under this person's name, for when they are back.
-		void signOut().then(signedOut, () =>
+		if (signOutState !== "closed") return;
+		signOutOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		setPalette(null);
+		setHelp(false);
+		setSignOutState("choosing");
+	}, [signOutState]);
+	const stay = (): void => {
+		setSignOutState("closed");
+		const origin = signOutOrigin.current;
+		signOutOrigin.current = null;
+		queueMicrotask(() => {
+			if (origin?.isConnected) origin.focus();
+		});
+	};
+	const confirmSignOut = (clear: boolean): void => {
+		if (!signOutOpen) return;
+		setSignOutState("ending");
+		void signOut({ clear }).then(signedOut, () =>
 			// No reply. The server may have ended the session all the same, so the page does not guess: it asks
 			// who is signed in. A 401 there shows the sign-in page (`session` sees to that).
 			session().then(
 				() => {
-					setSigningOut(false);
+					setSignOutState("closed");
 					setStatus("No answer came back to the sign-out, and this browser is still signed in. Press Sign out again.");
 				},
 				(error: unknown) => {
 					if (error instanceof ApiError && error.code === "unauthenticated") return;
-					setSigningOut(false);
+					setSignOutState("closed");
 					setStatus("Mainworthy did not answer, so the page cannot tell whether you are signed out. Try again.");
 				},
 			),
 		);
-	}, [signingOut]);
+	};
 	const [inInput, setInInput] = useState(false);
 	// Collapsed or open is this browser's choice, as the theme is: a reload and the next visit find it as it was.
 	const [sidebarCollapsed, setSidebarCollapsed] = useState(sidebarKept);
 	useEffect(() => keepSidebar(sidebarCollapsed), [sidebarCollapsed]);
 	const sidebarAction = sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar";
-	const { phone, pane, showList, menu, setMenu, listOnly } = usePhoneShell(route, palette !== null || help);
+	const { phone, pane, showList, menu, setMenu, listOnly } = usePhoneShell(
+		route,
+		palette !== null || help || signOutOpen,
+	);
 	const suiteOpen = route.screen === "suite" || route.screen === "case";
 	useEffect(() => {
 		const change = () =>
@@ -429,7 +462,8 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				setStatus,
 				openPalette,
 				refreshSession,
-				overlayOpen: palette !== null || help,
+				requestSignOut: leave,
+				overlayOpen: palette !== null || help || signOutOpen,
 			}}
 		>
 			<div
@@ -444,7 +478,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				// The palette and the sheet of keys cover the whole app, and nothing under them takes the focus or
 				// a key, on the desktop as on a phone: Tab would otherwise leave the sheet for the controls under
 				// it, and Enter would press what it reaches.
-				inert={palette !== null || help}
+				inert={palette !== null || help || signOutOpen}
 			>
 				{phone && (
 					<PhoneBar
@@ -697,6 +731,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 					</div>
 				</footer>
 			</div>
+			{signOutOpen && <SignOutDialog person={info.actor} stay={stay} choose={confirmSignOut} />}
 			{palette && (
 				<Palette
 					key={paletteOpening}
@@ -737,6 +772,75 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 		</AppContext.Provider>
 	);
 }
+function SignOutDialog({
+	person,
+	stay,
+	choose,
+}: {
+	person: string;
+	stay: () => void;
+	choose: (clear: boolean) => void;
+}) {
+	return (
+		<div className="overlay" data-overlay="signout">
+			<button
+				type="button"
+				className="overlay-backdrop"
+				tabIndex={-1}
+				aria-label="Close sign-out dialog"
+				onClick={stay}
+			/>
+			<section
+				className="signout-dialog"
+				tabIndex={-1}
+				onClick={(event) => {
+					if (event.target instanceof Element && !event.target.closest("button")) event.currentTarget.focus();
+				}}
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="signout-title"
+				aria-describedby="signout-warning"
+				onKeyDown={(event) => {
+					event.stopPropagation();
+					if (event.key === "Escape") {
+						event.preventDefault();
+						stay();
+					} else if (event.key === "Tab") {
+						event.preventDefault();
+						const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")];
+						const index =
+							document.activeElement instanceof HTMLButtonElement ? buttons.indexOf(document.activeElement) : -1;
+						buttons[
+							index < 0
+								? event.shiftKey
+									? buttons.length - 1
+									: 0
+								: (index + (event.shiftKey ? buttons.length - 1 : 1)) % buttons.length
+						]?.focus();
+					} else if (event.repeat && (event.key === "Enter" || event.key === " ")) event.preventDefault();
+				}}
+			>
+				<h2 id="signout-title">Sign out</h2>
+				<p id="signout-warning">
+					Keep {person}'s drafts for next time, or clear this browser of their data. Clearing deletes their unsaved case
+					drafts, queue answers and run notes in every open tab. Unsaved text cannot be recovered.
+				</p>
+				<div className="signout-choices">
+					<button type="button" className="out" ref={focusOnce} onClick={() => choose(false)}>
+						Sign out and keep drafts
+					</button>
+					<button type="button" className="out danger" onClick={() => choose(true)}>
+						Sign out and clear browser data
+					</button>
+					<button type="button" className="out" onClick={stay}>
+						Stay signed in <KeyCap>Esc</KeyCap>
+					</button>
+				</div>
+			</section>
+		</div>
+	);
+}
+
 function Palette({
 	project,
 	projects,

@@ -1,9 +1,8 @@
 import { useState } from "react";
 import type { SessionRow } from "../../core/people.ts";
-import { ApiError, signedOut } from "../lib/api.ts";
+import { ApiError } from "../lib/api.ts";
 import { browserName } from "../lib/browser.ts";
 import { endSession, listSessions, until } from "../lib/people.ts";
-import { signOut } from "../lib/signin.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink } from "../ui/index.tsx";
 import { saidBy, useList, withId } from "./list.ts";
@@ -36,7 +35,7 @@ function proof(row: SessionRow): string {
  * signing out here.
  */
 export function YourSessions() {
-	const { session } = useApp();
+	const { session, requestSignOut } = useApp();
 	const sessions = useList("session", listSessions);
 	const [ending, setEnding] = useState<ReadonlySet<number>>(new Set());
 	const [refusal, setRefusal] = useState<{ id: number; message: string } | null>(null);
@@ -44,14 +43,15 @@ export function YourSessions() {
 
 	function end(row: SessionRow): void {
 		if (ending.has(row.id)) return;
+		if (row.current) {
+			requestSignOut();
+			return;
+		}
 		setEnding((ids) => withId(ids, row.id, true));
 		setRefusal(null);
 		setMessage("");
-		// This browser's own session ends by signing out, which also clears the cookie.
-		const ended = row.current ? signOut().then(() => ({ current: true })) : endSession(row.id);
-		void ended
-			.then(({ current }) => {
-				if (current) return signedOut();
+		void endSession(row.id)
+			.then(() => {
 				setMessage("Session ended.");
 				return sessions.refetch().then(() => {});
 			})

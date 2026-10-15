@@ -247,3 +247,13 @@
 		overflow: visible;
 	}
 }
+
+:root[data-layout="phone"] .signout-dialog {
+	width: 94vw;
+	max-height: calc(100dvh - 72px);
+	padding: 20px;
+}
+:root[data-layout="phone"] .signout-choices .out {
+	min-height: 44px;
+	font-size: 15px;
+}

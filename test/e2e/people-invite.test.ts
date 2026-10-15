@@ -281,6 +281,7 @@ test.skipIf(!browserAvailable)(
 			tab.setDefaultTimeout(8000);
 			await tab.goto(`${server.url}/p/scratch/suite`);
 			await tab.getByRole("button", { name: "Sign out" }).click();
+			await tab.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
 			await tab.locator("#signin-name").fill("tom");
 			await tab.locator("#signin-password").fill(PASSWORD);
 			await tab.keyboard.press("Enter");

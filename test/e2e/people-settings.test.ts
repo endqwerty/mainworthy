@@ -242,6 +242,7 @@ test.skipIf(!browserAvailable)(
 
 			// Ending this browser's own session is signing out.
 			await rows(page).filter({ hasText: "this browser" }).getByRole("button", { name: "End" }).click();
+			await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
 			await page.locator("#signin-name").waitFor();
 			expect(await page.locator("#app").count()).toBe(0);
 			// What this journey asked for: the wait a test answered, the wrong current password, and the request

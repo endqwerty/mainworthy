@@ -283,7 +283,13 @@ In server mode the sign-in page has three ways in, one under the other:
 
 The caret starts in the name, <kbd>Tab</kbd> goes down the page, and <kbd>↵</kbd> sends the form the caret is in. The server opens a session for that browser, and the browser keeps a cookie that names the session. The cookie is not the token or the password: the browser holds neither after that.
 
-To sign out, press "Sign out" at the bottom of the sidebar, or <kbd>g</kbd> <kbd>x</kbd>. That ends the session on the server, so a copy of the cookie stops working too. If no answer comes back, the page asks the server whether the browser is still signed in, and shows the sign-in page or says that you are still signed in. If that question gets no answer either, the page says it cannot tell, and you press "Sign out" again. Text you typed and had not recorded stays in that browser under your name, and is there when you sign in again. In local mode there is nothing to sign out of, and no button.
+To sign out, press **Sign out** at the bottom of the sidebar, or <kbd>g</kbd> <kbd>x</kbd>. Ending this browser's session in Settings, **Your sessions**, opens the same dialog. It offers three choices:
+
+- **Sign out and keep drafts** starts with the focus. It keeps your browser data so your drafts are there when you sign in again.
+- **Sign out and clear browser data** removes your name, case drafts, queue answers, and run notes from this browser. The warning explains that unsaved text in every open tab will be lost and cannot be recovered.
+- **Stay signed in**, or <kbd>Esc</kbd>, closes the dialog without signing out or clearing data.
+
+<kbd>Tab</kbd> moves among the choices, and <kbd>↵</kbd> or <kbd>Space</kbd> presses the focused button. Signing out ends the session on the server, so a copy of the cookie stops working too. If no answer comes back, the page asks the server whether the browser is still signed in, and shows the sign-in page or says that you are still signed in. If that question gets no answer either, the page says it cannot tell, and you press **Sign out** again. A session that expires keeps your drafts. In local mode there is nothing to sign out of, and no button.
 
 A session ends after 14 days without use and after 90 days in any case. It also ends when the token you signed in with is revoked or reaches its end, when the password or passkey you signed in with is removed or replaced, and when your actor is forgotten. Each of these sends you back to the sign-in page. [Configuration](./configuration.md#variables-the-server-reads) says how to change the two lifetimes.
 

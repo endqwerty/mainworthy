@@ -1,7 +1,7 @@
 // A person gets in and out through the pages: an invitation accepted with a password, sign-out from the shell,
 // and the sign-in page with a name and a password. The owner's token still signs a browser in from the same page.
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { browserAvailable, openPage, type PageHarness, type Server, startServer } from "./support.ts";
+import { advanceClock, browserAvailable, openPage, type PageHarness, type Server, startServer } from "./support.ts";
 
 let server: Server;
 beforeAll(async () => {
@@ -10,6 +10,88 @@ beforeAll(async () => {
 afterAll(async () => {
 	await server?.stop();
 });
+
+for (const device of ["desktop", "phone"] as const)
+	test.skipIf(!browserAvailable)(
+		`the sign-out dialog on ${device} keeps the session until a choice, with safe focus and Escape`,
+		async () => {
+			let browser: PageHarness | null = null;
+			try {
+				browser = await openPage(server, { path: "/p/scratch/settings", device });
+				const { page } = browser;
+				page.setDefaultTimeout(5000);
+				let posts = 0;
+				page.on("request", (request) => {
+					if (request.url().endsWith("/api/logout") && request.method() === "POST") posts++;
+				});
+				await page.evaluate(() =>
+					localStorage.setItem("mainworthy:robin:queue-input:scratch:pending", "Keep this answer"),
+				);
+				for (const source of ["sidebar", "sessions", "keys"] as const) {
+					if (source === "sidebar") {
+						if (device === "phone") await page.getByRole("button", { name: "Menu", exact: true }).click();
+						await page.getByRole("button", { name: "Sign out", exact: true }).click();
+					} else if (source === "sessions") {
+						await page.getByRole("option", { name: "Your sessions", exact: true }).click();
+						await page.getByRole("button", { name: /End the session of .*this browser/ }).click();
+					} else {
+						await page.keyboard.press("g");
+						await page.keyboard.press("x");
+					}
+					const dialog = page.getByRole("dialog", { name: "Sign out" });
+					await dialog.waitFor();
+					expect(await dialog.textContent()).toContain("every open tab");
+					expect(await dialog.textContent()).toContain("unsaved");
+					expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Sign out and keep drafts");
+					expect(await page.locator("#app").getAttribute("inert")).not.toBeNull();
+					const path = new URL(page.url()).pathname;
+					await page.keyboard.press("g");
+					await page.keyboard.press("s");
+					await page.keyboard.press("ControlOrMeta+k");
+					expect(new URL(page.url()).pathname).toBe(path);
+					expect(await page.locator('[data-overlay="palette"]').count()).toBe(0);
+					await page.keyboard.press("Shift+Tab");
+					expect(await page.evaluate(() => document.activeElement?.textContent)).toContain("Stay signed in");
+					await page.keyboard.press("Tab");
+					expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Sign out and keep drafts");
+					if (device === "phone") {
+						const bounds = await dialog.boundingBox();
+						expect(bounds).not.toBeNull();
+						expect(bounds?.x).toBeGreaterThanOrEqual(0);
+						expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(390);
+					}
+					await dialog.locator("p").click();
+					await page.keyboard.press("g");
+					await page.keyboard.press("s");
+					await page.keyboard.press("ControlOrMeta+k");
+					expect(new URL(page.url()).pathname).toBe(path);
+					expect(await page.locator('[data-overlay="palette"]').count()).toBe(0);
+					if (source === "sessions") await dialog.getByRole("button", { name: "Stay signed in" }).click();
+					else await page.keyboard.press("Escape");
+					await dialog.waitFor({ state: "detached" });
+					expect(posts).toBe(0);
+					expect((await page.request.get(`${server.url}/api/session`)).ok()).toBe(true);
+					expect(await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending"))).toBe(
+						"Keep this answer",
+					);
+				}
+				await page.keyboard.press("g");
+				await page.keyboard.press("x");
+				await page.getByRole("dialog", { name: "Sign out" }).waitFor();
+				await page.keyboard.press("Enter");
+				await page.locator("#signin-name").waitFor();
+				expect(posts).toBe(1);
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending"))).toBe(
+					"Keep this answer",
+				);
+				expect(browser.dialogs).toEqual([]);
+				expect(browser.errors).toEqual([]);
+			} finally {
+				await browser?.close();
+			}
+		},
+		30_000,
+	);
 
 test.skipIf(!browserAvailable)(
 	"an invited person accepts with a password, signs out from the shell and signs in with name and password",
@@ -52,6 +134,8 @@ test.skipIf(!browserAvailable)(
 			// Out through the shell, by the key the keys sheet names.
 			await page.keyboard.press("g");
 			await page.keyboard.press("x");
+			await page.getByRole("dialog", { name: "Sign out" }).waitFor();
+			await page.keyboard.press("Enter");
 			await page.locator("#signin-name").waitFor();
 			expect(await page.locator("#app").count()).toBe(0);
 			// The session ended on the server, not only in the page: a reload is still the sign-in page.
@@ -81,7 +165,8 @@ test.skipIf(!browserAvailable)(
 			expect(await page.locator(".sfoot .me").textContent()).toContain("sam");
 
 			// The button in the shell does what the key does.
-			await page.getByRole("button", { name: "Sign out" }).click();
+			await page.getByRole("button", { name: "Sign out", exact: true }).click();
+			await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
 			await page.locator("#signin-name").waitFor();
 			expect(browser.errors).toEqual([]);
 		} finally {
@@ -273,6 +358,8 @@ for (const key of ["Enter", "Space"] as const)
 				await page.locator("#list").waitFor();
 				await page.getByRole("button", { name: "Sign out" }).focus();
 				await page.keyboard.press(key);
+				await page.getByRole("dialog", { name: "Sign out" }).waitFor();
+				await page.keyboard.press("Enter");
 				await page.locator("#signin-name").waitFor();
 				expect(posts).toBe(1);
 				expect(browser.errors).toEqual([]);
@@ -321,14 +408,19 @@ test.skipIf(!browserAvailable)(
 			browser = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = browser;
 			page.setDefaultTimeout(8000);
+			await page.evaluate(() => localStorage.setItem("mainworthy:robin:queue-input:scratch:pending", "Private answer"));
 			// The server signs the browser out, and the reply is dropped on its way back.
 			await page.route("**/api/logout", async (route) => {
 				await route.fetch();
 				await route.abort();
 			});
-			await page.getByRole("button", { name: "Sign out" }).click();
+			await page.getByRole("button", { name: "Sign out", exact: true }).click();
+			await page.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
 			await page.locator("#signin-name").waitFor();
 			expect(await page.locator("#app").count()).toBe(0);
+			expect(
+				await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending")),
+			).toBeNull();
 			expect(browser.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
 		} finally {
 			await browser?.close();
@@ -345,16 +437,199 @@ test.skipIf(!browserAvailable)(
 			browser = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = browser;
 			page.setDefaultTimeout(8000);
+			await page.evaluate(() => localStorage.setItem("mainworthy:robin:queue-input:scratch:pending", "Private answer"));
 			await page.route("**/api/logout", (route) => route.abort());
-			await page.getByRole("button", { name: "Sign out" }).click();
+			await page.getByRole("button", { name: "Sign out", exact: true }).click();
+			await page.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
 			await page.getByText("this browser is still signed in", { exact: false }).waitFor();
+			expect(await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending"))).toBe(
+				"Private answer",
+			);
 			expect(await page.locator("#app").count()).toBe(1);
 			await page.unroute("**/api/logout");
-			await page.getByRole("button", { name: "Sign out" }).click();
+			await page.getByRole("button", { name: "Sign out", exact: true }).click();
+			await page.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
 			await page.locator("#signin-name").waitFor();
 			expect(browser.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
 		} finally {
 			await browser?.close();
+		}
+	},
+	30_000,
+);
+
+for (const source of ["sidebar", "sessions"] as const)
+	test.skipIf(!browserAvailable)(
+		`signing out from ${source} can clear this person's browser data, including drafts in other open tabs`,
+		async () => {
+			const local = await startServer({ mode: "server" });
+			let browser: PageHarness | null = null;
+			try {
+				await local.api("propose", { edits: [{ op: "create", outline: "Private case\n  Original step" }] });
+				const run = await local.api("plan", { name: "Private run", select: {} });
+				browser = await openPage(local, { path: "/p/scratch/suite/c/1" });
+				const { page, context } = browser;
+				page.setDefaultTimeout(5000);
+				await page.getByRole("button", { name: "Private case", exact: true }).waitFor();
+				await page.keyboard.press("e");
+				await page.getByRole("textbox", { name: "Step 1", exact: true }).fill("Private unsaved case text");
+				const other = await context.newPage();
+				other.setDefaultTimeout(5000);
+				await other.goto(`${local.url}/p/scratch/runs/${run.run.slice(2)}`);
+				await other.locator('[data-active="true"][data-ready="true"]').waitFor();
+				await other.getByRole("textbox", { name: "Result note" }).fill("Private unsaved run note");
+				await page.evaluate(() => {
+					localStorage.setItem("mainworthy:robin:queue-input:scratch:Q-1:excuse:reason", "Private queue answer");
+					localStorage.setItem("mainworthy:someone-else:draft:scratch:C-2", "Their draft");
+					localStorage.setItem("mainworthy:theme", "dark");
+				});
+				if (source === "sessions") {
+					await other.goto(`${local.url}/p/scratch/settings`);
+					await other.getByRole("option", { name: "Your sessions", exact: true }).click();
+				}
+				const signingOut = source === "sidebar" ? page : other;
+				if (source === "sidebar") await page.getByRole("button", { name: "Sign out", exact: true }).click();
+				else await other.getByRole("button", { name: /End the session of .*this browser/ }).click();
+				const warning = await signingOut.getByRole("dialog", { name: "Sign out" }).textContent();
+				await signingOut.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
+				await signingOut.locator("#signin-name").waitFor();
+				expect(
+					await signingOut.evaluate(() =>
+						Object.keys(localStorage).filter(
+							(key) => key.startsWith("mainworthy:robin:") || key === "mainworthy:session-person",
+						),
+					),
+				).toEqual([]);
+				expect(warning).toContain("unsaved");
+				expect(warning).toContain("robin");
+				await page.locator("#signin-name").waitFor();
+				await other.locator("#signin-name").waitFor();
+				// A new session in this same document must work after clearing, with none of the discarded draft.
+				await signingOut.locator("#token").fill(local.token);
+				await signingOut.keyboard.press("Enter");
+				await signingOut.locator("#app").waitFor();
+				await signingOut.getByRole("link", { name: "Suite", exact: true }).click();
+				await signingOut.getByRole("option").filter({ hasText: "C-1" }).click();
+				await signingOut.getByRole("button", { name: "Private case", exact: true }).waitFor();
+				await signingOut.keyboard.press("e");
+				expect(await signingOut.getByRole("textbox", { name: "Step 1", exact: true }).inputValue()).toBe(
+					"Original step",
+				);
+				await signingOut.getByRole("button", { name: "Sign out", exact: true }).click();
+				await signingOut.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
+				for (const tab of [page, other]) {
+					await tab.locator("#signin-name").waitFor();
+					await tab.reload();
+					await tab.locator("#signin-name").waitFor();
+					expect(
+						await tab.evaluate(() =>
+							Object.entries(localStorage).filter(
+								([key]) => key.startsWith("mainworthy:robin:") || key === "mainworthy:session-person",
+							),
+						),
+					).toEqual([]);
+				}
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:someone-else:draft:scratch:C-2"))).toBe(
+					"Their draft",
+				);
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:theme"))).toBe("dark");
+				expect((await local.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
+				expect(browser.errors).toEqual([]);
+			} finally {
+				await browser?.close();
+				await local.stop();
+			}
+		},
+		30_000,
+	);
+
+test.skipIf(!browserAvailable)(
+	"keeping browser data at sign-out and signing in after expiry both preserve the same person's draft",
+	async () => {
+		const local = await startServer({ mode: "server" });
+		let browser: PageHarness | null = null;
+		try {
+			await local.api("propose", { edits: [{ op: "create", outline: "Kept case\n  Original step" }] });
+			browser = await openPage(local, { path: "/p/scratch/suite/c/1" });
+			const { page } = browser;
+			page.setDefaultTimeout(5000);
+			await page.getByRole("button", { name: "Kept case", exact: true }).waitFor();
+			await page.keyboard.press("e");
+			const step = page.getByRole("textbox", { name: "Step 1", exact: true });
+			await step.fill("Keep my unsaved text");
+			await page.getByRole("button", { name: "Sign out", exact: true }).click();
+			await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
+			await page.locator("#signin-name").waitFor();
+			expect(browser.dialogs).toEqual([]);
+			const stored = () => page.evaluate(() => localStorage.getItem("mainworthy:robin:draft:scratch:C-1"));
+			expect(await stored()).toContain("Keep my unsaved text");
+			for (const expired of [false, true]) {
+				if (expired) {
+					await advanceClock(local, 366 * 24 * 60 * 60 * 1000);
+					await page.reload();
+					await page.locator("#signin-name").waitFor();
+					expect(await stored()).toContain("Keep my unsaved text");
+				}
+				await page.locator("#token").fill(local.token);
+				await page.keyboard.press("Enter");
+				await page.locator("#app").waitFor();
+				await step.waitFor();
+				expect(await step.inputValue()).toBe("Keep my unsaved text");
+			}
+			expect(browser.dialogs).toEqual([]);
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser?.close();
+			await local.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"a tab with delayed storage events cannot rewrite cleared notes after the same person signs in again",
+	async () => {
+		const local = await startServer({ mode: "server" });
+		let browser: PageHarness | null = null;
+		try {
+			await local.api("propose", { edits: [{ op: "create", outline: "Delayed tab case\n  Original step" }] });
+			const run = await local.api("plan", { name: "Delayed tab run", select: {} });
+			browser = await openPage(local, { path: `/p/scratch/runs/${run.run.slice(2)}` });
+			const { page, context } = browser;
+			page.setDefaultTimeout(5000);
+			await page.locator('[data-active="true"][data-ready="true"]').waitFor();
+			// A suspended tab may not process its storage notifications until after another tab signed in again.
+			await page.addInitScript(() =>
+				window.addEventListener("storage", (event) => event.stopImmediatePropagation(), true),
+			);
+			await page.reload();
+			await page.locator('[data-active="true"][data-ready="true"]').waitFor();
+			const note = page.getByRole("textbox", { name: "Result note" });
+			await note.fill("Private note before clearing");
+			const other = await context.newPage();
+			other.setDefaultTimeout(5000);
+			await other.goto(`${local.url}/p/scratch/suite`);
+			await other.locator("#app").waitFor();
+			await other.getByRole("button", { name: "Sign out", exact: true }).click();
+			await other.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
+			await other.locator("#signin-name").waitFor();
+			await other.locator("#token").fill(local.token);
+			await other.keyboard.press("Enter");
+			await other.locator("#app").waitFor();
+			expect(await page.locator("#app").count()).toBe(1);
+			await note.fill("Old tab tried to restore private text");
+			expect(
+				await other.evaluate(() =>
+					Object.keys(localStorage).filter((key) => key.startsWith("mainworthy:robin:run-note:")),
+				),
+			).toEqual([]);
+			await page.reload();
+			await page.locator('[data-active="true"][data-ready="true"]').waitFor();
+			expect(await note.inputValue()).toBe("");
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser?.close();
+			await local.stop();
 		}
 	},
 	30_000,

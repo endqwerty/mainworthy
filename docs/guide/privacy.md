@@ -40,7 +40,9 @@ We store the content you put into Mainworthy: cases, test results, decisions, no
 
 The web app sets two cookies, and both are strictly necessary: one that keeps you signed in, and one that lasts the five minutes of a passkey sign-in. There are no analytics, advertising or tracking cookies.
 
-The web app keeps a few things in your browser so that you do not lose work: your unsaved drafts and notes, your theme, and the name you signed in with. They stay in that browser after you sign out, so that your drafts are there when you come back. Clear the site's data in your browser to remove them.
+The web app keeps your unsaved case drafts, queue answers, run notes, theme, and signed-in name in your browser. Signing out opens a dialog with three choices. **Sign out and keep drafts** starts with the focus and keeps your browser data for when you return. **Sign out and clear browser data** deletes your drafts, answers, notes, and name. The warning explains that clearing deletes unsaved text in every open tab and cannot be undone. **Stay signed in**, or <kbd>Esc</kbd>, closes the dialog without signing out or clearing data. The same dialog appears when you end this browser's session under Settings, **Your sessions**.
+
+Clearing takes effect in other open tabs and survives a reload. It leaves the theme and sidebar preference, other people's drafts, and content already recorded on the server. A session that expires keeps your drafts, as does signing in again as the same person. If the browser cannot clear its storage, the app warns you to clear the site's data in your browser settings.
 
 ### Logs
 

@@ -292,6 +292,7 @@ function QueueWorkbench() {
 		if (current) navigate(routeUrl({ project, screen: "queue", ref: current.q }), { replace: true });
 	}
 	function rememberInline(next: InlineAnswer): void {
+		if (!sessionCurrent(owner)) return;
 		setInline(next);
 		for (const entry of next.entries) {
 			const key = extraKey(entry, next.field);

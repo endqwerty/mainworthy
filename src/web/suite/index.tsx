@@ -149,11 +149,12 @@ export function SuiteScreen() {
 	);
 	const writeOwnedDraft = useCallback(
 		(next: Draft): boolean => {
+			if (!sessionCurrent(owner)) return false;
 			if (writeCopiedDraft({ project, draft: next })) return true;
 			mayWrite(next.id);
 			return false;
 		},
-		[project, mayWrite],
+		[project, mayWrite, owner],
 	);
 	const removeOwnedDraft = useCallback(
 		(id: string): void => {
