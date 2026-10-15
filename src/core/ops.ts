@@ -43,6 +43,11 @@ const TagChange = z.object({
 	remove: z.array(z.string()).optional(),
 });
 
+export const CaseAlias = z
+	.string()
+	.trim()
+	.regex(/^(?![CQRTP]-)(?!\d+$)[a-z0-9][a-z0-9_.:/-]{0,119}$/i);
+
 export const Edit = z.discriminatedUnion("op", [
 	z.object({
 		op: z.literal("create"),
@@ -53,6 +58,7 @@ export const Edit = z.discriminatedUnion("op", [
 		folder: FolderRef.optional(),
 		tags: z.array(z.string()).optional(),
 		covers: z.array(z.string()).optional(),
+		aliases: z.array(z.string()).max(20).optional(),
 		/** Place the new case after this case (a ref); the end of the folder when absent. */
 		after: z.string().optional(),
 	}),

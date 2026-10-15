@@ -10,7 +10,7 @@ Choice labels such as `[create]` or `[1]` show which input shape a field belongs
 
 ## propose
 
-Create or change test cases. Each edit of an existing case names the version it was made on (`base`). Reply: adopted (it is current), open (a person must accept it) or conflict.
+Propose cases; edits need base version. Status: adopted=current, open=needs acceptance, conflict=resolve.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -31,6 +31,7 @@ Create or change test cases. Each edit of an existing case names the version it 
 | `edits[][create].folder` | `integer \| string` | no |  |
 | `edits[][create].tags` | `array<string>` | no |  |
 | `edits[][create].covers` | `array<string>` | no |  |
+| `edits[][create].aliases` | `array<string>` | no |  |
 | `edits[][create].after` | `string` | no |  |
 | `edits[][edit].op` | `"edit"` | yes |  |
 | `edits[][edit].case` | `string` | yes | The case, for example C-311. |

@@ -117,7 +117,7 @@ export const proposeOp = defineOp({
 	needs: "produce",
 	scope: "project",
 	effect: "write",
-	mcp: "Create or change test cases. Each edit of an existing case names the version it was made on (`base`). Reply: adopted (it is current), open (a person must accept it) or conflict.",
+	mcp: "Propose cases; edits need base version. Status: adopted=current, open=needs acceptance, conflict=resolve.",
 	run: propose,
 });
 

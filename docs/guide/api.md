@@ -105,6 +105,7 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 | `edits[][create].folder` | `integer \| string` | no |  |
 | `edits[][create].tags` | `array<string>` | no |  |
 | `edits[][create].covers` | `array<string>` | no |  |
+| `edits[][create].aliases` | `array<string>` | no |  |
 | `edits[][create].after` | `string` | no |  |
 | `edits[][edit].op` | `"edit"` | yes |  |
 | `edits[][edit].case` | `string` | yes | The case, for example C-311. |
@@ -722,7 +723,7 @@ An agent that connects over MCP gets these operations as tools, with the same in
 
 | Tool | What the agent is told it is for |
 | --- | --- |
-| `propose` | Create or change test cases. Each edit of an existing case names the version it was made on (`base`). Reply: adopted (it is current), open (a person must accept it) or conflict. |
+| `propose` | Propose cases; edits need base version. Status: adopted=current, open=needs acceptance, conflict=resolve. |
 | `report` | Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref. Reply: counts, the questions raised per cause of failure, and the gate. |
 | `claim` | Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers. |
 | `decide` | Answer an inbox question with its evidenceHash as onEvidence. Replies: decided, advised (a person decides), forbidden, conflict (evidence or decision changed). Choose from the question's answers. To withdraw, send undo with ifDecision set to the reply's decision. |
