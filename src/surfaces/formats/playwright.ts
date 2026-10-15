@@ -1,5 +1,6 @@
 import { stripVTControlCharacters } from "node:util";
 import { z } from "zod";
+import { caseAnnotation } from "../../core/case-annotation.ts";
 import type { Outcome } from "../../core/ops.ts";
 import { nativeResult, type ParsedReport } from "./native.ts";
 
@@ -31,6 +32,7 @@ const Suite = z.object({
 					z.object({
 						projectName: z.string(),
 						expectedStatus: z.enum(["passed", "failed", "skipped"]),
+						annotations: z.array(z.object({ type: z.string(), description: z.string().optional() })).optional(),
 						results: z.array(Attempt).min(1),
 					}),
 				)
@@ -77,6 +79,10 @@ export function parsePlaywright(value: unknown): ParsedReport {
 						outcome: unexpectedPass ? "fail" : expectedFailure ? "pass" : outcomes[final.status],
 						durationMs: test.results.reduce((sum, attempt) => sum + attempt.duration, 0),
 						retries: final.retry,
+						annotation: test.annotations
+							?.filter((item) => item.type === "mainworthy")
+							.map((item) => caseAnnotation(item.description ?? "", true))
+							.findLast((claim) => claim !== undefined),
 						detail: unexpectedPass ? "Expected test to fail, but it passed" : stripVTControlCharacters(detail),
 					}),
 				);

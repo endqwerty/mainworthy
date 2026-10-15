@@ -142,7 +142,21 @@ You can instead put a property inside the test case:
 </testcase>
 ```
 
-The JUnit property takes precedence over an annotation in the name.
+An [imported alias](./data.md#bring-cases-from-another-tool), such as `C1234` or `PAY-7`,
+works wherever a case ref does here. Use `@C1234` in a name or `C1234` in a property.
+Add `@v1` to claim version 1 in Mainworthy, not the version in the source tool.
+Aliases keep their original letter case and resolve within the report's project.
+An unknown alias is recorded without a case, and the receipt explains why, just as for an unknown ref.
+
+Name annotations work in JUnit, Playwright, Jest, Vitest and TRX test names,
+and in pytest node IDs, including parameter IDs. These formats also carry case claims outside the name:
+
+- JUnit uses the `mainworthy` property shown above.
+- Playwright JSON uses a test annotation with `type: "mainworthy"` and `description: "C1234@v1"`.
+- pytest-json-report uses `record_property("mainworthy", "C1234@v1")`, serialized as `user_properties: [{"mainworthy": "C1234@v1"}]`.
+
+These properties and Playwright annotations take precedence over an annotation in the name.
+When several name the case on one test, the last valid claim wins.
 A test can also use a link previously decided in [Queue](./decide.md).
 
 Mainworthy identifies a test using its file, or its class name when there is no file,

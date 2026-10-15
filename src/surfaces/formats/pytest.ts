@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { caseAnnotation } from "../../core/case-annotation.ts";
 import { nativeResult, type ParsedReport } from "./native.ts";
 
 const Stage = z.object({
@@ -13,6 +14,7 @@ const Report = z.object({
 	tests: z.array(
 		z.object({
 			nodeid: z.string().min(1),
+			user_properties: z.array(z.object({ mainworthy: z.string().optional() })).optional(),
 			outcome: z.enum(["passed", "failed", "skipped", "xfailed", "xpassed", "error"]),
 			setup: Stage.optional(),
 			call: Stage.optional(),
@@ -65,6 +67,9 @@ export function parsePytest(value: unknown): ParsedReport {
 				file,
 				suites: names,
 				outcome,
+				annotation: test.user_properties
+					?.map((item) => caseAnnotation(item.mainworthy ?? "", true))
+					.findLast((claim) => claim !== undefined),
 				durationMs: stages.reduce((sum, stage) => sum + stage.duration, 0) * 1000,
 				message: failures
 					.map((failure) => failure.message)

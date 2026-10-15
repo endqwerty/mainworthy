@@ -1,3 +1,4 @@
+import { caseAnnotation } from "../../core/case-annotation.ts";
 import type { ResultIn } from "../../core/ops.ts";
 
 export type ParsedReport = { results: ResultIn[]; warnings: string[] };
@@ -15,6 +16,7 @@ export function nativeResult(input: {
 	detail?: string | undefined;
 	message?: string | undefined;
 	retries?: number;
+	annotation?: ResultIn["annotation"];
 }): ResultIn {
 	const withoutRetry = input.name.replace(/(?:\s*\(retry\s*#?\s*\d+\)|\s*\[retry\s*#?\s*\d+\])+\s*$/i, "");
 	const stableName = withoutRetry === input.name ? input.name : withoutRetry.trimEnd();
@@ -48,12 +50,8 @@ export function nativeResult(input: {
 			detail: detail.slice(0, 20_000),
 		};
 	}
-	const claim = /@(C-\d+)(?:@v(\d+))?(?![\w@-])/.exec(input.name.trim());
-	if (claim?.[1] !== undefined) {
-		const version = claim[2] === undefined ? undefined : Number(claim[2]);
-		if (version === undefined || Number.isSafeInteger(version))
-			result.annotation = { case: claim[1], ...(version === undefined ? {} : { version }) };
-	}
+	const claim = input.annotation ?? caseAnnotation(input.name);
+	if (claim !== undefined) result.annotation = claim;
 	if (input.retries && input.outcome === "pass") result.note = `passed after ${input.retries} retries`;
 	return result;
 }
