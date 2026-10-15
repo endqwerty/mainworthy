@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
+import { closeSync, openSync, readSync } from "node:fs";
 import { z } from "zod";
 import { type Api, type Envelope, ERROR_CODES, type OpName, type SessionInfo } from "../core/api.ts";
 import { Unlinked } from "../core/kinds.ts";
+import { TOKEN_MAX } from "../server/identity/identity.ts";
 import { OPS } from "../server/ops/index.ts";
 import type { Reply } from "../server/ops/registry.ts";
 import type { Args } from "./args.ts";
@@ -43,27 +44,56 @@ const SessionSchema = z.object({
 
 export type ClientOptions = { url: string; token: string | undefined; project: string | undefined };
 
+const TOKEN_FILE_MAX = 4096;
+
 /** The token in a file: the content without the whitespace around it. The file is named in a refusal, never quoted. */
 function tokenFromFile(path: string): string {
 	let text: string;
 	try {
-		text = readFileSync(path, "utf8");
-	} catch {
+		const file = openSync(path, "r");
+		try {
+			const buffer = Buffer.alloc(TOKEN_FILE_MAX + 1);
+			let size = 0;
+			while (size < buffer.length) {
+				const read = readSync(file, buffer, size, buffer.length - size, null);
+				if (read === 0) break;
+				size += read;
+			}
+			if (size > TOKEN_FILE_MAX)
+				throw new CliError("invalid", `the token file ${path} is larger than ${TOKEN_FILE_MAX} bytes`);
+			text = buffer.toString("utf8", 0, size);
+		} finally {
+			closeSync(file);
+		}
+	} catch (error) {
+		if (error instanceof CliError) throw error;
 		throw new CliError("invalid", `cannot read the token file ${path}`);
 	}
 	const token = text.trim();
+	if (token.length > TOKEN_MAX)
+		throw new CliError("invalid", `the token file ${path} holds a token longer than ${TOKEN_MAX} characters`);
 	if (token === "") throw new CliError("invalid", `the token file ${path} is empty`);
 	if (/\s/.test(token)) throw new CliError("invalid", `the token file ${path} holds more than a token`);
 	return token;
 }
 
 /**
- * Command-line flags override the environment. An absent token lets the server authenticate loopback local mode.
+ * Commands with no credentials ignore token options. Otherwise flags override the environment. An absent token
+ * lets the server authenticate loopback local mode.
  * An environment variable that is set and empty counts as absent: that is how a pipeline passes a setting nobody
  * configured (`MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}`). The token comes from `--token` or `--token-file`, else
  * from `MAINWORTHY_TOKEN` or `MAINWORTHY_TOKEN_FILE`; two ways at one level are refused, not chosen between.
  */
-export function clientOptions(args: Args, env: Record<string, string | undefined> = process.env): ClientOptions {
+export function clientOptions(
+	args: Args,
+	credentials: "none" | "token",
+	env: Record<string, string | undefined> = process.env,
+): ClientOptions {
+	const options = {
+		url: args.value("url") ?? (env.MAINWORTHY_URL || "http://127.0.0.1:7357"),
+		project: args.value("project") ?? (env.MAINWORTHY_PROJECT || undefined),
+	};
+	if (credentials === "none") return { ...options, token: undefined };
 	const flag = args.value("token");
 	const flagFile = args.value("token-file");
 	if (flag !== undefined && flagFile !== undefined)
@@ -73,9 +103,8 @@ export function clientOptions(args: Args, env: Record<string, string | undefined
 	const file =
 		flagFile ?? (flag === undefined && !env.MAINWORTHY_TOKEN ? env.MAINWORTHY_TOKEN_FILE || undefined : undefined);
 	return {
-		url: args.value("url") ?? (env.MAINWORTHY_URL || "http://127.0.0.1:7357"),
+		...options,
 		token: file !== undefined ? tokenFromFile(file) : (flag ?? (env.MAINWORTHY_TOKEN || undefined)),
-		project: args.value("project") ?? (env.MAINWORTHY_PROJECT || undefined),
 	};
 }
 
