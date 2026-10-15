@@ -82,7 +82,13 @@ const nameProbes = [
 	["login @C1234:", 1],
 	["login @C1234!", 1],
 	["login @C1234?", 1],
-	["login @c-2", null],
+	["login @c-2", 2],
+	["login @c-2@v1", 2],
+	["login @c1234", null],
+	["checkout @C-1 then @C-2", 2],
+	["login @smoke@C-2", null],
+	["login @C-2x", null],
+	["login @C-2@v1x", null],
 	["plain @C-2", 2],
 ] satisfies [string, number | null][];
 
@@ -104,7 +110,7 @@ test.each(nameFormats.flatMap((format) => nameProbes.map(([name, caseId]) => [fo
 			expect({ name, basis: receipt.basis, declined: receipt.declined }).toEqual({
 				name,
 				basis: {
-					exact: name.includes("@v1") ? 1 : 0,
+					exact: caseId !== null && name.includes("@v1") ? 1 : 0,
 					assumed: caseId !== null && !name.includes("@v1") ? 1 : 0,
 					unresolved: caseId === null ? 1 : 0,
 				},

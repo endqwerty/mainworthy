@@ -17,8 +17,8 @@ export function caseNameAnnotation(value: string, hasAlias: (alias: string) => b
 	for (const token of value.matchAll(/@([a-z0-9][a-z0-9_.:/@-]*)/gi)) {
 		const text = token[1]?.replace(/[.,:;!?]+$/, "");
 		if (text === undefined) continue;
-		const native = /^(C-\d+)(?:@v(\d+))?(?![\w@-])/.exec(text);
-		const claim = caseAnnotation(native?.[0] ?? text);
+		const native = /^(C-\d+)(?:@v(\d+))?(?![\w@-])/i.exec(text);
+		const claim = caseAnnotation(native?.[0].toUpperCase() ?? text);
 		if (claim !== undefined && (native !== null || hasAlias(claim.case))) last = claim;
 	}
 	return last;
