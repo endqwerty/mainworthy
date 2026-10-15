@@ -14,8 +14,9 @@ Read [README.md](README.md) first, then `docs/product-vision.md`,
 The MVP is built (2026-10-12): TypeScript on Bun, one SQLite file, a React web UI
 (`docs/decisions/0010-stack.md`). What it contains and where it departs from the
 design: `docs/decisions/0012-mvp-scope-and-departures.md`. What is left: the
-GitHub milestones M1 to M7, in the order they are meant to be worked
-(`docs/roadmap.md`; issue #64 lists every open issue on one page). How it fits
+GitHub milestones M1 to M7 and the separate `iOS app` milestone. The phases are in
+`docs/roadmap.md`; [issue #64](https://github.com/endqwerty/mainworthy/issues/64)
+keeps the current work order and every open issue. How it fits
 together: `docs/architecture.md`.
 It runs on the owner's Coolify for their own use since 2026-10-12, at
 `https://mainworthy.com` since 2026-10-13 (`docs/deploy.md`; the home lab's notes
