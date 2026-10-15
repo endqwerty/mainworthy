@@ -33,6 +33,13 @@ a copy storage event arrives, ownership confirmation finishes, or a copy is disc
 confirmed typing do not scan localStorage. If storage refuses a copy, retain it in the tab and say to copy
 it before closing the tab.
 
+If the shared write throws and storing `waiting` also fails, remove the stored `writing` marker and keep
+the text in the tab. This window cannot still be inside its synchronous write when it reads copies.
+A `writing` copy bearing its own window id, including one left before a reload or a session change,
+therefore becomes a recoverable `lost` copy and no longer delays confirmation. Another window's `writing`
+marker still delays confirmation. Silence cannot distinguish a crashed window from a paused writer that
+can resume and win the shared write, so these markers do not expire on a timer.
+
 ## Alternatives and tradeoffs
 
 Web Locks would make a claim asynchronous and require buffering input already accepted while waiting.

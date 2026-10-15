@@ -94,9 +94,9 @@ If two windows start typing at the same time, one can win ownership after the ot
 The losing text stays in a separate copy on this device. **Preserved text** shows it below the ownership
 message, including its tags, requirement links, and any typed merge. Select and copy the text you need into
 the editor after taking over. The copy survives a reload or closing the window. It stays until you choose
-**Discard preserved copy** or a later recorded version contains all its text. Ordinary takeovers carry the
-shared text forward and leave no preserved copy. If device storage is full, keep the window open until you
-have copied the text.
+**Discard preserved copy**, another window's draft matches it exactly, or a later recorded version contains
+all its text. Ordinary takeovers carry the shared text forward and leave no preserved copy. If device
+storage is full, keep the window open until you have copied the text.
 
 Moving to a case from another case never takes its draft by itself. Opening the app straight on a case, as a link or a reload does, continues a draft whose window is not answering, as it always has. When the window that holds a draft does not
 answer, because it closed, crashed or is busy, another window that shows the draft says "This draft is held by
