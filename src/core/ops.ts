@@ -366,6 +366,7 @@ export const AnyAnswerSchema = z.union([AdoptAnswer, MapAnswer, FailureAnswer, F
 
 const OneDecision = z.object({
 	q: ref("The question, for example Q-12."),
+	ifOpen: z.boolean().optional().describe("Refuse if the question is no longer open.").meta({ "x-mcp-hidden": true }),
 	onEvidence: z
 		.string()
 		.describe(

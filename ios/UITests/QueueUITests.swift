@@ -46,6 +46,56 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(app.navigationBars["Queue"].waitForExistence(timeout: 20))
 	}
 
+	@MainActor func testLinkAnUnlinkedTestAndCreateACase() async throws {
+		let project = try await makeProject()
+		let second = try await makeProject()
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
+		app.launch()
+		try signIn(app)
+		app.buttons["project-menu"].tap()
+		app.buttons[project].tap()
+		let question = app.staticTexts["1 test in tests/shipping.spec.ts has no case"]
+		XCTAssertTrue(question.waitForExistence(timeout: 10))
+		question.tap()
+		app.buttons["answer-link"].tap()
+		let choose = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'map-case-' ")).firstMatch
+		XCTAssertTrue(choose.waitForExistence(timeout: 5))
+		choose.tap()
+		let search = app.searchFields.firstMatch
+		XCTAssertTrue(search.waitForExistence(timeout: 5))
+		search.tap()
+		search.typeText("password")
+		let picked = app.buttons.matching(NSPredicate(format: "label CONTAINS 'Password reset restores access'")).firstMatch
+		XCTAssertTrue(picked.waitForExistence(timeout: 10))
+		picked.tap()
+		XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label ENDSWITH ': Shipping accepts an address'")).firstMatch.waitForExistence(timeout: 5))
+		shot("map-link-review")
+		app.buttons["submit-mapping"].tap()
+		let notice = app.staticTexts["mapping-notice"]
+		XCTAssertTrue(notice.waitForExistence(timeout: 10))
+		XCTAssertTrue(notice.label.hasPrefix("Recorded: the shown tests are linked"), notice.label)
+		XCTAssertFalse(app.staticTexts["Question changed"].exists)
+		XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Current answer:'")).firstMatch.exists)
+		shot("map-linked")
+		app.buttons["Done"].tap()
+		app.navigationBars.buttons.element(boundBy: 0).tap()
+
+		app.buttons["project-menu"].tap()
+		app.buttons[second].tap()
+		XCTAssertTrue(question.waitForExistence(timeout: 10))
+		question.tap()
+		app.buttons["answer-create"].tap()
+		XCTAssertTrue(app.staticTexts["New case: Shipping accepts an address"].waitForExistence(timeout: 5))
+		shot("map-create-review")
+		app.buttons["submit-mapping"].tap()
+		XCTAssertTrue(notice.waitForExistence(timeout: 10))
+		XCTAssertTrue(notice.label.hasPrefix("Recorded: one new case per shown test"), notice.label)
+		XCTAssertFalse(app.staticTexts["Question changed"].exists)
+		XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Current answer:'")).firstMatch.exists)
+		shot("map-created")
+	}
+
 	@MainActor func testAPersonSignsInAnswersAQuestionAndTakesItBack() async throws {
 		let project = try await makeProject()
 		let app = XCUIApplication()

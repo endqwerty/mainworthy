@@ -37,15 +37,7 @@ extension ProjectClient {
 		let reason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
 		if !reason.isEmpty { input["reason"] = .string(reason) }
 		let reply = try await decide(.object(input))
-		if reply.status == "decided" || reply.status == "already" {
-			guard let decision = reply.decision else { throw ClientError.unreadable }
-			return .decided(decision)
-		}
-		return switch reply.status {
-		case "advised": .advised(reply.needs ?? "Somebody else decides.")
-		case "conflict": .overtaken(reply.needs ?? "the question changed")
-		default: .notTaken(reply.needs ?? "another answer (\(reply.status))")
-		}
+		return try AnswerOutcome(reply)
 	}
 
 	/// Withdraws the decision that stands on a question. Both decisions stay in the ledger. The policy can ask
@@ -117,5 +109,20 @@ extension ProjectClient {
 			if let found = listed?.items.first(where: { $0.q == ref }) { return Question(found) }
 		}
 		return Question(alone)
+	}
+}
+
+extension AnswerOutcome {
+	init(_ reply: Wire.DecideReply) throws {
+		if reply.status == "decided" || reply.status == "already" {
+			guard let decision = reply.decision else { throw ClientError.unreadable }
+			self = .decided(decision)
+			return
+		}
+		self = switch reply.status {
+		case "advised": .advised(reply.needs ?? "Somebody else decides.")
+		case "conflict": .overtaken(reply.needs ?? "the question changed")
+		default: .notTaken(reply.needs ?? "another answer (\(reply.status))")
+		}
 	}
 }

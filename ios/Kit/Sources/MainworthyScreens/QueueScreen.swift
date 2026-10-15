@@ -52,6 +52,19 @@ public final class QueueScreen: ProjectScreen {
 	}
 
 	public var typed: [String: Typed] = [:]
+	private var mappings: [String: MappingScreen] = [:]
+
+	public func beginMapping(_ question: Question, creating: Bool) {
+		mapping(question, creating: creating).reopen(question)
+	}
+
+	public func mapping(_ question: Question, creating: Bool) -> MappingScreen {
+		let key = "\(question.ref) \(creating)"
+		if let kept = mappings[key] { return kept }
+		let draft = MappingScreen(project: project, question: question, creating: creating)
+		mappings[key] = draft
+		return draft
+	}
 
 	/// What each proposed edit changes, by its question and that question's evidence, once it was opened.
 	private var documents: [String: Documents] = [:]

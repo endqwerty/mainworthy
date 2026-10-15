@@ -23,6 +23,14 @@ struct QueueScreenTests {
 		#expect(!screen.hasMore)
 	}
 
+	@Test("a map question offers linking on the phone")
+	func nativeLink() async throws {
+		let screen = try await screen()
+		let question = try #require(screen.questions.first { $0.kind == .map })
+		let link = try #require(question.choices.first { $0.answer == "link" })
+		#expect(link.takes != .more)
+	}
+
 	@Test("an answer leaves the list, the screen says what was recorded, and Undo asks the question again")
 	func answerAndUndo() async throws {
 		let screen = try await screen()

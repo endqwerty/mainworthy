@@ -184,11 +184,13 @@ Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person d
 | --- | --- | --- | --- |
 | `project` | `string` | no |  |
 | `[1].q` | `string` | yes | The question, for example Q-12. |
+| `[1].ifOpen` | `boolean` | no | Refuse if the question is no longer open. |
 | `[1].onEvidence` | `string` | yes | The evidence hash you saw. If the evidence changed since, the reply is a conflict with the new evidence. |
 | `[1].answer` | `record<unknown>` | yes | The answer, for example {"is":"defect"}. The allowed answers depend on the question kind. |
 | `[1].reason` | `string` | no |  |
 | `[2].all` | `array<object>` | yes |  |
 | `[2].all[].q` | `string` | yes | The question, for example Q-12. |
+| `[2].all[].ifOpen` | `boolean` | no | Refuse if the question is no longer open. |
 | `[2].all[].onEvidence` | `string` | yes | The evidence hash you saw. If the evidence changed since, the reply is a conflict with the new evidence. |
 | `[2].all[].answer` | `record<unknown>` | yes | The answer, for example {"is":"defect"}. The allowed answers depend on the question kind. |
 | `[2].all[].reason` | `string` | no |  |

@@ -477,9 +477,12 @@ const reply = (q: QuestionRow, status: DecideReply["status"], more: Partial<Deci
  */
 export function answer(
 	ctx: Ctx,
-	input: { q: string; onEvidence: string; answer: unknown; reason: string | undefined },
+	input: { q: string; onEvidence: string; answer: unknown; reason?: string | undefined; ifOpen?: boolean | undefined },
 ): DecideReply {
 	const question = mustQuestion(ctx.db, ctx.project.id, input.q);
+	if (input.ifOpen && question.state !== "open") {
+		return reply(question, "conflict", { needs: "the question is no longer open; read it again before answering" });
+	}
 	const parsed = ANSWERS[question.kind].safeParse(input.answer);
 	if (!parsed.success) {
 		const allowed = (ANSWERS[question.kind].options as readonly { shape: { is: { value: string } } }[]).map(
