@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { z } from "zod";
+import api1Actors from "../../test/fixtures/cli/actor-list-api1.json";
 import { OP_LIST } from "../server/ops/index.ts";
 import { Client, plainHttpToAnotherMachine } from "./client.ts";
 import { COMMAND_NAMES } from "./dispatch.ts";
@@ -47,6 +48,58 @@ test("get prints folder archive and placement proposals with nullable edit field
 		expect(
 			outputWith(z.array(z.object({ ref: z.string(), edits: z.array(z.record(z.string(), z.unknown())) })), moved),
 		).toEqual([{ ref: place.proposal, edits: [{ op: "place", cases: ["C-1"], folder: "Moved", tags: null }] }]);
+	});
+});
+
+// Captured from main ceee7b57's local server, before actor.list included teams.
+test("actor list reads main's API 1 reply without teams", async () => {
+	await withInstance(
+		async ({ cli, run }) => {
+			const listed = await cli(["actor", "list"]);
+			expect(listed.stderr).toBe("");
+			expect(listed.code).toBe(0);
+			expect(listed.stdout).toBe(
+				"rule   policy  no grant\nhuman  robin  *  read, record, produce, answer, plan, admin\n",
+			);
+			const json = await run(["actor", "list", "--json"]);
+			expect(json.code).toBe(0);
+			expect(json.stderr).toBe("");
+			expect(JSON.parse(json.stdout)).toEqual([
+				{ name: "policy", kind: "rule", disabled: false, grants: [], teams: [] },
+				{
+					name: "robin",
+					kind: "human",
+					disabled: false,
+					teams: [],
+					grants: [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"] }],
+				},
+			]);
+		},
+		{ routes: { "/api/admin": () => Response.json(api1Actors) } },
+	);
+});
+
+test("generated admin commands manage teams and actor list attributes their grants", async () => {
+	await withInstance(async ({ cli, run, client }) => {
+		await client.call("admin", { do: "token.create", actor: "team-person", kind: "human", can: ["read"] });
+		const created = await cli(["admin", "--do", "team.create", "--name", "Quality"]);
+		expect(created.code).toBe(0);
+		for (const args of [
+			["--do", "team.grant.set", "--team", "Quality", "--can", "produce", "--project", "scratch"],
+			["--do", "team.member.add", "--team", "Quality", "--person", "team-person"],
+		])
+			expect((await run(["admin", ...args])).code).toBe(0);
+		const listed = await run(["actor", "list"]);
+		expect(listed.code).toBe(0);
+		expect(listed.stdout).toContain("scratch  record, produce  from team Quality");
+		expect(listed.stdout).toContain("*  read");
+		const history = await run(["admin", "--do", "team.history", "--team", "Quality"]);
+		expect(history.code).toBe(0);
+		expect(history.stdout).toContain('"member.add"');
+		expect(
+			(await run(["admin", "--do", "team.member.remove", "--team", "Quality", "--person", "team-person"])).code,
+		).toBe(0);
+		expect((await run(["actor", "list"])).stdout).not.toContain("from team Quality");
 	});
 });
 

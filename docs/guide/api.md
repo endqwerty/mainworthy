@@ -715,7 +715,7 @@ Read a tracker request's delivery state and its verified issue reference.
 
 ### admin
 
-Projects, actors, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do.
+Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do.
 
 |  |  |
 | --- | --- |
@@ -730,36 +730,54 @@ Projects, actors, grants and tokens. There are no seats: an actor is free, and a
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `[1].do` | `"project.create"` | yes |  |
-| `[1].key` | `string` | yes |  |
-| `[1].name` | `string` | no |  |
-| `[1].preset` | `string` | no |  |
-| `[1].unlinked` | `"ask" \| "track" \| "create"` | no | What happens to a test with no case: ask, track or create. Absent: what the preset starts with. |
-| `[2].do` | `"project.list"` | yes |  |
-| `[3].do` | `"project.demo"` | yes |  |
-| `[3].key` | `string` | yes | Makes the project a demo: a write to it may say when it happened. Only a project nothing was written to, and it is not undone. |
-| `[4].do` | `"token.create"` | yes |  |
-| `[4].actor` | `string` | yes |  |
-| `[4].kind` | `"human" \| "agent" \| "ci"` | yes |  |
-| `[4].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | no | What a new actor may do. Absent: a person everything, an agent read and produce, a pipeline record. Not for an actor that exists: use grant.set. Default: `[]`. |
-| `[4].project` | `string` | no | Limit the grant to one project. Absent: every project. |
-| `[4].label` | `string` | no |  |
-| `[4].expires` | `string` | no | How long the token works from now: 90d, 12h, 2w. After that it is refused as a revoked one is. Absent: it has no end. |
-| `[5].do` | `"token.list"` | yes |  |
-| `[6].do` | `"token.revoke"` | yes |  |
-| `[6].id` | `integer` | yes |  |
-| `[7].do` | `"actor.list"` | yes |  |
-| `[8].do` | `"grant.set"` | yes |  |
-| `[8].actor` | `string` | yes |  |
-| `[8].project` | `string` | no | The project the grant is for. Absent: every project. |
-| `[8].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | yes | What the actor may do there from now on, in place of what it could. |
-| `[9].do` | `"grant.remove"` | yes |  |
-| `[9].actor` | `string` | yes |  |
-| `[9].project` | `string` | no | The project the grant is for. Absent: the grant on every project. |
-| `[10].do` | `"actor.forget"` | yes |  |
-| `[10].name` | `string` | yes | Removes who this actor was: a pseudonym replaces the name and its tokens stop working. History keeps what was done. |
-| `[11].do` | `"policy.show"` | yes |  |
-| `[11].project` | `string` | yes |  |
+| `[1].do` | `"team.create"` | yes |  |
+| `[1].name` | `string` | yes |  |
+| `[2].do` | `"team.list"` | yes |  |
+| `[3].do` | `"team.member.add"` | yes |  |
+| `[3].team` | `string` | yes |  |
+| `[3].person` | `string` | yes |  |
+| `[4].do` | `"team.member.remove"` | yes |  |
+| `[4].team` | `string` | yes |  |
+| `[4].person` | `string` | yes |  |
+| `[5].do` | `"team.grant.set"` | yes |  |
+| `[5].team` | `string` | yes |  |
+| `[5].project` | `string` | no | The project key. Absent: every project. |
+| `[5].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | yes |  |
+| `[6].do` | `"team.grant.remove"` | yes |  |
+| `[6].team` | `string` | yes |  |
+| `[6].project` | `string` | no | The project key. Absent: every project. |
+| `[7].do` | `"team.history"` | yes |  |
+| `[7].team` | `string` | yes |  |
+| `[8].do` | `"project.create"` | yes |  |
+| `[8].key` | `string` | yes |  |
+| `[8].name` | `string` | no |  |
+| `[8].preset` | `string` | no |  |
+| `[8].unlinked` | `"ask" \| "track" \| "create"` | no | What happens to a test with no case: ask, track or create. Absent: what the preset starts with. |
+| `[9].do` | `"project.list"` | yes |  |
+| `[10].do` | `"project.demo"` | yes |  |
+| `[10].key` | `string` | yes | Makes the project a demo: a write to it may say when it happened. Only a project nothing was written to, and it is not undone. |
+| `[11].do` | `"token.create"` | yes |  |
+| `[11].actor` | `string` | yes |  |
+| `[11].kind` | `"human" \| "agent" \| "ci"` | yes |  |
+| `[11].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | no | What a new actor may do. Absent: a person everything, an agent read and produce, a pipeline record. Not for an actor that exists: use grant.set. Default: `[]`. |
+| `[11].project` | `string` | no | Limit the grant to one project. Absent: every project. |
+| `[11].label` | `string` | no |  |
+| `[11].expires` | `string` | no | How long the token works from now: 90d, 12h, 2w. After that it is refused as a revoked one is. Absent: it has no end. |
+| `[12].do` | `"token.list"` | yes |  |
+| `[13].do` | `"token.revoke"` | yes |  |
+| `[13].id` | `integer` | yes |  |
+| `[14].do` | `"actor.list"` | yes |  |
+| `[15].do` | `"grant.set"` | yes |  |
+| `[15].actor` | `string` | yes |  |
+| `[15].project` | `string` | no | The project the grant is for. Absent: every project. |
+| `[15].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | yes | What the actor may do there from now on, in place of what it could. |
+| `[16].do` | `"grant.remove"` | yes |  |
+| `[16].actor` | `string` | yes |  |
+| `[16].project` | `string` | no | The project the grant is for. Absent: the grant on every project. |
+| `[17].do` | `"actor.forget"` | yes |  |
+| `[17].name` | `string` | yes | Removes who this actor was: a pseudonym replaces the name and its tokens stop working. History keeps what was done. |
+| `[18].do` | `"policy.show"` | yes |  |
+| `[18].project` | `string` | yes |  |
 
 </details>
 

@@ -25,6 +25,7 @@ import {
 	SessionRow,
 } from "./people.ts";
 import { Obligation, TargetMatch, Verdict } from "./runs.ts";
+import { TeamReply, TeamSource } from "./teams.ts";
 import { TrackerReceipt } from "./tracker.ts";
 
 const text = z.string();
@@ -343,6 +344,7 @@ const Project = z.looseObject({
 });
 export const AdminReply = z.union([
 	z.looseObject({ key: text, since: number }),
+	TeamReply,
 	z.looseObject({ key: text, name: text, policy: text }),
 	z.array(Project),
 	z.looseObject({ actor: text, token: text, can: texts, expiresAt: number.nullable(), note: text }),
@@ -362,7 +364,9 @@ export const AdminReply = z.union([
 		}),
 	),
 	z.looseObject({ revoked: flag }),
-	z.array(z.looseObject({ name: text, kind: ActorKind, grants: z.array(Grant) })),
+	z.array(
+		z.looseObject({ name: text, kind: ActorKind, grants: z.array(Grant), teams: z.array(TeamSource).default([]) }),
+	),
 	z.looseObject({ removed: flag }),
 	Grant.extend({ actor: text }),
 	z.looseObject({ forgotten: text, tokensRevoked: whole }),

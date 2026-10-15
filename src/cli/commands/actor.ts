@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ActorKind, Capability } from "../../core/kinds.ts";
 import { AdminInput } from "../../core/ops.ts";
 import { FORGET_NOTICE } from "../../core/people.ts";
+import { TeamSource } from "../../core/teams.ts";
 import { assertPositionals } from "../args.ts";
 import { CliError } from "../errors.ts";
 import { line, printJson } from "../output.ts";
@@ -12,6 +13,7 @@ const Actors = z.array(
 		name: z.string(),
 		kind: ActorKind,
 		disabled: z.boolean(),
+		teams: z.array(TeamSource).default([]),
 		grants: z.array(z.object({ project: z.string(), can: z.array(Capability) })),
 	}),
 );
@@ -53,8 +55,12 @@ export const actorCommand: AdapterCommand = {
 			else
 				for (const actor of actors) {
 					const who = `${actor.kind.padEnd(5)}  ${actor.name}${actor.disabled ? " (forgotten)" : ""}`;
-					if (actor.grants.length === 0) line(`${who}  no grant`);
+					if (actor.grants.length === 0 && actor.teams.every((team) => team.grants.length === 0))
+						line(`${who}  no grant`);
 					for (const grant of actor.grants) line(`${who}  ${grant.project}  ${grant.can.join(", ")}`);
+					for (const team of actor.teams)
+						for (const grant of team.grants)
+							line(`${who}  ${grant.project}  ${grant.can.join(", ")}  from team ${team.name}`);
 				}
 			return 0;
 		}

@@ -3,6 +3,7 @@ import { type FormEvent, type RefObject, useRef, useState } from "react";
 import { z } from "zod";
 import { Capability, defaultCapabilities } from "../../core/kinds.ts";
 import { INVITATION_LASTS, type InvitationCreated, type InvitationRow } from "../../core/people.ts";
+import { TeamSource } from "../../core/teams.ts";
 import { copySecret } from "../lib/clipboard.ts";
 import { queryKey, useQueryOp } from "../lib/data.ts";
 import { createInvitation, dateTime, listInvitations, revokeInvitation, until } from "../lib/people.ts";
@@ -11,6 +12,7 @@ import { age, DocLink, ProducerGlyph, SectionHeading, Select } from "../ui/index
 import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
 import { PersonAccess } from "./people-access.tsx";
 import { ForgetPerson } from "./people-forget.tsx";
+import { Teams } from "./teams.tsx";
 import { IssuedTokens } from "./tokens.tsx";
 import "./people.css";
 
@@ -18,6 +20,7 @@ const Actor = z.object({
 	name: z.string(),
 	kind: z.string(),
 	disabled: z.boolean(),
+	teams: z.array(TeamSource).default([]),
 	grants: z.array(z.object({ project: z.string(), can: z.array(z.string()) })),
 });
 /** How long a link may last, as the form offers it. The server takes any duration up to thirty days. */
@@ -284,7 +287,12 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 						<ProducerGlyph kind="human" />
 						<span>
 							<b>{person.name}</b>
-							<small>{held(person.grants)}</small>
+							<small>Own grants: {held(person.grants)}</small>
+							{person.teams.map((team) => (
+								<small key={team.name}>
+									From team {team.name}: {held(team.grants)}
+								</small>
+							))}
 							{confirming === person.name && (
 								<small>
 									A recovery link is for somebody who lost their password or passkey. Once {person.name} accepts it, it
@@ -343,6 +351,7 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 				</div>
 			))}
 			<IssuedTokens />
+			<Teams people={people.map((person) => person.name)} changed={() => actors.refetch()} />
 			<ForgetPerson
 				people={people.map((person) => person.name)}
 				changed={async (forgotten) => {

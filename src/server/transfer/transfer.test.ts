@@ -67,6 +67,21 @@ const fixtures: Record<string, Row[]> = {
 		{ actor: 71, project: 23, can: '[ "read", "admin" ]' },
 		{ actor: 71, project: 0, can: '["read"]' },
 	],
+	teams: [{ id: 91, org: 17, name: "Quality 雪", created_at: time }],
+	team_members: [{ team: 91, actor: 71 }],
+	team_grants: [{ team: 91, project: 23, can: '[ "read", "produce" ]' }],
+	team_events: [
+		{
+			id: 92,
+			team: 91,
+			by_actor: 71,
+			at: time,
+			action: "grant.set",
+			person: null,
+			project: 23,
+			can: '[ "read", "produce" ]',
+		},
+	],
 	projects: [{ id: 23, org: 17, key: "qa", name: "雪 project", seq: Number.MAX_SAFE_INTEGER, created_at: time }],
 	counters: [
 		{ project: 23, name: "version", value: 9_223_372_036_854_775_807n },

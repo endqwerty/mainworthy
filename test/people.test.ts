@@ -1741,6 +1741,31 @@ describe("a person's own command-line token", () => {
 		expect(await w.ok("credential", { do: "token.list" }, headers)).toMatchObject([{ id: token.id, revoked: true }]);
 	});
 
+	test("a personal token follows team grants and membership without changing personal grants", async () => {
+		const w = world();
+		const cookie = await joined(w, "team-cli", FIRST, { can: ["read"], project: "scratch" });
+		const made = PersonalTokenCreated.parse(
+			await w.ok("credential", { do: "token.create", label: "Team CLI" }, { cookie, origin: w.instance.url }),
+		);
+		const use = () =>
+			w.post("/api/p/scratch/propose", { edits: [{ op: "create", outline: "From a team token" }] }, bearer(made.token));
+		expect(said(await use())).toBe("403 forbidden");
+		await w.ok("admin", { do: "team.create", name: "Quality" });
+		await w.ok("admin", { do: "team.grant.set", team: "Quality", project: "scratch", can: ["produce"] });
+		await w.ok("admin", { do: "team.member.add", team: "Quality", person: "team-cli" });
+		expect((await use()).status).toBe(200);
+		await w.ok("admin", { do: "team.grant.remove", team: "Quality", project: "scratch" });
+		expect(said(await use())).toBe("403 forbidden");
+		await w.ok("admin", { do: "team.grant.set", team: "Quality", project: "scratch", can: ["produce"] });
+		expect((await use()).status).toBe(200);
+		await w.ok("admin", { do: "team.member.remove", team: "Quality", person: "team-cli" });
+		expect(said(await use())).toBe("403 forbidden");
+		expect((await w.post("/api/p/scratch/find", {}, bearer(made.token))).status).toBe(200);
+		expect(await w.ok("admin", { do: "actor.list" })).toContainEqual(
+			expect.objectContaining({ name: "team-cli", grants: [{ project: "scratch", can: ["read"] }], teams: [] }),
+		);
+	});
+
 	test("expiry is bounded, caller identity cannot be supplied, and token sign-ins cannot renew themselves", async () => {
 		const w = world();
 		const cookie = await joined(w, "expiry-person", FIRST);

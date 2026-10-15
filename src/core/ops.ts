@@ -18,6 +18,7 @@ import {
 } from "./kinds.ts";
 import { Automate, CaseBody, MethodKind } from "./model.ts";
 import { Obligation, TargetMatch, Verdict } from "./runs.ts";
+import { TeamInput } from "./teams.ts";
 
 /**
  * A client-generated id that names one request. Sent again unchanged, it returns the first reply and writes
@@ -625,6 +626,7 @@ export type CommandFate = z.infer<typeof CommandFate>;
 // ── administer ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export const AdminInput = z.discriminatedUnion("do", [
+	...TeamInput.options,
 	z.object({
 		do: z.literal("project.create"),
 		key: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/),
