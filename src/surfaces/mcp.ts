@@ -295,6 +295,7 @@ class AgentServer extends McpServer {
 	constructor(call: Call, listProjects: ListProjects, protocolVersion: string) {
 		super({ name: "mainworthy", version: VERSION }, { instructions: INSTRUCTIONS });
 		const tools = mcpTools();
+		const supportsStructured = () => (this.server.getNegotiatedProtocolVersion() ?? protocolVersion) >= "2025-06-18";
 		for (const tool of tools) {
 			this.registerTool(
 				tool.name,
@@ -313,15 +314,15 @@ class AgentServer extends McpServer {
 					const result = { result: reply.result ?? null, seq: reply.seq };
 					return {
 						content: [{ type: "text", text: JSON.stringify(result) }],
-						...((this.server.getNegotiatedProtocolVersion() ?? protocolVersion) >= "2025-06-18"
-							? { structuredContent: result }
-							: {}),
+						...(supportsStructured() ? { structuredContent: result } : {}),
 					};
 				},
 			);
 		}
 		// McpServer owns tools/call. Its custom-handler API lets tools/list use the measured schemas.
-		this.server.setRequestHandler("tools/list", () => ({ tools }));
+		this.server.setRequestHandler("tools/list", () => ({
+			tools: supportsStructured() ? tools : tools.map(({ outputSchema: _output, ...tool }) => tool),
+		}));
 		this.server.registerCapabilities({ tools: { listChanged: false } });
 	}
 
