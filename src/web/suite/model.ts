@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CaseBody, Step } from "../../core/model.ts";
+import { CaseBody, CaseKind, ExpandedStep, Step, StepId } from "../../core/model.ts";
 import type { Draft } from "../lib/drafts.ts";
 import { randomId } from "../lib/ids.ts";
 import { Proofs } from "../ui/index.tsx";
@@ -38,7 +38,10 @@ export const CaseView = z.object({
 	state: z.string(),
 	title: z.string(),
 	pre: z.string(),
-	steps: z.array(Step),
+	steps: z.array(ExpandedStep),
+	sourceSteps: z.array(Step).optional(),
+	kind: CaseKind.default("case"),
+	users: z.array(z.object({ case: z.string(), base: z.number(), versions: z.array(z.number()) })).default([]),
 	methods: CaseBody.shape.methods,
 	automate: CaseBody.shape.automate,
 	fields: CaseBody.shape.fields.default({}),
@@ -48,14 +51,14 @@ export const CaseView = z.object({
 	updated: z.object({ at: z.number(), by: z.string(), kind: z.string() }),
 	proof: Proofs,
 	open: z.number(),
-	usedStepIds: z.array(Step.shape.id).default([]),
+	usedStepIds: z.array(StepId).default([]),
 });
 export type CaseView = z.infer<typeof CaseView>;
 export function bodyOf(view: CaseView): CaseBody {
 	return {
 		title: view.title,
 		pre: view.pre,
-		steps: view.steps,
+		steps: view.sourceSteps ?? view.steps,
 		methods: view.methods,
 		automate: view.automate,
 		fields: view.fields,
@@ -65,6 +68,7 @@ export function editDraft(view: CaseView): Draft {
 	const body = bodyOf(view);
 	return {
 		id: view.ref,
+		kind: view.kind,
 		ref: view.ref,
 		base: view.version,
 		body,

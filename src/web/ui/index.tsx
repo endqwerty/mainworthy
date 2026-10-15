@@ -2,7 +2,7 @@ import type { ComponentProps, MouseEvent, ReactNode } from "react";
 import { z } from "zod";
 import { diffBodies, diffWords } from "../../core/diff.ts";
 import { type DocSlug, docUrl } from "../../core/docs.ts";
-import type { CaseBody } from "../../core/model.ts";
+import { type CaseBody, stepAction } from "../../core/model.ts";
 import { PASSWORD_LENGTH } from "../../core/people.ts";
 
 export function KeyCap({ children }: { children: ReactNode }) {
@@ -274,7 +274,7 @@ export function DiffView({ before, after }: { before: CaseBody; after: CaseBody 
 							<div key={step.id} className="dl same">
 								<i>{step.to + 1}</i>
 								<div>
-									{step.after.action}
+									{stepAction(step.after)}
 									{step.after.expected && <div className="x">&gt; {step.after.expected}</div>}
 								</div>
 							</div>
@@ -284,7 +284,7 @@ export function DiffView({ before, after }: { before: CaseBody; after: CaseBody 
 							<div key={step.id} className="dl add">
 								<i>+</i>
 								<div>
-									{step.after.action}
+									{stepAction(step.after)}
 									{step.after.expected && <div>&gt; {step.after.expected}</div>}
 								</div>
 							</div>
@@ -294,7 +294,7 @@ export function DiffView({ before, after }: { before: CaseBody; after: CaseBody 
 							<div key={step.id} className="dl del">
 								<i>−</i>
 								<div>
-									{step.before.action}
+									{stepAction(step.before)}
 									{step.before.expected && <div>&gt; {step.before.expected}</div>}
 								</div>
 							</div>
@@ -304,7 +304,7 @@ export function DiffView({ before, after }: { before: CaseBody; after: CaseBody 
 							<div key={step.id} className="dl chg">
 								<i>~</i>
 								<div>
-									<WordDiff before={step.before.action} after={step.after.action} />
+									<WordDiff before={stepAction(step.before)} after={stepAction(step.after)} />
 									{(step.before.expected || step.after.expected) && (
 										<div>
 											&gt; <WordDiff before={step.before.expected ?? ""} after={step.after.expected ?? ""} />
@@ -318,7 +318,7 @@ export function DiffView({ before, after }: { before: CaseBody; after: CaseBody 
 							<div key={step.id} className="dl chg">
 								<i>↕</i>
 								<div>
-									{step.after.action}{" "}
+									{stepAction(step.after)}{" "}
 									<span className="dim">
 										step {step.from + 1} to {step.to + 1}
 									</span>

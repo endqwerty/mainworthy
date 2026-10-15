@@ -1,11 +1,13 @@
 import { type KeyboardEvent, useLayoutEffect, useRef } from "react";
 import { newStepId } from "../../core/ids.ts";
+import { CaseKind } from "../../core/model.ts";
 import { parseOutline, splitExpected } from "../../core/outline.ts";
 import { type Draft, knownStepIds } from "../lib/drafts.ts";
 import { useBindings } from "../lib/keys.ts";
 import { readRoute } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { KeyCap } from "../ui/index.tsx";
+import { FragmentInsert, FragmentReference } from "./fragments.tsx";
 
 export const conflictEditorStatus =
 	"Resolve the conflict first. Edit the merged fields in the conflict card; other fields can be edited after it is resolved.";
@@ -26,7 +28,7 @@ export const draftEndedStatus = {
 		"Another window recorded or ended this draft, and the case could not be read. This stays as it was until it is.",
 };
 
-export type DraftChange = (draft: Draft, focus?: boolean) => void;
+export type DraftChange = (draft: Draft, focus?: boolean, selectionOnly?: boolean) => void;
 function freshStep(draft: Draft) {
 	return {
 		id: newStepId(
@@ -158,7 +160,7 @@ export function BodyEditor({
 		change({ ...draft, caret: { field, start: position, end: position } }, true);
 	}
 	function remember(field: string, target: HTMLTextAreaElement): void {
-		change({ ...draft, caret: { field, start: target.selectionStart, end: target.selectionEnd } });
+		change({ ...draft, caret: { field, start: target.selectionStart, end: target.selectionEnd } }, false, true);
 	}
 	function update(field: string, text: string, target: HTMLTextAreaElement): void {
 		if (readOnly) {
@@ -413,6 +415,20 @@ export function BodyEditor({
 	return (
 		<div className="body-editor" ref={root}>
 			{readOnly && <p role="status">{readOnlyStatus}</p>}
+			{draft.ref === null && (
+				<label>
+					Kind{" "}
+					<select
+						aria-label="Case kind"
+						value={draft.kind ?? "case"}
+						disabled={readOnly || draft.sent !== null || draft.submission.kind === "waiting"}
+						onChange={(event) => change({ ...draft, kind: CaseKind.parse(event.target.value), dirty: true })}
+					>
+						<option value="case">Case</option>
+						<option value="fragment">Fragment</option>
+					</select>
+				</label>
+			)}
 			{input("title", draft.body.title, "Case title", "ctitle editor-input", "Untitled case")}
 			<div className="ctags">
 				{draft.tags.map((tag) => (
@@ -435,27 +451,45 @@ export function BodyEditor({
 					No steps yet. Enter from the title starts the first one.
 				</button>
 			) : (
-				draft.body.steps.map((step, index) => (
-					<div className={`st ${step.expected !== null ? "hasx" : ""}`} key={step.id}>
-						<span className="sn">{index + 1}</span>
-						<div>
-							{input(`${step.id}:action`, step.action, `Step ${index + 1}`, "stx editor-input", "What to do…")}
-							{step.expected !== null && (
-								<div className="sxw">
-									<span className="gt">&gt;</span>
-									{input(
-										`${step.id}:expected`,
-										step.expected,
-										`Expected result ${index + 1}`,
-										"sex editor-input",
-										"What should happen…",
-									)}
-								</div>
-							)}
+				draft.body.steps.map((step, index) =>
+					step.use ? (
+						<FragmentReference
+							key={step.id}
+							pin={step.use}
+							remove={
+								readOnly
+									? null
+									: () =>
+											change({
+												...draft,
+												dirty: true,
+												body: { ...draft.body, steps: draft.body.steps.filter((item) => item.id !== step.id) },
+											})
+							}
+						/>
+					) : (
+						<div className={`st ${step.expected !== null ? "hasx" : ""}`} key={step.id}>
+							<span className="sn">{index + 1}</span>
+							<div>
+								{input(`${step.id}:action`, step.action, `Step ${index + 1}`, "stx editor-input", "What to do…")}
+								{step.expected !== null && (
+									<div className="sxw">
+										<span className="gt">&gt;</span>
+										{input(
+											`${step.id}:expected`,
+											step.expected,
+											`Expected result ${index + 1}`,
+											"sex editor-input",
+											"What should happen…",
+										)}
+									</div>
+								)}
+							</div>
 						</div>
-					</div>
-				))
+					),
+				)
 			)}
+			{!readOnly && draft.kind !== "fragment" && <FragmentInsert draft={draft} change={change} />}
 			<div className="hintl">
 				<KeyCap>↵</KeyCap> next step <KeyCap>Tab</KeyCap> or typing " &gt; " starts the expected result{" "}
 				<KeyCap>⇧↵</KeyCap> next case

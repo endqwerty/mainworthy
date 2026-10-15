@@ -9,14 +9,42 @@ export type MethodKind = z.infer<typeof MethodKind>;
 export const StepId = z.string().regex(/^[a-z0-9]{2,8}$/);
 export type StepId = z.infer<typeof StepId>;
 
-export const Step = z.object({
+export const CaseKind = z.enum(["case", "fragment"]);
+export type CaseKind = z.infer<typeof CaseKind>;
+export const FragmentPin = z.object({
+	fragment: z.string().regex(/^C-[1-9]\d*$/),
+	version: z.number().int().positive(),
+});
+
+export const InlineStep = z.object({
 	id: StepId,
 	/** What to do. One or more lines of plain text; never empty. */
 	action: z.string().min(1),
 	/** What must be true afterwards. `null` when the author has not said. */
 	expected: z.string().min(1).nullable(),
 });
+export const FragmentStep = z
+	.object({
+		id: StepId,
+		use: FragmentPin,
+		action: z.string().length(0).default(""),
+		expected: z
+			.string()
+			.nullable()
+			.refine((value): boolean => value === null, "A fragment reference has no expected text")
+			.default(null),
+	})
+	.meta({ "x-mcp-hidden": true });
+export const Step = z.union([
+	InlineStep.extend({ use: z.never().optional().meta({ "x-mcp-hidden": true }) }),
+	FragmentStep,
+]);
 export type Step = z.infer<typeof Step>;
+export const ExpandedStep = InlineStep.extend({
+	id: z.string(),
+	source: FragmentPin.extend({ step: StepId, use: StepId }).optional(),
+});
+export type ExpandedStep = z.infer<typeof ExpandedStep>;
 
 export const Automate = z.enum(["none", "wanted", "not-applicable"]);
 export type Automate = z.infer<typeof Automate>;
@@ -46,6 +74,7 @@ export const emptyBody = (title = ""): CaseBody => ({
 
 /** Everything the canonical Markdown form of a case carries: the body plus the header fields. */
 export const CaseDoc = z.object({
+	kind: CaseKind.optional(),
 	/** `C-311`, or null for a case that has no ref yet (a file about to be imported). */
 	ref: z.string().nullable(),
 	body: CaseBody,
@@ -118,4 +147,8 @@ export function fieldErrors(
 		}
 	}
 	return errors;
+}
+
+export function stepAction(step: Step): string {
+	return step.use ? `!use ${step.use.fragment}@v${step.use.version}` : step.action;
 }

@@ -212,3 +212,39 @@ An explicit empty header, either `fields:` with no entries or `fields: {}`, clea
 The web and iPhone case editors preserve these values but do not edit them.
 
 A project can define text or choice fields and require values. [Custom fields](./policy.md#custom-fields) explains how to define them. New cases, restores, and changed field values must meet the definitions in force when proposed and adopted. An edit can keep unchanged values from the current case, including missing required values or choices no longer allowed. The web and iPhone editors can therefore edit older cases without filling new required fields. Older versions remain readable as recorded.
+
+## Reuse pinned fragments
+
+A fragment is a versioned set of shared steps. To create one in Suite, start a new
+case, choose **Fragment** in **Kind**, and write its steps. A recorded document's
+kind stays fixed. Fragments cannot include other fragments. A reference inserts
+only the steps, not the fragment's preconditions or custom fields.
+
+While editing a case, open **Insert fragment**. Enter its ref, such as `C-12`.
+Leave **Version** empty to pin its current version, or enter an older version.
+Choose **Insert pinned fragment**. The editor shows the shared steps and their
+source. **Remove fragment** removes this reference from the case. Edit the
+fragment itself to change shared instructions.
+
+Reading a case or running it shows the fragment steps inline, marked with the
+fragment ref and pinned version. Publishing another fragment version leaves
+existing cases unchanged. Old case versions and runs keep their original pins.
+Fragments themselves are omitted from run selections.
+
+Open a fragment to see **Fragment users** and the versions each case uses. Choose
+an older fragment version, select the cases to move, and choose **Update selected
+to vN**. One proposal records the selected updates and who requested them. The
+project's policy may require acceptance. Unselected cases stay pinned. If any
+selected case changes before the update is accepted, refresh and propose the
+batch again. No selected case moves from that refused batch.
+
+Markdown preserves a reference with its own step id:
+
+```markdown
+- !use C-12@v3 ^ab
+```
+
+A fragment's header uses `kind: fragment`. A literal action beginning with `!`
+is escaped as `\!` in canonical Markdown. Instance and project archives preserve
+fragment history and pins. Fragment authoring and batch updates use the web,
+HTTP `propose`, or CLI JSON; MCP discovery omits these inputs.

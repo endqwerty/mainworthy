@@ -61,7 +61,7 @@ export function structuralProblems(db: Db, project: number): SuiteProblem[] {
 		{
 			rule: "no-expected",
 			where:
-				"c.step_count > 0 AND NOT EXISTS (SELECT 1 FROM versions v, json_each(v.body, '$.steps') s WHERE v.case_id = c.id AND v.no = c.head AND json_extract(s.value, '$.expected') IS NOT NULL)",
+				"c.step_count > 0 AND NOT EXISTS (SELECT 1 FROM versions v, json_each(v.body, '$.steps') s WHERE v.case_id = c.id AND v.no = c.head AND (json_extract(s.value, '$.expected') IS NOT NULL OR EXISTS (SELECT 1 FROM cases f JOIN versions fv ON fv.case_id = f.id, json_each(fv.body, '$.steps') fs WHERE f.project = c.project AND f.no = CAST(substr(json_extract(s.value, '$.use.fragment'), 3) AS INTEGER) AND fv.no = json_extract(s.value, '$.use.version') AND json_extract(fs.value, '$.expected') IS NOT NULL)))",
 			message: (title) => `"${title}" has steps but no expected result, so it cannot fail`,
 		},
 		{
@@ -250,10 +250,12 @@ export function selectCases(ctx: Ctx, selection: Selection): CaseRow[] {
 	if ((selection.cases?.length ?? 0) > MAX_SELECTION) throw tooMany();
 	const named = selection.cases?.map((text) => mustCase(ctx.db, project, text)) ?? null;
 	const narrowing = selection.folders?.length || selection.tags?.length || selection.text;
+	if (named?.some((row) => row.kind === "fragment"))
+		throw invalid("fragments are shared steps; select their cases to run");
 	if (named && !narrowing) return named.filter((row) => row.state === "active");
 
 	const index = folderIndex(ctx.db, project);
-	const where: string[] = ["c.project = ?", "c.state = 'active'"];
+	const where: string[] = ["c.project = ?", "c.state = 'active'", "c.kind = 'case'"];
 	const params: SqlValue[] = [project];
 	if (selection.folders?.length) {
 		const ids = [...new Set(selection.folders.flatMap((folder) => subtree(index, resolveFolderId(index, folder))))];

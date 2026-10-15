@@ -661,6 +661,8 @@ enum Wire {
 
 	/// A case from get, at the version that was requested.
 	struct SuiteDocument: Decodable, Equatable, Sendable {
+		let kind: String?
+		let hasFragments: Bool?
 		let ref: String
 		let version: Int
 		let title: String

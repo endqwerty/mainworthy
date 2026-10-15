@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { printCase } from "../../core/markdown.ts";
 import { applyMergeChoice, mergeBodies } from "../../core/merge3.ts";
-import { Automate, CaseBody } from "../../core/model.ts";
+import { Automate, CaseBody, type ExpandedStep } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
@@ -17,6 +17,7 @@ import { useApp } from "../ui/context.tsx";
 import { age, DiffView, EmptyState, KeyCap, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
 import { useCaseBindings } from "./bindings.ts";
 import { BodyEditor, conflictEditorStatus, type DraftChange, draftEndedStatus, ownershipStatus } from "./editor.tsx";
+import { FragmentUsers } from "./fragments.tsx";
 
 export type ConflictState = DraftConflict;
 const EntryBase = z.object({ seq: z.number(), at: z.number(), by: z.string() });
@@ -318,8 +319,9 @@ export function CasePane({
 							readOnlyStatus={ownedElsewhere ? elsewhereStatus : conflict ? conflictEditorStatus : null}
 						/>
 					) : (
-						<ReadBody body={body} tags={view?.tags ?? []} begin={begin} />
+						<ReadBody body={{ ...body, steps: view?.steps ?? body.steps }} tags={view?.tags ?? []} begin={begin} />
 					)}
+					{!draft && view?.kind === "fragment" && <FragmentUsers key={view.ref} view={view} />}
 					<CaseProperties
 						body={body}
 						readOnly={ownedElsewhere || Boolean(conflict)}
@@ -381,7 +383,7 @@ export function CasePane({
 									Your private draft. Others see version {draft.base}.
 									<DiffView
 										before={draft.original}
-										after={{ ...draft.body, steps: draft.body.steps.filter((step) => step.action) }}
+										after={{ ...draft.body, steps: draft.body.steps.filter((step) => step.use || step.action) }}
 									/>
 								</div>
 							</div>
@@ -458,7 +460,15 @@ export function CasePane({
 		</section>
 	);
 }
-function ReadBody({ body, tags, begin }: { body: CaseBody; tags: string[]; begin: (field?: string) => void }) {
+function ReadBody({
+	body,
+	tags,
+	begin,
+}: {
+	body: Omit<CaseBody, "steps"> & { steps: ExpandedStep[] };
+	tags: string[];
+	begin: (field?: string) => void;
+}) {
 	return (
 		<div className="read-body">
 			<button type="button" className="ctitle" onClick={() => begin()}>
@@ -482,13 +492,18 @@ function ReadBody({ body, tags, begin }: { body: CaseBody; tags: string[]; begin
 				<div className={`st ${step.expected ? "hasx" : ""}`} key={step.id}>
 					<span className="sn">{index + 1}</span>
 					<div>
-						<button type="button" className="stx" onClick={() => begin(`${step.id}:action`)}>
+						<button type="button" className="stx" onClick={() => begin(`${step.source?.use ?? step.id}:action`)}>
 							{step.action}
 						</button>
+						{step.source && (
+							<div className="dim">
+								From {step.source.fragment} v{step.source.version}
+							</div>
+						)}
 						{step.expected && (
 							<div className="sxw">
 								<span className="gt">&gt;</span>
-								<button type="button" className="sex" onClick={() => begin(`${step.id}:expected`)}>
+								<button type="button" className="sex" onClick={() => begin(`${step.source?.use ?? step.id}:expected`)}>
 									{step.expected}
 								</button>
 							</div>

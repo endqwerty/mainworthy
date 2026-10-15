@@ -157,14 +157,29 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `edits` | `array<object>` | yes |  |
+| `edits[][fragment].op` | `"fragment"` | yes |  |
+| `edits[][fragment].fragment` | `string` | yes |  |
+| `edits[][fragment].from` | `integer` | yes |  |
+| `edits[][fragment].to` | `integer` | yes |  |
+| `edits[][fragment].cases` | `array<object>` | yes |  |
+| `edits[][fragment].cases[].case` | `string` | yes |  |
+| `edits[][fragment].cases[].base` | `integer` | yes |  |
 | `edits[][create].op` | `"create"` | yes |  |
+| `edits[][create].kind` | `"case" \| "fragment"` | no |  |
 | `edits[][create].body` | `object` | no |  |
 | `edits[][create].body.title` | `string` | no |  |
 | `edits[][create].body.pre` | `string` | no |  |
 | `edits[][create].body.steps` | `array<object>` | no |  |
-| `edits[][create].body.steps[].id` | `string` | yes |  |
-| `edits[][create].body.steps[].action` | `string` | yes |  |
-| `edits[][create].body.steps[].expected` | `string \| null` | yes |  |
+| `edits[][create].body.steps[][1].id` | `string` | yes |  |
+| `edits[][create].body.steps[][1].action` | `string` | yes |  |
+| `edits[][create].body.steps[][1].expected` | `string \| null` | yes |  |
+| `edits[][create].body.steps[][1].use` | `unknown` | no |  |
+| `edits[][create].body.steps[][2].id` | `string` | yes |  |
+| `edits[][create].body.steps[][2].use` | `object` | yes |  |
+| `edits[][create].body.steps[][2].use.fragment` | `string` | yes |  |
+| `edits[][create].body.steps[][2].use.version` | `integer` | yes |  |
+| `edits[][create].body.steps[][2].action` | `string` | no |  Default: `""`. |
+| `edits[][create].body.steps[][2].expected` | `string \| null` | no |  Default: `null`. |
 | `edits[][create].body.methods` | `array<"human" \| "auto" \| "agent">` | no |  |
 | `edits[][create].body.automate` | `"none" \| "wanted" \| "not-applicable"` | no |  |
 | `edits[][create].body.fields` | `record<string>` | no |  |
@@ -182,9 +197,16 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 | `edits[][edit].body.title` | `string` | no |  |
 | `edits[][edit].body.pre` | `string` | no |  |
 | `edits[][edit].body.steps` | `array<object>` | no |  |
-| `edits[][edit].body.steps[].id` | `string` | yes |  |
-| `edits[][edit].body.steps[].action` | `string` | yes |  |
-| `edits[][edit].body.steps[].expected` | `string \| null` | yes |  |
+| `edits[][edit].body.steps[][1].id` | `string` | yes |  |
+| `edits[][edit].body.steps[][1].action` | `string` | yes |  |
+| `edits[][edit].body.steps[][1].expected` | `string \| null` | yes |  |
+| `edits[][edit].body.steps[][1].use` | `unknown` | no |  |
+| `edits[][edit].body.steps[][2].id` | `string` | yes |  |
+| `edits[][edit].body.steps[][2].use` | `object` | yes |  |
+| `edits[][edit].body.steps[][2].use.fragment` | `string` | yes |  |
+| `edits[][edit].body.steps[][2].use.version` | `integer` | yes |  |
+| `edits[][edit].body.steps[][2].action` | `string` | no |  Default: `""`. |
+| `edits[][edit].body.steps[][2].expected` | `string \| null` | no |  Default: `null`. |
 | `edits[][edit].body.methods` | `array<"human" \| "auto" \| "agent">` | no |  |
 | `edits[][edit].body.automate` | `"none" \| "wanted" \| "not-applicable"` | no |  |
 | `edits[][edit].body.fields` | `record<string>` | no |  |

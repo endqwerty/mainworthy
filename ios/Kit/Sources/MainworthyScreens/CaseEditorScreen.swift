@@ -42,6 +42,9 @@ public final class CaseEditorScreen {
 	/// Lengths use UTF-16, as the server's JavaScript strings do. Other text and step counts have no cap.
 	public var validation: [String] {
 		var issues: [String] = []
+		if case .edit(let opened) = source, opened.hasSharedSteps {
+			issues.append("Edit fragments and their pins in the web editor.")
+		}
 		if content.title.isEmpty { issues.append("Enter a title.") }
 		if content.title.utf16.count > 300 { issues.append("Title: use at most 300 UTF-16 units.") }
 		let title = trimmed(content.title)

@@ -4,7 +4,7 @@ import { AuditReply } from "./audit.ts";
 import { CsvImportRow } from "./csv.ts";
 import { SameCodeEvidence } from "./flaky.ts";
 import { ActorKind, Policy, Unlinked } from "./kinds.ts";
-import { Automate, CaseBody, MethodKind, Step } from "./model.ts";
+import { Automate, CaseBody, CaseKind, ExpandedStep, MethodKind, Step } from "./model.ts";
 import {
 	AnnounceReply,
 	ArtifactCode,
@@ -54,7 +54,11 @@ const CaseDocument = z.looseObject({
 	state: text,
 	title: text.optional(),
 	pre: text.optional(),
-	steps: z.array(Step).optional(),
+	steps: z.array(ExpandedStep).optional(),
+	sourceSteps: z.array(Step).optional(),
+	hasFragments: flag.optional(),
+	kind: CaseKind.optional(),
+	users: z.array(z.object({ case: text, base: whole, versions: z.array(whole) })).optional(),
 	methods: z.array(MethodKind).optional(),
 	automate: Automate.optional(),
 	tags: texts.optional(),

@@ -21,6 +21,8 @@ import slotExcuses from "./migrations/0017_slot_excuses.sql" with { type: "text"
 import trackerPolls from "./migrations/0018_tracker_polls.sql" with { type: "text" };
 import grantRoles from "./migrations/0019_grant_roles.sql" with { type: "text" };
 
+import fragments from "./migrations/0019_fragments.sql" with { type: "text" };
+
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
  * Versions are contiguous from 1, and a branch takes the next free number when it lands.
@@ -50,6 +52,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 17, name: "slot_excuses", sql: slotExcuses, archive: true },
 	{ version: 18, name: "tracker_polls", sql: trackerPolls, archive: false },
 	{ version: 19, name: "grant_roles", sql: grantRoles, archive: true },
+	{ version: 20, name: "fragments", sql: fragments, archive: true },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

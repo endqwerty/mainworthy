@@ -1,5 +1,5 @@
 import { canonicalJson } from "./hash.ts";
-import type { CaseBody, Step } from "./model.ts";
+import { type CaseBody, type Step, stepAction } from "./model.ts";
 
 export type FieldDiff<T> = { kind: "same"; before: T; after: T } | { kind: "changed"; before: T; after: T };
 export type WordSegment = { op: "eq" | "del" | "ins"; text: string };
@@ -146,12 +146,16 @@ export function diffBodies(a: CaseBody, b: CaseBody): BodyDiff {
 		}
 		const common: ExistingStepDiff = { id: step.id, before: old.step, after: step, from: old.index, to };
 		const moved = movedIds.has(step.id);
-		if (old.step.action !== step.action || old.step.expected !== step.expected) {
+		if (
+			old.step.action !== step.action ||
+			old.step.expected !== step.expected ||
+			canonicalJson(old.step.use ?? null) !== canonicalJson(step.use ?? null)
+		) {
 			steps.push({
 				...common,
 				kind: "changed",
 				moved,
-				action: textDiff({ before: old.step.action, after: step.action }),
+				action: textDiff({ before: stepAction(old.step), after: stepAction(step) }),
 				expected: textDiff({ before: old.step.expected, after: step.expected }),
 			});
 		} else steps.push({ ...common, kind: moved ? "moved" : "same" });

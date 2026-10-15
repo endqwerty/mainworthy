@@ -12,8 +12,10 @@ import { parseCase } from "../../core/markdown.ts";
 import { type Conflict, mergeBodies } from "../../core/merge3.ts";
 import {
 	CaseBody,
+	type CaseKind,
 	cleanPath,
 	cleanTag,
+	type ExpandedStep,
 	emptyBody,
 	fieldErrors,
 	REQUIREMENT_KEY,
@@ -32,6 +34,7 @@ import { currentPolicy, resolvePolicy, writePolicy } from "../policy/policy.ts";
 
 export type CaseRow = {
 	id: number;
+	kind: CaseKind;
 	project: number;
 	no: number;
 	head: number;
@@ -97,6 +100,7 @@ type TagChange = { set: string[] | null; add: string[]; remove: string[] };
 export type Resolved =
 	| {
 			op: "create";
+			kind: CaseKind;
 			body: CaseBody;
 			folder: FolderTarget;
 			tags: string[];
@@ -104,7 +108,16 @@ export type Resolved =
 			aliases: string[];
 			after: number | null;
 	  }
-	| { op: "edit"; caseId: number; base: number; head: number; mine: CaseBody; body: CaseBody; conflicts: Conflict[] }
+	| {
+			op: "edit";
+			caseId: number;
+			base: number;
+			head: number;
+			mine: CaseBody;
+			body: CaseBody;
+			conflicts: Conflict[];
+			exact?: boolean;
+	  }
 	| {
 			op: "place";
 			caseIds: number[];
@@ -147,6 +160,7 @@ const Q = {
 		"SELECT rank FROM cases WHERE project = $project AND folder = $folder AND rank > $rank ORDER BY rank LIMIT 1",
 	),
 	insertCase: sql<{
+		kind: CaseKind;
 		project: number;
 		no: number;
 		hash: string;
@@ -163,9 +177,9 @@ const Q = {
 		at: number;
 		rev: number;
 	}>(
-		`INSERT INTO cases (project, no, head, head_hash, claim_hash, title, methods, automate, step_count, folder, rank, tags,
+		`INSERT INTO cases (kind, project, no, head, head_hash, claim_hash, title, methods, automate, step_count, folder, rank, tags,
 		                    aliases, created_by, created_at, updated_by, updated_at, rev)
-		 VALUES ($project, $no, 1, $hash, $claim, $title, $methods, $automate, $steps, $folder, $rank, $tags, $aliases, $actor, $at, $actor, $at, $rev)`,
+		 VALUES ($kind, $project, $no, 1, $hash, $claim, $title, $methods, $automate, $steps, $folder, $rank, $tags, $aliases, $actor, $at, $actor, $at, $rev)`,
 	),
 	insertAlias: sql<{ project: number; alias: string; id: number }>(
 		"INSERT INTO case_aliases (project, alias, case_id) VALUES ($project, $alias, $id)",
@@ -397,6 +411,13 @@ export function cleanBody(input: PartialBody, base: CaseBody): CaseBody {
 	const taken = new Set<string>();
 	const steps: Step[] = [];
 	for (const step of input.steps ?? base.steps) {
+		if (step.use) {
+			let id = step.id;
+			if (!StepId.safeParse(id).success || taken.has(id)) id = newStepId(taken);
+			taken.add(id);
+			steps.push({ id, use: step.use, action: "", expected: null });
+			continue;
+		}
 		const action = step.action.trim();
 		const expected = step.expected?.trim() || null;
 		if (!action && !expected) continue;
@@ -468,6 +489,48 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 
 	for (const edit of input.edits) {
 		switch (edit.op) {
+			case "fragment": {
+				if (input.edits.length !== 1) throw invalid("a fragment batch must be the only edit");
+				const fragment = mustCase(ctx.db, ctx.project.id, edit.fragment);
+				if (fragment.kind !== "fragment") throw invalid("the target must be a fragment");
+				if (edit.from === edit.to) throw invalid("choose a different fragment version");
+				bodyOf(ctx.db, fragment.id, edit.from);
+				bodyOf(ctx.db, fragment.id, edit.to);
+				const selected = new Set<number>();
+				for (const consumer of edit.cases) {
+					const row = lookup(consumer.case);
+					if (selected.has(row.id)) throw invalid("a fragment batch names each case once");
+					selected.add(row.id);
+					if (row.head !== consumer.base) throw conflict(`${caseRef(row)} changed; redo the fragment batch`);
+					const base = bodyOf(ctx.db, row.id, row.head);
+					let changed = false;
+					const body = {
+						...base,
+						steps: base.steps.map((step): Step => {
+							if (step.use?.fragment !== caseRef(fragment) || step.use.version !== edit.from) return step;
+							changed = true;
+							return {
+								id: step.id,
+								action: "",
+								expected: null,
+								use: { fragment: caseRef(fragment), version: edit.to },
+							};
+						}),
+					};
+					if (!changed) throw conflict(`${caseRef(row)} does not use that fragment version`);
+					resolved.push({
+						op: "edit",
+						caseId: row.id,
+						base: row.head,
+						head: row.head,
+						mine: body,
+						body,
+						conflicts: [],
+						exact: true,
+					});
+				}
+				break;
+			}
 			case "create": {
 				const keptAliases = [
 					...new Set(
@@ -494,6 +557,7 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 				const folder = edit.folder ?? (after ? after.folder : DEFAULT_FOLDER);
 				resolved.push({
 					op: "create",
+					kind: edit.kind ?? (edit.md ? markdownKind(edit.md) : "case"),
 					body: cleanBody(built.body, emptyBody()),
 					folder: folderTarget(index, folder),
 					tags: cleanTags([...built.tags, ...(edit.tags ?? [])]),
@@ -506,6 +570,7 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 			case "edit": {
 				const row = lookup(edit.case);
 				if (edit.base < 1 || edit.base > row.head) throw invalid(`${caseRef(row)} has no version ${edit.base}`);
+				if (edit.md !== undefined && markdownKind(edit.md) !== row.kind) throw invalid("a case kind cannot be changed");
 				const base = bodyOf(ctx.db, row.id, edit.base);
 				const mine = cleanBody(edit.md !== undefined ? fromMarkdown(edit.md, base).body : (edit.body ?? {}), base);
 				const head = edit.base === row.head ? base : bodyOf(ctx.db, row.id, row.head);
@@ -603,6 +668,13 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 	if (resolved.length === 0) return null;
 	const policy = resolved.findLast((edit) => edit.op === "policy")?.policy ?? currentPolicy(ctx.db, ctx.project.id);
 	for (const edit of resolved) {
+		if (edit.op === "create" || edit.op === "edit" || edit.op === "restore")
+			validateFragments(
+				ctx.db,
+				ctx.project.id,
+				edit.body,
+				edit.op === "create" ? edit.kind : (caseById(ctx.db, edit.caseId)?.kind ?? "case"),
+			);
 		if (edit.op === "create" || edit.op === "restore") validateFields(edit.body, policy);
 		else if (edit.op === "edit") validateFields(edit.body, policy, bodyOf(ctx.db, edit.caseId, edit.head));
 	}
@@ -745,6 +817,7 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 	};
 	const writeVersion = (row: CaseRow, body: CaseBody, previous?: CaseBody) => {
 		validateFields(body, policy, previous);
+		validateFragments(ctx.db, ctx.project.id, body, row.kind);
 		const no = row.head + 1;
 		const hash = versionHash(body);
 		insertVersion(ctx, witness, proposal, row.id, no, row.head, body, hash);
@@ -756,7 +829,7 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 			title: body.title,
 			methods: JSON.stringify(body.methods),
 			automate: body.automate,
-			steps: body.steps.length,
+			steps: expandSteps(ctx.db, ctx.project.id, body).length,
 			actor: author,
 			at: ctx.now,
 			rev: ctx.seq,
@@ -778,11 +851,13 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 						throw conflict(`case alias ${alias} is already in use`);
 				}
 				validateFields(edit.body, policy);
+				validateFragments(ctx.db, ctx.project.id, edit.body, edit.kind ?? "case");
 				const folder = ensureFolder(ctx, edit.folder);
 				const rank = rankAfter(ctx, folder, edit.after);
 				const no = ctx.nextNo("case");
 				const hash = versionHash(edit.body);
 				const { lastId } = ctx.db.run(Q.insertCase, {
+					kind: edit.kind ?? "case",
 					project: ctx.project.id,
 					no,
 					hash,
@@ -790,7 +865,7 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 					title: edit.body.title,
 					methods: JSON.stringify(edit.body.methods),
 					automate: edit.body.automate,
-					steps: edit.body.steps.length,
+					steps: expandSteps(ctx.db, ctx.project.id, edit.body).length,
 					folder,
 					rank,
 					tags: JSON.stringify(edit.tags),
@@ -819,6 +894,7 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 						paths: edit.conflicts.map((c) => c.path),
 					});
 				}
+				if (edit.exact && row.head !== edit.head) throw conflict(`${caseRef(row)} changed; redo the fragment batch`);
 				if (row.head !== edit.head) {
 					const merge = mergeBodies({
 						base: bodyOf(ctx.db, row.id, edit.base),
@@ -1048,4 +1124,59 @@ function setCover(ctx: Ctx, witness: Witness, caseId: number, key: string, title
 	if (on)
 		ctx.db.run(Q.insertCover, { requirement: requirement.id, id: caseId, decision: decisionOf(witness, "adopt") });
 	else ctx.db.run(Q.dropCover, { requirement: requirement.id, id: caseId });
+}
+
+function markdownKind(md: string): CaseKind {
+	const parsed = parseCase(md);
+	if (!parsed.ok) throw invalid("the Markdown is not a valid case", { errors: parsed.errors });
+	return parsed.doc.kind ?? "case";
+}
+
+function validateFragments(db: Db, project: number, body: CaseBody, kind: CaseKind): void {
+	for (const step of body.steps) {
+		if (!step.use) continue;
+		if (kind === "fragment") throw invalid("fragments cannot include fragments");
+		const target = mustCase(db, project, step.use.fragment);
+		if (target.kind !== "fragment") throw invalid(`${step.use.fragment} is not a fragment`);
+		const pinned = bodyOf(db, target.id, step.use.version);
+		if (pinned.steps.some((part) => part.use)) throw invalid("fragments cannot include fragments");
+	}
+}
+
+/** Concrete steps carry occurrence-qualified ids so two uses of one fragment stay distinct in results. */
+export function expandSteps(db: Db, project: number, body: CaseBody): ExpandedStep[] {
+	return body.steps.flatMap((step): ExpandedStep[] => {
+		if (!step.use) return [{ id: step.id, action: step.action, expected: step.expected }];
+		const pin = step.use;
+		const target = mustCase(db, project, pin.fragment);
+		return bodyOf(db, target.id, pin.version).steps.map((part) => ({
+			id: `${step.id}.${part.id}`,
+			action: part.action,
+			expected: part.expected,
+			source: { ...pin, step: part.id, use: step.id },
+		}));
+	});
+}
+
+/** Uses come from current immutable bodies, including cases that opted to keep an older pin. */
+export function fragmentUsers(
+	db: Db,
+	project: number,
+	fragment: string,
+): { case: string; base: number; versions: number[] }[] {
+	return db
+		.allDynamic<{ no: number; head: number; body: string }>(
+			`SELECT c.no, c.head, v.body FROM cases c JOIN versions v ON v.case_id = c.id AND v.no = c.head
+		 WHERE c.project = ? AND EXISTS (SELECT 1 FROM json_each(v.body, '$.steps') s WHERE json_extract(s.value, '$.use.fragment') = ?) ORDER BY c.no`,
+			[project, fragment],
+		)
+		.map((row) => ({
+			case: `C-${row.no}`,
+			base: row.head,
+			versions: [
+				...new Set(
+					json<CaseBody>(row.body).steps.flatMap((step) => (step.use?.fragment === fragment ? [step.use.version] : [])),
+				),
+			],
+		}));
 }
