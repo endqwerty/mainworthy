@@ -26,6 +26,8 @@ public final class SignInForm {
 		self.onSignedIn = onSignedIn
 	}
 
+	public var privacyAddress: URL { instance.url.appending(path: "/privacy") }
+
 	public var canSubmit: Bool {
 		!isWorking && !name.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
 	}

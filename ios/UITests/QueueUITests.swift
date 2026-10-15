@@ -303,6 +303,56 @@ final class QueueUITests: XCTestCase {
 		shot("206-recorded-answer")
 	}
 
+	@MainActor func testPrivacyIsReachableBeforeAndAfterSignIn() async throws {
+		let instance = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+		let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+		func privacyOpenings() async throws -> [String] {
+			struct Reply: Decodable {
+				struct Openings: Decodable { var urls: [String] }
+				var result: Openings
+			}
+			var request = URLRequest(url: try XCTUnwrap(URL(string: "\(instance)/test/privacy-openings")))
+			request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+			let (data, response) = try await URLSession.shared.data(for: request)
+			XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+			return try JSONDecoder().decode(Reply.self, from: data).result.urls
+		}
+		func openPrivacy(_ row: XCUIElement) async throws {
+			let before = try await privacyOpenings().count
+			row.tap()
+			XCTAssertTrue(safari.wait(for: .runningForeground, timeout: 20))
+			// Check the URL the browser actually requested, before the shared docs route redirects it.
+			let deadline = Date().addingTimeInterval(20)
+			var opened = try await privacyOpenings()
+			while opened.count == before && Date() < deadline {
+				try await Task.sleep(for: .milliseconds(100))
+				opened = try await privacyOpenings()
+			}
+			XCTAssertEqual(Array(opened.dropFirst(before)), ["\(instance)/privacy"])
+		}
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", instance]
+		app.launch()
+		XCTAssertTrue(app.textFields["name"].waitForExistence(timeout: 20))
+		let privacy = app.descendants(matching: .any)["privacy"]
+		XCTAssertTrue(privacy.waitForExistence(timeout: 5))
+		XCTAssertEqual(privacy.label, "Privacy")
+		shot("privacy-sign-in")
+		try await openPrivacy(privacy)
+		safari.terminate()
+		app.activate()
+		try signIn(app)
+		app.tabBars.buttons["You"].tap()
+		XCTAssertTrue(app.staticTexts["Signed in"].waitForExistence(timeout: 5))
+		if !privacy.isHittable { app.swipeUp() }
+		XCTAssertTrue(privacy.waitForExistence(timeout: 5))
+		XCTAssertEqual(privacy.label, "Privacy")
+		shot("privacy-you")
+		try await openPrivacy(privacy)
+		safari.terminate()
+		app.activate()
+	}
+
 	@MainActor func testAPersonSignsInAnswersAQuestionAndTakesItBack() async throws {
 		let project = try await makeProject()
 		let app = XCUIApplication()

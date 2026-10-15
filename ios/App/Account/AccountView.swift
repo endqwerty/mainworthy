@@ -48,6 +48,8 @@ struct AccountView: View {
 						}
 					}
 					Link("Documentation", destination: workspace.docsAddress)
+					Link("Privacy", destination: workspace.privacyAddress)
+						.accessibilityIdentifier("privacy")
 					LabeledContent("Licence", value: "Apache License 2.0")
 					Link("Licences", destination: workspace.docsAddress.appending(path: "licence"))
 						.accessibilityIdentifier("licences")

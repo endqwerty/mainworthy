@@ -40,6 +40,9 @@ TestFlight opens for 90 days, and the TestFlight app shows when it ends.
 
 ## Sign in
 
+**Privacy** on the sign-in screen opens the instance's [privacy policy](./privacy.md) in your browser, without
+signing in. The same link is under **You**, **About**. A build for another instance opens that instance's `/privacy` page.
+
 The app signs in to `mainworthy.com`. It does not ask for an address. Before signing in, set a password in
 the web app under Settings, **Your sign-in**. The app does not accept tokens. Use tokens for scripts or pipelines.
 To sign in, follow these steps:
