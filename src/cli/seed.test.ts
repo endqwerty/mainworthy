@@ -2,6 +2,8 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { Client } from "./client.ts";
+import { demoCases } from "./demo/cases.ts";
+import { demoAliases } from "./demo/fields.ts";
 import { seed } from "./seed.ts";
 import { withInstance } from "./test-support.ts";
 
@@ -27,11 +29,20 @@ const Project = z.array(z.object({ key: z.string(), policy: z.string() }));
 
 const on = (client: Client, project: string) => new Client({ ...client.options, project });
 const dayOf = (at: number) => Math.floor(at / DAY);
+/** Every case's title, archived or not (the history archives two), in the order of the alphabet. */
 const titlesOf = async (client: Client) =>
-	z
-		.array(Case)
-		.parse((await client.call("find", { limit: 500 })).items)
-		.map((item) => item.title);
+	(
+		await Promise.all(
+			["active", "archived"].map(async (state) =>
+				z
+					.array(Case)
+					.parse((await client.call("find", { state, limit: 500 })).items)
+					.map((item) => item.title),
+			),
+		)
+	)
+		.flat()
+		.sort();
 
 test("a seeded project holds a suite in folders, a fortnight of history and five questions for today", async () => {
 	await withInstance(async ({ client }) => {
@@ -98,6 +109,36 @@ test("a seeded project holds a suite in folders, a fortnight of history and five
 			expect(item.decision?.at).toBeLessThan(before);
 		}
 		expect(new Set(answered.map((item) => dayOf(item.openedAt))).size).toBeGreaterThan(3);
+
+		// Today's failure carries the trace its test runner wrote.
+		const failed = z
+			.array(z.object({ t: z.string(), id: z.number().optional(), outcome: z.string().optional() }))
+			.parse((await demo.call("timeline", { ref: "C-1", limit: 50 })).entries)
+			.find((entry) => entry.t === "result" && entry.outcome === "fail");
+		expect(JSON.stringify(await demo.call("attachment", { result: failed?.id ?? 0 }))).toContain('"trace.txt"');
+		// The pull requests of those days merged, and an ended change is not asked about; today's is open.
+		const changes = z
+			.array(z.object({ key: z.string(), state: z.string() }))
+			.parse((await demo.call("find", { in: "changes", limit: 100 })).items);
+		expect(changes.find((change) => change.key === "pr:482")?.state).toBe("open");
+		const ended = changes.filter((change) => change.key !== "pr:482");
+		expect(ended.length).toBeGreaterThan(5);
+		expect(ended.every((change) => change.state === "merged")).toBe(true);
+		// The project's own fields, set on its cases; two cases archived; the back office's TestRail ids.
+		const policy = z
+			.object({ settings: z.object({ fields: z.record(z.string(), z.unknown()) }) })
+			.parse(await client.call("admin", { do: "policy.show", project: "demo" }));
+		expect(Object.keys(policy.settings.fields)).toEqual(["priority", "team"]);
+		expect(JSON.stringify(await demo.call("get", { refs: ["C-2"], as: "md" }))).toMatch(/priority: P[123]/);
+		// A demo this small has no case that a run or an edit leaves alone, so nothing is archived (history.test.ts).
+		expect((await demo.call("find", { state: "archived" })).items).toHaveLength(0);
+		const suite = demoCases(1, 120);
+		const imported = suite.flatMap((item, index) => demoAliases(item, index));
+		expect(imported.length).toBeGreaterThan(0);
+		const [alias] = imported;
+		expect(z.array(z.object({ ref: z.string() })).parse(await demo.call("get", { refs: [alias ?? ""] }))).toHaveLength(
+			1,
+		);
 
 		expect(Project.parse(await client.call("admin", { do: "project.list" })).find((row) => row.key === "demo")).toEqual(
 			{

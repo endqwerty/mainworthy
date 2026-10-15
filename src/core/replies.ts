@@ -367,7 +367,7 @@ export const AdminReply = z.union([
 	TeamReply,
 	z.looseObject({ key: text, name: text, policy: text }),
 	z.array(Project),
-	z.looseObject({ actor: text, token: text, can: texts, expiresAt: number.nullable(), note: text }),
+	z.looseObject({ id: whole, actor: text, token: text, can: texts, expiresAt: number.nullable(), note: text }),
 	z.array(
 		z.looseObject({
 			id: whole,

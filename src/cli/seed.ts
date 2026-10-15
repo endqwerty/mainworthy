@@ -4,9 +4,10 @@
 // `src/cli/demo/` from a seed; this file sends it, each request with the time it happened at.
 import { z } from "zod";
 import type { Api } from "../core/api.ts";
-import type { ActorKind, Capability } from "../core/kinds.ts";
+import { type ActorKind, type Capability, PolicySettings } from "../core/kinds.ts";
 import type { Client } from "./client.ts";
 import { type DemoCase, demoCases, random } from "./demo/cases.ts";
+import { DEMO_FIELDS, demoAliases, demoFields } from "./demo/fields.ts";
 import { dayStart, demoHistory, type Failure, hex, REPO } from "./demo/history.ts";
 import { CliError } from "./errors.ts";
 
@@ -56,7 +57,9 @@ export function unitTests(files: number): Api["report"]["input"]["results"] {
 
 const Projects = z.array(z.object({ key: z.string() }));
 const Actors = z.array(z.object({ name: z.string(), kind: z.string() }));
-const Token = z.object({ token: z.string() });
+const Token = z.object({ id: z.number(), token: z.string() });
+const PolicyShown = z.object({ version: z.number(), settings: PolicySettings });
+const Proposed = z.object({ question: z.string().nullable() });
 const Demo = z.object({ since: z.number() });
 const Question = z.object({ q: z.string(), state: z.string(), evidenceHash: z.string() });
 const UnlinkedTest = z.object({ ref: z.string(), key: z.string(), file: z.string() });
@@ -84,13 +87,22 @@ type Result = Api["report"]["input"]["results"][number];
  * the two tokens again.
  *
  * What can refuse the caller comes first, so nothing is made for a seed that cannot be finished. The pipeline
- * and the agent are given a grant on this project alone, and their tokens end after an hour: the secrets are
- * dropped here, and nothing that could still sign in is left behind.
+ * and the agent are given a grant on this project alone, and their tokens are revoked when the seed ends, or end
+ * after an hour if it stops first: nothing that could still sign in is left behind.
  */
-export async function seed(
-	client: Client,
-	options: { project: string; cases: number; seed?: number; days?: number; unlinkedFiles?: number },
-): Promise<SeedResult> {
+export async function seed(client: Client, options: SeedOptions): Promise<SeedResult> {
+	const issued: number[] = [];
+	try {
+		return await fill(client, options, issued);
+	} finally {
+		await revokeProducers(client.with({ project: options.project }), issued);
+	}
+}
+
+type SeedOptions = { project: string; cases: number; seed?: number; days?: number; unlinkedFiles?: number };
+
+/** What `seed` writes. */
+async function fill(client: Client, options: SeedOptions, issued: number[]): Promise<SeedResult> {
 	const { project, cases, unlinkedFiles = 0 } = options;
 	const seedNumber = options.seed ?? DEFAULT_SEED;
 	const days = options.days ?? DEFAULT_SEED_DAYS;
@@ -108,16 +120,8 @@ export async function seed(
 	const as = (token: string | undefined) => client.with({ token, project });
 	const owner = as(client.options.token);
 	const id = (step: string) => `demo-${project}-${step}-v2`;
-	const actors = Actors.parse(await owner.call("admin", { do: "actor.list" }));
+	const actors = await refuseProducers(owner);
 	const known = (producer: Producer) => actors.find((row) => row.name === producer.actor);
-	for (const producer of [PIPELINE, REVIEWER]) {
-		const kind = known(producer)?.kind ?? producer.kind;
-		if (kind !== producer.kind)
-			throw new CliError(
-				"conflict",
-				`actor ${producer.actor} exists and is a ${kind}, not a ${producer.kind}: the demo needs that name`,
-			);
-	}
 	const exists = Projects.parse(await owner.call("admin", { do: "project.list" })).some((row) => row.key === project);
 	if (!exists) await owner.call("admin", { do: "project.create", key: project });
 	const begun = exists && (await owner.call("command", { cmd: id("folders") })).state !== "none";
@@ -134,11 +138,15 @@ export async function seed(
 		}),
 	);
 	const signIn = async (producer: Producer) => {
-		const { actor, kind, can, label } = producer;
+		const { actor, kind, can } = producer;
+		const label = labelOf(producer, project);
 		// A new token names the grant its actor holds. An actor from an earlier seed is given this project's first.
 		if (known(producer)) await owner.call("admin", { do: "grant.set", actor, project, can });
-		const made = await owner.call("admin", { do: "token.create", actor, kind, can, project, label, expires: "1h" });
-		return as(Token.parse(made).token);
+		const token = Token.parse(
+			await owner.call("admin", { do: "token.create", actor, kind, can, project, label, expires: "1h" }),
+		);
+		issued.push(token.id);
+		return as(token.token);
 	};
 	const ci = await signIn(PIPELINE);
 	const agent = await signIn(REVIEWER);
@@ -148,7 +156,7 @@ export async function seed(
 	 * a seed sent again with other cases, another seed or other days is another request, and is refused here in
 	 * words about the seed.
 	 */
-	const write = async <N extends "propose" | "report" | "claim" | "plan" | "decide">(
+	const write = async <N extends "propose" | "report" | "claim" | "plan" | "decide" | "change">(
 		who: Client,
 		op: N,
 		step: string,
@@ -188,6 +196,20 @@ export async function seed(
 		edits: [{ op: "policy", preset: "standard", unlinked: "ask" }],
 	});
 	if (policy.question) await answer([policy.question], "standard-yes", suiteAt - MINUTE, { answer: { is: "accept" } });
+	// The project's own fields, defined on the policy in force (decision 0052). The edit is built from what is in
+	// force, so a seed sent again reads the reply the first one was given instead of sending it again, and answers
+	// its question if that one stopped before it did.
+	const sent = await owner.call("command", { cmd: id("fields") });
+	let fields: z.infer<typeof Proposed>;
+	if (sent.state === "done") fields = Proposed.parse(sent.reply);
+	else {
+		const current = PolicyShown.parse(await owner.call("admin", { do: "policy.show", project }));
+		fields = await write(owner, "propose", "fields", suiteAt - MINUTE / 2, {
+			edits: [{ op: "policy", base: current.version, settings: { ...current.settings, fields: DEMO_FIELDS } }],
+		});
+	}
+	if (fields.question)
+		await answer([fields.question], "fields-yes", suiteAt - MINUTE / 2, { answer: { is: "accept" } });
 	const folders = [...new Set(suite.map((item) => item.folder))];
 	const made = new Set<string>();
 	const folderEdits: Api["propose"]["input"]["edits"] = [];
@@ -203,19 +225,24 @@ export async function seed(
 	await write(owner, "propose", "folders", suiteAt, { edits: folderEdits });
 	const refs: string[] = [];
 	for (let offset = 0; offset < cases; offset += 250) {
-		const edits: Api["propose"]["input"]["edits"] = suite.slice(offset, offset + 250).map((item) => ({
-			op: "create",
-			folder: item.folder,
-			tags: item.tags,
-			body: {
-				title: item.title,
-				pre: item.pre,
-				methods: ["human", "auto", "agent"],
-				automate: "none",
-				fields: {},
-				steps: item.steps,
-			},
-		}));
+		const edits: Api["propose"]["input"]["edits"] = suite.slice(offset, offset + 250).map((item, n) => {
+			const aliases = demoAliases(item, offset + n);
+			return {
+				op: "create",
+				folder: item.folder,
+				tags: item.tags,
+				...(aliases.length > 0 ? { aliases } : {}),
+				body: {
+					title: item.title,
+					pre: item.pre,
+					methods: ["human", "auto", "agent"],
+					automate: "none",
+					// The first case is the one today's questions are about, and the tests of the web app read it.
+					fields: offset + n === 0 ? {} : demoFields(item),
+					steps: item.steps,
+				},
+			};
+		});
 		const at = suiteAt + Math.min((offset / 250) * 5_000, 25 * MINUTE);
 		const reply = await write(owner, "propose", `cases-${offset}`, at, { edits });
 		refs.push(...reply.cases.map((item) => item.ref));
@@ -235,7 +262,7 @@ export async function seed(
 
 	// ── What a pipeline reports: every automated case, each as the test that covers it. ──
 	const tests = suite.flatMap((item, index) => (item.test ? [{ index, test: item.test }] : []));
-	const pipelineResults = (failures: readonly Failure[], jitter: number): Result[] =>
+	const pipelineResults = (failures: readonly Failure[], jitter: number, attach = false): Result[] =>
 		tests.map(({ index, test }, n) => {
 			const failure = failures.find((item) => item.case === index);
 			return {
@@ -243,6 +270,8 @@ export async function seed(
 				outcome: failure ? "fail" : "pass",
 				durationMs: Math.round((300 + ((n * 7919) % 4200)) * (0.85 + jitter * 0.3)),
 				...(failure ? { failure: { message: failure.message } } : {}),
+				// Today's failure carries the trace the test runner wrote, as a pipeline attaches it.
+				...(failure && attach ? { attachments: [traceOf(test.name, failure.message)] } : {}),
 				annotation: { case: refOf(index), version: 1 },
 			} satisfies Result;
 		});
@@ -350,6 +379,15 @@ export async function seed(
 				});
 				break;
 			}
+			case "end":
+				await write(ci, "change", event.step, event.at, { change: `pr:${event.pr}`, state: "merged" });
+				break;
+			case "archive":
+				await write(owner, "propose", event.step, event.at, {
+					reason: event.reason,
+					edits: [{ op: "state", cases: event.cases.map(refOf), to: "archived" }],
+				});
+				break;
 			case "review": {
 				const on = caseOf(event.finding.case).steps[0]?.id;
 				const claimed = await write(agent, "claim", event.step, event.at, {
@@ -387,7 +425,7 @@ export async function seed(
 	await write(ci, "report", "red", since - 3 * HOUR, {
 		target: { commit: red, repo: REPO, branch: "main" },
 		job: "shop",
-		results: pipelineResults(broken, 0.4),
+		results: pipelineResults(broken, 0.4, true),
 	});
 	await write(ci, "report", "pr", since - 2 * HOUR, {
 		target: {
@@ -400,7 +438,7 @@ export async function seed(
 			files: ["src/checkout.ts", "src/shipping.ts"],
 		},
 		job: "shop",
-		results: pipelineResults(broken, 0.6),
+		results: pipelineResults(broken, 0.6, true),
 	});
 	const checkout = suite.flatMap((item, index) => (item.folder.startsWith("Checkout") ? [refOf(index)] : []));
 	const planned = await write(owner, "plan", "run", since - 90 * MINUTE, {
@@ -466,6 +504,60 @@ export async function seed(
 		cursor = page.cursor;
 	}
 	return { cases: refs, run: planned.run, proposal: proposal.proposal, questions };
+}
+
+/**
+ * The demo's own pipeline and agent. What they may do on the demo is part of it: the seed sets their grants there
+ * each time it runs, to what it needs to write the demo.
+ */
+export const DEMO_ACTORS: readonly string[] = [PIPELINE.actor, REVIEWER.actor];
+
+/** The trace a test runner writes for a failing test, as a text file to attach to its result. */
+function traceOf(name: string, message: string): { name: string; data: string } {
+	const trace = [
+		`Test: ${name}`,
+		"",
+		"  ✓ open the cart with one $100.00 item (412 ms)",
+		"  ✓ apply the coupon (238 ms)",
+		`  ✗ check the total (5003 ms)`,
+		"",
+		`Error: ${message}`,
+		'  Locator: getByTestId("cart-total")',
+		"  at tests/e2e/checkout.spec.ts:42:38",
+		"",
+		"Console:",
+		"  [warn] coupon service answered 304 Not Modified",
+		"  [info] total recalculated from cached prices",
+	].join("\n");
+	return { name: "trace.txt", data: Buffer.from(trace).toString("base64") };
+}
+
+/** The label of a producer's token names the project, so the token list says which demo it was made for. */
+const labelOf = (producer: Producer, project: string) => `${producer.label} for ${project}`;
+
+/**
+ * Revokes the tokens this seed made for its pipeline and agent, by the ids `token.create` gave it: they stop working
+ * with the seed, and no other token is touched. A seed that stops before this leaves tokens that end within the hour.
+ */
+async function revokeProducers(owner: Client, issued: readonly number[]): Promise<void> {
+	for (const id of issued) await owner.call("admin", { do: "token.revoke", id }).catch(() => undefined);
+}
+
+/**
+ * Refuses a seed that could not finish because the name of its pipeline or its agent is somebody else's, before it
+ * writes anything. Returns the instance's actors.
+ */
+export async function refuseProducers(client: Client): Promise<z.infer<typeof Actors>> {
+	const actors = Actors.parse(await client.call("admin", { do: "actor.list" }));
+	for (const producer of [PIPELINE, REVIEWER]) {
+		const kind = actors.find((row) => row.name === producer.actor)?.kind ?? producer.kind;
+		if (kind !== producer.kind)
+			throw new CliError(
+				"conflict",
+				`actor ${producer.actor} exists and is a ${kind}, not a ${producer.kind}: the demo needs that name`,
+			);
+	}
+	return actors;
 }
 
 /** Whether the project holds anything a person, a pipeline or an agent put there. */

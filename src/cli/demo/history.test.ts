@@ -114,6 +114,30 @@ describe("the demo's history", () => {
 		}
 	});
 
+	test("every pull request but today's merges after its last report, and two cases nothing else uses are archived", () => {
+		const events = history();
+		const ends = of(events, "end");
+		const numbers = [...new Set(of(events, "pipeline").flatMap((event) => event.target.pr ?? []))];
+		expect(ends.map((event) => event.pr).sort()).toEqual(numbers.sort());
+		for (const end of ends) {
+			const last = of(events, "pipeline")
+				.filter((event) => event.target.pr === end.pr)
+				.at(-1);
+			expect(end.at).toBeGreaterThan(last?.at ?? Number.POSITIVE_INFINITY);
+		}
+		const [archive, ...more] = of(events, "archive");
+		expect(more).toEqual([]);
+		expect(archive?.cases).toHaveLength(2);
+		const used = new Set([
+			...of(events, "edit").map((event) => event.case),
+			...of(events, "plan").flatMap((event) => event.cases),
+		]);
+		for (const index of archive?.cases ?? []) {
+			expect(suite[index]?.test).toBeNull();
+			expect(used.has(index)).toBe(false);
+		}
+	});
+
 	test("a demo of one case has a history too", () => {
 		const tiny = demoCases(1, 1);
 		const events = history(14, 1, tiny);
