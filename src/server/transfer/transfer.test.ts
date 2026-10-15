@@ -163,6 +163,7 @@ const fixtures: Record<string, Row[]> = {
 			repo: null,
 			base_sha: null,
 			head_sha: null,
+			head_observed_seq: 2,
 			branch: "",
 			title: "",
 			url: null,
@@ -832,6 +833,45 @@ describe("Mainworthy instance archives", () => {
 		const result = importArchive(to, linesOf(archive(from)));
 		expect(result.tables["future 'table"]).toBe(1);
 		expect(dump(to)).toEqual(dump(from));
+	});
+
+	test("an older archive fills added nullable columns with NULL, even with defaults", () => {
+		const from = source();
+		const to = target();
+		to.raw.exec(
+			"ALTER TABLE cases ADD COLUMN later_note TEXT DEFAULT 'new'; ALTER TABLE cases ADD COLUMN later_count INTEGER",
+		);
+		importArchive(to, linesOf(archive(from)));
+		expect(to.raw.query("SELECT later_note, later_count FROM cases WHERE id = 101").get()).toEqual({
+			later_note: null,
+			later_count: null,
+		});
+		expect(to.raw.query("SELECT title FROM cases WHERE id = 101").get()).toEqual(
+			from.raw.query("SELECT title FROM cases WHERE id = 101").get(),
+		);
+	});
+
+	test("an archive from before head observations leaves the observation unset", () => {
+		const to = target();
+		const old = rehash(archive(source()).replace(',"head_observed_seq":2', ""));
+		expect(old).not.toContain('"head_observed_seq"');
+		importArchive(to, linesOf(old));
+		expect(to.raw.query("SELECT key, head_observed_seq FROM changes WHERE id = 503").get()).toEqual({
+			key: "change-one",
+			head_observed_seq: null,
+		});
+	});
+
+	test("a missing required column is refused rather than using a default", () => {
+		const to = target();
+		to.raw.exec("ALTER TABLE cases ADD COLUMN required_note TEXT NOT NULL DEFAULT 'new'");
+		const before = allRows(to);
+		expect(() => importArchive(to, linesOf(archive(source())))).toThrow("missing column cases.required_note");
+		expect(allRows(to)).toEqual(before);
+	});
+
+	test("a missing primary key is refused rather than assigned a new identity", () => {
+		refuse(rehash(archive(source()).replace('"id":101,', "")), /missing column cases.id/);
 	});
 
 	test("SQLite table and column names that match object prototypes remain lossless", () => {

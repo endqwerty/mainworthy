@@ -366,6 +366,140 @@ describe("what a result may prove", () => {
 		expect(gate({ change: "pr:12" })).toMatchObject({ verdict: "blocked", run: gate({ commit: "head0002" }).run });
 	});
 
+	test("a code host head follows a reset and still ignores ordinary late reports", () => {
+		const old = ciReport({ commit: "head0001", branch: "feature", pr: 12, n: 1 });
+		const newer = ciReport({ commit: "head0002", branch: "feature", pr: 12, n: 1, fail: { 0: "defect" } });
+		report(old);
+		report(newer);
+		const reset = { ...old, target: { ...old.target, head: "head0001" } };
+		report(reset);
+		expect(gate({ change: "pr:12" })).toMatchObject({ verdict: "passed", run: gate({ commit: "head0001" }).run });
+		report({ ...newer, job: "late" });
+		expect(gate({ change: "pr:12" }).verdict).toBe("passed");
+		report({ ...newer, target: { ...newer.target, head: "head0002" } });
+		expect(gate({ change: "pr:12" }).verdict).toBe("blocked");
+		expect(report(reset).fresh).toBe(false);
+		expect(gate({ change: "pr:12" }).verdict).toBe("blocked");
+	});
+
+	test("a new CI build with identical results can observe a reset, while retries cannot", () => {
+		const old = ciReport({ commit: "head0001", branch: "feature", pr: 12, n: 1, job: "test", attempt: 1 });
+		const first = { ...old, target: { ...old.target, head: "head0001" }, buildUrl: "https://ci.example/runs/1" };
+		const newer = ciReport({
+			commit: "head0002",
+			branch: "feature",
+			pr: 12,
+			n: 1,
+			job: "test",
+			attempt: 1,
+			fail: { 0: "defect" },
+		});
+		const second = { ...newer, target: { ...newer.target, head: "head0002" }, buildUrl: "https://ci.example/runs/2" };
+		report(first);
+		report(second);
+		expect(gate({ change: "pr:12" }).verdict).toBe("blocked");
+		expect(report(first).fresh).toBe(false);
+		expect(gate({ change: "pr:12" }).verdict).toBe("blocked");
+		const reset = { ...first, buildUrl: "https://ci.example/runs/3" };
+		expect(report(reset).fresh).toBe(true);
+		expect(gate({ change: "pr:12" })).toMatchObject({ verdict: "passed", run: gate({ commit: "head0001" }).run });
+		expect(report(reset).fresh).toBe(false);
+		expect(report(second).fresh).toBe(false);
+		expect(gate({ change: "pr:12" }).verdict).toBe("passed");
+		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 3 }]);
+	});
+
+	test("without a head, changing the build URL still deduplicates identical reports", () => {
+		const old = ciReport({ commit: "head0001", branch: "feature", n: 1 });
+		report({ ...old, buildUrl: "https://ci.example/runs/1" });
+		expect(report({ ...old, buildUrl: "https://ci.example/runs/2" }).fresh).toBe(false);
+		expect(gate({ change: "branch:feature" }).verdict).toBe("passed");
+		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 1 }]);
+	});
+
+	test("ordinary metadata updates preserve first-reported commit ordering", () => {
+		const old = ciReport({ commit: "head0001", branch: "feature", n: 1 });
+		report(old);
+		report(ciReport({ commit: "head0002", branch: "elsewhere", n: 1 }));
+		report({ ...old, job: "metadata", target: { ...old.target, title: "Updated title" } });
+		report(ciReport({ commit: "head0002", branch: "feature", n: 1 }));
+		expect(gate({ change: "branch:feature" }).run).toBe(gate({ commit: "head0002" }).run);
+	});
+
+	test("the reported head is separate from the tested commit and stays pending without evidence", () => {
+		const old = ciReport({ commit: "head0001", branch: "feature", n: 1 });
+		report(old);
+		report({ ...old, target: { ...old.target, head: "unseen01" } });
+		expect(gate({ change: "branch:feature" })).toMatchObject({ verdict: "pending", run: null });
+		expect(gate({ commit: "head0001" }).verdict).toBe("passed");
+		report({ ...old, job: "late" });
+		expect(gate({ change: "branch:feature" }).verdict).toBe("pending");
+		report(ciReport({ commit: "unseen01", branch: "feature", n: 1 }));
+		expect(gate({ change: "branch:feature" })).toMatchObject({
+			verdict: "passed",
+			run: gate({ commit: "unseen01" }).run,
+		});
+		report(ciReport({ commit: "future01", branch: "feature", n: 1 }));
+		expect(gate({ change: "branch:feature" }).run).toBe(gate({ commit: "future01" }).run);
+	});
+
+	test("a head observation protects the current head even when its hash is unchanged", () => {
+		const old = ciReport({ commit: "head0001", branch: "feature", n: 1 });
+		report(old);
+		report(ciReport({ commit: "head0002", branch: "elsewhere", n: 1 }));
+		report({ ...old, target: { ...old.target, head: "head0001" } });
+		report(ciReport({ commit: "head0002", branch: "feature", n: 1, job: "late" }));
+		expect(gate({ change: "branch:feature" }).run).toBe(gate({ commit: "head0001" }).run);
+	});
+
+	test("head observations are scoped to their repository and an agent cannot change them", () => {
+		const old = ciReport({ commit: "head0001", branch: "feature", pr: 12, n: 1 });
+		for (const repo of ["acme/web", "acme/other"]) {
+			report({ ...old, target: { ...old.target, repo } });
+			report({ ...old, target: { ...old.target, repo, commit: "head0002" } });
+		}
+		report({ ...old, target: { ...old.target, head: "head0001" } });
+		expect(gate({ change: "pr:12" }).run).toBe(gate({ commit: "head0001", repo: "acme/web" }).run);
+		expect(gate({ change: "acme/other#pr:12" }).run).toBe(gate({ commit: "head0002", repo: "acme/other" }).run);
+		report({ ...old, target: { ...old.target, head: "head0002" } }, h.actor("reviewer", "agent", ["read", "produce"]));
+		expect(gate({ change: "pr:12" }).run).toBe(gate({ commit: "head0001", repo: "acme/web" }).run);
+		report({ ...old, target: { ...old.target, head: "head0002" } }, h.actor("pipeline", "ci", ["record"]));
+		expect(gate({ change: "pr:12" }).run).toBe(gate({ commit: "head0002", repo: "acme/web" }).run);
+	});
+
+	test("a new observation can return to the same head without replaying an earlier observation", () => {
+		const old = ciReport({ commit: "head0001", branch: "feature", pr: 12, n: 1 });
+		const observed = { ...old, target: { ...old.target, head: "head0001" } };
+		report(observed);
+		report({ ...old, target: { ...old.target, head: "head0002" } });
+		expect(report(observed).fresh).toBe(false);
+		expect(gate({ change: "pr:12" }).verdict).toBe("pending");
+		expect(report({ ...observed, cmd: "fresh-head-observation" }).fresh).toBe(true);
+		expect(gate({ change: "pr:12" }).verdict).toBe("passed");
+	});
+
+	test("the same head observation on two pull requests is not a duplicate", () => {
+		const old = ciReport({ commit: "head0001", branch: "feature", pr: 12, n: 1 });
+		const observed = { ...old, target: { ...old.target, head: "head0001" } };
+		report(observed);
+		expect(report({ ...observed, target: { ...observed.target, pr: 13 } }).fresh).toBe(true);
+		expect(gate({ change: "pr:13" }).run).toBe(gate({ commit: "head0001" }).run);
+	});
+
+	test("a head observation needs a change and a valid commit identifier", () => {
+		const old = ciReport({ commit: "head0001", n: 1 });
+		for (const target of [
+			{ ...old.target, head: "short" },
+			{ ...old.target, head: "x".repeat(65) },
+			{ ...old.target, head: "head0001" },
+			{ commit: "head0001", head: "head0001" },
+			{ session: "manual", head: "head0001" },
+		]) {
+			expect(h.raw("report", { ...old, target })).toMatchObject({ ok: false, error: { code: "invalid" } });
+		}
+		expect(rows("SELECT count(*) AS n FROM batches")).toEqual([{ n: 0 }]);
+	});
+
 	test("in a slot, another test's pass or an older attempt does not hide a failure", () => {
 		seed();
 		const two = plan({ name: "two linked tests", select: {}, accepts: { commit: "slot0001" } });

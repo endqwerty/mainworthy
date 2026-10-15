@@ -104,12 +104,13 @@ Propose cases at their base version. Status: adopted=current, open=needs accepta
 
 ## report
 
-Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref.
+Report results for tested `target` or planned `run`.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `target` | `object` | no | What was tested. Required unless `run` is given. |
 | `target[1].commit` | `string` | yes |  |
+| `target[1].head` | `string` | no | Current code host head. |
 | `target[1].repo` | `string` | no |  |
 | `target[1].branch` | `string` | no |  |
 | `target[1].env` | `string` | no |  |

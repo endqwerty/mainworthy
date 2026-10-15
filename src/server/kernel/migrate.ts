@@ -10,14 +10,16 @@ import trackerRequests from "./migrations/0006_tracker_requests.sql" with { type
 import nothingRequired from "./migrations/0007_nothing_required.sql" with { type: "text" };
 import scopeMoves from "./migrations/0008_scope_moves.sql" with { type: "text" };
 import demoProjects from "./migrations/0009_demo_projects.sql" with { type: "text" };
+import changeHead from "./migrations/0010_change_head.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
  * Versions are contiguous from 1, and a branch takes the next free number when it lands.
  *
- * `archive` says whether the migration changes what an archive holds: a table or a column of the tables an export
- * writes. One that only adds a table an archive leaves out (`sessions`), or columns to one (`tokens`), does not,
- * and an archive taken before it still imports after it.
+ * `archive` says whether the migration breaks archive replay. Changes only to excluded tables do not. Adding
+ * nullable, non-key columns without a non-NULL default can stay compatible: import fills missing columns with NULL.
+ * Mark such an addition false only when NULL preserves the earlier behavior. Backfills and other data writes to
+ * exported tables require a new archive version, even when the table shape stays the same.
  */
 export const MIGRATIONS: readonly { version: number; name: string; sql: string; archive: boolean }[] = [
 	{ version: 1, name: "init", sql: init, archive: true },
@@ -29,12 +31,13 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 7, name: "nothing_required", sql: nothingRequired, archive: true },
 	{ version: 8, name: "scope_moves", sql: scopeMoves, archive: false },
 	{ version: 9, name: "demo_projects", sql: demoProjects, archive: false },
+	{ version: 10, name: "change_head", sql: changeHead, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
 
 /**
- * The version of what an archive holds: the last migration that changed it. An export writes this number and an
+ * The archive version: the last migration that broke replay of earlier archives. An export writes this number and an
  * import requires it, so the database's schema can move on without refusing every archive taken before.
  */
 export const ARCHIVE_VERSION = MIGRATIONS.findLast((migration) => migration.archive)?.version ?? 0;

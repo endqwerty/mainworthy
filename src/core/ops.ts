@@ -176,6 +176,7 @@ export type ResultIn = z.infer<typeof ResultIn>;
 export const TargetIn = z.union([
 	z.object({
 		commit: z.string().min(7).max(64),
+		head: z.string().min(7).max(64).optional().describe("Current code host head."),
 		repo: z.string().max(200).optional(),
 		branch: z.string().max(200).optional(),
 		env: z.string().max(60).optional(),
@@ -185,7 +186,7 @@ export const TargetIn = z.union([
 		url: z.string().max(500).optional(),
 		files: z.array(z.string()).max(5000).optional().describe("Paths the change touches, for impact."),
 	}),
-	z.object({ session: z.string().min(1).max(120) }),
+	z.strictObject({ session: z.string().min(1).max(120) }),
 ]);
 export type TargetIn = z.infer<typeof TargetIn>;
 

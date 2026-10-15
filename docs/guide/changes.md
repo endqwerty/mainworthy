@@ -18,8 +18,12 @@ See [the keyboard guide](./keyboard.md) for navigation keys.
 
 A report identifies the tested commit. Branch or pull request metadata groups
 commits into a change. For example, `pr:482` identifies a pull request.
-The change shows the latest counted commit's gate. A commit gate names one commit.
+The change shows its head commit's gate. A commit gate names one commit.
 An older report arriving late does not move the change back to an earlier commit.
+A report can also carry the current head read from the code host, so a reset or force-push
+can move the change back. That head's gate stays pending until it has counted evidence.
+See [report results](./report-results.md#follow-a-branch-reset) for `--head` and `target.head`.
+
 A commit first reported by hash alone gains its scope when a pipeline or person later
 names its branch or pull request, unless someone has typed a result for that commit.
 Typed results keep their scope, question ids and answers. Otherwise, former answers
@@ -121,6 +125,11 @@ A different merge or rebased hash does not move the original head. Omitting `lan
 only ends the change. It can be supplied later by repeating `merged` with the metadata.
 `landing.branch` takes `main`, `master` or `trunk`. Reopening a change does not move a
 commit back from trunk.
+
+A later report with a code-host head can move even an ended change's recorded head
+in either direction. The change stays ended, and its gate follows that head. This does
+not move the landed commit back from trunk: its evidence and failures still count there.
+Migration 0009 stores head observations without changing archive schema 7.
 
 What stays as it was:
 

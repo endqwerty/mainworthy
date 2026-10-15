@@ -1159,6 +1159,42 @@ describe("a change that ends", () => {
 		expect(count("runs")).toBe(1);
 	});
 
+	test("a code host head can move an ended change back without undoing its landing", () => {
+		const old = ciReport({ commit: "landold01", branch: "feature", pr: 68, n: 1 });
+		const landed = ciReport({ commit: "landnew01", branch: "feature", pr: 68, n: 1, fail: { 0: "defect" } });
+		h.call("report", old);
+		h.call("report", landed);
+		h.call("change", { change: "pr:68", state: "merged", landing: { commit: "landnew01", branch: "main" } });
+		const trunkGate = gate("landnew01");
+		expect(trunkGate.verdict).toBe("blocked");
+		expect(first(queue().items).evidence.scope).toBe("line:trunk@acme/web");
+
+		const reset = { ...landed, job: "head-after-landing", target: { ...landed.target, head: "landold01" } };
+		expect(h.call<ReportReceipt>("report", reset).fresh).toBe(true);
+		expect(h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({
+			run: gate("landold01").run,
+			verdict: "passed",
+		});
+		expect(h.app.db.raw.query("SELECT head_sha FROM changes WHERE key = 'pr:68'").get()).toEqual({
+			head_sha: "landold01",
+		});
+		expect(h.app.db.raw.query("SELECT ended FROM change_ends").all()).toEqual([{ ended: "merged" }]);
+		h.call("report", { ...landed, job: "late-after-reset", target: { ...landed.target, env: "two" } });
+		expect(h.call<GateStatus>("gate", { change: "pr:68" }).run).toBe(gate("landold01").run);
+		expect(h.app.db.raw.query("SELECT line, branch, change FROM targets WHERE commit_sha = 'landnew01'").all()).toEqual(
+			[
+				{ line: "trunk", branch: "main", change: null },
+				{ line: "trunk", branch: "main", change: null },
+			],
+		);
+		expect(gate("landnew01")).toMatchObject({ run: trunkGate.run, verdict: "blocked", tally: { unexplained: 3 } });
+		expect(queue().items.map((q) => q.evidence.scope)).toEqual(["line:trunk@acme/web"]);
+		expect(count("scope_moves")).toBe(1);
+		h.call("report", { ...landed, job: "head-forward", target: { ...landed.target, head: "landnew01" } });
+		expect(h.call<ReportReceipt>("report", reset).fresh).toBe(false);
+		expect(h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({ run: trunkGate.run, verdict: "blocked" });
+	});
+
 	test("a merge with another hash leaves the original commit's scope and decisions alone", () => {
 		h.call("report", ciReport({ commit: "landed002", branch: "feature", pr: 68, n: 1, fail: { 0: "same cause" } }));
 		decide(first(queue().items), { is: "flaky" });

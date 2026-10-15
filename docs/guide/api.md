@@ -212,6 +212,7 @@ Record results: a parsed CI report, one manual result, or an agent's batch. The 
 | --- | --- | --- | --- |
 | `target` | `object` | no | What was tested. Required unless `run` is given. |
 | `target[1].commit` | `string` | yes |  |
+| `target[1].head` | `string` | no | Current code host head. |
 | `target[1].repo` | `string` | no |  |
 | `target[1].branch` | `string` | no |  |
 | `target[1].env` | `string` | no |  |
@@ -806,7 +807,7 @@ An agent that connects over MCP gets these operations as tools, with the same in
 | Tool | What the agent is told it is for |
 | --- | --- |
 | `propose` | Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected. |
-| `report` | Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref. |
+| `report` | Report results for tested `target` or planned `run`. |
 | `claim` | Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers. |
 | `decide` | Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person decides, forbidden, invalid, already, reopened, conflict=evidence or decision changed. Choose from answers. Withdraw with undo and ifDecision=reply.decision. |
 | `inbox` | Open questions and evidenceHash; filter with on. |

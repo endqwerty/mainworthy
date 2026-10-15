@@ -138,6 +138,37 @@ Use `--session <name>` for work with no build identity. A session proves nothing
 about a commit's gate. A detected CI provider with no valid commit does not borrow
 an unrelated commit from the local checkout.
 
+## Follow a branch reset
+
+If a branch is reset or force-pushed to a commit already reported, read its current head
+from the code host when you send the report. Pass that hash with `--head`:
+
+```sh
+$ mainworthy report results.xml --pr 482 --commit 1111111111111111111111111111111111111111 --head 2222222222222222222222222222222222222222
+```
+
+`--commit` identifies what the results tested. `--head` identifies the change's current
+head, which can be another commit. Use `--pr` or a non-trunk `--branch` to name the change.
+Through the API, put the hash in `target.head` on `report`. A session target cannot carry a head or other build identity.
+
+A pipeline or person can supply the head. An agent's report cannot move it.
+Mainworthy follows an explicit head in either direction. If that commit has no counted
+results, the change's gate is pending. The receipt still shows the tested commit's gate.
+
+CI detection does not supply `--head`. An old workflow event can name an outdated head,
+so read the code host's current value instead of copying the event's commit.
+Without `--head`, reports keep their first-reported ordering. A commit already reported
+before a head observation cannot replace that head with a late job.
+
+An identical report with the same head and build URL is a retry and does not move the
+change again. With `--head`, the build URL distinguishes a new CI run even when its
+results and attempt number match an earlier run. GitHub Actions supplies a URL containing
+the run ID; other producers can set `MAINWORTHY_BUILD_URL` or send `buildUrl` in JSON.
+Keep it unchanged for a retry.
+Without a build URL, use a new `--attempt` number for a fresh observation with identical
+results and the same head. Through the API, a new `cmd` value also names a fresh
+observation. Reuse that value when retrying the command.
+
 ## Link tests to cases
 
 Put a case annotation in the test name, in JUnit or a native report:

@@ -49,6 +49,7 @@ export type ChangeRow = {
 	repo: string | null;
 	base_sha: string | null;
 	head_sha: string | null;
+	head_observed_seq: number | null;
 	branch: string | null;
 	title: string | null;
 	url: string | null;
@@ -170,25 +171,27 @@ const Q = {
 		repo: string | null;
 		base: string | null;
 		head: string | null;
+		observed: number | null;
 		branch: string | null;
 		title: string | null;
 		url: string | null;
 		files: string;
 		rev: number;
 	}>(
-		`INSERT INTO changes (project, key, repo, base_sha, head_sha, branch, title, url, files, rev)
-		 VALUES ($project, $key, $repo, $base, $head, $branch, $title, $url, $files, $rev)`,
+		`INSERT INTO changes (project, key, repo, base_sha, head_sha, head_observed_seq, branch, title, url, files, rev)
+		 VALUES ($project, $key, $repo, $base, $head, $observed, $branch, $title, $url, $files, $rev)`,
 	),
 	updateChange: sql<{
 		id: number;
 		base: string | null;
 		head: string | null;
+		observed: number | null;
 		title: string | null;
 		url: string | null;
 		files: string;
 		rev: number;
 	}>(
-		"UPDATE changes SET base_sha = $base, head_sha = $head, title = $title, url = $url, files = $files, rev = $rev WHERE id = $id",
+		"UPDATE changes SET base_sha = $base, head_sha = $head, head_observed_seq = $observed, title = $title, url = $url, files = $files, rev = $rev WHERE id = $id",
 	),
 	endChange: sql<{ id: number; ended: string; at: number }>(
 		`INSERT INTO change_ends (change, ended, at) VALUES ($id, $ended, $at)
@@ -412,7 +415,7 @@ export const codeWhat = (repo: string | undefined | null, commit: string): strin
  * A change belongs to one repository. The first repository to report `pr:12` in a project has that key; the same
  * number from another repository is another change, keyed `<repo>#pr:12`, with its own decisions and gate.
  */
-export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
+export function ensureTarget(ctx: Ctx, input: TargetIn, updateExistingChange = true): TargetRow {
 	const project = ctx.project.id;
 	if ("session" in input) {
 		const what = `session:${input.session}`;
@@ -450,6 +453,8 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 		!ctx.db.get(Q.humanReported, { project, what });
 	const settled = first !== undefined && (placed || advisory) && !gainsPlace;
 	const trunk = !advisory && input.pr === undefined && input.branch !== undefined && TRUNK_BRANCHES.has(input.branch);
+	if (input.head !== undefined && (trunk || (input.pr === undefined && !input.branch)))
+		throw invalid("head needs a pull request or a non-trunk branch");
 	let change: ChangeRow | null = null;
 	if (advisory) {
 		// An agent's word about a branch or a pull request is not taken, and no change is made because an agent
@@ -457,7 +462,7 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 		// its own, like a commit reported by its hash alone; one that is placed already is where it is.
 		if (first === undefined) {
 			const key = changeKey(ctx.db, project, ownKey(input.commit), input.repo ?? null);
-			change = upsertChange(ctx, key, input);
+			change = upsertChange(ctx, key, input, updateExistingChange);
 		}
 	} else if (!trunk) {
 		const key =
@@ -465,7 +470,8 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 		// A report that names neither a branch nor a pull request says nothing about where the commit is: for a
 		// commit whose place is known, no change of its own is made up for it.
 		const known = input.pr === undefined && input.branch === undefined && settled;
-		if (!known) change = upsertChange(ctx, changeKey(ctx.db, project, key, input.repo ?? null), input);
+		if (!known)
+			change = upsertChange(ctx, changeKey(ctx.db, project, key, input.repo ?? null), input, updateExistingChange);
 	}
 	// One commit, one scope across every environment. Automated hash-only reports leave the place open until
 	// a branch or pull request is named. Typed results keep their scope; a named scope moves on landing.
@@ -530,26 +536,30 @@ export function firstCountedReport(db: Db, batch: BatchRow, target: TargetRow): 
 }
 
 /**
- * Records a change, or moves it to a new head. The head only moves forward: to a commit first reported after the
- * current head was. A late report for an older commit (a retried job, a second job finishing after the next push)
- * leaves the head and the change's title, base and files alone, so it cannot turn the change's gate back.
- * A branch reset to an older commit therefore keeps its newer head here; the gate of a commit is always exact.
+ * A code host can say where a change's head is, in either direction. Without that observation, first-reported
+ * order still decides. A known late job cannot undo a newer head observation, even after a reset.
  */
-function upsertChange(ctx: Ctx, key: string, input: Extract<TargetIn, { commit: string }>): ChangeRow {
+function upsertChange(
+	ctx: Ctx,
+	key: string,
+	input: Extract<TargetIn, { commit: string }>,
+	updateExisting: boolean,
+): ChangeRow {
 	const existing = ctx.db.get(Q.change, { project: ctx.project.id, key });
 	// What an agent says about a change is not what the change is: no gate counts its results, so its report
 	// neither moves the head nor rewrites the base, the title or the files. It can name a change nobody has
 	// reported yet, and then the change has no head: the first pipeline or person to report it says where its
 	// head is, and what its base, title and files are.
 	const advisory = ctx.actor.kind === "agent";
-	if (existing && advisory) return existing;
+	if (existing && (advisory || !updateExisting)) return existing;
 	if (!existing) {
 		const { lastId } = ctx.db.run(Q.insertChange, {
 			project: ctx.project.id,
 			key,
 			repo: input.repo ?? null,
 			base: advisory ? null : (input.base ?? null),
-			head: advisory ? null : input.commit,
+			head: advisory ? null : (input.head ?? input.commit),
+			observed: !advisory && input.head !== undefined ? ctx.seq : null,
 			branch: input.branch ?? null,
 			title: advisory ? null : (input.title ?? null),
 			url: advisory ? null : (input.url ?? null),
@@ -561,22 +571,24 @@ function upsertChange(ctx: Ctx, key: string, input: Extract<TargetIn, { commit: 
 		if (!row) throw new Error("change was not stored");
 		return row;
 	}
-	if (input.commit !== existing.head_sha && existing.head_sha !== null) {
+	if (input.head === undefined && input.commit !== existing.head_sha && existing.head_sha !== null) {
 		const head = firstSeen(ctx.db, ctx.project.id, existing.repo, existing.head_sha);
 		const mine = firstSeen(ctx.db, ctx.project.id, existing.repo, input.commit);
-		if (head !== null && mine !== null && mine <= head) return existing;
+		if (mine !== null && mine <= Math.max(head ?? 0, existing.head_observed_seq ?? 0)) return existing;
 	}
 	const files = input.files ?? json<string[]>(existing.files);
 	const next = {
 		id: existing.id,
 		base: input.base ?? existing.base_sha,
-		head: input.commit,
+		head: input.head ?? input.commit,
+		observed: input.head !== undefined ? ctx.seq : existing.head_observed_seq,
 		title: input.title ?? existing.title,
 		url: input.url ?? existing.url,
 		files: JSON.stringify(files),
 		rev: ctx.seq,
 	};
 	if (
+		input.head !== undefined ||
 		next.base !== existing.base_sha ||
 		next.head !== existing.head_sha ||
 		next.title !== existing.title ||
@@ -710,7 +722,7 @@ export function accept(
 	input: {
 		target: TargetRow;
 		run: number | null;
-		report: Pick<ReportInput, "job" | "attempt" | "buildUrl" | "results" | "nothingRequired">;
+		report: Pick<ReportInput, "target" | "job" | "attempt" | "buildUrl" | "results" | "cmd" | "nothingRequired">;
 		/**
 		 * For results recorded against a case: the command id, so recording the same outcome again later is a new
 		 * fact. A report of automated tests only has no nonce: the same files sent twice are the same batch.
@@ -739,6 +751,15 @@ export function accept(
 		actor: ctx.actor.id,
 		nonce: files ? null : input.nonce,
 		results: report.results,
+		...(report.target && "commit" in report.target && report.target.head !== undefined
+			? {
+					head: report.target.head,
+					buildUrl: report.buildUrl ?? null,
+					pr: report.target.pr,
+					branch: report.target.branch,
+					observation: report.cmd ?? null,
+				}
+			: {}),
 	});
 	const existing = ctx.db.get(Q.batchByKey, { project: ctx.project.id, key });
 	if (existing) return { batch: existing, fresh: false };

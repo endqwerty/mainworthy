@@ -141,7 +141,8 @@ export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; f
 	if (run?.state === "closed" && !json<{ commit?: string }>(run.accepts).commit)
 		throw conflict(`${runRef(run)} is closed; withdraw its sign-off to reopen it`);
 	let target: TargetRow;
-	if (input.target) target = ensureTarget(ctx, input.target);
+	// An explicit head observation waits for batch deduplication: retrying an old report must not move it again.
+	if (input.target) target = ensureTarget(ctx, input.target, !("head" in input.target));
 	else if (run) {
 		const accepts = json<{ commit?: string; repo?: string; env?: string }>(run.accepts);
 		target = accepts.commit
@@ -161,6 +162,7 @@ export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; f
 
 	const accepted = accept(ctx, { target, run: run?.id ?? null, report: input, nonce: input.cmd ?? `${ctx.seq}` });
 	if (accepted.fresh) {
+		if (input.target && "head" in input.target) ensureTarget(ctx, input.target);
 		const runs = runsFor(ctx, target, run?.id ?? null, ctx.actor.kind);
 		noteAccepted(ctx, runs, accepted.batch.seq);
 		// The first report of a commit that a gate counts says where the commit is, and that is so from this
@@ -333,7 +335,7 @@ export const reportOp = defineOp({
 	needs: "record",
 	scope: "project",
 	effect: "write",
-	mcp: "Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref.",
+	mcp: "Report results for tested `target` or planned `run`.",
 	steps: reportSteps,
 });
 
