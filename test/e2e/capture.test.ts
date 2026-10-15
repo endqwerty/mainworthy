@@ -322,6 +322,41 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
+	"Tab from a step opens and focuses its expected result without losing the draft",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", outline: "Checkout\n  Open the cart" }] });
+		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = browser;
+			page.setDefaultTimeout(3000);
+			await page.getByRole("button", { name: "Checkout", exact: true }).waitFor();
+			await page.keyboard.press("e");
+			const step = page.getByRole("textbox", { name: "Step 1", exact: true });
+			await step.fill("Open the checkout");
+			await step.press("Tab");
+			const expected = page.getByRole("textbox", { name: "Expected result 1", exact: true });
+			await expected.waitFor();
+			expect(await expected.evaluate((node) => node === document.activeElement)).toBe(true);
+			await page.keyboard.type("Checkout is visible");
+			expect(await step.inputValue()).toBe("Open the checkout");
+			expect(await expected.inputValue()).toBe("Checkout is visible");
+			await expected.press("Escape");
+			const saved = await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.version === 2,
+			);
+			expect(saved[0]).toMatchObject({ steps: [{ action: "Open the checkout", expected: "Checkout is visible" }] });
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	15_000,
+);
+
+test.skipIf(!browserAvailable)(
 	"J1 captures six steps with three expected results without a dialog or page load",
 	async () => {
 		const server = await startServer();

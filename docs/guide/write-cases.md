@@ -234,8 +234,9 @@ Choose **Insert pinned fragment**. The editor shows the shared steps and their
 source. **Remove fragment** removes this reference from the case. Edit the
 fragment itself to change shared instructions.
 
-An archived fragment keeps its versions and existing pins. You can edit other
-content in its consumers. Restore the fragment before inserting another
+An archived fragment keeps its versions and existing pins. The insertion picker
+excludes archived fragments, including their historical versions. You can edit
+other content in its consumers. Restore the fragment before inserting another
 reference or moving a pin to a different version.
 
 Reading a case or running it shows the fragment steps inline, marked with the
@@ -263,3 +264,5 @@ is escaped as `\!` in canonical Markdown. Instance and project archives preserve
 fragment history and pins. Fragment authoring and batch updates use the web,
 HTTP `propose`, or CLI JSON; MCP discovery omits these inputs.
 When a creation supplies both `kind` and Markdown, their kinds must agree.
+A missing Markdown `kind:` line means `case`, so `kind: "fragment"` also requires
+`kind: fragment` in the Markdown header.

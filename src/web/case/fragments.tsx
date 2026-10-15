@@ -57,6 +57,7 @@ export function FragmentInsert({ draft, change }: { draft: Draft; change: DraftC
 		parsed.success &&
 		parsed.data.ref === ref &&
 		parsed.data.kind === "fragment" &&
+		parsed.data.state !== "archived" &&
 		(!version || parsed.data.version === Number(version))
 			? parsed.data
 			: null;
@@ -88,6 +89,12 @@ export function FragmentInsert({ draft, change }: { draft: Draft; change: DraftC
 					{fragment.title} · pins v{fragment.version}
 				</p>
 			)}
+			{parsed.success &&
+				parsed.data.ref === ref &&
+				parsed.data.kind === "fragment" &&
+				parsed.data.state === "archived" && (
+					<p role="status">This fragment is archived. Restore it before inserting a pin.</p>
+				)}
 			{read.error && <p role="status">{read.error.message}</p>}
 			<button
 				type="button"
