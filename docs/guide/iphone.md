@@ -171,7 +171,10 @@ which opens the page [Licence](./licence.md) on the instance, and the copyright 
    You can keep an action from one side and its expected result from the other, keep or remove a step, and
    choose the order when both sides reordered steps. Changes that do not overlap are combined automatically.
    If the case changes again, a new conflict keeps your merge for another choice. The policy can leave the
-   merge waiting for acceptance in the Queue. A refused answer keeps your draft and choices.
+   merge waiting for acceptance in the Queue. A refused answer keeps your draft and choices. If the question
+   was answered elsewhere or no longer applies, recording stops and the notice offers **Cancel**.
+   Keeping a removed step restores it beside its surviving neighbours from the chosen side. An order you
+   explicitly choose takes precedence; steps absent from that order follow at the end.
    An edit uses the version you opened.
 
 What you type stays while the app goes to the background, and when your session ends and you sign in again as yourself on the same server. **Cancel** asks before discarding a changed draft.

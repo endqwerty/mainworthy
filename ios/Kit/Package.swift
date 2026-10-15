@@ -23,7 +23,8 @@ let package = Package(
 		.target(name: "TestSupport", dependencies: ["MainworthyClient"], path: "Tests/Support"),
 		.testTarget(name: "MainworthyClientTests", dependencies: ["MainworthyClient", "TestSupport"]),
 		.testTarget(
-			name: "MainworthyScreensTests", dependencies: ["MainworthyScreens", "MainworthyClient", "TestSupport"]
+			name: "MainworthyScreensTests", dependencies: ["MainworthyScreens", "MainworthyClient", "TestSupport"],
+			resources: [.copy("Fixtures")]
 		),
 	],
 	swiftLanguageModes: [.v6]

@@ -161,7 +161,10 @@ The current version stays current while you resolve the conflict.
 
 1. Read "Your draft" and "Current version" in the conflict card.
 2. Choose a side for each field, or type the merged text.
-3. Choose "Resolve conflict".
+3. If both sides reordered steps, choose the draft or current order. A kept step that your draft removed
+   returns beside its surviving neighbours. An order you explicitly choose takes precedence; steps absent
+   from that order follow at the end.
+4. Choose "Resolve conflict".
 
 "Use all my changes" and "Keep current version" fill the merged body from one side.
 Resolving submits a new proposal. It still follows the policy for ordinary edits.

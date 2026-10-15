@@ -27,7 +27,7 @@ struct CaseConflictView: View {
 					}
 				}
 				.buttonStyle(.borderless)
-				.disabled(editor.busy || editor.isRetrying || editor.settled)
+				.disabled(editor.busy || editor.isRetrying || editor.settled || editor.conflictClosed)
 			}
 		}
 		Section("Merged case") {

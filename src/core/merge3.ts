@@ -30,6 +30,117 @@ function mergeField<T>({
 	return mine;
 }
 
+function insertionIndex({
+	ordered,
+	source,
+	index,
+	present,
+}: {
+	ordered: string[];
+	source: string[];
+	index: number;
+	present: ReadonlySet<string>;
+}): number {
+	let previous = -1;
+	let next = -1;
+	for (let i = index - 1; i >= 0; i--) {
+		const candidate = source[i];
+		if (candidate !== undefined && present.has(candidate)) {
+			previous = ordered.indexOf(candidate);
+			break;
+		}
+	}
+	for (let i = index + 1; i < source.length; i++) {
+		const candidate = source[i];
+		if (candidate !== undefined && present.has(candidate)) {
+			next = ordered.indexOf(candidate);
+			break;
+		}
+	}
+	return next >= 0 && (previous < 0 || previous < next) ? next : previous >= 0 ? previous + 1 : ordered.length;
+}
+
+/** Applies a chosen field to the working merge. An explicit order is applied last, preserving other additions. */
+export function applyMergeChoice({
+	merged,
+	source,
+	path,
+	order,
+}: {
+	merged: CaseBody;
+	source: CaseBody;
+	path: string;
+	order?: Step[] | undefined;
+}): CaseBody {
+	let result = merged;
+	switch (path) {
+		case "title":
+			result = { ...merged, title: source.title };
+			break;
+		case "pre":
+			result = { ...merged, pre: source.pre };
+			break;
+		case "methods":
+			result = { ...merged, methods: [...source.methods] };
+			break;
+		case "automate":
+			result = { ...merged, automate: source.automate };
+			break;
+		case "steps.order":
+			order = source.steps;
+			break;
+		default: {
+			if (path.startsWith("fields.")) {
+				const key = path.slice(7);
+				const fields = { ...merged.fields };
+				if (Object.hasOwn(source.fields, key) && source.fields[key] !== undefined) fields[key] = source.fields[key];
+				else delete fields[key];
+				result = { ...merged, fields };
+				break;
+			}
+			const [kind, id, part, extra] = path.split(".");
+			if (kind !== "steps" || !id || extra !== undefined) break;
+			const step = source.steps.find((item) => item.id === id);
+			if (part === undefined) {
+				const steps = merged.steps.filter((item) => item.id !== id);
+				if (step) {
+					const position = merged.steps.findIndex((item) => item.id === id);
+					steps.splice(
+						position >= 0
+							? position
+							: insertionIndex({
+									ordered: steps.map((item) => item.id),
+									source: source.steps.map((item) => item.id),
+									index: source.steps.indexOf(step),
+									present: new Set(steps.map((item) => item.id)),
+								}),
+						0,
+						{ ...step },
+					);
+				}
+				result = { ...merged, steps };
+			} else if (step && (part === "action" || part === "expected")) {
+				result = {
+					...merged,
+					steps: merged.steps.map((item) =>
+						item.id === id
+							? part === "action"
+								? { ...item, action: step.action }
+								: { ...item, expected: step.expected }
+							: item,
+					),
+				};
+			}
+		}
+	}
+	if (order) {
+		const steps = order.flatMap((item) => result.steps.filter((step) => step.id === item.id));
+		const ids = new Set(steps.map((item) => item.id));
+		result = { ...result, steps: [...steps, ...result.steps.filter((item) => !ids.has(item.id))] };
+	}
+	return result;
+}
+
 function mergeOrder({
 	base,
 	mine,
@@ -71,25 +182,7 @@ function mergeOrder({
 	const present = new Set(ordered);
 	for (const [index, id] of secondary.entries()) {
 		if (present.has(id)) continue;
-		let previous = -1;
-		let next = -1;
-		for (let i = index - 1; i >= 0; i--) {
-			const candidate = secondary[i];
-			if (candidate !== undefined && present.has(candidate)) {
-				previous = ordered.indexOf(candidate);
-				break;
-			}
-		}
-		for (let i = index + 1; i < secondary.length; i++) {
-			const candidate = secondary[i];
-			if (candidate !== undefined && present.has(candidate)) {
-				next = ordered.indexOf(candidate);
-				break;
-			}
-		}
-		const position =
-			next >= 0 && (previous < 0 || previous < next) ? next : previous >= 0 ? previous + 1 : ordered.length;
-		ordered.splice(position, 0, id);
+		ordered.splice(insertionIndex({ ordered, source: secondary, index, present }), 0, id);
 		present.add(id);
 	}
 	return ordered;

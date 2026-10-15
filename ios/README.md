@@ -180,8 +180,11 @@ Four things the queue does that a copy must keep:
 proposal, keeps the question's evidence hash, and interprets the effects of `decide`. A lost reply is recovered
 through `command` before another request is sent. The editor locks choices while that result is unknown.
 
-The three-way merge is the same `src/core/merge3.ts` used by the server and web app. `gen` bundles its pure
-code through `scripts/ios/merge.ts` into `Generated/MergeRuntime.swift`; `Conflicts.swift` runs that string
+The web and phone use `src/core/merge3.ts` for both three-way merging and applying choices. The server
+uses its three-way merge too. `gen` bundles the pure code through `scripts/ios/merge.ts` into `Generated/MergeRuntime.swift`; `Conflicts.swift` runs that string
 in a fresh JavaScriptCore context. No server code, hashing library or network API is in the bundle.
+One JSON table in `Kit/Tests/MainworthyScreensTests/Fixtures/conflict-choices.json` runs through the actual
+web conflict buttons and Swift package tests. It includes deleted-step restoration, both sides of action
+and removal choices, concurrent additions, and an explicit order applied before a later restoration.
 The contract test holds the generated string to the current source, and `ConflictTests` runs it against real
 server conflicts and checks mixed choices, removed steps, order, refusal, a moved case and lost replies.

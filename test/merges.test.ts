@@ -1,6 +1,7 @@
 // What a conflict card does once the server has said what became of its merge (issue #81). The browser tests
 // in `test/e2e/conflict-merge.test.ts` run the routes; these pin the rule itself, case by case.
 import { describe, expect, test } from "bun:test";
+import { applyMergeChoice } from "../src/core/merge3.ts";
 import type { CaseBody } from "../src/core/model.ts";
 import type { Draft, DraftConflict } from "../src/web/lib/drafts.ts";
 import {
@@ -365,4 +366,28 @@ describe("the case the page holds once it has read a version the server recorded
 		expect(() => caseHeld({ held: row(2, "Theirs"), read: [] })).toThrow();
 		expect(() => caseHeld({ held: row(2, "Theirs"), read: [{ ref: "C-1" }] })).toThrow();
 	});
+});
+
+test("shared choices apply every case property without changing the source documents", () => {
+	const initial: CaseBody = { ...v1, fields: { keep: "yes", remove: "old", "priority.level": "high" } };
+	const source: CaseBody = {
+		...v2,
+		pre: "Current precondition",
+		methods: ["agent"],
+		automate: "wanted",
+		fields: { keep: "current", "priority.level": "low" },
+	};
+	const before = structuredClone({ initial, source });
+	let merged = initial;
+	for (const path of ["title", "pre", "methods", "automate", "fields.remove", "fields.priority.level"])
+		merged = applyMergeChoice({ merged, source, path });
+	expect(merged).toEqual({
+		...v1,
+		title: v2.title,
+		pre: "Current precondition",
+		methods: ["agent"],
+		automate: "wanted",
+		fields: { keep: "yes", "priority.level": "low" },
+	});
+	expect({ initial, source }).toEqual(before);
 });

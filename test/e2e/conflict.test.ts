@@ -1,4 +1,8 @@
 import { expect, test } from "bun:test";
+import { z } from "zod";
+import choicesTable from "../../ios/Kit/Tests/MainworthyScreensTests/Fixtures/conflict-choices.json";
+import { mergeBodies } from "../../src/core/merge3.ts";
+import { CaseBody } from "../../src/core/model.ts";
 import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
 
 test.skipIf(!browserAvailable)(
@@ -40,3 +44,98 @@ test.skipIf(!browserAvailable)(
 	},
 	30_000,
 );
+
+const scenarios = z
+	.array(
+		z.object({
+			name: z.string(),
+			base: CaseBody,
+			mine: CaseBody,
+			current: CaseBody,
+			expected: CaseBody,
+			paths: z.array(z.string()),
+			choices: z.array(z.object({ path: z.string(), side: z.enum(["mine", "current"]) })),
+		}),
+	)
+	.parse(choicesTable);
+
+for (const row of scenarios)
+	test.skipIf(!browserAvailable)(
+		`shared conflict choices: ${row.name}`,
+		async () => {
+			const server = await startServer();
+			await server.api("propose", { edits: [{ op: "create", body: row.base }] });
+			const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			try {
+				const { page } = browser;
+				page.setDefaultTimeout(3000);
+				await page.getByRole("button", { name: row.base.title, exact: true }).waitFor();
+				await page.keyboard.press("e");
+				await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Fixture draft");
+				await server.api("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: row.current }] });
+				await server.api("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: row.mine }] });
+				const question = (await server.api("inbox", { on: "C-1", kind: "adopt" })).items[0];
+				if (!question) throw Error("Missing conflict question");
+				const merge = mergeBodies({ base: row.base, mine: row.mine, theirs: row.current });
+				expect(merge.conflicts.map((item) => item.path)).toEqual(row.paths);
+				// Restore a saved card so every table row starts with exactly the native draft and documents.
+				await page.evaluate(
+					({ row, question, merged }) => {
+						const key = Object.keys(localStorage).find((key) => key.includes(":draft:"));
+						if (!key) throw Error("Missing local draft");
+						const draft = JSON.parse(localStorage.getItem(key) ?? "null");
+						const conflict = {
+							q: question.q,
+							proposal: question.evidence.proposal,
+							ref: "C-1",
+							base: row.base,
+							mine: row.mine,
+							current: row.current,
+							merged,
+							paths: row.paths,
+							draftId: "C-1",
+							sentMerges: [],
+						};
+						localStorage.setItem(key, JSON.stringify({ ...draft, body: row.mine, conflict }));
+					},
+					{ row, question, merged: merge.merged },
+				);
+				await page.reload();
+				const card = page.getByRole("region", { name: "Edit conflict" });
+				await card.waitFor();
+				for (const choice of row.choices) {
+					const field = card.locator(".conflict-field").filter({ has: page.getByText(choice.path, { exact: true }) });
+					const kind =
+						choice.path === "steps.order" ? "order" : /^steps\.[a-z0-9]+$/.test(choice.path) ? "step" : choice.path;
+					const side =
+						kind === "step" || kind === "order"
+							? choice.side === "mine"
+								? "your draft"
+								: "current version"
+							: choice.side === "mine"
+								? "my"
+								: "current";
+					await field.getByRole("button", { name: `Use ${side} ${kind}`, exact: true }).click();
+					if (row.choices.length > 1 && choice.path === "steps.order") {
+						await page.reload();
+						await card.waitFor();
+					}
+				}
+				let submitted: unknown;
+				await page.route("**/decide", async (route) => {
+					submitted = route.request().postDataJSON().answer.body;
+					await route.continue();
+				});
+				await card.getByRole("button", { name: "Resolve conflict", exact: true }).click();
+				await card.waitFor({ state: "detached" });
+				expect(CaseBody.parse(submitted)).toEqual(row.expected);
+				const saved = (await server.api("get", { refs: ["C-1"] }))[0];
+				expect(CaseBody.parse({ ...saved, fields: {} })).toEqual(row.expected);
+				expect(browser.errors).toEqual([]);
+			} finally {
+				await browser.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
