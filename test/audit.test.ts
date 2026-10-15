@@ -715,3 +715,35 @@ test("audit retains and validates each policy's custom field definitions", () =>
 		h.close();
 	}
 });
+
+test("an audit export of a case that pins a fragment carries the pin and verifies", () => {
+	const h = harness();
+	try {
+		h.call("propose", {
+			edits: [
+				{
+					op: "create",
+					kind: "fragment",
+					body: { title: "Sign in", steps: [{ id: "ab", action: "Enter a password", expected: "Signed in" }] },
+				},
+			],
+		});
+		h.call("propose", {
+			edits: [
+				{ op: "create", body: { title: "Checkout", steps: [{ id: "cd", use: { fragment: "C-1", version: 1 } }] } },
+			],
+		});
+		const reply = AuditReply.parse(h.call("audit", {}));
+		expect(verifyAudit(reply.ndjson)).toMatchObject({ records: expect.any(Number) });
+		const pinned = entries(reply.ndjson).find((record) => record.type === "case-version" && record.case === "C-2");
+		expect(pinned).toMatchObject({ body: { steps: [{ id: "cd", use: { fragment: "C-1", version: 1 } }] } });
+		const unknown = rehash(reply.ndjson, (lines) => {
+			for (const line of lines)
+				if (line.type === "case-version" && line.case === "C-2")
+					for (const step of (line.body as { steps: Record<string, unknown>[] }).steps) step.extra = true;
+		});
+		expect(() => verifyAudit(unknown)).toThrow();
+	} finally {
+		h.close();
+	}
+});
