@@ -11,6 +11,7 @@ import {
 	linesOf,
 	linesOfStream,
 	removeBootstrap,
+	removeProject,
 	UNEXPORTED,
 } from "./transfer.ts";
 
@@ -786,6 +787,74 @@ describe("Mainworthy instance archives", () => {
 			from.close();
 			to.close();
 		}
+	});
+
+	test("removing a project deletes every row it owns and leaves people and another project as they were", () => {
+		const db = source();
+		db.exec(`
+			INSERT INTO projects VALUES (24, 17, 'other', 'Another project', 1, 1);
+			INSERT INTO folders VALUES (44, 24, NULL, 'Kept folder', 'a0', 'active', 1);
+			INSERT INTO grants (actor, project, can) VALUES (70, 24, '["read"]');
+			INSERT INTO change_ends VALUES (503, 'merged', 1);
+			INSERT INTO demo_projects VALUES (23, 1);
+			INSERT INTO tracker_polls VALUES (401, 'poll-1', 1, 0, NULL);
+			INSERT INTO tracker_requests (id, nonce, project, result, repository, action, item_key, title, body, state, at)
+				VALUES ('request-1', 'nonce-1', 23, 200, 'demo/shop', 'create', 'key-1', 'Title', 'Body', 'queued', 1);
+		`);
+		insert(db, "policies", { ...fixtures.policies?.[0], project: 24, actor: 71 });
+		const other = (): string => {
+			const chunks: string[] = [];
+			exportArchive(db, (chunk) => chunks.push(chunk), { now: time, project: "other" });
+			return chunks.join("");
+		};
+		const kept = ["meta", "orgs", "actors", "tokens", "teams", "team_members"];
+		const before = { other: other(), kept: kept.map((table) => db.raw.query(`SELECT * FROM ${table}`).all()) };
+		const removed = removeProject(db, "qa");
+		// Every table the fixture fills for the project lost its rows, the ones an archive leaves out included, and
+		// the count says so. The other project holds no rows of the tables that find their project through a parent.
+		for (const table of [
+			...exportedTables(db),
+			"change_ends",
+			"tracker_requests",
+			"tracker_polls",
+			"demo_projects",
+			"search_docs",
+		]) {
+			if (["meta", "orgs", "actors", "teams", "team_members"].includes(table)) continue;
+			expect({ table, removed: removed.tables[table] ?? 0 }).toEqual({
+				table,
+				removed: table === "grants" ? 1 : (fixtures[table]?.length ?? 1),
+			});
+			const columns = db.raw.query<{ name: string }, []>(`PRAGMA table_info(${identifier(table)})`).all();
+			const where =
+				table === "projects" ? "WHERE id = 23" : columns.some((c) => c.name === "project") ? "WHERE project = 23" : "";
+			expect({ table, left: db.raw.query(`SELECT count(*) AS n FROM ${identifier(table)} ${where}`).get() }).toEqual({
+				table,
+				left: { n: 0 },
+			});
+		}
+		expect(removed.rows).toBe(Object.values(removed.tables).reduce((sum, count) => sum + count, 0));
+		expect(db.raw.query("SELECT key FROM projects").all()).toEqual([{ key: "other" }]);
+		expect(db.raw.query("SELECT actor, project FROM grants ORDER BY actor, project").all()).toEqual([
+			{ actor: 70, project: 24 },
+			{ actor: 71, project: 0 },
+		]);
+		expect(other()).toBe(before.other);
+		expect(kept.map((table) => db.raw.query(`SELECT * FROM ${table}`).all())).toEqual(before.kept);
+		expect(db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+		expect(db.raw.inTransaction).toBe(false);
+	});
+
+	test("removing a project that is not there, or with a table nobody owns, changes nothing", () => {
+		const db = source();
+		const before = allRows(db);
+		expect(() => removeProject(db, "missing' OR 1=1 --")).toThrow(/project.*not found/i);
+		db.raw.exec("CREATE TABLE unscoped_private (id INTEGER PRIMARY KEY, note TEXT)");
+		expect(() => removeProject(db, "qa")).toThrow(
+			/removing a project has no ownership rule for table unscoped_private/,
+		);
+		expect({ ...allRows(db), unscoped_private: undefined }).toEqual({ ...before, unscoped_private: undefined });
+		expect(db.raw.inTransaction).toBe(false);
 	});
 
 	test("an unknown project refuses export before the writer receives a byte", () => {

@@ -165,15 +165,55 @@ const PROJECT_PARENT: Readonly<Record<string, { column: string; table: string }>
 	slot_results: { column: "run", table: "runs" },
 	depends_on: { column: "run", table: "runs" },
 	result_excuses: { column: "result", table: "results" },
+	// Not in an archive (`UNEXPORTED`), and still the project's: `removeProject` deletes it with its change.
+	change_ends: { column: "change", table: "changes" },
+	// Not in an archive either: when to ask a tracker again about the issue a decision names. It goes with it.
+	tracker_polls: { column: "decision", table: "decisions" },
 };
 
-function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<string, string> {
-	// Read the ID as text: SQLite IDs need not fit in a JavaScript number. The key is always a bound parameter.
+/**
+ * Tables that belong to no project: the instance's metadata, who people are and how they sign in, and the teams
+ * they are in. Removing a project leaves them; its grants, a team's included, are a project's and go with it.
+ */
+const INSTANCE_TABLES = [
+	"meta",
+	"orgs",
+	"actors",
+	"tokens",
+	"sessions",
+	"credentials",
+	"invitations",
+	"passkey_users",
+	// A team spans projects: its grant on this project and its events about it go, the team and its members stay.
+	"teams",
+	"team_members",
+	// When the instance may post to GitHub again: one row for every project. A project's statuses go with it.
+	"commit_status_delivery",
+];
+
+/**
+ * The project's ID as an SQL expression: read as text, since SQLite IDs need not fit in a JavaScript number, and
+ * cast back to an integer, since a column of the search index has no type to convert the text to.
+ */
+function projectLiteral(db: Db, key: string): string {
 	const project = db.raw
 		.query<{ id: string }, [string]>("SELECT CAST(id AS TEXT) AS id FROM projects WHERE key = ?")
 		.get(key);
 	if (!project) throw new OpError("not_found", `project ${key} not found`);
-	const id = literal(project.id);
+	return `CAST(${literal(project.id)} AS INTEGER)`;
+}
+
+/** The rows of `table` that project `id` owns, as a WHERE clause; it throws for a table with no rule. */
+function ownedBy(table: { name: string; columns: string[] }, id: string, what: string): string {
+	if (table.name === "projects") return `WHERE id = ${id}`;
+	if (table.columns.includes("project")) return `WHERE project = ${id}`;
+	const parent = PROJECT_PARENT[table.name];
+	if (!parent) throw invalid(`${what} has no ownership rule for table ${table.name}`);
+	return `WHERE ${identifier(parent.column)} IN (SELECT id FROM ${identifier(parent.table)} WHERE project = ${id})`;
+}
+
+function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<string, string> {
+	const id = projectLiteral(db, key);
 	const teams = `SELECT team FROM team_grants WHERE project IN (0, ${id}) UNION SELECT team FROM team_events WHERE project IN (0, ${id})`;
 	const filters = new Map<string, string>([
 		["teams", `WHERE id IN (${teams})`],
@@ -184,17 +224,7 @@ function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<st
 	for (const table of metadata) {
 		if (filters.has(table.name)) continue;
 		if (["actors", "orgs", "grants"].includes(table.name)) continue;
-		if (table.name === "meta") filters.set(table.name, "WHERE 0");
-		else if (table.name === "projects") filters.set(table.name, `WHERE id = ${id}`);
-		else if (table.columns.includes("project")) filters.set(table.name, `WHERE project = ${id}`);
-		else {
-			const parent = PROJECT_PARENT[table.name];
-			if (!parent) throw invalid(`project export has no ownership rule for table ${table.name}`);
-			filters.set(
-				table.name,
-				`WHERE ${identifier(parent.column)} IN (SELECT id FROM ${identifier(parent.table)} WHERE project = ${id})`,
-			);
-		}
+		filters.set(table.name, table.name === "meta" ? "WHERE 0" : ownedBy(table, id, "project export"));
 	}
 	// Declared actor references plus the schema's intentional non-FK references. Keep actors who have access,
 	// even if they have not yet acted, and follow on_behalf_of so historical delegation still has its person.
@@ -363,7 +393,10 @@ function importTransaction<T>(db: Db, fn: () => T): T {
 	const deferred =
 		db.raw.query<{ defer_foreign_keys: number }, []>("PRAGMA defer_foreign_keys").get()?.defer_foreign_keys ?? 0;
 	if (db.raw.inTransaction && deferred === 0 && db.raw.query("PRAGMA foreign_key_check").get()) {
-		throw new OpError("conflict", "the caller has pending foreign key violations; resolve them before importing");
+		throw new OpError(
+			"conflict",
+			"the caller has pending foreign key violations; resolve them before importing or removing a project",
+		);
 	}
 	try {
 		return db.savepoint(fn);
@@ -562,6 +595,94 @@ export function removeBootstrap(db: Db): void {
 	// The untouched project may have been made a demo. The mark goes with it: the project an archive puts under
 	// the same id is not one.
 	db.exec("DELETE FROM demo_projects; DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
+}
+
+/**
+ * Deletes project `key` and everything that is its own, in one transaction: the rows a project export selects,
+ * the grants on it, its search index, its tracker requests and the ends of its changes. Who people are stays,
+ * and so does every other project. The files of its attachments stay on disk until the next start prunes the ones
+ * no row names (`start`). The project's key is free afterwards, and a project made under it starts empty.
+ * A table with no ownership rule refuses the removal before a row goes, as it refuses a project export.
+ *
+ * No operation offers this. `mainworthy serve` calls it for the demo it seeds again (`MAINWORTHY_DEMO`, in
+ * `src/cli/demo.ts`), and only for a project `mainworthy seed` made.
+ */
+export function removeProject(db: Db, key: string): ArchiveCounts {
+	return importTransaction(db, () => {
+		const id = projectLiteral(db, key);
+		const shadow = new Set(
+			TableKind.array()
+				.parse(db.raw.query("PRAGMA table_list").all())
+				.filter((table) => table.type === "shadow")
+				.map((table) => table.name),
+		);
+		const statements = TableName.array()
+			.parse(db.raw.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
+			.map((table) => table.name)
+			.filter((name) => !name.startsWith("sqlite_") && !shadow.has(name) && !INSTANCE_TABLES.includes(name))
+			.map((name) => {
+				const columns = Column.array()
+					.parse(db.raw.query(`PRAGMA table_info(${identifier(name)})`).all())
+					.map((column) => column.name);
+				return { name, rows: `FROM ${identifier(name)} ${ownedBy({ name, columns }, id, "removing a project")}` };
+			})
+			// A table that finds its rows through a parent goes first, while the parent's rows are still there.
+			.sort((a, b) => Number(!(a.name in PROJECT_PARENT)) - Number(!(b.name in PROJECT_PARENT)));
+		// Counted before any row goes: a delete can take rows of another table with it (ON DELETE CASCADE).
+		const tables = Object.fromEntries(
+			statements.map(({ name, rows }) => [
+				name,
+				db.raw.query<{ n: number }, []>(`SELECT count(*) AS n ${rows}`).get()?.n ?? 0,
+			]),
+		);
+		db.raw.exec("PRAGMA defer_foreign_keys = ON");
+		for (const { rows } of statements) db.raw.exec(`DELETE ${rows}`);
+		const foreign = db.raw.query<{ table: string; parent: string }, []>("PRAGMA foreign_key_check").get();
+		if (foreign)
+			throw new OpError(
+				"internal",
+				`removing project ${key} left rows in ${foreign.table} that refer to ${foreign.parent}`,
+			);
+		return { rows: Object.values(tables).reduce((sum, count) => sum + count, 0), tables };
+	});
+}
+
+/**
+ * The sequence number of the first write to project `key` after it was made, or null when there was none. Every
+ * write stamps the instance's sequence on the rows it leaves (`seq`, `first_seq`, and `rev` where a row records
+ * its last change), so the smallest one the project owns is its first write. The policy a project is made with is
+ * part of making it, and the project's own row keeps a counter, not a write.
+ */
+export function firstWrite(db: Db, key: string): number | null {
+	const id = projectLiteral(db, key);
+	const shadow = new Set(
+		TableKind.array()
+			.parse(db.raw.query("PRAGMA table_list").all())
+			.filter((table) => table.type !== "table")
+			.map((table) => table.name),
+	);
+	let first: number | null = null;
+	const names = TableName.array()
+		.parse(db.raw.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all())
+		.map((table) => table.name)
+		.filter((name) => !name.startsWith("sqlite_") && !shadow.has(name) && !INSTANCE_TABLES.includes(name));
+	for (const name of names) {
+		if (name === "projects") continue;
+		const columns = Column.array()
+			.parse(db.raw.query(`PRAGMA table_info(${identifier(name)})`).all())
+			.map((column) => column.name);
+		const where = ownedBy({ name, columns }, id, "reading a project's first write");
+		const made = name === "policies" ? " AND version > 1" : "";
+		for (const column of columns.filter((column) => ["seq", "first_seq", "rev"].includes(column))) {
+			const row = db.raw
+				.query<{ n: number | null }, []>(
+					`SELECT min(${identifier(column)}) AS n FROM ${identifier(name)} ${where}${made}`,
+				)
+				.get();
+			if (row?.n != null && (first === null || row.n < first)) first = row.n;
+		}
+	}
+	return first;
 }
 
 /** Splits LF-delimited text lazily, retaining blank lines and CR bytes. A final LF creates no extra line. */
