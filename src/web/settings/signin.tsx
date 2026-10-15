@@ -9,7 +9,7 @@ import { NO_ANSWER, setPassword, signInMethods } from "../lib/signin.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, PASSWORD_RULES, PasswordCount, SectionHeading } from "../ui/index.tsx";
 import { saidBy, useList, withId } from "./list.ts";
-import { YourTokens } from "./tokens.tsx";
+import { YourTokens } from "./personal-tokens.tsx";
 import "./people.css";
 
 const ended = (count: number): string => (count === 0 ? "" : ` ${count} other session${count === 1 ? "" : "s"} ended.`);
