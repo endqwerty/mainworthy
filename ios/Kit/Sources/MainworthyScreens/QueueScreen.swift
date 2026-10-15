@@ -241,7 +241,7 @@ public final class QueueScreen: ProjectScreen {
 				withdrawn = true
 			case .notTaken(let asks):
 				notice = Notice(
-					text: "The decision on \(question.ref) stands. The server asks for \(asks).", isProblem: true,
+					text: "Withdrawal of \(question.ref) was not confirmed. Server response: \(asks).", isProblem: true,
 					undoes: nil
 				)
 				withdrawn = false

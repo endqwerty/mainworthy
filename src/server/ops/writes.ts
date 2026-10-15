@@ -507,7 +507,7 @@ export const decideOp = defineOp({
 	needs: "produce",
 	scope: "project",
 	effect: "write",
-	mcp: "Answer a question from `inbox`. Pass the `evidenceHash` you saw as `onEvidence`. Reply status: decided, advised (recorded; a person decides), conflict (evidence or decision changed), forbidden. Failure answers: defect, test, expected, flaky, infra, and where the question's `answers` lists them, inherited and mistaken.",
+	mcp: "Answer an inbox question with its evidenceHash as onEvidence. Replies: decided, advised (a person decides), forbidden, conflict (evidence or decision changed). Choose from the question's answers. To withdraw, send undo with ifDecision set to the reply's decision.",
 	run: decide,
 });
 

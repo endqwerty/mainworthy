@@ -58,7 +58,7 @@ struct QueueScreenTests {
 		_ = try await other.answer(failure, with: try #require(failure.choices.first { $0.answer == "defect" }))
 		#expect(await screen.withdraw(undo) == false)
 		#expect(screen.notice?.isProblem == true)
-		#expect(screen.notice?.text.contains("decision changed") == true)
+		#expect(screen.notice?.text == "Withdrawal of \(failure.ref) was not confirmed. Server response: the decision changed; read the question again before withdrawing.")
 		let standing = try #require(try await other.questions(open: false, kind: .failure).questions.first)
 		#expect(standing.decision?.label == "Defect in the product")
 	}
@@ -118,7 +118,7 @@ struct QueueScreenTests {
 		#expect(undoes.wantsReason)
 		// A withdrawal that was not taken says so, and the question's page stays to show why.
 		#expect(await screen.withdraw(undoes) == false)
-		#expect(screen.notice?.text == "The decision on \(signoff.ref) stands. The server asks for a reason.")
+		#expect(screen.notice?.text == "Withdrawal of \(signoff.ref) was not confirmed. Server response: a reason.")
 		#expect(await screen.withdraw(undoes, reason: "Closed too early."))
 		#expect(screen.notice?.text == "\(signoff.ref): the decision is withdrawn.")
 		#expect(screen.current(signoff.ref) != nil)
