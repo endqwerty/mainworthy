@@ -184,6 +184,8 @@ const INSTANCE_TABLES = [
 	"credentials",
 	"invitations",
 	"passkey_users",
+	// A person's recovery address: removing a project does not touch how its people sign in.
+	"mail_contacts",
 	// A team spans projects: its grant on this project and its events about it go, the team and its members stay.
 	"teams",
 	"team_members",
