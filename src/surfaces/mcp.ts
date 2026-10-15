@@ -1,17 +1,19 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { PassThrough } from "node:stream";
+import { ToolSchema } from "@modelcontextprotocol/core";
 import {
 	type CallToolResult,
+	createMcpHandler,
 	DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
-	InitializeResultSchema,
+	isLegacyRequest,
 	LATEST_PROTOCOL_VERSION,
-	ListToolsRequestSchema,
+	McpServer,
+	ProtocolErrorCode,
 	type Tool,
 	type ToolAnnotations,
-	ToolSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+	type Transport,
+	WebStandardStreamableHTTPServerTransport,
+} from "@modelcontextprotocol/server";
+import { StdioServerTransport, serveStdio } from "@modelcontextprotocol/server/stdio";
 import { z } from "zod";
 import type { Session } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
@@ -19,7 +21,6 @@ import { MCP_OPS, OPS } from "../server/ops/index.ts";
 import { invokeAsync, type Reply } from "../server/ops/registry.ts";
 import { grantedProjects, VERSION } from "./http.ts";
 
-// SDK 1.32.1 implements MCP 2025-11-25. Structured tool results start at revision 2025-06-18.
 /** The measured tools/list ceiling in o200k_base tokens. B7's draft target of 1,500 remains unmet. */
 export const TOOL_TOKEN_BUDGET = 3950;
 
@@ -291,11 +292,8 @@ function errorMessage(error: Extract<Reply, { ok: false }>["error"]): string {
 }
 
 class AgentServer extends McpServer {
-	private protocolVersion: string;
-
 	constructor(call: Call, listProjects: ListProjects, protocolVersion: string) {
 		super({ name: "mainworthy", version: VERSION }, { instructions: INSTRUCTIONS });
-		this.protocolVersion = protocolVersion;
 		const tools = mcpTools();
 		for (const tool of tools) {
 			this.registerTool(
@@ -315,22 +313,40 @@ class AgentServer extends McpServer {
 					const result = { result: reply.result ?? null, seq: reply.seq };
 					return {
 						content: [{ type: "text", text: JSON.stringify(result) }],
-						...(this.protocolVersion >= "2025-06-18" ? { structuredContent: result } : {}),
+						...((this.server.getNegotiatedProtocolVersion() ?? protocolVersion) >= "2025-06-18"
+							? { structuredContent: result }
+							: {}),
 					};
 				},
 			);
 		}
 		// McpServer owns tools/call. Its custom-handler API lets tools/list use the measured schemas.
-		this.server.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));
+		this.server.setRequestHandler("tools/list", () => ({ tools }));
 		this.server.registerCapabilities({ tools: { listChanged: false } });
 	}
 
 	override async connect(transport: Transport): Promise<void> {
 		const send = transport.send.bind(transport);
 		transport.send = async (message, options) => {
-			if ("result" in message) {
-				const initialized = InitializeResultSchema.safeParse(message.result);
-				if (initialized.success) this.protocolVersion = initialized.data.protocolVersion;
+			// SDK v2 moved unknown tools out of its tool-error handler. Keep Mainworthy's tool reply contract.
+			if (
+				"error" in message &&
+				message.id !== undefined &&
+				message.error.code === ProtocolErrorCode.InvalidParams &&
+				/^Tool .+ (?:not found|disabled)$/.test(message.error.message)
+			) {
+				await send(
+					{
+						jsonrpc: "2.0",
+						id: message.id,
+						result: {
+							...toolError("invalid", message.error.message),
+							...(this.server.getNegotiatedProtocolVersion() === "2026-07-28" ? { resultType: "complete" } : {}),
+						},
+					},
+					options,
+				);
+				return;
 			}
 			await send(message, options);
 		};
@@ -353,11 +369,21 @@ export function mcpRoute(app: App): (req: Request, session: Session) => Promise<
 		if (req.method !== "POST") {
 			return new Response(null, { status: 405, headers: { allow: "POST" } });
 		}
-		const server = mcpServer(
-			(op, project, input) => invokeAsync(app, OPS, { op, project, input, actor: session.actor }),
-			async () => grantedProjects(app, session).map((row) => row.key),
-			req.headers.get("mcp-protocol-version") ?? DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
-		);
+		const buildServer = () =>
+			mcpServer(
+				(op, project, input) => invokeAsync(app, OPS, { op, project, input, actor: session.actor }),
+				async () => grantedProjects(app, session).map((row) => row.key),
+				req.headers.get("mcp-protocol-version") ?? DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
+			);
+		if (!(await isLegacyRequest(req))) {
+			const handler = createMcpHandler(buildServer, { legacy: "reject" });
+			try {
+				return await handler.fetch(req);
+			} finally {
+				await handler.close();
+			}
+		}
+		const server = buildServer();
 		const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
 		try {
 			await server.connect(transport);
@@ -370,5 +396,40 @@ export function mcpRoute(app: App): (req: Request, session: Session) => Promise<
 
 /** Starts stdio without opening a database. The CLI forwards calls and project reads to the running instance. */
 export async function runStdio(call: Call, listProjects: ListProjects): Promise<void> {
-	await mcpServer(call, listProjects).connect(new StdioServerTransport());
+	// Keep replies to accepted requests when a piped client closes stdin after its last message.
+	const input = new PassThrough();
+	const wire = new StdioServerTransport(input);
+	const pending = new Set<string | number>();
+	let ended = false;
+	const finish = () => {
+		if (ended && pending.size === 0) input.end();
+	};
+	const onEnd = () => {
+		ended = true;
+		finish();
+	};
+	const transport: Transport = {
+		async start() {
+			wire.onmessage = (message) => {
+				if ("method" in message && "id" in message) pending.add(message.id);
+				transport.onmessage?.(message);
+			};
+			wire.onerror = (error) => transport.onerror?.(error);
+			wire.onclose = () => transport.onclose?.();
+			await wire.start();
+			process.stdin.once("end", onEnd);
+			process.stdin.pipe(input, { end: false });
+		},
+		async send(message) {
+			await wire.send(message);
+			if (("result" in message || "error" in message) && message.id !== undefined) pending.delete(message.id);
+			finish();
+		},
+		async close() {
+			process.stdin.unpipe(input);
+			process.stdin.off("end", onEnd);
+			await wire.close();
+		},
+	};
+	serveStdio(() => mcpServer(call, listProjects), { legacy: "serve", transport });
 }

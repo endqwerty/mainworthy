@@ -22,7 +22,7 @@ Shown once. It will not be shown again.
 
 ## Connect over MCP
 
-MCP is the protocol most agent tools use to call a server's tools. Mainworthy speaks it two ways.
+MCP is the protocol most agent tools use to call a server's tools. Mainworthy supports protocol 2026-07-28 with the v2 TypeScript SDK, and keeps the 2025-11-25 client path. Mainworthy speaks it two ways.
 
 Over standard input and output, run `mainworthy mcp`. It forwards each call to the running server, so the server must be up. Point it at the server with the same variables the other commands use, and give the agent's token:
 
@@ -35,6 +35,8 @@ MAINWORTHY_PROJECT=scratch
 Most MCP clients take a command, its arguments and a set of environment variables, so the client's entry runs `mainworthy` with the argument `mcp` and these three variables. The exact file depends on the client.
 
 Over HTTP, send MCP requests to `/mcp` on the server, for example `http://127.0.0.1:7357/mcp`, with the header `Authorization: Bearer <token>`. The endpoint takes `POST` only. Each request stands alone, with no session to open or close, and a body can be up to 4 MiB. Use the command line for a bigger report.
+
+A 2026-07-28 client uses `server/discover` to learn the server's capabilities, without an initialization handshake. Its requests carry the protocol and client metadata in `_meta`. Over HTTP, the SDK also sends `MCP-Protocol-Version` and `Mcp-Method`, and `Mcp-Name` for a tool call. A 2025-11-25 client keeps its `initialize` handshake and the same tools and replies.
 
 Settings, Connect, shows the `/mcp` address of this instance.
 
