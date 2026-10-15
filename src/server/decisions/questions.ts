@@ -36,6 +36,7 @@ export type QuestionRow = {
 };
 
 export type DecisionRow = {
+	on_evidence: string | null;
 	id: number;
 	project: number;
 	question: number;
@@ -224,6 +225,7 @@ const Q = {
 	),
 	answersOf: sql<{ question: number }, AnswerRow>("SELECT * FROM answers WHERE question = $question ORDER BY id"),
 	insertDecision: sql<{
+		hash: string;
 		project: number;
 		question: number;
 		kind: string;
@@ -236,8 +238,8 @@ const Q = {
 		at: number;
 		seq: number;
 	}>(
-		`INSERT INTO decisions (project, question, kind, answer, signers, basis, holds, expires_at, supersedes, at, seq)
-		 VALUES ($project, $question, $kind, $answer, $signers, $basis, $holds, $expires, $supersedes, $at, $seq)`,
+		`INSERT INTO decisions (project, question, kind, answer, signers, basis, holds, expires_at, supersedes, at, seq, on_evidence)
+		 VALUES ($project, $question, $kind, $answer, $signers, $basis, $holds, $expires, $supersedes, $at, $seq, $hash)`,
 	),
 	setEffects: sql<{ id: number; effects: string }>("UPDATE decisions SET effects = $effects WHERE id = $id"),
 	decisionById: sql<{ id: number }, DecisionRow>("SELECT * FROM decisions WHERE id = $id"),
@@ -465,6 +467,7 @@ export function insertDecision(
 ): DecisionRow {
 	const expires = input.holds.flatMap((term) => (term.until === "time" ? [term.at] : []));
 	const { lastId } = ctx.db.run(Q.insertDecision, {
+		hash: input.question.evidence_hash,
 		project: ctx.project.id,
 		question: input.question.id,
 		kind: input.question.kind,

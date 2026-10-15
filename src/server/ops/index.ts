@@ -3,6 +3,7 @@
 
 import { adminOp } from "./admin.ts";
 import { attachmentOp, attachOp } from "./attachments.ts";
+import { auditOp } from "./audit.ts";
 import { csvImportOp } from "./csv.ts";
 import { credentialOp, invitationOp, sessionOp } from "./people.ts";
 import {
@@ -49,6 +50,7 @@ const list: AnyOp[] = [
 	commandOp,
 	trackerStatusOp,
 	// administer
+	auditOp,
 	adminOp,
 	// sign in as yourself
 	sessionOp,

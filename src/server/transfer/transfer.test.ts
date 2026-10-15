@@ -4,7 +4,7 @@ import { harness } from "../../../test/helpers.ts";
 import { type BlobStore, memoryBlobs } from "../kernel/blobs.ts";
 import { Db } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
-import { ARCHIVE_VERSION, migrate, SCHEMA_VERSION } from "../kernel/migrate.ts";
+import { ARCHIVE_VERSION, MIGRATIONS, migrate, SCHEMA_VERSION } from "../kernel/migrate.ts";
 import {
 	exportArchive as exportWithBlobs,
 	importArchive as importWithBlobs,
@@ -930,6 +930,20 @@ describe("Mainworthy instance archives", () => {
 			key: "change-one",
 			head_observed_seq: null,
 		});
+	});
+
+	test("an archive without decision evidence imports legacy hashes as NULL", () => {
+		const migration = MIGRATIONS.find((entry) => entry.name === "decision_evidence");
+		expect(migration?.archive).toBe(false);
+		const from = source();
+		from.exec("ALTER TABLE decisions DROP COLUMN on_evidence");
+		const old = archive(from);
+		expect(old).toContain(`"schema":${ARCHIVE_VERSION},`);
+		const decision = [...linesOf(old)].map((line) => JSON.parse(line)).find((row) => row.t === "decisions");
+		expect(decision.r).not.toHaveProperty("on_evidence");
+		const to = target();
+		importArchive(to, linesOf(old));
+		expect(to.raw.query("SELECT DISTINCT on_evidence FROM decisions").all()).toEqual([{ on_evidence: null }]);
 	});
 
 	test("a missing required column is refused rather than using a default", () => {

@@ -3,6 +3,7 @@ import { type Args, GLOBAL_FLAGS, hasJsonInput, parseArgs } from "./args.ts";
 import { Client, clientOptions } from "./client.ts";
 import { actorCommand } from "./commands/actor.ts";
 import { announceCommand } from "./commands/announce.ts";
+import { auditCommand } from "./commands/audit.ts";
 import { checkCommand } from "./commands/check.ts";
 import { exportCommand } from "./commands/export.ts";
 import { fmtCommand } from "./commands/fmt.ts";
@@ -36,6 +37,7 @@ export const ADAPTER_COMMANDS: ReadonlyMap<string, AdapterCommand> = new Map(
 		tokenCommand,
 		inviteCommand,
 		actorCommand,
+		auditCommand,
 		policyCommand,
 		newCommand,
 		seedCommand,
@@ -132,10 +134,12 @@ export async function runCli(argv: readonly string[], ui: unknown): Promise<numb
 		return 0;
 	}
 	const client = new Client(
-		clientOptions(
-			args,
-			name === "login" || name === "health" || name === "fmt" || name === "version" ? "none" : "token",
-		),
+		name === "audit" && args.positionals[0] === "verify"
+			? { url: "http://127.0.0.1:7357", token: undefined, project: undefined }
+			: clientOptions(
+					args,
+					name === "login" || name === "health" || name === "fmt" || name === "version" ? "none" : "token",
+				),
 	);
 	if (generated && (!adapter || hasJsonInput(tokens) || machineOnly(adapter, args)))
 		return runGenerated(generated, args, client);

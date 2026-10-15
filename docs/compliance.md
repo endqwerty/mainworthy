@@ -24,8 +24,8 @@ Read this first. These are the known gaps, in order of how soon they bite.
    recorded text stay indefinitely. Privacy law expects the operator to set how long personal data is kept.
    Cost: medium, because it interacts with gap 1. Tracked in #40.
 3. **Sign-off is identity and time, not an electronic signature.** It does not re-authenticate the signer or
-   record the meaning of the signature, so it does not satisfy 21 CFR Part 11 or EU Annex 11. Cost: medium,
-   and it needs real accounts first (#30). Tracked in #40.
+   record the meaning of the signature, so it does not satisfy 21 CFR Part 11 or EU Annex 11. Cost: medium.
+   Individual accounts already exist (decision 0017). Tracked in #40.
 4. **Giving someone the executable or the image has open licence items, all from Bun.** The executable carries the
    Bun runtime and what it links, and `licences/README.md` lists what the audit of Bun 1.4.3 left open: LGPL
    libraries linked statically (JavaScriptCore, WTF, copied WebCore files, TinyCC), which a recipient may ask
@@ -88,10 +88,10 @@ For teams in pharmaceuticals and medical devices. The regulated profile is not b
 | # | Requirement | Status | How, or what is missing |
 | --- | --- | --- | --- |
 | E1 | Audit trail: computer-generated, time-stamped, who, what, when; earlier values not obscured | met | History is the storage model: versions are immutable, a change of mind supersedes and never erases. Check: `undo` leaves both decisions in the ledger; `restore` makes a new version. |
-| E2 | Records can be copied and retrieved for inspection | partly | The export is complete and machine-readable. A human-readable audit report (PDF or similar) does not exist. |
-| E3 | Access limited to authorised people; unique identities | partly | Actors and capabilities, tokens per actor. No personal accounts with passwords or SSO yet (#30). |
+| E2 | Records can be copied and retrieved for inspection | partly | Instance archives support restoration. `mainworthy audit export` selects a project and time range; `audit verify` checks its versioned NDJSON format, checksum, reference chains, evidence-hash associations, and case body hashes without importing it. Decision 0075 and `test/audit.test.ts`, `src/cli/audit.test.ts`. Older decisions lack their exact seen-evidence hash, original evidence payloads are not retained, and personal grant changes have no historical log. Scoped team events and current team state are included; current state does not prove historical signing eligibility. Names are resolved at export time. The checksum does not authenticate the source or prove completeness. A human-readable audit report and regulatory system validation remain absent. |
+| E3 | Access limited to authorised people; unique identities | partly | Actors and capabilities, tokens per actor, and individual accounts with passwords or passkeys after invitation (decision 0017). Single sign-on and a separate re-authenticated signing ceremony remain absent. |
 | E4 | Authority checks: only allowed people sign or change | met | The policy clause table decides who may answer each kind of question; the decision records the clause. Check: the policy tests. |
-| E5 | Signatures show name, time and meaning, and are bound to their record | not met | Gap 3. A decision is bound to its evidence by hash, which is the hard part; the signing ceremony is missing. |
+| E5 | Signatures show name, time and meaning, and are bound to their record | not met | Gap 3. New decisions retain the exact seen-evidence hash and their material basis. Older decisions retain only the basis. The signing ceremony and recorded meaning are missing. |
 | E6 | Two-component signing and re-authentication | not met | Gap 3. |
 | E7 | A validated system | not applicable yet | Validation is the customer's process; a vendor supplies the documents for it. Deferred until a regulated team asks. |
 
