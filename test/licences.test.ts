@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	bundledPackages,
+	bunMismatch,
 	ENTRYPOINTS,
 	missingTexts,
 	NOTICES,
@@ -66,7 +67,12 @@ describe("the third-party notices", () => {
 	});
 
 	test("the notices are read from the entry points the build compiles", async () => {
-		const build = JSON.parse(read("package.json")).scripts.build;
+		const { build, prebuild } = JSON.parse(read("package.json")).scripts;
+		// The Codex review of #226: a local build with another Bun carries a runtime the notices do not describe.
+		// `bun run build` runs `prebuild` first; `build` stays the one command the Dockerfile runs too.
+		expect(prebuild).toBe("bun scripts/licences.ts --check-bun");
+		expect(bunMismatch(readVendored().bun)).toBeNull();
+		expect(bunMismatch("1.4.2")).toContain("lists the libraries of Bun 1.4.3");
 		const docker = read("Dockerfile");
 		for (const entry of ENTRYPOINTS) {
 			expect(build).toContain(entry);

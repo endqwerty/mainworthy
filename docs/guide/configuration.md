@@ -170,7 +170,7 @@ In server mode everything that reads or changes a project needs a token or a sig
 
 ## Build the single executable
 
-`bun run build` compiles the server, the web UI, the command line and the MCP endpoint into one file, `dist/mainworthy`, tens of megabytes in size. It needs Bun and the source tree, and the result needs neither.
+`bun run build` compiles the server, the web UI, the command line and the MCP endpoint into one file, `dist/mainworthy`, tens of megabytes in size. It needs Bun and the source tree, and the result needs neither. The file carries the Bun that built it: with a Bun other than the one `THIRD-PARTY-NOTICES.md` lists, the build says so, and the notices do not describe that runtime.
 
 ```
 $ ./dist/mainworthy

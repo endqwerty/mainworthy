@@ -1,6 +1,7 @@
 // The licences of what Mainworthy ships that others wrote, gathered into `THIRD-PARTY-NOTICES.md`.
 //
-//   bun scripts/licences.ts    write THIRD-PARTY-NOTICES.md again, after a dependency or `licences/` changed
+//   bun scripts/licences.ts              write THIRD-PARTY-NOTICES.md again, after a dependency or `licences/` changed
+//   bun scripts/licences.ts --check-bun  say when this Bun is not the one the notices list (`bun run build` runs it first)
 //
 // Three sources. The npm packages are the ones the build bundles into the executable (and so into the web app),
 // found by bundling the build's entry points and reading which files went in: a package that is installed and not
@@ -34,6 +35,7 @@ export const LICENCES: Readonly<Record<string, string>> = {
 	"Apache-2.0": "keep the notice and any NOTICE file; say what was changed",
 	"CC0-1.0": "nothing: a public domain dedication",
 	"OFL-1.1": "keep the licence with the font; do not sell the font on its own",
+	"CC-BY-4.0": "credit the source, link the licence and say what was changed (the privacy policy does, at its end)",
 
 	"Apache-2.0 WITH LLVM-exception": "nothing in a binary: the exception waives the notice",
 	Zlib: "keep the notice in source; say when the source was changed",
@@ -218,7 +220,21 @@ export const missingTexts = (): string[] =>
 		.groups.flatMap((g) => g.components.flatMap((c) => c.texts))
 		.filter((path) => !existsSync(join(VENDORED, path)));
 
-if (import.meta.main) {
+/**
+ * What to tell whoever builds the executable with a Bun other than the one `licences/` lists, or null. The
+ * executable carries the Bun that built it, so its notices would describe another runtime. It is said and not
+ * refused: a person who builds from the source for themselves gives no copy away (the image is pinned and tested).
+ */
+export function bunMismatch(version: string = Bun.version): string | null {
+	const audited = readVendored().bun;
+	if (version === audited) return null;
+	return `licences: this is Bun ${version}, and THIRD-PARTY-NOTICES.md lists the libraries of Bun ${audited}. The executable carries this Bun, so before you give a copy to anyone, build it with Bun ${audited} (licences/README.md).`;
+}
+
+if (import.meta.main && process.argv.includes("--check-bun")) {
+	const why = bunMismatch();
+	if (why) console.warn(why);
+} else if (import.meta.main) {
 	const text = await notices();
 	if (text !== (existsSync(NOTICES) ? readFileSync(NOTICES, "utf8") : "")) {
 		await Bun.write(NOTICES, text);
