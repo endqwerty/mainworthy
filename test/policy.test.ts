@@ -2,6 +2,7 @@
 // strict; only who answers changes. Also: what an agent may and may not do, and what agents read.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ANSWER_KEYS, ANSWERS, type Ask, Clause, KINDS, type Policy, standingOf } from "../src/core/kinds.ts";
+import { parseCase } from "../src/core/markdown.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { missingCatchAll, PRESET_NAMES, PRESETS } from "../src/core/presets.ts";
 import { Db } from "../src/server/kernel/db.ts";
@@ -1556,6 +1557,72 @@ describe("project custom field definitions", () => {
 				edits: [{ op: "edit", case: "C-3", base: 4, body: { fields: {} } }],
 			}).ok,
 		).toBe(false);
+	});
+
+	test("Markdown edits preserve required fields unless the header explicitly replaces them", () => {
+		define();
+		h.call("propose", { edits: [{ op: "create", body: { title: "Original", fields: { risk: "high" } } }] });
+		const edit = h.call<Proposed>("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 1, md: "---\ntitle: Edited\n---\n## Steps\n" }],
+		});
+		expect(edit.status).toBe("adopted");
+		const read = () => first(h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" })).md;
+		const recorded = read();
+		expect(edit.cases[0]?.version).toBe(2);
+		expect(recorded).toContain("title: Edited");
+		expect(recorded).toContain("risk: high");
+		const refused = h.raw("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 2, md: "---\ntitle: Cleared\nfields: {}\n---\n## Steps\n" }],
+		});
+		expect(refused.ok).toBe(false);
+		if (!refused.ok) expect(refused.error.message).toContain("Risk is required");
+		expect(read()).toBe(recorded);
+	});
+
+	test.each([{}, { risk: " " }, { risk: "obsolete", legacy: "Keep me" }])(
+		"Markdown omission keeps unchanged historical fields: %j",
+		(fields) => {
+			h.call("propose", { edits: [{ op: "create", body: { title: "Before definitions", fields } }] });
+			define();
+			const edit = h.call<Proposed>("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 1, md: "---\ntitle: Edited\n---\n## Steps\n" }],
+			});
+			expect(edit.status).toBe("adopted");
+			expect(edit.cases[0]?.version).toBe(2);
+			const md = first(h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" })).md;
+			expect(md).toContain("title: Edited");
+			const parsed = parseCase(md);
+			expect(parsed.ok).toBe(true);
+			if (parsed.ok) expect(parsed.doc.body.fields).toEqual(fields);
+		},
+	);
+
+	test("pending Markdown omission preserves historical fields and merges current fields at adoption", () => {
+		h.call("propose", {
+			edits: [{ op: "create", body: { title: "Before definitions", fields: { risk: "obsolete", legacy: "Keep me" } } }],
+		});
+		accept(h.call<Proposed>("propose", { edits: [{ op: "policy", preset: "standard" }] }));
+		const agent = h.actor("markdown-editor", "agent", ["read", "produce"]);
+		const propose = (title: string, base: number) =>
+			h.call<Proposed>(
+				"propose",
+				{ edits: [{ op: "edit", case: "C-1", base, md: `---\ntitle: ${title}\n---\n## Steps\n` }] },
+				agent,
+			);
+		const pending = propose("Pending title", 1);
+		define();
+		expect(accept(pending)[0]?.status).toBe("decided");
+		const read = () => first(h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" })).md;
+		expect(read()).toContain("risk: obsolete");
+		const stale = propose("Merged title", 2);
+		h.call("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 2, body: { fields: { risk: "low", legacy: "Keep me" } } }],
+		});
+		expect(accept(stale)[0]?.status).toBe("decided");
+		expect(parseCase(read())).toMatchObject({
+			ok: true,
+			doc: { body: { title: "Merged title", fields: { risk: "low", legacy: "Keep me" } } },
+		});
 	});
 
 	test("a pending content proposal is revalidated against definitions at adoption", () => {
