@@ -179,9 +179,10 @@ export class Client {
 		}
 		if (response.status >= 300 && response.status < 400) {
 			const location = response.headers.get("location");
+			const origin = location && URL.canParse(location, this.url) ? new URL(location, this.url).origin : null;
 			throw new CliError(
 				"connection",
-				`the server answered ${response.status} to /healthz${location ? `; redirect to ${location}: use https or set --url to the destination` : "; a redirect without a Location header"}`,
+				`the server answered ${response.status} to /healthz${origin ? `; redirect to origin ${origin}; set --url to ${origin}` : "; a redirect without a valid Location header"}`,
 			);
 		}
 		if (!response.ok)
@@ -205,13 +206,13 @@ export class Client {
 
 	/** Request bodies and response bodies remain streams for archive transfer. */
 	async request(path: string, init: RequestInit = {}): Promise<Response> {
-		if (this.options.token) this.warnOfPlainHttp();
 		this.compatibilityPromise ??= this.compatible();
 		await this.compatibilityPromise;
 		const headers = new Headers(init.headers);
 		headers.set(API_VERSION_HEADER, String(API_VERSION));
 		if (this.options.token) {
 			headers.set("authorization", `Bearer ${this.options.token}`);
+			this.warnOfPlainHttp();
 		}
 		try {
 			return await fetch(`${this.url}${path}`, { ...init, headers });

@@ -33,9 +33,9 @@ function incompatibleRequest(req: Request): Response | null {
 		? jsonResponse(
 				{
 					ok: false,
-					error: { code: "invalid", message: `incompatible API version; server requires API ${API_VERSION}` },
+					error: { code: "conflict", message: `incompatible API version; server requires API ${API_VERSION}` },
 				},
-				409,
+				HTTP_STATUS.conflict,
 			)
 		: null;
 }

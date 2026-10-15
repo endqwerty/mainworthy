@@ -2527,7 +2527,7 @@ test("a mismatched CLI contract is refused before an operation writes", async ()
 	expect(refused.status).toBe(409);
 	expect(refused.body).toMatchObject({
 		ok: false,
-		error: { code: "invalid", message: "incompatible API version; server requires API 1" },
+		error: { code: "conflict", message: "incompatible API version; server requires API 1" },
 	});
 	const accepted = await post(instance, "/api/admin", input, { "x-mainworthy-api-version": "1" });
 	expect(accepted.status).toBe(200);

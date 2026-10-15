@@ -29,7 +29,7 @@ A reply that did not run has `ok: false` and an `error` with a `code` and a `mes
 | `unauthenticated` | 401 | No token, or one the server does not know. A name, a password, a passkey's answer or an invitation code that was looked at and refused, whatever was wrong with it. |
 | `forbidden` | 403 | The caller holds a grant on the project and lacks the capability, or the policy says no. |
 | `not_found` | 404 | No such operation, project or ref. A project the caller holds no grant on is answered the same way. |
-| `conflict` | 409 | The edit was made on an older version, or the command id was used for something else. |
+| `conflict` | 409 | The edit was made on an older version, the command id was used for something else, or the client's API version differs from the server's. |
 | `limited` | 429 | Too many failed attempts: wrong tokens from this address or for a token that starts as this one does, wrong passwords from this address or for this name, or refused passkeys or invitation codes from this address. The `Retry-After` header says how many seconds to wait. |
 | `internal` | 500 | The server failed. Nothing was written. The message is `internal error`, and the detail is in the server's log. |
 
