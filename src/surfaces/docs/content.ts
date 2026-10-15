@@ -26,6 +26,7 @@ import glossary from "../../../docs/guide/glossary.md" with { type: "text" };
 import index from "../../../docs/guide/index.md" with { type: "text" };
 import iphone from "../../../docs/guide/iphone.md" with { type: "text" };
 import keyboard from "../../../docs/guide/keyboard.md" with { type: "text" };
+import licence from "../../../docs/guide/licence.md" with { type: "text" };
 import policy from "../../../docs/guide/policy.md" with { type: "text" };
 import privacy from "../../../docs/guide/privacy.md" with { type: "text" };
 import quickstart from "../../../docs/guide/quickstart.md" with { type: "text" };
@@ -45,12 +46,15 @@ import settingsDark from "../../../docs/ui/screenshots/settings-dark.png" with {
 import settingsLight from "../../../docs/ui/screenshots/settings-light.png" with { type: "file" };
 import suiteDark from "../../../docs/ui/screenshots/suite-dark.png" with { type: "file" };
 import suiteLight from "../../../docs/ui/screenshots/suite-light.png" with { type: "file" };
+import licenceText from "../../../LICENSE" with { type: "text" };
+import noticeText from "../../../NOTICE" with { type: "text" };
 import skillReporting from "../../../skill/mainworthy/references/reporting.md" with { type: "text" };
 import skillReviewing from "../../../skill/mainworthy/references/reviewing.md" with { type: "text" };
 import skillTools from "../../../skill/mainworthy/references/tools.md" with { type: "text" };
 import skillWritingCases from "../../../skill/mainworthy/references/writing-cases.md" with { type: "text" };
 import skillIndex from "../../../skill/mainworthy/SKILL.md" with { type: "text" };
-import type { DocSlug } from "../../core/docs.ts";
+import thirdPartyNotices from "../../../THIRD-PARTY-NOTICES.md" with { type: "text" };
+import type { DocSlug, LicenceFile } from "../../core/docs.ts";
 import icon from "../../web/icon.svg" with { type: "text" };
 import script from "./client.js" with { type: "text" };
 import styles from "./site.css" with { type: "text" };
@@ -85,6 +89,7 @@ export const PAGES: Readonly<Record<DocSlug, string>> = {
 	glossary,
 	troubleshooting,
 	architecture,
+	licence,
 };
 
 /** The interactive diagrams, by the name a page links (`../diagrams/<name>.html`). Each is one self-contained page. */
@@ -127,6 +132,13 @@ export const SKILL: Readonly<Record<string, string>> = {
 	"references/reviewing.md": text(skillReviewing, "skill references/reviewing.md"),
 	"references/tools.md": text(skillTools, "skill references/tools.md"),
 	"references/writing-cases.md": text(skillWritingCases, "skill references/writing-cases.md"),
+};
+
+/** The licence files at the root of the repository, served as they are (`LICENCE_FILES` in the core). */
+export const LICENCES: Readonly<Record<LicenceFile, string>> = {
+	LICENSE: text(licenceText, "LICENSE"),
+	NOTICE: text(noticeText, "NOTICE"),
+	"THIRD-PARTY-NOTICES.md": text(thirdPartyNotices, "THIRD-PARTY-NOTICES.md"),
 };
 
 export const STYLES: string = text(styles, "style sheet");

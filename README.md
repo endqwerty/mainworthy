@@ -139,3 +139,9 @@ Rules for contributors, people and agents: [AGENTS.md](AGENTS.md).
 | [docs/roadmap.md](docs/roadmap.md) | phases and where the project stands |
 | [docs/design-arena/](docs/design-arena/) | the candidate designs, benchmarks and verdicts behind the decisions |
 | [CHANGELOG.md](CHANGELOG.md) | one line per user-visible change |
+
+## Licence
+
+Mainworthy is licensed under the [Apache License 2.0](LICENSE). Copyright 2026 Daniel Yang ([NOTICE](NOTICE)).
+The software it bundles from others, and their licences, are in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md); an instance serves all three at `/docs/licence`.

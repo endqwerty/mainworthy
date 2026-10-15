@@ -25,16 +25,19 @@ Read this first. These are the known gaps, in order of how soon they bite.
 3. **Sign-off is identity and time, not an electronic signature.** It does not re-authenticate the signer or
    record the meaning of the signature, so it does not satisfy 21 CFR Part 11 or EU Annex 11. Cost: medium,
    and it needs real accounts first (#30). Tracked in #40.
-4. **Third-party licence notices are not shipped with the container image.** The dependencies are permissive
-   (MIT, Apache-2.0, CC0, public domain), and their licences require the notices to travel with a distributed
-   binary. Harmless while the only user is the owner; required before anyone else is given the image. Cost:
-   low (generate the file at build). Tracked in #40.
+4. **Giving someone the executable or the image has open licence items, all from Bun.** The executable carries the
+   Bun runtime and what it links, and `licences/README.md` lists what the audit of Bun 1.4.3 left open: LGPL
+   libraries linked statically (JavaScriptCore, WTF, copied WebCore files, TinyCC), which a recipient may ask
+   the source of and link again; MPL-2.0 files whose source must stay available; TinyCC's runtime source under
+   the GPL with a linking exception; a package under Artistic-2.0; and two ports in Bun that name no licence. The
+   notices travel with every copy and point at the public source of each part at its exact revision. Harmless
+   while the only copy runs on the owner's server; before anyone else is given the image or the executable,
+   the owner decides how the source is offered (hosted beside the image, or a written offer) and whether the
+   open items are acceptable. Cost: low to medium. Decision 0025.
 5. **Accessibility has not been audited.** The UI is keyboard-first, with visible focus and live status, but
    nobody has checked it against WCAG 2.2 AA. Public-sector and many enterprise buyers require a conformance
    report. Cost: medium. Tracked in #47.
-6. **No project licence.** The repository is public since 2026-10-13 and `UNLICENSED`: anyone can read the code,
-   and nobody else has the right to use it. The owner has to choose a licence. Tracked in #34 with the name check.
-7. **The instance keeps more than it needs, in four places.** The policy at `/privacy`
+6. **The instance keeps more than it needs, in four places.** The policy at `/privacy`
    (`docs/guide/privacy.md`, 2026-10-14) says what is kept today, gaps included. To keep only what is needed:
    sign-in records that are never deleted (#227), a forgotten person's name in stored command replies (#228),
    forgetting a person without the raw API (#229), and a person's drafts left in the browser after sign-out
@@ -116,9 +119,20 @@ outcome); the audit and the fixes it finds are tracked in #47.
 
 ## Licences
 
-Gap 4 and gap 6. Dependencies in the shipped executable: Bun (MIT), React (MIT), TanStack Query and Virtual
-(MIT), Zod (MIT), @noble/hashes (MIT), the MCP SDK (MIT), fractional-indexing (CC0), SQLite (public domain).
-None is copyleft, so none constrains Mainworthy's own licence.
+Mainworthy is under the Apache License 2.0, copyright held by the owner (decision 0025). What it ships from others,
+with the full text of each licence, is in `THIRD-PARTY-NOTICES.md`, which `bun scripts/licences.ts` writes from the
+build. Every instance serves it at `/docs/licence/THIRD-PARTY-NOTICES.md`, and the container image has it in
+`/usr/share/doc/mainworthy/`. `test/licences.test.ts` fails on a dependency under a licence nobody has accepted.
+
+| Ships in | What | Licences |
+| --- | --- | --- |
+| The executable and the web UI | 18 npm packages: React, TanStack, Zod, the MCP SDK, Ajv, @noble/hashes and what they import | MIT, ISC, BSD-2-Clause, BSD-3-Clause, CC0-1.0 |
+| The executable | The Bun runtime 1.4.3 and what it links: 266 parts, among them 65 Rust crates and 111 npm packages for its Node.js fallbacks (`licences/README.md`) | Mostly MIT, BSD, Apache-2.0, ISC and Zlib; LGPL for JavaScriptCore, WebKit and TinyCC; MPL-2.0 for some CSS code, three crates and Mozilla's certificate list; GPL with runtime exceptions for the compilers' runtime libraries; Artistic-2.0 for domain-browser (gap 4) |
+| The diagrams at `/docs` | Archify 3.0.1's viewer and the JetBrains Mono font | MIT, OFL-1.1 |
+| The iPhone app | Nothing from others: its own code and Apple's frameworks | |
+
+None of these places a condition on Mainworthy's own licence. The container's base image, `debian:bookworm-slim`,
+carries Debian's packages with their copyright files in `/usr/share/doc`, as Debian ships them.
 
 ## Other regimes checked
 
@@ -128,6 +142,6 @@ None is copyleft, so none constrains Mainworthy's own licence.
   (`Bun.password`) and the verification of passkey signatures (ES256, EdDSA and RS256, by `verify` of
   `node:crypto` as Bun provides it). TLS is the proxy's. No algorithm is implemented here: the passkey
   verifier is hand-written and calls the runtime for every signature. Not a practical concern.
-- **Trade marks:** the name is unchecked (#34).
+- **Trade marks:** the name is unchecked (#34). The Apache licence grants no right to the name (its section 6).
 - **Selling a hosted tier:** terms of service, a privacy policy, a data processing agreement and sales tax or
   VAT handling are needed before the first paying customer (#31).
