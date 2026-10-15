@@ -20,7 +20,7 @@ Prefer `MAINWORTHY_TOKEN` to `--token`: an argument is in the process list of th
 
 `health`, `version`, `fmt`, `help` and a command's `--help` need no token. They ignore token flags and variables, including unreadable token files and conflicting token options. `serve` uses the [server configuration](./configuration.md#variables-the-server-reads), not the client token options.
 
-A command that is about to send a token to a plain `http://` address on another machine says so once on standard error, before the first request, and goes on: the token travels unencrypted, so use an `https://` address. The addresses of this machine (`localhost`, `127.0.0.1` and the rest of `127.0.0.0/8`, `[::1]`) and `https://` addresses get no warning, and neither does a command that sends no token. Standard output is not touched, so `--json` output stays clean.
+A command that is about to send a token to a plain `http://` address on another machine says so once on standard error, before the first request carrying the token, and goes on: the token travels unencrypted, so use an `https://` address. The addresses of this machine (`localhost`, `127.0.0.1` and the rest of `127.0.0.0/8`, `[::1]`) and `https://` addresses get no warning, and neither does a command that sends no token. Standard output is not touched, so `--json` output stays clean.
 
 [Configuration](./configuration.md) explains local and server mode. [People, agents and pipelines](./access.md) explains tokens.
 
@@ -32,10 +32,11 @@ A command that is about to send a token to a plain `http://` address on another 
 Health still exits 0 for a healthy server with an incompatible or unknown API version. It checks availability.
 
 Before its first authenticated request, the CLI reads `/healthz` without sending a token.
+If that probe redirects, the error gives the destination's origin for `--url`, without the `/healthz` path.
 The server must advertise the same API version as the CLI. Software versions and build commits may differ.
 An absent, malformed or different API version stops the command with `incompatible` and exit code 4, before it sends an operation.
 Use a CLI and server with the same API version to retry. Servers from before this contract need an upgrade.
-Every subsequent request carries `X-Mainworthy-API-Version`. A server with a different API version refuses it before reading or writing project data.
+Every subsequent request carries `X-Mainworthy-API-Version`. A server with a different API version refuses it with HTTP 409 and code `conflict` before reading or writing project data.
 This also catches a server upgrade after the first probe.
 
 Before 1.0, adding or removing an operation, or an incompatible change to its inputs, replies, capabilities or meaning, increments the API version.

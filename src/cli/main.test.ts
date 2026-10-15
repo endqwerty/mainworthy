@@ -1173,7 +1173,7 @@ const PLAIN = "http://files.example.test";
 async function viaServer<T>(
 	instance: { url: string },
 	run: () => Promise<T>,
-	options: { refuse?: boolean } = {},
+	options: { refuse?: boolean | "authenticated"; healthResponse?: Response } = {},
 ): Promise<{ result: T; asked: { url: string; authorization: string | null; apiVersion: string | null }[] }> {
 	const asked: { url: string; authorization: string | null; apiVersion: string | null }[] = [];
 	const real = globalThis.fetch;
@@ -1187,7 +1187,9 @@ async function viaServer<T>(
 				apiVersion: headers.get("x-mainworthy-api-version"),
 			});
 			process.stderr.write("[fetch]\n");
-			if (options.refuse) throw new TypeError("connection refused");
+			if (options.refuse === true || (options.refuse === "authenticated" && headers.has("authorization")))
+				throw new TypeError("connection refused");
+			if (new URL(url).pathname === "/healthz" && options.healthResponse) return options.healthResponse.clone();
 			return real(url.replace(/^https?:\/\/[^/]+/, instance.url), init);
 		},
 		{ preconnect: real.preconnect },
@@ -1201,7 +1203,7 @@ async function viaServer<T>(
 
 const PLAIN_WARNING = `warning: the token is sent to ${PLAIN} over plain http and travels unencrypted; use an https address\n`;
 
-test("a token bound for plain http on another machine is warned of once, on stderr, before the first request", async () => {
+test("a token bound for plain http on another machine is warned of once, on stderr, before the first authenticated request", async () => {
 	await withInstance(
 		async ({ run, instance }) => {
 			const token = instance.generatedToken ?? "";
@@ -1210,7 +1212,7 @@ test("a token bound for plain http on another machine is warned of once, on stde
 			expect(asked.map((request) => request.authorization)).toEqual([null, `Bearer ${token}`, `Bearer ${token}`]);
 			expect(asked.map((request) => request.apiVersion)).toEqual([null, "1", "1"]);
 			expect(result.code).toBe(0);
-			expect(result.stderr).toBe(`${PLAIN_WARNING}[fetch]\n[fetch]\n[fetch]\n`);
+			expect(result.stderr).toBe(`[fetch]\n${PLAIN_WARNING}[fetch]\n[fetch]\n`);
 			expect(outputWith(Found, result).items).toEqual([]);
 			expect(result.stdout).not.toContain("warning");
 			expect(result.stdout).not.toContain(token);
@@ -1249,32 +1251,33 @@ test("a token is not warned of for https, for this machine, or when none is sent
 	);
 });
 
-test("the warning comes before a connection that fails, and the command goes on to fail as it did", async () => {
+test("the warning comes before an authenticated connection that fails", async () => {
 	await withInstance(
 		async ({ run, instance }) => {
-			const { result, asked } = await viaServer(instance, () => run(["find", "--url", PLAIN]), { refuse: true });
-			expect(asked).toHaveLength(1);
+			const { result, asked } = await viaServer(instance, () => run(["find", "--url", PLAIN]), {
+				refuse: "authenticated",
+			});
+			expect(asked.map((request) => request.authorization)).toEqual([null, `Bearer ${instance.generatedToken}`]);
 			expect(result.code).toBe(4);
 			expect(result.stdout).toBe("");
 			expect(result.stderr).toBe(
-				`${PLAIN_WARNING}[fetch]\nconnection: cannot connect to ${PLAIN}; start the server with mainworthy serve\n`,
+				`[fetch]\n${PLAIN_WARNING}[fetch]\nconnection: cannot connect to ${PLAIN}; start the server with mainworthy serve\n`,
 			);
 		},
 		{ mode: "server" },
 	);
 });
 
-test("the executable puts the warning on its standard error and nothing on its standard output", async () => {
+test("the executable does not warn of a token when its unauthenticated health probe fails", async () => {
 	// 0.0.0.0 is not this machine's address by the rule above, and a connection to it is refused at once on Linux
-	// and on macOS, so one real start sees the warning ahead of the failure with no network.
+	// and on macOS, so one real start fails its health probe without sending a token.
 	await withInstance(async ({ cli, run }) => {
 		const argv = ["find", "--url", "http://0.0.0.0:1", "--token", "abc"];
 		const real = await cli(argv);
 		expect(real.stdout).toBe("");
 		expect(real.code).toBe(4);
 		expect(real.stderr).toBe(
-			"warning: the token is sent to http://0.0.0.0:1 over plain http and travels unencrypted; use an https address\n" +
-				"connection: cannot connect to http://0.0.0.0:1; start the server with mainworthy serve\n",
+			"connection: cannot connect to http://0.0.0.0:1; start the server with mainworthy serve\n",
 		);
 		expect(await run(argv)).toEqual(real);
 	});
@@ -1592,9 +1595,28 @@ test("an incompatible or unversioned server receives no CLI operation or credent
 	}
 });
 
+test("a redirecting health probe does not warn that a token was sent", async () => {
+	await withInstance(async ({ run, instance }) => {
+		const { result, asked } = await viaServer(
+			instance,
+			() => run(["find", "--url", PLAIN, "--token", "private-token"]),
+			{
+				healthResponse: new Response(null, {
+					status: 301,
+					headers: { location: "https://mainworthy.example/healthz" },
+				}),
+			},
+		);
+		expect(result.code).toBe(4);
+		expect(asked).toEqual([{ url: `${PLAIN}/healthz`, authorization: null, apiVersion: null }]);
+		expect(result.stderr).not.toContain("warning:");
+		expect(result.stderr).toContain("the server answered 301 to /healthz");
+	});
+});
+
 test("health probe diagnostics distinguish redirects, HTTP failures and invalid JSON", async () => {
 	const received: { path: string; token: string | null }[] = [];
-	let response = new Response(null, { status: 301, headers: { location: "https://mainworthy.example" } });
+	let response = new Response(null, { status: 301, headers: { location: "https://mainworthy.example/healthz" } });
 	const server = Bun.serve({
 		hostname: "127.0.0.1",
 		port: 0,
@@ -1606,7 +1628,7 @@ test("health probe diagnostics distinguish redirects, HTTP failures and invalid 
 	try {
 		await withInstance(async ({ run }) => {
 			for (const [reply, message] of [
-				[response, "redirect to https://mainworthy.example: use https"],
+				[response, "redirect to origin https://mainworthy.example; set --url to https://mainworthy.example"],
 				[new Response("proxy unavailable", { status: 503 }), "the server answered 503 to /healthz"],
 				[new Response("proxy page"), "the server answered 200 to /healthz with invalid JSON"],
 			] as const) {
