@@ -118,12 +118,14 @@ function mapSchemas(schema: Schema, visit: (child: SchemaNode) => SchemaNode): S
 	return result;
 }
 
-/** Keys a choice and its union may both carry without one changing what the other accepts. */
+/** Keys that describe a schema without changing what it accepts. */
 const ANNOTATIONS = new Set(["description", "default", "title", "examples"]);
 
 /**
- * A union whose hidden choices leave one is that choice, under the union's own annotations. A choice that shares a
- * structural key with its union (properties, type, required...) is left in the union, which says the same thing.
+ * A union whose hidden choices leave one is that choice, under the union's own annotations. Only a union that
+ * carries nothing but annotations is replaced: a keyword beside it (additionalProperties, if, properties...) could
+ * apply to the choice differently once merged, and a `$ref` inside the choice could point through the union. Any
+ * other union keeps its one choice, which says the same thing.
  */
 function collapseHiddenUnion(schema: Exclude<SchemaNode, boolean>): SchemaNode | undefined {
 	for (const key of ["anyOf", "oneOf"] satisfies ("anyOf" | "oneOf")[]) {
@@ -134,7 +136,8 @@ function collapseHiddenUnion(schema: Exclude<SchemaNode, boolean>): SchemaNode |
 		if (kept.length !== 1 || kept.length === choices.length || only === undefined || typeof only === "boolean")
 			continue;
 		const { [key]: _, ...parent } = schema;
-		if (Object.keys(only).some((name) => name in parent && !ANNOTATIONS.has(name))) continue;
+		if (Object.keys(parent).some((name) => !ANNOTATIONS.has(name))) continue;
+		if (JSON.stringify(only).includes('"$ref"')) continue;
 		const merged: Exclude<SchemaNode, boolean> = { ...parent, ...only };
 		for (const name of ANNOTATIONS) if (name in parent) Object.assign(merged, { [name]: parent[name] });
 		return merged;

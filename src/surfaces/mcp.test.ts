@@ -125,6 +125,19 @@ test("a union left with one choice after hiding is that choice, still compacted"
 			],
 		}),
 	).toEqual(node({ anyOf: [{ type: "integer" }, { type: "boolean" }] }));
+	// A keyword beside the union could apply to the merged choice differently, so the union stays.
+	for (const beside of [{ additionalProperties: false }, { if: { type: "integer" } }]) {
+		const choice = { type: "object", properties: { q: { type: "integer" } }, required: ["q"] };
+		expect(node({ ...beside, anyOf: [choice, { type: "null", ...hidden }] })).toMatchObject({
+			...beside,
+			anyOf: [{ required: ["q"] }],
+		});
+	}
+	// A reference that points through the union stays valid because the union stays.
+	const pointed = { $defs: { s: { type: "string" } }, $ref: "#/anyOf/0/$defs/s" };
+	expect(node({ anyOf: [pointed, { type: "null", ...hidden }] })).toMatchObject({
+		anyOf: [{ $ref: "#/anyOf/0/$defs/s" }],
+	});
 	// A choice that shares a structural key with its union stays a union.
 	expect(
 		node({
