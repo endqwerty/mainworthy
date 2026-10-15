@@ -326,3 +326,77 @@ import { PRESETS } from "../../src/core/presets.ts";
 	},
 	30000,
 );
+
+(browserAvailable ? test : test.skip)(
+	"Settings defines required choice fields through a proposal and decision",
+	async () => {
+		const server = await fixture({ preset: "loose" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			view = await openPage(server, { path: "/p/scratch/settings" });
+			const { page } = view;
+			page.setDefaultTimeout(6000);
+			await page.getByRole("button", { name: "Add custom field", exact: true }).click();
+			await page.getByLabel("Field key 1", { exact: true }).fill("risk");
+			await page.getByLabel("Field label 1", { exact: true }).fill("Risk");
+			await page.getByLabel("Field type 1", { exact: true }).selectOption("choice");
+			await page.getByLabel("Field required 1", { exact: true }).check();
+			await page.getByLabel("Field choices 1", { exact: true }).fill("low\nhigh");
+			await page.getByRole("button", { name: "Save field definitions", exact: true }).click();
+			await page.getByText("Custom field definitions are in force.", { exact: false }).waitFor();
+			expect(
+				Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" })).settings,
+			).toHaveProperty("fields", { risk: { kind: "choice", label: "Risk", required: true, choices: ["low", "high"] } });
+			const decided = await server.api("inbox", { state: "decided", kind: "adopt" });
+			expect(decided.items.some((q) => q.decision?.answer.is === "accept" && q.decision.by.includes("robin"))).toBe(
+				true,
+			);
+			await page.getByLabel("Field choices 1", { exact: true }).fill("low\nlow");
+			await page.getByRole("button", { name: "Save field definitions", exact: true }).click();
+			await page.getByText("Choices must be nonblank and unique", { exact: false }).waitFor();
+			expect(
+				Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" })).settings.fields?.risk,
+			).toHaveProperty("choices", ["low", "high"]);
+			await server.api("propose", {
+				edits: [{ op: "create", body: { title: "Field values", fields: { risk: "high", legacy: "keep" } } }],
+			});
+			const current = Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" }));
+			const changed = await server.api("propose", {
+				edits: [
+					{
+						op: "policy",
+						settings: {
+							...current.settings,
+							fields: {
+								risk: { kind: "choice", label: "Risk elsewhere", required: true, choices: ["low", "high"] },
+							},
+						},
+					},
+				],
+			});
+			const q = (await server.api("inbox", { kind: "adopt" })).items.find((q) => q.q === changed.question);
+			if (!q) throw new Error("Definition proposal is missing");
+			await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+			await page.getByText("Definitions changed. Reload them before saving.", { exact: true }).waitFor();
+			expect(await page.getByRole("button", { name: "Save field definitions", exact: true }).isDisabled()).toBe(true);
+			expect(await page.getByLabel("Field choices 1", { exact: true }).inputValue()).toBe("low\nlow");
+			await page.getByRole("button", { name: "Reload field definitions", exact: true }).click();
+			expect(await page.getByLabel("Field label 1", { exact: true }).inputValue()).toBe("Risk elsewhere");
+			await page.getByRole("button", { name: "Remove field 1", exact: true }).click();
+			await page.getByRole("button", { name: "Save field definitions", exact: true }).click();
+			await eventually(
+				() => server.api("admin", { do: "policy.show", project: "scratch" }),
+				(reply) => Object.keys(Policy.parse(reply).settings.fields ?? {}).length === 0,
+			);
+			const documents = await server.api("get", { refs: ["C-1"], as: "md" });
+			expect(documents[0]).toHaveProperty("md", expect.stringContaining("risk: high"));
+			expect(documents[0]).toHaveProperty("md", expect.stringContaining("legacy: keep"));
+
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	20000,
+);

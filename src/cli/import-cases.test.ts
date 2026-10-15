@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { z } from "zod";
+import { Policy } from "../core/kinds.ts";
+import { parseCase } from "../core/markdown.ts";
 import { withInstance } from "./test-support.ts";
 
 const Case = z.object({ ref: z.string(), title: z.string(), methods: z.array(z.string()), automate: z.string() });
@@ -34,6 +36,32 @@ test("CSV imports 2,000 cases through propose and every foreign alias resolves o
 
 test("vendor CSV imports keep aliases, folders, source metadata and proposal history", async () => {
 	await withInstance(async ({ run, client, directory }) => {
+		const policy = Policy.parse(await client.call("admin", { do: "policy.show", project: "scratch" }));
+		const proposed = z.object({ question: z.string() }).parse(
+			await client.call("propose", {
+				edits: [
+					{
+						op: "policy",
+						settings: { ...policy.settings, fields: { risk: { kind: "text", label: "Risk", required: false } } },
+					},
+				],
+			}),
+		);
+		const inbox = z
+			.object({ items: z.array(z.object({ q: z.string(), evidenceHash: z.string() })) })
+			.parse(await client.call("inbox", { kind: "adopt" }));
+		const question = inbox.items.find((row) => row.q === proposed.question);
+		if (!question) throw new Error("The field definitions proposal needs its adoption question");
+		expect(
+			await client.call("decide", {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "accept" },
+			}),
+		).toMatchObject([{ status: "decided" }]);
+		expect(Policy.parse(await client.call("admin", { do: "policy.show", project: "scratch" })).settings.fields).toEqual(
+			{ risk: { kind: "text", label: "Risk", required: false } },
+		);
 		const testrail = join(directory, "testrail.csv");
 		await Bun.write(
 			testrail,
@@ -55,6 +83,9 @@ test("vendor CSV imports keep aliases, folders, source metadata and proposal his
 			.parse(await client.call("get", { refs: ["C1234"], as: "md" }))[0]?.md;
 		expect(md).toContain("import.testrail.row.2");
 		expect(md).toContain("2020-01-02");
+		const parsed = parseCase(md ?? "");
+		if (!parsed.ok) throw new Error("The imported case must remain readable as canonical Markdown");
+		expect(parsed.doc.body.fields["import.testrail.row.2"]).toContain('"Updated On":"2020-01-02"');
 		expect(await client.call("history", { ref: "C1234" })).toMatchObject({
 			versions: [{ version: 1, reason: "Import testrail CSV" }],
 		});

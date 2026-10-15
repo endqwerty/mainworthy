@@ -2,7 +2,7 @@
 // This file is the one place a kind or an answer is declared (principle P10). The server's kind handlers, the
 // queue's keys and the policy presets are checked against it.
 import { z } from "zod";
-import { CaseBody } from "./model.ts";
+import { CaseBody, FieldDefinitions } from "./model.ts";
 
 export const Kind = z.enum(["adopt", "map", "failure", "finding", "signoff"]);
 export type Kind = z.infer<typeof Kind>;
@@ -357,6 +357,8 @@ export const UNLINKED_HELP: Record<Unlinked, string> = {
 
 /** What a project may change without touching a clause (open questions 12 and 25). */
 export const PolicySettings = z.object({
+	/** Project definitions for the case body's string-valued custom fields. */
+	fields: FieldDefinitions.optional().meta({ "x-mcp-hidden": true }),
 	unlinked: Unlinked,
 	/** Which bases a planned run's slots accept by default. */
 	basis: z.enum(["exact", "exact-or-assumed"]),

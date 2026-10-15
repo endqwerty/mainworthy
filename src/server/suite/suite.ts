@@ -10,7 +10,7 @@ import { newStepId } from "../../core/ids.ts";
 import type { Policy } from "../../core/kinds.ts";
 import { parseCase } from "../../core/markdown.ts";
 import { type Conflict, mergeBodies } from "../../core/merge3.ts";
-import { CaseBody, emptyBody, REQUIREMENT_KEY, type Step, StepId, TAG } from "../../core/model.ts";
+import { CaseBody, emptyBody, fieldErrors, REQUIREMENT_KEY, type Step, StepId, TAG } from "../../core/model.ts";
 import { CaseAlias, type CaseStamp, type Edit } from "../../core/ops.ts";
 import { parseOutline } from "../../core/outline.ts";
 import { clip } from "../../core/text.ts";
@@ -586,6 +586,10 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 		}
 	}
 	if (resolved.length === 0) return null;
+	const policy = resolved.findLast((edit) => edit.op === "policy")?.policy ?? currentPolicy(ctx.db, ctx.project.id);
+	for (const edit of resolved) {
+		if (edit.op === "create" || edit.op === "edit" || edit.op === "restore") validateFields(edit.body, policy);
+	}
 
 	const facts = [`author:${ctx.actor.kind}`];
 	if (conflicts.length > 0) facts.push("conflict");
@@ -636,6 +640,11 @@ export const resolvedOf = (proposal: ProposalRow): Resolved[] => json<Resolved[]
 
 export type Adopted = { cases: CaseStamp[]; created: string[]; policyVersion: number | null };
 
+function validateFields(body: CaseBody, policy: Policy): void {
+	const errors = fieldErrors(body.fields, policy.settings.fields ?? {});
+	if (errors.length > 0) throw invalid(`case custom fields are not valid: ${errors.join("; ")}`, { errors });
+}
+
 /**
  * Makes a sealed proposal current. Standing: callable only with the witness of the decision that accepted it.
  * A proposal that carries a conflict is never adopted: its author resolves it with a new proposal. If a case moved
@@ -646,11 +655,14 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 	decisionOf(witness, "adopt");
 	const out: Adopted = { cases: [], created: [], policyVersion: null };
 	const author = proposal.author;
+	const edits = resolvedOf(proposal);
+	const policy = edits.findLast((edit) => edit.op === "policy")?.policy ?? currentPolicy(ctx.db, ctx.project.id);
 	const stamp = (row: CaseRow, version: number, hash: string) => {
 		ctx.touched.add(caseRef(row));
 		out.cases.push({ ref: caseRef(row), version, hash });
 	};
 	const writeVersion = (row: CaseRow, body: CaseBody) => {
+		validateFields(body, policy);
 		const no = row.head + 1;
 		const hash = versionHash(body);
 		insertVersion(ctx, witness, proposal, row.id, no, row.head, body, hash);
@@ -676,13 +688,14 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 		return row;
 	};
 
-	for (const edit of resolvedOf(proposal)) {
+	for (const edit of edits) {
 		switch (edit.op) {
 			case "create": {
 				for (const alias of edit.aliases ?? []) {
 					if (ctx.db.get(Q.caseByAlias, { project: ctx.project.id, alias }))
 						throw conflict(`case alias ${alias} is already in use`);
 				}
+				validateFields(edit.body, policy);
 				const folder = ensureFolder(ctx, edit.folder);
 				const rank = rankAfter(ctx, folder, edit.after);
 				const no = ctx.nextNo("case");

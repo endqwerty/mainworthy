@@ -30,7 +30,7 @@ export const CaseBody = z.object({
 	/** Who may produce evidence for this case. Never empty. */
 	methods: z.array(MethodKind).min(1),
 	automate: Automate,
-	/** Custom field values. Reserved; always empty in the MVP. */
+	/** Custom field values, including keys without a project definition. */
 	fields: z.record(z.string(), z.string()),
 });
 export type CaseBody = z.infer<typeof CaseBody>;
@@ -59,3 +59,42 @@ export type CaseDoc = z.infer<typeof CaseDoc>;
 export const TAG = /^[a-z0-9][a-z0-9_./-]{0,39}$/;
 /** A requirement key as typed inline after `@`: `WEB-290`, `REQ-17`. */
 export const REQUIREMENT_KEY = /^[A-Za-z][A-Za-z0-9]{0,15}-[0-9]{1,9}$/;
+
+export const FieldDefinition = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("text"), label: z.string().trim().min(1).max(120), required: z.boolean() }),
+	z.object({
+		kind: z.literal("choice"),
+		label: z.string().trim().min(1).max(120),
+		required: z.boolean(),
+		choices: z
+			.array(
+				z
+					.string()
+					.min(1)
+					.max(200)
+					.regex(/^[^\r\n]+$/, "Choices must fit on one line"),
+			)
+			.min(1)
+			.max(100)
+			.refine(
+				(choices) => choices.every((choice) => choice.trim().length > 0) && new Set(choices).size === choices.length,
+				"Choices must be nonblank and unique",
+			),
+	}),
+]);
+export const FieldDefinitions = z.record(z.string().min(1).max(80), FieldDefinition);
+export type FieldDefinitions = z.infer<typeof FieldDefinitions>;
+
+/** Undefined keys remain free text. Definitions constrain future case content, never rewrite stored versions. */
+export function fieldErrors(fields: CaseBody["fields"], definitions: FieldDefinitions): string[] {
+	const errors: string[] = [];
+	for (const [key, definition] of Object.entries(definitions)) {
+		const value = Object.hasOwn(fields, key) ? fields[key] : undefined;
+		if (value === undefined || value.trim() === "") {
+			if (definition.required) errors.push(`${key}: ${definition.label} is required`);
+		} else if (definition.kind === "choice" && !definition.choices.includes(value)) {
+			errors.push(`${key}: choose one of ${definition.choices.join(", ")}`);
+		}
+	}
+	return errors;
+}

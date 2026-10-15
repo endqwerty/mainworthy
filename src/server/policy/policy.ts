@@ -95,7 +95,13 @@ export function resolvePolicy(
 	if (change.preset !== undefined) {
 		if (!isPreset(change.preset))
 			throw invalid(`unknown preset ${change.preset}; one of ${Object.keys(PRESETS).join(", ")}`);
-		next = PRESETS[change.preset];
+		next = {
+			...PRESETS[change.preset],
+			settings: {
+				...PRESETS[change.preset].settings,
+				...(current.settings.fields ? { fields: current.settings.fields } : {}),
+			},
+		};
 	}
 	if (change.clauses !== undefined) next = { ...next, preset: change.preset ?? "custom", clauses: change.clauses };
 	if (change.settings !== undefined) next = { ...next, settings: change.settings };
@@ -109,6 +115,10 @@ export function resolvePolicy(
 	// A rule that makes cases proposes them like anyone else. Where a person adopts every new case, it would
 	// make none, and say nothing.
 	if (parsed.data.settings.unlinked === "create") {
+		if (Object.values(parsed.data.settings.fields ?? {}).some((field) => field.required))
+			throw invalid(
+				"required custom fields need values when a case is proposed, so tests with no case cannot create cases automatically: choose ask or track",
+			);
 		const adoption = clauseOf(parsed.data, { kind: "adopt", facts: new Set(["author:ci"]) });
 		if (adoption?.ask.who !== "rule")
 			throw invalid(
