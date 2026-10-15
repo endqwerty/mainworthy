@@ -135,7 +135,11 @@ export function usePhoneShell(
 			show("list");
 		}, []),
 		menu,
-		setMenu: useCallback((open: boolean) => setMenuAt(open ? location.pathname + location.search : null), []),
+		setMenu: useCallback((open: boolean) => {
+			if (!open && document.activeElement instanceof Element && document.activeElement.closest("#side"))
+				document.querySelector<HTMLElement>(".top-menu")?.focus();
+			setMenuAt(open ? location.pathname + location.search : null);
+		}, []),
 		listOnly: phone && (pane === "list" || menu),
 	};
 }

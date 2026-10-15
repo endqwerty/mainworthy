@@ -105,12 +105,14 @@ test.skipIf(!browserAvailable)(
 				await page.evaluate((value) => {
 					document.documentElement.dataset.theme = value;
 				}, theme);
-				const result = await page.evaluate(() =>
-					window.axe.run(document, {
+				const result = await page.evaluate(() => {
+					// WCAG 2.5.8 Equivalent: full-size Run slots rows perform the same selection as run dots.
+					window.axe.configure({ rules: [{ id: "target-size", selector: "*:not(.run-dot)" }] });
+					return window.axe.run(document, {
 						runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"] },
 						resultTypes: ["violations", "incomplete"],
-					}),
-				);
+					});
+				});
 				for (const rule of result.incomplete)
 					for (const node of rule.nodes) manual.push(`${name}/${theme}: ${rule.id}: ${node.target.join(" ")}`);
 				for (const rule of result.violations)
@@ -164,6 +166,8 @@ test.skipIf(!browserAvailable)(
 								!node.matches(".overlay-backdrop,.menu-backdrop")
 								? [`No keyboard path: ${node.outerHTML.slice(0, 160)}`]
 								: [];
+						// WCAG 2.5.8 Equivalent: each run dot selects the same slot as its full-size Run slots row.
+						if (node.matches(".run-dot")) return [];
 						const label =
 							node instanceof HTMLInputElement && ["checkbox", "radio"].includes(node.type) ? node.labels?.[0] : null;
 						const box = (label ?? node).getBoundingClientRect();
