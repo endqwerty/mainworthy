@@ -39,6 +39,12 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. The same form. |
 | `MAINWORTHY_REQUIRE_ADMIN_MFA` | `false` | `true` requires a second factor for password sign-in by anyone with `admin` on any project. See [require a second factor for admins](#require-a-second-factor-for-admins). Other nonempty values except `false` stop startup. |
 | `MAINWORTHY_PUBLIC_URL` | none | The address people open the instance at, such as `https://mainworthy.example`. A passkey belongs to its host name, and an invitation link starts with it. Without it there are no passkeys and `mainworthy invite` prints a link with no host. |
+| `MAINWORTHY_SMTP_HOST` | none | SMTP host. Set it with `MAINWORTHY_MAIL_FROM` and `MAINWORTHY_PUBLIC_URL` to enable mail. |
+| `MAINWORTHY_SMTP_PORT` | `587` | SMTP port, from 1 to 65535. |
+| `MAINWORTHY_SMTP_TLS` | `starttls` | `starttls` requires an encrypted upgrade. `tls` starts encrypted, usually on port 465. `none` sends without encryption, for a local relay or development server. Certificates are checked in both encrypted modes. |
+| `MAINWORTHY_SMTP_USER` | none | SMTP username. Set it with the password, or leave both unset for an unauthenticated relay. |
+| `MAINWORTHY_SMTP_PASSWORD` | none | SMTP password, read only from the process environment. It never enters the database, archives, replies or logs. |
+| `MAINWORTHY_MAIL_FROM` | none | A single sender email address, such as `mainworthy@example.com`. Display names and address lists are refused. |
 | `MAINWORTHY_APPLE_APPS` | none | The iPhone apps whose sign-in screen the phone may offer the logins it keeps for this site, each as a team id and a bundle identifier (`ABCDE12345.com.mainworthy.app`), separated by commas. The server lists them at `/.well-known/apple-app-site-association`. Without it that address is not found. See [the iPhone app](./iphone.md#sign-in). |
 | `MAINWORTHY_TRUSTED_PROXY` | none | The addresses or CIDR ranges of the proxy in front, comma-separated. Set it together with the next one, or neither. |
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | none | The header in which that proxy reports the visitor's address. Believed only on a connection from a proxy named above. |
@@ -69,6 +75,14 @@ With reader threads enabled, a background thread checkpoints the write-ahead log
 GitHub Issues and Jira Cloud are optional. Each supports one destination for one project per instance, through the API and command line. See [create or link a tracker defect](./decide.md#create-or-link-a-tracker-defect). A partial or malformed configuration stops the server with a message that names the variables without quoting credentials. If both trackers name the same Mainworthy project, new defects go to Jira. GitHub remains available for commit statuses and existing defect holds.
 
 Every start gives the owner named by `MAINWORTHY_OWNER` every capability. The owner is a person: the server does not start when the name belongs to an agent, a pipeline or a person who was forgotten on this instance, or starts with `forgotten-`. If you change the name later, you get a second owner, and the first one keeps its grant. Remove its grant with `mainworthy actor ungrant`. To give the same person a new name instead, [rename the owner](#rename-the-owner). The first one keeps its tokens too, except the one that came from `MAINWORTHY_OWNER_TOKEN` when you set that variable to a new value: see the next paragraph.
+
+### Turn on mail
+
+Set `MAINWORTHY_SMTP_HOST`, `MAINWORTHY_MAIL_FROM` and `MAINWORTHY_PUBLIC_URL` in the server's environment, then restart. If your SMTP server requires authentication, set `MAINWORTHY_SMTP_USER` and `MAINWORTHY_SMTP_PASSWORD` together. Set `MAINWORTHY_SMTP_PORT` and `MAINWORTHY_SMTP_TLS` to the provider's values. The default is port 587 with required STARTTLS. SMTP authentication uses AUTH PLAIN. The Compose service passes these variables through.
+
+With all mail variables unset, invitations remain links you copy and the sign-in page offers no password reset. Partial or malformed settings stop startup with a generic configuration message that does not repeat their values. These settings are never stored in the database or an archive, and are never returned by an API.
+
+Mail delivery starts after the identity transaction commits. At most 100 messages are in flight per process, and each SMTP exchange has a five-second deadline. A full queue or failed delivery writes a generic log line. No message body, recipient, username, password or transport error is logged. There is no durable queue or automatic retry. Restart loses queued mail and pending verification and reset links. [Access](./access.md#a-lost-password-or-passkey) describes verification, reset and admin recovery.
 
 ### Rename the owner
 

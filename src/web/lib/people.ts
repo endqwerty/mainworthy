@@ -108,6 +108,7 @@ export const listInvitations = async (options: Options = {}): Promise<Invitation
  */
 export const createInvitation = async (input: {
 	name: string;
+	email?: string;
 	/** How long the link works: `12h`, `3d`, `2w`. */
 	expires: string;
 	/** What a new person may do, and on which project (null: every project). Null for a person who exists. */
@@ -117,6 +118,7 @@ export const createInvitation = async (input: {
 		await call("invitation", {
 			do: "create",
 			name: input.name,
+			...(input.email ? { email: input.email } : {}),
 			expires: input.expires,
 			...(input.grant
 				? { can: input.grant.can, ...(input.grant.project === null ? {} : { project: input.grant.project }) }

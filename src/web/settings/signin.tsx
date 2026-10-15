@@ -9,6 +9,7 @@ import { NO_ANSWER, setPassword, signInMethods } from "../lib/signin.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, PASSWORD_RULES, PasswordCount, SectionHeading } from "../ui/index.tsx";
 import { Authenticator } from "./authenticator.tsx";
+import { EmailForm } from "./email.tsx";
 import { saidBy, useList, withId } from "./list.ts";
 import { YourTokens } from "./personal-tokens.tsx";
 import "./people.css";
@@ -61,6 +62,7 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
 			<p className="dim">
 				How {session.actor} signs in to this instance. <DocLink page="access">Passwords and passkeys</DocLink>
 			</p>
+			{session.via === "cookie" && <EmailForm />}
 			<SectionHeading>Password</SectionHeading>
 			{session.via === "cookie" ? (
 				<PasswordForm

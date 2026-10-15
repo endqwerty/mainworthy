@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, type RefObject, useRef, useState } from "react";
 import { z } from "zod";
 import { Capability, defaultCapabilities } from "../../core/kinds.ts";
@@ -7,6 +7,7 @@ import { TeamSource } from "../../core/teams.ts";
 import { copySecret } from "../lib/clipboard.ts";
 import { queryKey, useQueryOp } from "../lib/data.ts";
 import { createInvitation, dateTime, listInvitations, revokeInvitation, until } from "../lib/people.ts";
+import { signInMethods } from "../lib/signin.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
 import { InlineConfirmation } from "./inline-confirmation.tsx";
@@ -52,13 +53,15 @@ const held = (grants: readonly { project: string; can: readonly string[]; roles?
 const STARTS_WITH: readonly Capability[] = defaultCapabilities("human").filter((capability) => capability !== "admin");
 
 /**
- * Who signs in to this instance, for an admin who is a person. There is no mail: an admin makes a link and
- * hands it over. A new name gets an invitation to join; a person who exists gets a recovery link, which
+ * Who signs in to this instance, for an admin who is a person. An admin makes a link and
+ * hands it over or sends it by mail. A new name gets an invitation to join; a person who exists gets a recovery link, which
  * replaces every way they sign in once they accept it.
  */
 export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null> }) {
 	const { project, session } = useApp();
 	const client = useQueryClient();
+	const methods = useQuery({ queryKey: ["instance", "sign-in-methods"], queryFn: signInMethods, staleTime: Infinity });
+	const [email, setEmail] = useState("");
 	const invitations = useList("invitation", listInvitations);
 	const actors = useQueryOp({ project, op: "admin", input: { do: "actor.list" } });
 	const listed = Actor.array().safeParse(actors.data);
@@ -97,9 +100,15 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 		if (busy || !wanted || exists || can.length === 0) return;
 		setBusy(true);
 		setProblem("");
-		void createInvitation({ name: wanted, expires, grant: { can, project: onProject || null } })
+		void createInvitation({
+			name: wanted,
+			expires,
+			grant: { can, project: onProject || null },
+			...(methods.data?.mail && email ? { email } : {}),
+		})
 			.then((link) => {
 				setName("");
+				setEmail("");
 				// The next person does not get `admin` because this one did.
 				setCan((now) => now.filter((capability) => capability !== "admin"));
 				return made(link);
@@ -164,8 +173,8 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 		<>
 			<h2>People</h2>
 			<p className="dim">
-				Mainworthy sends no mail. You make a link and hand it to the person; it works once, and they choose a password
-				or a passkey with it. <DocLink page="access">How a person gets in</DocLink>
+				You make a link and hand it to the person{methods.data?.mail ? ", or send it by mail" : ""}; it works once, and
+				they choose a password or a passkey with it. <DocLink page="access">How a person gets in</DocLink>
 			</p>
 			<form className="settings-form" onSubmit={invite}>
 				<label htmlFor="invite-name">Name</label>
@@ -181,6 +190,20 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 					placeholder="robin"
 					required
 				/>
+				{methods.data?.mail && (
+					<>
+						<label htmlFor="invite-email">Send to email address, optional</label>
+						<input
+							className="form-input"
+							id="invite-email"
+							type="email"
+							maxLength={254}
+							value={email}
+							onChange={(event) => setEmail(event.target.value)}
+							autoComplete="email"
+						/>
+					</>
+				)}
 				<p className="settings-problem" role="status">
 					{exists && `${wanted} signs in here already. A recovery link is made from their row below.`}
 				</p>

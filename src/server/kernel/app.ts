@@ -7,6 +7,7 @@ import { type AddressRanges, parseAddressRanges } from "./address.ts";
 import { type BlobStore, diskBlobs, memoryBlobs } from "./blobs.ts";
 import type { CallerReference } from "./caller.ts";
 import { Db } from "./db.ts";
+import { type MailConfig, mailConfig } from "./mail.ts";
 import { migrate } from "./migrate.ts";
 
 export type Config = {
@@ -66,6 +67,7 @@ export type Config = {
 	github?: { project: string; repository: string; token: string };
 	githubStatuses?: boolean;
 	jira?: { project: string; site: string; projectKey: string; issueType: string; email: string; token: string };
+	mail?: MailConfig | undefined;
 };
 
 /**
@@ -285,6 +287,7 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		requireAdminMfa: adminMfaOf(env),
 		...githubOf(env),
 		...jiraOf(env),
+		mail: mailConfig(env),
 	};
 }
 

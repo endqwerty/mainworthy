@@ -15,7 +15,7 @@
 // too long to arrive.
 import { z } from "zod";
 import { type ErrorCode, HTTP_STATUS } from "../core/api.ts";
-import { whyNotPassword } from "../core/people.ts";
+import { EmailAddress, whyNotPassword } from "../core/people.ts";
 import {
 	type Accepted,
 	acceptInvitation,
@@ -24,6 +24,8 @@ import {
 	type PasswordChange,
 	passkeySignInOptions,
 	publicAddress,
+	requestReset,
+	resetPassword,
 	type Session,
 	type SignedIn,
 	showInvitation,
@@ -31,6 +33,7 @@ import {
 	signInWithPasskey,
 	signInWithPassword,
 	signInWithTotp,
+	verifyEmail,
 	type WhyNot,
 } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
@@ -80,6 +83,9 @@ const NO_INVITATION =
 // request that carries two proofs is not judged by the one that happens to be read first.
 const WithPassword = z.strictObject({ name: z.string().min(1).max(64), password: z.string().min(1).max(512) });
 const WithTotp = z.strictObject({ challenge: z.string().min(1).max(128), code: z.string().min(1).max(128) });
+const ResetRequest = z.strictObject({ resetRequest: EmailAddress });
+const EmailVerification = z.strictObject({ emailVerification: z.string().min(1).max(128) });
+const ResetPassword = z.strictObject({ reset: z.string().min(1).max(128), password: z.string().max(4096) });
 const WithPasskey = z.strictObject({ passkey: z.record(z.string(), z.unknown()) });
 const WithInvitation = z.strictObject({
 	invitation: z.string().min(1).max(128),
@@ -133,6 +139,38 @@ export function signInRoutes(app: App, tools: Tools) {
 	}
 
 	async function answerSignIn(req: Request, server: Listener, input: unknown): Promise<Response> {
+		const resetRequest = ResetRequest.safeParse(input);
+		const verification = EmailVerification.safeParse(input);
+		const reset = ResetPassword.safeParse(input);
+		if (resetRequest.success || verification.success || reset.success) {
+			if (!app.config.mail) return failed("invalid", "mail is off on this instance");
+			if (resetRequest.success) {
+				const limited = requestReset(app, resetRequest.data.resetRequest, tools.address(req, server));
+				return limited ? tools.limited(limited.retryAfter) : answered({ requested: true });
+			}
+			if (verification.success)
+				return (await verifyEmail(app, verification.data.emailVerification, () => server.timeout(req, 0)))
+					? answered({ verified: true })
+					: failed("invalid", "this verification link does not work; ask for another");
+			if (reset.success) {
+				const why = whyNotPassword(reset.data.password);
+				if (why) return failed("invalid", why);
+				const changed = await resetPassword(app, {
+					code: reset.data.reset,
+					password: reset.data.password,
+					address: tools.address(req, server),
+					proven: () => server.timeout(req, 0),
+				});
+				if (typeof changed === "object") return tools.limited(changed.retryAfter);
+				if (changed === "changed") return answered({ changed: true });
+				return failed(
+					changed === "busy" ? "conflict" : "invalid",
+					changed === "busy"
+						? "the server is busy; try again in a moment"
+						: "this reset link does not work; ask for another",
+				);
+			}
+		}
 		const about = {
 			userAgent: req.headers.get("user-agent"),
 			address: tools.address(req, server),

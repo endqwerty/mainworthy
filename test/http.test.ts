@@ -25,14 +25,30 @@ import { type Instance, open, start } from "../src/server/start.ts";
 import type { TrackerPort } from "../src/server/trackers/port.ts";
 import { deliverTrackerRequests } from "../src/server/trackers/requests.ts";
 import { PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
+import { fakeSmtp } from "./mail-support.ts";
 import { authenticator } from "./people-support.ts";
 
 const dirs: string[] = [];
 const running: Instance[] = [];
+const mailServers: Awaited<ReturnType<typeof fakeSmtp>>[] = [];
 afterEach(async () => {
 	for (const instance of running.splice(0)) await instance.stop();
+	for (const smtp of mailServers.splice(0)) await smtp.close();
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+
+async function schemaMail(instance: Instance): Promise<void> {
+	const smtp = await fakeSmtp();
+	mailServers.push(smtp);
+	instance.app.config.publicUrl ??= "https://mainworthy.example";
+	instance.app.config.mail = defaultConfig({
+		MAINWORTHY_SMTP_HOST: "127.0.0.1",
+		MAINWORTHY_SMTP_PORT: String(smtp.port),
+		MAINWORTHY_SMTP_TLS: "none",
+		MAINWORTHY_MAIL_FROM: "mainworthy@example.com",
+		MAINWORTHY_PUBLIC_URL: "https://mainworthy.example",
+	}).mail;
+}
 
 function boot(
 	mode: Config["mode"],
@@ -2352,6 +2368,9 @@ describe("the surface", () => {
 		await checked("session", { do: "list" });
 		await checked("credential", { do: "list" });
 		await checked("invitation", { do: "create", name: "schema-person" });
+		await schemaMail(instance);
+		await checked("credential", { do: "email.get", actor: "schema-person" });
+		await checked("credential", { do: "email.set", actor: "schema-person", email: "schema@example.com" });
 		await checked("invitation", { do: "list" });
 		await checked("invitation", { do: "revoke", id: 1 });
 		await checked("admin", { do: "team.create", name: "Schema team" });
@@ -2606,6 +2625,10 @@ describe("the surface", () => {
 				}),
 			]),
 		);
+		await schemaMail(instance);
+		await checked("credential", { do: "email.get", actor: "sweep-person" });
+		await checked("credential", { do: "email.set", actor: "sweep-person", email: "sweep@example.com" });
+		await checked("invitation", { do: "list" });
 		await checked("invitation", { do: "revoke", id: invitation.id });
 		const empty = await replySweep(instance, "empty");
 		for (const area of ["cases", "tests", "runs", "folders", "tags", "requirements", "changes"])

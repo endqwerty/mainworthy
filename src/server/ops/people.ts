@@ -21,6 +21,7 @@ import {
 	createPersonalToken,
 	credentialOwner,
 	endSessionById,
+	getEmail,
 	invitedPerson,
 	KIND_NOUN,
 	listCredentials,
@@ -28,10 +29,13 @@ import {
 	listPersonalTokens,
 	listSessions,
 	mayActFor,
+	queueMail,
 	removeCredential,
+	requireMail,
 	revokeInvitation,
 	revokeToken,
 	sessionOwner,
+	setEmail,
 	tokenOwner,
 } from "../identity/identity.ts";
 import type { Actor } from "../kernel/ctx.ts";
@@ -105,7 +109,7 @@ export const credentialOp = defineInstanceOp({
 	name: "credential",
 	output: REPLIES.credential,
 	summary:
-		"Your password, passkeys, authenticator and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default.",
+		"Your password, passkeys, authenticator, recovery email and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default.",
 	input: CredentialInput,
 	needs: "self",
 	scope: "instance",
@@ -117,6 +121,12 @@ export const credentialOp = defineInstanceOp({
 			throw forbidden(`${env.actor.name} is ${KIND_NOUN[env.actor.kind]}: only a person has a password or a passkey`);
 		const db = env.app.db;
 		switch (input.do) {
+			case "email.get":
+				return getEmail(db, subject(env, input.actor, "the email address").id);
+			case "email.set": {
+				const person = subject(env, input.actor, "the email address");
+				return setEmail(env.app, { caller: env.actor, person, context: env.context, email: input.email });
+			}
 			case "list":
 				return listCredentials(db, subject(env, input.actor, "the passwords and passkeys").id);
 			// A passkey is registered by the person it is for, signed in, and for nobody else: an admin who could
@@ -176,7 +186,7 @@ export const invitationOp = defineInstanceOp({
 	name: "invitation",
 	output: REPLIES.invitation,
 	summary:
-		"Invite a person with a link, since there is no mail: make one, list them, revoke one. The link is shown once.",
+		"Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once.",
 	input: InvitationInput,
 	needs: "admin",
 	scope: "instance",
@@ -189,6 +199,7 @@ export const invitationOp = defineInstanceOp({
 		const db = env.app.db;
 		switch (input.do) {
 			case "create": {
+				if (input.email !== undefined) requireMail(env.app);
 				const lastsMs = durationMs(input.expires);
 				if (lastsMs === null || lastsMs > INVITATION_LASTS.mostMs)
 					throw invalid(
@@ -206,6 +217,12 @@ export const invitationOp = defineInstanceOp({
 				});
 				const purpose = person.isNew ? "join" : "recover";
 				const made = createInvitation(env.app, { actor: person.id, by: env.actor.id, purpose, lastsMs });
+				if (input.email !== undefined)
+					queueMail(env.app, {
+						to: input.email,
+						subject: "Your Mainworthy invitation",
+						text: `You have been invited as ${person.name}:\n${made.link}\n\nThis link works once, until ${new Date(made.expiresAt).toISOString()}.${purpose === "recover" ? " Accepting it replaces your passwords, passkeys and tokens and ends your sessions." : ""}`,
+					});
 				const relative = made.link.startsWith("/");
 				return {
 					id: made.id,
@@ -217,7 +234,7 @@ export const invitationOp = defineInstanceOp({
 					expiresAt: made.expiresAt,
 					code: made.code,
 					link: made.link,
-					note: `This link is shown once. Hand it to ${person.name}: it works once.${
+					note: `${input.email === undefined ? "" : "Mail delivery requested. "}This link is shown once. Hand it to ${person.name}: it works once.${
 						purpose === "recover"
 							? ` When it is accepted, every password, passkey and token ${person.name} had stops working and every session of theirs ends.`
 							: ""

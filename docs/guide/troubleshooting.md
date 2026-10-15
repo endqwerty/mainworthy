@@ -96,7 +96,7 @@ An invitation link works once and until the time it was made with, and a new inv
 
 ### I lost my password or my passkey
 
-There is no "forgot password", because Mainworthy sends no mail. Ask the owner for a recovery link, or make one for yourself if you are still signed in somewhere and administer the instance: Settings, People, "Recovery link" beside your name. See [people, agents and pipelines](./access.md#a-lost-password-or-passkey).
+With mail enabled, use **Forgot your password?** on the sign-in page and enter your verified email address. If no reset link arrives, check the address and ask for another. The reply never says whether the address belongs to an account. Reset retains an enrolled authenticator. Without mail, without a verified address, or after losing an authenticator too, ask the owner for a recovery link. An admin who is still signed in can make their own under Settings, People, **Recovery link**. See [people, agents and pipelines](./access.md#a-lost-password-or-passkey).
 
 ### The token is not accepted behind a proxy
 

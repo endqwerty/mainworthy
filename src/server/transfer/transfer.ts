@@ -70,6 +70,7 @@ type Table = {
  * `commit_statuses` holds GitHub commit status enrollment and delivery state. An import must not enroll historical commits.
  */
 export const UNEXPORTED: readonly string[] = [
+	"mail_contacts",
 	"sessions",
 	"credentials",
 	"invitations",

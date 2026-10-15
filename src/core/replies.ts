@@ -400,6 +400,7 @@ export const AdminReply = z.union([
 ]);
 export const SessionReply = z.union([z.array(SessionRow), z.looseObject({ ended: z.literal(true), current: flag })]);
 export const CredentialReply = z.union([
+	z.object({ email: text.nullable(), verified: flag }),
 	TotpEnrolment,
 	TotpConfirmed,
 	z.array(CredentialRow),

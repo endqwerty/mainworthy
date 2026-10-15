@@ -47,6 +47,13 @@ export function foldLog(path: string): boolean {
 export class Db {
 	readonly raw: Database;
 	private depth = 0;
+	private committed: (() => void)[] = [];
+
+	/** Schedules a non-throwing effect after the outer commit. Rollback discards it, including a savepoint's effects. */
+	afterCommit(fn: () => void): void {
+		if (this.depth === 0) fn();
+		else this.committed.push(fn);
+	}
 
 	/**
 	 * `reader: true` opens a connection that refuses writes. In WAL mode it reads a consistent snapshot of what is
@@ -105,12 +112,20 @@ export class Db {
 	commit(): void {
 		this.raw.exec("COMMIT");
 		this.depth = 0;
+		this.flushCommitted();
 	}
 
 	rollback(): void {
 		if (this.depth === 0) return;
 		this.raw.exec("ROLLBACK");
 		this.depth = 0;
+		this.committed = [];
+	}
+
+	private flushCommitted(): void {
+		const callbacks = this.committed;
+		this.committed = [];
+		for (const callback of callbacks) callback();
 	}
 
 	get<P extends Params, R>(statement: Statement<P, R>, ...params: P extends readonly [] ? [] : [P]): R | null {
@@ -161,16 +176,19 @@ export class Db {
 		if (this.depth > 0) return fn();
 		this.raw.exec("BEGIN IMMEDIATE");
 		this.depth++;
+		let out: T;
 		try {
-			const out = fn();
+			out = fn();
 			this.raw.exec("COMMIT");
-			return out;
 		} catch (error) {
 			this.raw.exec("ROLLBACK");
+			this.committed = [];
 			throw error;
 		} finally {
 			this.depth--;
 		}
+		this.flushCommitted();
+		return out;
 	}
 
 	/**
@@ -181,6 +199,7 @@ export class Db {
 	savepoint<T>(fn: () => T): T {
 		if (this.depth === 0) return this.transaction(fn);
 		const name = `sp_${this.depth}`;
+		const callbacks = this.committed.length;
 		this.raw.exec(`SAVEPOINT ${name}`);
 		this.depth++;
 		try {
@@ -189,6 +208,7 @@ export class Db {
 			return out;
 		} catch (error) {
 			this.exec(`ROLLBACK TO ${name}; RELEASE ${name}`);
+			this.committed.length = callbacks;
 			throw error;
 		} finally {
 			this.depth--;

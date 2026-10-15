@@ -1,4 +1,4 @@
-// An invitation: the link an admin hands a person, since there is no mail. Owns the table `invitations`.
+// An invitation: the link an admin hands a person or sends by mail. Owns the table `invitations`.
 //
 // The link carries a code of 32 random bytes and this file never sees it: it is given the code's SHA-256 and
 // stores that, as `sessions.ts` does for a cookie. An invitation is good once, until it runs out or is revoked.

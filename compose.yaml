@@ -33,6 +33,12 @@ services:
       # A project the server empties and fills with the demo again on every start (`mainworthy seed`). Only a
       # project that command made is emptied. Empty means none.
       MAINWORTHY_DEMO: ${MAINWORTHY_DEMO:-}
+      MAINWORTHY_SMTP_HOST: ${MAINWORTHY_SMTP_HOST:-}
+      MAINWORTHY_SMTP_PORT: ${MAINWORTHY_SMTP_PORT:-}
+      MAINWORTHY_SMTP_TLS: ${MAINWORTHY_SMTP_TLS:-}
+      MAINWORTHY_SMTP_USER: ${MAINWORTHY_SMTP_USER:-}
+      MAINWORTHY_SMTP_PASSWORD: ${MAINWORTHY_SMTP_PASSWORD:-}
+      MAINWORTHY_MAIL_FROM: ${MAINWORTHY_MAIL_FROM:-}
     volumes:
       - mainworthy-data:/data
 

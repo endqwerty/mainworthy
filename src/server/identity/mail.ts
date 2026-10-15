@@ -1,0 +1,180 @@
+import { connect, isIP, type Socket } from "node:net";
+import { connect as connectTls } from "node:tls";
+import type { App } from "../kernel/app.ts";
+import { invalid } from "../kernel/errors.ts";
+import type { MailConfig } from "../kernel/mail.ts";
+import { publicAddress } from "./people.ts";
+
+type Message = { to: string; subject: string; text: string };
+type Delivery = { pending: Set<Promise<void>>; stopped: boolean };
+const deliveries = new WeakMap<App, Delivery>();
+function delivery(app: App): Delivery {
+	let state = deliveries.get(app);
+	if (!state) {
+		state = { pending: new Set(), stopped: false };
+		deliveries.set(app, state);
+	}
+	return state;
+}
+
+export function requireMail(app: App): string {
+	const url = publicAddress(app.config)?.url;
+	if (!app.config.mail || !url) throw invalid("mail is off on this instance");
+	return url;
+}
+
+export function queueMail(app: App, message: Message): void {
+	if (!app.config.mail) return;
+	app.db.afterCommit(() => {
+		const config = app.config.mail;
+		const state = delivery(app);
+		if (!config || state.stopped) return;
+		if (state.pending.size >= 100) {
+			console.warn("[mainworthy] mail delivery queue is full; request a new link");
+			return;
+		}
+		const sent = sendMail(config, message)
+			.catch(() => {
+				console.warn("[mainworthy] mail delivery failed; check SMTP configuration and request a new link");
+			})
+			.finally(() => {
+				state.pending.delete(sent);
+			});
+		state.pending.add(sent);
+	});
+}
+
+export async function waitMail(app: App): Promise<void> {
+	await Promise.all(delivery(app).pending);
+}
+
+export function stopMail(app: App): void {
+	delivery(app).stopped = true;
+}
+
+function replies(socket: Socket) {
+	const ready: number[] = [];
+	let pending: ReturnType<typeof Promise.withResolvers<number>> | null = null;
+	let buffer = "";
+	let bytes = 0;
+	let code: string | null = null;
+	let failure: Error | null = null;
+	const failed = () => {
+		failure = new Error("SMTP exchange failed");
+		pending?.reject(failure);
+		pending = null;
+	};
+	const data = (chunk: Buffer) => {
+		buffer += chunk.toString("utf8");
+		if (buffer.length > 65_536) {
+			failed();
+			socket.destroy();
+			return;
+		}
+		while (buffer.includes("\r\n")) {
+			const at = buffer.indexOf("\r\n");
+			const line = buffer.slice(0, at);
+			buffer = buffer.slice(at + 2);
+			bytes += line.length + 2;
+			const match = /^(\d{3})(?:([ -])|$)/.exec(line);
+			if (!match || bytes > 65_536 || (code !== null && code !== match[1])) {
+				failed();
+				socket.destroy();
+				return;
+			}
+			code = match[1] ?? null;
+			if (match[2] !== "-") {
+				const value = Number(code);
+				if (pending) {
+					pending.resolve(value);
+					pending = null;
+				} else ready.push(value);
+				bytes = 0;
+				code = null;
+				if (ready.length > 20) {
+					failed();
+					socket.destroy();
+					return;
+				}
+			}
+		}
+	};
+	socket.on("data", data);
+	socket.on("error", failed);
+	socket.on("close", failed);
+	return {
+		async read(): Promise<number> {
+			const buffered = ready.shift();
+			if (buffered !== undefined) return buffered;
+			if (failure) throw failure;
+			pending = Promise.withResolvers<number>();
+			return pending.promise;
+		},
+		detach() {
+			socket.off("data", data);
+			socket.off("error", failed);
+			socket.off("close", failed);
+		},
+	};
+}
+
+async function sendMail(config: MailConfig, message: Message): Promise<void> {
+	const options = {
+		host: config.host,
+		port: config.port,
+		rejectUnauthorized: true,
+		...(isIP(config.host) ? {} : { servername: config.host }),
+	};
+	let socket: Socket = config.tls === "tls" ? connectTls(options) : connect(options);
+	let channel = replies(socket);
+	const deadline = setTimeout(() => socket.destroy(new Error("SMTP timeout")), 5000);
+	const expect = async (...codes: number[]) => {
+		if (!codes.includes(await channel.read())) throw new Error("SMTP exchange refused");
+	};
+	const command = async (line: string, ...codes: number[]) => {
+		socket.write(`${line}\r\n`);
+		await expect(...codes);
+	};
+	try {
+		await expect(220);
+		await command("EHLO mainworthy", 250);
+		if (config.tls === "starttls") {
+			await command("STARTTLS", 220);
+			channel.detach();
+			socket = connectTls({ ...options, socket });
+			channel = replies(socket);
+			await command("EHLO mainworthy", 250);
+		}
+		if (config.auth)
+			await command(`AUTH PLAIN ${Buffer.from(`\0${config.auth.user}\0${config.auth.pass}`).toString("base64")}`, 235);
+		await command(`MAIL FROM:<${config.from}>`, 250);
+		await command(`RCPT TO:<${message.to}>`, 250, 251);
+		await command("DATA", 354);
+		const text =
+			Buffer.from(message.text.replace(/\r?\n/g, "\r\n"))
+				.toString("base64")
+				.match(/.{1,76}/g)
+				?.join("\r\n") ?? "";
+		socket.write(
+			[
+				`Date: ${new Date().toUTCString()}`,
+				`From: <${config.from}>`,
+				`To: <${message.to}>`,
+				`Subject: =?UTF-8?B?${Buffer.from(message.subject).toString("base64")}?=`,
+				`Message-ID: <${crypto.randomUUID()}@${config.from.split("@")[1]}>`,
+				"MIME-Version: 1.0",
+				'Content-Type: text/plain; charset="UTF-8"',
+				"Content-Transfer-Encoding: base64",
+				"",
+				text,
+				".",
+				"",
+			].join("\r\n"),
+		);
+		await expect(250);
+		await command("QUIT", 221);
+	} finally {
+		clearTimeout(deadline);
+		socket.destroy();
+	}
+}

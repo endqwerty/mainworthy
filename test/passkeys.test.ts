@@ -633,7 +633,10 @@ describe("the relying party", () => {
 	test("without the variable passkeys are off: methods says so and the passkey routes refuse plainly", async () => {
 		const w = world({ publicUrl: null });
 		const cookie = await joined(w, "robin", PASSWORD);
-		expect((await w.get("/api/login/methods")).body).toEqual({ ok: true, result: { password: true, passkey: false } });
+		expect((await w.get("/api/login/methods")).body).toEqual({
+			ok: true,
+			result: { password: true, passkey: false, mail: false },
+		});
 		const replies = [
 			await w.post("/api/login/challenge", {}),
 			await w.post("/api/login/challenge", {}, { host: "localhost" }),

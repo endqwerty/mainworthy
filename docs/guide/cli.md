@@ -82,7 +82,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy login --name <name> --password-file <path> [--code-file <path>] [--label <label>] [--expires 30d] [--json]` | Sign in with a password and, when enrolled, an authenticator or recovery code. Print a personal CLI token once. |
 | `mainworthy gate [--commit <sha> \| --run R-4 \| --change pr:482] [--wait <seconds>] [--json]` | Check a commit, change or run. Exit 0 passed, 1 failed, 2 blocked, 3 pending. |
 | `mainworthy token new --agent <name> \| --ci <name> \| --human <name> [--can read,produce] [--project <key>] [--expires 90d] \| token list \| token revoke <id>` | Issue, list and revoke actor tokens. A new secret is shown once. |
-| `mainworthy invite new <name> [--can read,answer] [--project <key>] [--expires 3d] \| invite list \| invite revoke <id>` | Invite a person with a link that is shown once, list invitations, and revoke one. |
+| `mainworthy invite new <name> [--can read,answer] [--project <key>] [--expires 3d] [--email <address>] \| invite list \| invite revoke <id>` | Invite a person with a link that is shown once, list invitations, and revoke one. |
 | `mainworthy actor list \| actor grant <name> --can read,record [--roles approver,lead] [--project <key>] \| actor ungrant <name> [--project <key>] \| actor forget <name> --confirm <name>` | List who may do what, change grants, and forget an actor's identity while keeping history. |
 | `mainworthy audit export --out <file> [--from <time>] [--to <time>] \| audit verify <file>` | Export a project's audit history, or verify a saved audit file offline. |
 | `mainworthy policy show \| policy use <loose\|standard\|strict> \| policy tests <ask\|track\|create> \| policy empty <pending\|nothing-required> [--json]` | Show policy clauses, or record an admin's choice of preset, tests with no case, or empty reports. |
@@ -152,6 +152,7 @@ Flags of `mainworthy token`:
 
 Flags of `mainworthy invite`:
 
+- `--email <string>`: Send the invitation to this address. Requires instance mail settings.
 - `--can <a,b,...>`: What a new person may do, comma-separated or repeated. Not for one who exists.
 - `--expires <string>`: How long the link works: 12h, 3d, 2w. At most 30d.
 
@@ -229,8 +230,8 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy audit` | Export a project's retained decisions, answers, policy changes and case versions as a verifiable audit file. |
 | `mainworthy admin` | Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. |
 | `mainworthy session` | Your browser sessions: list them, and end one. An admin who is a person lists and ends anyone's. |
-| `mainworthy credential` | Your password, passkeys, authenticator and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default. |
-| `mainworthy invitation` | Invite a person with a link, since there is no mail: make one, list them, revoke one. The link is shown once. |
+| `mainworthy credential` | Your password, passkeys, authenticator, recovery email and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default. |
+| `mainworthy invitation` | Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once. |
 
 ### Flags every command takes
 

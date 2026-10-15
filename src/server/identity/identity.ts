@@ -27,6 +27,7 @@ import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
 import { CONTEXT, clearChallenges } from "./challenges.ts";
+import { credentialNotice, forgetContact } from "./contacts.ts";
 import { credentialSummary, dropUserHandle, forgetCredentialsOf } from "./credentials.ts";
 import { listInvitations, revokeInvitation, revokeInvitationsOf, sweepInvitations } from "./invitations.ts";
 import { addressKey, isGeneratedSecret, prefixKey } from "./limiter.ts";
@@ -48,6 +49,8 @@ import {
 import { dropTeamMemberships, teamCapabilities, teamsOf } from "./teams.ts";
 import { clearUses, flushUses, forgetNotedAddresses, lastAddress, notedUse, noteUse } from "./uses.ts";
 
+export { getEmail, requestReset, resetPassword, setEmail, verifyEmail } from "./contacts.ts";
+export { queueMail, requireMail, stopMail, waitMail } from "./mail.ts";
 // What the sign-in routes and the operations of a signed-in person need of them.
 export {
 	type Accepted,
@@ -272,6 +275,7 @@ export function orgId(db: Db): number {
 /** Refuses identity configuration that needs no database, before a start creates or locks its data. */
 export function validateBootstrap(config: Config): void {
 	publicAddress(config);
+	if (config.mail && !config.publicUrl) throw invalid("mail requires MAINWORTHY_PUBLIC_URL");
 	const configured = config.ownerToken;
 	if (configured && (configured.length < OWNER_TOKEN_MIN || configured.length > TOKEN_MAX)) {
 		const why =
@@ -1140,6 +1144,7 @@ export function forgetActor(app: App, name: string): { forgotten: string; tokens
 	if (row.kind === "rule") throw invalid("the policy's own actor cannot be forgotten");
 	const pseudonym = freePseudonym(db, row);
 	const at = app.now();
+	credentialNotice(app, row.id, "Your sign-in methods were removed because your account was forgotten");
 	db.run(Q.forget, { id: row.id, name: pseudonym, at });
 	const revoked = revokeTokensOf(db, row.id, at);
 	// A token's label can name the person, and its address says where they were. Both go from the row; the
@@ -1157,6 +1162,7 @@ export function forgetActor(app: App, name: string): { forgotten: string; tokens
 	// The same for what a person signed in with and for a link that would still let them in. The handle their
 	// passkeys were filed under is deleted: it named the person to an authenticator, and names nobody now.
 	forgetCredentialsOf(db, row.id, at);
+	forgetContact(db, row.id);
 	revokeInvitationsOf(db, row.id, at);
 	dropUserHandle(db, row.id);
 	forgottenCount++;

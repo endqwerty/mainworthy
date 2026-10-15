@@ -27,6 +27,7 @@ import { RunsScreen } from "./runs/index.tsx";
 import { SettingsScreen } from "./settings/index.tsx";
 import { SignIn } from "./signin/index.tsx";
 import { INVITE_PATH, Invitation } from "./signin/invite.tsx";
+import { MailEntry } from "./signin/mail.tsx";
 import { SuiteScreen } from "./suite/index.tsx";
 import { AppContext, type PaletteItem, type PaletteOptions } from "./ui/context.tsx";
 import { DocLink, KeyCap, openDocs, ProducerGlyph, StatusLine } from "./ui/index.tsx";
@@ -139,6 +140,7 @@ export function App() {
 		| { kind: "error"; message: string }
 	>({ kind: "loading" });
 	const [inviting, setInviting] = useState(() => location.pathname === INVITE_PATH);
+	const [mailEntry, setMailEntry] = useState(() => location.pathname === "/reset" || location.pathname === "/email");
 	const person = useRef<string | null>(null);
 	const refreshSession = useCallback(async (): Promise<void> => {
 		const owner = deviceSession();
@@ -173,7 +175,10 @@ export function App() {
 					history.replaceState(null, "", home.url);
 					if (home.missing) homeStatus = missingHomeStatus;
 				}
-			} else if (!location.pathname.startsWith("/p/") && location.pathname !== INVITE_PATH) {
+			} else if (
+				!location.pathname.startsWith("/p/") &&
+				![INVITE_PATH, "/reset", "/email"].includes(location.pathname)
+			) {
 				const first = info.projects[0];
 				if (first) history.replaceState(null, "", routeUrl({ project: first.key, screen: "suite" }));
 			}
@@ -218,6 +223,16 @@ export function App() {
 	}, []);
 	// The page of an invitation is shown whoever is or is not signed in: it is how somebody gets in at all, and
 	// a browser signed in as another person is asked there before anything is replaced.
+	if (mailEntry)
+		return (
+			<MailEntry
+				onDone={async () => {
+					history.replaceState(null, "", "/");
+					await refreshSession();
+					setMailEntry(false);
+				}}
+			/>
+		);
 	if (inviting)
 		return (
 			<Invitation
