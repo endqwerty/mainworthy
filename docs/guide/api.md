@@ -94,6 +94,9 @@ Ordinary JSON case reads omit custom field values and fragment users. Request
 them explicitly with `get` field selections such as `fields: ["title", "fields"]`
 or `fields: ["users"]`. The latter lists a fragment's current consumers and pins.
 The default selection includes `tests` as well as the fields named below.
+When `steps` is selected, `hasFragments` says whether that case version has pins.
+Only a version with pins also returns `sourceSteps`, the editable references
+behind its expanded `steps`.
 
 <!-- generated:operations -->
 

@@ -508,9 +508,45 @@ describe("what the iPhone Suite reads", () => {
 		const ref = page.items[0]?.ref;
 		const docs = z.array(z.unknown()).parse(await op(key, "get", { refs: [ref] }));
 		holds("get case", SuiteDocument, docs[0]);
+		expect(docs[0]).toMatchObject({ hasFragments: false });
+		expect(docs[0]).not.toHaveProperty("sourceSteps");
 		const old = z.array(z.unknown()).parse(await op(key, "get", { refs: [ref], version: 1 }));
 		holds("get case version", SuiteDocument, old[0]);
 		holds("history", SuiteHistory, await op(key, "history", { ref }));
+	});
+
+	test("a pinned case still decodes its shared instructions and native editing guard", async () => {
+		const { SuiteDocument } = await import("../scripts/ios/contract.ts");
+		const key = z.object({ project: z.string() }).parse(await result("POST", "/test/project", {})).project;
+		const created = z.object({ status: z.literal("adopted"), cases: z.array(z.object({ ref: z.string() })) });
+		const fragment = created.parse(
+			await op(key, "propose", {
+				edits: [
+					{
+						op: "create",
+						kind: "fragment",
+						body: { title: "Shared setup", steps: [{ id: "ab", action: "Sign in", expected: "Ready" }] },
+					},
+				],
+			}),
+		).cases[0]?.ref;
+		if (!fragment) throw new Error("Missing fragment ref");
+		const consumer = created.parse(
+			await op(key, "propose", {
+				edits: [
+					{ op: "create", body: { title: "Shared checkout", steps: [{ id: "cd", use: { fragment, version: 1 } }] } },
+				],
+			}),
+		).cases[0]?.ref;
+		if (!consumer) throw new Error("Missing consumer ref");
+		const docs = z.array(z.unknown()).parse(await op(key, "get", { refs: [consumer] }));
+		holds("get case with pinned steps", SuiteDocument, docs[0]);
+		expect(docs[0]).toMatchObject({
+			ref: consumer,
+			hasFragments: true,
+			sourceSteps: [{ id: "cd", use: { fragment, version: 1 } }],
+			steps: [{ action: "Sign in", expected: "Ready" }],
+		});
 	});
 
 	test("adopted, waiting and overlapping proposals", async () => {

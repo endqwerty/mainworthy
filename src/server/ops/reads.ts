@@ -182,8 +182,9 @@ export function caseView(
 	if (want.has("pre")) out.pre = body.pre;
 	if (want.has("steps")) {
 		out.steps = expandSteps(ctx.db, ctx.project.id, body);
-		out.sourceSteps = body.steps;
-		out.hasFragments = body.steps.some((step) => Boolean(step.use));
+		const hasFragments = body.steps.some((step) => Boolean(step.use));
+		if (hasFragments) out.sourceSteps = body.steps;
+		out.hasFragments = hasFragments;
 	}
 	if (want.has("fields")) out.fields = body.fields;
 	if (want.has("users") && row.kind === "fragment") out.users = fragmentUsers(ctx.db, ctx.project.id, caseRef(row));
