@@ -28,12 +28,13 @@ import {
 	livePassword,
 	noteCredentialUse,
 	passkeyByCredentialId,
+	rehashPassword,
 	revokeCredential,
 	revokeCredentialsOf,
 	storedPasskey,
 	userHandleOf,
 } from "./credentials.ts";
-import type { SignedIn } from "./identity.ts";
+import { revokeTokensOf, type SignedIn } from "./identity.ts";
 import {
 	type InvitationPurpose,
 	type InvitationRow,
@@ -44,7 +45,7 @@ import {
 	spendInvitation,
 } from "./invitations.ts";
 import { accountKey, addressKey, type LimiterAnswer } from "./limiter.ts";
-import { dummyHash, hashPassword, PasswordWorkBusy, verifyPassword } from "./passwords.ts";
+import { dummyHash, hashPassword, type PasswordMatch, PasswordWorkBusy, verifyPassword } from "./passwords.ts";
 import {
 	endSession,
 	endSessionsOf,
@@ -279,16 +280,18 @@ export async function signInWithPassword(
 	if (answer.kind === "blocked") return waiting(answer);
 	const person = app.reader.get(Q.personByName, { name: input.name });
 	const stored = person ? livePassword(app.reader, person.id) : null;
-	let right: boolean;
+	let right: PasswordMatch;
+	let rehashed: string | null = null;
 	try {
 		// Asked for whoever is named, so that the one sign-in that has to make it first is not marked by that.
 		const nobodys = await dummyHash(app.config.passwordCost);
 		right = await verifyPassword(input.password, stored?.data ?? nobodys);
+		if (right === "legacy") rehashed = await hashPassword(input.password, app.config.passwordCost);
 	} catch (error) {
 		if (error instanceof PasswordWorkBusy) return no("busy");
 		throw error;
 	}
-	if (!person || !stored || !right) {
+	if (!person || !stored || right === "wrong") {
 		// The clock is read again: the check took a tenth of a second, and a failure counts from when it is known.
 		limiter.failed(keys, app.now());
 		return no(!person ? "unknown-name" : !stored ? "no-password" : "wrong-password");
@@ -305,7 +308,8 @@ export async function signInWithPassword(
 		if (!now || !current || current.data !== stored.data) return no("changed-meanwhile");
 		const opened = openOn(app, current, cookie, about);
 		if (!opened) throw new Stop(no("changed-meanwhile"));
-		noteCredentialUse(app.db, current.id, app.now());
+		if (rehashed === null) noteCredentialUse(app.db, current.id, app.now());
+		else if (!rehashPassword(app.db, current, rehashed, app.now())) throw new Stop(no("changed-meanwhile"));
 		return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } } as const;
 	});
 }
@@ -352,7 +356,7 @@ export async function changePassword(
 			const keys = counted(addressKey(input.address), account);
 			const answer = limiter.check(keys, app.now());
 			if (answer.kind === "blocked") return waiting(answer);
-			if (!(await verifyPassword(input.current, held.data))) {
+			if ((await verifyPassword(input.current, held.data)) === "wrong") {
 				limiter.failed(keys, app.now());
 				return { ok: false, why: "wrong-current" };
 			}
@@ -727,7 +731,7 @@ export type Accepted = Entry | { ok: false; why: "other-session"; signedInAs: st
  * Accepts an invitation with a password, a passkey or both, and signs the person in.
  *
  * One transaction stores what the person will sign in with, spends the invitation and opens the session. An
- * invitation to recover also revokes, there, every credential the person had and ends every session of
+ * invitation to recover also revokes, there, every credential and token the person had and ends every session of
  * theirs: until it is accepted nothing of theirs changes, so a link that is never used locks nobody out.
  *
  * `browser` is the session cookie the request carried, if any. When it signs in somebody else, the invitation
@@ -800,6 +804,7 @@ export async function acceptInvitation(
 		if (!spendInvitation(app.db, hash, at)) throw new Stop(no("invitation"));
 		if (invitation.purpose === "recover") {
 			revokeCredentialsOf(app.db, person.id, at);
+			revokeTokensOf(app.db, person.id, at);
 			endSessionsOf(app.db, person.id, at, "ended");
 		} else if (liveCredentials(app.db, person.id).length > 0) throw new Stop(no("has-credentials"));
 		let root: CredentialRow | null = null;

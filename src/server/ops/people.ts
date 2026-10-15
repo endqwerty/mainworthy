@@ -208,7 +208,7 @@ export const invitationOp = defineInstanceOp({
 					link: made.link,
 					note: `This link is shown once. Hand it to ${person.name}: it works once.${
 						purpose === "recover"
-							? ` When it is accepted, every password and passkey ${person.name} had stops working and every session of theirs ends.`
+							? ` When it is accepted, every password, passkey and token ${person.name} had stops working and every session of theirs ends.`
 							: ""
 					}${
 						relative

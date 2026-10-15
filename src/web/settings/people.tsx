@@ -288,7 +288,7 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 							{confirming === person.name && (
 								<small>
 									A recovery link is for somebody who lost their password or passkey. Once {person.name} accepts it, it
-									replaces every way {person.name} signs in and ends their sessions.
+									replaces their passwords and passkeys, revokes all their tokens and ends their sessions.
 								</small>
 							)}
 							<small className="settings-refusal" role="status">
@@ -380,8 +380,8 @@ function InvitationLink({ created, dismiss }: { created: InvitationCreated; dism
 			</p>
 			{created.purpose === "recover" && (
 				<p>
-					When {created.name} accepts it, every password and passkey they had stops working and every session of theirs
-					ends.
+					When {created.name} accepts it, every password, passkey and token they had stops working and every session of
+					theirs ends.
 				</p>
 			)}
 			{relative && (

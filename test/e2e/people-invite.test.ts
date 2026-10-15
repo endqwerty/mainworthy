@@ -182,7 +182,10 @@ test.skipIf(!browserAvailable)(
 			page.setDefaultTimeout(8000);
 			await page.getByRole("heading", { name: "You are invited as pat" }).waitFor();
 			await page
-				.getByText("Accepting replaces every way you sign in and signs you out everywhere else.", { exact: true })
+				.getByText(
+					"Accepting replaces every password and passkey, revokes all your tokens, and signs you out everywhere else.",
+					{ exact: true },
+				)
 				.waitFor();
 			await page.locator("#invite-password").fill(PASSWORD);
 			await page.locator("#invite-password-again").fill(PASSWORD);

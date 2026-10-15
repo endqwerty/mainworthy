@@ -228,7 +228,9 @@ Open the link. The page says "You are invited as dana" and until when the link w
 
 The page takes the code out of the address bar as soon as it has read it. From then on the address you see, and the one Back returns to, has no code in it, so it is not copied with the address. That is as far as a page can go: the browser's own record of the address that was first opened still holds the whole link, as it does for any address. The code is the part after the `#`, which a browser sends to no server. If you reload the page, it has no code: open the link again.
 
-If the browser is signed in as somebody else, the page says who and asks before it signs them out of that browser. Until it knows who is signed in, and until you answer, the fields cannot be typed in. If the page cannot find out who is signed in, because the request failed or no answer came within twenty seconds, it says so and the fields stay closed: "Try again" asks once more, with the invitation as it was. The answer is about the person the page named and nobody else: if another person signs in to that browser before you accept, nothing is accepted, and the page asks again, about them. "Stay signed in" leaves the invitation as it is.
+If the browser is signed in as somebody else, the page says who and asks before it signs them out of that browser. Until it knows who is signed in, and until you answer, the fields cannot be typed in. If the page cannot find out who is signed in, because the request failed or no answer came within twenty seconds, it says so and the fields stay closed: "Try again" asks once more, with the invitation as it was. The answer is about the person the page named and nobody else: if the acceptance request carries a different person's cookie, nothing is accepted, and the page asks again, about them. "Stay signed in" leaves the invitation as it is.
+
+Two sign-ins already in flight can each finish and set this browser's cookie. The last response chooses who this browser is signed in as. A session whose cookie was replaced can remain open on the server, because the earlier request did not carry that cookie. Sign in as that person and end it in **Your sessions**, or leave it to expire after 14 days without use, at the default lifetime. This does not end their sessions on other devices.
 
 If no answer comes back when you accept, the page says that it cannot tell whether the invitation was accepted. Go to the sign-in page and try what you chose. If that signs you in, it was.
 
@@ -237,6 +239,10 @@ A link that was used, was revoked or has run out says "This invitation does not 
 A script accepts an invitation with `POST /api/login`. [API](./api.md#sign-in-as-a-person) has the request.
 
 ### A name and a password, or a passkey
+
+Mainworthy normalizes passwords to Unicode NFC before hashing and checking them. An accented letter such as `é` matches the same letter entered as `e` followed by a combining accent, including from an iPhone keyboard. Compatibility characters such as full-width letters stay distinct. Passkeys and the PIN or biometric check that unlocks them are unchanged.
+
+A password stored before this change still accepts its original spelling. For an older non-NFC spelling, the first successful sign-in with that spelling refreshes its hash, after which canonical spellings both work. Until then, a different spelling may fail. Refreshing the hash keeps existing sessions signed in. Changing a password accepts the original spelling of an older password too.
 
 After that the person signs in on the sign-in page with their name and password, or with "Sign in with a passkey". A wrong name or password gets one sentence, whichever of the two was wrong: "That name and password did not sign you in." A wrong token and a passkey that is refused each have a message of their own, and after too many failed attempts the page says how long to wait instead. A script signs in with `POST /api/login` and `{"name": "dana", "password": "..."}`. A name and a password that are looked at and refused get one answer whatever was wrong with them, `unauthenticated: that did not sign you in`. The reply does not say whether the name exists or the password was wrong. The server's log has the reason as a code, and never the name or the password that was tried.
 
@@ -258,10 +264,14 @@ From the command line, invite the person again. For a person who exists, the lin
 $ mainworthy invite new dana
 invitation 2 for "dana" (a recovery: accepting it replaces every way dana signs in), until 2026-10-16 09:57 UTC
 https://mainworthy.example/invite#<code>
-This link is shown once. Hand it to dana: it works once. When it is accepted, every password and passkey dana had stops working and every session of theirs ends.
+This link is shown once. Hand it to dana: it works once. When it is accepted, every password, passkey and token dana had stops working and every session of theirs ends.
 ```
 
-Nothing changes until the link is accepted, so a link nobody uses locks nobody out. The owner makes a recovery link for anybody. An admin who is a person can make their own. Everybody else asks the owner: a person who does not administer cannot make an invitation at all, and an admin who asks for another person's link is refused, for the same reason as with a token: whoever accepts the link is that person from then on. A recovery does not touch the person's tokens. Revoke those with `mainworthy token revoke`.
+Nothing changes until the link is accepted, so a link nobody uses locks nobody out. The owner makes a recovery link for anybody. An admin who is a person can make their own. Everybody else asks the owner: a person who does not administer cannot make an invitation at all, and an admin who asks for another person's link is refused, for the same reason as with a token: whoever accepts the link is that person from then on.
+
+Accepting recovery revokes every token belonging to that person, including personal CLI tokens and tokens made by an admin. Scripts using those tokens stop working and need new tokens. Tokens belonging to other people, agents and pipelines stay as they are.
+
+Recovering the owner also revokes their configured `MAINWORTHY_OWNER_TOKEN`, even if it was their last token. The new password or passkey still signs them in. To restore a configured owner token, set the variable to a new value and restart. Restarting with the revoked value does not revive it. CI jobs that use that owner token also fail authentication until their configured secret is updated to the new value. CI using a separate pipeline actor's token is unaffected.
 
 ### Your sessions and your ways of signing in
 

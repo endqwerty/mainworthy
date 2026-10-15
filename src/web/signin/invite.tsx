@@ -338,7 +338,11 @@ function Accept({
 			<main className="signin-card">
 				<h1>You are invited as {name}</h1>
 				<p className="dim">This link works once, until {dateTime(expiresAt)}.</p>
-				{purpose === "recover" && <p>Accepting replaces every way you sign in and signs you out everywhere else.</p>}
+				{purpose === "recover" && (
+					<p>
+						Accepting replaces every password and passkey, revokes all your tokens, and signs you out everywhere else.
+					</p>
+				)}
 				{asking && (
 					<div className="signin-ask">
 						<p>

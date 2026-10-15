@@ -700,7 +700,13 @@ describe("the relying party", () => {
 		expect(accepted.status).toBe(200);
 		const offered = await challenge(w);
 		expect(
-			(await fetch(`${w.instance.url}/api/import`, { method: "POST", headers: bearer(TOKEN), body: archive })).status,
+			(
+				await fetch(`${w.instance.url}/api/import`, {
+					method: "POST",
+					headers: { cookie: accepted.cookie },
+					body: archive,
+				})
+			).status,
 		).toBe(200);
 		const lines = await logged(async () => {
 			expect((await withPasskey(w, device.assert(offered))).text).toBe(REFUSED);

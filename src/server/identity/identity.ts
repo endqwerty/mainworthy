@@ -1038,6 +1038,11 @@ export function createPersonalToken(
 	return { id: created.id, actor: created.actor, token: created.secret, expiresAt: created.expiresAt };
 }
 
+/** Revokes every token of an actor, including the owner's last token, during recovery or erasure. */
+export function revokeTokensOf(db: Db, actor: number, at: number): number {
+	return db.run(Q.revokeTokensOf, { actor, at }).changes;
+}
+
 /** The minute job removes ended invitations and erases old token addresses, preserving token revocation. */
 export function sweepSignInRecords(app: App): void {
 	const now = app.now();
@@ -1083,7 +1088,7 @@ export function forgetActor(app: App, name: string): { forgotten: string; tokens
 	const pseudonym = freePseudonym(db, row);
 	const at = app.now();
 	db.run(Q.forget, { id: row.id, name: pseudonym, at });
-	const revoked = db.run(Q.revokeTokensOf, { actor: row.id, at }).changes;
+	const revoked = revokeTokensOf(db, row.id, at);
 	// A token's label can name the person, and its address says where they were. Both go from the row; the
 	// address also goes from what is noted and not yet written. When each token was last used stays.
 	db.run(Q.forgetTokenDetails, { actor: row.id });

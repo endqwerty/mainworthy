@@ -40,12 +40,12 @@ describe("what a password may be", () => {
 		const two = await hashPassword("correct horse battery staple", CHEAP);
 		expect(one).toMatch(/^\$argon2id\$v=19\$m=8,t=1,p=1\$/);
 		expect(one).not.toBe(two);
-		expect(await verifyPassword("correct horse battery staple", one)).toBe(true);
-		expect(await verifyPassword("correct horse battery stapl", one)).toBe(false);
-		expect(await verifyPassword("", one)).toBe(false);
+		expect(await verifyPassword("correct horse battery staple", one)).toBe("normalized");
+		expect(await verifyPassword("correct horse battery stapl", one)).toBe("wrong");
+		expect(await verifyPassword("", one)).toBe("wrong");
 		// A stored text that is no hash matches nothing, and is no error either.
 		for (const stored of ["", "correct horse battery staple", "$argon2id$nonsense", "{}"])
-			expect(await verifyPassword("correct horse battery staple", stored)).toBe(false);
+			expect(await verifyPassword("correct horse battery staple", stored)).toBe("wrong");
 	});
 
 	test("the hash a missing password is checked against is made once for each cost, and no password matches it", async () => {
@@ -54,7 +54,24 @@ describe("what a password may be", () => {
 		expect(first).toMatch(/^\$argon2id\$v=19\$m=8,t=1,p=1\$/);
 		expect(await dummyHash({ memoryCost: 16, timeCost: 1 })).toMatch(/\$m=16,t=1,p=1\$/);
 		for (const guess of ["", "password", "correct horse battery staple"])
-			expect(await verifyPassword(guess, first)).toBe(false);
+			expect(await verifyPassword(guess, first)).toBe("wrong");
+	});
+
+	test("password hashes use NFC, so canonical spellings match while compatibility characters stay distinct", async () => {
+		const composed = "café password for robin";
+		const decomposed = "cafe\u0301 password for robin";
+		for (const typed of [composed, decomposed]) {
+			const stored = await hashPassword(typed, CHEAP);
+			expect(await Bun.password.verify(composed, stored)).toBe(true);
+			expect(await verifyPassword(composed, stored)).toBe("normalized");
+			expect(await verifyPassword(decomposed, stored)).toBe("normalized");
+		}
+		const compatibility = await hashPassword("ｐassword for robin", CHEAP);
+		expect(await verifyPassword("password for robin", compatibility)).toBe("wrong");
+		expect(await verifyPassword("ｐassword for robin", compatibility)).toBe("normalized");
+		const legacy = await Bun.password.hash(decomposed, { algorithm: "argon2id", ...CHEAP });
+		expect(await verifyPassword(decomposed, legacy)).toBe("legacy");
+		expect(await verifyPassword(composed, legacy)).toBe("wrong");
 	});
 });
 
@@ -113,11 +130,11 @@ describe("how many at once", () => {
 			work.finish();
 			await settle();
 		}
-		expect(await Promise.all(taken)).toEqual(Array.from({ length: 34 }, () => true));
+		expect(await Promise.all(taken)).toEqual(Array.from({ length: 34 }, () => "normalized"));
 		const after = verifyPassword("x", "y");
 		await settle();
 		work.finish();
-		expect(await after).toBe(true);
+		expect(await after).toBe("normalized");
 		expect(work.most).toBe(2);
 	});
 

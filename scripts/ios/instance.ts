@@ -27,9 +27,11 @@ export type TestInstance = {
 
 const Ask = z.object({ kind: z.enum(["standard", "strict"]).default("standard") });
 const Invited = z.object({ ok: z.literal(true), result: z.object({ code: z.string() }) });
+const Issued = z.object({ ok: z.literal(true), result: z.object({ token: z.string() }) });
 
 export async function testInstance(): Promise<TestInstance> {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-ios-"));
+	let token = TOKEN;
 	let instance: Instance | null = null;
 	// Another origin, which only counts what reaches it: a client that follows a redirect there is seen.
 	let reached = 0;
@@ -75,8 +77,8 @@ export async function testInstance(): Promise<TestInstance> {
 						const key = `t-${randomBytes(5).toString("hex")}`;
 						const result =
 							asked.data.kind === "strict"
-								? { project: key, run: await passedRun(made.url, TOKEN, key) }
-								: await scenario(made.url, TOKEN, key);
+								? { project: key, run: await passedRun(made.url, token, key) }
+								: await scenario(made.url, token, key);
 						return Response.json({ ok: true, result });
 					},
 					"/test/elsewhere": () => Response.redirect(`http://127.0.0.1:${other.port}/api/session`, 307),
@@ -92,17 +94,28 @@ export async function testInstance(): Promise<TestInstance> {
 				headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
 				body: JSON.stringify(body),
 			});
-		// Each is given a password by an invitation: the owner's, to an existing person, is a recovery link, which
-		// leaves the owner's token as it was.
+		// Each is given a password by an invitation. Owner recovery revokes the startup token, so the recovered
+		// session makes a new one for setup requests.
 		for (const [name, password] of [
 			[PERSON.name, PERSON.password],
 			[OWNER, OWNER_PASSWORD],
 		]) {
-			const invited = Invited.parse(await (await post("/api/invitation", { do: "create", name }, TOKEN)).json());
+			const invited = Invited.parse(await (await post("/api/invitation", { do: "create", name }, token)).json());
 			const joined = await post("/api/login", { invitation: invited.result.code, password });
 			if (!joined.ok) throw new Error(`${name} could not join: ${joined.status} ${await joined.text()}`);
+			if (name === OWNER) {
+				const issued = await fetch(`${made.url}/api/admin`, {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						cookie: (joined.headers.getSetCookie()[0] ?? "").split(";")[0] ?? "",
+					},
+					body: JSON.stringify({ do: "token.create", actor: OWNER, kind: "human", label: "iOS test setup" }),
+				});
+				token = Issued.parse(await issued.json()).result.token;
+			}
 		}
-		return { url: made.url, token: TOKEN, person: PERSON, owner: { name: OWNER, password: OWNER_PASSWORD }, stop };
+		return { url: made.url, token, person: PERSON, owner: { name: OWNER, password: OWNER_PASSWORD }, stop };
 	} catch (error) {
 		await stop();
 		throw error;
