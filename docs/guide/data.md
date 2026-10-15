@@ -85,6 +85,91 @@ An unknown key is an error. Without `--project`, the command exports the whole i
 `MAINWORTHY_PROJECT` is set. Import either archive into a fresh instance with the command below.
 Import into an instance that already has data is still deferred.
 
+## Export and verify an audit
+
+A project admin can copy its retained decision history for a time range:
+
+```sh
+mainworthy audit export --project shop --from 2026-10-01T00:00:00Z --to 2026-10-15T00:00:00Z --out shop-audit.ndjson
+mainworthy audit verify shop-audit.ndjson
+```
+
+`--from` includes the start and `--to` excludes the end. Dates are nonnegative Unix
+milliseconds or ISO timestamps with a timezone. Omit both for all retained history
+through the server's current snapshot. An end later than the snapshot time plus one
+millisecond is refused. Export uses the selected project's admin capability and
+writes a private file atomically. The file is plain NDJSON. The operation buffers
+the reply in memory, so select a smaller period for large histories.
+
+The registry equivalent is `audit { from, to }` at `POST /api/p/<project>/audit`.
+Its JSON reply contains `format`, `project`, `records`, `sha256`, and `ndjson`.
+The operation reads one consistent snapshot and records no write. The web UI has
+no audit export control. `mainworthy audit verify <file>` needs neither a running
+server nor a token. Exit code 0 means the file passed the structural checks. Invalid
+files exit 4. `--json` prints the record count, checksum, number of before-range
+references, and number of decisions without a recorded historical evidence hash.
+
+### Audit format 1
+
+Each line is canonical JSON with lexically sorted object keys and one LF. The file
+uses UTF-8 and ends with an LF. The header has `mainworthy: "audit"`, `format: 1`,
+`project`, `from`, `to`, `exportedAt`, and the snapshot's project `seq`. It also
+states `grantChanges: "team-history-only"`, `teamState: "at-export"`,
+`evidencePayloads: "not-retained"`, and
+`actorNames: "at-export"`.
+
+Context records come first, sorted by id. Events follow, ordered by time, sequence,
+and id. Each record has a `type` and a unique `id`:
+
+| Type | Content |
+| --- | --- |
+| `question` | `question:<id>`, public `ref`, kind, fingerprint, `openedAt`, `openedSeq`, and prior question reference. Only referenced questions and their predecessors are included. |
+| `evidence` | `evidence:<question-id>:<hash>`, question reference, and the recorded hash. This is a digest record, without the original input payload. |
+| `result` | `result:<id>`, immutable test, target, commit, repository, environment, job, method, producer, outcome, signature, time and sequence for inherited head and base results. These context records can precede `from`. |
+| `team` | `team:<id>`, name, creation time, current members and current grants on this project or every project. This is state at export time, including for a historical range. |
+| `team-event` | `team-event:<id>`, time, team reference, actor, action, affected person, project and capabilities. Includes scoped grant changes and membership history in the range; these instance events have no project sequence. |
+| `decision` | `decision:<id>`, time, sequence, kind, answer, basis hash, holds, effects, expiry, question, prior decision, evidence, signers, and typed `inherited` result and base references. Each signer retains its actor, clause, policy version, and reason. Withdrawals and automatic endings are included. |
+| `answer` | `answer:<id>`, time, sequence, actor, question, answer, reason, whether it counted, and the exact evidence hash seen. Advice is included. |
+| `policy` | `policy:<version>`, time, sequence, actor, preset, clauses, settings, previous policy, and adopting decision. The initial policy has no adopting decision. |
+| `case-version` | `version:<case-id>:<version>`, public case ref, time, sequence, author, reason, full body, body and claim hashes, parent version, and adopting decision. |
+
+An actor contains `id`, `name`, and `kind`. Names reflect the time of export and use
+a pseudonym after forgetting. A reference is `{ scope: "included", id }` or
+`{ scope: "before-range", id, at }`. Only event references can precede the range.
+Their `at` must precede `from`. The exporter resolves the original event in the same
+project before creating that marker. Question and evidence context always appear
+inside the file.
+
+Recorded evidence is `{ state: "recorded", hash, ref }`. A decision made before
+migration 15 has `{ state: "not-recorded" }` because its exact seen-evidence hash was
+not retained. Its material `basis` remains available. A policy change or case version
+reaches its evidence through the adopting decision. The initial policy has none.
+
+The footer is `{ end: true, records, sha256 }`. `records` counts context and event
+records, excluding the header and footer. `sha256` covers every preceding UTF-8 byte,
+including LFs. Verification rejects unsupported formats, unknown keys, noncanonical
+lines, duplicate ids, unresolved or wrongly typed references, invalid range markers,
+reference cycles, skipped case or policy predecessors, decisions or answers before
+their question's opening sequence, inconsistent evidence hashes, and changed case
+body hashes. Demo projects can date writes out of order, so timestamp order is not
+an invariant. If a time range excludes a required demo predecessor that has a later
+date, export fails and asks you to widen `--to`.
+
+Verification checks the file's integrity and internal references. The checksum does
+not authenticate its source or prove that every database record was exported. An
+offline verifier cannot confirm old events outside the file or reconstruct original
+evidence payloads. Team history covers teams with current or historical grants on
+this project or every project. Other project grants and their events stay out.
+Personal grant changes and membership removal by forgetting have no retained event
+history. Current team state cannot prove who was eligible to sign in the past.
+Signatures with
+re-authentication and meaning, retention, legal hold, and recorded text redaction
+remain absent. A passing file check is not a regulated conformance claim.
+
+Migration 15 adds nullable decision evidence hashes to instance archives. It
+preserves the current archive version because a missing hash imports as NULL and
+exports as `not-recorded`. Older archive versions still need their matching build.
+
 ## Bring cases from another tool
 
 Use `mainworthy import` with `--format csv`, `--format testrail`, or `--format qase`

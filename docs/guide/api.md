@@ -780,6 +780,28 @@ Read a tracker request's delivery state and its verified issue reference.
 
 </details>
 
+### audit
+
+Export a project's retained decisions, answers, policy changes and case versions as a verifiable audit file.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/p/<project>/audit` |
+| Command | `mainworthy audit` |
+| Needs | `admin` |
+| Effect | reads |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>audit</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `from` | `integer` | no |  Default: `0`. |
+| `to` | `integer` | no |  |
+
+</details>
+
 ### admin
 
 Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do.

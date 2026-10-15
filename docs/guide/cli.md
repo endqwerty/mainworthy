@@ -2,7 +2,7 @@
 
 Every command of `mainworthy`, with its flags and exit codes. The tables on this page are read from the program, so they match the version you are running.
 
-`mainworthy` is one executable. With no arguments it starts the server. Almost every other command talks to a running server over HTTP, on this machine or another one. `mainworthy fmt` and `mainworthy help` need no server.
+`mainworthy` is one executable. With no arguments it starts the server. Almost every other command talks to a running server over HTTP, on this machine or another one. `mainworthy fmt`, `mainworthy audit verify <file>`, and `mainworthy help` need no server.
 
 ## Sign in with a password and a code
 
@@ -84,6 +84,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy token new --agent <name> \| --ci <name> \| --human <name> [--can read,produce] [--project <key>] [--expires 90d] \| token list \| token revoke <id>` | Issue, list and revoke actor tokens. A new secret is shown once. |
 | `mainworthy invite new <name> [--can read,answer] [--project <key>] [--expires 3d] \| invite list \| invite revoke <id>` | Invite a person with a link that is shown once, list invitations, and revoke one. |
 | `mainworthy actor list \| actor grant <name> --can read,record [--project <key>] \| actor ungrant <name> [--project <key>] \| actor forget <name> --confirm <name>` | List who may do what, change grants, and forget an actor's identity while keeping history. |
+| `mainworthy audit export --out <file> [--from <time>] [--to <time>] \| audit verify <file>` | Export a project's audit history, or verify a saved audit file offline. |
 | `mainworthy policy show \| policy use <loose\|standard\|strict> \| policy tests <ask\|track\|create> \| policy empty <pending\|nothing-required> [--json]` | Show policy clauses, or record an admin's choice of preset, tests with no case, or empty reports. |
 | `mainworthy new [file\|-] [--json]` | Create a case from a canonical Markdown file or an outline on stdin. |
 | `mainworthy seed <project> [--cases 2000] [--seed 1] [--days 14] [--unlinked-files 60] [--json]` | Fill a new or empty project with demo data: a shop's cases, two weeks of results and runs, and questions to answer. |
@@ -159,6 +160,12 @@ Flags of `mainworthy actor`:
 - `--can <a,b,...>`: Capabilities, comma-separated or repeated.
 - `--confirm <string>`: Repeat the name to confirm forgetting. A pseudonym replaces the name in attribution, question evidence and saved replies. Password hashes, passkey public keys, and token and credential labels are erased. Passwords, passkeys, tokens and invitations stop working, and sessions end. History and text the person typed in cases and notes stay. Some sign-in records and request fingerprints stay. This cannot be undone.
 
+Flags of `mainworthy audit`:
+
+- `--out <string>`: Audit NDJSON destination.
+- `--from <string>`: Inclusive start: Unix milliseconds or ISO timestamp with a timezone.
+- `--to <string>`: Exclusive end: Unix milliseconds or ISO timestamp with a timezone.
+
 Flags of `mainworthy seed`:
 
 - `--cases <number>`: How many cases to write. Defaults to 2000.
@@ -218,6 +225,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy check` | Check the suite for structural problems: cases with no steps or no expected result, duplicate titles, dangling links. |
 | `mainworthy command` | What became of a command you sent under an idempotency key: not recorded, begun, or done with its reply. |
 | `mainworthy tracker-status` | Read a tracker request's delivery state and its verified issue reference. |
+| `mainworthy audit` | Export a project's retained decisions, answers, policy changes and case versions as a verifiable audit file. |
 | `mainworthy admin` | Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. |
 | `mainworthy session` | Your browser sessions: list them, and end one. An admin who is a person lists and ends anyone's. |
 | `mainworthy credential` | Your password, passkeys, authenticator and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default. |

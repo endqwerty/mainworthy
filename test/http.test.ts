@@ -11,6 +11,7 @@ import { Client } from "../src/cli/client.ts";
 import { seed } from "../src/cli/seed.ts";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import { ERROR_CODES, type ErrorCode } from "../src/core/api.ts";
+import { AuditReply, verifyAudit } from "../src/core/audit.ts";
 import { Policy } from "../src/core/kinds.ts";
 import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
 import { PRESETS } from "../src/core/presets.ts";
@@ -663,6 +664,7 @@ describe("reads on other cores through HTTP", () => {
 		});
 		if (!attached.body.ok) throw new Error(attached.body.error.message);
 		const inputs: Record<string, unknown[]> = {
+			audit: [{}, { from: 10, to: 5 }],
 			attachment: [{ result: failed?.id }, { result: failed?.id, id: attached.body.result.id }, { result: 999999 }, {}],
 			get: [{ refs: ["C-1", "T-1", "R-1", "P-1"] }, { refs: ["C-1"], as: "md" }, { refs: [] }],
 			find: [{}, { in: "folders" }, { in: "tests" }, { folder: "checkout" }, { text: "revised" }],
@@ -689,7 +691,15 @@ describe("reads on other cores through HTTP", () => {
 					actor: () => instance.owner,
 				});
 				const reply = await post(instance, `/api/p/scratch/${op.name}`, input);
-				expect(reply.body).toEqual(JSON.parse(JSON.stringify(expected)));
+				if (op.name === "audit" && expected.ok && reply.body.ok) {
+					const actual = AuditReply.parse(reply.body.result);
+					const baseline = AuditReply.parse(expected.result);
+					expect(verifyAudit(actual.ndjson)).toMatchObject({ project: baseline.project, records: baseline.records });
+					// Each read has its own export time and checksum; the retained records must match.
+					expect(actual.ndjson.trimEnd().split("\n").slice(1, -1)).toEqual(
+						baseline.ndjson.trimEnd().split("\n").slice(1, -1),
+					);
+				} else expect(reply.body).toEqual(JSON.parse(JSON.stringify(expected)));
 				checked++;
 			}
 		}
@@ -2181,6 +2191,7 @@ describe("the surface", () => {
 		await sweepCsvImportReplies(checked, "SWEEP-CSV-1");
 		await sweepTrackerReplies(instance, checked, "scratch");
 		await sweepAttachmentReplies(checked);
+		verifyAudit(AuditReply.parse(await checked("audit", {})).ndjson);
 		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());
 		console.log(`all-operation sweep: ${sweep.counts.success} real HTTP replies; Zod and Ajv`);
 	});
@@ -2410,6 +2421,8 @@ describe("the surface", () => {
 		await sweepCsvImportReplies(checked, "SWEEP-CSV-2");
 		await sweepTrackerReplies(instance, checked, "demo");
 		await sweepAttachmentReplies(checked);
+		verifyAudit(AuditReply.parse(await checked("audit", {})).ndjson);
+		await checked("audit", { from: 10, to: 5 }, {}, "invalid");
 		const total = sweep.counts.success + sweep.counts.error + empty.counts.success + empty.counts.error;
 		expect(total).toBeGreaterThanOrEqual(236);
 		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());

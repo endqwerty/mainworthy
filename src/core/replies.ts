@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Attachment, AttachmentReply } from "./attachments.ts";
+import { AuditReply } from "./audit.ts";
 import { CsvImportRow } from "./csv.ts";
 import { SameCodeEvidence } from "./flaky.ts";
 import { ActorKind, Policy, Unlinked } from "./kinds.ts";
@@ -438,6 +439,7 @@ export type CsvImportReply = z.infer<typeof CsvImportReply>;
 export const REPLIES = {
 	attach: Attachment,
 	attachment: AttachmentReply,
+	audit: AuditReply,
 	tracker: TrackerReceipt,
 	"tracker-status": TrackerReceipt,
 	announce: AnnounceReply,

@@ -26,7 +26,7 @@ A grant lists capabilities, and a capability is permission to call a group of op
 | `produce` | `propose`, `import-csv`, `claim`, `tracker`, `decide` | a person, an agent |
 | `answer` | none by itself; it makes an answer count where the policy asks a member | a person |
 | `plan` | `plan` | a person |
-| `admin` | `admin`, `invitation` | a person |
+| `admin` | `audit`, `admin`, `invitation` | a person |
 
 A pipeline holds `read` and `record` at most, whatever its grant lists.
 

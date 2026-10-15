@@ -3,6 +3,7 @@
 
 import type { z } from "zod";
 import type { AttachInput, AttachmentReadInput } from "./attachments.ts";
+import type { AuditInput } from "./audit.ts";
 import type { CsvImportInput } from "./csv.ts";
 import type { Unlinked } from "./kinds.ts";
 import type {
@@ -34,6 +35,7 @@ type In<S extends z.ZodType> = z.input<S>;
 type Inputs = {
 	attach: In<typeof AttachInput>;
 	attachment: In<typeof AttachmentReadInput>;
+	audit: In<typeof AuditInput>;
 	tracker: In<typeof TrackerInput>;
 	"tracker-status": In<typeof TrackerStatusInput>;
 	announce: In<typeof AnnounceInput>;
