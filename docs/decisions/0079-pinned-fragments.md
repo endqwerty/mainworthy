@@ -46,6 +46,14 @@ the case version pinned when the run started. The native app can read and run
 expanded steps. It directs edits of fragments and their consumers to the web
 editor so its text-only editor cannot flatten pins.
 
+Fragment controls load through a dynamic import. The insertion picker loads
+when opened, and reference previews and usage controls load when shown. Bun's
+`--splitting` flag embeds their chunk and shared dependencies in the executable.
+The existing UI asset handler serves every embedded chunk with its content hash,
+immutable cache policy and security headers. The page's `script-src 'self'`
+allows these same-origin imports. Bun puts the licence banner on the entry
+script, and the page links the notices that cover all its chunks.
+
 Ordinary JSON reads continue to omit custom fields and fragment users. A caller
 can request `fields` or `users` through the `get` field selection. The usage panel
 requests `users` separately, so other fragment reads do not scan all consumers.

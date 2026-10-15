@@ -840,7 +840,12 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			expect(html).toContain('<link rel="license" href="/docs/licence"');
 			const files = [...html.matchAll(/(?:src|href)="(\/(?!docs\/)[^"]+)"/g)].map((match) => match[1] ?? "");
 			expect(files.map((file) => file.replace(/^.*\./, "")).sort()).toEqual(["css", "js", "svg"]);
+			const checked = new Set<string>();
+			const deferred = new Set<string>();
+			const entries = new Set(files);
 			for (const file of files) {
+				if (checked.has(file)) continue;
+				checked.add(file);
 				const asset = await fetch(`${url}${file}`);
 				expect(asset.status, file).toBe(200);
 				expect(carried(asset), file).toEqual(expected(OTHER, false));
@@ -855,16 +860,28 @@ describe("the executable, built the way `bun run build` builds it", () => {
 					// development bundle whatever else it was told (the JSX runtime's `jsxDEV` at every element, 882 KB),
 					// and nothing said so.
 					expect(body.includes("jsxDEV"), "the web script is a development build").toBe(false);
-					// The minifier drops the licence comments of the packages in it: the file names where they are.
-					expect(body.startsWith("/*! Mainworthy, Apache-2.0."), "the web script names its licences").toBe(true);
-					expect(body.slice(0, 200)).toContain("/docs/licence */");
-					expect(new TextEncoder().encode(body).byteLength, "the web script outgrew its budget").toBeLessThan(700_000);
+					// Bun puts the banner on entry scripts. It covers their imported chunks too.
+					if (entries.has(file)) {
+						expect(body.startsWith("/*! Mainworthy, Apache-2.0."), "the web script names its licences").toBe(true);
+						expect(body.slice(0, 200)).toContain("/docs/licence */");
+					}
+					const bytes = new TextEncoder().encode(body).byteLength;
+					console.info(`Built web script ${file}: ${bytes} bytes`);
+					expect(bytes, "the web script outgrew its budget").toBeLessThan(700_000);
+					// Imported chunks, including ones loaded on demand, carry the same security and cache headers.
+					for (const match of body.matchAll(/(?:from\s*|import\s*\(?\s*)["']([^"']+\.js)["']/g)) {
+						const imported = new URL(match[1] ?? "", `${url}${file}`);
+						expect(imported.origin).toBe(url);
+						files.push(imported.pathname);
+						if (match[0].startsWith("import(")) deferred.add(imported.pathname);
+					}
 				}
 				const again = await fetch(`${url}${file}`, { headers: { "if-none-match": asset.headers.get("etag") ?? "" } });
 				expect(again.status, file).toBe(304);
 				const any = await fetch(`${url}${file}`, { headers: { "if-none-match": "*" } });
 				expect(any.status, file).toBe(304);
 			}
+			expect(deferred.size, "fragment controls are a separate on-demand script").toBeGreaterThan(0);
 			const api = await fetch(`${url}/api/session`, { headers: bearer });
 			expect(api.status).toBe(200);
 			expect(carried(api)).toEqual(expected(OTHER, false));

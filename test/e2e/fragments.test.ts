@@ -1,81 +1,158 @@
 import { expect, test } from "bun:test";
-import { mkdir } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { z } from "zod";
 import { CaseView } from "../../src/web/suite/model.ts";
-import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
+import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
 
-test.skipIf(!browserAvailable)(
-	"insert a pinned fragment, read it inline, and update only selected users",
-	async () => {
-		const server = await startServer();
-		await server.api("propose", {
-			edits: [
-				{
-					op: "create",
-					kind: "fragment",
-					body: { title: "Sign in", steps: [{ id: "ab", action: "Enter a password", expected: "Signed in" }] },
-				},
-				{ op: "create", body: { title: "Checkout", steps: [{ id: "ef", action: "Pay", expected: "Receipt" }] } },
-			],
+async function compiledServer(): Promise<Server> {
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-fragment-build-"));
+	try {
+		const manifest = z
+			.object({ scripts: z.object({ build: z.string() }) })
+			.parse(await Bun.file("package.json").json());
+		const executable = join(directory, "mainworthy");
+		const words = [...manifest.scripts.build.replace("dist/mainworthy", executable).matchAll(/'([^']*)'|(\S+)/g)].map(
+			(word) => word[1] ?? word[2] ?? "",
+		);
+		const assigned = words.filter((word) => /^[A-Z_]+=/.test(word));
+		const [, ...build] = words.slice(assigned.length);
+		const child = Bun.spawn([process.execPath, ...build], {
+			env: { ...process.env, ...Object.fromEntries(assigned.map((word) => word.split("="))) },
+			stdout: "ignore",
+			stderr: "pipe",
 		});
-		const h = await openPage(server, { path: "/p/scratch/suite/c/2" });
-		try {
-			const { page } = h;
-			page.setDefaultTimeout(3000);
-			await page.getByRole("button", { name: "Checkout", exact: true }).click();
-			await page.getByText("Insert fragment", { exact: true }).click();
-			await page.getByLabel("Fragment ref", { exact: true }).fill("C-1");
-			await page.getByRole("button", { name: "Insert pinned fragment" }).click();
-			await page.getByRole("button", { name: "Remove fragment" }).waitFor();
-			await page.getByLabel("Case title", { exact: true }).press("Escape");
-			const saved = await eventually(
-				async () => CaseView.parse((await server.api("get", { refs: ["C-2"] }))[0]),
-				(view) => view.sourceSteps?.[1]?.use?.fragment === "C-1",
-			);
-			expect(saved.sourceSteps?.[1]?.use).toEqual({ fragment: "C-1", version: 1 });
-			expect(saved.steps[1]?.action).toBe("Enter a password");
-			await page.reload();
-			await page.getByText(/^From C-1 v1(?: · Sign in)?$/).waitFor();
-			await page.getByText("Enter a password").waitFor();
-			const directory = process.env.MAINWORTHY_FRAGMENT_SCREENSHOT_DIR;
-			if (directory) {
-				await mkdir(directory, { recursive: true });
-				await page.screenshot({ path: `${directory}/case-fragment.png`, fullPage: true });
-			}
-			const run = await server.api("plan", { name: "Pinned checkout", select: { cases: ["C-2"] } });
+		expect(await child.exited, await new Response(child.stderr).text()).toBe(0);
+		const server = await startServer({ executable });
+		return {
+			...server,
+			stop: async () => {
+				try {
+					await server.stop();
+				} finally {
+					await rm(directory, { recursive: true, force: true });
+				}
+			},
+		};
+	} catch (error) {
+		await rm(directory, { recursive: true, force: true });
+		throw error;
+	}
+}
+
+for (const compiled of [false, true]) {
+	test.skipIf(!browserAvailable)(
+		`insert a pinned fragment, read it inline, and update only selected users (${compiled ? "compiled, on demand" : "source"})`,
+		async () => {
+			const server = await (compiled ? compiledServer() : startServer());
 			await server.api("propose", {
 				edits: [
-					{ op: "create", body: { title: "Stay pinned", steps: [{ id: "cd", use: { fragment: "C-1", version: 1 } }] } },
 					{
-						op: "edit",
-						case: "C-1",
-						base: 1,
-						body: { steps: [{ id: "ab", action: "Use a passkey", expected: "Signed in" }] },
+						op: "create",
+						kind: "fragment",
+						body: { title: "Sign in", steps: [{ id: "ab", action: "Enter a password", expected: "Signed in" }] },
 					},
+					{ op: "create", body: { title: "Checkout", steps: [{ id: "ef", action: "Pay", expected: "Receipt" }] } },
 				],
 			});
-			await page.goto(`${server.url}/p/scratch/suite/c/1`);
-			await page.getByLabel("Update C-2", { exact: true }).check();
-			await page.getByRole("button", { name: "Update selected to v2" }).click();
-			const views = await eventually(
-				async () => (await server.api("get", { refs: ["C-2", "C-3"] })).map((view) => CaseView.parse(view)),
-				(views) => views[0]?.steps[1]?.action === "Use a passkey",
-			);
-			expect(views[0]?.steps[1]?.action).toBe("Use a passkey");
-			expect(views[1]?.steps[0]?.action).toBe("Enter a password");
-			await page.goto(`${server.url}/p/scratch/runs/${run.run.slice(2)}`);
-			const pinned = page.locator('[data-run-document="C-2"][data-active="true"][data-ready="true"]');
-			await pinned.waitFor();
-			expect(await pinned.textContent()).toContain("Enter a password");
-			expect(await pinned.textContent()).toContain("From C-1 v1");
-			expect(await pinned.textContent()).not.toContain("Use a passkey");
-			expect(h.errors).toEqual([]);
-		} finally {
-			await h.close();
-			await server.stop();
-		}
-	},
-	30_000,
-);
+			const h = await openPage(server, { path: "/p/scratch/suite/c/2" });
+			try {
+				const { page } = h;
+				page.setDefaultTimeout(3000);
+				await page.getByRole("button", { name: "Checkout", exact: true }).click();
+				const entry = await page.locator('script[type="module"][src]').getAttribute("src");
+				const script = await (await h.context.request.get(`${server.url}${entry}`)).text();
+				const deferred = [...script.matchAll(/import\("([^"]+\.js)"\)/g)].map((match) => match[1] ?? "");
+				if (compiled) {
+					expect(deferred).toHaveLength(1);
+					const loaded = await page.evaluate(() => performance.getEntriesByType("resource").map((entry) => entry.name));
+					expect(loaded).not.toContain(`${server.url}${deferred[0]}`);
+				}
+				const chunk = compiled ? page.waitForResponse(`${server.url}${deferred[0]}`) : null;
+				await page.getByText("Insert fragment", { exact: true }).click();
+				if (chunk) {
+					const loaded = await chunk;
+					expect(loaded.status()).toBe(200);
+					expect(new URL(loaded.url()).pathname).toMatch(/-[a-z0-9]{8}\.js$/);
+					expect(loaded.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+				}
+				await page.getByLabel("Fragment ref", { exact: true }).fill("C-1");
+				await page.getByText("Insert fragment", { exact: true }).click();
+				await page.getByText("Insert fragment", { exact: true }).click();
+				expect(await page.getByLabel("Fragment ref", { exact: true }).inputValue()).toBe("C-1");
+				await page.getByRole("button", { name: "Insert pinned fragment" }).click();
+				await page.getByRole("button", { name: "Remove fragment" }).waitFor();
+				await page.getByLabel("Case title", { exact: true }).press("Escape");
+				const saved = await eventually(
+					async () => CaseView.parse((await server.api("get", { refs: ["C-2"] }))[0]),
+					(view) => view.sourceSteps?.[1]?.use?.fragment === "C-1",
+				);
+				expect(saved.sourceSteps?.[1]?.use).toEqual({ fragment: "C-1", version: 1 });
+				expect(saved.steps[1]?.action).toBe("Enter a password");
+				await page.reload();
+				await page.getByText(/^From C-1 v1(?: · Sign in)?$/).waitFor();
+				await page.getByText("Enter a password").waitFor();
+				const directory = process.env.MAINWORTHY_FRAGMENT_SCREENSHOT_DIR;
+				if (directory) {
+					await mkdir(directory, { recursive: true });
+					await page.screenshot({ path: `${directory}/case-fragment.png`, fullPage: true });
+				}
+				const run = await server.api("plan", { name: "Pinned checkout", select: { cases: ["C-2"] } });
+				await server.api("propose", {
+					edits: [
+						{
+							op: "create",
+							body: { title: "Stay pinned", steps: [{ id: "cd", use: { fragment: "C-1", version: 1 } }] },
+						},
+						{
+							op: "edit",
+							case: "C-1",
+							base: 1,
+							body: { steps: [{ id: "ab", action: "Use a passkey", expected: "Signed in" }] },
+						},
+					],
+				});
+				await page.goto(`${server.url}/p/scratch/suite/c/1`);
+				await page.getByLabel("Update C-2", { exact: true }).check();
+				await page.getByRole("button", { name: "Update selected to v2" }).click();
+				const views = await eventually(
+					async () => (await server.api("get", { refs: ["C-2", "C-3"] })).map((view) => CaseView.parse(view)),
+					(views) => views[0]?.steps[1]?.action === "Use a passkey",
+				);
+				expect(views[0]?.steps[1]?.action).toBe("Use a passkey");
+				expect(views[1]?.steps[0]?.action).toBe("Enter a password");
+				await page.goto(`${server.url}/p/scratch/runs/${run.run.slice(2)}`);
+				const pinned = page.locator('[data-run-document="C-2"][data-active="true"][data-ready="true"]');
+				await pinned.waitFor();
+				expect(await pinned.textContent()).toContain("Enter a password");
+				expect(await pinned.textContent()).toContain("From C-1 v1");
+				expect(await pinned.textContent()).not.toContain("Use a passkey");
+				expect(h.errors).toEqual([]);
+				if (compiled) {
+					const unavailable = await openPage(server, { path: "/p/scratch/suite/c/2" });
+					try {
+						const controls = `${server.url}${deferred[0]}`;
+						await unavailable.page.route(controls, (route) => route.fulfill({ status: 503, body: "Unavailable" }));
+						await unavailable.page.getByRole("button", { name: "Checkout", exact: true }).click();
+						await unavailable.page.getByText("Could not load fragment controls. Reload to try again.").waitFor();
+						expect(await unavailable.page.getByLabel("Case title", { exact: true }).inputValue()).toBe("Checkout");
+						await unavailable.page.unroute(controls);
+						await unavailable.page.reload();
+						await unavailable.page.getByRole("button", { name: "Checkout", exact: true }).click();
+						await unavailable.page.getByRole("button", { name: "Remove fragment", exact: true }).waitFor();
+					} finally {
+						await unavailable.close();
+					}
+				}
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
 
 test.skipIf(!browserAvailable)(
 	"a new fragment can be authored in the Suite editor",

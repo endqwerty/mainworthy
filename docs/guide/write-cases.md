@@ -226,6 +226,9 @@ Choose **Insert pinned fragment**. The editor shows the shared steps and their
 source. **Remove fragment** removes this reference from the case. Edit the
 fragment itself to change shared instructions.
 
+Fragment controls load when first opened. If loading fails, the page asks you to
+reload and try again.
+
 An archived fragment keeps its versions and existing pins. The insertion picker
 excludes archived fragments, including their historical versions. You can edit
 other content in its consumers. Restore the fragment before inserting another

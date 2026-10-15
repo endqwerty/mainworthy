@@ -62,8 +62,7 @@ export function FragmentInsert({ draft, change }: { draft: Draft; change: DraftC
 			? parsed.data
 			: null;
 	return (
-		<details>
-			<summary>Insert fragment</summary>
+		<>
 			<label>
 				Fragment ref{" "}
 				<input
@@ -125,7 +124,7 @@ export function FragmentInsert({ draft, change }: { draft: Draft; change: DraftC
 			>
 				Insert pinned fragment
 			</button>
-		</details>
+		</>
 	);
 }
 

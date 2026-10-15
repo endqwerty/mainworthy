@@ -111,6 +111,7 @@ export async function startServer({
 	seed: seedData = cases > 0,
 	days = 0,
 	passkeys = false,
+	executable,
 }: {
 	cases?: number;
 	firstProject?: string;
@@ -126,6 +127,8 @@ export async function startServer({
 	 * then opens its pages at `localhost`: Chromium makes no passkey at `127.0.0.1` (`passkey-verifier.test.ts`).
 	 */
 	passkeys?: boolean;
+	/** A production executable in place of the source test server. It has no test clock route. */
+	executable?: string;
 } = {}): Promise<Server> {
 	const dataDir = await mkdtemp(join(tmpdir(), `mainworthy-e2e-${process.pid}-`));
 	ownedDirectories.add(dataDir);
@@ -133,7 +136,7 @@ export async function startServer({
 	const port = reservation.port;
 	const token = crypto.randomUUID();
 	const url = `http://127.0.0.1:${port}`;
-	const child = Bun.spawn([process.execPath, "test/e2e/serve.ts"], {
+	const child = Bun.spawn(executable ? [executable, "serve"] : [process.execPath, "test/e2e/serve.ts"], {
 		cwd: process.cwd(),
 		env: {
 			...process.env,

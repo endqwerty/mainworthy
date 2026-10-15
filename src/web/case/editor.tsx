@@ -7,7 +7,7 @@ import { useBindings } from "../lib/keys.ts";
 import { readRoute } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { KeyCap } from "../ui/index.tsx";
-import { FragmentInsert, FragmentReference } from "./fragments.tsx";
+import { FragmentInsert, FragmentReference } from "./lazy-fragments.tsx";
 
 export const conflictEditorStatus =
 	"Resolve the conflict first. Edit the merged fields in the conflict card; other fields can be edited after it is resolved.";

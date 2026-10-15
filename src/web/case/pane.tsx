@@ -17,7 +17,7 @@ import { useApp } from "../ui/context.tsx";
 import { age, DiffView, EmptyState, KeyCap, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
 import { useCaseBindings } from "./bindings.ts";
 import { BodyEditor, conflictEditorStatus, type DraftChange, draftEndedStatus, ownershipStatus } from "./editor.tsx";
-import { FragmentUsers } from "./fragments.tsx";
+import { FragmentUsers } from "./lazy-fragments.tsx";
 
 export type ConflictState = DraftConflict;
 const EntryBase = z.object({ seq: z.number(), at: z.number(), by: z.string() });
