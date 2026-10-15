@@ -22,16 +22,16 @@ import { mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from "./mcp.ts";
 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
-	propose: 1285,
-	report: 679,
-	claim: 401,
-	decide: 329,
-	inbox: 177,
-	get: 204,
-	find: 274,
-	impact: 211,
-	since: 169,
-	gate: 171,
+	propose: 1362,
+	report: 687,
+	claim: 395,
+	decide: 323,
+	inbox: 171,
+	get: 198,
+	find: 268,
+	impact: 205,
+	since: 163,
+	gate: 165,
 };
 
 function resultOf<S extends z.ZodType>(reply: unknown, schema: S): z.output<S> {
@@ -83,6 +83,13 @@ test("tools come from the registry and stay within their measured token limits",
 	}
 	console.log(`tool definitions: ${total} tokens; budget ${TOOL_TOKEN_BUDGET}; o200k_base`);
 	console.table(tools.map((tool) => ({ tool: tool.name, tokens: tokens(tool) })));
+});
+
+test("report tools omit the CI-only nothing-required declaration", () => {
+	const tool = mcpTools().find((entry) => entry.name === "report");
+	if (!tool) throw new Error("report");
+	expect(Object.keys(tool.inputSchema.properties ?? {})).toContain("results");
+	expect(Object.keys(tool.inputSchema.properties ?? {})).not.toContain("nothingRequired");
 });
 
 test("schema trims preserve the registry's constraints and union choices", () => {

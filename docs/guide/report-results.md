@@ -94,7 +94,7 @@ $ mainworthy report --nothing-required --commit 11111111111111111111111111111111
 $ mainworthy gate --commit 1111111111111111111111111111111111111111
 ```
 
-The report needs a CI token. It accepts no files or results. CI detection can supply the commit, job, and other build metadata as for an ordinary report.
+The report needs a CI token. It accepts no files, results, or planned run. CI detection can supply the commit, job, and other build metadata as for an ordinary report.
 
 All presets keep this gate pending by default. A project admin must first record `mainworthy policy empty nothing-required`. See [reports with no tests](./policy.md#reports-with-no-tests) for the policy choice and its record.
 

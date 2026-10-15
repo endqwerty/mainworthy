@@ -25,8 +25,8 @@ import { grantedProjects, VERSION } from "./http.ts";
 export const TOOL_TOKEN_BUDGET = 3950;
 
 const INSTRUCTIONS =
-	"Start with impact for a change, or inbox for questions. Pass hashes back with unless and onEvidence, and reuse cursors with since. Your answers may be advice; check the reply status.";
-const PROJECT_DESCRIPTION = "Omit only for a single project.";
+	"Start with impact for a change or inbox for questions, and omit project only when the instance has exactly one project. Pass hashes back with unless and onEvidence, and reuse cursors with since. Your answers may be advice; check the reply status.";
+const PROJECT_DESCRIPTION = "Optional.";
 const DESCRIPTIONS = new Map([
 	["The case, for example C-311.", ""],
 	["The version this edit was made on. A stale base is merged or reported, never overwritten.", ""],
