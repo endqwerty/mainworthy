@@ -429,6 +429,65 @@ test.skipIf(!browserAvailable)(
 	30_000,
 );
 
+for (const storage of ["available", "unavailable"] as const)
+	test.skipIf(!browserAvailable)(
+		`a clear choice survives a lost logout reply and first session check when storage is ${storage}`,
+		async () => {
+			let browser: PageHarness | null = null;
+			try {
+				browser = await openPage(server, { path: "/p/scratch/settings" });
+				const { page } = browser;
+				page.setDefaultTimeout(8000);
+				await page.evaluate((refuseRemoval) => {
+					localStorage.setItem("mainworthy:robin:queue-input:scratch:pending", "Private answer");
+					localStorage.setItem("mainworthy:someone-else:draft:scratch:C-2", "Their draft");
+					if (refuseRemoval)
+						Storage.prototype.removeItem = () => {
+							throw new DOMException("Storage unavailable", "SecurityError");
+						};
+				}, storage === "unavailable");
+				await page.route("**/api/logout", async (route) => {
+					await route.fetch();
+					await route.abort();
+				});
+				let checks = 0;
+				await page.route("**/api/session", (route) => (++checks === 1 ? route.abort() : route.continue()));
+				await page.getByRole("button", { name: "Sign out", exact: true }).click();
+				await page.getByRole("button", { name: "Sign out and clear browser data", exact: true }).click();
+				await page.locator("#signin-name").waitFor();
+				expect(checks).toBe(2);
+				expect(await page.locator("#app").count()).toBe(0);
+				if (storage === "available") {
+					expect(
+						await page.evaluate(() =>
+							Object.keys(localStorage).filter(
+								(key) => key.startsWith("mainworthy:robin:") || key === "mainworthy:session-person",
+							),
+						),
+					).toEqual([]);
+					expect(browser.dialogs).toEqual([]);
+				} else {
+					expect(browser.dialogs).toEqual([
+						"You are signed out, but this browser could not clear all your data. Clear this site's data in your browser settings before leaving a shared computer.",
+					]);
+					expect(await page.evaluate(() => localStorage.getItem("mainworthy:robin:queue-input:scratch:pending"))).toBe(
+						"Private answer",
+					);
+				}
+				expect(await page.evaluate(() => localStorage.getItem("mainworthy:someone-else:draft:scratch:C-2"))).toBe(
+					"Their draft",
+				);
+				expect(browser.errors).toEqual([
+					"Failed to load resource: net::ERR_FAILED",
+					"Failed to load resource: net::ERR_FAILED",
+				]);
+			} finally {
+				await browser?.close();
+			}
+		},
+		30_000,
+	);
+
 test.skipIf(!browserAvailable)(
 	"a sign-out that never reached the server leaves the browser signed in, and the page says so and takes another press",
 	async () => {

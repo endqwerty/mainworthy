@@ -42,7 +42,7 @@ The web app sets two cookies, and both are strictly necessary: one that keeps yo
 
 The web app keeps your unsaved case drafts, queue answers, run notes, theme, and signed-in name in your browser. Signing out opens a dialog with three choices. **Sign out and keep drafts** starts with the focus and keeps your browser data for when you return. **Sign out and clear browser data** deletes your drafts, answers, notes, and name. The warning explains that clearing deletes unsaved text in every open tab and cannot be undone. **Stay signed in**, or <kbd>Esc</kbd>, closes the dialog without signing out or clearing data. The same dialog appears when you end this browser's session under Settings, **Your sessions**.
 
-Clearing takes effect in other open tabs and survives a reload. It leaves the theme and sidebar preference, other people's drafts, and content already recorded on the server. A session that expires keeps your drafts, as does signing in again as the same person. If the browser cannot clear its storage, the app warns you to clear the site's data in your browser settings.
+Clearing takes effect in other open tabs and survives a reload. It leaves the theme and sidebar preference, other people's drafts, and content already recorded on the server. If the sign-out reply is lost, the open page keeps your choice to clear until it learns that the session ended. A session that expires keeps your drafts, as does signing in again as the same person. If the browser cannot clear its storage, the app warns you to clear the site's data in your browser settings.
 
 ### Logs
 
