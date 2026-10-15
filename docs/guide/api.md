@@ -157,6 +157,15 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `edits` | `array<object>` | yes |  |
+| `edits[][quarantine].op` | `"quarantine"` | yes |  |
+| `edits[][quarantine].test` | `string` | yes |  |
+| `edits[][quarantine].base` | `integer \| null` | yes |  |
+| `edits[][quarantine].exit` | `object \| null` | yes |  |
+| `edits[][quarantine].exit[1][1].kind` | `"person"` | yes |  |
+| `edits[][quarantine].exit[1][2].kind` | `"expiry"` | yes |  |
+| `edits[][quarantine].exit[1][2].at` | `integer` | yes |  |
+| `edits[][quarantine].exit[1][3].kind` | `"passes"` | yes |  |
+| `edits[][quarantine].exit[1][3].count` | `integer` | yes |  |
 | `edits[][create].op` | `"create"` | yes |  |
 | `edits[][create].body` | `object` | no |  |
 | `edits[][create].body.title` | `string` | no |  |

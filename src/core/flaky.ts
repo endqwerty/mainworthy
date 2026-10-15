@@ -32,3 +32,30 @@ export const SameCodeEvidence = z.object({
 	),
 });
 export type SameCodeEvidence = z.infer<typeof SameCodeEvidence>;
+
+export const QuarantineExit = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("person") }),
+	z.object({ kind: z.literal("expiry"), at: z.number().int().nonnegative().max(8_640_000_000_000_000) }),
+	z.object({ kind: z.literal("passes"), count: z.number().int().min(1).max(100) }),
+]);
+export type QuarantineExit = z.infer<typeof QuarantineExit>;
+export const Quarantine = z.object({
+	decision: z.number().int(),
+	reason: z.string(),
+	by: z.string(),
+	since: z.number(),
+	exit: QuarantineExit.nullable(),
+	active: z.boolean(),
+});
+export type Quarantine = z.infer<typeof Quarantine>;
+export function quarantineExitText(exit: QuarantineExit | null): string {
+	if (exit === null) return "Ended by a person";
+	switch (exit.kind) {
+		case "person":
+			return "A person's decision";
+		case "expiry":
+			return `Expires ${new Date(exit.at).toISOString()}`;
+		case "passes":
+			return `${exit.count} consecutive passing trunk commits`;
+	}
+}

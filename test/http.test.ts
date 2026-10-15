@@ -310,6 +310,51 @@ async function replySweep(instance: Instance, project: string) {
 	return { checked, seen, counts, validators };
 }
 
+async function sweepQuarantineReplies(checked: Awaited<ReturnType<typeof replySweep>>["checked"]) {
+	await checked("report", {
+		target: { commit: "daaa0001", branch: "main" },
+		results: [
+			{
+				test: { key: "quarantine-schema", file: "quarantine-schema.ts" },
+				outcome: "fail",
+				failure: { message: "expected quarantine schema" },
+			},
+		],
+	});
+	const tests = z
+		.object({ items: z.array(z.object({ ref: z.string(), key: z.string() })) })
+		.parse(await checked("find", { in: "tests", text: "quarantine-schema" }));
+	const test = tests.items.find((row) => row.key === "quarantine-schema");
+	if (!test) throw new Error("Missing quarantine schema test");
+	const proposal = z.object({ question: z.string(), proposal: z.string() }).parse(
+		await checked("propose", {
+			edits: [{ op: "quarantine", test: test.ref, base: null, exit: { kind: "passes", count: 3 } }],
+			reason: "Check quarantine replies",
+		}),
+	);
+	await checked("get", { refs: [proposal.proposal] });
+	const q = z
+		.array(z.object({ q: z.string(), evidenceHash: z.string() }))
+		.parse(await checked("get", { refs: [proposal.question] }))[0];
+	if (!q) throw new Error("Missing quarantine question");
+	await checked("decide", {
+		q: q.q,
+		onEvidence: q.evidenceHash,
+		answer: { is: "accept" },
+		reason: "Keep schema failures visible",
+	});
+	await checked("get", { refs: [test.ref] });
+	const list = z
+		.object({ items: z.array(z.object({ ref: z.string(), quarantine: z.object({ active: z.boolean() }) })) })
+		.parse(await checked("find", { in: "tests", state: "quarantined" }));
+	expect(list.items).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({ ref: test.ref, quarantine: expect.objectContaining({ active: true }) }),
+		]),
+	);
+	expect(await checked("gate", { commit: "daaa0001" })).toMatchObject({ verdict: "passed", quarantined: 1 });
+}
+
 async function sweepCsvImportReplies(checked: Awaited<ReturnType<typeof replySweep>>["checked"], id: string) {
 	const csv = `ID,Title,Steps,Expected\n${id},Imported by the reply sweep,Open it,It opens\n`;
 	const mapping = { id: "ID", title: "Title", steps: "Steps", expected: "Expected" };
@@ -2410,6 +2455,7 @@ describe("the surface", () => {
 		await sweepTrackerReplies(instance, checked, "scratch");
 		await sweepAttachmentReplies(checked);
 		verifyAudit(AuditReply.parse(await checked("audit", {})).ndjson);
+		await sweepQuarantineReplies(checked);
 		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());
 		console.log(`all-operation sweep: ${sweep.counts.success} real HTTP replies; Zod and Ajv`);
 	});
@@ -2668,6 +2714,7 @@ describe("the surface", () => {
 		await sweepAttachmentReplies(checked);
 		verifyAudit(AuditReply.parse(await checked("audit", {})).ndjson);
 		await checked("audit", { from: 10, to: 5 }, {}, "invalid");
+		await sweepQuarantineReplies(checked);
 		const total = sweep.counts.success + sweep.counts.error + empty.counts.success + empty.counts.error;
 		expect(total).toBeGreaterThanOrEqual(236);
 		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());

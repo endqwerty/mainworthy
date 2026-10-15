@@ -234,3 +234,11 @@ After thirty days without a gate-payload change or a new counted report, an acce
 Status delivery, shared limits, and enrollment are excluded from archives. Imported history does not publish statuses until a new counted report enrolls a commit. The token stays in process configuration.
 
 The published status is separate from the workflow step that ran `mainworthy gate`. A later decision can make `mainworthy/gate` green while that earlier step stays red. Choose required status checks accordingly, and keep runner setup failures and missing reports as CI failures.
+
+
+A quarantined automated test keeps its failures in the run and history. The gate's
+reason says how many quarantined failures were recorded and are not blocking,
+including when other evidence keeps the gate blocked or pending. The `quarantined`
+field gives that count when nonzero. A passing verdict with quarantined failures
+therefore does not claim those tests passed. See
+[quarantine an unreliable test](./report-results.md#quarantine-an-unreliable-test).

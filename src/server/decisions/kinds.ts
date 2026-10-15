@@ -20,6 +20,7 @@ import {
 	testById,
 	unlinkedInFile,
 } from "../evidence/evidence.ts";
+import { setQuarantine, validateQuarantineEdit } from "../evidence/quarantine.ts";
 import { actorById, requirePolicyRoles } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
@@ -32,6 +33,7 @@ import {
 	fillsOf,
 	findRun,
 	gateOf,
+	quarantineRuns,
 	reconsiderEmptyReports,
 	reopenRun,
 	restoreFailures,
@@ -50,7 +52,15 @@ import {
 	seal,
 } from "../suite/suite.ts";
 import type { Raise, Raised } from "./decisions.ts";
-import { type DecisionRow, decisionById, type HoldTerm, type QuestionRow, questionById, refsOf } from "./questions.ts";
+import {
+	answersOf,
+	type DecisionRow,
+	decisionById,
+	type HoldTerm,
+	type QuestionRow,
+	questionById,
+	refsOf,
+} from "./questions.ts";
 
 type Tools = {
 	raise: (ctx: Ctx, r: Raise) => Raised;
@@ -110,6 +120,8 @@ export function raiseAdopt(
 				return { op: edit.op, name: edit.name };
 			case "policy":
 				return { op: edit.op, base: edit.base, preset: edit.policy.preset };
+			case "quarantine":
+				return edit;
 			default: {
 				const _exhaustive: never = edit;
 				return _exhaustive;
@@ -117,8 +129,10 @@ export function raiseAdopt(
 		}
 	});
 	const first = summary[0];
-	const title =
-		resolved.length === 1 && first && "title" in first && first.title
+	const quarantine = resolved.find((edit) => edit.op === "quarantine");
+	const title = quarantine
+		? `${quarantine.exit === null ? "End quarantine" : "Quarantine"} ${quarantine.test}`
+		: resolved.length === 1 && first && "title" in first && first.title
 			? `${first.op === "create" ? "New case" : first.op === "edit" ? "Edit" : first.op}: ${first.title}`
 			: `${resolved.length} edits`;
 	return tools.raise(ctx, {
@@ -151,6 +165,18 @@ const adoptHandler: Handler<"adopt"> = {
 		if (answer.is === "merge") return resolveConflict(ctx, proposal, answer.body, tools);
 		for (const edit of resolvedOf(proposal))
 			if (edit.op === "policy") requirePolicyRoles(ctx.db, ctx.project.id, edit.policy.clauses);
+		const quarantine = resolvedOf(proposal).find((edit) => edit.op === "quarantine");
+		if (quarantine) {
+			const test = validateQuarantineEdit(ctx, quarantine);
+			if (ctx.actor.kind !== "human") throw invalid("a person decides quarantine");
+			setQuarantine(ctx, witness, {
+				test: test.id,
+				exit: quarantine.exit,
+				reason: answersOf(ctx.db, question.id).findLast((row) => row.counts === 1)?.reason ?? proposal.reason ?? "",
+			});
+			for (const id of quarantineRuns(ctx.db, ctx.project.id, new Set([test.id]))) ctx.recompute.add(id);
+			return { cases: [], created: [], policyVersion: null, quarantine };
+		}
 		const adopted = adopt(ctx, witness, proposal);
 		const effects = { cases: adopted.cases, created: adopted.created, policyVersion: adopted.policyVersion };
 		if (adopted.policyVersion === null) return effects;

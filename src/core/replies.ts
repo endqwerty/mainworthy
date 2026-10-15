@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Attachment, AttachmentReply } from "./attachments.ts";
 import { AuditReply } from "./audit.ts";
 import { CsvImportRow } from "./csv.ts";
-import { SameCodeEvidence } from "./flaky.ts";
+import { Quarantine, SameCodeEvidence } from "./flaky.ts";
 import { ActorKind, Policy, Unlinked } from "./kinds.ts";
 import { Automate, CaseBody, MethodKind, Step } from "./model.ts";
 import {
@@ -17,6 +17,7 @@ import {
 	PlanReply,
 	Problem,
 	ProposeReply,
+	QuarantineEdit,
 	QuestionItem,
 	ReportReceipt,
 } from "./ops.ts";
@@ -100,6 +101,7 @@ const Result = z.looseObject({
 	corrects: whole.nullable(),
 });
 const TestSummary = z.looseObject({
+	quarantine: Quarantine.nullable(),
 	ref: text.regex(/^T-\d+$/),
 	kind: text,
 	key: text,
@@ -108,6 +110,7 @@ const TestSummary = z.looseObject({
 	case: nullableText,
 });
 const Run = z.looseObject({
+	quarantined: GateStatus.shape.quarantined,
 	ref: text.regex(/^R-\d+$/),
 	name: text,
 	origin: text,
@@ -125,6 +128,7 @@ const Run = z.looseObject({
 		.array(
 			z.looseObject({
 				test: nullableText,
+				quarantine: Quarantine.nullable(),
 				name: nullableText,
 				file: nullableText,
 				case: nullableText,
@@ -147,6 +151,7 @@ const Run = z.looseObject({
 	createdBy: text,
 });
 const ProposalEdit = z.discriminatedUnion("op", [
+	QuarantineEdit,
 	z.looseObject({ op: z.literal("create"), body: Body, folder: text, tags: texts, covers: texts }),
 	z.looseObject({
 		op: z.literal("edit"),

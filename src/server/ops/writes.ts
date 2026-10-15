@@ -57,6 +57,7 @@ import {
 	unlinkedInFile,
 } from "../evidence/evidence.ts";
 import { insertFinding, insertReview, reviewBasis, reviewedAt } from "../evidence/findings.ts";
+import { validateQuarantineEdit } from "../evidence/quarantine.ts";
 import { announce } from "../evidence/releases.ts";
 import { actorByName, actorLabel } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
@@ -77,6 +78,7 @@ import {
 	pinnedVersions,
 	plan,
 	plannedCounting,
+	quarantineRuns,
 	type RunRow,
 	runAccepts,
 	runById,
@@ -103,6 +105,7 @@ export const announceOp = defineOp({
 // ── propose ────────────────────────────────────────────────────────────────────────────────────────────────
 
 export function propose(ctx: Ctx, input: ProposeInput): ProposeReply {
+	for (const edit of input.edits) if (edit.op === "quarantine") validateQuarantineEdit(ctx, edit);
 	const sealed = seal(ctx, { edits: input.edits, reason: input.reason });
 	if (!sealed) return { proposal: null, status: "adopted", question: null, needs: null, cases: [], conflicts: [] };
 	const raised = raiseAdopt(ctx, { raise }, sealed);
@@ -243,6 +246,8 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 
 	// The batch is applied before the runs are folded: a run that requires this job must count it.
 	markProcessed(ctx, batch, applied.counts);
+	for (const id of quarantineRuns(ctx.db, ctx.project.id, new Set(applied.results.map((result) => result.test.id))))
+		ctx.recompute.add(id);
 	// The first report of a commit that a gate counts says where the commit is (only an agent may have said so
 	// before): every run that counts the commit is recomputed with the others, because its failures are
 	// answered there from now on.

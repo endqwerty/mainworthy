@@ -83,6 +83,14 @@ export const policySummary = (policy: Policy): { policy: string; unlinked: Unlin
 
 /** The clause that owns a question. A policy is checked for totality when written, so this always finds one. */
 export function clauseFor(policy: Policy, facts: Facts): Clause {
+	if (facts.kind === "adopt" && facts.facts.has("quarantine"))
+		return {
+			id: "quarantine-person",
+			kind: "adopt",
+			when: ["always"],
+			blocks: "nothing",
+			ask: { who: "member", agents: "advise", notProducer: false, reason: "required" },
+		};
 	const clause = clauseOf(policy, facts);
 	if (!clause) throw new Error(`policy ${policy.preset} has no clause for a ${facts.kind} question`);
 	return clause;

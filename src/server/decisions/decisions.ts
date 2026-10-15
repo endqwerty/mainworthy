@@ -801,7 +801,7 @@ function askAgain(ctx: Ctx, question: QuestionRow, targets: readonly number[]): 
 		subject.signature !== undefined && subject.scope !== undefined ? causeKey(subject.signature, subject.scope) : null;
 	const runs = runsAbout(ctx, question).flatMap((id) => {
 		const run = runById(ctx.db, id);
-		return run && (key === null || unexplainedIn(ctx.db, run).has(key)) ? [run] : [];
+		return run && (key === null || unexplainedIn(ctx.db, run, ctx.now).has(key)) ? [run] : [];
 	});
 	const newest = latestByFingerprint(ctx.db, ctx.project.id, question.fingerprint) ?? question;
 	open(
@@ -1061,7 +1061,7 @@ function askUnexplained(ctx: Ctx, run: RunRow): boolean {
 				newestInScope(ctx.db, run.project, run.scope)?.id === run.id;
 	if (!speaks) return false;
 	let asked = false;
-	for (const cause of unexplainedShown(ctx.db, run)) {
+	for (const cause of unexplainedShown(ctx.db, run, ctx.now)) {
 		const signature = signatureById(ctx.db, cause.signature);
 		if (!signature) continue;
 		const fingerprint = contentHash({ kind: "failure", key: `${signature.hash}|${cause.scope}` });
@@ -1659,7 +1659,7 @@ function endedUnawaited(ctx: Ctx, question: QuestionRow): boolean {
 	const key = causeKey(subject.signature, subject.scope);
 	return !runsAbout(ctx, question).some((id) => {
 		const run = runById(ctx.db, id);
-		return run?.origin === "planned" && run.state === "open" && unexplainedIn(ctx.db, run).has(key);
+		return run?.origin === "planned" && run.state === "open" && unexplainedIn(ctx.db, run, ctx.now).has(key);
 	});
 }
 
@@ -1683,7 +1683,7 @@ function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number, Set<
 	const shows = (run: RunRow): boolean => {
 		let causes = shown.get(run.id);
 		if (!causes) {
-			causes = unexplainedIn(ctx.db, run);
+			causes = unexplainedIn(ctx.db, run, ctx.now);
 			shown.set(run.id, causes);
 		}
 		return causes.has(key);

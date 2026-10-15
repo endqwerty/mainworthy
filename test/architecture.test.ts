@@ -312,6 +312,7 @@ describe("the module map", () => {
 			"reviews",
 			"excuses",
 			"result_excuses",
+			"quarantines",
 		],
 		"server/runs": ["runs", "run_tests", "slots", "slot_results", "depends_on"],
 		"server/decisions": ["questions", "question_refs", "answers", "decisions"],
