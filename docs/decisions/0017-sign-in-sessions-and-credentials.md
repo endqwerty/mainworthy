@@ -562,7 +562,7 @@ A model from another provider reviewed the design against the code before anythi
 ## Authority in the operation's snapshot
 
 Issue #113 completes candidate C's credential resolution. An admitted request carries a reference to the
-hash of its token or session, or to the local owner's actor. A reader gets this reference, never a resolved
+hash of its token or session, or to the configured owner's name. A reader gets this reference, never a resolved
 actor. Identity resolves the credential, actor, grants and browser session context on the connection running
 the operation. Reads begin their snapshot before resolving the project or caller. Writes take their initial
 transaction before doing either. A report retains that actor over its acceptance and application commits.
