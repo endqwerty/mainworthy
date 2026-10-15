@@ -82,7 +82,9 @@ export function archiveRoutes(
 				return json({ ok: false, error: { code: "invalid", message: "export requires GET" } }, 405);
 			const file = scratch(app.config.dataDir);
 			try {
-				await runArchive(app, { op: "export", path: file.path, now: app.now() });
+				const project = new URL(req.url).searchParams.get("project") ?? undefined;
+				if (project === "") throw new OpError("invalid", "export needs a nonempty project key");
+				await runArchive(app, { op: "export", path: file.path, now: app.now(), project });
 				const stream = await fileStream(file);
 				if (!allowed(session)) {
 					await stream.cancel();

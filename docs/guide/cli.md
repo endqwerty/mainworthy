@@ -55,7 +55,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy get <ref> [--md] [--json]` | Read a ref, or print a case's canonical Markdown with --md. |
 | `mainworthy fmt <file> [--json]` | Print canonical case Markdown. Parse errors include source line numbers. |
 | `mainworthy check [--limit <number>] [--json]` | Print suite problems grouped by rule. Exit 0 with none, 1 with problems. |
-| `mainworthy export --out <file> [--json]` | Stream the instance's lossless archive to a file. A .gz suffix enables gzip. |
+| `mainworthy export --out <file> [--project <key>] [--json]` | Stream an instance or project archive to a file. A .gz suffix enables gzip. |
 | `mainworthy import <file> [--format csv\|testrail\|qase] [--case-prefix QASE] [--json]` | Import an archive into a fresh instance, or propose cases from CSV, TestRail or Qase. |
 | `mainworthy mcp` | Serve MCP on stdin/stdout, forwarding tools to the running HTTP server. |
 | `mainworthy open [--json]` | Print the web UI URL of the running instance. |

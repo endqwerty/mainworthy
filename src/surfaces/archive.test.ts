@@ -3,6 +3,7 @@ import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { withInstance } from "../cli/test-support.ts";
+import { Policy } from "../core/kinds.ts";
 import type { GateStatus } from "../core/ops.ts";
 import { actorByName, authenticate, revokeToken, type Session } from "../server/identity/identity.ts";
 import { findProject, makeCtx, stampSeq } from "../server/kernel/ctx.ts";
@@ -46,6 +47,116 @@ test("HTTP export is NDJSON, import accepts stream chunks and warns about sessio
 			expect(await imported.text()).toContain("previous session may no longer exist");
 			expect((await target.client.call("find", {})).items).toEqual((await source.client.call("find", {})).items);
 		});
+	});
+});
+
+test("CLI project export replays only that project over HTTP and keeps the source intact", async () => {
+	await withInstance(async (source) => {
+		await source.client.call("propose", {
+			edits: [{ op: "create", outline: "Other project's private case", aliases: ["C1234", "OTHER-1"] }],
+		});
+		await source.client.call("admin", { do: "project.create", key: "selected" });
+		const selected = source.client.with({ project: "selected" });
+		await selected.call("propose", {
+			edits: [
+				{
+					op: "create",
+					body: { title: "Keep this project", steps: [{ id: "s1", action: "An action", expected: "Expected" }] },
+					aliases: ["C1234", "SELECTED-1"],
+				},
+			],
+		});
+		for (const [client, project, field] of [
+			[source.client, "scratch", "other_only"],
+			[selected, "selected", "risk"],
+		] as const) {
+			const policy = Policy.parse(await client.call("admin", { do: "policy.show", project }));
+			const proposed = await client.call("propose", {
+				edits: [
+					{
+						op: "policy",
+						settings: {
+							...policy.settings,
+							fields: { [field]: { kind: "choice", label: field, required: true, choices: ["low", "high"] } },
+						},
+					},
+				],
+			});
+			const question = (await client.call("inbox", { kind: "adopt" })).items.find((row) => row.q === proposed.question);
+			if (!question) throw new Error("The field definitions need their adoption question");
+			expect(
+				await client.call("decide", {
+					q: question.q,
+					onEvidence: question.evidenceHash,
+					answer: { is: "accept" },
+				}),
+			).toMatchObject([{ status: "decided" }]);
+		}
+		const policyRows = source.instance.app.reader.raw
+			.query("SELECT * FROM policies WHERE project = (SELECT id FROM projects WHERE key = 'selected') ORDER BY version")
+			.all();
+		const aliasRows = source.instance.app.reader.raw
+			.query(
+				"SELECT * FROM case_aliases WHERE project = (SELECT id FROM projects WHERE key = 'selected') ORDER BY alias",
+			)
+			.all();
+		await selected.call("report", {
+			target: { commit: "projectexport1", branch: "main" },
+			results: [{ test: { key: "selected-test" }, outcome: "pass", annotation: { case: "C-1" } }],
+		});
+		const before = await selected.call("find", {});
+		const gate = await selected.call("gate", { commit: "projectexport1" });
+		const file = join(source.directory, "selected.ndjson.gz");
+		const exported = await source.cli(["export", "--project", "selected", "--out", file]);
+		expect(exported.code).toBe(0);
+		expect(exported.stderr).toBe("");
+		await withInstance(async (target) => {
+			const imported = await target.run(["import", file]);
+			expect(imported.code).toBe(0);
+			const restored = target.client.with({ project: "selected" });
+			expect(await restored.call("find", {})).toEqual(before);
+			expect(await restored.call("gate", { commit: "projectexport1" })).toEqual(gate);
+			expect(target.instance.app.reader.raw.query("SELECT key FROM projects").all()).toEqual([{ key: "selected" }]);
+			expect(target.instance.app.reader.raw.query("SELECT * FROM policies ORDER BY version").all()).toEqual(policyRows);
+			expect(target.instance.app.reader.raw.query("SELECT * FROM case_aliases ORDER BY alias").all()).toEqual(
+				aliasRows,
+			);
+			expect(
+				Policy.parse(await restored.call("admin", { do: "policy.show", project: "selected" })).settings.fields,
+			).toEqual({
+				risk: { kind: "choice", label: "risk", required: true, choices: ["low", "high"] },
+			});
+			expect(await restored.call("get", { refs: ["C1234", "SELECTED-1"] })).toMatchObject([
+				{ title: "Keep this project" },
+				{ title: "Keep this project" },
+			]);
+			await expect(restored.call("get", { refs: ["OTHER-1"] })).rejects.toThrow();
+			await expect(
+				restored.call("propose", { edits: [{ op: "create", body: { title: "Missing risk" } }] }),
+			).rejects.toThrow("risk");
+			expect(
+				await restored.call("propose", {
+					edits: [{ op: "create", body: { title: "Valid risk", fields: { risk: "high" } } }],
+				}),
+			).toMatchObject({ status: "adopted" });
+			for (const table of ["tokens", "sessions", "credentials", "invitations", "passkey_users"]) {
+				expect(target.instance.app.reader.raw.query(`SELECT * FROM ${table}`).all()).toEqual([]);
+			}
+		});
+		expect(await selected.call("find", {})).toEqual(before);
+		expect((await source.client.call("find", {})).items[0]?.title).toBe("Other project's private case");
+	});
+});
+
+test("HTTP project export rejects unknown and empty selections", async () => {
+	await withInstance(async ({ client, instance }) => {
+		const unknown = await client.request("/api/export?project=missing");
+		expect(unknown.status).toBe(404);
+		expect(await unknown.text()).toContain("project missing not found");
+		const empty = await client.request("/api/export?project=");
+		expect(empty.status).toBe(400);
+		expect(await empty.text()).toContain("project key");
+		expect(await readdir(join(instance.app.config.dataDir, "spool"))).toEqual([]);
 	});
 });
 
@@ -130,7 +241,7 @@ test("export pulls fixed chunks and cancels without leaving its spool on disk", 
 		const session: Session = { via: "local", actor: () => instance.owner };
 		const route = archiveRoutes(instance.app)["/api/export"];
 		if (!route) throw new Error("export route is missing");
-		const response = await route(new Request(`${instance.url}/api/export`), session);
+		const response = await route(new Request(`${instance.url}/api/export?project=scratch`), session);
 		if (!response.body) throw new Error("export body is missing");
 		const reader = response.body.getReader();
 		try {

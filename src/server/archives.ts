@@ -6,7 +6,7 @@ import type { App } from "./kernel/app.ts";
 import { OpError } from "./kernel/errors.ts";
 
 export const ArchiveTask = z.discriminatedUnion("op", [
-	z.object({ op: z.literal("export"), path: z.string(), now: z.number() }),
+	z.object({ op: z.literal("export"), path: z.string(), now: z.number(), project: z.string().min(1).optional() }),
 	z.object({
 		op: z.literal("import"),
 		path: z.string(),
