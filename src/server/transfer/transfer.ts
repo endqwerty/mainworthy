@@ -70,7 +70,6 @@ type Table = {
  * `commit_statuses` holds GitHub commit status enrollment and delivery state. An import must not enroll historical commits.
  */
 export const UNEXPORTED: readonly string[] = [
-	"mail_contacts",
 	"sessions",
 	"credentials",
 	"invitations",
@@ -224,7 +223,7 @@ function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<st
 	]);
 	for (const table of metadata) {
 		if (filters.has(table.name)) continue;
-		if (["actors", "orgs", "grants"].includes(table.name)) continue;
+		if (["actors", "orgs", "grants", "mail_contacts"].includes(table.name)) continue;
 		filters.set(table.name, table.name === "meta" ? "WHERE 0" : ownedBy(table, id, "project export"));
 	}
 	// Declared actor references plus the schema's intentional non-FK references. Keep actors who have access,
@@ -253,6 +252,7 @@ function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<st
 	);
 	const included = `WITH RECURSIVE included(id) AS (${actors.join(" UNION ")} UNION SELECT a.on_behalf_of FROM actors a JOIN included i ON a.id = i.id WHERE a.on_behalf_of IS NOT NULL) SELECT id FROM included`;
 	filters.set("actors", `WHERE id IN (${included})`);
+	filters.set("mail_contacts", `WHERE actor IN (${included})`);
 	filters.set(
 		"orgs",
 		`WHERE id IN (SELECT org FROM projects WHERE id = ${id} UNION SELECT org FROM actors WHERE id IN (${included}))`,

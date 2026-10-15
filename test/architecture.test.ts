@@ -374,7 +374,16 @@ describe("the module map", () => {
 		// invitation's code. The tables named here are all of identity that an archive holds. A table that
 		// is added later is unexported, or it is added to this list on purpose: until then this fails, before
 		// an export carries what signs somebody in.
-		const exported = ["orgs", "actors", "grants", "teams", "team_members", "team_grants", "team_events"];
+		const exported = [
+			"orgs",
+			"actors",
+			"grants",
+			"teams",
+			"team_members",
+			"team_grants",
+			"team_events",
+			"mail_contacts",
+		];
 		const identity = owners["server/identity"] ?? [];
 		// Change endings, scope-move audit rows and demo marks preserve the old archive version (decisions 0022, 0038
 		// and 0020). Tracker delivery must never replay after import. None of these tables holds credentials.

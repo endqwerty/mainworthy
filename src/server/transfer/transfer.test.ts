@@ -64,6 +64,7 @@ const fixtures: Record<string, Row[]> = {
 		{ id: 71, org: 17, kind: "human", name: "Zoë 雪", on_behalf_of: null, created_at: time, disabled_at: null },
 		{ id: 70, org: 17, kind: "agent", name: "Agent", on_behalf_of: 71, created_at: time, disabled_at: time + 1 },
 	],
+	mail_contacts: [{ actor: 71, email: "zoe@example.com", verified_at: time, revision: "contact-revision" }],
 	grants: [
 		{ actor: 71, project: 23, can: '[ "read", "admin" ]', roles: '["approver","auditor"]' },
 		{ actor: 71, project: 0, can: '["read"]' },
@@ -637,6 +638,7 @@ describe("Mainworthy instance archives", () => {
 			INSERT INTO projects VALUES (24, 18, 'other', 'Unrelated project', 1, 1);
 			INSERT INTO folders VALUES (44, 24, NULL, 'Private folder', 'a0', 'active', 1);
 			INSERT INTO grants (actor, project, can) VALUES (80, 24, '["admin"]');
+			INSERT INTO mail_contacts VALUES (80, 'unrelated@example.com', NULL, 'other-revision');
 			INSERT INTO actors VALUES (81, 17, 'human', 'Other project only', NULL, 1, NULL);
 			INSERT INTO grants (actor, project, can) VALUES (81, 24, '["read"]');
 		`);
@@ -645,6 +647,8 @@ describe("Mainworthy instance archives", () => {
 		const chunks: string[] = [];
 		exportArchive(from, (chunk) => chunks.push(chunk), { now: time, project: "qa" });
 		const text = chunks.join("");
+		expect(text).not.toContain("unrelated@example.com");
+		expect(text).toContain("zoe@example.com");
 		expect(text).not.toContain("Unrelated");
 		expect(text).not.toContain("Private folder");
 		expect(text).not.toContain("Other project only");
@@ -681,6 +685,10 @@ describe("Mainworthy instance archives", () => {
 		}
 		const other = target();
 		importArchive(other, linesOf(otherChunks.join("")));
+		expect(other.raw.query("SELECT email, verified_at FROM mail_contacts ORDER BY actor").all()).toEqual([
+			{ email: "zoe@example.com", verified_at: time },
+			{ email: "unrelated@example.com", verified_at: null },
+		]);
 		expect(other.raw.query("SELECT key FROM projects").all()).toEqual([{ key: "other" }]);
 		expect(other.raw.query("SELECT name FROM actors ORDER BY id").all()).toEqual([
 			{ name: "Zoë 雪" },

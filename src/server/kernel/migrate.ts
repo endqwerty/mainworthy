@@ -51,7 +51,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 17, name: "slot_excuses", sql: slotExcuses, archive: true },
 	{ version: 18, name: "tracker_polls", sql: trackerPolls, archive: false },
 	{ version: 19, name: "grant_roles", sql: grantRoles, archive: true },
-	{ version: 20, name: "mail_contacts", sql: mailContacts, archive: false },
+	{ version: 20, name: "mail_contacts", sql: mailContacts, archive: true },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
