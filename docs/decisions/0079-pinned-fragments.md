@@ -51,7 +51,7 @@ can request `fields` or `users` through the `get` field selection. The usage pan
 requests `users` separately, so other fragment reads do not scan all consumers.
 An explicit creation kind must agree with the kind in its Markdown document.
 
-Schema 20 adds the case kind with a non-null default, so its archive version
+Schema 22 adds the case kind with a non-null default, so its archive version
 changes. Old archives must be exported by a build using this schema before they
 can be imported. Current archives retain all versions, kinds and pins.
 
