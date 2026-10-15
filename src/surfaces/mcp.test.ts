@@ -19,7 +19,7 @@ import { createToken, listTokens } from "../server/identity/identity.ts";
 import { MCP_OPS, OPS } from "../server/ops/index.ts";
 import { invoke, invokeAsync } from "../server/ops/registry.ts";
 import { serve, sessionOf, VERSION } from "./http.ts";
-import { mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from "./mcp.ts";
+import { compactSchema, mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from "./mcp.ts";
 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
@@ -101,6 +101,42 @@ test("report tools omit the CI-only nothing-required declaration", () => {
 	if (!tool) throw new Error("report");
 	expect(Object.keys(tool.inputSchema.properties ?? {})).toContain("results");
 	expect(Object.keys(tool.inputSchema.properties ?? {})).not.toContain("nothingRequired");
+});
+
+test("a union left with one choice after hiding is that choice, still compacted", () => {
+	const node = (schema: unknown) => compactSchema(schema as Parameters<typeof compactSchema>[0]);
+	const hidden = { "x-mcp-hidden": true };
+	// A hidden field inside the remaining choice stays hidden.
+	expect(
+		node({
+			description: "Where",
+			anyOf: [
+				{ type: "object", properties: { a: { type: "integer" }, b: { type: "integer", ...hidden } } },
+				{ type: "null", ...hidden },
+			],
+		}),
+	).toEqual(node({ description: "Where", type: "object", properties: { a: { type: "integer" } } }));
+	// A hidden choice of a union inside the remaining choice is dropped too.
+	expect(
+		node({
+			anyOf: [
+				{ anyOf: [{ type: "integer" }, { type: "number", ...hidden }, { type: "boolean" }] },
+				{ type: "null", ...hidden },
+			],
+		}),
+	).toEqual(node({ anyOf: [{ type: "integer" }, { type: "boolean" }] }));
+	// A choice that shares a structural key with its union stays a union.
+	expect(
+		node({
+			type: "object",
+			properties: { p: { type: "integer" } },
+			required: ["p"],
+			anyOf: [
+				{ type: "object", properties: { q: { type: "integer" } }, required: ["q"] },
+				{ type: "null", ...hidden },
+			],
+		}),
+	).toMatchObject({ properties: { p: {} }, required: ["p"], anyOf: [{ required: ["q"] }] });
 });
 
 test("find lists deployments for CLI and HTTP but keeps MCP's earlier choices", () => {

@@ -118,8 +118,34 @@ function mapSchemas(schema: Schema, visit: (child: SchemaNode) => SchemaNode): S
 	return result;
 }
 
-function compactSchema(schema: SchemaNode, envelope = false): SchemaNode {
+/** Keys a choice and its union may both carry without one changing what the other accepts. */
+const ANNOTATIONS = new Set(["description", "default", "title", "examples"]);
+
+/**
+ * A union whose hidden choices leave one is that choice, under the union's own annotations. A choice that shares a
+ * structural key with its union (properties, type, required...) is left in the union, which says the same thing.
+ */
+function collapseHiddenUnion(schema: Exclude<SchemaNode, boolean>): SchemaNode | undefined {
+	for (const key of ["anyOf", "oneOf"] satisfies ("anyOf" | "oneOf")[]) {
+		const choices = schema[key];
+		if (!choices) continue;
+		const kept = choices.filter((child) => child["x-mcp-hidden"] !== true);
+		const only = kept[0];
+		if (kept.length !== 1 || kept.length === choices.length || only === undefined || typeof only === "boolean")
+			continue;
+		const { [key]: _, ...parent } = schema;
+		if (Object.keys(only).some((name) => name in parent && !ANNOTATIONS.has(name))) continue;
+		const merged: Exclude<SchemaNode, boolean> = { ...parent, ...only };
+		for (const name of ANNOTATIONS) if (name in parent) Object.assign(merged, { [name]: parent[name] });
+		return merged;
+	}
+	return undefined;
+}
+
+export function compactSchema(schema: SchemaNode, envelope = false): SchemaNode {
 	if (typeof schema === "boolean") return schema;
+	const collapsed = collapseHiddenUnion(schema);
+	if (collapsed !== undefined) return compactSchema(collapsed, envelope);
 	const visible = { ...schema };
 	if (schema.properties)
 		visible.properties = Object.fromEntries(
@@ -130,16 +156,7 @@ function compactSchema(schema: SchemaNode, envelope = false): SchemaNode {
 		);
 	for (const key of ["anyOf", "oneOf"] satisfies ("anyOf" | "oneOf")[]) {
 		const choices = schema[key];
-		if (!choices) continue;
-		const kept = choices.filter((child) => child["x-mcp-hidden"] !== true);
-		const only = kept.length === 1 && kept.length < choices.length ? kept[0] : undefined;
-		if (only === undefined || typeof only === "boolean") {
-			visible[key] = kept;
-			continue;
-		}
-		// Hiding left one choice: that choice is the schema, under the parent's own keys.
-		delete visible[key];
-		for (const [name, value] of Object.entries(only)) if (!(name in visible)) Object.assign(visible, { [name]: value });
+		if (choices) visible[key] = choices.filter((child) => child["x-mcp-hidden"] !== true);
 	}
 	const result = mapSchemas(visible, (child) => compactSchema(child));
 	delete result["x-mcp-hidden"];

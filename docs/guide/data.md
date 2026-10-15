@@ -54,7 +54,7 @@ The archive is text, one JSON object per line. The first line describes the arch
 
 ```
 $ head -n 1 mainworthy.ndjson | cut -c 1-80
-{"mainworthy":"archive","format":1,"schema":13,"exportedAt":1791875678677,"tables
+{"mainworthy":"archive","format":1,"schema":15,"exportedAt":1791875678677,"tables
 $ tail -n 1 mainworthy.ndjson
 {"end":true,"rows":67,"sha256":"ca0a5d4d76fe0de47415d595159393df3fad4fc517e4227325a4e5b5ca6b9cf7"}
 ```
