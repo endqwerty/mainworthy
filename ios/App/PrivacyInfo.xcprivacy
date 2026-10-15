@@ -3,7 +3,7 @@
 <plist version="1.0">
 <!-- What App Store Connect asks of every upload. The app tracks nobody. It sends the name a person signs in with
      and what they write to the instance the build names, mainworthy.com, run by the owner, unless a build from source
-     names another: so a user id and the person's content are collected, linked to them, for the app to work, and so is
+     names another or an earlier version left the phone signed in elsewhere: so a user id and the person's content are collected, linked to them, for the app to work, and so is
      what each session records for security (the app's name and version, and the network address it was used from:
      other data, as Apple says to declare an address by what it is used for; it is not used for location).
      docs/guide/privacy.md says the same in words. It keeps its last project in UserDefaults (AppModel.swift), read by
