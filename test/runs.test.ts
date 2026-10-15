@@ -283,6 +283,112 @@ describe("a run that accepts a build", () => {
 		expect(run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
 	});
 
+	for (const preset of ["standard", "strict"] as const) {
+		for (const reportKind of [
+			"other repository",
+			"other environment",
+			"unrelated case",
+			"unqualified result",
+		] as const) {
+			test(`${preset}: a closed run keeps its approval after a report for ${reportKind}`, () => {
+				if (preset === "strict") {
+					h.call("propose", { edits: [{ op: "policy", preset }] });
+					const policy = first(h.call<InboxReply>("inbox", { kind: "adopt" }).items);
+					h.call("decide", {
+						q: policy.q,
+						onEvidence: policy.evidenceHash,
+						answer: { is: "accept" },
+						reason: "require sign-off",
+					});
+				}
+				const target = { commit: "same0001", repo: "acme/app", env: "prod" };
+				const planned = h.call<PlanReply>("plan", {
+					name: "only counted evidence",
+					select: { cases: ["C-2"] },
+					accepts: target,
+					require: [{ id: "exercise", kind: "exercise", methods: ["human"], minActors: 1, basis: "exact" }],
+				});
+				record(planned.run, "C-2", "pass");
+				if (preset === "strict") {
+					const signoff = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
+					h.call("decide", {
+						q: signoff.q,
+						onEvidence: signoff.evidenceHash,
+						answer: { is: "approve" },
+						reason: "checked",
+					});
+				}
+				const signoffs = () => h.call<InboxReply>("inbox", { kind: "signoff", state: "decided" }).items;
+				const original = signoffs();
+				const horizon = () =>
+					h.app.db.raw
+						.query<{ applied_seq: number; outstanding: number }, [number]>(
+							"SELECT applied_seq, outstanding FROM runs WHERE no = ?",
+						)
+						.get(Number(planned.run.slice(2)));
+				const before = horizon();
+				expect(run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
+				expect(first(original).decision?.answer).toEqual({ is: "approve" });
+				const receipt = h.call<ReportReceipt>("report", {
+					target: {
+						...target,
+						...(reportKind === "other repository" ? { repo: "acme/other" } : {}),
+						...(reportKind === "other environment" ? { env: "staging" } : {}),
+					},
+					job: "unrelated",
+					results: [
+						{
+							test: { key: "tests/z.spec.ts::unrelated" },
+							outcome: "pass",
+							...(reportKind === "unqualified result" ? { annotation: { case: "C-2", version: 1 } } : {}),
+							...(reportKind === "unrelated case" ? { annotation: { case: "C-3", version: 1 } } : {}),
+						},
+					],
+				});
+				if (reportKind === "unqualified result" || reportKind === "unrelated case")
+					expect(receipt.basis).toEqual({ exact: 1, assumed: 0, unresolved: 0 });
+				expect(run(planned.run)).toMatchObject({ state: "closed", verdict: "passed", tally: { pass: 1, missing: 0 } });
+				expect(signoffs()).toEqual(original);
+				expect(h.call<InboxReply>("inbox", { kind: "signoff" }).items).toEqual([]);
+				expect(horizon()).toEqual(before);
+				expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "passed", stale: false });
+			});
+		}
+	}
+
+	test("a never-closed strict run dissolves a repeated sign-off when a failure arrives", () => {
+		h.call("propose", { edits: [{ op: "policy", preset: "strict" }] });
+		const policy = first(h.call<InboxReply>("inbox", { kind: "adopt" }).items);
+		h.call("decide", {
+			q: policy.q,
+			onEvidence: policy.evidenceHash,
+			answer: { is: "accept" },
+			reason: "require sign-off",
+		});
+		const planned = h.call<PlanReply>("plan", {
+			name: "never approved",
+			select: { cases: ["C-1", "C-2"] },
+			accepts: { commit: "never001" },
+		});
+		record(planned.run, "C-1", "pass");
+		record(planned.run, "C-2", "pass");
+		const original = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
+		h.call("decide", { q: original.q, onEvidence: original.evidenceHash, answer: { is: "reject" }, reason: "not yet" });
+		record(planned.run, "C-1", "pass");
+		const repeated = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
+		expect(repeated.q).not.toBe(original.q);
+		expect(repeated.evidence).toMatchObject({ verdict: "passed" });
+		record(planned.run, "C-2", "fail", { failure: { message: "new failure" } });
+		expect(run(planned.run)).toMatchObject({ state: "open", verdict: "blocked" });
+		expect(h.call<InboxReply>("inbox", { kind: "signoff" }).items).toEqual([]);
+		expect(
+			h.app.db.raw
+				.query<{ state: string }, [number]>("SELECT state FROM questions WHERE no = ?")
+				.get(Number(repeated.q.slice(2))),
+		).toEqual({ state: "dissolved" });
+		expect(first(h.call<InboxReply>("inbox", { kind: "failure" }).items).title).toBe("new failure");
+	});
+
 	test.each([false, true])("E5: a closed run waits for both accepted batches, reversed processing: %s", (reverse) => {
 		const planned = h.call<PlanReply>("plan", {
 			name: "two late batches",

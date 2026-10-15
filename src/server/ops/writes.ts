@@ -219,11 +219,7 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 		for (const id of plannedCounting(ctx.db, ctx.project.id, target.commit_sha)) ctx.recompute.add(id);
 		askWhereCommitIs(ctx, target);
 	}
-	noteApplied(
-		ctx,
-		waiting.map((run) => run.id),
-		batch.seq,
-	);
+	noteApplied(ctx, waiting, batch.seq);
 	// They are folded with the others below, after the report is marked applied for them: a question asked on
 	// the way here may already have recomputed them while they were still waiting.
 	for (const run of waiting) ctx.recompute.add(run.id);

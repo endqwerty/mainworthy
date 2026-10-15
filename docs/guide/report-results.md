@@ -27,7 +27,8 @@ which reads the verdict now.
 Reports also fill qualifying slots in planned runs that accept the tested commit,
 even after those runs close. A late report makes the run's gate `pending` until
 all accepted reports are applied, then Mainworthy reconsiders its sign-off on the
-new evidence. See [planned runs](./runs.md#close-and-reopen-a-run).
+new evidence if the report added qualifying slot results. A report that adds none
+leaves the approval in place. See [planned runs](./runs.md#close-and-reopen-a-run).
 
 [Diagram: one red build, from upload to a green gate](../diagrams/red-build.html)
 
