@@ -1,7 +1,7 @@
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
 import { ERROR_CODES } from "../core/api.ts";
-import { ActorKind, Capability } from "../core/kinds.ts";
+import { ActorKind, Capability, Role } from "../core/kinds.ts";
 import type { App } from "./kernel/app.ts";
 import { OpError } from "./kernel/errors.ts";
 
@@ -25,7 +25,15 @@ export const ArchiveReply = z.discriminatedUnion("ok", [
 			rows: z.number().int().nonnegative(),
 			tables: z.record(z.string(), z.number().int().nonnegative()),
 		}),
-		owner: z.object({ id: z.number().int(), kind: ActorKind, name: z.string(), can: z.array(Capability) }).nullable(),
+		owner: z
+			.object({
+				id: z.number().int(),
+				kind: ActorKind,
+				name: z.string(),
+				can: z.array(Capability),
+				roles: z.array(Role).default([]),
+			})
+			.nullable(),
 		events: z.array(
 			z.object({
 				project: z.string(),

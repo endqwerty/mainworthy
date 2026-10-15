@@ -86,7 +86,7 @@ export function actorsWithGrants(db: Db) {
 		});
 	return listActors(db).map((actor) => ({
 		...actor,
-		grants: display(actor.grants),
+		grants: actor.grants.flatMap((grant) => display([grant]).map((shown) => ({ ...shown, roles: grant.roles }))),
 		teams: actor.teams.map((team) => ({ ...team, grants: display(team.grants) })),
 	}));
 }
@@ -216,8 +216,13 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 				throw invalid(`${input.actor} owns this instance and may do everything; that is not changed here`);
 			const project = projectOf(db, input.project);
 			if (input.do === "grant.remove") return { removed: removeGrant(env.app, { actor: input.actor, project }) };
-			setGrant(env.app, { actor: input.actor, project, can: input.can });
-			return { actor: input.actor, project: input.project ?? "*", can: input.can };
+			const roles = setGrant(env.app, {
+				actor: input.actor,
+				project,
+				can: input.can,
+				...(input.roles === undefined ? {} : { roles: input.roles }),
+			});
+			return { actor: input.actor, project: input.project ?? "*", can: input.can, roles };
 		}
 		case "actor.forget": {
 			personOnly(env, "an actor is forgotten");

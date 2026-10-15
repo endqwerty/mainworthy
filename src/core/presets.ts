@@ -1,6 +1,6 @@
 // The policy presets: three clause lists over one model (principle P5). A team's strictness is which list is in
 // force. `strict` is a fixture that proves the same data works under a policy where a person answers everything;
-// the regulated preset proper needs the `gap` kind and role sign-off, which are not built yet.
+// the regulated preset still needs quorum, frozen evidence and the `gap` kind.
 import { FlakyDetectionSettings } from "./flaky.ts";
 import { type Ask, Clause, clauseOf, KINDS, type Kind, type Policy, type PolicySettings } from "./kinds.ts";
 
@@ -91,7 +91,7 @@ const standard: Clause[] = [
 	{ id: "failure-change", kind: "failure", when: ["scope:change"], ask: member, blocks: "change" },
 	{ id: "failure-any", kind: "failure", when: ["always"], ask: member, blocks: "release" },
 	{ id: "finding-any", kind: "finding", when: ["always"], ask: member, blocks: "nothing" },
-	// Until role sign-off is built, `standard` closes a passed run by rule, and the ledger names this clause.
+	// `standard` closes a passed run by rule; a custom clause can ask a named role instead.
 	{
 		id: "signoff-passed-preview",
 		kind: "signoff",

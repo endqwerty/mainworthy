@@ -21,6 +21,9 @@ test.skipIf(!browserAvailable)(
 			page.setDefaultTimeout(5000);
 			await page.getByRole("option", { name: "People", exact: true }).click();
 			const teams = page.getByRole("region", { name: "Teams", exact: true });
+			await teams
+				.getByText("Teams grant permissions only. Assign named roles on each person's own grant.", { exact: false })
+				.waitFor();
 			await teams.getByLabel("New team name").fill("Quality");
 			await teams.getByRole("button", { name: "Create team", exact: true }).click();
 			await teams.getByRole("heading", { name: "Quality", exact: true }).waitFor();

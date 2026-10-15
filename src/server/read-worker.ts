@@ -91,7 +91,9 @@ async function archive(task: z.infer<typeof ArchiveTask>): Promise<void> {
 			reply = {
 				ok: true,
 				...restored,
-				owner: restored.owner ? { ...restored.owner, can: [...restored.owner.can] } : null,
+				owner: restored.owner
+					? { ...restored.owner, can: [...restored.owner.can], roles: [...(restored.owner.roles ?? [])] }
+					: null,
 				events,
 			};
 		}

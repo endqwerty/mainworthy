@@ -13,6 +13,7 @@ import {
 	Kind,
 	MapAnswer,
 	PolicySettings,
+	Role,
 	SignoffAnswer,
 	Unlinked,
 } from "./kinds.ts";
@@ -728,6 +729,11 @@ export const AdminInput = z.discriminatedUnion("do", [
 		actor: z.string(),
 		project: z.string().optional().describe("The project the grant is for. Absent: every project."),
 		can: z.array(Capability).min(1).describe("What the actor may do there from now on, in place of what it could."),
+		roles: z
+			.array(Role)
+			.max(32)
+			.optional()
+			.describe("Named roles on this grant. Absent: keep its roles; []: clear them."),
 		cmd,
 	}),
 	z.object({

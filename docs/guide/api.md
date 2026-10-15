@@ -221,7 +221,7 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 | `edits[][policy].clauses[].kind` | `"adopt" \| "map" \| "failure" \| "finding" \| "signoff"` | yes |  |
 | `edits[][policy].clauses[].when` | `array<"always" \| "author:human" \| "author:agent" \| "author:ci" \| "conflict" \| "policy" \| "scope:change" \| "scope:trunk" \| "scope:run" \| "hint:disputed" \| "inherited" \| "category:defect" \| "verdict:passed" \| "unlinked:track" \| "unlinked:create" \| string>` | yes |  |
 | `edits[][policy].clauses[].ask` | `object` | yes |  |
-| `edits[][policy].clauses[].ask.who` | `"rule" \| "member" \| "admin" \| "author"` | yes |  |
+| `edits[][policy].clauses[].ask.who` | `"rule" \| "member" \| "admin" \| "author" \| string` | yes |  |
 | `edits[][policy].clauses[].ask.agents` | `"answer" \| "advise" \| "none"` | yes |  |
 | `edits[][policy].clauses[].ask.notProducer` | `boolean` | yes |  |
 | `edits[][policy].clauses[].ask.reason` | `"optional" \| "required"` | yes |  |
@@ -860,6 +860,7 @@ Projects, actors, teams, grants and tokens. There are no seats: an actor is free
 | `[15].actor` | `string` | yes |  |
 | `[15].project` | `string` | no | The project the grant is for. Absent: every project. |
 | `[15].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | yes | What the actor may do there from now on, in place of what it could. |
+| `[15].roles` | `array<string>` | no | Named roles on this grant. Absent: keep its roles; []: clear them. |
 | `[16].do` | `"grant.remove"` | yes |  |
 | `[16].actor` | `string` | yes |  |
 | `[16].project` | `string` | no | The project the grant is for. Absent: the grant on every project. |

@@ -706,3 +706,23 @@ test.skipIf(!browserAvailable)(
 	},
 	20_000,
 );
+test.skipIf(!browserAvailable)("People shows named roles on a project grant", async () => {
+	await person("role-reviewer", ["read", "produce", "answer"]);
+	await server.api("admin", {
+		do: "grant.set",
+		actor: "role-reviewer",
+		project: "scratch",
+		can: ["read", "produce", "answer"],
+		roles: ["approver"],
+	});
+	const admin = await openPage(server, { path: "/p/scratch/settings" });
+	try {
+		await section(admin.page, "People");
+		const personRow = rows(admin.page).filter({ hasText: "role-reviewer" });
+		await personRow.getByText("scratch: read, record, produce, answer; roles: approver", { exact: false }).waitFor();
+		expect(await personRow.innerText()).toContain("roles: approver");
+		expect(admin.errors).toEqual([]);
+	} finally {
+		await admin.close();
+	}
+});

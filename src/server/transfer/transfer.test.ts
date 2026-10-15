@@ -64,7 +64,7 @@ const fixtures: Record<string, Row[]> = {
 		{ id: 70, org: 17, kind: "agent", name: "Agent", on_behalf_of: 71, created_at: time, disabled_at: time + 1 },
 	],
 	grants: [
-		{ actor: 71, project: 23, can: '[ "read", "admin" ]' },
+		{ actor: 71, project: 23, can: '[ "read", "admin" ]', roles: '["approver","auditor"]' },
 		{ actor: 71, project: 0, can: '["read"]' },
 	],
 	teams: [{ id: 91, org: 17, name: "Quality 雪", created_at: time }],
@@ -635,9 +635,9 @@ describe("Mainworthy instance archives", () => {
 			INSERT INTO actors VALUES (80, 18, 'human', 'Unrelated person', NULL, 1, NULL);
 			INSERT INTO projects VALUES (24, 18, 'other', 'Unrelated project', 1, 1);
 			INSERT INTO folders VALUES (44, 24, NULL, 'Private folder', 'a0', 'active', 1);
-			INSERT INTO grants VALUES (80, 24, '["admin"]');
+			INSERT INTO grants (actor, project, can) VALUES (80, 24, '["admin"]');
 			INSERT INTO actors VALUES (81, 17, 'human', 'Other project only', NULL, 1, NULL);
-			INSERT INTO grants VALUES (81, 24, '["read"]');
+			INSERT INTO grants (actor, project, can) VALUES (81, 24, '["read"]');
 		`);
 		const otherSettings = '{"fields":{"other_only":{"kind":"text","label":"Private field","required":false}}}';
 		insert(from, "policies", { ...fixtures.policies?.[0], project: 24, settings: otherSettings, actor: 80 });

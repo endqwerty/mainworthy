@@ -53,7 +53,9 @@ const InvitationRows = z.array(
 		createdAt: z.number(),
 		expiresAt: z.number(),
 		state: z.enum(["open", "used", "revoked", "expired"]),
-		grants: z.array(z.object({ project: z.string(), can: z.array(z.string()) })),
+		grants: z.array(
+			z.object({ project: z.string(), can: z.array(z.string()), roles: z.array(z.string()).default([]) }),
+		),
 	}),
 ) satisfies z.ZodType<InvitationRow[]>;
 

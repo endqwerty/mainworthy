@@ -579,6 +579,130 @@ test("reader threads resolve current team grants from the credential reference",
 	expect(await pool.run(call, fallback)).toMatchObject({ ok: false, error: { code: "not_found" } });
 });
 
+test("role-restricted answers use current project grants for bearer and browser sessions", async () => {
+	const instance = boot("server", "role-test-owner-token-0123456789");
+	const headers = bearer("role-test-owner-token-0123456789");
+	const admin = async <T>(input: unknown): Promise<T> => {
+		const reply = await post<T>(instance, "/api/admin", input, headers);
+		if (!reply.body.ok) throw new Error(JSON.stringify(reply.body));
+		return reply.body.result;
+	};
+	const token = await admin<{ token: string }>({
+		do: "token.create",
+		actor: "approver",
+		kind: "human",
+		can: ["read", "produce", "answer"],
+	});
+	await admin({ do: "project.create", key: "other" });
+	await admin({
+		do: "grant.set",
+		actor: "approver",
+		project: "other",
+		can: ["read", "produce", "answer"],
+		roles: ["approver"],
+	});
+	const send = <T>(op: string, input: unknown, as: Record<string, string> = headers) =>
+		post<T>(instance, `/api/p/scratch/${op}`, input, as);
+	await admin({
+		do: "grant.set",
+		actor: "approver",
+		project: "scratch",
+		can: ["read", "produce", "answer"],
+		roles: ["approver"],
+	});
+	const policyBase = await admin<{ version: number }>({ do: "policy.show", project: "scratch" });
+	const proposed = await send<ProposeReply>("propose", {
+		edits: [
+			{
+				op: "policy",
+				base: policyBase.version,
+				clauses: PRESETS.strict.clauses.map((clause) =>
+					clause.id === "finding-any"
+						? { ...clause, ask: { who: "role:approver", agents: "none", notProducer: true, reason: "required" } }
+						: clause,
+				),
+			},
+		],
+	});
+	if (!proposed.body.ok) throw new Error(JSON.stringify(proposed.body));
+	const queue = async (kind: string, as: Record<string, string> = headers) => {
+		const reply = await send<InboxReply>("inbox", { kind }, as);
+		if (!reply.body.ok || !reply.body.result.items[0]) throw new Error(JSON.stringify(reply.body));
+		return reply.body.result.items[0];
+	};
+	const policy = await queue("adopt");
+	expect(
+		(await send("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } })).body,
+	).toMatchObject({ ok: true, result: [{ status: "decided" }] });
+	await admin({
+		do: "grant.set",
+		actor: "approver",
+		project: "scratch",
+		can: ["read", "produce", "answer"],
+		roles: [],
+	});
+	// A finding is about a case; strict adoption needs the owner's recorded reason first.
+	const created = await send<ProposeReply>("propose", { edits: [{ op: "create", outline: "Role review" }] });
+	expect(created.body).toMatchObject({ ok: true, result: { status: "open" } });
+	const adoption = await queue("adopt");
+	await send("decide", {
+		q: adoption.q,
+		onEvidence: adoption.evidenceHash,
+		answer: { is: "accept" },
+		reason: "case reviewed",
+	});
+	expect(
+		(
+			await send("claim", {
+				lens: "review",
+				reviewed: [],
+				findings: [{ on: "C-1", category: "defect", note: "Check the total" }],
+			})
+		).body,
+	).toMatchObject({ ok: true });
+	const finding = await queue("finding", bearer(token.token));
+	const answer = {
+		q: finding.q,
+		onEvidence: finding.evidenceHash,
+		answer: { is: "reject" },
+		reason: "review complete",
+	};
+	expect((await send("decide", answer, bearer(token.token))).body).toMatchObject({
+		ok: true,
+		result: [{ status: "forbidden" }],
+	});
+	const signedIn = await post(instance, "/api/login", { token: token.token });
+	const cookie = signedIn.cookie?.split(";")[0];
+	if (!cookie) throw new Error("no browser session cookie");
+	const browser = { cookie, origin: instance.url };
+	expect((await send("decide", answer, browser)).body).toMatchObject({ ok: true, result: [{ status: "forbidden" }] });
+	await admin({
+		do: "grant.set",
+		actor: "approver",
+		project: "scratch",
+		can: ["read", "produce", "answer"],
+		roles: ["approver"],
+	});
+	const current = await queue("finding", browser);
+	expect(current.you).toBe("counts");
+	expect((await send("decide", { ...answer, reason: " " }, browser)).body).toMatchObject({
+		ok: true,
+		result: [{ status: "invalid", needs: "a reason" }],
+	});
+	expect((await send("decide", answer, browser)).body).toMatchObject({ ok: true, result: [{ status: "decided" }] });
+	await admin({
+		do: "grant.set",
+		actor: "approver",
+		project: "scratch",
+		can: ["read", "produce", "answer"],
+		roles: [],
+	});
+	expect((await send("decide", { undo: finding.q, reason: "withdraw review" }, browser)).body).toMatchObject({
+		ok: true,
+		result: [{ status: "forbidden" }],
+	});
+});
+
 describe("graceful stop", () => {
 	for (const count of [0, 2]) {
 		test(`a waiting write receives its reply and the event stream ends, with ${count} readers`, async () => {
@@ -1344,17 +1468,16 @@ describe("a pipeline's token", () => {
 		await admin(instance, { do: "project.create", key: "other" });
 		const ci = await token(instance, { actor: "github-actions", kind: "ci", project: "scratch" });
 		const listed = async () => {
-			const reply = await admin<{ name: string; kind: string; grants: { project: string; can: string[] }[] }[]>(
-				instance,
-				{ do: "actor.list" },
-			);
+			const reply = await admin<
+				{ name: string; kind: string; grants: { project: string; can: string[]; roles: string[] }[] }[]
+			>(instance, { do: "actor.list" });
 			if (!reply.body.ok) throw new Error(`actor.list: ${reply.body.error.message}`);
 			return reply.body.result.map((actor) => [actor.name, actor.kind, actor.grants]);
 		};
 		expect(await listed()).toEqual([
 			["policy", "rule", []],
-			["robin", "human", [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"] }]],
-			["github-actions", "ci", [{ project: "scratch", can: ["record"] }]],
+			["robin", "human", [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"], roles: [] }]],
+			["github-actions", "ci", [{ project: "scratch", can: ["record"], roles: [] }]],
 		]);
 
 		const set = { do: "grant.set", actor: "github-actions", project: "scratch" };
@@ -1374,7 +1497,7 @@ describe("a pipeline's token", () => {
 		expect((await post(instance, "/api/p/scratch/report", report, ci)).body).toMatchObject(missing);
 		expect((await post(instance, "/api/p/other/report", report, ci)).body).toMatchObject({ ok: true });
 		expect((await admin(instance, remove)).body).toMatchObject({ ok: true, result: { removed: false } });
-		expect((await listed())[2]).toEqual(["github-actions", "ci", [{ project: "other", can: ["record"] }]]);
+		expect((await listed())[2]).toEqual(["github-actions", "ci", [{ project: "other", can: ["record"], roles: [] }]]);
 
 		// An admin does not change or drop their own grant: a slip there locks the instance.
 		expect((await admin(instance, { do: "grant.remove", actor: "robin" })).body).toMatchObject(invalid);
@@ -1518,7 +1641,7 @@ describe("who may make a token for whom", () => {
 		expect([tokensOf(instance, "robin"), tokensOf(instance, "eve")]).toEqual([{ n: 1 }, { n: 1 }]);
 		const eve = await admin<{ name: string; grants: unknown[] }[]>(instance, { do: "actor.list" });
 		expect(eve.body.ok && eve.body.result.find((actor) => actor.name === "eve")?.grants).toEqual([
-			{ project: "scratch", can: ["read"] },
+			{ project: "scratch", can: ["read"], roles: [] },
 		]);
 		// Everything else an agent that administers could do, it still can.
 		expect((await admin(instance, { do: "project.create", key: "made-by-bot" }, bot)).body).toMatchObject({ ok: true });
@@ -2403,7 +2526,16 @@ describe("the surface", () => {
 		await checked("claim", { ...finding, findings: [] });
 		await checked("get", { refs: [q] });
 
-		await checked("admin", { do: "grant.set", actor: "sweep-agent", can: ["read"], project: "demo" });
+		expect(
+			await checked("admin", {
+				do: "grant.set",
+				actor: "sweep-agent",
+				can: ["read"],
+				roles: ["approver"],
+				project: "demo",
+			}),
+		).toMatchObject({ roles: ["approver"] });
+		await checked("admin", { do: "actor.list" });
 		await checked("admin", { do: "grant.remove", actor: "sweep-agent", project: "demo" });
 		const tokens = z.array(z.object({ id: z.number() })).parse(await checked("admin", { do: "token.list" }));
 		const last = tokens.at(-1);
@@ -2459,7 +2591,21 @@ describe("the surface", () => {
 			.object({ id: z.number() })
 			.parse(await checked("invitation", { do: "create", name: "sweep-person" }));
 		await checked("invitation", { do: "create", name: "sweep-person" });
-		await checked("invitation", { do: "list" });
+		await checked("admin", {
+			do: "grant.set",
+			actor: "sweep-person",
+			project: "demo",
+			can: ["read", "answer"],
+			roles: ["approver"],
+		});
+		expect(await checked("invitation", { do: "list" })).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					name: "sweep-person",
+					grants: expect.arrayContaining([{ project: "demo", can: ["read", "answer"], roles: ["approver"] }]),
+				}),
+			]),
+		);
 		await checked("invitation", { do: "revoke", id: invitation.id });
 		const empty = await replySweep(instance, "empty");
 		for (const area of ["cases", "tests", "runs", "folders", "tags", "requirements", "changes"])

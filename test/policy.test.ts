@@ -5,6 +5,7 @@ import { ANSWER_KEYS, ANSWERS, type Ask, Clause, KINDS, type Policy, standingOf 
 import { parseCase } from "../src/core/markdown.ts";
 import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { missingCatchAll, PRESET_NAMES, PRESETS } from "../src/core/presets.ts";
+import { actorByName, invitedPerson } from "../src/server/identity/identity.ts";
 import { Db } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
 import { type CurrentPolicy, currentPolicy, policyAt } from "../src/server/policy/policy.ts";
@@ -83,6 +84,296 @@ describe("who may answer", () => {
 		expect(standing(person(["read", "answer"]), ask({ notProducer: true }), true)).toBe("forbidden");
 		expect(standing(agent(["read", "produce", "answer"]), ask({ agents: "answer" }))).toBe("counts");
 		expect(standing(agent(["read", "produce", "answer"]), ask({ agents: "advise" }))).toBe("advice");
+	});
+});
+
+describe("named role grants", () => {
+	test("a policy refuses a role nobody holds in its project", () => {
+		const clauses = PRESETS.strict.clauses.map((clause) =>
+			clause.id === "adopt-any" ? { ...clause, ask: { ...clause.ask, who: "role:nobody-holds" } } : clause,
+		);
+		const propose = () => h.raw("propose", { edits: [{ op: "policy", base: 1, clauses }] });
+		const refused = {
+			ok: false,
+			error: {
+				code: "invalid",
+				message: "clause adopt-any: no eligible actor holds role nobody-holds in this project",
+			},
+		};
+		expect(propose()).toMatchObject(refused);
+		expect(queue().items).toEqual([]);
+		const reviewer = h.actor("role-holder", "human", ["read"]);
+		h.call("admin", { do: "project.create", key: "other" });
+		h.call("admin", {
+			do: "grant.set",
+			actor: reviewer.name,
+			project: "other",
+			can: ["read", "produce", "answer"],
+			roles: ["nobody-holds"],
+		});
+		expect(propose()).toMatchObject(refused);
+		h.call("admin", {
+			do: "grant.set",
+			actor: reviewer.name,
+			project: "scratch",
+			can: ["read"],
+			roles: ["nobody-holds"],
+		});
+		expect(propose()).toMatchObject(refused);
+		h.call("admin", { do: "grant.set", actor: reviewer.name, can: ["read", "produce", "answer"] });
+		// Its global grant supplies answer and produce, so the scoped role can count here.
+		expect(propose()).toMatchObject({ ok: true, result: { status: "open" } });
+	});
+
+	test("a personal role uses team permissions and loses eligibility when membership ends", () => {
+		h.actor("team-approver", "human", ["read"]);
+		h.call("admin", { do: "team.create", name: "Reviewers" });
+		h.call("admin", { do: "team.grant.set", team: "Reviewers", project: "scratch", can: ["produce", "answer"] });
+		h.call("admin", { do: "team.member.add", team: "Reviewers", person: "team-approver" });
+		const clauses = PRESETS.strict.clauses.map((clause) =>
+			clause.id === "adopt-any" ? { ...clause, ask: { ...clause.ask, who: "role:approver" } } : clause,
+		);
+		const propose = () => h.raw("propose", { edits: [{ op: "policy", base: 1, clauses }] });
+		const refused = {
+			ok: false,
+			error: { code: "invalid", message: "clause adopt-any: no eligible actor holds role approver in this project" },
+		};
+		expect(propose()).toMatchObject(refused);
+		h.call("admin", {
+			do: "grant.set",
+			actor: "team-approver",
+			project: "scratch",
+			can: ["read"],
+			roles: ["approver"],
+		});
+		expect(actorByName(h.app.db, "team-approver", 1)).toMatchObject({
+			can: ["read", "record", "produce", "answer"],
+			roles: ["approver"],
+		});
+		expect(propose()).toMatchObject({ ok: true, result: { status: "open" } });
+		const question = first(queue({ kind: "adopt" }).items);
+		const accept = () =>
+			h.call<{ status: string }[]>("decide", {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "accept" },
+			});
+		h.call("admin", { do: "team.member.remove", team: "Reviewers", person: "team-approver" });
+		expect(accept()).toMatchObject([{ status: "invalid" }]);
+		h.call("admin", { do: "team.member.add", team: "Reviewers", person: "team-approver" });
+		expect(accept()).toMatchObject([{ status: "decided" }]);
+	});
+
+	test("a settings-only proposal keeps the role-holder requirement", () => {
+		h.actor("settings-approver", "human", ["read", "produce", "answer"]);
+		h.call("admin", {
+			do: "grant.set",
+			actor: "settings-approver",
+			can: ["read", "produce", "answer"],
+			roles: ["approver"],
+		});
+		const clauses = PRESETS.strict.clauses.map((clause) =>
+			clause.id === "signoff-any" ? { ...clause, ask: { ...clause.ask, who: "role:approver" } } : clause,
+		);
+		h.call("propose", { edits: [{ op: "policy", base: 1, clauses }] });
+		const question = first(queue({ kind: "adopt" }).items);
+		expect(
+			h.call<{ status: string }[]>("decide", {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "accept" },
+			}),
+		).toMatchObject([{ status: "decided" }]);
+		h.call("admin", { do: "grant.set", actor: "settings-approver", can: ["read", "produce", "answer"], roles: [] });
+		const policy = h.call<Policy & { version: number }>("admin", { do: "policy.show", project: "scratch" });
+		const edit = {
+			op: "policy",
+			base: policy.version,
+			settings: { ...policy.settings, holds: { ...policy.settings.holds, flakyDays: 7 } },
+		};
+		expect(h.raw("propose", { edits: [edit] })).toMatchObject({
+			ok: false,
+			error: { code: "invalid", message: "clause signoff-any: no eligible actor holds role approver in this project" },
+		});
+		expect(h.call<Policy>("admin", { do: "policy.show", project: "scratch" }).settings.holds.flakyDays).toBe(
+			policy.settings.holds.flakyDays,
+		);
+		expect(h.raw("propose", { edits: [{ ...edit, clauses: PRESETS.strict.clauses }] })).toMatchObject({
+			ok: true,
+			result: { status: "open" },
+		});
+	});
+
+	test("a policy rechecks role holders when its waiting proposal is accepted", () => {
+		const reviewer = h.actor("role-holder", "human", ["read", "produce", "answer"]);
+		const grant = (roles: string[]) =>
+			h.call("admin", { do: "grant.set", actor: reviewer.name, can: ["read", "produce", "answer"], roles });
+		grant(["approver"]);
+		const clauses = PRESETS.strict.clauses.map((clause) =>
+			clause.id === "adopt-any" ? { ...clause, ask: { ...clause.ask, who: "role:approver" } } : clause,
+		);
+		h.call("propose", { edits: [{ op: "policy", base: 1, clauses }] });
+		const question = first(queue({ kind: "adopt" }).items);
+		grant([]);
+		const accept = () =>
+			h.call<{ status: string; needs: string }[]>("decide", {
+				q: question.q,
+				onEvidence: question.evidenceHash,
+				answer: { is: "accept" },
+			});
+		expect(accept()).toMatchObject([
+			{ status: "invalid", needs: "clause adopt-any: no eligible actor holds role approver in this project" },
+		]);
+		expect(h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version).toBe(1);
+		expect(queue({ kind: "adopt" }).items.map((item) => item.q)).toEqual([question.q]);
+		grant(["approver"]);
+		expect(accept()).toMatchObject([{ status: "decided" }]);
+		expect(h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version).toBe(2);
+	});
+
+	test("an agent with a role counts only when the clause permits agent answers", () => {
+		const agent = h.actor("role-agent", "agent", ["read", "produce", "answer"]);
+		h.call("admin", { do: "grant.set", actor: agent.name, can: ["read", "produce", "answer"], roles: ["approver"] });
+		const clauses = (agents: "answer" | "none") =>
+			PRESETS.strict.clauses.map((clause) =>
+				clause.id === "adopt-any" ? { ...clause, ask: { ...clause.ask, who: "role:approver", agents } } : clause,
+			);
+		expect(h.raw("propose", { edits: [{ op: "policy", base: 1, clauses: clauses("none") }] })).toMatchObject({
+			ok: false,
+			error: { code: "invalid" },
+		});
+		h.call("propose", { edits: [{ op: "policy", base: 1, clauses: clauses("answer") }] });
+		const policyQuestion = first(queue({ kind: "adopt" }).items);
+		h.call("decide", { q: policyQuestion.q, onEvidence: policyQuestion.evidenceHash, answer: { is: "accept" } });
+		h.call("propose", { edits: [{ op: "create", outline: "An agent may review this" }] });
+		const question = first(queue({ kind: "adopt" }).items);
+		expect(
+			h.call<{ status: string }[]>(
+				"decide",
+				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" }, reason: "reviewed" },
+				actorByName(h.app.db, agent.name, 1) ?? agent,
+			),
+		).toMatchObject([{ status: "decided" }]);
+		expect(title("C-1")).toBe("An agent may review this");
+	});
+
+	test("a grant keeps its roles per project and removing it removes those roles", () => {
+		const reviewer = h.actor("reviewer", "human", ["read", "produce", "answer"]);
+		h.call("admin", { do: "project.create", key: "other" });
+		h.call("admin", {
+			do: "grant.set",
+			actor: reviewer.name,
+			project: "scratch",
+			can: ["read", "produce", "answer"],
+			roles: ["approver", "lead", "approver"],
+		});
+		h.call("admin", { do: "token.create", actor: reviewer.name, kind: "human" });
+		expect(invitedPerson(h.app, { name: reviewer.name, can: [], project: 0 })).toMatchObject({
+			name: reviewer.name,
+			isNew: false,
+		});
+		const actors = () =>
+			h.call<{ name: string; grants: { project: string; can: string[]; roles: string[] }[] }[]>("admin", {
+				do: "actor.list",
+			});
+		expect(actors().find((actor) => actor.name === reviewer.name)?.grants).toEqual([
+			{ project: "*", can: ["read", "record", "produce", "answer"], roles: [] },
+			{ project: "scratch", can: ["read", "record", "produce", "answer"], roles: ["approver", "lead"] },
+		]);
+		h.call("admin", { do: "grant.set", actor: reviewer.name, can: ["read", "produce", "answer"], roles: ["auditor"] });
+		expect(actorByName(h.app.db, reviewer.name, 1)?.roles).toEqual(["auditor", "approver", "lead"]);
+		expect(actorByName(h.app.db, reviewer.name, 2)?.roles).toEqual(["auditor"]);
+		h.call("admin", { do: "grant.set", actor: reviewer.name, can: ["read", "produce", "answer"], roles: [] });
+		h.call("admin", { do: "grant.remove", actor: reviewer.name, project: "scratch" });
+		expect(actors().find((actor) => actor.name === reviewer.name)?.grants).toEqual([
+			{ project: "*", can: ["read", "record", "produce", "answer"], roles: [] },
+		]);
+	});
+	test("named role eligibility keeps every other condition and validates role selectors", () => {
+		const ask: Ask = { who: "role:approver", agents: "answer", notProducer: true, reason: "required" };
+		const person = { kind: "human", can: ["produce", "answer"], roles: ["approver"] } as const;
+		const standing = (actor: Parameters<typeof standingOf>[0]["actor"], isProducer = false) =>
+			standingOf({ actor, ask, isAuthor: false, isProducer });
+		expect(standing(person)).toBe("counts");
+		expect(standing(person, true)).toBe("forbidden");
+		expect(standing({ ...person, roles: [] })).toBe("forbidden");
+		expect(standing({ ...person, can: ["produce", "admin"] })).toBe("forbidden");
+		expect(standing({ ...person, kind: "ci" })).toBe("forbidden");
+		expect(standing({ ...person, kind: "agent" })).toBe("counts");
+		expect(standing({ ...person, kind: "agent" }, true)).toBe("advice");
+		expect(standing({ ...person, kind: "agent", roles: [] })).toBe("advice");
+		expect(
+			standingOf({
+				actor: { ...person, kind: "agent" },
+				ask: { ...ask, agents: "none" },
+				isAuthor: false,
+				isProducer: false,
+			}),
+		).toBe("forbidden");
+		for (const who of ["role:", "role:Approver", "role:a b", `role:${"a".repeat(33)}`])
+			expect(Clause.safeParse({ ...PRESETS.strict.clauses[0], ask: { ...ask, who } }).success).toBe(false);
+	});
+
+	test("a named role requires that project role, answer permission, independence and a reason", () => {
+		const reviewer = h.actor("reviewer", "human", ["read", "produce", "answer"]);
+		const clauses = PRESETS.strict.clauses.map((clause) =>
+			clause.id === "adopt-any"
+				? { ...clause, ask: { who: "role:approver", agents: "none", notProducer: true, reason: "required" } }
+				: clause,
+		);
+		h.call("admin", { do: "grant.set", actor: reviewer.name, can: ["read", "produce", "answer"], roles: ["approver"] });
+		h.call("propose", { edits: [{ op: "policy", base: currentPolicy(h.app.db, 1).version, clauses }] });
+		const policyQuestion = first(queue({ kind: "adopt" }).items);
+		h.call("decide", { q: policyQuestion.q, onEvidence: policyQuestion.evidenceHash, answer: { is: "accept" } });
+		h.call("admin", { do: "grant.set", actor: reviewer.name, can: ["read", "produce", "answer"], roles: [] });
+		const proposed = h.call<Proposed>("propose", { edits: [{ op: "create", outline: "Role reviewed case" }] });
+		const question = first(queue({ kind: "adopt" }).items);
+		expect(proposed.needs).toContain("approver");
+		const answer = (as = h.owner, reason?: string) =>
+			first(
+				h.call<{ status: string; needs: string }[]>(
+					"decide",
+					{
+						q: question.q,
+						onEvidence: question.evidenceHash,
+						answer: { is: "accept" },
+						...(reason ? { reason } : {}),
+					},
+					as,
+				),
+			);
+		expect(answer(h.owner, "admin alone is insufficient").status).toBe("forbidden");
+		expect(answer(reviewer, "not an approver yet").status).toBe("forbidden");
+		h.call("admin", {
+			do: "grant.set",
+			actor: reviewer.name,
+			project: "scratch",
+			can: ["read", "produce", "answer"],
+			roles: ["approver"],
+		});
+		// The harness carries actors by value; re-read authority exactly as a real request does.
+		const current = () => actorByName(h.app.db, reviewer.name, 1) ?? reviewer;
+		expect(answer(current()).status).toBe("invalid");
+		expect(h.raw("get", { refs: ["C-1"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+		expect(answer(current(), "independent review complete").status).toBe("decided");
+		expect(title("C-1")).toBe("Role reviewed case");
+		const own = h.call<Proposed>("propose", { edits: [{ op: "create", outline: "Own proposal" }] }, current());
+		const ownQuestion = first(queue({ kind: "adopt" }).items);
+		expect(own.status).toBe("open");
+		expect(
+			first(
+				h.call<{ status: string }[]>(
+					"decide",
+					{
+						q: ownQuestion.q,
+						onEvidence: ownQuestion.evidenceHash,
+						answer: { is: "accept" },
+						reason: "my own review",
+					},
+					current(),
+				),
+			).status,
+		).toBe("forbidden");
 	});
 });
 

@@ -216,7 +216,13 @@ export function PolicyEditor({
 												updateClause(index, { ask: { ...clause.ask, who: Ask.shape.who.parse(event.target.value) } })
 											}
 										>
-											{Ask.shape.who.options.map((who) => (
+											{[
+												"rule",
+												"member",
+												"admin",
+												"author",
+												...new Set(draft.clauses.map((item) => item.ask.who).filter((who) => who.startsWith("role:"))),
+											].map((who) => (
 												<option key={who}>{who}</option>
 											))}
 										</Select>

@@ -20,6 +20,9 @@ export type ActorKind = z.infer<typeof ActorKind>;
 export const Capability = z.enum(["read", "record", "produce", "answer", "plan", "admin"]);
 export type Capability = z.infer<typeof Capability>;
 
+export const Role = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/);
+export type Role = z.infer<typeof Role>;
+
 /** What holding one capability also gives. Nothing else implies anything. */
 const IMPLIES: Partial<Record<Capability, readonly Capability[]>> = { produce: ["record"] };
 /**
@@ -279,10 +282,14 @@ export function applicableAnswers(kind: Kind, facts: ReadonlySet<string>): strin
  *   a person is asked until a person gives the rule's answer.
  * - `member`: an actor with the `answer` capability.
  * - `admin`: an actor with the `admin` capability.
+ * - `role:<name>`: an actor with `answer` and that named role on the project.
  * - `author`: the author of the proposal the question is about (a conflict only its author can resolve).
  */
 export const Ask = z.object({
-	who: z.enum(["rule", "member", "admin", "author"]),
+	who: z.union([
+		z.enum(["rule", "member", "admin", "author"]),
+		z.templateLiteral(["role:", Role]).meta({ "x-mcp-hidden": true }),
+	]),
 	/** What an agent's answer is worth: counted, shown as advice, or refused. */
 	agents: z.enum(["answer", "advise", "none"]),
 	/** When true, an actor who produced the evidence in question may not settle it. */
@@ -438,7 +445,7 @@ function holds(predicate: Predicate, q: Facts): boolean {
  * `isAuthor` and `isProducer` are facts about this actor and this question that the caller looks up.
  */
 export function standingOf(input: {
-	actor: { kind: ActorKind; can: readonly Capability[] };
+	actor: { kind: ActorKind; can: readonly Capability[]; roles?: readonly Role[] };
 	ask: Ask;
 	isAuthor: boolean;
 	isProducer: boolean;
@@ -461,7 +468,10 @@ export function standingOf(input: {
 	}
 	// From here a clause is held to everything it asks at once: the role, whether an agent may answer, and who
 	// produced the evidence. None of the three is skipped because another was met first.
-	const role = ask.who === "admin" ? actor.can.includes("admin") : actor.can.includes("answer");
+	const role =
+		ask.who === "admin"
+			? actor.can.includes("admin")
+			: actor.can.includes("answer") && (ask.who === "member" || actor.roles?.includes(ask.who.slice(5)) === true);
 	if (actor.kind === "agent") {
 		if (ask.agents === "none") return "forbidden";
 		if (!actor.can.includes("produce") && !actor.can.includes("answer")) return "forbidden";
@@ -477,13 +487,17 @@ export function standingOf(input: {
 
 /** One sentence saying who a question is waiting for, shown in the queue and returned to an agent. */
 export function describeAsk(ask: Ask): string {
-	const who: Record<Ask["who"], string> = {
+	const who: Record<Exclude<Ask["who"], `role:${string}`>, string> = {
 		rule: "a rule",
 		member: "one member",
 		admin: "an admin",
 		author: "the author of the proposal",
 	};
-	const parts = [who[ask.who]];
+	const parts = [
+		ask.who === "rule" || ask.who === "member" || ask.who === "admin" || ask.who === "author"
+			? who[ask.who]
+			: `a member with role ${ask.who.slice(5)}`,
+	];
 	if (ask.notProducer) parts.push("who did not produce the evidence");
 	if (ask.agents === "none") parts.push("who is not an agent");
 	if (ask.reason === "required") parts.push("with a reason");

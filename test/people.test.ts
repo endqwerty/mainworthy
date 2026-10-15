@@ -1561,6 +1561,7 @@ describe("what a signed-in caller sees and ends", () => {
 				actor: name,
 				project: "scratch",
 				can: ["read", "produce"],
+				roles: [],
 			});
 			await w.ok("admin", { do: "project.create", key: "review", preset: "strict" });
 			await w.ok("admin", { do: "grant.set", actor: name, project: "review", can: ["read", "produce"] });
@@ -1656,6 +1657,7 @@ describe("what a signed-in caller sees and ends", () => {
 				actor: "forgotten-3",
 				project: "scratch",
 				can: ["read", "produce"],
+				roles: [],
 			});
 			expect((await w.op("admin", { ...grant, can: ["read"] })).status).toBe(409);
 			expect(await w.ok<unknown>("admin", { do: "actor.forget", name, cmd: "forget-person-01" })).toEqual(forgotten);
@@ -2058,26 +2060,30 @@ describe("what the pages of the web UI asked of the server", () => {
 		await invite(w, { name: "robin", can: ["read", "produce"], project: "checkout" });
 		await invite(w, { name: "sam" });
 		await invite(w, { name: OWNER });
-		type Row = { name: string; purpose: string; grants: { project: string; can: string[] }[] };
+		type Row = { name: string; purpose: string; grants: { project: string; can: string[]; roles: string[] }[] };
 		const listed = await w.ok<Row[]>("invitation", { do: "list" });
 		expect(listed.map((row) => ({ name: row.name, purpose: row.purpose, grants: row.grants }))).toEqual([
 			// `produce` includes `record`, and the list says what the person holds, as the registry will see it.
-			{ name: "robin", purpose: "join", grants: [{ project: "checkout", can: ["read", "record", "produce"] }] },
+			{
+				name: "robin",
+				purpose: "join",
+				grants: [{ project: "checkout", can: ["read", "record", "produce"], roles: [] }],
+			},
 			{
 				name: "sam",
 				purpose: "join",
-				grants: [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"] }],
+				grants: [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"], roles: [] }],
 			},
 			{
 				name: OWNER,
 				purpose: "recover",
-				grants: [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"] }],
+				grants: [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"], roles: [] }],
 			},
 		]);
 		// A grant that changes after the invitation was made is what the list shows: it is the person's, not the link's.
 		await w.ok("admin", { do: "grant.set", actor: "robin", project: "checkout", can: ["read"] });
 		const after = await w.ok<Row[]>("invitation", { do: "list" });
-		expect(after[0]?.grants).toEqual([{ project: "checkout", can: ["read"] }]);
+		expect(after[0]?.grants).toEqual([{ project: "checkout", can: ["read"], roles: [] }]);
 	});
 
 	test("a password an invitation was accepted with says when it was last used: the moment it signed its person in", async () => {
@@ -2237,7 +2243,11 @@ describe("a person's own command-line token", () => {
 		expect(said(await use())).toBe("403 forbidden");
 		expect((await w.post("/api/p/scratch/find", {}, bearer(made.token))).status).toBe(200);
 		expect(await w.ok("admin", { do: "actor.list" })).toContainEqual(
-			expect.objectContaining({ name: "team-cli", grants: [{ project: "scratch", can: ["read"] }], teams: [] }),
+			expect.objectContaining({
+				name: "team-cli",
+				grants: [{ project: "scratch", can: ["read"], roles: [] }],
+				teams: [],
+			}),
 		);
 	});
 
