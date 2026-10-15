@@ -1,8 +1,6 @@
 import { z } from "zod";
 import type { TrackerItem } from "../../core/tracker.ts";
-import type { TrackerPort } from "./port.ts";
-
-export class TrackerError extends Error {}
+import { TrackerError, type TrackerPort } from "./port.ts";
 
 const Issue = z.object({
 	number: z.number().int().positive(),

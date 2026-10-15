@@ -314,7 +314,7 @@ describe("the module map", () => {
 		],
 		"server/runs": ["runs", "run_tests", "slots", "slot_results", "depends_on"],
 		"server/decisions": ["questions", "question_refs", "answers", "decisions"],
-		"server/trackers": ["tracker_requests"],
+		"server/trackers": ["tracker_requests", "tracker_polls"],
 		"server/statuses": ["commit_statuses", "commit_status_delivery"],
 	};
 
@@ -380,6 +380,7 @@ describe("the module map", () => {
 		const other = [
 			"change_ends",
 			"tracker_requests",
+			"tracker_polls",
 			"scope_moves",
 			"demo_projects",
 			"commit_statuses",

@@ -65,6 +65,7 @@ export type Config = {
 	passwordCost?: { memoryCost: number; timeCost: number };
 	github?: { project: string; repository: string; token: string };
 	githubStatuses?: boolean;
+	jira?: { project: string; site: string; projectKey: string; issueType: string; email: string; token: string };
 };
 
 /**
@@ -283,7 +284,41 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		appleApps: appleAppsOf(env),
 		requireAdminMfa: adminMfaOf(env),
 		...githubOf(env),
+		...jiraOf(env),
 	};
+}
+
+function jiraOf(env: Record<string, string | undefined>): Pick<Config, "jira"> {
+	const project = env.MAINWORTHY_JIRA_PROJECT?.trim();
+	const site = env.MAINWORTHY_JIRA_SITE?.trim().replace(/\/$/, "");
+	const projectKey = env.MAINWORTHY_JIRA_PROJECT_KEY?.trim();
+	const issueType = env.MAINWORTHY_JIRA_ISSUE_TYPE?.trim();
+	const email = env.MAINWORTHY_JIRA_EMAIL?.trim();
+	const token = env.MAINWORTHY_JIRA_TOKEN?.trim();
+	if (!project && !site && !projectKey && !issueType && !email && !token) return {};
+	if (!project || !site || !projectKey || !issueType || !email || !token)
+		throw new Error(
+			"Set MAINWORTHY_JIRA_PROJECT, MAINWORTHY_JIRA_SITE, MAINWORTHY_JIRA_PROJECT_KEY, MAINWORTHY_JIRA_ISSUE_TYPE, MAINWORTHY_JIRA_EMAIL and MAINWORTHY_JIRA_TOKEN together.",
+		);
+	if (!/^[A-Za-z0-9_-]{1,80}$/.test(project)) throw new Error("MAINWORTHY_JIRA_PROJECT must be a project key.");
+	let url: URL;
+	try {
+		url = new URL(site);
+	} catch {
+		throw new Error("MAINWORTHY_JIRA_SITE must be an HTTPS origin.");
+	}
+	if (url.protocol !== "https:" || url.origin !== site)
+		throw new Error("MAINWORTHY_JIRA_SITE must be an HTTPS origin without a path, credentials, query or fragment.");
+	if (!/^[A-Z][A-Z0-9_]{1,79}$/.test(projectKey))
+		throw new Error("MAINWORTHY_JIRA_PROJECT_KEY must be a Jira project key.");
+	if (
+		issueType.length > 100 ||
+		[...issueType].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
+	)
+		throw new Error("MAINWORTHY_JIRA_ISSUE_TYPE must name an issue type.");
+	if (!/^[^\s:]+@[^\s:]+$/.test(email)) throw new Error("MAINWORTHY_JIRA_EMAIL must be an account email address.");
+	if (!/^[!-~]{1,1024}$/.test(token)) throw new Error("MAINWORTHY_JIRA_TOKEN must be a token without whitespace.");
+	return { jira: { project, site, projectKey, issueType, email, token } };
 }
 
 function githubOf(env: Record<string, string | undefined>): Pick<Config, "github" | "githubStatuses"> {

@@ -18,6 +18,7 @@ import commitStatuses from "./migrations/0014_commit_statuses.sql" with { type: 
 import releases from "./migrations/0015_releases.sql" with { type: "text" };
 import decisionEvidence from "./migrations/0016_decision_evidence.sql" with { type: "text" };
 import slotExcuses from "./migrations/0017_slot_excuses.sql" with { type: "text" };
+import trackerPolls from "./migrations/0018_tracker_polls.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -46,6 +47,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 15, name: "releases", sql: releases, archive: true },
 	{ version: 16, name: "decision_evidence", sql: decisionEvidence, archive: false },
 	{ version: 17, name: "slot_excuses", sql: slotExcuses, archive: true },
+	{ version: 18, name: "tracker_polls", sql: trackerPolls, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

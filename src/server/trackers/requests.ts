@@ -8,8 +8,8 @@ import { type Ctx, projectById } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 import { caseById, caseRef, versionOf } from "../suite/suite.ts";
-import { githubPort, TrackerError } from "./github.ts";
-import type { TrackerPort } from "./port.ts";
+import { configuredTrackers } from "./config.ts";
+import { TrackerError, type TrackerPort } from "./port.ts";
 
 type RequestRow = {
 	id: string;
@@ -61,10 +61,10 @@ export function trackerStatus(db: Db, project: number, id: string): TrackerRecei
 }
 
 export function queueDefect(ctx: Ctx, input: TrackerInput): TrackerReceipt {
-	const config = ctx.app.config.github;
-	if (!config || config.project !== ctx.project.key) throw invalid("GitHub Issues is not configured for this project.");
-	if (input.do === "link" && !/^[1-9]\d{0,14}$/.test(input.key))
-		throw invalid("A GitHub issue key is its positive issue number.");
+	const config = configuredTrackers(ctx.app.config, ctx.project.key)[0];
+	if (!config) throw invalid("A tracker is not configured for this project.");
+	if (input.do === "link" && !config.validKey(input.key))
+		throw invalid("The issue key must name an issue in the configured tracker project.");
 	const result = resultById(ctx.db, input.result);
 	if (!result || result.project !== ctx.project.id) throw notFound("result");
 	if (result.outcome !== "fail" && result.outcome !== "error")
@@ -98,7 +98,7 @@ export function queueDefect(ctx: Ctx, input: TrackerInput): TrackerReceipt {
 		nonce: randomUUID(),
 		project: ctx.project.id,
 		result: result.id,
-		repository: config.repository,
+		repository: config.destination,
 		action: input.do,
 		item_key: input.do === "link" ? input.key : null,
 		title: `Failure: ${body?.title ?? test.name}`.slice(0, 240),
@@ -146,10 +146,12 @@ async function deliver(app: App, supplied?: TrackerPort): Promise<number> {
 		let issue: TrackerItem | null = null;
 		let error: string | null = null;
 		try {
-			const config = app.config.github;
-			if (!config || config.repository !== row.repository || config.project !== project)
+			const config = project
+				? configuredTrackers(app.config, project).find((tracker) => tracker.destination === row.repository)
+				: undefined;
+			if (!config)
 				throw new TrackerError("The configured tracker project or repository changed; the request was not sent.");
-			const port = supplied ?? githubPort(config);
+			const port = supplied ?? config.port();
 			issue =
 				row.action === "create"
 					? await port.createDefect({ title: row.title, body: row.body })

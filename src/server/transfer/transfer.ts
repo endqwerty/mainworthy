@@ -77,6 +77,7 @@ export const UNEXPORTED: readonly string[] = [
 	"tokens",
 	"change_ends",
 	"tracker_requests",
+	"tracker_polls",
 	"scope_moves",
 	"demo_projects",
 	"commit_statuses",

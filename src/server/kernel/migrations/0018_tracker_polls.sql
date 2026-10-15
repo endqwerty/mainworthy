@@ -1,0 +1,7 @@
+CREATE TABLE tracker_polls (
+	decision INTEGER PRIMARY KEY REFERENCES decisions(id) ON DELETE CASCADE,
+	nonce TEXT NOT NULL UNIQUE,
+	next_at INTEGER NOT NULL,
+	attempts INTEGER NOT NULL,
+	error TEXT
+) STRICT;
