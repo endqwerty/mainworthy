@@ -24,6 +24,8 @@ import {
 	SessionInfo,
 	SessionRow,
 	SignInReply,
+	TokenRevoke,
+	TokenRow,
 } from "../scripts/ios/contract.ts";
 import { type TestInstance, testInstance } from "../scripts/ios/instance.ts";
 import { mismatches, type Shape } from "../scripts/ios/shape.ts";
@@ -73,6 +75,37 @@ async function result(method: "GET" | "POST", path: string, body?: unknown): Pro
 	return reply.result;
 }
 const op = (key: string, name: string, input: unknown) => result("POST", `/api/p/${key}/${name}`, input);
+
+test("the iPhone token list and replayed revocation read real admin replies", async () => {
+	const made = z.object({ actor: z.string(), token: z.string() }).parse(
+		await result("POST", "/api/admin", {
+			do: "token.create",
+			actor: "phone-contract-pipeline",
+			kind: "ci",
+			can: ["read"],
+			label: "Contract pipeline",
+			expires: "1h",
+		}),
+	);
+	const readTokens = async () => {
+		const rows = z.array(z.unknown()).parse(await result("POST", "/api/admin", { do: "token.list" }));
+		for (const row of rows) holds("token.list", TokenRow, row);
+		return z.array(z.object({ id: z.number(), actor: z.string() })).parse(rows);
+	};
+	const token = (await readTokens()).find((row) => row.actor === made.actor);
+	expect(token).toBeDefined();
+	await fetch(`${server.url}/api/session`, { headers: { authorization: `Bearer ${made.token}` } });
+	await readTokens();
+	const input = { do: "token.revoke", id: token?.id, cmd: crypto.randomUUID() };
+	const revoked = await result("POST", "/api/admin", input);
+	holds("token.revoke", TokenRevoke, revoked);
+	expect(revoked).toEqual({ revoked: true });
+	expect(await result("POST", "/api/admin", input)).toEqual({ revoked: true });
+	const already = await result("POST", "/api/admin", { ...input, cmd: crypto.randomUUID() });
+	holds("token.revoke already", TokenRevoke, already);
+	expect(already).toEqual({ revoked: false });
+	await readTokens();
+});
 
 function holds(what: string, shape: Shape, reply: unknown): void {
 	expect(mismatches(shape, reply), `${what}. ${WHAT_TO_DO}`).toEqual([]);

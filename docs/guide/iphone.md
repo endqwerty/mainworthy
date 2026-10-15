@@ -163,6 +163,22 @@ passwords and passkeys are managed in the web app.
 **You**, **About** also shows the app's version and the server's, the licence (Apache License 2.0), **Licences**,
 which opens the page [Licence](./licence.md) on the instance, and the copyright line.
 
+## Revoke a token
+
+1. Open **You**, then **Tokens**. This entry appears for a person with the instance's `admin` capability.
+   Being an admin of one project is not enough.
+2. Identify the token by its label, number, actor, kind, creation date and creator, last use and address,
+   expiry, and state. Pull down to refresh. The list covers the instance, whichever project is open.
+3. Press **Revoke token**. The confirmation names its label and number. Review them, then confirm.
+   Revocation stops the token and ends sessions opened with it. The app signs in with a password, so its own
+   session stays signed in.
+4. The screen says **Revoked**, **Already revoked**, or shows the server's refusal reason.
+   If the reply is lost or unreadable, it says **Outcome unknown** and pauses further revocations.
+   Press **Check again** to send the saved command again and learn its result without revoking twice.
+
+The pending command stays when you leave this screen or switch projects. Keep the app open until its outcome
+is known. Token creation, people, and policy administration still need the web app or command line.
+
 ## Browse and write cases
 
 1. Open **Cases**. It works like the Files app: **All cases**, the top folders, and the most used tags, with

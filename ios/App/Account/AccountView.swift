@@ -16,6 +16,9 @@ struct AccountView: View {
 					}
 					LabeledContent("Instance", value: workspace.instanceName)
 					NavigationLink("Your sessions") { SessionsView(screen: workspace.sessions) }
+					if workspace.account.mayAdministerTokens {
+						NavigationLink("Tokens") { TokensView(screen: workspace.tokens) }
+					}
 				}
 				Section("Project") {
 					ForEach(workspace.account.projects) { project in

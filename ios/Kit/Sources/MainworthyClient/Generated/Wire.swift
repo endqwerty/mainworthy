@@ -564,6 +564,43 @@ enum Wire {
 		let current: Bool
 	}
 
+	/// `admin` token.list: identity and use, without the secret.
+	struct TokenRow: Decodable, Equatable, Sendable {
+		let id: Int
+		let actor: String
+		let kind: String
+		let label: String
+		let createdAt: Double
+		let createdBy: String?
+		let expiresAt: Double?
+		let expired: Bool
+		let lastUsedAt: Double?
+		let lastUsedFrom: String?
+		let revoked: Bool
+
+		private enum CodingKeys: String, CodingKey { case id, actor, kind, label, createdAt, createdBy, expiresAt, expired, lastUsedAt, lastUsedFrom, revoked }
+
+		init(from decoder: any Decoder) throws {
+			let container = try decoder.container(keyedBy: CodingKeys.self)
+			id = try container.decode(Int.self, forKey: .id)
+			actor = try container.decode(String.self, forKey: .actor)
+			kind = try container.decode(String.self, forKey: .kind)
+			label = try container.decode(String.self, forKey: .label)
+			createdAt = try container.decode(Double.self, forKey: .createdAt)
+			createdBy = try container.decode(String?.self, forKey: .createdBy)
+			expiresAt = try container.decode(Double?.self, forKey: .expiresAt)
+			expired = try container.decode(Bool.self, forKey: .expired)
+			lastUsedAt = try container.decode(Double?.self, forKey: .lastUsedAt)
+			lastUsedFrom = try container.decode(String?.self, forKey: .lastUsedFrom)
+			revoked = try container.decode(Bool.self, forKey: .revoked)
+		}
+	}
+
+	/// `admin` token.revoke: true when this command revoked it.
+	struct TokenRevoke: Decodable, Equatable, Sendable {
+		let revoked: Bool
+	}
+
 	/// The latest evidence of one method, not a gate verdict.
 	struct SuiteProof: Decodable, Equatable, Sendable {
 		let outcome: String

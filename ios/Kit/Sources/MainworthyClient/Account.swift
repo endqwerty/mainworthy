@@ -5,6 +5,8 @@ public struct Account: Equatable, Sendable {
 	public let name: String
 	package let actorId: Int
 	public let isOwner: Bool
+	/// Token administration needs a person's instance grant, not admin on the open project.
+	public let mayAdministerTokens: Bool
 	/// The version of the server, for the About screen.
 	public let serverVersion: String
 	/// The projects the person may read. One they hold a grant on and may not read is not a screen's to show.
@@ -14,6 +16,7 @@ public struct Account: Equatable, Sendable {
 		name = wire.actor
 		actorId = wire.actorId
 		isOwner = wire.owner
+		mayAdministerTokens = wire.kind == "human" && wire.can.contains("admin")
 		serverVersion = wire.version
 		projects = wire.projects.map(Project.init).filter { $0.may(.read) }
 	}
@@ -22,6 +25,7 @@ public struct Account: Equatable, Sendable {
 		self.name = name
 		self.actorId = actorId
 		self.isOwner = isOwner
+		self.mayAdministerTokens = false
 		self.serverVersion = serverVersion
 		self.projects = projects
 	}
