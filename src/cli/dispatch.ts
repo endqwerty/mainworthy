@@ -122,7 +122,7 @@ export async function runCli(argv: readonly string[], ui: unknown): Promise<numb
 		}
 		return 0;
 	}
-	const client = new Client(clientOptions(args));
+	const client = new Client(clientOptions(args, name === "health" || name === "fmt" ? "none" : "token"));
 	if (generated && (!adapter || hasJsonInput(tokens) || machineOnly(adapter, args)))
 		return runGenerated(generated, args, client);
 	if (adapter) {

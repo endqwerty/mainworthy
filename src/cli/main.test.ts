@@ -1190,6 +1190,82 @@ test("--token-file reads the token from a file, trims it, and refuses what canno
 	);
 });
 
+test.each(["health", "fmt"])("%s ignores unused token files and token conflicts", async (command) => {
+	await withInstance(async ({ run, instance, directory }) => {
+		const file = join(directory, "case.md");
+		const markdown =
+			"---\nkind: case\ntitle: Coupon applies\nmethods: [human]\ncovers: []\ntags: []\n---\n## Steps\n- Apply coupon ^apply\n  > Total is reduced\n";
+		await writeFile(file, markdown);
+		const argv = command === "fmt" ? [command, file] : [command];
+		const missing = join(directory, "absent-token");
+		for (const [flags, env] of [
+			[[], { MAINWORTHY_TOKEN_FILE: missing }],
+			[["--token-file", missing], {}],
+			[[], { MAINWORTHY_TOKEN: "unused-secret", MAINWORTHY_TOKEN_FILE: missing }],
+			[["--token", "unused-secret", "--token-file", missing], {}],
+		] satisfies [string[], Record<string, string>][]) {
+			const result = await run([...argv, ...flags], { env });
+			expect(result).toEqual({
+				code: 0,
+				stdout: command === "fmt" ? markdown : `healthy: Mainworthy 0.1.0 at ${instance.url}\n`,
+				stderr: "",
+			});
+		}
+	});
+});
+
+test.each([513, 32_768])("a %i-character token file is refused before a request", async (length) => {
+	await withInstance(async ({ run, instance, directory }) => {
+		const file = join(directory, "oversized-token");
+		const token = "synthetic-secret-".padEnd(length, "x");
+		await writeFile(file, token);
+		const { result, asked } = await viaServer(instance, () => run(["find", "--token-file", file]));
+		expect(result).toEqual({
+			code: 4,
+			stdout: "",
+			stderr: `invalid: the token file ${file} ${length > 4096 ? "is larger than 4096 bytes" : "holds a token longer than 512 characters"}\n`,
+		});
+		expect(asked).toEqual([]);
+		expect(result.stderr).not.toContain("synthetic-secret-");
+	});
+});
+
+test("token files accept the server's longest token and preserve flag precedence", async () => {
+	const token = "custom-owner-".padEnd(512, "x");
+	await withInstance(
+		async ({ run, directory }) => {
+			const file = join(directory, "owner-token");
+			const missing = join(directory, "absent-token");
+			for (const content of [`${token}\r\n`, token.padEnd(4096, " ")]) {
+				await writeFile(file, content);
+				for (const [flags, env] of [
+					[["--token-file", file], { MAINWORTHY_TOKEN: "wrong", MAINWORTHY_TOKEN_FILE: missing }],
+					[["--token", token], { MAINWORTHY_TOKEN: "wrong", MAINWORTHY_TOKEN_FILE: missing }],
+					[[], { MAINWORTHY_TOKEN_FILE: file }],
+				] satisfies [string[], Record<string, string>][]) {
+					const found = await run(["find", ...flags, "--compact"], { env });
+					expect([found.code, found.stderr]).toEqual([0, ""]);
+					expect(outputWith(Found, found).items).toEqual([]);
+				}
+			}
+			await writeFile(file, token.padEnd(4097, " "));
+			const oversized = await run(["find"], { env: { MAINWORTHY_TOKEN_FILE: file } });
+			expect(oversized).toEqual({
+				code: 4,
+				stdout: "",
+				stderr: `invalid: the token file ${file} is larger than 4096 bytes\n`,
+			});
+			const unread = await run(["find", "--token-file", missing], { env: { MAINWORTHY_TOKEN: token } });
+			expect(unread).toEqual({
+				code: 4,
+				stdout: "",
+				stderr: `invalid: cannot read the token file ${missing}\n`,
+			});
+		},
+		{ mode: "server", env: { MAINWORTHY_OWNER_TOKEN: token } },
+	);
+});
+
 test("the help says to prefer the variable to --token, and offers a file", async () => {
 	await withInstance(async ({ run }) => {
 		for (const argv of [["help"], ["find", "--help"], ["serve", "--help"]]) {
