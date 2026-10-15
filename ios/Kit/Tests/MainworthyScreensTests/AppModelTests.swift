@@ -42,6 +42,19 @@ struct AppModelTests {
 		init(_ phase: AppModel.Phase) { self.phase = "\(phase)" }
 	}
 
+	@Test("the signed-out privacy link follows the named instance without signing in")
+	func privacyBeforeSignIn() async throws {
+		for (address, expected) in [
+			("mainworthy.com", "https://mainworthy.com/privacy"),
+			("https://mainworthy.example:8443/p/shop", "https://mainworthy.example:8443/privacy"),
+			("localhost:7357", "http://localhost:7357/privacy"),
+		] {
+			let app = Device().app(at: try #require(Instance(address: address)))
+			await app.start()
+			#expect(try form(app).privacyAddress.absoluteString == expected)
+		}
+	}
+
 	@Test("a new device shows the sign-in form; signing in opens a project; the next start is signed in; signing out ends it")
 	func signInAndOut() async throws {
 		_ = try await Live.project()
@@ -51,6 +64,11 @@ struct AppModelTests {
 		let form = try form(app)
 		// It signs in to the instance the app was given, and asks for a name and a password before it signs anybody in.
 		#expect(form.instance == Live.instance && !form.canSubmit)
+		#expect(form.privacyAddress.absoluteString == "\(Live.address)/privacy")
+		let (policy, response) = try await URLSession.shared.data(from: form.privacyAddress)
+		#expect((response as? HTTPURLResponse)?.statusCode == 200)
+		#expect(response.url?.path == "/docs/privacy")
+		#expect(String(decoding: policy, as: UTF8.self).contains("<h1 id=\"privacy\">Privacy</h1>"))
 		form.name = Live.name
 		form.password = "not the password"
 		#expect(form.canSubmit)
@@ -60,6 +78,7 @@ struct AppModelTests {
 		await form.submit()
 		let workspace = try workspace(app)
 		#expect(workspace.account.name == Live.name)
+		#expect(workspace.privacyAddress.absoluteString == "\(Live.address)/privacy")
 		#expect(workspace.project != nil && workspace.queue != nil)
 		#expect(form.password.isEmpty)
 
@@ -245,6 +264,8 @@ struct AppModelTests {
 		try await Task.sleep(for: .milliseconds(50))
 		let again = try self.form(app)
 		#expect(again.instance == Live.instance)
+		#expect(again.privacyAddress.absoluteString == "\(Live.address)/privacy")
+		#expect(workspace.privacyAddress.absoluteString == "\(Live.address)/privacy")
 		again.name = Live.name
 		again.password = Live.password
 		await again.submit()

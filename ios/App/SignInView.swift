@@ -52,6 +52,10 @@ struct SignInView: View {
 					.disabled(!form.canSubmit)
 					.accessibilityIdentifier("sign-in")
 				}
+				Section {
+					Link("Privacy", destination: form.privacyAddress)
+						.accessibilityIdentifier("privacy")
+				}
 			}
 			.navigationTitle("Mainworthy")
 		}

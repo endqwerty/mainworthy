@@ -141,6 +141,20 @@ describe("what the iOS app reads", () => {
 		});
 	});
 
+	test("the iOS test instance publishes the real anonymous privacy route and records the opened URL", async () => {
+		const openings = () => result("GET", "/test/privacy-openings");
+		expect(await openings()).toEqual({ urls: [] });
+		const redirect = await fetch(`${server.url}/privacy`, { redirect: "manual" });
+		expect(redirect.status).toBe(308);
+		expect(redirect.headers.get("location")).toBe("/docs/privacy");
+		const policy = await fetch(new URL(redirect.headers.get("location") ?? "", server.url));
+		expect(policy.status).toBe(200);
+		expect(await policy.text()).toContain('<h1 id="privacy">Privacy</h1>');
+		expect(await openings()).toEqual({ urls: [`${server.url}/privacy`] });
+		const anonymous = await fetch(`${server.url}/test/privacy-openings`);
+		expect(anonymous.status).toBe(401);
+	});
+
 	test("who is signed in, with a token and with the session a password opens", async () => {
 		holds("GET /api/session", SessionInfo, await result("GET", "/api/session"));
 		// The app holds a session cookie, never a token, so this is the reply it reads.

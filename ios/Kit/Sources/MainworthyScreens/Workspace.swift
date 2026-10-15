@@ -146,6 +146,8 @@ public final class Workspace {
 	/// The documentation the instance serves.
 	public var docsAddress: URL { server.instance.url.appending(path: "/docs") }
 
+	public var privacyAddress: URL { server.instance.url.appending(path: "/privacy") }
+
 	/// Whether this workspace talks to this very server, so that a session renewed on it can take it back.
 	func isOn(_ server: Server) -> Bool {
 		self.server === server

@@ -9,7 +9,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { type Instance, start } from "../../src/server/start.ts";
+import { type Instance, start, VERSION } from "../../src/server/start.ts";
+import { docsRoutes } from "../../src/surfaces/docs/site.ts";
 import { passedRun, scenario } from "./scenario.ts";
 
 export const OWNER = "robin";
@@ -35,6 +36,7 @@ export async function testInstance(): Promise<TestInstance> {
 	let instance: Instance | null = null;
 	// Another origin, which only counts what reaches it: a client that follows a redirect there is seen.
 	let reached = 0;
+	const privacyOpenings: string[] = [];
 	let elsewhere: ReturnType<typeof Bun.serve> | null = null;
 	let answerProxy: ReturnType<typeof Bun.serve> | null = null;
 	const unavailable = new Map<string, "rejected" | "uncertain">();
@@ -73,6 +75,17 @@ export async function testInstance(): Promise<TestInstance> {
 			},
 			() => ({
 				ui: null,
+				// Run the same public handlers as `serveCommand`, observing the browser handoff without
+				// depending on how Safari displays its address bar. Redirects and page content stay shared.
+				open: Object.fromEntries(
+					Object.entries(docsRoutes(VERSION)).map(([path, handler]) => [
+						path,
+						(req: Request) => {
+							if (new URL(req.url).pathname === "/privacy") privacyOpenings.push(req.url);
+							return handler(req);
+						},
+					]),
+				),
 				routes: {
 					"/test/project": async (req) => {
 						const asked = Ask.safeParse(await req.json().catch(() => ({})));
@@ -114,6 +127,7 @@ export async function testInstance(): Promise<TestInstance> {
 					},
 					"/test/elsewhere": () => Response.redirect(`http://127.0.0.1:${other.port}/api/session`, 307),
 					"/test/elsewhere-seen": () => Response.json({ ok: true, result: { requests: reached } }),
+					"/test/privacy-openings": () => Response.json({ ok: true, result: { urls: privacyOpenings } }),
 				},
 			}),
 			{ readers: 0 },
