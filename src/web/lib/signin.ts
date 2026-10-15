@@ -2,7 +2,8 @@
 // in yet when most of them are called, and a password never goes through an operation (decision 0017). What a
 // refusal means to the page is for the page to say; these throw the `ApiError` as the server sent it.
 import { z } from "zod";
-import { ApiError, exchange } from "./api.ts";
+import { ApiError, exchange, session } from "./api.ts";
+import { clearDevicePerson, deviceSession } from "./device.ts";
 import { type Assertion, CreationOptions, type Registration, RequestOptions } from "./passkey.ts";
 
 const Methods = z.object({ password: z.boolean(), passkey: z.boolean() });
@@ -105,8 +106,33 @@ export async function setPassword(input: { current: string | null; next: string 
 }
 
 /** Ends this browser's session on the server and clears its cookie. It answers the same whatever it ended. */
-export const signOut = async (): Promise<void> => {
-	await exchange("/api/logout", { body: {} });
+export const signOut = async ({ clear }: { clear: boolean }): Promise<void> => {
+	const owner = deviceSession();
+	const forget = (): void => {
+		if (!clear) return;
+		try {
+			clearDevicePerson(owner);
+		} catch {
+			window.alert(
+				"You are signed out, but this browser could not clear all your data. Clear this site's data in your browser settings before leaving a shared computer.",
+			);
+		}
+	};
+	try {
+		await exchange("/api/logout", { body: {} });
+	} catch (error) {
+		if (!clear) throw error;
+		try {
+			await session();
+		} catch (check) {
+			if (check instanceof ApiError && check.code === "unauthenticated") {
+				forget();
+				return;
+			}
+		}
+		throw error;
+	}
+	forget();
 };
 
 /** What to show for a failure that is not the server's refusal: the request did not get there, or no reply came back. */

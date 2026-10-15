@@ -13,6 +13,7 @@ export type AppContext = {
 	setStatus: (text: string | ((shown: string) => string)) => void;
 	openPalette: (options?: PaletteOptions) => void;
 	refreshSession: () => Promise<void>;
+	requestSignOut: () => void;
 	overlayOpen: boolean;
 };
 export const AppContext = createContext<AppContext | null>(null);

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { CaseBody, Step } from "../../core/model.ts";
 import { ProposeInput } from "../../core/ops.ts";
-import { deviceKey } from "./device.ts";
+import { deviceKey, deviceSession, sessionCurrent } from "./device.ts";
 import { draftOwnedElsewhere, draftOwner, randomId } from "./ids.ts";
 
 export const DraftBody = CaseBody.extend({
@@ -176,7 +176,7 @@ export function knownStepIds({
 			changed = true;
 		}
 	}
-	if (changed)
+	if (changed && sessionCurrent(deviceSession()))
 		try {
 			localStorage.setItem(key, JSON.stringify([...taken]));
 		} catch {}

@@ -50,6 +50,7 @@ test.skipIf(!browserAvailable)(
 
 			// Out, and in again with the passkey: no name is typed.
 			await page.getByRole("button", { name: "Sign out" }).click();
+			await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
 			await page.getByRole("button", { name: "Sign in with a passkey" }).click();
 			await page.locator("#app").waitFor();
 			expect(await page.locator(".sfoot .me").textContent()).toContain("sam");

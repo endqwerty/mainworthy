@@ -81,6 +81,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const notePrefix = deviceKey("run-note", `${project}:${runRef}:`, owner.person);
 	const [notes, setNotes] = useState<Record<string, string>>(() => readNotes(notePrefix));
 	const setNoteOf = (slotId: number, text: string): void => {
+		if (!sessionCurrent(owner)) return;
 		consumedNotes.current.delete(slotId);
 		storeNote(`${notePrefix}${slotId}`, text);
 		setNotes((previous) => {
@@ -122,7 +123,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 	const current = cursor === null ? (slots.find(missing) ?? slots[0]) : slots.find((slot) => slot.id === cursor);
 	const step = current ? (steps[current.id] ?? "") : "";
 	function setStep(value: string | ((previous: string) => string)): void {
-		if (!current) return;
+		if (!current || !sessionCurrent(owner)) return;
 		const next = typeof value === "function" ? value(step) : value;
 		consumedSteps.current.delete(current.id);
 		storeNote(`${stepPrefix}${current.id}`, next);
