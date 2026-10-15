@@ -185,8 +185,8 @@ export function caseView(
 		out.sourceSteps = body.steps;
 		out.hasFragments = body.steps.some((step) => Boolean(step.use));
 	}
-	out.fields = body.fields;
-	if (row.kind === "fragment") out.users = fragmentUsers(ctx.db, ctx.project.id, caseRef(row));
+	if (want.has("fields")) out.fields = body.fields;
+	if (want.has("users") && row.kind === "fragment") out.users = fragmentUsers(ctx.db, ctx.project.id, caseRef(row));
 	if (want.has("methods")) {
 		out.methods = body.methods;
 		out.automate = body.automate;

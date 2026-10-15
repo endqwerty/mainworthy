@@ -28,6 +28,15 @@ head through the existing witness, or none. A case changed before sealing or
 before acceptance refuses the batch. Unselected cases and old case versions
 retain their pins. The proposal records the fragment, both versions, selected
 cases, author and reason. Existing policy determines whether it needs review.
+Moving a pin changes the consumer's claim hash, even when both fragment versions
+have identical steps. Earlier results therefore stop counting as current proof
+of that consumer. The pin itself is part of the recorded claim.
+
+Archiving a fragment keeps its versions and existing pins readable. Its users
+can keep those pins while editing other content. This lets a team retire shared
+instructions without rewriting historical or current consumers. New references,
+including additional occurrences or moves to another version, require an active
+fragment. Validation checks this both when proposing and when adopting.
 
 The Suite editor can create a fragment, insert a pinned fragment by ref and
 version, and remove a reference. A fragment's detail lists current users and
@@ -36,6 +45,11 @@ omit fragments; explicitly selecting a fragment is refused. Run documents expand
 the case version pinned when the run started. The native app can read and run
 expanded steps. It directs edits of fragments and their consumers to the web
 editor so its text-only editor cannot flatten pins.
+
+Ordinary JSON reads continue to omit custom fields and fragment users. A caller
+can request `fields` or `users` through the `get` field selection. The usage panel
+requests `users` separately, so other fragment reads do not scan all consumers.
+An explicit creation kind must agree with the kind in its Markdown document.
 
 Schema 15 adds the case kind with a non-null default, so its archive version
 changes. Old archives must be exported by a build using this schema before they

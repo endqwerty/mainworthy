@@ -124,20 +124,23 @@ export function FragmentInsert({ draft, change }: { draft: Draft; change: DraftC
 
 export function FragmentUsers({ view }: { view: CaseView }) {
 	const { project, setStatus } = useApp();
-	const versions = [...new Set(view.users.flatMap((user) => user.versions))]
+	const read = useQueryOp({ project, op: "get", input: { refs: [view.ref], fields: ["users"] } });
+	const response = read.data?.find((item) => item.ref === view.ref);
+	const currentUsers = CaseView.shape.users.parse(response?.users);
+	const versions = [...new Set(currentUsers.flatMap((user) => user.versions))]
 		.filter((version) => version !== view.head)
 		.sort((a, b) => a - b);
 	const [from, setFrom] = useState(versions[0] ?? 0);
 	const [selected, setSelected] = useState<string[]>([]);
 	const [busy, setBusy] = useState(false);
-	const currentBasis = JSON.stringify([view.ref, view.head, view.users]);
+	const currentBasis = JSON.stringify([view.ref, view.head, currentUsers]);
 	const [basis, setBasis] = useState(currentBasis);
 	if (basis !== currentBasis) {
 		setBasis(currentBasis);
 		setFrom(versions[0] ?? 0);
 		setSelected([]);
 	}
-	const users = view.users.filter((user) => user.versions.includes(from));
+	const users = currentUsers.filter((user) => user.versions.includes(from));
 	async function update() {
 		setBusy(true);
 		try {
@@ -175,9 +178,13 @@ export function FragmentUsers({ view }: { view: CaseView }) {
 	return (
 		<section>
 			<h3>Fragment users</h3>
-			{view.users.length ? (
+			{read.error ? (
+				<p role="status">{read.error.message}</p>
+			) : !response ? (
+				<p role="status">Reading fragment users…</p>
+			) : currentUsers.length ? (
 				<ul>
-					{view.users.map((user) => (
+					{currentUsers.map((user) => (
 						<li key={user.case}>
 							{user.case} v{user.base} · fragment {user.versions.map((version) => `v${version}`).join(", ")}
 						</li>
