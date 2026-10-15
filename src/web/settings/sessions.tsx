@@ -5,6 +5,7 @@ import { browserName } from "../lib/browser.ts";
 import { endSession, listSessions, until } from "../lib/people.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink } from "../ui/index.tsx";
+import { InlineConfirmation } from "./inline-confirmation.tsx";
 import { saidBy, useList, withId } from "./list.ts";
 import "./people.css";
 
@@ -108,29 +109,19 @@ export function SessionList({ actor }: { actor?: string }) {
 						</small>
 						{confirming === row.id && <small>{actor} must sign in again in that browser.</small>}
 					</span>
-					{confirming === row.id ? (
-						<>
-							<button className="out" type="button" onClick={() => end(row)}>
-								End this session
-							</button>
-							<button type="button" className="dim" onClick={() => setConfirming(null)}>
-								Cancel
-							</button>
-						</>
-					) : (
-						<button
-							className="out"
-							type="button"
-							aria-disabled={ending.has(row.id)}
-							aria-label={`End the session of ${browserName(row.userAgent)}, opened ${age(row.createdAt)}${row.current ? ", this browser" : ""}`}
-							onClick={() => {
-								if (actor === undefined || actor === session.actor) end(row);
-								else if (!ending.has(row.id)) setConfirming(row.id);
-							}}
-						>
-							{ending.has(row.id) ? "Ending…" : "End"}
-						</button>
-					)}
+					<InlineConfirmation
+						open={confirming === row.id}
+						trigger={ending.has(row.id) ? "Ending…" : "End"}
+						triggerLabel={`End the session of ${browserName(row.userAgent)}, opened ${age(row.createdAt)}${row.current ? ", this browser" : ""}`}
+						confirm="End this session"
+						busy={ending.has(row.id)}
+						onOpen={() => {
+							if (actor === undefined || actor === session.actor) end(row);
+							else if (!ending.has(row.id)) setConfirming(row.id);
+						}}
+						onCancel={() => setConfirming(null)}
+						onConfirm={() => end(row)}
+					/>
 				</div>
 			))}
 			{sessions.data?.length === 0 && (

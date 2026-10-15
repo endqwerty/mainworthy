@@ -4,6 +4,7 @@ import type { CredentialRow } from "../../core/people.ts";
 import { listCredentials, removeCredential } from "../lib/people.ts";
 import { useApp } from "../ui/context.tsx";
 import { age } from "../ui/index.tsx";
+import { InlineConfirmation } from "./inline-confirmation.tsx";
 import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
 import { SessionList } from "./sessions.tsx";
 
@@ -71,30 +72,20 @@ export function PersonAccess({ actor }: { actor: string }) {
 							</small>
 						)}
 					</span>
-					{confirming === row.id ? (
-						<>
-							<button className="out" type="button" disabled={onlyOne} onClick={() => remove(row)}>
-								Remove this sign-in method
-							</button>
-							<button type="button" className="dim" onClick={() => setConfirming(null)}>
-								Cancel
-							</button>
-						</>
-					) : (
-						<button
-							className="out"
-							type="button"
-							disabled={onlyOne}
-							aria-disabled={removing.has(row.id)}
-							aria-label={`Remove ${row.kind === "password" ? "the password" : row.label}`}
-							onClick={() => {
-								if (actor === session.actor) remove(row);
-								else if (!removing.has(row.id)) setConfirming(row.id);
-							}}
-						>
-							{removing.has(row.id) ? "Removing…" : "Remove"}
-						</button>
-					)}
+					<InlineConfirmation
+						open={confirming === row.id}
+						trigger={removing.has(row.id) ? "Removing…" : "Remove"}
+						triggerLabel={`Remove ${row.kind === "password" ? "the password" : row.label}`}
+						confirm="Remove this sign-in method"
+						disabled={onlyOne}
+						busy={removing.has(row.id)}
+						onOpen={() => {
+							if (actor === session.actor) remove(row);
+							else if (!removing.has(row.id)) setConfirming(row.id);
+						}}
+						onCancel={() => setConfirming(null)}
+						onConfirm={() => remove(row)}
+					/>
 				</div>
 			))}
 			{rows?.length === 0 && (

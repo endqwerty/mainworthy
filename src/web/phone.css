@@ -281,3 +281,8 @@
 	min-width: 44px;
 	min-height: 44px;
 }
+:root[data-layout="phone"] .settings-confirm-cancel {
+	min-width: 44px;
+	min-height: 44px;
+	flex-shrink: 0;
+}
