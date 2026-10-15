@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { whyNotPassword } from "../../core/people.ts";
+import { PASSWORD_LENGTH, whyNotPassword } from "../../core/people.ts";
 import { refusalOf, requestReset, resetPassword, signInMethods, verifyEmail } from "../lib/signin.ts";
 import "./signin.css";
 
@@ -92,7 +92,10 @@ export function MailEntry({ onDone }: { onDone: () => Promise<void> }) {
 									onChange={(event) => setPassword(event.target.value)}
 									required
 								/>
-								<p className="dim">Use 12 to 256 characters. If you use an authenticator, it stays enrolled.</p>
+								<p className="dim">
+									Use {PASSWORD_LENGTH.min} to {PASSWORD_LENGTH.max} characters. If you use an authenticator, it stays
+									enrolled.
+								</p>
 							</>
 						) : (
 							<>
