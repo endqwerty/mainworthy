@@ -13,6 +13,8 @@ mainworthy.db  mainworthy.db-shm  mainworthy.db-wal  blobs/  server.lock  spool/
 
 While the server runs, it also keeps a `-wal` and a `-shm` file beside the database. The three belong together. After a clean stop the `-wal` file is empty.
 
+An upgrade runs each database migration in its own transaction. If any statement fails, startup stops and rolls back that migration without advancing the schema version. Earlier successful migrations remain applied. Before upgrading existing data, Mainworthy saves a consistent copy beside the database as `mainworthy.db.v<N>.bak`, where `<N>` is the version before the upgrade.
+
 On `SIGTERM` or `SIGINT`, the server stops accepting connections and closes its change streams. It gives requests already in flight five seconds to send their replies before closing the remaining connections, then stops the reader threads and closes the database. A request that outlasts this wait can lose its reply. If you retry a write, send the same command id, `cmd`, so it is not applied twice. The CLI and web UI send command ids.
 
 With reader threads enabled, a background thread checkpoints every half second, and the writer keeps a 20,000-page automatic checkpoint fallback. Once read snapshots finish and a checkpoint completes, the next write can reuse the log and trim it to at most 4 MiB. The retention limit does not change when checkpoints happen. Active snapshots and large transactions can grow the log past 4 MiB, so keep room for them as well as the database.

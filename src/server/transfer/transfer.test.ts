@@ -614,7 +614,7 @@ describe("Mainworthy instance archives", () => {
 			'{ "named": "雪", "fields": { "risk": { "kind": "choice", "label": "Risk", "required": true, "choices": ["low", "high"] } } }';
 		from.raw.query("UPDATE policies SET settings = ? WHERE project = 23").run(selectedSettings);
 		const expected = dump(from);
-		from.raw.exec(`
+		from.exec(`
 			INSERT INTO orgs VALUES (18, 'Unrelated organisation', 1);
 			INSERT INTO actors VALUES (80, 18, 'human', 'Unrelated person', NULL, 1, NULL);
 			INSERT INTO projects VALUES (24, 18, 'other', 'Unrelated project', 1, 1);
@@ -676,7 +676,7 @@ describe("Mainworthy instance archives", () => {
 
 	test("project identity includes signer-only actors and the people and organisations behind them", () => {
 		const from = source();
-		from.raw.exec(`
+		from.exec(`
 			INSERT INTO orgs VALUES (18, 'Delegated organisation', 1);
 			INSERT INTO actors VALUES (81, 18, 'human', 'Delegating person', NULL, 1, NULL);
 			INSERT INTO actors VALUES (82, 18, 'agent', 'Signer only', 81, 1, NULL);
@@ -879,7 +879,7 @@ describe("Mainworthy instance archives", () => {
 		const from = source();
 		const to = target();
 		for (const db of [from, to])
-			db.raw.exec(`
+			db.exec(`
 			ALTER TABLE cases ADD COLUMN extra_text TEXT;
 			CREATE TABLE "future 'table" ("odd column" INTEGER PRIMARY KEY, owner INTEGER REFERENCES cases(id), note TEXT) STRICT;
 		`);
@@ -893,7 +893,7 @@ describe("Mainworthy instance archives", () => {
 	test("an older archive fills added nullable columns with NULL, even with defaults", () => {
 		const from = source();
 		const to = target();
-		to.raw.exec(
+		to.exec(
 			"ALTER TABLE cases ADD COLUMN later_note TEXT DEFAULT 'new'; ALTER TABLE cases ADD COLUMN later_count INTEGER",
 		);
 		importArchive(to, linesOf(archive(from)));
@@ -933,7 +933,7 @@ describe("Mainworthy instance archives", () => {
 		const from = source();
 		const to = target();
 		for (const db of [from, to])
-			db.raw.exec(`
+			db.exec(`
 			CREATE TABLE future_notes (id INTEGER PRIMARY KEY, "__proto__" TEXT) STRICT;
 			CREATE TABLE "__proto__" (id INTEGER PRIMARY KEY, "constructor" TEXT) STRICT;
 		`);
