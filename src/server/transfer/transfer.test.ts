@@ -489,7 +489,15 @@ function tables(db: Db): string[] {
 function exportedTables(db: Db): string[] {
 	return tables(db).filter(
 		(name) =>
-			!["tokens", "sessions", "credentials", "invitations", "passkey_users", "change_ends"].includes(name) &&
+			![
+				"tokens",
+				"sessions",
+				"credentials",
+				"invitations",
+				"passkey_users",
+				"change_ends",
+				"tracker_requests",
+			].includes(name) &&
 			!name.startsWith("search_docs") &&
 			!name.startsWith("sqlite_"),
 	);
@@ -867,6 +875,7 @@ describe("Mainworthy instance archives", () => {
 			"passkey_users",
 			"sessions",
 			"tokens",
+			"tracker_requests",
 		]);
 		// The list is the order they are emptied in: a table comes before every table it refers to.
 		const late: string[] = [];
