@@ -723,8 +723,8 @@ the ones that are still captures.
 
 Left: a page that closes before the answer sends nothing; the draft waits for the next page. A save sent again
 on `none` records the text it carried, which the person may have changed since; the later text is the next
-version. "Take over here" still drops the former owner's request: if that request was recorded, or lands later,
-the new owner's save meets it.
+version. Since issue #217, "Take over here" also keeps and reconciles the former owner's request, so a
+create still on its way cannot make a second case.
 
 ## Issue #79: one window, and the fixes of round 8 that no test held (review round 9)
 
@@ -755,7 +755,7 @@ reason given as the server's (`refusedStatus`).
 | R9-4: a merge of a proposal that also places a tag | `conflict-merge.test.ts`, new | The page's sentence with the server's reason; the card and the draft stay; nothing recorded |
 | R9-4: the sentence | `test/merges.test.ts` | With and without a reason |
 | Only the owner settles a conflict | `merged-drafts.test.ts`, both R8-3 tests | The other window sends no `command` while the owner's reply is held |
-| `writeDraft`, `removeDraft` and `claimDraft` (`sent` dropped on "Take over here", kept for a closed owner) | `test/drafts.test.ts`, new | Each rule on a stored draft |
+| `writeDraft`, `removeDraft` and `claimDraft` (`sent` kept on "Take over here" and for a closed owner) | `test/drafts.test.ts`, new | Each rule on a stored draft |
 
 The first three failed on `af6b61f` (waiting for the rejection's status; for the merged title in the second
 window; for the page's sentence). The others were each taken out of a copy of `593f1eb`, one at a time, and the
@@ -767,7 +767,7 @@ was taken out again on this change, to see the new assertion fail. Against the r
 | The non-owner's settle effect stops at once (`ownedElsewhere`) | every file passed; with the new assertion, both R8-3 tests fail: the other window sent 417 and 315 `command` requests in 1.5 s | the R8-3 assertion |
 | The card's sent merges stored before the request (`sentMerges`, once `sentMerge`) | 11 fail across `conflict-merge`, `merged-drafts` and `round7` | those, since #81 |
 | A hand-typed merge counted as later text: in `draftAfterMerge` / `allRecorded` / on a rejection | 4 / 1 unit tests fail / 7 browser tests fail | those, since #81 |
-| `sent` kept on "Take over here" | `round3-capture` A-2 fails | that test, and `test/drafts.test.ts` |
+| `sent` kept on "Take over here" (the rule at this review was corrected by issue #217) | `round3-capture` A-2 failed at this review | `test/drafts.test.ts` and the issue #217 browser regressions now require keeping it |
 | `writeDraft` and `removeDraft` refuse another window's draft | every browser file passes | `test/drafts.test.ts` only |
 
 No route of the app reaches the checks in `writeDraft` and `removeDraft` alone: every caller asks `mayWrite`
@@ -933,3 +933,17 @@ What no browser test holds:
   person's name, the lengths a new password may have (`passwordrules`) and, on the token, `data-1p-ignore`;
   nothing checks that a manager reads them. The mark 1Password leaves on a field it filled
   (`data-com-onepassword-filled`) is put there by the test, not by 1Password: no test runs the extension.
+
+## Issue #217: taking over while the first save is on its way
+
+`claimDraft` keeps the remembered save when another window takes over. The new owner uses the ordinary
+save's reconciliation and replay rules. `draft-ownership.test.ts`, "takeover reconciles a new case's first
+save", holds the original reply or request through the takeover, including a lost first `command` reply.
+After the new owner leaves and the original request returns, there is one case: the first phrase at version
+1 and the later text at version 2. Replays retain the original command id and edits. The lost-answer route
+also checks that the request stays in device storage and no replacement proposal is sent before retrying.
+
+The existing late-conflict test holds the new owner's `command` reply while it types, then checks that the
+former owner's reply changes neither the stored draft nor its text. Releasing reconciliation builds the
+conflict from that text. `round3-capture.test.ts`, "A-2 taking over reconciles the pending edit", now requires
+version 3 with the new window's text and version 2 with the first window's, without a conflict with itself.

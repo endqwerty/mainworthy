@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import type { Page } from "playwright-core";
 import { z } from "zod";
-import { browserAvailable, eventually, openPage, startServer } from "./support.ts";
+import { browserAvailable, eventually, fetched, openPage, startServer } from "./support.ts";
 
 const check = test.skipIf(!browserAvailable);
 const title = (page: Page) => page.getByRole("textbox", { name: "Case title", exact: true });
@@ -373,8 +373,16 @@ check(
 		const held = new Promise<void>((done) => {
 			release = done;
 		});
+		let reconcile = () => {};
+		const reconciliation = new Promise<void>((done) => {
+			reconcile = done;
+		});
 		try {
 			const { a, b, server } = w;
+			await b.route("**/command", async (route) => {
+				await reconciliation;
+				await route.continue();
+			});
 			await a.keyboard.press("e");
 			await title(a).fill("Coupon case mine");
 			await server.api("propose", {
@@ -397,7 +405,7 @@ check(
 			await refused(a);
 			expect(await stored(b)).toEqual(before);
 			expect(await step(b).inputValue()).toBe("Apply the coupon accepted in B");
-			await b.keyboard.press("Escape");
+			reconcile();
 			await card(b).waitFor();
 			expect(await step(b).inputValue()).toBe("Apply the coupon accepted in B");
 			await b.getByRole("button", { name: "Use all my changes", exact: true }).click();
@@ -406,6 +414,7 @@ check(
 			expect(JSON.stringify(await server.api("get", { refs: ["C-1"] }))).toContain("accepted in B");
 		} finally {
 			release();
+			reconcile();
 			await w.close();
 		}
 	},
@@ -533,3 +542,99 @@ check(
 	},
 	30000,
 );
+
+for (const fate of ["recorded", "in flight", "lost reconciliation reply"]) {
+	check(
+		`takeover reconciles a new case's first save: ${fate}`,
+		async () => {
+			const server = await startServer();
+			const h = await openPage(server, { path: "/p/scratch/suite" });
+			let release = () => {};
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			try {
+				const a = h.page;
+				a.setDefaultTimeout(5000);
+				await a.locator("#list").waitFor();
+				const requests: { cmd: string; edits: unknown[] }[] = [];
+				let originalReady = false;
+				let originalReturned = false;
+				await a.route("**/propose", async (route) => {
+					requests.push(
+						z.object({ cmd: z.string(), edits: z.array(z.unknown()) }).parse(route.request().postDataJSON()),
+					);
+					const recorded = fate === "recorded" ? await fetched(route) : null;
+					originalReady = true;
+					await held;
+					const response = recorded ?? (await fetched(route));
+					if (response) await route.fulfill({ response: response.response });
+					else await route.abort();
+					originalReturned = true;
+				});
+				await a.keyboard.press("c");
+				await title(a).fill("First phrase");
+				await a.keyboard.press("Escape");
+				await eventually(async () => originalReady, Boolean);
+				await title(a).fill("First phrase with the rest");
+
+				const b = await h.context.newPage();
+				b.setDefaultTimeout(5000);
+				let asked = 0;
+				await b.route("**/command", async (route) => {
+					asked++;
+					if (fate === "lost reconciliation reply" && asked === 1) {
+						await route.fetch();
+						await route.abort("failed");
+					} else await route.continue();
+				});
+				await b.route("**/propose", async (route) => {
+					requests.push(
+						z.object({ cmd: z.string(), edits: z.array(z.unknown()) }).parse(route.request().postDataJSON()),
+					);
+					await route.continue();
+				});
+				await b.goto(`${server.url}/p/scratch/suite`);
+				await takeover(b);
+				if (fate === "lost reconciliation reply") {
+					await b.locator("#stat").filter({ hasText: "Your draft is kept on this device" }).waitFor();
+					expect(requests).toHaveLength(1);
+					const remembered = await b.evaluate(() => {
+						const key = Object.keys(localStorage).find((key) => key.includes(":draft:"));
+						return key ? JSON.parse(localStorage.getItem(key) ?? "null") : null;
+					});
+					expect(
+						z.object({ sent: z.object({ input: z.object({ cmd: z.string() }) }) }).parse(remembered).sent.input.cmd,
+					).toBe(requests[0]?.cmd ?? "");
+				}
+				await title(b).click();
+				await b.keyboard.press("Escape");
+				await eventually(
+					() => server.api("get", { refs: ["C-1"] }).catch(() => []),
+					(rows) => rows[0]?.title === "First phrase with the rest",
+				);
+				release();
+				await eventually(async () => originalReturned, Boolean);
+				expect((await server.api("find", { in: "cases" })).items).toHaveLength(1);
+				expect((await server.api("get", { refs: ["C-1"] }))[0]).toMatchObject({
+					title: "First phrase with the rest",
+					version: 2,
+				});
+				expect((await server.api("get", { refs: ["C-1"], version: 1 }))[0]?.title).toBe("First phrase");
+				expect((await server.api("inbox", { kind: "adopt" })).items).toHaveLength(0);
+				expect(asked).toBe(fate === "lost reconciliation reply" ? 2 : 1);
+				expect(requests).toHaveLength(fate === "recorded" ? 2 : 3);
+				for (const replay of requests.filter((request) => request.cmd === requests[0]?.cmd))
+					expect(replay.edits).toEqual(requests[0]?.edits ?? []);
+				if (fate !== "recorded") expect(requests[1]).toEqual(requests[0]);
+				expect(requests.at(-1)?.cmd).not.toBe(requests[0]?.cmd ?? "");
+				expect(await title(b).inputValue()).toBe("First phrase with the rest");
+			} finally {
+				release();
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}

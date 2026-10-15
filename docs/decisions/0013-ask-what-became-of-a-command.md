@@ -90,6 +90,13 @@ on the server refusing a repeated id whose request differs; that rule stays as t
 
 - A save sent again on `none` records the text it carried, which the person may have changed since. What they
   typed later is the next version, so the history shows both.
-- "Take over here" drops the former owner's request instead of asking about it (the same person sent it). A new
-  owner whose former owner's last save was recorded meanwhile, or lands later, meets it as a conflict with
-  their own version; for a new case's first save, that can make a second case.
+
+## Taking over keeps the last save (issue #217)
+
+"Take over here" keeps the former window's remembered request, including its command id and exact input.
+The new window uses the same recovery path as a reload: ask `command`, replay the unchanged request on
+`none`, and carry later text onto the version that request made. A lost answer leaves the request in the
+draft for the next attempt. The draft gets a new command id for future edits, as before.
+
+Clearing the request on takeover let an in-flight create and the new window's save make two cases.
+Handling recovery separately in the takeover action would duplicate the ordinary save's rules.

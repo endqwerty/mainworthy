@@ -86,6 +86,9 @@ A draft belongs to the window that is editing it. Another window that opens the 
 read-only, with "This case is being edited in another window" and "Take over here".
 Choose "Take over here" to move the draft to the window you are in. It opens there with its text,
 and with its conflict card when it has one. The first window becomes read-only.
+If its last save has not been confirmed, the new window asks the server what became of it.
+A save still on its way is retried unchanged and recorded once. Later text becomes the next version
+when you leave the editor. If the answer is lost, the draft keeps that save and asks again when you leave.
 
 Moving to a case from another case never takes its draft by itself. Opening the app straight on a case, as a link or a reload does, continues a draft whose window is not answering, as it always has. When the window that holds a draft does not
 answer, because it closed, crashed or is busy, another window that shows the draft says "This draft is held by
