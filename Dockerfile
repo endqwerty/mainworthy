@@ -14,9 +14,10 @@ COPY skill ./skill
 COPY docs/guide ./docs/guide
 COPY docs/diagrams ./docs/diagrams
 COPY docs/ui/screenshots ./docs/ui/screenshots
-# The licence files, which /docs serves too.
+# The licence files, which /docs serves too, and Archify's, which each diagram page carries.
 COPY LICENSE NOTICE THIRD-PARTY-NOTICES.md ./
-RUN NODE_ENV=production bun build --compile --minify --sourcemap src/cli/main.ts src/server/read-worker.ts --outfile /out/mainworthy
+COPY licences/archify ./licences/archify
+RUN NODE_ENV=production bun build --compile --minify --sourcemap --banner '/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */' src/cli/main.ts src/server/read-worker.ts --outfile /out/mainworthy
 
 FROM debian:bookworm-slim
 RUN useradd --system --uid 10001 --home-dir /data mainworthy && mkdir -p /data && chown mainworthy:mainworthy /data

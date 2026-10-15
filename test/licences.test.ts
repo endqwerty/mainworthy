@@ -38,7 +38,8 @@ describe("Mainworthy's licence", () => {
 		const name = HOLDER.replace("Copyright 2026 ", "");
 		// Every file of the tree, not only those git tracks: a checkout and an export are read alike. What others
 		// wrote (installed packages, licences/) can name anyone.
-		const skip = new Set([".git", "node_modules", "licences", ".mainworthy", "test-results"]);
+		// `dist` is the build's output, which carries NOTICE inside the executable (the verifier's finding of 2026-10-14).
+		const skip = new Set([".git", "node_modules", "licences", ".mainworthy", "test-results", "dist"]);
 		const files = (dir: string): string[] =>
 			readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
 				const path = dir === "." ? entry.name : join(dir, entry.name);

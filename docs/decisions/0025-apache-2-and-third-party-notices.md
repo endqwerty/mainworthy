@@ -40,7 +40,8 @@ code from others: only its own and Apple's frameworks.
 **What a browser is given carries its notices or points at them.** Serving the web UI gives each visitor a copy of
 the npm packages in its bundle, and MIT, ISC and BSD ask that their notice goes with every copy. Bun's bundler
 drops the licence comments of what it minifies (the bundle of 2026-10-14 held none), so, as is usual for a
-minified web app, the notices are a page beside it: the app's page names it with
+minified web app, the notices are a page beside it. The bundle opens with a comment that names it (the build's
+`--banner`, so a copy of the file alone still says where its notices are), the app's page names it with
 `<link rel="license" href="/docs/licence">`, the app links the docs on every screen, and every page of the docs
 links "Licence" at its foot. A diagram page is a copy of Archify's viewer, which is MIT: archify writes the
 font's licence into the page and not its own, so the instance adds Archify's notice, word for word, in a comment

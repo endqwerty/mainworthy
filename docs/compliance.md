@@ -123,7 +123,8 @@ outcome); the audit and the fixes it finds are tracked in #47.
 Mainworthy is under the Apache License 2.0, copyright held by the owner (decision 0025). What it ships from others,
 with the full text of each licence, is in `THIRD-PARTY-NOTICES.md`, which `bun scripts/licences.ts` writes from the
 build. Every instance serves it at `/docs/licence/THIRD-PARTY-NOTICES.md`, and the container image has it in
-`/usr/share/doc/mainworthy/`. The web UI's page names it (`<link rel="license">`), every page of the docs links
+`/usr/share/doc/mainworthy/`. The web UI's script opens with a comment that names it, its page does too
+(`<link rel="license">`), every page of the docs links
 it at its foot, each diagram page carries Archify's notice, and the iPhone app links it under **You**, **About**. `test/licences.test.ts` fails on a dependency under a licence nobody has accepted.
 
 | Ships in | What | Licences |

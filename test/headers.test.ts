@@ -775,7 +775,10 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			.parse(await Bun.file(new URL("../package.json", import.meta.url)).json());
 		const directory = scratch();
 		const executable = join(directory, "mainworthy");
-		const words = manifest.scripts.build.replace("dist/mainworthy", executable).split(" ");
+		// Split as the shell does: a quoted word (the banner) is one word, without its quotes.
+		const words = [...manifest.scripts.build.replace("dist/mainworthy", executable).matchAll(/'([^']*)'|(\S+)/g)].map(
+			(word) => word[1] ?? word[2] ?? "",
+		);
 		// `NODE_ENV=production bun build ...`: the assignments the script makes, then the command.
 		const assigned = words.filter((word) => /^[A-Z_]+=/.test(word));
 		const [, ...build] = words.slice(assigned.length);
@@ -852,6 +855,9 @@ describe("the executable, built the way `bun run build` builds it", () => {
 					// development bundle whatever else it was told (the JSX runtime's `jsxDEV` at every element, 882 KB),
 					// and nothing said so.
 					expect(body.includes("jsxDEV"), "the web script is a development build").toBe(false);
+					// The minifier drops the licence comments of the packages in it: the file names where they are.
+					expect(body.startsWith("/*! Mainworthy, Apache-2.0."), "the web script names its licences").toBe(true);
+					expect(body.slice(0, 200)).toContain("/docs/licence */");
 					expect(new TextEncoder().encode(body).byteLength, "the web script outgrew its budget").toBeLessThan(700_000);
 				}
 				const again = await fetch(`${url}${file}`, { headers: { "if-none-match": asset.headers.get("etag") ?? "" } });
