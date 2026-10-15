@@ -44,7 +44,6 @@ const SECTIONS = [
 			{ slug: "glossary", title: "Glossary" },
 			{ slug: "troubleshooting", title: "Troubleshooting" },
 			{ slug: "architecture", title: "How it is built" },
-			{ slug: "licence", title: "Licence" },
 		],
 	},
 ] as const;
@@ -82,13 +81,3 @@ export const SCREEN_DOCS = {
 	changes: "changes",
 	settings: "customize",
 } as const satisfies Record<string, DocSlug>;
-
-/**
- * The licence files at the root of the repository, which the site serves as they are: Mainworthy's licence, its
- * copyright notice, and the licences of what it bundles from others. A page links one as `../../NAME`, which is
- * the file on GitHub too.
- */
-export const LICENCE_FILES = ["LICENSE", "NOTICE", "THIRD-PARTY-NOTICES.md"] as const;
-export type LicenceFile = (typeof LICENCE_FILES)[number];
-
-export const licenceFileUrl = (name: LicenceFile): string => `${DOCS_ROOT}/licence/${name}`;

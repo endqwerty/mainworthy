@@ -2,15 +2,7 @@
 // nothing else. It is not given the instance, so it cannot show a project's name, a person or a setting: the
 // same pages for every instance of a version, which is why they need no session (`serve` in `../http.ts`).
 import { z } from "zod";
-import {
-	DOC_PAGES,
-	DOCS_ROOT,
-	type DocPage,
-	docUrl,
-	isDocSlug,
-	LICENCE_FILES,
-	licenceFileUrl,
-} from "../../core/docs.ts";
+import { DOC_PAGES, DOCS_ROOT, type DocPage, docUrl, isDocSlug } from "../../core/docs.ts";
 import { type Article, escapeHtml, renderArticle, renderDocument } from "./render.ts";
 
 /**
@@ -125,7 +117,7 @@ export type Site = {
  * starts: they are several megabytes, and most starts (every server a test makes) are never asked for a page.
  */
 export async function buildSite(version: string): Promise<Site> {
-	const { DIAGRAMS, ICON, LICENCES, PAGES, SCREENSHOTS, SCRIPT, SKILL, STYLES } = await import("./content.ts");
+	const { DIAGRAMS, ICON, PAGES, SCREENSHOTS, SCRIPT, SKILL, STYLES } = await import("./content.ts");
 	const articles = new Map(DOC_PAGES.map((page) => [page, renderArticle(PAGES[page.slug])] as const));
 	const entries = new Map<string, Entry>();
 	const search: SearchEntry[] = [];
@@ -164,11 +156,6 @@ export async function buildSite(version: string): Promise<Site> {
 		Object.fromEntries(Object.entries(SKILL).map(([path, text]) => [`mainworthy/${path}`, text])),
 		{ compress: "gzip" },
 	);
-	for (const name of LICENCE_FILES)
-		entries.set(
-			licenceFileUrl(name),
-			entry({ body: LICENCES[name], type: "text/plain; charset=utf-8", policy: ASSET_POLICY }),
-		);
 	entries.set(SKILL_URL, entry({ body: await skill.bytes(), type: GZIP, policy: ASSET_POLICY }));
 	entries.set(
 		`${DOCS_ROOT}/search.json`,

@@ -18,8 +18,8 @@ in the work, and it says outright that a contribution comes in under the same li
 text and a NOTICE file that whoever passes Mainworthy on must keep.
 
 **The copyright holder is the owner, by their legal name.** It is written in `NOTICE`, in the
-iPhone app's `Info.plist` (`NSHumanReadableCopyright`, which the app shows under You, About) and in the tests
-that check those lines (`test/licences.test.ts`, the app's UI test); every other page links to `NOTICE`, and a
+iPhone app's `Info.plist` (`NSHumanReadableCopyright`, which the system reads and the App Store listing copies)
+and in the test that checks those lines (`test/licences.test.ts`); every other page links to `NOTICE`, and that
 test lists the files that hold the name. This is the one exception to the rule that the owner's name is not written in the repository, at the
 owner's request on 2026-10-14. Everywhere else the rule stands.
 
@@ -33,9 +33,14 @@ three sources:
 | The Bun runtime | `bun build --compile` puts the whole runtime into the executable, with every library Bun links. The list was made from Bun's source at the release tag (`licences/README.md`). | The executable |
 | Archify and JetBrains Mono | Each diagram page embeds Archify's viewer and the font. | The diagrams at `/docs` |
 
-An instance serves `LICENSE`, `NOTICE` and the notices at `/docs/licence/`, the page "Licence" of the guide says
-what they mean, and the container image has them in `/usr/share/doc/mainworthy/`. The iPhone app contains no
-code from others: only its own and Apple's frameworks.
+The three files are at the root of the repository, for GitHub and for anyone who takes the code, and the
+container image has them in `/usr/share/doc/mainworthy/`. The iPhone app contains no code from others: only its
+own and Apple's frameworks.
+
+**The apps do not show the licence yet.** The owner decided on 2026-10-14 that licensing stays out of the user
+interfaces for now, like hosting an instance on another server: no page in the guide, no route on the instance
+and no rows in the iPhone app's About section. Showing them, and what distribution needs (below), are kept in
+[#234](https://github.com/endqwerty/mainworthy/issues/234).
 
 **A licence is accepted once, by name.** `LICENCES` in `scripts/licences.ts` lists each licence a shipped
 component may have, with what it asks of us. A dependency under any other licence fails `test/licences.test.ts`
@@ -69,8 +74,12 @@ and the notices to the same version, so upgrading Bun means reading its librarie
 ## Consequences
 
 - Giving anyone else the executable or the image needs a decision first: how the source of the LGPL and MPL
-  parts is offered, and whether the items the audit left open are acceptable (`docs/compliance.md`, gap 4).
-  Running it for others on the owner's server, and publishing the source, need none.
+  parts is offered, and whether the items the audit left open are acceptable (`docs/compliance.md`, gap 4;
+  [#234](https://github.com/endqwerty/mainworthy/issues/234)). Running it for others on the owner's server, and
+  publishing the source, need none.
+- The web UI sends some of the npm packages (React, TanStack, Zod among them) to every browser that opens it, and
+  the minified bundle does not carry their notices. Until #234 puts them in the apps, the notices are in the
+  repository and the image only.
 - The notices are about 1.4 MB, and `licences/` about 2.6 MB: the price of keeping every text as published.
 - A Bun upgrade fails `test/licences.test.ts` until `licences/` is brought up to the new release.
 - The App Store listing uses Apple's standard licence agreement and the copyright line of `Info.plist`
