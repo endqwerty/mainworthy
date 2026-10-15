@@ -322,7 +322,11 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 				people={people.map((person) => person.name)}
 				changed={async (forgotten) => {
 					setCreated((links) => links.filter((link) => link.name !== forgotten));
-					await Promise.all([invitations.refetch(), actors.refetch()]);
+					const [, refreshed] = await Promise.all([invitations.refetch(), actors.refetch()]);
+					const list = Actor.array().safeParse(refreshed.data);
+					return refreshed.isSuccess && list.success
+						? list.data.some((person) => person.name === forgotten && person.kind === "human" && !person.disabled)
+						: null;
 				}}
 			/>
 		</>

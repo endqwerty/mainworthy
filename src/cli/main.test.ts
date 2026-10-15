@@ -37,6 +37,10 @@ test("actor forget requires a named confirmation, removes access, and preserves 
 				tokensRevoked: 1,
 			});
 			expect((await run(["actor", "list"], { env: { MAINWORTHY_TOKEN: made.token } })).code).toBe(4);
+			await client.call("admin", { do: "token.create", actor: "forget-one-token", kind: "human" });
+			const singular = await run(["actor", "forget", "forget-one-token", "--confirm", "forget-one-token"]);
+			expect(singular.code).toBe(0);
+			expect(singular.stdout).toBe("Forgotten as forgotten-4. 1 token revoked. History and typed text stay.\n");
 			const self = await run(["actor", "forget", "robin", "--confirm", "robin"]);
 			expect(self.stderr).toContain("you cannot forget yourself");
 			const admin = Token.parse(
