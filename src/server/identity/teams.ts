@@ -4,6 +4,8 @@ import type { App } from "../kernel/app.ts";
 import { type Actor, allProjects } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
+import { hasAdminGrant } from "./identity.ts";
+import { endPasswordSessions } from "./sessions.ts";
 
 type Team = { id: number; name: string; created_at: number };
 type Grant = { project: number; can: string };
@@ -33,9 +35,9 @@ const Q = {
 	sources: sql<{ actor: number }, Team>(
 		"SELECT t.* FROM teams t JOIN team_members m ON m.team = t.id WHERE m.actor = $actor ORDER BY t.name",
 	),
-	effective: sql<{ actor: number; project: number }, Grant>(
+	effective: sql<{ actor: number; project: number | null }, Grant>(
 		`SELECT g.project, g.can FROM team_grants g JOIN team_members m ON m.team = g.team
-		 WHERE m.actor = $actor AND (g.project = 0 OR g.project = $project)`,
+		 WHERE m.actor = $actor AND ($project IS NULL OR g.project = 0 OR g.project = $project)`,
 	),
 	event: sql<{
 		team: number;
@@ -67,7 +69,7 @@ const Q = {
 	),
 };
 
-export function teamCapabilities(db: Db, actor: number, project: number): Capability[] {
+export function teamCapabilities(db: Db, actor: number, project: number | null): Capability[] {
 	return db.all(Q.effective, { actor, project }).flatMap((grant) => json<Capability[]>(grant.can));
 }
 
@@ -131,6 +133,7 @@ export function manageTeams(app: App, by: Actor, org: number, input: TeamInput) 
 	let can: string | null = null;
 	let changed = false;
 	let action: Action;
+	const adminsBefore = new Map<number, boolean>();
 	switch (input.do) {
 		case "team.member.add":
 		case "team.member.remove": {
@@ -142,6 +145,7 @@ export function manageTeams(app: App, by: Actor, org: number, input: TeamInput) 
 			if (found.kind !== "human") throw invalid("only a person can join a team");
 			person = found.id;
 			action = input.do === "team.member.add" ? "member.add" : "member.remove";
+			if (app.config.requireAdminMfa && action === "member.add") adminsBefore.set(person, hasAdminGrant(db, person));
 			changed = db.run(action === "member.add" ? Q.add : Q.remove, { team: team.id, actor: person }).changes > 0;
 			break;
 		}
@@ -159,7 +163,12 @@ export function manageTeams(app: App, by: Actor, org: number, input: TeamInput) 
 				can = JSON.stringify([...new Set(input.can)].sort());
 				const previous = db.all(Q.grants, { team: team.id }).find((grant) => grant.project === project);
 				changed = previous?.can !== can;
-				if (changed) db.run(Q.grant, { team: team.id, project, can });
+				if (changed) {
+					if (app.config.requireAdminMfa)
+						for (const member of db.all(Q.members, { team: team.id }))
+							adminsBefore.set(member.id, hasAdminGrant(db, member.id));
+					db.run(Q.grant, { team: team.id, project, can });
+				}
 			}
 			break;
 		}
@@ -168,6 +177,8 @@ export function manageTeams(app: App, by: Actor, org: number, input: TeamInput) 
 			throw invalid(`unknown team action ${JSON.stringify(_exhaustive)}`);
 		}
 	}
+	for (const [actor, wasAdmin] of adminsBefore)
+		if (changed && !wasAdmin && hasAdminGrant(db, actor)) endPasswordSessions(db, actor, app.now());
 	if (changed) db.run(Q.event, { team: team.id, by: by.id, at: app.now(), action, person, project, can });
 	return { team: name, changed };
 }

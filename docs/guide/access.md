@@ -191,9 +191,13 @@ In Settings, open **Your sign-in**, then choose **Add an authenticator**.
 
 Your other sessions end when you confirm. Your current session stays signed in. The next password sign-in shows **One more step**. Enter a fresh authenticator code or an unused recovery code. The password alone opens no session. A passkey with user verification needs no extra code.
 
-Authenticator codes change every 30 seconds. Mainworthy allows the previous and next 30-second step for clock differences and refuses a code already used. Wait for a new code if you just confirmed enrolment. Wrong codes count toward the same failed-attempt limit as other sign-ins. Re-entering the right password does not clear failed-code attempts.
+If you choose a passkey during **One more step** and cancel, restart password sign-in before entering a code.
 
-The credential list identifies your authenticator without showing its setup key or recovery codes. **Remove** removes it and ends all your sessions. To replace lost recovery codes, remove the authenticator and enrol again from a session you can still open. Otherwise, ask the owner for a recovery invitation. An instance that requires a second factor for admins keeps an admin's authenticator while that person still has a password. An admin recovery invitation on such an instance must be accepted with a passkey.
+Authenticator codes change every 30 seconds. Mainworthy allows the previous and next 30-second step for clock differences and refuses a code already used. Wait for a new code if you just confirmed enrolment. Wrong sign-in codes count against your account and the request address. Re-entering the right password does not clear failed-code attempts. Enrolment has a separate failed-code count, so setup typos do not block sign-in codes.
+
+The credential list identifies your authenticator without showing its setup key or recovery codes. **Remove** removes it and ends all your sessions. Removing your own authenticator uses your signed-in session and does not ask for a fresh code. To replace lost recovery codes, remove the authenticator and enrol again from a session you can still open. Otherwise, ask the owner for a recovery invitation.
+
+An instance that requires a second factor for admins keeps an admin's authenticator while that person still has a password. The requirement covers personal and team grants on any project. An admin recovery invitation on such an instance must be accepted with a passkey. An admin password without an authenticator does not count as a working sign-in method. Add another passkey or enrol an authenticator before removing the last usable passkey.
 
 The [configuration](./configuration.md#require-a-second-factor-for-admins) page describes the admin requirement. The [command line](./cli.md#sign-in-with-a-password-and-a-code) also supports the second step. The current iPhone build explains when a second step is required and asks you to use the web app.
 

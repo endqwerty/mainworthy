@@ -297,6 +297,173 @@ test("TOTP admin policy ends existing password sessions on startup and promotion
 	expect(await w.status({ cookie: verified.cookie })).toBe(200);
 });
 
+for (const project of [undefined, "other"]) {
+	for (const path of ["personal grant", "team grant", "team membership"]) {
+		test(`TOTP review: ${path} promotion on ${project ?? "every project"} ends password sessions`, async () => {
+			const w = world();
+			await w.ok("admin", { do: "project.create", key: "other" });
+			const cookie = await joined(w, "promoted", FIRST);
+			const ordinary = await joined(w, "ordinary", FIRST);
+			await w.ok("admin", { do: "team.create", name: "Admins" });
+			if (path === "team grant") await w.ok("admin", { do: "team.member.add", team: "Admins", person: "promoted" });
+			if (path === "team membership")
+				await w.ok("admin", { do: "team.grant.set", team: "Admins", project, can: ["admin"] });
+			w.instance.app.config.requireAdminMfa = true;
+			if (path === "personal grant")
+				await w.ok("admin", { do: "grant.set", actor: "promoted", project, can: ["admin"] });
+			else if (path === "team grant")
+				await w.ok("admin", { do: "team.grant.set", team: "Admins", project, can: ["admin"] });
+			else await w.ok("admin", { do: "team.member.add", team: "Admins", person: "promoted" });
+			expect(await w.status({ cookie })).toBe(401);
+			expect((await signIn(w, "promoted", FIRST)).status).toBe(403);
+			expect(await w.status({ cookie: ordinary })).toBe(200);
+			expect((await signIn(w, "ordinary", FIRST)).status).toBe(200);
+		});
+	}
+
+	test(`TOTP review: team admin on ${project ?? "every project"} is covered by startup and password refusal`, async () => {
+		const w = world();
+		await w.ok("admin", { do: "project.create", key: "other" });
+		const cookie = await joined(w, "team-startup", FIRST);
+		await w.ok("admin", { do: "team.create", name: "Admins" });
+		await w.ok("admin", { do: "team.grant.set", team: "Admins", project, can: ["admin"] });
+		await w.ok("admin", { do: "team.member.add", team: "Admins", person: "team-startup" });
+		w.instance.app.config.requireAdminMfa = true;
+		expect((await signIn(w, "team-startup", FIRST)).status).toBe(403);
+		await w.instance.app.gate.run(() => bootstrap(w.instance.app));
+		expect(await w.status({ cookie })).toBe(401);
+	});
+
+	test(`TOTP review: team admin on ${project ?? "every project"} needs a passkey invitation and keeps TOTP`, async () => {
+		const w = world();
+		await w.ok("admin", { do: "project.create", key: "other" });
+		await joined(w, "team-recover", FIRST);
+		await w.ok("admin", { do: "team.create", name: "Admins" });
+		await w.ok("admin", { do: "team.grant.set", team: "Admins", project, can: ["admin"] });
+		await w.ok("admin", { do: "team.member.add", team: "Admins", person: "team-recover" });
+		const invitation = await invite(w, { name: "team-recover", can: [] });
+		w.instance.app.config.requireAdminMfa = true;
+		expect((await w.post("/api/login", { invitation: invitation.code, password: FIRST })).status).toBe(403);
+		const options = must(
+			await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: invitation.code }),
+		);
+		const accepted = await w.post("/api/login", {
+			invitation: invitation.code,
+			password: FIRST,
+			passkey: authenticator().register(options.passkey),
+		});
+		expect(accepted.status).toBe(200);
+		const enrolled = await enrol(w, accepted.cookie);
+		expect((await w.op("credential", { do: "remove", id: enrolled.id }, { cookie: accepted.cookie })).status).toBe(403);
+		const step = await secondStep(w, "team-recover");
+		expect(
+			(await w.post("/api/login", { challenge: step.challenge, code: appCode(enrolled.secret, w.clock.now()) }, step))
+				.status,
+		).toBe(200);
+	});
+}
+
+test("TOTP review: an admin keeps the last usable passkey when their password is refused", async () => {
+	const w = world();
+	w.instance.app.config.requireAdminMfa = true;
+	const invitation = await invite(w, { name: "last-passkey", can: ["admin"] });
+	const device = authenticator();
+	const options = must(
+		await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: invitation.code }),
+	);
+	const accepted = await w.post("/api/login", {
+		invitation: invitation.code,
+		password: FIRST,
+		passkey: device.register(options.passkey),
+	});
+	expect(accepted.status).toBe(200);
+	const cookie = accepted.cookie;
+	const credentials = await w.ok<{ id: number; kind: string }[]>("credential", { do: "list" }, { cookie });
+	const passkey = credentials.find((row) => row.kind === "passkey");
+	const refused = await w.op("credential", { do: "remove", id: passkey?.id }, { cookie });
+	expect(refused.status).toBe(400);
+	expect(refused.text).toContain("this instance requires a second factor for admins");
+	expect(refused.text).toContain("add another passkey or enrol an authenticator first");
+	expect((await signIn(w, "last-passkey", FIRST)).status).toBe(403);
+	const challenge = await w.post<{ passkey: AssertionOptions }>("/api/login/challenge", {});
+	const signed = await w.post(
+		"/api/login",
+		{ passkey: device.assert(must(challenge).passkey) },
+		{ cookie: challenge.cookie },
+	);
+	expect(signed.status).toBe(200);
+	const enrolled = await enrol(w, cookie);
+	expect((await w.op("credential", { do: "remove", id: passkey?.id }, { cookie })).status).toBe(200);
+	const step = await secondStep(w, "last-passkey");
+	expect(
+		(await w.post("/api/login", { challenge: step.challenge, code: appCode(enrolled.secret, w.clock.now()) }, step))
+			.status,
+	).toBe(200);
+});
+
+test("TOTP review: enrolment typos have their own limit and do not block password second steps", async () => {
+	const w = world();
+	const cookie = await joined(w, "setup-typos", FIRST);
+	const setup = await w.ok<Enrolment>("credential", { do: "totp.begin" }, { cookie });
+	const acceptedCodes = [-30_000, 0, 30_000].map((offset) => appCode(setup.secret, w.clock.now() + offset));
+	const wrongCode = ["000000", "000001", "000002", "000003"].find((code) => !acceptedCodes.includes(code));
+	for (let i = 0; i < 5; i++)
+		expect(
+			(await w.op("credential", { do: "totp.confirm", challenge: setup.challenge, code: wrongCode }, { cookie }))
+				.status,
+		).toBe(400);
+	const blocked = await w.op(
+		"credential",
+		{ do: "totp.confirm", challenge: setup.challenge, code: appCode(setup.secret, w.clock.now()) },
+		{ cookie },
+	);
+	expect(blocked.status).toBe(429);
+	expect(blocked.text).toContain("wait 1 seconds");
+	w.clock.advance(1_000);
+	const confirmed = await w.ok<ConfirmedTotp>(
+		"credential",
+		{ do: "totp.confirm", challenge: setup.challenge, code: appCode(setup.secret, w.clock.now()) },
+		{ cookie },
+	);
+	const step = await secondStep(w, "setup-typos");
+	for (let i = 0; i < 5; i++)
+		expect((await w.post("/api/login", { challenge: step.challenge, code: "bad-code" }, step)).status).toBe(401);
+	expect(
+		(await w.post("/api/login", { challenge: step.challenge, code: confirmed.recoveryCodes[0] }, step)).status,
+	).toBe(429);
+});
+
+test("TOTP review: enrolment neither shares nor resets the sign-in code limit", async () => {
+	const w = world();
+	const cookie = await joined(w, "separate-limits", FIRST);
+	const enrolled = await enrol(w, cookie);
+	const step = await secondStep(w, "separate-limits");
+	for (let i = 0; i < 5; i++)
+		expect(
+			(await w.post("/api/login", { challenge: step.challenge, code: "bad-code" }, { cookie: step.cookie })).status,
+		).toBe(401);
+	expect((await w.op("credential", { do: "remove", id: enrolled.id }, { cookie })).status).toBe(200);
+	const signed = await signIn(w, "separate-limits", FIRST);
+	expect(signed.status).toBe(200);
+	const setup = await w.ok<Enrolment>("credential", { do: "totp.begin" }, { cookie: signed.cookie });
+	const confirmed = await w.op<ConfirmedTotp>(
+		"credential",
+		{ do: "totp.confirm", challenge: setup.challenge, code: appCode(setup.secret, w.clock.now()) },
+		{ cookie: signed.cookie },
+	);
+	expect(confirmed.status).toBe(200);
+	const next = await secondStep(w, "separate-limits");
+	expect(
+		(
+			await w.post(
+				"/api/login",
+				{ challenge: next.challenge, code: must(confirmed).recoveryCodes[0] },
+				{ cookie: next.cookie },
+			)
+		).status,
+	).toBe(429);
+});
+
 test("TOTP secret replies are not recorded, archives exclude them, and import clears pending proofs", async () => {
 	const w = world();
 	const archive = await (await fetch(`${w.instance.url}/api/export`, { headers: bearer(TOKEN) })).text();
