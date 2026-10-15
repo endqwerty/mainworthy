@@ -333,6 +333,20 @@ import { PRESETS } from "../../src/core/presets.ts";
 		const server = await fixture({ preset: "loose" });
 		let view: Awaited<ReturnType<typeof openPage>> | null = null;
 		try {
+			const original = Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" }));
+			const flakyDetection = { enabled: true, windowDays: 7, minFlips: 4 };
+			const configured = await server.api("propose", {
+				edits: [{ op: "policy", settings: { ...original.settings, flakyDetection } }],
+			});
+			const detectorQuestion = (await server.api("inbox", { kind: "adopt" })).items.find(
+				(q) => q.q === configured.question,
+			);
+			if (!detectorQuestion) throw new Error("Detector policy proposal is missing");
+			await server.api("decide", {
+				q: detectorQuestion.q,
+				onEvidence: detectorQuestion.evidenceHash,
+				answer: { is: "accept" },
+			});
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const { page } = view;
 			page.setDefaultTimeout(6000);
@@ -347,6 +361,12 @@ import { PRESETS } from "../../src/core/presets.ts";
 			expect(
 				Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" })).settings,
 			).toHaveProperty("fields", { risk: { kind: "choice", label: "Risk", required: true, choices: ["low", "high"] } });
+			expect(
+				Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" })).settings.flakyDetection,
+			).toEqual(flakyDetection);
+			expect(await page.getByText(/Same-code detector: on/).innerText()).toContain(
+				"4 outcome changes per test and failure cause in 7 days",
+			);
 			const decided = await server.api("inbox", { state: "decided", kind: "adopt" });
 			expect(decided.items.some((q) => q.decision?.answer.is === "accept" && q.decision.by.includes("robin"))).toBe(
 				true,

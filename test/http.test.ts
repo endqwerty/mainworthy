@@ -11,6 +11,7 @@ import { Client } from "../src/cli/client.ts";
 import { seed } from "../src/cli/seed.ts";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import { ERROR_CODES, type ErrorCode } from "../src/core/api.ts";
+import { Policy } from "../src/core/kinds.ts";
 import { TrackerReceipt } from "../src/core/tracker.ts";
 import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
@@ -234,7 +235,7 @@ async function replySweep(instance: Instance, project: string) {
 		counts.success++;
 		return reply.result;
 	};
-	return { checked, seen, counts };
+	return { checked, seen, counts, validators };
 }
 
 async function sweepTrackerReplies(
@@ -1748,12 +1749,83 @@ describe("the surface", () => {
 		});
 		await checked("plan", { name: "Schema run", select: { cases: ["C-1"] } });
 		await checked("report", { run: "R-1", results: [{ test: { case: "C-1" }, outcome: "pass" }] });
-		await checked("report", {
-			target: { commit: "abcdef1", pr: 52 },
-			results: [
-				{ test: { key: "schema-test", file: "schema.ts" }, outcome: "fail", failure: { message: "Expected a value" } },
-			],
+		const producer = z.object({ token: z.string() }).parse(
+			await checked("admin", {
+				do: "token.create",
+				actor: "schema-ci",
+				kind: "ci",
+				project: "scratch",
+				can: ["record"],
+			}),
+		);
+		await checked(
+			"report",
+			{
+				target: { commit: "abcdef1", pr: 52 },
+				results: [
+					{
+						test: { key: "schema-test", file: "schema.ts" },
+						outcome: "fail",
+						failure: { message: "Expected a value" },
+					},
+				],
+			},
+			bearer(producer.token),
+		);
+		for (const [attempt, outcome] of [
+			[2, "pass"],
+			[3, "fail"],
+		] as const) {
+			await checked(
+				"report",
+				{
+					target: { commit: "abcdef1", pr: 52 },
+					attempt,
+					results: [
+						{
+							test: { key: "schema-test", file: "schema.ts" },
+							outcome,
+							...(outcome === "fail" ? { failure: { message: "Expected a value" } } : {}),
+						},
+					],
+				},
+				bearer(producer.token),
+			);
+		}
+		const tests = z
+			.object({ items: z.array(z.object({ ref: z.string(), key: z.string() })) })
+			.parse(await checked("find", { in: "tests" }));
+		const reportedTest = tests.items.find((test) => test.key === "schema-test");
+		if (!reportedTest) throw new Error("No schema test");
+		const [testDetail] = z
+			.array(z.record(z.string(), z.unknown()))
+			.parse(await checked("get", { refs: [reportedTest.ref] }));
+		if (!testDetail) throw new Error("No test detail");
+		expect(testDetail.sameCode).toMatchObject({
+			enabled: true,
+			windowDays: 14,
+			minFlips: 2,
+			signals: [{ signature: { text: "Expected a value" }, class: "assertion", flips: 2, suggested: true }],
 		});
+		const validateGet = sweep.validators.get("get");
+		if (!validateGet) throw new Error("No get validator");
+		const { sameCode, ...withoutSameCode } = testDetail;
+		const evidence = z
+			.object({ signals: z.array(z.record(z.string(), z.unknown())) })
+			.passthrough()
+			.parse(sameCode);
+		const [signal] = evidence.signals;
+		if (!signal) throw new Error("No same-code signal");
+		const { samples: _samples, ...withoutSamples } = signal;
+		for (const invalid of [
+			withoutSameCode,
+			{ ...testDetail, sameCode: { ...evidence, signals: "wrong" } },
+			{ ...testDetail, sameCode: { ...evidence, signals: [withoutSamples] } },
+			{ ...testDetail, sameCode: { ...evidence, signals: [{ ...signal, suggested: "wrong" }] } },
+		]) {
+			expect(OPS.get?.output.safeParse([invalid]).success).toBe(false);
+			expect(validateGet.ok({ ok: true, result: [invalid], seq: null }).valid).toBe(false);
+		}
 		await checked("claim", {
 			lens: "review",
 			findings: [{ on: "C-1", category: "other", note: "Review the expected value" }],
@@ -1803,7 +1875,40 @@ describe("the surface", () => {
 			.object({ proposal: z.string() })
 			.parse(await checked("propose", { edits: [{ op: "place", cases: ["C-1"], folder: "Moved" }] }));
 		await checked("get", { refs: [archived.proposal, placed.proposal] });
-		await checked("admin", { do: "policy.show", project: "scratch" });
+		const current = Policy.parse(await checked("admin", { do: "policy.show", project: "scratch" }));
+		const settings = {
+			...current.settings,
+			fields: { risk: { kind: "text" as const, label: "Risk", required: false } },
+			flakyDetection: { enabled: true, windowDays: 7, minFlips: 3 },
+		};
+		const policyProposal = z.object({ question: z.string() }).parse(
+			await checked("propose", {
+				edits: [{ op: "policy", settings }],
+			}),
+		);
+		const [policyQuestion] = z
+			.array(z.object({ evidenceHash: z.string() }))
+			.parse(await checked("get", { refs: [policyProposal.question] }));
+		if (!policyQuestion) throw new Error("No policy question");
+		await checked("decide", {
+			q: policyProposal.question,
+			onEvidence: policyQuestion.evidenceHash,
+			answer: { is: "accept" },
+		});
+		const shownPolicy = await checked("admin", { do: "policy.show", project: "scratch" });
+		expect(Policy.parse(shownPolicy).settings).toEqual(settings);
+		const policyEnvelope = sweep.validators.get("admin");
+		if (!policyEnvelope) throw new Error("No admin validator");
+		const policy = Policy.parse(shownPolicy);
+		for (const invalidSettings of [
+			{ ...policy.settings, flakyDetection: { enabled: true, windowDays: 7, minFlips: "wrong" } },
+			{ ...policy.settings, fields: { risk: { kind: "text", label: "Risk", required: "wrong" } } },
+		]) {
+			const result = { ...z.record(z.string(), z.unknown()).parse(shownPolicy), settings: invalidSettings };
+			expect(OPS.admin?.output.safeParse(result).success).toBe(false);
+			expect(policyEnvelope.ok({ ok: true, result, seq: null }).valid).toBe(false);
+		}
+
 		await checked("admin", { do: "token.create", actor: "schema-agent", kind: "agent" });
 		await checked("admin", { do: "token.list" });
 		await checked("session", { do: "list" });

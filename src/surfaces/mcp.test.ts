@@ -23,12 +23,12 @@ import { mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from "./mcp.ts";
 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
-	propose: 1264,
-	report: 698,
+	propose: 1342,
+	report: 665,
 	claim: 401,
 	decide: 329,
-	inbox: 192,
-	get: 235,
+	inbox: 177,
+	get: 204,
 	find: 274,
 	impact: 211,
 	since: 169,

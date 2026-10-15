@@ -700,3 +700,53 @@ async function recordedDecisions(server: Server, ref: string) {
 	},
 	25000,
 );
+
+(browserAvailable ? test : test.skip)(
+	"same-code suggestions show their evidence and never excuse a failure",
+	async () => {
+		const server = await startServer();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			for (const attempt of [1, 2, 3]) {
+				await server.api("report", {
+					target: { commit: "browser-flaky1", branch: "main" },
+					job: "e2e",
+					attempt,
+					results: [
+						{
+							test: { key: "checkout.ts::coupon", name: "Coupon", file: "checkout.ts" },
+							outcome: attempt === 2 ? "pass" : "fail",
+							...(attempt === 2 ? {} : { failure: { message: "expected 1, got 2" } }),
+						},
+					],
+				});
+			}
+			view = await openPage(server, { path: "/p/scratch/queue" });
+			const { page } = view;
+			page.setDefaultTimeout(8000);
+			const signal = page.locator("#detail .same-code-evidence");
+			await signal.waitFor();
+			expect(await signal.locator("summary").innerText()).toContain(
+				"Assertion: 2 same-code outcome changes in 14 days.",
+			);
+			expect(await signal.locator("summary").innerText()).toContain("Review for flakiness.");
+			await signal.locator("summary").click();
+			expect(await signal.locator("p").first().innerText()).toBe("expected 1, got 2");
+			expect(await signal.innerText()).toContain("This evidence alone excuses no failure.");
+			expect(await signal.innerText()).toContain("pass, attempt 2");
+			expect(await signal.innerText()).toContain("fail, attempt 3");
+			expect((await server.api("gate", { commit: "browser-flaky1" })).verdict).toBe("blocked");
+			expect((await server.api("inbox", {})).items.filter((q) => q.kind === "failure")).toHaveLength(1);
+			await page.goto(`${server.url}/p/scratch/settings`);
+			await page.getByText(/Same-code detector: on/).waitFor();
+			expect(await page.getByText(/Same-code detector: on/).innerText()).toContain(
+				"2 outcome changes per test and failure cause in 14 days",
+			);
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	25000,
+);

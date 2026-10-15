@@ -184,7 +184,36 @@ An admin accepts it like any policy change. Mainworthy refuses a policy in which
 invalid: every kind must end with a clause that always matches; missing for: finding
 ```
 
-The settings are sent whole: `unlinked`, the basis and the holds. The flaky hold takes 1 to 365 days. `infraThisTargetOnly` is true when an "Infrastructure" answer covers only the build it was given for.
+The settings are sent whole: `unlinked`, the basis, the holds, custom field definitions in `fields`, and `flakyDetection`.
+Omitting `fields` clears the definitions. Omitting `flakyDetection` selects its defaults.
+The flaky hold takes 1 to 365 days. `infraThisTargetOnly` is true when an "Infrastructure" answer covers only the build it was given for.
+
+## Same-code detector settings
+
+Settings, Policy shows the detector's current values below the clause table.
+`mainworthy policy show --json` includes them in `settings.flakyDetection`.
+Every preset starts with detection enabled, a 14-day window, and a threshold of
+two outcome changes per test and failure signature. A file-split signature has its
+own count, separate from the original cause.
+
+To change them, start from the current settings and send a policy edit. Keep the
+other settings as they are. This example uses the other defaults:
+
+```json
+{"edits":[{"op":"policy","settings":{"unlinked":"track","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"flakyDetection":{"enabled":true,"windowDays":7,"minFlips":3}}}]}
+```
+
+Send it through `mainworthy propose --json` and have an admin accept the policy
+question. `windowDays` accepts 1 to 365 days, and `minFlips` accepts 1 to 100.
+`enabled: false` hides current detector suggestions without deleting observations.
+Changing these values affects current test-detail reads and future failure-question
+occurrences. Existing questions keep the snapshot recorded with their evidence.
+Omitting `flakyDetection` from a whole-settings edit selects its defaults.
+
+These settings control suggestions only. They do not change `holds.flakyDays`,
+which controls how long a person's `flaky` answer carries forward. Infrastructure
+and timeout observations have their own counts and never raise the assertion count.
+See [report results](./report-results.md#preserve-attempts-and-retries) for what a flip counts.
 
 ## What custom means
 

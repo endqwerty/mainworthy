@@ -54,6 +54,7 @@ import {
 	unlinkedCount,
 } from "../evidence/evidence.ts";
 import { findingsOfCase, reviewBasis, reviewsAtVersion, reviewsOfCase } from "../evidence/findings.ts";
+import { sameCodeEvidence } from "../evidence/flaky.ts";
 import { actorLabel } from "../identity/identity.ts";
 import { type Ctx, findCommand, UNFINISHED } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
@@ -147,7 +148,7 @@ export const inboxOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: "List open questions with evidence and `evidenceHash`, counts first. `on` selects a case, run or change.",
+	mcp: "Open questions and evidenceHash; filter with on.",
 	run: inbox,
 });
 
@@ -353,6 +354,12 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 				file: test.file,
 				case: linked ? caseRef(linked) : null,
 				flips: flipCount(ctx.db, test.project, test.id),
+				sameCode: sameCodeEvidence(ctx.db, {
+					project: test.project,
+					test: test.id,
+					now: ctx.now,
+					settings: currentPolicy(ctx.db, test.project).settings.flakyDetection,
+				}),
 				last: lastResultsOfTest(ctx.db, test.project, test.id, 20).map((row) => resultView(ctx, row)),
 			};
 		}
@@ -388,7 +395,7 @@ export const getOp = defineOp({
 	needs: "read",
 	scope: "project",
 	effect: "read",
-	mcp: 'Read refs (C-, Q-, R-, T-, P-). For cases, `as: "md"` and `fields` read less; `unless: {ref: hash}` skips unchanged cases.',
+	mcp: "Read refs. For cases: as, fields, unless.",
 	run: get,
 });
 

@@ -32,6 +32,7 @@ import {
 	testById,
 	testRef,
 } from "../evidence/evidence.ts";
+import { sameCodeEvidence } from "../evidence/flaky.ts";
 import { actorLabel, ruleActor } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json } from "../kernel/db.ts";
@@ -956,6 +957,7 @@ export function raiseFailure(
 		shown.push("hint:fails-on-base");
 	const change = target.change !== null ? changeById(ctx.db, target.change) : null;
 	const listed = [...tests.values()];
+	const detectorSettings = currentPolicy(ctx.db, ctx.project.id).settings.flakyDetection;
 	const cases = [...new Set(listed.flatMap((test) => (test.case ? [test.case] : [])))];
 	return raise(ctx, {
 		kind: "failure",
@@ -969,7 +971,16 @@ export function raiseFailure(
 			// An occurrence that brings no failing result of its own (a pass that makes the slot a dispute) leaves
 			// what the question already shows of the failure.
 			message: group.message ?? earlier.message ?? null,
-			tests: listed.slice(0, 50),
+			tests: listed.slice(0, 50).map((test) => {
+				const sameCode = sameCodeEvidence(ctx.db, {
+					project: ctx.project.id,
+					test: test.id,
+					now: ctx.now,
+					settings: detectorSettings,
+				});
+				sameCode.signals = sameCode.signals.filter((signal) => signal.signature.id === group.signature.id);
+				return { ...test, ...(sameCode.signals.length > 0 ? { sameCode } : {}) };
+			}),
 			// The list is cut to fifty; the count is not taken from the cut list, so it never falls when a later
 			// occurrence adds a test to a question that has seen hundreds.
 			count: Math.max(listed.length, earlier.count ?? 0, input.count ?? 0),

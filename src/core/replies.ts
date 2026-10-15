@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SameCodeEvidence } from "./flaky.ts";
 import { ActorKind, Policy, Unlinked } from "./kinds.ts";
 import { Automate, CaseBody, MethodKind, Step } from "./model.ts";
 import {
@@ -199,7 +200,7 @@ const GetRow: z.ZodType<Record<string, unknown>> = z.union([
 	QuestionItem,
 	Run,
 	Proposal,
-	TestSummary.extend({ flips: whole, last: z.array(Result) }),
+	TestSummary.extend({ flips: whole, sameCode: SameCodeEvidence, last: z.array(Result) }),
 ]);
 export const GetReply = z.array(GetRow);
 const FindRow: z.ZodType<Record<string, unknown>> = z.union([

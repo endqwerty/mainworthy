@@ -434,6 +434,12 @@ function SettingsWorkbench() {
 											: "held until the evidence changes"}
 										.
 									</p>
+									<p className="dim">
+										Same-code detector: {policy.settings.flakyDetection.enabled ? "on" : "off"} ·{" "}
+										{policy.settings.flakyDetection.minFlips} outcome changes per test and failure cause in{" "}
+										{policy.settings.flakyDetection.windowDays} days suggest investigation. Suggestions excuse no
+										failure. Change these settings through a <DocLink page="policy">policy edit</DocLink>.
+									</p>
 								</>
 							)}
 						</>

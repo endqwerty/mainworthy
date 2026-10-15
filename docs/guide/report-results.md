@@ -179,8 +179,32 @@ previous outcome. An older attempt arriving late does not replace a newer one.
 The same attempt reported twice keeps the worse outcome.
 A skip or blocked result does not replace an existing pass or failure.
 A pass from one job or environment does not clear another job's failure.
-Mainworthy records same-commit changes between pass and fail. It does not yet provide
-a flaky score or automatic quarantine. A person decides whether a failure is flaky.
+Mainworthy records a same-code flip when a higher decisive attempt changes between pass
+and failure within one producer, job, test, and target. Failure includes `fail` and `error`.
+A skip does not hide the previous decisive result. An old attempt or same-attempt
+disagreement adds no flip. Identical reports add nothing.
+
+The detector counts recent flips per test and failure signature, across assertion,
+timeout, and infrastructure classes. By default, two flips of one cause within
+14 days suggest investigation. A file-split signature is a separate cause.
+Earlier flips of the original cause do not count toward the split cause's threshold.
+The failure question shows its cause's count and up to three pairs of concrete results.
+Expand a count to see the commit, job, environment, producer, result ids,
+outcomes, and attempts. `mainworthy get T-1 --json` returns the current evidence in
+`sameCode`, including `signature`, `class`, `flips`, `suggested`, and `samples`
+for each cause. `signature` contains its id and normalized text.
+The question keeps the evidence shown when its occurrence was recorded.
+
+Both observations must be in the configured window. Corrected observations and
+passes contradicted by a failure at the same attempt do not support a suggestion.
+The detector uses automated results on commit targets. Agent results and sessions
+are excluded. The failure class comes from the normalized failure message, so an
+infrastructure suggestion is evidence to investigate, not a diagnosis.
+
+A suggestion excuses no failure. A person still gives the existing `flaky` or
+`infra` answer, under the project's policy. Automatic quarantine and alternation
+across different trunk commits are not built yet. Change the detector's settings
+through a [policy edit](./policy.md#same-code-detector-settings).
 
 Playwright retries become one logical test result. The highest numbered decisive
 execution supplies its outcome and failure; a skipped retry does not erase an

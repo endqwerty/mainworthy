@@ -2,6 +2,7 @@
 // This file is the one place a kind or an answer is declared (principle P10). The server's kind handlers, the
 // queue's keys and the policy presets are checked against it.
 import { z } from "zod";
+import { FlakyDetectionSettings } from "./flaky.ts";
 import { CaseBody, FieldDefinitions } from "./model.ts";
 
 export const Kind = z.enum(["adopt", "map", "failure", "finding", "signoff"]);
@@ -359,6 +360,7 @@ export const UNLINKED_HELP: Record<Unlinked, string> = {
 export const PolicySettings = z.object({
 	/** Project definitions for the case body's string-valued custom fields. */
 	fields: FieldDefinitions.optional().meta({ "x-mcp-hidden": true }),
+	flakyDetection: FlakyDetectionSettings,
 	unlinked: Unlinked,
 	/** Which bases a planned run's slots accept by default. */
 	basis: z.enum(["exact", "exact-or-assumed"]),

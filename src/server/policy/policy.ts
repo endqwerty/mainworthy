@@ -1,5 +1,6 @@
 // The project's policy: a versioned clause table. Owns the table `policies`.
 // Reading is open to every module; the only writer is the effect of an `adopt` decision (see suite/adopt).
+import { FlakyDetectionSettings } from "../../core/flaky.ts";
 import { type Clause, clauseOf, type Facts, type Kind, Policy, type Unlinked } from "../../core/kinds.ts";
 import { missingCatchAll, PRESETS, type PresetName, presetOf } from "../../core/presets.ts";
 import type { Ctx } from "../kernel/ctx.ts";
@@ -36,12 +37,18 @@ export type CurrentPolicy = Policy & { version: number };
 
 function read(row: PolicyRow): CurrentPolicy {
 	// A policy stored before the `unlinked` setting existed has none: its clauses alone say who is asked.
-	const stored = json<Omit<Policy["settings"], "unlinked"> & { unlinked?: Unlinked }>(row.settings);
+	const stored = json<
+		Omit<Policy["settings"], "unlinked" | "flakyDetection"> & { unlinked?: Unlinked; flakyDetection?: unknown }
+	>(row.settings);
 	return {
 		version: row.version,
 		preset: row.preset,
 		clauses: json(row.clauses),
-		settings: { ...stored, unlinked: stored.unlinked ?? "ask" },
+		settings: {
+			...stored,
+			unlinked: stored.unlinked ?? "ask",
+			flakyDetection: FlakyDetectionSettings.parse(stored.flakyDetection),
+		},
 	};
 }
 
