@@ -352,7 +352,19 @@ async function sweepQuarantineReplies(checked: Awaited<ReturnType<typeof replySw
 			expect.objectContaining({ ref: test.ref, quarantine: expect.objectContaining({ active: true }) }),
 		]),
 	);
-	expect(await checked("gate", { commit: "daaa0001" })).toMatchObject({ verdict: "passed", quarantined: 1 });
+	// A quarantine covers results reported from its entry on: the earlier commit keeps its verdict, a new one is covered.
+	await checked("report", {
+		target: { commit: "daaa0002", branch: "main" },
+		results: [
+			{
+				test: { key: "quarantine-schema", file: "quarantine-schema.ts" },
+				outcome: "fail",
+				failure: { message: "expected quarantine schema" },
+			},
+		],
+	});
+	expect(await checked("gate", { commit: "daaa0001" })).toMatchObject({ verdict: "blocked" });
+	expect(await checked("gate", { commit: "daaa0002" })).toMatchObject({ verdict: "passed", quarantined: 1 });
 }
 
 async function sweepCsvImportReplies(checked: Awaited<ReturnType<typeof replySweep>>["checked"], id: string) {

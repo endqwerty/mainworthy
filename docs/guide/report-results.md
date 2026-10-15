@@ -476,6 +476,8 @@ settings in **Settings**, **Policy**. Enter the test ref, reason and exit rule,
 then choose **Propose quarantine**. Review and accept the proposal in the queue
 with a reason. A person with answer authority must decide under every preset.
 Agents may propose and leave advice. Detector suggestions never enter quarantine.
+A quarantine covers results reported from its entry on, so the failure you opened it from
+still counts: run the job again once the quarantine stands to see it covered.
 To propose an end, fill **Reason to end quarantine** and choose the test's end
 button. Entry and expiry times appear in your browser's local time, including an
 expiry entered in the form.
