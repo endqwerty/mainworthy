@@ -106,7 +106,7 @@ export function raiseAdopt(
 			case "folder":
 				return { op: edit.op, name: edit.name };
 			case "policy":
-				return { op: edit.op, preset: edit.policy.preset };
+				return { op: edit.op, base: edit.base, preset: edit.policy.preset };
 			default: {
 				const _exhaustive: never = edit;
 				return _exhaustive;

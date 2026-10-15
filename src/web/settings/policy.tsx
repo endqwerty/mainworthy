@@ -8,7 +8,11 @@ import { call } from "../lib/api.ts";
 import { randomId } from "../lib/ids.ts";
 import { Select } from "../ui/index.tsx";
 
-export type ClauseChange = Pick<Policy, "clauses" | "settings">;
+export const PolicySnapshot = Policy.extend({ version: z.number().int().positive() });
+export type PolicySnapshot = z.infer<typeof PolicySnapshot>;
+export type ClauseChange = Pick<Policy, "clauses" | "settings"> & { base: number };
+export const policyConflictMessage =
+	"The policy changed while you edited. Your draft is kept. Cancel and reopen the editor to start from the current policy.";
 const draftOf = (policy: Policy) => ({
 	clauses: policy.clauses.map((clause) => ({
 		...clause,
@@ -29,7 +33,7 @@ function validate(draft: Draft): { policy: Policy; problem: null } | { policy: n
 			clauses: draft.clauses.map(({ when, answer, ...clause }) => ({
 				...clause,
 				when: when.split(/\r?\n/).map((part) => part.trim()),
-				...(clause.ask.who === "rule" ? { answer: JSON.parse(answer) as unknown } : {}),
+				...(answer !== "" ? { answer: JSON.parse(answer) as unknown } : {}),
 			})),
 			settings: { ...draft.settings, holds: { ...draft.settings.holds, flakyDays: Number(draft.flakyDays) } },
 		});
@@ -69,13 +73,13 @@ export function PolicyEditor({
 	busy,
 	onApply,
 }: {
-	policy: Policy;
+	policy: PolicySnapshot;
 	project: string;
 	mayChange: boolean;
 	busy: boolean;
 	onApply: (change: ClauseChange, reason: string) => Promise<boolean>;
 }) {
-	const [base, setBase] = useState<Policy | null>(null);
+	const [base, setBase] = useState<PolicySnapshot | null>(null);
 	const [draft, setDraft] = useState(() => draftOf(policy));
 	const [reason, setReason] = useState("");
 	const [working, setWorking] = useState(false);
@@ -84,6 +88,7 @@ export function PolicyEditor({
 	const checked = validate(draft);
 	const candidate = checked.policy;
 	const locked = busy || working || !mayChange;
+	const stale = base !== null && base.version !== policy.version;
 	const update = (next: Draft) => {
 		setDraft(next);
 		setSample(null);
@@ -118,14 +123,12 @@ export function PolicyEditor({
 		setWorking(true);
 		setMessage("");
 		try {
-			const current = Policy.parse(await call("admin", { do: "policy.show", project }, { project }));
-			if (JSON.stringify(current) !== JSON.stringify(base)) {
-				setMessage(
-					"The policy changed while you edited. Your draft is kept. Cancel and reopen the editor to start from the current policy.",
-				);
-				return;
-			}
-			if (await onApply({ clauses: checked.policy.clauses, settings: checked.policy.settings }, reason.trim())) {
+			if (
+				await onApply(
+					{ base: base.version, clauses: checked.policy.clauses, settings: checked.policy.settings },
+					reason.trim(),
+				)
+			) {
 				setBase(null);
 				setSample(null);
 			}
@@ -154,6 +157,7 @@ export function PolicyEditor({
 	return (
 		<section aria-label="Policy clause editor" className="policy-editor">
 			<h3>Edit clauses · first match wins</h3>
+			{stale && <p role="status">{policyConflictMessage}</p>}
 			<p className="dim">
 				Conditions are written one per line and must all match. Every kind must end with an always clause. A rule answer
 				is JSON.

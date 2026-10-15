@@ -14,7 +14,11 @@ Applying uses the existing Settings `propose`, `get`, and `decide` sequence. Onl
 
 Preview reads up to 20 open and 20 recently settled questions through `inbox`. It matches their current facts and applicable answer choices with the shared core matcher, showing the clause, who may answer, rule answers, and which runs list the question. It compares with the policy read when editing began. It does not replay recorded decisions, execute rules, or predict a gate result.
 
-Before applying, the editor rereads the current policy and refuses a draft based on different clauses or settings. This is a browser check, not an atomic version condition on the operation. Policy writes still have the existing operation's concurrency behavior.
+A policy proposal records the version it was made on in its resolved edit. Sealing refuses a stale explicit base. Adoption checks the base again inside the decision transaction, so simultaneous saves and proposals that wait for another admin cannot silently replace an intervening change. A conflict leaves the proposal open and rolls back every effect of adoption.
+
+Edits carrying clauses or settings must send `base`, the version returned by `policy.show`. These fields replace entire values and cannot safely infer the version a caller read. Preset switches and changes to `unlinked` can omit `base`: they express an action against the current policy, and sealing records that version. Older waiting proposals without a recorded base conflict on acceptance and must be proposed again.
+
+The editor keeps its opened version and sends it with Apply. Event-driven policy reads show a notice if that version changes, including while previewing. A conflict keeps the draft open. Fields disabled in the editor, including answers on clauses answered by people, round-trip unchanged.
 
 ## Alternatives
 

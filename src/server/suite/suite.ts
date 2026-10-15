@@ -107,7 +107,7 @@ export type Resolved =
 	| { op: "restore"; caseId: number; to: number; body: CaseBody }
 	| { op: "folder"; id: number | null; name: string | null; parent: FolderTarget | null | undefined; archive: boolean }
 	| { op: "cover"; caseId: number; key: string; title: string | null; on: boolean }
-	| { op: "policy"; policy: Policy };
+	| { op: "policy"; base: number; policy: Policy };
 
 const Q = {
 	caseByNo: sql<{ project: number; no: number }, CaseRow>("SELECT * FROM cases WHERE project = $project AND no = $no"),
@@ -576,7 +576,12 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 			}
 			case "policy": {
 				const current = currentPolicy(ctx.db, ctx.project.id);
-				resolved.push({ op: "policy", policy: resolvePolicy(current, edit) });
+				if (edit.base === undefined && (edit.clauses !== undefined || edit.settings !== undefined))
+					throw invalid("a policy edit with clauses or settings needs the policy version it was made on (base)");
+				const base = edit.base ?? current.version;
+				if (base !== current.version)
+					throw conflict(`the policy changed; redo the proposal on version ${current.version}`);
+				resolved.push({ op: "policy", base, policy: resolvePolicy(current, edit) });
 				break;
 			}
 			default: {
@@ -807,6 +812,11 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 				break;
 			}
 			case "policy": {
+				const current = currentPolicy(ctx.db, ctx.project.id);
+				if (edit.base !== current.version)
+					throw conflict(
+						`the policy changed after this proposal was made; redo the proposal on version ${current.version}`,
+					);
 				out.policyVersion = writePolicy(ctx, witness, edit.policy);
 				ctx.touched.add("policy");
 				break;

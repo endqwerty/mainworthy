@@ -72,6 +72,7 @@ Propose cases at their base version. Status: adopted=current, open=needs accepta
 | `edits[][cover].on` | `boolean` | yes |  |
 | `edits[][cover].title` | `string` | no |  |
 | `edits[][policy].op` | `"policy"` | yes |  |
+| `edits[][policy].base` | `integer` | no | Required with clauses or settings. |
 | `edits[][policy].preset` | `string` | no |  |
 | `edits[][policy].clauses` | `array<object>` | no |  |
 | `edits[][policy].clauses[].id` | `string` | yes |  |

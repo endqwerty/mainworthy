@@ -162,6 +162,7 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 | `edits[][cover].on` | `boolean` | yes |  |
 | `edits[][cover].title` | `string` | no |  |
 | `edits[][policy].op` | `"policy"` | yes |  |
+| `edits[][policy].base` | `integer` | no | Required with clauses or settings. |
 | `edits[][policy].preset` | `string` | no |  |
 | `edits[][policy].clauses` | `array<object>` | no |  |
 | `edits[][policy].clauses[].id` | `string` | yes |  |

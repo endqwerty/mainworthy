@@ -1566,7 +1566,15 @@ describe("what a run and a change may count", () => {
 					}
 				: clause,
 		);
-		h.call("propose", { edits: [{ op: "policy", clauses }] });
+		h.call("propose", {
+			edits: [
+				{
+					op: "policy",
+					base: h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version,
+					clauses,
+				},
+			],
+		});
 		expect(decide(open("adopt"), { is: "accept" }, h.owner, { reason: "rules for plain failures" }).status).toBe(
 			"decided",
 		);
@@ -2440,7 +2448,15 @@ describe("what a decision may change", () => {
 				? { ...clause, ask: { ...clause.ask, who: "admin" as const, notProducer: false } }
 				: clause,
 		);
-		h.call("propose", { edits: [{ op: "policy", clauses }] });
+		h.call("propose", {
+			edits: [
+				{
+					op: "policy",
+					base: h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version,
+					clauses,
+				},
+			],
+		});
 		expect(decide(open("adopt"), { is: "accept" }, h.owner, { reason: "our own rules" }).status).toBe("decided");
 		seed(1, ["human", "auto"]);
 		const alice = h.actor("alice", "human", ["read", "produce", "answer", "plan"]);

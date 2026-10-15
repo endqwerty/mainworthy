@@ -4,14 +4,13 @@ import {
 	Capability,
 	CI_CAPABILITIES,
 	defaultCapabilities,
-	Policy,
 	UNLINKED_HELP,
 	UNLINKED_LABELS,
 	Unlinked,
 } from "../../core/kinds.ts";
 import { PRESET_GUIDE, PRESET_SUMMARY } from "../../core/policy-guide.ts";
 import { presetOf } from "../../core/presets.ts";
-import { call } from "../lib/api.ts";
+import { ApiError, call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
 import { randomId } from "../lib/ids.ts";
 import { useBindings } from "../lib/keys.ts";
@@ -21,7 +20,7 @@ import { DocLink, EmptyState, KeyCap, ListRow, SectionHeading, Select } from "..
 import { CustomFields } from "./fields.tsx";
 import { YourHome } from "./home.tsx";
 import { People } from "./people.tsx";
-import { type ClauseChange, PolicyEditor } from "./policy.tsx";
+import { type ClauseChange, PolicyEditor, PolicySnapshot, policyConflictMessage } from "./policy.tsx";
 import { YourSessions } from "./sessions.tsx";
 import { YourSignIn } from "./signin.tsx";
 import { IssuedTokens } from "./tokens.tsx";
@@ -131,7 +130,7 @@ function SettingsWorkbench() {
 		input: { do: "policy.show", project },
 		enabled: instanceAdmin && mayRead,
 	});
-	const parsedPolicy = Policy.safeParse(policyRead.data);
+	const parsedPolicy = PolicySnapshot.safeParse(policyRead.data);
 	const policy = parsedPolicy.success ? parsedPolicy.data : null;
 	// The name is a preset's only while the clauses are that preset's. The session's name is checked by the server;
 	// the clauses, which only an instance admin reads, are checked here.
@@ -229,6 +228,7 @@ function SettingsWorkbench() {
 				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" }, reason, cmd: attempt.decide },
 				{ project },
 			);
+			if (replies[0]?.status === "conflict") throw new Error(policyConflictMessage);
 			if (replies[0]?.status !== "decided" && replies[0]?.status !== "already")
 				throw new Error(`Policy is awaiting ${replies[0]?.needs ?? "review"}. Open ${question.q} in Queue.`);
 			const ruled = z.object({ ruled: z.number() }).safeParse(replies[0]?.effects).data?.ruled ?? 0;
@@ -243,7 +243,12 @@ function SettingsWorkbench() {
 			policyAttempt.current = null;
 			return true;
 		} catch (error) {
-			const message = error instanceof Error ? error.message : "The policy could not be changed.";
+			const message =
+				error instanceof ApiError && error.code === "conflict"
+					? policyConflictMessage
+					: error instanceof Error
+						? error.message
+						: "The policy could not be changed.";
 			setPolicyMessage(message);
 			setStatus(message);
 			return false;
@@ -359,18 +364,14 @@ function SettingsWorkbench() {
 								</label>
 							)}
 							<p className="dim">
-								Changing policy here needs a person with produce and admin on this project. Editing clauses also needs
-								instance admin to read the full policy. Applying records a proposal and an accepting decision.
+								Changing policy here needs a person with produce and admin on this project. An instance admin can read
+								the clause table; editing it also needs those project permissions. Applying records a proposal and an
+								accepting decision.
 							</p>
 							<p className="settings-message" role="status">
 								{policyMessage}
 							</p>
 							{policyRead.error && <p role="status">{policyRead.error.message}</p>}
-							{!instanceAdmin && (
-								<p className="dim">
-									An instance admin can read the clause table; a project admin can change the policy.
-								</p>
-							)}
 							{policy && (
 								<>
 									<CustomFields

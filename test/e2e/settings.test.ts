@@ -160,17 +160,96 @@ import { PRESETS } from "../../src/core/presets.ts";
 			const q = (await server.api("inbox", { kind: "adopt" })).items.find((item) => item.q === changed.question);
 			if (!q) throw new Error("Policy review missing");
 			await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
-			await page.getByRole("button", { name: "Apply policy" }).click();
 			await page
 				.getByText(
 					"The policy changed while you edited. Your draft is kept. Cancel and reopen the editor to start from the current policy.",
 					{ exact: true },
 				)
 				.waitFor();
+			await page.getByRole("button", { name: "Apply policy" }).click();
+			await page
+				.locator("#detail .settings-message")
+				.getByText("The policy changed while you edited.", { exact: false })
+				.waitFor();
 			expect(await page.getByLabel("Flaky hold in days").inputValue()).toBe("8");
 			expect(Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" })).preset).toBe(
 				"standard",
 			);
+			expect(view.errors).toEqual(["Failed to load resource: the server responded with a status of 409 (Conflict)"]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"policy edits preserve answers on clauses whose answer field is disabled",
+	async () => {
+		const server = await fixture({ preset: "loose", mode: "server" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			const before = Policy.extend({ version: z.number() }).parse(
+				await server.api("admin", { do: "policy.show", project: "scratch" }),
+			);
+			const clauses = before.clauses.map((c) => (c.id === "failure-any" ? { ...c, answer: { is: "flaky" } } : c));
+			const seed = await server.api("propose", { edits: [{ op: "policy", base: before.version, clauses }] });
+			const q = (await server.api("inbox", { kind: "adopt" })).items.find((item) => item.q === seed.question);
+			if (!q) throw new Error("Policy review missing");
+			await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+			view = await openPage(server, { path: "/p/scratch/settings" });
+			await view.page.getByRole("button", { name: "Edit clauses", exact: true }).click();
+			await view.page.getByLabel("Flaky hold in days").fill("9");
+			await view.page.getByLabel("Policy change reason").fill("Only change the hold.");
+			await view.page.getByRole("button", { name: "Apply policy" }).click();
+			await view.page.getByText("Custom policy is in force.", { exact: false }).waitFor();
+			const after = Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" }));
+			expect(after.clauses).toEqual(clauses);
+			expect(after.settings.holds.flakyDays).toBe(9);
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"the policy editor keeps its draft when adoption conflicts with a newer policy",
+	async () => {
+		const server = await fixture({ preset: "loose", mode: "server" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			view = await openPage(server, { path: "/p/scratch/settings" });
+			const { page } = view;
+			page.setDefaultTimeout(3000);
+			await page.getByRole("button", { name: "Edit clauses", exact: true }).click();
+			await page.getByLabel("Flaky hold in days").fill("9");
+			await page.getByLabel("Policy change reason").fill("Keep this on conflict.");
+			await page.route("**/api/p/scratch/decide", async (route) => {
+				const other = await server.api("propose", { edits: [{ op: "policy", preset: "standard" }] });
+				const q = (await server.api("inbox", { kind: "adopt" })).items.find((item) => item.q === other.question);
+				if (!q) throw new Error("Policy review missing");
+				await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+				await route.continue();
+			});
+			await page.getByRole("button", { name: "Apply policy" }).click();
+			await page
+				.locator("#detail .settings-message")
+				.getByText(
+					"The policy changed while you edited. Your draft is kept. Cancel and reopen the editor to start from the current policy.",
+					{ exact: true },
+				)
+				.first()
+				.waitFor();
+			expect(await page.getByLabel("Flaky hold in days").inputValue()).toBe("9");
+			expect(await page.getByLabel("Policy change reason").inputValue()).toBe("Keep this on conflict.");
+			expect(Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" })).preset).toBe(
+				"standard",
+			);
+			expect((await server.api("inbox", { kind: "adopt" })).items).toHaveLength(1);
 			expect(view.errors).toEqual([]);
 		} finally {
 			await view?.close();
@@ -402,6 +481,9 @@ import { PRESETS } from "../../src/core/presets.ts";
 				edits: [
 					{
 						op: "policy",
+						base: z
+							.object({ version: z.number() })
+							.parse(await server.api("admin", { do: "policy.show", project: "scratch" })).version,
 						preset: "loose",
 						clauses: PRESETS.loose.clauses.map((clause) =>
 							clause.id === "finding-any" ? { ...clause, ask: { ...clause.ask, reason: "required" as const } } : clause,

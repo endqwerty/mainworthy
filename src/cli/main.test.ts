@@ -270,6 +270,11 @@ test("standard policy records both a proposal and a decision and prints its clau
 		expect(shown.stdout).toContain("agent's answer");
 		expect(shown.stdout).toContain("author:agent");
 		expect(shown.stdout).toContain("hint:disputed");
+		const snapshot = outputWith(
+			z.object({ version: z.number(), preset: z.string() }),
+			await run(["policy", "show", "--json"]),
+		);
+		expect(snapshot).toEqual({ version: 2, preset: "standard" });
 		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM decisions").get()?.n).toBe(1);
 	});
 });
