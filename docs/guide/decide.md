@@ -250,7 +250,10 @@ the withdrawal conflicts and their decision stays. The withdrawal button in "Set
 names the decision shown there. Read the question again before withdrawing a replacement.
 For several answers, undo withdraws each decision separately. A refused answer is not
 withdrawn, and a failed withdrawal does not stop the others. The message names the failures;
-pressing <kbd>u</kbd> again retries only those, with the same decision ids.
+pressing <kbd>u</kbd> again retries only those, with the same decision ids and command ids.
+If the server took a withdrawal but its reply was lost, the retry reads its recorded reply.
+If somebody already withdrew the decision, the queue reads the question again and says
+it is already open.
 
 API and command-line callers can send `{"undo":"Q-12","ifDecision":31}`. The server
 compares `ifDecision` inside the transaction that withdraws the decision. Without it,

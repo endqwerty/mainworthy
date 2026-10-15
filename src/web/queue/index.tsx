@@ -49,7 +49,11 @@ const kindNames: Record<Kind, string> = {
 	signoff: "sign-off",
 };
 type DecisionEntry = { question: QuestionItem; answer: Record<string, unknown> };
-type Withdrawal = { question: QuestionItem; decision: number };
+type Withdrawal = {
+	question: QuestionItem;
+	decision: number;
+	command: { id: string; reason: string | undefined } | null;
+};
 type LastAnswer = { entries: DecisionEntry[]; confirmed: Promise<Withdrawal[]> };
 type InlineAnswer = { entries: DecisionEntry[]; field: "ref" | "reason"; value: string } & (
 	| { kind: "answer" }
@@ -356,7 +360,7 @@ function QueueWorkbench() {
 				const accepted = entries.flatMap(({ question }) => {
 					const reply = replies.find((reply) => reply.q === question.q);
 					return reply && (reply.status === "decided" || reply.status === "already") && reply.decision !== null
-						? [{ question, decision: reply.decision }]
+						? [{ question, decision: reply.decision, command: null }]
 						: [];
 				});
 				for (const ref of refs) if (refActions.current.get(ref) === action) pendingAnswers.current.delete(ref);
@@ -591,7 +595,7 @@ function QueueWorkbench() {
 							entries: questions.map((question) => ({ question, answer: question.decision?.answer ?? {} })),
 							confirmed: Promise.resolve(
 								questions.flatMap((question) =>
-									question.decision ? [{ question, decision: question.decision.id }] : [],
+									question.decision ? [{ question, decision: question.decision.id, command: null }] : [],
 								),
 							),
 						}
@@ -621,6 +625,7 @@ function QueueWorkbench() {
 		undoing.current.add(prior);
 		setLast(null);
 		const reopened = new Set<string>();
+		const alreadyOpen = new Set<string>();
 		let receipts: Withdrawal[] = [];
 		const action = ++actionNo.current;
 		bringBack(questions.map((q) => ({ ...q, state: "open", decision: null })));
@@ -634,16 +639,35 @@ function QueueWorkbench() {
 				receipts = await prior.confirmed;
 				if (!receipts.length) return;
 				const failures: string[] = [];
-				for (const { question, decision } of receipts) {
+				for (const receipt of receipts) {
+					const { question, decision } = receipt;
+					receipt.command ??= { id: randomId(), reason };
+					const command = receipt.command;
 					try {
 						const replies = await call(
 							"decide",
-							{ undo: question.q, ifDecision: decision, cmd: randomId(), ...(reason ? { reason } : {}) },
+							{
+								undo: question.q,
+								ifDecision: decision,
+								cmd: command.id,
+								...(command.reason ? { reason: command.reason } : {}),
+							},
 							{ project, owner },
 						);
 						const reply = replies[0];
 						if (!sessionCurrent(owner)) return;
-						if (reply?.status !== "reopened") throw new Error(reply?.needs ?? "The decision could not be withdrawn.");
+						if (reply?.status === "conflict") {
+							const rows = await call("get", { refs: [question.q] }, { project, owner });
+							if (!sessionCurrent(owner)) return;
+							if (
+								rows.some(
+									(row) => z.object({ q: z.literal(question.q), state: z.literal("open") }).safeParse(row).success,
+								)
+							)
+								alreadyOpen.add(question.q);
+						}
+						if (reply?.status !== "reopened" && !alreadyOpen.has(question.q))
+							throw new Error(reply?.needs ?? "The decision could not be withdrawn.");
 						reopened.add(question.q);
 						if (extra) {
 							const entry = extra.entries.find((entry) => entry.question.q === question.q);
@@ -656,8 +680,11 @@ function QueueWorkbench() {
 				if (failures.length) throw new Error(failures.join(" "));
 				if (action === actionNo.current) {
 					setLast(null);
-					setLastMessage("Answer withdrawn. Both decisions stay in the ledger.");
-					setStatus("Answer withdrawn. Both decisions stay in the ledger.");
+					const message = alreadyOpen.size
+						? `${[...alreadyOpen].join(", ")}: already open.${reopened.size > alreadyOpen.size ? " Other answers withdrawn." : ""}`
+						: "Answer withdrawn. Both decisions stay in the ledger.";
+					setLastMessage(message);
+					setStatus(message);
 				}
 				await invalidateProject(project);
 				const cached = queryClient.getQueryData<InfiniteData<InboxReply>>([
@@ -700,7 +727,7 @@ function QueueWorkbench() {
 							})),
 						},
 				);
-				const message = `${[...unconfirmed].join(", ")}: the withdrawal failed. ${reopened.size ? `${reopened.size} withdrawn. ` : ""}${error instanceof Error ? error.message : "Try again."} Press u to retry.`;
+				const message = `${[...unconfirmed].join(", ")}: the withdrawal failed. ${reopened.size ? `${reopened.size} confirmed open. ` : ""}${error instanceof Error ? error.message : "Try again."} Press u to retry.`;
 				if (action === actionNo.current) {
 					setLast({
 						entries: prior.entries.filter((entry) => unconfirmed.has(entry.question.q)),

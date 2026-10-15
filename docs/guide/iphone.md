@@ -83,6 +83,7 @@ You cannot answer from the list. A question is answered from its page, where its
 
 **Decided** at the top shows what was decided and by whom. Open a question there to withdraw its decision.
 The withdrawal names the decision shown. If it changed meanwhile, read the question again before withdrawing it.
+An unconfirmed withdrawal shows the server's response without claiming that the earlier decision still stands.
 
 The chips over the list show one kind of question. The name at the top left is the project that is open. Press
 it to open another.

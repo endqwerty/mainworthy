@@ -24,7 +24,10 @@ the same. Its answer outcome and undo question carry the receipt to the undo cal
 
 Bulk web answers keep a receipt for each successful answer, even if others were
 refused. Undo attempts every successful decision separately and reports partial
-failure. A retry contains only the withdrawals that failed and retains their ids.
+failure. A retry contains only the withdrawals that failed and retains their decision
+ids, command ids and reasons. The server replays a recorded reply if the first reply
+was lost. On conflict, the web app reads the question: an open question is reported
+as already open, without claiming this request withdrew its decision.
 
 An API caller may omit `ifDecision` to request withdrawal of whichever decision
 stands when the transaction runs. This preserves deliberate current-decision

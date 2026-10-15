@@ -173,6 +173,66 @@ for (const scenario of [
 		30000,
 	);
 
+for (const scenario of ["lost reply", "withdrawn by someone else"])
+	check(
+		`undo confirms an open question: ${scenario}`,
+		async () => {
+			const server = await startServer({ preset: "standard" });
+			await failures(server);
+			const colleague = scenario === "withdrawn by someone else" ? await grant(server, "colleague") : server.token;
+			const h = await openPage(server, { path: "/p/scratch/queue" });
+			try {
+				const { page } = h;
+				page.setDefaultTimeout(5000);
+				await page.locator("[data-current-question]").waitFor();
+				const q = await qref(page);
+				if (!q) throw Error("No current question");
+				const sent: { cmd: string; ifDecision: number }[] = [];
+				await page.route("**/decide", async (route) => {
+					const input = route.request().postDataJSON();
+					if (!("undo" in input)) return route.continue();
+					sent.push(z.object({ cmd: z.string(), ifDecision: z.number() }).parse(input));
+					if (scenario === "withdrawn by someone else")
+						await server.api("decide", { undo: q, ifDecision: input.ifDecision }, { token: colleague });
+					const response = await route.fetch();
+					if (scenario === "lost reply" && sent.length === 1) await route.abort();
+					else await route.fulfill({ response });
+				});
+				await page.keyboard.press("f");
+				await page.locator(".queue-last").getByText("recorded", { exact: false }).waitFor();
+				await page.keyboard.press("u");
+				if (scenario === "lost reply") {
+					await page.locator(".queue-last").getByText("withdrawal failed", { exact: false }).waitFor();
+					await page.keyboard.press("u");
+					await eventually(
+						() => Promise.resolve(sent.length),
+						(count) => count === 2,
+					);
+					expect(sent[1]).toEqual(sent[0]);
+				}
+				await page
+					.locator(".queue-last")
+					.getByText(
+						scenario === "lost reply" ? "Answer withdrawn. Both decisions stay in the ledger." : `${q}: already open.`,
+						{ exact: true },
+					)
+					.waitFor();
+				expect((await server.api("get", { refs: [q] }))[0]).toMatchObject({ q, state: "open", decision: null });
+				await page.locator(`[data-question="${q}"]`).click();
+				await page.locator(`[data-current-question="${q}"]`).waitFor();
+				expect(await qref(page)).toBe(q);
+				await page.keyboard.press("f");
+				await page.locator(".queue-last").getByText("recorded", { exact: false }).waitFor();
+				expect((await server.api("get", { refs: [q] }))[0]).toMatchObject({ state: "decided" });
+				expect(h.errors).toEqual(scenario === "lost reply" ? ["Failed to load resource: net::ERR_FAILED"] : []);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
+
 for (const field of ["ref", "reason"])
 	for (const leave of ["row", "kind", "state"])
 		check(

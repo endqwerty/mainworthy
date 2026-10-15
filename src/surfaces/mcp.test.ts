@@ -25,7 +25,7 @@ const TOKEN_COUNTS: Record<string, number> = {
 	propose: 1257,
 	report: 713,
 	claim: 414,
-	decide: 335,
+	decide: 315,
 	inbox: 190,
 	get: 284,
 	find: 281,
