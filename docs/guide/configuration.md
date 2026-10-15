@@ -29,7 +29,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | --- | --- | --- |
 | `MAINWORTHY_HOST` | `127.0.0.1` | The address to listen on. Use `0.0.0.0` to listen on every interface. A value that is not loopback selects server mode. |
 | `MAINWORTHY_PORT` | `PORT`, else `7357` | The port to listen on. |
-| `MAINWORTHY_DATA` | `~/.mainworthy` | The data directory. It holds one SQLite file. |
+| `MAINWORTHY_DATA` | `~/.mainworthy` | The data directory. It holds `mainworthy.db`, its WAL and shared-memory files while running, `server.lock`, and `spool/` for archive transfers. |
 | `MAINWORTHY_LOCK_WAIT_SECONDS` | `30` | Seconds to wait for another server to release the data directory. A finite nonnegative number, including fractions. `0` refuses immediately. |
 | `MAINWORTHY_MODE` | none | `server` selects server mode. |
 | `MAINWORTHY_OWNER` | `USER`, else `owner` | The name of the owner, who holds every capability on every project. |
@@ -45,6 +45,8 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_COMMIT` | none | The commit this server was built from, which `/healthz` reports. 40 lower-case hexadecimal characters, or it reads as unknown. Without it the server reads `SOURCE_COMMIT`. |
 
 A value outside the whole numbers `0` through `8` for `MAINWORTHY_READERS` stops the start with `invalid: MAINWORTHY_READERS must be an integer between 0 and 8`. A session lifetime that is not a duration stops the start too, with a line that names the variable. So does an entry of `MAINWORTHY_APPLE_APPS` that is not a team id and a bundle identifier, and a `MAINWORTHY_PUBLIC_URL` that is not such an address: write `https` and a host name with nothing after it, or `http://localhost` with its port. An IP address and plain `http` anywhere else are refused because no browser makes a passkey there. A path and a query are refused because the server wants the root address of the instance.
+
+The server checks configuration before creating the data directory or taking its lock. A refused public address, owner token length or reserved owner name creates no files.
 
 The first start creates the data directory, one owner and a project named `scratch`. It does not need any variable. The server holds `server.lock` in that directory until it stops. Another server using the same directory waits up to `MAINWORTHY_LOCK_WAIT_SECONDS` before it opens the application database. It says once on standard error that it is waiting for another server on the data directory. If the lock is still held at the deadline, startup is refused with `another server is already using this data directory; stop it or choose another MAINWORTHY_DATA`. This permits a replacement to start when the previous server finishes stopping. A deployment must let the previous server stop while the replacement waits; waiting for the replacement to become healthy first prevents that handoff. The operating system releases the lock if the process is killed. The file stays in place; do not delete or replace it while a server runs.
 

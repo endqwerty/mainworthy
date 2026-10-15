@@ -5,10 +5,10 @@ import { type Extra, type Patience, serve, VERSION } from "../surfaces/http.ts";
 import {
 	bootstrap,
 	flushUses,
-	publicAddress,
 	ruleActor,
 	sweepSessions,
 	sweepSignInRecords,
+	validateBootstrap,
 } from "./identity/identity.ts";
 import { recoverAccepted, sweep } from "./jobs.ts";
 import { type App, type Config, openApp } from "./kernel/app.ts";
@@ -35,9 +35,7 @@ export function open(
 	config: Config,
 	options: { memory?: boolean; firstProject?: string; now?: () => number } = {},
 ): { app: App; owner: Actor; project: string; generatedToken: string | null; warnings: string[] } {
-	// A public address that no browser would make a passkey at, or that is not the root address of the instance,
-	// stops the start here, before the data is opened.
-	publicAddress(config);
+	validateBootstrap(config);
 	const app = openApp(config, {
 		...(options.memory ? { memory: true } : {}),
 		...(options.now ? { now: options.now } : {}),
@@ -69,6 +67,7 @@ export function start(
 	/** `now` is the instance's clock: a test passes its own, so nothing in it has to wait for time to pass. */
 	options: { firstProject?: string; readers?: number; patience?: Patience; now?: () => number } = {},
 ): Instance {
+	validateBootstrap(config);
 	const count = readerCount({
 		MAINWORTHY_READERS: options.readers === undefined ? process.env.MAINWORTHY_READERS : String(options.readers),
 	});

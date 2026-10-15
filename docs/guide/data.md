@@ -7,8 +7,8 @@ Find your data, export it to a text file, back it up and move it to another mach
 Mainworthy keeps everything in one SQLite file, `mainworthy.db`, in the data directory. The directory is `~/.mainworthy` unless you set `MAINWORTHY_DATA`, and `/data` in the container. See [configuration](./configuration.md#variables-the-server-reads).
 
 ```
-$ ls ~/.mainworthy
-mainworthy.db  mainworthy.db-shm  mainworthy.db-wal
+$ ls -F ~/.mainworthy  # after an archive transfer
+mainworthy.db  mainworthy.db-shm  mainworthy.db-wal  server.lock  spool/
 ```
 
 While the server runs, it also keeps a `-wal` and a `-shm` file beside the database. The three belong together. After a clean stop the `-wal` file is empty.
@@ -16,6 +16,8 @@ While the server runs, it also keeps a `-wal` and a `-shm` file beside the datab
 On `SIGTERM` or `SIGINT`, the server stops accepting connections and closes its change streams. It gives requests already in flight five seconds to send their replies before closing the remaining connections, then stops the reader threads and closes the database. A request that outlasts this wait can lose its reply. If you retry a write, send the same command id, `cmd`, so it is not applied twice. The CLI and web UI send command ids.
 
 With reader threads enabled, a background thread checkpoints every half second, and the writer keeps a 20,000-page automatic checkpoint fallback. Once read snapshots finish and a checkpoint completes, the next write can reuse the log and trim it to at most 4 MiB. The retention limit does not change when checkpoints happen. Active snapshots and large transactions can grow the log past 4 MiB, so keep room for them as well as the database.
+
+Before this limit, Bun's own SQLite on Linux, including the container, defaulted to no retention limit, `-1`. On a Mac, Bun uses Apple's libsqlite3, whose default was `32768`, or 32 KiB. The 4 MiB limit is a new bound in the container and a looser one on a Mac.
 
 The server also keeps `server.lock` and uses `spool/` for archive transfers, both inside the data directory. Exports stage the whole archive before sending it; imports stage the whole upload before reading it. Leave enough free space on that filesystem for every concurrent transfer. Each temporary directory is private, and each archive file is readable and writable by its owner only. Completed, cancelled and rejected transfers remove their temporary files. A killed process can leave files in `spool/`; after stopping the server, you can remove that directory.
 

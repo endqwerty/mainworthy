@@ -84,6 +84,38 @@ test("another server process is refused and a killed server leaves no stale lock
 	expect((await fetch(`${restarted.url}/healthz`)).status).toBe(200);
 });
 
+test("an invalid public address is refused before waiting for another server's data directory", async () => {
+	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-lock-config-"));
+	dirs.push(dataDir);
+	const first = await serve(dataDir);
+	const refused = Bun.spawn([process.execPath, ENTRY, "serve"], {
+		env: {
+			PATH: process.env.PATH ?? "",
+			MAINWORTHY_DATA: dataDir,
+			MAINWORTHY_PORT: "0",
+			MAINWORTHY_OWNER: "robin",
+			MAINWORTHY_MODE: "local",
+			MAINWORTHY_READERS: "0",
+			MAINWORTHY_PUBLIC_URL: "http://192.0.2.1:7357",
+			MAINWORTHY_LOCK_WAIT_SECONDS: "0.15",
+		},
+		stdout: "pipe",
+		stderr: "pipe",
+		stdin: "ignore",
+	});
+	children.push(refused);
+	const [code, stdout, stderr] = await Promise.all([
+		refused.exited,
+		new Response(refused.stdout).text(),
+		new Response(refused.stderr).text(),
+	]);
+	expect(code).toBe(4);
+	expect(stdout).toBe("");
+	expect(stderr).toContain("MAINWORTHY_PUBLIC_URL is not an address this instance can use for passkeys");
+	expect(stderr).not.toContain("waiting for another server");
+	expect((await fetch(`${first.url}/healthz`)).status).toBe(200);
+});
+
 test("a replacement server waits for a stopping server to release the data directory", async () => {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-lock-handoff-"));
 	dirs.push(dataDir);

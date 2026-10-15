@@ -10,7 +10,7 @@ import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/ker
 import { OP_LIST, OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { Readers } from "../src/server/readers.ts";
-import { type Instance, start } from "../src/server/start.ts";
+import { type Instance, open, start } from "../src/server/start.ts";
 import { PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
 
 const dirs: string[] = [];
@@ -79,6 +79,36 @@ test("one data directory admits one server, releases on stop, and releases after
 	).toThrow("extra failed");
 	const third = boot("local", null, config.dataDir);
 	expect((await fetch(`${third.url}/healthz`)).status).toBe(200);
+});
+
+test.each([
+	{ setting: { publicUrl: "http://192.0.2.1:7357" }, error: "MAINWORTHY_PUBLIC_URL" },
+	{ setting: { ownerToken: "short" }, error: "MAINWORTHY_OWNER_TOKEN is shorter than 20" },
+	{ setting: { ownerToken: "x".repeat(513) }, error: "MAINWORTHY_OWNER_TOKEN is longer than 512" },
+	{ setting: { owner: "forgotten-9" }, error: "MAINWORTHY_OWNER names forgotten-9" },
+])("invalid startup configuration creates no data and takes no lock: $error", async ({ setting, error }) => {
+	const parent = mkdtempSync(join(tmpdir(), "mainworthy-start-config-"));
+	dirs.push(parent);
+	const first = boot("local");
+	const previousWait = process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
+	process.env.MAINWORTHY_LOCK_WAIT_SECONDS = "0";
+	try {
+		for (const mode of ["local", "server"] as const) {
+			const dataDir = join(parent, mode);
+			const config = { ...first.app.config, ...setting, mode, dataDir };
+			expect(() => open(config)).toThrow(error);
+			expect(existsSync(dataDir)).toBe(false);
+			expect(() => start(config, () => ({ ui: null }), { readers: 0 })).toThrow(error);
+			expect(existsSync(dataDir)).toBe(false);
+			expect(() =>
+				start({ ...config, dataDir: first.app.config.dataDir }, () => ({ ui: null }), { readers: 0 }),
+			).toThrow(error);
+		}
+	} finally {
+		if (previousWait === undefined) delete process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
+		else process.env.MAINWORTHY_LOCK_WAIT_SECONDS = previousWait;
+	}
+	expect((await fetch(`${first.url}/healthz`)).status).toBe(200);
 });
 
 test("an invalid lock wait refuses startup before creating the data directory", () => {
