@@ -11,7 +11,7 @@ import type { Policy } from "../../core/kinds.ts";
 import { parseCase } from "../../core/markdown.ts";
 import { type Conflict, mergeBodies } from "../../core/merge3.ts";
 import { CaseBody, emptyBody, REQUIREMENT_KEY, type Step, StepId, TAG } from "../../core/model.ts";
-import type { CaseStamp, Edit } from "../../core/ops.ts";
+import { CaseAlias, type CaseStamp, type Edit } from "../../core/ops.ts";
 import { parseOutline } from "../../core/outline.ts";
 import { clip } from "../../core/text.ts";
 import { type Ctx, parseRef, ref } from "../kernel/ctx.ts";
@@ -85,7 +85,15 @@ type TagChange = { set: string[] | null; add: string[]; remove: string[] };
 
 /** An edit with every ref looked up and every body built: exactly what `adopt` will apply. */
 export type Resolved =
-	| { op: "create"; body: CaseBody; folder: FolderTarget; tags: string[]; covers: string[]; after: number | null }
+	| {
+			op: "create";
+			body: CaseBody;
+			folder: FolderTarget;
+			tags: string[];
+			covers: string[];
+			aliases: string[];
+			after: number | null;
+	  }
 	| { op: "edit"; caseId: number; base: number; head: number; mine: CaseBody; body: CaseBody; conflicts: Conflict[] }
 	| {
 			op: "place";
@@ -134,6 +142,7 @@ const Q = {
 		methods: string;
 		automate: string;
 		steps: number;
+		aliases: string;
 		folder: number;
 		rank: string;
 		tags: string;
@@ -142,8 +151,11 @@ const Q = {
 		rev: number;
 	}>(
 		`INSERT INTO cases (project, no, head, head_hash, claim_hash, title, methods, automate, step_count, folder, rank, tags,
-		                    created_by, created_at, updated_by, updated_at, rev)
-		 VALUES ($project, $no, 1, $hash, $claim, $title, $methods, $automate, $steps, $folder, $rank, $tags, $actor, $at, $actor, $at, $rev)`,
+		                    aliases, created_by, created_at, updated_by, updated_at, rev)
+		 VALUES ($project, $no, 1, $hash, $claim, $title, $methods, $automate, $steps, $folder, $rank, $tags, $aliases, $actor, $at, $actor, $at, $rev)`,
+	),
+	insertAlias: sql<{ project: number; alias: string; id: number }>(
+		"INSERT INTO case_aliases (project, alias, case_id) VALUES ($project, $alias, $id)",
 	),
 	moveHead: sql<{
 		id: number;
@@ -440,6 +452,7 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 	const resolved: Resolved[] = [];
 	const conflicts: Sealed["conflicts"] = [];
 	const cases = new Set<string>();
+	const aliases = new Set<string>();
 	const lookup = (text: string): CaseRow => {
 		const row = mustCase(ctx.db, ctx.project.id, text);
 		cases.add(caseRef(row));
@@ -449,6 +462,20 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 	for (const edit of input.edits) {
 		switch (edit.op) {
 			case "create": {
+				const keptAliases = [
+					...new Set(
+						(edit.aliases ?? []).map((alias) => {
+							const parsed = CaseAlias.safeParse(alias);
+							if (!parsed.success) throw invalid(`invalid case alias ${JSON.stringify(alias)}`);
+							return parsed.data;
+						}),
+					),
+				];
+				for (const alias of keptAliases) {
+					if (aliases.has(alias) || ctx.db.get(Q.caseByAlias, { project: ctx.project.id, alias }))
+						throw conflict(`case alias ${alias} is already in use`);
+					aliases.add(alias);
+				}
 				let built: { body: PartialBody; tags: string[]; covers: string[] } = {
 					body: edit.body ?? {},
 					tags: [],
@@ -464,6 +491,7 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 					folder: folderTarget(index, folder),
 					tags: cleanTags([...built.tags, ...(edit.tags ?? [])]),
 					covers: cleanCovers([...built.covers, ...(edit.covers ?? [])]),
+					aliases: keptAliases,
 					after: after?.id ?? null,
 				});
 				break;
@@ -651,6 +679,10 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 	for (const edit of resolvedOf(proposal)) {
 		switch (edit.op) {
 			case "create": {
+				for (const alias of edit.aliases ?? []) {
+					if (ctx.db.get(Q.caseByAlias, { project: ctx.project.id, alias }))
+						throw conflict(`case alias ${alias} is already in use`);
+				}
 				const folder = ensureFolder(ctx, edit.folder);
 				const rank = rankAfter(ctx, folder, edit.after);
 				const no = ctx.nextNo("case");
@@ -667,10 +699,13 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 					folder,
 					rank,
 					tags: JSON.stringify(edit.tags),
+					aliases: JSON.stringify(edit.aliases ?? []),
 					actor: author,
 					at: ctx.now,
 					rev: ctx.seq,
 				});
+				for (const alias of edit.aliases ?? [])
+					ctx.db.run(Q.insertAlias, { project: ctx.project.id, alias, id: lastId });
 				insertVersion(ctx, witness, proposal, lastId, 1, null, edit.body, hash);
 				writeTags(ctx, lastId, edit.tags);
 				indexCase(ctx, lastId, edit.body, edit.tags);

@@ -41,6 +41,83 @@ You can read it with any tool that reads text, search it with `grep`, and keep i
 
 The archive holds everything except three things. It leaves out tokens, because they are credentials, and the search index, which Mainworthy rebuilds on import. It also leaves out which changes have ended: after an import every change is open, and the questions that were closed when one ended stay closed. If a failure on such a change is reported again, say once more that the change ended (`mainworthy change`). Anyone who reads the archive reads your cases and decisions, so store it as you would the data itself.
 
+## Bring cases from another tool
+
+Use `mainworthy import` with `--format csv`, `--format testrail`, or `--format qase`
+to propose cases in the selected project. Unlike an archive import, this adds cases
+to an existing project. Each file becomes one proposal under the project's policy.
+Exit code 0 means adopted. Exit code 2 means the proposal needs attention; its reply
+names the proposal and question. Accept it through the queue when the policy asks.
+
+```sh
+mainworthy import cases.csv --format csv --project checkout
+mainworthy import testrail.csv --format testrail --project checkout
+mainworthy import qase.csv --format qase --case-prefix PAY --project checkout
+```
+
+The file must use UTF-8, comma separators and a header row. Quoted cells may contain
+commas, doubled quotes and line breaks. Each file is limited to 32 MB and 5,000 cases.
+Mainworthy parses the whole file before sending it. A malformed file or an alias
+already in use refuses the entire proposal. Imports create cases; they do not update
+cases with matching foreign ids. Keep the proposal receipt if a connection fails,
+and check the project before sending a file again, especially one without ids.
+
+For a spreadsheet, use these exact headers. Only `title` is required.
+
+| Header | Meaning |
+| --- | --- |
+| `id` | Foreign alias, such as `OLD123`. Leave empty if none exists. |
+| `title` | Case title, from 1 to 300 characters. |
+| `preconditions` | Preconditions as text. |
+| `steps` | One action block, which may contain line breaks. |
+| `expected` | Expected result for that action block. |
+| `execution_type` | `manual`, `automated`, `to-be-automated`, or `not-applicable`. Empty means manual. |
+| `folder` | Folder path, such as `Checkout/Coupons`. |
+| `tags` | Comma-separated tags that follow Mainworthy's tag grammar. |
+
+```csv
+id,title,steps,expected,execution_type
+OLD123,Apply coupon,Enter SAVE10,Total falls by 10%,to-be-automated
+```
+
+An automated case gets the `auto` method. A manual case gets `human`.
+`to-be-automated` keeps `human` and sets automation intent to `wanted`;
+`not-applicable` keeps `human` and sets intent to `not-applicable`.
+
+TestRail CSV must include `ID` and `Title`. `C1234` remains an alias, so
+`mainworthy get C1234` reads the imported case. Include `Section` and `Section Depth`
+to recreate nested folders, including their parents. Text steps use `Steps` and
+`Expected Result`; separated steps use `Steps (Step)` and `Steps (Expected Result)`.
+A following row with an empty id and title, or the same id and title, adds a step.
+`Automation Type` uses the execution values above. If it is empty or absent,
+`Type` equal to `Automated` selects `auto`; other testing types keep `human`.
+`References` entries that are requirement keys become coverage links.
+
+Qase CSV supports the older `id` header and the current `v2.id` header, with `title`.
+Numeric ids become `QASE-123` by default. Pass the source project key with
+`--case-prefix PAY` to keep an alias such as `PAY-123`. Suite definition rows and
+`suite_id`, `suite_parent_id`, and `suite` become folder paths. The `automation`
+slugs `is-not-automated`, `to-be-automated`, and `automated` map to the methods and
+intent above. `steps_actions`, `steps_result`, and `steps_data` must have matching
+numbered entries. Step data follows its action under `Data:`. Current v2 classic
+steps decode their quoted JSON strings; Gherkin actions stay plain text. Child
+steps become flat steps with paths such as `[1.1]` in their actions. Use v2 when
+an older export has multiline step content that cannot be read as numbered lines.
+
+Aliases are unique within a project and case-sensitive. They contain at most 120
+ASCII letters, digits, `_`, `.`, `:`, `/`, or `-`, and start with a letter or digit.
+An alias cannot be a bare number or start with `C-`, `Q-`, `R-`, `T-`, or `P-`,
+in either letter case, because those names belong to Mainworthy.
+
+Every source case column, including dates, descriptions, custom fields and any history
+column, stays in the case body's `fields` as JSON under `import.<format>.row.<record>`.
+Read it with `mainworthy get C1234 --md` or export the instance. Tags outside
+Mainworthy's grammar stay there but do not become tags. The imported case starts
+at version 1 with the importing actor and time; source metadata does not create
+native revisions, results, actors, or decisions. The checked vendor CSV examples
+contain snapshots, not revision history. XML, JSON, XLSX, attachments and replay
+of earlier revisions or results are not supported by these case importers.
+
 ## Import into a new instance
 
 An import loads an archive into a new instance and makes it a copy of the one that exported it. It does not merge. The server keeps answering reads during the import; writes wait until it finishes.

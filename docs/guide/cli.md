@@ -56,7 +56,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy fmt <file> [--json]` | Print canonical case Markdown. Parse errors include source line numbers. |
 | `mainworthy check [--limit <number>] [--json]` | Print suite problems grouped by rule. Exit 0 with none, 1 with problems. |
 | `mainworthy export --out <file> [--json]` | Stream the instance's lossless archive to a file. A .gz suffix enables gzip. |
-| `mainworthy import <file> [--json]` | Stream an archive into a fresh instance, replacing its bootstrap rows. Supports gzip. |
+| `mainworthy import <file> [--format csv\|testrail\|qase] [--case-prefix QASE] [--json]` | Import an archive into a fresh instance, or propose cases from CSV, TestRail or Qase. |
 | `mainworthy mcp` | Serve MCP on stdin/stdout, forwarding tools to the running HTTP server. |
 | `mainworthy open [--json]` | Print the web UI URL of the running instance. |
 | `mainworthy health [--url <url>] [--json]` | Check that the server answers. Exit 0 when it does, 1 when it does not. |
@@ -116,6 +116,11 @@ Flags of `mainworthy check`:
 Flags of `mainworthy export`:
 
 - `--out <string>`: Archive destination. Use .gz for gzip.
+
+Flags of `mainworthy import`:
+
+- `--format <string>`: Case CSV format: csv, testrail or qase. Omit for a Mainworthy archive.
+- `--case-prefix <string>`: Qase source project key for foreign aliases. Defaults to QASE.
 
 ### One command per operation
 
