@@ -137,6 +137,13 @@ is under the GitHub milestone `iOS app`.
   nothing was written to. Do not add a second way to date a row, and do not put a time in an operation's input.
   What `mainworthy seed` writes is decided in `src/cli/demo/`, which is pure: the same seed, cases and days give
   the same requests, or a seed sent again is refused as another request.
+- **A feature adds to the demo** (the owner, 2026-10-15). The owner tries a change on the instance's project
+  `demo`, which every deploy empties and seeds again (`MAINWORTHY_DEMO`, `src/cli/demo.ts`). So a new feature, or a
+  change to one, adds what uses it to the demo in the same pull request when the demo has nothing that does:
+  `src/cli/demo/` decides what is written (the history in `history.ts`, the cases in `cases.ts` and `catalog.ts`)
+  and `src/cli/seed.ts` sends it. Draw nothing new from an existing random stream, so the rest of the demo stays
+  as it was (`end` and `archive` in `history.ts` show how). Leave it out only when that is truly unreasonable (it
+  needs an outside service, a person's credentials, or people on the instance), and say why in the pull request.
 - **Budgets are tests** (`test/budgets.test.ts`, `bench/`). A change that misses a
   hot-path budget does not merge; do not raise the number.
 - **The check's wall time is a budget** (`scripts/check-plan.ts`). The check warns
