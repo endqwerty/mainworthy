@@ -230,6 +230,22 @@ a case made for each such test, or have each file raise an unlinked-test questio
 where `strict` starts. See [policy](./policy.md#tests-with-no-case).
 An unlinked automated test still counts toward the commit gate.
 
+## Read what each test did
+
+Press <kbd>g</kbd> <kbd>t</kbd> to open Tests. It lists every automated test the project's
+reports have named, the newest first, with its file and its case or "no case". Type in the
+filter to find one by name or file, and check "Only tests with no case" to see the tests
+tracked without one. <kbd>j</kbd> and <kbd>k</kbd> move between tests.
+
+A test's page shows its file, its key and its case, how often it flipped between passing
+and failing on the same code, and its quarantine when one is in force. "Latest results"
+lists its last twenty results, newest first: the outcome, the commit and change it was
+reported for, the job, the attempt, how long it took, who reported it, and the failure
+message. "build" opens the CI build when the report named one.
+
+To see every result of one commit, open its change in [Changes](./changes.md#read-the-results-behind-the-verdict).
+From the command line, `mainworthy get T-12` prints the same page.
+
 ## Read the result's basis
 
 To report execution of a deployed artifact, use `--build <label> --env <environment>`.

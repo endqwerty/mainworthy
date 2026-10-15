@@ -283,6 +283,17 @@ export function openFor(db: Db, project: number, fingerprint: string, target: nu
 	return seenHere ?? opened[0] ?? null;
 }
 
+/** A failure's cause in a scope: one question asks about it, whichever tests and runs show it. */
+const failureFingerprint = (signature: string, scope: string): string =>
+	contentHash({ kind: "failure", key: `${signature}|${scope}` });
+
+/** The open question about a failure's cause, which a gate that shows the failure unexplained waits for. */
+export const openFailureQuestion = (
+	db: Db,
+	project: number,
+	cause: { signature: string; scope: string; target: number },
+): QuestionRow | null => openFor(db, project, failureFingerprint(cause.signature, cause.scope), cause.target);
+
 const seenHash = (basis: string, target: number | undefined): string => contentHash({ basis, target: target ?? null });
 
 /**
@@ -972,7 +983,11 @@ export function raiseFailure(
 	const scopeKind = group.scope.startsWith("change:") ? "change" : group.scope.startsWith("line:") ? "trunk" : "run";
 	const key = `${group.signature.hash}|${group.scope}`;
 	// One question per cause: an occurrence adds its tests to the open question instead of opening another.
-	const open = openFor(ctx.db, ctx.project.id, contentHash({ kind: "failure", key }), target.id);
+	const open = openFailureQuestion(ctx.db, ctx.project.id, {
+		signature: group.signature.hash,
+		scope: group.scope,
+		target: target.id,
+	});
 	const earlier = open
 		? json<{
 				tests?: { id: number; t: string; name: string; case: string | null; counted?: boolean }[];
@@ -1080,8 +1095,11 @@ function askUnexplained(ctx: Ctx, run: RunRow): boolean {
 	for (const cause of unexplainedShown(ctx.db, run)) {
 		const signature = signatureById(ctx.db, cause.signature);
 		if (!signature) continue;
-		const fingerprint = contentHash({ kind: "failure", key: `${signature.hash}|${cause.scope}` });
-		const open = openFor(ctx.db, ctx.project.id, fingerprint, cause.target);
+		const open = openFailureQuestion(ctx.db, ctx.project.id, {
+			signature: signature.hash,
+			scope: cause.scope,
+			target: cause.target,
+		});
 		if (open && (json<{ targets?: number[] }>(open.evidence).targets ?? []).includes(cause.target)) {
 			// Already asked. If the question did not name this run yet, the run is recomputed to list it.
 			if (alsoAbout(ctx, open, [runRef(run)]) > 0) asked = true;

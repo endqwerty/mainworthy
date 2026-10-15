@@ -165,6 +165,7 @@ test.skipIf(!browserAvailable)(
 				`/p/scratch/runs`,
 				`/p/scratch/runs/${run.slice(2)}`,
 				"/p/scratch/changes/pr%3A482",
+				"/p/scratch/tests",
 				"/p/scratch/settings",
 			];
 			let listed = 0;

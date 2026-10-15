@@ -618,8 +618,10 @@ export const FindInput = z.object({
 	in: z
 		.union([
 			z.enum(["cases", "tests", "runs", "folders", "tags", "requirements", "slots", "changes"]),
-			// Deployments are listed for CLI and HTTP; MCP's find keeps its earlier choices.
+			// Deployments and results are listed for CLI and HTTP; MCP's find keeps its earlier choices, whose
+			// tools/list is at its token budget (src/surfaces/mcp.ts).
 			z.literal("deployments").meta({ "x-mcp-hidden": true }),
+			z.literal("results").meta({ "x-mcp-hidden": true }),
 		])
 		.default("cases"),
 	text: z.string().max(200).optional(),
@@ -628,6 +630,9 @@ export const FindInput = z.object({
 	tags: z.array(z.string()).optional(),
 	state: z.string().optional(),
 	run: z.string().optional().describe("For slots: the run."),
+	commit: z.string().optional().describe("For results: the commit.").meta({ "x-mcp-hidden": true }),
+	change: z.string().optional().describe("For results: a change key (pr:482).").meta({ "x-mcp-hidden": true }),
+	repo: z.string().optional().meta({ "x-mcp-hidden": true }),
 	unlinked: z.boolean().optional().describe("For tests: only those with no case."),
 	limit,
 	cursor,

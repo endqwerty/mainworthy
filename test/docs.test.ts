@@ -153,6 +153,7 @@ describe("what the docs must name", () => {
 			queue: "queue",
 			runs: "run",
 			changes: "Changes",
+			tests: "Tests",
 			settings: "Settings",
 		};
 		for (const [screen, slug] of Object.entries(SCREEN_DOCS)) {

@@ -103,6 +103,30 @@ const Result = z.looseObject({
 	atStep: nullableText,
 	signature: nullableText,
 	corrects: whole.nullable(),
+	commit: nullableText,
+	change: nullableText,
+	job: text,
+	build: nullableText,
+});
+/** A test as a commit's gate counted it: `find --in results`. */
+const CountedResult = z.looseObject({
+	result: whole,
+	test: text.regex(/^T-\d+$/),
+	name: text,
+	file: nullableText,
+	case: nullableText,
+	outcome: text,
+	standing: text,
+	quarantined: flag,
+	question: nullableText,
+	attempt: whole,
+	durationMs: number.nullable(),
+	message: nullableText,
+	job: text,
+	by: text,
+	at: number,
+	commit: nullableText,
+	build: nullableText,
 });
 const TestSummary = z.looseObject({
 	quarantine: Quarantine.nullable(),
@@ -242,6 +266,7 @@ const GetRow: z.ZodType<Record<string, unknown>> = z.union([
 export const GetReply = z.array(GetRow);
 const FindRow: z.ZodType<Record<string, unknown>> = z.union([
 	CaseSummary,
+	CountedResult,
 	Run,
 	Slot,
 	TestSummary,
@@ -255,6 +280,8 @@ export const FindReply = z.looseObject({
 	count: whole.nullable(),
 	cursor: nullableText,
 	items: z.array(FindRow),
+	/** For results: every row the gate counts, by how it counts them, whatever the filter. */
+	tally: counts.optional(),
 });
 export const ImpactReply = z.looseObject({
 	change: z.union([

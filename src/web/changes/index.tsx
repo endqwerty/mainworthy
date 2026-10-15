@@ -7,6 +7,7 @@ import { useBindings } from "../lib/keys.ts";
 import { navigate, refUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, ListRow, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
+import { ChangeResults, STANDING_LABELS, type Standing, standingOf } from "./results.tsx";
 import "./changes.css";
 
 const Change = z.object({
@@ -41,6 +42,7 @@ export function ChangesScreen() {
 function ChangesWorkbench() {
 	const { project, route, overlayOpen } = useApp();
 	const [cursor, setCursor] = useState<string | null>(null);
+	const [standing, setStanding] = useState<Standing | null>(null);
 	const read = useQueryOp({ project, op: "find", input: { in: "changes", limit: 100 } });
 	const parsed = Change.array().safeParse(read.data?.items);
 	const changes = parsed.success ? parsed.data : [];
@@ -67,6 +69,7 @@ function ChangesWorkbench() {
 	const go = (ref: string) => navigate(refUrl({ project, ref }));
 	const choose = (change: string) => {
 		setCursor(change);
+		setStanding(null);
 		navigate(routeUrl({ project, screen: "changes", ref: change }), { replace: true });
 	};
 	const move = (delta: number) => {
@@ -145,11 +148,26 @@ function ChangesWorkbench() {
 								<div className="change-tally">
 									{Object.entries(gateData.tally)
 										.filter(([, count]) => count > 0)
-										.map(([label, count]) => (
-											<span key={label}>
-												{count} {label}
-											</span>
-										))}
+										.map(([label, count]) => {
+											const shows = standingOf(label);
+											return shows ? (
+												<button
+													type="button"
+													key={label}
+													className={`s-${shows}`}
+													onClick={() => {
+														setStanding(shows);
+														document.getElementById("change-results")?.scrollIntoView({ block: "start" });
+													}}
+												>
+													{count} {STANDING_LABELS[shows]}
+												</button>
+											) : (
+												<span key={label}>
+													{count} {label}
+												</span>
+											);
+										})}
 								</div>
 							)}
 							<SectionHeading>Open questions</SectionHeading>
@@ -201,6 +219,7 @@ function ChangesWorkbench() {
 								</div>
 							))}
 							{settledData?.items.length === 0 && <p className="dim">No decisions on this change yet.</p>}
+							<ChangeResults key={key} change={key} standing={standing} choose={setStanding} />
 							<SectionHeading>Impact</SectionHeading>
 							{impact.error && <p role="status">{impact.error.message}</p>}
 							{impactData.success && (
