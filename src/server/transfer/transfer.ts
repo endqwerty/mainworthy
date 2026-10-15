@@ -67,6 +67,7 @@ type Table = {
  * Tracker credentials are process configuration and never enter a table or archive.
  * `scope_moves` is also omitted: targets and runs carry the resulting scope, but an import loses the move audit
  * trail (decision 0038). Keeping it out lets older archives import without a format change.
+ * `commit_statuses` holds GitHub commit status enrollment and delivery state. An import must not enroll historical commits.
  */
 export const UNEXPORTED: readonly string[] = [
 	"sessions",
@@ -78,6 +79,8 @@ export const UNEXPORTED: readonly string[] = [
 	"tracker_requests",
 	"scope_moves",
 	"demo_projects",
+	"commit_statuses",
+	"commit_status_delivery",
 ];
 
 /** The row counts describe exported data, excluding migration metadata, credentials and the search index. */

@@ -206,5 +206,31 @@ The result stays recorded in either case. The decision changes what the failure
 means for the gate. Withdrawing an excuse can block the gate again.
 See [decide](./decide.md#explain-a-failure) for duration and later occurrences.
 
-Mainworthy does not yet post the verdict as a code-host check.
-Use the `gate` exit code in CI and follow the question links in the web app.
+## Publish the gate as a GitHub commit status
+
+Give a fine-grained personal access token **Commit statuses: write** permission for the repository. A classic token with the `repo:status` scope also works. The token's user needs push access to that repository. Keep the token in the server's secret environment as `MAINWORTHY_GITHUB_TOKEN`. Set these server variables too:
+
+```sh
+MAINWORTHY_GITHUB_PROJECT=scratch
+MAINWORTHY_GITHUB_REPOSITORY=example/shop
+MAINWORTHY_PUBLIC_URL=https://mainworthy.example
+MAINWORTHY_GITHUB_STATUSES=1
+```
+
+See [configuration](./configuration.md) for the shared GitHub variables. If you also send GitHub defect requests, a fine-grained token needs **Issues: write** permission.
+
+Restart the server, then report results with that repository and the full, lowercase, forty-character commit hash. A report from a pipeline or a person enrolls the commit. Reports accepted before publication was enabled are not enrolled. Agent-only reports do not enroll a commit.
+
+On the pull request, look for `mainworthy/gate` among the status checks. It shows the gate's reason, shortened to 140 characters, and links to the change on the instance. A trunk commit links to its run. GitHub shows success for `passed`, failure for `failed`, error for `blocked`, and pending for `pending`.
+
+Later decisions, withdrawals, reports, and expired holds post a newer status in the same context without rerunning CI. GitHub displays the latest status for that context. A commit gets at most one publication attempt per minute. Intermediate changes combine into the latest verdict; unchanged accepted content sends nothing. The job handles up to twenty commits per run, with shared rolling limits of twenty posts per minute and 240 per hour. Failed and uncertain attempts count toward both limits.
+
+If GitHub refuses a post, is unreachable, or its reply is lost, Mainworthy retries the current gate with exponential back-off. The delay starts at one minute, doubles after each unsuccessful attempt, and stops growing at one hour. After sixteen consecutive failed or uncertain attempts, that commit stops delivery with one fixed diagnostic. A new counted report resumes it, subject to any existing delay. Check connectivity, repository access, and Commit statuses write permission before reporting again. A successful post resets the attempt count.
+
+An HTTP 429 pauses status posts for every commit, including newly enrolled commits. An HTTP 403 does so only when `x-ratelimit-remaining` is zero or `retry-after` is valid. Mainworthy waits for the longest of the exponential delay and applicable headers. It uses `x-ratelimit-reset` only with remaining zero or a valid `retry-after`, and caps each header-derived pause at one day. Repeated rate-limit replies increase the shared delay too, even across different commits. Other 403 replies, including missing permission, use the ordinary per-commit back-off, starting at one minute. The pause, attempt counts, and rolling limits survive a restart. No response body or exception text is stored or logged. GitHub allows 1,000 statuses per commit and context, so repeated changes or uncertain retries can eventually exhaust that limit.
+
+After thirty days without a gate-payload change or a new counted report, an accepted commit stops automatic reconciliation. GitHub keeps its last status. Later decisions on that commit publish only after another counted report resumes reconciliation. Failed deliveries stop after the sixteen-attempt bound, even if the gate changes. Decisions alone do not resume a stopped commit.
+
+Status delivery, shared limits, and enrollment are excluded from archives. Imported history does not publish statuses until a new counted report enrolls a commit. The token stays in process configuration.
+
+The published status is separate from the workflow step that ran `mainworthy gate`. A later decision can make `mainworthy/gate` green while that earlier step stays red. Choose required status checks accordingly, and keep runner setup failures and missing reports as CI failures.

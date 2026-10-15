@@ -49,6 +49,7 @@
     "test/e2e/settings.test.ts": 2293,
     "test/e2e/headers.test.ts": 2201,
     "test/e2e/people-passkey.test.ts": 2140,
+    "test/github-statuses.test.ts": 2010,
     "test/e2e/browser.test.ts": 1974,
     "test/e2e/passkey-verifier.test.ts": 1859,
     "test/policy.test.ts": 1217,

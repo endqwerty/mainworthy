@@ -17,6 +17,8 @@ import { type Actor, allProjects } from "./kernel/ctx.ts";
 import { lockInstance } from "./kernel/instance-lock.ts";
 import { createProject } from "./ops/admin.ts";
 import { Readers, readerCount } from "./readers.ts";
+import type { StatusPort } from "./statuses/port.ts";
+import { deliverCommitStatuses, stopCommitStatuses, waitCommitStatuses } from "./statuses/statuses.ts";
 import type { TrackerPort } from "./trackers/port.ts";
 import { deliverTrackerRequests, stopTrackerRequests, waitTrackerRequests } from "./trackers/requests.ts";
 
@@ -74,6 +76,7 @@ export function start(
 		patience?: Patience;
 		now?: () => number;
 		trackerPort?: TrackerPort;
+		statusPort?: StatusPort;
 	} = {},
 ): Instance {
 	validateBootstrap(config);
@@ -117,6 +120,7 @@ export function start(
 			["ending expired sessions", app.gate.run(() => sweepSessions(app))],
 			["deleting old sign-in records", app.gate.run(() => sweepSignInRecords(app))],
 			["sending tracker requests", deliverTrackerRequests(app, options.trackerPort)],
+			["posting GitHub commit statuses", deliverCommitStatuses(app, options.statusPort)],
 		] as const;
 		for (const [name, job] of jobs) {
 			await job.catch((error: unknown) => console.error(`[mainworthy] ${name} failed:`, error));
@@ -134,8 +138,10 @@ export function start(
 			stopping ??= (async () => {
 				clearInterval(timer);
 				stopTrackerRequests(app);
+				stopCommitStatuses(app);
 				await server.stop();
 				await waitTrackerRequests(app);
+				await waitCommitStatuses(app);
 				await app.readers?.stop();
 				// No request is being served any more. What was noted since the last minute is written, so a
 				// session used a moment ago is not found idle by the next start.

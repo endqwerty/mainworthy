@@ -555,6 +555,8 @@ function exportedTables(db: Db): string[] {
 				"tracker_requests",
 				"scope_moves",
 				"demo_projects",
+				"commit_statuses",
+				"commit_status_delivery",
 			].includes(name) &&
 			!name.startsWith("search_docs") &&
 			!name.startsWith("sqlite_"),
@@ -1126,6 +1128,8 @@ describe("Mainworthy instance archives", () => {
 		for (const table of UNEXPORTED) expect(to.raw.query(`SELECT * FROM ${table}`).all()).toEqual([]);
 		expect([...UNEXPORTED].sort()).toEqual([
 			"change_ends",
+			"commit_status_delivery",
+			"commit_statuses",
 			"credentials",
 			"demo_projects",
 			"invitations",

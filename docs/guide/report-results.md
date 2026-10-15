@@ -332,8 +332,9 @@ variables, and the pipeline token as a repository secret.
 Keep missing reports and failed runner setup as CI failures. A gate cannot prove
 that a job ran when the job sent no evidence. For a planned run, require named jobs
 as described in [runs](./runs.md#require-ci-jobs).
-Mainworthy does not yet post a check to your code host. The `gate` command's exit
-code is what makes this workflow step pass or fail.
+The `gate` command's exit code makes this workflow step pass or fail.
+An operator can also [publish a GitHub commit status](./changes.md#publish-the-gate-as-a-github-commit-status)
+that updates after a later decision. It does not change this workflow step's recorded exit code.
 
 ## Say when a pull request ends
 

@@ -63,6 +63,7 @@ export type Config = {
 	 */
 	passwordCost?: { memoryCost: number; timeCost: number };
 	github?: { project: string; repository: string; token: string };
+	githubStatuses?: boolean;
 };
 
 /**
@@ -283,11 +284,15 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 	};
 }
 
-function githubOf(env: Record<string, string | undefined>): Pick<Config, "github"> {
+function githubOf(env: Record<string, string | undefined>): Pick<Config, "github" | "githubStatuses"> {
 	const project = env.MAINWORTHY_GITHUB_PROJECT?.trim();
 	const repository = env.MAINWORTHY_GITHUB_REPOSITORY?.trim();
 	const token = env.MAINWORTHY_GITHUB_TOKEN?.trim();
-	if (!project && !repository && !token) return {};
+	const statuses = env.MAINWORTHY_GITHUB_STATUSES?.trim();
+	if (statuses && statuses !== "0" && statuses !== "1") throw new Error("MAINWORTHY_GITHUB_STATUSES must be 0 or 1.");
+	if (statuses === "1" && !env.MAINWORTHY_PUBLIC_URL)
+		throw new Error("MAINWORTHY_GITHUB_STATUSES requires MAINWORTHY_PUBLIC_URL for commit status links.");
+	if (!project && !repository && !token && statuses !== "1") return {};
 	if (!project || !repository || !token)
 		throw new Error(
 			"Set MAINWORTHY_GITHUB_PROJECT, MAINWORTHY_GITHUB_REPOSITORY and MAINWORTHY_GITHUB_TOKEN together.",
@@ -300,5 +305,5 @@ function githubOf(env: Record<string, string | undefined>): Pick<Config, "github
 	)
 		throw new Error("MAINWORTHY_GITHUB_REPOSITORY must be owner/repository on github.com.");
 	if (!/^[!-~]{1,512}$/.test(token)) throw new Error("MAINWORTHY_GITHUB_TOKEN must be a token without whitespace.");
-	return { github: { project, repository, token } };
+	return { github: { project, repository, token }, ...(statuses === "1" ? { githubStatuses: true } : {}) };
 }

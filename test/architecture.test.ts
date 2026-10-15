@@ -245,6 +245,7 @@ describe("the module map", () => {
 			],
 			"server/transfer": ["server/kernel", "server/suite"],
 			"server/trackers": ["server/kernel", "server/evidence", "server/suite"],
+			"server/statuses": ["server/kernel", "server/evidence", "server/runs"],
 		};
 		const offenders: string[] = [];
 		for (const file of files) {
@@ -311,6 +312,7 @@ describe("the module map", () => {
 		"server/runs": ["runs", "run_tests", "slots", "slot_results", "depends_on"],
 		"server/decisions": ["questions", "question_refs", "answers", "decisions"],
 		"server/trackers": ["tracker_requests"],
+		"server/statuses": ["commit_statuses", "commit_status_delivery"],
 	};
 
 	test("a module runs SQL only on the tables it owns", () => {
@@ -372,7 +374,14 @@ describe("the module map", () => {
 		const identity = owners["server/identity"] ?? [];
 		// Change endings, scope-move audit rows and demo marks preserve the old archive version (decisions 0022, 0038
 		// and 0020). Tracker delivery must never replay after import. None of these tables holds credentials.
-		const other = ["change_ends", "tracker_requests", "scope_moves", "demo_projects"];
+		const other = [
+			"change_ends",
+			"tracker_requests",
+			"scope_moves",
+			"demo_projects",
+			"commit_statuses",
+			"commit_status_delivery",
+		];
 		expect(UNEXPORTED.filter((table) => !other.includes(table)).sort()).toEqual(
 			identity.filter((table) => !exported.includes(table)).sort(),
 		);
