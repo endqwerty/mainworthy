@@ -409,6 +409,7 @@ check(
 				const top = box.top + node.clientTop;
 				return {
 					dots: dots.length,
+					dotHeight: Math.max(...dots.map((dot) => dot.getBoundingClientRect().height)),
 					clientHeight: node.clientHeight,
 					scrollHeight: node.scrollHeight,
 					visible: dots.filter((dot) => {
@@ -420,6 +421,8 @@ check(
 			console.info(`STRIP ${JSON.stringify(strip)}`);
 			expect(strip.scrollHeight).toBe(strip.clientHeight);
 			expect(strip).toMatchObject({ dots: 158, visible: 158 });
+			// The dots stay under the 24 px target size: at that size a larger run scrolls again (they are exempt).
+			expect(strip.dotHeight).toBeLessThan(24);
 			await page.locator(".run-dot").last().click();
 			const slots = page.getByRole("listbox", { name: "Run slots", exact: true });
 			expect(await slots.getByRole("option", { selected: true }).locator(".ref").innerText()).toBe("C-158");
