@@ -36,7 +36,7 @@ Most MCP clients take a command, its arguments and a set of environment variable
 
 Over HTTP, send MCP requests to `/mcp` on the server, for example `http://127.0.0.1:7357/mcp`, with the header `Authorization: Bearer <token>`. The endpoint takes `POST` only. Each request stands alone, with no session to open or close, and a body can be up to 4 MiB. Use the command line for a bigger report.
 
-A 2026-07-28 client uses `server/discover` to learn the server's capabilities, without an initialization handshake. Its requests carry the protocol and client metadata in `_meta`. Over HTTP, the SDK also sends `MCP-Protocol-Version` and `Mcp-Method`, and `Mcp-Name` for a tool call. A 2025-11-25 client keeps its `initialize` handshake and the same tools and replies.
+A 2026-07-28 client uses `server/discover` to learn the server's capabilities, without an initialization handshake. Its requests carry the protocol and client metadata in `_meta`. Over HTTP, a request must send `Mcp-Method` with its JSON-RPC method. Without it, the server returns HTTP 400 with error code `-32020`. The SDK sends this header, `MCP-Protocol-Version`, and `Mcp-Name` for a tool call. A 2025-11-25 client keeps its `initialize` handshake and the same tools and replies.
 
 Settings, Connect, shows the `/mcp` address of this instance.
 

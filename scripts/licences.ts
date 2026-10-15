@@ -5,14 +5,16 @@
 //
 // Three sources. The npm packages are the ones the build bundles into the executable (and so into the web app),
 // found by bundling the build's entry points and reading which files went in: a package that is installed and not
-// imported is not shipped and not listed. Their texts are the licence files in each package. The rest is in
+// imported is not shipped and not listed. pnpm region paths inside bundled inputs also name packages the publisher
+// embedded in its dist; their exact-version manifests and licence files are saved in `licences/npm/`.
+// Other npm texts are the licence files in each installed package. The rest is in
 // `licences/`: what the documentation's diagrams embed, and the Bun runtime that `bun build --compile` puts
 // into the executable, with every library it links (`licences/README.md` says how that list was made).
 //
 // `test/licences.test.ts` fails when the committed file is not what this prints, and when a licence is not one
 // `LICENCES` names.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { z } from "zod";
 
 const ROOT = new URL("../", import.meta.url).pathname;
@@ -87,6 +89,22 @@ export const Vendored = z.object({
 export type Package = { name: string; version: string; licence: string; dir: string; texts: string[] };
 
 const LICENCE_FILE = /^(licen[cs]e|copying|notice)([.-].*)?$/i;
+const PackageManifest = z.object({ name: z.string(), version: z.string(), license: z.string() });
+
+function readPackage(dir: string): Package {
+	const manifest = PackageManifest.parse(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")));
+	let texts = readdirSync(dir)
+		.filter((file) => LICENCE_FILE.test(file))
+		.sort();
+	const saved = join(VENDORED, "npm", `${manifest.name}@${manifest.version}`);
+	const textDir = texts.length === 0 && existsSync(saved) ? saved : dir;
+	if (textDir !== dir)
+		texts = readdirSync(textDir)
+			.filter((file) => LICENCE_FILE.test(file))
+			.sort();
+	if (texts.length === 0) throw new Error(`${manifest.name} ships no licence file: find its text before shipping it`);
+	return { name: manifest.name, version: manifest.version, licence: manifest.license, dir: textDir, texts };
+}
 
 /** The npm packages the build bundles, each once, from the files the bundler read. */
 export async function bundledPackages(): Promise<Package[]> {
@@ -98,6 +116,11 @@ export async function bundledPackages(): Promise<Package[]> {
 	});
 	const inputs = Object.keys(built.metafile?.inputs ?? {});
 	if (inputs.length === 0) throw new Error("the bundler reported no inputs: the list of packages would be empty");
+	return packagesFromInputs(inputs);
+}
+
+/** Read only bundled files, including tsdown's exact-version pnpm regions inside a publisher's dist. */
+export function packagesFromInputs(inputs: readonly string[], root: string = ROOT): Package[] {
 	const dirs = new Set<string>();
 	for (const input of inputs) {
 		const at = input.lastIndexOf("node_modules/");
@@ -105,24 +128,38 @@ export async function bundledPackages(): Promise<Package[]> {
 		const [scope, name] = input.slice(at + "node_modules/".length).split("/");
 		dirs.add(input.slice(0, at + "node_modules/".length) + (scope?.startsWith("@") ? `${scope}/${name}` : scope));
 	}
-	const packages = [...dirs].map((relative): Package => {
-		const dir = join(ROOT, relative);
-		const manifest = z
-			.object({ name: z.string(), version: z.string(), license: z.string() })
-			.parse(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")));
-		let texts = readdirSync(dir)
-			.filter((file) => LICENCE_FILE.test(file))
-			.sort();
-		const saved = join(VENDORED, "npm", `${manifest.name}@${manifest.version}`);
-		const textDir = texts.length === 0 && existsSync(saved) ? saved : dir;
-		if (textDir !== dir)
-			texts = readdirSync(textDir)
-				.filter((file) => LICENCE_FILE.test(file))
-				.sort();
-		if (texts.length === 0) throw new Error(`${manifest.name} ships no licence file: find its text before shipping it`);
-		return { name: manifest.name, version: manifest.version, licence: manifest.license, dir: textDir, texts };
-	});
-	return packages.sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
+	const packages = new Map(
+		[...dirs].map((dir) => {
+			const p = readPackage(resolve(root, dir));
+			return [`${p.name}@${p.version}`, p];
+		}),
+	);
+	for (const input of inputs) {
+		const source = readFileSync(resolve(root, input), "utf8");
+		const regions =
+			/^\/\/#region [^\r\n]*\/node_modules\/\.pnpm\/([^/\r\n]+)\/node_modules\/((?:@[^/\r\n]+\/)?[^/\r\n]+)\//gm;
+		for (const region of source.matchAll(regions)) {
+			const [, store, name] = region;
+			if (!store || !name) throw new Error(`cannot read a vendored package region in ${input}`);
+			const prefix = `${name.replace("/", "+")}@`;
+			if (!store.startsWith(prefix)) throw new Error(`cannot read the vendored version of ${name} in ${input}`);
+			// pnpm appends peer resolutions after the version, with `_` or parentheses.
+			const version = z
+				.string()
+				.regex(/^\d+\.\d+\.\d+(?:[-+][\w.+-]+)?$/)
+				.parse(store.slice(prefix.length).split(/[_(]/)[0]);
+			const id = `${name}@${version}`;
+			if (packages.has(id)) continue;
+			const dir = join(root, "licences", "npm", name, version);
+			if (!existsSync(join(dir, "package.json"))) {
+				throw new Error(`${id} is embedded in ${input}: save its published manifest and licence files in ${dir}`);
+			}
+			const p = readPackage(dir);
+			if (p.name !== name || p.version !== version) throw new Error(`${dir} must hold the published manifest of ${id}`);
+			packages.set(id, p);
+		}
+	}
+	return [...packages.values()].sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
 }
 
 const readJson = (path: string): unknown => JSON.parse(readFileSync(join(VENDORED, path), "utf8"));

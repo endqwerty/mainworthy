@@ -11,6 +11,7 @@ build bundles and from this directory (decision 0025). The directory holds what 
 | `bun-1.4.3/components.json` | Every part of Bun 1.4.3 that is or may be linked into its Linux binary, with its licence files |
 | `bun-1.4.3/texts/` | Those licence files, exactly as each project publishes them, each text once |
 | `bun-1.4.3/audit.tsv` | The audit's decision for each of 444 parts it looked at, linked or not, and why |
+| `npm/<name>/<version>/` | Published manifests and licence files of npm packages embedded inside another bundled package's dist |
 
 Every text is a file as its project publishes it, at the revision named, byte for byte; two parts share a text only
 when the bytes are the same. Where the audit kept a source file or a README rather than a licence file, the notice
@@ -18,6 +19,26 @@ it states is copied line for line into a file whose name ends in `.licence.txt`:
 source file, or the licence section of the README. That is kept beside the project's licence file, because a
 source file can carry a copyright and conditions of its own (WTF's `FastMalloc.cpp`) or the exception that applies
 to it (TinyCC's `libtcc1.c`).
+
+## Packages embedded in npm bundles
+
+The generator reads tsdown's `//#region .../node_modules/.pnpm/<package>@<version>/node_modules/...` paths in
+the files the build bundles. These identify code already embedded by a package's publisher, which Bun's input
+list cannot name separately. Repeated regions count once per package and version. pnpm's peer-resolution suffix
+is not part of the version. A region whose exact version has no installed or saved manifest and licence fails
+generation and the licence tests.
+
+For a new embedded package or version, run `npm pack <name>@<version> --ignore-scripts` under `~/.cache`.
+Copy its `package.json` and every root licence and NOTICE file from the published tarball, byte for byte, into
+`licences/npm/<name>/<version>/`, then run `bun scripts/licences.ts`. The generator checks that the saved
+manifest names the package and version in the region. It also checks the licence against `LICENCES` through
+`test/licences.test.ts`. A licence that list does not name needs the owner's acceptance.
+
+The six packages currently saved here come from the npm tarballs for Ajv 8.18.0, ajv-formats 3.0.1,
+content-type 1.0.5, fast-deep-equal 3.1.3, fast-uri 3.1.0, and json-schema-traverse 1.0.0, embedded in
+`@modelcontextprotocol/server` 2.3.1. Only files the build reads are scanned, so an unused validator does not
+add its dependencies. Inspect the publisher's dist when upgrading: a bundler that drops or changes these
+regions needs another discovery method before its embedded packages can be accounted for.
 
 ## The Bun audit
 
