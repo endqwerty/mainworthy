@@ -107,13 +107,19 @@ test("actor forget requires a named confirmation, removes access, and preserves 
 	await withInstance(
 		async ({ cli, run, client }) => {
 			const made = Token.parse(await client.call("admin", { do: "token.create", actor: "forget-cli", kind: "human" }));
-			const unconfirmed = await cli(["actor", "forget", "forget-cli"]);
+			const listed = outputWith(
+				z.array(z.object({ name: z.string(), owner: z.boolean().optional() })),
+				await run(["actor", "list", "--json"]),
+			);
+			expect(listed.find((actor) => actor.name === "robin")).toEqual({ name: "robin", owner: true });
+			expect(listed.find((actor) => actor.name === "forget-cli")).toEqual({ name: "forget-cli", owner: false });
+			const unconfirmed = await run(["actor", "forget", "forget-cli"]);
 			expect(unconfirmed.code).toBe(4);
 			expect(unconfirmed.stderr).toContain("--confirm forget-cli");
 			expect(unconfirmed.stderr).toContain("text the person typed in cases and notes stay");
 			expect((await run(["actor", "forget", "forget-cli", "--confirm", "somebody-else"])).code).toBe(4);
 			expect((await run(["actor", "list"])).stdout).toContain("forget-cli");
-			const forgotten = await run(["actor", "forget", "forget-cli", "--confirm", "forget-cli", "--json"]);
+			const forgotten = await cli(["actor", "forget", "forget-cli", "--confirm", "forget-cli", "--json"]);
 			expect(forgotten.code).toBe(0);
 			expect(outputWith(z.object({ forgotten: z.string(), tokensRevoked: z.number() }), forgotten)).toEqual({
 				forgotten: "forgotten-3",

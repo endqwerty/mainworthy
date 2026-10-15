@@ -2,6 +2,7 @@
 // password, the sessions, and invitations.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Page } from "playwright-core";
+import { z } from "zod";
 import type { Capability } from "../../src/core/kinds.ts";
 import { browserAvailable, eventually, openPage, type PageHarness, type Server, startServer } from "./support.ts";
 
@@ -54,19 +55,26 @@ test.skipIf(!browserAvailable)(
 			expect(tokenNumber).toMatch(/^token \d+$/);
 			const refreshed = page.locator(".settings-token").filter({ hasText: `${tokenNumber} ·` });
 			await issued.getByRole("button", { name: "Revoke forget-web", exact: true }).waitFor();
+			const trigger = page.getByRole("button", { name: "Forget this person", exact: true });
+			expect(await trigger.isDisabled()).toBe(true);
 			await page.getByLabel("Person to forget", { exact: true }).selectOption("forget-web");
+			await trigger.click();
 			await page.getByText("text the person typed in cases and notes stay", { exact: false }).waitFor();
-			const confirm = page.getByRole("button", { name: "Forget this person", exact: true });
-			expect(await confirm.getAttribute("aria-disabled")).toBe("true");
-			await page.getByLabel("Type the name to confirm", { exact: true }).press("Enter");
+			const confirm = page.getByRole("button", { name: "Forget forget-web", exact: true });
+			expect(await confirm.evaluate((element) => element === document.activeElement)).toBe(true);
+			expect(
+				await confirm.evaluate((element) => {
+					const { top, bottom } = element.getBoundingClientRect();
+					return top >= 0 && bottom <= window.innerHeight;
+				}),
+			).toBe(true);
+			await page.keyboard.press("Escape");
+			expect(await trigger.evaluate((element) => element === document.activeElement)).toBe(true);
 			expect(await rows(page).filter({ hasText: "forget-web" }).count()).toBe(1);
-			await page.getByLabel("Type the name to confirm", { exact: true }).fill("wrong-name");
-			await page.getByLabel("Type the name to confirm", { exact: true }).press("Enter");
-			expect(await rows(page).filter({ hasText: "forget-web" }).count()).toBe(1);
-			await page.getByRole("button", { name: "Cancel forgetting", exact: true }).click();
-			expect(await page.getByLabel("Person to forget", { exact: true }).inputValue()).toBe("");
-			await page.getByLabel("Person to forget", { exact: true }).selectOption("forget-web");
-			await page.getByLabel("Type the name to confirm", { exact: true }).fill("forget-web");
+			await trigger.click();
+			await page.getByRole("button", { name: "Cancel", exact: true }).click();
+			expect(await trigger.evaluate((element) => element === document.activeElement)).toBe(true);
+			await trigger.click();
 			let lostCommand = "";
 			await page.route("**/api/admin", async (route) => {
 				const input = route.request().postDataJSON();
@@ -79,7 +87,7 @@ test.skipIf(!browserAvailable)(
 				.getByRole("status")
 				.filter({ hasText: "the page cannot tell whether the person was forgotten" })
 				.waitFor();
-			expect(await page.getByLabel("Type the name to confirm", { exact: true }).inputValue()).toBe("forget-web");
+			expect(await page.getByLabel("Person to forget", { exact: true }).inputValue()).toBe("forget-web");
 			await page.unroute("**/api/admin");
 			expect(lostCommand).toMatch(/^[0-9a-f-]{36}$/);
 			const retried = page.waitForRequest(
@@ -128,32 +136,110 @@ test.skipIf(!browserAvailable)(
 			expect(tokenNumber).toMatch(/^token \d+$/);
 			const refreshed = page.locator(".settings-token").filter({ hasText: `${tokenNumber} ·` });
 			await page.getByLabel("Person to forget", { exact: true }).selectOption("forget-lost-reply");
-			await page.getByLabel("Type the name to confirm", { exact: true }).fill("forget-lost-reply");
+			await page.getByRole("button", { name: "Forget this person", exact: true }).click();
 			await page.route("**/api/admin", async (route) => {
 				if (route.request().postDataJSON().do !== "actor.forget") return route.continue();
 				await route.fetch();
 				await route.abort();
 			});
-			await page.getByRole("button", { name: "Forget this person", exact: true }).click();
+			await page.getByRole("button", { name: "Forget forget-lost-reply", exact: true }).click();
 			await page
 				.getByRole("status")
 				.filter({ hasText: "No answer came back. The person is no longer listed. The confirmation was cleared." })
 				.waitFor();
 			expect(await page.getByLabel("Person to forget", { exact: true }).inputValue()).toBe("");
-			expect(await page.getByLabel("Type the name to confirm", { exact: true }).inputValue()).toBe("");
 			expect(await rows(page).filter({ hasText: "forget-lost-reply" }).count()).toBe(0);
 			await refreshed.getByText("Revoked", { exact: true }).waitFor();
 			expect(await refreshed.locator("b").innerText()).toMatch(/^forgotten-\d+$/);
 			expect(await refreshed.getByRole("button", { name: /^Revoke / }).count()).toBe(0);
-			expect(
-				await page.getByRole("button", { name: "Forget this person", exact: true }).getAttribute("aria-disabled"),
-			).toBe("true");
+			expect(await page.getByRole("button", { name: "Forget this person", exact: true }).isDisabled()).toBe(true);
 			expect(admin.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
 		} finally {
 			await admin.close();
 		}
 	},
 	20_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"an admin forgets another person on a phone while self and owner forgetting are unavailable",
+	async () => {
+		await person("forget-admin", ["read", "admin"]);
+		await person("forget-phone", ["read"]);
+		const admin = await openPage(server, {
+			as: { name: "forget-admin", password: OLD },
+			path: "/p/scratch/settings",
+			device: "phone",
+		});
+		try {
+			const { page } = admin;
+			page.setDefaultTimeout(3000);
+			await section(page, "People");
+			const select = page.getByLabel("Person to forget", { exact: true });
+			await select.locator('option[value="forget-admin"]').waitFor({ state: "attached" });
+			expect(await select.locator('option[value="forget-admin"]').isDisabled()).toBe(true);
+			expect(await select.locator('option[value="forget-admin"]').innerText()).toContain("you cannot forget yourself");
+			expect(await select.locator('option[value="robin"]').isDisabled()).toBe(true);
+			expect(await select.locator('option[value="robin"]').innerText()).toContain("current owner");
+			expect(await page.getByRole("button", { name: "Forget this person", exact: true }).isDisabled()).toBe(true);
+			await select.selectOption("forget-phone");
+			await page.getByRole("button", { name: "Forget this person", exact: true }).click();
+			const confirm = page.getByRole("button", { name: "Forget forget-phone", exact: true });
+			expect(await confirm.evaluate((element) => element === document.activeElement)).toBe(true);
+			const cancel = page.getByRole("button", { name: "Cancel", exact: true });
+			for (const button of [confirm, cancel])
+				expect(
+					await button.evaluate((element) => {
+						const { width, height } = element.getBoundingClientRect();
+						return width >= 44 && height >= 44;
+					}),
+				).toBe(true);
+			await confirm.click();
+			await page
+				.getByRole("status")
+				.filter({ hasText: /Forgotten as forgotten-\d+\. 0 tokens revoked\./ })
+				.waitFor();
+			await select.locator('option[value="forget-phone"]').waitFor({ state: "detached" });
+			expect(await select.locator('option[value="robin"]').isDisabled()).toBe(true);
+			expect(admin.errors).toEqual([]);
+		} finally {
+			await admin.close();
+		}
+	},
+	15_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"People keeps forgetting unavailable when an older server omits ownership",
+	async () => {
+		await person("forget-unknown-owner", ["read"]);
+		const admin = await openPage(server, { path: "/p/scratch/settings" });
+		try {
+			const { page } = admin;
+			page.setDefaultTimeout(3000);
+			await page.route("**/api/admin", async (route) => {
+				if (route.request().postDataJSON().do !== "actor.list") return route.continue();
+				const response = await route.fetch();
+				const body = z
+					.looseObject({ result: z.array(z.looseObject({ owner: z.boolean().optional() })) })
+					.parse(await response.json());
+				for (const actor of body.result) delete actor.owner;
+				await route.fulfill({ response, json: body });
+			});
+			await section(page, "People");
+			const choice = page
+				.getByLabel("Person to forget", { exact: true })
+				.locator('option[value="forget-unknown-owner"]');
+			await choice.waitFor({ state: "attached" });
+			expect(await choice.isDisabled()).toBe(true);
+			expect(await choice.innerText()).toContain("the server did not identify the current owner");
+			expect(await page.getByRole("button", { name: "Forget this person", exact: true }).isDisabled()).toBe(true);
+			expect(admin.errors).toEqual([]);
+		} finally {
+			await admin.close();
+		}
+	},
+	15_000,
 );
 
 test.skipIf(!browserAvailable)(
@@ -482,16 +568,12 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Recovery link for ada" }).click();
 			await page.getByRole("button", { name: "Make the recovery link" }).click();
 			await page.getByLabel("Invitation link for ada").waitFor();
-			expect(await page.getByLabel("Person to forget", { exact: true }).locator('option[value="ada"]').count()).toBe(0);
-			await page.getByLabel("Person to forget", { exact: true }).selectOption("robin");
-			await page.getByLabel("Type the name to confirm", { exact: true }).fill("robin");
-			await page.getByRole("button", { name: "Forget this person", exact: true }).click();
-			await page.getByRole("status").filter({ hasText: "robin owns this instance and is not forgotten" }).waitFor();
-			expect(await page.getByLabel("Type the name to confirm", { exact: true }).inputValue()).toBe("robin");
+			const choices = page.getByLabel("Person to forget", { exact: true });
+			expect(await choices.locator('option[value="ada"]').isDisabled()).toBe(true);
+			expect(await choices.locator('option[value="robin"]').isDisabled()).toBe(true);
+			expect(await page.getByRole("button", { name: "Forget this person", exact: true }).isDisabled()).toBe(true);
 			expect(await rows(page).getByText("robin", { exact: true }).count()).toBe(1);
-			expect(admin.errors).toEqual([
-				"Failed to load resource: the server responded with a status of 400 (Bad Request)",
-			]);
+			expect(admin.errors).toEqual([]);
 		} finally {
 			await reader?.close();
 			await admin?.close();

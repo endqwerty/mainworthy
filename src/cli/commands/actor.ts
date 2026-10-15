@@ -13,6 +13,7 @@ const Actors = z.array(
 		name: z.string(),
 		kind: ActorKind,
 		disabled: z.boolean(),
+		owner: z.boolean().optional(),
 		teams: z.array(TeamSource).default([]),
 		grants: z.array(z.object({ project: z.string(), can: z.array(Capability) })),
 	}),

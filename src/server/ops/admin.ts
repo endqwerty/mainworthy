@@ -204,7 +204,7 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 		case "token.revoke":
 			return { revoked: revokeToken(env.app, input.id) };
 		case "actor.list":
-			return actorsWithGrants(db);
+			return actorsWithGrants(db).map((actor) => ({ ...actor, owner: actor.name === owner }));
 		case "grant.set":
 		case "grant.remove": {
 			personOnly(env, "a grant is changed");
