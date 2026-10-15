@@ -345,16 +345,18 @@ test("the HTTP operations preserve queued and uncertain requests across restart 
 	});
 });
 
-test("stopping waits for tracker delivery to persist its reply before closing the database", async () => {
+test("stopping persists the in-flight tracker reply and leaves queued requests for the next start", async () => {
 	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-stop-"));
 	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
 	const entered = Promise.withResolvers<void>();
 	const reply = Promise.withResolvers<TrackerItem>();
+	let calls = 0;
 	instance = start(config, () => ({ ui: null }), {
 		readers: 0,
 		trackerPort: {
 			...port,
 			createDefect: () => {
+				calls++;
 				entered.resolve();
 				return reply.promise;
 			},
@@ -375,10 +377,12 @@ test("stopping waits for tracker delivery to persist its reply before closing th
 		}),
 	).toMatchObject({ ok: true });
 	const result = instance.app.db.raw.query<{ id: number }, []>("SELECT id FROM results").get()?.id;
-	expect(await post("tracker", { do: "create", result, cmd: "tracker-stop-01" })).toMatchObject({
-		ok: true,
-		result: { state: "queued" },
-	});
+	const ids = Array.from({ length: 6 }, (_, index) => `tracker-stop-0${index + 1}`);
+	for (const cmd of ids)
+		expect(await post("tracker", { do: "create", result, cmd })).toMatchObject({
+			ok: true,
+			result: { state: "queued" },
+		});
 	const minute = instance.minute();
 	await entered.promise;
 	const stopping = instance.stop();
@@ -390,9 +394,18 @@ test("stopping waits for tracker delivery to persist its reply before closing th
 		await minute;
 		await stopping;
 	}
+	expect(calls).toBe(1);
 	instance = start(config, () => ({ ui: null }), { readers: 0, trackerPort: port });
 	expect(await post("tracker-status", { id: "tracker-stop-01" })).toMatchObject({
 		ok: true,
 		result: { state: "complete", issue: item },
 	});
+	for (const id of ids.slice(1))
+		expect(await post("tracker-status", { id })).toMatchObject({ ok: true, result: { state: "queued", issue: null } });
+	await instance.minute();
+	for (const id of ids)
+		expect(await post("tracker-status", { id })).toMatchObject({
+			ok: true,
+			result: { state: "complete", issue: item },
+		});
 });

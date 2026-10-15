@@ -17,7 +17,7 @@ import { lockInstance } from "./kernel/instance-lock.ts";
 import { createProject } from "./ops/admin.ts";
 import { Readers, readerCount } from "./readers.ts";
 import type { TrackerPort } from "./trackers/port.ts";
-import { deliverTrackerRequests, waitTrackerRequests } from "./trackers/requests.ts";
+import { deliverTrackerRequests, stopTrackerRequests } from "./trackers/requests.ts";
 
 export type Instance = {
 	app: App;
@@ -131,8 +131,9 @@ export function start(
 		stop() {
 			stopping ??= (async () => {
 				clearInterval(timer);
+				const trackerRequests = stopTrackerRequests(app);
 				await server.stop();
-				await waitTrackerRequests(app);
+				await trackerRequests;
 				await app.readers?.stop();
 				// No request is being served any more. What was noted since the last minute is written, so a
 				// session used a moment ago is not found idle by the next start.

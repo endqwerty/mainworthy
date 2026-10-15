@@ -113,16 +113,19 @@ export function queueDefect(ctx: Ctx, input: TrackerInput): TrackerReceipt {
 }
 
 const active = new WeakMap<App, Promise<number>>();
+const stopping = new WeakSet<App>();
 
 export function deliverTrackerRequests(app: App, port?: TrackerPort): Promise<number> {
 	const running = active.get(app);
 	if (running) return running;
+	if (stopping.has(app)) return Promise.resolve(0);
 	const work = deliver(app, port).finally(() => active.delete(app));
 	active.set(app, work);
 	return work;
 }
 
-export async function waitTrackerRequests(app: App): Promise<void> {
+export async function stopTrackerRequests(app: App): Promise<void> {
+	stopping.add(app);
 	await active.get(app);
 }
 
@@ -130,6 +133,7 @@ async function deliver(app: App, supplied?: TrackerPort): Promise<number> {
 	let delivered = 0;
 	for (let n = 0; n < 20; n++) {
 		const claimed = await app.gate.run(() => {
+			if (stopping.has(app)) return null;
 			const next = app.db.get(Q.next);
 			if (next) app.db.run(Q.claim, { id: next.id, nonce: next.nonce });
 			return next ? { row: next, project: projectById(app.db, next.project)?.key } : null;
