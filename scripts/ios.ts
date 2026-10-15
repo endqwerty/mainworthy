@@ -441,9 +441,10 @@ async function install(args: string[]): Promise<void> {
 }
 
 /**
- * The build number of an upload: the minute it was built, in UTC, as `202610141530`. App Store Connect takes each
- * number once for a version and wants each one higher than the last, so it is not the commit: the same commit
- * can be sent twice, and a branch can be behind another.
+ * The build number an upload asks for: the minute it was built, in UTC, as `202610141530`. App Store Connect takes
+ * each number once for a version and wants each one higher than the last, so it is not the commit: the same commit
+ * can be sent twice, and a branch can be behind another. Two uploads in one minute ask for the same number, so the
+ * export lets Xcode raise it past the last one App Store Connect has (`manageAppVersionAndBuildNumber`).
  */
 function buildNumber(now = new Date()): string {
 	return now.toISOString().slice(0, 16).replace(/\D/g, "");
@@ -495,7 +496,7 @@ async function upload(args: string[]): Promise<void> {
 	<key>signingStyle</key>
 	<string>automatic</string>
 	<key>manageAppVersionAndBuildNumber</key>
-	<false/>
+	<true/>
 </dict>
 </plist>
 `,
@@ -525,11 +526,17 @@ async function upload(args: string[]): Promise<void> {
 		);
 		return;
 	}
+	// The number the build went with, which Xcode may have raised past the one asked for.
+	const summary = join(out, "export", "DistributionSummary.plist");
+	const sent = existsSync(summary)
+		? /<key>buildNumber<\/key>\s*<string>([^<]+)<\/string>/.exec(readFileSync(summary, "utf8"))?.[1]
+		: undefined;
 	console.log(
 		[
-			`sent build ${number} to App Store Connect.`,
-			"Apple processes it for a few minutes, then TestFlight offers it to the app's internal testers.",
-			"The first build of a version asks you there about export compliance unless Info.plist answers it (it does).",
+			sent
+				? `sent build ${sent} to App Store Connect.`
+				: `sent build ${number} to App Store Connect, or the next number free if it had that one.`,
+			"Apple processes it, usually in minutes, then TestFlight offers it to the internal groups that distribute automatically.",
 		].join("\n"),
 	);
 }

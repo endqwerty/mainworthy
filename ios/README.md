@@ -43,20 +43,23 @@ A build from TestFlight opens for 90 days.
 
 1. Once: in [App Store Connect](https://appstoreconnect.apple.com) accept the agreements it shows, then Apps, +,
    New App, with the bundle ID that `ios/Config/Local.xcconfig` names (`com.mainworthy.app.` and the team's id).
-   In the app's TestFlight tab, add yourself to an internal group.
+   In the app's TestFlight tab, make an internal group with automatic distribution on, and add yourself.
 2. Send a build:
 
 	```
 	$ bun scripts/ios.ts upload
 	```
 
-3. Apple processes it for a few minutes. Then the TestFlight app on the phone offers it.
+3. Apple processes it, usually in minutes. Then the TestFlight app on the phone offers it.
 
 The command builds for release, signs for distribution with the Apple ID in Xcode under Settings, Accounts, and
 uploads. The first time, Xcode makes the team's distribution certificate. The build number is the minute it was
-built, in UTC (`202610141530`): App Store Connect takes each number once and wants each one higher than the last.
-The app's version is `MARKETING_VERSION` in `Config/Base.xcconfig`. `Info.plist` answers the question about
-encryption, and `App/PrivacyInfo.xcprivacy` says what the app keeps and why, so App Store Connect asks neither.
+built, in UTC (`202610141530`): App Store Connect takes each number once and wants each one higher than the last,
+and when it has that number already, Xcode raises it; the command prints the one sent. The app's version is
+`MARKETING_VERSION` in `Config/Base.xcconfig`. `Info.plist` answers the question about encryption, so a build is
+not held for it. `App/PrivacyInfo.xcprivacy` says the app collects nothing and why it reads its own settings, which
+Apple asks of every upload; the App Privacy answers on the App Store page are a separate form, needed only for
+the App Store.
 
 `bun scripts/ios.ts upload --dry-run` builds and signs the same and writes the `.ipa` to the cache instead of
 sending it. Testers outside the team need Apple's beta review first, and issue #210 says what else is left before the
