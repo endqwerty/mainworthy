@@ -33,7 +33,6 @@ import {
 	fillsOf,
 	findRun,
 	gateOf,
-	quarantineRuns,
 	reconsiderEmptyReports,
 	reopenRun,
 	restoreFailures,
@@ -173,7 +172,6 @@ const adoptHandler: Handler<"adopt"> = {
 				exit: quarantine.exit,
 				reason: answersOf(ctx.db, question.id).findLast((row) => row.counts === 1)?.reason ?? proposal.reason ?? "",
 			});
-			for (const id of quarantineRuns(ctx.db, ctx.project.id, new Set([test.id]))) ctx.recompute.add(id);
 			return { cases: [], created: [], policyVersion: null, quarantine };
 		}
 		const adopted = yield* adoptSteps(ctx, witness, proposal);

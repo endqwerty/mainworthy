@@ -24,6 +24,7 @@ import mailContacts from "./migrations/0020_mail_contacts.sql" with { type: "tex
 import quarantines from "./migrations/0021_quarantines.sql" with { type: "text" };
 
 import fragments from "./migrations/0022_fragments.sql" with { type: "text" };
+import quarantineObservations from "./migrations/0023_quarantine_observations.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -57,6 +58,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 20, name: "mail_contacts", sql: mailContacts, archive: true },
 	{ version: 21, name: "quarantines", sql: quarantines, archive: true },
 	{ version: 22, name: "fragments", sql: fragments, archive: true },
+	{ version: 23, name: "quarantine_observations", sql: quarantineObservations, archive: true },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

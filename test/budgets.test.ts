@@ -60,11 +60,11 @@ test("on-disk hot paths stay inside the design budgets", async () => {
 	}
 }, 20_000);
 
-test("quarantined reports stay within budget after 400 earlier trunk commits", async () => {
+test("quarantined reports stay within budget after 3000 earlier trunk commits", async () => {
 	const h = harness({ unlinked: "track" });
 	try {
 		const commit = (i: number) => i.toString(16).padStart(40, "0");
-		for (let i = 1; i <= 400; i++)
+		for (let i = 1; i <= 3000; i++)
 			h.call(
 				"report",
 				ciReport({ commit: commit(i), n: 1, ...(i % 3 === 0 ? { fail: { 0: "expected green" } } : {}) }),
@@ -82,18 +82,18 @@ test("quarantined reports stay within budget after 400 earlier trunk commits", a
 			reason: "Require 100 clean commits before exit",
 		});
 		const row = await measure({
-			name: "quarantined report after 400 trunk commits",
+			name: "quarantined report after 3000 trunk commits",
 			budget: 100,
 			iterations: 20,
 			warmup: 0,
 			correctness: "one fresh result recorded, its gate passes, and quarantine remains active",
 			prepare: (i) => {
-				const input = ciReport({ commit: commit(401 + i), n: 1 });
+				const input = ciReport({ commit: commit(3001 + i), n: 1 });
 				return () => h.call<ReportReceipt>("report", input);
 			},
 			check: (result, i) => {
 				expect(result).toMatchObject({ fresh: true, counts: { total: 1, pass: 1 }, rejected: [] });
-				expect(h.call<GateStatus>("gate", { commit: commit(401 + i) })).toMatchObject({
+				expect(h.call<GateStatus>("gate", { commit: commit(3001 + i) })).toMatchObject({
 					verdict: "passed",
 					tally: { pass: 1, unexplained: 0 },
 				});

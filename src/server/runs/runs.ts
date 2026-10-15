@@ -53,7 +53,7 @@ import {
 	targetsWithCommit,
 	testById,
 } from "../evidence/evidence.ts";
-import { quarantineCaseIds, quarantineEntries, quarantineLookup } from "../evidence/quarantine.ts";
+import { quarantineLookup } from "../evidence/quarantine.ts";
 import { buildWhat } from "../evidence/releases.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
@@ -80,6 +80,7 @@ export type RunRow = {
 	outstanding: number;
 	next_expiry: number | null;
 	tally: string;
+	quarantined: number;
 	blocking: string;
 	verdict: Verdict;
 	created_by: number;
@@ -106,13 +107,6 @@ export type SlotRow = {
 };
 
 const Q = {
-	dependencies: sql<{ run: number }, { decision: number }>("SELECT decision FROM depends_on WHERE run=$run"),
-	quarantineTestRuns: sql<{ test: number }, { id: number }>(
-		"SELECT DISTINCT run AS id FROM run_tests WHERE test=$test",
-	),
-	quarantineCaseRuns: sql<{ caseId: number }, { id: number }>(
-		"SELECT DISTINCT run AS id FROM slots WHERE case_id=$caseId",
-	),
 	emptyChangeRuns: sql<{ project: number }, { id: number }>(
 		`SELECT id FROM runs WHERE project = $project AND origin = 'change'
 		 AND json_extract(tally, '$.pass') + json_extract(tally, '$.excused') = 0`,
@@ -165,8 +159,16 @@ const Q = {
 	applied: sql<{ id: number; seq: number; rev: number }>(
 		"UPDATE runs SET outstanding = max(outstanding - 1, 0), applied_seq = max(applied_seq, $seq), rev = $rev WHERE id = $id",
 	),
-	project: sql<{ id: number; tally: string; blocking: string; verdict: string; expiry: number | null; rev: number }>(
-		"UPDATE runs SET tally = $tally, blocking = $blocking, verdict = $verdict, next_expiry = $expiry, rev = $rev WHERE id = $id",
+	project: sql<{
+		id: number;
+		tally: string;
+		quarantined: number;
+		blocking: string;
+		verdict: string;
+		expiry: number | null;
+		rev: number;
+	}>(
+		"UPDATE runs SET tally = $tally, quarantined = $quarantined, blocking = $blocking, verdict = $verdict, next_expiry = $expiry, rev = $rev WHERE id = $id",
 	),
 	setState: sql<{ id: number; state: string; signoff: number | null; rev: number }>(
 		"UPDATE runs SET state = $state, signoff = $signoff, rev = $rev WHERE id = $id",
@@ -795,8 +797,8 @@ export type Unexplained = { signature: number; target: number; scope: string };
  * The failures a run shows that no decision explains, one per cause and target. Read when a run is recomputed, to
  * make sure each of them has a question somebody can answer.
  */
-export function unexplainedShown(db: Db, run: RunRow, now: number): Unexplained[] {
-	const quarantined = quarantineLookup(db, run.project, now);
+export function unexplainedShown(db: Db, run: RunRow): Unexplained[] {
+	const quarantined = quarantineLookup(db, run.project);
 	const shown = new Map<string, Unexplained>();
 	const note = (result: { id: number; signature: number | null; target: number }): void => {
 		if (result.signature === null) return;
@@ -1158,10 +1160,9 @@ function baseRunOf(db: Db, target: TargetRow): RunRow | null {
 function count(
 	db: Db,
 	run: RunRow,
-	now: number,
 ): { tally: Tally; failing: Set<string>; depends: Map<number, number | null>; quarantined: number } {
 	let quarantined = 0;
-	const quarantineFor = quarantineLookup(db, run.project, now);
+	const quarantineFor = quarantineLookup(db, run.project);
 	const tally: Tally = emptyTally();
 	const failing = new Set<string>();
 	const depends = new Map<number, number | null>();
@@ -1266,7 +1267,7 @@ function count(
 }
 
 /** The causes a run shows with no excuse in force, by `causeKey`: what an open failure question is about. */
-export const unexplainedIn = (db: Db, run: RunRow, now: number): Set<string> => count(db, run, now).failing;
+export const unexplainedIn = (db: Db, run: RunRow): Set<string> => count(db, run).failing;
 
 /**
  * Recomputes a run's tally, the questions blocking it and its verdict from the facts, and stores them. Called in
@@ -1281,7 +1282,7 @@ export function retally(
 ): Retallied {
 	const run = runById(ctx.db, runId);
 	if (!run) throw new Error(`run ${runId} is missing`);
-	const { tally, failing, depends } = count(ctx.db, run, ctx.now);
+	const { tally, failing, depends, quarantined } = count(ctx.db, run);
 
 	// The questions whose answers this run is waiting for. A failure question is one of them exactly when this run
 	// shows its cause unexplained: the run is blocked by that failure whatever the policy says a question may hold,
@@ -1310,6 +1311,7 @@ export function retally(
 	ctx.db.run(Q.project, {
 		id: run.id,
 		tally: JSON.stringify(tally),
+		quarantined,
 		blocking: JSON.stringify(blocking),
 		verdict: next,
 		expiry,
@@ -1651,28 +1653,10 @@ export const nothingCounted = (): GateStatus => ({
 	stale: false,
 });
 
-export function quarantineRuns(db: Db, project: number, tests?: ReadonlySet<number>): Set<number> {
-	const ids = new Set<number>();
-	for (const entry of quarantineEntries(db, project)) {
-		if (tests && !tests.has(entry.test)) continue;
-		for (const row of db.all(Q.quarantineTestRuns, { test: entry.test })) ids.add(row.id);
-		const test = testById(db, entry.test);
-		const cases = new Set(quarantineCaseIds(db, project, entry.test));
-		if (test?.case_id != null) cases.add(test.case_id);
-		for (const caseId of cases) for (const row of db.all(Q.quarantineCaseRuns, { caseId })) ids.add(row.id);
-	}
-	return ids;
-}
 export function gateOf(ctx: Ctx, run: RunRow): GateStatus {
-	const entries = new Set(quarantineEntries(ctx.db, run.project).map((entry) => entry.decision));
-	const affected =
-		entries.size > 0 && ctx.db.all(Q.dependencies, { run: run.id }).some((row) => entries.has(row.decision));
-	const current = affected ? count(ctx.db, run, ctx.now) : null;
-	const tally = current?.tally ?? json<Tally>(run.tally);
+	const tally = json<Tally>(run.tally);
 	const open = json<string[]>(run.blocking);
-	const expired = current
-		? [...current.depends.values()].some((at) => at !== null && at <= ctx.now)
-		: run.next_expiry !== null && run.next_expiry <= ctx.now;
+	const expired = run.next_expiry !== null && run.next_expiry <= ctx.now;
 	const facts = {
 		tally,
 		blocking: open.length,
@@ -1686,10 +1670,10 @@ export function gateOf(ctx: Ctx, run: RunRow): GateStatus {
 		verdict: now,
 		reason:
 			explainVerdict(facts) +
-			(current?.quarantined
-				? `; ${current.quarantined} quarantined ${current.quarantined === 1 ? "failure" : "failures"} recorded, not blocking`
+			(run.quarantined
+				? `; ${run.quarantined} quarantined ${run.quarantined === 1 ? "failure" : "failures"} recorded, not blocking`
 				: ""),
-		...(current?.quarantined ? { quarantined: current.quarantined } : {}),
+		...(run.quarantined ? { quarantined: run.quarantined } : {}),
 		tally: { ...tally },
 		open,
 		url: null,

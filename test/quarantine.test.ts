@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { type AuditRecord, AuditReply, verifyAudit } from "../src/core/audit.ts";
 import type { Quarantine } from "../src/core/flaky.ts";
-import type { GateStatus, InboxReply, ProposeReply } from "../src/core/ops.ts";
-import { effectiveQuarantine, quarantineEntries } from "../src/server/evidence/quarantine.ts";
+import type { GateStatus, InboxReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
+import { effectiveQuarantine, quarantineEntries, quarantineLookup } from "../src/server/evidence/quarantine.ts";
 import { Db } from "../src/server/kernel/db.ts";
 import { migrate } from "../src/server/kernel/migrate.ts";
 import { pollDefectHolds } from "../src/server/tracker-holds.ts";
@@ -15,7 +15,10 @@ beforeEach(() => {
 });
 afterEach(() => h.close());
 const report = (commit: string, fail = true, branch = "main", attempt = 1) =>
-	h.call("report", ciReport({ commit, n: 1, branch, attempt, ...(fail ? { fail: { 0: "expected green" } } : {}) }));
+	h.call<ReportReceipt>(
+		"report",
+		ciReport({ commit, n: 1, branch, attempt, ...(fail ? { fail: { 0: "expected green" } } : {}) }),
+	);
 const gate = (commit: string) => h.call<GateStatus>("gate", { commit });
 function quarantine(exit: unknown, base: number | null = null) {
 	const p = h.call<ProposeReply>("propose", {
@@ -32,11 +35,121 @@ function quarantine(exit: unknown, base: number | null = null) {
 	})[0];
 }
 
+describe("quarantine covers observations when reported", () => {
+	for (const kind of ["person", "expiry", "passes"] as const) {
+		test(`past verdicts survive a ${kind} exit and later failures block`, () => {
+			report("aaaa0001");
+			const entry = quarantine(
+				kind === "expiry" ? { kind, at: 1_800_000_001_000 } : kind === "passes" ? { kind, count: 1 } : { kind },
+			);
+			if (!entry) throw new Error("missing quarantine decision");
+			report("aaaa0002");
+			expect(gate("aaaa0002")).toMatchObject({ verdict: "passed", quarantined: 1 });
+			if (kind === "person") quarantine(null, entry.decision);
+			else if (kind === "expiry") h.advance(1_800_000_001_000 - h.app.now() - 1);
+			else report("aaaa0003", false);
+			expect(gate("aaaa0002")).toMatchObject({ verdict: "passed", quarantined: 1, tally: { excused: 1 } });
+			report("aaaa0004");
+			expect(gate("aaaa0004")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+			expect(gate("aaaa0002")).toMatchObject({ verdict: "passed", quarantined: 1 });
+			expect(gate("aaaa0001")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+		});
+	}
+	test("a correction after the pass exit changes its commit but never reopens quarantine", () => {
+		report("aaaa0001");
+		quarantine({ kind: "passes", count: 1 });
+		report("aaaa0002", false);
+		const detail = h.call<{ last: { id: number }[] }[]>("get", { refs: ["T-1"] })[0];
+		const original = detail?.last[0];
+		if (!original) throw new Error("missing original observation");
+		const input = ciReport({ commit: "aaaa0002", n: 1, fail: { 0: "corrected failure" } });
+		h.call("report", { ...input, results: input.results.map((row) => ({ ...row, corrects: original.id })) });
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(false);
+		expect(gate("aaaa0002")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+		report("aaaa0003");
+		expect(gate("aaaa0003").verdict).toBe("blocked");
+	});
+	test("the threshold result is covered but later results in the same report are not", () => {
+		report("aaaa0001");
+		const entry = quarantine({ kind: "passes", count: 1 });
+		const input = ciReport({ commit: "aaaa0002", n: 1 });
+		const pass = input.results[0];
+		if (!pass) throw new Error("missing test input");
+		const receipt = h.call<ReportReceipt>("report", {
+			...input,
+			results: [pass, { ...pass, outcome: "fail", failure: { message: "later in the same report" } }],
+		});
+		const covered = quarantineLookup(h.app.db, 1);
+		expect(covered(receipt.results?.[0] ?? 0)).toMatchObject({ decision: entry?.decision, quarantined: true });
+		expect(covered(receipt.results?.[1] ?? 0)).toBe(null);
+		expect(gate("aaaa0002")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(false);
+	});
+	test("a correction before the pass exit can complete the streak at its own sequence", () => {
+		report("aaaa0001");
+		quarantine({ kind: "passes", count: 2 });
+		const failure = report("aaaa0002").results?.[0];
+		if (!failure) throw new Error("missing original failure");
+		report("aaaa0003", false);
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(true);
+		const input = ciReport({ commit: "aaaa0002", n: 1 });
+		h.call("report", { ...input, results: input.results.map((row) => ({ ...row, corrects: failure })) });
+		expect(gate("aaaa0002")).toMatchObject({ verdict: "passed", tally: { pass: 1 } });
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(false);
+		report("aaaa0004");
+		expect(gate("aaaa0004").verdict).toBe("blocked");
+	});
+	test("a report folds only its changed run and a person's exit folds no old runs", () => {
+		report("aaaa0001");
+		const entry = quarantine({ kind: "person" });
+		if (!entry) throw new Error("missing quarantine decision");
+		report("aaaa0002");
+		const db = h.app.db;
+		const run = db.run.bind(db);
+		let folds = 0;
+		db.run = (statement, ...params) => {
+			if (statement.text.startsWith("UPDATE runs SET tally")) folds++;
+			return run(statement, ...params);
+		};
+		try {
+			report("aaaa0003");
+			expect(folds).toBe(1);
+			folds = 0;
+			quarantine(null, entry.decision);
+			expect(folds).toBe(0);
+		} finally {
+			db.run = run;
+		}
+		expect(gate("aaaa0002")).toMatchObject({ verdict: "passed", quarantined: 1 });
+		expect(gate("aaaa0003")).toMatchObject({ verdict: "passed", quarantined: 1 });
+	});
+	test("replacement entries retain each earlier observation's covering decision", () => {
+		report("aaaa0001");
+		const first = quarantine({ kind: "person" });
+		if (!first) throw new Error("missing entry decision");
+		const older = report("aaaa0002").results?.[0];
+		const exit = quarantine(null, first.decision);
+		if (!exit || !older) throw new Error("missing exit or result");
+		report("aaaa0003");
+		const second = quarantine({ kind: "person" }, exit.decision);
+		const newer = report("aaaa0004").results?.[0];
+		if (!second || !newer) throw new Error("missing replacement entry or result");
+		const covered = quarantineLookup(h.app.db, 1);
+		expect(covered(older)).toMatchObject({ decision: first.decision });
+		expect(covered(newer)).toMatchObject({ decision: second.decision });
+		expect(gate("aaaa0002")).toMatchObject({ verdict: "passed", quarantined: 1 });
+		expect(gate("aaaa0003").verdict).toBe("blocked");
+		expect(gate("aaaa0004")).toMatchObject({ verdict: "passed", quarantined: 1 });
+	});
+});
+
 describe("quarantine", () => {
 	test("a person's decision excuses one test and makes quarantined failures explicit", () => {
 		report("aaaa0001");
 		expect(gate("aaaa0001").verdict).toBe("blocked");
 		expect(quarantine({ kind: "person" })?.status).toBe("decided");
+		expect(gate("aaaa0001").verdict).toBe("blocked");
+		report("aaaa0001", true, "main", 2);
 		expect(gate("aaaa0001")).toMatchObject({ verdict: "passed", quarantined: 1, tally: { excused: 1, pass: 0 } });
 		expect(gate("aaaa0001").reason).toContain("1 quarantined failure recorded, not blocking");
 		const list = h.call<{ items: { ref: string; quarantine: Quarantine }[]; count: number }>("find", {
@@ -57,35 +170,39 @@ describe("quarantine", () => {
 		if (!entry) throw new Error("missing quarantine entry");
 		const d = quarantine(null, entry.decision);
 		expect(d?.status).toBe("decided");
-		expect(gate("aaaa0001").verdict).toBe("blocked");
+		expect(gate("aaaa0001").verdict).toBe("passed");
 	});
-	test("expiry blocks again at its deadline without a sweep", () => {
+	test("expiry leaves earlier results excused and the first result at its deadline blocks", () => {
 		report("aaaa0001");
 		quarantine({ kind: "expiry", at: 1_800_000_001_000 });
-		expect(gate("aaaa0001").verdict).toBe("passed");
-		h.advance(1_800_000_001_000 - h.app.now() - 1);
-		expect(gate("aaaa0001")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+		h.advance(1_800_000_001_000 - h.app.now() - 2);
+		report("aaaa0002");
+		report("aaaa0003");
+		expect(gate("aaaa0002")).toMatchObject({ verdict: "passed", quarantined: 1 });
+		expect(gate("aaaa0003")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
 	});
 	test("distinct passing trunk commits exit despite later failing commits, while change passes do not", () => {
 		report("aaaa0001");
 		quarantine({ kind: "passes", count: 2 });
+		report("aaaa0001", true, "main", 2);
 		report("aaaa0002", false, "feature");
 		report("aaaa0003", false);
 		report("aaaa0003", false, "main", 2);
 		expect(gate("aaaa0001").verdict).toBe("passed");
 		report("aaaa0004", false);
-		expect(gate("aaaa0001").verdict).toBe("blocked");
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(false);
 		report("aaaa0005");
 		expect(gate("aaaa0005").verdict).toBe("blocked");
 	});
-	test("a same-attempt failure on the exit commit can make quarantine active again", () => {
+	test("a same-attempt failure after the exit cannot reopen quarantine", () => {
 		report("aaaa0001");
 		quarantine({ kind: "passes", count: 1 });
 		report("aaaa0002", false);
 		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(false);
 		report("aaaa0002");
-		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(true);
-		expect(gate("aaaa0002")).toMatchObject({ verdict: "passed", quarantined: 1, tally: { excused: 1, pass: 0 } });
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(false);
+		expect(gate("aaaa0002")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1, pass: 0 } });
 	});
 	test("a retry of a commit first reported before entry does not count toward the pass exit", () => {
 		report("aaaa0001");
@@ -100,7 +217,7 @@ describe("quarantine", () => {
 		report("aaaa0001");
 		quarantine({ kind: "passes", count: 1 });
 		report("aaaa0001", false);
-		expect(gate("aaaa0001")).toMatchObject({ verdict: "passed", quarantined: 1, tally: { excused: 1, pass: 0 } });
+		expect(gate("aaaa0001")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1, pass: 0 } });
 		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(true);
 		report("aaaa0002", false);
 		expect(gate("aaaa0001")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
@@ -139,6 +256,7 @@ describe("quarantine boundaries", () => {
 		expect(gate("aaaa0001").verdict).toBe("blocked");
 		expect(h.call<{ status: string }[]>("decide", { ...input, reason: " " })[0]?.status).toBe("invalid");
 		expect(h.call<{ status: string }[]>("decide", input)[0]?.status).toBe("decided");
+		report("aaaa0001", true, "main", 2);
 		expect(gate("aaaa0001").verdict).toBe("passed");
 		const detail = h.call<{ quarantine: { decision: number } }[]>("get", { refs: ["T-1"] })[0];
 		const end = h.call<ProposeReply>(
@@ -169,11 +287,15 @@ describe("quarantine boundaries", () => {
 		expect(
 			h.raw("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "Earlier" }),
 		).toMatchObject({ ok: true, result: [{ status: "conflict" }] });
-		expect(gate("aaaa0001").verdict).toBe("passed");
+		expect(gate("aaaa0001").verdict).toBe("blocked");
 	});
 	test("another test with the same cause still blocks and keeps the quarantine visible", () => {
 		h.call("report", ciReport({ commit: "aaaa0001", n: 2, fail: { 0: "expected green", 1: "expected green" } }));
 		quarantine({ kind: "person" });
+		h.call(
+			"report",
+			ciReport({ commit: "aaaa0001", n: 2, attempt: 2, fail: { 0: "expected green", 1: "expected green" } }),
+		);
 		expect(gate("aaaa0001")).toMatchObject({
 			verdict: "blocked",
 			quarantined: 1,
@@ -205,6 +327,7 @@ describe("quarantine boundaries", () => {
 	test("skips and failures reset the pass streak, while two clean commits end it", () => {
 		report("aaaa0001");
 		quarantine({ kind: "passes", count: 2 });
+		report("aaaa0001", true, "main", 2);
 		report("aaaa0002", false);
 		const skip = ciReport({ commit: "aaaa0003", n: 1 });
 		h.call("report", { ...skip, results: skip.results.map((row) => ({ ...row, outcome: "skip" })) });
@@ -214,21 +337,25 @@ describe("quarantine boundaries", () => {
 		report("aaaa0006", false);
 		expect(gate("aaaa0001").verdict).toBe("passed");
 		report("aaaa0007", false);
-		expect(gate("aaaa0001").verdict).toBe("blocked");
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(false);
 	});
 	test("a failing lane on a trunk commit prevents a clean commit", () => {
 		report("aaaa0001");
 		quarantine({ kind: "passes", count: 2 });
+		report("aaaa0001", true, "main", 2);
 		report("aaaa0002", false);
 		h.call("report", ciReport({ commit: "aaaa0002", job: "other-job", n: 1, fail: { 0: "expected green" } }));
 		report("aaaa0003", false);
 		expect(gate("aaaa0001").verdict).toBe("passed");
 		report("aaaa0004", false);
-		expect(gate("aaaa0001").verdict).toBe("blocked");
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(false);
 	});
 	test("same-attempt disagreement keeps the failure, higher attempts can pass", () => {
 		report("aaaa0001");
 		quarantine({ kind: "passes", count: 2 });
+		report("aaaa0001", true, "main", 2);
 		report("aaaa0002");
 		report("aaaa0002", false);
 		report("aaaa0003", false);
@@ -237,16 +364,19 @@ describe("quarantine boundaries", () => {
 		expect(gate("aaaa0001").verdict).toBe("passed");
 		report("aaaa0002", false, "main", 2);
 		report("aaaa0003", false, "main", 2);
-		expect(gate("aaaa0001").verdict).toBe("blocked");
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(false);
 	});
 	test("agent reports do not satisfy a pass rule", () => {
 		report("aaaa0001");
 		quarantine({ kind: "passes", count: 1 });
+		report("aaaa0001", true, "main", 2);
 		const agent = h.actor("reporting-agent", "agent", ["read", "produce"]);
 		h.call("report", ciReport({ commit: "aaaa0002", n: 1 }), agent);
 		expect(gate("aaaa0001").verdict).toBe("passed");
 		report("aaaa0003", false);
-		expect(gate("aaaa0001").verdict).toBe("blocked");
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(false);
 	});
 	test("entry is project scoped and rejects missing tests, manual tests, mixed edits and missing reasons", () => {
 		report("aaaa0001");
@@ -281,7 +411,7 @@ describe("quarantine boundaries", () => {
 			other.close();
 		}
 	});
-	test("planned runs excuse quarantined automated failures and block again at expiry", () => {
+	test("planned runs keep observation-time coverage at expiry, including a run planned afterward", () => {
 		h.call("propose", { edits: [{ op: "create", body: { title: "Checkout", methods: ["auto"] } }] });
 		const planned = h.call<{ run: string }>("plan", {
 			name: "Checkout regression",
@@ -295,6 +425,11 @@ describe("quarantine boundaries", () => {
 		});
 		expect(h.call<GateStatus>("gate", { run: planned.run }).verdict).toBe("blocked");
 		quarantine({ kind: "expiry", at: 1_800_000_001_000 });
+		h.call("report", {
+			...input,
+			attempt: 2,
+			results: input.results.map((row) => ({ ...row, annotation: { case: "C-1", version: 1 } })),
+		});
 		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 			verdict: "passed",
 			quarantined: 1,
@@ -302,17 +437,29 @@ describe("quarantine boundaries", () => {
 		});
 		h.advance(1000);
 		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
-			verdict: "blocked",
-			tally: { unexplained: 1 },
+			verdict: "passed",
+			quarantined: 1,
+			tally: { excused: 1, unexplained: 0 },
 		});
-		expect(h.call<{ tally: GateStatus["tally"] }[]>("get", { refs: [planned.run] })[0]?.tally.unexplained).toBe(1);
+		expect(h.call<{ tally: GateStatus["tally"] }[]>("get", { refs: [planned.run] })[0]?.tally.excused).toBe(1);
+		const later = h.call<{ run: string }>("plan", {
+			name: "Later checkout regression",
+			select: { cases: ["C-1"] },
+			accepts: { commit: "aaaa0001" },
+		});
+		expect(h.call<GateStatus>("gate", { run: later.run })).toMatchObject({ verdict: "passed", quarantined: 1 });
 	});
 });
 
 test("archives retain quarantine decisions, exit rules and observations", () => {
 	report("aaaa0001");
 	quarantine({ kind: "passes", count: 2 });
+	report("aaaa0001", true, "main", 2);
 	report("aaaa0002", false);
+	report("aaaa0003", false);
+	const detail = h.call<{ last: { id: number; outcome: string }[] }[]>("get", { refs: ["T-1"] })[0];
+	const failure = detail?.last.find((result) => result.outcome === "fail");
+	if (!failure) throw new Error("missing quarantined failure");
 	let archive = "";
 	exportArchive(
 		h.app.db,
@@ -333,12 +480,12 @@ test("archives retain quarantine decisions, exit rules and observations", () => 
 			reason: "Keep failures visible while repairing the test",
 			exit_rule: '{"kind":"passes","count":2}',
 		});
-		expect(effectiveQuarantine(imported, entry, h.app.now())).toBe(true);
+		expect(effectiveQuarantine(imported, entry, h.app.now())).toBe(false);
+		expect(quarantineLookup(imported, 1)(failure.id)).toMatchObject({ decision: entry.decision, quarantined: true });
 	} finally {
 		imported.close();
 	}
-	report("aaaa0003", false);
-	expect(gate("aaaa0001").verdict).toBe("blocked");
+	expect(gate("aaaa0001")).toMatchObject({ verdict: "passed", quarantined: 1 });
 });
 
 test("audit keeps each quarantine test and exit rule after its standing is replaced", () => {
@@ -398,6 +545,11 @@ for (const mixed of [false, true]) {
 			tally: { disputed: 1 },
 		});
 		quarantine({ kind: "expiry", at: 1_800_000_001_000 });
+		h.call("report", {
+			...input,
+			attempt: 2,
+			results: input.results.map((row) => ({ ...row, annotation: { case: "C-1", version: 1 } })),
+		});
 		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
 			verdict: mixed ? "blocked" : "passed",
 			quarantined: 1,
@@ -408,8 +560,9 @@ for (const mixed of [false, true]) {
 		).toEqual(["disputed"]);
 		h.advance(1000);
 		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
-			verdict: "blocked",
-			tally: { disputed: 1 },
+			verdict: mixed ? "blocked" : "passed",
+			quarantined: 1,
+			tally: mixed ? { disputed: 1, excused: 0 } : { disputed: 0, excused: 1, pass: 0 },
 		});
 	});
 }
@@ -430,10 +583,12 @@ for (const endBeforeClosure of [false, true]) {
 		expect(gate("aaaa0001")).toMatchObject({ verdict: "failed", tally: { attributed: 1 } });
 		const entry = quarantine({ kind: "person" });
 		if (!entry) throw new Error("missing quarantine decision");
+		expect(gate("aaaa0001")).toMatchObject({ verdict: "failed", tally: { attributed: 1 } });
+		report("aaaa0001", true, "main", 2);
 		expect(gate("aaaa0001")).toMatchObject({ verdict: "passed", quarantined: 1 });
 		if (endBeforeClosure) {
 			quarantine(null, entry.decision);
-			expect(gate("aaaa0001")).toMatchObject({ verdict: "failed", tally: { attributed: 1 } });
+			expect(gate("aaaa0001")).toMatchObject({ verdict: "passed", quarantined: 1 });
 		}
 		const issue = { ref: "github:acme/web#42", url: "https://github.com/acme/web/issues/42", state: "closed" } as const;
 		expect(await pollDefectHolds(h.app, { createDefect: async () => issue, getItem: async () => issue })).toBe(1);
@@ -459,8 +614,9 @@ for (const endBeforeClosure of [false, true]) {
 			quarantine(null, entry.decision);
 		}
 		expect(gate("aaaa0001")).toMatchObject({
-			verdict: "blocked",
-			tally: { unexplained: 1, attributed: 0, excused: 0 },
+			verdict: "passed",
+			quarantined: 1,
+			tally: { unexplained: 0, attributed: 0, excused: 1 },
 		});
 	});
 }

@@ -32,9 +32,10 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 				.fill("Keep checkout failures visible while the test is repaired");
 			await page.getByLabel("Reason required by policy").press("Enter");
 			await eventually(
-				() => server.api("gate", { commit: "aaaa0001" }),
-				(gate) => gate.quarantined === 1,
+				() => server.api("find", { in: "tests", state: "quarantined" }),
+				(tests) => tests.count === 1,
 			);
+			expect(await server.api("gate", { commit: "aaaa0001" })).toMatchObject({ verdict: "blocked" });
 			for (const [ref, exit, reason] of [
 				["T-2", { kind: "person" }, "Review the timeout before restoring its gate"],
 			] as const) {
@@ -64,8 +65,12 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 			await page.getByLabel("Reason required by policy").fill("Temporary quarantine while the modal test is repaired");
 			await page.getByLabel("Reason required by policy").press("Enter");
 			await eventually(
-				() => server.api("gate", { commit: "aaaa0001" }),
-				(gate) => gate.quarantined === 3,
+				() => server.api("find", { in: "tests", state: "quarantined" }),
+				(tests) => tests.count === 3,
+			);
+			await server.api(
+				"report",
+				ciReport({ commit: "aaaa0002", n: 3, fail: { 0: "expected green", 1: "expected total", 2: "expected modal" } }),
 			);
 			await page.goto(`${server.url}/p/scratch/settings`);
 			await panel.getByText("3 quarantined tests", { exact: true }).waitFor();
@@ -101,7 +106,7 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 			expect(await end.isDisabled()).toBe(true);
 			await panel.getByLabel("Reason to end quarantine", { exact: true }).fill(" ");
 			expect(await end.isDisabled()).toBe(true);
-			const status = await server.api("gate", { commit: "aaaa0001" });
+			const status = await server.api("gate", { commit: "aaaa0002" });
 			expect(status).toMatchObject({ verdict: "passed", quarantined: 3, tally: { excused: 3, pass: 0 } });
 			expect(status.reason).toContain("3 quarantined failures recorded, not blocking");
 			const artifact = process.env.MAINWORTHY_QUARANTINE_SCREENSHOT;
@@ -144,9 +149,15 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 			await page.getByLabel("Reason required by policy").fill("The timeout fix has been checked");
 			await page.getByLabel("Reason required by policy").press("Enter");
 			await eventually(
-				() => server.api("gate", { commit: "aaaa0001" }),
-				(gate) => gate.verdict === "blocked" && gate.quarantined === 2,
+				() => server.api("find", { in: "tests", state: "quarantined" }),
+				(tests) => tests.count === 2,
 			);
+			expect(await server.api("gate", { commit: "aaaa0002" })).toMatchObject({ verdict: "passed", quarantined: 3 });
+			await server.api(
+				"report",
+				ciReport({ commit: "aaaa0003", n: 3, fail: { 0: "expected green", 1: "expected total", 2: "expected modal" } }),
+			);
+			expect(await server.api("gate", { commit: "aaaa0003" })).toMatchObject({ verdict: "blocked", quarantined: 2 });
 			expect(view.errors).toEqual([]);
 		} finally {
 			await view?.close();

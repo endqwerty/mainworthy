@@ -452,6 +452,7 @@ const fixtures: Record<string, Row[]> = {
 			applied_seq: 1,
 			outstanding: 1,
 			next_expiry: null,
+			quarantined: 0,
 			tally: "{}",
 			blocking: "[]",
 			verdict: "pending",

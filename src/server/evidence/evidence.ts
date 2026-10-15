@@ -114,6 +114,8 @@ export type ResultRow = {
 	run: number | null;
 	corrects: number | null;
 	at: number;
+	quarantine_decision: number | null;
+	quarantine_exit: number | null;
 };
 
 const TRUNK_BRANCHES = new Set(["main", "master", "trunk"]);

@@ -66,6 +66,7 @@ export type HistoryEvent = Base &
 		| { kind: "end"; pr: number }
 		/** Cases a person archived, because something else covers them now. */
 		| { kind: "archive"; cases: number[]; reason: string }
+		| { kind: "quarantine"; case: number; active: boolean; reason: string }
 		/** The agent's review of a pull request, with one finding. */
 		| {
 				kind: "review";
@@ -408,6 +409,46 @@ export function demoHistory(options: {
 				reason: index === 0 ? "Right. The case is reworded." : "The mobile layout has its own cases.",
 			});
 		});
+
+	const quarantined = automated[0];
+	if (quarantined !== undefined) {
+		const at = dayStart(since, days) + 17 * HOUR + 40 * MINUTE;
+		const commit = hex(random(options.seed ^ 0x6a09e667));
+		events.push(
+			{
+				kind: "quarantine",
+				at,
+				step: "qenter",
+				case: quarantined,
+				active: true,
+				reason: "Keep an intermittent failure visible during its repair",
+			},
+			{
+				kind: "pipeline",
+				at: at + MINUTE,
+				step: "qreport",
+				target: { commit, branch: "main" },
+				failures: [{ case: quarantined, message: "Intermittent response during quarantine example" }],
+				jitter: 0,
+			},
+			{
+				kind: "answer",
+				at: at + 2 * MINUTE,
+				step: "qanswer",
+				of: "qreport",
+				answer: { is: "infra" },
+				reason: "The isolated example runner lost its connection",
+			},
+			{
+				kind: "quarantine",
+				at: at + 3 * MINUTE,
+				step: "qexit",
+				case: quarantined,
+				active: false,
+				reason: "The repair is checked; the earlier covered result stays excused",
+			},
+		);
+	}
 
 	// A stable order: by time, and at the same time the order they were made in.
 	return events

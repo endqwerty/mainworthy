@@ -4,6 +4,7 @@ import { z } from "zod";
 import { Client } from "./client.ts";
 import { demoCases } from "./demo/cases.ts";
 import { demoAliases } from "./demo/fields.ts";
+import { demoHistory } from "./demo/history.ts";
 import { seed } from "./seed.ts";
 import { withInstance } from "./test-support.ts";
 
@@ -51,6 +52,15 @@ test("a seeded project holds a suite in folders, a fortnight of history and five
 		const demo = on(client, "demo");
 		// The day the project became a demo, which the server keeps: asked again, it is the same moment.
 		const { since } = Since.parse(await client.call("admin", { do: "project.demo", key: "demo" }));
+		const covered = demoHistory({ seed: 1, cases: demoCases(1, 120), days: 14, since }).find(
+			(event) => event.kind === "pipeline" && event.step === "qreport",
+		);
+		if (covered?.kind !== "pipeline") throw new Error("missing demo quarantine report");
+		expect(await demo.call("gate", { commit: covered.target.commit })).toMatchObject({
+			verdict: "passed",
+			quarantined: 1,
+		});
+		expect((await demo.call("find", { in: "tests", state: "quarantined" })).count).toBe(0);
 		expect(since).toBeGreaterThanOrEqual(before);
 		const today = dayOf(since);
 

@@ -6,7 +6,7 @@ import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
-import { findTest, resultById, testById } from "./evidence.ts";
+import { findTest, type ResultRow, resultById, testById } from "./evidence.ts";
 
 type Entry = {
 	project: number;
@@ -19,9 +19,6 @@ type Entry = {
 	seq: number;
 };
 const Q = {
-	cases: sql<{ project: number; test: number }, { caseId: number }>(
-		"SELECT DISTINCT basis_case AS caseId FROM results WHERE project=$project AND test=$test AND basis_case IS NOT NULL",
-	),
 	entry: sql<{ project: number; test: number }, Entry>(
 		"SELECT * FROM quarantines WHERE project = $project AND test = $test",
 	),
@@ -30,22 +27,25 @@ const Q = {
  VALUES ($project,$test,$decision,$actor,$reason,$exit_rule,$at,$seq)
  ON CONFLICT (project,test) DO UPDATE SET decision=excluded.decision, actor=excluded.actor,
  reason=excluded.reason, exit_rule=excluded.exit_rule, at=excluded.at, seq=excluded.seq`),
-	trunk: sql<
-		{ project: number; test: number; since: number },
-		{ commit_sha: string; lane: string; attempt: number; outcome: string; seq: number; ord: number }
-	>(
+	trunk: sql<{ project: number; test: number; since: number }, TrunkResult>(
 		`SELECT t.commit_sha, printf('%d:%s:%d:%s',r.target,b.job,r.actor,r.method) AS lane,
- r.attempt,r.outcome,r.seq,r.ord FROM results r JOIN targets t ON t.id=r.target JOIN batches b ON b.id=r.batch
+ r.id,r.corrects,r.attempt,r.outcome,r.seq,r.ord FROM results r JOIN targets t ON t.id=r.target JOIN batches b ON b.id=r.batch
  WHERE r.project=$project AND r.test=$test AND r.seq>$since AND t.line='trunk' AND t.commit_sha IS NOT NULL
  AND NOT EXISTS (SELECT 1 FROM targets initial JOIN results first ON first.target=initial.id
  WHERE initial.project=r.project AND initial.commit_sha=t.commit_sha AND first.test=r.test AND first.seq<=$since)
- AND r.method='auto' AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects=r.id)
+ AND r.method='auto'
  ORDER BY r.seq,r.ord`,
 	),
+	exit: sql<{ decision: number }, Position>("SELECT id,seq,ord FROM results WHERE quarantine_exit=$decision LIMIT 1"),
+	cover: sql<{ result: number; decision: number }>("UPDATE results SET quarantine_decision=$decision WHERE id=$result"),
+	end: sql<{ result: number; decision: number }>(
+		"UPDATE results SET quarantine_exit=$decision WHERE id=$result AND quarantine_exit IS NULL",
+	),
 };
+type Position = Pick<ResultRow, "id" | "seq" | "ord">;
+type TrunkResult = Position &
+	Pick<ResultRow, "attempt" | "outcome" | "corrects"> & { commit_sha: string; lane: string };
 export const quarantineEntries = (db: Db, project: number) => db.all(Q.entries, { project });
-export const quarantineCaseIds = (db: Db, project: number, test: number) =>
-	db.all(Q.cases, { project, test }).map((row) => row.caseId);
 export const quarantineEntry = (db: Db, project: number, test: number) => db.get(Q.entry, { project, test });
 
 export function validateQuarantineEdit(ctx: Ctx, edit: Extract<Edit, { op: "quarantine" }>) {
@@ -83,44 +83,92 @@ export function effectiveQuarantine(db: Db, entry: Entry, now: number): boolean 
 	const exit = ExitSchema.parse(json<unknown>(entry.exit_rule));
 	if (exit.kind === "person") return true;
 	if (exit.kind === "expiry") return now < exit.at;
-	const commits = new Map<string, Map<string, { attempt: number; outcome: string }>>();
-	let streak = 0;
-
-	for (const row of db.all(Q.trunk, { project: entry.project, test: entry.test, since: entry.seq })) {
-		let lanes = commits.get(row.commit_sha);
-		if (!lanes) {
-			lanes = new Map();
-			commits.set(row.commit_sha, lanes);
-		}
-		const prior = lanes.get(row.lane);
-		if (!prior || replacesInLane(prior, row)) lanes.set(row.lane, { attempt: row.attempt, outcome: row.outcome });
-	}
-	for (const lanes of commits.values()) {
-		streak = [...lanes.values()].every((row) => row.outcome === "pass") ? streak + 1 : 0;
-		if (streak >= exit.count) return false;
-	}
-	return true;
+	return passExit(db, entry, exit.count) === null;
 }
-export function quarantineLookup(db: Db, project: number, now: number) {
-	const entries = new Map(quarantineEntries(db, project).map((entry) => [entry.test, entry]));
-	const active = new Map<number, boolean>();
-	return (id: number) => {
-		if (entries.size === 0) return null;
-		const result = resultById(db, id);
-		if (result?.method !== "auto") return null;
-		const entry = entries.get(result.test);
-		if (!entry) return null;
-		let stands = active.get(entry.test);
-		if (stands === undefined) {
-			stands = effectiveQuarantine(db, entry, now);
-			active.set(entry.test, stands);
+
+function passExit(db: Db, entry: Entry, count: number): Position | null {
+	const ended = db.get(Q.exit, { decision: entry.decision });
+	if (ended) return ended;
+	const commits = new Map<string, { index: number; lanes: Set<string> }>();
+	const lanes = new Map<string, Map<number, TrunkResult>>();
+	const observations = new Map<number, TrunkResult>();
+	const held = new Map<string, TrunkResult>();
+	const clean: boolean[] = [];
+	for (const row of db.all(Q.trunk, { project: entry.project, test: entry.test, since: entry.seq })) {
+		let commit = commits.get(row.commit_sha);
+		if (!commit) {
+			commit = { index: commits.size, lanes: new Set() };
+			commits.set(row.commit_sha, commit);
+			clean.push(false);
 		}
-		if (!stands) return null;
-		const exit = entry.exit_rule === null ? null : ExitSchema.parse(json<unknown>(entry.exit_rule));
+		commit.lanes.add(row.lane);
+		const corrected = row.corrects === null ? null : observations.get(row.corrects);
+		if (corrected) {
+			const history = lanes.get(corrected.lane);
+			history?.delete(corrected.id);
+			held.delete(corrected.lane);
+			for (const prior of history?.values() ?? []) {
+				const current = held.get(prior.lane);
+				if (!current || replacesInLane(current, prior)) held.set(prior.lane, prior);
+			}
+		}
+		let history = lanes.get(row.lane);
+		if (!history) {
+			history = new Map();
+			lanes.set(row.lane, history);
+		}
+		history.set(row.id, row);
+		observations.set(row.id, row);
+		const prior = held.get(row.lane);
+		if (!prior || replacesInLane(prior, row)) held.set(row.lane, row);
+		const { index } = commit;
+		clean[index] = [...commit.lanes].every((lane) => {
+			const result = held.get(lane);
+			return !result || result.outcome === "pass";
+		});
+		if (!clean[index]) continue;
+		let streak = 1;
+		for (let i = index - 1; i >= 0 && clean[i] && streak < count; i--) streak++;
+		for (let i = index + 1; i < clean.length && clean[i] && streak < count; i++) streak++;
+		if (streak >= count) return row;
+	}
+	return null;
+}
+
+export function recordQuarantines(ctx: Ctx, results: readonly { id: number }[]): void {
+	const entries = new Map(quarantineEntries(ctx.db, ctx.project.id).map((entry) => [entry.test, entry]));
+	if (entries.size === 0) return;
+	const exits = new Map<number, Position | null>();
+	for (const { id } of results) {
+		const result = resultById(ctx.db, id);
+		if (result?.method !== "auto") continue;
+		const entry = entries.get(result.test);
+		if (!entry?.exit_rule || result.seq <= entry.seq) continue;
+		const exit = ExitSchema.parse(json<unknown>(entry.exit_rule));
+		if (exit.kind === "expiry" && result.at >= exit.at) continue;
+		if (exit.kind === "passes") {
+			if (!exits.has(entry.test)) {
+				const ended = passExit(ctx.db, entry, exit.count);
+				exits.set(entry.test, ended);
+				if (ended) ctx.db.run(Q.end, { result: ended.id, decision: entry.decision });
+			}
+			const ended = exits.get(entry.test);
+			if (ended && (result.seq > ended.seq || (result.seq === ended.seq && result.ord > ended.ord))) continue;
+		}
+		ctx.db.run(Q.cover, { result: id, decision: entry.decision });
+	}
+}
+
+export function quarantineLookup(db: Db, project: number) {
+	const present = quarantineEntries(db, project).length > 0;
+	return (id: number) => {
+		if (!present) return null;
+		const result = resultById(db, id);
+		if (result?.project !== project || result.quarantine_decision === null) return null;
 		return {
-			decision: entry.decision,
+			decision: result.quarantine_decision,
 			class: "excused" as const,
-			expires_at: exit?.kind === "expiry" ? exit.at : null,
+			expires_at: null,
 			quarantined: true,
 		};
 	};
