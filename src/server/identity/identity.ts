@@ -18,7 +18,7 @@ import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
 import { CONTEXT, clearChallenges } from "./challenges.ts";
-import { credentialSummary, dropUserHandle, revokeCredentialsOf } from "./credentials.ts";
+import { credentialSummary, dropUserHandle, forgetCredentialsOf } from "./credentials.ts";
 import { listInvitations, revokeInvitation, revokeInvitationsOf } from "./invitations.ts";
 import { addressKey, isGeneratedSecret, prefixKey } from "./limiter.ts";
 import {
@@ -178,9 +178,11 @@ const Q = {
 	revokeTokensOf: sql<{ actor: number; at: number }>(
 		"UPDATE tokens SET revoked_at = $at WHERE actor = $actor AND revoked_at IS NULL",
 	),
-	// Every token of an actor, revoked or not, and the erasure of where each was last used from.
+	// Every token of an actor, revoked or not, and the erasure of its label and where it was last used from.
 	tokensOf: sql<{ actor: number }, { id: number }>("SELECT id FROM tokens WHERE actor = $actor"),
-	forgetAddresses: sql<{ actor: number }>("UPDATE tokens SET last_used_addr = NULL WHERE actor = $actor"),
+	forgetTokenDetails: sql<{ actor: number }>(
+		"UPDATE tokens SET last_used_addr = NULL, label = '' WHERE actor = $actor",
+	),
 	forget: sql<{ id: number; name: string; at: number }>(
 		"UPDATE actors SET name = $name, disabled_at = coalesce(disabled_at, $at) WHERE id = $id",
 	),
@@ -921,7 +923,7 @@ function freePseudonym(db: Db, row: ActorRow): string {
 
 /**
  * Removes an actor's identity and keeps the record true: the name becomes a pseudonym, the actor is disabled, its
- * tokens are revoked and no longer say where they were used from, and its sessions are ended. Every fact still
+ * tokens are revoked and lose their labels and addresses, and its sessions are ended. Every fact still
  * points at the same actor row, so history says the same actor did each thing; it no longer says who that was.
  * Text the person typed elsewhere is not touched (docs/compliance.md).
  */
@@ -934,9 +936,9 @@ export function forgetActor(app: App, name: string): { forgotten: string; tokens
 	const at = app.now();
 	db.run(Q.forget, { id: row.id, name: pseudonym, at });
 	const revoked = db.run(Q.revokeTokensOf, { actor: row.id, at }).changes;
-	// An address says where the person was. A token's row is never deleted, so the address goes now, from the row
-	// and from what is noted of it and not yet written. When each token was last used stays: that names nobody.
-	db.run(Q.forgetAddresses, { actor: row.id });
+	// A token's label can name the person, and its address says where they were. Both go from the row; the
+	// address also goes from what is noted and not yet written. When each token was last used stays.
+	db.run(Q.forgetTokenDetails, { actor: row.id });
 	forgetNotedAddresses(
 		app,
 		"token",
@@ -947,7 +949,7 @@ export function forgetActor(app: App, name: string): { forgotten: string; tokens
 	endSessionsOf(db, row.id, at);
 	// The same for what a person signed in with and for a link that would still let them in. The handle their
 	// passkeys were filed under is deleted: it named the person to an authenticator, and names nobody now.
-	revokeCredentialsOf(db, row.id, at);
+	forgetCredentialsOf(db, row.id, at);
 	revokeInvitationsOf(db, row.id, at);
 	dropUserHandle(db, row.id);
 	forgottenCount++;

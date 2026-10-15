@@ -62,6 +62,9 @@ const Q = {
 	revokeOf: sql<{ actor: number; at: number }>(
 		"UPDATE credentials SET revoked_at = $at, data = '' WHERE actor = $actor AND revoked_at IS NULL",
 	),
+	forgetOf: sql<{ actor: number; at: number }>(
+		"UPDATE credentials SET revoked_at = coalesce(revoked_at, $at), data = '', label = '' WHERE actor = $actor",
+	),
 	used: sql<{ id: number; at: number }>("UPDATE credentials SET last_used_at = $at WHERE id = $id"),
 	// The row is given its new counter only if it still holds what the sign-in was checked against.
 	counted: sql<{ id: number; was: string; data: string; at: number }>(
@@ -172,6 +175,11 @@ export const revokeCredential = (db: Db, id: number, at: number): boolean => db.
 /** Revokes every credential of a person and erases what each held. Returns how many. */
 export const revokeCredentialsOf = (db: Db, actor: number, at: number): number =>
 	db.run(Q.revokeOf, { actor, at }).changes;
+
+/** Erases every credential's label and data, including revoked rows, while retaining credential ids. */
+export function forgetCredentialsOf(db: Db, actor: number, at: number): void {
+	db.run(Q.forgetOf, { actor, at });
+}
 
 /** What a person signs in with, in two numbers: for a page that decides what to offer. */
 export function credentialSummary(db: Db, actor: number): { password: boolean; passkeys: number } {

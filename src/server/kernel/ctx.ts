@@ -76,6 +76,10 @@ const Q = {
 	finishCommand: sql<{ id: string; seq: number; touched: string; outcome: string }>(
 		"UPDATE commands SET seq = $seq, touched = $touched, outcome = $outcome WHERE id = $id",
 	),
+	replies: sql<readonly [], { id: string; op: string; outcome: string }>(
+		"SELECT id, op, outcome FROM commands WHERE outcome <> ''",
+	),
+	rewriteReply: sql<{ id: string; outcome: string }>("UPDATE commands SET outcome = $outcome WHERE id = $id"),
 };
 
 export const findProject = (db: Db, key: string): ProjectRow | null => db.get(Q.project, { key });
@@ -94,6 +98,14 @@ export function insertProject(db: Db, input: { org: number; key: string; name: s
  * reply and writes nothing; the same id with other content is refused.
  */
 export const findCommand = (db: Db, id: string) => db.get(Q.command, { id });
+
+/** Rewrites stored replies without changing which request each command id names, or an unfinished command. */
+export function rewriteCommandReplies(db: Db, rewrite: (op: string, reply: string) => string): void {
+	for (const row of db.all(Q.replies)) {
+		const outcome = rewrite(row.op, row.outcome);
+		if (outcome !== row.outcome) db.run(Q.rewriteReply, { id: row.id, outcome });
+	}
+}
 
 /**
  * Records that an instance command ran (project 0: projects, actors, tokens). `outcome` is null when the reply held
