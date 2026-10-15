@@ -556,6 +556,7 @@ for (const recovery of ["first check", "fallback check", "no answer"] as const)
 				await page.locator("#app").waitFor();
 				await page.getByRole("link", { name: "Suite", exact: true }).click();
 				await page.getByRole("option").filter({ hasText: "C-1" }).click();
+				await page.getByRole("button", { name: "Kept case", exact: true }).waitFor();
 				await page.keyboard.press("e");
 				expect(await step.inputValue()).toBe("Draft after failed clear");
 			} finally {
