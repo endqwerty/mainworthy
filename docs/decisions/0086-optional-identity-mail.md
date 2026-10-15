@@ -26,6 +26,6 @@ Pending proofs are hashed keys in a map bounded at 10,000 entries. All delivery 
 
 ## Accepted limits
 
-Restart loses queued messages and pending links. The person requests another link. There is no retry or delivery-status API, so the invitation reply says delivery was requested. Verification status is instance-local and never trusted from an archive. SMTP acceptance does not prove inbox delivery.
+Restart loses queued messages and pending links. The person requests another link. There is no retry or delivery-status API, so the invitation reply says delivery was requested. A restore keeps each address and its verification time, as the archive carries them; pending links never travel, so a restore asks people to request new ones. SMTP acceptance does not prove inbox delivery.
 
 The reset request and completion pages use fragment codes, clear them from the address bar and retain the code only in component memory. They also handle a link opened on an already-mounted request page. Mail controls are absent when the server does not advertise mail.
