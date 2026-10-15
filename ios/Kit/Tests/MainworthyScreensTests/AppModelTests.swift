@@ -231,6 +231,26 @@ struct AppModelTests {
 		#expect(try self.workspace(app) !== workspace)
 	}
 
+	@Test("a session kept for another instance than the build's is renewed on that instance, with its screens")
+	func renewedOnKeptInstance() async throws {
+		let device = Device()
+		_ = try await Server(instance: Live.instance, secrets: device.secrets, transport: URLSessionTransport())
+			.signIn(.password(name: Live.name, password: Live.password))
+		// The build names an instance that does not answer: a password sent there would be lost.
+		let app = device.app(at: try #require(Instance(address: "127.0.0.1:9")))
+		await app.start()
+		let workspace = try workspace(app)
+		await Server.kept(in: device.secrets)?.signOut()
+		await workspace.refreshAccount()
+		try await Task.sleep(for: .milliseconds(50))
+		let again = try self.form(app)
+		#expect(again.instance == Live.instance)
+		again.name = Live.name
+		again.password = Live.password
+		await again.submit()
+		#expect(try self.workspace(app) === workspace)
+	}
+
 	@Test("an instance that does not answer is said so")
 	func unreachable() async throws {
 		let app = Device().app(at: try #require(Instance(address: "127.0.0.1:9")))

@@ -20,7 +20,8 @@ public final class AppModel {
 	private let secrets: any SecretStore
 	private let transport: any Transport
 	private let userAgent: String
-	/// The instance the sign-in form signs in to. A session the device already holds may be for another.
+	/// The instance the sign-in form signs in to. A session the device already holds may be for another, and is
+	/// renewed there when it ends (`sessionEnded`).
 	private let instance: Instance
 	private let remembered: Remembered
 	private var server: Server?
@@ -140,7 +141,9 @@ public final class AppModel {
 		guard case .signedIn(let workspace) = phase else { return }
 		suspended = workspace
 		attempt += 1
-		phase = .signedOut(form(saying: "Your session ended. Sign in again."))
+		// It is renewed where it was opened, which a session the device kept from an older build may place on another
+		// instance than this build's: the password goes there, and the workspace waits on that server.
+		phase = .signedOut(form(saying: "Your session ended. Sign in again.", at: server?.instance ?? instance))
 	}
 
 	/// Signing out, or giving up a session that could not be used: nothing of it is kept.
@@ -154,9 +157,9 @@ public final class AppModel {
 		phase = .signedOut(form(saying: notice))
 	}
 
-	private func form(saying notice: String? = nil) -> SignInForm {
+	private func form(saying notice: String? = nil, at instance: Instance? = nil) -> SignInForm {
 		SignInForm(
-			instance: instance, notice: notice,
+			instance: instance ?? self.instance, notice: notice,
 			connect: { [weak self, secrets, transport, userAgent] instance in
 				// A session that ended is renewed on the server the workspace that waits for it holds.
 				if let kept = self?.server, self?.suspended != nil, kept.instance == instance { return kept }
