@@ -127,18 +127,18 @@ not the same things done worse.
    change: a 10,000-result report held the one thread for 0.3 to 0.65 s. Writes queue at a gate; they never
    block the thread. This is the design's horizon made real rather than a departure, but the mechanism
    (generator steps driven by one of two drivers) is new and is the part to review.
-7. **A closed run takes no more results.** The design re-raises the sign-off when a late upload arrives. Here a
-   report that names the run is refused with a message saying how to reopen it (withdraw the sign-off); a late
-   upload for its commit is recorded for the commit and does not reach it. A correction withdraws
-   the result it names wherever that counted (the commit's gate, open runs, runs planned later) and stands where
-   that result stood: it is never an older attempt than the one it corrects, whatever number its report carries,
-   and the lane is folded again from its whole history, so if the correction decides nothing (a skip) the attempt
-   before it stands again. A closed run keeps what it was closed on. Reopened, it is live again and counts the
-   evidence as it is now: a result its producer corrected meanwhile is withdrawn there too, one a decision
-   called a mistake is discounted there too, the results reported for its targets while it was closed are
-   admitted, and it is asked about every failure it then shows. A rule that signs off a passing run does not
-   sign it off again after a person refused to: once a person has answered against the rule, a person is asked
-   each time the run's evidence moves, until a person approves. Re-raising on a late upload is deferred (#48).
+7. **Closed runs and late results.** Updated 2026-10-14 (issue #48): a planned run that accepts a commit
+   continues receiving qualifying reports after closing, including reports that name it. Acceptance marks it
+   outstanding, so its gate is pending until every accepted report is applied. Folding the new evidence
+   re-raises sign-off through the existing basis-change and supersession ledger. A passing run closes again
+   under its policy; a run that no longer passes reopens and cannot be approved. A closed run that counts only
+   results recorded in it still refuses reports until its sign-off is withdrawn. Freeze remains deferred (#53).
+   A correction withdraws the result it names wherever a receiving run counts it and stands where that result
+   stood: it is never an older attempt than the one it corrects, whatever number its report carries. The lane
+   is folded again from its whole history, so if the correction decides nothing (a skip), the attempt before
+   it stands again. Reopening a run reconciles withdrawn results, decisions that discounted its evidence and
+   qualifying results not yet admitted, and asks about every failure it then shows. A rule does not
+   approve after a person refused its answer: each changed basis asks a person until a person approves.
 8. **Holds:** `basis-changes`, `this-target`, a date and `results-named` (a `mistaken` answer: the results it
    named and nothing later) are built. "N clean runs" and
    "until the linked defect closes" are not (#38, #32). A decision held for one target (an infrastructure failure)

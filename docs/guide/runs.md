@@ -73,13 +73,14 @@ A failure opens a question. Answer it in [Queue](./decide.md).
 
 Press <kbd>u</kbd> to correct the last result while the run remains open.
 If there was no previous result, the correction is a skip. Both results stay recorded.
-Once the run closes, reopen it before recording or correcting results.
+The web app requires you to reopen a closed run before recording or correcting results.
+The reporting operation also accepts late results for closed runs that accept a commit.
 
 ## Let CI fill the run
 
 A run that accepts a commit can use linked test results for that same commit.
 Evidence already recorded fills qualifying slots when you plan the run.
-Later reports fill qualifying slots while the run is open.
+Later reports fill qualifying slots even after a commit run closes.
 The result must meet the slot's pinned version, method, and basis requirements.
 
 An assumed result cannot fill a slot that requires an exact basis.
@@ -126,9 +127,15 @@ Under `loose` and `standard`, a recorded rule normally approves and closes it.
 Under `strict`, an authorized person approves with a reason in Queue.
 Rejecting sign-off leaves the run open. You cannot approve a run that no longer passes.
 
-A closed run takes no more results. It keeps the evidence it closed on.
-To reopen it, find its sign-off in Queue's "Settled" view and withdraw that approval.
-The run becomes live again and uses qualifying evidence recorded since it closed.
+A run that accepts a commit keeps receiving qualifying results after it closes,
+including reports that name the run. While a report waits to be applied, its gate
+is `pending`. Once all accepted reports are applied, Mainworthy asks for sign-off
+again on the new evidence. The ledger keeps the earlier approval and records that
+it no longer holds. A passing run can close again under its policy; a run with
+missing proof or unexplained failures stays open and cannot be approved.
+
+A run that counts only results recorded in it takes no more results after closing.
+To reopen one, find its sign-off in Queue's "Settled" view and withdraw that approval.
 Newer decisions and the current policy still control who may withdraw it.
 
 ## Plan a run from the command line

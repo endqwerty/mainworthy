@@ -24,6 +24,11 @@ it was at the first upload, so a repeat can show "blocked" for a commit that
 has passed since. The command says so on stderr and points at `mainworthy gate`,
 which reads the verdict now.
 
+Reports also fill qualifying slots in planned runs that accept the tested commit,
+even after those runs close. A late report makes the run's gate `pending` until
+all accepted reports are applied, then Mainworthy reconsiders its sign-off on the
+new evidence. See [planned runs](./runs.md#close-and-reopen-a-run).
+
 [Diagram: one red build, from upload to a green gate](../diagrams/red-build.html)
 
 ## Upload a native report
