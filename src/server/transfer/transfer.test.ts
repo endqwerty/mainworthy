@@ -500,6 +500,7 @@ function exportedTables(db: Db): string[] {
 				"change_ends",
 				"tracker_requests",
 				"scope_moves",
+				"demo_projects",
 			].includes(name) &&
 			!name.startsWith("search_docs") &&
 			!name.startsWith("sqlite_"),
@@ -1031,6 +1032,7 @@ describe("Mainworthy instance archives", () => {
 		expect([...UNEXPORTED].sort()).toEqual([
 			"change_ends",
 			"credentials",
+			"demo_projects",
 			"invitations",
 			"passkey_users",
 			"scope_moves",

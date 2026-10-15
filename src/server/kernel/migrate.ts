@@ -9,6 +9,7 @@ import changeEnds from "./migrations/0005_change_ends.sql" with { type: "text" }
 import trackerRequests from "./migrations/0006_tracker_requests.sql" with { type: "text" };
 import nothingRequired from "./migrations/0007_nothing_required.sql" with { type: "text" };
 import scopeMoves from "./migrations/0008_scope_moves.sql" with { type: "text" };
+import demoProjects from "./migrations/0009_demo_projects.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -27,6 +28,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 6, name: "tracker_requests", sql: trackerRequests, archive: false },
 	{ version: 7, name: "nothing_required", sql: nothingRequired, archive: true },
 	{ version: 8, name: "scope_moves", sql: scopeMoves, archive: false },
+	{ version: 9, name: "demo_projects", sql: demoProjects, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

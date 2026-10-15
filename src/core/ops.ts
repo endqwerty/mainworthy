@@ -617,6 +617,15 @@ export const AdminInput = z.discriminatedUnion("do", [
 	}),
 	z.object({ do: z.literal("project.list") }),
 	z.object({
+		do: z.literal("project.demo"),
+		key: z
+			.string()
+			.describe(
+				"Makes the project a demo: a write to it may say when it happened. Only a project nothing was written to, and it is not undone.",
+			),
+		cmd,
+	}),
+	z.object({
 		do: z.literal("token.create"),
 		actor: z.string(),
 		kind: ActorKind.exclude(["rule"]),

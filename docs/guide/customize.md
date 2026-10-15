@@ -67,15 +67,36 @@ To look around before you write a case of your own, fill a project with the demo
 
 ```
 $ mainworthy seed demo
-seeded demo: 2000 cases, run R-4, 65 questions
+seeded demo: 2000 cases, run R-53, 65 questions
 http://127.0.0.1:7357/p/demo/suite
 ```
 
-The demo is a shop's suite: checkout, accounts, orders and a catalog. A pipeline named `pipeline` has reported three commits, the last of them pull request 482, where one test fails. A run named "Checkout regression" is planned on that pull request. An agent named `reviewer` has left a finding and a proposed edit. The queue holds five questions that each want a judgment: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The project ends on the `standard` preset, set to ask about tests with no case. `--cases` sets how many cases the demo writes, from 1 to 100000.
+The demo is a shop's suite. Its cases are in 29 folders under eight areas: Checkout, Accounts, Orders, Catalog, Back office, Notifications, Mobile app and API. Each folder holds the scenarios of one feature, and each case has steps of its own. A feature that needs more cases than it has scenarios repeats them for another browser, language or kind of customer, as a real suite does. About a third of the cases have an automated test, and each test is linked to its case.
 
 The pipeline also reports the shop's unit tests, which no case names: 60 files under `tests/unit/`, one open question each. That is the queue a first real project has, with many rows that want the same answer. Answer them one at a time to see what that costs. Then answer them all at once: in Settings, Policy, set "Tests with no case" to "Track without a case", or run `mainworthy --project demo policy tests track`. `--unlinked-files` sets how many files there are, from 0 to 500.
 
-You name the project each time. `seed` makes it when the instance has none of that name, and it does not read `--project` or `MAINWORTHY_PROJECT`. It refuses a project that already holds cases, tests or runs, so it cannot add the demo to your own work. If a seed stops halfway, send the same command again: it finishes the rest and writes nothing twice.
+The project holds fourteen days of history before today:
+
+- A pipeline named `pipeline` reported on `main` every night, and on one to three pull requests on most days. Two days of each week are quieter; this pattern comes from the seed, so it does not depend on the real weekday. Two nights found a defect, one night its services were down, and some pull requests failed before they were fixed. A person answered each failure the day it was reported.
+- A run was planned every other day and worked through by hand. The older ones are closed as passed. The one from two days ago found a defect and stays open, and yesterday's is half done.
+- Some cases were edited, and an agent named `reviewer` reviewed two pull requests.
+
+Today `main` fails one test, and so does pull request 482, which starts from that commit. A run named "Checkout regression" is planned on the pull request, and `reviewer` has left a finding and a proposed edit. The queue holds five questions that need judgment: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The sixty unit-test questions make 65 in all. The project is on the `standard` preset, set to ask about tests with no case, from its first day.
+
+Four flags change what is written:
+
+- `--cases` sets how many cases, from 1 to 100000.
+- `--seed` is the number the demo is made from. The same seed gives the same cases, pull requests and failures on any instance. Another seed gives another demo of the same shop. The default is 1.
+- `--days` sets how many days of history, from 0 to 90. With 0 the demo holds today and nothing before it.
+- `--unlinked-files` sets how many files of unit tests have no case, from 0 to 500. The default is 60; use 0 to leave only the five questions above.
+
+The history ends on the day you run the command. It does not move forward afterwards: a demo seeded a month ago shows the fourteen days before that day.
+
+You name the project each time. `seed` makes it when the instance has none of that name, and it does not read `--project` or `MAINWORTHY_PROJECT`. It fills a project nothing was written to, and refuses any other, so it cannot add the demo to your own work. If a seed stops halfway, send the same command again with the same flags: it finishes the rest and writes nothing twice.
+
+A seeded project is a demo project, and stays one. Only a demo project accepts a write that says when it happened, which is how the demo comes to hold days it was not there for. Every other project records the server's clock, and no flag or token changes that. [The API page](./api.md#say-when-a-write-happened) has the detail.
+
+The demo mark is stored by migration `0009_demo_projects.sql`, schema version 9. It is excluded from archives, so it does not change their version.
 
 `seed` needs a person who administers the instance, because it makes the project and the two actors. In server mode, give that person's token with `--token` or `MAINWORTHY_TOKEN`. The pipeline and the agent hold a grant on the demo project alone, and the two tokens `seed` used for them end after an hour.
 

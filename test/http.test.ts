@@ -1742,6 +1742,19 @@ describe("the surface", () => {
 		const instance = boot("local");
 		const sweep = await replySweep(instance, "scratch");
 		const { checked } = sweep;
+		await checked("admin", { do: "project.create", key: "schema-demo" });
+		expect(await checked("admin", { do: "project.demo", key: "schema-demo" })).toMatchObject({
+			key: "schema-demo",
+			since: expect.any(Number),
+		});
+		const projects = await checked("admin", { do: "project.list" });
+		expect(projects).toEqual(expect.arrayContaining([expect.objectContaining({ key: "schema-demo", demo: true })]));
+		expect(await new Client({ url: instance.url, token: undefined, project: "scratch" }).session()).toMatchObject({
+			projects: expect.arrayContaining([
+				expect.objectContaining({ key: "scratch", demo: false }),
+				expect.objectContaining({ key: "schema-demo", demo: true }),
+			]),
+		});
 		await checked("propose", {
 			cmd: "schema-create",
 			edits: [
@@ -1933,7 +1946,7 @@ describe("the surface", () => {
 			publicUrl: "https://mainworthy.example",
 		});
 		const client = new Client({ url: instance.url, token: undefined, project: "demo" });
-		const seeded = await seed(client, { project: "demo", cases: 24, unlinkedFiles: 8 });
+		const seeded = await seed(client, { project: "demo", cases: 24, days: 0, unlinkedFiles: 8 });
 		const sweep = await replySweep(instance, "demo");
 		const { checked } = sweep;
 		const rows = z.object({ items: z.array(z.record(z.string(), z.unknown())), cursor: z.string().nullable() });
@@ -2036,7 +2049,10 @@ describe("the surface", () => {
 		await checked("gate", { commit: "abcdef0" });
 		await checked("gate", { run: seeded.run });
 		await checked("check");
-		await checked("command", { cmd: "demo-demo-cases-0-v1" });
+		expect(await checked("command", { cmd: "demo-demo-cases-0-v2" })).toMatchObject({
+			state: "done",
+			op: "propose",
+		});
 		await checked("command", { cmd: "never-sent-command" });
 		for (const state of ["closed", "closed", "open", "merged"]) await checked("change", { change: "pr:482", state });
 		await checked("admin", { do: "project.create", key: "empty", preset: "standard" });

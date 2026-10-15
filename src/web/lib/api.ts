@@ -32,6 +32,7 @@ const Session = z.object({
 			createdAt: z.number(),
 			policy: z.string(),
 			unlinked: Unlinked,
+			demo: z.boolean(),
 			can: z.array(z.string()),
 		}),
 	),

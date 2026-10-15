@@ -6,6 +6,7 @@ import { API_VERSION, API_VERSION_HEADER, ApiHealth } from "../core/version.ts";
 import { TOKEN_MAX } from "../server/identity/identity.ts";
 import { OPS } from "../server/ops/index.ts";
 import type { Reply } from "../server/ops/registry.ts";
+import { AT_HEADER } from "../surfaces/http.ts";
 import type { Args } from "./args.ts";
 import { CliError } from "./errors.ts";
 import { warning } from "./output.ts";
@@ -38,6 +39,7 @@ const SessionSchema = z.object({
 			createdAt: z.number(),
 			policy: z.string(),
 			unlinked: Unlinked.optional(),
+			demo: z.boolean(),
 			can: z.array(z.string()).default([]),
 		}),
 	),
@@ -241,8 +243,11 @@ export class Client {
 		throw new CliError("invalid", `choose a project with --project or MAINWORTHY_PROJECT; projects: ${existing}`);
 	}
 
-	/** Returns the validated envelope, including failures, for MCP's protocol-level forwarding. */
-	async forward(op: string, project: string | null, input: unknown): Promise<Reply> {
+	/**
+	 * Returns the validated envelope, including failures, for MCP's protocol-level forwarding. `at` says when the
+	 * request happened, which only a write to a demo project takes (`seed`).
+	 */
+	async forward(op: string, project: string | null, input: unknown, at?: number): Promise<Reply> {
 		const path =
 			project === null
 				? `/api/${encodeURIComponent(op)}`
@@ -250,7 +255,7 @@ export class Client {
 		const reply = await readEnvelope(
 			await this.request(path, {
 				method: "POST",
-				headers: { "content-type": "application/json" },
+				headers: { "content-type": "application/json", ...(at === undefined ? {} : { [AT_HEADER]: String(at) }) },
 				body: JSON.stringify(input),
 			}),
 		);
@@ -259,14 +264,14 @@ export class Client {
 		return { ok: false, error: { code, message, ...(details ? { details } : {}) } };
 	}
 
-	async operation(op: string, input: unknown): Promise<unknown> {
+	async operation(op: string, input: unknown, at?: number): Promise<unknown> {
 		const definition = OPS[op];
 		if (!definition) throw new CliError("invalid", `unknown operation ${op}`);
-		return unwrap(await this.forward(op, definition.scope === "project" ? await this.project() : null, input));
+		return unwrap(await this.forward(op, definition.scope === "project" ? await this.project() : null, input, at));
 	}
 
-	async call<N extends OpName>(op: N, input: Api[N]["input"]): Promise<Api[N]["reply"]> {
-		const result = await this.operation(op, input);
+	async call<N extends OpName>(op: N, input: Api[N]["input"], at?: number): Promise<Api[N]["reply"]> {
+		const result = await this.operation(op, input, at);
 		const parsed = REPLY_SCHEMAS[op].safeParse(result);
 		if (!parsed.success) throw new CliError("internal", `the server returned invalid ${op} data`);
 		return parsed.data;

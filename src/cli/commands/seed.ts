@@ -1,15 +1,26 @@
 import { assertPositionals } from "../args.ts";
 import { CliError } from "../errors.ts";
 import { line, printJson } from "../output.ts";
-import { seed } from "../seed.ts";
+import { DEFAULT_SEED, DEFAULT_SEED_CASES, DEFAULT_SEED_DAYS, seed } from "../seed.ts";
 import type { AdapterCommand } from "./types.ts";
 
 export const seedCommand: AdapterCommand = {
 	name: "seed",
-	summary: "Fill a new or empty project with demo data: a shop's cases, results, a run and questions to answer.",
-	usage: "seed <project> [--cases 2000] [--unlinked-files 60] [--json]",
+	summary:
+		"Fill a new or empty project with demo data: a shop's cases, two weeks of results and runs, and questions to answer.",
+	usage: `seed <project> [--cases ${DEFAULT_SEED_CASES}] [--seed ${DEFAULT_SEED}] [--days ${DEFAULT_SEED_DAYS}] [--unlinked-files 60] [--json]`,
 	flags: [
-		{ name: "cases", kind: "number", description: "How many cases to write. Defaults to 2000." },
+		{ name: "cases", kind: "number", description: `How many cases to write. Defaults to ${DEFAULT_SEED_CASES}.` },
+		{
+			name: "seed",
+			kind: "number",
+			description: `The number the demo is made from: the same seed gives the same demo. Defaults to ${DEFAULT_SEED}.`,
+		},
+		{
+			name: "days",
+			kind: "number",
+			description: `How many days of history to write before today, 0 for none. Defaults to ${DEFAULT_SEED_DAYS}.`,
+		},
 		{
 			name: "unlinked-files",
 			kind: "number",
@@ -23,9 +34,13 @@ export const seedCommand: AdapterCommand = {
 		if (args.has("project"))
 			throw new CliError("invalid", `seed takes the project as its argument: mainworthy ${seedCommand.usage}`);
 		const project = args.positionals[0] ?? "";
+		const seedNumber = args.number("seed");
+		const days = args.number("days");
 		const seeded = await seed(client, {
 			project,
-			cases: args.number("cases") ?? 2000,
+			cases: args.number("cases") ?? DEFAULT_SEED_CASES,
+			...(seedNumber === undefined ? {} : { seed: seedNumber }),
+			...(days === undefined ? {} : { days }),
 			unlinkedFiles: args.number("unlinked-files") ?? 60,
 		});
 		const summary = {

@@ -12,6 +12,7 @@ import {
 	type Actor,
 	beginCommand,
 	type Ctx,
+	demoSince,
 	findCommand,
 	findProject,
 	finishCommand,
@@ -138,7 +139,26 @@ export type Call = {
 	session?: () => number | null;
 	/** Where the caller is signed in, as it stands when it is asked, or null (see `InstanceCtx`). */
 	context?: () => string | null;
+	/**
+	 * When the caller says this happened, in milliseconds. Only a write to a demo project takes it (decision
+	 * 0020); anywhere else it is refused, not ignored, so nobody believes a real project recorded the time it
+	 * was given. It is part of what a command id names: the same request at another time is another request.
+	 */
+	at?: number;
 };
+
+/**
+ * Why a call that says when it happened is refused before it runs, or null. Asked wherever a call enters, a read
+ * that goes to a reader thread included. Whether the project is a demo is asked inside the write (`execute`).
+ */
+function misplacedTime(op: AnyOp | undefined, call: Call): Reply | null {
+	if (call.at === undefined || !op) return null;
+	if (op.scope !== "project" || op.effect !== "write")
+		return fail("invalid", `${op.name} takes no time: only a write to a demo project says when it happened`);
+	if (!Number.isSafeInteger(call.at) || call.at < 0)
+		return fail("invalid", "the time is a whole number of milliseconds since 1970");
+	return null;
+}
 
 /**
  * Runs one operation: validates the input at the boundary, checks the capability, and for a write wraps the work
@@ -171,6 +191,8 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 	// written against the wrong address would work until the day the two differ.
 	if (op.scope === "instance" && call.project !== null)
 		return fail("not_found", `${op.name} is an operation of the instance and of no project: POST /api/${op.name}`);
+	const misplaced = misplacedTime(op, call);
+	if (misplaced) return misplaced;
 	// Who may call is settled before the operation's input is checked: a caller that may not run the operation
 	// learns that and nothing about what it sent. (A surface has read the body by then: HTTP wants it to be JSON.)
 	const db = op.effect === "write" ? app.db : app.reader;
@@ -214,7 +236,7 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 	const cmd =
 		typeof input === "object" && input !== null && "cmd" in input && typeof input.cmd === "string" ? input.cmd : null;
 	const writing = op.effect === "write";
-	const request = cmd && writing ? digest(input) : "";
+	const request = cmd && writing ? digest(call.at === undefined ? input : { input, at: call.at }) : "";
 
 	try {
 		if (op.scope === "instance") {
@@ -279,7 +301,15 @@ function* executeInSnapshot(app: App, ops: Readonly<Record<string, AnyOp>>, call
 			}
 			// Read the project inside the transaction: its sequence number is what this command builds on.
 			const project = findProject(app.db, found.key) ?? found;
-			const ctx = makeCtx(app, project, actor, true);
+			if (call.at !== undefined) {
+				if (demoSince(app.db, project.id) === null)
+					throw new OpError(
+						"invalid",
+						`${project.key} is not a demo project: what it records takes the server's clock, and no time from a caller`,
+					);
+				if (call.at > app.now()) throw new OpError("invalid", "the time is in the future");
+			}
+			const ctx = makeCtx(app, project, actor, true, call.at);
 			const publish = () => {
 				app.publish({ project: found.key, seq: ctx.seq, op: op.name, actor: actor.name, touched: [...ctx.touched] });
 				ctx.touched.clear();
@@ -348,6 +378,8 @@ const nextTick = (): Promise<void> => new Promise((resolve) => setImmediate(reso
  */
 export function invokeAsync(app: App, ops: Readonly<Record<string, AnyOp>>, call: Call): Promise<Reply> {
 	const op = ops[call.op];
+	const misplaced = misplacedTime(op, call);
+	if (misplaced) return Promise.resolve(misplaced);
 	if (op?.effect === "read" && app.readers && call.reference) {
 		const project = op.scope === "project" && call.project ? findProject(app.reader, call.project) : null;
 		if (op.scope === "project" && !project) return Promise.resolve(invoke(app, ops, call));

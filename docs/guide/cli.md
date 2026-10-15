@@ -70,7 +70,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy actor list \| actor grant <name> --can read,record [--project <key>] \| actor ungrant <name> [--project <key>] \| actor forget <name> --confirm <name>` | List who may do what, change grants, and forget an actor's identity while keeping history. |
 | `mainworthy policy show \| policy use <loose\|standard\|strict> \| policy tests <ask\|track\|create> \| policy empty <pending\|nothing-required> [--json]` | Show policy clauses, or record an admin's choice of preset, tests with no case, or empty reports. |
 | `mainworthy new [file\|-] [--json]` | Create a case from a canonical Markdown file or an outline on stdin. |
-| `mainworthy seed <project> [--cases 2000] [--unlinked-files 60] [--json]` | Fill a new or empty project with demo data: a shop's cases, results, a run and questions to answer. |
+| `mainworthy seed <project> [--cases 2000] [--seed 1] [--days 14] [--unlinked-files 60] [--json]` | Fill a new or empty project with demo data: a shop's cases, two weeks of results and runs, and questions to answer. |
 | `mainworthy get <ref> [--md] [--json]` | Read a ref, or print a case's canonical Markdown with --md. |
 | `mainworthy fmt <file> [--json]` | Print canonical case Markdown. Parse errors include source line numbers. |
 | `mainworthy check [--limit <number>] [--json]` | Print suite problems grouped by rule. Exit 0 with none, 1 with problems. |
@@ -125,6 +125,8 @@ Flags of `mainworthy actor`:
 Flags of `mainworthy seed`:
 
 - `--cases <number>`: How many cases to write. Defaults to 2000.
+- `--seed <number>`: The number the demo is made from: the same seed gives the same demo. Defaults to 1.
+- `--days <number>`: How many days of history to write before today, 0 for none. Defaults to 14.
 - `--unlinked-files <number>`: How many files of unit tests with no case the pipeline reports: one open question each. Defaults to 60; 0 for none.
 
 Flags of `mainworthy get`:

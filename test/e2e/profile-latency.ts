@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { openPage, startServer } from "./support.ts";
 
-const server = await startServer({ cases: 2000 });
+const server = await startServer({ cases: 2000, days: 14 });
 const harness = await openPage(server);
 try {
 	await harness.page.waitForFunction(

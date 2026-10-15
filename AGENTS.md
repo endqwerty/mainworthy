@@ -126,6 +126,11 @@ is under the GitHub milestone `iOS app`.
   and commit the result. A licence that `LICENCES` in that script does not name fails `test/licences.test.ts`:
   whether Mainworthy may ship it is the owner's call, asked in the pull request. Upgrading Bun means reading its
   libraries again (`licences/README.md`); the Dockerfile, CI and the notices name the same version.
+- **The time of a write is the server's.** Only a demo project takes one from its caller (decision 0020):
+  `Call.at` in the registry, the header `X-Mainworthy-At`, and `project.demo`, which marks only a project
+  nothing was written to. Do not add a second way to date a row, and do not put a time in an operation's input.
+  What `mainworthy seed` writes is decided in `src/cli/demo/`, which is pure: the same seed, cases and days give
+  the same requests, or a seed sent again is refused as another request.
 - **Budgets are tests** (`test/budgets.test.ts`, `bench/`). A change that misses a
   hot-path budget does not merge; do not raise the number.
 - **The check's wall time is a budget** (`scripts/check-plan.ts`). The check warns

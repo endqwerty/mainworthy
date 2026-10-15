@@ -56,7 +56,9 @@ type Table = {
  * of the three an archive is meant to hold fails there.
  *
  * `change_ends` says which changes have ended (decision 0022), and it does not travel either: a change that
- * arrives in an archive is open, and the questions that were closed when it ended stay closed. Exported, the
+ * arrives in an archive is open, and the questions that were closed when it ended stay closed.
+ * `demo_projects` is the leave to date a write (decision 0020), and it does not travel either: a project that
+ * arrives in an archive takes the server's clock from then on, whatever it was where it came from. Exported, either
  * table would raise the archive version and refuse every archive taken before it.
  * `tracker_requests` is delivery state for this instance only. Importing it must never send an issue again.
  * Tracker credentials are process configuration and never enter a table or archive.
@@ -72,6 +74,7 @@ export const UNEXPORTED: readonly string[] = [
 	"change_ends",
 	"tracker_requests",
 	"scope_moves",
+	"demo_projects",
 ];
 
 /** The row counts describe exported data, excluding migration metadata, credentials and the search index. */
@@ -514,7 +517,9 @@ export function removeBootstrap(db: Db): void {
 	) {
 		throw new OpError("conflict", "import needs a fresh instance; existing projects or user data will not be replaced");
 	}
-	db.raw.exec("DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
+	// The untouched project may have been made a demo. The mark goes with it: the project an archive puts under
+	// the same id is not one.
+	db.raw.exec("DELETE FROM demo_projects; DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
 }
 
 /** Splits LF-delimited text lazily, retaining blank lines and CR bytes. A final LF creates no extra line. */

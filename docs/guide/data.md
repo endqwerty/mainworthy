@@ -45,7 +45,7 @@ $ tail -n 1 mainworthy.ndjson
 
 You can read it with any tool that reads text, search it with `grep`, and keep it in version control if the data suits that.
 
-The archive leaves out tokens, sessions, passwords, passkeys, invitations and the search index, which Mainworthy rebuilds on import. It also leaves out which changes have ended: after an import every change is open, and the questions that were closed when one ended stay closed. If a failure on such a change is reported again, say once more that the change ended (`mainworthy change`). Anyone who reads the archive reads your cases and decisions, so store it as you would the data itself.
+The archive leaves out tokens, sessions, passwords, passkeys, invitations and the search index, which Mainworthy rebuilds on import. It also leaves out which changes have ended: after an import every change is open, and the questions that were closed when one ended stay closed. If a failure on such a change is reported again, say once more that the change ended (`mainworthy change`). It also leaves out which project is a [demo](./customize.md#a-project-of-demo-data): an imported demo keeps its data and its dates, and accepts no more writes dated in the past. Anyone who reads the archive reads your cases and decisions, so store it as you would the data itself.
 
 ## Export one project
 

@@ -128,7 +128,7 @@ describe("the module map", () => {
 	// The owner of each table. A read of another module's data goes through that module's functions, so the
 	// rules about its rows live in one place and a join cannot quietly depend on another module's schema.
 	const owners: Record<string, string[]> = {
-		"server/kernel": ["meta", "projects", "counters", "commands"],
+		"server/kernel": ["meta", "projects", "counters", "commands", "demo_projects"],
 		"server/identity": [
 			"orgs",
 			"actors",
@@ -228,9 +228,9 @@ describe("the module map", () => {
 		// an export carries what signs somebody in.
 		const exported = ["orgs", "actors", "grants"];
 		const identity = owners["server/identity"] ?? [];
-		// Change endings and scope-move audit rows preserve the old archive version (decisions 0022 and 0038).
-		// Tracker delivery must never replay after import. None of these tables holds credentials.
-		const other = ["change_ends", "tracker_requests", "scope_moves"];
+		// Change endings, scope-move audit rows and demo marks preserve the old archive version (decisions 0022, 0038
+		// and 0020). Tracker delivery must never replay after import. None of these tables holds credentials.
+		const other = ["change_ends", "tracker_requests", "scope_moves", "demo_projects"];
 		expect(UNEXPORTED.filter((table) => !other.includes(table)).sort()).toEqual(
 			identity.filter((table) => !exported.includes(table)).sort(),
 		);
