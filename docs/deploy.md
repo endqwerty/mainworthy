@@ -267,6 +267,9 @@ the steps are kept below for an instance that has none.
    On the Coolify instance the commands ran inside the container, which already holds the owner token, so that
    token was copied nowhere: `docker exec <container> sh -c 'MAINWORTHY_TOKEN="$MAINWORTHY_OWNER_TOKEN" mainworthy …'`.
    The new token went from that command's output into `gh secret set MAINWORTHY_TOKEN` and was never printed.
+   After the owner's own account is recovered, that owner token no longer signs in (decision 0067): set
+   `MAINWORTHY_OWNER_TOKEN` to a new value and redeploy before using this route again. The CI token above is another
+   actor's and keeps working.
 2. **In the GitHub repository** (Settings → Secrets and variables → Actions, or `gh variable set` and
    `gh secret set`): variables `MAINWORTHY_URL=https://mainworthy.com` and `MAINWORTHY_PROJECT=mainworthy`, secret
    `MAINWORTHY_TOKEN`. The workflow gives the secret to the one step that reports. `TS_OAUTH_CLIENT_ID` and
