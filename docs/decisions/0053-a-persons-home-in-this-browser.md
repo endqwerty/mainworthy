@@ -16,8 +16,12 @@ Settings has a Your home section for each project. Its choice is Suite, Queue, a
 run reference, or one saved Suite search with text, folder, and tag filters.
 The search reads current cases, not a saved result set. Suite remains the default.
 The shell uses the home when a person opens `/`, `/p/<project>`, or
-`/p/<project>/` without a query. Other addresses, including invitations, explicit
-screen and item links, and roots with filters, keep their destinations.
+`/p/<project>/` without a query. Invitations, explicit screen and item links,
+and project roots with filters keep their destinations. Other paths outside
+`/p/`, including `/?utm=1` and `/nowhere`, open the first accessible project's
+Suite, preserving the previous entry redirect. These paths do not select the
+saved home. Entry redirects happen before the panes mount, so no pane asks for
+the router's default project when that project is absent or inaccessible.
 `g h`, also Go home in the palette, uses
 the current project's choice through `navigate`, so leaving an editor still seals it.
 

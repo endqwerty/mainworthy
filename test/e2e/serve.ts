@@ -38,7 +38,7 @@ const instance = start(
 		},
 		open: docsRoutes(VERSION),
 	}),
-	{ now: () => Date.now() + ahead },
+	{ now: () => Date.now() + ahead, firstProject: process.env.MAINWORTHY_FIRST_PROJECT ?? "scratch" },
 );
 console.info(instance.url);
 for (const signal of ["SIGTERM", "SIGINT"] satisfies NodeJS.Signals[])

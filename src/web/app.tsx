@@ -173,6 +173,9 @@ export function App() {
 					history.replaceState(null, "", home.url);
 					if (home.missing) homeStatus = missingHomeStatus;
 				}
+			} else if (!location.pathname.startsWith("/p/") && location.pathname !== INVITE_PATH) {
+				const first = info.projects[0];
+				if (first) history.replaceState(null, "", routeUrl({ project: first.key, screen: "suite" }));
 			}
 			setAuth({ kind: "ready", session: info, homeStatus });
 		} catch (error) {
