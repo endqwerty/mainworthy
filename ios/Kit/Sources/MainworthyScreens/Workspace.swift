@@ -25,6 +25,7 @@ public final class Workspace {
 	@ObservationIgnored public private(set) lazy var sessions = SessionsScreen(server: server) { [weak self] in
 		await self?.signOut()
 	}
+	@ObservationIgnored public private(set) lazy var tokens = TokensScreen(server: server)
 	public private(set) var suite: SuiteScreen?
 
 	/// Every screen of the open project. What the change stream tells of, each of them reads again.

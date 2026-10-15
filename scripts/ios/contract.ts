@@ -416,6 +416,24 @@ export const SessionEnd = struct("SessionEnd", "`session` end: whether it ended,
 	current: flag,
 });
 
+export const TokenRow = struct("TokenRow", "`admin` token.list: identity and use, without the secret.", {
+	id: whole,
+	actor: text,
+	kind: text,
+	label: text,
+	createdAt: moment,
+	createdBy: nullable(text),
+	expiresAt: nullable(moment),
+	expired: flag,
+	lastUsedAt: nullable(moment),
+	lastUsedFrom: nullable(text),
+	revoked: flag,
+});
+
+export const TokenRevoke = struct("TokenRevoke", "`admin` token.revoke: true when this command revoked it.", {
+	revoked: flag,
+});
+
 // ── The suite ──────────────────────────────────────────────────────────────────────────────────────────────
 
 const SuiteProof = struct("SuiteProof", "The latest evidence of one method, not a gate verdict.", {
@@ -511,6 +529,8 @@ export const SHAPES: readonly Shape[] = [
 	ChangeRun,
 	SessionRow,
 	SessionEnd,
+	TokenRow,
+	TokenRevoke,
 	SuiteCases,
 	SuiteFolders,
 	SuiteTags,
