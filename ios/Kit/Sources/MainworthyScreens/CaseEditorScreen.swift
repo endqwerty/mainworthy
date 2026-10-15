@@ -12,6 +12,9 @@ public final class CaseEditorScreen {
 	public private(set) var notice: String?
 	public private(set) var settled = false
 	public private(set) var savedDocument: CaseDocument?
+	public private(set) var conflict: CaseConflict?
+	private var overlapQuestion: String?
+	private var mergeSent: MergeSubmission?
 	private let original: CaseContent
 	private var used: Set<String>
 	private let project: ProjectClient
@@ -34,7 +37,7 @@ public final class CaseEditorScreen {
 	}
 
 	public var dirty: Bool { content != original || !reason.isEmpty }
-	public var locked: Bool { busy || sent != nil || settled }
+	public var locked: Bool { busy || sent != nil || settled || conflict != nil || overlapQuestion != nil }
 	/// Lengths use UTF-16, as the server's JavaScript strings do. Other text and step counts have no cap.
 	public var validation: [String] {
 		var issues: [String] = []
@@ -60,8 +63,15 @@ public final class CaseEditorScreen {
 		if reason.utf16.count > 500 { issues.append("Reason: use at most 500 UTF-16 units.") }
 		return issues
 	}
-	public var maySave: Bool { !busy && !settled && (sent != nil || validation.isEmpty) }
-	public var isRetrying: Bool { sent != nil && !busy }
+	public var maySave: Bool {
+		!busy && !settled && (mergeSent != nil || (conflict.map(\.complete) ?? (sent != nil || validation.isEmpty)))
+	}
+	public var isRetrying: Bool { (sent != nil || mergeSent != nil || (overlapQuestion != nil && conflict == nil)) && !busy }
+
+	public func chooseConflict(_ path: String, side: CaseConflict.Side) {
+		guard !busy, mergeSent == nil, !settled else { return }
+		conflict?.choose(path, side: side)
+	}
 
 	public func addStep() {
 		guard !locked else { return }
@@ -91,6 +101,7 @@ public final class CaseEditorScreen {
 		guard maySave else { return nil }
 		busy = true
 		defer { busy = false }
+		if conflict != nil || overlapQuestion != nil || mergeSent != nil { return await resolveConflict() }
 		if sent == nil { sent = SuiteSubmission(source: source, content: content, reason: reason) }
 		guard let sent else { return nil }
 		do {
@@ -119,12 +130,13 @@ public final class CaseEditorScreen {
 				settled = true
 				notice = "The edit waits for a person's answer in the Queue\(question.map { " (\($0))" } ?? "")."
 				if let needs { notice = "\(notice ?? "") The server asks for \(needs)." }
-			case .overlap(let question, let paths, let sentence):
-				settled = true
-				notice = "The case changed meanwhile and the edits overlap: \(paths.joined(separator: ", ")). "
-					+ "The proposal waits for its author in the web app\(question.map { " (\($0))" } ?? ""), "
-					+ "where an overlap is resolved."
-				if let sentence { notice = "\(notice ?? "") \(sentence)" }
+			case .overlap(let question, _, _):
+				guard let question, case .edit(let opened) = source else { throw ClientError.unreadable }
+				overlapQuestion = question
+				self.sent = nil
+				conflict = try await project.conflict(question, ref: opened.ref)
+				notice = "Both edits are kept. Choose each overlapping field, then record the merge."
+
 			case .notTaken(let sentence): notice = sentence
 			}
 			self.sent = nil
@@ -136,4 +148,42 @@ public final class CaseEditorScreen {
 			return nil
 		}
 	}
+	private func resolveConflict() async -> SaveCaseOutcome? {
+		do {
+			if conflict == nil, let question = overlapQuestion, case .edit(let opened) = source {
+				conflict = try await project.conflict(question, ref: opened.ref)
+				notice = "Both edits are kept. Choose each overlapping field, then record the merge."
+				return nil
+			}
+			guard let conflict else { throw ClientError.unreadable }
+			let recovering = mergeSent != nil
+			if mergeSent == nil { mergeSent = MergeSubmission(conflict) }
+			guard let submission = mergeSent else { return nil }
+			let outcome = try await project.resolve(submission, recovering: recovering)
+			switch outcome {
+			case .adopted(let stamp):
+				let document = try await project.caseDocument(stamp.ref, version: stamp.version)
+				savedDocument = document
+				settled = true; mergeSent = nil
+				return .adopted(stamp)
+			case .unchanged:
+				settled = true; mergeSent = nil
+				notice = "Conflict resolved. The recorded version already holds this text."
+			case .waiting(let question):
+				settled = true; mergeSent = nil
+				notice = "Your merge is proposed and waits for a person's answer in the Queue (\(question))."
+			case .moved(let question):
+				// Do not drop the pending command until its replacement has been read. A failed read recovers
+				// the same reply and keeps every choice from this card.
+				let next = try await project.conflict(question, ref: conflict.ref)
+				self.conflict = next; overlapQuestion = question; mergeSent = nil
+				notice = "Nothing was adopted. The case changed again. Your merge is kept in this new conflict."
+			case .refused(let sentence):
+				mergeSent = nil
+				notice = sentence
+			}
+		} catch { notice = error.shown }
+		return nil
+	}
+
 }

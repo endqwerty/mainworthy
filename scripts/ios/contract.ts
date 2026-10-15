@@ -210,6 +210,49 @@ export const Proposal = struct("Proposal", "`get` with a P- ref: a proposed edit
 	),
 });
 
+// The conflict resolver reads the complete three-way inputs and the recorded fate of its own command.
+export const ConflictProposal = struct("ConflictProposal", "One edit that the author resolves.", {
+	ref: text,
+	edits: list(
+		struct("ConflictEdit", "The complete edit and the current document.", {
+			op: text,
+			case: maybe(text),
+			base: whole,
+			mine: CaseBody,
+			current: CaseBody,
+		}),
+	),
+});
+export const ConflictBaseFields = struct(
+	"ConflictBaseFields",
+	"Custom fields at the exact base version, from history.",
+	{
+		ref: text,
+		from: whole,
+		to: whole,
+		diff: struct("ConflictBaseDiff", "The complete custom fields, including when unchanged.", {
+			fields: struct("ConflictCustomFields", "The fields before this comparison.", { before: dictionary(text) }),
+		}),
+	},
+);
+export const MergeReply = struct("MergeReply", "One decide reply, with the effect of a merge.", {
+	q: text,
+	status: text,
+	needs: maybe(text),
+	effects: maybe(
+		struct("MergeEffects", "The server's result of the resolved proposal.", {
+			status: text,
+			cases: list(struct("MergeStamp", "An adopted version.", { ref: text, version: whole })),
+			adopt: maybe(text),
+			proposal: maybe(text),
+		}),
+	),
+});
+export const MergeCommand = struct("MergeCommand", "The recorded reply of a merge command.", {
+	state: text,
+	reply: maybe(list(MergeReply)),
+});
+
 // ── The change stream ──────────────────────────────────────────────────────────────────────────────────────
 
 export const ChangeEvent = struct("ChangeEvent", "One event of `GET /api/p/<project>/events`: something changed.", {
@@ -443,6 +486,10 @@ export const SHAPES: readonly Shape[] = [
 	...Object.values(EVIDENCE),
 	DecideReply,
 	Proposal,
+	ConflictProposal,
+	ConflictBaseFields,
+	MergeReply,
+	MergeCommand,
 	ChangeEvent,
 	PlannedRun,
 	RunPage,

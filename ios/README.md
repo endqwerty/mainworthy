@@ -119,7 +119,7 @@ from any checkout, waits for the first.
 | `project.yml`, `Config/` | The Xcode project as XcodeGen reads it, and its build settings |
 | `App/` | The SwiftUI views. They bind to a class of `MainworthyScreens`. The client is out of their reach, and a test keeps them from the system's networking |
 | `Kit/Sources/MainworthyClient/` | Everything that knows the server. `Server.swift` sends; the other files are the values it hands out |
-| `Kit/Sources/MainworthyClient/Generated/` | Written by `gen`: the reply types and the queue's words. Never edited |
+| `Kit/Sources/MainworthyClient/Generated/` | Written by `gen`: reply types, the queue's words, and the shared merge code. Never edited |
 | `Kit/Sources/MainworthyScreens/` | What each screen shows and does: one class for each |
 | `Kit/Tests/` | The package's tests. `Support/Live.swift` gives a test its own project on the tests' server |
 | `UITests/` | The tests that drive the app in a simulator |
@@ -173,3 +173,15 @@ Four things the queue does that a copy must keep:
   view's own state is not.
 - **What is sent later is sent on what was shown.** A sheet or a dialog keeps the value the person acted on
   (`Chosen` in `QuestionView`), not a ref to look up again when it is submitted.
+
+## Resolve overlapping edits
+
+`CaseEditorScreen` owns the conflict and the choices made in its editor. `Conflicts.swift` reads the full
+proposal, keeps the question's evidence hash, and interprets the effects of `decide`. A lost reply is recovered
+through `command` before another request is sent. The editor locks choices while that result is unknown.
+
+The three-way merge is the same `src/core/merge3.ts` used by the server and web app. `gen` bundles its pure
+code through `scripts/ios/merge.ts` into `Generated/MergeRuntime.swift`; `Conflicts.swift` runs that string
+in a fresh JavaScriptCore context. No server code, hashing library or network API is in the bundle.
+The contract test holds the generated string to the current source, and `ConflictTests` runs it against real
+server conflicts and checks mixed choices, removed steps, order, refusal, a moved case and lost replies.
