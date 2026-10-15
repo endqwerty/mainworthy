@@ -10,6 +10,6 @@ export const CallerReference = z.discriminatedUnion("via", [
 		activity: z.number().finite(),
 		idleMs: z.number().nonnegative().finite(),
 	}),
-	z.object({ via: z.literal("local"), actor: z.number().int() }),
+	z.object({ via: z.literal("local"), owner: z.string() }),
 ]);
 export type CallerReference = z.infer<typeof CallerReference>;

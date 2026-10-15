@@ -275,7 +275,7 @@ An admin cannot see or set anybody's password, and cannot register a passkey for
 
 ## Sign in to the web UI
 
-In local mode you sign in as the owner, with no step. See [configuration](./configuration.md#local-mode-and-server-mode) for what local mode means.
+In local mode you sign in as the owner, with no step. An operation waiting across an archive import still runs as the configured local owner. See [configuration](./configuration.md#local-mode-and-server-mode) for what local mode means.
 
 In server mode the sign-in page has three ways in, one under the other:
 

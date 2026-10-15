@@ -558,7 +558,7 @@ export function resolveCaller(
 				: null;
 		}
 		case "local": {
-			const actor = db.get(Q.actorById, { id: reference.actor });
+			const actor = db.get(Q.actorByName, { org: orgId(db), name: reference.owner });
 			return actor && actor.disabled_at === null
 				? { actor: toActor(db, actor, project), session: null, context: CONTEXT.local }
 				: null;
@@ -704,7 +704,7 @@ export function admit(app: App, facts: Facts): Admission {
 				kind: "admitted",
 				session: {
 					via: "local",
-					reference: () => ({ via: "local", actor: owner.id }),
+					reference: () => ({ via: "local", owner: app.config.owner }),
 					actor: () => owner,
 					context: () => CONTEXT.local,
 				},

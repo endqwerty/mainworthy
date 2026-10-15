@@ -57,6 +57,7 @@ function scratch(): string {
 
 type Boot = {
 	mode?: Config["mode"];
+	owner?: string;
 	dataDir?: string;
 	clock?: Clock;
 	readers?: number;
@@ -71,7 +72,7 @@ function boot(options: Boot = {}): Instance {
 			host: "127.0.0.1",
 			port: 0,
 			mode,
-			owner: "robin",
+			owner: options.owner ?? "robin",
 			ownerToken: options.ownerToken === undefined ? (mode === "server" ? TOKEN : null) : options.ownerToken,
 			commit: null,
 			sessionIdleMs: IDLE,
@@ -1015,6 +1016,92 @@ describe("an upgrade and an archive", () => {
 			expect(await statusOf(instance, bearer(replaced.body.ok ? replaced.body.result.token : ""))).toBe(200);
 		} finally {
 			queue.restore();
+		}
+	});
+
+	test("a local write queued behind an import resolves the configured owner after the gate", async () => {
+		const source = boot({ mode: "local", owner: "alice" });
+		const archive = await (await fetch(`${source.url}/api/export`)).text();
+		const instance = boot({ mode: "local" });
+		const oldId = instance.owner.id;
+		const gate = holdGate(instance);
+		const queue = gateQueue(instance);
+		try {
+			const importing = fetch(`${instance.url}/api/import`, { method: "POST", body: archive });
+			await queue.reaches(1);
+			const writing = post(instance, "/api/p/scratch/propose", {
+				edits: [{ op: "create", outline: "After the queued import\nAn action > Expected" }],
+			});
+			await queue.reaches(2);
+			await gate.release();
+			expect((await importing).status).toBe(200);
+			expect((await writing).status).toBe(200);
+			expect(
+				instance.app.reader.raw.query<{ name: string }, [number]>("SELECT name FROM actors WHERE id = ?").get(oldId)
+					?.name,
+			).toBe("alice");
+			expect(instance.owner.id).not.toBe(oldId);
+			expect(
+				instance.app.reader.raw
+					.query<{ name: string }, []>("SELECT a.name FROM cases c JOIN actors a ON a.id = c.created_by")
+					.all(),
+			).toEqual([{ name: "robin" }]);
+		} finally {
+			queue.restore();
+			await gate.release();
+		}
+	});
+
+	test("a local read dispatched before an import resolves the configured owner on its reader thread", async () => {
+		const source = boot({ mode: "local", owner: "alice" });
+		await post(source, "/api/p/scratch/propose", {
+			edits: [{ op: "create", outline: "# Read after import\nAn action > Expected" }],
+		});
+		const archive = await (await fetch(`${source.url}/api/export`)).text();
+		const instance = boot({ mode: "local", readers: 1 });
+		const pool = instance.app.readers;
+		if (!pool) throw new Error("the reader pool did not start");
+		let release = (): void => {};
+		const busy = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		let handed = (): void => {};
+		const dispatched = new Promise<void>((resolve) => {
+			handed = resolve;
+		});
+		const replies: Envelope<unknown>[] = [];
+		instance.app.readers = {
+			run: (call) => {
+				handed();
+				return busy
+					.then(() =>
+						pool.run(call, () => {
+							throw new Error("the real reader must answer");
+						}),
+					)
+					.then((reply) => {
+						replies.push(reply);
+						return reply;
+					});
+			},
+			refresh: () => pool.refresh(),
+			stop: () => pool.stop(),
+		};
+		const reading = post(instance, "/api/p/scratch/find", {});
+		try {
+			await dispatched;
+			expect((await fetch(`${instance.url}/api/import`, { method: "POST", body: archive })).status).toBe(200);
+			// Only the configured owner may read now. The actor holding its old id has no grant.
+			expect((await admin(instance, { do: "grant.remove", actor: "alice" }, {})).status).toBe(200);
+			release();
+			const answered = await reading;
+			expect(answered.status).toBe(200);
+			expect(answered.body).toMatchObject({ ok: true, result: { count: 1, items: [{ title: "Read after import" }] } });
+			expect(replies).toMatchObject([{ ok: true, result: { count: 1 } }]);
+		} finally {
+			release();
+			await reading;
+			instance.app.readers = pool;
 		}
 	});
 

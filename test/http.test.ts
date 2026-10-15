@@ -615,7 +615,7 @@ describe("reads on other cores through HTTP", () => {
 				op: "propose",
 				project: "scratch",
 				input: { edits: [{ op: "create", outline: "Must not be written" }] },
-				caller: { via: "local", actor: instance.owner.id },
+				caller: { via: "local", owner: instance.app.config.owner },
 				clockOffset: 0,
 			},
 			() => {

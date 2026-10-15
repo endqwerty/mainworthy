@@ -261,7 +261,7 @@ describe("reader threads", () => {
 			let retried = 0;
 			const requests = Array.from({ length: 32 }, () =>
 				pool.run(
-					{ op: "find", project: "scratch", input: {}, caller: { via: "local", actor: 0 }, clockOffset: 0 },
+					{ op: "find", project: "scratch", input: {}, caller: { via: "local", owner: "robin" }, clockOffset: 0 },
 					() => {
 						retried++;
 						return { ok: true, result: "replayed", seq: null };
@@ -274,7 +274,7 @@ describe("reader threads", () => {
 			expect(pool.threads).toHaveLength(1);
 			expect(log).toHaveBeenCalledTimes(1);
 			const reply = await pool.run(
-				{ op: "find", project: "missing", input: {}, caller: { via: "local", actor: 0 }, clockOffset: 0 },
+				{ op: "find", project: "missing", input: {}, caller: { via: "local", owner: "robin" }, clockOffset: 0 },
 				() => {
 					throw new Error("the replacement must answer");
 				},
@@ -299,7 +299,7 @@ describe("reader threads", () => {
 		const exits = threads.map((worker) => new Promise<void>((resolve) => worker.once("exit", () => resolve())));
 		const requests = Array.from({ length: 12 }, () =>
 			pool.run(
-				{ op: "find", project: "scratch", input: {}, caller: { via: "local", actor: 0 }, clockOffset: 0 },
+				{ op: "find", project: "scratch", input: {}, caller: { via: "local", owner: "robin" }, clockOffset: 0 },
 				() => ({
 					ok: true,
 					result: "shutdown fallback",
