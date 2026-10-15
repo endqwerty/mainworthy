@@ -20,9 +20,13 @@ The existing `change` operation accepts optional landing metadata:
 {"change":"pr:482","state":"merged","landing":{"commit":"abc12345","branch":"main"}}
 ```
 
-A pipeline or person reports this fact. It moves the head only if its complete hash
-matches `landing.commit`. A different merge or rebased hash ends the change without
-placing its original head on trunk. Metadata can arrive after the initial end event.
+A pipeline or person reports this fact. `landing.commit` sets the change's head to that
+exact hash, even if it is older than the recorded head or has no reports yet. The gate
+is pending until evidence arrives. The landed commit belongs to trunk immediately,
+so later results count for both the change's head gate and trunk's questions, even when
+the report still names the pull request. A different merge or rebased hash leaves the
+original commit's scope unchanged. Metadata can arrive after the initial end event.
+Without landing metadata, a merge keeps the head recorded when the change ended.
 Reopening a change leaves a landed commit on trunk.
 
 An automated report first made with only a commit hash is provisional about its scope.
@@ -37,7 +41,9 @@ Reports about a commit already in a named scope keep that scope. Agents cannot c
 `ChangeInput` adds `landing?: { commit: string; branch: "main" | "master" | "trunk" }`.
 The operation refuses landing metadata unless the state is `merged`. Evidence owns
 the target placement and the append-only `scope_moves` record, including source scope,
-destination scope, actor, sequence and time. Runs updates the existing gate's scope
+destination scope, actor, sequence and time. For an unreported landing, evidence creates
+a trunk target without creating evidence or a gate run. Reports preserve that trunk
+placement across environments, even before the first counted report. Runs updates the existing gate's scope
 and change reference. The operation recomputes that gate and all planned runs counting
 the commit, using the ordinary failure-question path.
 
@@ -67,7 +73,7 @@ atomically and evaluates failures under the destination's decisions.
 
 ## Limits
 
-Only a matching recorded head moves. A lifecycle event for another head leaves it
-alone. A missed event can be resent with the landing metadata. The GitHub workflow
+The landing identifies the merged head. Reports and code-host head observations cannot
+replace it while the change is merged. A missed event can be resent with the landing metadata. The GitHub workflow
 supplies landing metadata on merge events into the three recognized trunk names;
 manual workflow dispatch still ends the change without inferring a landing.
