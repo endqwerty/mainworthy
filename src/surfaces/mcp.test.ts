@@ -153,11 +153,12 @@ test("compact output schemas describe structured results from the registry", () 
 	const validator = new AjvJsonSchemaValidator();
 	const compile = (schema: NonNullable<ReturnType<typeof mcpTools>[number]["outputSchema"]>) => {
 		const { properties, required, ...base } = schema;
-		return validator.getValidator({
+		const jsonSchema: Record<string, unknown> = {
 			...base,
 			...(properties ? { properties } : {}),
 			...(required ? { required } : {}),
-		});
+		};
+		return validator.getValidator(jsonSchema);
 	};
 	for (const tool of mcpTools()) {
 		if (!tool.outputSchema) throw new Error(`${tool.name}: missing output schema`);
@@ -483,7 +484,7 @@ test("authenticated stateless HTTP answers initialize and tools/list and keeps t
 	}
 });
 
-test.each(["2025-11-25", "2026-07-28"])(
+test.each(["2025-03-26", "2025-11-25", "2026-07-28"])(
 	"a v2 HTTP client negotiates %s and discovers and calls the same tools",
 	async (version) => {
 		const h = harness();
@@ -497,7 +498,10 @@ test.each(["2025-11-25", "2026-07-28"])(
 		});
 		const client = new Client(
 			{ name: "v2-http-agent", version: "1" },
-			{ versionNegotiation: { mode: version === "2026-07-28" ? { pin: version } : "legacy" } },
+			{
+				versionNegotiation: { mode: version === "2026-07-28" ? { pin: version } : "legacy" },
+				supportedProtocolVersions: [version],
+			},
 		);
 		const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${http.port}/mcp`), {
 			requestInit: { headers: { authorization: `Bearer ${secret}` } },
@@ -512,11 +516,16 @@ test.each(["2025-11-25", "2026-07-28"])(
 			await unauthorized.body?.cancel();
 			await client.connect(transport);
 			expect(client.getNegotiatedProtocolVersion()).toBe(version);
-			expect((await client.listTools()).tools).toEqual(mcpTools());
-			resultOf(
-				await client.callTool({ name: "inbox", arguments: {} }),
-				z.object({ items: z.array(z.unknown()).length(0) }),
-			);
+			const listed = await client.listTools();
+			const inbox = await client.callTool({ name: "inbox", arguments: {} });
+			if (version === "2025-03-26") {
+				expect(listed).toEqual({ tools: mcpTools().map(({ outputSchema: _output, ...tool }) => tool) });
+				const envelope = { result: { counts: { open: 0 }, items: [], cursor: null }, seq: 1 };
+				expect(inbox).toEqual({ content: [{ type: "text", text: JSON.stringify(envelope) }] });
+			} else {
+				expect(listed.tools).toEqual(mcpTools());
+				resultOf(inbox, z.object({ items: z.array(z.unknown()).length(0) }));
+			}
 			const refused = CallToolResultSchema.parse(
 				await client.callTool({ name: "propose", arguments: { edits: [{ op: "create", outline: "Not allowed" }] } }),
 			);
@@ -590,7 +599,7 @@ test("an HTTP tool write waits for an applying report and records token use", as
 	}
 });
 
-test.each(["2025-11-25", "2026-07-28"])(
+test.each(["2025-03-26", "2025-11-25", "2026-07-28"])(
 	"stdio %s forwards calls to the running HTTP instance without owning its database",
 	async (version) => {
 		const h = harness();
@@ -629,16 +638,22 @@ test.each(["2025-11-25", "2026-07-28"])(
 			{ name: "stdio-client", version: "1" },
 			{
 				versionNegotiation: { mode: version === "2026-07-28" ? { pin: version } : "legacy" },
+				supportedProtocolVersions: [version],
 			},
 		);
 		try {
 			await client.connect(transport);
 			expect(client.getNegotiatedProtocolVersion()).toBe(version);
-			expect((await client.listTools()).tools).toEqual(mcpTools());
-			resultOf(
-				await client.callTool({ name: "inbox", arguments: {} }),
-				z.object({ items: z.array(z.unknown()).length(0) }),
-			);
+			const listed = await client.listTools();
+			const inbox = await client.callTool({ name: "inbox", arguments: {} });
+			if (version === "2025-03-26") {
+				expect(listed).toEqual({ tools: mcpTools().map(({ outputSchema: _output, ...tool }) => tool) });
+				const envelope = { result: { counts: { open: 0 }, items: [], cursor: null }, seq: 1 };
+				expect(inbox).toEqual({ content: [{ type: "text", text: JSON.stringify(envelope) }] });
+			} else {
+				expect(listed.tools).toEqual(mcpTools());
+				resultOf(inbox, z.object({ items: z.array(z.unknown()).length(0) }));
+			}
 			const refused = CallToolResultSchema.parse(
 				await client.callTool({ name: "propose", arguments: { edits: [{ op: "create", outline: "Not allowed" }] } }),
 			);

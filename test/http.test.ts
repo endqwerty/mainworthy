@@ -5,7 +5,7 @@ import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
-import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
 import { z } from "zod";
 import { Client } from "../src/cli/client.ts";
 import { seed } from "../src/cli/seed.ts";
