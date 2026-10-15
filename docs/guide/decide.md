@@ -280,7 +280,7 @@ mainworthy tracker --json '{"do":"create","result":123,"cmd":"defect-result-123"
 mainworthy tracker-status --id defect-result-123
 ```
 
-The request needs `produce`. Reading its status needs `read`. The server sends up to twenty queued requests once a minute. When stopping, it waits for the request already in flight and leaves queued requests for the next start. A completed request returns an issue URL and the issue's state as GitHub reported it. To check an existing issue instead of creating one:
+The request needs `produce`. Reading its status needs `read`. The server sends up to twenty queued requests once a minute. When stopping, it waits for the request already in flight and leaves queued requests for the next start. If saving that reply fails, the server logs the error once and finishes shutting down. A completed request returns an issue URL and the issue's state as GitHub reported it. To check an existing issue instead of creating one:
 
 ```
 mainworthy tracker --json '{"do":"link","result":123,"key":"42","cmd":"link-result-123"}'

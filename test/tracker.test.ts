@@ -487,3 +487,77 @@ test("a tracker delivery rejected during HTTP drain does not create an unhandled
 		instance = undefined;
 	}
 });
+
+test("a tracker delivery rejected after HTTP drain still completes shutdown and logs once", async () => {
+	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-after-drain-"));
+	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
+	const entered = Promise.withResolvers<void>();
+	const trackerReply = Promise.withResolvers<TrackerItem>();
+	instance = start(config, () => ({ ui: null }), {
+		readers: 1,
+		trackerPort: {
+			...port,
+			createDefect: () => {
+				entered.resolve();
+				return trackerReply.promise;
+			},
+		},
+	});
+	const current = instance;
+	const post = async (operation: string, input: unknown) => {
+		const response = await fetch(`${current.url}/api/p/scratch/${operation}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(input),
+		});
+		return response.json();
+	};
+	expect(
+		await post("report", {
+			target: { session: "reject-after-drain" },
+			results: [{ test: { key: "checkout" }, outcome: "fail" }],
+		}),
+	).toMatchObject({ ok: true });
+	const result = current.app.db.raw.query<{ id: number }, []>("SELECT id FROM results").get()?.id;
+	expect(await post("tracker", { do: "create", result, cmd: "tracker-after-drain" })).toMatchObject({
+		ok: true,
+		result: { state: "queued" },
+	});
+	const pool = current.app.readers;
+	if (!pool) throw new Error("No reader pool");
+	const logged = spyOn(console, "error").mockImplementation(() => undefined);
+	const readersStopped = spyOn(pool, "stop");
+	const minute = current.minute();
+	await entered.promise;
+	const write = spyOn(current.app.db, "run").mockImplementationOnce(() => {
+		throw new Error("tracker reply write failed after drain");
+	});
+	const outcome = current.stop().then(
+		() => "stopped",
+		(error: unknown) => String(error),
+	);
+	try {
+		expect(await Promise.race([outcome, Bun.sleep(50).then(() => "waiting")])).toBe("waiting");
+		trackerReply.resolve(item);
+		await minute;
+		expect(await outcome).toBe("stopped");
+		expect(readersStopped.mock.calls).toEqual([[]]);
+		expect(() => current.app.db.raw.query("SELECT 1").get()).toThrow(/closed/i);
+		expect(logged.mock.calls).toEqual([
+			[
+				"[mainworthy] sending tracker requests failed:",
+				expect.objectContaining({ message: "tracker reply write failed after drain" }),
+			],
+		]);
+	} finally {
+		trackerReply.resolve(item);
+		await minute;
+		await outcome;
+		write.mockRestore();
+		readersStopped.mockRestore();
+		logged.mockRestore();
+		await pool.stop();
+		current.app.close();
+		instance = undefined;
+	}
+});

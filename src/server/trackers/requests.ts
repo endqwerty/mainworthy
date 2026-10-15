@@ -129,7 +129,7 @@ export function stopTrackerRequests(app: App): void {
 }
 
 export async function waitTrackerRequests(app: App): Promise<void> {
-	await active.get(app);
+	await active.get(app)?.catch(() => undefined);
 }
 
 async function deliver(app: App, supplied?: TrackerPort): Promise<number> {
