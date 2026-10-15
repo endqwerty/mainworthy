@@ -87,9 +87,9 @@ The scoped extension keeps one witness writer, one expiry representation and one
 Separate readers keep local settlement precedence out of ordinary cause and inherited callers.
 Model the Domain shaped the slot key. Fix Root Causes shaped the separate question and the removal of cause-derived dispute facts.
 
-Migration 0015 rebuilds `result_excuses` with nullable `slot`, a row ID and separate unique indexes for global and slot rows.
+Migration 0016 rebuilds `result_excuses` with nullable `slot`, a row ID and separate unique indexes for global and slot rows.
 Existing rows become global rows without changing their decisions or classification.
-It requires archive schema 15. Older archives must be exported again after upgrading the original database.
+It requires archive schema 16. Older archives must be exported again after upgrading the original database.
 The migration number may need renumbering when concurrent branches land.
 
 ## Validation and review boundary
