@@ -133,15 +133,14 @@ function fenced(text: string): string {
 	return `${fence}text\n${text.replace(/\s+$/, "")}\n${fence}`;
 }
 
-/** Writes each text once; a component whose text is the same as an earlier one's points at it. */
+/** Writes each text once; a component whose text is byte for byte an earlier one's points at it. */
 function texts(): (heading: string, files: { name: string; text: string }[]) => string[] {
 	const seen = new Map<string, string>();
 	return (heading, files) =>
 		files.map(({ name, text }) => {
-			const key = text.replace(/\s+/g, " ").trim();
-			const earlier = seen.get(key);
+			const earlier = seen.get(text);
 			if (earlier) return `\`${name}\`: the same text as ${earlier}.`;
-			seen.set(key, `\`${name}\` of ${heading}`);
+			seen.set(text, `\`${name}\` of ${heading}`);
 			return `\`${name}\`:\n\n${fenced(text)}`;
 		});
 }
@@ -165,7 +164,7 @@ export async function notices(): Promise<string> {
 		"",
 		"## npm packages",
 		"",
-		"Bundled into the executable. The web app a browser loads is built from the same packages.",
+		"Bundled into the executable. The web UI a browser loads is built from some of them.",
 		"",
 		"| Package | Version | Licence |",
 		"| --- | --- | --- |",

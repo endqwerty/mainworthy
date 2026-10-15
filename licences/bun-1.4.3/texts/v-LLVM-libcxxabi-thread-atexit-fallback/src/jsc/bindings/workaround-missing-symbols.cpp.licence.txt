@@ -1,0 +1,16 @@
+// glibc 2.18 added __cxa_thread_atexit_impl for C++11 thread_local destructors.
+// All in-tree callers (libstdc++, libc++abi, Rust std) weak-reference it, but
+// lld emits a non-weak GLIBC_2.18 verneed entry regardless, which the loader
+// rejects on 2.17. Providing a strong definition here satisfies the link-time
+// reference and removes the dynamic dependency.
+//
+// At runtime we forward to glibc's real implementation when present (≥ 2.18,
+// i.e. effectively always); this preserves glibc's DSO-refcount handling so
+// dlclose() of FFI/napi addons stays safe.
+//
+// The fallback for glibc 2.17 is libc++abi's, taken verbatim (modulo
+// __libcpp_tls_* → pthread_* and abort_message → abort) from
+// https://github.com/llvm/llvm-project/blob/llvmorg-19.1.0/libcxxabi/src/cxa_thread_atexit.cpp
+// under the Apache-2.0 WITH LLVM-exception license. See LICENSE.md for the
+// full text. Its documented limitations (dso_symbol ignored; main-thread dtors
+// run at static-destruction time) apply only on glibc 2.17.

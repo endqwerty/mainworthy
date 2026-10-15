@@ -4,7 +4,7 @@ Mainworthy is open source under the Apache License 2.0. This page says what the 
 
 ## Mainworthy's licence
 
-Copyright 2026 Daniel Yang. Mainworthy is licensed under the [Apache License 2.0](../../LICENSE). The licence covers all of it: the server, the web UI, the command line, the agent skill, the iPhone app and this documentation.
+Mainworthy is licensed under the [Apache License 2.0](../../LICENSE), and its copyright notice is in [NOTICE](../../NOTICE). The licence covers all of it: the server, the web UI, the command line, the agent skill, the iPhone app and this documentation.
 
 You may use Mainworthy for any purpose, change it, run it for others and sell it. The licence also grants you the authors' patents on what they contributed. When you give a copy to someone else, changed or not:
 
@@ -22,7 +22,7 @@ Mainworthy contains software that other people wrote. Each part keeps its own li
 
 | What | Where it ships | Licences |
 | --- | --- | --- |
-| npm packages: React, TanStack Query and Virtual, Zod, the MCP SDK, Ajv, @noble/hashes and the packages they need | the executable, and the web UI a browser loads | MIT, ISC, BSD-2-Clause, BSD-3-Clause, CC0-1.0 |
+| npm packages: React, TanStack Query and Virtual, Zod, the MCP SDK, Ajv, @noble/hashes and the packages they need | the executable; the web UI a browser loads takes some of them | MIT, ISC, BSD-3-Clause, CC0-1.0 |
 | The Bun runtime 1.4.3, with the libraries, Rust crates and packages it links | the executable: `bun build --compile` puts the runtime into it | Mostly MIT, BSD, Apache-2.0, ISC and Zlib; LGPL for JavaScriptCore, WebKit and TinyCC; MPL-2.0 for some CSS code and three Rust crates; GPL with a runtime exception for the compilers' runtime libraries; Artistic-2.0 for one npm package |
 | Archify's viewer and the JetBrains Mono font | the diagrams on these pages | MIT, OFL-1.1 |
 
@@ -34,4 +34,4 @@ None of these licences limits the licence of Mainworthy's own code. Some ask mor
 
 ## The iPhone app
 
-The iPhone app contains only its own code and Apple's frameworks: no third-party library. Its copyright and licence are listed under **You**, **About**, with a link to this page on your instance. Apple delivers apps from the App Store under its standard licence agreement for apps. The app's source is under the Apache License 2.0, like the rest of Mainworthy.
+The iPhone app contains only its own code and Apple's frameworks: no third-party library. Its copyright and licence are listed under **You**, **About**, with a link to this page on your instance. On the App Store, Mainworthy uses Apple's standard licence agreement for apps. The app's source is under the Apache License 2.0, like the rest of Mainworthy.

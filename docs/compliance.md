@@ -126,8 +126,8 @@ build. Every instance serves it at `/docs/licence/THIRD-PARTY-NOTICES.md`, and t
 
 | Ships in | What | Licences |
 | --- | --- | --- |
-| The executable and the web UI | 18 npm packages: React, TanStack, Zod, the MCP SDK, Ajv, @noble/hashes and what they import | MIT, ISC, BSD-2-Clause, BSD-3-Clause, CC0-1.0 |
-| The executable | The Bun runtime 1.4.3 and what it links: 266 parts, among them 65 Rust crates and 111 npm packages for its Node.js fallbacks (`licences/README.md`) | Mostly MIT, BSD, Apache-2.0, ISC and Zlib; LGPL for JavaScriptCore, WebKit and TinyCC; MPL-2.0 for some CSS code, three crates and Mozilla's certificate list; GPL with runtime exceptions for the compilers' runtime libraries; Artistic-2.0 for domain-browser (gap 4) |
+| The executable, and of those the web UI a browser loads takes some | 18 npm packages: React, TanStack, Zod, the MCP SDK, Ajv, @noble/hashes and what they import | MIT, ISC, BSD-3-Clause, CC0-1.0 |
+| The executable | The Bun runtime 1.4.3 and what it links: 266 parts, among them 65 Rust crates and 84 npm packages it embeds for its Node.js fallbacks (`licences/README.md`) | Mostly MIT, BSD, Apache-2.0, ISC and Zlib; LGPL for JavaScriptCore, WebKit and TinyCC; MPL-2.0 for some CSS code, three crates and Mozilla's certificate list; GPL with runtime exceptions for the compilers' runtime libraries; Artistic-2.0 for domain-browser (gap 4) |
 | The diagrams at `/docs` | Archify 3.0.1's viewer and the JetBrains Mono font | MIT, OFL-1.1 |
 | The iPhone app | Nothing from others: its own code and Apple's frameworks | |
 
