@@ -125,7 +125,7 @@ export function raiseAdopt(
 		producer: ctx.actor.kind,
 		evidence: {
 			proposal: `P-${proposal.no}`,
-			author: ctx.actor.name,
+			authorId: ctx.actor.id,
 			reason: proposal.reason,
 			edits: summary,
 			count: resolved.length,

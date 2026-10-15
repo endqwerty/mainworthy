@@ -1459,6 +1459,9 @@ export function toItemFor(ctx: Ctx, row: QuestionRow): QuestionItem & { you: "co
 
 function itemOf(db: Db, row: QuestionRow, facts: ReadonlySet<string>, ask: Ask): QuestionItem {
 	const stored = json<Record<string, unknown> & { hints?: string[] }>(row.evidence);
+	if (row.kind === "adopt" && typeof stored.authorId === "number") stored.author = actorLabel(db, stored.authorId).name;
+	if (row.kind === "finding" && typeof stored.finderId === "number")
+		stored.finder = actorLabel(db, stored.finderId).name;
 	const hints = (stored.hints ?? []).filter((hint) => hint !== "disputed");
 	if (facts.has("hint:disputed")) hints.unshift("disputed");
 	const answers = answersOf(db, row.id);
