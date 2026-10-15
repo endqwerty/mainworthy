@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { Client } from "../src/cli/client.ts";
-import type { GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
+import type { ClaimReply, CommandFate, GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { stakes } from "../src/core/stakes.ts";
 import { recoverAccepted, sweep } from "../src/server/jobs.ts";
 import { type Config, defaultConfig, openApp } from "../src/server/kernel/app.ts";
@@ -62,6 +62,66 @@ describe("a green report", () => {
 });
 
 describe("a red report", () => {
+	test("forgetting rewrites report attribution in command replay and receipts while preserving decisions", () => {
+		const person = h.actor("erasure-person", "human", ["read", "produce", "answer"]);
+		const report = ciReport({ commit: "ddddddd1", n: 1, fail: { 0: "expected total" } });
+		h.call("report", report);
+		expect(decide(first(queue().items), { is: "defect" }, person)?.status).toBe("decided");
+		const input = { ...report, attempt: 2, cmd: "receipt-command-01" };
+		const receipt = h.call<ReportReceipt>("report", input);
+		expect(receipt.questions[0]).toMatchObject({ by: person.name, answer: "defect" });
+		const fate = h.call<CommandFate>("command", { cmd: input.cmd });
+		if (fate.state !== "done") throw new Error("the report command did not finish");
+		const decisions = h.app.db.raw.query("SELECT * FROM decisions ORDER BY id").all();
+		const commands = h.app.db.raw.query("SELECT id, request, seq, touched FROM commands ORDER BY id").all();
+		const results = count("results");
+		h.call("admin", { do: "actor.forget", name: person.name });
+		const expected = {
+			...receipt,
+			questions: receipt.questions.map((question) => ({ ...question, by: `forgotten-${person.id}` })),
+		};
+		expect(h.call<CommandFate>("command", { cmd: input.cmd })).toEqual({ ...fate, reply: expected });
+		expect(h.call<ReportReceipt>("report", input)).toEqual(expected);
+		expect(h.call<ReportReceipt>("report", { ...input, cmd: undefined })).toEqual({ ...expected, fresh: false });
+		expect(
+			h.app.db.raw
+				.query("SELECT receipt FROM batches WHERE receipt IS NOT NULL")
+				.all()
+				.map((row) => JSON.stringify(row))
+				.join(""),
+		).not.toContain(person.name);
+		expect(h.app.db.raw.query("SELECT * FROM decisions ORDER BY id").all()).toEqual(decisions);
+		expect(h.app.db.raw.query("SELECT id, request, seq, touched FROM commands ORDER BY id").all()).toEqual(commands);
+		expect(count("results")).toBe(results);
+		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure" }).items[0]?.decision?.by).toEqual([
+			`forgotten-${person.id}`,
+		]);
+		expect(h.raw("report", { ...input, attempt: 3 })).toMatchObject({ ok: false, error: { code: "conflict" } });
+	});
+
+	test("forgetting rewrites known claim attribution but leaves arbitrary content and other replies alone", () => {
+		const person = h.actor("erasure-person", "human", ["read", "produce", "answer"]);
+		h.call("propose", { edits: [{ op: "create", outline: person.name }] });
+		const claim = { lens: "review", findings: [{ on: "C-1", category: "ambiguous", note: person.name }] };
+		h.call("claim", claim);
+		expect(decide(first(queue().items), { is: "reject" }, person)?.status).toBe("decided");
+		const input = { ...claim, cmd: "known-claim-01" };
+		const reply = h.call<ClaimReply>("claim", input);
+		expect(reply.known[0]).toMatchObject({ by: person.name, answer: "reject" });
+		const project = { do: "project.create", key: "another", name: person.name, cmd: "project-create-01" };
+		const projectReply = h.call("admin", project);
+		const before = h.call("get", { refs: ["C-1"] });
+		h.call("admin", { do: "actor.forget", name: person.name });
+		const expected = { ...reply, known: reply.known.map((known) => ({ ...known, by: `forgotten-${person.id}` })) };
+		expect(h.call<ClaimReply>("claim", input)).toEqual(expected);
+		expect(h.call<CommandFate>("command", { cmd: input.cmd })).toMatchObject({ state: "done", reply: expected });
+		expect(h.call<unknown>("get", { refs: ["C-1"] })).toEqual(before);
+		expect(h.call<unknown>("admin", project)).toEqual(projectReply);
+		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "finding" }).items[0]?.evidence.note).toBe(
+			person.name,
+		);
+	});
+
 	test("D1: 500 failures with one cause open one question", () => {
 		const fail = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [i, "expected 90.00, got 100.00"]));
 		const receipt = h.call<ReportReceipt>("report", ciReport({ commit: "bbbbbbb1", n: 600, fail }));

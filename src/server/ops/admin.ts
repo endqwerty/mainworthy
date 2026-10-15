@@ -2,6 +2,7 @@
 import { durationMs } from "../../core/duration.ts";
 import { type ActorKind, defaultCapabilities, type Unlinked } from "../../core/kinds.ts";
 import { AdminInput } from "../../core/ops.ts";
+import { rewriteReportReceipts } from "../evidence/evidence.ts";
 import {
 	actorByName,
 	createToken,
@@ -15,7 +16,15 @@ import {
 	revokeToken,
 	setGrant,
 } from "../identity/identity.ts";
-import { type Actor, allProjects, findProject, insertProject, makeCtx, stampSeq } from "../kernel/ctx.ts";
+import {
+	type Actor,
+	allProjects,
+	findProject,
+	insertProject,
+	makeCtx,
+	rewriteCommandReplies,
+	stampSeq,
+} from "../kernel/ctx.ts";
 import type { Db } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { currentPolicy, isPreset, policySummary, seedPolicy } from "../policy/policy.ts";
@@ -204,7 +213,21 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 					`${owner} owns this instance and is not forgotten: nobody would be left who can always repair it. To hand the instance to somebody else, start it with MAINWORTHY_OWNER set to their name; ${owner} can be forgotten after that`,
 				);
 			}
-			return forgetActor(env.app, input.name);
+			const forgotten = forgetActor(env.app, input.name);
+			// These write replies name people in grant.actor, report.questions[].by and claim.known[].by.
+			// Requests are digests; their binding to a command id must survive forgetting, as must free text.
+			const rewrite = (op: string, reply: string): string => {
+				const field = op === "admin" ? "actor" : op === "report" || op === "claim" ? "by" : null;
+				if (field === null || !reply.includes(JSON.stringify(input.name))) return reply;
+				return JSON.stringify(
+					JSON.parse(reply, (key, value: unknown) =>
+						key === field && value === input.name ? forgotten.forgotten : value,
+					),
+				);
+			};
+			rewriteCommandReplies(db, rewrite);
+			rewriteReportReceipts(db, (receipt) => rewrite("report", receipt));
+			return forgotten;
 		}
 		case "policy.show": {
 			const project = findProject(db, input.project);

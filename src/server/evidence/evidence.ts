@@ -207,6 +207,9 @@ const Q = {
 		"UPDATE batches SET state = 'processed', counts = $counts, staged = NULL WHERE id = $id",
 	),
 	setReceipt: sql<{ id: number; receipt: string }>("UPDATE batches SET receipt = $receipt WHERE id = $id"),
+	receipts: sql<readonly [], { id: number; receipt: string }>(
+		"SELECT id, receipt FROM batches WHERE receipt IS NOT NULL",
+	),
 	accepted: sql<readonly [], BatchRow>("SELECT * FROM batches WHERE state = 'accepted' ORDER BY id"),
 	processedJobs: sql<{ target: number }, { job: string }>(
 		`SELECT DISTINCT job FROM batches WHERE target = $target AND state = 'processed'
@@ -966,6 +969,14 @@ export function markProcessed(ctx: Ctx, batch: BatchRow, counts: Counts): void {
 /** Keeps the reply to a report, so the same report sent again gets the same answer. */
 export function keepReceipt(ctx: Ctx, batch: BatchRow, receipt: unknown): void {
 	ctx.db.run(Q.setReceipt, { id: batch.id, receipt: JSON.stringify(receipt) });
+}
+
+/** Rewrites saved report replies without changing the report's identity or its results. */
+export function rewriteReportReceipts(db: Db, rewrite: (receipt: string) => string): void {
+	for (const row of db.all(Q.receipts)) {
+		const receipt = rewrite(row.receipt);
+		if (receipt !== row.receipt) db.run(Q.setReceipt, { id: row.id, receipt });
+	}
 }
 
 function annotationIn(name: string): { case: string; version?: number } | null {
