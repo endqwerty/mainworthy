@@ -18,8 +18,7 @@ struct QueueScreenTests {
 	@Test("an answer during a network drop waits on the device without claiming a decision")
 	func offlineAnswer() async throws {
 		let transport = SwitchableQueueTransport()
-		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
-		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let server = try await Live.signedIn(transport: transport)
 		let screen = QueueScreen(project: server.project(try await Live.project()))
 		await screen.show(.open, filter: nil)
 		let question = try #require(screen.questions.first { $0.kind == .failure })
@@ -33,8 +32,7 @@ struct QueueScreenTests {
 	@Test("saved answers survive a restart and are sent in order with the original evidence and command")
 	func durableFIFO() async throws {
 		let transport = SwitchableQueueTransport()
-		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
-		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let server = try await Live.signedIn(transport: transport)
 		let project = server.project(try await Live.project())
 		let directory = URL.cachesDirectory.appending(path: "mainworthy-outbox-\(UUID().uuidString)")
 		defer { try? FileManager.default.removeItem(at: directory) }
@@ -85,8 +83,7 @@ struct QueueScreenTests {
 	@Test("dropping a stuck answer checks its command and preserves the next answer", arguments: [false, true])
 	func dropStuckAnswer(recorded: Bool) async throws {
 		let transport = SwitchableQueueTransport()
-		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
-		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let server = try await Live.signedIn(transport: transport)
 		let project = server.project(try await Live.project())
 		let questions = try await project.questions(open: true).questions
 		let failure = try #require(questions.first { $0.kind == .failure })
@@ -131,8 +128,7 @@ struct QueueScreenTests {
 	@Test("a dropped timed-out answer survives relaunch, lets later answers send, and recovers late delivery", arguments: ["timeout", "retry error", "later error"])
 	func lateDroppedAnswer(failure: String) async throws {
 		let transport = LateAnswerTransport()
-		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
-		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let server = try await Live.signedIn(transport: transport)
 		let project = server.project(try await Live.project())
 		let questions = try await project.questions(open: true).questions
 		let question = try #require(questions.first { $0.kind == .failure })
@@ -180,8 +176,7 @@ struct QueueScreenTests {
 	@Test("waiting answers record before dropped checks, which stop after a network failure", arguments: [false, true])
 	func waitingBeforeDroppedChecks(lookupFails: Bool) async throws {
 		let transport = SwitchableQueueTransport()
-		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
-		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let server = try await Live.signedIn(transport: transport)
 		let project = server.project(try await Live.project())
 		let questions = try await project.questions(open: true).questions
 		let failure = try #require(questions.first { $0.kind == .failure })
@@ -216,6 +211,77 @@ struct QueueScreenTests {
 		let ids = outbox.entries.prefix(2).map { Optional($0.id) }
 		#expect(checked.map { $0["cmd"]?.string } == (lookupFails ? [ids[0], ids[0]] : ids))
 		#expect(outbox.entries.map(\.status) == ["Dropped", "Dropped", "Recorded"])
+	}
+
+	@Test("an answer saved during dropped checks sends in the same pass or pauses on failure", arguments: [false, true], [false, true])
+	func answerDuringDroppedChecks(lookupFails: Bool, answerFails: Bool) async throws {
+		let (outbox, project, transport, _) = try await stuckAnswer()
+		transport.offline.withLock { $0 = true }
+		await outbox.send()
+		transport.offline.withLock { $0 = false }
+		await outbox.drop(try #require(outbox.stuck?.id))
+		#expect(outbox.entries.map(\.status) == ["Dropped"])
+		let screen = QueueScreen(project: project, outbox: outbox)
+		await screen.show(.open, filter: nil)
+		let finding = try #require(screen.questions.first { $0.kind == .finding })
+		let choice = try #require(finding.choices.first { $0.answer == "defer" })
+		transport.commands.withLock { $0 = [] }
+		transport.lookups.withLock { $0 = [] }
+		transport.lookupFails.withLock { $0 = lookupFails }
+		await transport.lookupGate.holdNext()
+		let sending = Task { await outbox.send() }
+		try await transport.lookupGate.waitUntilPaused()
+		if answerFails { transport.serverProblem.withLock { $0 = ("internal", "Not recorded.") } }
+		let answering = Task { await screen.answer(finding, with: choice) }
+		let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+		while outbox.pendingCount == 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+		#expect(outbox.pendingCount == 1)
+		await transport.lookupGate.release()
+		await sending.value
+		let settled = await answering.value
+		#expect(settled == !answerFails)
+		if answerFails {
+			#expect(outbox.entries.map(\.status) == ["Dropped", "Waiting to send"])
+			#expect(outbox.stuck?.detail == "Not recorded. The saved answer is waiting to send.")
+			#expect(screen.notice?.text == "\(finding.ref): saved on this device, waiting to send. Open Unsent answers to see its outcome.")
+		} else {
+			#expect(outbox.entries.map(\.status) == ["Dropped", "Recorded"])
+			#expect(screen.notice?.text == "\(finding.ref): \(choice.label).")
+		}
+		#expect(!screen.busy.contains(finding.ref))
+		#expect(try await project.question(finding.ref)?.isOpen == answerFails)
+		let sent = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
+		#expect(sent.map { $0["cmd"]?.string } == [outbox.entries.last?.id])
+		#expect(transport.lookups.withLock { $0.count } == (lookupFails ? 2 : 1))
+	}
+
+	@Test("the screen confirms an answer before slow dropped checks finish")
+	func confirmsBeforeDroppedChecks() async throws {
+		let (outbox, project, transport, _) = try await stuckAnswer()
+		transport.offline.withLock { $0 = true }
+		await outbox.send()
+		transport.offline.withLock { $0 = false }
+		await outbox.drop(try #require(outbox.stuck?.id))
+		let screen = QueueScreen(project: project, outbox: outbox)
+		await screen.show(.open, filter: nil)
+		let finding = try #require(screen.questions.first { $0.kind == .finding })
+		let choice = try #require(finding.choices.first { $0.answer == "defer" })
+		await transport.lookupGate.holdNext()
+		var settled: Bool?
+		let answering = Task { settled = await screen.answer(finding, with: choice) }
+		try await transport.lookupGate.waitUntilPaused()
+		let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+		while settled == nil, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+		#expect(settled == true)
+		#expect(screen.notice?.text == "\(finding.ref): \(choice.label).")
+		#expect(!screen.busy.contains(finding.ref))
+		#expect(try await project.question(finding.ref)?.isOpen == false)
+		await transport.lookupGate.release()
+		await answering.value
+		// Join the pass if answer() already returned before its dropped lookup.
+		let finished = ContinuousClock.now.advanced(by: .seconds(3))
+		while outbox.sending, ContinuousClock.now < finished { try await Task.sleep(for: .milliseconds(10)) }
+		#expect(outbox.sending == false)
 	}
 
 	@Test("an older saved answer without delivery metadata stays dropped on none")
@@ -265,8 +331,7 @@ struct QueueScreenTests {
 
 	func stuckAnswer() async throws -> (AnswerOutbox, ProjectClient, SwitchableQueueTransport, SwitchableAnswerStore) {
 		let transport = SwitchableQueueTransport()
-		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
-		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let server = try await Live.signedIn(transport: transport)
 		let project = server.project(try await Live.project())
 		let question = try #require(try await project.questions(open: true, kind: .failure).questions.first)
 		let choice = try #require(question.choices.first { $0.answer == "flaky" })
@@ -377,8 +442,7 @@ struct QueueScreenTests {
 	@Test("an answer saved offline cannot replace another person's decision on unchanged evidence")
 	func decidedWhileOffline() async throws {
 		let transport = SwitchableQueueTransport()
-		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
-		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let server = try await Live.signedIn(transport: transport)
 		let project = server.project(try await Live.project())
 		let screen = QueueScreen(project: project)
 		await screen.show(.open, filter: nil)
@@ -388,8 +452,7 @@ struct QueueScreenTests {
 		transport.offline.withLock { $0 = true }
 		#expect(await screen.answer(question, with: flaky) == false)
 		#expect(screen.outbox.pendingCount == 1)
-		let owner = Live.server()
-		_ = try await owner.signIn(Live.owner)
+		let owner = try await Live.signedIn(as: Live.owner)
 		let other = owner.project(project.key)
 		guard case .decided(let decision) = try await other.answer(question, with: defect, reference: "SHOP-1", reason: "Checked by another person") else {
 			Issue.record("the other person's answer was not recorded")
@@ -409,11 +472,10 @@ struct QueueScreenTests {
 		#expect(after.decision?.reference == "SHOP-1" && after.decision?.reason == "Checked by another person")
 	}
 
-	@Test("an online answer queued during another send says sending until both are recorded")
+	@Test("an online answer queued during another send confirms when its result is saved")
 	func answerDuringSend() async throws {
 		let transport = SwitchableQueueTransport()
-		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
-		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let server = try await Live.signedIn(transport: transport)
 		let screen = QueueScreen(project: server.project(try await Live.project()))
 		await screen.show(.open, filter: nil)
 		let failure = try #require(screen.questions.first { $0.kind == .failure })
@@ -423,18 +485,20 @@ struct QueueScreenTests {
 		await transport.gate.holdNext()
 		let first = Task { await screen.answer(failure, with: flaky) }
 		try await transport.gate.waitUntilPaused()
-		#expect(await screen.answer(finding, with: deferChoice) == false)
-		#expect(screen.notice?.text == "\(finding.ref): sending. Open Unsent answers to see its outcome.")
+		let next = Task { await screen.answer(finding, with: deferChoice) }
+		let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+		while screen.outbox.pendingCount < 2, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+		#expect(screen.outbox.pendingCount == 2)
 		await transport.gate.release()
 		#expect(await first.value)
+		#expect(await next.value)
 		#expect(screen.outbox.entries.map(\.status) == ["Recorded", "Recorded"])
 	}
 
 	@Test("an uncertain server error ends its sentence before the waiting explanation", arguments: ["Something broke", "Something broke."])
 	func waitingErrorSentence(message: String) async throws {
 		let transport = SwitchableQueueTransport()
-		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
-		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let server = try await Live.signedIn(transport: transport)
 		let screen = QueueScreen(project: server.project(try await Live.project()))
 		await screen.show(.open, filter: nil)
 		let question = try #require(screen.questions.first { $0.kind == .failure })
@@ -447,8 +511,7 @@ struct QueueScreenTests {
 	@Test("a reply lost after recording replays the same command after a restart")
 	func lostReply() async throws {
 		let transport = SwitchableQueueTransport()
-		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
-		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let server = try await Live.signedIn(transport: transport)
 		let project = server.project(try await Live.project())
 		let question = try #require(try await project.questions(open: true, kind: .failure).questions.first)
 		let store = MemoryAnswerStore()
@@ -530,8 +593,7 @@ struct QueueScreenTests {
 	@Test("saving another answer during a send preserves both, including a new workspace after sign-out", arguments: [false, true])
 	func concurrentSave(stopped: Bool) async throws {
 		let transport = SwitchableQueueTransport()
-		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
-		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let server = try await Live.signedIn(transport: transport)
 		let project = server.project(try await Live.project())
 		let questions = try await project.questions(open: true).questions
 		let failure = try #require(questions.first { $0.kind == .failure })
@@ -560,10 +622,10 @@ struct QueueScreenTests {
 	@Test("opening another project does not strand a saved answer when the stream reconnects")
 	func projectSwitchReplay() async throws {
 		let transport = SwitchableQueueTransport()
-		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
+		let server = try await Live.signedIn(transport: transport)
 		let firstKey = try await Live.project()
 		let secondKey = try await Live.project()
-		let account = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let account = try await server.account()
 		let defaultsName = "mainworthy-outbox-\(UUID().uuidString)"
 		let defaults = try #require(UserDefaults(suiteName: defaultsName))
 		defer { defaults.removePersistentDomain(forName: defaultsName) }

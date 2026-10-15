@@ -219,7 +219,7 @@ public final class QueueScreen: ProjectScreen {
 				return false
 			}
 			let id = try outbox.enqueue(prepared)
-			await outbox.send()
+			await outbox.send(id)
 			guard let outcome = outbox.entries.first(where: { $0.id == id })?.outcome else {
 				let state = outbox.sending ? "sending" : "saved on this device, waiting to send"
 				notice = Notice(
