@@ -20,6 +20,37 @@ const Token = z.object({ token: z.string() });
 const Created = z.object({ cases: z.array(Ref) });
 const Receipt = z.object({ batch: z.number(), fresh: z.boolean(), counts: z.object({ total: z.number() }) });
 
+test("actor forget requires a named confirmation, removes access, and preserves the self and owner guards", async () => {
+	await withInstance(
+		async ({ cli, run, client }) => {
+			const made = Token.parse(await client.call("admin", { do: "token.create", actor: "forget-cli", kind: "human" }));
+			const unconfirmed = await cli(["actor", "forget", "forget-cli"]);
+			expect(unconfirmed.code).toBe(4);
+			expect(unconfirmed.stderr).toContain("--confirm forget-cli");
+			expect(unconfirmed.stderr).toContain("text the person typed in cases and notes stay");
+			expect((await run(["actor", "forget", "forget-cli", "--confirm", "somebody-else"])).code).toBe(4);
+			expect((await run(["actor", "list"])).stdout).toContain("forget-cli");
+			const forgotten = await run(["actor", "forget", "forget-cli", "--confirm", "forget-cli", "--json"]);
+			expect(forgotten.code).toBe(0);
+			expect(outputWith(z.object({ forgotten: z.string(), tokensRevoked: z.number() }), forgotten)).toEqual({
+				forgotten: "forgotten-3",
+				tokensRevoked: 1,
+			});
+			expect((await run(["actor", "list"], { env: { MAINWORTHY_TOKEN: made.token } })).code).toBe(4);
+			const self = await run(["actor", "forget", "robin", "--confirm", "robin"]);
+			expect(self.stderr).toContain("you cannot forget yourself");
+			const admin = Token.parse(
+				await client.call("admin", { do: "token.create", actor: "other-admin", kind: "human" }),
+			);
+			const owner = await run(["actor", "forget", "robin", "--confirm", "robin"], {
+				env: { MAINWORTHY_TOKEN: admin.token },
+			});
+			expect(owner.stderr).toContain("owns this instance and is not forgotten");
+		},
+		{ mode: "server" },
+	);
+});
+
 test("red report, blocked gate, generated decision, passed gate without another report", async () => {
 	await withInstance(async ({ cli, instance }) => {
 		const report = await cli([

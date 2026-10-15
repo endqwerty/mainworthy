@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ActorKind, Capability } from "../../core/kinds.ts";
 import { AdminInput } from "../../core/ops.ts";
+import { FORGET_NOTICE } from "../../core/people.ts";
 import { assertPositionals } from "../args.ts";
 import { CliError } from "../errors.ts";
 import { line, printJson } from "../output.ts";
@@ -17,13 +18,32 @@ const Actors = z.array(
 
 export const actorCommand: AdapterCommand = {
 	name: "actor",
-	summary: "List who may do what on which project, and change or take away a grant.",
-	usage: "actor list | actor grant <name> --can read,record [--project <key>] | actor ungrant <name> [--project <key>]",
-	flags: [{ name: "can", kind: "strings", description: "Capabilities, comma-separated or repeated." }],
+	summary: "List who may do what, change grants, and forget an actor's identity while keeping history.",
+	usage:
+		"actor list | actor grant <name> --can read,record [--project <key>] | actor ungrant <name> [--project <key>] | actor forget <name> --confirm <name>",
+	flags: [
+		{ name: "can", kind: "strings", description: "Capabilities, comma-separated or repeated." },
+		{ name: "confirm", kind: "string", description: `Repeat the name to confirm forgetting. ${FORGET_NOTICE}` },
+	],
 	async run(args, client) {
 		const action = args.positionals[0];
 		// With no project named, a grant is the one on every project, shown as `*`.
 		const project = client.options.project;
+		if (action === "forget") {
+			assertPositionals(args, 2, 2, actorCommand.usage);
+			const name = z.string().parse(args.positionals[1]);
+			const input = AdminInput.parse({ do: "actor.forget", name });
+			if (args.value("confirm") !== name) {
+				throw new CliError("invalid", `${FORGET_NOTICE} To confirm, repeat the name with --confirm ${name}`);
+			}
+			const result = z
+				.object({ forgotten: z.string(), tokensRevoked: z.number() })
+				.parse(await client.call("admin", input));
+			if (args.has("json")) printJson(result, args.bool("compact"));
+			else
+				line(`Forgotten as ${result.forgotten}. ${result.tokensRevoked} tokens revoked. History and typed text stay.`);
+			return 0;
+		}
 		if (action === "list") {
 			assertPositionals(args, 1, 1, actorCommand.usage);
 			const actors = Actors.parse(await client.call("admin", { do: "actor.list" }));

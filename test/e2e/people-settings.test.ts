@@ -38,6 +38,62 @@ const section = (page: Page, name: string) => page.getByRole("option", { name, e
 const rows = (page: Page) => page.locator(".settings-row");
 
 test.skipIf(!browserAvailable)(
+	"People forgets a person only after confirmation and ends their access",
+	async () => {
+		await person("forget-web", ["read"]);
+		const admin = await openPage(server, { path: "/p/scratch/settings" });
+		const other = await openPage(server, { as: { name: "forget-web", password: OLD } });
+		try {
+			const { page } = admin;
+			page.setDefaultTimeout(3000);
+			await section(page, "People");
+			await page.getByLabel("Person to forget", { exact: true }).selectOption("forget-web");
+			await page.getByText("text the person typed in cases and notes stay", { exact: false }).waitFor();
+			const confirm = page.getByRole("button", { name: "Forget this person", exact: true });
+			expect(await confirm.getAttribute("aria-disabled")).toBe("true");
+			await page.getByLabel("Type the name to confirm", { exact: true }).press("Enter");
+			expect(await rows(page).filter({ hasText: "forget-web" }).count()).toBe(1);
+			await page.getByLabel("Type the name to confirm", { exact: true }).fill("wrong-name");
+			await page.getByLabel("Type the name to confirm", { exact: true }).press("Enter");
+			expect(await rows(page).filter({ hasText: "forget-web" }).count()).toBe(1);
+			await page.getByRole("button", { name: "Cancel forgetting", exact: true }).click();
+			expect(await page.getByLabel("Person to forget", { exact: true }).inputValue()).toBe("");
+			await page.getByLabel("Person to forget", { exact: true }).selectOption("forget-web");
+			await page.getByLabel("Type the name to confirm", { exact: true }).fill("forget-web");
+			let lostCommand = "";
+			await page.route("**/api/admin", async (route) => {
+				const input = route.request().postDataJSON();
+				if (input.do !== "actor.forget") return route.continue();
+				lostCommand = input.cmd;
+				await route.abort();
+			});
+			await confirm.click();
+			await page
+				.getByRole("status")
+				.filter({ hasText: "the page cannot tell whether the person was forgotten" })
+				.waitFor();
+			expect(await page.getByLabel("Type the name to confirm", { exact: true }).inputValue()).toBe("forget-web");
+			await page.unroute("**/api/admin");
+			expect(lostCommand).toMatch(/^[0-9a-f-]{36}$/);
+			const retried = page.waitForRequest(
+				(request) => request.url().endsWith("/api/admin") && request.postDataJSON().do === "actor.forget",
+			);
+			await confirm.click();
+			expect((await retried).postDataJSON().cmd).toBe(lostCommand);
+			await page.getByRole("status").filter({ hasText: "The person was forgotten." }).waitFor();
+			expect(await rows(page).filter({ hasText: "forget-web" }).count()).toBe(0);
+			await other.page.reload();
+			await other.page.locator("#signin-name").waitFor();
+			expect(admin.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
+		} finally {
+			await admin.close();
+			await other.close();
+		}
+	},
+	20_000,
+);
+
+test.skipIf(!browserAvailable)(
 	"changing the password ends the person's other session; the sessions list ends another session, then this browser's",
 	async () => {
 		await person("sam", ["read", "answer"]);
@@ -359,7 +415,16 @@ test.skipIf(!browserAvailable)(
 			await page.getByRole("button", { name: "Recovery link for ada" }).click();
 			await page.getByRole("button", { name: "Make the recovery link" }).click();
 			await page.getByLabel("Invitation link for ada").waitFor();
-			expect(admin.errors).toEqual([]);
+			expect(await page.getByLabel("Person to forget", { exact: true }).locator('option[value="ada"]').count()).toBe(0);
+			await page.getByLabel("Person to forget", { exact: true }).selectOption("robin");
+			await page.getByLabel("Type the name to confirm", { exact: true }).fill("robin");
+			await page.getByRole("button", { name: "Forget this person", exact: true }).click();
+			await page.getByRole("status").filter({ hasText: "robin owns this instance and is not forgotten" }).waitFor();
+			expect(await page.getByLabel("Type the name to confirm", { exact: true }).inputValue()).toBe("robin");
+			expect(await rows(page).getByText("robin", { exact: true }).count()).toBe(1);
+			expect(admin.errors).toEqual([
+				"Failed to load resource: the server responded with a status of 400 (Bad Request)",
+			]);
 		} finally {
 			await reader?.close();
 			await admin?.close();

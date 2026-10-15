@@ -115,7 +115,29 @@ $ mainworthy admin --json '{"do":"actor.forget","name":"dana"}'
 {"forgotten":"forgotten-5","tokensRevoked":0}
 ```
 
-There is no shorter command for it. See [API](./api.md).
+The raw operation remains available. The page and shorter command are described in [Forget a person](#forget-a-person).
+
+## Forget a person
+
+In Settings, open **People** and find **Forget a person** below the list of people.
+
+1. Read what forgetting erases and what stays.
+2. Choose the person in **Person to forget**.
+3. Type their name in **Type the name to confirm**.
+4. Press **Forget this person**. **Cancel forgetting** clears the selection without changing anything.
+
+The page reads the people and invitations again and removes any invitation link it was showing for that person. If no reply comes back, it says that the result is unknown and reads the lists again. Retrying the same confirmation uses the same command id.
+
+From the command line, `mainworthy actor forget dana` prints the warning and makes no change. After reading it, repeat the name to confirm:
+
+```
+$ mainworthy actor forget dana --confirm dana
+Forgotten as forgotten-5. 0 tokens revoked. History and typed text stay.
+```
+
+Add `--json` for the pseudonym and the number of revoked tokens as JSON. Both the page and the command use the same admin operation. You must be a person who administers the instance. You cannot forget yourself or the current owner. To forget a former owner, first [hand the instance to somebody else](./configuration.md).
+
+A person cannot yet request forgetting inside Mainworthy or delete their own account. Ask the person who runs your instance. For `mainworthy.com`, follow [Privacy, changes and questions](./privacy.md#changes-and-questions). See [Privacy](./privacy.md#your-rights-with-respect-to-your-information) for retained records and typed text.
 
 ## Sign in as yourself
 
@@ -294,7 +316,7 @@ A pipeline with only `record` cannot read cases or the queue either. Add `read` 
 
 - Policy shows who answers under the current policy. See [policy](./policy.md).
 - Tokens makes, lists and revokes tokens. An admin sees the form, and anyone else sees "An admin creates and revokes tokens."
-- People invites a person, lists and revokes open invitations, and makes a recovery link. Only a person who holds `admin` on every project has this section.
+- People invites a person, lists and revokes open invitations, makes a recovery link, and forgets a person after confirmation. Only a person who holds `admin` on every project has this section.
 - Projects lists the projects you can reach and creates a new one.
 - Connect shows the pipeline and agent connection lines, with the address of this instance.
 - Your sign-in sets or changes your password and adds and removes passkeys. Only a person has this section.

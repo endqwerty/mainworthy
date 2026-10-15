@@ -8,6 +8,7 @@ import { createInvitation, dateTime, listInvitations, revokeInvitation, until } 
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
 import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
+import { ForgetPerson } from "./people-forget.tsx";
 import "./people.css";
 
 const Actor = z.object({
@@ -317,6 +318,13 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 					)}
 				</div>
 			))}
+			<ForgetPerson
+				people={people.map((person) => person.name)}
+				changed={async (forgotten) => {
+					setCreated((links) => links.filter((link) => link.name !== forgotten));
+					await Promise.all([invitations.refetch(), actors.refetch()]);
+				}}
+			/>
 		</>
 	);
 }

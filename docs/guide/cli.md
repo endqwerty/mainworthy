@@ -48,7 +48,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy gate [--commit <sha> \| --run R-4 \| --change pr:482] [--wait <seconds>] [--json]` | Check a commit, change or run. Exit 0 passed, 1 failed, 2 blocked, 3 pending. |
 | `mainworthy token new --agent <name> \| --ci <name> \| --human <name> [--can read,produce] [--project <key>] [--expires 90d] \| token list \| token revoke <id>` | Issue, list and revoke actor tokens. A new secret is shown once. |
 | `mainworthy invite new <name> [--can read,answer] [--project <key>] [--expires 3d] \| invite list \| invite revoke <id>` | Invite a person with a link that is shown once, list invitations, and revoke one. |
-| `mainworthy actor list \| actor grant <name> --can read,record [--project <key>] \| actor ungrant <name> [--project <key>]` | List who may do what on which project, and change or take away a grant. |
+| `mainworthy actor list \| actor grant <name> --can read,record [--project <key>] \| actor ungrant <name> [--project <key>] \| actor forget <name> --confirm <name>` | List who may do what, change grants, and forget an actor's identity while keeping history. |
 | `mainworthy policy show \| policy use <loose\|standard\|strict> \| policy tests <ask\|track\|create> [--json]` | Show policy clauses, or propose and record an admin's choice of preset or of what happens to a test with no case. |
 | `mainworthy new [file\|-] [--json]` | Create a case from a canonical Markdown file or an outline on stdin. |
 | `mainworthy seed <project> [--cases 2000] [--unlinked-files 60] [--json]` | Fill a new or empty project with demo data: a shop's cases, results, a run and questions to answer. |
@@ -98,6 +98,7 @@ Flags of `mainworthy invite`:
 Flags of `mainworthy actor`:
 
 - `--can <a,b,...>`: Capabilities, comma-separated or repeated.
+- `--confirm <string>`: Repeat the name to confirm forgetting. A pseudonym replaces the name in attribution, question evidence and saved replies. Password hashes, passkey public keys, and token and credential labels are erased. Passwords, passkeys, tokens and invitations stop working, and sessions end. History and text the person typed in cases and notes stay. Some sign-in records and request fingerprints stay. This cannot be undone.
 
 Flags of `mainworthy seed`:
 
