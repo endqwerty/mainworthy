@@ -273,7 +273,7 @@ public struct QueueCounts: Equatable, Sendable {
 }
 
 /// What became of an answer.
-public enum AnswerOutcome: Equatable, Sendable {
+public enum AnswerOutcome: Codable, Equatable, Sendable {
 	/// It settled the question.
 	case decided(Int)
 	/// It was recorded as advice. The sentence says who decides.

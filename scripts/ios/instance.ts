@@ -36,7 +36,10 @@ export async function testInstance(): Promise<TestInstance> {
 	// Another origin, which only counts what reaches it: a client that follows a redirect there is seen.
 	let reached = 0;
 	let elsewhere: ReturnType<typeof Bun.serve> | null = null;
+	let answerProxy: ReturnType<typeof Bun.serve> | null = null;
+	const unavailable = new Set<string>();
 	const stop = async (): Promise<void> => {
+		await answerProxy?.stop(true);
 		await elsewhere?.stop(true);
 		await instance?.stop();
 		rmSync(dataDir, { recursive: true, force: true });
@@ -80,6 +83,23 @@ export async function testInstance(): Promise<TestInstance> {
 								? { project: key, run: await passedRun(made.url, token, key) }
 								: await scenario(made.url, token, key);
 						return Response.json({ ok: true, result });
+					},
+					"/test/answer-connection": async (req) => {
+						const parsed = z.object({ project: z.string(), unavailable: z.boolean() }).safeParse(await req.json());
+						if (!parsed.success) return Response.json({ ok: false }, { status: 400 });
+						const path = `/api/p/${encodeURIComponent(parsed.data.project)}/decide`;
+						if (parsed.data.unavailable) unavailable.add(path);
+						else unavailable.delete(path);
+						answerProxy ??= Bun.serve({
+							hostname: "127.0.0.1",
+							port: 0,
+							fetch: (request) => {
+								const url = new URL(request.url);
+								if (unavailable.has(url.pathname)) return new Response(null, { status: 503 });
+								return fetch(new Request(`${made.url}${url.pathname}${url.search}`, request), { redirect: "manual" });
+							},
+						});
+						return Response.json({ ok: true, result: { url: `http://127.0.0.1:${answerProxy.port}` } });
 					},
 					"/test/elsewhere": () => Response.redirect(`http://127.0.0.1:${other.port}/api/session`, 307),
 					"/test/elsewhere-seen": () => Response.json({ ok: true, result: { requests: reached } }),

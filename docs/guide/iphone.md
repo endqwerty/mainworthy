@@ -101,6 +101,8 @@ To make cases instead, press **Create cases** on the question. Review the test n
 The server makes one automated case per test, with that test's name, and links it. It chooses the folder from the test file.
 If the policy requires somebody to adopt new cases first, the server refuses this answer. Create and adopt the cases in **Cases**, then link them here.
 
+Linking tests and creating cases need a connection. These answers are not saved in **Unsent answers**. Keep the app open and use **Retry** after a network drop. Closing the app loses these choices and any uncertain mapping command.
+
 Closing the sheet keeps your case choices, search and reason in the current workspace. A refusal or changed question keeps them too.
 If the evidence changed, press **Review current tests** before answering on the new evidence.
 If somebody else answered, the sheet shows their current answer and preserves your choices.
@@ -206,6 +208,18 @@ The editor keeps custom field values without editing them. A newly required fiel
 Moving, tagging, archiving and restoring cases, changing folders and version diffs still
 need the web app. The button on a case's page opens it there.
 
+## Answer during a network drop
+
+Except for linking tests and creating cases, you can answer questions whose evidence the app has already shown. Before sending, the app saves each answer on this device with its original evidence and command id. The question stays open until the server confirms a decision. A second answer to the same question waits until the first has an outcome.
+
+Open **Unsent answers** at the top right of Queue. Each entry shows **Waiting to send**, **Recorded**, **Recorded as advice**, **Overtaken**, or **Refused**, with the server's reason. Keep the app open. Waiting answers send in order when the connection returns, including answers in other projects. **Send waiting answers** tries again immediately.
+
+For **Overtaken**, open **Read Q-…**, read its current evidence, and choose an answer again if one is still needed. The saved answer will not be sent again. For **Refused**, read the reason and the question before giving another answer. A lost reply keeps the same command id when retried, so it cannot record the answer twice.
+
+Saved answers and their outcomes survive closing the app. Signing out keeps them for you on the same instance and stops new sends from that workspace. A request already sent may complete. Other people signing in on the device have separate saved answers. Removing the app deletes them. **Clear outcomes** removes completed entries and keeps waiting answers.
+
+The app needs a connection to identify you after reopening. It sends no answers while closed. Case drafts still do not survive closing.
+
 ## What the app does not do yet
 
 - **Resolve a conflict opened from the Queue**. The answer is listed and greyed.
@@ -216,14 +230,13 @@ need the web app. The button on a case's page opens it there.
   app does not show all of what it changes. So is one with more than twenty edits. A new case and an edit to a
   case are shown step by step, and their answers stay off until that is on the screen.
 - **Notifications.** They need a paid Apple developer membership.
-- **Work without a connection.** An answer whose reply was lost is sent again by itself. The app does not keep
-  an answer for later.
+- **Start without a connection.** Reopening the app needs the server to identify you. Answers saved before closing stay on the device until you reconnect and open your workspace.
 
 ## When something is wrong
 
 | The app says | What to do |
 | --- | --- |
-| "The reply could not be read." | The server is newer than the app: install the app again |
+| "The reply could not be read." | Update the server and install the app from matching source revisions |
 | "This build cannot show what the question is about" | The same: install the app again, or answer in the web app |
 | "Your session ended. Sign in again." | The session ran out, or was ended under **Your sessions**. Sign in as yourself and the screens come back as you left them |
 | "Too many attempts." | Wait as long as it says. The server limits failed sign-ins |

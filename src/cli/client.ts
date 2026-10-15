@@ -23,6 +23,7 @@ const EnvelopeSchema = z.discriminatedUnion("ok", [
 ]);
 const SessionSchema = z.object({
 	actor: z.string(),
+	actorId: z.number().int(),
 	kind: z.enum(["human", "agent", "ci", "rule"]),
 	can: z.array(z.string()),
 	mode: z.enum(["local", "server"]),

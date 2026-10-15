@@ -96,6 +96,53 @@ final class QueueUITests: XCTestCase {
 		shot("map-created")
 	}
 
+	@MainActor func testSavedAnswerSurvivesClosingAndShowsItsOutcome() async throws {
+		let project = try await makeProject()
+		func connection(unavailable: Bool) async throws -> String {
+			let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+			var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/test/answer-connection")))
+			request.httpMethod = "POST"
+			request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+			request.httpBody = try JSONSerialization.data(withJSONObject: ["project": project, "unavailable": unavailable])
+			let (data, _) = try await URLSession.shared.data(for: request)
+			struct Reply: Decodable { struct Result: Decodable { let url: String }; let result: Result }
+			return try JSONDecoder().decode(Reply.self, from: data).result.url
+		}
+		let proxy = try await connection(unavailable: true)
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", proxy]
+		app.launch()
+		try signIn(app)
+		app.buttons["project-menu"].tap()
+		app.buttons[project].tap()
+		let failure = app.staticTexts["expected $90.00, got $100.00"]
+		XCTAssertTrue(failure.waitForExistence(timeout: 10))
+		failure.tap()
+		app.buttons["answer-flaky"].tap()
+		let pending = app.staticTexts["question-notice"]
+		XCTAssertTrue(pending.waitForExistence(timeout: 15))
+		XCTAssertTrue(pending.label.contains("waiting to send"), pending.label)
+		app.navigationBars.buttons.element(boundBy: 0).tap()
+		app.buttons["unsent-answers"].tap()
+		XCTAssertTrue(app.staticTexts["Waiting to send"].waitForExistence(timeout: 10))
+		shot("206-unsent-answers")
+
+		app.terminate()
+		app.launchArguments = ["-instance", proxy]
+		app.launch()
+		// The unsigned simulator build cannot use the keychain, so this run signs in again after relaunch.
+		// Signed device builds keep their session. This test proves answer persistence, not keychain persistence.
+		if app.textFields["name"].waitForExistence(timeout: 3) { try signIn(app) }
+		XCTAssertTrue(app.navigationBars["Queue"].waitForExistence(timeout: 20))
+		app.buttons["unsent-answers"].tap()
+		XCTAssertTrue(app.staticTexts["Waiting to send"].waitForExistence(timeout: 10))
+		_ = try await connection(unavailable: false)
+		app.buttons["send-waiting-answers"].tap()
+		XCTAssertTrue(app.staticTexts["Recorded"].waitForExistence(timeout: 15))
+		XCTAssertFalse(app.staticTexts["Waiting to send"].exists)
+		shot("206-recorded-answer")
+	}
+
 	@MainActor func testAPersonSignsInAnswersAQuestionAndTakesItBack() async throws {
 		let project = try await makeProject()
 		let app = XCUIApplication()

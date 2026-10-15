@@ -123,6 +123,33 @@ describe("what the iOS app reads", () => {
 		expect(mine.result.session).toBeNumber();
 	});
 
+	test("a reused sign-in name has a different actor id for saved device answers", async () => {
+		const name = "outbox-person";
+		const password = "a password for saved answer tests";
+		async function identity() {
+			const invited = z
+				.object({ code: z.string() })
+				.parse(await result("POST", "/api/invitation", { do: "create", name }));
+			const joined = await fetch(`${server.url}/api/login`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ invitation: invited.code, password }),
+			});
+			const cookie = (joined.headers.getSetCookie()[0] ?? "").split(";")[0] ?? "";
+			const envelope = z.object({
+				ok: z.literal(true),
+				result: z.object({ actor: z.string(), actorId: z.number().int() }),
+			});
+			return envelope.parse(await (await fetch(`${server.url}/api/session`, { headers: { cookie } })).json()).result;
+		}
+		const first = await identity();
+		await result("POST", "/api/admin", { do: "actor.forget", name });
+		const second = await identity();
+		expect(first.actor).toBe(name);
+		expect(second.actor).toBe(name);
+		expect(first.actorId).not.toBe(second.actorId);
+	});
+
 	test("the queue, and the evidence of every kind of question", async () => {
 		const reply = await op(project, "inbox", { state: "open", limit: 100 });
 		holds("inbox", Inbox, reply);

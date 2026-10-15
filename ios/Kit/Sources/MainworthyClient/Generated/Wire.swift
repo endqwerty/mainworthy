@@ -23,6 +23,8 @@ enum Wire {
 	struct SessionInfo: Decodable, Equatable, Sendable {
 		/// The caller's name.
 		let actor: String
+		/// The caller's stable actor id. A new person reusing a forgotten name has another id.
+		let actorId: Int
 		let kind: String
 		/// What the caller may do on the instance, not in a project.
 		let can: [String]

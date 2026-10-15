@@ -16,6 +16,7 @@ const Wire = z.discriminatedUnion("ok", [
 ]);
 const Session = z.object({
 	actor: z.string(),
+	actorId: z.number().int(),
 	kind: z.enum(["human", "agent", "ci", "rule"]),
 	can: z.array(z.string()),
 	mode: z.enum(["local", "server"]),

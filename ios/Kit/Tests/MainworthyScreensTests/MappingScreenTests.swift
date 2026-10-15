@@ -16,6 +16,30 @@ struct MappingScreenTests {
 		return (server, project, queue, try #require(queue.questions.first { $0.kind == .map }))
 	}
 
+	@Test("an offline mapping needs a connection and is explicitly outside Unsent answers")
+	func offlineMapping() async throws {
+		let transport = SwitchableQueueTransport()
+		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
+		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let project = server.project(try await Live.project())
+		let queue = QueueScreen(project: project)
+		await queue.refresh()
+		let question = try #require(queue.questions.first { $0.kind == .map })
+		let draft = queue.mapping(question, creating: true)
+		draft.reason = "Keep this mapping"
+		transport.offline.withLock { $0 = true }
+		#expect(await draft.submit() == false)
+		#expect(draft.notice?.contains("Linking tests and creating cases need a connection. This answer is not saved in Unsent answers.") == true)
+		#expect(draft.isRetrying && draft.locked && queue.outbox.pendingCount == 0)
+		transport.offline.withLock { $0 = false }
+		#expect(await draft.submit())
+		let payloads = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
+		#expect(payloads.count == 3 && Set(payloads).count == 1)
+		#expect(payloads.first?["ifOpen"] == true)
+		#expect(draft.actual?.decision?.reason == "Keep this mapping")
+		#expect(try await project.cases(text: "Shipping accepts an address").items.count == 1)
+	}
+
 	@Test("rebuilding a sheet keeps its confirmed answer and notice")
 	func confirmedDraft() async throws {
 		let (_, _, queue, question) = try await setup()

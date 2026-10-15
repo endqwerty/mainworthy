@@ -188,3 +188,15 @@ web conflict buttons and Swift package tests. It includes deleted-step restorati
 and removal choices, concurrent additions, and an explicit order applied before a later restoration.
 The contract test holds the generated string to the current source, and `ConflictTests` runs it against real
 server conflicts and checks mixed choices, removed steps, order, refusal, a moved case and lost replies.
+
+## Saved queue answers
+
+`AnswerOutbox` belongs to one instance, signed-in person, and project. `Workspace` owns every accessible project's outbox, so its existing stream reconnect loop sends waiting answers even after a project switch. `QueueScreen` captures a `PreparedAnswer` through `ProjectClient`, saves it before sending, and leaves the question open until the server confirms a decision. Views still reach the server only through screen classes.
+
+The saved `decide` input includes the original evidence, answer, reference, reason, and command id. Replay uses that input unchanged. A lost or unreadable reply leaves it waiting. Changed evidence and refusals become outcomes, never silent retries on newer evidence. Atomic files under Application Support survive app closure and explicit sign-out, scoped to the stable actor id and instance. The session reply supplies actorId, so a new person reusing a forgotten name cannot inherit these files. Closing the app stops delivery. Reopening still needs a connection to identify the signed-in person. See decision 0074.
+
+Mapping answers keep `MappingSubmission` and its `ifOpen` precondition. They need a connection and are not saved in `AnswerOutbox`. Their sheet and failed-submit notice say so. An uncertain reply keeps the same command in memory for **Retry**, with choices locked until the result is known. Closing the app loses that mapping command and its choices.
+
+`QueueScreenTests` covers persistence, ordered replay, lost replies, storage failure, and separate scopes against the local server. `QueueUITests/testSavedAnswerSurvivesClosingAndShowsItsOutcome` uses the test server's answer proxy to make `decide` temporarily unavailable while sign-in and reads work. It checks the waiting entry after a relaunch, restores delivery, and captures both outcomes. No such route exists in the product.
+
+The simulator command uses `CODE_SIGNING_ALLOWED=NO`. Its executable has no keychain entitlement, so Security returns `errSecMissingEntitlement` (-34018) when `KeychainStore` adds or reads the session. The saved-answer UI test signs in again as the same person after relaunch. It proves that answer files survive closure, not that the simulator keeps a session. Signed device builds use the keychain across relaunches; package tests cover restoring a stored session, but this UI run does not check a signed device.

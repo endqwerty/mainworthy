@@ -486,6 +486,7 @@ function sessionInfo(app: App, session: Session): Response {
 		ok: true,
 		result: {
 			actor: actor.name,
+			actorId: actor.id,
 			kind: actor.kind,
 			can: actor.can,
 			mode: app.config.mode,

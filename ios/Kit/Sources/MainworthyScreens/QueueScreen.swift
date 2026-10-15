@@ -79,13 +79,15 @@ public final class QueueScreen: ProjectScreen {
 	private var openedReads = 0
 	/// Whether the open question is being read by itself for the first time: its page has nothing to show yet.
 	public private(set) var isOpening = false
+	public let outbox: AnswerOutbox
 	private let project: ProjectClient
 	private var next: String?
 	/// Counts every read that was started, so that a slow one that was overtaken does not replace a newer one.
 	private var reads = 0
 
-	package init(project: ProjectClient) {
+	package init(project: ProjectClient, outbox: AnswerOutbox? = nil) {
 		self.project = project
+		self.outbox = outbox ?? AnswerOutbox(project: project)
 	}
 
 	/// The question as it is now: as the list holds it, or, for the one whose page is open, as it was read by
@@ -134,6 +136,10 @@ public final class QueueScreen: ProjectScreen {
 
 	/// Reads the list again and keeps what is shown until the reply is there.
 	public func refresh() async {
+		await outbox.send()
+		for entry in outbox.entries {
+			if case .decided = entry.outcome { typed[entry.question] = nil }
+		}
 		await read()
 	}
 
@@ -204,10 +210,23 @@ public final class QueueScreen: ProjectScreen {
 			)
 			return false
 		}
+		guard !hasPendingAnswer(question.ref) else { return false }
 		guard busy.insert(question.ref).inserted else { return false }
 		defer { busy.remove(question.ref) }
 		do {
-			let outcome = try await project.answer(question, with: choice, reference: reference, reason: reason)
+			guard let prepared = project.prepareAnswer(question, with: choice, reference: reference, reason: reason) else {
+				notice = Notice(text: "This answer needs the web app.", isProblem: true, undoes: nil)
+				return false
+			}
+			let id = try outbox.enqueue(prepared)
+			await outbox.send()
+			guard let outcome = outbox.entries.first(where: { $0.id == id })?.outcome else {
+				notice = Notice(
+					text: "\(question.ref): saved on this device, waiting to send. Open Unsent answers to see its outcome.",
+					isProblem: false, undoes: nil
+				)
+				return false
+			}
 			switch outcome {
 			case .decided(let decision):
 				typed[question.ref] = nil
@@ -219,7 +238,7 @@ public final class QueueScreen: ProjectScreen {
 				notice = Notice(text: "\(question.ref): recorded as advice. Waiting for \(who).", isProblem: false, undoes: nil)
 			case .overtaken(let why):
 				notice = Notice(
-					text: "Nothing was recorded for \(question.ref): \(why).", isProblem: true, undoes: nil
+					text: "Nothing was recorded for \(question.ref): \(why). Read the question again and answer on its current evidence.", isProblem: true, undoes: nil
 				)
 			case .notTaken(let asks):
 				notice = Notice(
@@ -233,6 +252,10 @@ public final class QueueScreen: ProjectScreen {
 			notice = Notice(text: error.shown, isProblem: true, undoes: nil)
 			return false
 		}
+	}
+
+	public func hasPendingAnswer(_ ref: String) -> Bool {
+		outbox.entries.contains { $0.question == ref && $0.outcome == nil }
 	}
 
 	/// Withdraws the decision on a question: the answer just given ("Undo"), or one in the decided list.
