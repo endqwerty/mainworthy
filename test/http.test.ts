@@ -1895,7 +1895,9 @@ describe("the surface", () => {
 			.object({ proposal: z.string() })
 			.parse(await checked("propose", { edits: [{ op: "place", cases: ["C-1"], folder: "Moved" }] }));
 		await checked("get", { refs: [archived.proposal, placed.proposal] });
-		const current = Policy.parse(await checked("admin", { do: "policy.show", project: "scratch" }));
+		const current = Policy.extend({ version: z.number() }).parse(
+			await checked("admin", { do: "policy.show", project: "scratch" }),
+		);
 		const settings = {
 			...current.settings,
 			fields: { risk: { kind: "text" as const, label: "Risk", required: false } },
@@ -1903,7 +1905,7 @@ describe("the surface", () => {
 		};
 		const policyProposal = z.object({ question: z.string() }).parse(
 			await checked("propose", {
-				edits: [{ op: "policy", settings }],
+				edits: [{ op: "policy", base: current.version, settings }],
 			}),
 		);
 		const [policyQuestion] = z
@@ -1916,6 +1918,7 @@ describe("the surface", () => {
 			answer: { is: "accept" },
 		});
 		const shownPolicy = await checked("admin", { do: "policy.show", project: "scratch" });
+		expect(OPS.admin?.output.parse(shownPolicy)).toHaveProperty("version", current.version + 1);
 		expect(Policy.parse(shownPolicy).settings).toEqual(settings);
 		const policyEnvelope = sweep.validators.get("admin");
 		if (!policyEnvelope) throw new Error("No admin validator");

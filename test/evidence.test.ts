@@ -522,9 +522,11 @@ describe("same-code detector suggestions", () => {
 
 	test("project settings change thresholds, disable suggestions, and expire old evidence", () => {
 		const configure = (flakyDetection: { enabled: boolean; windowDays: number; minFlips: number }) => {
-			const policy = Policy.parse(h.call("admin", { do: "policy.show", project: "scratch" }));
+			const policy = Policy.extend({ version: z.number() }).parse(
+				h.call("admin", { do: "policy.show", project: "scratch" }),
+			);
 			const proposed = h.call<{ question: string }>("propose", {
-				edits: [{ op: "policy", settings: { ...policy.settings, flakyDetection } }],
+				edits: [{ op: "policy", base: policy.version, settings: { ...policy.settings, flakyDetection } }],
 			});
 			const q = h.call<InboxReply["items"]>("get", { refs: [proposed.question] })[0];
 			if (!q) throw new Error("policy question missing");
@@ -555,7 +557,9 @@ describe("same-code detector suggestions", () => {
 	});
 
 	test("invalid detector settings are refused without changing the policy", () => {
-		const policy = Policy.parse(h.call("admin", { do: "policy.show", project: "scratch" }));
+		const policy = Policy.extend({ version: z.number() }).parse(
+			h.call("admin", { do: "policy.show", project: "scratch" }),
+		);
 		for (const bad of [
 			{ enabled: "yes" },
 			{ minFlips: 0 },
@@ -568,6 +572,7 @@ describe("same-code detector suggestions", () => {
 					edits: [
 						{
 							op: "policy",
+							base: policy.version,
 							settings: { ...policy.settings, flakyDetection: { ...policy.settings.flakyDetection, ...bad } },
 						},
 					],

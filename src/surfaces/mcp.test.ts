@@ -22,16 +22,16 @@ import { mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from "./mcp.ts";
 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
-	propose: 1362,
-	report: 687,
-	claim: 395,
-	decide: 323,
-	inbox: 171,
-	get: 198,
-	find: 268,
-	impact: 205,
-	since: 163,
-	gate: 165,
+	propose: 1377,
+	report: 682,
+	claim: 390,
+	decide: 318,
+	inbox: 166,
+	get: 193,
+	find: 263,
+	impact: 200,
+	since: 158,
+	gate: 160,
 };
 
 function resultOf<S extends z.ZodType>(reply: unknown, schema: S): z.output<S> {
@@ -55,6 +55,16 @@ test("tools/list names every proposal and decision reply status", () => {
 		if (!tool) throw new Error(name);
 		for (const status of statuses) expect(tool.description).toContain(status);
 	}
+});
+
+test("tools/list explains proposal statuses and how to identify reported tests", () => {
+	const tools = mcpTools();
+	expect(tools.find((tool) => tool.name === "propose")?.description).toBe(
+		"Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected.",
+	);
+	expect(tools.find((tool) => tool.name === "report")?.description).toBe(
+		"Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref.",
+	);
 });
 
 test("tools come from the registry and stay within their measured token limits", () => {
@@ -110,6 +120,9 @@ test("schema trims preserve the registry's constraints and union choices", () =>
 			{ edits: [{ op: "create", outline: "A case\n  Click > A value" }] },
 			{ edits: [{ op: "edit", case: "C-1", base: 1 }] },
 			{ edits: [{ op: "edit", case: "C-1", base: 1.5 }] },
+			{ edits: [{ op: "policy", base: 1, preset: "strict" }] },
+			{ edits: [{ op: "policy", base: 0, preset: "strict" }] },
+			{ edits: [{ op: "policy", base: 1.5, preset: "strict" }] },
 			{ edits: [{ op: "state", cases: ["C-1"], to: "archived" }] },
 			{ edits: [{ op: "restore", case: "C-1", to: 2 }] },
 			{ edits: [{ op: "create", body: { steps: [{ id: "!", action: "", expected: null }] } }] },
@@ -466,6 +479,9 @@ test("authenticated stateless HTTP answers initialize and tools/list and keeps t
 		expect(init.instructions).toContain("onEvidence");
 		// Tool schemas call `project` optional; the rule for omitting it is said once, here.
 		expect(init.instructions).toContain("omit project only when the instance has exactly one project");
+		expect(init.instructions).toContain(
+			"read base for policy clauses or settings through CLI policy show --json or HTTP admin policy.show",
+		);
 		expect(init.instructions?.split(/[.!?](?:\s|$)/).filter(Boolean).length).toBeLessThanOrEqual(3);
 		const listed = await post({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
 		expect(listed.status).toBe(200);

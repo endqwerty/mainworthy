@@ -171,6 +171,8 @@ The API policy edit is `{"op":"policy","emptyReports":"nothing-required"}`. The 
 
 The switch "Agent edits need a person" is a shortcut. It flips between `loose` and `standard`. It is hidden while the policy is `custom`.
 
+If another policy change wins while you choose a preset or the tests-with-no-case setting, Settings asks you to review the current policy and choose again.
+
 From the command line:
 
 ```
@@ -205,14 +207,18 @@ Invalid conditions, duplicate clause ids, invalid rule answers, missing final `a
 
 A refused request keeps your draft in the open editor. If the policy changes while you edit, a notice marks your opened version as out of date. Apply sends that version, and the server refuses a stale proposal or acceptance. Cancel and reopen to start from the current policy. A waiting proposal cannot replace a newer policy when accepted later. Cancel discards the draft. Leaving Settings or reloading also discards it.
 
+A conflict during acceptance leaves the proposal's adoption question open in Queue. Reject that question before sending a replacement, including after a failed save in Settings. A waiting proposal made before policy versions also needs rejection and a new proposal from the current policy.
+
 From the command line, send a policy edit to `mainworthy propose`. The edit carries the whole clause list, so start from what `mainworthy policy show --json` prints, change a clause, and send it back. Include its `version` as `base` when sending clauses or settings. This example, with the clauses cut to `[...]`, makes a reason mandatory for findings and shortens the flaky hold to 7 days:
+
+Send only one policy edit per proposal. Combine its clause and setting changes in that edit. MCP has no tool to read the policy version. Before using MCP `propose` with clauses or settings, read it through `mainworthy policy show --json` or the HTTP `admin` operation with `{"do":"policy.show","project":"<key>"}`. The read requires instance admin. If neither is available, ask an instance admin for the current policy and version; do not guess `base`.
 
 ```
 $ mainworthy propose --json '{"edits":[{"op":"policy","base":1,"preset":"standard","clauses":[...],"settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":7,"infraThisTargetOnly":true}}}]}'
 {"proposal":"P-9","question":"Q-9","conflicts":[],"status":"open","needs":"an admin","cases":[]}
 ```
 
-Use the version you read in place of `1`. Preset-only and `unlinked` edits may omit `base`; the proposal records the policy version current when it is made. An admin accepts it like any policy change. Mainworthy refuses a policy in which some kind of question has no last clause that matches `always`:
+Use the version you read in place of `1`. Preset-only, `unlinked` and `emptyReports` edits may omit `base`; the proposal records the policy version current when it is made. An admin accepts it like any policy change. Mainworthy refuses a policy in which some kind of question has no last clause that matches `always`:
 
 ```
 invalid: every kind must end with a clause that always matches; missing for: finding
@@ -231,7 +237,8 @@ two outcome changes per test and failure signature. A file-split signature has i
 own count, separate from the original cause.
 
 To change them, start from the current settings and send a policy edit. Keep the
-other settings as they are. This example uses the other defaults:
+other settings as they are. Use the `version` you read as `base` in place of `1`.
+This example uses the other defaults:
 
 ```json
 {"edits":[{"op":"policy","base":1,"settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"flakyDetection":{"enabled":true,"windowDays":7,"minFlips":3}}}]}

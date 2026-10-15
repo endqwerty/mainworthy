@@ -70,11 +70,14 @@ test("CLI project export replays only that project over HTTP and keeps the sourc
 			[source.client, "scratch", "other_only"],
 			[selected, "selected", "risk"],
 		] as const) {
-			const policy = Policy.parse(await client.call("admin", { do: "policy.show", project }));
+			const policy = Policy.extend({ version: z.number() }).parse(
+				await client.call("admin", { do: "policy.show", project }),
+			);
 			const proposed = await client.call("propose", {
 				edits: [
 					{
 						op: "policy",
+						base: policy.version,
 						settings: {
 							...policy.settings,
 							fields: { [field]: { kind: "choice", label: field, required: true, choices: ["low", "high"] } },

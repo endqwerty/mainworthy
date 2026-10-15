@@ -213,6 +213,12 @@ function SettingsWorkbench() {
 					: "clauses" in change
 						? "Custom policy, edited in Settings."
 						: "Change custom field definitions in Settings.");
+		const conflictMessage =
+			"clauses" in change
+				? policyConflictMessage
+				: "settings" in change
+					? "The policy changed while you edited. Your field draft is kept. Review the current policy and try saving again."
+					: "The policy changed before this selection was saved. Review the current policy and choose again.";
 		const basedChange = { ...(policy ? { base: policy.version } : {}), ...change };
 		const key = JSON.stringify({ change: basedChange, reason });
 		if (policyAttempt.current?.key !== key) policyAttempt.current = { key, propose: randomId(), decide: randomId() };
@@ -238,12 +244,7 @@ function SettingsWorkbench() {
 				{ q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" }, reason, cmd: attempt.decide },
 				{ project },
 			);
-			if (replies[0]?.status === "conflict")
-				throw new Error(
-					"settings" in change && !("clauses" in change)
-						? "The policy changed while you edited. Your field draft is kept. Review the current policy and try saving again."
-						: policyConflictMessage,
-				);
+			if (replies[0]?.status === "conflict") throw new Error(conflictMessage);
 			if (replies[0]?.status !== "decided" && replies[0]?.status !== "already")
 				throw new Error(`Policy is awaiting ${replies[0]?.needs ?? "review"}. Open ${question.q} in Queue.`);
 			const ruled = z.object({ ruled: z.number() }).safeParse(replies[0]?.effects).data?.ruled ?? 0;
@@ -260,9 +261,7 @@ function SettingsWorkbench() {
 		} catch (error) {
 			const message =
 				error instanceof ApiError && error.code === "conflict"
-					? "settings" in change && !("clauses" in change)
-						? "The policy changed while you edited. Your field draft is kept. Review the current policy and try saving again."
-						: policyConflictMessage
+					? conflictMessage
 					: error instanceof Error
 						? error.message
 						: "The policy could not be changed.";
