@@ -115,7 +115,7 @@ All three send a change to the policy to an admin, and send a conflicting edit b
 
 | Preset | In short |
 | --- | --- |
-| `loose` | Edits to cases take effect at once and a test needs no case. A person is asked about failures and findings, and a run that passed closes by itself. |
+| `loose` | Edits to cases take effect at once and a test needs no case. A failure already present on the base is excused by rule while its evidence holds. A person answers other failures and findings, and a run that passed closes by itself. |
 | `standard` | An agent's edit waits for a person. A person's own edit still takes effect at once, and a test needs no case. |
 | `strict` | A person, never an agent, answers every edit, test with no case, failure, finding and passed run, and gives a reason. The project can have its tests with no case tracked instead. A policy change and a conflicting edit are handled as under the other presets. Approval by a named role or by two people is not built yet. |
 
@@ -127,6 +127,7 @@ Who answers each question:
 | An agent's edit to a case | By rule: Accept | A person | A person, with a reason |
 | A test with no case | By rule: Track without a case | By rule: Track without a case | A person, with a reason |
 | A failed result | A person; agents advise | A person; agents advise | A person who did not report it, with a reason |
+| A test already failing on the base | By rule: Already failing on base | A person; agents advise | A person who did not report it, with a reason |
 | A result that two reports disagree on | A person; agents advise | A person who did not report it | A person who did not report it, with a reason |
 | A finding | A person; agents advise. Duplicate: a person or an agent | A person; agents advise | A person, with a reason |
 | Closing a run that passed | By rule: Approve | By rule: Approve | A person, with a reason |

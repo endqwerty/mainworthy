@@ -152,8 +152,9 @@ test("teams, grants, members and attribution survive an archive; its version cha
 	const chunks: string[] = [];
 	exportArchive(h.app.db, (chunk) => chunks.push(chunk));
 	const archive = chunks.join("");
-	expect(ARCHIVE_VERSION).toBe(12);
-	expect(archive.split("\n")[0]).toContain('"schema":12');
+	// Teams raised the archive version to 12; later migrations may raise it further.
+	expect(ARCHIVE_VERSION).toBeGreaterThanOrEqual(12);
+	expect(archive.split("\n")[0]).toContain(`"schema":${ARCHIVE_VERSION}`);
 	const target = new Db(":memory:");
 	try {
 		migrate(target, ":memory:");
@@ -167,8 +168,8 @@ test("teams, grants, members and attribution survive an archive; its version cha
 	const empty = new Db(":memory:");
 	try {
 		migrate(empty, ":memory:");
-		expect(() => importArchive(empty, linesOf(archive.replace('"schema":12', '"schema":7')))).toThrow(
-			"older than this build's archive schema 12",
+		expect(() => importArchive(empty, linesOf(archive.replace(`"schema":${ARCHIVE_VERSION}`, '"schema":7')))).toThrow(
+			`older than this build's archive schema ${ARCHIVE_VERSION}`,
 		);
 	} finally {
 		empty.close();

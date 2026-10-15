@@ -7,7 +7,7 @@ import { PRESETS, type PresetName } from "./presets.ts";
 
 export const PRESET_SUMMARY: Record<PresetName, string> = {
 	loose:
-		"Edits to cases take effect at once and a test needs no case. A person is asked about failures and findings, and a run that passed closes by itself.",
+		"Edits to cases take effect at once and a test needs no case. A failure already present on the base is excused by rule while its evidence holds. A person answers other failures and findings, and a run that passed closes by itself.",
 	standard:
 		"An agent's edit waits for a person. A person's own edit still takes effect at once, and a test needs no case.",
 	strict:
@@ -20,6 +20,10 @@ const QUESTIONS: { question: string; facts: Facts }[] = [
 	{ question: "An agent's edit to a case", facts: { kind: "adopt", facts: new Set(["author:agent"]) } },
 	{ question: "A test with no case", facts: { kind: "map", facts: new Set() } },
 	{ question: "A failed result", facts: { kind: "failure", facts: new Set(["scope:change"]) } },
+	{
+		question: "A test already failing on the base",
+		facts: { kind: "failure", facts: new Set(["scope:change", "inherited"]) },
+	},
 	{
 		question: "A result that two reports disagree on",
 		facts: { kind: "failure", facts: new Set(["scope:run", "hint:disputed"]) },

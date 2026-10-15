@@ -77,7 +77,7 @@ Propose cases at their base version. Status: adopted=current, open=needs accepta
 | `edits[][policy].clauses` | `array<object>` | no |  |
 | `edits[][policy].clauses[].id` | `string` | yes |  |
 | `edits[][policy].clauses[].kind` | `"adopt" \| "map" \| "failure" \| "finding" \| "signoff"` | yes |  |
-| `edits[][policy].clauses[].when` | `array<"always" \| "author:human" \| "author:agent" \| "author:ci" \| "conflict" \| "policy" \| "scope:change" \| "scope:trunk" \| "scope:run" \| "hint:disputed" \| "category:defect" \| "verdict:passed" \| "unlinked:track" \| "unlinked:create" \| string>` | yes |  |
+| `edits[][policy].clauses[].when` | `array<"always" \| "author:human" \| "author:agent" \| "author:ci" \| "conflict" \| "policy" \| "scope:change" \| "scope:trunk" \| "scope:run" \| "hint:disputed" \| "inherited" \| "category:defect" \| "verdict:passed" \| "unlinked:track" \| "unlinked:create" \| string>` | yes |  |
 | `edits[][policy].clauses[].ask` | `object` | yes |  |
 | `edits[][policy].clauses[].ask.who` | `"rule" \| "member" \| "admin" \| "author"` | yes |  |
 | `edits[][policy].clauses[].ask.agents` | `"answer" \| "advise" \| "none"` | yes |  |

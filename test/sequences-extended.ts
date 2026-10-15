@@ -34,6 +34,7 @@ import { recoverAccepted, sweep } from "../src/server/jobs.ts";
 import { type Actor, findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { harness } from "./helpers.ts";
+import { failingSlotResults, invalidInherited } from "./inherited-audit.ts";
 
 const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
 const STEPS = Number(process.env.MAINWORTHY_SEQUENCE_STEPS ?? 100);
@@ -139,13 +140,14 @@ export function sequence(seed: number, preset: string): Problem | null {
 			`SELECT q.no, q.subject, q.evidence, group_concat(r.ref) AS refs FROM questions q
 			 LEFT JOIN question_refs r ON r.question = q.id WHERE q.state = 'open' AND q.kind = 'failure' GROUP BY q.id`,
 		);
-		const excuseOf = (signature: number, scope: string, target: number) =>
+		const excuseOf = (signature: number, scope: string, target: number, result = 0) =>
 			rows(
-				"SELECT class, decision FROM excuses WHERE project = ? AND signature = ? AND scope = ? AND target IN (0, ?) ORDER BY (target != 0) DESC, decision DESC LIMIT 1",
+				`SELECT class, decision FROM (SELECT class, decision FROM excuses WHERE project = ? AND signature = ? AND scope = ? AND target IN (0, ?) ORDER BY (target != 0) DESC, decision DESC LIMIT 1) UNION ALL SELECT class, decision FROM result_excuses WHERE result = ? ORDER BY decision DESC LIMIT 1`,
 				project,
 				signature,
 				scope,
 				target,
+				result,
 			)[0];
 		const verdictOf = (tally: Record<string, number>, blocking: number, outstanding: number): string => {
 			if (outstanding > 0) return "pending";
@@ -165,18 +167,19 @@ export function sequence(seed: number, preset: string): Problem | null {
 			if (live) {
 				const causes =
 					run.origin === "change"
-						? rows<{ signature: number; target: number }>(
-								"SELECT DISTINCT signature, target FROM run_tests WHERE run = ? AND outcome IN ('fail', 'error')",
+						? rows<{ signature: number; target: number; result: number }>(
+								"SELECT signature, target, result FROM run_tests WHERE run = ? AND outcome IN ('fail', 'error')",
 								id,
 							)
-						: rows<{ causes: string }>("SELECT causes FROM slots WHERE run = ?", id).flatMap((slot) =>
-								(JSON.parse(slot.causes) as [number, number][]).map(([signature, target]) => ({ signature, target })),
-							);
+						: rows<{ id: number }>(
+								"SELECT id FROM slots WHERE run = ? AND state IN ('failing', 'disputed')",
+								id,
+							).flatMap((slot) => failingSlotResults(h.app.db, slot.id));
 				for (const cause of causes) {
 					const target = targets.get(cause.target);
 					if (!target) return { what: "a cause on an unknown target", detail: cause };
 					const scope = scopeOf(target, id);
-					if (excuseOf(cause.signature, scope, cause.target)) continue;
+					if (excuseOf(cause.signature, scope, cause.target, cause.result)) continue;
 					const asked = open.filter((question) => {
 						const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string };
 						const evidence = JSON.parse(String(question.evidence)) as { targets?: number[] };
@@ -244,7 +247,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 					else {
 						const seenOn = targets.get(Number(row.target));
 						if (!seenOn) return { what: "a result on an unknown target", detail: row };
-						const excuse = excuseOf(Number(row.signature), scopeOf(seenOn, id), Number(row.target));
+						const excuse = excuseOf(Number(row.signature), scopeOf(seenOn, id), Number(row.target), Number(row.result));
 						tally[excuse ? (excuse.class === "attributed" ? "attributed" : "excused") : "unexplained"]++;
 					}
 				}
@@ -436,10 +439,12 @@ export function sequence(seed: number, preset: string): Problem | null {
 					tally.skipped++;
 					tally.missing++;
 				} else {
-					const causes = JSON.parse(String(slot.causes)) as [number, number][];
-					const excuses = causes.map(([signature, target]) => {
-						const seenOn = targets.get(target);
-						return seenOn ? excuseOf(signature, scopeOf(seenOn, id), target) : undefined;
+					const causes = [...latest.values()].filter((fill) => fill.outcome === "fail" || fill.outcome === "error");
+					const excuses = causes.map((fill) => {
+						const seenOn = targets.get(Number(fill.target));
+						return seenOn
+							? excuseOf(Number(fill.signature), scopeOf(seenOn, id), Number(fill.target), Number(fill.id))
+							: undefined;
 					});
 					const unanswered = excuses.filter((excuse) => !excuse).length;
 					if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed++;
@@ -502,7 +507,8 @@ export function sequence(seed: number, preset: string): Problem | null {
 		const bare = rows(
 			`SELECT q.no, d.id, d.answer FROM questions q JOIN decisions d ON d.id = q.decision
 			 WHERE q.kind = 'failure' AND q.state = 'decided' AND json_extract(d.effects, '$.class') IS NOT NULL
-			   AND NOT EXISTS (SELECT 1 FROM excuses e WHERE e.decision = d.id)`,
+			   AND NOT EXISTS (SELECT 1 FROM excuses e WHERE e.decision = d.id)
+     AND NOT EXISTS (SELECT 1 FROM result_excuses e WHERE e.decision = d.id)`,
 		);
 		if (bare.length > 0) return { what: "4: an answer is in force with nothing to show for it", detail: bare };
 
@@ -535,6 +541,10 @@ export function sequence(seed: number, preset: string): Problem | null {
 					detail: { target, expected, change },
 				};
 		}
+		const unsupported = invalidInherited(h.app.db);
+		if (unsupported.length > 0)
+			return { what: "an inherited failure does not fail on its base now", detail: unsupported };
+
 		return null;
 	};
 

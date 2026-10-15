@@ -112,14 +112,16 @@ $ mainworthy change --json '{"change":"pr:482","state":"merged","landing":{"comm
 When `landing.commit` matches the change's recorded head, all its environments move to
 trunk together. The commit keeps its one gate, and planned runs that count it are recomputed.
 Pull request answers remain attributable in history and still cover its older commits.
-They do not carry to trunk. Existing trunk answers apply. If this commit gate is the
+They do not carry to trunk. A landed commit's automatic inherited answer ends because it no longer belongs to the change's base comparison.
+Existing trunk answers apply. If this commit gate is the
 newest run in trunk, its unexplained failures raise trunk questions immediately, even
 before another report arrives. An older gate can remain blocked without an open
 question. Planned runs that count the commit still ask about their unexplained failures.
 
 Migration 8 records scope moves locally. Archives keep the resulting target and run
-scopes but omit the move audit trail. Migration 8 keeps archive schema 7 compatible;
-archives from before schema 7 still require the older build described in [data](./data.md).
+scopes but omit the move audit trail. That audit table does not change the archive schema.
+Result-specific inherited excuses require archive schema 11. To transfer older data, upgrade
+the source database and export it again as described in [data](./data.md).
 
 A different merge or rebased hash does not move the original head. Omitting `landing`
 only ends the change. It can be supplied later by repeating `merged` with the metadata.

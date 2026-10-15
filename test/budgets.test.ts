@@ -85,7 +85,11 @@ test("a report that makes many failures go away recomputes each run once, not on
 		const db = h.app.db;
 		const all = db.all.bind(db);
 		db.all = ((statement: { text: string }, ...args: unknown[]) => {
-			if (statement.text.includes("GROUP BY outcome, signature, target")) tallies++;
+			if (
+				statement.text ===
+				"SELECT test, result, target, outcome, signature FROM run_tests WHERE run = $run ORDER BY result"
+			)
+				tallies++;
 			return (all as (...rest: unknown[]) => unknown[])(statement, ...args);
 		}) as typeof db.all;
 		try {

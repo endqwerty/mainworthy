@@ -77,8 +77,8 @@ is under the GitHub milestone `iOS app`.
   decision witness. Fix the design, not the test.
 - **Standing changes only through a decision.** Anything that is "current" (a case's
   head, a link, an excuse, a closed run, the policy) is written by a function that
-  takes a `Witness`. Do not add a writer without one. Four functions put back what
-  a withdrawn or ended decision did (`restoreLink`, `dropExcuse`, `reopenRun`,
+  takes a `Witness`. Do not add a writer without one. Five functions put back what
+  a withdrawn or ended decision did (`restoreLink`, `dropExcuse`, `dropResultExcuses`, `reopenRun`,
   `restoreFailures`) and take no witness: the withdrawal is the recorded event,
   and a test allows only the kind handlers to call them.
 - **`src/core` is pure** and runs in the browser and the server. No I/O, no Node or

@@ -8,6 +8,7 @@ import type { CaseBody } from "../../core/model.ts";
 import type { Edit } from "../../core/ops.ts";
 import {
 	dropExcuse,
+	dropResultExcuses,
 	findTest,
 	linkTest,
 	mustTarget,
@@ -15,6 +16,7 @@ import {
 	restoreLink,
 	scopeOf,
 	setExcuse,
+	setResultExcuses,
 	testById,
 	unlinkedInFile,
 } from "../evidence/evidence.ts";
@@ -368,6 +370,20 @@ const failureHandler: Handler<"failure"> = {
 			return { corrected };
 		}
 		const klass = failureClass(answer);
+		if (json<{ perResult?: boolean }>(question.subject).perResult) {
+			const { inherited } = json<{ inherited: { result: number; base: number[] }[] }>(question.evidence);
+			setResultExcuses(
+				ctx,
+				witness,
+				inherited.map((row) => row.result),
+				klass,
+			);
+			return {
+				class: klass,
+				results: inherited.map((row) => row.result),
+				inherited: answer.is === "inherited" ? inherited : [],
+			};
+		}
 		// A decision that holds on certain targets excuses those and no other.
 		const policy = currentPolicy(ctx.db, ctx.project.id);
 		const here = failureHandler
@@ -402,10 +418,14 @@ const failureHandler: Handler<"failure"> = {
 		const subject = json<{ signature: number; scope: string }>(question.subject);
 		const effects = json<{ corrected?: [number, number][]; class?: string }>(decision.effects);
 		if (effects.corrected) restoreFailures(ctx, decision.id);
-		if (effects.class) dropExcuse(ctx, subject.signature, subject.scope, decision.id);
+		if (effects.class) {
+			dropExcuse(ctx, subject.signature, subject.scope, decision.id);
+			dropResultExcuses(ctx, decision.id);
+		}
 	},
 	holds({ question, answer, now, policy }) {
 		const basis = untilBasisChanges(question);
+		if (json<{ perResult?: boolean }>(question.subject).perResult) return basis;
 		// The target of the question's latest evidence: the build the person answering was looking at.
 		const latest = json<{ targetId?: number }>(question.evidence).targetId;
 		const targets = latest !== undefined ? [latest] : [];

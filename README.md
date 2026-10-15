@@ -93,7 +93,7 @@ $ mainworthy policy show           # the whole policy is one table
 ```
 
 A policy says who answers each kind of question. Under `loose`, the default, edits to cases take effect at once,
-a test needs no case, and a person is asked about failures and findings. Under `standard` an agent's edit waits
+a test needs no case, and a failure already present on the base is excused by rule while its evidence holds, and a person answers other failures and findings. Under `standard` an agent's edit waits
 for a person. Under `strict` a person, never an agent, answers each of those questions and gives a reason. What
 happens to a test with no case is a choice of its own: it is tracked without one, it gets a case made for it,
 or its file is a question in the queue. All three send a policy change to an admin and a conflicting edit back to

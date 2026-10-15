@@ -42,8 +42,7 @@ The runs a failure lists are the ones it was listed under as its results arrived
 run to read its gate as it is now: an older commit's run can pass again while a newer
 commit keeps the question open.
 
-A failure stops blocking a gate in two ways. Someone answers the question. Or the failing
-result is replaced. A newer attempt of the same job that passes replaces it; an attempt
+A failure stops blocking a gate when a decision explains it or the failing result is replaced. A newer attempt of the same job that passes replaces it; an attempt
 that is skipped or blocked leaves the failure in place. A result that names
 the failing one as the result it corrects replaces it whatever its outcome: passed, skipped
 or blocked. A pass reported beside the failure replaces nothing. The two disagree, and a
@@ -70,6 +69,26 @@ The guard counts reported files, so missing file names do not help reach the thr
 Look for "blocks gate" and the runs named beside the question.
 
 [Diagram: the life of a question](../diagrams/question-lifecycle.html)
+
+## Failures already present on the base
+
+Under the loose policy, a test that fails with the same cause on the change's base is excused by rule.
+The decision appears in Settled. It names exact results of one commit and the base results that support them.
+Other tests with the same message still need their own evidence. Splitting a report does not change which tests qualify.
+
+The comparison uses the change's current base in its own repository and the effective results of pipelines and people.
+The base must fail in the same environment, method and job as the change's result. A failure in another lane does not qualify.
+A newer passing attempt, a correction, a result judged a mistake, or a different base can end the excuse.
+Mainworthy updates the affected commits and planned runs immediately when that evidence changes, including reports recovered after a restart.
+Landing the change's head on trunk ends that commit's inherited excuse. Trunk answers apply, and unexplained failures are asked again.
+A skipped or blocked retry does not remove an earlier failure. An agent's report supplies no base evidence and receives no automatic inherited excuse.
+
+If you withdraw the rule's answer, the queue keeps one ordinary failure question for you to answer.
+The rule stops answering that commit and cause, including after base or change retries. Another commit or cause can still qualify.
+Your answer follows the usual failure holds; a failing base retry does not take it away.
+
+Standard and strict policies leave the comparison as a hint for a person. A person's "Already failing on base" answer
+still covers the build they answered about. Changing to a newer preset requires applying it; stored policies keep their existing clauses.
 
 ## Choose an answer
 

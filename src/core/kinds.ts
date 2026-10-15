@@ -113,8 +113,8 @@ export const FailureAnswer = z.discriminatedUnion("is", [
 	z.object({ is: z.literal("flaky") }),
 	z.object({ is: z.literal("infra") }),
 	/**
-	 * Already failing on the base of the change with the same cause; not this change's doing. A person's answer
-	 * for the build they were looking at: no rule gives it, and the next commit is asked about again.
+	 * Already failing on the base of the change with the same cause. A rule's answer names exact results
+	 * and their base evidence. A person's broad answer covers one build.
 	 */
 	z.object({ is: z.literal("inherited") }),
 	/** A disputed slot: the failing result was a mistake and the passing one stands. */
@@ -307,6 +307,7 @@ export const Predicate = z.union([
 		"scope:trunk",
 		"scope:run",
 		"hint:disputed",
+		"inherited",
 		"category:defect",
 		"verdict:passed",
 		// What the project's own `unlinked` setting says, so a clause can test a setting like any other fact.

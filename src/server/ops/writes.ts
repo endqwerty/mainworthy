@@ -27,6 +27,7 @@ import {
 	type Raised,
 	raise,
 	raiseFailure,
+	raiseFailures,
 	refold,
 	stopAskingAbout,
 	undo,
@@ -170,6 +171,9 @@ export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; f
 		// applied and they are recomputed, none of them goes on showing a verdict from before the move.
 		noteAccepted(ctx, alsoWaiting(ctx, accepted.batch, target, runs), accepted.batch.seq);
 	}
+	// Target metadata is accepted even when this report's results were already processed.
+	// Retargeting must therefore update inherited standing before a saved receipt can return.
+	if (ctx.changedBases.size > 0) refold(ctx, [], { dissolveStale: true });
 	return accepted;
 }
 
@@ -202,14 +206,19 @@ export function* processBatchSteps(ctx: Ctx, batchId: number): Generator<Pause, 
 	const groups = yield* applyBatchSteps(ctx, { batch, target, applied: applied.results, runs });
 
 	const questions: QuestionBrief[] = [];
-	for (const group of groups) {
+	const asking = groups.filter((group) => {
 		// A report for a change that has ended (a pipeline that finished after the merge) is recorded and counted,
 		// and not asked about, unless an open planned run shows the failure and waits for the answer.
-		if (scopeEnded(ctx.db, group.scope) && !group.runs.some((run) => run.origin === "planned" && run.state === "open"))
-			continue;
-		const raised = raiseFailure(ctx, { group, target, by: batch.actor, producer });
-		questions.push(brief(ctx, raised, group.tests.length));
-	}
+		return (
+			!scopeEnded(ctx.db, group.scope) || group.runs.some((run) => run.origin === "planned" && run.state === "open")
+		);
+	});
+	const raised = raiseFailures(
+		ctx,
+		asking.map((group) => ({ group, target, by: batch.actor, producer })),
+	);
+	for (const [index, question] of raised.entries())
+		questions.push(brief(ctx, question, asking[index]?.tests.length ?? 0));
 
 	const files = new Set<string>();
 	for (const result of applied.results) {

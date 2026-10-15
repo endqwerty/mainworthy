@@ -28,14 +28,16 @@ import {
 	batchById,
 	changeById,
 	changeByKey,
+	changesBasedOn,
 	codeWhat,
-	excuseFor,
+	excuseForResult,
 	firstCountedReport,
 	isWithdrawn,
 	laneHistory,
 	mustTarget,
 	nothingRequiredOn,
 	processedJobs,
+	type ResultRow,
 	resolveCommit,
 	resultById,
 	resultsOfCaseOnTargets,
@@ -105,6 +107,13 @@ const Q = {
 		`SELECT id FROM runs WHERE project = $project AND origin = 'change'
 		 AND json_extract(tally, '$.pass') + json_extract(tally, '$.excused') = 0`,
 	),
+	changeRuns: sql<{ change: number }, { id: number }>(
+		"SELECT id FROM runs WHERE change = $change AND origin = 'change'",
+	),
+	allRunTests: sql<
+		{ run: number },
+		{ test: number; result: number; target: number; outcome: string; signature: number | null }
+	>("SELECT test, result, target, outcome, signature FROM run_tests WHERE run = $run ORDER BY result"),
 	byNo: sql<{ project: number; no: number }, RunRow>("SELECT * FROM runs WHERE project = $project AND no = $no"),
 	byId: sql<{ id: number }, RunRow>("SELECT * FROM runs WHERE id = $id"),
 	changeRun: sql<{ project: number; what: string }, RunRow>(
@@ -173,9 +182,6 @@ const Q = {
 		        AND (CASE excluded.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END)
 		         >= (CASE run_tests.outcome WHEN 'fail' THEN 3 WHEN 'error' THEN 3 WHEN 'pass' THEN 2 WHEN 'blocked' THEN 1 ELSE 0 END))`,
 	),
-	runTestGroups: sql<{ run: number }, { outcome: string; signature: number | null; target: number; n: number }>(
-		"SELECT outcome, signature, target, count(*) AS n FROM run_tests WHERE run = $run GROUP BY outcome, signature, target",
-	),
 	runTests: sql<
 		{ run: number; outcome: string; limit: number },
 		{ test: number; result: number; outcome: string; signature: number | null; flipped: number }
@@ -214,10 +220,6 @@ const Q = {
 		 WHERE d.decision = $decision
 		   AND EXISTS (SELECT 1 FROM json_each(s.causes) WHERE json_extract(value, '$[0]') = $signature)`,
 	),
-	failingCauses: sql<{ run: number }, { signature: number; target: number }>(
-		`SELECT DISTINCT signature, target FROM run_tests
-		 WHERE run = $run AND outcome IN ('fail', 'error') AND signature IS NOT NULL`,
-	),
 	failingOfCause: sql<{ run: number; signature: number; target: number }, { test: number; result: number }>(
 		`SELECT test, result FROM run_tests
 		 WHERE run = $run AND signature = $signature AND target = $target AND outcome IN ('fail', 'error') LIMIT 200`,
@@ -241,8 +243,8 @@ const Q = {
 	discountsOfRun: sql<{ run: number }, { decision: number }>(
 		"SELECT DISTINCT discounted_by AS decision FROM slot_results WHERE run = $run AND discounted_by IS NOT NULL",
 	),
-	effectiveOfTest: sql<{ run: number; test: number }, { outcome: string; signature: number | null }>(
-		"SELECT outcome, signature FROM run_tests WHERE run = $run AND test = $test",
+	effectiveOfTest: sql<{ run: number; test: number }, { result: number; outcome: string; signature: number | null }>(
+		"SELECT result, outcome, signature FROM run_tests WHERE run = $run AND test = $test ORDER BY result",
 	),
 	insertSlot: sql<{
 		run: number;
@@ -844,17 +846,18 @@ export type Unexplained = { signature: number; target: number; scope: string };
  */
 export function unexplainedShown(db: Db, run: RunRow): Unexplained[] {
 	const shown = new Map<string, Unexplained>();
-	const note = (signature: number, target: number): void => {
-		const scope = scopeIn(db, run, target);
-		if (!excuseFor(db, run.project, signature, scope, target))
-			shown.set(`${signature}:${target}`, { signature, target, scope });
+	const note = (result: { id: number; signature: number | null; target: number }): void => {
+		if (result.signature === null) return;
+		const scope = scopeIn(db, run, result.target);
+		if (!excuseForResult(db, { ...result, project: run.project }, scope))
+			shown.set(`${result.signature}:${result.target}`, { signature: result.signature, target: result.target, scope });
 	};
 	if (run.origin === "change") {
-		for (const row of db.all(Q.failingCauses, { run: run.id })) note(row.signature, row.target);
+		for (const row of countedTestsOf(db, run.id))
+			if (row.outcome === "fail" || row.outcome === "error") note({ ...row, id: row.result });
 	} else {
-		for (const slot of db.all(Q.failingSlots, { run: run.id })) {
-			for (const [signature, target] of json<Cause[]>(slot.causes)) note(signature, target);
-		}
+		for (const slot of db.all(Q.failingSlots, { run: run.id }))
+			for (const fill of failingFillsOf(db, slot.id)) note(fill);
 	}
 	return [...shown.values()];
 }
@@ -944,7 +947,30 @@ function refreshSlot(
 ): { state: SlotState; causes: Cause[] } {
 	const fills = fillsOf(ctx.db, slot.id);
 	const byResult = new Map(fills.map((fill) => [fill.id, fill]));
-	const { agg, failing } = aggregateSlot(
+	const { agg, failing } = aggregateFills(fills);
+	// A cause is a failure signature on a target.
+	const seen = new Set<string>();
+	const causes: Cause[] = [];
+	for (const id of failing) {
+		const fill = byResult.get(id);
+		if (!fill || fill.signature === null || seen.has(`${fill.signature}:${fill.target}`)) continue;
+		seen.add(`${fill.signature}:${fill.target}`);
+		causes.push([fill.signature, fill.target]);
+	}
+	const state = slotState(agg, obligation?.minActors ?? 1);
+	ctx.db.run(Q.updateSlot, {
+		id: slot.id,
+		agg: JSON.stringify(agg),
+		state,
+		signature: causes[0]?.[0] ?? null,
+		causes: JSON.stringify(causes),
+		rev: ctx.seq,
+	});
+	return { state, causes };
+}
+
+function aggregateFills(fills: Fill[]) {
+	return aggregateSlot(
 		fills.map((fill) => ({
 			id: fill.id,
 			actor: fill.actor,
@@ -964,26 +990,12 @@ function refreshSlot(
 							: "blocked",
 		})),
 	);
-	// A cause is a failure signature on a target: the same signature in two environments is two things to answer
-	// for, because an answer may hold for one of them only.
-	const seen = new Set<string>();
-	const causes: Cause[] = [];
-	for (const id of failing) {
-		const fill = byResult.get(id);
-		if (!fill || fill.signature === null || seen.has(`${fill.signature}:${fill.target}`)) continue;
-		seen.add(`${fill.signature}:${fill.target}`);
-		causes.push([fill.signature, fill.target]);
-	}
-	const state = slotState(agg, obligation?.minActors ?? 1);
-	ctx.db.run(Q.updateSlot, {
-		id: slot.id,
-		agg: JSON.stringify(agg),
-		state,
-		signature: causes[0]?.[0] ?? null,
-		causes: JSON.stringify(causes),
-		rev: ctx.seq,
-	});
-	return { state, causes };
+}
+
+export function failingFillsOf(db: Db, slot: number): Fill[] {
+	const fills = fillsOf(db, slot);
+	const failing = new Set(aggregateFills(fills).failing);
+	return fills.filter((fill) => failing.has(fill.id));
 }
 
 /** A failure signature and the target it was seen on. */
@@ -1028,19 +1040,109 @@ export type Blocker = {
 /** A cause in the scope it is answered in: the identity of a failure question. */
 export const causeKey = (signature: number, scope: string): string => `${signature}|${scope}`;
 
+function comparisonLane(db: Db, result: ResultRow): string {
+	return JSON.stringify([
+		result.test,
+		result.signature,
+		mustTarget(db, result.target).env,
+		result.method,
+		batchById(db, result.batch)?.job,
+	]);
+}
+
 /**
  * Does this test already fail, with this cause, where the change started? That is the base commit the change
  * names, and only that: where the change names none, or Mainworthy has no result of this test on it, the answer
- * is no. It is a hint shown to the person who answers, as of the moment a report arrives; nothing is excused by
- * it and no answer stands on it. It reads what the base's gate counts: the effective result per lane, after
+ * is no. It supplies the comparison hint and the inherited rule's evidence. It reads the base's effective
+ * result per lane, after
  * attempts and corrections, never an agent's result and never another repository's.
  */
-export function failsOnBase(db: Db, target: TargetRow, test: number, signature: number): boolean {
-	const base = baseRunOf(db, target);
+export function failsOnBase(db: Db, id: number): boolean {
+	const result = resultById(db, id);
+	if (!result) return false;
+	const base = baseRunOf(db, mustTarget(db, result.target));
 	if (!base) return false;
-	return db
-		.all(Q.effectiveOfTest, { run: base.id, test })
-		.some((row) => (row.outcome === "fail" || row.outcome === "error") && row.signature === signature);
+	const lane = comparisonLane(db, result);
+	return db.all(Q.effectiveOfTest, { run: base.id, test: result.test }).some((row) => {
+		if ((row.outcome !== "fail" && row.outcome !== "error") || row.signature !== result.signature) return false;
+		const support = resultById(db, row.result);
+		return support !== null && comparisonLane(db, support) === lane;
+	});
+}
+export const changeRunsOf = (db: Db, change: number): number[] => db.all(Q.changeRuns, { change }).map((row) => row.id);
+export const countedTestsOf = (db: Db, run: number) => db.all(Q.allRunTests, { run });
+
+/** Failures counted by this commit or pinned in a planned run, including a run already closed on them. */
+export function inheritedResultsOf(db: Db, run: RunRow) {
+	const results = new Map(countedTestsOf(db, run.id).map((row) => [row.result, row]));
+	const accepts = acceptsOf(run);
+	if (!("commit" in accepts)) return [...results.values()];
+	for (const id of plannedCounting(db, run.project, accepts.commit)) {
+		for (const slot of db.all(Q.failingSlots, { run: id })) {
+			for (const fill of failingFillsOf(db, slot.id)) {
+				if (fill.method === "agent" || mustTarget(db, fill.target).what !== run.accepts_what) continue;
+				results.set(fill.id, {
+					result: fill.id,
+					test: fill.test,
+					target: fill.target,
+					signature: fill.signature,
+					outcome: fill.outcome,
+				});
+			}
+		}
+	}
+	return [...results.values()].sort((a, b) => a.result - b.result);
+}
+
+/** Read each base run once, indexed by the test, cause and matching environment, method and job. */
+export function inheritedEvidenceOf(db: Db, run: RunRow) {
+	const bases = new Map<number, Map<string, number[]>>();
+	const targets = new Map<number, RunRow | null>();
+	return inheritedResultsOf(db, run).flatMap((row) => {
+		if (row.signature === null || (row.outcome !== "fail" && row.outcome !== "error")) return [];
+		const result = resultById(db, row.result);
+		if (!result || result.method === "agent") return [];
+		if (!targets.has(row.target)) targets.set(row.target, baseRunOf(db, mustTarget(db, row.target)));
+		const baseRun = targets.get(row.target);
+		if (!baseRun) return [];
+		let lanes = bases.get(baseRun.id);
+		if (!lanes) {
+			lanes = new Map();
+			bases.set(baseRun.id, lanes);
+			for (const base of countedTestsOf(db, baseRun.id)) {
+				if (base.outcome !== "fail" && base.outcome !== "error") continue;
+				const support = resultById(db, base.result);
+				if (!support || support.method === "agent") continue;
+				const key = comparisonLane(db, support);
+				const ids = lanes.get(key) ?? [];
+				ids.push(base.result);
+				lanes.set(key, ids);
+			}
+		}
+		const base = lanes.get(comparisonLane(db, result)) ?? [];
+		return base.length > 0 ? [{ ...row, base }] : [];
+	});
+}
+
+/** Runs affected by this commit's base, or by this commit being a base for another change. */
+export function inheritanceAffected(db: Db, run: RunRow): number[] {
+	if (run.origin !== "change" || !run.accepts_what) return [];
+	const targets = targetsOfCommit(db, run.project, run.accepts_what);
+	const changes = new Set(
+		targets.flatMap((target) =>
+			target.commit_sha === null ? [] : changesBasedOn(db, run.project, target.commit_sha, target.repo),
+		),
+	);
+	if (run.change !== null) changes.add(run.change);
+	const runs = new Set<number>([run.id]);
+	for (const change of changes) for (const row of db.all(Q.changeRuns, { change })) runs.add(row.id);
+	for (const id of [...runs]) {
+		const row = runById(db, id);
+		if (!row) continue;
+		const accepts = acceptsOf(row);
+		if ("commit" in accepts) for (const planned of plannedCounting(db, row.project, accepts.commit)) runs.add(planned);
+	}
+	return [...runs];
 }
 
 /** The run of the commit a change started from, when the change names one and it is not this commit itself. */
@@ -1072,21 +1174,12 @@ function count(db: Db, run: RunRow): { tally: Tally; failing: Set<string>; depen
 		}
 		return found;
 	};
-	/**
-	 * The excuse for a cause seen on a target, if one applies. An excuse held for certain targets (an
-	 * infrastructure failure) covers failures on those only: the same cause on another commit, or in another
-	 * environment of the same commit, stays unexplained until it is answered there.
-	 */
-	const excuseOf = (signature: number, target: number) => {
-		return excuseFor(db, run.project, signature, scopeFor(target), target);
-	};
-
-	const classify = (signature: number | null, target: number, n: number): void => {
+	const classify = (signature: number | null, target: number, n: number, result: number): void => {
 		if (signature === null) {
 			tally.unexplained += n;
 			return;
 		}
-		const excuse = excuseOf(signature, target);
+		const excuse = excuseForResult(db, { id: result, project: run.project, signature, target }, scopeFor(target));
 		if (!excuse) {
 			failing.add(causeKey(signature, scopeFor(target)));
 			tally.unexplained += n;
@@ -1098,11 +1191,11 @@ function count(db: Db, run: RunRow): { tally: Tally; failing: Set<string>; depen
 	};
 
 	if (run.origin === "change") {
-		for (const row of db.all(Q.runTestGroups, { run: run.id })) {
-			if (row.outcome === "pass") tally.pass += row.n;
-			else if (row.outcome === "skip") tally.skipped += row.n;
-			else if (row.outcome === "blocked") tally.missing += row.n;
-			else classify(row.signature, row.target, row.n);
+		for (const row of countedTestsOf(db, run.id)) {
+			if (row.outcome === "pass") tally.pass += 1;
+			else if (row.outcome === "skip") tally.skipped += 1;
+			else if (row.outcome === "blocked") tally.missing += 1;
+			else classify(row.signature, row.target, 1, row.result);
 		}
 	} else {
 		for (const row of db.all(Q.slotGroups, { run: run.id })) {
@@ -1116,10 +1209,13 @@ function count(db: Db, run: RunRow): { tally: Tally; failing: Set<string>; depen
 		// A failing or disputed slot counts once, by all of its causes: it is excused only when every one is.
 		for (const slot of db.all(Q.failingSlots, { run: run.id })) {
 			const disputed = slot.state === "disputed";
-			const causes = json<Cause[]>(slot.causes);
-			const excuses = causes.map(([signature, target]) => excuseOf(signature, target));
+			const causes = failingFillsOf(db, slot.id);
+			const excuses = causes.map((fill) =>
+				excuseForResult(db, { ...fill, project: run.project }, scopeFor(fill.target)),
+			);
 			const open = causes.filter((_, i) => !excuses[i]);
-			for (const [signature, target] of open) failing.add(causeKey(signature, scopeFor(target)));
+			for (const { signature, target } of open)
+				if (signature !== null) failing.add(causeKey(signature, scopeFor(target)));
 			for (const excuse of excuses) if (excuse) depends.set(excuse.decision, excuse.expires_at);
 			if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed += 1;
 			else if (open.length > 0 || causes.length === 0) {

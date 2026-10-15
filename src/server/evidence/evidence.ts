@@ -118,6 +118,18 @@ export type ResultRow = {
 const TRUNK_BRANCHES = new Set(["main", "master", "trunk"]);
 
 const Q = {
+	resultExcuse: sql<
+		{ result: number },
+		{ decision: number; class: "attributed" | "excused"; expires_at: number | null }
+	>("SELECT decision, class, expires_at FROM result_excuses WHERE result = $result"),
+	setResultExcuse: sql<{ result: number; decision: number; class: string; expires: number | null }>(
+		`INSERT INTO result_excuses (result, decision, class, expires_at) VALUES ($result, $decision, $class, $expires)
+   ON CONFLICT (result) DO UPDATE SET decision = excluded.decision, class = excluded.class, expires_at = excluded.expires_at`,
+	),
+	dropResultExcuses: sql<{ decision: number }>("DELETE FROM result_excuses WHERE decision = $decision"),
+	changesBasedOn: sql<{ project: number; base: string; repo: string | null }, { id: number }>(
+		"SELECT id FROM changes WHERE project = $project AND base_sha = $base AND repo IS $repo",
+	),
 	target: sql<{ project: number; what: string; env: string }, TargetRow>(
 		"SELECT * FROM targets WHERE project = $project AND what = $what AND env = $env",
 	),
@@ -604,6 +616,7 @@ function upsertChange(
 		next.title !== existing.title ||
 		next.files !== existing.files
 	) {
+		if (next.base !== existing.base_sha) ctx.changedBases.add(existing.id);
 		ctx.db.run(Q.updateChange, next);
 		ctx.touched.add(key);
 	}
@@ -1476,3 +1489,32 @@ export function setExcuse(
 export function dropExcuse(ctx: Ctx, signature: number, scope: string, decision: number): void {
 	ctx.db.run(Q.dropExcuse, { project: ctx.project.id, signature, scope, decision });
 }
+
+/** An exact result's answer and the broader cause's answer, with the newer judgement taking precedence. */
+export function excuseForResult(
+	db: Db,
+	result: Pick<ResultRow, "id" | "project" | "signature" | "target">,
+	scope: string,
+) {
+	const broad =
+		result.signature === null ? null : excuseFor(db, result.project, result.signature, scope, result.target);
+	const exact = db.get(Q.resultExcuse, { result: result.id });
+	return exact && (!broad || exact.decision > broad.decision) ? exact : broad;
+}
+
+/** Standing for precisely the results named by a failure decision. */
+export function setResultExcuses(
+	ctx: Ctx,
+	witness: Witness,
+	results: readonly number[],
+	klass: "attributed" | "excused",
+): void {
+	const decision = decisionOf(witness, "failure");
+	for (const result of results)
+		ctx.db.run(Q.setResultExcuse, { result, decision, class: klass, expires: witness.expiresAt });
+}
+export function dropResultExcuses(ctx: Ctx, decision: number): void {
+	ctx.db.run(Q.dropResultExcuses, { decision });
+}
+export const changesBasedOn = (db: Db, project: number, base: string, repo: string | null): number[] =>
+	db.all(Q.changesBasedOn, { project, base, repo }).map((row) => row.id);
