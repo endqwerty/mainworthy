@@ -29,7 +29,7 @@
 	color: var(--pass);
 	font-size: 14px;
 	line-height: 1.6;
-	min-height: 23px;
+	min-height: 24px;
 }
 .sn {
 	font: 12px / 24px var(--mono);
@@ -40,7 +40,7 @@
 .pre-input {
 	font-size: 14px;
 	line-height: 1.6;
-	min-height: 23px;
+	min-height: 24px;
 }
 .editor-input:focus {
 	box-shadow: 0 1px 0 var(--acc);

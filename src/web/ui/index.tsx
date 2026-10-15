@@ -66,7 +66,7 @@ export function ProofStrip({ proof }: { proof?: unknown }) {
 }
 export function StatusLine({ children }: { children: ReactNode }) {
 	return (
-		<span id="stat" role="status" aria-live="polite">
+		<span id="stat" role="status" aria-live="polite" aria-atomic="true">
 			{children}
 		</span>
 	);
