@@ -13,6 +13,8 @@ mainworthy.db  mainworthy.db-shm  mainworthy.db-wal
 
 While the server runs, it also keeps a `-wal` and a `-shm` file beside the database. The three belong together. After a clean stop the `-wal` file is empty.
 
+On `SIGTERM` or `SIGINT`, the server stops accepting connections and closes its change streams. It gives requests already in flight five seconds to send their replies before closing the remaining connections, then stops the reader threads and closes the database. A request that outlasts this wait can lose its reply. If you retry a write, send the same command id, `cmd`, so it is not applied twice. The CLI and web UI send command ids.
+
 The file holds every project, case and version, every result, decision and policy, and the actors, grants and a hash of each token. Treat it like the data of any private system. What it keeps about people, and for how long, is on the [privacy](./privacy.md) page.
 
 ## Export everything

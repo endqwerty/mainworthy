@@ -11,7 +11,7 @@ import { OP_LIST, OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { Readers } from "../src/server/readers.ts";
 import { type Instance, start } from "../src/server/start.ts";
-import { type Patience, sessionOf } from "../src/surfaces/http.ts";
+import { PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
 
 const dirs: string[] = [];
 const running: Instance[] = [];
@@ -96,7 +96,7 @@ const lanAddress = Object.values(networkInterfaces())
 	.flat()
 	.find((entry) => entry?.family === "IPv4" && !entry.internal)?.address;
 
-function bootReaders(count: number): Instance {
+function bootReaders(count: number, patience: Patience = PATIENCE): Instance {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-http-readers-"));
 	dirs.push(dataDir);
 	const instance = start(
@@ -112,7 +112,7 @@ function bootReaders(count: number): Instance {
 			proxy: null,
 		},
 		() => ({ ui: null }),
-		{ readers: count },
+		{ readers: count, patience },
 	);
 	running.push(instance);
 	return instance;
@@ -122,6 +122,90 @@ function readersOf(instance: Instance): Readers {
 	if (!(instance.app.readers instanceof Readers)) throw new Error("reader pool did not start");
 	return instance.app.readers;
 }
+
+describe("graceful stop", () => {
+	for (const count of [0, 2]) {
+		test(`a waiting write receives its reply and the event stream ends, with ${count} readers`, async () => {
+			const instance = bootReaders(count);
+			if (count > 0) await readersOf(instance).ready();
+			const events = await fetch(`${instance.url}/api/p/scratch/events`);
+			const reader = events.body?.getReader();
+			if (!reader) throw new Error("no stream");
+			expect(new TextDecoder().decode((await reader.read()).value)).toBe("retry: 2000\n\n");
+			const held = Promise.withResolvers<void>();
+			const entered = Promise.withResolvers<void>();
+			const blocking = instance.app.gate.run(() => held.promise);
+			const run = instance.app.gate.run;
+			const gate = spyOn(instance.app.gate, "run").mockImplementation((fn) => {
+				entered.resolve();
+				return run(fn);
+			});
+			const reply = post(instance, "/api/p/scratch/propose", {
+				edits: [{ op: "create", outline: "Written before stopping" }],
+			}).catch((error: unknown) => ({ error: String(error) }));
+			try {
+				await entered.promise;
+				gate.mockRestore();
+				const stopping = instance.stop();
+				expect(instance.stop()).toBe(stopping);
+				// The never-ending stream must finish while the ordinary reply is still waiting at the gate.
+				expect(await reader.read()).toEqual({ done: true, value: undefined });
+				held.resolve();
+				expect(await reply).toMatchObject({
+					status: 200,
+					body: { ok: true, result: { status: "adopted", cases: [{ ref: "C-1", version: 1 }] } },
+				});
+				await stopping;
+				if (count > 0) expect(readersOf(instance).threads).toHaveLength(0);
+			} finally {
+				gate.mockRestore();
+				held.resolve();
+				await blocking;
+				await reply;
+				await reader.cancel().catch(() => undefined);
+			}
+		});
+	}
+
+	test("a read already dispatched to a reader thread receives its reply before that thread stops", async () => {
+		const instance = bootReaders(2);
+		const pool = readersOf(instance);
+		await pool.ready();
+		const dispatched = Promise.withResolvers<void>();
+		const run = pool.run.bind(pool);
+		const reads = spyOn(pool, "run").mockImplementation((call, fallback) => {
+			const reply = run(call, fallback);
+			dispatched.resolve();
+			return reply;
+		});
+		const reply = post(instance, "/api/p/scratch/find", {}).catch((error: unknown) => ({ error: String(error) }));
+		try {
+			await dispatched.promise;
+			const stopping = instance.stop();
+			expect(await reply).toMatchObject({ status: 200, body: { ok: true, result: { items: [] } } });
+			await stopping;
+			expect(pool.completed).toBe(1);
+			expect(pool.fallbacks).toBe(0);
+		} finally {
+			reads.mockRestore();
+			await reply;
+		}
+	});
+
+	test("a request whose body never finishes cannot keep shutdown waiting indefinitely", async () => {
+		const instance = bootReaders(0, { ...PATIENCE, shutdownMs: 50 });
+		const host = `Host: ${new URL(instance.url).host}\r\n`;
+		const client = wire(instance, `POST /api/p/scratch/propose HTTP/1.1\r\n${host}Content-Length: 1000\r\n\r\n{`);
+		try {
+			// A separate answered request ensures the listener has had a turn to accept the partial body too.
+			expect((await fetch(`${instance.url}/healthz`)).status).toBe(200);
+			await instance.stop();
+			expect(await client.within(1000)).toBe("closed");
+		} finally {
+			client.end();
+		}
+	}, 10_000);
+});
 
 describe("reads on other cores through HTTP", () => {
 	test("every registered read has the same reply as inline, including refusals", async () => {
@@ -1554,7 +1638,7 @@ describe("a connection that sends nothing", () => {
 	test("is closed after the idle time, and a change stream outlives it", async () => {
 		// One second here; three minutes on a server nobody configured. Bun counts idle time in steps of four seconds, so
 		// one second is over within five.
-		const instance = boot("local", null, undefined, { patience: { idleSeconds: 1, signInBodyMs: 5000 } });
+		const instance = boot("local", null, undefined, { patience: { ...PATIENCE, idleSeconds: 1 } });
 		const host = `Host: ${new URL(instance.url).host}\r\n`;
 		const idle = wire(instance, `GET /healthz HTTP/1.1\r\n${host}\r\n`);
 		const stream = wire(instance, `GET /api/p/scratch/events HTTP/1.1\r\n${host}\r\n`);
@@ -1578,7 +1662,7 @@ describe("a connection that sends nothing", () => {
 		// The idle time counts the server's own silence too. A write that waits at the gate behind a long report, a
 		// large report on a slow machine, a tool call: each may answer after it, and must not lose its reply.
 		const instance = boot("server", "owner-secret-0123456789", undefined, {
-			patience: { idleSeconds: 1, signInBodyMs: 5000 },
+			patience: { ...PATIENCE, idleSeconds: 1 },
 		});
 		const host = `Host: ${new URL(instance.url).host}\r\n`;
 		const refused = wire(
@@ -1630,7 +1714,7 @@ describe("a connection that sends nothing", () => {
 	test("the body of a sign-in has a few seconds to arrive, then the request is answered and the connection closed", async () => {
 		// 300 ms here; five seconds on a server nobody configured. The body is ten bytes of the 4000 it announced.
 		const instance = boot("server", "owner-secret-0123456789", undefined, {
-			patience: { idleSeconds: 30, signInBodyMs: 300 },
+			patience: { ...PATIENCE, idleSeconds: 30, signInBodyMs: 300 },
 		});
 		const host = `Host: ${new URL(instance.url).host}\r\n`;
 		const stalled = wire(

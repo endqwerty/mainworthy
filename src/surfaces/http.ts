@@ -302,6 +302,8 @@ export type Patience = {
 	idleSeconds: number;
 	/** Milliseconds the whole body of a sign-in may take to arrive. It is a token: one packet. */
 	signInBodyMs: number;
+	/** Milliseconds requests in flight have to send their replies after the listener stops accepting. */
+	shutdownMs: number;
 };
 /**
  * Three minutes of silence, not half a minute: a proxy in front keeps idle connections to this server and reuses
@@ -309,7 +311,7 @@ export type Patience = {
  * Traefik and Cloudflare's tunnel give up an idle connection after 90 seconds, nginx after 60 and Caddy after two
  * minutes, so the proxy closes first.
  */
-export const PATIENCE: Patience = { idleSeconds: 180, signInBodyMs: 5000 };
+export const PATIENCE: Patience = { idleSeconds: 180, signInBodyMs: 5000, shutdownMs: 5000 };
 
 class BodyTooLarge extends Error {}
 class BodyTooSlow extends Error {}
@@ -549,7 +551,7 @@ async function logout(app: App, req: Request, server: Listener): Promise<Respons
  * that misses an event refetches. It is silent for as long as nothing changes; like every request with a session,
  * it is not held to the idle timeout (`sessionFor`).
  */
-function events(app: App, req: Request, session: Session, project: string): Response {
+function events(app: App, req: Request, session: Session, project: string, closing: AbortSignal): Response {
 	const allowed = mayRead(app, session, project);
 	if (allowed === "missing") {
 		const { code, message } = noProject(project);
@@ -564,13 +566,26 @@ function events(app: App, req: Request, session: Session, project: string): Resp
 	const encoder = new TextEncoder();
 	let unsubscribe = (): void => {};
 	let beat: ReturnType<typeof setInterval> | undefined;
+	let close = (): void => {};
+	const cleanup = () => {
+		unsubscribe();
+		clearInterval(beat);
+		req.signal.removeEventListener("abort", close);
+		closing.removeEventListener("abort", close);
+	};
 	const stream = new ReadableStream<Uint8Array>({
 		start(controller) {
+			close = () => {
+				cleanup();
+				try {
+					controller.close();
+				} catch {}
+			};
 			const send = (text: string) => {
 				try {
 					controller.enqueue(encoder.encode(text));
 				} catch {
-					unsubscribe();
+					cleanup();
 				}
 			};
 			send("retry: 2000\n\n");
@@ -578,11 +593,7 @@ function events(app: App, req: Request, session: Session, project: string): Resp
 			// revoked, or an actor that was forgotten, stops receiving at the next event or heartbeat.
 			const stillAllowed = (): boolean => {
 				if (mayRead(app, session, project) === "yes") return true;
-				unsubscribe();
-				clearInterval(beat);
-				try {
-					controller.close();
-				} catch {}
+				close();
 				return false;
 			};
 			unsubscribe = app.subscribe((event: ChangeEvent) => {
@@ -591,15 +602,11 @@ function events(app: App, req: Request, session: Session, project: string): Resp
 			beat = setInterval(() => {
 				if (stillAllowed()) send(": keep-alive\n\n");
 			}, 20_000);
-			req.signal.addEventListener("abort", () => {
-				unsubscribe();
-				clearInterval(beat);
-			});
+			req.signal.addEventListener("abort", close, { once: true });
+			closing.addEventListener("abort", close, { once: true });
+			if (req.signal.aborted || closing.aborted) close();
 		},
-		cancel() {
-			unsubscribe();
-			clearInterval(beat);
-		},
+		cancel: cleanup,
 	});
 	return new Response(stream, {
 		headers: { "content-type": "text/event-stream", "cache-control": "no-store", "x-accel-buffering": "no" },
@@ -715,6 +722,7 @@ export type Extra = {
  * takes (`sessionFor` says why, and what remains).
  */
 export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patience: Patience = PATIENCE) {
+	const closing = new AbortController();
 	// Every route that takes a session takes it here or in `handleOp`, and both through `sessionFor`.
 	const guarded =
 		(handler: (req: Request, session: Session) => Response | Promise<Response>) => (req: Request, server: Listener) => {
@@ -763,7 +771,7 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patie
 		"/api/logout": { POST: (req: Request, server: Listener) => logout(app, req, server) },
 		"/api/p/:project/events": {
 			GET: guarded((req, session) =>
-				events(app, req, session, (req as Request & { params: { project: string } }).params.project),
+				events(app, req, session, (req as Request & { params: { project: string } }).params.project, closing.signal),
 			),
 		},
 		"/api/p/:project/:op": {
@@ -781,7 +789,7 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patie
 	// A route that answers without a session (`open`: the documentation) writes the policy of its own pages,
 	// which differ from the app's (a page of the documentation frames its diagrams), and keeps it.
 	const ui = extra.ui ? uiSurface(extra.ui, sameOrigin) : null;
-	return Bun.serve({
+	const server = Bun.serve({
 		hostname: app.config.host,
 		port: app.config.port,
 		idleTimeout: patience.idleSeconds,
@@ -800,4 +808,20 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patie
 			return withHeaders(null, jsonResponse({ ok: false, error: { code: "internal", message: INTERNAL_ERROR } }, 500));
 		},
 	});
+	let stopping: Promise<void> | null = null;
+	return {
+		port: server.port,
+		stop(closeActiveConnections = false): Promise<void> {
+			if (stopping) {
+				if (closeActiveConnections) void server.stop(true);
+				return stopping;
+			}
+			// Stop accepting before closing the endless streams. Ordinary replies have a bounded wait to finish.
+			const drained = server.stop(closeActiveConnections);
+			closing.abort();
+			const deadline = setTimeout(() => void server.stop(true), patience.shutdownMs);
+			stopping = drained.finally(() => clearTimeout(deadline));
+			return stopping;
+		},
+	};
 }
