@@ -46,7 +46,7 @@ The server writes no log of requests. It logs when it starts and when something 
 
 ### The iPhone app
 
-The app talks only to the instance you type in, which is `mainworthy.com` unless you change it. It keeps your session in the phone's keychain and the instance's address and your last project in its settings. It does not keep your password. It contains no analytics, advertising or crash-reporting code, and it tells the server only that it is "Mainworthy for iPhone" and which version. The only permission it can ask for is to reach your local network, and only if you type in an instance on it.
+The app talks only to `mainworthy.com`, or to the instance a build of the app from its source code names. It keeps your session in the phone's keychain and your last project in its settings. It does not keep your password. It contains no analytics, advertising or crash-reporting code, and it tells the server only that it is "Mainworthy for iPhone" and which version. The only permission it can ask for is to reach your local network, and only a build that names an instance on it asks.
 
 ### Voluntary correspondence
 
