@@ -3,7 +3,7 @@
 // refusal means to the page is for the page to say; these throw the `ApiError` as the server sent it.
 import { z } from "zod";
 import { ApiError, exchange, session } from "./api.ts";
-import { clearDevicePerson, deviceSession } from "./device.ts";
+import { clearDevicePerson, type DeviceSession, deviceSession } from "./device.ts";
 import { type Assertion, CreationOptions, type Registration, RequestOptions } from "./passkey.ts";
 
 const Methods = z.object({ password: z.boolean(), passkey: z.boolean() });
@@ -105,19 +105,25 @@ export async function setPassword(input: { current: string | null; next: string 
 	);
 }
 
+let pendingClear: DeviceSession | null = null;
+
+/** The app has learned that the session ended, possibly through a later request after a lost logout reply. */
+export function clearSignedOutData(): void {
+	const owner = pendingClear;
+	pendingClear = null;
+	if (!owner) return;
+	try {
+		clearDevicePerson(owner);
+	} catch {
+		window.alert(
+			"You are signed out, but this browser could not clear all your data. Clear this site's data in your browser settings before leaving a shared computer.",
+		);
+	}
+}
+
 /** Ends this browser's session on the server and clears its cookie. It answers the same whatever it ended. */
 export const signOut = async ({ clear }: { clear: boolean }): Promise<void> => {
-	const owner = deviceSession();
-	const forget = (): void => {
-		if (!clear) return;
-		try {
-			clearDevicePerson(owner);
-		} catch {
-			window.alert(
-				"You are signed out, but this browser could not clear all your data. Clear this site's data in your browser settings before leaving a shared computer.",
-			);
-		}
-	};
+	pendingClear = clear ? deviceSession() : null;
 	try {
 		await exchange("/api/logout", { body: {} });
 	} catch (error) {
@@ -126,13 +132,11 @@ export const signOut = async ({ clear }: { clear: boolean }): Promise<void> => {
 			await session();
 		} catch (check) {
 			if (check instanceof ApiError && check.code === "unauthenticated") {
-				forget();
 				return;
 			}
 		}
 		throw error;
 	}
-	forget();
 };
 
 /** What to show for a failure that is not the server's refusal: the request did not get there, or no reply came back. */

@@ -18,7 +18,7 @@ import {
 } from "./lib/device.ts";
 import { useBindings, useKeyboard, useKeyRegistry } from "./lib/keys.ts";
 import { navigate, projectUrl, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
-import { signOut } from "./lib/signin.ts";
+import { clearSignedOutData, signOut } from "./lib/signin.ts";
 import { PhoneBar, usePhoneShell } from "./phone.tsx";
 import { QueueScreen } from "./queue/index.tsx";
 import { RunsScreen } from "./runs/index.tsx";
@@ -158,6 +158,7 @@ export function App() {
 	}, []);
 	useEffect(() => {
 		const refused = () => {
+			clearSignedOutData();
 			suspendDeviceSession();
 			queryClient.clear();
 			setAuth({ kind: "signin" });

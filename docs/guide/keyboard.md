@@ -45,7 +45,7 @@ The layout follows the pointer, not the width of the window. A browser worked wi
 | <kbd>g</kbd> <kbd>,</kbd> | Go to Settings |
 | <kbd>g</kbd> <kbd>p</kbd> | Switch project. Lists the projects you can read. Type part of a name or a key and press <kbd>↵</kbd>. The screen you are on stays open. The key is there when you can read more than one project. |
 | <kbd>g</kbd> <kbd>d</kbd> | Docs for this screen. Opens the page about the screen you are on, in a new tab. |
-| <kbd>g</kbd> <kbd>x</kbd> | Open the sign-out dialog. Choose to sign out and keep drafts, sign out and clear browser data, or stay signed in. It is there when you signed in, and not in local mode, where the owner of the machine needs no sign-in. |
+| <kbd>g</kbd> <kbd>x</kbd> | Sign out. Opens a dialog to sign out and keep drafts, sign out and clear browser data, or stay signed in. It is there when you signed in, and not in local mode, where the owner of the machine needs no sign-in. |
 | <kbd>⌘</kbd> <kbd>K</kbd> | Jump to or run. Opens the palette: type a ref such as `C-12`, words from a case title, the name of an action, or `docs` and a word. |
 | <kbd>?</kbd> | All keys of the current screen |
 | <kbd>[</kbd> | Collapse / expand sidebar |
