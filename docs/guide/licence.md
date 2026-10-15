@@ -12,7 +12,7 @@ You may use Mainworthy for any purpose, change it, run it for others and sell it
 - keep the copyright notices that are in the files;
 - mark the files you changed.
 
-The licence does not give you the name. You may say that your product is based on Mainworthy, but do not call it Mainworthy or make it look like the original.
+The licence gives no permission to use the name Mainworthy as a trademark (section 6), beyond what describing where your copy came from needs.
 
 Mainworthy comes with no warranty. Sections 7 and 8 of the licence say so in full.
 

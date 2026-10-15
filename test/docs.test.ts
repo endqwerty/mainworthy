@@ -377,4 +377,29 @@ describe("the build", () => {
 			expect(ignored, `.dockerignore lets ${directory} in`).toContain(`!${directory}`);
 		}
 	});
+
+	test("the container's build stage has every file the site imports, at the path it imports it from", () => {
+		// The test above knows the docs' directories by name; this one reads every import that leaves `src`, so a
+		// new kind of file (the licences, 2026-10-14: the verifier found `licences/archify/LICENSE` missing) is
+		// caught here and not by a build on the server.
+		const files = [
+			...readFileSync("src/surfaces/docs/content.ts", "utf8").matchAll(/from "\.\.\/\.\.\/\.\.\/([^"]+)"/g),
+		].map((match) => match[1] ?? "");
+		expect(files).toContain("licences/archify/LICENSE");
+		const stage = readFileSync("Dockerfile", "utf8").split(/^FROM /m)[1] ?? "";
+		// `COPY a b ./` puts each where it was; `COPY dir ./dir` too. Only such copies keep the import's path.
+		const kept = [...stage.matchAll(/^COPY (?!--)(.+)$/gm)].flatMap((match) => {
+			const words = (match[1] ?? "").trim().split(/\s+/);
+			const target = words.pop() ?? "";
+			return words.filter((source) => target === "./" || target === `./${source}`);
+		});
+		const ignored = readFileSync(".dockerignore", "utf8").split("\n");
+		for (const file of files) {
+			expect(
+				kept.some((source) => file === source || file.startsWith(`${source}/`)),
+				`the build stage copies ${file}`,
+			).toBe(true);
+			expect(ignored, `.dockerignore keeps out ${file}`).not.toContain(file.split("/")[0]);
+		}
+	});
 });
