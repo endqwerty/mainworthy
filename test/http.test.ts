@@ -628,6 +628,64 @@ function readersOf(instance: Instance): Readers {
 	return instance.app.readers;
 }
 
+test("a confirmed 5,000-row CSV import answers reads and publishes all rows or none", async () => {
+	const instance = bootReaders(4);
+	await readersOf(instance).ready();
+	const csv = `ID,Title\n${Array.from({ length: 5000 }, (_, i) => `OLD${i},CSV case ${i}`).join("\n")}`;
+	const mapping = { id: "ID", title: "Title" };
+	const preview = await post<{ confirmation: string }>(instance, "/api/p/scratch/import-csv", { csv, mapping });
+	if (!preview.body.ok) throw new Error(JSON.stringify(preview.body.error));
+	const input = { csv, mapping, confirm: preview.body.result.confirmation, cmd: "bulk-csv" };
+	instance.app.db.raw.exec(`CREATE TEMP TRIGGER fail_csv BEFORE INSERT ON versions WHEN NEW.case_id = 5000
+		BEGIN SELECT RAISE(ABORT, 'CSV final row failed'); END`);
+	const readsPerAttempt: number[] = [];
+	for (const fails of [true, false]) {
+		let finished = false;
+		let readsDuringAdoption = 0;
+		const counts = new Set<number>();
+		const saving = post<{ proposal: { status: string; cases: unknown[] } }>(
+			instance,
+			"/api/p/scratch/import-csv",
+			input,
+		);
+		void saving.then(() => {
+			finished = true;
+		});
+		await Promise.all(
+			Array.from({ length: 8 }, async () => {
+				while (!finished) {
+					const read = await post<{ count: number }>(instance, "/api/p/scratch/find", {});
+					if (!read.body.ok) throw new Error(JSON.stringify(read.body.error));
+					counts.add(read.body.result.count);
+					const written = instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM cases").get()?.n ?? 0;
+					if (!finished && written > 0 && written < 5000) readsDuringAdoption++;
+				}
+			}),
+		);
+		const saved = await saving;
+		expect([...counts].every((count) => count === 0 || count === 5000)).toBe(true);
+		if (fails) {
+			expect(saved.body).toMatchObject({ ok: false, error: { code: "internal", message: "internal error" } });
+			for (const table of ["cases", "versions", "proposals", "decisions", "commands", "search_docs"]) {
+				const row = instance.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get();
+				expect(row?.n).toBe(0);
+			}
+			instance.app.db.raw.exec("DROP TRIGGER fail_csv");
+		} else {
+			expect(saved.body).toMatchObject({ ok: true, result: { proposal: { status: "adopted" } } });
+			if (!saved.body.ok) throw new Error(JSON.stringify(saved.body.error));
+			expect(saved.body.result.proposal.cases).toHaveLength(5000);
+			expect((await post(instance, "/api/p/scratch/import-csv", input)).body).toEqual(saved.body);
+		}
+		expect((await post(instance, "/api/p/scratch/find", {})).body).toMatchObject({
+			ok: true,
+			result: { count: fails ? 0 : 5000 },
+		});
+		readsPerAttempt.push(readsDuringAdoption);
+	}
+	for (const count of readsPerAttempt) expect(count).toBeGreaterThan(0);
+});
+
 test("reader threads resolve current team grants from the credential reference", async () => {
 	const instance = bootReaders(1);
 	const pool = readersOf(instance);

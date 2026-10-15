@@ -8,7 +8,7 @@ import { defaultConfig } from "../src/server/kernel/app.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke, invokeAsync, type Reply } from "../src/server/ops/registry.ts";
 import { open } from "../src/server/start.ts";
-import { type Harness, harness } from "./helpers.ts";
+import { ciReport, type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
 beforeEach(() => {
@@ -87,6 +87,87 @@ describe("atomic bulk proposals", () => {
 		const policy = result<ProposeReply>(instance.raw("propose", { edits: [{ op: "policy", preset: "strict" }] }));
 		expect(result<DecideReply[]>(instance.raw("decide", acceptance(instance, policy)))[0]?.status).toBe("decided");
 	};
+
+	test.each(["map", "finding", "policy"] as const)(
+		"case creation from %s answers yields without publishing partial effects",
+		async (kind) => {
+			const instance = disk();
+			try {
+				const total = kind === "finding" ? 200 : count;
+				const questionKind = kind === "finding" ? "finding" : "map";
+				if (kind !== "finding") {
+					const policy = result<ProposeReply>(instance.raw("propose", { edits: [{ op: "policy", unlinked: "ask" }] }));
+					expect(result<DecideReply[]>(instance.raw("decide", acceptance(instance, policy)))[0]?.status).toBe(
+						"decided",
+					);
+					result(instance.raw("report", ciReport({ commit: "ba1c0001", n: total })));
+				} else {
+					result(
+						instance.raw("claim", {
+							lens: "coverage",
+							findings: Array.from({ length: total }, (_, i) => ({
+								on: `req:bulk-${i}`,
+								category: "uncovered-path",
+								note: `Missing path ${i}`,
+								suggest: { case: { title: `Suggested ${i}`, steps: ["Check > Pass"] } },
+							})),
+						}),
+					);
+				}
+				const questions = result<{ items: { q: string; evidenceHash: string }[] }>(
+					instance.raw("inbox", { kind: questionKind, limit: 200 }),
+				).items;
+				expect(questions).toHaveLength(kind === "finding" ? total : 1);
+				const pendingPolicy =
+					kind === "policy"
+						? result<ProposeReply>(instance.raw("propose", { edits: [{ op: "policy", unlinked: "create" }] }))
+						: null;
+				const input = {
+					all: pendingPolicy
+						? [acceptance(instance, pendingPolicy)]
+						: questions.map((question) => ({
+								q: question.q,
+								onEvidence: question.evidenceHash,
+								answer: kind === "map" ? { is: "create" } : { is: "accept", apply: true },
+							})),
+					cmd: `bulk-${kind}`,
+				};
+				let done = false;
+				const saving = invokeAsync(instance.app, OPS, instance.call("decide", input));
+				void saving.then(() => {
+					done = true;
+				});
+				let partial = false;
+				while (!done) {
+					await tick();
+					const written = storedCount(instance, "cases");
+					if (done || written === 0 || written === total) continue;
+					partial = true;
+					expect(result(instance.raw("find"))).toMatchObject({ count: 0, items: [] });
+					expect(
+						result<{ items: unknown[] }>(instance.raw("inbox", { kind: questionKind, limit: 200 })).items,
+					).toHaveLength(questions.length);
+				}
+				const saved = result<DecideReply[]>(await saving);
+				expect(saved.map((reply) => reply.status)).toEqual(questions.map(() => "decided"));
+				expect(result(instance.raw("find"))).toMatchObject({ count: total });
+				expect(result(instance.raw("inbox", { kind: questionKind }))).toMatchObject({ items: [] });
+				expect(result<DecideReply[]>(await invokeAsync(instance.app, OPS, instance.call("decide", input)))).toEqual(
+					saved,
+				);
+				if (kind !== "finding") {
+					const receipt = result<{ basis: { assumed: number; unresolved: number } }>(
+						instance.raw("report", ciReport({ commit: "ba1c0002", n: total })),
+					);
+					expect(receipt.basis).toMatchObject({ assumed: total, unresolved: 0 });
+				}
+				expect(partial).toBe(true);
+			} finally {
+				await instance.app.gate.run(() => {});
+				instance.close();
+			}
+		},
+	);
 
 	test("sealing a bulk proposal that needs review also answers reads before publishing it", async () => {
 		const instance = disk();

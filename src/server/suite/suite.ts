@@ -460,6 +460,7 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 	return complete(sealSteps(ctx, input));
 }
 
+// Each loop yields after about 200 case visits. Counters restart between phases, so this is not a shared bound.
 const SLICE = 200;
 
 export function* sealSteps(ctx: Ctx, input: Parameters<typeof seal>[1]): Generator<undefined, Sealed | null, void> {

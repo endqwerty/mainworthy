@@ -153,6 +153,9 @@ Use [the API](./api.md) to return an archived case to active state.
 While a large bulk change is saved or accepted, you can keep reading the suite.
 Each read sees the complete state before or after the change. No part of a proposal becomes current on its own.
 A save queued behind that change still waits for it to finish.
+This includes confirmed CSV imports and answers that create cases for unlinked tests or apply accepted findings.
+Large case loops let reads through after about 200 case visits. This is approximate: separate loops count their
+own work, and parsing, writing question references, and committing still run without a pause.
 
 Press <kbd>/</kbd> to focus "Filter cases". Type words to filter the current list.
 Use the sidebar's tags to narrow the suite by tag.
