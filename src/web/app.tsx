@@ -11,12 +11,13 @@ import { queryClient, useEvents, useQueryOp } from "./lib/data.ts";
 import {
 	deviceClearKey,
 	deviceSession,
+	sessionCurrent,
 	sessionPersonKey,
 	sessionUnchanged,
 	setDevicePerson,
 	suspendDeviceSession,
 } from "./lib/device.ts";
-import { homeUrl } from "./lib/home.ts";
+import { resolveHome } from "./lib/home.ts";
 import { useBindings, useKeyboard, useKeyRegistry } from "./lib/keys.ts";
 import { navigate, projectUrl, readRoute, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
 import { signOut } from "./lib/signin.ts";
@@ -29,6 +30,8 @@ import { INVITE_PATH, Invitation } from "./signin/invite.tsx";
 import { SuiteScreen } from "./suite/index.tsx";
 import { AppContext, type PaletteItem, type PaletteOptions } from "./ui/context.tsx";
 import { DocLink, KeyCap, openDocs, ProducerGlyph, StatusLine } from "./ui/index.tsx";
+
+const missingHomeStatus = "Your home was not found. Opened Suite.";
 
 const screens = {
 	suite: SuiteScreen,
@@ -132,7 +135,7 @@ export function App() {
 	const [auth, setAuth] = useState<
 		| { kind: "loading" }
 		| { kind: "signin" }
-		| { kind: "ready"; session: SessionInfo }
+		| { kind: "ready"; session: SessionInfo; homeStatus: string | null }
 		| { kind: "error"; message: string }
 	>({ kind: "loading" });
 	const [inviting, setInviting] = useState(() => location.pathname === INVITE_PATH);
@@ -148,14 +151,26 @@ export function App() {
 			person.current = info.actor;
 			setDevicePerson(info.actor);
 			// This is still the entry address, before the shell mounts. Keep it an initial visit so Suite restores drafts.
-			const first = info.projects[0];
+			const address = location.href;
 			const requested = readRoute().project;
-			if (!location.pathname.startsWith("/p/")) {
-				if (first) history.replaceState(null, "", homeUrl(first.key));
-			} else if (/^\/p\/[^/]+\/?$/.test(location.pathname) && info.projects.some((entry) => entry.key === requested)) {
-				history.replaceState(null, "", homeUrl(requested));
+			const entryProject = location.search
+				? undefined
+				: location.pathname === "/"
+					? info.projects[0]
+					: /^\/p\/[^/]+\/?$/.test(location.pathname)
+						? info.projects.find((entry) => entry.key === requested)
+						: undefined;
+			let homeStatus: string | null = null;
+			if (entryProject) {
+				const owner = deviceSession();
+				const home = await resolveHome(entryProject.key);
+				if (!sessionCurrent(owner)) return;
+				if (location.href === address) {
+					history.replaceState(null, "", home.url);
+					if (home.missing) homeStatus = missingHomeStatus;
+				}
 			}
-			setAuth({ kind: "ready", session: info });
+			setAuth({ kind: "ready", session: info, homeStatus });
 		} catch (error) {
 			if (!sessionUnchanged(owner)) return;
 			setAuth(
@@ -238,13 +253,29 @@ export function App() {
 				</span>
 			</div>
 		);
-	return <Workbench key={auth.session.actor} info={auth.session} refreshSession={refreshSession} />;
+	return (
+		<Workbench
+			key={auth.session.actor}
+			info={auth.session}
+			initialStatus={auth.homeStatus}
+			refreshSession={refreshSession}
+		/>
+	);
 }
-function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession: () => Promise<void> }) {
+function Workbench({
+	info,
+	initialStatus,
+	refreshSession,
+}: {
+	info: SessionInfo;
+	initialStatus: string | null;
+	refreshSession: () => Promise<void>;
+}) {
 	const route = useRoute();
 	const project = route.project;
 	const [status, setStatus] = useState(
-		"Drafts stay on this device. A version is recorded when you leave, press ⌘↵, or pause for 30 seconds.",
+		initialStatus ??
+			"Drafts stay on this device. A version is recorded when you leave, press ⌘↵, or pause for 30 seconds.",
 	);
 	const [palette, setPalette] = useState<PaletteOptions | null>(null);
 	// Counts the openings. A choice in the palette may open it again (a second case to link, the projects), and
@@ -338,6 +369,27 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 	);
 	const inbox = useQueryOp({ project, op: "inbox", input: { state: "open", limit: 1 } });
 	const go = (screen: Screen) => navigate(routeUrl({ project, screen }));
+	const goHome = useCallback(async (): Promise<void> => {
+		const address = location.href;
+		const owner = deviceSession();
+		try {
+			const home = await resolveHome(project);
+			if (!sessionCurrent(owner) || location.href !== address) return;
+			navigate(home.url);
+			if (home.missing) setStatus(missingHomeStatus);
+		} catch (error) {
+			if (!sessionCurrent(owner) || location.href !== address) return;
+			setStatus(error instanceof Error ? error.message : "Cannot read your home. Try again.");
+		}
+	}, [project]);
+	const filterSuite = (changes: { folder?: string | null; tag?: string | null }): void => {
+		const params = new URLSearchParams(location.search);
+		for (const [key, value] of Object.entries(changes)) {
+			if (value === null) params.delete(key);
+			else params.set(key, value);
+		}
+		navigate(`${routeUrl({ project, screen: "suite" })}${params.size ? `?${params}` : ""}`);
+	};
 	// The projects the session names, as the choices of the palette: the sidebar's button and g p list them
 	// alone, and the palette finds one by a word of its name or key.
 	const projectChoices = useMemo(
@@ -387,7 +439,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				key: "g h",
 				label: "Go home",
 				list: true,
-				handler: () => navigate(homeUrl(project)),
+				handler: () => void goHome(),
 			},
 			// It goes somewhere and records nothing, so a phone offers it while the list is shown, as it does a screen.
 			...(switchable ? [{ key: "g p", label: "Switch project", list: true, handler: pickProject }] : []),
@@ -433,7 +485,20 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 			// to the owner of a machine in local mode.
 			...(account ? [{ key: "g x", label: "Sign out", list: true, handler: leave }] : []),
 		],
-		[project, route.screen, palette, help, openPalette, closePalette, account, leave, phone, switchable, pickProject],
+		[
+			project,
+			route.screen,
+			palette,
+			help,
+			openPalette,
+			closePalette,
+			account,
+			leave,
+			phone,
+			switchable,
+			pickProject,
+			goHome,
+		],
 	);
 	useBindings(globalKeys);
 	const priorities = inInput
@@ -593,7 +658,11 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 						<div className="suite-tree">
 							<div className="sech side">Folders</div>
 							<div id="tree">
-								<button className={`fo ${route.folder === null ? "on" : ""}`} type="button" onClick={() => go("suite")}>
+								<button
+									className={`fo ${route.folder === null ? "on" : ""}`}
+									type="button"
+									onClick={() => filterSuite({ folder: null })}
+								>
 									<span className="tw" />
 									<span className="fn">All cases</span>
 									<span className="n">{folders.data?.count ?? 0}</span>
@@ -615,7 +684,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 												type="button"
 												className={`fo ${route.folder === path ? "on" : ""}`}
 												style={{ paddingLeft: `${path.split("/").length * 12}px` }}
-												onClick={() => navigate(routeUrl({ project, screen: "suite", folder: path }))}
+												onClick={() => filterSuite({ folder: path })}
 												onDragOver={(event) => event.preventDefault()}
 												onDrop={(event) => {
 													event.preventDefault();
@@ -637,11 +706,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 							<div className="sidebar-tags">
 								<div className="sech side">Tags</div>
 								{new URLSearchParams(location.search).has("tag") && (
-									<button
-										type="button"
-										className="fo"
-										onClick={() => navigate(routeUrl({ project, screen: "suite", folder: route.folder }))}
-									>
+									<button type="button" className="fo" onClick={() => filterSuite({ tag: null })}>
 										All tags
 									</button>
 								)}
@@ -651,8 +716,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 										type="button"
 										className={`fo ${new URLSearchParams(location.search).getAll("tag").includes(tag) ? "on" : ""}`}
 										onClick={() => {
-											const path = routeUrl({ project, screen: "suite", folder: route.folder });
-											navigate(`${path}${route.folder ? "&" : "?"}tag=${encodeURIComponent(tag)}`);
+											filterSuite({ tag });
 										}}
 									>
 										<span className="fn">#{tag}</span>

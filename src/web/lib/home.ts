@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TAG } from "../../core/model.ts";
-import { deviceKey } from "./device.ts";
+import { call } from "./api.ts";
+import { deviceKey, deviceSession } from "./device.ts";
 import { routeUrl } from "./router.ts";
 
 export const Home = z.discriminatedUnion("kind", [
@@ -35,8 +36,7 @@ export function saveHome(project: string, home: Home): boolean {
 	}
 }
 
-export function homeUrl(project: string): string {
-	const home = readHome(project);
+function homeUrl(project: string, home: Home): string {
 	switch (home.kind) {
 		case "suite":
 		case "queue":
@@ -51,4 +51,28 @@ export function homeUrl(project: string): string {
 			return `${routeUrl({ project, screen: "suite" })}${params.size ? `?${params}` : ""}`;
 		}
 	}
+}
+
+/** Resolve before mounting a screen, so a missing target never starts failing detail reads. */
+export async function resolveHome(project: string): Promise<{ url: string; missing: boolean }> {
+	const home = readHome(project);
+	const owner = deviceSession();
+	let missing = false;
+	if (home.kind === "run") {
+		const id = Number(home.ref.slice(2));
+		missing = true;
+		if (Number.isSafeInteger(id)) {
+			for (const state of ["planned", "change"]) {
+				const runs = await call("find", { in: "runs", state, cursor: String(id + 1), limit: 1 }, { project, owner });
+				if (runs.items.some((run) => run.ref === home.ref)) {
+					missing = false;
+					break;
+				}
+			}
+		}
+	} else if (home.kind === "search" && home.folder) {
+		const folders = await call("find", { in: "folders" }, { project, owner });
+		missing = !folders.items.some((folder) => folder.path === home.folder);
+	}
+	return { url: missing ? routeUrl({ project, screen: "suite" }) : homeUrl(project, home), missing };
 }
