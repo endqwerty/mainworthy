@@ -25,8 +25,11 @@ matches `landing.commit`. A different merge or rebased hash ends the change with
 placing its original head on trunk. Metadata can arrive after the initial end event.
 Reopening a change leaves a landed commit on trunk.
 
-A report first made with only a commit hash is provisional about its scope. A later
-pipeline or person naming a branch or pull request places all its environments there.
+An automated report first made with only a commit hash is provisional about its scope.
+A later pipeline or person naming a branch or pull request places all its environments
+there, unless the commit has a recorded `human` batch or any result row with method
+`human`. This check includes results that the gate does not count. Those reports keep
+their scope so a later branch report preserves their question id, dispute hints and answers.
 Reports about a commit already in a named scope keep that scope. Agents cannot choose it.
 
 ## Shape
@@ -44,8 +47,11 @@ not excuse trunk failures. Trunk's existing decisions apply and unexplained fail
 are asked again. An answer in a provisional hash-only scope becomes outdated, through
 the existing decision lifecycle, before the failure is evaluated in its named scope.
 
-The scope history travels in archives. Schema version 6 changes the archive format;
-archives from before this change cannot be imported into this build.
+Migration 8 adds `scope_moves` with `archive: false`. Like `change_ends` in decision
+0022, the table is `UNEXPORTED`, so this migration keeps archive schema 7 compatible.
+Migration 7 already requires archive schema 7. Targets
+and runs already carry the resulting scope. An import loses the audit trail of moves,
+including their source, reporter and time, while preserving the resulting placement.
 
 ## Alternatives considered
 

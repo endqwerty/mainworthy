@@ -379,6 +379,11 @@ const Q = {
 		`SELECT min(b.seq) AS seq FROM batches b JOIN targets t ON t.id = b.target
 		 WHERE t.project = $project AND t.what = $what AND b.method != 'agent'`,
 	),
+	humanReported: sql<{ project: number; what: string }, { reported: number }>(
+		`SELECT 1 AS reported FROM batches b JOIN targets t ON t.id = b.target
+		 WHERE t.project = $project AND t.what = $what AND
+		 (b.method = 'human' OR EXISTS (SELECT 1 FROM results r WHERE r.batch = b.id AND r.method = 'human')) LIMIT 1`,
+	),
 	// Every target of a commit, with no cap: which results a run counts and which repository a commit belongs
 	// to are decided from this list, and a list cut short would decide them wrongly without saying so.
 	targetsByCommit: sql<{ project: number; commit: string }, TargetRow>(
@@ -431,7 +436,8 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 	const found = ctx.db.get(Q.target, { project, what, env });
 	const first = ctx.db.all(Q.targetsOfCommit, { project, what })[0];
 	// A pipeline or person names a commit's scope. An agent's report settles nothing, and a hash-only report
-	// leaves the place provisional until a pipeline or person names a branch or pull request.
+	// leaves the place provisional until a pipeline or person names a branch or pull request, unless somebody
+	// has a human batch or result there, even if uncounted: their question and answer keep that scope.
 	const advisory = ctx.actor.kind === "agent";
 	const placed = first !== undefined && firstSeen(ctx.db, project, input.repo ?? null, input.commit) !== null;
 	const own = first?.change !== null && first?.change !== undefined ? changeById(ctx.db, first.change) : null;
@@ -440,7 +446,8 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 		!advisory &&
 		named &&
 		own !== null &&
-		own.key === changeKey(ctx.db, project, ownKey(input.commit), input.repo ?? null);
+		own.key === changeKey(ctx.db, project, ownKey(input.commit), input.repo ?? null) &&
+		!ctx.db.get(Q.humanReported, { project, what });
 	const settled = first !== undefined && (placed || advisory) && !gainsPlace;
 	const trunk = !advisory && input.pr === undefined && input.branch !== undefined && TRUNK_BRANCHES.has(input.branch);
 	let change: ChangeRow | null = null;
@@ -460,8 +467,8 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 		const known = input.pr === undefined && input.branch === undefined && settled;
 		if (!known) change = upsertChange(ctx, changeKey(ctx.db, project, key, input.repo ?? null), input);
 	}
-	// One commit, one scope across every environment. A hash-only report leaves its place open until a branch
-	// or pull request is named. A named scope otherwise changes only through a recorded landing.
+	// One commit, one scope across every environment. Automated hash-only reports leave the place open until
+	// a branch or pull request is named. Typed results keep their scope; a named scope moves on landing.
 	const place: Pick<TargetRow, "line" | "branch" | "change"> = settled
 		? { line: first.line, branch: first.branch, change: first.change }
 		: advisory

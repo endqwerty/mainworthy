@@ -26,7 +26,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 5, name: "change_ends", sql: changeEnds, archive: false },
 	{ version: 6, name: "tracker_requests", sql: trackerRequests, archive: false },
 	{ version: 7, name: "nothing_required", sql: nothingRequired, archive: true },
-	{ version: 8, name: "scope_moves", sql: scopeMoves, archive: true },
+	{ version: 8, name: "scope_moves", sql: scopeMoves, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

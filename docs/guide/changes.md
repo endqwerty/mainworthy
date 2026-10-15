@@ -21,8 +21,10 @@ commits into a change. For example, `pr:482` identifies a pull request.
 The change shows the latest counted commit's gate. A commit gate names one commit.
 An older report arriving late does not move the change back to an earlier commit.
 A commit first reported by hash alone gains its scope when a pipeline or person later
-names its branch or pull request. Its former answers stay in the ledger as outdated;
-failures are evaluated in the named scope. Every environment shares the same commit gate.
+names its branch or pull request, unless someone has typed a result for that commit.
+Typed results keep their scope, question ids and answers. Otherwise, former answers
+stay in the ledger as outdated and failures are evaluated in the named scope.
+Every environment shares the same commit gate.
 
 The list says "Latest commit's verdict". The detail shows the gate's reason and
 nonzero counts, followed by "Open questions", "Settled and excused", "Impact",
@@ -106,8 +108,14 @@ $ mainworthy change --json '{"change":"pr:482","state":"merged","landing":{"comm
 When `landing.commit` matches the change's recorded head, all its environments move to
 trunk together. The commit keeps its one gate, and planned runs that count it are recomputed.
 Pull request answers remain attributable in history and still cover its older commits.
-They do not carry to trunk. Existing trunk answers apply, and unexplained failures raise
-trunk questions immediately, even before another report arrives.
+They do not carry to trunk. Existing trunk answers apply. If this commit gate is the
+newest run in trunk, its unexplained failures raise trunk questions immediately, even
+before another report arrives. An older gate can remain blocked without an open
+question. Planned runs that count the commit still ask about their unexplained failures.
+
+Migration 8 records scope moves locally. Archives keep the resulting target and run
+scopes but omit the move audit trail. Migration 8 keeps archive schema 7 compatible;
+archives from before schema 7 still require the older build described in [data](./data.md).
 
 A different merge or rebased hash does not move the original head. Omitting `landing`
 only ends the change. It can be supplied later by repeating `merged` with the metadata.

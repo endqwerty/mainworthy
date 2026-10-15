@@ -60,6 +60,8 @@ type Table = {
  * table would raise the archive version and refuse every archive taken before it.
  * `tracker_requests` is delivery state for this instance only. Importing it must never send an issue again.
  * Tracker credentials are process configuration and never enter a table or archive.
+ * `scope_moves` is also omitted: targets and runs carry the resulting scope, but an import loses the move audit
+ * trail (decision 0038). Keeping it out lets older archives import without a format change.
  */
 export const UNEXPORTED: readonly string[] = [
 	"sessions",
@@ -69,6 +71,7 @@ export const UNEXPORTED: readonly string[] = [
 	"tokens",
 	"change_ends",
 	"tracker_requests",
+	"scope_moves",
 ];
 
 /** The row counts describe exported data, excluding migration metadata, credentials and the search index. */

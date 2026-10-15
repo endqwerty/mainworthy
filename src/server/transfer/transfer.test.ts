@@ -170,18 +170,6 @@ const fixtures: Record<string, Row[]> = {
 			rev: 1,
 		},
 	],
-	scope_moves: [
-		{
-			id: 510,
-			project: 23,
-			what: "code:example/app@abc12345",
-			before_scope: "change:503",
-			after_scope: "line:trunk@example/app",
-			actor: 71,
-			at: time,
-			seq: 2,
-		},
-	],
 	batches: [
 		{
 			id: 504,
@@ -511,6 +499,7 @@ function exportedTables(db: Db): string[] {
 				"passkey_users",
 				"change_ends",
 				"tracker_requests",
+				"scope_moves",
 			].includes(name) &&
 			!name.startsWith("search_docs") &&
 			!name.startsWith("sqlite_"),
@@ -705,6 +694,38 @@ describe("Mainworthy instance archives", () => {
 			value: String(SCHEMA_VERSION),
 		});
 		expect(to.raw.query("SELECT * FROM tokens").all()).toEqual([]);
+	});
+
+	test("an archive keeps the moved scope but leaves its audit trail behind", () => {
+		const from = source();
+		from.raw
+			.query(
+				"UPDATE targets SET what = 'code:example/app@abc12345', commit_sha = 'abc12345', branch = 'main', line = 'trunk' WHERE id = 502",
+			)
+			.run();
+		from.raw.query("UPDATE runs SET scope = 'line:trunk@example/app' WHERE id = 601").run();
+		insert(from, "scope_moves", {
+			id: 510,
+			project: 23,
+			what: "code:example/app@abc12345",
+			before_scope: "change:503",
+			after_scope: "line:trunk@example/app",
+			actor: 71,
+			at: time,
+			seq: 2,
+		});
+		const text = archive(from);
+		expect(text).not.toContain('"t":"scope_moves"');
+		const to = target();
+		importArchive(to, linesOf(text));
+		expect(to.raw.query("SELECT line, branch, change FROM targets WHERE id = 502").get()).toEqual({
+			line: "trunk",
+			branch: "main",
+			change: null,
+		});
+		expect(to.raw.query("SELECT scope FROM runs WHERE id = 601").get()).toEqual({ scope: "line:trunk@example/app" });
+		expect(from.raw.query("SELECT count(*) AS n FROM scope_moves").get()).toEqual({ n: 1 });
+		expect(to.raw.query("SELECT * FROM scope_moves").all()).toEqual([]);
 	});
 
 	test("an archive exported under the former name replays the same rows", () => {
@@ -1012,6 +1033,7 @@ describe("Mainworthy instance archives", () => {
 			"credentials",
 			"invitations",
 			"passkey_users",
+			"scope_moves",
 			"sessions",
 			"tokens",
 			"tracker_requests",

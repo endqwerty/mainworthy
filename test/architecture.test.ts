@@ -228,9 +228,9 @@ describe("the module map", () => {
 		// an export carries what signs somebody in.
 		const exported = ["orgs", "actors", "grants"];
 		const identity = owners["server/identity"] ?? [];
-		// Change endings preserve the old archive version. Tracker delivery belongs to this instance and must
-		// never replay after import. Neither table holds credentials.
-		const other = ["change_ends", "tracker_requests"];
+		// Change endings and scope-move audit rows preserve the old archive version (decisions 0022 and 0038).
+		// Tracker delivery must never replay after import. None of these tables holds credentials.
+		const other = ["change_ends", "tracker_requests", "scope_moves"];
 		expect(UNEXPORTED.filter((table) => !other.includes(table)).sort()).toEqual(
 			identity.filter((table) => !exported.includes(table)).sort(),
 		);
