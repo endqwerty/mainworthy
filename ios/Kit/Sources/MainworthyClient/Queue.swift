@@ -47,8 +47,8 @@ extension ProjectClient {
 		return PreparedAnswer(question: question.ref, title: question.title, label: choice.label, input: .object(input))
 	}
 
-	package func send(_ answer: PreparedAnswer) async throws -> AnswerOutcome {
-		let reply = try await decide(answer.input, command: answer.command)
+	package func send(_ answer: PreparedAnswer, delivery: WriteDelivery? = nil) async throws -> AnswerOutcome {
+		let reply = try await decide(answer.input, command: answer.command, delivery: delivery)
 		return try AnswerOutcome(reply)
 	}
 
@@ -80,8 +80,8 @@ extension ProjectClient {
 	}
 
 	/// `decide` answers with one reply for each question it was sent. The app sends one.
-	private func decide(_ input: JSONValue, command: String = UUID().uuidString.lowercased()) async throws -> Wire.DecideReply {
-		let replies: [Wire.DecideReply] = try await server.write("decide", in: key, input, command: command)
+	private func decide(_ input: JSONValue, command: String = UUID().uuidString.lowercased(), delivery: WriteDelivery? = nil) async throws -> Wire.DecideReply {
+		let replies: [Wire.DecideReply] = try await server.write("decide", in: key, input, command: command, delivery: delivery)
 		guard let reply = replies.first else { throw ClientError.unreadable }
 		return reply
 	}

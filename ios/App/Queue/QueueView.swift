@@ -220,6 +220,10 @@ extension String {
 
 private struct UnsentAnswersView: View {
 	let screen: QueueScreen
+	@State private var chosen: AnswerOutbox.Entry?
+	private var confirming: Binding<Bool> {
+		Binding(get: { chosen != nil }, set: { if !$0 { chosen = nil } })
+	}
 
 	var body: some View {
 		List {
@@ -228,10 +232,10 @@ private struct UnsentAnswersView: View {
 					.font(.subheadline).foregroundStyle(.secondary)
 				if let problem = screen.outbox.storageProblem { Text(problem).foregroundStyle(Color.fail) }
 				if let problem = screen.outbox.dropProblem { Text(problem).foregroundStyle(Color.fail) }
-				Button(screen.outbox.sending ? "Sending…" : "Send waiting answers") {
+				Button(screen.outbox.sending ? "Sending…" : screen.outbox.hasDropped ? "Send waiting answers and check dropped" : "Send waiting answers") {
 					Task { await screen.refresh() }
 				}
-				.disabled(screen.outbox.sending || screen.outbox.pendingCount == 0)
+				.disabled(screen.outbox.sending || (screen.outbox.pendingCount == 0 && !screen.outbox.hasDropped))
 				.accessibilityIdentifier("send-waiting-answers")
 			}
 			ForEach(screen.outbox.entries) { entry in
@@ -249,11 +253,11 @@ private struct UnsentAnswersView: View {
 							.disabled(screen.outbox.sending)
 							.accessibilityIdentifier("retry-saved-answer")
 						Button("Drop saved answer", role: .destructive) {
-							Task { await screen.outbox.drop(entry.id) }
+							chosen = entry
 						}
 						.disabled(screen.outbox.sending)
 						.accessibilityIdentifier("drop-saved-answer")
-						Text("Drop checks the server first. An answer already recorded stays here with its outcome. Later answers are kept and sending resumes in order.")
+						Text("Drop checks the server first. Only definite rejections can be removed now. An answer that may still arrive stays as Dropped, never sends again, and is checked on each send pass until its recorded outcome can be cleared. Later answers resume in order.")
 							.font(.footnote).foregroundStyle(.secondary)
 					}
 				}
@@ -265,5 +269,16 @@ private struct UnsentAnswersView: View {
 		.navigationTitle("Unsent answers")
 		.navigationBarTitleDisplayMode(.inline)
 		.toolbar(.hidden, for: .tabBar)
+		.confirmationDialog("Drop saved answer for \(chosen?.question ?? "this question")?", isPresented: confirming,
+			titleVisibility: .visible, presenting: chosen
+		) { entry in
+			Button("Drop saved answer", role: .destructive) {
+				chosen = nil
+				Task { await screen.outbox.drop(entry.id) }
+			}
+			Button("Cancel", role: .cancel) { chosen = nil }
+		} message: { _ in
+			Text("This stops retrying the answer and lets later answers send. A request already on its way may still be recorded. If any request may still arrive, a Dropped entry stays until the server reports an outcome.")
+		}
 	}
 }

@@ -128,6 +128,100 @@ struct QueueScreenTests {
 		#expect(AnswerOutbox(project: project, store: store).entries == reopened.entries)
 	}
 
+	@Test("a dropped timed-out answer survives relaunch, lets later answers send, and recovers late delivery", arguments: ["timeout", "retry error", "later error"])
+	func lateDroppedAnswer(failure: String) async throws {
+		let transport = LateAnswerTransport()
+		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
+		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let project = server.project(try await Live.project())
+		let questions = try await project.questions(open: true).questions
+		let question = try #require(questions.first { $0.kind == .failure })
+		let finding = try #require(questions.first { $0.kind == .finding })
+		let flaky = try #require(question.choices.first { $0.answer == "flaky" })
+		let deferred = try #require(finding.choices.first { $0.answer == "defer" })
+		let first = try #require(project.prepareAnswer(question, with: flaky))
+		let next = try #require(project.prepareAnswer(finding, with: deferred))
+		let store = MemoryAnswerStore()
+		let outbox = AnswerOutbox(project: project, store: store)
+		_ = try outbox.enqueue(first)
+		_ = try outbox.enqueue(next)
+		transport.rejectRetries.withLock { $0 = failure == "retry error" }
+		await outbox.send()
+		#expect(outbox.pendingCount == 2)
+		if failure == "later error" {
+			transport.rejectRetries.withLock { $0 = true }
+			await outbox.send()
+		}
+		transport.holding.withLock { $0 = false }
+		await outbox.drop(first.command)
+		#expect(outbox.entries.map(\.status) == ["Dropped", "Recorded"])
+		#expect(outbox.pendingCount == 0)
+		#expect(try await project.question(question.ref)?.isOpen == true)
+		#expect(try await project.question(finding.ref)?.isOpen == false)
+		outbox.clearOutcomes()
+		let reopened = AnswerOutbox(project: project, store: store)
+		#expect(reopened.entries.map(\.id) == [first.command])
+		#expect(reopened.entries.first?.status == "Dropped")
+		let sentBefore = transport.sent.withLock { $0 }
+		await reopened.send()
+		#expect(transport.sent.withLock { $0 } == sentBefore)
+		#expect(reopened.entries.first?.status == "Dropped")
+		try await transport.deliverHeld()
+		await reopened.send()
+		let decision = try #require(try await project.question(question.ref)?.ifDecision)
+		#expect(reopened.entries.first?.outcome == .decided(decision))
+		#expect(reopened.entries.first?.status == "Recorded")
+		#expect(transport.sent.withLock { $0 } == sentBefore)
+		#expect(AnswerOutbox(project: project, store: store).entries == reopened.entries)
+		reopened.clearOutcomes()
+		#expect(AnswerOutbox(project: project, store: store).entries.isEmpty)
+	}
+
+	@Test("an older saved answer without delivery metadata stays dropped on none")
+	func legacyDrop() async throws {
+		let (outbox, project, _, store) = try await stuckAnswer()
+		let id = try #require(outbox.stuck?.id)
+		let data = try #require(store.data)
+		var rows = try #require(try JSONDecoder().decode(JSONValue.self, from: data).array)
+		var row = try #require(rows[0].object)
+		row.removeValue(forKey: "delivery")
+		rows[0] = .object(row)
+		store.data = try JSONEncoder().encode(JSONValue.array(rows))
+		let reopened = AnswerOutbox(project: project, store: store)
+		await reopened.drop(id)
+		#expect(reopened.entries.map(\.status) == ["Dropped"])
+		let dropped = try #require(reopened.entries.first)
+		#expect(try await project.question(dropped.question)?.isOpen == true)
+	}
+
+	@Test("possible delivery is saved before a request leaves the device")
+	func deliverySavedBeforeSend() async throws {
+		let (outbox, project, transport, store) = try await stuckAnswer()
+		let entry = try #require(outbox.stuck)
+		await transport.gate.holdNext()
+		let sending = Task { await outbox.send() }
+		try await transport.gate.waitUntilPaused()
+		outbox.stop()
+		// Restore the disk state before the paused request can produce a reply.
+		let reopened = AnswerOutbox(project: project, store: store)
+		await reopened.drop(entry.id)
+		#expect(reopened.entries.map(\.status) == ["Dropped"])
+		await transport.gate.release()
+		await sending.value
+		await reopened.send()
+		#expect(reopened.entries.first?.status == "Recorded")
+		#expect(try await project.question(entry.question)?.isOpen == false)
+	}
+
+	@Test("a lookup pause that never happens fails rather than hanging")
+	func boundedLookupWait() async throws {
+		let gate = QueueSendGate()
+		do {
+			try await gate.waitUntilPaused(timeout: .milliseconds(20))
+			Issue.record("a gate with no request unexpectedly paused")
+		} catch GateTimeout.neverPaused {}
+	}
+
 	func stuckAnswer() async throws -> (AnswerOutbox, ProjectClient, SwitchableQueueTransport, SwitchableAnswerStore) {
 		let transport = SwitchableQueueTransport()
 		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
@@ -168,7 +262,7 @@ struct QueueScreenTests {
 		if problem == "offline" {
 			#expect(outbox.dropProblem?.hasPrefix("The command could not be checked. The saved answer was kept. The server could not be reached.") == true)
 		} else if problem == "begun" {
-			#expect(outbox.dropProblem == "The server is still recording this answer. It was kept. Keep trying to ask again.")
+			#expect(outbox.dropProblem == "The server is still recording this answer. It was kept. Keep trying resends the same answer and command id.")
 		} else if problem == "storage" {
 			#expect(outbox.storageProblem?.hasPrefix("The saved answer could not be updated on this device. It was kept.") == true)
 		} else {
@@ -191,7 +285,7 @@ struct QueueScreenTests {
 		let next = try #require(project.prepareAnswer(question, with: choice))
 		await transport.lookupGate.holdNext()
 		let dropping = Task { await outbox.drop(first.id) }
-		await transport.lookupGate.waitUntilPaused()
+		try await transport.lookupGate.waitUntilPaused()
 		#expect(outbox.sending)
 		await outbox.send()
 		await outbox.drop(first.id)
@@ -218,10 +312,12 @@ struct QueueScreenTests {
 		let entry = try #require(outbox.stuck)
 		await transport.gate.holdNext()
 		let sending = Task { await outbox.send() }
-		await transport.gate.waitUntilPaused()
+		try await transport.gate.waitUntilPaused()
 		await outbox.drop(entry.id)
 		#expect(transport.lookups.withLock { $0.isEmpty })
-		#expect(outbox.entries == [entry])
+		#expect(outbox.entries.map(\.id) == [entry.id])
+		#expect(outbox.entries.first?.problem == entry.problem)
+		#expect(outbox.entries.first?.status == "Waiting to send")
 		await transport.gate.release()
 		await sending.value
 		#expect(outbox.entries.first?.status == "Recorded")
@@ -285,7 +381,7 @@ struct QueueScreenTests {
 		let deferChoice = try #require(finding.choices.first { $0.answer == "defer" })
 		await transport.gate.holdNext()
 		let first = Task { await screen.answer(failure, with: flaky) }
-		await transport.gate.waitUntilPaused()
+		try await transport.gate.waitUntilPaused()
 		#expect(await screen.answer(finding, with: deferChoice) == false)
 		#expect(screen.notice?.text == "\(finding.ref): sending. Open Unsent answers to see its outcome.")
 		await transport.gate.release()
@@ -406,7 +502,7 @@ struct QueueScreenTests {
 		_ = try outbox.enqueue(try #require(project.prepareAnswer(failure, with: flaky)))
 		await transport.gate.holdNext()
 		let sending = Task { await outbox.send() }
-		await transport.gate.waitUntilPaused()
+		try await transport.gate.waitUntilPaused()
 		if stopped { outbox.stop() }
 		let resumed = stopped ? AnswerOutbox(project: project, store: store) : outbox
 		_ = try resumed.enqueue(try #require(project.prepareAnswer(finding, with: deferChoice)))
@@ -769,20 +865,53 @@ final class SwitchableQueueTransport: Transport, Sendable {
 actor QueueSendGate {
 	private var holding = false
 	private var paused: CheckedContinuation<Void, Never>?
-	private var observers: [CheckedContinuation<Void, Never>] = []
 	func holdNext() { holding = true }
 	func pauseIfNeeded() async {
 		guard holding else { return }
 		holding = false
 		await withCheckedContinuation { continuation in
 			paused = continuation
-			for observer in observers { observer.resume() }
-			observers = []
 		}
 	}
-	func waitUntilPaused() async {
-		if paused != nil { return }
-		await withCheckedContinuation { observers.append($0) }
+	func waitUntilPaused(timeout: Duration = .seconds(3)) async throws {
+		let deadline = ContinuousClock.now.advanced(by: timeout)
+		while paused == nil {
+			guard ContinuousClock.now < deadline else { throw GateTimeout.neverPaused }
+			try await Task.sleep(for: .milliseconds(10))
+		}
 	}
 	func release() { paused?.resume(); paused = nil }
+}
+
+private enum GateTimeout: Error { case neverPaused }
+
+private final class LateAnswerTransport: Transport, Sendable {
+	let holding = Mutex(true)
+	let rejectRetries = Mutex(false)
+	let held = Mutex<[URLRequest]>([])
+	let sent = Mutex(0)
+	private let inner = URLSessionTransport()
+
+	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+		if request.url?.lastPathComponent == "decide" {
+			sent.withLock { $0 += 1 }
+			if holding.withLock({ $0 }) {
+				if rejectRetries.withLock({ $0 }), held.withLock({ !$0.isEmpty }) {
+					let body: JSONValue = ["ok": false, "error": ["code": "internal", "message": "Not recorded."]]
+					return (try JSONEncoder().encode(body), HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
+				}
+				held.withLock { $0.append(request) }
+				throw URLError(.timedOut)
+			}
+		}
+		return try await inner.send(request)
+	}
+
+	func deliverHeld() async throws {
+		for request in held.withLock({ $0 }) { _ = try await inner.send(request) }
+	}
+
+	func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
+		try await inner.lines(request)
+	}
 }

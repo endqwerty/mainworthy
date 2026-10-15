@@ -37,7 +37,7 @@ export async function testInstance(): Promise<TestInstance> {
 	let reached = 0;
 	let elsewhere: ReturnType<typeof Bun.serve> | null = null;
 	let answerProxy: ReturnType<typeof Bun.serve> | null = null;
-	const unavailable = new Set<string>();
+	const unavailable = new Map<string, "rejected" | "uncertain">();
 	const stop = async (): Promise<void> => {
 		await answerProxy?.stop(true);
 		await elsewhere?.stop(true);
@@ -85,16 +85,23 @@ export async function testInstance(): Promise<TestInstance> {
 						return Response.json({ ok: true, result });
 					},
 					"/test/answer-connection": async (req) => {
-						const parsed = z.object({ project: z.string(), unavailable: z.boolean() }).safeParse(await req.json());
+						const parsed = z
+							.object({
+								project: z.string(),
+								unavailable: z.boolean(),
+								failure: z.enum(["rejected", "uncertain"]).default("rejected"),
+							})
+							.safeParse(await req.json());
 						if (!parsed.success) return Response.json({ ok: false }, { status: 400 });
 						const path = `/api/p/${encodeURIComponent(parsed.data.project)}/decide`;
-						if (parsed.data.unavailable) unavailable.add(path);
+						if (parsed.data.unavailable) unavailable.set(path, parsed.data.failure);
 						else unavailable.delete(path);
 						answerProxy ??= Bun.serve({
 							hostname: "127.0.0.1",
 							port: 0,
 							fetch: (request) => {
 								const url = new URL(request.url);
+								if (unavailable.get(url.pathname) === "uncertain") return new Response("unreadable reply");
 								if (unavailable.has(url.pathname))
 									return Response.json(
 										{ ok: false, error: { code: "internal", message: "The answer could not be recorded." } },
