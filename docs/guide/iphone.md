@@ -26,6 +26,13 @@ Settings, Accounts. A free Apple ID will do.
 An app signed with a free Apple ID opens for seven days. The app shows the day under **You**, beside **Works
 until**. Run the command again before that day. You stay signed in.
 
+### From TestFlight
+
+With a paid Apple developer membership you can send the app to TestFlight instead, and install it from there on
+your phone and on your team's, with no cable. Run `bun scripts/ios.ts upload` on the Mac, after making the app
+once in App Store Connect (the repository's `ios/README.md`, "Send it to TestFlight", has the steps). A build from
+TestFlight opens for 90 days, and the TestFlight app shows when it ends.
+
 ## Sign in
 
 1. The address is `mainworthy.com` until you change it. For another instance, type the address you open it at in
