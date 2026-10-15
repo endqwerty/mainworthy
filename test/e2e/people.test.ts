@@ -97,7 +97,11 @@ test.skipIf(!browserAvailable)(
 			});
 
 			// The sign-in page is told what this instance offers, and nobody is signed in.
-			expect(resultOf<unknown>(await send(page, "/api/login/methods"))).toEqual({ password: true, passkey: true });
+			expect(resultOf<unknown>(await send(page, "/api/login/methods"))).toEqual({
+				password: true,
+				passkey: true,
+				mail: false,
+			});
 			expect((await send(page, "/api/session")).status).toBe(401);
 
 			// The invitation: who it is for, and the options for a passkey. Chromium makes one and the page accepts.

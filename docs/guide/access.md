@@ -249,7 +249,7 @@ A person cannot yet request forgetting inside Mainworthy or delete their own acc
 
 ## Sign in as yourself
 
-A person can sign in with their name and a password, or with a passkey, and needs no token for it. Mainworthy sends no mail and nobody chooses a password for somebody else, so a person gets their first way in through a link that an admin hands them.
+A person can sign in with their name and a password, or with a passkey, and needs no token for it. A person gets their first way in through an invitation link. An admin copies it or sends it by mail when [SMTP is configured](./configuration.md#turn-on-mail). Nobody chooses a password for somebody else.
 
 Each step below is in the web UI, under Settings, and has a command that does the same for a script.
 
@@ -264,6 +264,8 @@ In Settings, open People. You see it when you are a person who holds `admin` on 
 5. Press "Make invitation link".
 
 The link appears once, masked, with "Copy link". Copy it and hand it to the person. "Dismiss link" takes it off the page, and so does leaving the section. Nothing shows it again. If no answer comes back when you make a link, the page says so and reads its lists again. A person who is in them was invited, and that link is lost: a recovery link is then their way in.
+
+With mail enabled, the form also offers **Send to email address, optional**. The CLI accepts `mainworthy invite new robin --email robin@example.com`, and the API accepts `email` on `invitation` with `do: "create"`. The recipient gets the same single-use link and expiry. The reply still shows the link once so you can deliver it yourself if mail fails. Sending an invitation does not verify or save a recovery address.
 
 "Open invitations" lists the links nobody has accepted yet: who each is for, what that person may do, who made it and when it runs out. "Revoke" withdraws one.
 
@@ -322,7 +324,17 @@ Failed attempts are counted. The fifth wrong password for one name within 15 min
 
 ### A lost password or passkey
 
-The sign-in page has no "forgot password", because there is no mail to send one by. A recovery link replaces it. In Settings, People, "People who sign in" lists each person. The owner sees "Recovery link" beside every person. Another person who administers the instance sees it beside their own name only. Somebody who does not administer has no People section and asks the owner. Press it, read what it replaces, and press "Make the recovery link". The link is shown once, as an invitation's is.
+With mail enabled, **Forgot your password?** on the sign-in page opens a reset request. Enter your verified email address. The page gives the same answer for known, unknown and unverified addresses. Requests are counted per email address and client address by the failed-attempt limiter, including its exemption for private and loopback client addresses. The sixth request inside the counting window waits one second, and later requests increase the wait. A public client's count is shared with failed sign-ins. [Configuration](./configuration.md#run-behind-a-proxy-that-ends-tls) describes how a proxy supplies the client address.
+
+The reset link works once for 15 minutes. It replaces your password and ends all your sessions, without signing you in. Your passkeys and tokens stay, and an enrolled authenticator is still required for password sign-in. A later password change, address change, reset request, restart or archive import invalidates the link. Losing your authenticator still needs a recovery code, a passkey or an admin recovery invitation.
+
+In **Your sign-in**, set **Email for password reset**, then open the verification mail and press **Verify email**. The link works once for 24 hours. Until you verify, the address cannot receive reset links or sign-in method notices. The instance owner can set an address under a person's **Sign-in details**, but the person who holds that mailbox must still verify it. As with recovery invitations, another admin cannot change someone else's recovery address. The API uses `credential` with `do: "email.get"` or `do: "email.set"`, an optional `actor`, and `email` on set. Set `email` to `null` to remove it. Changing it needs a signed-in browser for your own address, or the instance owner for somebody else's.
+
+Without mail, there is no reset link or invitation address field. An admin recovery invitation remains available. In Settings, People, "People who sign in" lists each person. The owner sees "Recovery link" beside every person. Another person who administers the instance sees it beside their own name only. Somebody who does not administer has no People section and asks the owner. Press it, read what it replaces, and press "Make the recovery link". The link is shown once, as an invitation's is.
+
+The public sign-in exchange is `POST /api/login`. Send `{ "resetRequest": "robin@example.com" }` to request a reset, `{ "emailVerification": "<code>" }` to verify an address, or `{ "reset": "<code>", "password": "<new password>" }` to finish a reset. A successful request replies `{ "requested": true }` for every address. A blocked request returns `429` with `Retry-After`. Successful verification replies `{ "verified": true }`, and a successful reset replies `{ "changed": true }` without a session cookie. `GET /api/login/methods` includes `mail`, which says whether the instance offers these flows.
+
+A verified address receives a notice when a password, passkey or authenticator is added, changed or removed. Mail is requested after the account change commits. Delivery failure does not undo a change or reveal SMTP details. The queue and pending links live in memory, so restart loses them. Ask for another link if none arrives. Contacts and verification status do not travel in archives.
 
 Opening the confirmation moves focus to **Make the recovery link**. **Cancel** or <kbd>Esc</kbd> closes the confirmation and returns focus to that person's **Recovery link** button.
 

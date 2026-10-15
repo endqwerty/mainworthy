@@ -4,6 +4,7 @@ import type { CredentialRow } from "../../core/people.ts";
 import { listCredentials, removeCredential } from "../lib/people.ts";
 import { useApp } from "../ui/context.tsx";
 import { age } from "../ui/index.tsx";
+import { EmailForm } from "./email.tsx";
 import { InlineConfirmation } from "./inline-confirmation.tsx";
 import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
 import { SessionList } from "./sessions.tsx";
@@ -52,6 +53,7 @@ export function PersonAccess({ actor }: { actor: string }) {
 
 	return (
 		<section className="settings-person-access" aria-label={`Sign-in details for ${actor}`}>
+			{(actor === session.actor ? session.via === "cookie" : session.owner) && <EmailForm actor={actor} />}
 			<h4>Ways of signing in</h4>
 			{credentials.isPending && <p className="dim">Reading ways of signing in…</p>}
 			{credentials.error && <p role="status">{saidBy(credentials.error)}</p>}

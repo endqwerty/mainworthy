@@ -180,7 +180,13 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
 						</div>
 					</div>
 				)}
-				<p className="dim signin-note">If you lost your password or passkey, an admin can send you a new link.</p>
+				<p className="dim signin-note">
+					{methods?.mail ? (
+						<a href="/reset">Forgot your password?</a>
+					) : (
+						"If you lost your password or passkey, an admin can send you a new link."
+					)}
+				</p>
 				<form
 					className="signin-way"
 					onSubmit={(event) => {

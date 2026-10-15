@@ -5,7 +5,9 @@ import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import { fakeSmtp } from "../../test/mail-support.ts";
 import { PersonalTokenCreated, TotpConfirmed, TotpEnrolment } from "../core/people.ts";
+import { waitMail } from "../server/identity/identity.ts";
 import { totpCode } from "../server/identity/totp.ts";
 import { outputWith, withInstance } from "./test-support.ts";
 
@@ -26,6 +28,35 @@ test("serve does not start with a public address it cannot use for passkeys, and
 const Invited = z.object({ id: z.number(), name: z.string(), purpose: z.string(), link: z.string(), code: z.string() });
 const Listed = z.array(z.object({ id: z.number(), name: z.string(), purpose: z.string(), state: z.string() }));
 const UNTIL = String.raw`until \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC`;
+
+test("invite new --email delivers the printed link through the configured SMTP server", async () => {
+	const smtp = await fakeSmtp();
+	try {
+		await withInstance(
+			async ({ cli, instance }) => {
+				const made = await cli(["invite", "new", "mailed-cli", "--email", "robin@example.com"]);
+				expect(made.code).toBe(0);
+				expect(made.stdout).toContain("Mail delivery requested.");
+				await waitMail(instance.app);
+				expect(smtp.messages).toHaveLength(1);
+				const link = made.stdout.split("\n")[1] ?? "";
+				expect(link).toMatch(/^https:\/\/mainworthy\.example\/invite#/);
+				expect(smtp.messages[0]?.text).toContain(link);
+			},
+			{
+				env: {
+					MAINWORTHY_SMTP_HOST: "127.0.0.1",
+					MAINWORTHY_SMTP_PORT: String(smtp.port),
+					MAINWORTHY_SMTP_TLS: "none",
+					MAINWORTHY_MAIL_FROM: "mainworthy@example.com",
+					MAINWORTHY_PUBLIC_URL: "https://mainworthy.example",
+				},
+			},
+		);
+	} finally {
+		await smtp.close();
+	}
+});
 
 test("invite new prints the link once, invite list never shows the code, and invite revoke withdraws it", async () => {
 	await withInstance(

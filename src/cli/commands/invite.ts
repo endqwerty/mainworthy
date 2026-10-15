@@ -35,8 +35,14 @@ const when = (at: number): string => `${new Date(at).toISOString().slice(0, 16).
 export const inviteCommand: AdapterCommand = {
 	name: "invite",
 	summary: "Invite a person with a link that is shown once, list invitations, and revoke one.",
-	usage: "invite new <name> [--can read,answer] [--project <key>] [--expires 3d] | invite list | invite revoke <id>",
+	usage:
+		"invite new <name> [--can read,answer] [--project <key>] [--expires 3d] [--email <address>] | invite list | invite revoke <id>",
 	flags: [
+		{
+			name: "email",
+			kind: "string",
+			description: "Send the invitation to this address. Requires instance mail settings.",
+		},
 		{
 			name: "can",
 			kind: "strings",
@@ -51,6 +57,7 @@ export const inviteCommand: AdapterCommand = {
 			const input = InvitationInput.parse({
 				do: "create",
 				name: args.positionals[1],
+				...(args.has("email") ? { email: args.value("email") } : {}),
 				can: args.strings("can"),
 				...(args.has("expires") ? { expires: args.value("expires") } : {}),
 				...(client.options.project ? { project: client.options.project } : {}),

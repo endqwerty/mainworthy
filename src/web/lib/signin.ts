@@ -7,7 +7,7 @@ import { ApiError, exchange, session } from "./api.ts";
 import { clearDevicePerson, type DeviceSession, deviceSession } from "./device.ts";
 import { type Assertion, CreationOptions, type Registration, RequestOptions } from "./passkey.ts";
 
-const Methods = z.object({ password: z.boolean(), passkey: z.boolean() });
+const Methods = z.object({ password: z.boolean(), passkey: z.boolean(), mail: z.boolean().default(false) });
 export type Methods = z.infer<typeof Methods>;
 
 /** What this instance offers on its sign-in page. `passkey` is false on an instance with no public address. */
@@ -145,6 +145,16 @@ export const signOut = async ({ clear }: { clear: boolean }): Promise<"signed-ou
 
 /** What to show for a failure that is not the server's refusal: the request did not get there, or no reply came back. */
 export const NO_ANSWER = "Mainworthy did not answer. Check the connection and try again.";
+
+export const requestReset = async (email: string): Promise<void> => {
+	await exchange("/api/login", { body: { resetRequest: email } });
+};
+export const verifyEmail = async (code: string): Promise<void> => {
+	await exchange("/api/login", { body: { emailVerification: code } });
+};
+export const resetPassword = async (code: string, password: string): Promise<void> => {
+	await exchange("/api/login", { body: { reset: code, password } });
+};
 
 /**
  * The sentence for a refused sign-in. The server answers 401 with one sentence whatever was wrong, and the page

@@ -267,6 +267,7 @@ describe("the module map", () => {
 	const owners: Record<string, string[]> = {
 		"server/kernel": ["meta", "projects", "counters", "commands", "demo_projects"],
 		"server/identity": [
+			"mail_contacts",
 			"orgs",
 			"actors",
 			"grants",

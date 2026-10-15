@@ -17,6 +17,7 @@ import { type Db, sql } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound, OpError } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
 import { CONTEXT, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
+import { credentialNotice } from "./contacts.ts";
 import {
 	type CredentialRow,
 	countPasskeyUse,
@@ -148,8 +149,8 @@ function mustHavePasskeys(app: App): RelyingParty {
 }
 
 /** What `GET /api/login/methods` says: the ways of signing in this instance offers. */
-export function signInMethods(app: App): { password: true; passkey: boolean } {
-	return { password: true, passkey: publicAddress(app.config) !== null };
+export function signInMethods(app: App): { password: true; passkey: boolean; mail: boolean } {
+	return { password: true, passkey: publicAddress(app.config) !== null, mail: app.config.mail !== undefined };
 }
 
 // ── Refusals ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -415,6 +416,7 @@ export async function changePassword(
 			const at = app.now();
 			if (current) revokeCredential(app.db, current.id, at);
 			const made = insertPassword(app.db, { actor: now.id, hash, at });
+			credentialNotice(app, now.id, current ? "Your password was changed" : "A password was added");
 			if (!current) return { ok: true, sessionsEnded: 0 };
 			restSession(app.db, { session, from: current.id, to: made });
 			return { ok: true, sessionsEnded: endSessionsOn(app.db, current.id, at) };
@@ -621,6 +623,7 @@ export function addPasskey(
 		);
 	}
 	const row = insertPasskey(app.db, { actor: person.id, passkey: judged.passkey, label: input.label, at: app.now() });
+	credentialNotice(app, person.id, "A passkey was added");
 	spendChallenge(app, judged.challenge);
 	return { id: row.id, label: row.label };
 }
@@ -672,6 +675,7 @@ export function removeCredential(app: App, id: number): { removed: true; session
 	}
 	const at = app.now();
 	revokeCredential(app.db, id, at);
+	credentialNotice(app, row.actor, row.kind === "totp" ? "An authenticator was removed" : `A ${row.kind} was removed`);
 	return {
 		removed: true,
 		sessionsEnded: row.kind === "totp" ? endSessionsOf(app.db, row.actor, at, "ended") : endSessionsOn(app.db, id, at),
@@ -877,6 +881,13 @@ export async function acceptInvitation(
 		// The browser was somebody else's until now, and the page said whose. That session ends as a sign-out does.
 		if (input.browser !== null && held) endSession(app, hashOf(input.browser), "signed-out");
 		if (registration) spendChallenge(app, registration.challenge);
+		credentialNotice(
+			app,
+			person.id,
+			invitation.purpose === "recover"
+				? "Your sign-in methods were replaced through account recovery"
+				: "Your sign-in methods were added",
+		);
 		return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } } as const;
 	});
 }
@@ -964,6 +975,7 @@ export function confirmTotp(
 		at,
 	});
 	const sessionsEnded = endOtherSessions(app.db, person.id, input.session, at);
+	credentialNotice(app, person.id, "An authenticator was added");
 	spendTotp(app, input.challenge);
 	attempt.limiter.succeeded([attempt.account]);
 	return { id, recoveryCodes: recovery.codes, sessionsEnded };

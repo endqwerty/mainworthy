@@ -897,7 +897,7 @@ Your browser sessions: list them, and end one. An admin who is a person lists an
 
 ### credential
 
-Your password, passkeys, authenticator and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default.
+Your password, passkeys, authenticator, recovery email and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default.
 
 |  |  |
 | --- | --- |
@@ -912,30 +912,35 @@ Your password, passkeys, authenticator and CLI tokens: list, add or remove them.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `[1].do` | `"list"` | yes |  |
-| `[1].actor` | `string` | no | Whose. Absent: your own. Somebody else's is for an admin who is a person. |
-| `[2].do` | `"passkey.begin"` | yes |  |
-| `[3].do` | `"totp.begin"` | yes |  |
-| `[4].do` | `"totp.confirm"` | yes |  |
-| `[4].challenge` | `string` | yes |  |
-| `[4].code` | `string` | yes |  |
-| `[5].do` | `"passkey.add"` | yes |  |
-| `[5].passkey` | `record<unknown>` | yes | What the browser returned for the options of passkey.begin: id, clientDataJSON, authenticatorData, publicKey, publicKeyAlgorithm, transports. |
-| `[5].label` | `string` | yes | What you call this passkey: the device it is on. |
-| `[6].do` | `"remove"` | yes |  |
-| `[6].id` | `integer` | yes | The credential, from the list. The last one a person has is not removed. |
-| `[7].do` | `"token.create"` | yes |  |
-| `[7].label` | `string` | yes | What you use this token for. |
-| `[7].expires` | `string` | no | Default: 30d. At most 365d. A password or passkey session creates your own token, shown once. Default: `"30d"`. |
-| `[8].do` | `"token.list"` | yes |  |
-| `[9].do` | `"token.revoke"` | yes |  |
-| `[9].id` | `integer` | yes |  |
+| `[1].do` | `"email.get"` | yes |  |
+| `[1].actor` | `string` | no |  |
+| `[2].do` | `"email.set"` | yes |  |
+| `[2].actor` | `string` | no |  |
+| `[2].email` | `string \| null` | yes |  |
+| `[3].do` | `"list"` | yes |  |
+| `[3].actor` | `string` | no | Whose. Absent: your own. Somebody else's is for an admin who is a person. |
+| `[4].do` | `"passkey.begin"` | yes |  |
+| `[5].do` | `"totp.begin"` | yes |  |
+| `[6].do` | `"totp.confirm"` | yes |  |
+| `[6].challenge` | `string` | yes |  |
+| `[6].code` | `string` | yes |  |
+| `[7].do` | `"passkey.add"` | yes |  |
+| `[7].passkey` | `record<unknown>` | yes | What the browser returned for the options of passkey.begin: id, clientDataJSON, authenticatorData, publicKey, publicKeyAlgorithm, transports. |
+| `[7].label` | `string` | yes | What you call this passkey: the device it is on. |
+| `[8].do` | `"remove"` | yes |  |
+| `[8].id` | `integer` | yes | The credential, from the list. The last one a person has is not removed. |
+| `[9].do` | `"token.create"` | yes |  |
+| `[9].label` | `string` | yes | What you use this token for. |
+| `[9].expires` | `string` | no | Default: 30d. At most 365d. A password or passkey session creates your own token, shown once. Default: `"30d"`. |
+| `[10].do` | `"token.list"` | yes |  |
+| `[11].do` | `"token.revoke"` | yes |  |
+| `[11].id` | `integer` | yes |  |
 
 </details>
 
 ### invitation
 
-Invite a person with a link, since there is no mail: make one, list them, revoke one. The link is shown once.
+Invite a person with a link: make one, list them, revoke one. Optionally send it by mail. The link is shown once.
 
 |  |  |
 | --- | --- |
@@ -951,6 +956,7 @@ Invite a person with a link, since there is no mail: make one, list them, revoke
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `[1].do` | `"create"` | yes |  |
+| `[1].email` | `string` | no | Send the link to this address when mail is enabled. |
 | `[1].name` | `string` | yes | The person. A new name: an invitation to join. A person who exists: a recovery, which replaces every way they sign in once it is accepted. |
 | `[1].can` | `array<"read" \| "record" \| "produce" \| "answer" \| "plan" \| "admin">` | no | What a new person may do. Absent: everything. Not for a person who exists: use grant.set. Default: `[]`. |
 | `[1].project` | `string` | no | Limit the grant to one project. Absent: every project. |

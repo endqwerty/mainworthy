@@ -7,9 +7,11 @@ import {
 	bootstrap,
 	flushUses,
 	ruleActor,
+	stopMail,
 	sweepSessions,
 	sweepSignInRecords,
 	validateBootstrap,
+	waitMail,
 } from "./identity/identity.ts";
 import { recoverAccepted, recoverDisputes, sweep } from "./jobs.ts";
 import { type App, type Config, openApp } from "./kernel/app.ts";
@@ -144,6 +146,8 @@ export function start(
 				stopTrackerPolls(app);
 				stopCommitStatuses(app);
 				await server.stop();
+				stopMail(app);
+				await waitMail(app);
 				await waitTrackerRequests(app);
 				await waitTrackerPolls(app);
 				await waitCommitStatuses(app);

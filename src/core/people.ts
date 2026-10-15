@@ -11,6 +11,12 @@ import { Capability } from "./kinds.ts";
 import { cmd } from "./ops.ts";
 
 const actor = z.string().max(64);
+export const EmailAddress = z
+	.string()
+	.trim()
+	.max(254)
+	.email()
+	.transform((text) => text.toLowerCase());
 
 export const FORGET_NOTICE =
 	"A pseudonym replaces the name in attribution, question evidence and saved replies. Password hashes, passkey public keys, and token and credential labels are erased. Passwords, passkeys, tokens and invitations stop working, and sessions end. History and text the person typed in cases and notes stay. Some sign-in records and request fingerprints stay. This cannot be undone.";
@@ -89,6 +95,8 @@ export const PersonalTokenRow = z.object({
 export type PersonalTokenRow = z.infer<typeof PersonalTokenRow>;
 
 export const CredentialInput = z.discriminatedUnion("do", [
+	z.strictObject({ do: z.literal("email.get"), actor: actor.optional() }),
+	z.strictObject({ do: z.literal("email.set"), actor: actor.optional(), email: EmailAddress.nullable() }),
 	z.object({
 		do: z.literal("list"),
 		actor: actor.optional().describe("Whose. Absent: your own. Somebody else's is for an admin who is a person."),
@@ -151,6 +159,7 @@ export const INVITATION_LASTS = { default: "3d", mostMs: 30 * 86_400_000 } as co
 export const InvitationInput = z.discriminatedUnion("do", [
 	z.object({
 		do: z.literal("create"),
+		email: EmailAddress.optional().describe("Send the link to this address when mail is enabled."),
 		name: actor.describe(
 			"The person. A new name: an invitation to join. A person who exists: a recovery, which replaces every way they sign in once it is accepted.",
 		),

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SESSION_LIFETIMES } from "../../src/server/kernel/app.ts";
+import { defaultConfig, SESSION_LIFETIMES } from "../../src/server/kernel/app.ts";
 import { start, VERSION } from "../../src/server/start.ts";
 import { archiveRoutes } from "../../src/surfaces/archive.ts";
 import { docsRoutes } from "../../src/surfaces/docs/site.ts";
@@ -21,6 +21,7 @@ const instance = start(
 		commit: null,
 		...SESSION_LIFETIMES,
 		proxy: null,
+		mail: defaultConfig(process.env).mail,
 		// The browser tests hash a password for every person they make and every sign-in. At what the build
 		// ships with, that is most of their time; the hashing itself is tested where it is written.
 		passwordCost: { memoryCost: 8, timeCost: 1 },

@@ -111,6 +111,7 @@ export async function startServer({
 	seed: seedData = cases > 0,
 	days = 0,
 	passkeys = false,
+	mail,
 }: {
 	cases?: number;
 	firstProject?: string;
@@ -126,6 +127,7 @@ export async function startServer({
 	 * then opens its pages at `localhost`: Chromium makes no passkey at `127.0.0.1` (`passkey-verifier.test.ts`).
 	 */
 	passkeys?: boolean;
+	mail?: { port: number };
 } = {}): Promise<Server> {
 	const dataDir = await mkdtemp(join(tmpdir(), `mainworthy-e2e-${process.pid}-`));
 	ownedDirectories.add(dataDir);
@@ -143,7 +145,13 @@ export async function startServer({
 			MAINWORTHY_MODE: mode,
 			MAINWORTHY_FIRST_PROJECT: firstProject,
 			MAINWORTHY_OWNER_TOKEN: token,
-			MAINWORTHY_PUBLIC_URL: passkeys ? `http://localhost:${port}` : "",
+			MAINWORTHY_PUBLIC_URL: passkeys || mail ? `http://localhost:${port}` : "",
+			MAINWORTHY_SMTP_HOST: mail ? "127.0.0.1" : "",
+			MAINWORTHY_SMTP_PORT: mail ? String(mail.port) : "",
+			MAINWORTHY_SMTP_TLS: mail ? "none" : "",
+			MAINWORTHY_SMTP_USER: "",
+			MAINWORTHY_SMTP_PASSWORD: "",
+			MAINWORTHY_MAIL_FROM: mail ? "mainworthy@example.com" : "",
 			MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
 		},
 		stdout: "ignore",
