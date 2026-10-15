@@ -6,6 +6,108 @@ const check = test.skipIf(!browserAvailable);
 const titleOf = (page: Awaited<ReturnType<typeof openPage>>["page"]) =>
 	page.getByRole("textbox", { name: "Case title", exact: true });
 
+// Keep the real selection handler from an earlier render, as an event already in progress would.
+async function holdEditorSelection(page: Awaited<ReturnType<typeof openPage>>["page"]): Promise<void> {
+	await titleOf(page).evaluate((title) => {
+		const key = Object.keys(title).find((key) => key.startsWith("__reactProps$"));
+		const props = key ? Reflect.get(title, key) : null;
+		const select = props && Reflect.get(props, "onSelect");
+		if (typeof select !== "function") throw new Error("Editor selection handler missing");
+		Reflect.set(window, "heldEditorSelection", () => select({ currentTarget: title }));
+	});
+}
+async function selectInOldEditor(page: Awaited<ReturnType<typeof openPage>>["page"]): Promise<void> {
+	await page.evaluate(() => {
+		const select = Reflect.get(window, "heldEditorSelection");
+		if (typeof select !== "function") throw new Error("Held editor selection missing");
+		select();
+	});
+}
+
+check(
+	"an old editor selection cannot forget a proposal waiting for review",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", outline: "Original\n  Open cart" }] });
+		const policy = await server.api("propose", { edits: [{ op: "policy", preset: "strict" }] });
+		const question = (await server.api("inbox", { kind: "adopt" })).items.find((item) => item.q === policy.question);
+		if (!question) throw new Error("Policy question missing");
+		await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Original", exact: true }).waitFor();
+			let requests = 0;
+			await page.route("**/propose", async (route) => {
+				requests++;
+				await route.continue();
+			});
+			await page.keyboard.press("e");
+			await titleOf(page).fill("Awaiting review");
+			await holdEditorSelection(page);
+			await page.keyboard.press("Escape");
+			await page.locator("#stat").filter({ hasText: "Proposed, waiting for a person" }).waitFor();
+			const before = await page.evaluate(() =>
+				localStorage.getItem(Object.keys(localStorage).find((key) => key.endsWith(":draft:scratch:C-1")) ?? ""),
+			);
+			await selectInOldEditor(page);
+			const after = await page.evaluate(() =>
+				localStorage.getItem(Object.keys(localStorage).find((key) => key.endsWith(":draft:scratch:C-1")) ?? ""),
+			);
+			const metadata = z.object({
+				cmd: z.string(),
+				submission: z.object({ kind: z.literal("waiting"), question: z.string() }),
+			});
+			expect(metadata.parse(JSON.parse(after ?? "null"))).toEqual(metadata.parse(JSON.parse(before ?? "null")));
+			await page.keyboard.press("Escape");
+			await page.waitForTimeout(150);
+			expect(requests).toBe(1);
+			expect((await server.api("inbox", { kind: "adopt" })).items).toHaveLength(1);
+			expect((await server.api("get", { refs: ["C-1"] }))[0]?.title).toBe("Original");
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+check(
+	"an old editor selection cannot undo following a newer case version",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", { edits: [{ op: "create", outline: "Original\n  Open cart" }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = h;
+			await page.getByRole("button", { name: "Original", exact: true }).waitFor();
+			await page.keyboard.press("e");
+			await holdEditorSelection(page);
+			await server.api("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated elsewhere" } }],
+			});
+			await page.waitForFunction(() => {
+				const title = document.querySelector('textarea[aria-label="Case title"]');
+				return title instanceof HTMLTextAreaElement && title.value === "Updated elsewhere";
+			});
+			await selectInOldEditor(page);
+			expect(await titleOf(page).inputValue()).toBe("Updated elsewhere");
+			await titleOf(page).fill("Updated elsewhere continued");
+			await page.keyboard.press("Escape");
+			const rows = await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.title === "Updated elsewhere continued",
+			);
+			expect(rows[0]).toMatchObject({ title: "Updated elsewhere continued", version: 3 });
+			expect((await server.api("inbox", { kind: "adopt" })).items).toHaveLength(0);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
 for (const kind of ["new", "edit"]) {
 	check(
 		`A-1 ${kind}: changed text after an applied request with a lost reply is recorded once`,
