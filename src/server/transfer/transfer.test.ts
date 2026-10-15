@@ -170,6 +170,18 @@ const fixtures: Record<string, Row[]> = {
 			rev: 1,
 		},
 	],
+	scope_moves: [
+		{
+			id: 510,
+			project: 23,
+			what: "code:example/app@abc12345",
+			before_scope: "change:503",
+			after_scope: "line:trunk@example/app",
+			actor: 71,
+			at: time,
+			seq: 2,
+		},
+	],
 	batches: [
 		{
 			id: 504,

@@ -1862,6 +1862,12 @@ describe("the surface", () => {
 		await checked("command", { cmd: "schema-create" });
 		await checked("command", { cmd: "schema-absent" });
 		await checked("change", { change: "pr:52", state: "closed" });
+		for (let attempt = 0; attempt < 2; attempt++)
+			await checked("change", {
+				change: "pr:52",
+				state: "merged",
+				landing: { commit: "abcdef1", branch: "main" },
+			});
 		for (const action of ["project.list", "token.list", "actor.list"]) await checked("admin", { do: action });
 		await checked("propose", { edits: [{ op: "folder", name: "Archive me" }] });
 		const folders = z

@@ -8,7 +8,7 @@ import { caseNameAnnotation } from "../../core/case-annotation.ts";
 import { contentHash } from "../../core/hash.ts";
 import type { ActorKind } from "../../core/kinds.ts";
 import type { MethodKind } from "../../core/model.ts";
-import type { Outcome, ReportInput, ResultIn, TargetIn } from "../../core/ops.ts";
+import type { ChangeInput, Outcome, ReportInput, ResultIn, TargetIn } from "../../core/ops.ts";
 import { normaliseFailure, signatureHash } from "../../core/signature.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
@@ -125,6 +125,18 @@ const Q = {
 	),
 	placeCommit: sql<{ project: number; what: string; line: string; branch: string | null; change: number | null }>(
 		"UPDATE targets SET line = $line, branch = $branch, change = $change WHERE project = $project AND what = $what",
+	),
+	scopeMove: sql<{
+		project: number;
+		what: string;
+		before: string;
+		after: string;
+		actor: number;
+		at: number;
+		seq: number;
+	}>(
+		`INSERT INTO scope_moves (project, what, before_scope, after_scope, actor, at, seq)
+		 VALUES ($project, $what, $before, $after, $actor, $at, $seq)`,
 	),
 	insertTarget: sql<{
 		project: number;
@@ -418,12 +430,18 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 	const env = input.env ?? "";
 	const found = ctx.db.get(Q.target, { project, what, env });
 	const first = ctx.db.all(Q.targetsOfCommit, { project, what })[0];
-	// Where a commit is (its line, or the change it belongs to) is said by the first pipeline or person to
-	// report it. An agent's report is counted by no gate, so it settles nothing: what it says holds only until
-	// such a report arrives, and that report is not answered in a place an agent chose.
+	// A pipeline or person names a commit's scope. An agent's report settles nothing, and a hash-only report
+	// leaves the place provisional until a pipeline or person names a branch or pull request.
 	const advisory = ctx.actor.kind === "agent";
 	const placed = first !== undefined && firstSeen(ctx.db, project, input.repo ?? null, input.commit) !== null;
-	const settled = first !== undefined && (placed || advisory);
+	const own = first?.change !== null && first?.change !== undefined ? changeById(ctx.db, first.change) : null;
+	const named = input.pr !== undefined || input.branch !== undefined;
+	const gainsPlace =
+		!advisory &&
+		named &&
+		own !== null &&
+		own.key === changeKey(ctx.db, project, ownKey(input.commit), input.repo ?? null);
+	const settled = first !== undefined && (placed || advisory) && !gainsPlace;
 	const trunk = !advisory && input.pr === undefined && input.branch !== undefined && TRUNK_BRANCHES.has(input.branch);
 	let change: ChangeRow | null = null;
 	if (advisory) {
@@ -442,18 +460,15 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 		const known = input.pr === undefined && input.branch === undefined && settled;
 		if (!known) change = upsertChange(ctx, changeKey(ctx.db, project, key, input.repo ?? null), input);
 	}
-	// One commit, one place where its failures are answered: the line or the change it was first reported on.
-	// A later report of the same commit from somewhere else (a pull request's head that reached trunk, a result
-	// typed into a run that counts the commit) is that commit, and is answered there. A commit's gate has one
-	// run; two scopes inside it would let one line's answer classify the other line's failure.
-	const place = settled
+	// One commit, one scope across every environment. A hash-only report leaves its place open until a branch
+	// or pull request is named. A named scope otherwise changes only through a recorded landing.
+	const place: Pick<TargetRow, "line" | "branch" | "change"> = settled
 		? { line: first.line, branch: first.branch, change: first.change }
 		: advisory
 			? { line: "change", branch: null, change: change?.id ?? null }
 			: { line: trunk ? "trunk" : "change", branch: input.branch ?? null, change: change?.id ?? null };
-	// The first report a gate counts, for a commit only an agent had reported: every target of it moves there.
-	// (Applying that report recomputes every run that counts the commit: see `firstCountedReport`.)
-	if (first !== undefined && !settled) ctx.db.run(Q.placeCommit, { project, what, ...place });
+	// A scope is shared by every environment, including environments reported before its place was named.
+	if (first !== undefined && !settled) moveCommit(ctx, first, place);
 	if (found) return settled ? found : mustTarget(ctx.db, found.id);
 	const { lastId } = ctx.db.run(Q.insertTarget, {
 		project,
@@ -470,8 +485,8 @@ export function ensureTarget(ctx: Ctx, input: TargetIn): TargetRow {
 }
 
 /**
- * The change a commit was given for itself when only an agent had reported it (`commit:<hash>`), or null. Its
- * scope is where the agent's findings were asked about until a pipeline or a person said where the commit is.
+ * The provisional change given to a commit reported only by hash (`commit:<hash>`), or null. Its questions
+ * belong there until a pipeline or person names a scope for it.
  */
 export function ownChangeOf(db: Db, project: number, repo: string | null, commit: string): ChangeRow | null {
 	return db.get(Q.change, { project, key: changeKey(db, project, ownKey(commit), repo) });
@@ -587,6 +602,37 @@ export function setChangeEnded(ctx: Ctx, change: ChangeRow, ended: ChangeRow["en
 	ctx.db.run(Q.touchChange, { id: change.id, rev: ctx.seq });
 	ctx.touched.add(change.key);
 	return { ...change, ended, ended_at: ended === null ? null : ctx.now, rev: ctx.seq };
+}
+
+/** A recorded landing moves only a matching head, never a different merge or rebased commit. */
+export function landChangeHead(
+	ctx: Ctx,
+	change: ChangeRow,
+	landing: NonNullable<ChangeInput["landing"]>,
+): TargetRow | null {
+	if (change.head_sha !== landing.commit) return null;
+	const what = codeWhat(change.repo, landing.commit);
+	const target = targetsOfCommit(ctx.db, ctx.project.id, what)[0];
+	if (!target || (target.line === "trunk" && target.branch === landing.branch && target.change === null)) return null;
+	moveCommit(ctx, target, { line: "trunk", branch: landing.branch, change: null });
+	ctx.touched.add(change.key);
+	return mustTarget(ctx.db, target.id);
+}
+
+function moveCommit(ctx: Ctx, target: TargetRow, place: Pick<TargetRow, "line" | "branch" | "change">): void {
+	const before = scopeOf(target, null);
+	const after = scopeOf({ ...target, ...place }, null);
+	if (before !== after)
+		ctx.db.run(Q.scopeMove, {
+			project: ctx.project.id,
+			what: target.what,
+			before,
+			after,
+			actor: ctx.actor.id,
+			at: ctx.now,
+			seq: ctx.seq,
+		});
+	ctx.db.run(Q.placeCommit, { project: ctx.project.id, what: target.what, ...place });
 }
 
 /** Whether the change a scope names (`change:<id>`) has ended. A line and a run never end this way. */

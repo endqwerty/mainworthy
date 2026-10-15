@@ -157,6 +157,7 @@ describe("the module map", () => {
 			"targets",
 			"changes",
 			"change_ends",
+			"scope_moves",
 			"batches",
 			"signatures",
 			"results",
