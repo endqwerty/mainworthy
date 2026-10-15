@@ -53,7 +53,8 @@ export function Teams({ people, changed }: { people: readonly string[]; changed:
 			<SectionHeading>Teams</SectionHeading>
 			<p className="dim">
 				A person's own grants and their teams' grants add up. Removing a membership takes away that team's grants at
-				once. Another admin changes your membership and the grants of teams you belong to.
+				once. Teams grant permissions only. Assign named roles on each person's own grant. Another admin changes your
+				membership and the grants of teams you belong to.
 			</p>
 			<form
 				className="settings-form"

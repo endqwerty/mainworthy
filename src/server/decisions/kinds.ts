@@ -20,7 +20,7 @@ import {
 	testById,
 	unlinkedInFile,
 } from "../evidence/evidence.ts";
-import { actorById } from "../identity/identity.ts";
+import { actorById, requirePolicyRoles } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
@@ -86,6 +86,8 @@ export function raiseAdopt(
 	sealed: NonNullable<ReturnType<typeof seal>>,
 ): Raised {
 	const { proposal, resolved } = sealed;
+	for (const edit of resolved)
+		if (edit.op === "policy") requirePolicyRoles(ctx.db, ctx.project.id, edit.policy.clauses);
 	const summary = resolved.slice(0, 20).map((edit) => {
 		switch (edit.op) {
 			case "create":
@@ -147,6 +149,8 @@ const adoptHandler: Handler<"adopt"> = {
 		if (!proposal) throw notFound("proposal");
 		if (answer.is === "reject") return { rejected: true };
 		if (answer.is === "merge") return resolveConflict(ctx, proposal, answer.body, tools);
+		for (const edit of resolvedOf(proposal))
+			if (edit.op === "policy") requirePolicyRoles(ctx.db, ctx.project.id, edit.policy.clauses);
 		const adopted = adopt(ctx, witness, proposal);
 		const effects = { cases: adopted.cases, created: adopted.created, policyVersion: adopted.policyVersion };
 		if (adopted.policyVersion === null) return effects;

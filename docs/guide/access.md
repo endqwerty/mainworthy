@@ -57,6 +57,29 @@ reviewer holds no grant on checkout any more
 
 Leave out `--project` to change the grant on every project. Only a person changes a grant: an agent that holds `admin` is refused. You cannot change your own grant, because a slip could lock the instance. Another admin does it. Nobody changes the owner's grant, which Mainworthy writes again at every start.
 
+### Named roles
+
+A personal grant can also list named roles. Team grants provide capabilities only and reject role assignments. A custom policy can require a role such as `approver` before an answer counts.
+A role does not give capabilities. The actor still needs `produce` to send an answer and `answer` for a role clause to count it.
+Team permissions can supply `produce` and `answer` for a personal role. Team membership alone gives no named role.
+Roles on every project and roles on one project add up. A role on another project gives nothing here.
+
+```
+$ mainworthy actor grant reviewer --can read,produce,answer --roles approver --project checkout
+reviewer on checkout: read, produce, answer; roles: approver
+```
+
+Role names use lowercase letters, digits and `-`, start with a letter, and have at most 32 characters.
+`--roles` accepts commas or repeated flags. Omit it to keep the grant's roles; use `--roles=` to clear them.
+Removing a grant removes its roles. A new token or invitation for an existing actor keeps their roles.
+Settings, People and `mainworthy actor list` show the roles with their grants. Assign them through the command above or the `admin` operation's `grant.set` action.
+
+Only a person who administers the instance can change roles. The existing guards for self and owner grants also apply.
+The owner has no implicit named role and cannot be assigned one through `grant.set`; use separate people as approvers.
+Changing roles affects later answers and withdrawals. It leaves recorded decisions in place.
+An agent can hold a role and give a counted answer if the clause permits agent answers.
+Grant and role changes do not yet have an attributed change history.
+
 The owner is the person named by `MAINWORTHY_OWNER`. See [configuration](./configuration.md).
 
 ## Make your own command-line token
@@ -119,7 +142,7 @@ $ mainworthy admin --do team.member.remove --team Quality --person sam
 $ mainworthy admin --do team.grant.remove --team Quality --project checkout
 ```
 
-Leave out `--project` for a grant on every project. `mainworthy actor list` labels grants received from a team. With an older API-version-1 server that omits team membership, the CLI and People still show personal grants. `team.history` lists creation, membership changes and grant changes with the person who made each change, its time, and the affected person or project. Repeating an action with the same `cmd` returns its original reply without adding another event. Forgetting a person removes their memberships and shows their pseudonym in team history. Teams, grants, memberships and this history travel in an [archive](./data.md#export-everything).
+Leave out `--project` for a grant on every project. `mainworthy actor list` labels grants received from a team. With an older API-version-1 server that omits team membership or roles, the CLI and People still show personal grants. Missing roles mean an empty role list. `team.history` lists creation, membership changes and grant changes with the person who made each change, its time, and the affected person or project. Repeating an action with the same `cmd` returns its original reply without adding another event. Forgetting a person removes their memberships and shows their pseudonym in team history. Teams, grants, memberships and this history travel in an [archive](./data.md#export-everything).
 
 ## Make a token
 
@@ -433,7 +456,7 @@ A pipeline with only `record` cannot read cases or the queue either. Add `read` 
 - Your sign-in sets or changes your password and adds and removes passkeys. Only a person has this section.
 - Your sessions lists the browsers you are signed in on and ends any of them.
 
-People shows personal grants and the grants received from each team. To change a personal grant, use `mainworthy actor grant`.
+People shows personal grants with their roles and the permissions received from each team. Use `mainworthy actor grant` to edit personal grants.
 
 ## See also
 

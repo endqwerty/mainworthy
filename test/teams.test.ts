@@ -218,3 +218,15 @@ test("an unrecorded team still prevents bootstrap replacement during import", ()
 	h.call("admin", { do: "team.create", name: "Quality" });
 	expect(() => removeBootstrap(h.app.db)).toThrow("import needs a fresh instance");
 });
+
+test("team grants reject roles without changing the team's permissions", () => {
+	h = harness();
+	h.call("admin", { do: "team.create", name: "Reviewers" });
+	h.call("admin", { do: "team.grant.set", team: "Reviewers", can: ["read"] });
+	expect(
+		h.raw("admin", { do: "team.grant.set", team: "Reviewers", can: ["answer"], roles: ["approver"] }),
+	).toMatchObject({ ok: false, error: { code: "invalid" } });
+	expect(h.call<unknown[]>("admin", { do: "team.list" })).toMatchObject([
+		{ name: "Reviewers", members: [], grants: [{ project: "*", can: ["read"] }] },
+	]);
+});

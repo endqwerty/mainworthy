@@ -11,7 +11,15 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import { untilPhrase } from "../../core/duration.ts";
-import { type ActorKind, Capability, heldCapabilities, whyNotGrantable } from "../../core/kinds.ts";
+import {
+	type ActorKind,
+	Capability,
+	type Clause,
+	heldCapabilities,
+	Role,
+	standingOf,
+	whyNotGrantable,
+} from "../../core/kinds.ts";
 import type { App, Config } from "../kernel/app.ts";
 import type { CallerReference } from "../kernel/caller.ts";
 import type { Actor } from "../kernel/ctx.ts";
@@ -115,8 +123,11 @@ const Q = {
 		"INSERT INTO actors (org, kind, name, on_behalf_of, created_at) VALUES ($org, $kind, $name, $behalf, $at)",
 	),
 	actors: sql<{ org: number }, ActorRow & { created_at: number }>("SELECT * FROM actors WHERE org = $org ORDER BY id"),
-	grants: sql<{ actor: number }, { project: number; can: string }>(
-		"SELECT project, can FROM grants WHERE actor = $actor ORDER BY project",
+	grants: sql<{ actor: number }, { project: number; can: string; roles: string }>(
+		"SELECT project, can, roles FROM grants WHERE actor = $actor ORDER BY project",
+	),
+	setRoles: sql<{ actor: number; project: number; roles: string }>(
+		"UPDATE grants SET roles = $roles WHERE actor = $actor AND project = $project",
 	),
 	dropGrant: sql<{ actor: number; project: number }>("DELETE FROM grants WHERE actor = $actor AND project = $project"),
 	setGrant: sql<{ actor: number; project: number; can: string }>(
@@ -487,11 +498,32 @@ function ensureActor(db: Db, input: { org: number; kind: ActorKind; name: string
 
 function toActor(db: Db, row: ActorRow, project: number | null): Actor {
 	const granted: Capability[] = row.kind === "human" ? teamCapabilities(db, row.id, project) : [];
+	const roles = new Set<Role>();
 	for (const grant of db.all(Q.grants, { actor: row.id })) {
 		if (project !== null && grant.project !== 0 && grant.project !== project) continue;
 		granted.push(...json<Capability[]>(grant.can));
+		for (const role of Role.array().parse(json(grant.roles))) roles.add(role);
 	}
-	return { id: row.id, kind: row.kind, name: row.name, can: heldCapabilities(row.kind, granted) };
+	return { id: row.id, kind: row.kind, name: row.name, can: heldCapabilities(row.kind, granted), roles: [...roles] };
+}
+
+export function requirePolicyRoles(db: Db, project: number, clauses: readonly Clause[]): void {
+	const named = clauses.filter((clause) => clause.ask.who.startsWith("role:"));
+	if (named.length === 0) return;
+	const actors = db
+		.all(Q.actors, { org: orgId(db) })
+		.filter((row) => row.disabled_at === null)
+		.map((row) => toActor(db, row, project));
+	for (const clause of named) {
+		if (
+			!actors.some(
+				(actor) =>
+					actor.can.includes("produce") &&
+					standingOf({ actor, ask: clause.ask, isAuthor: false, isProducer: false }) === "counts",
+			)
+		)
+			throw invalid(`clause ${clause.id}: no eligible actor holds role ${clause.ask.who.slice(5)} in this project`);
+	}
 }
 
 /**
@@ -946,13 +978,21 @@ function mustActor(db: Db, name: string): ActorRow {
 }
 
 /** Replaces what an actor may do on one project (0: on every project). The one way to change a grant. */
-export function setGrant(app: App, input: { actor: string; project: number; can: readonly Capability[] }): void {
+export function setGrant(
+	app: App,
+	input: { actor: string; project: number; can: readonly Capability[]; roles?: readonly Role[] },
+): Role[] {
 	const row = mustActor(app.db, input.actor);
 	refuseGrant(row.kind, input.can);
 	const wasAdmin = hasAdminGrant(app.db, row.id);
 	app.db.run(Q.setGrant, { actor: row.id, project: input.project, can: JSON.stringify(input.can) });
 	if (app.config.requireAdminMfa && !wasAdmin && hasAdminGrant(app.db, row.id))
 		endPasswordSessions(app.db, row.id, app.now());
+	if (input.roles !== undefined)
+		app.db.run(Q.setRoles, { actor: row.id, project: input.project, roles: JSON.stringify([...new Set(input.roles)]) });
+	return Role.array().parse(
+		json(app.db.all(Q.grants, { actor: row.id }).find((grant) => grant.project === input.project)?.roles ?? "[]"),
+	);
 }
 
 /** Takes away an actor's grant on one project (0: its grant on every project). False when it held none there. */
@@ -1134,6 +1174,7 @@ export function listActors(db: Db) {
 		grants: db.all(Q.grants, { actor: row.id }).map((grant) => ({
 			project: grant.project,
 			can: heldCapabilities(row.kind, json<Capability[]>(grant.can)),
+			roles: Role.array().parse(json(grant.roles)),
 		})),
 	}));
 }

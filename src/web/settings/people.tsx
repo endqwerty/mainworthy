@@ -23,7 +23,7 @@ const Actor = z.object({
 	disabled: z.boolean(),
 	owner: z.boolean().optional(),
 	teams: z.array(TeamSource).default([]),
-	grants: z.array(z.object({ project: z.string(), can: z.array(z.string()) })),
+	grants: z.array(z.object({ project: z.string(), can: z.array(z.string()), roles: z.array(z.string()).default([]) })),
 });
 /** How long a link may last, as the form offers it. The server takes any duration up to thirty days. */
 const LASTS: readonly [string, string][] = [
@@ -36,10 +36,15 @@ const LASTS: readonly [string, string][] = [
 ];
 const where = (project: string): string => (project === "*" ? "every project" : project);
 /** What a person holds, grant by grant: "every project: read, answer". */
-const held = (grants: readonly { project: string; can: readonly string[] }[]): string =>
+const held = (grants: readonly { project: string; can: readonly string[]; roles?: readonly string[] }[]): string =>
 	grants.length === 0
 		? "no grant"
-		: grants.map((grant) => `${where(grant.project)}: ${grant.can.join(", ")}`).join("; ");
+		: grants
+				.map(
+					(grant) =>
+						`${where(grant.project)}: ${grant.can.join(", ")}${grant.roles?.length ? `; roles: ${grant.roles.join(", ")}` : ""}`,
+				)
+				.join("; ");
 /**
  * What a new invitation starts with: what a person needs to work. `admin` is for the inviter to tick, because
  * whoever holds it on every project invites people, makes tokens and changes what others may do.

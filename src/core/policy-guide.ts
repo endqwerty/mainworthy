@@ -11,7 +11,7 @@ export const PRESET_SUMMARY: Record<PresetName, string> = {
 	standard:
 		"An agent's edit waits for a person. A person's own edit still takes effect at once, and a test needs no case.",
 	strict:
-		"A person, never an agent, answers every edit, test with no case, failure, finding and passed run, and gives a reason. The project can have its tests with no case tracked instead. A policy change and a conflicting edit are handled as under the other presets. Approval by a named role or by two people is not built yet.",
+		"A person, never an agent, answers every edit, test with no case, failure, finding and passed run, and gives a reason. The project can have its tests with no case tracked instead. A policy change and a conflicting edit are handled as under the other presets. Custom clauses can require a named role. Approval by two people is not built yet.",
 };
 
 /** The questions the guide lists, each with the facts such a question carries when the server raises it. */
@@ -69,8 +69,9 @@ export function whoAnswers(clause: Clause): string {
 			return `An admin${ask.notProducer ? " who did not report it" : ""}${reason}${agents}`;
 		}
 		default: {
-			const _exhaustive: never = ask.who;
-			return _exhaustive;
+			const who: `role:${string}` = ask.who;
+			const agents = { answer: ", agents included", advise: "; agents advise", none: ", not an agent" }[ask.agents];
+			return `A member with role ${who.slice(5)}${ask.notProducer ? " who did not report it" : ""}${reason}${agents}`;
 		}
 	}
 }

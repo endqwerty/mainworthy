@@ -352,7 +352,7 @@ export const TimelineReply = z.object({
 	questions: z.array(QuestionItem),
 });
 export const CheckReply = z.looseObject({ problems: z.array(Problem), counts });
-const Grant = z.looseObject({ project: text, can: texts });
+const Grant = z.looseObject({ project: text, can: texts, roles: texts.default([]) });
 const Project = z.looseObject({
 	key: text,
 	name: text,

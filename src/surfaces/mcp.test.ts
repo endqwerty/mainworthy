@@ -13,9 +13,11 @@ import { encode } from "gpt-tokenizer/encoding/o200k_base";
 import { z } from "zod";
 import { generateToolReference } from "../../scripts/gen-skill.ts";
 import { harness } from "../../test/helpers.ts";
-import { FindInput } from "../core/ops.ts";
+import type { Ask } from "../core/kinds.ts";
+import { FindInput, type InboxReply, ProposeInput } from "../core/ops.ts";
+import { PRESETS } from "../core/presets.ts";
 import { REPLIES } from "../core/replies.ts";
-import { createToken, listTokens } from "../server/identity/identity.ts";
+import { actorByName, createToken, listTokens } from "../server/identity/identity.ts";
 import { MCP_OPS, OPS } from "../server/ops/index.ts";
 import { invoke, invokeAsync } from "../server/ops/registry.ts";
 import { serve, sessionOf, VERSION } from "./http.ts";
@@ -101,6 +103,41 @@ test("report tools omit the CI-only nothing-required declaration", () => {
 	if (!tool) throw new Error("report");
 	expect(Object.keys(tool.inputSchema.properties ?? {})).toContain("results");
 	expect(Object.keys(tool.inputSchema.properties ?? {})).not.toContain("nothingRequired");
+});
+
+test("propose keeps role selectors out of MCP's listing while core accepts them", () => {
+	const tool = mcpTools().find((entry) => entry.name === "propose");
+	if (!tool) throw new Error("propose");
+	const { properties, required, ...base } = tool.inputSchema;
+	const schema: Record<string, unknown> = {
+		...base,
+		...(properties ? { properties } : {}),
+		...(required ? { required } : {}),
+	};
+	const validate = new AjvJsonSchemaValidator().getValidator(schema);
+	const input = (who: Ask["who"]): ProposeInput => ({
+		edits: [
+			{
+				op: "policy",
+				base: 1,
+				clauses: [
+					{
+						id: "signoff-role",
+						kind: "signoff",
+						when: ["always"],
+						ask: { who, agents: "none", notProducer: true, reason: "required" },
+						blocks: "release",
+					},
+				],
+			},
+		],
+	});
+	const role = input("role:approver");
+	expect(ProposeInput.parse(role)).toEqual(role);
+	for (const who of ["rule", "member", "admin", "author"] satisfies Ask["who"][])
+		expect(validate(input(who)).valid).toBe(true);
+	expect(validate(role).valid).toBe(false);
+	expect(JSON.stringify(tool.inputSchema)).not.toContain("role:");
 });
 
 test("a union left with one choice after hiding is that choice, still compacted", () => {
@@ -298,6 +335,68 @@ test("compact output schemas describe structured results from the registry", () 
 			seq: 1,
 		}).valid,
 	).toBe(true);
+});
+
+test("MCP role approval follows the current grant and requires a reason", async () => {
+	const h = harness();
+	const actor = h.actor("role-reviewer", "human", ["read", "produce", "answer"]);
+	const server = mcpServer(
+		async (op, project, input) =>
+			invoke(h.app, OPS, { op, project, input, actor: (id) => actorByName(h.app.db, actor.name, id) }),
+		async () => ["scratch"],
+	);
+	const client = new Client({ name: "role-client", version: "1" });
+	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+	try {
+		await server.connect(serverTransport);
+		await client.connect(clientTransport);
+		h.call("admin", { do: "grant.set", actor: actor.name, can: ["read", "produce", "answer"], roles: ["approver"] });
+		const proposed = resultOf(
+			await client.callTool({
+				name: "propose",
+				arguments: {
+					edits: [
+						{
+							op: "policy",
+							base: h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version,
+							clauses: PRESETS.strict.clauses.map((clause) =>
+								clause.id === "adopt-any"
+									? { ...clause, ask: { who: "role:approver", agents: "none", notProducer: true, reason: "required" } }
+									: clause,
+							),
+						},
+					],
+				},
+			}),
+			REPLIES.propose,
+		);
+		expect(proposed.status).toBe("open");
+		const policy = h.call<InboxReply>("inbox", { kind: "adopt" }).items[0];
+		if (!policy) throw new Error("no policy question");
+		h.call("decide", { q: policy.q, onEvidence: policy.evidenceHash, answer: { is: "accept" } });
+		h.call("admin", { do: "grant.set", actor: actor.name, can: ["read", "produce", "answer"], roles: [] });
+		h.call("propose", { edits: [{ op: "create", outline: "MCP reviewed case" }] });
+		const question = h.call<InboxReply>("inbox", { kind: "adopt" }).items[0];
+		if (!question) throw new Error("no case question");
+		const decide = (reason: string) =>
+			client.callTool({
+				name: "decide",
+				arguments: { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" }, reason },
+			});
+		expect(resultOf(await decide("reviewed"), z.array(z.object({ status: z.string() })))).toEqual([
+			{ status: "forbidden" },
+		]);
+		h.call("admin", { do: "grant.set", actor: actor.name, can: ["read", "produce", "answer"], roles: ["approver"] });
+		expect(resultOf(await decide(" "), z.array(z.object({ status: z.string() })))).toEqual([{ status: "invalid" }]);
+		expect(resultOf(await decide("independent review"), z.array(z.object({ status: z.string() })))).toEqual([
+			{ status: "decided" },
+		]);
+		expect(h.call<{ title: string }[]>("get", { refs: ["C-1"] })[0]?.title).toBe("MCP reviewed case");
+	} finally {
+		await client.close();
+		await server.close();
+		h.close();
+	}
 });
 
 test.each(["2025-11-25", "2026-07-28"])(

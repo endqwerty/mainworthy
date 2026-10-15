@@ -83,6 +83,10 @@ test("who answers, for each way a clause can ask", () => {
 	const base: Ask = { who: "member", agents: "none", notProducer: false, reason: "optional" };
 	const of = (more: Partial<Ask>, answer?: unknown) =>
 		whoAnswers({ id: "c", kind: "adopt", when: ["always"], blocks: "nothing", ask: { ...base, ...more }, answer });
+	expect(of({ who: "role:approver", reason: "required", notProducer: true })).toBe(
+		"A member with role approver who did not report it, with a reason, not an agent",
+	);
+
 	expect(of({ who: "rule" }, { is: "accept" })).toBe("By rule: Accept");
 	expect(of({ who: "rule" })).toBe("By rule");
 	expect(of({ who: "admin", agents: "answer" })).toBe("An admin, agents included");

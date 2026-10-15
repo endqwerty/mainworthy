@@ -1,7 +1,7 @@
 // The operations that produce evidence, request it, or decide: propose, report, claim, plan, decide.
 // Each composes the owning modules; none of them writes a table itself.
 import { contentHash } from "../../core/hash.ts";
-import type { ActorKind } from "../../core/kinds.ts";
+import { type ActorKind, Ask, describeAsk } from "../../core/kinds.ts";
 import {
 	AnnounceInput,
 	ChangeInput,
@@ -115,16 +115,19 @@ export function propose(ctx: Ctx, input: ProposeInput): ProposeReply {
 		const effects = raised.effects as { cases?: ProposeReply["cases"]; rejected?: boolean };
 		return { ...base, status: effects.rejected ? "rejected" : "adopted", needs: null, cases: effects.cases ?? [] };
 	}
-	const needs = json<{ who: string }>(raised.question.ask).who;
+	const ask = Ask.parse(json(raised.question.ask));
+	const needs = ask.who;
 	return {
 		...base,
 		status: sealed.conflicts.length > 0 ? "conflict" : "open",
 		needs:
 			sealed.conflicts.length > 0
 				? `the case changed since the base you named: answer ${questionRef(raised.question)} with a merge, or reject it and propose again on the current version`
-				: needs === "admin"
-					? "an admin"
-					: "a member who is not an agent",
+				: needs.startsWith("role:")
+					? describeAsk(ask)
+					: needs === "admin"
+						? "an admin"
+						: "a member who is not an agent",
 		cases: [],
 	};
 }

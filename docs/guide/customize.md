@@ -147,10 +147,10 @@ Some things look like settings and are not. Each of these is the same on every i
 - A pipeline holds `read` and `record` at most, whatever its grant says.
 - Three named presets. A policy with different clauses is called `custom`. Settings edits its clauses under Policy.
 - The shape of a case: a title, preconditions, steps with expected results, methods, an automation intent, tags, a folder and the requirements it covers. A case can carry free `fields` of text in its Markdown, and project definitions can require values or limit them to a choice. The case editor does not show or edit field values; use Markdown or a `propose` body. [Policy](./policy.md#custom-fields) explains the definitions.
-- Sign-in is by token, or for a person by a name and a password or a passkey, which an admin's invitation link sets up. There is no single sign-on, no second factor beside a password, and no mail: a lost password is replaced through a recovery link. A password is 12 to 256 characters and has no other rule. A token works until you revoke it or until the end you gave it.
+- Sign-in is by token, or for a person by a name and a password or a passkey, which an admin's invitation link sets up. A password can require an authenticator code. There is no single sign-on or mail: a lost password is replaced through a recovery link. A password is 12 to 256 characters and has no other rule. A token works until you revoke it or until the end you gave it.
 - The database is one SQLite file.
 
-These are not built yet: stable-trunk flakiness detection, quarantine entry and exit, a requirements coverage matrix, sign-off by a named role or by two people, attachments, a gate check posted to your code host, importers from other tools, and reports or dashboards.
+These are not built yet: stable-trunk flakiness detection, quarantine entry and exit, a requirements coverage matrix, two-person approval, frozen evidence, gap waivers, importers from other tools, and reports or dashboards.
 
 ## See also
 

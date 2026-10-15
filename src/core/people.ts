@@ -203,6 +203,7 @@ export const InvitationRow = z.object({
 		z.object({
 			project: z.string(),
 			can: z.array(z.string()),
+			roles: z.array(z.string()).default([]),
 		}),
 	),
 });

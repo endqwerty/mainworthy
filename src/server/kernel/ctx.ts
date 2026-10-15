@@ -1,9 +1,9 @@
 // The context an operation runs in: who, on which project, at what time and with which sequence number.
-import type { ActorKind, Capability } from "../../core/kinds.ts";
+import type { ActorKind, Capability, Role } from "../../core/kinds.ts";
 import type { App } from "./app.ts";
 import { type Db, sql } from "./db.ts";
 
-export type Actor = { id: number; kind: ActorKind; name: string; can: readonly Capability[] };
+export type Actor = { id: number; kind: ActorKind; name: string; can: readonly Capability[]; roles?: readonly Role[] };
 
 export type ProjectRow = { id: number; org: number; key: string; name: string; seq: number; created_at: number };
 

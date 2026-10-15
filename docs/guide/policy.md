@@ -17,6 +17,7 @@ The `when` column holds the conditions a clause tests. `always` matches every qu
 - A rule. Nobody is asked. The policy gives its answer at once and records it as a decision. A person with the `answer` capability can still overrule it.
 - A member. A person with the `answer` capability.
 - An admin. A person with the `admin` capability.
+- A named role, written as `role:approver`. An actor with `answer` and that role on the project, subject to the clause's rules for agents.
 - The author. The person who wrote the proposal, or an admin.
 
 An agent's answer is one of three things. It counts as a decision, it is shown as advice and a person decides, or it is refused. The table also says whether a person who produced the evidence may answer, and whether the answer needs a reason.
@@ -107,7 +108,7 @@ An admin who is a person accepts the resulting question in Queue or with `decide
 
 `standard` holds an agent's edit for a person. A person's own edit still takes effect at once, and a test needs no case. Two reports that disagree go to a person who did not produce either one.
 
-`strict` asks a person for every edit, test with no case, failure, finding and passed run, and the person gives a reason. No agent answers any of them. Approval by a named role or by two people is not built yet, so `strict` is as far as the product goes today.
+`strict` asks a person for every edit, test with no case, failure, finding and passed run, and the person gives a reason. No agent answers any of them. Custom clauses can require a named role. Two-person approval, frozen evidence, gap waivers and a regulated preset are not built yet.
 
 All three send a change to the policy to an admin, and send a conflicting edit back to its author. The presets differ most in what they ask of people, so this table, built from the presets themselves, shows who answers each question.
 
@@ -117,7 +118,7 @@ All three send a change to the policy to an admin, and send a conflicting edit b
 | --- | --- |
 | `loose` | Edits to cases take effect at once and a test needs no case. A failure already present on the base is excused by rule while its evidence holds. A person answers other failures and findings, and a run that passed closes by itself. |
 | `standard` | An agent's edit waits for a person. A person's own edit still takes effect at once, and a test needs no case. |
-| `strict` | A person, never an agent, answers every edit, test with no case, failure, finding and passed run, and gives a reason. The project can have its tests with no case tracked instead. A policy change and a conflicting edit are handled as under the other presets. Approval by a named role or by two people is not built yet. |
+| `strict` | A person, never an agent, answers every edit, test with no case, failure, finding and passed run, and gives a reason. The project can have its tests with no case tracked instead. A policy change and a conflicting edit are handled as under the other presets. Custom clauses can require a named role. Approval by two people is not built yet. |
 
 Who answers each question:
 
@@ -298,6 +299,39 @@ Choose the first policy when you create a project. In Settings, open Projects an
 Whether each test needs a case is a separate choice. Leave it at "Track without a case" when the cases describe what people check and the pipeline's tests stand beside them. Choose "Create a case for each test" when every test should appear in the suite. Choose "Ask in the queue" when someone links each file's tests by hand.
 
 A policy belongs to one project. A team can run a `loose` scratch project and a `strict` release project on one instance.
+
+## Require a named role
+
+Give a reviewer the `approver` role as described in [People, agents and pipelines](./access.md#named-roles).
+In a custom policy, set the clause's `ask` to:
+
+```json
+{
+	"who": "role:approver",
+	"agents": "none",
+	"notProducer": true,
+	"reason": "required"
+}
+```
+
+Read the current version with `admin` action `policy.show` and include it as `base` alongside the full clause list in a `propose` policy edit.
+Have an admin accept that proposal under the current policy.
+A proposal and its acceptance are refused if a role clause has no eligible holder in the project.
+Assign the role first to an actor with `produce` and `answer` whose kind the clause permits to answer.
+Roles come from personal grants, while teams can supply the required capabilities. Team membership alone gives no named role.
+A role on another project does not count. Removing the last holder after adoption can leave questions waiting until an admin assigns the role again.
+While no eligible holder exists, every policy proposal that keeps the role clause is refused, including settings-only edits.
+Assign an eligible holder again or remove the role clause in the proposal.
+The clause editor preserves existing role selectors. Introduce a new role selector through a policy proposal in the API or CLI.
+Use this `ask` on an adoption clause to require a reviewer who did not write the proposal.
+The reviewer opens the question and answers with a reason. Someone without the role gets `forbidden`; a blank reason gets `invalid`.
+The queue says which role is needed. The same check applies to the web UI, iPhone app, CLI, API and MCP.
+An admin has no implicit role. A role does not override `notProducer` or the clause's rules for agents.
+An agent can hold a role, and its answer counts with `agents: "answer"` when it meets the other conditions.
+Use `agents: "none"` when the sign-off must come from a person.
+
+This is one-person role approval. Mainworthy does not yet collect two independent approvals, freeze evidence, or waive coverage gaps.
+It makes no certification claim.
 
 ## See also
 

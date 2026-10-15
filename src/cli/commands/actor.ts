@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ActorKind, Capability } from "../../core/kinds.ts";
+import { ActorKind, Capability, Role } from "../../core/kinds.ts";
 import { AdminInput } from "../../core/ops.ts";
 import { FORGET_NOTICE } from "../../core/people.ts";
 import { TeamSource } from "../../core/teams.ts";
@@ -15,7 +15,7 @@ const Actors = z.array(
 		disabled: z.boolean(),
 		owner: z.boolean().optional(),
 		teams: z.array(TeamSource).default([]),
-		grants: z.array(z.object({ project: z.string(), can: z.array(Capability) })),
+		grants: z.array(z.object({ project: z.string(), can: z.array(Capability), roles: z.array(Role).default([]) })),
 	}),
 );
 
@@ -23,8 +23,13 @@ export const actorCommand: AdapterCommand = {
 	name: "actor",
 	summary: "List who may do what, change grants, and forget an actor's identity while keeping history.",
 	usage:
-		"actor list | actor grant <name> --can read,record [--project <key>] | actor ungrant <name> [--project <key>] | actor forget <name> --confirm <name>",
+		"actor list | actor grant <name> --can read,record [--roles approver,lead] [--project <key>] | actor ungrant <name> [--project <key>] | actor forget <name> --confirm <name>",
 	flags: [
+		{
+			name: "roles",
+			kind: "strings",
+			description: "Named roles, comma-separated or repeated. Omit to keep; an empty value clears.",
+		},
 		{ name: "can", kind: "strings", description: "Capabilities, comma-separated or repeated." },
 		{ name: "confirm", kind: "string", description: `Repeat the name to confirm forgetting. ${FORGET_NOTICE}` },
 	],
@@ -58,7 +63,10 @@ export const actorCommand: AdapterCommand = {
 					const who = `${actor.kind.padEnd(5)}  ${actor.name}${actor.disabled ? " (forgotten)" : ""}`;
 					if (actor.grants.length === 0 && actor.teams.every((team) => team.grants.length === 0))
 						line(`${who}  no grant`);
-					for (const grant of actor.grants) line(`${who}  ${grant.project}  ${grant.can.join(", ")}`);
+					for (const grant of actor.grants)
+						line(
+							`${who}  ${grant.project}  ${grant.can.join(", ")}${grant.roles.length ? `  roles: ${grant.roles.join(", ")}` : ""}`,
+						);
 					for (const team of actor.teams)
 						for (const grant of team.grants)
 							line(`${who}  ${grant.project}  ${grant.can.join(", ")}  from team ${team.name}`);
@@ -71,13 +79,17 @@ export const actorCommand: AdapterCommand = {
 				do: "grant.set",
 				actor: args.positionals[1],
 				can: args.strings("can"),
+				...(args.has("roles") ? { roles: args.strings("roles") } : {}),
 				...(project ? { project } : {}),
 			});
 			const result = z
-				.object({ actor: z.string(), project: z.string(), can: z.array(Capability) })
+				.object({ actor: z.string(), project: z.string(), can: z.array(Capability), roles: z.array(Role).default([]) })
 				.parse(await client.call("admin", input));
 			if (args.has("json")) printJson(result, args.bool("compact"));
-			else line(`${result.actor} on ${result.project}: ${result.can.join(", ")}`);
+			else
+				line(
+					`${result.actor} on ${result.project}: ${result.can.join(", ")}${result.roles.length ? `; roles: ${result.roles.join(", ")}` : ""}`,
+				);
 			return 0;
 		}
 		if (action === "ungrant") {

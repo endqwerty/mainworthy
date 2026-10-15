@@ -185,6 +185,58 @@ import { PRESETS } from "../../src/core/presets.ts";
 );
 
 (browserAvailable ? test : test.skip)(
+	"policy edits preserve named role selectors",
+	async () => {
+		const server = await fixture({ preset: "loose", mode: "server" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("admin", {
+				do: "token.create",
+				actor: "role-reviewer",
+				kind: "human",
+				can: ["read", "produce", "answer"],
+			});
+			await server.api("admin", {
+				do: "grant.set",
+				actor: "role-reviewer",
+				can: ["read", "produce", "answer"],
+				roles: ["approver"],
+			});
+			const before = Policy.extend({ version: z.number() }).parse(
+				await server.api("admin", { do: "policy.show", project: "scratch" }),
+			);
+			const clauses = before.clauses.map((clause): Policy["clauses"][number] =>
+				clause.id === "failure-any" ? { ...clause, ask: { ...clause.ask, who: "role:approver" } } : clause,
+			);
+			const seed = await server.api("propose", { edits: [{ op: "policy", base: before.version, clauses }] });
+			const q = (await server.api("inbox", { kind: "adopt" })).items.find((item) => item.q === seed.question);
+			if (!q) throw new Error("Policy review missing");
+			await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+			view = await openPage(server, { path: "/p/scratch/settings" });
+			await view.page.getByRole("button", { name: "Edit clauses", exact: true }).click();
+			expect(
+				await view.page
+					.getByRole("row", { name: "Clause failure-any", exact: true })
+					.getByLabel("Who answers")
+					.inputValue(),
+			).toBe("role:approver");
+			await view.page.getByLabel("Flaky hold in days").fill("9");
+			await view.page.getByLabel("Policy change reason").fill("Keep role approval while changing the hold.");
+			await view.page.getByRole("button", { name: "Apply policy" }).click();
+			await view.page.getByText("Custom policy is in force.", { exact: false }).waitFor();
+			const after = Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" }));
+			expect(after.clauses).toEqual(clauses);
+			expect(after.settings.holds.flakyDays).toBe(9);
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+(browserAvailable ? test : test.skip)(
 	"policy edits preserve answers on clauses whose answer field is disabled",
 	async () => {
 		const server = await fixture({ preset: "loose", mode: "server" });

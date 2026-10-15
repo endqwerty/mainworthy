@@ -71,7 +71,7 @@ test("actor list reads main's API 1 reply without teams", async () => {
 					kind: "human",
 					disabled: false,
 					teams: [],
-					grants: [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"] }],
+					grants: [{ project: "*", can: ["read", "record", "produce", "answer", "plan", "admin"], roles: [] }],
 				},
 			]);
 		},
@@ -100,6 +100,70 @@ test("generated admin commands manage teams and actor list attributes their gran
 			(await run(["admin", "--do", "team.member.remove", "--team", "Quality", "--person", "team-person"])).code,
 		).toBe(0);
 		expect((await run(["actor", "list"])).stdout).not.toContain("from team Quality");
+	});
+});
+
+test("actor grant assigns, lists, preserves and clears named roles", async () => {
+	await withInstance(async ({ cli, run, client }) => {
+		await client.call("admin", {
+			do: "token.create",
+			actor: "role-cli",
+			kind: "human",
+			can: ["read", "produce", "answer"],
+		});
+		const assigned = await cli([
+			"actor",
+			"grant",
+			"role-cli",
+			"--project",
+			"scratch",
+			"--can",
+			"read,produce,answer",
+			"--roles",
+			"approver,lead",
+		]);
+		expect([assigned.code, assigned.stdout]).toEqual([
+			0,
+			"role-cli on scratch: read, produce, answer; roles: approver, lead\n",
+		]);
+		expect((await run(["actor", "list"])).stdout).toContain(
+			"scratch  read, record, produce, answer  roles: approver, lead",
+		);
+		const kept = await run([
+			"actor",
+			"grant",
+			"role-cli",
+			"--project",
+			"scratch",
+			"--can",
+			"read,produce,answer",
+			"--json",
+		]);
+		expect(outputWith(z.object({ roles: z.array(z.string()) }), kept).roles).toEqual(["approver", "lead"]);
+		const cleared = await run([
+			"actor",
+			"grant",
+			"role-cli",
+			"--project",
+			"scratch",
+			"--can",
+			"read,produce,answer",
+			"--roles=",
+			"--json",
+		]);
+		expect(outputWith(z.object({ roles: z.array(z.string()) }), cleared).roles).toEqual([]);
+		const invalid = await run([
+			"actor",
+			"grant",
+			"role-cli",
+			"--project",
+			"scratch",
+			"--can",
+			"read",
+			"--roles",
+			"Approver",
+		]);
+		expect(invalid.code).toBe(4);
 	});
 });
 
