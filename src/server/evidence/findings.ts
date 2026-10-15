@@ -1,5 +1,6 @@
 // Review evidence: findings and the review ledger. Owns findings and reviews.
 // A review is evidence that someone looked; it is never a result and never fills an exercise slot.
+import { contentHash } from "../../core/hash.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, sql } from "../kernel/db.ts";
 
@@ -30,6 +31,9 @@ export type ReviewRow = {
 	at: number;
 	seq: number;
 };
+
+export const reviewBasis = (input: { version: string; about: string | null; patch: string | null }): string =>
+	contentHash(input);
 
 const Q = {
 	insertFinding: sql<{

@@ -138,12 +138,13 @@ Record test results in one batch. Give `target` (the commit tested) or `run` (a 
 
 ## claim
 
-Record a review: the cases you read (`reviewed`, as C-311@hash) and your findings. A finding already raised comes back under `known` with its answer, so you do not raise it twice.
+Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `lens` | `string` | yes | The kind of review, for example adversarial-review. |
 | `about` | `string` | no | The change reviewed, for example pr:482. |
+| `patch` | `string` | no | Exact commit from impact's change.head; required for review reuse. |
 | `reviewed` | `array<string>` | no | Cases read, each as C-311@<hash>. Recorded even with no findings. |
 | `findings` | `array<object>` | no |  Default: `[]`. |
 | `findings[].on` | `string` | yes | Where: a case (C-311), a step (C-311#b7), a requirement (req:WEB-290) or a change (pr:482). |

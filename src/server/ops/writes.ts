@@ -51,7 +51,7 @@ import {
 	testRef,
 	unlinkedInFile,
 } from "../evidence/evidence.ts";
-import { insertFinding, insertReview, reviewedAt } from "../evidence/findings.ts";
+import { insertFinding, insertReview, reviewBasis, reviewedAt } from "../evidence/findings.ts";
 import { actorByName, actorLabel } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
@@ -346,7 +346,7 @@ export function claim(ctx: Ctx, input: ClaimInput): ClaimReply {
 		if (!caseText || !hash) throw invalid(`reviewed entry "${entry}": expected C-311@<hash>`);
 		const row = mustCase(ctx.db, ctx.project.id, caseText);
 		if (row.head_hash !== hash) continue; // the case moved since it was read: that review is of an old version
-		const basis = contentHash({ version: row.head_hash, about: input.about ?? null });
+		const basis = reviewBasis({ version: row.head_hash, about: input.about ?? null, patch: input.patch ?? null });
 		if (!reviewedAt(ctx.db, row.id, basis, input.lens, ctx.actor.id)) {
 			insertReview(ctx, { caseId: row.id, version: row.head, basis, lens: input.lens, about: input.about ?? null });
 		}
@@ -415,7 +415,7 @@ export const claimOp = defineOp({
 	needs: "produce",
 	scope: "project",
 	effect: "write",
-	mcp: "Record a review: the cases you read (`reviewed`, as C-311@hash) and your findings. A finding already raised comes back under `known` with its answer, so you do not raise it twice.",
+	mcp: "Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers.",
 	run: claim,
 });
 

@@ -170,8 +170,8 @@ not the same things done worse.
    A decision about a cause recomputes every run that shows it, an older commit's included, so the gate of any
    commit is exact. `test/sequences.ts` and `test/sequences-extended.ts` check these rules after every
    step of random sequences of reports, corrections, plans, answers, withdrawals, reopened runs and expiries.
-9. **The review basis is the case version plus the change key,** not the patch tree hash. A changed patch under
-   the same pull request does not yet invalidate a review. Deferred (#49).
+9. **A review now names its exact commit as well as the case version and change key** (decision 0030, issue #49).
+   A new commit under the same pull request needs another review. The MVP originally kept only the change key.
 10. **The export is the whole instance,** as newline-delimited JSON, imported into an empty instance. Per-project
     export and merge are deferred (#50). Tokens are not exported.
 11. **Operations:** fifteen, not eighteen. `announce`, `attach` and `trace` are deferred (#42, #51, #41).

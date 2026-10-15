@@ -258,6 +258,12 @@ export type FindingIn = z.infer<typeof FindingIn>;
 export const ClaimInput = z.object({
 	lens: z.string().min(1).max(60).describe("The kind of review, for example adversarial-review."),
 	about: z.string().max(120).optional().describe("The change reviewed, for example pr:482."),
+	patch: z
+		.string()
+		.min(7)
+		.max(64)
+		.optional()
+		.describe("Exact commit from impact's change.head; required for review reuse."),
 	reviewed: z
 		.array(z.string())
 		.max(1000)

@@ -751,6 +751,95 @@ describe("unlinked tests", () => {
 });
 
 describe("what an agent reads", () => {
+	type ReviewImpact = {
+		cases: { id: string; hash: string; reviewed?: boolean }[];
+		counts: { cases: number; unreviewed: number };
+		cursor: string;
+	};
+	const reviewFixture = () => {
+		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		h.call("propose", {
+			edits: ["Coupon applies", "Coupon expires"].map((title) => ({
+				op: "create",
+				outline: `${title}\n  Apply coupon > Correct total`,
+				covers: ["WEB-290"],
+			})),
+		});
+		const report = (pr: number, commit: string) =>
+			h.call("report", {
+				target: { commit, pr, title: "WEB-290: fix coupons" },
+				results: [{ test: { case: "C-1" }, outcome: "pass" }],
+			});
+		report(482, "cccc0001");
+		const read = (change = "pr:482", since?: string) => h.call<ReviewImpact>("impact", { change, since }, agent);
+		const initial = read();
+		const claim = (patch: string, cases = initial.cases, about = "pr:482") =>
+			h.call(
+				"claim",
+				{
+					lens: "adversarial-review",
+					about,
+					patch,
+					reviewed: cases.map((row) => `${row.id}@${row.hash}`),
+				},
+				agent,
+			);
+		return { agent, report, read, claim, initial };
+	};
+
+	test("a review of one change does not review another change at the same commit and case version", () => {
+		const f = reviewFixture();
+		f.claim("cccc0001");
+		expect(f.read().counts).toMatchObject({ cases: 2, unreviewed: 0 });
+		f.report(483, "cccc0001");
+		expect(f.read("pr:483").counts).toMatchObject({ cases: 2, unreviewed: 2 });
+	});
+
+	test("A5: a pushed fix invalidates reviews, including unchanged cases requested since a cursor", () => {
+		const f = reviewFixture();
+		f.claim("cccc0001");
+		const reviewed = f.read();
+		f.report(482, "cccc0002");
+		expect(f.read().counts).toMatchObject({ cases: 2, unreviewed: 2 });
+		expect(f.read("pr:482", reviewed.cursor)).toMatchObject({
+			cases: f.initial.cases,
+			counts: { cases: 2, unreviewed: 2 },
+		});
+		// A late claim must keep the patch actually read, even after the head moved.
+		f.claim("cccc0001");
+		expect(f.read().counts.unreviewed).toBe(2);
+		f.claim("cccc0002");
+		expect(f.read().counts.unreviewed).toBe(0);
+		const timeline = h.call<{ entries: { t: string }[] }>("timeline", { ref: "C-1" });
+		expect(timeline.entries.filter((entry) => entry.t === "review")).toHaveLength(2);
+	});
+
+	test("a review without an exact change basis, or by another caller, cannot cover the change", () => {
+		const f = reviewFixture();
+		const reviewed = f.initial.cases.map((row) => `${row.id}@${row.hash}`);
+		for (const basis of [{}, { about: "pr:482" }, { patch: "cccc0001" }]) {
+			h.call("claim", { lens: "review", reviewed, ...basis }, f.agent);
+			expect(f.read().counts.unreviewed).toBe(2);
+		}
+		f.claim("cccc0001");
+		expect(f.read().counts.unreviewed).toBe(0);
+		expect(h.call<ReviewImpact>("impact", { change: "pr:482" }).counts.unreviewed).toBe(2);
+	});
+
+	test("A5: unchanged patch preserves reviews and a case edit invalidates only that case", () => {
+		const f = reviewFixture();
+		f.claim("cccc0001");
+		const reviewed = f.read();
+		f.report(482, "cccc0001");
+		expect(f.read().counts).toMatchObject({ cases: 2, unreviewed: 0 });
+		expect(f.read("pr:482", reviewed.cursor).cases).toEqual([]);
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon applies exactly" } }] });
+		const moved = f.read("pr:482", reviewed.cursor);
+		expect(moved.counts).toMatchObject({ cases: 1, unreviewed: 1 });
+		expect(moved.cases.map((row) => row.id)).toEqual(["C-1"]);
+		expect(f.read().counts).toMatchObject({ cases: 2, unreviewed: 1 });
+	});
+
 	test("impact names the cases a change touches and why; since returns only what moved; get skips what the caller holds", () => {
 		use("standard", "ask");
 		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
@@ -802,7 +891,11 @@ describe("what an agent reads", () => {
 		expect(h.call<Record<string, unknown>[]>("get", { refs: ["C-1"], unless: { "C-1": held } }, agent)).toEqual([
 			{ ref: "C-1", unchanged: true, hash: held },
 		]);
-		h.call("claim", { lens: "adversarial-review", about: "pr:482", reviewed: [`C-1@${held}`], findings: [] }, agent);
+		h.call(
+			"claim",
+			{ lens: "adversarial-review", about: "pr:482", patch: "cccc0002", reviewed: [`C-1@${held}`], findings: [] },
+			agent,
+		);
 		expect(first(h.call<Impact>("impact", { change: "pr:482" }, agent).cases).reviewed).toBe(true);
 		expect(first(h.call<Impact>("impact", { change: "pr:482", ledger: false }, agent).cases).reviewed).toBeUndefined();
 
