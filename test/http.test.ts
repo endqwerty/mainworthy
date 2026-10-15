@@ -1,6 +1,6 @@
 // The HTTP surface on a real listener: who gets in, in each mode, and that every operation is there.
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,6 +46,58 @@ function boot(
 	running.push(instance);
 	return instance;
 }
+
+test("one data directory admits one server, releases on stop, and releases after failed startup", async () => {
+	const first = boot("local");
+	const previousWait = process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
+	process.env.MAINWORTHY_LOCK_WAIT_SECONDS = "0";
+	try {
+		expect(() => boot("local", null, first.app.config.dataDir)).toThrow(
+			"another server is already using this data directory",
+		);
+		const alias = join(first.app.config.dataDir, "alias");
+		symlinkSync(first.app.config.dataDir, alias);
+		expect(() => boot("local", null, alias)).toThrow("another server is already using this data directory");
+	} finally {
+		if (previousWait === undefined) delete process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
+		else process.env.MAINWORTHY_LOCK_WAIT_SECONDS = previousWait;
+	}
+	expect((await fetch(`${first.url}/healthz`)).status).toBe(200);
+	await first.stop();
+	const second = boot("local", null, first.app.config.dataDir);
+	expect((await fetch(`${second.url}/healthz`)).status).toBe(200);
+	await second.stop();
+	const config = { ...first.app.config };
+	expect(() =>
+		start(
+			config,
+			() => {
+				throw new Error("extra failed");
+			},
+			{ readers: 0 },
+		),
+	).toThrow("extra failed");
+	const third = boot("local", null, config.dataDir);
+	expect((await fetch(`${third.url}/healthz`)).status).toBe(200);
+});
+
+test("an invalid lock wait refuses startup before creating the data directory", () => {
+	const parent = mkdtempSync(join(tmpdir(), "mainworthy-lock-setting-"));
+	dirs.push(parent);
+	const previousWait = process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
+	try {
+		for (const value of ["-1", "NaN", "Infinity", "1e309", "later"]) {
+			process.env.MAINWORTHY_LOCK_WAIT_SECONDS = value;
+			expect(() => boot("local", null, join(parent, "absent"))).toThrow(
+				"MAINWORTHY_LOCK_WAIT_SECONDS must be a finite nonnegative number of seconds",
+			);
+			expect(existsSync(join(parent, "absent"))).toBe(false);
+		}
+	} finally {
+		if (previousWait === undefined) delete process.env.MAINWORTHY_LOCK_WAIT_SECONDS;
+		else process.env.MAINWORTHY_LOCK_WAIT_SECONDS = previousWait;
+	}
+});
 
 async function post<T>(
 	instance: Instance,

@@ -65,6 +65,7 @@ export class Db {
 			PRAGMA cache_size = -65536;
 			PRAGMA temp_store = MEMORY;
 			PRAGMA mmap_size = 268435456;
+			PRAGMA journal_size_limit = 4194304;
 		`);
 		if (options.reader) this.raw.exec("PRAGMA query_only = ON");
 	}

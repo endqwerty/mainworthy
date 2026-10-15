@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { withInstance } from "../cli/test-support.ts";
@@ -127,30 +126,53 @@ test("export pulls fixed chunks and cancels without leaving its spool on disk", 
 				},
 			],
 		});
-		// The spool goes to the temp directory. Other test files export at the same time in other workers, so this
-		// test gives the export a temp directory of its own and looks only there.
-		const shared = process.env.TMPDIR;
-		const own = await mkdtemp(join(tmpdir(), "mainworthy-spool-test-"));
-		process.env.TMPDIR = own;
+		const spool = join(instance.app.config.dataDir, "spool");
+		const session: Session = { via: "local", actor: () => instance.owner };
+		const route = archiveRoutes(instance.app)["/api/export"];
+		if (!route) throw new Error("export route is missing");
+		const response = await route(new Request(`${instance.url}/api/export`), session);
+		if (!response.body) throw new Error("export body is missing");
+		const reader = response.body.getReader();
 		try {
-			const session: Session = { via: "local", actor: () => instance.owner };
-			const route = archiveRoutes(instance.app)["/api/export"];
-			if (!route) throw new Error("export route is missing");
-			const response = await route(new Request(`${instance.url}/api/export`), session);
-			if (!response.body) throw new Error("export body is missing");
-			const reader = response.body.getReader();
 			const first = await reader.read();
 			expect(first.value?.byteLength).toBeLessThanOrEqual(64 * 1024);
-			// The spool is in this directory while the export is read, so the check below looks in the right place.
-			expect((await readdir(own)).filter((name) => name.startsWith("mainworthy-archive-"))).toHaveLength(1);
+			expect((await readdir(spool)).filter((name) => name.startsWith("mainworthy-archive-"))).toHaveLength(1);
+		} finally {
 			await reader.cancel();
 			reader.releaseLock();
-			expect(await readdir(own)).toEqual([]);
-		} finally {
-			if (shared === undefined) delete process.env.TMPDIR;
-			else process.env.TMPDIR = shared;
-			await rm(own, { recursive: true, force: true });
 		}
+		expect(await readdir(spool)).toEqual([]);
+	});
+});
+
+test("imports spool privately on the data filesystem and remove rejected uploads", async () => {
+	await withInstance(async ({ instance }) => {
+		let input: ReadableStreamDefaultController<Uint8Array> | undefined;
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				input = controller;
+				controller.enqueue(new TextEncoder().encode("not an archive"));
+			},
+		});
+		const route = archiveRoutes(instance.app)["/api/import"];
+		if (!route || !input) throw new Error("missing import input");
+		const pending = route(new Request(`${instance.url}/api/import`, { method: "POST", body }), {
+			via: "local",
+			actor: () => instance.owner,
+		});
+		const spool = join(instance.app.config.dataDir, "spool");
+		try {
+			await Bun.sleep(0);
+			const entries = await readdir(spool);
+			expect(entries).toHaveLength(1);
+			const directory = join(spool, entries[0] ?? "missing");
+			expect((await stat(directory)).mode & 0o777).toBe(0o700);
+			expect((await stat(join(directory, "archive.ndjson"))).mode & 0o777).toBe(0o600);
+		} finally {
+			input.close();
+		}
+		expect((await pending).status).toBe(400);
+		expect(await readdir(spool)).toEqual([]);
 	});
 });
 

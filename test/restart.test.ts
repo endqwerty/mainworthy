@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Envelope } from "../src/core/api.ts";
 import type { GateStatus, ReportReceipt } from "../src/core/ops.ts";
+import { defaultConfig } from "../src/server/kernel/app.ts";
+import { start } from "../src/server/start.ts";
 
 const ENTRY = resolve(import.meta.dir, "../src/cli/main.ts");
 const dirs: string[] = [];
@@ -49,6 +51,105 @@ async function serve(dataDir: string): Promise<{ url: string; child: ReturnType<
 		printed += decoder.decode(chunk.value, { stream: true });
 	}
 }
+
+test("another server process is refused and a killed server leaves no stale lock", async () => {
+	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-lock-process-"));
+	dirs.push(dataDir);
+	const first = await serve(dataDir);
+	const started = performance.now();
+	const duplicate = Bun.spawn([process.execPath, ENTRY, "serve"], {
+		env: {
+			PATH: process.env.PATH ?? "",
+			MAINWORTHY_DATA: dataDir,
+			MAINWORTHY_PORT: "0",
+			MAINWORTHY_OWNER: "robin",
+			MAINWORTHY_MODE: "local",
+			MAINWORTHY_READERS: "0",
+			MAINWORTHY_LOCK_WAIT_SECONDS: "0.15",
+		},
+		stdout: "pipe",
+		stderr: "pipe",
+		stdin: "ignore",
+	});
+	children.push(duplicate);
+	const [code, stderr] = await Promise.all([duplicate.exited, new Response(duplicate.stderr).text()]);
+	expect(code).toBe(4);
+	expect(performance.now() - started).toBeGreaterThanOrEqual(150);
+	expect(stderr.split("waiting for another server on the data directory")).toHaveLength(2);
+	expect(stderr).toContain("another server is already using this data directory");
+	expect((await fetch(`${first.url}/healthz`)).status).toBe(200);
+	first.child.kill("SIGKILL");
+	await first.child.exited;
+	const restarted = await serve(dataDir);
+	expect((await fetch(`${restarted.url}/healthz`)).status).toBe(200);
+});
+
+test("a replacement server waits for a stopping server to release the data directory", async () => {
+	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-lock-handoff-"));
+	dirs.push(dataDir);
+	const first = start(
+		defaultConfig({ MAINWORTHY_DATA: dataDir, MAINWORTHY_PORT: "0", MAINWORTHY_OWNER: "robin" }),
+		() => ({ ui: null }),
+		{ readers: 0 },
+	);
+	let release = () => {};
+	const pending = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const held = first.app.gate.run(() => pending);
+	const stopping = first.stop();
+	const replacement = Bun.spawn([process.execPath, ENTRY, "serve"], {
+		env: {
+			PATH: process.env.PATH ?? "",
+			MAINWORTHY_DATA: dataDir,
+			MAINWORTHY_PORT: "0",
+			MAINWORTHY_OWNER: "robin",
+			MAINWORTHY_MODE: "local",
+			MAINWORTHY_READERS: "0",
+			MAINWORTHY_LOCK_WAIT_SECONDS: "0.5",
+		},
+		stdout: "pipe",
+		stderr: "pipe",
+		stdin: "ignore",
+	});
+	children.push(replacement);
+	let stderr = "";
+	try {
+		const reader = replacement.stderr.getReader();
+		try {
+			while (!stderr.includes("waiting for another server on the data directory")) {
+				const chunk = await reader.read();
+				if (chunk.done) break;
+				stderr += new TextDecoder().decode(chunk.value);
+			}
+		} finally {
+			reader.releaseLock();
+		}
+		expect(stderr).toContain("waiting for another server on the data directory");
+	} finally {
+		release();
+		await held;
+		await stopping;
+	}
+	const reader = replacement.stdout.getReader();
+	let stdout = "";
+	let url: string | undefined;
+	try {
+		while (!url) {
+			const chunk = await reader.read();
+			if (chunk.done) throw new Error(`replacement failed: ${stdout} ${stderr}`);
+			stdout += new TextDecoder().decode(chunk.value);
+			url = /http:\/\/127\.0\.0\.1:\d+/.exec(stdout)?.[0];
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	expect((await fetch(`${url}/healthz`)).status).toBe(200);
+	replacement.kill("SIGTERM");
+	expect(await replacement.exited).toBe(0);
+	for await (const chunk of replacement.stderr) stderr += new TextDecoder().decode(chunk);
+	expect(stderr.split("waiting for another server on the data directory")).toHaveLength(2);
+});
 
 async function call<T>(url: string, op: string, input: unknown): Promise<T> {
 	const response = await fetch(`${url}/api/p/scratch/${op}`, {

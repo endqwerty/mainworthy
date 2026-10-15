@@ -15,6 +15,10 @@ While the server runs, it also keeps a `-wal` and a `-shm` file beside the datab
 
 On `SIGTERM` or `SIGINT`, the server stops accepting connections and closes its change streams. It gives requests already in flight five seconds to send their replies before closing the remaining connections, then stops the reader threads and closes the database. A request that outlasts this wait can lose its reply. If you retry a write, send the same command id, `cmd`, so it is not applied twice. The CLI and web UI send command ids.
 
+With reader threads enabled, a background thread checkpoints every half second, and the writer keeps a 20,000-page automatic checkpoint fallback. Once read snapshots finish and a checkpoint completes, the next write can reuse the log and trim it to at most 4 MiB. The retention limit does not change when checkpoints happen. Active snapshots and large transactions can grow the log past 4 MiB, so keep room for them as well as the database.
+
+The server also keeps `server.lock` and uses `spool/` for archive transfers, both inside the data directory. Exports stage the whole archive before sending it; imports stage the whole upload before reading it. Leave enough free space on that filesystem for every concurrent transfer. Each temporary directory is private, and each archive file is readable and writable by its owner only. Completed, cancelled and rejected transfers remove their temporary files. A killed process can leave files in `spool/`; after stopping the server, you can remove that directory.
+
 The file holds every project, case and version, every result, decision and policy, and the actors, grants and a hash of each token. Treat it like the data of any private system. What it keeps about people, and for how long, is on the [privacy](./privacy.md) page.
 
 ## Export everything
