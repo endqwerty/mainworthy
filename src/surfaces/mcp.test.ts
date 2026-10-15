@@ -17,7 +17,7 @@ import { REPLIES } from "../core/replies.ts";
 import { createToken, listTokens } from "../server/identity/identity.ts";
 import { MCP_OPS, OPS } from "../server/ops/index.ts";
 import { invoke, invokeAsync } from "../server/ops/registry.ts";
-import { serve, sessionOf } from "./http.ts";
+import { serve, sessionOf, VERSION } from "./http.ts";
 import { mcpRoute, mcpServer, mcpTools, TOOL_TOKEN_BUDGET } from "./mcp.ts";
 
 const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
@@ -210,7 +210,23 @@ test.each(["2025-11-25", "2026-07-28"])(
 			await client.connect(clientTransport);
 			const definitions = await client.listTools();
 			expect(client.getNegotiatedProtocolVersion()).toBe(version);
-			expect(definitions.tools).toEqual(mcpTools());
+			if (version === "2025-11-25") {
+				expect(definitions).toEqual({ tools: mcpTools() });
+			} else {
+				const listed = {
+					tools: mcpTools(),
+					ttlMs: 0,
+					cacheScope: "private",
+					_meta: { "io.modelcontextprotocol/serverInfo": { name: "mainworthy", version: VERSION } },
+				};
+				// The client's listTools schema strips resultType; check the full envelope on the wire too.
+				expect(definitions).toEqual(listed);
+				expect(wire.map((message) => JSON.parse(message))).toContainEqual({
+					jsonrpc: "2.0",
+					id: expect.any(Number),
+					result: { ...listed, resultType: "complete" },
+				});
+			}
 			const call = (name: string, args: Record<string, unknown>) => client.callTool({ name, arguments: args });
 			const initial = resultOf(
 				await call("impact", { files: ["tests/checkout.spec.ts"] }),

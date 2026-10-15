@@ -13,6 +13,7 @@ import {
 	missingTexts,
 	NOTICES,
 	notices,
+	packagesFromInputs,
 	readVendored,
 	unapproved,
 } from "../scripts/licences.ts";
@@ -80,6 +81,66 @@ describe("the third-party notices", () => {
 		expect(createHash("sha256").update(read("licences/npm/saxes@6.0.0/LICENSE")).digest("hex")).toBe(
 			"0fac2374380621b22e6b50451057721a9c52935b02d16d106a9f04897f061d0e",
 		);
+	});
+
+	test("the notices include exact versions of packages embedded inside bundled SDK inputs", async () => {
+		const packages = await bundledPackages();
+		const text = await notices();
+		for (const [name, version, licence] of [
+			["ajv", "8.18.0", "MIT"],
+			["ajv-formats", "3.0.1", "MIT"],
+			["content-type", "1.0.5", "MIT"],
+			["fast-deep-equal", "3.1.3", "MIT"],
+			["fast-uri", "3.1.0", "BSD-3-Clause"],
+			["json-schema-traverse", "1.0.0", "MIT"],
+		]) {
+			expect(packages.find((p) => p.name === name)?.version, name).toBe(version);
+			expect(text, name).toContain(`| ${name} | ${version} | ${licence} |`);
+		}
+	});
+
+	test("a bundled vendored region requires its own exact-version manifest and licence text", () => {
+		const root = mkdtempSync(join(tmpdir(), "mainworthy-vendored-licences-"));
+		const wrapper = join(root, "node_modules/wrapper");
+		const saved = join(root, "licences/npm/@robin/dependency/2.0.0");
+		const input = "node_modules/wrapper/dist.mjs";
+		try {
+			mkdirSync(wrapper, { recursive: true });
+			writeFileSync(
+				join(wrapper, "package.json"),
+				JSON.stringify({ name: "wrapper", version: "1.0.0", license: "MIT" }),
+			);
+			writeFileSync(join(wrapper, "LICENSE"), "wrapper licence");
+			const region =
+				"//#region ../../node_modules/.pnpm/@robin+dependency@2.0.0_peer@1.0.0/node_modules/@robin/dependency/index.js\n";
+			writeFileSync(join(root, input), region.repeat(2));
+			expect(() => packagesFromInputs([input], root)).toThrow("@robin/dependency@2.0.0 is embedded");
+			mkdirSync(saved, { recursive: true });
+			writeFileSync(
+				join(saved, "package.json"),
+				JSON.stringify({ name: "@robin/dependency", version: "1.0.0", license: "MIT" }),
+			);
+			writeFileSync(join(saved, "LICENSE"), "dependency licence");
+			expect(() => packagesFromInputs([input], root)).toThrow(
+				"must hold the published manifest of @robin/dependency@2.0.0",
+			);
+			writeFileSync(
+				join(saved, "package.json"),
+				JSON.stringify({ name: "@robin/dependency", version: "2.0.0", license: "MIT" }),
+			);
+			expect(packagesFromInputs([input], root).map(({ name, version }) => [name, version])).toEqual([
+				["@robin/dependency", "2.0.0"],
+				["wrapper", "1.0.0"],
+			]);
+			rmSync(join(saved, "LICENSE"));
+			expect(() => packagesFromInputs([input], root)).toThrow("@robin/dependency ships no licence file");
+			writeFileSync(join(root, input), region.replace("2.0.0_peer@1.0.0", "2.0.1(peer@1.0.0)"));
+			expect(() => packagesFromInputs([input], root)).toThrow("@robin/dependency@2.0.1 is embedded");
+			writeFileSync(join(root, input), "export const value = 1;\n");
+			expect(packagesFromInputs([input], root).map((p) => p.name)).toEqual(["wrapper"]);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	test("every licence text the notices name is in licences/", () => {
