@@ -3,6 +3,7 @@ import { parseReport, ReportFormat } from "../../surfaces/formats/report.ts";
 import { assertPositionals } from "../args.ts";
 import { CliError } from "../errors.ts";
 import { line, printJson, warning } from "../output.ts";
+import { loadReportAttachments } from "../report-attachments.ts";
 import { detectedTarget, reportRoot, reportTarget, TARGET_FLAGS } from "../target.ts";
 import type { AdapterCommand } from "./types.ts";
 
@@ -18,7 +19,7 @@ function identity(target: TargetIn | undefined, receipt: ReportReceipt): string 
 export function printReceipt(input: {
 	project: string;
 	report: ReportInput;
-	receipt: ReportReceipt;
+	receipt: ReportReceipt & { skippedAttachments?: number };
 	url: string;
 }): void {
 	const { report, receipt } = input;
@@ -57,6 +58,7 @@ export function printReceipt(input: {
 		line(`  ${receipt.declined.length} case/version claims declined; results kept without a case`);
 		for (const declined of receipt.declined) warning(`result ${declined.index + 1}: ${declined.reason}`);
 	}
+	if (receipt.skippedAttachments) line(`  ${count(receipt.skippedAttachments)} attachments skipped; results kept`);
 	const gate = receipt.gate;
 	const reason = gate?.reason.replace(new RegExp(`^${gate.verdict}:\\s*`), "");
 	line(
@@ -79,6 +81,12 @@ export const reportCommand: AdapterCommand = {
 			name: "format",
 			kind: "string",
 			description: "Report format: auto (default), junit, playwright, jest, vitest, pytest (pytest-json-report), trx.",
+		},
+		{
+			name: "attachments",
+			kind: "string",
+			description:
+				"Read JUnit attachment files inside this directory. Unavailable or disallowed files are skipped with a warning.",
 		},
 		{ name: "session", kind: "string", description: "Named test session with no build identity." },
 		{ name: "run", kind: "string", description: "Planned run these results are for." },
@@ -105,11 +113,20 @@ export const reportCommand: AdapterCommand = {
 		const results: ReportInput["results"] = [];
 		const format = ReportFormat.parse(args.value("format") ?? "auto");
 		const rootDir = reportRoot();
+		const attachmentBudget = { bytes: 0, files: 0 };
+		let skippedAttachments = 0;
 		for (const file of args.positionals) {
 			const parsed = parseReport(await Bun.file(file).text(), { file, format, rootDir });
-			results.push(...parsed.results);
+			const loaded = loadReportAttachments(parsed, file, args.value("attachments"), attachmentBudget);
+			results.push(...loaded.results);
+			skippedAttachments += loaded.skipped;
+			for (const message of loaded.warnings) warning(message);
 			for (const message of parsed.warnings) warning(message);
 		}
+		if (skippedAttachments && !args.has("attachments"))
+			warning(
+				"Attachment markers ignored; use --attachments <directory> to permit reading local files. Results are kept.",
+			);
 		const job = args.value("job") ?? detected.job;
 		const attempt = args.number("attempt") ?? detected.attempt;
 		const report = ReportInput.parse({
@@ -121,7 +138,7 @@ export const reportCommand: AdapterCommand = {
 			results,
 			...(nothingRequired ? { nothingRequired: true } : {}),
 		});
-		const receipt = await client.call("report", report);
+		const receipt = { ...(await client.call("report", report)), skippedAttachments };
 		// A repeat is answered with the receipt of the first upload, gate line included. That is how a lost reply is
 		// recovered; the gate may have moved since, and the receipt cannot know.
 		if (!receipt.fresh) {

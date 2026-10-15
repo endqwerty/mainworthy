@@ -15,6 +15,7 @@ import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts
 import { invalid } from "../kernel/errors.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
 import { type CaseRow, caseById, caseRef, findCase, versionOf } from "../suite/suite.ts";
+import { recordAttachments } from "./attachments.ts";
 
 export type TestRow = {
 	id: number;
@@ -1017,6 +1018,7 @@ export function* applySteps(
 			corrects,
 			at: ctx.now,
 		});
+		recordAttachments(ctx, lastId, input.attachments ?? []);
 		const decisive = (o: Outcome) => (o === "pass" ? "pass" : o === "fail" || o === "error" ? "fail" : null);
 		const flipped =
 			previous !== null &&

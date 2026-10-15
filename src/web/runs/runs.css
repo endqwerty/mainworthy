@@ -301,3 +301,31 @@
 		overflow: visible;
 	}
 }
+
+.result-attachments {
+	list-style: none;
+	padding: 0;
+	margin: 8px 0;
+}
+.result-attachment {
+	margin: 8px 0;
+}
+.result-attachment-image {
+	display: block;
+	max-width: 100%;
+	max-height: 320px;
+	object-fit: contain;
+	margin-bottom: 4px;
+}
+.run-attachment-picker {
+	display: grid;
+	gap: 4px;
+	font-size: 12px;
+}
+.run-attachment-picker input {
+	max-width: 100%;
+}
+.run-attachment-picker ul {
+	margin: 0;
+	padding-left: 16px;
+}

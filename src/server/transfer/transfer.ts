@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { Attachment, AttachmentData } from "../../core/attachments.ts";
+import { attachmentType, type BlobStore, blobHash } from "../kernel/blobs.ts";
 import type { Db } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
 import { ARCHIVE_VERSION } from "../kernel/migrate.ts";
@@ -29,7 +31,7 @@ const Value = z.union([
 	z.null(),
 ]);
 const Entry = z.union([
-	z.strictObject({ t: z.string(), r: jsonMap(Value) }),
+	z.strictObject({ t: z.string(), r: jsonMap(Value), blob: z.string().optional() }),
 	z.strictObject({ end: z.literal(true), rows: Count, sha256: z.string().regex(/^[a-f0-9]{64}$/) }),
 ]);
 type Value = z.infer<typeof Value>;
@@ -149,6 +151,7 @@ function discoverTables(db: Db): Table[] {
 
 /** Tables whose project is held by a parent rather than their own row. Unknown unscoped tables fail closed. */
 const PROJECT_PARENT: Readonly<Record<string, { column: string; table: string }>> = {
+	attachments: { column: "result", table: "results" },
 	answers: { column: "question", table: "questions" },
 	versions: { column: "case_id", table: "cases" },
 	placements: { column: "case_id", table: "cases" },
@@ -228,7 +231,7 @@ function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<st
 export function exportArchive(
 	db: Db,
 	write: (chunk: string) => void,
-	options: { now?: number; project?: string } = {},
+	options: { now?: number; project?: string; blobs?: BlobStore } = {},
 ): ExportedArchive {
 	const exportedAt = options.now ?? Date.now();
 	if (!Number.isSafeInteger(exportedAt) || exportedAt < 0)
@@ -279,7 +282,15 @@ export function exportArchive(
 					} catch {
 						throw invalid(`cannot export table ${table.name} losslessly: stored TEXT contains invalid UTF-8`);
 					}
-					append(`{"t":${JSON.stringify(table.name)},"r":${json}}\n`);
+					let blob = "";
+					if (table.name === "attachments") {
+						const item = Attachment.parse(JSON.parse(json));
+						const bytes = options.blobs?.get(item.hash);
+						if (!bytes || bytes.length !== item.size || attachmentType(bytes) !== item.type)
+							throw invalid(`attachment ${item.id} is missing or damaged; restore its content before exporting`);
+						blob = `,"blob":${JSON.stringify(Buffer.from(bytes).toString("base64"))}`;
+					}
+					append(`{"t":${JSON.stringify(table.name)},"r":${json}${blob}}\n`);
 					rows++;
 				}
 			} finally {
@@ -366,7 +377,7 @@ function importTransaction<T>(db: Db, fn: () => T): T {
  * A caller with pending deferred constraints and global deferral off must resolve those references first,
  * because restoring that PRAGMA would otherwise discard its pending constraint checks.
  */
-export function importArchive(db: Db, lines: Iterable<string>): ArchiveCounts {
+export function importArchive(db: Db, lines: Iterable<string>, options: { blobs?: BlobStore } = {}): ArchiveCounts {
 	return importTransaction(db, () => {
 		if (db.raw.query("SELECT 1 FROM projects LIMIT 1").get()) {
 			throw new OpError(
@@ -422,6 +433,20 @@ export function importArchive(db: Db, lines: Iterable<string>): ArchiveCounts {
 				const table = tables.get(entry.t);
 				const insert = inserts.get(entry.t);
 				if (!table || !insert) throw invalid(`unknown or excluded archive table ${entry.t}`);
+				if (entry.t === "attachments") {
+					const item = Attachment.safeParse(Object.fromEntries(entry.r));
+					const content = AttachmentData.safeParse(entry.blob);
+					if (!item.success || !content.success || !options.blobs)
+						throw invalid("archive attachment metadata, content or storage is missing or invalid");
+					const bytes = Buffer.from(content.data, "base64");
+					if (
+						bytes.length !== item.data.size ||
+						blobHash(bytes) !== item.data.hash ||
+						attachmentType(bytes) !== item.data.type
+					)
+						throw invalid("archive attachment does not match its hash, size or content type");
+					options.blobs.put(bytes);
+				} else if (entry.blob !== undefined) throw invalid("only an attachment row may carry blob content");
 				const columns = new Set(table.columns);
 				for (const column of entry.r.keys()) {
 					if (!columns.has(column)) throw invalid(`unknown column ${entry.t}.${column}`);

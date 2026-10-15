@@ -407,6 +407,25 @@ test("scoped agent edits wait for a person through HTTP", async () => {
 	expect(await checked("admin", { do: "policy.show", project: "scratch" })).toMatchObject({ clauses, settings });
 });
 
+async function sweepAttachmentReplies(checked: Awaited<ReturnType<typeof replySweep>>["checked"]) {
+	const report = z.object({ results: z.array(z.number()).min(1) }).parse(
+		await checked("report", {
+			target: { session: "attachment-schema" },
+			results: [
+				{ test: { key: "attachment-schema" }, outcome: "fail", attachments: [{ name: "report.txt", data: "eA==" }] },
+			],
+		}),
+	);
+	const result = report.results[0];
+	const attachment = z
+		.object({ id: z.number() })
+		.parse(await checked("attach", { result, attachment: { name: "appended.html", data: "eA==" } }));
+	await checked("attachment", { result });
+	await checked("attachment", { result, id: attachment.id });
+	await checked("attachment", { result, id: 99999999 }, {}, "not_found");
+	await checked("attach", { result: 99999999, attachment: { name: "absent.txt", data: "eA==" } }, {}, "not_found");
+}
+
 /** A plain socket to the instance: what the server sent on it, and whether the server has closed it. */
 function wire(instance: Instance, payload: string) {
 	const { hostname, port } = new URL(instance.url);
@@ -594,7 +613,13 @@ describe("reads on other cores through HTTP", () => {
 				})
 			).body,
 		).toMatchObject({ ok: true, result: { state: "queued" } });
+		const attached = await post<{ id: number }>(instance, "/api/p/scratch/attach", {
+			result: failed?.id,
+			attachment: { name: "reader.txt", data: "eA==" },
+		});
+		if (!attached.body.ok) throw new Error(attached.body.error.message);
 		const inputs: Record<string, unknown[]> = {
+			attachment: [{ result: failed?.id }, { result: failed?.id, id: attached.body.result.id }, { result: 999999 }, {}],
 			get: [{ refs: ["C-1", "T-1", "R-1", "P-1"] }, { refs: ["C-1"], as: "md" }, { refs: [] }],
 			find: [{}, { in: "folders" }, { in: "tests" }, { folder: "checkout" }, { text: "revised" }],
 			inbox: [{}, { state: "decided" }],
@@ -1081,7 +1106,7 @@ describe("a pipeline's token", () => {
 			.query("SELECT count(*) AS n FROM cases c JOIN projects p ON p.id = c.project WHERE p.key = ?")
 			.get(project);
 
-	test("issued with no list of capabilities, it records, says when a change ended and reads the gate, and nothing else, under every preset", async () => {
+	test("issued with no list of capabilities, it records and attaches its own evidence, says when a change ended and reads the gate, under every preset", async () => {
 		const instance = boot("server", OWNER);
 		for (const preset of ["loose", "standard", "strict"]) {
 			await admin(instance, { do: "project.create", key: preset, preset });
@@ -1093,18 +1118,56 @@ describe("a pipeline's token", () => {
 			});
 			expect(made.body).toMatchObject({ ok: true, result: { can: ["record"] } });
 			const ci = bearer(made.body.ok ? (made.body.result as unknown as { token: string }).token : "");
-			expect((await post(instance, `/api/p/${preset}/report`, report, ci)).body).toMatchObject({ ok: true });
+			const recorded = await post<{ results: number[] }>(instance, `/api/p/${preset}/report`, report, ci);
+			if (!recorded.body.ok) throw new Error(recorded.body.error.message);
+			const appended = await post<{ id: number }>(
+				instance,
+				`/api/p/${preset}/attach`,
+				{
+					result: recorded.body.result.results[0],
+					attachment: { name: "pipeline.txt", data: "eA==" },
+				},
+				ci,
+			);
+			if (!appended.body.ok) throw new Error(appended.body.error.message);
+			expect(
+				(
+					await post(
+						instance,
+						`/api/p/${preset}/attachment`,
+						{
+							result: recorded.body.result.results[0],
+							id: appended.body.result.id,
+						},
+						owner,
+					)
+				).body,
+			).toMatchObject({ ok: true, result: { kind: "file", data: "eA==", attachment: { name: "pipeline.txt" } } });
+			const byOwner = await post<{ results: number[] }>(instance, `/api/p/${preset}/report`, report, owner);
+			if (!byOwner.body.ok) throw new Error(byOwner.body.error.message);
+			expect(
+				(
+					await post(
+						instance,
+						`/api/p/${preset}/attach`,
+						{
+							result: byOwner.body.result.results[0],
+							attachment: { name: "other.txt", data: "eA==" },
+						},
+						ci,
+					)
+				).body,
+			).toMatchObject(forbidden);
 			expect((await post(instance, `/api/p/${preset}/gate`, { commit: "abc1234" }, ci)).body).toMatchObject({
 				ok: true,
 				result: { verdict: "blocked" },
 			});
-			// Saying that a change ended is the third thing it may do (decision 0022): it is let in, and here there is
-			// no such change to end.
+			// Saying that a change ended is also allowed (decision 0022); here there is no such change to end.
 			const ended = await post(instance, `/api/p/${preset}/change`, { change: "pr:404", state: "merged" }, ci);
 			expect(ended.status).toBe(404);
 			// Every other operation of the registry, whatever it is: one added later is refused here too.
 			for (const op of OP_LIST) {
-				if (op.name === "report" || op.name === "gate" || op.name === "change") continue;
+				if (op.name === "attach" || op.name === "report" || op.name === "gate" || op.name === "change") continue;
 				const path = op.scope === "project" ? `/api/p/${preset}/${op.name}` : `/api/${op.name}`;
 				const reply = await post(instance, path, op.name === "propose" ? create : {}, ci);
 				expect(`${preset} ${op.name}: ${reply.status}`).toBe(`${preset} ${op.name}: 403`);
@@ -2042,6 +2105,7 @@ describe("the surface", () => {
 		await checked("invitation", { do: "list" });
 		await checked("invitation", { do: "revoke", id: 1 });
 		await sweepTrackerReplies(instance, checked, "scratch");
+		await sweepAttachmentReplies(checked);
 		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());
 		console.log(`all-operation sweep: ${sweep.counts.success} real HTTP replies; Zod and Ajv`);
 	});
@@ -2262,6 +2326,7 @@ describe("the surface", () => {
 		await checked("get", { refs: ["C-99999"] }, {}, "not_found");
 		await checked("get", { refs: ["C-1"] }, bearer("wrong-token"), "unauthenticated");
 		await sweepTrackerReplies(instance, checked, "demo");
+		await sweepAttachmentReplies(checked);
 		const total = sweep.counts.success + sweep.counts.error + empty.counts.success + empty.counts.error;
 		expect(total).toBeGreaterThanOrEqual(236);
 		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());

@@ -4,11 +4,11 @@ Find your data, export it to a text file, back it up and move it to another mach
 
 ## Where the data lives
 
-Mainworthy keeps everything in one SQLite file, `mainworthy.db`, in the data directory. The directory is `~/.mainworthy` unless you set `MAINWORTHY_DATA`, and `/data` in the container. See [configuration](./configuration.md#variables-the-server-reads).
+Mainworthy keeps structured records in one SQLite file, `mainworthy.db`, and attachment bytes in `blobs/` in the data directory. The directory is `~/.mainworthy` unless you set `MAINWORTHY_DATA`, and `/data` in the container. See [configuration](./configuration.md#variables-the-server-reads).
 
 ```
 $ ls -F ~/.mainworthy  # after an archive transfer
-mainworthy.db  mainworthy.db-shm  mainworthy.db-wal  server.lock  spool/
+mainworthy.db  mainworthy.db-shm  mainworthy.db-wal  blobs/  server.lock  spool/
 ```
 
 While the server runs, it also keeps a `-wal` and a `-shm` file beside the database. The three belong together. After a clean stop the `-wal` file is empty.
@@ -22,6 +22,20 @@ Before this limit, Bun's own SQLite on Linux, including the container, defaulted
 The server also keeps `server.lock` (and `server.lock-journal` while it holds the lock; a clean stop removes the journal) and uses `spool/` for archive transfers, both inside the data directory. Exports stage the whole archive before sending it; imports stage the whole upload before reading it. Leave enough free space on that filesystem for every concurrent transfer. Each temporary directory is private, and each archive file is readable and writable by its owner only. Completed, cancelled and rejected transfers remove their temporary files. A killed process can leave files in `spool/`; after stopping the server, you can remove that directory.
 
 The file holds every project, case and version, every result, decision and policy, and the actors, grants and a hash of each token. Treat it like the data of any private system. What it keeps about people, and for how long, is on the [privacy](./privacy.md) page.
+
+Attachment files use their SHA-256 hash as the file name. Identical content shares
+one disk file, even across results. Back up `blobs/` with the database; a database
+copy alone cannot restore attachments. Archives include the file bytes as base64
+on attachment rows, covered by the archive checksum. Import validates each file's
+hash, size and content type. An export refuses missing or damaged files rather
+than writing an incomplete backup.
+
+There is no automatic evidence expiry or total disk quota. Monitor free space and
+include retained attachments and archive staging files in storage planning. A
+failed write or import can leave unreferenced blob files; startup removes these
+before recovering accepted reports. Referenced evidence is kept when a producer
+is forgotten. File contents and file names may contain personal information and
+are not scanned or redacted.
 
 ## Export everything
 
@@ -38,14 +52,14 @@ The archive is text, one JSON object per line. The first line describes the arch
 
 ```
 $ head -n 1 mainworthy.ndjson | cut -c 1-80
-{"mainworthy":"archive","format":1,"schema":7,"exportedAt":1791875678677,"tables
+{"mainworthy":"archive","format":1,"schema":11,"exportedAt":1791875678677,"tables
 $ tail -n 1 mainworthy.ndjson
 {"end":true,"rows":67,"sha256":"ca0a5d4d76fe0de47415d595159393df3fad4fc517e4227325a4e5b5ca6b9cf7"}
 ```
 
 You can read it with any tool that reads text, search it with `grep`, and keep it in version control if the data suits that.
 
-The archive leaves out tokens, sessions, passwords, passkeys, invitations and the search index, which Mainworthy rebuilds on import. It also leaves out which changes have ended: after an import every change is open, and the questions that were closed when one ended stay closed. If a failure on such a change is reported again, say once more that the change ended (`mainworthy change`). It also leaves out which project is a [demo](./customize.md#a-project-of-demo-data): an imported demo keeps its data and its dates, and accepts no more writes dated in the past. Anyone who reads the archive reads your cases and decisions, so store it as you would the data itself.
+The archive holds attachment bytes along with the database records. It leaves out tokens, sessions, passwords, passkeys, invitations and the search index, which Mainworthy rebuilds on import. Tracker delivery requests do not travel, so restoring an archive never sends an issue again. It also leaves out which changes have ended: after an import every change is open, and the questions that were closed when one ended stay closed. If a failure on such a change is reported again, say once more that the change ended (`mainworthy change`). It also leaves out which project is a [demo](./customize.md#a-project-of-demo-data): an imported demo keeps its data and its dates, and accepts no more writes dated in the past. Anyone who reads the archive reads your cases and decisions, so store it as you would the data itself.
 
 ## Export one project
 
@@ -56,7 +70,7 @@ $ mainworthy export --project shop --out shop.ndjson.gz
 exported to shop.ndjson.gz
 ```
 
-The archive keeps that project's cases and versions, results, runs, questions, decisions, policies and command history.
+The archive keeps that project's cases and versions, results and their attachment bytes, runs, questions, decisions, policies and command history.
 Case aliases and custom field definitions in the policy travel with the project.
 It preserves their IDs, head hashes and verdicts. It includes actors who acted in the project, signed its decisions,
 or have a grant on it, and the people those actors act on behalf of. The policy's rule actor travels too. Their organisations, project grants and global
@@ -176,6 +190,8 @@ conflict: import needs a fresh instance; existing projects or user data will not
 A fresh instance is one that has only its first project, `scratch`, with no edits and no policy change, and only its owner. Making a token for a new person, agent or pipeline adds an actor, and that is enough to make the instance non-fresh. There is no merge yet, so to bring an archive into an instance that has data, start a new instance.
 
 An archive imports into a build with the same archive version as the one that wrote it. The database schema may be newer: an added nullable column can stay compatible, and import fills a missing nullable, non-key column with NULL, even if it has a default. Missing required columns and unknown columns are refused. A migration that adds or removes exported tables, removes or renames exported columns, adds a column with a non-NULL default, or writes exported data changes the archive version. This includes backfills and transforms that leave the table shape unchanged. An archive with a newer version is refused with a message to upgrade; one with an older version is refused because Mainworthy cannot yet transform it. Use matching archive versions on both sides.
+
+Attachments change the archive version to 11. To move older data forward, upgrade the original database and take a fresh export. If only an older archive remains, restore it with a matching older build first, then upgrade that database and export again.
 
 Explicit empty-report declarations add a column to archived batches in schema 7. Import an older archive with the build that wrote it before upgrading that instance. Upgrading its SQLite database preserves existing records and adds the declaration column.
 

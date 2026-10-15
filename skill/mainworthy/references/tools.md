@@ -131,6 +131,10 @@ Record test results in one batch. Give `target` (the commit tested) or `run` (a 
 | `results[].test[1].file` | `string` | no |  |
 | `results[].test[2].case` | `string` | yes | The case this manual or agent result is for. |
 | `results[].outcome` | `"pass" \| "fail" \| "skip" \| "blocked" \| "error"` | yes |  |
+| `results[].attachments` | `array<object>` | no |  |
+| `results[].attachments[].name` | `string` | yes |  |
+| `results[].attachments[].data` | `string` | yes |  |
+| `results[].attachments[].at` | `string` | no |  |
 | `results[].durationMs` | `integer` | no |  |
 | `results[].failure` | `object` | no |  |
 | `results[].failure.message` | `string` | yes |  |

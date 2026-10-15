@@ -376,3 +376,76 @@ a matching head moves to trunk and its failures are evaluated there again. A dif
 merge or rebased hash leaves the original head's scope alone.
 The call is answered `not_found` for a pull request that never sent a report.
 [Changes and the gate](./changes.md#when-a-change-ends) says what ending a change does.
+
+## Attach screenshots and small files
+
+In a planned run, paste a screenshot into **Result note** or choose **Attach a file**
+before recording the outcome. The files belong to that slot's next result. They
+stay on the open page until recorded, so keep the page open. Files selected while
+an earlier result is saving are kept for the next result. Each saved result shows
+raster images inline and offers a download for every file. The case's timeline
+shows the same attachments.
+
+A report through the API can include `attachments` on each result. Each entry has
+`name` and canonical base64 `data`, plus an optional step id in `at`:
+
+```json
+{"target":{"session":"screenshots"},"results":[{"test":{"key":"checkout"},"outcome":"fail","attachments":[{"name":"details.txt","data":"ZXhwZWN0ZWQgcmVhZHk="}]}]}
+```
+
+`attach` appends a file to a result you recorded. Send
+`{"result":123,"attachment":{"name":"details.txt","data":"ZXhwZWN0ZWQgcmVhZHk="},"cmd":"attachment-123"}`.
+Use a new `cmd` for a different file and reuse it for a retry. `attachment` with
+`{"result":123}` lists metadata; add `"id":456` to read one file's base64 data.
+Both operations are available through the CLI and API. They are not additional
+MCP tools, and the MCP report schema omits attachment inputs to keep tool discovery
+within its token budget.
+
+Each file is limited to 4 MiB. A report may include at most 100 files and 16 MiB of
+decoded data. One result may hold at most 20 files and 16 MiB, including files
+appended later. These limits bound upload memory and per-result disk growth while
+allowing screenshots and small diagnostics. Large recordings belong in an external
+artifact store. File names cannot contain paths, control characters or bidi
+overrides and isolates. The API refuses the whole request if an attachment is
+invalid or exceeds a limit. Large reports can briefly delay other requests while
+the server validates and stores their contents.
+
+For JUnit XML, the CLI reads `[[ATTACHMENT|path/to/file]]` on its own line in a
+testcase's `system-out` or `system-err`, as described by the
+[JUnit Attachments plugin](https://plugins.jenkins.io/junit-attachments/).
+It also reads testcase properties named `attachment` or `attachment.1`,
+`attachment.2`, and so on when their `value` names a file. The XML parser itself
+never opens a path. Permit local file reads explicitly:
+
+```sh
+mainworthy report reports/results.xml --attachments reports
+```
+
+The directory is the boundary for file reads. Relative paths try that directory
+first, then the XML file's directory. Absolute paths must still be inside the
+permitted directory. Keep only intended evidence in that directory. Without
+`--attachments`, file markers are ignored and stderr says so once. The results
+still upload, including reports from Playwright's JUnit reporter that always names
+its videos and traces.
+
+With the flag, a missing, hidden, outside-root, non-file, unreadable, changed,
+invalid-name or over-limit file is skipped. Each skipped file gets one stderr
+line with its path and reason. An unavailable attachment directory skips the
+named files too. Skipped files consume no limit, and every parsed result still
+uploads. Links within the directory keep the name used in the report.
+The CLI receipt includes a skipped-attachments count, `skippedAttachments` in
+JSON. This count describes files skipped locally on this command; it is not
+part of the server's stored receipt. Embedded attachment bodies and native-report
+attachments are not read in this first version.
+
+A caller needs `record` to send attachments and `read` on the result's project to
+retrieve them. Only the original producer can append files through `attach`.
+PNG, JPEG, GIF and WebP signatures select inline image types. Everything else,
+including HTML and SVG, downloads as binary data. The UI never inserts a file's
+contents as HTML or uses its name as a path.
+
+Attachments are retained evidence and may themselves contain personal data.
+Forgetting a person keeps their files and file names, just as it keeps typed
+notes. Avoid personal information in screenshots and diagnostics. There is no
+attachment deletion or retention control yet. See [your data](./data.md) for
+storage and backups and [privacy](./privacy.md) for erasure requests.

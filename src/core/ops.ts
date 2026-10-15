@@ -1,6 +1,7 @@
 // The wire contract of every operation: one input schema and one output schema each. The HTTP API, the OpenAPI
 // document, the MCP tools, the CLI and the web client are all derived from these, so a shape is declared once.
 import { z } from "zod";
+import { ATTACHMENT_LIMITS, AttachmentInput, attachmentBytes } from "./attachments.ts";
 import { DURATION_FORMAT, DURATION_PATTERN } from "./duration.ts";
 import {
 	ActorKind,
@@ -157,6 +158,7 @@ export const ResultIn = z.object({
 		z.object({ case: ref("The case this manual or agent result is for.") }),
 	]),
 	outcome: Outcome,
+	attachments: z.array(AttachmentInput).max(ATTACHMENT_LIMITS.perResult).optional().meta({ "x-mcp-hidden": true }),
 	durationMs: z.number().int().min(0).optional(),
 	failure: z
 		.object({
@@ -208,6 +210,22 @@ export const ReportInput = z
 	.refine((report) => (report.nothingRequired ? report.results.length === 0 : report.results.length > 0), {
 		message: "send results, or an empty results array with nothingRequired: true, never both",
 		path: ["results"],
+	})
+	.superRefine((report, ctx) => {
+		let size = 0;
+		let count = 0;
+		for (const result of report.results) {
+			let resultSize = 0;
+			for (const attachment of result.attachments ?? []) {
+				resultSize += attachmentBytes(attachment.data);
+				count++;
+			}
+			if (resultSize > ATTACHMENT_LIMITS.report)
+				ctx.addIssue({ code: "custom", message: "Attachments exceed 16 MiB for one result", path: ["results"] });
+			size += resultSize;
+		}
+		if (size > ATTACHMENT_LIMITS.report || count > ATTACHMENT_LIMITS.perReport)
+			ctx.addIssue({ code: "custom", message: "Attachments exceed 16 MiB or 100 files per report", path: ["results"] });
 	});
 export type ReportInput = z.infer<typeof ReportInput>;
 

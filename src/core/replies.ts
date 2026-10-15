@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Attachment, AttachmentReply } from "./attachments.ts";
 import { SameCodeEvidence } from "./flaky.ts";
 import { ActorKind, Policy, Unlinked } from "./kinds.ts";
 import { Automate, CaseBody, MethodKind, Step } from "./model.ts";
@@ -394,6 +395,8 @@ export const InvitationReply = z.union([InvitationCreated, z.array(InvitationRow
 
 /** Reply contracts shared by clients and registered beside each operation's input on the server. */
 export const REPLIES = {
+	attach: Attachment,
+	attachment: AttachmentReply,
 	tracker: TrackerReceipt,
 	"tracker-status": TrackerReceipt,
 	propose: ProposeReply,

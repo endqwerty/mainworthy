@@ -11,6 +11,7 @@ import nothingRequired from "./migrations/0007_nothing_required.sql" with { type
 import scopeMoves from "./migrations/0008_scope_moves.sql" with { type: "text" };
 import demoProjects from "./migrations/0009_demo_projects.sql" with { type: "text" };
 import changeHead from "./migrations/0010_change_head.sql" with { type: "text" };
+import attachments from "./migrations/0011_attachments.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -32,6 +33,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 8, name: "scope_moves", sql: scopeMoves, archive: false },
 	{ version: 9, name: "demo_projects", sql: demoProjects, archive: false },
 	{ version: 10, name: "change_head", sql: changeHead, archive: false },
+	{ version: 11, name: "attachments", sql: attachments, archive: true },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

@@ -9,7 +9,14 @@ import { join } from "node:path";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import { flushUses, removeGrant, revokeToken, sweepSessions } from "../src/server/identity/identity.ts";
 import { openSession } from "../src/server/identity/sessions.ts";
-import { type Config, databasePath, defaultConfig, type ReadCall, type ReadPool } from "../src/server/kernel/app.ts";
+import {
+	type Config,
+	databasePath,
+	defaultConfig,
+	openApp,
+	type ReadCall,
+	type ReadPool,
+} from "../src/server/kernel/app.ts";
 import { ARCHIVE_VERSION, SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
 import { Readers } from "../src/server/readers.ts";
 import { type Instance, start } from "../src/server/start.ts";
@@ -230,10 +237,23 @@ async function ownToken(instance: Instance): Promise<string> {
 	if (!made.body.ok) throw new Error("no token");
 	return made.body.result.token;
 }
+/** Current-format evidence with the old fixture's identities, after applying the real database migrations. */
+function currentFixtureArchive(): string {
+	const dataDir = scratch();
+	writeFileSync(databasePath(dataDir), Bun.gunzipSync(readFileSync(join(FIXTURES, "instance-v1.db.gz"))));
+	const app = openApp(defaultConfig({ MAINWORTHY_DATA: dataDir }));
+	try {
+		const chunks: string[] = [];
+		exportArchive(app.db, (chunk) => chunks.push(chunk), { blobs: app.blobs });
+		return chunks.join("");
+	} finally {
+		app.close();
+	}
+}
 /** Replays a current-format snapshot, which removes tokens and sessions while retaining actor ids. */
 const importCurrent = (instance: Instance): Promise<Response> => {
 	const chunks: string[] = [];
-	exportArchive(instance.app.db, (chunk) => chunks.push(chunk));
+	exportArchive(instance.app.db, (chunk) => chunks.push(chunk), { blobs: instance.app.blobs });
 	return fetch(`${instance.url}/api/import`, {
 		method: "POST",
 		body: chunks.join(""),
@@ -1139,6 +1159,39 @@ describe("an upgrade and an archive", () => {
 		} finally {
 			queue.restore();
 		}
+	});
+
+	test("an old archive is refused, and re-exporting its migrated database restores its cases and runs", async () => {
+		const archive = readFileSync(join(FIXTURES, "archive-v1.ndjson"), "utf8");
+		expect(archive.split("\n")[0]).toContain('"schema":1');
+		const dataDir = scratch();
+		const first = boot({ dataDir });
+		const refused = await fetch(`${first.url}/api/import`, { method: "POST", headers: bearer(TOKEN), body: archive });
+		expect(refused.status).toBe(400);
+		expect(await refused.text()).toContain("older than this build");
+		const imported = await fetch(`${first.url}/api/import`, {
+			method: "POST",
+			headers: bearer(TOKEN),
+			body: currentFixtureArchive(),
+		});
+		expect(`${imported.status} ${await imported.text()}`).toContain('200 {"ok":true,"result":{"rows":21,');
+		// An import leaves no token behind; the next start takes the owner's from the configuration again.
+		await first.stop();
+		const second = boot({ dataDir });
+		const found = await post<{ count: number; items: { title: string }[] }>(
+			second,
+			"/api/p/scratch/find",
+			{},
+			bearer(TOKEN),
+		);
+		expect(found.body.ok && found.body.result).toMatchObject({ count: 1, items: [{ title: "Coupon applies" }] });
+		const run = await post<{ ref: string }[]>(second, "/api/p/scratch/get", { refs: ["R-1"] }, bearer(TOKEN));
+		expect(run.body.ok && run.body.result).toMatchObject([{ ref: "R-1" }]);
+		const actors = await admin<{ name: string }[]>(second, { do: "actor.list" });
+		expect(actors.body.ok && actors.body.result.map((actor) => actor.name)).toEqual(["policy", "robin", "sam"]);
+		// A fresh export includes the attachment table, so it names the current archive version.
+		const again = await (await fetch(`${second.url}/api/export`, { headers: bearer(TOKEN) })).text();
+		expect(again.split("\n")[0]).toContain(`"schema":${ARCHIVE_VERSION}`);
 	});
 
 	test("an archive from before explicit empty reports is refused without changing the instance", async () => {

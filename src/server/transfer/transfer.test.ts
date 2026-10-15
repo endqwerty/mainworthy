@@ -1,16 +1,41 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { harness } from "../../../test/helpers.ts";
+import { type BlobStore, memoryBlobs } from "../kernel/blobs.ts";
 import { Db } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
 import { ARCHIVE_VERSION, migrate, SCHEMA_VERSION } from "../kernel/migrate.ts";
-import { exportArchive, importArchive, linesOf, linesOfStream, removeBootstrap, UNEXPORTED } from "./transfer.ts";
+import {
+	exportArchive as exportWithBlobs,
+	importArchive as importWithBlobs,
+	linesOf,
+	linesOfStream,
+	removeBootstrap,
+	UNEXPORTED,
+} from "./transfer.ts";
 
 // Completion checks use real migrated SQLite databases: compare every stored column, query rebuilt FTS,
 // compare the target before/after rejected input, and time actual export/import of 50,000 result rows.
 type Value = string | number | bigint | null;
 type Row = Record<string, Value>;
 const opened: Db[] = [];
+const stores = new WeakMap<Db, BlobStore>();
+const attachmentBytes = Buffer.from("archive attachment");
+function storage(db: Db): BlobStore {
+	let store = stores.get(db);
+	if (!store) {
+		store = memoryBlobs();
+		stores.set(db, store);
+	}
+	return store;
+}
+function exportArchive(db: Db, write: (chunk: string) => void, options: { now?: number; project?: string } = {}) {
+	return exportWithBlobs(db, write, { ...options, blobs: storage(db) });
+}
+function importArchive(db: Db, lines: Iterable<string>) {
+	return importWithBlobs(db, lines, { blobs: storage(db) });
+}
+
 const time = 1_791_741_600_000;
 const body = `{
   "title": "雪だるま ☃ café", "pre": "Précondition 雪", "methods": ["human", "auto"],
@@ -21,6 +46,17 @@ const body = `{
 }`;
 
 const fixtures: Record<string, Row[]> = {
+	attachments: [
+		{
+			id: 901,
+			result: 201,
+			name: "proof.txt",
+			hash: createHash("sha256").update(attachmentBytes).digest("hex"),
+			size: attachmentBytes.length,
+			type: "application/octet-stream",
+			at: "sone",
+		},
+	],
 	meta: [{ key: "instance-note", value: "  canonical text\n雪 ☃  " }],
 	orgs: [{ id: 17, name: "Archive organisation", created_at: time }],
 	actors: [
@@ -437,6 +473,7 @@ function insert(db: Db, table: string, row: Row): void {
 
 function source(): Db {
 	const db = database();
+	storage(db).put(attachmentBytes);
 	db.transaction(() => {
 		db.raw.exec("PRAGMA defer_foreign_keys = ON");
 		for (const [table, rows] of Object.entries(fixtures)) {
@@ -596,6 +633,7 @@ describe("Mainworthy instance archives", () => {
 		const otherChunks: string[] = [];
 		const otherCounts = exportArchive(from, (chunk) => otherChunks.push(chunk), { project: "other" });
 		for (const table of [
+			"attachments",
 			"answers",
 			"versions",
 			"placements",

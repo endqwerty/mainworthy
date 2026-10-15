@@ -1,6 +1,7 @@
 import type { ResultIn } from "../../core/ops.ts";
 
-export type ParsedReport = { results: ResultIn[]; warnings: string[] };
+export type ParsedResult = ResultIn & { attachmentPaths?: string[] };
+export type ParsedReport = { results: ParsedResult[]; warnings: string[] };
 
 const reportPath = (value: string): string => value.replace(/\\/g, "/").replace(/^(?:\.\/)+/, "");
 
