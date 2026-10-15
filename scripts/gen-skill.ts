@@ -69,7 +69,7 @@ export function generateToolReference(): string {
 		const tool = tools.find((entry) => entry.name === op.name);
 		if (!tool) throw new Error(`No agent tool for ${op.name}`);
 		const project = z
-			.object({ type: z.literal("string"), description: z.string() })
+			.object({ type: z.literal("string"), description: z.string().default("") })
 			.parse(tool.inputSchema.properties?.project);
 		const schema = z.toJSONSchema(op.input, { io: "input" });
 		schema.properties = { ...schema.properties, project };

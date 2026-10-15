@@ -219,6 +219,42 @@ describe("policy proposal bases", () => {
 		);
 	};
 
+	test("one proposal refuses a second policy edit before it records anything", () => {
+		const before = current();
+		const refused = h.raw("propose", {
+			edits: [
+				{ op: "create", outline: "Must not be recorded" },
+				{ op: "policy", preset: "strict" },
+				{ op: "policy", unlinked: "ask" },
+			],
+		});
+		expect(refused).toMatchObject({
+			ok: false,
+			error: { code: "invalid", message: "send only one policy edit per proposal" },
+		});
+		expect(current()).toEqual(before);
+		expect(queue({ kind: "adopt" }).items).toEqual([]);
+		expect(h.call<{ count: number; items: unknown[] }>("find", {})).toMatchObject({ count: 0, items: [] });
+	});
+
+	test("a waiting proposal made before policy versions asks to be redone without claiming a change", () => {
+		const before = current();
+		const waiting = h.call<Proposed>("propose", {
+			edits: [
+				{ op: "create", outline: "Must not be partly adopted" },
+				{ op: "policy", preset: "strict" },
+			],
+		});
+		h.app.db.raw.query("UPDATE proposals SET resolved = json_remove(resolved, '$[1].base')").run();
+		expect(accept(waiting)).toMatchObject({
+			status: "conflict",
+			needs: "this proposal was made before policy versions; redo it on the current policy",
+		});
+		expect(current()).toEqual(before);
+		expect(queue({ kind: "adopt" }).items).toMatchObject([{ q: waiting.question }]);
+		expect(h.call<{ count: number; items: unknown[] }>("find", {})).toMatchObject({ count: 0, items: [] });
+	});
+
 	test("P2: simultaneous saves on one version cannot both replace the policy", async () => {
 		const sam = h.actor("sam", "human", ["read", "produce", "answer", "admin"]);
 		const base = current();

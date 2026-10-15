@@ -609,10 +609,12 @@ import { PRESETS } from "../../src/core/presets.ts";
 		const server = await fixture({ preset: "loose" });
 		let view: Awaited<ReturnType<typeof openPage>> | null = null;
 		try {
-			const original = Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" }));
+			const original = Policy.extend({ version: z.number() }).parse(
+				await server.api("admin", { do: "policy.show", project: "scratch" }),
+			);
 			const flakyDetection = { enabled: true, windowDays: 7, minFlips: 4 };
 			const configured = await server.api("propose", {
-				edits: [{ op: "policy", settings: { ...original.settings, flakyDetection } }],
+				edits: [{ op: "policy", base: original.version, settings: { ...original.settings, flakyDetection } }],
 			});
 			const detectorQuestion = (await server.api("inbox", { kind: "adopt" })).items.find(
 				(q) => q.q === configured.question,
@@ -1227,6 +1229,55 @@ for (const restricted of [true, false]) {
 		30_000,
 	);
 }
+
+for (const control of ["Policy preset", "Tests with no case"] as const)
+	for (const stage of ["propose", "decide"] as const)
+		(browserAvailable ? test : test.skip)(
+			`${control} explains a concurrent change at ${stage} without editor instructions`,
+			async () => {
+				const server = await fixture({ preset: "loose", mode: "server" });
+				let view: Awaited<ReturnType<typeof openPage>> | null = null;
+				try {
+					view = await openPage(server, { path: "/p/scratch/settings" });
+					const { page } = view;
+					page.setDefaultTimeout(3000);
+					await page.getByRole("button", { name: "Edit clauses", exact: true }).waitFor();
+					await page.route(`**/api/p/scratch/${stage}`, async (route) => {
+						const before = Policy.extend({ version: z.number() }).parse(
+							await server.api("admin", { do: "policy.show", project: "scratch" }),
+						);
+						const other = await server.api("propose", {
+							edits: [{ op: "policy", base: before.version, settings: { ...before.settings, basis: "exact" } }],
+						});
+						const q = (await server.api("inbox", { kind: "adopt" })).items.find((item) => item.q === other.question);
+						if (!q) throw new Error("Policy review missing");
+						await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+						await route.continue();
+					});
+					await page.getByLabel(control, { exact: true }).selectOption(control === "Policy preset" ? "strict" : "ask");
+					const message = page.locator("#detail .settings-message");
+					await message.getByText("The policy changed", { exact: false }).waitFor();
+					expect(await message.textContent()).toBe(
+						"The policy changed before this selection was saved. Review the current policy and choose again.",
+					);
+					expect(await server.api("admin", { do: "policy.show", project: "scratch" })).toMatchObject({
+						version: 2,
+						preset: "loose",
+						settings: { unlinked: "track", basis: "exact" },
+					});
+					expect((await server.api("inbox", { kind: "adopt" })).items).toHaveLength(stage === "decide" ? 1 : 0);
+					expect(view.errors).toEqual(
+						stage === "propose"
+							? ["Failed to load resource: the server responded with a status of 409 (Conflict)"]
+							: [],
+					);
+				} finally {
+					await view?.close();
+					await server.stop();
+				}
+			},
+			15000,
+		);
 
 (browserAvailable ? test : test.skip)(
 	"field definitions keep their draft when a concurrent policy change conflicts",

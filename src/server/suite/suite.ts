@@ -575,6 +575,7 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 				break;
 			}
 			case "policy": {
+				if (resolved.some((edit) => edit.op === "policy")) throw invalid("send only one policy edit per proposal");
 				const current = currentPolicy(ctx.db, ctx.project.id);
 				if (edit.base === undefined && (edit.clauses !== undefined || edit.settings !== undefined))
 					throw invalid("a policy edit with clauses or settings needs the policy version it was made on (base)");
@@ -813,6 +814,8 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 			}
 			case "policy": {
 				const current = currentPolicy(ctx.db, ctx.project.id);
+				if (edit.base === undefined)
+					throw conflict("this proposal was made before policy versions; redo it on the current policy");
 				if (edit.base !== current.version)
 					throw conflict(
 						`the policy changed after this proposal was made; redo the proposal on version ${current.version}`,
