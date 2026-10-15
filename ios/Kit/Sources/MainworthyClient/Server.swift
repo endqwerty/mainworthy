@@ -6,6 +6,15 @@ package enum Proof: Sendable {
 	case password(name: String, password: String)
 }
 
+/// Evidence about all attempts in one write, including a lost reply before a later rejection.
+package final class WriteDelivery: Sendable {
+	private let attempts = Mutex((uncertain: false, rejected: false))
+	package init() {}
+	package var definitelyRejected: Bool { attempts.withLock { $0.rejected && !$0.uncertain } }
+	fileprivate func lostReply() { attempts.withLock { $0.uncertain = true } }
+	fileprivate func rejected() { attempts.withLock { $0.rejected = true } }
+}
+
 /// One Mainworthy, as this app talks to it. It is the only thing that sends a request, and it hides what a
 /// request takes: the address of an operation, the envelope around a reply, the session cookie and where it
 /// is kept, the id that makes a write safe to send twice, and what a refusal means.
@@ -151,11 +160,12 @@ package final class Server: Sendable {
 	/// An operation that writes. A saved command keeps its id across restarts; other writes get a new one.
 	/// Retries use the same id: the server runs a command once and answers a repeat with the first reply.
 	package func write<Reply: Decodable>(
-		_ operation: String, in project: String?, _ input: JSONValue, command: String = UUID().uuidString.lowercased()
+		_ operation: String, in project: String?, _ input: JSONValue, command: String = UUID().uuidString.lowercased(),
+		delivery: WriteDelivery? = nil
 	) async throws -> Reply {
 		var body = input.object ?? [:]
 		body["cmd"] = .string(command)
-		return try await exchange("POST", Server.path(operation, project), body: .object(body), attempts: 3)
+		return try await exchange("POST", Server.path(operation, project), body: .object(body), attempts: 3, delivery: delivery)
 	}
 
 	/// What changes in a project, as it happens, until the reader stops or the connection is lost. Nothing is
@@ -227,9 +237,9 @@ package final class Server: Sendable {
 
 	/// Sends a request and returns its reply's result, read as `Result`.
 	private func exchange<Result: Decodable>(
-		_ method: String, _ path: String, body: JSONValue? = nil, attempts: Int
+		_ method: String, _ path: String, body: JSONValue? = nil, attempts: Int, delivery: WriteDelivery? = nil
 	) async throws -> Result {
-		let (data, _) = try await send(method, path, body: body, attempts: attempts, asSignedIn: true)
+		let (data, _) = try await send(method, path, body: body, attempts: attempts, asSignedIn: true, delivery: delivery)
 		guard let read = try? JSONDecoder().decode(Body<Result>.self, from: data) else { throw ClientError.unreadable }
 		return read.result
 	}
@@ -238,7 +248,7 @@ package final class Server: Sendable {
 	/// A no is thrown as what it means. `asSignedIn` says a 401 means the session ended, as it does everywhere
 	/// but at sign-in, where it means the proof was not accepted.
 	private func send(
-		_ method: String, _ path: String, body: JSONValue?, attempts: Int, asSignedIn: Bool
+		_ method: String, _ path: String, body: JSONValue?, attempts: Int, asSignedIn: Bool, delivery: WriteDelivery? = nil
 	) async throws -> (Data, HTTPURLResponse) {
 		// The session the request goes out under. A 401 that comes back ends that one, and no other.
 		let session = cookie.withLock { $0 }
@@ -250,6 +260,7 @@ package final class Server: Sendable {
 			do {
 				(data, response) = try await transport.send(request)
 			} catch {
+				delivery?.lostReply()
 				// A task that was cancelled is not a server that could not be reached.
 				if Task.isCancelled || (error as? URLError)?.code == .cancelled { throw CancellationError() }
 				failure = error.localizedDescription
@@ -258,6 +269,7 @@ package final class Server: Sendable {
 			}
 			guard let head = try? JSONDecoder().decode(Head.self, from: data) else { throw ClientError.unreadable }
 			if head.ok { return (data, response) }
+			if (400...599).contains(response.statusCode), head.error != nil { delivery?.rejected() }
 			let refusal = head.error ?? Refusal(code: "internal", message: "the server refused without saying why")
 			switch refusal.code {
 			case "unauthenticated" where asSignedIn:

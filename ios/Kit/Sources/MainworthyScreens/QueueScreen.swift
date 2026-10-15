@@ -256,7 +256,7 @@ public final class QueueScreen: ProjectScreen {
 	}
 
 	public func hasPendingAnswer(_ ref: String) -> Bool {
-		outbox.entries.contains { $0.question == ref && $0.outcome == nil }
+		outbox.entries.contains { $0.question == ref && $0.waiting }
 	}
 
 	/// Withdraws the decision on a question: the answer just given ("Undo"), or one in the decided list.

@@ -46,6 +46,25 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(app.navigationBars["Queue"].waitForExistence(timeout: 20))
 	}
 
+	@MainActor private func selectProject(_ project: String, in app: XCUIApplication) {
+		let projectMenu = app.buttons["project-menu"]
+		projectMenu.tap()
+		let projectOption = app.collectionViews.buttons[project]
+		let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: projectOption)
+		XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed)
+		projectOption.tap()
+		let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", project), object: projectMenu)
+		XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed)
+	}
+
+	@MainActor private func dropConfirmation(in app: XCUIApplication) -> XCUIElement {
+		let confirm = app.buttons.matching(
+			NSPredicate(format: "label == %@ AND identifier != %@", "Drop saved answer", "drop-saved-answer")
+		).firstMatch
+		XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+		return confirm
+	}
+
 	@MainActor func testLinkAnUnlinkedTestAndCreateACase() async throws {
 		let project = try await makeProject()
 		let second = try await makeProject()
@@ -53,8 +72,7 @@ final class QueueUITests: XCTestCase {
 		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
 		app.launch()
 		try signIn(app)
-		app.buttons["project-menu"].tap()
-		app.buttons[project].tap()
+		selectProject(project, in: app)
 		let question = app.staticTexts["1 test in tests/shipping.spec.ts has no case"]
 		XCTAssertTrue(question.waitForExistence(timeout: 10))
 		question.tap()
@@ -81,8 +99,7 @@ final class QueueUITests: XCTestCase {
 		app.buttons["Done"].tap()
 		app.navigationBars.buttons.element(boundBy: 0).tap()
 
-		app.buttons["project-menu"].tap()
-		app.buttons[second].tap()
+		selectProject(second, in: app)
 		XCTAssertTrue(question.waitForExistence(timeout: 10))
 		question.tap()
 		app.buttons["answer-create"].tap()
@@ -98,12 +115,12 @@ final class QueueUITests: XCTestCase {
 
 	@MainActor func testSavedAnswerSurvivesClosingAndShowsItsOutcome() async throws {
 		let project = try await makeProject()
-		func connection(unavailable: Bool) async throws -> String {
+		func connection(unavailable: Bool, uncertain: Bool = false) async throws -> String {
 			let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
 			var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/test/answer-connection")))
 			request.httpMethod = "POST"
 			request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
-			request.httpBody = try JSONSerialization.data(withJSONObject: ["project": project, "unavailable": unavailable])
+			request.httpBody = try JSONSerialization.data(withJSONObject: ["project": project, "unavailable": unavailable, "failure": uncertain ? "uncertain" : "rejected"])
 			let (data, _) = try await URLSession.shared.data(for: request)
 			struct Reply: Decodable { struct Result: Decodable { let url: String }; let result: Result }
 			return try JSONDecoder().decode(Reply.self, from: data).result.url
@@ -113,14 +130,7 @@ final class QueueUITests: XCTestCase {
 		app.launchArguments = ["-forget", "-instance", proxy]
 		app.launch()
 		try signIn(app)
-		let projectMenu = app.buttons["project-menu"]
-		projectMenu.tap()
-		let projectOption = app.collectionViews.buttons[project]
-		let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: projectOption)
-		XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed)
-		projectOption.tap()
-		let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", project), object: projectMenu)
-		XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed)
+		selectProject(project, in: app)
 		let failure = app.staticTexts["expected $90.00, got $100.00"]
 		XCTAssertTrue(failure.waitForExistence(timeout: 10))
 		failure.tap()
@@ -151,10 +161,23 @@ final class QueueUITests: XCTestCase {
 		XCTAssertEqual(XCTWaiter.wait(for: [canDrop], timeout: 10), .completed)
 		XCTAssertTrue(app.staticTexts["Waiting to send"].exists)
 		app.buttons["drop-saved-answer"].tap()
+		_ = dropConfirmation(in: app)
+		shot("321-drop-confirmation")
+		if app.buttons["Cancel"].exists {
+			app.buttons["Cancel"].tap()
+		} else {
+			let dismiss = app.otherElements["PopoverDismissRegion"]
+			XCTAssertTrue(dismiss.exists)
+			dismiss.tap()
+		}
+		XCTAssertTrue(app.staticTexts["Waiting to send"].exists)
+		app.buttons["drop-saved-answer"].tap()
+		dropConfirmation(in: app).tap()
 		let removed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.staticTexts["Waiting to send"])
 		XCTAssertEqual(XCTWaiter.wait(for: [removed], timeout: 10), .completed)
-		shot("321-dropped-answer")
-		// Dropping the unrecorded answer leaves its question available for a new answer.
+		shot("321-definite-error-removed")
+		// An unreadable reply cannot prove that no request is still on its way.
+		_ = try await connection(unavailable: true, uncertain: true)
 		app.navigationBars.buttons.element(boundBy: 0).tap()
 		XCTAssertTrue(failure.waitForExistence(timeout: 10))
 		failure.tap()
@@ -163,9 +186,27 @@ final class QueueUITests: XCTestCase {
 		app.navigationBars.buttons.element(boundBy: 0).tap()
 		app.buttons["unsent-answers"].tap()
 		XCTAssertTrue(app.staticTexts["Waiting to send"].waitForExistence(timeout: 10))
+		app.buttons["drop-saved-answer"].tap()
+		dropConfirmation(in: app).tap()
+		XCTAssertTrue(app.staticTexts["Dropped"].waitForExistence(timeout: 10))
+		XCTAssertFalse(app.staticTexts["Waiting to send"].exists)
+		shot("321-dropped-answer")
+		app.terminate()
+		app.launch()
+		if app.textFields["name"].waitForExistence(timeout: 3) { try signIn(app) }
+		XCTAssertTrue(app.navigationBars["Queue"].waitForExistence(timeout: 20))
+		app.buttons["unsent-answers"].tap()
+		XCTAssertTrue(app.staticTexts["Dropped"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.buttons["send-waiting-answers"].isEnabled)
 		_ = try await connection(unavailable: false)
-		app.buttons["send-waiting-answers"].tap()
+		app.navigationBars.buttons.element(boundBy: 0).tap()
+		XCTAssertTrue(failure.waitForExistence(timeout: 10))
+		failure.tap()
+		app.buttons["answer-flaky"].tap()
+		XCTAssertTrue(app.staticTexts["notice"].waitForExistence(timeout: 15))
+		app.buttons["unsent-answers"].tap()
 		XCTAssertTrue(app.staticTexts["Recorded"].waitForExistence(timeout: 15))
+		XCTAssertTrue(app.staticTexts["Dropped"].exists)
 		XCTAssertFalse(app.staticTexts["Waiting to send"].exists)
 		shot("206-recorded-answer")
 	}
@@ -178,8 +219,7 @@ final class QueueUITests: XCTestCase {
 		try signIn(app)
 
 		// The instance's first project is empty. The test's own is opened from the menu.
-		app.buttons["project-menu"].tap()
-		app.buttons[project].tap()
+		selectProject(project, in: app)
 		let failure = app.staticTexts["expected $90.00, got $100.00"]
 		XCTAssertTrue(failure.waitForExistence(timeout: 10))
 		XCTAssertTrue(app.staticTexts["1 failure to explain · 3 can wait"].exists)
