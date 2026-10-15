@@ -37,7 +37,7 @@ the case version pinned when the run started. The native app can read and run
 expanded steps. It directs edits of fragments and their consumers to the web
 editor so its text-only editor cannot flatten pins.
 
-Schema 14 adds the case kind with a non-null default, so its archive version
+Schema 15 adds the case kind with a non-null default, so its archive version
 changes. Old archives must be exported by a build using this schema before they
 can be imported. Current archives retain all versions, kinds and pins.
 
