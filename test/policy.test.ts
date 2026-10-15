@@ -89,6 +89,7 @@ describe("the presets", () => {
 	test("every preset is valid and total: no kind of question is left without an owner", () => {
 		for (const name of PRESET_NAMES) {
 			const preset = PRESETS[name];
+			expect(preset.settings.emptyReports).toBe("pending");
 			for (const clause of preset.clauses) expect(Clause.safeParse(clause).success).toBe(true);
 			expect(missingCatchAll(preset.clauses)).toEqual([]);
 			for (const clause of preset.clauses.filter((c) => c.ask.who === "rule")) {
@@ -751,6 +752,9 @@ describe("unlinked tests", () => {
 		expect(queue().counts.map).toBe(1);
 		const projects = h.call<{ policy: string; unlinked: string }[]>("admin", { do: "project.list" });
 		expect(projects[0]).toMatchObject({ policy: "custom", unlinked: "ask" });
+		expect(h.call("admin", { do: "policy.show", project: "scratch" })).toMatchObject({
+			settings: { emptyReports: "pending" },
+		});
 	});
 });
 

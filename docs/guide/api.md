@@ -169,11 +169,13 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 | `edits[][policy].settings.flakyDetection.windowDays` | `integer` | yes |  |
 | `edits[][policy].settings.flakyDetection.minFlips` | `integer` | yes |  |
 | `edits[][policy].settings.unlinked` | `"ask" \| "track" \| "create"` | yes |  |
+| `edits[][policy].settings.emptyReports` | `"pending" \| "nothing-required"` | no |  Default: `"pending"`. |
 | `edits[][policy].settings.basis` | `"exact" \| "exact-or-assumed"` | yes |  |
 | `edits[][policy].settings.holds` | `object` | yes |  |
 | `edits[][policy].settings.holds.flakyDays` | `integer` | yes |  |
 | `edits[][policy].settings.holds.infraThisTargetOnly` | `boolean` | yes |  |
 | `edits[][policy].unlinked` | `"ask" \| "track" \| "create"` | no |  |
+| `edits[][policy].emptyReports` | `"pending" \| "nothing-required"` | no |  |
 | `reason` | `string` | no | Why. Shown in the case history. |
 
 </details>
@@ -230,6 +232,7 @@ Record results: a parsed CI report, one manual result, or an agent's batch. The 
 | `results[].annotation.case` | `string` | yes |  |
 | `results[].annotation.version` | `integer` | no |  |
 | `results[].corrects` | `integer` | no | The id of an earlier result of yours that this one replaces. |
+| `nothingRequired` | `true` | no | CI-only empty declaration; requires policy permission. |
 
 </details>
 

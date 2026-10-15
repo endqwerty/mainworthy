@@ -38,7 +38,7 @@ The archive is text, one JSON object per line. The first line describes the arch
 
 ```
 $ head -n 1 mainworthy.ndjson | cut -c 1-80
-{"mainworthy":"archive","format":1,"schema":1,"exportedAt":1791875678677,"tables
+{"mainworthy":"archive","format":1,"schema":6,"exportedAt":1791875678677,"tables
 $ tail -n 1 mainworthy.ndjson
 {"end":true,"rows":67,"sha256":"ca0a5d4d76fe0de47415d595159393df3fad4fc517e4227325a4e5b5ca6b9cf7"}
 ```
@@ -176,6 +176,8 @@ conflict: import needs a fresh instance; existing projects or user data will not
 A fresh instance is one that has only its first project, `scratch`, with no edits and no policy change, and only its owner. Making a token for a new person, agent or pipeline adds an actor, and that is enough to make the instance non-fresh. There is no merge yet, so to bring an archive into an instance that has data, start a new instance.
 
 An archive imports only into a build with the same schema as the one that wrote it. A newer archive is refused with a message to upgrade. An older one is refused too, because Mainworthy cannot yet replay an archive across a schema change. Use the same version on both sides.
+
+Explicit empty-report declarations add a column to archived batches in schema 7. Import an older archive with the build that wrote it before upgrading that instance. Upgrading its SQLite database preserves existing records and adds the declaration column.
 
 After an import in server mode, the tokens are gone, because the archive carries none. It carries no password, passkey or invitation either: an archive holds nothing that signs somebody in. The people, agents and pipelines are still there with their grants. Restart the server to sign in: with no owner token configured it prints a new one, and with `MAINWORTHY_OWNER_TOKEN` set it takes that value. Then make new tokens for the others with `mainworthy token new`, and as the owner invite each person again with `mainworthy invite new <name>`, which for a person who exists prints a recovery link. In local mode, Mainworthy refreshes the owner and you can carry on.
 

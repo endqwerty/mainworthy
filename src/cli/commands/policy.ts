@@ -1,4 +1,4 @@
-import { Policy, Unlinked } from "../../core/kinds.ts";
+import { Policy, PolicySettings, Unlinked } from "../../core/kinds.ts";
 import { PRESET_NAMES, presetOf } from "../../core/presets.ts";
 import { assertPositionals } from "../args.ts";
 import { CliError } from "../errors.ts";
@@ -28,15 +28,15 @@ export function printPolicy(policy: Policy): void {
 				.trimEnd(),
 		);
 	line(
-		`basis: ${policy.settings.basis}; flaky hold: ${policy.settings.holds.flakyDays} days; tests with no case: ${policy.settings.unlinked}`,
+		`basis: ${policy.settings.basis}; flaky hold: ${policy.settings.holds.flakyDays} days; tests with no case: ${policy.settings.unlinked}; empty reports: ${policy.settings.emptyReports}`,
 	);
 }
 
 export const policyCommand: AdapterCommand = {
 	name: "policy",
-	summary:
-		"Show policy clauses, or propose and record an admin's choice of preset or of what happens to a test with no case.",
-	usage: "policy show | policy use <loose|standard|strict> | policy tests <ask|track|create> [--json]",
+	summary: "Show policy clauses, or record an admin's choice of preset, tests with no case, or empty reports.",
+	usage:
+		"policy show | policy use <loose|standard|strict> | policy tests <ask|track|create> | policy empty <pending|nothing-required> [--json]",
 	flags: [],
 	async run(args, client) {
 		const action = args.positionals[0];
@@ -47,16 +47,28 @@ export const policyCommand: AdapterCommand = {
 			else printPolicy(policy);
 			return 0;
 		}
-		if (action !== "use" && action !== "tests")
+		if (action !== "use" && action !== "tests" && action !== "empty")
 			throw new CliError("invalid", `usage: mainworthy ${policyCommand.usage}`);
 		assertPositionals(args, 2, 2, policyCommand.usage);
 		const chosen = args.positionals[1];
 		// What is proposed, why, and how the result is named in the line printed.
-		let change: { edit: { preset: string } | { unlinked: Unlinked }; reason: string; name: string };
+		let change: {
+			edit: { preset: string } | { unlinked: Unlinked } | { emptyReports: Policy["settings"]["emptyReports"] };
+			reason: string;
+			name: string;
+		};
 		if (action === "use") {
 			if (!PRESET_NAMES.some((name) => name === chosen))
 				throw new CliError("invalid", "policy use needs loose, standard or strict");
 			change = { edit: { preset: chosen ?? "" }, reason: `Use the ${chosen} policy preset`, name: `policy: ${chosen}` };
+		} else if (action === "empty") {
+			const empty = PolicySettings.shape.emptyReports.safeParse(chosen);
+			if (!empty.success) throw new CliError("invalid", "policy empty needs pending or nothing-required");
+			change = {
+				edit: { emptyReports: empty.data },
+				reason: `Empty reports: ${empty.data}`,
+				name: `empty reports: ${empty.data}`,
+			};
 		} else {
 			const unlinked = Unlinked.safeParse(chosen);
 			if (!unlinked.success) throw new CliError("invalid", "policy tests needs ask, track or create");

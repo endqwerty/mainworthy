@@ -22,6 +22,7 @@ Two words recur below. An instance admin holds the `admin` capability on every p
 | --- | --- | --- | --- |
 | The policy preset | Settings, Policy, "Preset", or `mainworthy policy use` | An admin on the project who also holds `produce` | [Policy](./policy.md) |
 | What happens to a test with no case | Settings, Policy, "Tests with no case", or `mainworthy policy tests` | The same | [Policy](./policy.md#tests-with-no-case) |
+| When a report with no tests passes | `mainworthy policy empty pending` or `mainworthy policy empty nothing-required` | The same | [Policy](./policy.md#reports-with-no-tests) |
 | Single clauses, the flaky hold, the evidence basis, same-code detector settings | `mainworthy propose` with a policy edit. Settings has no control for these | The same | [Policy](./policy.md#change-single-clauses) |
 | Custom field definitions | Settings, Policy, "Custom fields", or a `propose` policy edit | An instance admin who holds `produce` in Settings; a project admin through `propose` | [Policy](./policy.md#custom-fields) |
 | Projects | Settings, Projects, "Create a project", or `mainworthy admin` | An instance admin | [Policy](./policy.md#choose-a-preset-for-a-new-project) |

@@ -7,6 +7,7 @@ import tokenLimits from "./migrations/0003_token_limits.sql" with { type: "text"
 import people from "./migrations/0004_people.sql" with { type: "text" };
 import changeEnds from "./migrations/0005_change_ends.sql" with { type: "text" };
 import trackerRequests from "./migrations/0006_tracker_requests.sql" with { type: "text" };
+import nothingRequired from "./migrations/0007_nothing_required.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -23,6 +24,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 4, name: "people", sql: people, archive: false },
 	{ version: 5, name: "change_ends", sql: changeEnds, archive: false },
 	{ version: 6, name: "tracker_requests", sql: trackerRequests, archive: false },
+	{ version: 7, name: "nothing_required", sql: nothingRequired, archive: true },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

@@ -104,8 +104,9 @@ export const Edit = z.discriminatedUnion("op", [
 		preset: z.string().optional(),
 		clauses: z.array(Clause).optional(),
 		settings: PolicySettings.optional(),
-		/** The one setting a project admin changes without reading the others: what happens to a test with no case. */
+		/** What happens to a test with no case, changed without replacing the other settings. */
 		unlinked: Unlinked.optional(),
+		emptyReports: PolicySettings.shape.emptyReports.removeDefault().optional(),
 	}),
 ]);
 export type Edit = z.infer<typeof Edit>;
@@ -187,15 +188,21 @@ export const TargetIn = z.union([
 ]);
 export type TargetIn = z.infer<typeof TargetIn>;
 
-export const ReportInput = z.object({
-	target: TargetIn.optional().describe("What was tested. Required unless `run` is given."),
-	run: z.string().optional().describe("A planned run these results are for, for example R-4."),
-	job: z.string().max(120).optional(),
-	attempt: z.number().int().min(1).optional(),
-	buildUrl: z.string().max(500).optional(),
-	results: z.array(ResultIn).min(1).max(100_000),
-	cmd,
-});
+export const ReportInput = z
+	.object({
+		target: TargetIn.optional().describe("What was tested. Required unless `run` is given."),
+		run: z.string().optional().describe("A planned run these results are for, for example R-4."),
+		job: z.string().max(120).optional(),
+		attempt: z.number().int().min(1).optional(),
+		buildUrl: z.string().max(500).optional(),
+		results: z.array(ResultIn).max(100_000),
+		nothingRequired: z.literal(true).optional().describe("CI-only empty declaration; requires policy permission."),
+		cmd,
+	})
+	.refine((report) => (report.nothingRequired ? report.results.length === 0 : report.results.length > 0), {
+		message: "send results, or an empty results array with nothingRequired: true, never both",
+		path: ["results"],
+	});
 export type ReportInput = z.infer<typeof ReportInput>;
 
 export const QuestionBrief = z.object({

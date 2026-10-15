@@ -301,6 +301,41 @@ test("change says a pull request ended, and the questions about it are no longer
 	});
 });
 
+test("CI can declare nothing required and a recorded policy choice controls the gate exit code", async () => {
+	await withInstance(
+		async ({ cli, run, client }) => {
+			const pipeline = z.object({ token: z.string() }).parse(
+				await client.call("admin", {
+					do: "token.create",
+					actor: "pipeline",
+					kind: "ci",
+					project: "scratch",
+					can: ["read", "record"],
+				}),
+			);
+			const env = { MAINWORTHY_TOKEN: pipeline.token };
+			const sent = await cli(["report", "--nothing-required", "--commit", COMMIT], { env });
+			expect(sent.code).toBe(0);
+			expect(sent.stdout).toContain("0 results");
+			expect(sent.stdout).toContain("pending:");
+			expect((await run(["gate", "--commit", COMMIT], { env })).code).toBe(3);
+			const changed = await run(["policy", "empty", "nothing-required"]);
+			expect(changed.code).toBe(0);
+			expect(changed.stdout).toContain("empty reports: nothing-required; proposal");
+			expect(changed.stdout).toContain("are both recorded");
+			const passed = await run(["gate", "--commit", COMMIT], { env });
+			expect(passed.code).toBe(0);
+			expect(passed.stdout).toContain("the pipeline declared nothing required under the project's policy");
+			expect((await run(["policy", "show"])).stdout).toContain("empty reports: nothing-required");
+			expect((await run(["policy", "empty", "always"])).code).toBe(4);
+			expect((await run(["report", RED_XML, "--nothing-required", "--commit", COMMIT], { env })).code).toBe(4);
+			expect((await run(["policy", "use", "standard"])).code).toBe(0);
+			expect((await run(["gate", "--commit", COMMIT], { env })).code).toBe(3);
+		},
+		{ mode: "server" },
+	);
+});
+
 test("policy tests changes what happens to a test with no case, and says how many open questions the rule answered", async () => {
 	await withInstance(async ({ run, client }) => {
 		const asking = await run(["policy", "tests", "ask"]);

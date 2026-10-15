@@ -1,6 +1,7 @@
 import { ReportInput, type ReportReceipt, type TargetIn } from "../../core/ops.ts";
 import { parseReport, ReportFormat } from "../../surfaces/formats/report.ts";
 import { assertPositionals } from "../args.ts";
+import { CliError } from "../errors.ts";
 import { line, printJson, warning } from "../output.ts";
 import { detectedTarget, reportRoot, reportTarget, TARGET_FLAGS } from "../target.ts";
 import type { AdapterCommand } from "./types.ts";
@@ -68,8 +69,10 @@ export function printReceipt(input: {
 
 export const reportCommand: AdapterCommand = {
 	name: "report",
-	summary: "Upload test reports, detect the CI build, and print the receipt. Use gate to check the verdict.",
-	usage: "report <files...> [--format <format>] [--session <name>] [--run R-4] [--json]",
+	summary:
+		"Upload test reports or declare no tests required, detect the CI build, and print the receipt. Use gate to check the verdict.",
+	usage:
+		"report <files...> [--format <format>] [--session <name>] [--run R-4] | report --nothing-required [--commit <sha>] [--json]",
 	flags: [
 		...TARGET_FLAGS,
 		{
@@ -81,9 +84,22 @@ export const reportCommand: AdapterCommand = {
 		{ name: "run", kind: "string", description: "Planned run these results are for." },
 		{ name: "job", kind: "string", description: "CI job name. Overrides detection." },
 		{ name: "attempt", kind: "number", description: "Build attempt. Overrides detection." },
+		{
+			name: "nothing-required",
+			kind: "boolean",
+			description: "CI declares this commit requires no tests, if its policy allows. No files.",
+		},
 	],
 	async run(args, client) {
-		assertPositionals(args, 1, Number.POSITIVE_INFINITY, reportCommand.usage);
+		const nothingRequired = args.bool("nothing-required");
+		assertPositionals(
+			args,
+			nothingRequired ? 0 : 1,
+			nothingRequired ? 0 : Number.POSITIVE_INFINITY,
+			reportCommand.usage,
+		);
+		if (nothingRequired && args.has("run"))
+			throw new CliError("invalid", "nothing required is a declaration about a commit, not a planned run");
 		const detected = detectedTarget();
 		const target = reportTarget(args, detected);
 		const results: ReportInput["results"] = [];
@@ -103,6 +119,7 @@ export const reportCommand: AdapterCommand = {
 			...(attempt !== null ? { attempt } : {}),
 			...(detected.buildUrl ? { buildUrl: detected.buildUrl } : {}),
 			results,
+			...(nothingRequired ? { nothingRequired: true } : {}),
 		});
 		const receipt = await client.call("report", report);
 		// A repeat is answered with the receipt of the first upload, gate line included. That is how a lost reply is

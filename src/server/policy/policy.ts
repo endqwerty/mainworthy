@@ -38,7 +38,8 @@ export type CurrentPolicy = Policy & { version: number };
 function read(row: PolicyRow): CurrentPolicy {
 	// A policy stored before the `unlinked` setting existed has none: its clauses alone say who is asked.
 	const stored = json<
-		Omit<Policy["settings"], "unlinked" | "flakyDetection"> & { unlinked?: Unlinked; flakyDetection?: unknown }
+		Partial<Pick<Policy["settings"], "unlinked" | "emptyReports">> &
+			Omit<Policy["settings"], "unlinked" | "emptyReports" | "flakyDetection"> & { flakyDetection?: unknown }
 	>(row.settings);
 	return {
 		version: row.version,
@@ -47,6 +48,7 @@ function read(row: PolicyRow): CurrentPolicy {
 		settings: {
 			...stored,
 			unlinked: stored.unlinked ?? "ask",
+			emptyReports: stored.emptyReports ?? "pending",
 			flakyDetection: FlakyDetectionSettings.parse(stored.flakyDetection),
 		},
 	};
@@ -96,6 +98,7 @@ export function resolvePolicy(
 		clauses?: Clause[] | undefined;
 		settings?: Policy["settings"] | undefined;
 		unlinked?: Unlinked | undefined;
+		emptyReports?: Policy["settings"]["emptyReports"] | undefined;
 	},
 ): Policy {
 	let next: Policy = current;
@@ -113,6 +116,8 @@ export function resolvePolicy(
 	if (change.clauses !== undefined) next = { ...next, preset: change.preset ?? "custom", clauses: change.clauses };
 	if (change.settings !== undefined) next = { ...next, settings: change.settings };
 	if (change.unlinked !== undefined) next = { ...next, settings: { ...next.settings, unlinked: change.unlinked } };
+	if (change.emptyReports !== undefined)
+		next = { ...next, settings: { ...next.settings, emptyReports: change.emptyReports } };
 	const parsed = Policy.safeParse(next);
 	if (!parsed.success) throw invalid("policy is not valid", { issues: parsed.error.issues });
 	const missing: Kind[] = missingCatchAll(parsed.data.clauses);

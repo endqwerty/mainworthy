@@ -14,6 +14,7 @@ const admin: Ask = { who: "admin", agents: "none", notProducer: false, reason: "
 const settings: PolicySettings = {
 	flakyDetection: FlakyDetectionSettings.parse(undefined),
 	unlinked: "track",
+	emptyReports: "pending",
 	basis: "exact-or-assumed",
 	holds: { flakyDays: 14, infraThisTargetOnly: true },
 };

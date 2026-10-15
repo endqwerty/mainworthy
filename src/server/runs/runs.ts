@@ -34,6 +34,7 @@ import {
 	isWithdrawn,
 	laneHistory,
 	mustTarget,
+	nothingRequiredOn,
 	processedJobs,
 	resolveCommit,
 	resultById,
@@ -100,6 +101,10 @@ export type SlotRow = {
 };
 
 const Q = {
+	emptyChangeRuns: sql<{ project: number }, { id: number }>(
+		`SELECT id FROM runs WHERE project = $project AND origin = 'change'
+		 AND json_extract(tally, '$.pass') + json_extract(tally, '$.excused') = 0`,
+	),
 	byNo: sql<{ project: number; no: number }, RunRow>("SELECT * FROM runs WHERE project = $project AND no = $no"),
 	byId: sql<{ id: number }, RunRow>("SELECT * FROM runs WHERE id = $id"),
 	changeRun: sql<{ project: number; what: string }, RunRow>(
@@ -1138,7 +1143,12 @@ export const unexplainedIn = (db: Db, run: RunRow): Set<string> => count(db, run
  * the transaction of every event that can change them: an applied batch, a decision, a withdrawn decision.
  * `blockers` are the open questions about this run.
  */
-export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): Retallied {
+export function retally(
+	ctx: Ctx,
+	runId: number,
+	blockers: readonly Blocker[],
+	emptyReports: Policy["settings"]["emptyReports"] = "pending",
+): Retallied {
 	const run = runById(ctx.db, runId);
 	if (!run) throw new Error(`run ${runId} is missing`);
 	const { tally, failing, depends } = count(ctx.db, run);
@@ -1160,7 +1170,13 @@ export function retally(ctx: Ctx, runId: number, blockers: readonly Blocker[]): 
 		ctx.db.run(Q.depend, { run: run.id, decision, expires });
 		if (expires !== null && (expiry === null || expires < expiry)) expiry = expires;
 	}
-	const next = verdict({ tally, blocking: blocking.length, outstanding: run.outstanding, expired: false });
+	const next = verdict({
+		tally,
+		blocking: blocking.length,
+		outstanding: run.outstanding,
+		expired: false,
+		nothingRequired: permitsEmpty(ctx, run, tally, emptyReports),
+	});
 	ctx.db.run(Q.project, {
 		id: run.id,
 		tally: JSON.stringify(tally),
@@ -1525,7 +1541,13 @@ export function gateOf(ctx: Ctx, run: RunRow): GateStatus {
 	const tally = json<Tally>(run.tally);
 	const open = json<string[]>(run.blocking);
 	const expired = run.next_expiry !== null && run.next_expiry <= ctx.now;
-	const facts = { tally, blocking: open.length, outstanding: run.outstanding, expired };
+	const facts = {
+		tally,
+		blocking: open.length,
+		outstanding: run.outstanding,
+		expired,
+		nothingRequired: run.origin === "change" && run.verdict === "passed",
+	};
 	const now = verdict(facts);
 	return {
 		run: runRef(run),
@@ -1536,4 +1558,19 @@ export function gateOf(ctx: Ctx, run: RunRow): GateStatus {
 		url: null,
 		stale: now !== run.verdict,
 	};
+}
+
+/** The exception applies only to a commit with a declaration and no ordinary reports, never a planned run. */
+function permitsEmpty(ctx: Ctx, run: RunRow, tally: Tally, emptyReports: Policy["settings"]["emptyReports"]): boolean {
+	return (
+		run.origin === "change" &&
+		Object.values(tally).every((n) => n === 0) &&
+		emptyReports === "nothing-required" &&
+		nothingRequiredOn(ctx.db, targetsOfRun(ctx.db, run))
+	);
+}
+
+/** A policy choice changes existing empty commit gates as well as future reports. */
+export function reconsiderEmptyReports(ctx: Ctx): void {
+	for (const run of ctx.db.all(Q.emptyChangeRuns, { project: ctx.project.id })) ctx.recompute.add(run.id);
 }

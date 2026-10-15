@@ -119,7 +119,7 @@ export const proposeOp = defineOp({
 	needs: "produce",
 	scope: "project",
 	effect: "write",
-	mcp: "Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected.",
+	mcp: "Propose at base version. Status: adopted=current, open=review, conflict, rejected.",
 	run: propose,
 });
 
@@ -131,6 +131,8 @@ export const proposeOp = defineOp({
  * evidence about another build count for it.
  */
 export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; fresh: boolean } {
+	if (input.nothingRequired && (ctx.actor.kind !== "ci" || !input.target || !("commit" in input.target)))
+		throw invalid("nothingRequired needs a CI actor and an explicit commit target");
 	const run = input.run ? mustRun(ctx.db, ctx.project.id, input.run) : null;
 	if (run?.state === "closed" && !json<{ commit?: string }>(run.accepts).commit)
 		throw conflict(`${runRef(run)} is closed; withdraw its sign-off to reopen it`);
@@ -326,7 +328,7 @@ export const reportOp = defineOp({
 	needs: "record",
 	scope: "project",
 	effect: "write",
-	mcp: "Record results for target or run.",
+	mcp: "Report results for target commit or run.",
 	steps: reportSteps,
 });
 

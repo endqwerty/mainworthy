@@ -75,15 +75,21 @@ export const emptyTally = (): Tally => ({
  * - `pending`: evidence is missing, an accepted upload is not yet applied, or a decision it rests on has expired.
  * - `failed`: something is attributed to the target and needs a fix.
  * - `blocked`: a failure nobody has explained, a dispute, or an open question that blocks this run.
- * - `passed`: none of the above, and something was proven. Missing evidence is never green, and neither is a
- *   run with nothing counted at all: a report of skips only, or one whose every result was refused.
+ * - `passed`: none of the above, and something was proven, or the caller established a policy-permitted
+ *   declaration of nothing required. A skip or refused result cannot establish that declaration.
  */
-export function verdict(input: { tally: Tally; blocking: number; outstanding: number; expired: boolean }): Verdict {
+export function verdict(input: {
+	tally: Tally;
+	blocking: number;
+	outstanding: number;
+	expired: boolean;
+	nothingRequired?: boolean;
+}): Verdict {
 	const { tally } = input;
 	if (input.outstanding > 0 || input.expired) return "pending";
 	if (tally.attributed > 0) return "failed";
 	if (tally.unexplained > 0 || tally.disputed > 0 || input.blocking > 0) return "blocked";
-	if (tally.missing > 0 || tally.pass + tally.excused === 0) return "pending";
+	if (tally.missing > 0 || (tally.pass + tally.excused === 0 && !input.nothingRequired)) return "pending";
 	return "passed";
 }
 
@@ -93,6 +99,7 @@ export function explainVerdict(input: {
 	blocking: number;
 	outstanding: number;
 	expired: boolean;
+	nothingRequired?: boolean;
 }): string {
 	const { tally } = input;
 	const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -108,6 +115,7 @@ export function explainVerdict(input: {
 	}
 	if (tally.missing > 0) return `pending: ${plural(tally.missing, "result")} missing`;
 	if (tally.pass + tally.excused === 0) {
+		if (input.nothingRequired) return "passed: the pipeline declared nothing required under the project's policy";
 		return tally.skipped > 0
 			? `pending: nothing was proven (${plural(tally.skipped, "result")} skipped)`
 			: "pending: nothing has been proven yet";
