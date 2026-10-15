@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { parseCase } from "../src/core/markdown.ts";
 import type { DecideReply, Edit, ProposeReply } from "../src/core/ops.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
+import { Db } from "../src/server/kernel/db.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke, invokeAsync, type Reply } from "../src/server/ops/registry.ts";
 import { open } from "../src/server/start.ts";
@@ -782,4 +783,26 @@ describe("organising", () => {
 		expect(h.call<{ items: unknown[] }>("find", {}).items).toEqual([]);
 		expect(h.call<{ state: string }[]>("get", { refs: ["C-1"] })[0]?.state).toBe("archived");
 	});
+});
+
+test("a sliced savepoint closed early rolls back and drops the after-commit work it queued", () => {
+	const db = new Db(":memory:");
+	db.exec("CREATE TABLE t (x INTEGER)");
+	const ran: string[] = [];
+	db.begin();
+	db.afterCommit(() => ran.push("before"));
+	const steps = db.savepointSteps(function* () {
+		db.exec("INSERT INTO t VALUES (1)");
+		db.afterCommit(() => ran.push("inside"));
+		yield;
+		return 1;
+	});
+	steps.next();
+	// An abandoned request closes its generator at a slice boundary, without a throw.
+	steps.return(undefined as never);
+	expect(db.raw.query("SELECT count(*) AS n FROM t").get()).toEqual({ n: 0 });
+	db.commit();
+	expect(ran).toEqual(["before"]);
+	db.transaction(() => db.afterCommit(() => ran.push("next")));
+	expect(ran).toEqual(["before", "next"]);
 });
