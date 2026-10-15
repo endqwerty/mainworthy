@@ -58,6 +58,9 @@ restore the cache and call `setStatus(error.message)`, keeping the input.
 `optimisticWrite({key, update, write})` is available for a single cache; it
 cancels queries, snapshots, patches, rolls back on errors, and invalidates.
 For multiple caches or same-frame keyboard effects, patch manually before call.
+Cancel each affected list's active read before taking its snapshot or patching its
+cache. Change events preserve paged reads, so they do not cancel an older reply
+that could replace the patch. Invalidate after the write to read the list afresh.
 
 ## Signing in and out
 
