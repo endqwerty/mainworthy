@@ -70,7 +70,7 @@ A supplied `fields` map replaces that map. Include every value you want to keep;
 To define fields through the CLI or HTTP API, start with `mainworthy policy show --json`. Keep its settings and add a `fields` map, then propose the whole settings object:
 
 ```
-$ mainworthy propose --json '{"edits":[{"op":"policy","settings":{"unlinked":"track","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"fields":{"risk":{"kind":"choice","label":"Risk","required":true,"choices":["low","high"]},"notes":{"kind":"text","label":"Notes","required":false}}}}]}'
+$ mainworthy propose --json '{"edits":[{"op":"policy","settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"fields":{"risk":{"kind":"choice","label":"Risk","required":true,"choices":["low","high"]},"notes":{"kind":"text","label":"Notes","required":false}}}}]}'
 ```
 
 An admin who is a person accepts the resulting question in Queue or with `decide`. Sending the whole settings object without `fields` removes all definitions. The MCP tool listing omits field definitions to keep its token limit; use the CLI, HTTP API, or Settings for definition changes. Archives include the policy versions, values, proposals, and decisions.
@@ -222,7 +222,7 @@ To change them, start from the current settings and send a policy edit. Keep the
 other settings as they are. This example uses the other defaults:
 
 ```json
-{"edits":[{"op":"policy","settings":{"unlinked":"track","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"flakyDetection":{"enabled":true,"windowDays":7,"minFlips":3}}}]}
+{"edits":[{"op":"policy","settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"flakyDetection":{"enabled":true,"windowDays":7,"minFlips":3}}}]}
 ```
 
 Send it through `mainworthy propose --json` and have an admin accept the policy

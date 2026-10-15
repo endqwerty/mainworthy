@@ -464,6 +464,8 @@ test("authenticated stateless HTTP answers initialize and tools/list and keeps t
 		const init = z.object({ result: InitializeResultSchema }).parse(await initialized.json()).result;
 		expect(init.protocolVersion).toBe("2025-11-25");
 		expect(init.instructions).toContain("onEvidence");
+		// Tool schemas call `project` optional; the rule for omitting it is said once, here.
+		expect(init.instructions).toContain("omit project only when the instance has exactly one project");
 		expect(init.instructions?.split(/[.!?](?:\s|$)/).filter(Boolean).length).toBeLessThanOrEqual(3);
 		const listed = await post({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
 		expect(listed.status).toBe(200);
