@@ -10,6 +10,7 @@ export const TARGET_FLAGS: readonly Flag[] = [
 	{ name: "branch", kind: "string", description: "Branch tested." },
 	{ name: "pr", kind: "number", description: "Pull request number." },
 	{ name: "base", kind: "string", description: "Base commit of the change." },
+	{ name: "head", kind: "string", description: "Current change head read from the code host. Never inferred from CI." },
 	{ name: "env", kind: "string", description: "Test environment." },
 ];
 
@@ -67,7 +68,7 @@ export function reportTarget(args: Args, detected: ReturnType<typeof detectTarge
 		if (TARGET_FLAGS.some((flag) => args.has(flag.name)))
 			throw new CliError(
 				"invalid",
-				"--session has no build identity; omit commit, branch, PR, base and environment flags",
+				"--session has no build identity; omit commit, branch, PR, base, head and environment flags",
 			);
 		return TargetIn.parse({ session });
 	}
@@ -86,6 +87,7 @@ export function reportTarget(args: Args, detected: ReturnType<typeof detectTarge
 		...(args.has("branch") ? { branch: args.value("branch") } : {}),
 		...(args.has("pr") ? { pr: args.number("pr") } : {}),
 		...(args.has("base") ? { base: args.value("base") } : {}),
+		...(args.has("head") ? { head: args.value("head") } : {}),
 		...(args.has("env") ? { env: args.value("env") } : {}),
 	});
 }

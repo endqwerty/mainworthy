@@ -28,6 +28,71 @@ const layerOf = (file: string): string => {
 	return parts[1] === "server" ? `server/${parts[2]}` : (parts[1] ?? "");
 };
 
+function migrationArchiveMismatches(migrations: typeof MIGRATIONS): string[] {
+	const mismatches: string[] = [];
+	const db = new Db(":memory:");
+	const exported = () =>
+		new Map(
+			db.raw
+				.query<{ name: string }, []>(
+					"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'search_docs%' ORDER BY name",
+				)
+				.all()
+				.filter((table) => !UNEXPORTED.includes(table.name))
+				.map((table) => [
+					table.name,
+					db.raw
+						.query<{ name: string; type: string; notnull: number; pk: number; dflt_value: string | null }, []>(
+							`PRAGMA table_info(${table.name})`,
+						)
+						.all(),
+				]),
+		);
+	let before = exported();
+	for (const migration of migrations) {
+		db.exec(migration.sql);
+		const after = exported();
+		const incompatible =
+			before.size !== after.size ||
+			[...before].some(([name, columns]) => {
+				const next = after.get(name);
+				if (!next) return true;
+				return (
+					columns.some(
+						(column) => JSON.stringify(next.find((item) => item.name === column.name)) !== JSON.stringify(column),
+					) ||
+					next.some(
+						(column) =>
+							!columns.some((item) => item.name === column.name) &&
+							(column.notnull !== 0 ||
+								column.pk !== 0 ||
+								(column.dflt_value !== null &&
+									db.raw.query<{ nonnull: number }, []>(`SELECT (${column.dflt_value}) IS NOT NULL AS nonnull`).get()
+										?.nonnull === 1)),
+					)
+				);
+			});
+		const sql = migration.sql.replace(/--[^\n]*|\/\*[\s\S]*?\*\/|'(?:''|[^'])*'/g, " ");
+		const writes = [
+			...sql.matchAll(
+				/\b(?:UPDATE(?:\s+OR\s+\w+)?|INSERT(?:\s+OR\s+\w+)?\s+INTO|REPLACE\s+INTO|DELETE\s+FROM)\s+(?:main\s*\.\s*)?(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|(\w+))/gi,
+			),
+		];
+		const transforms = writes.some((write) =>
+			[...before.keys(), ...after.keys()].some(
+				(name) => name.toLowerCase() === (write[1] ?? write[2] ?? write[3] ?? write[4])?.toLowerCase(),
+			),
+		);
+		const requiresArchive = incompatible || transforms;
+		const unchanged = JSON.stringify([...after]) === JSON.stringify([...before]);
+		// A nullable addition without a default can still change meaning; its behavior needs a separate test.
+		if ((requiresArchive || unchanged) && migration.archive !== requiresArchive) mismatches.push(migration.name);
+		before = after;
+	}
+	db.close();
+	return mismatches;
+}
+
 describe("the module map", () => {
 	test("only the decision machinery can mint a witness, so standing cannot change without a decision", () => {
 		// The mint is claimed once, by the module that settles decisions; a second claim throws when it loads
@@ -249,41 +314,37 @@ describe("the module map", () => {
 		}
 	});
 
-	test("each migration says truly whether it changes what an archive holds", () => {
-		// An import requires the archive version, which is the last migration marked `archive`. A migration that
-		// changes an exported table and is not marked would let an older archive in with a column missing; one
-		// that is marked and changes none would refuse every archive taken before it for nothing.
-		const db = new Db(":memory:");
-		const exported = (): string =>
-			JSON.stringify(
-				db.raw
-					.query<{ name: string }, []>(
-						"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'search_docs%' ORDER BY name",
-					)
-					.all()
-					.filter((table) => !UNEXPORTED.includes(table.name))
-					.map((table) => [
-						table.name,
-						db.raw
-							.query<{ name: string; type: string; notnull: number; pk: number }, []>(
-								`PRAGMA table_info(${table.name})`,
-							)
-							.all()
-							.map((column) => `${column.name} ${column.type} ${column.notnull} ${column.pk}`),
-					]),
-			);
-		const changes: string[] = [];
-		let before = exported();
-		for (const migration of MIGRATIONS) {
-			db.exec(migration.sql);
-			const after = exported();
-			changes.push(`${migration.version} ${migration.name}: ${after !== before}`);
-			before = after;
+	test("migrations mark incompatible archive shapes and leave excluded changes unmarked", () => {
+		expect(migrationArchiveMismatches(MIGRATIONS)).toEqual([]);
+	});
+
+	for (const [name, sql] of [
+		["B: nullable column with a non-NULL default", "ALTER TABLE changes ADD COLUMN probe_flag INTEGER DEFAULT 1;"],
+		[
+			"C: nullable column with a backfill",
+			"ALTER TABLE changes ADD COLUMN probe_ended INTEGER; UPDATE changes SET probe_ended = 0;",
+		],
+		["A: transform existing exported data", "UPDATE changes SET head_sha = lower(head_sha);"],
+	] satisfies readonly [string, string][]) {
+		for (const archive of [false, true]) {
+			test(`archive marks require a version bump for ${name}, archive: ${archive}`, () => {
+				const probe = { version: MIGRATIONS.length + 1, name: "probe", sql, archive };
+				expect(migrationArchiveMismatches([...MIGRATIONS, probe])).toEqual(archive ? [] : ["probe"]);
+			});
 		}
-		db.close();
-		expect(MIGRATIONS.map((migration) => `${migration.version} ${migration.name}: ${migration.archive}`)).toEqual(
-			changes,
-		);
+	}
+
+	test("archive marks keep NULL defaults and writes to excluded tables compatible", () => {
+		const probe = {
+			version: MIGRATIONS.length + 1,
+			name: "probe",
+			archive: false,
+			sql: `ALTER TABLE changes ADD COLUMN probe_flag INTEGER DEFAULT (NULL);
+				-- UPDATE changes SET probe_flag = 1;
+				/* UPDATE changes SET probe_flag = 2; */
+				UPDATE change_ends SET at = 3 WHERE 'UPDATE changes SET probe_flag = 3' IS NOT NULL;`,
+		};
+		expect(migrationArchiveMismatches([...MIGRATIONS, probe])).toEqual([]);
 	});
 
 	test("writers that undo a withdrawn decision are called only by the kind handlers", () => {

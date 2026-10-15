@@ -195,10 +195,10 @@ not the same things done worse.
     refused, or one that holds only an agent's results leaves the gate where it was. A skip never replaces a pass
     or a failure of the same test, in a commit's gate or in a slot. The cost: a commit whose pipeline runs no test
     at all (a change to the docs only) stays `pending` until a project can say what that means (#63).
-16. **A change's head only moves forward, and only on a report a gate counts.** A report for a commit first seen
-    before the current head (a retried job, a slow job of the previous push) does not move the change back, and
-    an agent's report does not move it at all. A branch reset to an older commit
-    therefore keeps its newer head in the change's gate; the gate of a commit is always exact.
+16. **A change follows the code host's reported head, or first-reported order without it.** Fixed for resets in
+    issue #62: `report` accepts `target.head`, with `--head` on the CLI (decision 0033). A pipeline or person
+    can move the head in either direction. Without it, a known late job cannot move the head back or undo a
+    newer head observation. An agent's report does not move it at all. The gate of a commit is always exact.
 17. **A change belongs to one repository.** The first repository to report `pr:12` in a project has that key;
     the same number from another repository is its own change, keyed `<repository>#pr:12`. The same commit can
     exist in two repositories (a fork): each has its own gate, a change's gate is always its own repository's,

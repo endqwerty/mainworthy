@@ -36,12 +36,13 @@ type Value = z.infer<typeof Value>;
 type Header = z.infer<typeof Header>;
 const TableName = z.object({ name: z.string() });
 const TableKind = z.object({ schema: z.string(), name: z.string(), type: z.string() });
-const Column = z.object({ name: z.string(), pk: Count });
+const Column = z.object({ name: z.string(), pk: Count, notnull: Count });
 const ForeignKey = z.object({ table: z.string(), from: z.string() });
 const ConstraintError = z.object({ code: z.string().startsWith("SQLITE_CONSTRAINT"), message: z.string() });
 type Table = {
 	name: string;
 	columns: string[];
+	nullable: Set<string>;
 	primary: string[];
 	parents: string[];
 	references: z.infer<typeof ForeignKey>[];
@@ -120,6 +121,9 @@ function discoverTables(db: Db): Table[] {
 		tables.set(name, {
 			name,
 			columns: columns.map((column) => column.name),
+			nullable: new Set(
+				columns.filter((column) => column.notnull === 0 && column.pk === 0).map((column) => column.name),
+			),
 			primary: columns
 				.filter((column) => column.pk > 0)
 				.sort((a, b) => a.pk - b.pk)
@@ -351,9 +355,9 @@ function importTransaction<T>(db: Db, fn: () => T): T {
 
 /**
  * Replays a format-1 archive into an instance with no projects, preserving all IDs and stored values. The
- * header must name this build's archive version, which is the last migration that changed an exported table, so an
- * archive taken before a migration that changed none still imports. Every count, digest, column and foreign key
- * is checked before commit; a failure restores the entire target, including bootstrap rows, sessions and the old
+ * header must name this build's archive version. Missing nullable, non-key columns are filled with NULL, so adding
+ * such columns need not change the archive version when NULL preserves the earlier behavior. Every count, digest,
+ * column and foreign key is checked before commit; a failure restores the entire target, including bootstrap rows, sessions and the old
  * search index. Tokens and sessions are discarded on success along with bootstrap identity rows.
  * Migration-owned schema_version is retained.
  * Lines exclude the LF separator and retain all other characters, since their bytes determine the digest.
@@ -423,7 +427,7 @@ export function importArchive(db: Db, lines: Iterable<string>): ArchiveCounts {
 					if (!columns.has(column)) throw invalid(`unknown column ${entry.t}.${column}`);
 				}
 				for (const column of table.columns) {
-					if (!entry.r.has(column)) throw invalid(`missing column ${entry.t}.${column}`);
+					if (!entry.r.has(column) && !table.nullable.has(column)) throw invalid(`missing column ${entry.t}.${column}`);
 				}
 				if (entry.t === "meta" && entry.r.get("key") === "schema_version")
 					throw invalid("archive must not overwrite meta.schema_version");

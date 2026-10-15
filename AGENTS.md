@@ -98,9 +98,15 @@ is under the GitHub milestone `iOS app`.
   not join its tables. A schema change is a new file in
   `src/server/kernel/migrations/`; a shipped migration is never edited. Versions
   are contiguous from 1, and a branch takes the next free number when it lands (a
-  test holds both). Its entry in `MIGRATIONS` says whether it changes a table an archive holds (`archive`): an
-  import requires the last version that did, so an archive taken before a migration
-  that changed none still imports. A test checks each entry against the schema.
+  test holds both). Its entry
+  in `MIGRATIONS` says whether it breaks archive replay (`archive`): an import
+  requires the last version that did. Added nullable, non-key columns may use
+  `archive: false` when filling them with NULL preserves the earlier behavior; import
+  fills missing columns with NULL even if they have defaults. An added column with a
+  non-NULL default requires `archive: true`. A backfill or other data write to an
+  exported table in the migration also changes the archive version, even when the
+  table shape stays the same. A test checks these declarations against the schema
+  and migration SQL; the behavior needs a test too.
 - **Who a request is, is asked once.** A surface calls `admit` in
   `src/server/identity/identity.ts` and holds no secret (decision 0017). Nothing
   outside `src/server/identity` imports another file of it. A table that holds the

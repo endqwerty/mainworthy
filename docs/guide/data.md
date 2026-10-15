@@ -175,7 +175,7 @@ conflict: import needs a fresh instance; existing projects or user data will not
 
 A fresh instance is one that has only its first project, `scratch`, with no edits and no policy change, and only its owner. Making a token for a new person, agent or pipeline adds an actor, and that is enough to make the instance non-fresh. There is no merge yet, so to bring an archive into an instance that has data, start a new instance.
 
-An archive imports only into a build with the same schema as the one that wrote it. A newer archive is refused with a message to upgrade. An older one is refused too, because Mainworthy cannot yet replay an archive across a schema change. Use the same version on both sides.
+An archive imports into a build with the same archive version as the one that wrote it. The database schema may be newer: an added nullable column can stay compatible, and import fills a missing nullable, non-key column with NULL, even if it has a default. Missing required columns and unknown columns are refused. A migration that adds or removes exported tables, removes or renames exported columns, adds a column with a non-NULL default, or writes exported data changes the archive version. This includes backfills and transforms that leave the table shape unchanged. An archive with a newer version is refused with a message to upgrade; one with an older version is refused because Mainworthy cannot yet transform it. Use matching archive versions on both sides.
 
 Explicit empty-report declarations add a column to archived batches in schema 7. Import an older archive with the build that wrote it before upgrading that instance. Upgrading its SQLite database preserves existing records and adds the declaration column.
 

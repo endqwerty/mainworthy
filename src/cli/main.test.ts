@@ -153,6 +153,26 @@ test("red report, blocked gate, generated decision, passed gate without another 
 	});
 });
 
+test("report --head follows the code host after a reset while keeping the tested commit exact", async () => {
+	await withInstance(async ({ cli, client }) => {
+		const target = { commit: COMMIT, repo: "acme/web", branch: "feature", pr: 12 };
+		await client.call("report", { target, results: [{ test: { key: "old" }, outcome: "pass" }] });
+		await client.call("report", {
+			target: { ...target, commit: "newhead1" },
+			results: [{ test: { key: "new" }, outcome: "fail", failure: { message: "defect" } }],
+		});
+		expect((await client.call("gate", { change: "pr:12" })).verdict).toBe("blocked");
+		const receipt = await cli(
+			["report", RED_XML, "--commit", "newhead1", "--pr", "12", "--branch", "feature", "--head", COMMIT],
+			{ env: { MAINWORTHY_COMMIT: "newhead1", MAINWORTHY_REPO: "acme/web" } },
+		);
+		expect(receipt.code).toBe(0);
+		expect(receipt.stderr).toBe("");
+		expect((await client.call("gate", { change: "pr:12" })).verdict).toBe("passed");
+		expect((await client.call("gate", { commit: "newhead1", repo: "acme/web" })).verdict).toBe("blocked");
+	});
+});
+
 test("repeated report returns the same receipt, writes one batch, and names the duplicate", async () => {
 	await withInstance(async ({ run, instance }) => {
 		const argv = ["report", RED_XML, "--commit", COMMIT, "--branch", "main"];

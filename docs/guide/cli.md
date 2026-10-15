@@ -88,6 +88,7 @@ Flags of `mainworthy report`:
 - `--branch <string>`: Branch tested.
 - `--pr <number>`: Pull request number.
 - `--base <string>`: Base commit of the change.
+- `--head <string>`: Current change head read from the code host. Never inferred from CI.
 - `--env <string>`: Test environment.
 - `--format <string>`: Report format: auto (default), junit, playwright, jest, vitest, pytest (pytest-json-report), trx.
 - `--session <string>`: Named test session with no build identity.
