@@ -517,6 +517,19 @@ export function SuiteScreen() {
 			return;
 		}
 		const prior = draftRef.current;
+		if (prior?.id === next.id) {
+			if (next.base < prior.base) return;
+			if (next.base === prior.base)
+				next = {
+					...prior,
+					body: next.body,
+					tags: next.tags,
+					covers: next.covers,
+					folder: next.folder,
+					caret: next.caret,
+					dirty: prior.dirty || next.dirty,
+				};
+		}
 		const contentChanged =
 			prior &&
 			JSON.stringify([prior.body, prior.tags, prior.covers, prior.folder]) !==

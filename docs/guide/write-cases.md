@@ -53,7 +53,9 @@ the recorded version named beside your draft.
 A dirty draft is submitted when you leave, press <kbd>Cmd</kbd> <kbd>Enter</kbd>
 on macOS or <kbd>Ctrl</kbd> <kbd>Enter</kbd> elsewhere, or pause for 30 seconds.
 The policy then decides whether the proposal becomes current or waits for review.
-There is no save button.
+There is no save button. Moving the caret or selecting text while a save finishes
+keeps that save's outcome: text waiting for review is not proposed again, and when
+the case updates before you edit, your next edit starts from the newer version.
 
 A step is recorded once it has an action. A step with an expected result and no action yet
 is left out of the version and stays in your draft on this device, also after a reload.
