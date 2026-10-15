@@ -226,8 +226,9 @@ dashboard. This page writes the tailnet's name as `example.ts.net` and the node'
    To take the instance off the internet, delete the DNS record for the name or its route in the tunnel. A
    firewall rule for incoming connections does not do it: the tunnel is a connection the server opens outward.
 
-Nothing redeploys by itself. After a change lands on the branch, press Redeploy in Coolify or call its API
-(`POST /api/v1/deploy?uuid=<application>`).
+This setup alone does not enable automatic deployment. To deploy manually, press Redeploy in Coolify or call
+its API (`POST /api/v1/deploy?uuid=<application>`). The owner's instance uses an external deploy job; its
+required check reads are under "Checks a deployment must wait for" below.
 
 ## This repository's CI reporting to the instance
 
@@ -307,17 +308,19 @@ the steps are kept below for an instance that has none.
   0022, since 2026-10-13). A failure nobody explained on it is then no longer asked about. Before this, such a
   question stayed in the queue until a person answered it: the one about pull request 150 outlived its merge.
   For a pull request that ended earlier, or whose event was missed: `gh workflow run change.yml -f pull=150
-  -f state=merged`.
+  -f state=merged`. The workflow checks the instance's API version first. An incompatible instance or an unknown
+  operation fails the job and needs a replay after the instance is upgraded. Only the specific reply that the
+  named change was never reported is accepted as a harmless 404.
 - **A push to `main` reports too**, as the workflow runs on it.
 
 What can go wrong, and what the job does: the instance is down (its own Mainworthy, a warning); the instance is an
-older or newer build that describes `report` or `gate` differently (the same); the token was revoked or is for
-another project (the job fails and says which); the instance answers the token `429` after too many failed
+older or newer build with a different or absent API version, or which describes `report` or `gate` differently
+(the same); the token was revoked or is for another project (the job fails and says which); the instance answers the token `429` after too many failed
 attempts (the job fails too: the right token of a pipeline passes a block, so this one is not it). To stop
 reporting to the instance, delete the `MAINWORTHY_URL`
-variable. A pull request that changes the shape of a `report` or `gate` reply fails against the instance until it
-is redeployed (#90): delete the variable for that pull request. To replace the token, follow "Replacing a token"
-below: the new one is in use before the old one is revoked, so no run is refused in between.
+variable. A breaking reply change increments `API_VERSION` in `src/core/version.ts`; CI then starts its own
+instance until the deployed instance advertises that API version. No variable change is needed. To replace the
+token, follow "Replacing a token" below: the new one is in use before the old one is revoked, so no run is refused in between.
 
 The token is visible to the code of every pull request, because the `gate` job runs it. That code can report
 wrong results for this one project; it cannot do anything else with the token. Until backups exist (#59) the
@@ -600,3 +603,35 @@ up (#59), a failed disk loses the instance.
 bun install && bun run build      # dist/mainworthy, one self-contained executable
 MAINWORTHY_MODE=server MAINWORTHY_HOST=0.0.0.0 MAINWORTHY_DATA=/var/lib/mainworthy ./dist/mainworthy serve
 ```
+
+## Checks a deployment must wait for
+
+The deploy job lives outside this repository. The existing `check` workflow publishes the `gate` job through
+GitHub Actions. No new status, artifact or repository credential is required here. A delay alone does not
+prove the checks passed. The external job needs these reads before deploying a candidate commit:
+
+1. Read `GET https://api.github.com/repos/endqwerty/mainworthy/git/ref/heads/main` and keep the full `object.sha`.
+2. Read `GET https://api.github.com/repos/endqwerty/mainworthy/actions/workflows/check.yml/runs?event=push&branch=main&head_sha=<sha>&per_page=100`.
+   Follow pagination. Select the newest run by `run_number`, without filtering for successful runs. Confirm its
+   `head_sha`, `head_branch: "main"`, `event: "push"`, `status: "completed"` and `conclusion: "success"`.
+   No run, a pending run, a failed run or an unreadable response means wait, never deploy.
+3. Read `GET https://api.github.com/repos/endqwerty/mainworthy/actions/runs/<run-id>/attempts/<run_attempt>/jobs?per_page=100`.
+   Follow pagination. Require exactly one job named `gate`, with `status: "completed"` and `conclusion: "success"`.
+   A skipped or cancelled gate is not permission to deploy. Use the run's current attempt, never an older passing attempt.
+4. Read `GET https://api.github.com/repos/endqwerty/mainworthy/actions/runs/<run-id>` and `main` again immediately
+   before deploying. If the run's attempt or result changed,
+   check it again. If the tip changed, start over with that commit and the existing settle delay.
+5. After deploying the pinned commit, read `GET https://mainworthy.com/healthz`. Require HTTP 200, `ok: true`
+   and `commit` equal to the full candidate SHA. Record failure if the deploy fails or that reply does not arrive
+   within the job's deployment deadline. The external job must notify the operator of that failure and retain
+   the commit, workflow run URL, deployment identifier and failure reason. Recovery remains a separate task
+   tracked by [issue #59](https://github.com/endqwerty/mainworthy/issues/59).
+
+These are public GitHub reads. A token with repository Actions read permission can avoid anonymous API rate
+limits. The external job chooses and stores it. It needs no write permission. GitHub documents
+[workflow-run reads](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-workflow) and
+[jobs for a run attempt](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt).
+A pull request's check does not replace the push check of the resulting `main` commit.
+
+This documents the handoff for [issue #90](https://github.com/endqwerty/mainworthy/issues/90). It does not change
+or verify the external deploy job, its notifications or its recovery procedure.

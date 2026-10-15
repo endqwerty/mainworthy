@@ -657,7 +657,14 @@ test("health prints the first 12 characters of the commit the server reports, an
 			expect(text.code).toBe(0);
 			expect(text.stdout).toBe(`healthy: Mainworthy 0.1.0 (commit ${sha.slice(0, 12)}) at ${instance.url}\n`);
 			const json = await run(["health", "--json"]);
-			expect(JSON.parse(json.stdout)).toEqual({ url: instance.url, healthy: true, version: "0.1.0", commit: sha });
+			expect(JSON.parse(json.stdout)).toEqual({
+				url: instance.url,
+				healthy: true,
+				version: "0.1.0",
+				commit: sha,
+				apiVersion: 1,
+				compatible: true,
+			});
 		},
 		{ env: { MAINWORTHY_COMMIT: sha } },
 	);
@@ -678,7 +685,14 @@ test("health stays compatible with a server that reports no commit", async () =>
 				expect(text.code).toBe(0);
 				expect(text.stdout).toBe(`healthy: Mainworthy 0.1.0 at ${url}\n`);
 				const json = await run(["health", "--url", url, "--json"]);
-				expect(JSON.parse(json.stdout)).toEqual({ url, healthy: true, version: "0.1.0", commit: null });
+				expect(JSON.parse(json.stdout)).toEqual({
+					url,
+					healthy: true,
+					version: "0.1.0",
+					commit: null,
+					apiVersion: null,
+					compatible: false,
+				});
 			});
 		} finally {
 			await server.stop(true);
@@ -1160,13 +1174,18 @@ async function viaServer<T>(
 	instance: { url: string },
 	run: () => Promise<T>,
 	options: { refuse?: boolean } = {},
-): Promise<{ result: T; asked: { url: string; authorization: string | null }[] }> {
-	const asked: { url: string; authorization: string | null }[] = [];
+): Promise<{ result: T; asked: { url: string; authorization: string | null; apiVersion: string | null }[] }> {
+	const asked: { url: string; authorization: string | null; apiVersion: string | null }[] = [];
 	const real = globalThis.fetch;
 	globalThis.fetch = Object.assign(
 		async (input: Request | string | URL, init?: RequestInit) => {
 			const url = String(input);
-			asked.push({ url, authorization: new Headers(init?.headers).get("authorization") });
+			const headers = new Headers(init?.headers);
+			asked.push({
+				url,
+				authorization: headers.get("authorization"),
+				apiVersion: headers.get("x-mainworthy-api-version"),
+			});
 			process.stderr.write("[fetch]\n");
 			if (options.refuse) throw new TypeError("connection refused");
 			return real(url.replace(/^https?:\/\/[^/]+/, instance.url), init);
@@ -1187,10 +1206,11 @@ test("a token bound for plain http on another machine is warned of once, on stde
 		async ({ run, instance }) => {
 			const token = instance.generatedToken ?? "";
 			const { result, asked } = await viaServer(instance, () => run(["find", "--url", PLAIN, "--compact"]));
-			// `find` asks for the session and then for the cases: two requests, one warning, ahead of both.
-			expect(asked.map((request) => request.authorization)).toEqual([`Bearer ${token}`, `Bearer ${token}`]);
+			// The health probe sends no token; the session and operation follow, with one warning ahead of them.
+			expect(asked.map((request) => request.authorization)).toEqual([null, `Bearer ${token}`, `Bearer ${token}`]);
+			expect(asked.map((request) => request.apiVersion)).toEqual([null, "1", "1"]);
 			expect(result.code).toBe(0);
-			expect(result.stderr).toBe(`${PLAIN_WARNING}[fetch]\n[fetch]\n`);
+			expect(result.stderr).toBe(`${PLAIN_WARNING}[fetch]\n[fetch]\n[fetch]\n`);
 			expect(outputWith(Found, result).items).toEqual([]);
 			expect(result.stdout).not.toContain("warning");
 			expect(result.stdout).not.toContain(token);
@@ -1216,14 +1236,14 @@ test("a token is not warned of for https, for this machine, or when none is sent
 				"http://robin:secret@localhost:7357",
 			]) {
 				const { result, asked } = await viaServer(instance, () => run(["find", "--url", url]));
-				expect([url, result.code, result.stderr]).toEqual([url, 0, "[fetch]\n[fetch]\n"]);
-				expect(asked).toHaveLength(2);
+				expect([url, result.code, result.stderr]).toEqual([url, 0, "[fetch]\n[fetch]\n[fetch]\n"]);
+				expect(asked).toHaveLength(3);
 			}
 			// No token, none sent, nothing to say: the health check sends none either.
 			const bare = await viaServer(instance, () => run(["find", "--url", PLAIN], { env: { MAINWORTHY_TOKEN: "" } }));
 			expect(bare.result.stderr).not.toContain("warning:");
-			// The server refuses the session at once, so one request is asked, and it carries no token.
-			expect(bare.asked.map((request) => request.authorization)).toEqual([null]);
+			// After the health probe, the session is refused. Neither request carries a token.
+			expect(bare.asked.map((request) => request.authorization)).toEqual([null, null]);
 		},
 		{ mode: "server" },
 	);
@@ -1516,4 +1536,58 @@ test("real report outputs use git top level or cwd for stable Jest and Vitest ke
 			if (format === "pytest") expect(JSON.parse(result.stdout).questions).toHaveLength(3);
 		}
 	});
+});
+
+test("version reports the CLI contract without reaching a server or reading a token", async () => {
+	await withInstance(async ({ run, instance }) => {
+		const { result, asked } = await viaServer(
+			instance,
+			() => run(["version", "--json"], { env: { MAINWORTHY_TOKEN_FILE: "/missing/token" } }),
+			{ refuse: true },
+		);
+		expect(result.code).toBe(0);
+		expect(JSON.parse(result.stdout)).toEqual({ version: "0.1.0", apiVersion: 1 });
+		expect(asked).toEqual([]);
+	});
+});
+
+test("an incompatible or unversioned server receives no CLI operation or credentials", async () => {
+	for (const apiVersion of [undefined, 0, 2, "1", null]) {
+		const received: { path: string; token: string | null }[] = [];
+		const server = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch(req) {
+				received.push({ path: new URL(req.url).pathname, token: req.headers.get("authorization") });
+				return Response.json(
+					new URL(req.url).pathname === "/healthz"
+						? { ok: true, version: "0.1.0", apiVersion }
+						: { ok: true, result: {} },
+				);
+			},
+		});
+		try {
+			await withInstance(async ({ run }) => {
+				const result = await run([
+					"change",
+					"--project",
+					"scratch",
+					"--change",
+					"pr:482",
+					"--state",
+					"merged",
+					"--url",
+					`http://127.0.0.1:${server.port}`,
+					"--token",
+					"private-token",
+				]);
+				expect(result.code).toBe(4);
+				expect(result.stderr).toContain("incompatible:");
+				expect(result.stderr).toContain("CLI requires API 1");
+				expect(received).toEqual([{ path: "/healthz", token: null }]);
+			});
+		} finally {
+			await server.stop(true);
+		}
+	}
 });

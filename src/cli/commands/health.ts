@@ -1,3 +1,4 @@
+import { API_VERSION, ApiHealth } from "../../core/version.ts";
 import { assertPositionals } from "../args.ts";
 import { line, printJson } from "../output.ts";
 import type { AdapterCommand } from "./types.ts";
@@ -17,10 +18,13 @@ export const healthCommand: AdapterCommand = {
 		const url = named ? client.url : `http://127.0.0.1:${process.env.MAINWORTHY_PORT || "7357"}`;
 		let version: string | null = null;
 		let commit: string | null = null;
+		let apiVersion: number | null = null;
 		try {
 			const response = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(2500) });
 			const body: unknown = await response.json().catch(() => null);
 			if (response.ok && typeof body === "object" && body !== null && "ok" in body && body.ok === true) {
+				const api = ApiHealth.safeParse(body);
+				apiVersion = api.success ? api.data.apiVersion : null;
 				version = "version" in body && typeof body.version === "string" ? body.version : "";
 				// Only a full commit is shown: the address may be any server, and a reply must not put its own text on the terminal.
 				commit =
@@ -29,7 +33,11 @@ export const healthCommand: AdapterCommand = {
 						: null;
 			}
 		} catch {}
-		if (args.has("json")) printJson({ url, healthy: version !== null, version, commit }, args.bool("compact"));
+		if (args.has("json"))
+			printJson(
+				{ url, healthy: version !== null, version, commit, apiVersion, compatible: apiVersion === API_VERSION },
+				args.bool("compact"),
+			);
 		else if (version === null) line(`not answering: ${url}`);
 		else line(`healthy: Mainworthy ${version}${commit ? ` (commit ${commit.slice(0, 12)})` : ""} at ${url}`);
 		return version !== null ? 0 : 1;

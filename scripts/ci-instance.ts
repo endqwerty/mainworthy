@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { API_VERSION, API_VERSION_HEADER, ApiHealth } from "../src/core/version.ts";
 import { openApi } from "../src/surfaces/http.ts";
 
 export type Choice =
@@ -47,7 +48,7 @@ function canonical(value: unknown): string {
 
 /**
  * The pipeline operations an API description describes differently from this checkout: their input, and what
- * they ask of the caller. A reply's shape is not in the description (issue #52), so a change to one is not seen.
+ * they ask of the caller. The API version also covers replies and operation meaning.
  */
 export function contractDifferences(theirs: unknown, ours: unknown = openApi()): string[] {
 	const [remote, local] = [Description.safeParse(theirs), Description.parse(ours)];
@@ -62,7 +63,11 @@ export async function chooseInstance(env: Environment, probe: Probe = PROBE): Pr
 	const url = env.MAINWORTHY_URL?.replace(/\/+$/, "");
 	if (!url) return { use: "own", warn: false, why: "MAINWORTHY_URL is not set" };
 	const get = (path: string, headers: Record<string, string> = {}) =>
-		probe.fetch(`${url}${path}`, { headers, redirect: "error", signal: AbortSignal.timeout(probe.timeoutMs) });
+		probe.fetch(`${url}${path}`, {
+			headers: { [API_VERSION_HEADER]: String(API_VERSION), ...headers },
+			redirect: "error",
+			signal: AbortSignal.timeout(probe.timeoutMs),
+		});
 	const own = (why: string): Choice => ({
 		use: "own",
 		warn: true,
@@ -70,10 +75,15 @@ export async function chooseInstance(env: Environment, probe: Probe = PROBE): Pr
 	});
 
 	let unreachable = "";
+	let compatible = false;
 	for (let attempt = 1; attempt <= probe.attempts; attempt++) {
 		try {
 			const health = await get("/healthz");
 			unreachable = health.ok ? "" : `it answered ${health.status}`;
+			if (health.ok) {
+				const parsed = ApiHealth.safeParse(await health.json().catch(() => null));
+				compatible = parsed.success && parsed.data.apiVersion === API_VERSION;
+			}
 		} catch (error) {
 			unreachable = error instanceof Error ? error.message : String(error);
 		}
@@ -81,6 +91,8 @@ export async function chooseInstance(env: Environment, probe: Probe = PROBE): Pr
 		if (attempt < probe.attempts) await Bun.sleep(probe.pauseMs);
 	}
 	if (unreachable !== "") return own(`${url} cannot be reached (${unreachable})`);
+
+	if (!compatible) return own(`${url} does not support CLI API ${API_VERSION}`);
 
 	let differences: string[];
 	try {

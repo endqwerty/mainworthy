@@ -8,6 +8,7 @@ import { z } from "zod";
 import { CI_SHARD_LIMITS } from "../scripts/check-plan.ts";
 import { chooseInstance, contractDifferences, type Probe } from "../scripts/ci-instance.ts";
 import { type Running, withInstance } from "../src/cli/test-support.ts";
+import { API_VERSION } from "../src/core/version.ts";
 import { openApi } from "../src/surfaces/http.ts";
 
 /** A file whose tests did not run at all, as on a runner with no browser. */
@@ -479,7 +480,7 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 		},
 	});
 	const healthy: Answers = {
-		"/healthz": () => Response.json({ ok: true }),
+		"/healthz": () => Response.json({ ok: true, apiVersion: 1 }),
 		"/api/openapi.json": () => Response.json(openApi()),
 		"/api/session": recorder,
 	};
@@ -494,6 +495,13 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 	};
 
 	expect(await choose(healthy)).toBe("deployed: https://mainworthy.example, project mainworthy");
+	for (const apiVersion of [undefined, 0, 2, "1", null]) {
+		asked.length = 0;
+		expect(await choose({ ...healthy, "/healthz": () => Response.json({ ok: true, apiVersion }) })).toStartWith(
+			"own (warning): https://mainworthy.example does not support CLI API 1",
+		);
+		expect(asked).toEqual(["/healthz"]);
+	}
 	expect(await choose(healthy, { MAINWORTHY_URL: "" })).toBe("own: MAINWORTHY_URL is not set");
 
 	// Unreachable: asked three times, then the job's own.
@@ -509,7 +517,7 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 	let tries = 0;
 	const slow = () => {
 		if (++tries === 1) throw new Error("no route yet");
-		return Response.json({ ok: true });
+		return Response.json({ ok: true, apiVersion: 1 });
 	};
 	expect(await choose({ ...healthy, "/healthz": slow })).toStartWith("deployed:");
 
@@ -581,4 +589,63 @@ test("choosing the instance: each thing that can be wrong with a deployed one, a
 	expect(await choose({ ...healthy, "/api/session": () => new Response("", { status: 503 }) })).toStartWith(
 		"own (warning): https://mainworthy.example did not say who this job is",
 	);
+});
+
+test("the change workflow refuses unknown operations and incompatible servers, and accepts only a missing change", async () => {
+	const workflow = z
+		.object({ jobs: z.object({ tell: z.object({ steps: z.array(z.object({ run: z.string().optional() })) }) }) })
+		.parse(Bun.YAML.parse(await Bun.file(".github/workflows/change.yml").text()));
+	const script = workflow.jobs.tell.steps.find((step) => step.run)?.run;
+	if (!script) throw new Error("change workflow has no request step");
+	const directory = await mkdtemp(join(tmpdir(), "mainworthy-change-workflow-"));
+	try {
+		for (const [apiVersion, status, body, expected] of [
+			[API_VERSION, 200, { ok: true, result: { change: "pr:482", state: "merged" } }, 0],
+			[API_VERSION, 404, { ok: false, error: { code: "not_found", message: "change pr:482 not found" } }, 0],
+			[API_VERSION, 404, { ok: false, error: { code: "not_found", message: "no operation named change" } }, 1],
+			[API_VERSION, 404, { ok: false, error: { code: "not_found", message: "project missing not found" } }, 1],
+			[API_VERSION, 200, { ok: false, error: { code: "invalid", message: "refused" } }, 1],
+			[API_VERSION + 1, 200, { ok: true, result: {} }, 1],
+			[undefined, 404, { ok: false, error: { code: "not_found", message: "no operation named change" } }, 1],
+		] as const) {
+			const received: string[] = [];
+			const server = Bun.serve({
+				hostname: "127.0.0.1",
+				port: 0,
+				fetch(req) {
+					const path = new URL(req.url).pathname;
+					received.push(path);
+					return path === "/healthz" ? Response.json({ ok: true, apiVersion }) : Response.json(body, { status });
+				},
+			});
+			try {
+				const child = Bun.spawn(["bash", "-e", "-o", "pipefail", "-c", script], {
+					cwd: directory,
+					env: {
+						PATH: process.env.PATH ?? "",
+						MAINWORTHY_URL: `http://127.0.0.1:${server.port}`,
+						MAINWORTHY_PROJECT: "scratch",
+						MAINWORTHY_TOKEN: "test-token",
+						PULL: "482",
+						STATE: "merged",
+					},
+					stdout: "pipe",
+					stderr: "pipe",
+				});
+				const [code, stdout, stderr] = await Promise.all([
+					child.exited,
+					new Response(child.stdout).text(),
+					new Response(child.stderr).text(),
+				]);
+				expect([apiVersion, status, code, stderr]).toEqual([apiVersion, status, expected, ""]);
+				if (apiVersion !== API_VERSION) expect(received).toEqual(["/healthz"]);
+				else expect(received).toEqual(["/healthz", "/api/p/scratch/change"]);
+				if (expected !== 0) expect(stdout).toContain("::error::");
+			} finally {
+				await server.stop(true);
+			}
+		}
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
 });

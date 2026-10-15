@@ -41,16 +41,21 @@ jobs:
           PULL: ${{ inputs.pull || github.event.pull_request.number }}
           STATE: ${{ inputs.state || (github.event.action == 'reopened' && 'open' || (github.event.pull_request.merged && 'merged' || 'closed')) }}
         run: |
+          if ! curl --fail --silent --show-error --max-time 10 "$MAINWORTHY_URL/healthz" | jq -e '.ok == true and .apiVersion == 1' > /dev/null; then
+            echo "::error::The instance does not advertise API 1. Upgrade it, then replay this event with workflow_dispatch."
+            exit 1
+          fi
           status=$(curl -sS -o reply.json -w '%{http_code}' -X POST "$MAINWORTHY_URL/api/p/$MAINWORTHY_PROJECT/change" \
-            -H "authorization: Bearer $MAINWORTHY_TOKEN" -H 'content-type: application/json' \
+            -H "authorization: Bearer $MAINWORTHY_TOKEN" -H 'content-type: application/json' -H 'x-mainworthy-api-version: 1' \
             -d "{\"change\":\"pr:$PULL\",\"state\":\"$STATE\"}")
           cat reply.json
           echo
-          # 404: the pull request never reported, or the instance is older than this operation. Neither stops a merge.
-          case "$status" in
-            200 | 404) ;;
-            *)
-              echo "::error::Mainworthy answered $status"
-              exit 1
-              ;;
-          esac
+          if [ "$status" = 200 ] && jq -e '.ok == true' reply.json > /dev/null; then
+            exit 0
+          fi
+          # A change with no report needs no lifecycle update. Other 404s must be replayed after fixing the cause.
+          if [ "$status" = 404 ] && jq -e --arg message "change pr:$PULL not found" '.ok == false and .error.code == "not_found" and .error.message == $message' reply.json > /dev/null; then
+            exit 0
+          fi
+          echo "::error::Mainworthy answered $status. Fix the cause, then replay this event with workflow_dispatch."
+          exit 1

@@ -1,3 +1,4 @@
+import { VERSION } from "../core/version.ts";
 import { type Args, GLOBAL_FLAGS, hasJsonInput, parseArgs } from "./args.ts";
 import { Client, clientOptions } from "./client.ts";
 import { actorCommand } from "./commands/actor.ts";
@@ -18,6 +19,7 @@ import { seedCommand } from "./commands/seed.ts";
 import { serveCommand } from "./commands/serve.ts";
 import { tokenCommand } from "./commands/token.ts";
 import type { AdapterCommand } from "./commands/types.ts";
+import { versionCommand } from "./commands/version.ts";
 import { CliError } from "./errors.ts";
 import { GENERATED_COMMANDS, generatedHelp, printFlags, runGenerated } from "./generated.ts";
 import { line } from "./output.ts";
@@ -40,6 +42,7 @@ export const ADAPTER_COMMANDS: ReadonlyMap<string, AdapterCommand> = new Map(
 		mcpCommand,
 		openCommand,
 		healthCommand,
+		versionCommand,
 	].map((command) => [command.name, command]),
 );
 
@@ -52,7 +55,7 @@ export const COMMAND_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 function printHelp(): void {
-	line("Mainworthy 0.1.0");
+	line(`Mainworthy ${VERSION}`);
 	line("usage: mainworthy [serve] | <command> [--help]");
 	line(
 		"A token: prefer MAINWORTHY_TOKEN or --token-file to --token, which the process list and the shell's history show.",
@@ -122,7 +125,9 @@ export async function runCli(argv: readonly string[], ui: unknown): Promise<numb
 		}
 		return 0;
 	}
-	const client = new Client(clientOptions(args, name === "health" || name === "fmt" ? "none" : "token"));
+	const client = new Client(
+		clientOptions(args, name === "health" || name === "fmt" || name === "version" ? "none" : "token"),
+	);
 	if (generated && (!adapter || hasJsonInput(tokens) || machineOnly(adapter, args)))
 		return runGenerated(generated, args, client);
 	if (adapter) {

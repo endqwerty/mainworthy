@@ -135,12 +135,12 @@ The image checks its own health every 30 seconds by running `mainworthy health`.
 
 ```
 $ curl -s http://127.0.0.1:7357/healthz
-{"ok":true,"version":"0.1.0","commit":null}
+{"ok":true,"version":"0.1.0","apiVersion":1,"commit":null}
 $ mainworthy health
 healthy: Mainworthy 0.1.0 at http://127.0.0.1:7357
 ```
 
-`mainworthy health` exits 0 when the server answers and 1 when it does not. Use `/healthz` for a monitor of your own.
+`mainworthy health` exits 0 when the server answers and 1 when it does not. Use `/healthz` for a monitor of your own. Its `apiVersion` is the CLI compatibility contract. `mainworthy health --json` also reports `compatible`, which is false for an older server that advertises no API version. An incompatible healthy server still exits 0. [CLI and server versions](./cli.md#cli-and-server-versions) explains refusal of operations.
 
 `commit` is the commit the server runs, when it was told. Build the image with `MAINWORTHY_COMMIT=$(git rev-parse HEAD) docker compose build` and `/healthz` names that commit, and `mainworthy health` prints its first 12 characters. Without it the answer is `null`.
 
@@ -175,7 +175,7 @@ In server mode everything that reads or changes a project needs a token or a sig
 
 | Address | What it returns |
 | --- | --- |
-| `/healthz` | Whether the server is up, its version, and the commit it runs when it was told |
+| `/healthz` | Whether the server is up, its software and API versions, and the commit it runs when it was told |
 | `/docs` and the pages under it | This documentation, the same for every instance of a version |
 | `/api/openapi.json` | The description of the API, built from the list of operations |
 | `/` | The web UI's own files. The page then asks you to sign in. `/invite`, the page an invitation link opens, is one of them. |
