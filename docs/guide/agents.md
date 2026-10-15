@@ -75,6 +75,12 @@ An edit that an agent proposes follows the policy for edits. Under `loose` it ta
 
 A finding from a review is recorded and shown. A person accepts, rejects, defers or marks it a duplicate. In the web queue, accepting a finding that carries a suggestion turns the suggestion into a proposed edit, with the agent as its author, and that edit follows the policy again. A finding never changes a gate by itself.
 
+A finding can suggest a step edit with `suggest: { step, action, expected }`, or a new case with
+`suggest: { case: { title, folder, steps } }`. For a new case, `folder` is optional and each step is
+an outline line, such as `Remove the coupon > Total shows $100.00`. The claim keeps this content
+for acceptance. Through the API, use `decide` with `answer: { is: "accept", apply: true }` to turn
+the suggestion into a proposal.
+
 A result is recorded, shown and asked about, and it does not move a commit's gate. The next section explains why.
 
 An answer from an agent is one of three things, and the reply to `decide` says which. `decided` means the answer counts. `advised` means it is recorded as advice and a person decides. `forbidden` means the policy refuses it. With the default grant, `read` and `produce`, an agent's failure answer is advised under `loose` and `standard` and forbidden under `strict`:

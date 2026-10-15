@@ -277,6 +277,52 @@ describe("changing the policy", () => {
 });
 
 describe("findings", () => {
+	test("a claimed new-case suggestion keeps its content and creates the case once when accepted", () => {
+		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		h.call("propose", { edits: [{ op: "create", outline: "Checkout applies a coupon" }] });
+		const suggest = {
+			case: {
+				title: "Coupon can be removed",
+				folder: "checkout/coupons",
+				steps: ["Apply SAVE10 > Total shows $90.00", "Remove the coupon > Total shows $100.00"],
+			},
+		};
+		const claim = {
+			cmd: "new-case-claim",
+			lens: "adversarial-review",
+			findings: [{ on: "C-1", category: "uncovered-path", note: "Removing the coupon is not covered.", suggest }],
+		};
+		const claimed = h.call("claim", claim, agent);
+		expect(h.call<typeof claimed>("claim", claim, agent)).toEqual(claimed);
+		const q = first(queue({ kind: "finding" }).items);
+		expect(q.evidence).toMatchObject({ suggest });
+		const stored = h.app.db.raw.query<{ suggest: string }, []>("SELECT suggest FROM findings").all();
+		expect(stored.map((row) => JSON.parse(row.suggest))).toEqual([suggest]);
+		const accept = {
+			cmd: "accept-new-case",
+			q: q.q,
+			onEvidence: q.evidenceHash,
+			answer: { is: "accept", apply: true },
+		};
+		const accepted = h.call<{ status: string; effects: { status: string } }[]>("decide", accept);
+		expect(first(accepted)).toMatchObject({ status: "decided", effects: { status: "adopted" } });
+		expect(h.call<typeof accepted>("decide", accept)).toEqual(accepted);
+		expect(first(h.call<{ status: string }[]>("decide", { ...accept, cmd: "accept-new-case-again" })).status).toBe(
+			"already",
+		);
+		expect(h.call<{ count: number }>("find", { in: "cases" }).count).toBe(2);
+		const created = first(h.call<Record<string, unknown>[]>("get", { refs: ["C-2"] }));
+		expect(created).toMatchObject({
+			title: "Coupon can be removed",
+			folder: { path: "checkout/coupons" },
+			version: 1,
+			steps: [
+				{ action: "Apply SAVE10", expected: "Total shows $90.00" },
+				{ action: "Remove the coupon", expected: "Total shows $100.00" },
+			],
+		});
+	});
+
 	test("an agent's review opens one question per finding, is not raised twice, and an accepted suggestion becomes the agent's proposal", () => {
 		use("standard");
 		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
@@ -309,9 +355,17 @@ describe("findings", () => {
 		const q = first(queue({ kind: "finding" }).items);
 		const accepted = h.call<{ status: string; effects: { proposal: string; status: string; adopt: string } }[]>(
 			"decide",
-			{ q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept", apply: true } },
+			{ cmd: "accept-step-suggestion", q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept", apply: true } },
 		);
 		expect(accepted[0]).toMatchObject({ status: "decided", effects: { status: "open" } }); // standard: the agent's proposal still needs a person
+		expect(
+			h.call<typeof accepted>("decide", {
+				cmd: "accept-step-suggestion",
+				q: q.q,
+				onEvidence: q.evidenceHash,
+				answer: { is: "accept", apply: true },
+			}),
+		).toEqual(accepted);
 		const adopt = first(queue({ kind: "adopt" }).items);
 		expect(adopt.evidence).toMatchObject({ author: "reviewer" });
 		h.call("decide", { q: adopt.q, onEvidence: adopt.evidenceHash, answer: { is: "accept" } });

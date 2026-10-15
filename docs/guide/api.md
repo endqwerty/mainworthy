@@ -249,13 +249,13 @@ Record a review and what it found. A review with no findings is still recorded.
 | `findings[].note` | `string` | yes |  |
 | `findings[].repro` | `string` | no |  |
 | `findings[].suggest` | `object` | no |  |
-| `findings[].suggest[1].step` | `string` | no |  |
-| `findings[].suggest[1].action` | `string` | no |  |
-| `findings[].suggest[1].expected` | `string` | no |  |
-| `findings[].suggest[2].case` | `object` | yes |  |
-| `findings[].suggest[2].case.title` | `string` | yes |  |
-| `findings[].suggest[2].case.folder` | `string` | no |  |
-| `findings[].suggest[2].case.steps` | `array<string>` | yes |  |
+| `findings[].suggest[1].case` | `object` | yes |  |
+| `findings[].suggest[1].case.title` | `string` | yes |  |
+| `findings[].suggest[1].case.folder` | `string` | no |  |
+| `findings[].suggest[1].case.steps` | `array<string>` | yes |  |
+| `findings[].suggest[2].step` | `string` | no |  |
+| `findings[].suggest[2].action` | `string` | no |  |
+| `findings[].suggest[2].expected` | `string` | no |  |
 
 </details>
 

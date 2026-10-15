@@ -248,8 +248,8 @@ export const FindingIn = z.object({
 	repro: z.string().max(4000).optional(),
 	suggest: z
 		.union([
-			z.object({ step: z.string().optional(), action: z.string().optional(), expected: z.string().optional() }),
 			z.object({ case: z.object({ title: z.string(), folder: z.string().optional(), steps: z.array(z.string()) }) }),
+			z.object({ step: z.string().optional(), action: z.string().optional(), expected: z.string().optional() }),
 		])
 		.optional(),
 });
