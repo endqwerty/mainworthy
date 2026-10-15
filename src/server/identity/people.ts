@@ -17,7 +17,7 @@ import { type Db, sql } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound, OpError } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
 import { CONTEXT, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
-import { credentialNotice } from "./contacts.ts";
+import { clearMailLinksOf, credentialNotice } from "./contacts.ts";
 import {
 	type CredentialRow,
 	countPasskeyUse,
@@ -862,6 +862,7 @@ export async function acceptInvitation(
 			revokeCredentialsOf(app.db, person.id, at);
 			revokeTokensOf(app.db, person.id, at);
 			endSessionsOf(app.db, person.id, at, "ended");
+			app.db.afterCommit(() => clearMailLinksOf(app, person.id));
 		} else if (liveCredentials(app.db, person.id).length > 0) throw new Stop(no("has-credentials"));
 		let root: CredentialRow | null = null;
 		if (passwordHash !== null)

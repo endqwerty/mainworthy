@@ -60,6 +60,125 @@ async function verified(w: World, messages: { text: string }[]) {
 	return { cookie, code };
 }
 
+test("a reset request delivers independently of another write and its rollback", async () => {
+	const box = await mailbox();
+	const w = box.w;
+	try {
+		await verified(w, box.messages);
+		const before = box.messages.length;
+		w.instance.app.db.begin();
+		try {
+			const reply = await w.post("/api/login", { resetRequest: "robin@example.com" });
+			expect(reply.status).toBe(200);
+			expect(must(reply)).toEqual({ requested: true });
+			await waitMail(w.instance.app);
+			expect(box.messages.slice(before).map((message) => message.to)).toEqual(["<robin@example.com>"]);
+		} finally {
+			w.instance.app.db.rollback();
+		}
+		await waitMail(w.instance.app);
+		expect(box.messages).toHaveLength(before + 1);
+		const reset = linkCode(box.messages.at(-1)?.text ?? "", "reset");
+		expect((await w.post("/api/login", { reset, password: NEXT })).status).toBe(200);
+		expect((await signIn(w, "robin", NEXT)).status).toBe(200);
+	} finally {
+		await waitMail(w.instance.app);
+		await box.close();
+	}
+});
+
+for (const email of ["replacement@example.com", null]) {
+	test(`a signed-in browser ${email === null ? "removes" : "replaces"} a verified address and notifies the old mailbox`, async () => {
+		const box = await mailbox();
+		const w = box.w;
+		try {
+			const { cookie } = await verified(w, box.messages);
+			const before = box.messages.length;
+			expect((await w.op("credential", { do: "email.set", email }, bearer(TOKEN))).status).toBe(403);
+			expect((await w.op("credential", { do: "email.set", email }, { cookie })).status).toBe(200);
+			await waitMail(w.instance.app);
+			const notices = box.messages.slice(before).filter((message) => message.to === "<robin@example.com>");
+			expect(notices).toHaveLength(1);
+			expect(notices[0]?.text).toContain(
+				`Your recovery email address was ${email === null ? "removed" : "changed"} for robin`,
+			);
+			expect(notices[0]?.text).toContain("If you did not make this change, contact an instance admin.");
+			expect(notices[0]?.text).not.toMatch(/\/(?:email|reset|invite)#/);
+			expect(
+				must(await w.op<{ email: string | null; verified: boolean }>("credential", { do: "email.get" }, { cookie })),
+			).toEqual({ email, verified: false });
+			if (email !== null) {
+				const verification = box.messages.slice(before).find((message) => message.to === `<${email}>`);
+				const code = linkCode(verification?.text ?? "", "email");
+				expect((await w.post("/api/login", { emailVerification: code })).status).toBe(200);
+				expect(
+					must(await w.op<{ email: string | null; verified: boolean }>("credential", { do: "email.get" }, { cookie })),
+				).toEqual({ email, verified: true });
+			} else expect(box.messages).toHaveLength(before + 1);
+		} finally {
+			await box.close();
+		}
+	});
+}
+
+test("a stored recovery address can be removed after mail is switched off", async () => {
+	const box = await mailbox();
+	const w = box.w;
+	try {
+		const { cookie } = await verified(w, box.messages);
+		const before = box.messages.length;
+		w.instance.app.config.mail = undefined;
+		expect((await w.op("credential", { do: "email.set", email: "new@example.com" }, { cookie })).status).toBe(400);
+		expect((await w.op("credential", { do: "email.set", email: null }, { cookie })).status).toBe(200);
+		expect(
+			must(await w.op<{ email: string | null; verified: boolean }>("credential", { do: "email.get" }, { cookie })),
+		).toEqual({ email: null, verified: false });
+		await waitMail(w.instance.app);
+		expect(box.messages).toHaveLength(before);
+	} finally {
+		await box.close();
+	}
+});
+
+test("passkey-only account recovery ends earlier mail links and preserves the verified contact", async () => {
+	const box = await mailbox();
+	const w = box.w;
+	const accept = async (code: string) => {
+		const offered = must(await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", { invitation: code }));
+		const reply = await w.post("/api/login", { invitation: code, passkey: authenticator().register(offered.passkey) });
+		expect(reply.status).toBe(200);
+		return reply.cookie;
+	};
+	try {
+		const invitation = await invite(w, { name: "robin" });
+		await accept(invitation.code);
+		expect((await w.op("credential", contactInput("robin@example.com"))).status).toBe(200);
+		await waitMail(w.instance.app);
+		const verify = linkCode(box.messages.at(-1)?.text ?? "", "email");
+		expect((await w.post("/api/login", { emailVerification: verify })).status).toBe(200);
+		await w.post("/api/login", { resetRequest: "robin@example.com" });
+		await waitMail(w.instance.app);
+		const reset = linkCode(box.messages.at(-1)?.text ?? "", "reset");
+		const recovery = await invite(w, { name: "robin", recover: true });
+		const cookie = await accept(recovery.code);
+		expect((await w.post("/api/login", { reset, password: PASSWORD })).status).toBe(400);
+		expect(
+			must(await w.op<{ email: string | null; verified: boolean }>("credential", { do: "email.get" }, { cookie })),
+		).toEqual({
+			email: "robin@example.com",
+			verified: true,
+		});
+		await w.post("/api/login", { resetRequest: "robin@example.com" });
+		await waitMail(w.instance.app);
+		const fresh = linkCode(box.messages.at(-1)?.text ?? "", "reset");
+		expect((await w.post("/api/login", { reset: fresh, password: NEXT })).status).toBe(200);
+		expect((await signIn(w, "robin", NEXT)).status).toBe(200);
+	} finally {
+		await waitMail(w.instance.app);
+		await box.close();
+	}
+});
+
 test("SMTP configuration is process-only, optional, and refuses incomplete settings without repeating values", () => {
 	expect(defaultConfig({}).mail).toBeUndefined();
 	for (const env of [
@@ -181,7 +300,10 @@ test("address replacement, password replacement, expiry and import invalidate pe
 		await w.op("credential", contactInput("new@example.com"));
 		await waitMail(w.instance.app);
 		expect((await w.post("/api/login", { reset: first, password: NEXT })).status).toBe(400);
-		const verify = linkCode(box.messages.at(-1)?.text ?? "", "email");
+		const verify = linkCode(
+			box.messages.findLast((message) => message.to === "<new@example.com>")?.text ?? "",
+			"email",
+		);
 		await w.post("/api/login", { emailVerification: verify });
 		await w.post("/api/login", { resetRequest: "new@example.com" });
 		await waitMail(w.instance.app);
@@ -406,7 +528,10 @@ test("archives preserve verified contacts and import invalidates all mail links"
 			200,
 		);
 		await waitMail(w.instance.app);
-		const pendingVerify = linkCode(box.messages.at(-1)?.text ?? "", "email");
+		const pendingVerify = linkCode(
+			box.messages.findLast((message) => message.to === "<replacement@example.com>")?.text ?? "",
+			"email",
+		);
 		const imported = await fetch(`${w.instance.url}/api/import`, {
 			method: "POST",
 			headers: { cookie },
