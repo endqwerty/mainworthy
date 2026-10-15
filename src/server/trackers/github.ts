@@ -35,7 +35,7 @@ export function githubPort(config: { repository: string; token: string }, reques
 			if (!parsed.success) throw new TrackerError("GitHub did not return an issue.");
 			if (path && path !== `/${parsed.data.number}`)
 				throw new TrackerError(
-					"GitHub returned another issue. Answer the failure again with the new issue key.",
+					"GitHub returned another issue than the one requested; it may have moved. Use the new issue key.",
 					"moved",
 				);
 			return {

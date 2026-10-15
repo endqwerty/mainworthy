@@ -69,7 +69,7 @@ export function jiraPort(config: NonNullable<Config["jira"]>, request: typeof fe
 		const returnedKey = Created.safeParse(body);
 		if (returnedKey.success && returnedKey.data.key !== key)
 			throw new TrackerError(
-				"Jira did not return the requested issue and status category. Answer the failure again with the new issue key.",
+				"Jira did not return the requested issue and status category; it may have moved. Use the new issue key.",
 				"moved",
 			);
 		const parsed = Issue.safeParse(body);
