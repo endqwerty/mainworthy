@@ -590,7 +590,11 @@ export type GetInput = z.infer<typeof GetInput>;
 
 export const FindInput = z.object({
 	in: z
-		.enum(["cases", "tests", "runs", "folders", "tags", "requirements", "slots", "changes", "deployments"])
+		.union([
+			z.enum(["cases", "tests", "runs", "folders", "tags", "requirements", "slots", "changes"]),
+			// Deployments are listed for CLI and HTTP; MCP's find keeps its earlier choices.
+			z.literal("deployments").meta({ "x-mcp-hidden": true }),
+		])
 		.default("cases"),
 	text: z.string().max(200).optional(),
 	folder: FolderRef.optional(),
