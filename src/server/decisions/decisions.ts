@@ -1218,22 +1218,25 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 		if (result.failing.size > 0 && askUnexplained(ctx, result.run))
 			result = retally(ctx, id, blockersOf(ctx, result.run));
 		if (options.dissolveStale) dissolveStale(ctx, result.run);
-		if (!result.wantsSignoff) {
-			// A sign-off was asked while this run passed. It no longer does, so that question is closed: nobody
-			// can close the run on what it showed then. When it passes again, it is asked again on what it shows.
-			const run = result.run;
-			if (run.origin === "planned" && run.state === "open" && run.verdict !== "passed" && run.outstanding === 0) {
-				const asked = openFor(
-					ctx.db,
-					ctx.project.id,
-					contentHash({ kind: "signoff", key: `run:${run.id}` }),
-					undefined,
-				);
-				if (asked) setQuestionState(ctx, asked, "dissolved", null);
-			}
+		const run = result.run;
+		const asked =
+			run.origin === "planned"
+				? openFor(ctx.db, ctx.project.id, contentHash({ kind: "signoff", key: `run:${run.id}` }), undefined)
+				: null;
+		// A commit run's late report changes the basis of its approval even when it no longer passes. Keep
+		// that new question current while the failure is resolved; approving still requires a passing gate.
+		const reconsider =
+			run.origin === "planned" &&
+			json<{ commit?: string }>(run.accepts).commit !== undefined &&
+			run.outstanding === 0 &&
+			(run.state === "closed" || (asked !== null && asked.prior !== null));
+		if (!result.wantsSignoff && !reconsider) {
+			// A first sign-off was asked while the run passed. It no longer does, so nobody can approve it on
+			// what it showed then. A late report to an approved commit run is reconsidered above instead.
+			if (asked && run.state === "open" && run.verdict !== "passed" && run.outstanding === 0)
+				setQuestionState(ctx, asked, "dissolved", null);
 			continue;
 		}
-		const run = result.run;
 		raise(ctx, {
 			kind: "signoff",
 			key: `run:${run.id}`,
@@ -1242,7 +1245,7 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 			producer: "rule",
 			evidence: { run: runRef(run), name: run.name, verdict: run.verdict, tally: json(run.tally) },
 			material: { tally: json(run.tally), applied: run.applied_seq },
-			facts: ["verdict:passed"],
+			facts: [`verdict:${run.verdict}`],
 			refs: [runRef(run)],
 			runs: [],
 		});

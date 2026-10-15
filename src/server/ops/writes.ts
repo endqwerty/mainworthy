@@ -132,7 +132,8 @@ export const proposeOp = defineOp({
  */
 export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; fresh: boolean } {
 	const run = input.run ? mustRun(ctx.db, ctx.project.id, input.run) : null;
-	if (run?.state === "closed") throw conflict(`${runRef(run)} is closed; withdraw its sign-off to reopen it`);
+	if (run?.state === "closed" && !json<{ commit?: string }>(run.accepts).commit)
+		throw conflict(`${runRef(run)} is closed; withdraw its sign-off to reopen it`);
 	let target: TargetRow;
 	if (input.target) target = ensureTarget(ctx, input.target);
 	else if (run) {

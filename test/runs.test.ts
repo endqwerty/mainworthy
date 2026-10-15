@@ -1,6 +1,8 @@
-// Three producers, one run: planned runs, slots and what may fill them (fixtures E1, E3, E7 in the design).
+// Three producers, one run: planned runs, slots and what may fill them (fixtures E1, E3, E5, E7 in the design).
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
+import type { DecideReply, GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
+import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
+import { acceptReport, processBatch } from "../src/server/ops/writes.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -182,6 +184,149 @@ describe("a run that accepts a build", () => {
 		});
 		expect(first(slots("R-3")).state).toBe("satisfied");
 		expect(run("R-3")).toMatchObject({ verdict: "passed", state: "closed" });
+	});
+
+	test("E5: late batches supersede a closed commit run's sign-off, including a late failure", () => {
+		const planned = h.call<PlanReply>("plan", {
+			name: "late evidence",
+			select: { cases: ["C-1"] },
+			accepts: { commit: "late0001" },
+		});
+		const report = (outcome: string, job: string, named = false) =>
+			h.call<ReportReceipt>("report", {
+				...(named ? { run: planned.run } : {}),
+				target: { commit: "late0001", branch: "main" },
+				job,
+				results: [{ test: { key: "tests/a.spec.ts::case one" }, outcome }],
+			});
+		const signoffs = () => h.call<InboxReply>("inbox", { kind: "signoff", state: "decided" }).items;
+		report("pass", "first");
+		const original = first(signoffs());
+		expect(run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
+
+		report("pass", "late", true);
+		const replacement = first(signoffs());
+		expect(signoffs()).toHaveLength(2);
+		expect(replacement.q).not.toBe(original.q);
+		expect(
+			h.app.db.raw
+				.query<{ prior: number; supersedes: number; approval: number }, [number]>(
+					`SELECT prior.no AS prior, next.supersedes, ended.supersedes AS approval FROM questions q
+			 JOIN questions prior ON prior.id = q.prior JOIN decisions next ON next.id = q.decision
+			 JOIN decisions ended ON ended.id = prior.decision WHERE q.no = ?`,
+				)
+				.all(Number(replacement.q.slice(2))),
+		).toEqual([
+			{
+				prior: Number(original.q.slice(2)),
+				supersedes: signoffs().find((q) => q.q === original.q)?.decision?.id ?? -1,
+				approval: original.decision?.id ?? -1,
+			},
+		]);
+		expect(replacement.decision?.answer).toEqual({ is: "approve" });
+		expect(signoffs().find((q) => q.q === original.q)?.decision?.answer).toEqual({ is: "outdated" });
+		expect(run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
+
+		report("fail", "late failure");
+		const asked = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
+		expect(signoffs().find((q) => q.q === replacement.q)?.decision?.answer).toEqual({ is: "outdated" });
+		expect(asked.evidence).toMatchObject({ verdict: "blocked" });
+		expect(run(planned.run)).toMatchObject({ state: "open", verdict: "blocked" });
+		expect(first(slots(planned.run)).state).toBe("failing");
+		expect(
+			first(h.call<DecideReply[]>("decide", { q: asked.q, onEvidence: asked.evidenceHash, answer: { is: "approve" } })),
+		).toMatchObject({ status: "conflict", decision: null });
+	});
+
+	test("a strict commit run asks a person again after a late pass, and an older approval cannot reopen it", () => {
+		h.call("propose", { edits: [{ op: "policy", preset: "strict" }] });
+		const policy = first(h.call<InboxReply>("inbox", { kind: "adopt" }).items);
+		h.call("decide", {
+			q: policy.q,
+			onEvidence: policy.evidenceHash,
+			answer: { is: "accept" },
+			reason: "require sign-off",
+		});
+		const planned = h.call<PlanReply>("plan", {
+			name: "human sign-off",
+			select: { cases: ["C-1"] },
+			accepts: { commit: "late0003" },
+		});
+		const approve = (q: InboxReply["items"][number]) =>
+			first(
+				h.call<DecideReply[]>("decide", {
+					q: q.q,
+					onEvidence: q.evidenceHash,
+					answer: { is: "approve" },
+					reason: "checked the evidence",
+				}),
+			);
+		record(planned.run, "C-1", "pass");
+		const original = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
+		expect(approve(original).status).toBe("decided");
+		expect(run(planned.run).state).toBe("closed");
+		const lateInput = {
+			cmd: "late-human-pass",
+			run: planned.run,
+			results: [{ test: { case: "C-1" }, outcome: "pass" }],
+		};
+		const late = h.call<ReportReceipt>("report", lateInput);
+		const asked = first(h.call<InboxReply>("inbox", { kind: "signoff" }).items);
+		expect(asked.q).not.toBe(original.q);
+		expect(asked.evidence).toMatchObject({ verdict: "passed" });
+		expect(run(planned.run)).toMatchObject({ state: "open", verdict: "passed" });
+		expect(approve(asked).status).toBe("decided");
+		h.call("decide", { undo: original.q, reason: "withdraw the older approval" });
+		expect(run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
+		const retried = h.call<ReportReceipt>("report", lateInput);
+		expect(retried).toEqual(late);
+		expect(run(planned.run)).toMatchObject({ state: "closed", verdict: "passed" });
+	});
+
+	test.each([false, true])("E5: a closed run waits for both accepted batches, reversed processing: %s", (reverse) => {
+		const planned = h.call<PlanReply>("plan", {
+			name: "two late batches",
+			select: { cases: ["C-1"] },
+			accepts: { commit: "late0002" },
+		});
+		const input = (attempt: number) => ({
+			run: planned.run,
+			target: { commit: "late0002", branch: "main" },
+			job: "tests",
+			attempt,
+			results: [{ test: { key: "tests/a.spec.ts::case one" }, outcome: "pass" as const }],
+		});
+		h.call("report", input(1));
+		const original = first(h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" }).items);
+		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
+			h.app.db.transaction(() => {
+				const project = findProject(h.app.db, "scratch");
+				if (!project) throw new Error("no project");
+				const ctx = makeCtx(h.app, project, h.owner, true);
+				const result = fn(ctx);
+				stampSeq(ctx);
+				return result;
+			});
+		const batches = [2, 3].map((attempt) => inTx((ctx) => acceptReport(ctx, input(attempt))).batch);
+		if (reverse) batches.reverse();
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "pending",
+			stale: true,
+			reason: "pending: 2 reports accepted and not yet applied",
+		});
+		inTx((ctx) => processBatch(ctx, first(batches).id));
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "pending",
+			reason: "pending: 1 report accepted and not yet applied",
+		});
+		expect(first(h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" }).items).q).toBe(original.q);
+		inTx((ctx) => processBatch(ctx, first(batches.slice(1)).id));
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "passed", stale: false });
+		expect(run(planned.run).state).toBe("closed");
+		const signoffs = h.call<InboxReply>("inbox", { state: "decided", kind: "signoff" }).items;
+		expect(signoffs).toHaveLength(2);
+		expect(first(signoffs).decision?.answer).toEqual({ is: "approve" });
+		expect(signoffs.find((q) => q.q === original.q)?.decision?.answer).toEqual({ is: "outdated" });
 	});
 
 	test("E3: an assumed result does not count when the run asks for an exact basis", () => {

@@ -105,8 +105,9 @@ const Q = {
 	changeRun: sql<{ project: number; what: string }, RunRow>(
 		"SELECT * FROM runs WHERE project = $project AND origin = 'change' AND accepts_what = $what",
 	),
-	openPlanned: sql<{ project: number }, RunRow>(
-		"SELECT * FROM runs WHERE project = $project AND state = 'open' AND origin = 'planned'",
+	receivingPlanned: sql<{ project: number; commit: string | null }, RunRow>(
+		`SELECT * FROM runs WHERE project = $project AND origin = 'planned'
+		 AND (state = 'open' OR (state = 'closed' AND json_extract(accepts, '$.commit') = $commit))`,
 	),
 	plannedForCommit: sql<{ project: number; commit: string }, { id: number }>(
 		`SELECT id FROM runs WHERE project = $project AND origin = 'planned'
@@ -470,7 +471,7 @@ export function runsFor(ctx: Ctx, target: TargetRow, typedInto: number | null, p
 	const out: RunRow[] = [];
 	const change = ensureChangeRun(ctx, target, producer !== "agent");
 	if (change) out.push(change);
-	for (const run of ctx.db.all(Q.openPlanned, { project: ctx.project.id })) {
+	for (const run of ctx.db.all(Q.receivingPlanned, { project: ctx.project.id, commit: target.commit_sha })) {
 		if (matches(run, target, typedInto)) out.push(run);
 	}
 	return out;
@@ -603,7 +604,7 @@ export function* applyBatchSteps(
 			});
 		}
 		if (result.corrects !== null) {
-			// A correction reaches the open runs this batch counts toward. A closed run keeps what it was closed on.
+			// A correction reaches every receiving run this batch counts toward.
 			for (const { slot } of ctx.db.all(Q.slotsOfResult, { result: result.corrects })) {
 				const row = slotById(ctx.db, slot);
 				if (!row || !plannedIds.has(row.run)) continue;
@@ -1336,11 +1337,10 @@ export function reopenRun(ctx: Ctx, run: RunRow, decision: number): void {
 }
 
 /**
- * A reopened run is live again, so it counts the evidence as it is now and not as it was when the run was
- * closed. While closed it kept what it was closed on: a correction, a `mistaken` decision and a later report did
- * not reach it. Now they do: a result its producer corrected is withdrawn here too, one a decision called a
- * mistake is discounted here too, the results reported for its targets meanwhile are admitted, and every slot is
- * rebuilt. The caller recomputes the run, which asks about each failure it now shows.
+ * A reopened run reconciles its slots with the current evidence. A result its producer corrected is withdrawn
+ * here too, one a decision called a mistake is discounted here too, any qualifying results not yet admitted
+ * are admitted, and every slot is rebuilt. This also catches up runs closed before late reports were accepted.
+ * The caller recomputes the run, which asks about each failure it now shows.
  */
 function catchUp(ctx: Ctx, run: RunRow): void {
 	const exercises = obligationsOf(run).filter((o): o is ExerciseObligation => o.kind === "exercise");

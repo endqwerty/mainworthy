@@ -274,7 +274,7 @@ describe("what a result may prove", () => {
 		expect(gate({ run: late.run }).verdict).toBe("blocked");
 	});
 
-	test("a correction names a result on the same target, and never changes a closed run", () => {
+	test("a correction must name a result on the same target", () => {
 		seed();
 		const planned = plan({ name: "closed evidence", select: {}, accepts: { commit: "closed01" } });
 		const recorded = report({ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
@@ -978,7 +978,7 @@ describe("what a run and a change may count", () => {
 		expect(waiting()).toEqual({ verdict: "passed", missing: 0 });
 	});
 
-	test("a run reopened after its evidence changed counts the evidence as it is now", () => {
+	test("a late correction reopens a commit run on its current evidence", () => {
 		seed(1, ["human", "auto"]);
 		const commit = "feedface00000000000000000000000000000001";
 		const target = { commit, branch: "main" };
@@ -988,19 +988,16 @@ describe("what a run and a change may count", () => {
 		const stored = () =>
 			first(rows<{ state: string; verdict: string }>("SELECT state, verdict FROM runs WHERE origin = 'planned'"));
 		expect(stored()).toEqual({ state: "closed", verdict: "passed" });
-		// The pipeline withdraws its pass: the test failed. The closed run keeps what it was closed on.
+		// The pipeline withdraws its pass: the test failed, and the sign-off no longer holds.
 		report({ target, job: "e2e", results: [{ ...linked("fail"), corrects: first(pass.results) }] }, ci);
 		expect(gate({ commit }).verdict).toBe("blocked");
-		expect(stored()).toEqual({ state: "closed", verdict: "passed" });
-		// Its sign-off is withdrawn: the run is live again, and shows what the commit shows.
-		h.call("decide", { undo: open("signoff", "decided").q, reason: "the pass was withdrawn" });
 		expect(stored()).toEqual({ state: "open", verdict: "blocked" });
 		expect(slots(planned.run).map((slot) => slot.state)).toEqual(["failing"]);
-		expect(h.call<InboxReply>("inbox", { kind: "signoff", limit: 50 }).items).toEqual([]);
+		expect(open("signoff").evidence).toMatchObject({ verdict: "blocked" });
 		expect(open("failure").about).toContain(planned.run);
 	});
 
-	test("a result that arrived while a run was closed counts when the run is reopened", () => {
+	test("a late result in another environment reopens a closed commit run", () => {
 		seed(1, ["human", "auto"]);
 		const commit = "feedface00000000000000000000000000000002";
 		const ci = pipeline();
@@ -1009,7 +1006,7 @@ describe("what a run and a change may count", () => {
 		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("closed");
 		// Another environment of the same commit fails after the run was closed.
 		report({ target: { commit, branch: "main", env: "staging" }, results: [linked("fail")] }, ci);
-		h.call("decide", { undo: open("signoff", "decided").q, reason: "staging failed" });
+		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("open");
 		expect(gate({ run: planned.run }).verdict).toBe("blocked");
 	});
 
@@ -2416,7 +2413,7 @@ describe("what a decision may change", () => {
 		expect(gate({ commit: "twoenv02" }).verdict).toBe("passed");
 	});
 
-	test("a run reopened after its failure's question was closed is asked about that failure again", () => {
+	test("a closed commit run keeps its pinned failure question after the commit passes on a newer case version", () => {
 		seed();
 		const result = (outcome: string, attempt: number) =>
 			report({
@@ -2435,13 +2432,10 @@ describe("what a decision may change", () => {
 		const planned = plan({ name: "Reopen later", select: {}, accepts: { commit: "reopen01" } });
 		const question = open("failure");
 		decide(question, { is: "flaky" });
-		const signoff = h
-			.call<InboxReply>("inbox", { state: "decided", limit: 50 })
-			.items.find((item) => item.kind === "signoff");
-		if (!signoff) throw new Error("the run was not signed off");
+		expect(first(rows<{ state: string }>("SELECT state FROM runs WHERE origin = 'planned'")).state).toBe("closed");
 		h.call("decide", { undo: question.q });
 		// The case is edited and the commit passes on a newer attempt, proving the new version. The run is pinned
-		// to the version it was planned on, so that pass is not its evidence: reopened, it still shows the failure.
+		// to the version it was planned on, so that pass is not its evidence: it still shows the failure.
 		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Case 1, reworded" } }] });
 		report({
 			target: { commit: "reopen01", branch: "main" },
@@ -2449,8 +2443,6 @@ describe("what a decision may change", () => {
 			results: [{ test: { key: "one" }, annotation: { case: "C-1", version: 2 }, outcome: "pass" }],
 		});
 		expect(gate({ commit: "reopen01" }).verdict).toBe("passed");
-		expect(h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items).toEqual([]);
-		expect(first(h.call<DecideReply[]>("decide", { undo: signoff.q })).status).toBe("reopened");
 		const asked = h.call<InboxReply>("inbox", { kind: "failure", limit: 50 }).items;
 		expect(asked).toHaveLength(1);
 		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", open: [first(asked).q] });
