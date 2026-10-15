@@ -37,8 +37,11 @@ extension ProjectClient {
 		let reason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
 		if !reason.isEmpty { input["reason"] = .string(reason) }
 		let reply = try await decide(.object(input))
+		if reply.status == "decided" || reply.status == "already" {
+			guard let decision = reply.decision else { throw ClientError.unreadable }
+			return .decided(decision)
+		}
 		return switch reply.status {
-		case "decided", "already": .decided
 		case "advised": .advised(reply.needs ?? "Somebody else decides.")
 		case "conflict": .overtaken(reply.needs ?? "the question changed")
 		default: .notTaken(reply.needs ?? "another answer (\(reply.status))")
@@ -49,6 +52,7 @@ extension ProjectClient {
 	/// for a reason here too.
 	package func withdraw(_ question: Question, reason: String = "") async throws -> WithdrawOutcome {
 		var input: [String: JSONValue] = ["undo": .string(question.ref)]
+		if let decision = question.ifDecision { input["ifDecision"] = .number(Double(decision)) }
 		let reason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
 		if !reason.isEmpty { input["reason"] = .string(reason) }
 		let reply = try await decide(.object(input))

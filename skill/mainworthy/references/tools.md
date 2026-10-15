@@ -163,7 +163,7 @@ Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Reco
 
 ## decide
 
-Answer a question from `inbox`. Pass the `evidenceHash` you saw as `onEvidence`. Reply status: decided, advised (recorded; a person decides), conflict (evidence changed) or forbidden. Failure answers: defect, test, expected, flaky, infra, and where the question's `answers` lists them, inherited and mistaken.
+Answer a question from `inbox`. Pass the `evidenceHash` you saw as `onEvidence`. Reply status: decided, advised (recorded; a person decides), conflict (evidence or decision changed), forbidden. Failure answers: defect, test, expected, flaky, infra, and where the question's `answers` lists them, inherited and mistaken.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -179,6 +179,7 @@ Answer a question from `inbox`. Pass the `evidenceHash` you saw as `onEvidence`.
 | `[2].all[].reason` | `string` | no |  |
 | `[2].reason` | `string` | no |  |
 | `[3].undo` | `string` | yes | The question whose decision to withdraw. |
+| `[3].ifDecision` | `integer` | no |  |
 | `[3].reason` | `string` | no |  |
 
 ## inbox

@@ -102,6 +102,8 @@ public struct Question: Identifiable, Equatable, Sendable {
 	/// What an answer must say it was given on, so that an answer to evidence that has changed since is not
 	/// taken. Only `ProjectClient.answer` reads it: a screen cannot answer on evidence it was not handed.
 	package let evidenceHash: String
+	/// The decision read in the list, or returned by the answer that the Undo bar withdraws.
+	package var ifDecision: Int? = nil
 	let facts: Set<String>
 
 	/// Whether leaving it open holds anything up. Only an unexplained failure does.
@@ -141,6 +143,7 @@ extension Question {
 		decision = wire.decision.map(Decision.init)
 		about = wire.about
 		evidenceHash = wire.evidenceHash
+		ifDecision = wire.decision?.id
 		facts = Set(wire.evidence["facts"]?.array?.compactMap(\.string) ?? [])
 	}
 }
@@ -269,7 +272,7 @@ public struct QueueCounts: Equatable, Sendable {
 /// What became of an answer.
 public enum AnswerOutcome: Equatable, Sendable {
 	/// It settled the question.
-	case decided
+	case decided(Int)
 	/// It was recorded as advice. The sentence says who decides.
 	case advised(String)
 	/// Nothing was recorded, because the question is not what the person read any more: its evidence changed,
@@ -277,6 +280,11 @@ public enum AnswerOutcome: Equatable, Sendable {
 	case overtaken(String)
 	/// The server did not take it. What it asks for instead: "a reason", "one member who is not an agent".
 	case notTaken(String)
+
+	package var isDecided: Bool {
+		if case .decided = self { return true }
+		return false
+	}
 }
 
 /// What became of withdrawing a decision.

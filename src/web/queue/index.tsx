@@ -49,7 +49,8 @@ const kindNames: Record<Kind, string> = {
 	signoff: "sign-off",
 };
 type DecisionEntry = { question: QuestionItem; answer: Record<string, unknown> };
-type LastAnswer = { entries: DecisionEntry[]; confirmed: Promise<boolean> };
+type Withdrawal = { question: QuestionItem; decision: number };
+type LastAnswer = { entries: DecisionEntry[]; confirmed: Promise<Withdrawal[]> };
 type InlineAnswer = { entries: DecisionEntry[]; field: "ref" | "reason"; value: string } & (
 	| { kind: "answer" }
 	| { kind: "withdrawal"; prior: LastAnswer }
@@ -351,7 +352,13 @@ function QueueWorkbench() {
 			call("decide", all.length === 1 ? { ...one, cmd: randomId() } : { all, cmd: randomId() }, { project, owner }),
 		)
 			.then(async (replies) => {
-				if (!sessionCurrent(owner)) return false;
+				if (!sessionCurrent(owner)) return [];
+				const accepted = entries.flatMap(({ question }) => {
+					const reply = replies.find((reply) => reply.q === question.q);
+					return reply && (reply.status === "decided" || reply.status === "already") && reply.decision !== null
+						? [{ question, decision: reply.decision }]
+						: [];
+				});
 				for (const ref of refs) if (refActions.current.get(ref) === action) pendingAnswers.current.delete(ref);
 				if (extra)
 					for (const entry of entries)
@@ -382,13 +389,20 @@ function QueueWorkbench() {
 					if (action === actionNo.current) {
 						setLastMessage(message);
 						setStatus(message);
-						setLast(null);
+						setLast(
+							accepted.length
+								? {
+										entries: entries.filter((entry) => accepted.some((one) => one.question.q === entry.question.q)),
+										confirmed: Promise.resolve(accepted),
+									}
+								: null,
+						);
 					}
 					await invalidateProject(project);
-					if (!sessionCurrent(owner)) return false;
+					if (!sessionCurrent(owner)) return [];
 					const fresh = await call("inbox", { state: "open", limit: 500 }, { project, owner });
 					setRestored((previous) => previous.map((item) => fresh.items.find((q) => q.q === item.q) ?? item));
-					return false;
+					return accepted;
 				}
 				if (action === actionNo.current) setLastMessage(`${text} · recorded`);
 				await invalidateProject(project);
@@ -397,10 +411,10 @@ function QueueWorkbench() {
 					for (const ref of refs) if (refActions.current.get(ref) === action) next.delete(ref);
 					return next;
 				});
-				return true;
+				return accepted;
 			})
 			.catch((error: unknown) => {
-				if (!sessionCurrent(owner)) return false;
+				if (!sessionCurrent(owner)) return [];
 				for (const ref of refs) if (refActions.current.get(ref) === action) pendingAnswers.current.delete(ref);
 				bringBack(
 					entries.map((entry) => entry.question),
@@ -413,7 +427,7 @@ function QueueWorkbench() {
 					setLast(null);
 				}
 				void invalidateProject(project);
-				return false;
+				return [];
 			});
 		setLast({ entries, confirmed });
 	}
@@ -575,7 +589,11 @@ function QueueWorkbench() {
 				: state === "decided"
 					? {
 							entries: questions.map((question) => ({ question, answer: question.decision?.answer ?? {} })),
-							confirmed: Promise.resolve(true),
+							confirmed: Promise.resolve(
+								questions.flatMap((question) =>
+									question.decision ? [{ question, decision: question.decision.id }] : [],
+								),
+							),
 						}
 					: last;
 		if (!prior || undoing.current.has(prior)) return;
@@ -603,34 +621,39 @@ function QueueWorkbench() {
 		undoing.current.add(prior);
 		setLast(null);
 		const reopened = new Set<string>();
+		let receipts: Withdrawal[] = [];
 		const action = ++actionNo.current;
 		bringBack(questions.map((q) => ({ ...q, state: "open", decision: null })));
+		// Undo chooses the open list even if a pending route read still says decided.
+		seenRoute.current = route.ref;
 		setState("open");
 		setLastMessage(`${named(questions)} · withdrawing the answer`);
 		void ordered(
 			questions.map((q) => q.q),
 			async () => {
-				if (prior && !(await prior.confirmed)) return;
-				for (const question of questions) {
-					const replies = await call(
-						"decide",
-						{ undo: question.q, cmd: randomId(), ...(reason ? { reason } : {}) },
-						{ project, owner },
-					);
-					const reply = replies[0];
-					if (!sessionCurrent(owner)) return;
-					if (reply?.status !== "reopened") {
-						const current = z
-							.object({ q: z.string(), state: z.string() })
-							.parse((await call("get", { refs: [question.q] }, { project }))[0]);
-						if (current.state !== "open") throw new Error(reply?.needs ?? "The decision could not be withdrawn.");
-					}
-					reopened.add(question.q);
-					if (extra) {
-						const entry = extra.entries.find((entry) => entry.question.q === question.q);
-						if (entry) clearExtra(entry, extra);
+				receipts = await prior.confirmed;
+				if (!receipts.length) return;
+				const failures: string[] = [];
+				for (const { question, decision } of receipts) {
+					try {
+						const replies = await call(
+							"decide",
+							{ undo: question.q, ifDecision: decision, cmd: randomId(), ...(reason ? { reason } : {}) },
+							{ project, owner },
+						);
+						const reply = replies[0];
+						if (!sessionCurrent(owner)) return;
+						if (reply?.status !== "reopened") throw new Error(reply?.needs ?? "The decision could not be withdrawn.");
+						reopened.add(question.q);
+						if (extra) {
+							const entry = extra.entries.find((entry) => entry.question.q === question.q);
+							if (entry) clearExtra(entry, extra);
+						}
+					} catch (error) {
+						failures.push(`${question.q}: ${error instanceof Error ? error.message : "Try again."}`);
 					}
 				}
+				if (failures.length) throw new Error(failures.join(" "));
 				if (action === actionNo.current) {
 					setLast(null);
 					setLastMessage("Answer withdrawn. Both decisions stay in the ledger.");
@@ -652,9 +675,8 @@ function QueueWorkbench() {
 		)
 			.catch((error: unknown) => {
 				if (!sessionCurrent(owner)) return;
-				const unconfirmed = new Set(
-					questions.filter((question) => !reopened.has(question.q)).map((question) => question.q),
-				);
+				const remaining = receipts.filter(({ question }) => !reopened.has(question.q));
+				const unconfirmed = new Set(remaining.map(({ question }) => question.q));
 				setRestored((previous) => previous.filter((q) => !unconfirmed.has(q.q)));
 				setHidden((previous) => {
 					const next = new Set(previous);
@@ -678,9 +700,12 @@ function QueueWorkbench() {
 							})),
 						},
 				);
-				const message = `${questions.map((q) => q.q).join(", ")} is still decided: the withdrawal failed. ${error instanceof Error ? error.message : "Try again."} Press u to retry.`;
+				const message = `${[...unconfirmed].join(", ")}: the withdrawal failed. ${reopened.size ? `${reopened.size} withdrawn. ` : ""}${error instanceof Error ? error.message : "Try again."} Press u to retry.`;
 				if (action === actionNo.current) {
-					setLast(prior);
+					setLast({
+						entries: prior.entries.filter((entry) => unconfirmed.has(entry.question.q)),
+						confirmed: Promise.resolve(remaining),
+					});
 					setLastMessage(message);
 					setStatus(message);
 				}

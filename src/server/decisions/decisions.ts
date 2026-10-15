@@ -818,8 +818,13 @@ function askAgain(ctx: Ctx, question: QuestionRow, targets: readonly number[]): 
  * Withdraws the current decision on a question and opens it again. The withdrawal is itself a decision in the
  * ledger, superseding the one it withdraws, so both remain (commitment L6: undo never erases).
  */
-export function undo(ctx: Ctx, input: { q: string; reason: string | undefined }): DecideReply {
+export function undo(
+	ctx: Ctx,
+	input: { q: string; ifDecision: number | undefined; reason: string | undefined },
+): DecideReply {
 	const question = mustQuestion(ctx.db, ctx.project.id, input.q);
+	if (input.ifDecision !== undefined && (question.state !== "decided" || question.decision !== input.ifDecision))
+		return reply(question, "conflict", { needs: "the decision changed; read the question again before withdrawing" });
 	if (question.state !== "decided" || question.decision === null)
 		return reply(question, "invalid", { needs: "a decided question" });
 	const asked = askedAgain(ctx, question);

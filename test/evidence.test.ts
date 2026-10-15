@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { Client } from "../src/cli/client.ts";
-import type { ClaimReply, CommandFate, GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
+import type { ClaimReply, CommandFate, DecideReply, GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { stakes } from "../src/core/stakes.ts";
 import { recoverAccepted, sweep } from "../src/server/jobs.ts";
 import { type Config, defaultConfig, openApp } from "../src/server/kernel/app.ts";
@@ -319,6 +319,50 @@ describe("a red report", () => {
 		expect(queue().counts.open).toBe(1);
 		expect(count("decisions WHERE kind = 'failure'")).toBe(2);
 		expect(count("excuses")).toBe(0);
+	});
+
+	test("undo with a decision receipt leaves an intervening answer in force", () => {
+		h.call("report", ciReport({ commit: "fffffff2", n: 1, fail: { 0: "expected one, got two" } }));
+		const q = first(queue().items);
+		const give = (is: string, as = h.owner) =>
+			first(h.call<DecideReply[]>("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is } }, as));
+		const receipt = give("flaky");
+		const colleague = h.actor("colleague", "human", ["read", "produce", "answer"]);
+		const replacement = give("defect", colleague);
+		expect(receipt.status).toBe("decided");
+		expect(replacement.status).toBe("decided");
+		const decisions = count("decisions");
+		const stale = first(h.call<DecideReply[]>("decide", { undo: q.q, ifDecision: receipt.decision }));
+		expect(stale.status).toBe("conflict");
+		expect(stale.needs).toContain("decision changed");
+		expect(first(h.call<InboxReply>("inbox", { state: "decided" }).items).decision).toMatchObject({
+			id: replacement.decision,
+		});
+		expect(gate("fffffff2").verdict).toBe("failed");
+		expect(count("decisions")).toBe(decisions);
+		for (const ifDecision of [0, -1, 1.5, null, "decision"]) {
+			expect(h.raw("decide", { undo: q.q, ifDecision })).toMatchObject({
+				ok: false,
+				error: { code: "invalid" },
+			});
+		}
+		expect(count("decisions")).toBe(decisions);
+		expect(first(h.call<DecideReply[]>("decide", { undo: q.q, ifDecision: replacement.decision })).status).toBe(
+			"reopened",
+		);
+		expect(gate("fffffff2").verdict).toBe("blocked");
+		expect(first(h.call<DecideReply[]>("decide", { undo: q.q, ifDecision: replacement.decision })).status).toBe(
+			"conflict",
+		);
+	});
+
+	test("receiptless undo deliberately withdraws the decision that stands now", () => {
+		h.call("report", ciReport({ commit: "fffffff3", n: 1, fail: { 0: "expected one, got two" } }));
+		const q = first(queue().items);
+		decide(q, { is: "flaky" });
+		decide(q, { is: "defect" });
+		expect(first(h.call<DecideReply[]>("decide", { undo: q.q })).status).toBe("reopened");
+		expect(gate("fffffff3").verdict).toBe("blocked");
 	});
 
 	test("a retry that passes is a recorded flip, the gate passes, and nobody is asked why it failed", () => {

@@ -494,7 +494,7 @@ export const planOp = defineOp({
 // ── decide ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 export function decide(ctx: Ctx, input: DecideInput): DecideReply[] {
-	if ("undo" in input) return [undo(ctx, { q: input.undo, reason: input.reason })];
+	if ("undo" in input) return [undo(ctx, { q: input.undo, ifDecision: input.ifDecision, reason: input.reason })];
 	if ("all" in input) return input.all.map((one) => answer(ctx, { ...one, reason: one.reason ?? input.reason }));
 	return [answer(ctx, { q: input.q, onEvidence: input.onEvidence, answer: input.answer, reason: input.reason })];
 }
@@ -507,7 +507,7 @@ export const decideOp = defineOp({
 	needs: "produce",
 	scope: "project",
 	effect: "write",
-	mcp: "Answer a question from `inbox`. Pass the `evidenceHash` you saw as `onEvidence`. Reply status: decided, advised (recorded; a person decides), conflict (evidence changed) or forbidden. Failure answers: defect, test, expected, flaky, infra, and where the question's `answers` lists them, inherited and mistaken.",
+	mcp: "Answer a question from `inbox`. Pass the `evidenceHash` you saw as `onEvidence`. Reply status: decided, advised (recorded; a person decides), conflict (evidence or decision changed), forbidden. Failure answers: defect, test, expected, flaky, infra, and where the question's `answers` lists them, inherited and mistaken.",
 	run: decide,
 });
 

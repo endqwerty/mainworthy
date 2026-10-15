@@ -196,11 +196,12 @@ public final class QueueScreen: ProjectScreen {
 		do {
 			let outcome = try await project.answer(question, with: choice, reference: reference, reason: reason)
 			switch outcome {
-			case .decided:
+			case .decided(let decision):
 				typed[question.ref] = nil
 				// An accepted edit cannot be withdrawn: the case's history is where it is undone.
-				let undoable = question.kind == .adopt ? nil : question
-				notice = Notice(text: "\(question.ref): \(choice.label).", isProblem: false, undoes: undoable)
+				var undoable = question
+				undoable.ifDecision = decision
+				notice = Notice(text: "\(question.ref): \(choice.label).", isProblem: false, undoes: question.kind == .adopt ? nil : undoable)
 			case .advised(let who):
 				notice = Notice(text: "\(question.ref): recorded as advice. Waiting for \(who).", isProblem: false, undoes: nil)
 			case .overtaken(let why):
@@ -214,7 +215,7 @@ public final class QueueScreen: ProjectScreen {
 				)
 			}
 			await read()
-			return outcome == .decided
+			return outcome.isDecided
 		} catch {
 			notice = Notice(text: error.shown, isProblem: true, undoes: nil)
 			return false

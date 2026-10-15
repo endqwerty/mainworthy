@@ -23,7 +23,7 @@ struct ChangesLiveTests {
 		let question = try #require(details.questions.first { $0.kind == .failure })
 		let byRef = try #require(try await client.question(question.ref))
 		#expect(byRef == question && byRef.standing == .counts)
-		#expect(try await client.answer(byRef, with: try #require(byRef.choices.first { $0.answer == "flaky" })) == .decided)
+		#expect((try await client.answer(byRef, with: try #require(byRef.choices.first { $0.answer == "flaky" }))).isDecided)
 		let now = try await client.details(of: change)
 		#expect(now.gate.verdict == .passed && now.gate.phrase.contains("1 excused"))
 		#expect(!now.questions.contains { $0.kind == .failure })

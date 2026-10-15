@@ -164,8 +164,14 @@ describe("what the iOS app reads", () => {
 		const decided = await decide({ q: failure.q, onEvidence: failure.evidenceHash, answer: { is: "flaky" } });
 		holds("decide", DecideReply, decided);
 		expect(decided).toMatchObject({ status: "decided" });
+		const receipt = z.object({ decision: z.number() }).parse(decided).decision;
+		const replacement = await decide({ q: failure.q, onEvidence: failure.evidenceHash, answer: { is: "defect" } });
+		const current = z.object({ decision: z.number() }).parse(replacement).decision;
 		holds("inbox, decided", Inbox, await op(project, "inbox", { state: "decided", limit: 100 }));
-		const withdrawn = await decide({ undo: failure.q });
+		const overtaken = await decide({ undo: failure.q, ifDecision: receipt });
+		holds("decide, undo of a replaced decision", DecideReply, overtaken);
+		expect(overtaken).toMatchObject({ status: "conflict" });
+		const withdrawn = await decide({ undo: failure.q, ifDecision: current });
 		holds("decide, undo", DecideReply, withdrawn);
 		expect(withdrawn).toMatchObject({ status: "reopened" });
 	});
