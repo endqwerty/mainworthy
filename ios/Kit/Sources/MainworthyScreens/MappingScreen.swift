@@ -123,10 +123,12 @@ public final class MappingScreen {
 			return outcome.isDecided
 		} catch {
 			if case ClientError.refused = error { sent = nil }
+			let why = error.shown
+			let stop = why.last.map { ".!?".contains($0) } == true ? "" : "."
 			if sent != nil {
-				notice = "Linking tests and creating cases need a connection. This answer is not saved in Unsent answers. " + error.shown + " Retry to learn the result of the same command. Your choices are kept here."
+				notice = "Linking tests and creating cases need a connection. This answer is not saved in Unsent answers. \(why)\(stop) Retry to learn the result of the same command. Your choices are kept here."
 			} else {
-				notice = error.shown + " Your choices are kept here."
+				notice = "\(why)\(stop) Your choices are kept here."
 			}
 			return false
 		}

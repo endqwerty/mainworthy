@@ -52,7 +52,7 @@ struct MappingScreenTests {
 		draft.reason = "Keep my choices"
 		transport.serverProblem.withLock { $0 = ("forbidden", "decide needs decide on this project") }
 		#expect(await draft.submit() == false)
-		#expect(draft.notice == "Decide needs decide on this project Your choices are kept here.")
+		#expect(draft.notice == "Decide needs decide on this project. Your choices are kept here.")
 		#expect(!draft.isRetrying && !draft.locked && draft.reason == "Keep my choices")
 		#expect(queue.outbox.pendingCount == 0)
 	}
