@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { withInstance } from "../cli/test-support.ts";
 import type { GateStatus } from "../core/ops.ts";
-import { actorByName, authenticate, type Session } from "../server/identity/identity.ts";
+import { actorByName, authenticate, revokeToken, type Session } from "../server/identity/identity.ts";
 import { findProject, makeCtx, stampSeq } from "../server/kernel/ctx.ts";
 import { acceptReport } from "../server/ops/writes.ts";
 import { archiveRoutes } from "./archive.ts";
@@ -59,6 +59,48 @@ test("invalid import leaves bootstrap rows and the caller's token intact", async
 			expect(await response.text()).toContain('"code":"invalid"');
 			expect(await client.call("admin", { do: "project.list" })).toEqual(before);
 			expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM actors").get()?.n).toBe(2);
+		},
+		{ mode: "server" },
+	);
+});
+
+test("a failed export reports the worker's validation error and the next export succeeds", async () => {
+	await withInstance(async ({ client, instance }) => {
+		instance.app.db.raw.exec("INSERT INTO meta (key, value) VALUES ('bad-text', CAST(X'80' AS TEXT))");
+		const refused = await client.request("/api/export");
+		expect(refused.status).toBe(400);
+		expect(await refused.json()).toEqual({
+			ok: false,
+			error: { code: "invalid", message: "cannot export table meta losslessly: stored TEXT contains invalid UTF-8" },
+		});
+		instance.app.db.raw.exec("DELETE FROM meta WHERE key = 'bad-text'");
+		const exported = await client.request("/api/export");
+		expect(exported.status).toBe(200);
+		expect(await exported.text()).toContain('"end":true');
+	});
+});
+
+test("an export whose token is revoked while its worker runs returns no archive", async () => {
+	await withInstance(
+		async ({ client, instance }) => {
+			const secret = z
+				.object({ token: z.string() })
+				.parse(await client.call("admin", { do: "token.create", actor: "robin", kind: "human" })).token;
+			const token = z
+				.array(z.object({ id: z.number() }))
+				.parse(await client.call("admin", { do: "token.list" }))
+				.at(-1);
+			if (!token) throw new Error("the second owner token is missing");
+			const session: Session = { via: "token", actor: (project) => authenticate(instance.app, secret, project) };
+			const route = archiveRoutes(instance.app)["/api/export"];
+			if (!route) throw new Error("export route is missing");
+			const pending = route(new Request(`${instance.url}/api/export`), session);
+			// The route has admitted the token and started the worker. Revoke before any worker reply is handled.
+			instance.app.db.transaction(() => revokeToken(instance.app, token.id));
+			const response = await pending;
+			if (response.status === 200) await response.body?.cancel();
+			expect(response.status).toBe(403);
+			expect(await response.json()).toMatchObject({ ok: false, error: { code: "forbidden" } });
 		},
 		{ mode: "server" },
 	);
