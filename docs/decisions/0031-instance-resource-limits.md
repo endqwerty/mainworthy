@@ -9,7 +9,9 @@ Reader configuration accepted any nonnegative safe integer. Failed reader starts
 
 ## Usage and ownership
 
-`start(config, extra)` takes a directory lock before `open()` touches the application database. `Instance.stop()` drains requests and workers, closes the application, then releases the lock. An unsuccessful start releases it too. Direct offline commands and read workers do not acquire this server lock.
+`start(config, extra)` validates configuration before taking a directory lock, then `open()` opens the application database. The public address, owner token length and reserved owner name are checked before any data directory or lock file is created. Checks that need existing actors and grants still run after the database opens.
+
+`Instance.stop()` drains requests and workers, closes the application, then releases the lock. An unsuccessful start releases it too. Direct offline commands and read workers do not acquire this server lock.
 
 `Readers` validates its count through `readerCount`, keeps a failure count per replacement chain, and resets it when that worker reports readiness. `ready(timeoutMs = 5000): Promise<void>` rejects at its deadline. Reads go to ready workers, or use the caller's existing inline fallback. HTTP startup still does not await readiness.
 
@@ -27,7 +29,7 @@ The other design used a PID file, startup polling and a stale-file recovery prot
 - Eight is both the existing default ceiling and the configured maximum. Larger values now fail startup instead of allocating more workers.
 - Retry delays double from 100 ms to a 30-second maximum. The cap limits repeated startup errors without permanently disabling recovery.
 - A readiness timeout rejects its caller; it does not stop replacement attempts. Unready workers cannot hold reads in their input queues.
-- Checkpoint timing stays as it was. Measurements on a loaded machine could not establish that lowering the reader-thread fallback from 20,000 to 1,000 pages preserves write latency, so that change is deferred. `journal_size_limit = 4194304` trims the file to at most 4 MiB when a write reuses the log after a completed checkpoint. Active snapshots and large transactions can still grow the log beyond that retention limit. See [SQLite's WAL documentation](https://www.sqlite.org/wal.html) and [journal_size_limit](https://www.sqlite.org/pragma.html#pragma_journal_size_limit).
+- Checkpoint timing stays as it was. Measurements on a loaded machine could not establish that lowering the reader-thread fallback from 20,000 to 1,000 pages preserves write latency, so that change is deferred. Before this change, Bun's own SQLite on Linux, including the container, defaulted to `journal_size_limit = -1`, with no retention limit. Bun uses Apple's libsqlite3 on a Mac, where the default was `32768`, or 32 KiB. The 4 MiB setting adds a bound in the container and loosens the bound on a Mac. `journal_size_limit = 4194304` trims the file to at most 4 MiB when a write reuses the log after a completed checkpoint. Active snapshots and large transactions can still grow the log beyond that retention limit. See [SQLite's WAL documentation](https://www.sqlite.org/wal.html) and [journal_size_limit](https://www.sqlite.org/pragma.html#pragma_journal_size_limit).
 - Spooling consumes space on the data filesystem, one whole archive per transfer. A process killed during a transfer can leave a private temporary directory; it can be removed while the server is stopped.
 - A hard disk quota would require a separate policy for refusing writes or ending readers and is outside this change. No hard quota is claimed.
 

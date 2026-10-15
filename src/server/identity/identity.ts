@@ -12,7 +12,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import { untilPhrase } from "../../core/duration.ts";
 import { type ActorKind, Capability, heldCapabilities, whyNotGrantable } from "../../core/kinds.ts";
-import type { App } from "../kernel/app.ts";
+import type { App, Config } from "../kernel/app.ts";
 import type { Actor } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
@@ -21,6 +21,7 @@ import { CONTEXT, clearChallenges } from "./challenges.ts";
 import { credentialSummary, dropUserHandle, forgetCredentialsOf } from "./credentials.ts";
 import { listInvitations, revokeInvitation, revokeInvitationsOf, sweepInvitations } from "./invitations.ts";
 import { addressKey, isGeneratedSecret, prefixKey } from "./limiter.ts";
+import { publicAddress } from "./people.ts";
 import {
 	endSession,
 	endSessionById,
@@ -239,6 +240,26 @@ export function orgId(db: Db): number {
 	return row.id;
 }
 
+/** Refuses identity configuration that needs no database, before a start creates or locks its data. */
+export function validateBootstrap(config: Config): void {
+	publicAddress(config);
+	const configured = config.ownerToken;
+	if (configured && (configured.length < OWNER_TOKEN_MIN || configured.length > TOKEN_MAX)) {
+		const why =
+			configured.length < OWNER_TOKEN_MIN
+				? `is shorter than ${OWNER_TOKEN_MIN} characters, and it opens everything on this instance`
+				: `is longer than ${TOKEN_MAX} characters, and a sign-in reads no token longer than that`;
+		throw invalid(
+			`MAINWORTHY_OWNER_TOKEN ${why}. Make one with \`openssl rand -hex 32\`, set MAINWORTHY_OWNER_TOKEN to it and start again; ${START_REFUSED}`,
+		);
+	}
+	if (isForgottenName(config.owner)) {
+		throw invalid(
+			`MAINWORTHY_OWNER names ${config.owner}, and a name that starts with forgotten- is what a forgotten actor is called. Set MAINWORTHY_OWNER to the owner's name and start again; ${START_REFUSED}`,
+		);
+	}
+}
+
 /**
  * Every start: one organisation, the rule actor and the owner, with every capability and, in server mode, a way
  * in. Idempotent.
@@ -261,26 +282,13 @@ export function orgId(db: Db): number {
  * the refusal says so (`START_REFUSED`).
  */
 export function bootstrap(app: App): { owner: Actor; generatedToken: string | null; warnings: string[] } {
+	validateBootstrap(app.config);
 	const configured = app.config.ownerToken;
-	if (configured && (configured.length < OWNER_TOKEN_MIN || configured.length > TOKEN_MAX)) {
-		const why =
-			configured.length < OWNER_TOKEN_MIN
-				? `is shorter than ${OWNER_TOKEN_MIN} characters, and it opens everything on this instance`
-				: `is longer than ${TOKEN_MAX} characters, and a sign-in reads no token longer than that`;
-		throw invalid(
-			`MAINWORTHY_OWNER_TOKEN ${why}. Make one with \`openssl rand -hex 32\`, set MAINWORTHY_OWNER_TOKEN to it and start again; ${START_REFUSED}`,
-		);
-	}
 	return app.db.transaction(() => {
 		const at = app.now();
 		if (!app.db.get(Q.org)) app.db.run(Q.insertOrg, { name: "default", at });
 		const org = orgId(app.db);
 		ensureActor(app.db, { org, kind: "rule", name: RULE_ACTOR, at });
-		if (isForgottenName(app.config.owner)) {
-			throw invalid(
-				`MAINWORTHY_OWNER names ${app.config.owner}, and a name that starts with forgotten- is what a forgotten actor is called. Set MAINWORTHY_OWNER to the owner's name and start again; ${START_REFUSED}`,
-			);
-		}
 		const renamed = renameOwner(app, org);
 		const existing = app.db.get(Q.actorByName, { org, name: app.config.owner });
 		if (existing && existing.kind !== "human") {
