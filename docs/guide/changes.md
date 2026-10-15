@@ -123,7 +123,7 @@ question. Planned runs that count the commit still ask about their unexplained f
 
 Migration 8 records scope moves locally. Archives keep the resulting target and run
 scopes but omit the move audit trail. That audit table does not change the archive schema.
-Slot-specific settlements and inherited result excuses require archive schema 16. To transfer older data, upgrade
+Slot-specific settlements and inherited result excuses require archive schema 17. To transfer older data, upgrade
 the source database and export it again as described in [data](./data.md).
 
 A different merge or rebased hash leaves the original commit in its existing scope.
