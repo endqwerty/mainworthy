@@ -651,16 +651,20 @@ export function credentialOwner(db: Db, id: number): number | null {
 export function removeCredential(app: App, id: number): { removed: true; sessionsEnded: number } {
 	const row = credentialById(app.db, id);
 	if (!row || row.revoked_at !== null) throw notFound(`credential ${id}`);
-	if (
-		row.kind === "totp" &&
-		app.config.requireAdminMfa &&
-		hasAdminGrant(app.db, row.actor) &&
-		livePassword(app.db, row.actor)
-	)
+	const requiresFactor = app.config.requireAdminMfa && hasAdminGrant(app.db, row.actor);
+	if (row.kind === "totp" && requiresFactor && livePassword(app.db, row.actor))
 		throw forbidden(
 			"this instance requires a second factor for admins with a password; remove the password first to use only passkeys",
 		);
-	if (row.kind !== "totp" && liveCredentials(app.db, row.actor).filter((held) => held.kind !== "totp").length <= 1) {
+	const passwordWorks = !requiresFactor || liveTotp(app.db, row.actor) !== null;
+	const waysIn = liveCredentials(app.db, row.actor).filter(
+		(held) => held.kind === "passkey" || (held.kind === "password" && passwordWorks),
+	);
+	if (row.kind === "passkey" && !passwordWorks && waysIn.length <= 1)
+		throw invalid(
+			"this is the last way to sign in because this instance requires a second factor for admins; add another passkey or enrol an authenticator first, then remove this passkey",
+		);
+	if (row.kind !== "totp" && waysIn.filter((held) => held.id !== row.id).length === 0) {
 		const name = app.db.get(Q.nameOf, { id: row.actor })?.name ?? "this person";
 		throw invalid(
 			`this is the last way ${name} signs in, so it stays. Add a passkey or set a password first, then remove this one. If it is lost, an admin can make a recovery link (mainworthy invite new ${name})`,
@@ -877,11 +881,10 @@ export async function acceptInvitation(
 	});
 }
 
-const factorKey = (name: string): string => `totp:${name}`;
-function factorAttempt(app: App, name: string, address: string | null) {
+function factorAttempt(app: App, input: { kind: "sign-in" | "enrol"; name: string; address: string | null }) {
 	const limiter = limiterOf(app);
-	const account = factorKey(name);
-	const keys = counted(addressKey(address), account);
+	const account = `${input.kind === "enrol" ? "totp-enrol" : "totp"}:${input.name}`;
+	const keys = counted(addressKey(input.address), account);
 	const answer = limiter.check(keys, app.now());
 	return { limiter, account, keys, answer };
 }
@@ -894,7 +897,7 @@ export async function signInWithTotp(
 	const initial = findTotp(app, input.challenge, "sign-in");
 	if (!initial || input.ceremony === null || initial.context !== CONTEXT.browser(secretHash(input.ceremony)))
 		return byAddress(app, about.address).wrong(no("challenge"));
-	const attempt = factorAttempt(app, initial.name, about.address);
+	const attempt = factorAttempt(app, { kind: "sign-in", name: initial.name, address: about.address });
 	if (attempt.answer.kind === "blocked") return waiting(attempt.answer);
 	const cookie = newSessionSecret();
 	return commit(app, () => {
@@ -945,7 +948,7 @@ export function confirmTotp(
 	if (!held || held.actor !== person.id || held.name !== person.name || held.context !== input.context)
 		throw invalid("this authenticator enrolment ended; begin again in the same session");
 	if (liveTotp(app.db, person.id)) throw conflict("an authenticator is enrolled already");
-	const attempt = factorAttempt(app, person.name, null);
+	const attempt = factorAttempt(app, { kind: "enrol", name: person.name, address: null });
 	if (attempt.answer.kind === "blocked")
 		throw new OpError("limited", `wait ${attempt.answer.retryAfterSeconds} seconds before trying another code`);
 	const stored = acceptTotp({ secret: held.secret, lastStep: -1, recovery: [] }, input.code, app.now());

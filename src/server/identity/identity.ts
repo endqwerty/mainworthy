@@ -485,10 +485,10 @@ function ensureActor(db: Db, input: { org: number; kind: ActorKind; name: string
 	return { id: lastId, org: input.org, kind: input.kind, name: input.name, disabled_at: null };
 }
 
-function toActor(db: Db, row: ActorRow, project: number): Actor {
+function toActor(db: Db, row: ActorRow, project: number | null): Actor {
 	const granted: Capability[] = row.kind === "human" ? teamCapabilities(db, row.id, project) : [];
 	for (const grant of db.all(Q.grants, { actor: row.id })) {
-		if (grant.project !== 0 && grant.project !== project) continue;
+		if (project !== null && grant.project !== 0 && grant.project !== project) continue;
 		granted.push(...json<Capability[]>(grant.can));
 	}
 	return { id: row.id, kind: row.kind, name: row.name, can: heldCapabilities(row.kind, granted) };
@@ -1139,5 +1139,6 @@ export function listActors(db: Db) {
 }
 
 export function hasAdminGrant(db: Db, actor: number): boolean {
-	return db.all(Q.grants, { actor }).some((grant) => json<string[]>(grant.can).includes("admin"));
+	const row = db.get(Q.actorById, { id: actor });
+	return row !== null && row.disabled_at === null && toActor(db, row, null).can.includes("admin");
 }
