@@ -3,6 +3,14 @@
 // the screen's own check before it writes. These pin the rule in `src/web/lib/drafts.ts` itself (issue #79).
 import { beforeEach, expect, test } from "bun:test";
 import { emptyBody } from "../src/core/model.ts";
+import { setDevicePerson, suspendDeviceSession } from "../src/web/lib/device.ts";
+import {
+	claimCopiedDraft,
+	discardDraftCopy,
+	forgetDraftCopy,
+	readDraftCopies,
+	writeCopiedDraft,
+} from "../src/web/lib/draft-copies.ts";
 import { claimDraft, type Draft, draftKey, readDraft, removeDraft, writeDraft } from "../src/web/lib/drafts.ts";
 import { draftOwner } from "../src/web/lib/ids.ts";
 
@@ -20,7 +28,12 @@ Object.defineProperty(globalThis, "localStorage", {
 		removeItem: (key: string) => void kept.delete(key),
 	},
 });
-beforeEach(() => kept.clear());
+beforeEach(() => {
+	setDevicePerson("");
+	for (const copy of readDraftCopies({ project, id: "C-1" })) discardDraftCopy(copy.key);
+	kept.clear();
+	forgetDraftCopy({ project, draft: draft({}) });
+});
 
 const project = "scratch";
 const body = { ...emptyBody("Coupon case"), steps: [{ id: "s1", action: "Open the cart", expected: null }] };
@@ -94,4 +107,157 @@ test("taking a draft over keeps the request its owner sent, as does claiming a c
 	const found = claimDraft({ project, draft: draft({ owner: "another-window", sent: request }) });
 	expect(found).toMatchObject({ owner: draftOwner(), sent: request });
 	expect(stored()).toEqual(found);
+});
+
+test("a losing window keeps its whole accepted draft separately from the shared draft and from other people", () => {
+	const mine = draft({
+		body: { ...body, title: "Coupon case A", steps: [{ id: "s1", action: "", expected: "Still being typed" }] },
+		tags: ["checkout"],
+		covers: ["WEB-290"],
+		conflict: {
+			q: "Q-1",
+			proposal: "P-1",
+			ref: "C-1",
+			base: body,
+			mine: body,
+			current: body,
+			merged: { ...body, title: "Hand-typed merge" },
+			sentMerges: [],
+			paths: ["title"],
+			draftId: "C-1",
+		},
+	});
+	writeCopiedDraft({ project, draft: mine });
+	expect(readDraftCopies({ project, id: mine.id })).toEqual([]);
+	const winner = another({ body: { ...body, title: "Coupon case B" } });
+	expect(readDraftCopies({ project, id: mine.id }).map((copy) => copy.draft)).toEqual([mine]);
+	expect(stored()).toEqual(winner);
+	setDevicePerson("another-person");
+	try {
+		expect(readDraftCopies({ project, id: mine.id })).toEqual([]);
+	} finally {
+		setDevicePerson("");
+	}
+});
+
+test("typing after takeover and recording keeps the earlier losing copy until it is explicitly discarded", () => {
+	const mine = draft({ body: { ...body, title: "Accepted before the race" } });
+	writeCopiedDraft({ project, draft: mine });
+	another({ body: { ...body, title: "The winner's draft" } });
+	const claimed = claimCopiedDraft({ project, draft: mine, takeOver: true });
+	const later = { ...claimed, body: { ...claimed.body, title: "Typed after takeover" } };
+	writeCopiedDraft({ project, draft: later });
+	const [copy] = readDraftCopies({ project, id: mine.id });
+	expect(copy?.draft).toEqual(mine);
+	removeDraft({ project, id: mine.id });
+	forgetDraftCopy({ project, draft: later });
+	expect(readDraftCopies({ project, id: mine.id }).map((copy) => copy.draft)).toEqual([mine]);
+	if (!copy) throw new Error("Missing preserved draft");
+	discardDraftCopy(copy.key);
+	expect(readDraftCopies({ project, id: mine.id })).toEqual([]);
+});
+
+test("full device storage keeps the losing copy in the tab with its storage state", () => {
+	const mine = draft({ body: { ...body, title: "Accepted while storage was full" } });
+	const set = localStorage.setItem;
+	localStorage.setItem = () => {
+		throw new DOMException("Full", "QuotaExceededError");
+	};
+	try {
+		expect(() => writeCopiedDraft({ project, draft: mine })).toThrow("Full");
+		another();
+		expect(readDraftCopies({ project, id: mine.id }).map(({ draft, stored }) => ({ draft, stored }))).toEqual([
+			{ draft: mine, stored: false },
+		]);
+	} finally {
+		localStorage.setItem = set;
+		for (const copy of readDraftCopies({ project, id: mine.id })) discardDraftCopy(copy.key);
+		forgetDraftCopy({ project, draft: mine });
+	}
+});
+
+test("the first storage turn confirms ownership and later keys do not write copies", async () => {
+	const mine = draft({ body: { ...body, title: "First accepted text" } });
+	expect(writeCopiedDraft({ project, draft: mine })).toBe(true);
+	expect([...kept.keys()].filter((key) => key.includes(":draft-copy:")).length).toBe(1);
+	await new Promise((done) => setTimeout(done, 5));
+	expect([...kept.keys()].filter((key) => key.includes(":draft-copy:")).length).toBe(0);
+	const next = { ...mine, body: { ...body, title: "Later accepted text" } };
+	expect(writeCopiedDraft({ project, draft: next })).toBe(true);
+	expect(stored()?.body.title).toBe("Later accepted text");
+	expect([...kept.keys()].filter((key) => key.includes(":draft-copy:")).length).toBe(0);
+	another({ body: { ...body, title: "Ordinary takeover and later edit" } });
+	expect(readDraftCopies({ project, id: mine.id })).toEqual([]);
+});
+
+for (const withMerge of [false, true])
+	test(`a deliberate handoff before confirmation carries ${withMerge ? "typed merge" : "draft"} text without a leftover`, () => {
+		const mine = draft({
+			body: { ...body, title: "Accepted and carried to the next window" },
+			...(withMerge
+				? {
+						conflict: {
+							q: "Q-1",
+							proposal: "P-1",
+							ref: "C-1",
+							base: body,
+							mine: body,
+							current: body,
+							merged: { ...body, title: "Accepted typed merge" },
+							sentMerges: [],
+							paths: ["title"],
+							draftId: "C-1",
+						},
+					}
+				: {}),
+		});
+		writeCopiedDraft({ project, draft: mine });
+		another({ ...mine, owner: "another-window" });
+		const taken = claimCopiedDraft({ project, draft: mine, takeOver: true });
+		writeCopiedDraft({ project, draft: { ...taken, body: { ...body, title: "Later edits after the handoff" } } });
+		expect(stored()?.body.title).toBe("Later edits after the handoff");
+		expect(readDraftCopies({ project, id: mine.id })).toEqual([]);
+	});
+
+test("a losing copy that matches a later recorded version is removed", () => {
+	const mine = draft({ body: { ...body, title: "Accepted before a competing first write" } });
+	writeCopiedDraft({ project, draft: mine });
+	another({ body: { ...body, title: "Competing first write" } });
+	expect(readDraftCopies({ project, id: mine.id }).map((copy) => copy.draft.body.title)).toEqual([mine.body.title]);
+	expect(readDraftCopies({ project, id: mine.id, recorded: { ...mine, base: 2, dirty: false } })).toEqual([]);
+	expect([...kept.keys()].filter((key) => key.includes(":draft-copy:")).length).toBe(0);
+});
+
+test("copies stay under the person's device prefix so clearing that prefix removes them", () => {
+	setDevicePerson("person/one");
+	const mine = draft({ body: { ...body, title: "This person's accepted text" } });
+	writeCopiedDraft({ project, draft: mine });
+	another({ body: { ...body, title: "The competing first write" } });
+	const [copy] = readDraftCopies({ project, id: mine.id });
+	expect(copy?.draft.body.title).toBe("This person's accepted text");
+	expect(copy?.key.startsWith("mainworthy:person%2Fone:")).toBe(true);
+	for (const key of kept.keys()) if (key.startsWith("mainworthy:person%2Fone:")) kept.delete(key);
+	expect(readDraftCopies({ project, id: mine.id })).toEqual([]);
+	setDevicePerson("");
+});
+
+test("clearing a person's keys and signing in again cannot reuse the old ownership confirmation", async () => {
+	setDevicePerson("returning-person");
+	const first = draft({ body: { ...body, title: "Before sign-out" } });
+	writeCopiedDraft({ project, draft: first });
+	await new Promise((done) => setTimeout(done, 5));
+	expect([...kept.keys()].filter((key) => key.includes(":draft-copy:")).length).toBe(0);
+	suspendDeviceSession();
+	kept.clear();
+	setDevicePerson("returning-person");
+	try {
+		const next = draft({ body: { ...body, title: "Accepted after signing in again" } });
+		writeCopiedDraft({ project, draft: next });
+		another({ body: { ...body, title: "A competing first write" } });
+		expect(readDraftCopies({ project, id: next.id }).map((copy) => copy.draft.body.title)).toEqual([next.body.title]);
+	} finally {
+		suspendDeviceSession();
+		kept.clear();
+		setDevicePerson("");
+	}
 });

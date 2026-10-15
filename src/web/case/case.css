@@ -183,3 +183,10 @@
 	background: var(--agent-soft);
 	padding: 6px 0;
 }
+.preserved-draft {
+	margin-block: 16px;
+}
+.preserved-draft textarea {
+	width: 100%;
+	min-height: 160px;
+}

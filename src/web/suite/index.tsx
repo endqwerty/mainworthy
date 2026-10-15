@@ -14,8 +14,16 @@ import { ApiError, call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { deviceSession, sessionCurrent } from "../lib/device.ts";
 import {
+	claimCopiedDraft,
+	discardDraftCopy,
+	draftCopiesChanged,
+	draftCopyPrefix,
+	forgetDraftCopy,
+	readDraftCopies,
+	writeCopiedDraft,
+} from "../lib/draft-copies.ts";
+import {
 	activeDraft,
-	claimDraft,
 	type Draft,
 	draftKey,
 	hasTypedMerge,
@@ -24,7 +32,6 @@ import {
 	readDraft,
 	readDrafts,
 	removeDraft,
-	writeDraft,
 } from "../lib/drafts.ts";
 import { draftOwner, draftOwnerIsLive, randomId } from "../lib/ids.ts";
 import {
@@ -95,7 +102,7 @@ export function SuiteScreen() {
 	const { project, route, setStatus, openPalette, overlayOpen } = useApp();
 	const owner = useRef(deviceSession()).current;
 	const windowId = useRef(draftOwner()).current;
-	const ownedDraft = useCallback((saved: Draft): Draft => claimDraft({ project, draft: saved }), [project]);
+	const ownedDraft = useCallback((saved: Draft): Draft => claimCopiedDraft({ project, draft: saved }), [project]);
 	const tagFilter = new URLSearchParams(location.search)
 		.getAll("tag")
 		.filter((tag) => TAG.test(tag))
@@ -142,11 +149,19 @@ export function SuiteScreen() {
 	);
 	const writeOwnedDraft = useCallback(
 		(next: Draft): boolean => {
-			if (writeDraft({ project, draft: next })) return true;
+			if (writeCopiedDraft({ project, draft: next })) return true;
 			mayWrite(next.id);
 			return false;
 		},
 		[project, mayWrite],
+	);
+	const removeOwnedDraft = useCallback(
+		(id: string): void => {
+			const copy = liveDrafts.current.get(id);
+			removeDraft({ project, id });
+			if (copy?.owner === windowId && !readDraft({ project, id })) forgetDraftCopy({ project, draft: copy });
+		},
+		[project, windowId],
 	);
 	const storeConflict = useCallback(
 		(state: ConflictState): void => {
@@ -377,6 +392,32 @@ export function SuiteScreen() {
 		const parsed = CaseView.safeParse(current.data?.find((item) => item.ref === selected));
 		return parsed.success ? parsed.data : null;
 	}, [current.data, selected]);
+	const copyCase = draft?.id ?? selected ?? "";
+	const [heldCopies, setCopies] = useState<{ id: string; copies: ReturnType<typeof readDraftCopies> }>({
+		id: "",
+		copies: [],
+	});
+	const copies = heldCopies.id === copyCase ? heldCopies.copies : [];
+	useEffect(() => {
+		const refresh = (): void => {
+			if (!sessionCurrent(owner)) return;
+			setCopies({
+				id: copyCase,
+				copies: readDraftCopies({ project, id: copyCase, ...(view ? { recorded: editDraft(view) } : {}) }),
+			});
+		};
+		const changed = (event: StorageEvent): void => {
+			if (event.key === null || event.key.startsWith(draftCopyPrefix({ project, id: copyCase }))) refresh();
+		};
+		refresh();
+		window.addEventListener("storage", changed);
+		window.addEventListener(draftCopiesChanged, refresh);
+		return () => {
+			window.removeEventListener("storage", changed);
+			window.removeEventListener(draftCopiesChanged, refresh);
+		};
+	}, [project, copyCase, view, owner]);
+
 	useEffect(() => {
 		if (view) knownStepIds({ project, id: view.ref, ids: [...view.usedStepIds, ...view.steps.map((step) => step.id)] });
 	}, [view, project]);
@@ -532,7 +573,7 @@ export function SuiteScreen() {
 			!snapshot.body.title.trim() &&
 			!snapshot.body.steps.some((step) => step.action.trim())
 		) {
-			removeDraft({ project, id: snapshot.id });
+			removeOwnedDraft(snapshot.id);
 			setCaptures((previous) => {
 				if (!previous.has(snapshot.id)) return previous;
 				const next = new Map(previous);
@@ -585,7 +626,7 @@ export function SuiteScreen() {
 	);
 	const dropDraft = useCallback(
 		(id: string): void => {
-			removeDraft({ project, id });
+			removeOwnedDraft(id);
 			liveDrafts.current.delete(id);
 			setCaptures((previous) => {
 				const next = new Map(previous);
@@ -597,7 +638,7 @@ export function SuiteScreen() {
 				setDraftState(null);
 			}
 		},
-		[project],
+		[removeOwnedDraft],
 	);
 	/**
 	 * The draft of a card as it is now, while its conflict is still the question `state` was shown for. Tags and
@@ -877,7 +918,7 @@ export function SuiteScreen() {
 		if (!snapshot || !mayWrite(snapshot.id, !snapshot.dirty || !draftStored) || dropEmpty(snapshot)) return;
 		if (snapshot.ref && readDraft({ project, id: snapshot.id })?.conflict) return;
 		if (!snapshot.dirty) {
-			removeDraft({ project, id: snapshot.id });
+			removeOwnedDraft(snapshot.id);
 			return;
 		}
 		liveDrafts.current.set(snapshot.id, snapshot);
@@ -1139,7 +1180,7 @@ export function SuiteScreen() {
 						return next;
 					});
 				}
-				removeDraft({ project, id: snapshot.id });
+				removeOwnedDraft(snapshot.id);
 				const latest = liveDrafts.current.get(snapshot.id);
 				let unfinished = false;
 				if (latest && ref) {
@@ -1445,7 +1486,7 @@ export function SuiteScreen() {
 			if (ended) void endFollowed(ended);
 			return;
 		}
-		const next = claimDraft({ project, draft: saved, takeOver: true });
+		const next = claimCopiedDraft({ project, draft: saved, takeOver: true });
 		// A window that only showed the case owns its draft now. The draft opens here, so the card this window is
 		// told to resolve is on its screen (review round 9, R9-3).
 		if (!draftRef.current) draftRef.current = next;
@@ -1923,6 +1964,14 @@ export function SuiteScreen() {
 				</div>
 			</section>
 			<CasePane
+				copies={copies}
+				onDiscardCopy={(copy) => {
+					discardDraftCopy(copy.key);
+					setCopies({
+						id: copyCase,
+						copies: readDraftCopies({ project, id: copyCase, ...(view ? { recorded: editDraft(view) } : {}) }),
+					});
+				}}
 				ownedElsewhere={ownedElsewhere}
 				ownerLive={!displayedDraft || draftOwnerIsLive(displayedDraft.owner)}
 				ending={draft && gone.current?.draft === draft ? ending : null}

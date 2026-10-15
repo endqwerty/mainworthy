@@ -40,7 +40,7 @@ export function hasTypedMerge(state: DraftConflict): boolean {
 	});
 }
 
-const Draft = z
+export const Draft = z
 	.object({
 		id: z.string(),
 		ref: z.string().nullable(),

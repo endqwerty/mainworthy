@@ -1,11 +1,13 @@
 import { useMemo, useRef, useState } from "react";
 import { z } from "zod";
+import { printCase } from "../../core/markdown.ts";
 import { mergeBodies } from "../../core/merge3.ts";
 import { Automate, CaseBody } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
 import { deviceSession, sessionCurrent } from "../lib/device.ts";
+import type { DraftCopy } from "../lib/draft-copies.ts";
 import type { Draft, DraftConflict } from "../lib/drafts.ts";
 import { proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
@@ -88,6 +90,8 @@ export function CasePane({
 	ownerLive = true,
 	ending = null,
 	onTakeOver,
+	copies,
+	onDiscardCopy,
 }: {
 	view: CaseView | null;
 	draft: Draft | null;
@@ -106,6 +110,8 @@ export function CasePane({
 	/** The other window has removed the draft shown: the case is being read, or could not be. */
 	ending?: keyof typeof draftEndedStatus | null;
 	onTakeOver: () => void;
+	copies: DraftCopy[];
+	onDiscardCopy: (copy: DraftCopy) => void;
 }) {
 	const { project, session, setStatus, overlayOpen } = useApp();
 	const elsewhereStatus = ending ? draftEndedStatus[ending] : ownershipStatus(ownerLive);
@@ -268,6 +274,31 @@ export function CasePane({
 							)}
 						</div>
 					)}
+					{copies.map(({ draft: copy, key, stored: copyStored }) => (
+						<details className="preserved-draft" key={key} open>
+							<summary>Preserved text</summary>
+							<p>
+								This text was accepted in a window that lost ownership. Copy any text you need before discarding it.
+							</p>
+							{!copyStored && <p>Device storage is full. Keep this tab open until you have copied this text.</p>}
+							<p>Folder: {copy.folder || "All cases"}</p>
+							<textarea
+								aria-label="Preserved draft text"
+								readOnly
+								value={printCase({ ref: copy.ref, body: copy.body, tags: copy.tags, covers: copy.covers })}
+							/>
+							{copy.conflict && (
+								<textarea
+									aria-label="Preserved merge text"
+									readOnly
+									value={printCase({ ref: copy.ref, body: copy.conflict.merged, tags: copy.tags, covers: copy.covers })}
+								/>
+							)}
+							<button type="button" onClick={() => onDiscardCopy({ key, draft: copy, stored: copyStored })}>
+								Discard preserved copy
+							</button>
+						</details>
+					))}
 					{conflict && (
 						<ConflictCard
 							key={conflict.q}

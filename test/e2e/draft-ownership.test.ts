@@ -177,6 +177,102 @@ check(
 );
 
 check(
+	"ordinary takeovers and later edits leave no preserved copies",
+	async () => {
+		const w = await windows();
+		try {
+			const { a, b, server } = w;
+			await a.keyboard.press("e");
+			await title(a).fill("Coupon case ordinary A");
+			await b.keyboard.press("e");
+			await takeover(b);
+			await eventually(() => readOnly(a), Boolean);
+			await title(b).fill("Coupon case ordinary A and B");
+			await takeover(a);
+			await eventually(() => readOnly(b), Boolean);
+			await title(a).fill("Coupon case ordinary A and B and A again");
+			for (const page of [a, b]) expect(await page.locator(".preserved-draft").count()).toBe(0);
+			await a.keyboard.press("Escape");
+			await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.version === 2,
+			);
+			for (const page of [a, b]) {
+				await page.reload();
+				await page.locator("#detail .ctitle").filter({ hasText: "Coupon case ordinary A and B and A again" }).waitFor();
+				expect(await page.locator(".preserved-draft").count()).toBe(0);
+			}
+			expect(
+				await a.evaluate(() => Object.keys(localStorage).filter((key) => key.includes(":draft-copy:")).length),
+			).toBe(0);
+		} finally {
+			await w.close();
+		}
+	},
+	30000,
+);
+
+check(
+	"confirmed ownership adds no copy reads or writes per keystroke",
+	async () => {
+		const w = await windows();
+		try {
+			const { a, b } = w;
+			await b.close();
+			await a.keyboard.press("e");
+			await title(a).fill("Coupon case warm");
+			await a.waitForTimeout(50);
+			await title(a).press("End");
+			await a.evaluate(() => {
+				for (let index = 0; index < 100; index++) localStorage.setItem(`unrelated:${index}`, "other data");
+				const counts = { reads: 0, writes: 0, keys: 0, copyReads: 0, copyWrites: 0 };
+				const get = Storage.prototype.getItem;
+				const set = Storage.prototype.setItem;
+				const keyAt = Storage.prototype.key;
+				Storage.prototype.getItem = function (key) {
+					if (this === localStorage) {
+						counts.reads++;
+						if (key.includes(":draft-copy:")) counts.copyReads++;
+					}
+					return get.call(this, key);
+				};
+				Storage.prototype.setItem = function (key, value) {
+					if (this === localStorage) {
+						counts.writes++;
+						if (key.includes(":draft-copy:")) counts.copyWrites++;
+					}
+					set.call(this, key, value);
+				};
+				Storage.prototype.key = function (index) {
+					if (this === localStorage) counts.keys++;
+					return keyAt.call(this, index);
+				};
+				Object.assign(window, { draftStorageCounts: counts });
+			});
+			await a.keyboard.type("0123456789", { delay: 10 });
+			expect(await title(a).inputValue()).toBe("Coupon case warm0123456789");
+			const counts = z
+				.object({
+					reads: z.number(),
+					writes: z.number(),
+					keys: z.number(),
+					copyReads: z.number(),
+					copyWrites: z.number(),
+				})
+				.parse(await a.evaluate(() => Reflect.get(window, "draftStorageCounts")));
+			console.log(`Draft storage operations for 10 accepted keys: ${JSON.stringify(counts)}`);
+			expect((await stored(a)).body.title).toBe("Coupon case warm0123456789");
+			expect(counts.copyWrites).toBe(0);
+			expect(counts.copyReads).toBe(0);
+			expect(counts.keys).toBe(0);
+		} finally {
+			await w.close();
+		}
+	},
+	30000,
+);
+
+check(
 	"R8 a closed owner's mid-sentence draft is claimed on opening the editor",
 	async () => {
 		const w = await windows();
@@ -461,6 +557,84 @@ check(
 	},
 	30000,
 );
+
+for (const beforeEvent of [false, true])
+	check(
+		`simultaneous first writes keep accepted text ${beforeEvent ? "when closed before the storage event" : "after reload and close"}`,
+		async () => {
+			const w = await windows();
+			const debuggerSession = await w.h.context.newCDPSession(w.b);
+			try {
+				const { a, b, h, server } = w;
+				if (beforeEvent) {
+					await a.addInitScript(() => window.addEventListener("storage", (event) => event.stopImmediatePropagation()));
+					await a.reload();
+					await a.getByRole("button", { name: "Coupon case", exact: true }).waitFor();
+				}
+				await a.keyboard.press("e");
+				await b.keyboard.press("e");
+				await debuggerSession.send("Debugger.enable");
+				await b.evaluate(() => {
+					const set = Storage.prototype.setItem;
+					Storage.prototype.setItem = function (key, value) {
+						if (key.includes(":draft:") && key.endsWith(":C-1")) {
+							Storage.prototype.setItem = set;
+							// biome-ignore lint/suspicious/noDebugger: stop exactly between the ownership read and shared write.
+							debugger;
+						}
+						set.call(this, key, value);
+					};
+				});
+				const paused = new Promise<void>((resolve) => debuggerSession.once("Debugger.paused", () => resolve()));
+				const typing = title(b).fill("Coupon case B");
+				await paused;
+				const accepted = "Coupon case A complete sentence accepted before B writes";
+				await title(a).fill(accepted);
+				expect((await stored(a)).body.title).toBe(accepted);
+				await debuggerSession.send("Debugger.resume");
+				await typing;
+				const preserved = (page: Page) => page.getByRole("textbox", { name: "Preserved draft text", exact: true });
+				if (beforeEvent) {
+					expect(await title(a).inputValue()).toBe(accepted);
+					await a.close();
+					const c = await h.context.newPage();
+					await c.goto(`${server.url}/p/scratch/suite/c/1`);
+					await preserved(c).waitFor();
+					expect(await preserved(c).inputValue()).toContain(accepted);
+					expect((await stored(c)).body.title).toBe("Coupon case B");
+					return;
+				}
+				await refused(a);
+				expect(await readOnly(a)).toBe(true);
+				expect((await stored(a)).body.title).toBe("Coupon case B");
+				await preserved(a).waitFor();
+				expect(await preserved(a).inputValue()).toContain(accepted);
+				await a.reload();
+				await preserved(a).waitFor();
+				expect(await preserved(a).inputValue()).toContain(accepted);
+				await a.close();
+				const c = await h.context.newPage();
+				await c.goto(`${server.url}/p/scratch/suite/c/1`);
+				await preserved(c).waitFor();
+				expect(await preserved(c).inputValue()).toContain(accepted);
+				expect((await stored(c)).body.title).toBe("Coupon case B");
+				expect((await server.api("get", { refs: ["C-1"] }))[0]?.version).toBe(1);
+				await takeover(c);
+				await title(c).fill(accepted);
+				await c.keyboard.press("Escape");
+				await eventually(
+					() => server.api("get", { refs: ["C-1"] }),
+					(rows) => rows[0]?.title === accepted,
+				);
+				await preserved(c).waitFor({ state: "detached" });
+				expect(await c.locator(".preserved-draft").count()).toBe(0);
+			} finally {
+				await debuggerSession.send("Debugger.disable").catch(() => {});
+				await w.close();
+			}
+		},
+		30000,
+	);
 
 check(
 	"R8 a takeover stored before its event guards a conflict-card change and merge",
