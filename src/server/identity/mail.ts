@@ -24,24 +24,25 @@ export function requireMail(app: App): string {
 }
 
 export function queueMail(app: App, message: Message): void {
+	app.db.afterCommit(() => deliverMail(app, message));
+}
+
+export function deliverMail(app: App, message: Message): void {
 	if (!app.config.mail) return;
-	app.db.afterCommit(() => {
-		const config = app.config.mail;
-		const state = delivery(app);
-		if (!config || state.stopped) return;
-		if (state.pending.size >= 100) {
-			console.warn("[mainworthy] mail delivery queue is full; request a new link");
-			return;
-		}
-		const sent = sendMail(config, message)
-			.catch(() => {
-				console.warn("[mainworthy] mail delivery failed; check SMTP configuration and request a new link");
-			})
-			.finally(() => {
-				state.pending.delete(sent);
-			});
-		state.pending.add(sent);
-	});
+	const state = delivery(app);
+	if (state.stopped) return;
+	if (state.pending.size >= 100) {
+		console.warn("[mainworthy] mail delivery queue is full; request a new link");
+		return;
+	}
+	const sent = sendMail(app.config.mail, message)
+		.catch(() => {
+			console.warn("[mainworthy] mail delivery failed; check SMTP configuration and request a new link");
+		})
+		.finally(() => {
+			state.pending.delete(sent);
+		});
+	state.pending.add(sent);
 }
 
 export async function waitMail(app: App): Promise<void> {

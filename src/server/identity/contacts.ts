@@ -6,7 +6,7 @@ import { conflict, forbidden, invalid } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
 import { insertPassword, livePassword, revokeCredential } from "./credentials.ts";
 import { addressKey } from "./limiter.ts";
-import { queueMail, requireMail } from "./mail.ts";
+import { deliverMail, queueMail, requireMail } from "./mail.ts";
 import { hashPassword, PasswordWorkBusy } from "./passwords.ts";
 import { endSessionsOf, newSessionSecret } from "./sessions.ts";
 
@@ -42,16 +42,14 @@ function heldLinks(app: App): Map<string, Link> {
 }
 function issue(app: App, link: Link): string {
 	const code = newSessionSecret();
-	app.db.afterCommit(() => {
-		const held = heldLinks(app);
-		for (const [key, prior] of held)
-			if (prior.contact.actor === link.contact.actor && prior.kind === link.kind) held.delete(key);
-		if (held.size >= 10_000) {
-			const first = held.keys().next();
-			if (!first.done) held.delete(first.value);
-		}
-		held.set(hash(code), link);
-	});
+	const held = heldLinks(app);
+	for (const [key, prior] of held)
+		if (prior.contact.actor === link.contact.actor && prior.kind === link.kind) held.delete(key);
+	if (held.size >= 10_000) {
+		const first = held.keys().next();
+		if (!first.done) held.delete(first.value);
+	}
+	held.set(hash(code), link);
 	return code;
 }
 function find(app: App, db: Db, code: string): Link | null {
@@ -62,6 +60,10 @@ function find(app: App, db: Db, code: string): Link | null {
 }
 export function clearMailLinks(app: App): void {
 	links.delete(app);
+}
+export function clearMailLinksOf(app: App, actor: number): void {
+	const held = heldLinks(app);
+	for (const [key, link] of held) if (link.contact.actor === actor) held.delete(key);
 }
 export function forgetContact(db: Db, actor: number): void {
 	db.run(Q.drop, { actor });
@@ -82,22 +84,26 @@ export function setEmail(
 	} else if (caller.name !== app.config.owner)
 		throw forbidden("a recovery email address is changed by that person or the owner of this instance");
 	const actor = person.id;
-	const url = requireMail(app);
 	if (email === null) {
+		credentialNotice(app, actor, "Your recovery email address was removed");
 		forgetContact(app.db, actor);
 		return { email: null, verified: false };
 	}
+	const url = requireMail(app);
 	const owner = app.db.get(Q.owner, { email });
 	if (owner && owner.actor !== actor) throw conflict("that email address is already assigned");
+	credentialNotice(app, actor, "Your recovery email address was changed");
 	const revision = newSessionSecret();
 	app.db.run(Q.put, { actor, email, revision });
 	const contact = app.db.get(Q.get, { actor });
 	if (!contact) throw invalid("only a person has an email address");
-	const code = issue(app, { kind: "verify", contact, expires: app.now() + 24 * 3_600_000 });
-	queueMail(app, {
-		to: email,
-		subject: "Verify your Mainworthy email",
-		text: `Verify this address for ${contact.name}:\n${url}/email#${code}\n\nThis link works once for 24 hours. If you did not ask for it, ignore this message.`,
+	app.db.afterCommit(() => {
+		const code = issue(app, { kind: "verify", contact, expires: app.now() + 24 * 3_600_000 });
+		deliverMail(app, {
+			to: email,
+			subject: "Verify your Mainworthy email",
+			text: `Verify this address for ${contact.name}:\n${url}/email#${code}\n\nThis link works once for 24 hours. If you did not ask for it, ignore this message.`,
+		});
 	});
 	return { email, verified: false };
 }
@@ -140,7 +146,7 @@ export function requestReset(app: App, email: string, address: string | null): {
 			password: livePassword(app.reader, contact.actor)?.data ?? null,
 			expires: app.now() + 15 * 60_000,
 		});
-		queueMail(app, {
+		deliverMail(app, {
 			to: email,
 			subject: "Reset your Mainworthy password",
 			text: `Reset the password for ${contact.name}:\n${url}/reset#${code}\n\nThis link works once for 15 minutes. It ends your existing sessions. If you use an authenticator, it is still required after resetting. If you did not ask for it, ignore this message.`,

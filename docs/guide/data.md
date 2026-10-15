@@ -78,7 +78,7 @@ It preserves their IDs, head hashes and verdicts. It includes actors who acted i
 or have a grant on it, and the people those actors act on behalf of. The policy's rule actor travels too. Their organisations, project grants and global
 grants travel with them. Other projects, their grants, instance metadata and commands outside the project stay out.
 Relevant teams, their memberships, grants on this project or every project, and history for that scope travel too. Other project team grants and their events stay out.
-Tokens and other sign-in credentials never travel.
+Recovery addresses and their verification status travel for the included people. Pending verification and reset links never travel. Tokens and other sign-in credentials never travel.
 
 The HTTP equivalent is `GET /api/export?project=shop`, with the same instance admin requirement as a full export.
 An unknown key is an error. Without `--project`, the command exports the whole instance, even when
