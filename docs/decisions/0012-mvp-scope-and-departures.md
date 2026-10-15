@@ -79,7 +79,8 @@ not the same things done worse.
    which the design left unnamed) and `mistaken` (a disputed slot: the failing result was wrong). `mistaken`
    replaces the design's `resolve { trust: [...] }`; any other failure answer on a disputed slot also resolves
    it, by saying what the failure was.
-   **`inherited` is a person's answer, not a rule's.** The design's loose policy excuses by itself a failure
+   Decision [0042](0042-inherited-result-excuses.md) replaces this restriction with a per-result rule under loose policy.
+   **At MVP delivery, `inherited` was a person's answer, not a rule's.** The design's loose policy excuses by itself a failure
    that the change's base already has. That was built, and cut back after five review rounds kept finding ways
    for such an answer to outlive its evidence (the base corrected, the change pointed at another base, an
    agent's failure with the same cause, a rule and an open run undoing each other). What is left is sound and

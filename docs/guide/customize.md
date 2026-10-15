@@ -82,7 +82,7 @@ The project holds fourteen days of history before today:
 - A run was planned every other day and worked through by hand. The older ones are closed as passed. The one from two days ago found a defect and stays open, and yesterday's is half done.
 - Some cases were edited, and an agent named `reviewer` reviewed two pull requests.
 
-Today `main` fails one test, and so does pull request 482, which starts from that commit. A run named "Checkout regression" is planned on the pull request, and `reviewer` has left a finding and a proposed edit. The queue holds five questions that need judgment: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The sixty unit-test questions make 65 in all. The project is on the `standard` preset, set to ask about tests with no case, from its first day.
+Today `main` fails one test, and so does pull request 482, which starts from that commit. A run named "Checkout regression" is planned on the pull request, and `reviewer` has left a finding and a proposed edit. The queue holds five questions that need judgment: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The sixty unit-test questions make 65 in all. The demo adopts the `standard` preset before its first report, set to ask about tests with no case. This keeps the pull request's failure open with the hint that it also fails on the base.
 
 Four flags change what is written:
 

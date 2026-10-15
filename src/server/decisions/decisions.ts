@@ -23,8 +23,10 @@ import {
 	type ChangeRow,
 	changeById,
 	excuseFor,
+	excuseForResult,
 	mustTarget,
 	ownChangeOf,
+	resultById,
 	scopeEnded,
 	scopeOf,
 	signatureById,
@@ -42,10 +44,14 @@ import { clauseFor, currentPolicy, policyAt } from "../policy/policy.ts";
 import {
 	type Blocker,
 	causeKey,
+	changeRunsOf,
+	countedTestsOf,
 	disputants,
 	type FailingGroup,
 	failsOnBase,
 	inDispute,
+	inheritanceAffected,
+	inheritedEvidenceOf,
 	newestInScope,
 	passesAny,
 	type RunRow,
@@ -858,6 +864,14 @@ export function undo(
 		holds: [],
 		supersedes: prior.id,
 	});
+	if (question.kind === "failure" && json<{ perResult?: boolean }>(question.subject).perResult) {
+		setQuestionState(ctx, question, "dissolved", decision.id);
+		refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, prior.id)]);
+		return reply(question, "reopened", {
+			decision: decision.id,
+			needs: "withdrawn; automatic inheritance is disabled for this commit and cause",
+		});
+	}
 	setQuestionState(ctx, question, "open", null);
 	// Open again, it asks what any question of its kind asks. Where that is a rule, a person now decides: the
 	// rule does not answer again behind the back of whoever withdrew its answer.
@@ -884,6 +898,23 @@ export function undo(
 
 // ── Failures ───────────────────────────────────────────────────────────────────────────────────────────────
 
+/** Reconcile inherited standing once for all the causes in a report, before raising their questions. */
+export function raiseFailures(ctx: Ctx, inputs: readonly Parameters<typeof raiseFailure>[1][]): Raised[] {
+	const active = ctx.folding;
+	ctx.folding = true;
+	try {
+		const runs = new Map(inputs.flatMap(({ group }) => group.runs.map((run) => [run.id, run] as const)));
+		const automatic = new Map(
+			[...runs.values()]
+				.flatMap((run) => refreshInherited(ctx, run))
+				.map((raised) => [json<{ signature: number }>(raised.question.subject).signature, raised] as const),
+		);
+		return inputs.map((input) => raiseFailure(ctx, input, automatic));
+	} finally {
+		ctx.folding = active;
+	}
+}
+
 /**
  * Puts one cause of failure to the queue. `by` is the actor whose result shows it, `producer` that actor's kind.
  * Called for the failures of a report as it is applied, and for the failures a run shows when it is planned
@@ -902,8 +933,20 @@ export function raiseFailure(
 		/** Parties to a dispute about the cause that the caller already knows of (a question asked again elsewhere). */
 		parties?: readonly number[];
 	},
+	automatic: ReadonlyMap<number, Raised> = new Map(),
 ): Raised {
 	const { group, target } = input;
+	if (
+		automatic.size > 0 &&
+		group.results.length > 0 &&
+		group.results.every((id) => {
+			const row = resultById(ctx.db, id);
+			return row && excuseForResult(ctx.db, row, group.scope);
+		})
+	) {
+		const matching = automatic.get(group.signature.id);
+		if (matching) return matching;
+	}
 	const scopeKind = group.scope.startsWith("change:") ? "change" : group.scope.startsWith("line:") ? "trunk" : "run";
 	const key = `${group.signature.hash}|${group.scope}`;
 	// One question per cause: an occurrence adds its tests to the open question instead of opening another.
@@ -951,8 +994,8 @@ export function raiseFailure(
 	const shown = [...hints];
 	if (
 		scopeKind === "change" &&
-		group.tests.length > 0 &&
-		group.tests.every((test) => failsOnBase(ctx.db, target, test.id, group.signature.id))
+		group.results.length > 0 &&
+		group.results.every((result) => failsOnBase(ctx.db, result))
 	)
 		shown.push("hint:fails-on-base");
 	const change = target.change !== null ? changeById(ctx.db, target.change) : null;
@@ -1224,67 +1267,220 @@ function renewedApproval(ctx: Ctx, asked: QuestionRow | null): boolean {
 	return approval !== null && json<{ closed?: string }>(approval.effects).closed !== undefined;
 }
 
-/**
- * Recomputes the given runs and acts on what follows: a planned run that has just passed gets its sign-off
- * question (which a rule may answer and so close the run).
- */
-export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveStale?: boolean } = {}): void {
-	// Runs whose counted results a decision changed on the way here (`ctx.recompute`) come along.
-	const ids = new Set([...runIds, ...ctx.recompute]);
-	ctx.recompute.clear();
-	for (const id of ids) {
-		const existing = runById(ctx.db, id);
-		if (!existing) continue;
-		let result = retally(
-			ctx,
-			id,
-			blockersOf(ctx, existing),
-			currentPolicy(ctx.db, ctx.project.id).settings.emptyReports,
-		);
-		if (result.failing.size > 0 && askUnexplained(ctx, result.run))
-			result = retally(
-				ctx,
-				id,
-				blockersOf(ctx, result.run),
-				currentPolicy(ctx.db, ctx.project.id).settings.emptyReports,
-			);
-		if (options.dissolveStale) dissolveStale(ctx, result.run);
-		const run = result.run;
-		const asked =
-			run.origin === "planned"
-				? openFor(ctx.db, ctx.project.id, contentHash({ kind: "signoff", key: `run:${run.id}` }), undefined)
-				: null;
-		// A commit run's late report changes the basis of its approval even when it no longer passes. Keep
-		// that new question current while the failure is resolved; approving still requires a passing gate.
-		const material = { tally: json(run.tally), applied: run.applied_seq };
-		const approval = run.signoff !== null ? decisionById(ctx.db, run.signoff) : null;
-		const reconsider =
-			run.origin === "planned" &&
-			json<{ commit?: string }>(run.accepts).commit !== undefined &&
-			run.outstanding === 0 &&
-			((run.state === "closed" && approval?.basis !== contentHash(material)) || renewedApproval(ctx, asked));
-		if (!result.wantsSignoff && !reconsider) {
-			// A first sign-off was asked while the run passed. It no longer does, so nobody can approve it on
-			// what it showed then. A late report to an approved commit run is reconsidered above instead.
-			if (asked && run.state === "open" && run.verdict !== "passed" && run.outstanding === 0)
-				setQuestionState(ctx, asked, "dissolved", null);
+/** Reconcile a commit's rule answers with its complete effective results and the base's current lanes. */
+function refreshInherited(ctx: Ctx, run: RunRow): Raised[] {
+	if (run.origin !== "change") return [];
+	const about = `inherited:${runRef(run)}`;
+	const questions = everyQuestionOn(ctx.db, ctx.project.id, about);
+	if (!run.scope?.startsWith("change:") && questions.length === 0) return [];
+	const policy = currentPolicy(ctx.db, ctx.project.id);
+	const enabled = policy.clauses.some(
+		(clause) =>
+			clause.kind === "failure" &&
+			clause.ask.who === "rule" &&
+			ANSWERS.failure.safeParse(clause.answer).data?.is === "inherited",
+	);
+	if (!enabled && questions.length === 0) return [];
+	const withdrawn = new Set(
+		questions.flatMap((question) =>
+			question.decision !== null &&
+			json<{ is?: string }>(decisionById(ctx.db, question.decision)?.answer ?? "{}").is === "withdrawn"
+				? [json<{ signature: number }>(question.subject).signature]
+				: [],
+		),
+	);
+	const groups = new Map<number, { target: TargetRow; inherited: { result: number; base: number[] }[] }>();
+	for (const row of inheritedEvidenceOf(ctx.db, run)) {
+		if (row.signature === null || withdrawn.has(row.signature)) continue;
+		const target = mustTarget(ctx.db, row.target);
+		const scope = scopeOf(target, null);
+		if (excuseFor(ctx.db, run.project, row.signature, scope, target.id)) continue;
+		let group = groups.get(row.signature);
+		if (!group) {
+			group = { target, inherited: [] };
+			groups.set(row.signature, group);
+		}
+		group.inherited.push({ result: row.result, base: row.base });
+	}
+	const live = questions.filter(
+		(question) =>
+			question.state === "open" ||
+			(question.state === "decided" &&
+				question.decision !== null &&
+				!["outdated", "expired", "withdrawn"].includes(
+					json<{ is: string }>(decisionById(ctx.db, question.decision)?.answer ?? "{}").is,
+				)),
+	);
+	const raised: Raised[] = [];
+	const bySignature = new Map(
+		live.map((question) => [json<{ signature: number }>(question.subject).signature, question]),
+	);
+	for (const question of live) {
+		const { signature } = json<{ signature: number }>(question.subject);
+		if (groups.has(signature)) continue;
+		if (question.state === "decided" && question.decision !== null) {
+			const decision = decisionById(ctx.db, question.decision);
+			if (decision) {
+				HANDLERS.failure.revert(ctx, question, decision);
+				lapse(ctx, question, decision, ctx.now);
+				for (const id of runsDependingOn(ctx.db, decision.id)) ctx.recompute.add(id);
+			}
+		}
+		setQuestionState(ctx, question, "dissolved", questionById(ctx.db, question.id)?.decision ?? null);
+	}
+	for (const [signatureId, group] of groups) {
+		const signature = signatureById(ctx.db, signatureId);
+		if (!signature) continue;
+		const { target, inherited } = group;
+		const scope = scopeOf(target, null);
+		const material = { inherited };
+		const prior = bySignature.get(signatureId);
+		if (prior?.state === "decided" && prior.decision !== null && prior.basis === contentHash(material)) {
+			const decision = decisionById(ctx.db, prior.decision);
+			if (decision) {
+				raised.push({ s: "carried", question: prior, decision });
+				continue;
+			}
+		}
+		const facts = [
+			"scope:change",
+			"inherited",
+			...(inDispute(ctx.db, ctx.project.id, signatureId, scope) ? ["hint:disputed"] : []),
+		];
+		const clause = clauseFor(policy, { kind: "failure", facts: new Set(facts) });
+		const answer = ANSWERS.failure.safeParse(clause.answer);
+		if (clause.ask.who !== "rule" || !answer.success || answer.data.is !== "inherited") {
+			if (prior?.state === "decided" && prior.decision !== null) {
+				const decision = decisionById(ctx.db, prior.decision);
+				if (decision) {
+					HANDLERS.failure.revert(ctx, prior, decision);
+					lapse(ctx, prior, decision, ctx.now);
+					for (const id of runsDependingOn(ctx.db, decision.id)) ctx.recompute.add(id);
+				}
+			}
+			if (prior) setQuestionState(ctx, prior, "dissolved", questionById(ctx.db, prior.id)?.decision ?? null);
 			continue;
 		}
-		raise(ctx, {
-			kind: "signoff",
-			key: `run:${run.id}`,
-			subject: { run: run.id },
-			title: `Close ${runRef(run)} ${run.name}`,
-			producer: "rule",
-			evidence: { run: runRef(run), name: run.name, verdict: run.verdict, tally: json(run.tally) },
-			material,
-			facts: [`verdict:${run.verdict}`],
-			refs: [runRef(run)],
-			runs: [],
+		const change = target.change === null ? null : changeById(ctx.db, target.change);
+		const tests = inherited.flatMap((item) => {
+			const result = resultById(ctx.db, item.result);
+			const test = result ? testById(ctx.db, result.test) : null;
+			return test ? [{ id: test.id, t: testRef(test), name: test.name, case: null, counted: true }] : [];
 		});
+		raised.push(
+			raise(ctx, {
+				kind: "failure",
+				key: `inherited:${run.id}:${signatureId}`,
+				subject: { signature: signatureId, scope, perResult: true },
+				title: clip(signature.text, 160),
+				producer: "rule",
+				evidence: {
+					inherited,
+					tests: tests.slice(0, 50),
+					count: tests.length,
+					targetId: target.id,
+					target: target.commit_sha,
+					targets: [
+						...new Set(
+							inherited.flatMap((item) => {
+								const result = resultById(ctx.db, item.result);
+								return result ? [result.target] : [];
+							}),
+						),
+					],
+					hints: ["fails-on-base"],
+					scope,
+				},
+				material,
+				facts,
+				refs: [about, runRef(run), `scope:${scope}`, ...(change ? [change.key] : [])],
+				runs: [run],
+				target: target.id,
+			}),
+		);
 	}
-	// Anything a step above changed in turn.
-	if (ctx.recompute.size > 0) refold(ctx, [], options);
+	return raised;
+}
+
+/** Recompute affected runs and raise sign-off for a planned run that now passes. */
+export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveStale?: boolean } = {}): void {
+	for (const id of runIds) ctx.recompute.add(id);
+	ctx.dissolveStale ||= options.dissolveStale === true;
+	if (ctx.folding) return;
+	ctx.folding = true;
+	try {
+		do {
+			// Runs whose counted results a decision changed on the way here (`ctx.recompute`) come along.
+			const ids = new Set(ctx.recompute);
+			for (const change of ctx.changedBases) for (const id of changeRunsOf(ctx.db, change)) ids.add(id);
+			ctx.changedBases.clear();
+			ctx.recompute.clear();
+			// Base results and retargeting reach every affected commit and planned run in this transaction.
+			for (const id of ids) {
+				const run = runById(ctx.db, id);
+				if (run) for (const affected of inheritanceAffected(ctx.db, run)) ids.add(affected);
+			}
+			for (const id of ids) {
+				const run = runById(ctx.db, id);
+				if (run) refreshInherited(ctx, run);
+			}
+			for (const id of ids) {
+				ctx.recompute.delete(id);
+				const existing = runById(ctx.db, id);
+				if (!existing) continue;
+				let result = retally(
+					ctx,
+					id,
+					blockersOf(ctx, existing),
+					currentPolicy(ctx.db, ctx.project.id).settings.emptyReports,
+				);
+				if (result.failing.size > 0 && askUnexplained(ctx, result.run))
+					result = retally(
+						ctx,
+						id,
+						blockersOf(ctx, result.run),
+						currentPolicy(ctx.db, ctx.project.id).settings.emptyReports,
+					);
+				if (ctx.dissolveStale) dissolveStale(ctx, result.run);
+				const run = result.run;
+				const asked =
+					run.origin === "planned"
+						? openFor(ctx.db, ctx.project.id, contentHash({ kind: "signoff", key: `run:${run.id}` }), undefined)
+						: null;
+				// A commit run's late report changes the basis of its approval even when it no longer passes. Keep
+				// that new question current while the failure is resolved; approving still requires a passing gate.
+				const material = { tally: json(run.tally), applied: run.applied_seq };
+				const approval = run.signoff !== null ? decisionById(ctx.db, run.signoff) : null;
+				const reconsider =
+					run.origin === "planned" &&
+					json<{ commit?: string }>(run.accepts).commit !== undefined &&
+					run.outstanding === 0 &&
+					((run.state === "closed" && approval?.basis !== contentHash(material)) || renewedApproval(ctx, asked));
+				if (!result.wantsSignoff && !reconsider) {
+					// A first sign-off was asked while the run passed. It no longer does, so nobody can approve it on
+					// what it showed then. A late report to an approved commit run is reconsidered above instead.
+					if (asked && run.state === "open" && run.verdict !== "passed" && run.outstanding === 0)
+						setQuestionState(ctx, asked, "dissolved", null);
+					continue;
+				}
+				raise(ctx, {
+					kind: "signoff",
+					key: `run:${run.id}`,
+					subject: { run: run.id },
+					title: `Close ${runRef(run)} ${run.name}`,
+					producer: "rule",
+					evidence: { run: runRef(run), name: run.name, verdict: run.verdict, tally: json(run.tally) },
+					material,
+					facts: [`verdict:${run.verdict}`],
+					refs: [runRef(run)],
+					runs: [],
+				});
+			}
+		} while (ctx.recompute.size > 0 || ctx.changedBases.size > 0);
+	} finally {
+		ctx.folding = false;
+		ctx.dissolveStale = false;
+	}
 }
 
 /** The open questions about a run, as the run fold needs them. */
@@ -1403,7 +1599,18 @@ function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number, Set<
 		const tests = (json<{ tests?: { id: number; counted?: boolean }[] }>(question.evidence).tests ?? []).flatMap(
 			(test) => (test.counted ? [test.id] : []),
 		);
-		gone = passesAny(ctx.db, newest.id, tests);
+		gone =
+			passesAny(ctx.db, newest.id, tests) ||
+			countedTestsOf(ctx.db, newest.id).some(
+				(row) =>
+					row.signature === subject.signature &&
+					tests.includes(row.test) &&
+					excuseForResult(
+						ctx.db,
+						{ id: row.result, project: newest.project, signature: row.signature, target: row.target },
+						subject.scope,
+					) !== null,
+			);
 	}
 	for (const id of runsAbout(ctx, question)) {
 		const run = runById(ctx.db, id);

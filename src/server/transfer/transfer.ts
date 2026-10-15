@@ -160,6 +160,7 @@ const PROJECT_PARENT: Readonly<Record<string, { column: string; table: string }>
 	slots: { column: "run", table: "runs" },
 	slot_results: { column: "run", table: "runs" },
 	depends_on: { column: "run", table: "runs" },
+	result_excuses: { column: "result", table: "results" },
 };
 
 function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<string, string> {

@@ -31,6 +31,11 @@ export type Ctx = {
 	 * put back). Whatever recomputes runs next takes them along, so none is left with the tally from before.
 	 */
 	recompute: Set<number>;
+	/** Nested decisions enqueue folds for the active pass instead of entering it again. */
+	folding: boolean;
+	dissolveStale: boolean;
+	/** Changes whose base moved while accepting target metadata, including a duplicate report. */
+	changedBases: Set<number>;
 	/**
 	 * How often this command has raised each question for each target. No command has a reason to raise one
 	 * question for one target more than a handful of times; one that does is going round in circles, and is
@@ -218,6 +223,9 @@ export function makeCtx(app: App, project: ProjectRow, actor: Actor, write: bool
 		write,
 		touched: new Set(),
 		recompute: new Set(),
+		folding: false,
+		dissolveStale: false,
+		changedBases: new Set(),
 		raised: new Map(),
 		nextNo(name) {
 			const row = app.db.get(Q.bumpCounter, { project: project.id, name });

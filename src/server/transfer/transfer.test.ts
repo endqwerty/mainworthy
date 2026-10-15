@@ -333,6 +333,7 @@ const fixtures: Record<string, Row[]> = {
 			seq: 1,
 		},
 	],
+	result_excuses: [{ result: 201, decision: 401, class: "excused", expires_at: null }],
 	excuses: [{ project: 23, signature: 505, scope: "line:trunk", decision: 401, class: "excused" }],
 	questions: [
 		{
@@ -657,6 +658,7 @@ describe("Mainworthy instance archives", () => {
 			"slots",
 			"slot_results",
 			"depends_on",
+			"result_excuses",
 		]) {
 			expect(otherCounts.tables[table]).toBe(0);
 		}

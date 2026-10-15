@@ -894,28 +894,18 @@ describe("same-code detector suggestions", () => {
 describe("a change against its base", () => {
 	const failure = { 4: "expected 90.00, got 100.00" };
 
-	test("a failure the base has too is shown as such, and a person may call it inherited for that build", () => {
+	test("loose: a failure the base has too is excused by a recorded rule for each commit", () => {
 		h.call("report", ciReport({ commit: "base0001", n: 10, fail: failure }));
-		decide(first(queue().items), { is: "defect" }); // trunk is red and somebody owns it
+		decide(first(queue().items), { is: "defect" });
 		const change = (commit: string) =>
 			ciReport({ commit, branch: "feature", pr: 482, base: "base0001", n: 10, fail: failure });
 		const pr = h.call<ReportReceipt>("report", change("feat0001"));
-		// No rule excuses it: the base comparison is a hint for the person who answers.
-		expect(pr.questions[0]).toMatchObject({ how: "new", state: "open" });
-		expect(pr.gate?.verdict).toBe("blocked");
-		const asked = queue().items.find((item) => item.about.includes("pr:482"));
-		if (!asked) throw new Error("the change's failure was not asked about");
-		expect((asked.evidence as { hints: string[] }).hints).toContain("fails-on-base");
-		expect(asked.answers).toContain("inherited");
-		expect(decide(asked, { is: "inherited" })).toMatchObject({ status: "decided" });
-		expect(h.call<GateStatus>("gate", { change: "pr:482" })).toMatchObject({
-			verdict: "passed",
-			tally: { excused: 1 },
-		});
-		// It was said of that build. The next push is asked about again.
+		expect(pr.questions[0]).toMatchObject({ how: "decided by rule", state: "decided", answer: "inherited" });
+		expect(pr.gate).toMatchObject({ verdict: "passed", tally: { excused: 1 } });
 		const next = h.call<ReportReceipt>("report", change("feat0001b"));
-		expect(next.questions[0]).toMatchObject({ how: "new", state: "open" });
-		expect(next.gate?.verdict).toBe("blocked");
+		expect(next.questions[0]).toMatchObject({ how: "decided by rule", state: "decided", answer: "inherited" });
+		expect(next.questions[0]?.q).not.toBe(pr.questions[0]?.q);
+		expect(next.gate?.verdict).toBe("passed");
 	});
 
 	test("loose: a failure the change introduced is a question, and it blocks the change", () => {

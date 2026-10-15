@@ -59,6 +59,9 @@ test("a seeded project holds a suite in folders, a fortnight of history and five
 		// Today: the failing test on `main` and on the pull request, the finding, the agent's edit, the test with no case.
 		const open = await demo.call("inbox", { limit: 50 });
 		expect(open.items.map((item) => item.kind).sort()).toEqual(["adopt", "failure", "failure", "finding", "map"]);
+		const inherited = (await demo.call("inbox", { on: "pr:482", kind: "failure" })).items;
+		expect(inherited).toHaveLength(1);
+		expect(inherited[0]?.evidence).toMatchObject({ hints: ["fails-on-base"] });
 		expect(seeded.questions.toSorted()).toEqual(open.items.map((item) => item.q).sort());
 		for (const item of open.items) expect(dayOf(item.openedAt)).toBeGreaterThanOrEqual(today - 1);
 
@@ -119,6 +122,9 @@ test("the same seed writes the same suite, another seed another, and no days lea
 		const runs = z.array(Run).parse((await today.call("find", { in: "runs", limit: 100 })).items);
 		expect(runs.map((run) => run.name)).toEqual(["Checkout regression"]);
 		expect((await today.call("inbox", { limit: 50 })).items).toHaveLength(5);
+		const inherited = (await today.call("inbox", { on: "pr:482", kind: "failure" })).items;
+		expect(inherited).toHaveLength(1);
+		expect(inherited[0]?.evidence).toMatchObject({ hints: ["fails-on-base"] });
 		expect(Checked.parse(await today.call("check", {})).counts["unlinked-tests"]).toBe(1);
 	});
 });

@@ -235,6 +235,7 @@ describe("the module map", () => {
 			"findings",
 			"reviews",
 			"excuses",
+			"result_excuses",
 		],
 		"server/runs": ["runs", "run_tests", "slots", "slot_results", "depends_on"],
 		"server/decisions": ["questions", "question_refs", "answers", "decisions"],
@@ -355,7 +356,7 @@ describe("the module map", () => {
 	test("writers that undo a withdrawn decision are called only by the kind handlers", () => {
 		// These change standing without a witness on purpose: they put back what a decision did when that decision
 		// is withdrawn or stops holding, which is itself a recorded event. Nothing else may reach for them.
-		const undo = /\b(restoreLink|dropExcuse|reopenRun|restoreFailures)\(/;
+		const undo = /\b(restoreLink|dropExcuse|dropResultExcuses|reopenRun|restoreFailures)\(/;
 		const callers = files.filter((file) => undo.test(readFileSync(file, "utf8")));
 		expect(callers.sort()).toEqual([
 			"src/server/decisions/kinds.ts",

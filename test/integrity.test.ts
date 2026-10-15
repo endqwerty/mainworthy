@@ -686,13 +686,13 @@ describe("what a result may prove", () => {
 		};
 		const base = { repo: "app", commit: "corrbase01", branch: "main" };
 		const failed = report({ ...one(base, "fail"), attempt: 2 }, ci);
-		// While the base fails, a change that fails the same way is shown the hint. Nothing is excused by it.
+		// While the base fails, the loose policy records an inherited answer for the matching test.
 		const during = report(
 			one({ repo: "app", commit: "corrhead00", branch: "early", pr: 4, base: "corrbase01" }, "fail"),
 			ci,
 		);
-		expect(during.gate?.verdict).toBe("blocked");
-		expect(hintOn(4)).toContain("fails-on-base");
+		expect(during.gate?.verdict).toBe("passed");
+		expect(during.questions[0]).toMatchObject({ how: "decided by rule", answer: "inherited" });
 		// The producer withdraws the failure: the base passes, and a later change is not shown the hint.
 		report(one(base, "pass", { corrects: first(failed.results) }), ci);
 		expect(gate({ commit: "corrbase01", repo: "app" }).verdict).toBe("passed");
@@ -1367,7 +1367,7 @@ describe("what a run and a change may count", () => {
 		const probe = { test: { key: "agent::probe" }, outcome: "skip" };
 		report({ target: { repo: "acme/web", commit: "head00001", branch: "main" }, results: [probe] }, explorer());
 		// The pipeline reports that commit as the head of pr:7, failing with the same cause. It is the pull
-		// request's failure: asked about there, not excused by what was decided about trunk.
+		// request's failure: it gets its own inherited decision, independent of trunk's flaky answer.
 		const reported = report(
 			{
 				target: { repo: "acme/web", commit: "head00001", pr: 7, branch: "feature", base: "trunk0001" },
@@ -1375,8 +1375,9 @@ describe("what a run and a change may count", () => {
 			},
 			ci,
 		);
-		expect(reported.questions.map((q) => q.how)).toEqual(["new"]);
-		expect(gate({ change: "pr:7" }).verdict).toBe("blocked");
+		expect(reported.questions.map((q) => q.how)).toEqual(["decided by rule"]);
+		expect(reported.questions[0]?.answer).toBe("inherited");
+		expect(gate({ change: "pr:7" }).verdict).toBe("passed");
 		expect(rows("SELECT DISTINCT line, branch FROM targets WHERE commit_sha = 'head00001'")).toEqual([
 			{ line: "change", branch: "feature" },
 		]);
