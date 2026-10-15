@@ -27,6 +27,7 @@ import { clip } from "../../core/text.ts";
 import { type Ctx, parseRef, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
+import { complete } from "../kernel/steps.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
 import { currentPolicy, resolvePolicy, writePolicy } from "../policy/policy.ts";
 
@@ -456,6 +457,12 @@ export type Sealed = {
  * carries, both sides kept, for its author to resolve (decision 0004).
  */
 export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string | undefined }): Sealed | null {
+	return complete(sealSteps(ctx, input));
+}
+
+const SLICE = 200;
+
+export function* sealSteps(ctx: Ctx, input: Parameters<typeof seal>[1]): Generator<undefined, Sealed | null, void> {
 	if (input.edits.some((edit) => edit.op === "quarantine") && (input.edits.length !== 1 || !input.reason?.trim()))
 		throw invalid("a quarantine edit stands alone and needs a reason");
 	const index = folderIndex(ctx.db, ctx.project.id);
@@ -469,7 +476,9 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 		return row;
 	};
 
+	let work = 0;
 	for (const edit of input.edits) {
+		if (++work % SLICE === 0) yield;
 		switch (edit.op) {
 			case "create": {
 				const keptAliases = [
@@ -529,7 +538,11 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 				break;
 			}
 			case "place": {
-				const rows = edit.cases.map(lookup);
+				const rows: CaseRow[] = [];
+				for (const ref of edit.cases) {
+					rows.push(lookup(ref));
+					if (++work % SLICE === 0) yield;
+				}
 				const after = edit.after === undefined || edit.after === null ? edit.after : lookup(edit.after).id;
 				const tags: TagChange | null = edit.tags
 					? {
@@ -548,7 +561,12 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 				break;
 			}
 			case "state": {
-				const rows = edit.cases.map(lookup).filter((row) => row.state !== edit.to);
+				const rows: CaseRow[] = [];
+				for (const ref of edit.cases) {
+					const row = lookup(ref);
+					if (row.state !== edit.to) rows.push(row);
+					if (++work % SLICE === 0) yield;
+				}
 				if (rows.length > 0) resolved.push({ op: "state", caseIds: rows.map((row) => row.id), to: edit.to });
 				break;
 			}
@@ -609,11 +627,12 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 	if (resolved.length === 0) return null;
 	const policy = resolved.findLast((edit) => edit.op === "policy")?.policy ?? currentPolicy(ctx.db, ctx.project.id);
 	for (const edit of resolved) {
+		if (++work % SLICE === 0) yield;
 		if (edit.op === "create" || edit.op === "restore") validateFields(edit.body, policy);
 		else if (edit.op === "edit") validateFields(edit.body, policy, bodyOf(ctx.db, edit.caseId, edit.head));
 	}
 
-	const facts = [`author:${ctx.actor.kind}`, ...scopeFacts(ctx.db, ctx.project.id, resolved)];
+	const facts = [`author:${ctx.actor.kind}`, ...(yield* scopeFactsSteps(ctx.db, ctx.project.id, resolved))];
 	if (conflicts.length > 0) facts.push("conflict");
 	if (resolved.some((r) => r.op === "policy")) facts.push("policy");
 	if (resolved.some((r) => r.op === "quarantine")) facts.push("quarantine");
@@ -645,6 +664,14 @@ function isInside(index: FolderIndex, folder: number | null, ancestor: number): 
 
 /** Scopes touched by the whole proposal, before and after its edits, including nested folders. */
 export function scopeFacts(db: Db, project: number, edits: readonly Resolved[]): string[] {
+	return complete(scopeFactsSteps(db, project, edits));
+}
+
+export function* scopeFactsSteps(
+	db: Db,
+	project: number,
+	edits: readonly Resolved[],
+): Generator<undefined, string[], void> {
 	const index = folderIndex(db, project);
 	const facts = new Set<string>();
 	const folder = (path: string) => {
@@ -661,7 +688,9 @@ export function scopeFacts(db: Db, project: number, edits: readonly Resolved[]):
 		folder(index.path(row.folder));
 		tags(json<string[]>(row.tags));
 	};
+	let work = 0;
 	for (const edit of edits) {
+		if (++work % SLICE === 0) yield;
 		switch (edit.op) {
 			case "create":
 				folder(targetPath(edit.folder));
@@ -675,10 +704,16 @@ export function scopeFacts(db: Db, project: number, edits: readonly Resolved[]):
 			case "place":
 				if (edit.folder) folder(targetPath(edit.folder));
 				if (edit.tags) tags([...(edit.tags.set ?? []), ...edit.tags.add]);
-				for (const id of edit.caseIds) existing(id);
+				for (const id of edit.caseIds) {
+					existing(id);
+					if (++work % SLICE === 0) yield;
+				}
 				break;
 			case "state":
-				for (const id of edit.caseIds) existing(id);
+				for (const id of edit.caseIds) {
+					existing(id);
+					if (++work % SLICE === 0) yield;
+				}
 				break;
 			case "folder": {
 				const row = edit.id === null ? null : index.byId.get(edit.id);
@@ -741,7 +776,7 @@ function validateFields(body: CaseBody, policy: Policy, previous?: CaseBody): vo
  * after the proposal was sealed, the edit is merged again; a new conflict stops the adoption (nothing is written)
  * and the proposal must be redone. Tags and folders are applied to the suite as it is now, not as it was sealed.
  */
-export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopted {
+export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): Generator<undefined, Adopted, void> {
 	decisionOf(witness, "adopt");
 	const out: Adopted = { cases: [], created: [], policyVersion: null };
 	const author = proposal.author;
@@ -778,7 +813,9 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 		return row;
 	};
 
+	let work = 0;
 	for (const edit of edits) {
+		if (++work % SLICE === 0) yield;
 		switch (edit.op) {
 			case "create": {
 				for (const alias of edit.aliases ?? []) {
@@ -858,7 +895,8 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 				// A move to another folder or an explicit position re-ranks; a retag alone leaves the order alone.
 				const rerank = folder !== null || edit.after !== undefined;
 				let cursor: string | null = null;
-				edit.caseIds.forEach((id) => {
+				for (const id of edit.caseIds) {
+					if (++work % SLICE === 0) yield;
 					const row = mustRow(id);
 					const to = folder ?? row.folder;
 					let rank = row.rank;
@@ -872,11 +910,12 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 						? cleanTags(edit.tags.set ?? [...current, ...edit.tags.add]).filter((tag) => !remove.has(tag))
 						: current;
 					place(ctx, witness, proposal, row, { folder: to, rank, tags, state: row.state });
-				});
+				}
 				break;
 			}
 			case "state": {
 				for (const id of edit.caseIds) {
+					if (++work % SLICE === 0) yield;
 					const row = mustRow(id);
 					place(ctx, witness, proposal, row, {
 						folder: row.folder,

@@ -41,7 +41,7 @@ import {
 	runRef,
 } from "../runs/runs.ts";
 import {
-	adopt,
+	adoptSteps,
 	bodyOf,
 	caseById,
 	caseRef,
@@ -49,6 +49,7 @@ import {
 	mustCase,
 	proposalById,
 	resolvedOf,
+	type Sealed,
 	seal,
 } from "../suite/suite.ts";
 import type { Raise, Raised } from "./decisions.ts";
@@ -75,7 +76,7 @@ type Handler<K extends Kind> = {
 		question: QuestionRow,
 		answer: AnswerOf<K>,
 		tools: Tools,
-	) => Record<string, unknown>;
+	) => Generator<undefined, Record<string, unknown>, void>;
 	revert: (ctx: Ctx, question: QuestionRow, decision: DecisionRow) => void;
 	holds: (input: { question: QuestionRow; answer: AnswerOf<K>; now: number; policy: Policy }) => HoldTerm[];
 	/** Whether the acting actor wrote the thing in question (the author of a proposal). */
@@ -90,11 +91,7 @@ const untilBasisChanges = (question: QuestionRow): HoldTerm[] => [{ until: "basi
 const DAY = 86_400_000;
 
 /** Raises the `adopt` question for a sealed proposal. Shared by every path that proposes: there is only this one. */
-export function raiseAdopt(
-	ctx: Ctx,
-	tools: Pick<Tools, "raise">,
-	sealed: NonNullable<ReturnType<typeof seal>>,
-): Raised {
+export function raiseAdopt<T>(ctx: Ctx, tools: { raise: (ctx: Ctx, r: Raise) => T }, sealed: Sealed): T {
 	const { proposal, resolved } = sealed;
 	for (const edit of resolved)
 		if (edit.op === "policy") requirePolicyRoles(ctx.db, ctx.project.id, edit.policy.clauses);
@@ -157,7 +154,7 @@ export function raiseAdopt(
 }
 
 const adoptHandler: Handler<"adopt"> = {
-	effect(ctx, witness, question, answer, tools) {
+	*effect(ctx, witness, question, answer, tools) {
 		const { proposal: id } = json<{ proposal: number }>(question.subject);
 		const proposal = proposalById(ctx.db, id);
 		if (!proposal) throw notFound("proposal");
@@ -177,7 +174,7 @@ const adoptHandler: Handler<"adopt"> = {
 			for (const id of quarantineRuns(ctx.db, ctx.project.id, new Set([test.id]))) ctx.recompute.add(id);
 			return { cases: [], created: [], policyVersion: null, quarantine };
 		}
-		const adopted = adopt(ctx, witness, proposal);
+		const adopted = yield* adoptSteps(ctx, witness, proposal);
 		const effects = { cases: adopted.cases, created: adopted.created, policyVersion: adopted.policyVersion };
 		if (adopted.policyVersion === null) return effects;
 		reconsiderEmptyReports(ctx);
@@ -247,7 +244,7 @@ function stands(ctx: Ctx, decisionId: number): boolean {
 type Relinked = [test: number, previous: number | null, by?: number | null];
 
 const mapHandler: Handler<"map"> = {
-	effect(ctx, witness, question, answer, tools) {
+	*effect(ctx, witness, question, answer, tools) {
 		const { file } = json<{ file: string }>(question.subject);
 		switch (answer.is) {
 			case "link": {
@@ -369,7 +366,7 @@ export function disputeParties(ctx: Ctx, question: QuestionRow): number[] {
 }
 
 const failureHandler: Handler<"failure"> = {
-	effect(ctx, witness, question, answer) {
+	*effect(ctx, witness, question, answer) {
 		const subject = json<{ signature: number; scope: string; slot?: number }>(question.subject);
 		if (subject.slot !== undefined) {
 			const { results } = json<{ results: number[] }>(question.evidence);
@@ -499,7 +496,7 @@ type Suggestion =
 	| { case: { title: string; folder?: string; steps: string[] } };
 
 const findingHandler: Handler<"finding"> = {
-	effect(ctx, _witness, question, answer, tools) {
+	*effect(ctx, _witness, question, answer, tools) {
 		if (answer.is !== "accept" || !answer.apply) return {};
 		const evidence = json<{ suggest?: Suggestion; finderId?: number; case?: string; step?: string }>(question.evidence);
 		if (!evidence.suggest)
@@ -550,7 +547,8 @@ const findingHandler: Handler<"finding"> = {
 };
 
 const signoffHandler: Handler<"signoff"> = {
-	effect(ctx, witness, question, answer) {
+	// biome-ignore lint/correctness/useYield: every decision effect is a generator; sign-off has no bulk work.
+	*effect(ctx, witness, question, answer) {
 		if (answer.is === "reject") return {};
 		const run = runById(ctx.db, json<{ run: number }>(question.subject).run);
 		if (!run) throw notFound("run");
@@ -580,7 +578,7 @@ type AnyHandler = {
 		question: QuestionRow,
 		answer: AnyAnswer,
 		tools: Tools,
-	) => Record<string, unknown>;
+	) => Generator<undefined, Record<string, unknown>, void>;
 	revert: Handler<Kind>["revert"];
 	holds: (input: { question: QuestionRow; answer: AnyAnswer; now: number; policy: Policy }) => HoldTerm[];
 	isAuthor: Handler<Kind>["isAuthor"];
