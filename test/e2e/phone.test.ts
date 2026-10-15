@@ -392,7 +392,7 @@ test.skipIf(!browserAvailable)(
 				select: { cases: long.cases.map((made) => made.ref) },
 			});
 			await page.goto(`${server.url}/p/scratch/runs/${planned.run.slice(2)}`);
-			await pass.waitFor();
+			await page.locator('.run-document[data-active="true"][data-ready="true"]').waitFor();
 			expect(await inView(page)).toBe("detail");
 			expect(await page.locator(".run-documents").evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
 			expect(await outside(page)).toEqual([]);
