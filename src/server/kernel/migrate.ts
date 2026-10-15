@@ -9,6 +9,7 @@ import changeEnds from "./migrations/0005_change_ends.sql" with { type: "text" }
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
+ * Versions are contiguous from 1, and a branch takes the next free number when it lands.
  *
  * `archive` says whether the migration changes what an archive holds: a table or a column of the tables an export
  * writes. One that only adds a table an archive leaves out (`sessions`), or columns to one (`tokens`), does not,

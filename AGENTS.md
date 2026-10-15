@@ -96,8 +96,9 @@ is under the GitHub milestone `iOS app`.
   each table is listed in `test/architecture.test.ts`), so the check can prepare every
   statement against the schema. To read another module's data, call its functions; do
   not join its tables. A schema change is a new file in
-  `src/server/kernel/migrations/`; a shipped migration is never edited. Its entry
-  in `MIGRATIONS` says whether it changes a table an archive holds (`archive`): an
+  `src/server/kernel/migrations/`; a shipped migration is never edited. Versions
+  are contiguous from 1, and a branch takes the next free number when it lands (a
+  test holds both). Its entry in `MIGRATIONS` says whether it changes a table an archive holds (`archive`): an
   import requires the last version that did, so an archive taken before a migration
   that changed none still imports. A test checks each entry against the schema.
 - **Who a request is, is asked once.** A surface calls `admit` in
