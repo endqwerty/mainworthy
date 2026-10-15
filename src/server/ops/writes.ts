@@ -80,6 +80,7 @@ import {
 	runRef,
 	runsFor,
 } from "../runs/runs.ts";
+import { enrollCommitStatus } from "../statuses/statuses.ts";
 import { selectCases } from "../suite/read.ts";
 import { type CaseRow, caseRef, mustCase, seal } from "../suite/suite.ts";
 import { COMMIT, defineOp, type Pause } from "./registry.ts";
@@ -170,6 +171,7 @@ export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; f
 		// moment (`ensureTarget`). Every other run that counts the commit waits for this report too: until it is
 		// applied and they are recomputed, none of them goes on showing a verdict from before the move.
 		noteAccepted(ctx, alsoWaiting(ctx, accepted.batch, target, runs), accepted.batch.seq);
+		enrollCommitStatus(ctx, target);
 	}
 	// Target metadata is accepted even when this report's results were already processed.
 	// Retargeting must therefore update inherited standing before a saved receipt can return.

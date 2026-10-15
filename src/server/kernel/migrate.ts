@@ -14,6 +14,7 @@ import changeHead from "./migrations/0010_change_head.sql" with { type: "text" }
 import attachments from "./migrations/0011_attachments.sql" with { type: "text" };
 import teams from "./migrations/0012_teams.sql" with { type: "text" };
 import resultExcuses from "./migrations/0013_result_excuses.sql" with { type: "text" };
+import commitStatuses from "./migrations/0014_commit_statuses.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -38,6 +39,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 11, name: "attachments", sql: attachments, archive: true },
 	{ version: 12, name: "teams", sql: teams, archive: true },
 	{ version: 13, name: "result_excuses", sql: resultExcuses, archive: true },
+	{ version: 14, name: "commit_statuses", sql: commitStatuses, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
