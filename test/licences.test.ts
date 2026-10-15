@@ -164,6 +164,7 @@ describe("the third-party notices", () => {
 		expect(names).toContain("react-dom");
 		expect(names).toContain("@modelcontextprotocol/server");
 		expect(names).toContain("@modelcontextprotocol/core");
+		expect(names).not.toContain("axe-core");
 	});
 
 	test("the Bun the notices list is the Bun the image and CI build with", () => {

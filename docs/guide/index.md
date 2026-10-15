@@ -15,6 +15,10 @@ Mainworthy keeps your test cases, the results that people, pipelines and agents 
 
 ## All pages
 
+The [web accessibility assessment](https://github.com/endqwerty/mainworthy/blob/main/docs/accessibility.md)
+describes the automated checks, known gaps, and the VoiceOver and NVDA work still needed. It is not a
+claim of WCAG conformance.
+
 <!-- generated:pages -->
 
 ### Start

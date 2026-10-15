@@ -6,7 +6,7 @@
 	--line2: #efede8;
 	--ink: #1b1b19;
 	--dim: #5f5e59;
-	--faint: #99978f;
+	--faint: #69675f;
 	--acc: #2f55d4;
 	--sel: #e9eefc;
 	--selq: #f0efec;
@@ -31,7 +31,7 @@
 	--line2: #1e1f1d;
 	--ink: #eae9e5;
 	--dim: #a5a49d;
-	--faint: #6f6e68;
+	--faint: #9a9990;
 	--acc: #8ea3ff;
 	--sel: #1b2140;
 	--selq: #1d1e1c;
@@ -69,6 +69,24 @@ button {
 	padding: 0;
 	cursor: pointer;
 }
+/* Shared controls keep a 24 CSS pixel target even in dense toolbars and document editors. */
+button,
+summary,
+input:not([type="hidden"]),
+select,
+textarea,
+label:has(input[type="checkbox"]),
+label:has(input[type="radio"]) {
+	min-width: 24px;
+	min-height: 24px;
+}
+a:not(p a) {
+	display: inline-flex;
+	align-items: center;
+	min-width: 24px;
+	min-height: 24px;
+}
+
 ::-webkit-scrollbar {
 	width: 10px;
 	height: 10px;
@@ -262,7 +280,7 @@ button.project:hover {
 }
 #nav em.hot {
 	background: var(--fail);
-	color: #fff;
+	color: var(--panel);
 	border-radius: 9px;
 	font-weight: 600;
 }
@@ -701,7 +719,7 @@ b.st2 {
 	height: 17px;
 	margin: 0 -1px;
 	background: var(--agent);
-	color: #fff;
+	color: var(--panel);
 	clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
 	font-size: 8px;
 }
@@ -952,7 +970,7 @@ body[data-focus="detail"] #detail {
 	outline: none;
 	white-space: pre-wrap;
 	word-break: break-word;
-	min-height: 20px;
+	min-height: 24px;
 	font-size: 14px;
 	line-height: 20px;
 }
@@ -1389,7 +1407,7 @@ pre.log .ok {
 }
 .doc-link {
 	color: var(--acc);
-	text-decoration: none;
+	text-decoration: underline;
 	white-space: nowrap;
 }
 .doc-link:hover {
@@ -1429,6 +1447,7 @@ a:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
+summary:focus-visible,
 [tabindex]:focus-visible {
 	outline: 2px solid var(--acc);
 	outline-offset: 2px;

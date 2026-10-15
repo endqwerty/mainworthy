@@ -36,8 +36,9 @@ Read this first. These are the known gaps, in order of how soon they bite.
    owner's server; before anyone else is given the image or the executable, the owner decides how the source is
    offered (hosted beside the image, or a written offer) and whether the open items are acceptable. Cost: low to
    medium. Decision 0025; tracked in [#234](https://github.com/endqwerty/mainworthy/issues/234).
-5. **Accessibility has not been audited.** The UI is keyboard-first, with visible focus and live status, but
-   nobody has checked it against WCAG 2.2 AA. Public-sector and many enterprise buyers require a conformance
+5. **Accessibility needs manual assessment.** The automated WCAG 2.2 AA checks and remaining gaps are in
+   [the web accessibility assessment](accessibility.md). VoiceOver and NVDA testing is still open.
+   Public-sector and many enterprise buyers require a conformance
    report. Cost: medium. Tracked in #47.
 6. **The instance keeps more than it needs.** The policy at `/privacy`
    (`docs/guide/privacy.md`, 2026-10-14) says what is kept today, gaps included. To keep only what is needed:
@@ -115,9 +116,12 @@ procedures with a tested restore on the hosting side.
 ## Accessibility (EU Accessibility Act, EN 301 549, Section 508, ADA)
 
 Gap 5. Business software sold to private companies is mostly outside the Accessibility Act, but public
-procurement in the EU and the US asks for a conformance report against WCAG. The cheap things are done in the
-MVP (everything reachable by keyboard, focus visible, status announced, colour never the only signal for an
-outcome); the audit and the fixes it finds are tracked in #47.
+procurement in the EU and the US asks for a conformance report against WCAG.
+The [web accessibility assessment](accessibility.md) lists every WCAG 2.2 A and AA criterion, automated
+evidence, known gaps, and the tasks still needing a person with VoiceOver or NVDA. Automated checks cover
+both themes, keyboard traversal, focus visibility, target sizes, and the live status region. They do not
+establish screen-reader conformance. The remaining audit and fixes are tracked in
+[issue #47](https://github.com/endqwerty/mainworthy/issues/47).
 
 ## Licences
 

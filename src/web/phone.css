@@ -287,3 +287,14 @@
 	min-height: 44px;
 	flex-shrink: 0;
 }
+
+/* A proposal's question link stays visible when Tab reaches it on a narrow case. */
+:root[data-layout="phone"] .cstate {
+	flex-wrap: wrap;
+	white-space: normal;
+	overflow: visible;
+}
+:root[data-layout="phone"] .cstate .sv {
+	overflow: visible;
+	overflow-wrap: anywhere;
+}

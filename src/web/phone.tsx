@@ -53,6 +53,10 @@ export function usePhoneShell(
 	if (overlayOpen && menuAt !== null) setMenuAt(null);
 	const menu = phone && menuAt === address;
 	useEffect(() => {
+		if (menu && document.activeElement instanceof Element && document.activeElement.closest(".top-menu"))
+			document.querySelector<HTMLElement>("#side .logo")?.focus();
+	}, [menu]);
+	useEffect(() => {
 		if (!phone) return;
 		// Where the address points decides the pane when somebody goes there, and when a window that was laid
 		// out for the desktop becomes a phone's (a tablet turned upright).
@@ -83,6 +87,10 @@ export function usePhoneShell(
 		const focused = (event: FocusEvent) => {
 			const node = event.target;
 			if (!(node instanceof Element)) return;
+			if (node.closest("#top")) {
+				setMenuAt(null);
+				return;
+			}
 			const to = node.closest("#detail")
 				? "detail"
 				: node.closest("#list") && (typingIn("list") || tabbed)

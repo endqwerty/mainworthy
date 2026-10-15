@@ -2,6 +2,12 @@
 
 Every key of the web UI, by screen. In the app, <kbd>?</kbd> lists the keys of the screen you are on, and the bar at the bottom shows the ones you are most likely to want next.
 
+Tab shows a focus indicator on controls. Buttons and form controls have targets of at least 24 CSS pixels;
+links within sentences use their text as the target. Links to the docs are underlined in both themes.
+On a phone, a case's proposal status wraps so its question link stays visible when it takes focus.
+The [web accessibility assessment](https://github.com/endqwerty/mainworthy/blob/main/docs/accessibility.md)
+records the automated coverage and remaining manual checks, including screen-reader use.
+
 ## How the keys work
 
 - Two keys in a row, such as <kbd>g</kbd> <kbd>q</kbd>, are pressed one after the other, not together. You have a little under a second for the second key.
@@ -16,7 +22,7 @@ Every key of the web UI, by screen. In the app, <kbd>?</kbd> lists the keys of t
 
 A phone, or a tablet held upright, is worked with a finger, so the app is laid out for one there. It shows one pane at a time.
 
-- **Menu** (☰) opens the sidebar: the screens, the project, the folders and tags of the suite, the theme and Sign out.
+- **Menu** (☰) opens the sidebar: the screens, the project, the folders and tags of the suite, the theme and Sign out. Opening it with a keyboard moves focus into the drawer.
 - A screen opens on its list. Tap a row to read it, and **Back** to return to the list. A link to one case, question, run or change opens on that thing.
 - **Actions** opens the palette. It lists what the keys of the screen do, but not <kbd>⌘</kbd> <kbd>K</kbd> (you are in it) or <kbd>?</kbd>, the list of keys (a phone has none to list; with a keyboard attached <kbd>?</kbd> still opens it). Tap one to run it. Tap the field at the top to search for a case or to jump to a ref.
 - While a list is shown, **Actions** offers what belongs to the list, such as New case, New folder, Filter and Plan run. Open a row for the actions on it, such as Edit case, an answer or Record version. Nothing is decided about a case or a question you have not opened.

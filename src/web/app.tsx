@@ -570,7 +570,13 @@ function Workbench({
 					/>
 				)}
 				{menu && (
-					<button type="button" className="menu-backdrop" aria-label="Close menu" onClick={() => setMenu(false)} />
+					<button
+						type="button"
+						className="menu-backdrop"
+						tabIndex={-1}
+						aria-label="Close menu"
+						onClick={() => setMenu(false)}
+					/>
 				)}
 				<aside id="side">
 					<div className="brand">
@@ -819,7 +825,13 @@ function Workbench({
 			)}{" "}
 			{help && (
 				<div className="overlay" data-overlay="help">
-					<button type="button" className="overlay-backdrop" aria-label="Close keys" onClick={() => setHelp(false)} />
+					<button
+						type="button"
+						className="overlay-backdrop"
+						tabIndex={-1}
+						aria-label="Close keys"
+						onClick={() => setHelp(false)}
+					/>
 					<section className="help" aria-label="Keyboard shortcuts">
 						<button className="help-close" type="button" ref={focusOnce} onClick={() => setHelp(false)}>
 							Close <KeyCap>Esc</KeyCap>
@@ -1024,7 +1036,13 @@ function Palette({
 	}, [typing]);
 	return (
 		<div className="overlay" data-overlay="palette">
-			<button type="button" className="overlay-backdrop" aria-label="Close palette" onClick={() => close()} />
+			<button
+				type="button"
+				className="overlay-backdrop"
+				tabIndex={-1}
+				aria-label="Close palette"
+				onClick={() => close()}
+			/>
 			<section
 				className="pal"
 				aria-label={options.title ?? "Command palette"}
@@ -1056,7 +1074,7 @@ function Palette({
 						setCursor(0);
 					}}
 				/>
-				<div className="palette-list" role="listbox">
+				<div className="palette-list" role="listbox" aria-label={options.title ?? "Commands and cases"}>
 					{items.map((item, index) => (
 						<button
 							key={item.id}
