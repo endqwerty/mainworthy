@@ -83,7 +83,7 @@ We apply the same rights to everyone, wherever they are:
 - **Right to complain.** You can complain to the data protection authority where you live.
 - **Right to non-discrimination.** Exercising these rights never costs you anything.
 
-You can do some of this yourself. Under Settings, **Your sessions** lists every session you have open and ends any of them, and **Your sign-in** removes a password or a passkey, as long as one way to sign in is left. For the rest, contact us as described in [changes and questions](#changes-and-questions). We may need to make sure a request comes from you before acting on it.
+You can do some of this yourself. Under Settings, **Your sessions** lists every session you have open and ends any of them, and **Your sign-in** removes a password or a passkey, as long as one way to sign in is left. A person who administers the instance can forget somebody through Settings, **People**, **Forget a person**, or `mainworthy actor forget <name> --confirm <name>`. Both require confirmation and explain what stays. You cannot forget yourself or the current owner. [People, agents and pipelines](./access.md#forget-a-person) gives the steps. There is no in-app request for forgetting or self-service account deletion yet. For the rest, contact us as described in [changes and questions](#changes-and-questions). We may need to make sure a request comes from you before acting on it.
 
 ## How we secure your data
 

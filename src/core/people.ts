@@ -12,6 +12,9 @@ import { cmd } from "./ops.ts";
 
 const actor = z.string().max(64);
 
+export const FORGET_NOTICE =
+	"A pseudonym replaces the name in attribution, question evidence and saved replies. Password hashes, passkey public keys, and token and credential labels are erased. Passwords, passkeys, tokens and invitations stop working, and sessions end. History and text the person typed in cases and notes stay. Some sign-in records and request fingerprints stay. This cannot be undone.";
+
 /**
  * How long a password is, in characters. Twelve, because nothing else is asked of it: no digit, no capital
  * and no sign, which make passwords harder to remember and no harder to guess. The upper end only bounds the
