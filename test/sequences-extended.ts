@@ -140,15 +140,17 @@ export function sequence(seed: number, preset: string): Problem | null {
 			`SELECT q.no, q.subject, q.evidence, group_concat(r.ref) AS refs FROM questions q
 			 LEFT JOIN question_refs r ON r.question = q.id WHERE q.state = 'open' AND q.kind = 'failure' GROUP BY q.id`,
 		);
-		const excuseOf = (signature: number, scope: string, target: number, result = 0) =>
-			rows(
-				`SELECT class, decision FROM (SELECT class, decision FROM excuses WHERE project = ? AND signature = ? AND scope = ? AND target IN (0, ?) ORDER BY (target != 0) DESC, decision DESC LIMIT 1) UNION ALL SELECT class, decision FROM result_excuses WHERE result = ? ORDER BY decision DESC LIMIT 1`,
-				project,
-				signature,
-				scope,
-				target,
-				result,
-			)[0];
+		const excuseOf = (signature: number, scope: string, target: number, result = 0, slot?: number) =>
+			slot !== undefined
+				? rows("SELECT class, decision FROM result_excuses WHERE result = ? AND slot = ?", result, slot)[0]
+				: rows(
+						`SELECT class, decision FROM (SELECT class, decision FROM excuses WHERE project = ? AND signature = ? AND scope = ? AND target IN (0, ?) ORDER BY (target != 0) DESC, decision DESC LIMIT 1) UNION ALL SELECT class, decision FROM result_excuses WHERE result = ? AND slot IS NULL ORDER BY decision DESC LIMIT 1`,
+						project,
+						signature,
+						scope,
+						target,
+						result,
+					)[0];
 		const verdictOf = (tally: Record<string, number>, blocking: number, outstanding: number): string => {
 			if (outstanding > 0) return "pending";
 			if ((tally.attributed ?? 0) > 0) return "failed";
@@ -165,27 +167,33 @@ export function sequence(seed: number, preset: string): Problem | null {
 					: Math.max(...runs.filter((other) => other.scope === run.scope).map((o) => Number(o.id)));
 			const live = run.origin === "planned" ? run.state === "open" : id === newest;
 			if (live) {
-				const causes =
+				const causes: { signature: number; target: number; result: number; slot?: number }[] =
 					run.origin === "change"
 						? rows<{ signature: number; target: number; result: number }>(
 								"SELECT signature, target, result FROM run_tests WHERE run = ? AND outcome IN ('fail', 'error')",
 								id,
 							)
-						: rows<{ id: number }>(
-								"SELECT id FROM slots WHERE run = ? AND state IN ('failing', 'disputed')",
+						: rows<{ id: number; state: string }>(
+								"SELECT id, state FROM slots WHERE run = ? AND state IN ('failing', 'disputed')",
 								id,
-							).flatMap((slot) => failingSlotResults(h.app.db, slot.id));
+							).flatMap((slot) =>
+								failingSlotResults(h.app.db, slot.id).map((cause) => ({
+									...cause,
+									...(slot.state === "disputed" ? { slot: slot.id } : {}),
+								})),
+							);
 				for (const cause of causes) {
 					const target = targets.get(cause.target);
 					if (!target) return { what: "a cause on an unknown target", detail: cause };
 					const scope = scopeOf(target, id);
-					if (excuseOf(cause.signature, scope, cause.target, cause.result)) continue;
+					if (excuseOf(cause.signature, scope, cause.target, cause.result, cause.slot)) continue;
 					const asked = open.filter((question) => {
-						const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string };
+						const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string; slot?: number };
 						const evidence = JSON.parse(String(question.evidence)) as { targets?: number[] };
 						return (
 							subject.signature === cause.signature &&
 							subject.scope === scope &&
+							subject.slot === cause.slot &&
 							(evidence.targets ?? []).includes(cause.target) &&
 							String(question.refs ?? "")
 								.split(",")
@@ -443,11 +451,18 @@ export function sequence(seed: number, preset: string): Problem | null {
 					const excuses = causes.map((fill) => {
 						const seenOn = targets.get(Number(fill.target));
 						return seenOn
-							? excuseOf(Number(fill.signature), scopeOf(seenOn, id), Number(fill.target), Number(fill.id))
+							? excuseOf(
+									Number(fill.signature),
+									scopeOf(seenOn, id),
+									Number(fill.target),
+									Number(fill.id),
+									stateNow === "disputed" ? Number(slot.id) : undefined,
+								)
 							: undefined;
 					});
 					const unanswered = excuses.filter((excuse) => !excuse).length;
-					if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed++;
+					if (stateNow === "disputed" && (unanswered > 0 || causes.length === 0)) tally.disputed++;
+					else if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed++;
 					else if (unanswered > 0 || causes.length === 0) tally[stateNow === "disputed" ? "disputed" : "unexplained"]++;
 					else if (stateNow === "disputed") tally.pass++;
 					else tally.excused++;
@@ -478,8 +493,20 @@ export function sequence(seed: number, preset: string): Problem | null {
 
 		// 7. Nobody is asked about what already has an answer.
 		for (const question of open) {
-			const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string };
-			const evidence = JSON.parse(String(question.evidence)) as { targets?: number[] };
+			const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string; slot?: number };
+			const evidence = JSON.parse(String(question.evidence)) as { targets?: number[]; results?: number[] };
+			if (subject.slot !== undefined) {
+				if (
+					(evidence.results ?? []).length > 0 &&
+					evidence.results?.every(
+						(result) =>
+							rows("SELECT decision FROM result_excuses WHERE slot = ? AND result = ?", subject.slot ?? 0, result)
+								.length > 0,
+					)
+				)
+					return { what: "a settled slot still has an open dispute question", detail: question };
+				continue;
+			}
 			const listed = evidence.targets ?? [];
 			if (listed.length > 0 && listed.every((target) => excuseOf(subject.signature, subject.scope, target)))
 				return {

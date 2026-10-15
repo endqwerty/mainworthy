@@ -48,7 +48,7 @@ export function invalidInherited(db: Db): unknown[] {
 		.query(`SELECT e.result, e.decision FROM result_excuses e JOIN decisions d ON d.id = e.decision
   JOIN questions q ON q.id = d.question JOIN results r ON r.id = e.result JOIN targets t ON t.id = r.target
   LEFT JOIN changes c ON c.id = t.change
-  WHERE json_extract(d.answer, '$.is') = 'inherited' AND (
+  WHERE e.slot IS NULL AND json_extract(d.answer, '$.is') = 'inherited' AND (
    q.state != 'decided' OR q.decision != d.id OR r.method = 'agent' OR c.base_sha IS NULL OR
    NOT EXISTS (
     SELECT 1 FROM run_tests rt JOIN runs b ON b.id = rt.run

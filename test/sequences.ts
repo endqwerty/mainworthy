@@ -96,15 +96,17 @@ function sequence(seed: number, preset: string): Problem | null {
 			`SELECT q.no, q.subject, q.evidence, group_concat(r.ref) AS refs FROM questions q
 			 LEFT JOIN question_refs r ON r.question = q.id WHERE q.state = 'open' AND q.kind = 'failure' GROUP BY q.id`,
 		);
-		const excuseOf = (project: number, signature: number, scope: string, target: number, result = 0) =>
-			rows(
-				`SELECT class, decision FROM (SELECT class, decision FROM excuses WHERE project = ? AND signature = ? AND scope = ? AND target IN (0, ?) ORDER BY (target != 0) DESC, decision DESC LIMIT 1) UNION ALL SELECT class, decision FROM result_excuses WHERE result = ? ORDER BY decision DESC LIMIT 1`,
-				project,
-				signature,
-				scope,
-				target,
-				result,
-			)[0];
+		const excuseOf = (project: number, signature: number, scope: string, target: number, result = 0, slot?: number) =>
+			slot !== undefined
+				? rows("SELECT class, decision FROM result_excuses WHERE result = ? AND slot = ?", result, slot)[0]
+				: rows(
+						`SELECT class, decision FROM (SELECT class, decision FROM excuses WHERE project = ? AND signature = ? AND scope = ? AND target IN (0, ?) ORDER BY (target != 0) DESC, decision DESC LIMIT 1) UNION ALL SELECT class, decision FROM result_excuses WHERE result = ? AND slot IS NULL ORDER BY decision DESC LIMIT 1`,
+						project,
+						signature,
+						scope,
+						target,
+						result,
+					)[0];
 
 		for (const run of runs) {
 			const id = Number(run.id);
@@ -115,27 +117,33 @@ function sequence(seed: number, preset: string): Problem | null {
 					: Math.max(...runs.filter((other) => other.scope === run.scope).map((o) => Number(o.id)));
 			const live = run.origin === "planned" ? run.state === "open" : id === newest;
 			if (live) {
-				const causes =
+				const causes: { signature: number; target: number; result: number; slot?: number }[] =
 					run.origin === "change"
 						? rows<{ signature: number; target: number; result: number }>(
 								"SELECT signature, target, result FROM run_tests WHERE run = ? AND outcome IN ('fail', 'error')",
 								id,
 							)
-						: rows<{ id: number }>(
-								"SELECT id FROM slots WHERE run = ? AND state IN ('failing', 'disputed')",
+						: rows<{ id: number; state: string }>(
+								"SELECT id, state FROM slots WHERE run = ? AND state IN ('failing', 'disputed')",
 								id,
-							).flatMap((slot) => failingSlotResults(h.app.db, slot.id));
+							).flatMap((slot) =>
+								failingSlotResults(h.app.db, slot.id).map((cause) => ({
+									...cause,
+									...(slot.state === "disputed" ? { slot: slot.id } : {}),
+								})),
+							);
 				for (const cause of causes) {
 					const target = targets.get(cause.target);
 					if (!target) return { what: "a cause on an unknown target", detail: cause };
 					const scope = scopeOf(target, id);
-					if (excuseOf(Number(run.project), cause.signature, scope, cause.target, cause.result)) continue;
+					if (excuseOf(Number(run.project), cause.signature, scope, cause.target, cause.result, cause.slot)) continue;
 					const asked = open.filter((question) => {
-						const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string };
+						const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string; slot?: number };
 						const evidence = JSON.parse(String(question.evidence)) as { targets?: number[] };
 						return (
 							subject.signature === cause.signature &&
 							subject.scope === scope &&
+							subject.slot === cause.slot &&
 							(evidence.targets ?? []).includes(cause.target) &&
 							String(question.refs ?? "")
 								.split(",")
@@ -280,11 +288,19 @@ function sequence(seed: number, preset: string): Problem | null {
 					const excuses = causes.map(({ signature, target, result }) => {
 						const seenOn = targets.get(target);
 						return seenOn
-							? excuseOf(Number(run.project), signature, scopeOf(seenOn, Number(run.id)), target, result)
+							? excuseOf(
+									Number(run.project),
+									signature,
+									scopeOf(seenOn, Number(run.id)),
+									target,
+									result,
+									slot.state === "disputed" ? Number(slot.id) : undefined,
+								)
 							: undefined;
 					});
 					const unanswered = excuses.filter((excuse) => !excuse).length;
-					if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed++;
+					if (slot.state === "disputed" && (unanswered > 0 || causes.length === 0)) tally.disputed++;
+					else if (excuses.some((excuse) => excuse?.class === "attributed")) tally.attributed++;
 					else if (unanswered > 0 || causes.length === 0)
 						tally[slot.state === "disputed" ? "disputed" : "unexplained"]++;
 					else if (slot.state === "disputed") tally.pass++;
@@ -369,8 +385,20 @@ function sequence(seed: number, preset: string): Problem | null {
 
 		// 7. Nobody is asked about what already has an answer.
 		for (const question of open) {
-			const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string };
-			const evidence = JSON.parse(String(question.evidence)) as { targets?: number[] };
+			const subject = JSON.parse(String(question.subject)) as { signature: number; scope: string; slot?: number };
+			const evidence = JSON.parse(String(question.evidence)) as { targets?: number[]; results?: number[] };
+			if (subject.slot !== undefined) {
+				if (
+					(evidence.results ?? []).length > 0 &&
+					evidence.results?.every(
+						(result) =>
+							rows("SELECT decision FROM result_excuses WHERE slot = ? AND result = ?", subject.slot ?? 0, result)
+								.length > 0,
+					)
+				)
+					return { what: "a settled slot still has an open dispute question", detail: question };
+				continue;
+			}
 			const listed = evidence.targets ?? [];
 			const project = Number(runs[0]?.project ?? 0);
 			if (listed.length > 0 && listed.every((target) => excuseOf(project, subject.signature, subject.scope, target)))
@@ -446,7 +474,7 @@ function sequence(seed: number, preset: string): Problem | null {
 		if (preset === "loose") return false;
 		const question = rows<{ subject: string }>("SELECT subject FROM questions WHERE no = ?", no)[0];
 		if (!question) return false;
-		const subject = JSON.parse(question.subject) as { signature: number; scope: string };
+		const subject = JSON.parse(question.subject) as { signature: number; scope: string; slot?: number };
 		const targets = new Map(rows("SELECT * FROM targets").map((target) => [Number(target.id), target]));
 		const reported = rows<{ target: number; run: number | null }>(
 			`SELECT r.target, b.run FROM results r JOIN batches b ON b.id = r.batch
@@ -457,40 +485,19 @@ function sequence(seed: number, preset: string): Problem | null {
 			const target = targets.get(Number(row.target));
 			return target !== undefined && scopeOf(target, Number(row.run ?? 0)) === subject.scope;
 		});
-		// A slot disputes the question where its run is open, or closed and showing the dispute with nothing
-		// excusing it, or closed on the answer this question has in force.
-		const disputing = rows<{ id: number; run: number; causes: string }>(
-			`SELECT s.id, s.run, s.causes FROM slots s JOIN runs r ON r.id = s.run
-			 WHERE s.state = 'disputed' AND r.origin = 'planned'
-			   AND (r.state = 'open' OR json_extract(r.tally, '$.disputed') > 0
-			        OR EXISTS (SELECT 1 FROM depends_on d JOIN questions q ON q.decision = d.decision
-			                   WHERE d.run = r.id AND q.no = ? AND q.state = 'decided'))`,
-			no,
-		).filter((slot) =>
-			(JSON.parse(slot.causes) as [number, number][]).some(([signature, on]) => {
-				const target = targets.get(on);
-				return (
-					signature === subject.signature && target !== undefined && scopeOf(target, Number(slot.run)) === subject.scope
-				);
-			}),
-		);
 		const parties = new Set<number>();
-		for (const slot of disputing)
+		if (subject.slot !== undefined)
 			for (const row of rows<{ actor: number }>(
-				"SELECT DISTINCT r.actor FROM slot_results s JOIN results r ON r.id = s.result WHERE s.slot = ?",
-				Number(slot.id),
+				"SELECT DISTINCT r.actor FROM slot_results s JOIN results r ON r.id = s.result WHERE s.slot = ? AND s.corrected = 0 AND s.discounted_by IS NULL",
+				subject.slot,
 			))
 				parties.add(Number(row.actor));
-		seen.now = { no, parties: disputing.length > 0 ? parties : null };
-		if (preset === "strict") return reported;
-		// `standard` keeps a disputed failure from its parties: a dispute the runs show now, or the one this
-		// question's answer in force was given to.
+		seen.now = { no, parties: subject.slot !== undefined ? parties : null };
 		const decided = rows<{ state: string }>("SELECT state FROM questions WHERE no = ?", no)[0]?.state === "decided";
 		const before = decided ? answeredAsDispute.get(no) : undefined;
-		return (
-			(disputing.length > 0 && (reported || parties.has(as.id))) ||
-			(before !== undefined && (reported || before.has(as.id)))
-		);
+		return subject.slot === undefined
+			? preset === "strict" && reported
+			: parties.has(as.id) || before?.has(as.id) === true;
 	};
 
 	try {

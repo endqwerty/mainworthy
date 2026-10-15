@@ -11,7 +11,7 @@ import {
 	sweepSignInRecords,
 	validateBootstrap,
 } from "./identity/identity.ts";
-import { recoverAccepted, sweep } from "./jobs.ts";
+import { recoverAccepted, recoverDisputes, sweep } from "./jobs.ts";
 import { type App, type Config, openApp } from "./kernel/app.ts";
 import { type Actor, allProjects } from "./kernel/ctx.ts";
 import { lockInstance } from "./kernel/instance-lock.ts";
@@ -96,6 +96,7 @@ export function start(
 	try {
 		app.blobs.prune(attachmentHashes(app.db));
 		recoverAccepted(app);
+		recoverDisputes(app);
 		server = serve(app, owner, extra(app, owner), options.patience);
 	} catch (error) {
 		app.close();

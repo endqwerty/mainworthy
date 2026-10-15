@@ -28,11 +28,10 @@ import type { Witness } from "../kernel/witness.ts";
 import { clauseFor, currentPolicy } from "../policy/policy.ts";
 import {
 	closeRun,
-	discountFailures,
-	disputants,
+	discountResults,
+	fillsOf,
 	findRun,
 	gateOf,
-	type RunRow,
 	reconsiderEmptyReports,
 	reopenRun,
 	restoreFailures,
@@ -333,42 +332,27 @@ export function runsAbout(ctx: Ctx, question: QuestionRow): number[] {
 	return [...ids];
 }
 
-/** The planned runs a question names that are still open: the ones whose slots a decision on it can change. */
-function openPlannedAbout(ctx: Ctx, question: QuestionRow): RunRow[] {
-	return runsAbout(ctx, question).flatMap((id) => {
-		const run = runById(ctx.db, id);
-		return run?.origin === "planned" && run.state === "open" ? [run] : [];
-	});
-}
-
-/** The answer in force on a question, if it has one: the decision a closed run may be resting on. */
-export const inForce = (question: QuestionRow): number | null =>
-	question.state === "decided" ? question.decision : null;
-
-/**
- * Everybody with a result in a slot that disputes this question's cause: the parties to the dispute as the runs
- * show it now. Kept on the question when the dispute is raised and when it is answered (`parties` in its
- * evidence), because the runs stop showing it once it is settled by setting the disputed result aside. Whoever
- * a dispute was kept from stays kept from its answer.
- */
+/** The result producers in this slot, kept on its question after settlement too. */
 export function disputeParties(ctx: Ctx, question: QuestionRow): number[] {
-	const subject = json<{ signature: number; scope: string }>(question.subject);
-	return [...disputants(ctx.db, ctx.project.id, subject.signature, subject.scope, inForce(question))];
+	const subject = json<{ slot?: number }>(question.subject);
+	return subject.slot === undefined ? [] : [...new Set(fillsOf(ctx.db, subject.slot).map((fill) => fill.actor))];
 }
 
 const failureHandler: Handler<"failure"> = {
 	effect(ctx, witness, question, answer) {
-		const subject = json<{ signature: number; scope: string }>(question.subject);
-		if (answer.is === "mistaken") {
-			const corrected: [number, number][] = [];
-			const seen = json<{ targets?: number[]; targetId?: number }>(question.evidence);
-			const targets = seen.targets ?? (seen.targetId !== undefined ? [seen.targetId] : []);
-			for (const run of openPlannedAbout(ctx, question))
-				corrected.push(...discountFailures(ctx, witness, run, subject.signature, subject.scope, targets));
-			if (corrected.length === 0)
-				throw invalid("`mistaken` is for a disputed result in a planned run; this failure has none");
-			return { corrected };
+		const subject = json<{ signature: number; scope: string; slot?: number }>(question.subject);
+		if (subject.slot !== undefined) {
+			const { results } = json<{ results: number[] }>(question.evidence);
+			if (answer.is === "mistaken") {
+				const corrected = discountResults(ctx, witness, results);
+				if (corrected.length === 0) throw invalid("this slot no longer counts the failing results");
+				return { corrected };
+			}
+			const klass = failureClass(answer);
+			setResultExcuses(ctx, witness, results, klass, { kind: "slot", slot: subject.slot });
+			return { class: klass, results, slot: subject.slot };
 		}
+		if (answer.is === "mistaken") throw invalid("`mistaken` answers a slot dispute, not the whole cause");
 		const klass = failureClass(answer);
 		if (json<{ perResult?: boolean }>(question.subject).perResult) {
 			const { inherited } = json<{ inherited: { result: number; base: number[] }[] }>(question.evidence);
@@ -425,6 +409,12 @@ const failureHandler: Handler<"failure"> = {
 	},
 	holds({ question, answer, now, policy }) {
 		const basis = untilBasisChanges(question);
+		if (json<{ slot?: number }>(question.subject).slot !== undefined) {
+			if (answer.is === "mistaken") return [{ until: "results-named" }];
+			return answer.is === "flaky"
+				? [...basis, { until: "time", at: now + policy.settings.holds.flakyDays * DAY }]
+				: basis;
+		}
 		if (json<{ perResult?: boolean }>(question.subject).perResult) return basis;
 		// The target of the question's latest evidence: the build the person answering was looking at.
 		const latest = json<{ targetId?: number }>(question.evidence).targetId;
@@ -456,21 +446,19 @@ const failureHandler: Handler<"failure"> = {
 	},
 	isAuthor: () => false,
 	/**
-	 * A producer of a failure question's evidence is anyone whose result a decision on it would judge: who raised
-	 * an occurrence (kept on the question), who has reported a failure with this cause in this scope, and who has
-	 * a result in a slot that shows it, on either side of a dispute. The last two are read from the results, so
-	 * nobody stops being a producer because an answer was carried to their failure or the cause was asked again.
+	 * A cause answer judges its failure producers in its scope. A slot settlement judges only that slot's parties.
 	 */
 	isProducer(ctx, question) {
-		const subject = json<{ signature: number; scope: string }>(question.subject);
+		const subject = json<{ signature: number; scope: string; slot?: number }>(question.subject);
 		const actor = ctx.actor.id;
 		const kept = json<{ producers?: number[]; parties?: number[] }>(question.evidence);
 		if ((kept.producers ?? []).includes(actor) || (kept.parties ?? []).includes(actor)) return true;
+		if (subject.slot !== undefined) return disputeParties(ctx, question).includes(actor);
 		const reported = producedCause(ctx.db, ctx.project.id, subject.signature, actor).some(
 			(seen) => scopeOf(mustTarget(ctx.db, seen.target), seen.run) === subject.scope,
 		);
 		if (reported) return true;
-		return disputants(ctx.db, ctx.project.id, subject.signature, subject.scope, inForce(question)).has(actor);
+		return false;
 	},
 	undoable: true,
 	undoHint: "",

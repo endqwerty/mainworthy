@@ -46,10 +46,10 @@ import {
 	causeKey,
 	changeRunsOf,
 	countedTestsOf,
-	disputants,
+	disputedRuns,
+	disputesOf,
 	type FailingGroup,
 	failsOnBase,
-	inDispute,
 	inheritanceAffected,
 	inheritedEvidenceOf,
 	newestInScope,
@@ -61,11 +61,12 @@ import {
 	runsDependingOn,
 	runsShowing,
 	shownFailure,
+	slotById,
 	unexplainedIn,
 	unexplainedShown,
 } from "../runs/runs.ts";
 import { caseById, caseRef, proposalById, resolvedOf, scopeFacts } from "../suite/suite.ts";
-import { disputeParties, HANDLERS, inForce, runsAbout } from "./kinds.ts";
+import { disputeParties, HANDLERS, runsAbout } from "./kinds.ts";
 import {
 	addQuestionParties,
 	alsoAbout,
@@ -198,8 +199,6 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 	for (const { question, decision } of standing) {
 		if (!stillHolds(decision, occurrence)) continue;
 		noteCarried(ctx, question, r.refs);
-		// A dispute that arises while an answer stands is not asked about (issue #70), but who it is kept from
-		// is kept all the same: the standing answer may not be changed or withdrawn by either of them.
 		const parties = (r.evidence as { parties?: number[] }).parties;
 		if (parties && parties.length > 0) addQuestionParties(ctx, question, parties);
 		return { s: "carried", question, decision };
@@ -629,11 +628,13 @@ function settle(
 	// A decision about a failure changes how every run that shows the cause counts it, an older commit's run and
 	// a run the question never named included. Each is recomputed now, so none is left with yesterday's tally.
 	if (question.kind === "failure") {
-		const subject = json<{ signature?: number; scope?: string }>(question.subject);
-		if (subject.signature !== undefined && subject.scope !== undefined)
+		const subject = json<{ signature?: number; scope?: string; slot?: number }>(question.subject);
+		if (subject.slot === undefined && subject.signature !== undefined && subject.scope !== undefined)
 			about.push(...runsShowing(ctx.db, ctx.project.id, subject.signature));
 	}
-	refold(ctx, [...about, ...(supersedes !== null ? runsDependingOn(ctx.db, supersedes) : [])]);
+	refold(ctx, [...about, ...(supersedes !== null ? runsDependingOn(ctx.db, supersedes) : [])], {
+		dissolveStale: json<{ slot?: number }>(question.subject).slot !== undefined,
+	});
 	return { decision: { ...decision, effects: JSON.stringify(effects) }, effects };
 }
 
@@ -746,6 +747,7 @@ function endedBefore(ctx: Ctx, question: QuestionRow): number | null {
  */
 function closeAnswered(ctx: Ctx, question: QuestionRow): number[] {
 	if (question.kind !== "failure") return [];
+	if (json<{ slot?: number }>(question.subject).slot !== undefined) return [];
 	const subject = json<{ signature?: number; scope?: string }>(question.subject);
 	const { signature, scope } = subject;
 	if (signature === undefined || scope === undefined) return [];
@@ -965,13 +967,6 @@ export function raiseFailure(
 				targets?: number[];
 			}>(open.evidence)
 		: {};
-	// The parties to a dispute about this cause, kept from one question about it to the next: what the open
-	// question holds, or what the question this one follows held, and whoever has a result in a slot that
-	// disputes it now. (The runs stop showing them once the dispute is settled; see `disputeParties`.)
-	const before = open ?? latestByFingerprint(ctx.db, ctx.project.id, contentHash({ kind: "failure", key }));
-	const parties = new Set(before ? (json<{ parties?: number[] }>(before.evidence).parties ?? []) : []);
-	for (const actor of disputants(ctx.db, ctx.project.id, group.signature.id, group.scope)) parties.add(actor);
-	for (const actor of input.parties ?? []) parties.add(actor);
 	const tests = new Map((earlier.tests ?? []).map((test) => [test.id, test]));
 	for (const test of group.tests) {
 		const row = test.case_id !== null ? caseById(ctx.db, test.case_id) : null;
@@ -986,15 +981,8 @@ export function raiseFailure(
 			...(counted ? { counted: true } : {}),
 		});
 	}
-	// Two hints, neither part of what an answer stands on. `disputed` is a fact about the runs as they are now
-	// (a slot where a failure with this cause stands beside another producer's pass): it decides which answers
-	// apply and who may give them. It is read from the slots, not from the arriving report, so a report that
-	// touches no slot neither ends a dispute nor an answer. `fails-on-base` is shown and nothing more: every
-	// failing test of this report also fails, with this cause, on the commit the change started from, as
-	// Mainworthy had it when the report arrived. No rule acts on it; a person reads it and decides.
-	const hints: string[] = [];
-	if (group.disputed || inDispute(ctx.db, ctx.project.id, group.signature.id, group.scope)) hints.push("hint:disputed");
-	const shown = [...hints];
+	// The base hint describes these results; inherited rule answers use their own complete evidence question.
+	const shown: string[] = [];
 	if (
 		scopeKind === "change" &&
 		group.results.length > 0 &&
@@ -1034,17 +1022,15 @@ export function raiseFailure(
 			branch: target.branch,
 			hints: shown.map((hint) => hint.slice(5)),
 			producers: [...new Set([...(earlier.producers ?? []), input.by])],
-			parties: [...parties],
+			parties: [],
 			// Every target this question has seen the cause on. An answer that holds "here only" covers the
 			// latest of them; the others of that commit are asked about again.
 			targets: [...new Set([...(earlier.targets ?? []), target.id])],
 			sample: group.results[0] ?? earlier.sample ?? null,
 		},
-		// What an answer about a cause stands on is the cause in its scope. Who else reports it, and whether a
-		// slot disputes it at the moment, changes who may answer and with what, never whether an answer stands:
-		// an agent's report, which no gate counts, must not be able to end a person's decision.
+		// A slot dispute has its own question. New reports never end an answer about this cause in its scope.
 		material: { signature: group.signature.id, scope: group.scope },
-		facts: [`scope:${scopeKind}`, ...hints],
+		facts: [`scope:${scopeKind}`],
 		refs: [
 			`scope:${group.scope}`,
 			...group.runs.map(runRef),
@@ -1345,11 +1331,7 @@ function refreshInherited(ctx: Ctx, run: RunRow): Raised[] {
 				continue;
 			}
 		}
-		const facts = [
-			"scope:change",
-			"inherited",
-			...(inDispute(ctx.db, ctx.project.id, signatureId, scope) ? ["hint:disputed"] : []),
-		];
+		const facts = ["scope:change", "inherited"];
 		const clause = clauseFor(policy, { kind: "failure", facts: new Set(facts) });
 		const answer = ANSWERS.failure.safeParse(clause.answer);
 		if (clause.ask.who !== "rule" || !answer.success || answer.data.is !== "inherited") {
@@ -1405,6 +1387,86 @@ function refreshInherited(ctx: Ctx, run: RunRow): Raised[] {
 	return raised;
 }
 
+/** Slot settlements have their own question and basis; changing them never withdraws a cause answer. */
+function refreshDisputes(ctx: Ctx, run: RunRow): void {
+	if (run.origin !== "planned") return;
+	const about = `dispute:${runRef(run)}`;
+	const previous = everyQuestionOn(ctx.db, ctx.project.id, about);
+	const active = new Set<string>();
+	for (const dispute of disputesOf(ctx.db, run)) {
+		const { slot, signature, scope, failures, effective } = dispute;
+		const key = `dispute:${slot.id}:${signature}:${scope}`;
+		const fingerprint = contentHash({ kind: "failure", key });
+		active.add(fingerprint);
+		const material = { results: effective.map((fill) => fill.id).sort((a, b) => a - b) };
+		const prior = latestByFingerprint(ctx.db, ctx.project.id, fingerprint);
+		if (prior?.basis === contentHash(material) && (prior.state === "open" || prior.state === "decided")) continue;
+		const cause = signatureById(ctx.db, signature);
+		const latest = failures.at(-1);
+		if (!cause || !latest) continue;
+		const parties = new Set(effective.map((fill) => fill.actor));
+		if (prior) for (const actor of json<{ parties?: number[] }>(prior.evidence).parties ?? []) parties.add(actor);
+		const target = mustTarget(ctx.db, latest.target);
+		const change = target.change === null ? null : changeById(ctx.db, target.change);
+		const caseRow = caseById(ctx.db, slot.case_id);
+		const tests = [...new Set(failures.map((fill) => fill.test))].flatMap((id) => {
+			const test = testById(ctx.db, id);
+			return test ? [{ id, t: testRef(test), name: test.name, case: caseRow ? caseRef(caseRow) : null }] : [];
+		});
+		raise(ctx, {
+			kind: "failure",
+			key,
+			subject: { slot: slot.id, signature, scope },
+			title: `Disputed ${caseRow ? caseRef(caseRow) : "slot"} in ${runRef(run)}: ${clip(cause.text, 110)}`,
+			producer: actorLabel(ctx.db, latest.actor).kind,
+			evidence: {
+				signature: { class: cause.class, text: cause.text },
+				message: latest.message,
+				scope: change ? change.key : scope,
+				slot: slot.id,
+				run: runRef(run),
+				results: failures.map((fill) => fill.id),
+				effective: material.results,
+				parties: [...parties],
+				producers: [...parties],
+				tests: tests.slice(0, 50),
+				count: tests.length,
+				targets: [...new Set(failures.map((fill) => fill.target))],
+				target: target.commit_sha ?? target.what,
+				hints: ["disputed"],
+				sample: latest.id,
+			},
+			material,
+			facts: ["scope:run", "hint:disputed"],
+			refs: [about, runRef(run), ...(caseRow ? [caseRef(caseRow)] : [])],
+			runs: [run],
+		});
+	}
+	for (const question of previous) {
+		if (active.has(question.fingerprint)) continue;
+		if (question.state === "decided" && question.decision !== null) {
+			const decision = decisionById(ctx.db, question.decision);
+			if (!decision || json<{ is: string }>(decision.answer).is === "mistaken") continue;
+			if (["withdrawn", "expired", "outdated"].includes(json<{ is: string }>(decision.answer).is)) continue;
+			HANDLERS.failure.revert(ctx, question, decision);
+			lapse(ctx, question, decision, ctx.now);
+			for (const id of runsDependingOn(ctx.db, decision.id)) ctx.recompute.add(id);
+		}
+		if (question.state === "open" || question.state === "decided")
+			setQuestionState(ctx, question, "dissolved", questionById(ctx.db, question.id)?.decision ?? null);
+	}
+}
+
+/** Upgrade earlier disputes before serving reads. Later starts find their slot questions and do no work. */
+export function recoverDisputes(ctx: Ctx): number {
+	const missing = disputedRuns(ctx.db, ctx.project.id).filter((id) => {
+		const run = runById(ctx.db, id);
+		return run && everyQuestionOn(ctx.db, ctx.project.id, `dispute:${runRef(run)}`).length === 0;
+	});
+	if (missing.length > 0) refold(ctx, missing, { dissolveStale: true });
+	return missing.length;
+}
+
 /** Recompute affected runs and raise sign-off for a planned run that now passes. */
 export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveStale?: boolean } = {}): void {
 	for (const id of runIds) ctx.recompute.add(id);
@@ -1431,6 +1493,7 @@ export function refold(ctx: Ctx, runIds: Iterable<number>, options: { dissolveSt
 				ctx.recompute.delete(id);
 				const existing = runById(ctx.db, id);
 				if (!existing) continue;
+				refreshDisputes(ctx, existing);
 				let result = retally(
 					ctx,
 					id,
@@ -1493,6 +1556,7 @@ function blockersOf(ctx: Ctx, run: RunRow): Blocker[] {
 		kind: open.kind,
 		signature: open.kind === "failure" ? (json<{ signature?: number }>(open.subject).signature ?? null) : null,
 		scope: open.kind === "failure" ? (json<{ scope?: string }>(open.subject).scope ?? null) : null,
+		slot: open.kind === "failure" ? json<{ slot?: number }>(open.subject).slot : undefined,
 		blocks: json<number[]>(open.blocks),
 	}));
 }
@@ -1560,6 +1624,7 @@ function closeIfGone(ctx: Ctx, id: number): boolean {
  */
 function endedUnawaited(ctx: Ctx, question: QuestionRow): boolean {
 	if (question.kind !== "failure") return false;
+	if (json<{ slot?: number }>(question.subject).slot !== undefined) return false;
 	const subject = json<{ signature?: number; scope?: string }>(question.subject);
 	if (subject.signature === undefined || subject.scope === undefined) return false;
 	if (!scopeEnded(ctx.db, subject.scope)) return false;
@@ -1584,7 +1649,8 @@ function endedUnawaited(ctx: Ctx, question: QuestionRow): boolean {
  * test says nothing about the failure an agent found in it, which stays asked about until a person answers.
  */
 function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number, Set<string>>): boolean {
-	const subject = json<{ signature: number; scope: string }>(question.subject);
+	const subject = json<{ signature: number; scope: string; slot?: number }>(question.subject);
+	if (subject.slot !== undefined) return slotById(ctx.db, subject.slot)?.state !== "disputed";
 	const key = causeKey(subject.signature, subject.scope);
 	const shows = (run: RunRow): boolean => {
 		let causes = shown.get(run.id);
@@ -1661,13 +1727,7 @@ export function sweepExpired(ctx: Ctx, expired: readonly DecisionRow[]): number 
 
 // ── Reading ────────────────────────────────────────────────────────────────────────────────────────────────
 
-/**
- * The facts a clause is chosen by, as they are now. A question keeps the facts of its latest occurrence. One of
- * them can change with no occurrence at all: somebody else's pass makes a slot dispute a failure that was
- * answered long ago, and a correction ends a dispute. So for a failure the dispute is read from the runs each
- * time somebody answers, changes an answer or withdraws one, and each time the question is shown: what is done
- * about a failure from the moment it is disputed is held to the clause for disputes.
- */
+/** Current clause facts. Only a slot question asks about a dispute; cause answers retain their own policy. */
 export function factsNow(db: Db, question: QuestionRow): Set<string> {
 	const facts = new Set(json<{ facts?: string[] }>(question.evidence).facts ?? []);
 	if (question.kind === "adopt" && question.state !== "decided") {
@@ -1679,12 +1739,9 @@ export function factsNow(db: Db, question: QuestionRow): Set<string> {
 		}
 	}
 	if (question.kind !== "failure") return facts;
-	const subject = json<{ signature?: number; scope?: string }>(question.subject);
+	const subject = json<{ signature?: number; scope?: string; slot?: number }>(question.subject);
 	if (subject.signature === undefined || subject.scope === undefined) return facts;
-	// An answer in force that was given to a dispute keeps that fact (see `answer`); otherwise the runs say.
-	const settledDispute = question.state === "decided" && facts.has("hint:disputed");
-	if (settledDispute || inDispute(db, question.project, subject.signature, subject.scope, inForce(question)))
-		facts.add("hint:disputed");
+	if (subject.slot !== undefined) facts.add("hint:disputed");
 	else facts.delete("hint:disputed");
 	return facts;
 }

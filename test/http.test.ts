@@ -173,6 +173,57 @@ async function post<T>(
 }
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
+test.each(["answer-then-pass", "pass-then-answer"])(
+	"HTTP disputes keep the slot separate from its cause: %s",
+	async (order) => {
+		const instance = boot("local");
+		const owner = new Client({ url: instance.url, token: undefined, project: "disputes" });
+		await owner.call("admin", { do: "project.create", key: "disputes", preset: "standard" });
+		const member = async (actor: string) => {
+			const made = await post<{ token: string }>(instance, "/api/admin", {
+				do: "token.create",
+				actor,
+				kind: "human",
+				can: ["read", "produce", "answer"],
+				project: "disputes",
+			});
+			if (!made.body.ok) throw new Error(made.body.error.message);
+			return new Client({ url: instance.url, token: made.body.result.token, project: "disputes" });
+		};
+		const passer = await member("passer");
+		const judge = await member("judge");
+		await owner.call("propose", {
+			edits: [
+				{ op: "create", outline: "First" },
+				{ op: "create", outline: "Keep open" },
+			],
+		});
+		const planned = await owner.call("plan", { name: "Disputed", select: {} });
+		await owner.call("report", {
+			run: planned.run,
+			results: [{ test: { case: "C-1" }, outcome: "fail", note: "shared failure" }],
+		});
+		const cause = (await owner.call("inbox", { kind: "failure" })).items[0];
+		if (!cause) throw new Error("missing cause question");
+		const explain = () => owner.call("decide", { q: cause.q, onEvidence: cause.evidenceHash, answer: { is: "flaky" } });
+		if (order === "answer-then-pass") expect(await explain()).toMatchObject([{ status: "decided" }]);
+		await passer.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		if (order === "pass-then-answer") expect(await explain()).toMatchObject([{ status: "decided" }]);
+		expect(await owner.call("gate", { run: planned.run })).toMatchObject({
+			verdict: "blocked",
+			tally: { disputed: 1, pass: 0 },
+		});
+		const dispute = (await owner.call("inbox", { kind: "failure" })).items[0];
+		if (!dispute) throw new Error("missing slot question");
+		expect(dispute.q).not.toBe(cause.q);
+		const answer = { q: dispute.q, onEvidence: dispute.evidenceHash, answer: { is: "flaky" } };
+		for (const producer of [owner, passer])
+			expect(await producer.call("decide", answer)).toMatchObject([{ status: "forbidden" }]);
+		expect(await judge.call("decide", answer)).toMatchObject([{ status: "decided" }]);
+		expect(await owner.call("gate", { run: planned.run })).toMatchObject({ tally: { disputed: 0, pass: 1 } });
+	},
+);
+
 /** Validate the actual wire reply, including fields Zod would strip, against the served document. */
 async function replySweep(instance: Instance, project: string) {
 	const schema = z.object({
