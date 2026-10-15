@@ -1135,7 +1135,10 @@ export function SuiteScreen() {
 					adoptedTags = received.tags;
 					adoptedCovers = received.covers;
 					queryClient.setQueryData([project, "get", { refs: [ref] }], [received]);
-					void queryClient.cancelQueries({ queryKey: [project, "find"] });
+					void queryClient.cancelQueries({
+						queryKey: [project, "find"],
+						predicate: (query) => query.state.data !== undefined,
+					});
 					queryClient.setQueriesData<{
 						pages: { items: Record<string, unknown>[]; count: number | null; cursor: string | null }[];
 						pageParams: unknown[];

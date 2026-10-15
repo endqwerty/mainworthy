@@ -2,6 +2,65 @@ import { expect, test } from "bun:test";
 import { parseCase } from "../../src/core/markdown.ts";
 import { browserAvailable, eventually, keyCount, openPage, paste, startServer } from "./support.ts";
 
+test.skipIf(!browserAvailable)(
+	"a save lets the Suite's first list read finish when there is no cached list to patch",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{ op: "create", body: { title: "Local case" } },
+				{ op: "create", body: { title: "Remote case" } },
+			],
+		});
+		const h = await openPage(server, { path: "/p/scratch/queue" });
+		try {
+			const { page } = h;
+			await page.addInitScript(() => {
+				const send = window.fetch.bind(window);
+				let reads = 0;
+				const sending = async (input: RequestInfo | URL, init?: RequestInit) => {
+					const reply = await send(input, init);
+					if (String(input).endsWith("/find") && typeof init?.body === "string" && init.body.includes('"cases"')) {
+						const read = ++reads;
+						document.documentElement.dataset.heldReads = String(read);
+						await new Promise<void>((resolve) =>
+							window.addEventListener(read === 1 ? "test:first" : "test:fresh", () => resolve(), { once: true }),
+						);
+					}
+					return reply;
+				};
+				window.fetch = Object.assign(sending, { preconnect: window.fetch.preconnect });
+			});
+			await page.goto(`${server.url}/p/scratch/suite/c/1`);
+			await page.getByRole("button", { name: "Local case", exact: true }).waitFor();
+			await page.waitForFunction(() => document.documentElement.dataset.heldReads === "1");
+			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-loaded")).toBe("0");
+			await page.keyboard.press("e");
+			await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Saved local case");
+			await page.keyboard.press("Escape");
+			await page.waitForFunction(() => document.querySelector(".cstate .chip")?.textContent === "v2");
+			await page.evaluate(() => window.dispatchEvent(new Event("test:first")));
+			await page.waitForFunction(
+				() => document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded") === "2",
+				undefined,
+				{ timeout: 4000 },
+			);
+			expect(await page.locator('#list [role="option"] .ti').allTextContents()).toEqual([
+				"Saved local case",
+				"Remote case",
+			]);
+			await page.waitForFunction(() => Number(document.documentElement.dataset.heldReads) >= 2);
+			await page.evaluate(() => window.dispatchEvent(new Event("test:fresh")));
+			await page.getByRole("option").filter({ hasText: "Saved local case" }).waitFor();
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
 for (const action of ["placement", "save"] as const) {
 	test.skipIf(!browserAvailable)(
 		`a held Suite page cannot overwrite a ${action} and is followed by a fresh read`,

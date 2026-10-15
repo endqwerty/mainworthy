@@ -59,8 +59,10 @@ restore the cache and call `setStatus(error.message)`, keeping the input.
 cancels queries, snapshots, patches, rolls back on errors, and invalidates.
 For multiple caches or same-frame keyboard effects, patch manually before call.
 Cancel each affected list's active read before taking its snapshot or patching its
-cache. Change events preserve paged reads, so they do not cancel an older reply
-that could replace the patch. Invalidate after the write to read the list afresh.
+cache, including a next page that would return its earlier pages too. Leave a first
+read with no cached data running: there is no patch for that reply to replace.
+Change events preserve paged reads, so they do not cancel an older reply that
+could replace the patch. Invalidate after the write to read the list afresh.
 
 ## Signing in and out
 
