@@ -1182,6 +1182,71 @@ describe("a change that ends", () => {
 		expect(count("runs")).toBe(1);
 	});
 
+	test("a typed failure keeps its open question when CI later names the commit's branch", () => {
+		h.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
+		const tester = h.actor("tester", "human", ["read", "produce"]);
+		const ci = h.actor("ci", "ci", ["read", "record"]);
+		const run = h.call<{ run: string }>("plan", {
+			name: "Dispute",
+			select: {},
+			accepts: { commit: "typed0068" },
+		});
+		h.call(
+			"report",
+			{
+				run: run.run,
+				results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "expected 10, got 12" } }],
+			},
+			tester,
+		);
+		const asked = first(queue().items.filter((q) => q.kind === "failure"));
+		h.call(
+			"report",
+			{
+				target: { commit: "typed0068", branch: "main" },
+				results: [{ test: { key: "checkout" }, outcome: "pass", annotation: { case: "C-1", version: 1 } }],
+			},
+			ci,
+		);
+		const disputed = first(queue().items.filter((q) => q.kind === "failure"));
+		expect(disputed).toMatchObject({ q: asked.q, evidence: { hints: ["disputed"], message: "expected 10, got 12" } });
+		expect(disputed.answers).toEqual(["defect", "test", "expected", "flaky", "infra", "inherited", "mistaken"]);
+		expect(h.call<GateStatus>("gate", { run: run.run })).toMatchObject({ verdict: "blocked", open: [asked.q] });
+		expect(count("scope_moves")).toBe(0);
+	});
+
+	test("a typed failure keeps its answer when CI later names the commit's branch", () => {
+		h.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
+		const run = h.call<{ run: string }>("plan", {
+			name: "Answered",
+			select: {},
+			accepts: { commit: "typed0069" },
+		});
+		h.call("report", {
+			run: run.run,
+			results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "same cause" } }],
+		});
+		const asked = first(queue().items.filter((q) => q.kind === "failure"));
+		expect(decide(asked, { is: "flaky" })?.status).toBe("decided");
+		const decisions = h.app.db.raw.query("SELECT * FROM decisions WHERE kind = 'failure'").all();
+		h.call("report", {
+			target: { commit: "typed0069", branch: "main" },
+			results: [
+				{
+					test: { key: "checkout" },
+					outcome: "fail",
+					failure: { message: "same cause" },
+					annotation: { case: "C-1", version: 1 },
+				},
+			],
+		});
+		expect(h.call<{ state: string }[]>("get", { refs: [asked.q] })[0]?.state).toBe("decided");
+		expect(h.app.db.raw.query("SELECT * FROM decisions WHERE kind = 'failure'").all()).toEqual(decisions);
+		expect(h.call<GateStatus>("gate", { run: run.run })).toMatchObject({ verdict: "passed", tally: { excused: 1 } });
+		expect(queue().items.filter((q) => q.kind === "failure")).toEqual([]);
+		expect(count("scope_moves")).toBe(0);
+	});
+
 	test("a landing uses trunk's existing answer while older pull request commits keep their answer", () => {
 		const fail = { 0: "same cause" };
 		h.call("report", ciReport({ commit: "trunk0068", n: 1, fail }));
