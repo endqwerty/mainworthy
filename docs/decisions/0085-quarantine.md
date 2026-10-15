@@ -46,7 +46,7 @@ breaks the streak. Retries
 use their highest decisive attempt with worse same-attempt disagreement retained.
 Agent evidence, sessions and change commits cannot satisfy the exit. A failure on
 a later commit does not restart quarantine after the threshold is reached. A later
-failure at the same counted attempt on a commit in the qualifying streak can
+failure at the same or a later counted attempt on a commit in the qualifying streak can
 invalidate that streak and make quarantine active again. Correcting an observation
 can also change the derived exit because the corrected observation no longer stands.
 No current row is rewritten by a detector or a clock.
