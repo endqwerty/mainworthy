@@ -1,13 +1,13 @@
-import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HTTP_STATUS } from "../core/api.ts";
-import { bootstrap, clearChallenges, clearUses, type Session } from "../server/identity/identity.ts";
-import { recoverAccepted } from "../server/jobs.ts";
+import { runArchive } from "../server/archives.ts";
+import { clearChallenges, clearUses, type Session } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
 import type { Actor } from "../server/kernel/ctx.ts";
 import { OpError } from "../server/kernel/errors.ts";
-import { exportArchive, importArchive, linesOf, removeBootstrap } from "../server/transfer/transfer.ts";
 
 const CHUNK_BYTES = 64 * 1024;
 const json = (body: unknown, status = 200): Response =>
@@ -26,83 +26,45 @@ function scratch(): { path: string; remove: () => void } {
 	return { path: join(directory, "archive.ndjson"), remove: () => rmSync(directory, { recursive: true, force: true }) };
 }
 
-function writeBytes(fd: number, bytes: Uint8Array): void {
-	let offset = 0;
-	while (offset < bytes.byteLength) {
-		const written = writeSync(fd, bytes, offset, bytes.byteLength - offset);
-		if (written === 0) throw new Error("archive spool could not be written");
-		offset += written;
-	}
-}
-
-/** The synchronous transfer contract needs a disk spool to preserve HTTP backpressure without queueing the archive. */
-function fileStream(file: { path: string; remove: () => void }): ReadableStream<Uint8Array> {
-	const fd = openSync(file.path, "r");
-	let closed = false;
-	const close = (): void => {
-		if (closed) return;
-		closed = true;
-		closeSync(fd);
-		file.remove();
+/** Spooling keeps download backpressure separate from the worker's snapshot. File I/O also leaves HTTP free. */
+async function fileStream(file: { path: string; remove: () => void }): Promise<ReadableStream<Uint8Array>> {
+	const fd = await open(file.path, "r");
+	let closing: Promise<void> | undefined;
+	let cancelled = false;
+	const close = (): Promise<void> => {
+		closing ??= fd.close().finally(file.remove);
+		return closing;
 	};
 	return new ReadableStream<Uint8Array>({
-		pull(controller) {
+		async pull(controller) {
 			try {
 				const buffer = new Uint8Array(CHUNK_BYTES);
-				const bytes = readSync(fd, buffer);
-				if (bytes === 0) {
-					close();
+				const { bytesRead } = await fd.read(buffer);
+				if (cancelled) return;
+				if (bytesRead === 0) {
+					await close();
 					controller.close();
-				} else controller.enqueue(buffer.subarray(0, bytes));
+				} else controller.enqueue(buffer.subarray(0, bytesRead));
 			} catch (error) {
-				close();
+				if (cancelled) return;
+				await close().catch(() => undefined);
 				controller.error(error);
 			}
 		},
-		cancel: close,
+		cancel() {
+			cancelled = true;
+			return close();
+		},
 	});
-}
-
-/** The importer receives a lazy synchronous iterator; only its current row and one 64 KiB chunk are in memory. */
-function* fileLines(path: string): Iterable<string> {
-	const fd = openSync(path, "r");
-	const buffer = new Uint8Array(CHUNK_BYTES);
-	const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-	let pending = "";
-	try {
-		while (true) {
-			const size = readSync(fd, buffer);
-			if (size === 0) break;
-			pending += decoder.decode(buffer.subarray(0, size), { stream: true });
-			const end = pending.lastIndexOf("\n");
-			if (end >= 0) {
-				yield* linesOf(pending.slice(0, end + 1));
-				pending = pending.slice(end + 1);
-			}
-		}
-		pending += decoder.decode();
-		if (pending.length > 0) yield pending;
-	} catch (error) {
-		if (error instanceof TypeError) throw new OpError("invalid", "the archive is not valid UTF-8");
-		throw error;
-	} finally {
-		closeSync(fd);
-	}
 }
 
 async function stageBody(req: Request, path: string): Promise<void> {
 	if (!req.body) throw new OpError("invalid", "an archive body is required");
-	const fd = openSync(path, "w", 0o600);
-	const reader = req.body.getReader();
+	const fd = await open(path, "w", 0o600);
 	try {
-		while (true) {
-			const chunk = await reader.read();
-			if (chunk.done) return;
-			writeBytes(fd, chunk.value);
-		}
+		await fd.writeFile(req.body);
 	} finally {
-		reader.releaseLock();
-		closeSync(fd);
+		await fd.close();
 	}
 }
 
@@ -113,19 +75,22 @@ export function archiveRoutes(
 ): Record<string, (req: Request, session: Session) => Response | Promise<Response>> {
 	const allowed = (session: Session): boolean => session.actor(0)?.can.includes("admin") ?? false;
 	return {
-		"/api/export": (req, session) => {
+		"/api/export": async (req, session) => {
 			if (!allowed(session)) return failure(new OpError("forbidden", "export needs the admin capability"));
 			if (req.method !== "GET")
 				return json({ ok: false, error: { code: "invalid", message: "export requires GET" } }, 405);
 			const file = scratch();
 			try {
-				const fd = openSync(file.path, "w", 0o600);
-				try {
-					exportArchive(app.reader, (chunk) => writeBytes(fd, new TextEncoder().encode(chunk)), { now: app.now() });
-				} finally {
-					closeSync(fd);
+				await runArchive(app, { op: "export", path: file.path, now: app.now() });
+				const stream = await fileStream(file);
+				if (!allowed(session)) {
+					await stream.cancel();
+					throw new OpError(
+						"forbidden",
+						"export needs the admin capability; the token or grant changed while exporting",
+					);
 				}
-				return new Response(fileStream(file), {
+				return new Response(stream, {
 					headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" },
 				});
 			} catch (error) {
@@ -141,16 +106,20 @@ export function archiveRoutes(
 			const localOwner = owner ?? (session.via === "local" ? session.actor(0) : null);
 			try {
 				await stageBody(req, file.path);
-				const result = await app.gate.run(() => {
+				const result = await app.gate.run(async () => {
 					if (!allowed(session))
 						throw new OpError(
 							"forbidden",
 							"import needs the admin capability; the token or grant changed while uploading",
 						);
-					const restored = app.db.savepoint(() => {
-						removeBootstrap(app.db);
-						const counts = importArchive(app.db, fileLines(file.path));
-						return { counts, owner: app.config.mode === "local" ? bootstrap(app).owner : null };
+					const restored = await runArchive(app, {
+						op: "import",
+						path: file.path,
+						...(app.now === Date.now ? {} : { now: app.now() }),
+						mode: app.config.mode,
+						owner: app.config.owner,
+						ownerToken: app.config.ownerToken,
+						...(app.config.ownerWas ? { ownerWas: app.config.ownerWas } : {}),
 					});
 					// The import is committed: every token and session row is gone, and the next ones made take
 					// their ids. What was noted of the old rows' use must not become the new rows' use.
@@ -162,7 +131,7 @@ export function archiveRoutes(
 					// An export taken while a report was between its two transactions holds that report accepted and
 					// not applied. The original applied it a moment later; so does this instance, now, and not only
 					// at its next start.
-					recoverAccepted(app);
+					for (const event of restored.events) app.publish(event);
 					return restored.counts;
 				});
 				return json({

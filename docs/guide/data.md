@@ -17,7 +17,7 @@ The file holds every project, case and version, every result, decision and polic
 
 ## Export everything
 
-An admin on every project exports the whole instance with one command. It works while the server runs, and the archive is one consistent snapshot.
+An admin on every project exports the whole instance with one command. It works while the server runs, and the archive is one consistent snapshot. Other requests keep running while Mainworthy prepares the archive.
 
 ```
 $ mainworthy export --out mainworthy.ndjson.gz
@@ -41,7 +41,7 @@ The archive holds everything except three things. It leaves out tokens, because 
 
 ## Import into a new instance
 
-An import loads an archive into a new instance and makes it a copy of the one that exported it. It does not merge.
+An import loads an archive into a new instance and makes it a copy of the one that exported it. It does not merge. The server keeps answering reads during the import; writes wait until it finishes.
 
 1. Start a new instance and make nothing in it.
 2. Run `mainworthy import` with the archive.

@@ -1,4 +1,4 @@
-// A worker thread of the server, in one of two roles.
+// A worker thread of the server.
 //
 // `read` (the default): answers read operations on its own read-only connection, so a read never waits for the
 // thread that writes. It is handed a call only after the main thread has decided the caller may make it.
@@ -6,18 +6,97 @@
 // `checkpoint`: copies committed pages from the write-ahead log into the database file, so that no commit on the
 // main thread has to. SQLite otherwise checkpoints inside the commit that fills the log, and the server answers
 // nobody while it does.
+//
+// `archive`: exports a read snapshot or restores an archive under the parent's write gate, on its own connection.
 import { parentPort, workerData } from "node:worker_threads";
 import { z } from "zod";
+import { type ArchiveReply, ArchiveTask } from "./archives.ts";
 import { databasePath, openApp } from "./kernel/app.ts";
 import { Db } from "./kernel/db.ts";
 import type { Reply } from "./ops/registry.ts";
 
-const data = z.object({ dataDir: z.string(), role: z.enum(["read", "checkpoint"]).default("read") }).parse(workerData);
+const data = z
+	.discriminatedUnion("role", [
+		z.object({ dataDir: z.string(), role: z.literal("archive"), task: ArchiveTask }),
+		z.object({ dataDir: z.string(), role: z.literal("read") }),
+		z.object({ dataDir: z.string(), role: z.literal("checkpoint") }),
+	])
+	.parse({ role: "read", ...workerData });
 if (!parentPort) throw new Error("a worker needs its parent thread");
 const port = parentPort;
 
-if (data.role === "checkpoint") checkpoints();
+if (data.role === "archive") await archive(data.task);
+else if (data.role === "checkpoint") checkpoints();
 else await reads();
+
+async function archive(task: z.infer<typeof ArchiveTask>): Promise<void> {
+	const [
+		{ exportArchive, importArchive, removeBootstrap },
+		{ fileLines, writeBytes },
+		{ closeSync, openSync },
+		{ OpError },
+	] = await Promise.all([
+		import("./transfer/transfer.ts"),
+		import("./transfer/spool.ts"),
+		import("node:fs"),
+		import("./kernel/errors.ts"),
+	]);
+	let app: ReturnType<typeof openApp> | undefined;
+	let reply: z.infer<typeof ArchiveReply>;
+	try {
+		if (task.op === "export") {
+			const db = new Db(databasePath(data.dataDir), { reader: true });
+			try {
+				const fd = openSync(task.path, "w", 0o600);
+				try {
+					const encoder = new TextEncoder();
+					const counts = exportArchive(db, (chunk) => writeBytes(fd, encoder.encode(chunk)), { now: task.now });
+					reply = { ok: true, counts, owner: null, events: [] };
+				} finally {
+					closeSync(fd);
+				}
+			} finally {
+				db.close();
+			}
+		} else {
+			const { defaultConfig } = await import("./kernel/app.ts");
+			const { bootstrap } = await import("./identity/identity.ts");
+			const { recoverAccepted } = await import("./jobs.ts");
+			const now = task.now;
+			app = openApp(
+				defaultConfig({
+					MAINWORTHY_DATA: data.dataDir,
+					MAINWORTHY_OWNER: task.owner,
+					MAINWORTHY_MODE: task.mode,
+					MAINWORTHY_OWNER_TOKEN: task.ownerToken ?? undefined,
+					MAINWORTHY_OWNER_WAS: task.ownerWas,
+				}),
+				now === undefined ? {} : { now: () => now },
+			);
+			const target = app;
+			const restored = target.db.savepoint(() => {
+				removeBootstrap(target.db);
+				const counts = importArchive(target.db, fileLines(task.path));
+				return { counts, owner: task.mode === "local" ? bootstrap(target).owner : null };
+			});
+			const events: Extract<z.infer<typeof ArchiveReply>, { ok: true }>["events"] = [];
+			target.subscribe((event) => events.push(event));
+			recoverAccepted(target);
+			reply = {
+				ok: true,
+				...restored,
+				owner: restored.owner ? { ...restored.owner, can: [...restored.owner.can] } : null,
+				events,
+			};
+		}
+	} catch (error) {
+		const known = error instanceof OpError ? error : new OpError("internal", "archive transfer failed");
+		reply = { ok: false, error: { code: known.code, message: known.message } };
+	} finally {
+		app?.close();
+	}
+	port.postMessage(reply);
+}
 
 function checkpoints(): void {
 	// An ordinary connection that never writes a row. A passive checkpoint makes nobody wait: it copies what no
