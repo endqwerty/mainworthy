@@ -277,7 +277,8 @@
 	overflow-wrap: anywhere;
 }
 :root[data-layout="phone"] .settings-row .out,
-:root[data-layout="phone"] .settings-token .out {
+:root[data-layout="phone"] .settings-token .out,
+:root[data-layout="phone"] .settings-confirm-actions .out {
 	min-width: 44px;
 	min-height: 44px;
 }

@@ -367,7 +367,13 @@ export const AdminReply = z.union([
 	),
 	z.looseObject({ revoked: flag }),
 	z.array(
-		z.looseObject({ name: text, kind: ActorKind, grants: z.array(Grant), teams: z.array(TeamSource).default([]) }),
+		z.looseObject({
+			name: text,
+			kind: ActorKind,
+			owner: flag.optional(),
+			grants: z.array(Grant),
+			teams: z.array(TeamSource).default([]),
+		}),
 	),
 	z.looseObject({ removed: flag }),
 	Grant.extend({ actor: text }),

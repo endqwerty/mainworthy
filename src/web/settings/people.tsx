@@ -21,6 +21,7 @@ const Actor = z.object({
 	name: z.string(),
 	kind: z.string(),
 	disabled: z.boolean(),
+	owner: z.boolean().optional(),
 	teams: z.array(TeamSource).default([]),
 	grants: z.array(z.object({ project: z.string(), can: z.array(z.string()) })),
 });
@@ -342,7 +343,7 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 			<IssuedTokens />
 			<Teams people={people.map((person) => person.name)} changed={() => actors.refetch()} />
 			<ForgetPerson
-				people={people.map((person) => person.name)}
+				people={people}
 				changed={async (forgotten) => {
 					setCreated((links) => links.filter((link) => link.name !== forgotten));
 					const [, refreshed] = await Promise.all([

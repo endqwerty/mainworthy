@@ -205,10 +205,11 @@ The [configuration](./configuration.md#require-a-second-factor-for-admins) page 
 
 In Settings, open **People** and find **Forget a person** below the list of people.
 
-1. Read what forgetting erases and what stays.
-2. Choose the person in **Person to forget**.
-3. Type their name in **Type the name to confirm**.
-4. Press **Forget this person**. **Cancel forgetting** clears the selection without changing anything.
+1. Choose the person in **Person to forget**. Your own name and the current owner's name are unavailable, with the reason beside each.
+2. Press **Forget this person**.
+3. Read what forgetting erases and what stays, then press **Forget** followed by the person's name to confirm.
+
+The confirmation takes the keyboard focus. **Cancel** or <kbd>Esc</kbd> closes it without changing anything and returns focus to **Forget this person**.
 
 The page shows the pseudonym and the number of tokens revoked. It reads the people and invitations again and removes any invitation link it was showing for that person. If no reply comes back, it reads the lists again. If the person is no longer listed, the page says so and clears the confirmation. Otherwise, retrying the same confirmation uses the same command id.
 
@@ -219,7 +220,7 @@ $ mainworthy actor forget dana --confirm dana
 Forgotten as forgotten-5. 0 tokens revoked. History and typed text stay.
 ```
 
-Add `--json` for the pseudonym and the number of revoked tokens as JSON. Both the page and the command use the same admin operation. You must be a person who administers the instance. You cannot forget yourself or the current owner. To forget a former owner, first [hand the instance to somebody else](./configuration.md).
+Add `--json` for the pseudonym and the number of revoked tokens as JSON. Both the page and the command use the same admin operation. `actor list --json` identifies the current owner with `owner: true`. If an older server does not identify the owner, the page keeps forgetting unavailable. You must be a person who administers the instance. You cannot forget yourself or the current owner. To forget a former owner, first [hand the instance to somebody else](./configuration.md).
 
 A person cannot yet request forgetting inside Mainworthy or delete their own account. Ask the person who runs your instance. For `mainworthy.com`, follow [Privacy, changes and questions](./privacy.md#changes-and-questions). See [Privacy](./privacy.md#your-rights-with-respect-to-your-information) for retained records and typed text.
 

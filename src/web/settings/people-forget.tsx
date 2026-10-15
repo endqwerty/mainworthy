@@ -5,6 +5,7 @@ import { ApiError, call } from "../lib/api.ts";
 import { randomId } from "../lib/ids.ts";
 import { useApp } from "../ui/context.tsx";
 import { DocLink, SectionHeading, Select } from "../ui/index.tsx";
+import { InlineConfirmation } from "./inline-confirmation.tsx";
 import { saidOfWrite } from "./list.ts";
 
 const Forgotten = z.object({ forgotten: z.string(), tokensRevoked: z.number() });
@@ -13,28 +14,40 @@ export function ForgetPerson({
 	people,
 	changed,
 }: {
-	people: readonly string[];
+	people: readonly { name: string; owner?: boolean | undefined }[];
 	changed: (name: string) => Promise<boolean | null>;
 }) {
 	const { session, project } = useApp();
 	const id = useId();
-	const [target, setTarget] = useState<{ name: string; cmd: string } | null>(null);
-	const [confirmation, setConfirmation] = useState("");
+	const [target, setTarget] = useState<{ name: string; cmd: string; phase: "chosen" | "confirming" } | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [message, setMessage] = useState("");
-	const choices = people.filter((name) => name !== session.actor);
-	const allowed = target !== null && choices.includes(target.name) && confirmation === target.name && !busy;
+	const choices = people.map((person) => ({
+		...person,
+		reason:
+			person.name === session.actor
+				? "you cannot forget yourself"
+				: person.owner === true
+					? "current owner, hand the instance to somebody else first"
+					: person.owner === undefined
+						? "the server did not identify the current owner"
+						: null,
+	}));
+	const selected = choices.find((person) => person.name === target?.name);
+	const allowed = selected !== undefined && selected.reason === null && !busy;
+	const confirming = target?.phase === "confirming";
 
 	async function forget(): Promise<void> {
-		if (!allowed || !target) return;
+		if (!allowed || !target || !confirming) return;
 		setBusy(true);
 		setMessage("");
 		let reread = true;
 		let uncertain = false;
 		try {
-			const result = Forgotten.parse(await call("admin", { do: "actor.forget", ...target }, { project }));
+			const result = Forgotten.parse(
+				await call("admin", { do: "actor.forget", name: target.name, cmd: target.cmd }, { project }),
+			);
 			setTarget(null);
-			setConfirmation("");
 			setMessage(
 				`Forgotten as ${result.forgotten}. ${result.tokensRevoked} ${result.tokensRevoked === 1 ? "token" : "tokens"} revoked. History and typed text stay.`,
 			);
@@ -52,7 +65,6 @@ export function ForgetPerson({
 				const stillListed = await changed(target.name);
 				if (uncertain && stillListed === false) {
 					setTarget(null);
-					setConfirmation("");
 					setMessage("No answer came back. The person is no longer listed. The confirmation was cleared.");
 				}
 			}
@@ -70,62 +82,47 @@ export function ForgetPerson({
 				You cannot forget yourself or the current owner. To forget a former owner, first hand the instance to somebody
 				else.
 			</p>
-			<form
-				className="settings-form"
-				onSubmit={(event) => {
-					event.preventDefault();
-					void forget();
-				}}
-			>
+			<div className="settings-form">
 				<label htmlFor={`${id}-person`}>Person to forget</label>
 				<Select
 					id={`${id}-person`}
 					className="form-input"
-					value={target && choices.includes(target.name) ? target.name : ""}
+					value={selected?.name ?? ""}
 					disabled={busy}
 					onChange={(event) => {
-						setTarget(event.target.value ? { name: event.target.value, cmd: randomId() } : null);
-						setConfirmation("");
+						setTarget(event.target.value ? { name: event.target.value, cmd: randomId(), phase: "chosen" } : null);
 						setMessage("");
 					}}
 				>
 					<option value="">Choose a person</option>
-					{choices.map((name) => (
-						<option key={name} value={name}>
-							{name}
+					{choices.map((person) => (
+						<option key={person.name} value={person.name} disabled={person.reason !== null}>
+							{person.name}
+							{person.reason ? ` (${person.reason})` : ""}
 						</option>
 					))}
 				</Select>
-				<label htmlFor={`${id}-confirm`}>Type the name to confirm</label>
-				<input
-					id={`${id}-confirm`}
-					className="form-input"
-					value={confirmation}
-					disabled={busy}
-					autoComplete="off"
-					autoCapitalize="none"
-					spellCheck={false}
-					onChange={(event) => setConfirmation(event.target.value)}
-				/>
-				<button type="submit" className="out" aria-disabled={!allowed}>
-					{busy ? "Forgetting…" : "Forget this person"}
-				</button>
-				<button
-					type="button"
-					className="dim"
-					disabled={busy}
-					onClick={() => {
-						setTarget(null);
-						setConfirmation("");
-						setMessage("");
-					}}
-				>
-					Cancel forgetting
-				</button>
+				<div className="settings-confirm-actions">
+					<InlineConfirmation
+						open={confirming}
+						trigger="Forget this person"
+						confirm={busy ? "Forgetting…" : `Forget ${target?.name ?? "this person"}`}
+						disabled={selected === undefined || selected.reason !== null}
+						busy={busy}
+						onOpen={() => {
+							if (allowed && target) setTarget({ ...target, phase: "confirming" });
+						}}
+						onCancel={() => {
+							setTarget((now) => (now ? { ...now, phase: "chosen" } : null));
+							setMessage("");
+						}}
+						onConfirm={() => void forget()}
+					/>
+				</div>
 				<p className="settings-message" role="status">
 					{message}
 				</p>
-			</form>
+			</div>
 		</>
 	);
 }
