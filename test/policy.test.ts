@@ -202,6 +202,116 @@ describe("agent edits", () => {
 	});
 });
 
+describe("policy proposal bases", () => {
+	const current = () => h.call<Policy & { version: number }>("admin", { do: "policy.show", project: "scratch" });
+	const accept = (proposal: Proposed, actor = h.owner) => {
+		const q = first(queue({ kind: "adopt", on: proposal.proposal }).items);
+		return first(
+			h.call<{ status: string; needs: string }[]>(
+				"decide",
+				{
+					q: q.q,
+					onEvidence: q.evidenceHash,
+					answer: { is: "accept" },
+				},
+				actor,
+			),
+		);
+	};
+
+	test("P2: simultaneous saves on one version cannot both replace the policy", async () => {
+		const sam = h.actor("sam", "human", ["read", "produce", "answer", "admin"]);
+		const base = current();
+		const proposals = await Promise.all(
+			[h.owner, sam].map(async (actor, index) =>
+				h.call<Proposed>(
+					"propose",
+					{
+						edits: [
+							{
+								op: "policy",
+								base: base.version,
+								clauses: base.clauses,
+								settings: { ...base.settings, holds: { ...base.settings.holds, flakyDays: 11 + index } },
+							},
+						],
+					},
+					actor,
+				),
+			),
+		);
+		expect(accept(first(proposals)).status).toBe("decided");
+		expect(accept(first(proposals.slice(1)), sam).status).toBe("conflict");
+		expect(current().settings.holds.flakyDays).toBe(11);
+		expect(current().version).toBe(base.version + 1);
+		expect(queue({ kind: "adopt" }).items).toMatchObject([{ q: first(proposals.slice(1)).question }]);
+		expect(queue({ kind: "adopt", state: "decided" }).items).toHaveLength(1);
+		const stale = h.raw("propose", { edits: [{ op: "policy", base: base.version, settings: base.settings }] }, sam);
+		expect(stale).toMatchObject({ ok: false, error: { code: "conflict" } });
+	});
+
+	test("P6: accepting a waiting proposal cannot revert a policy adopted meanwhile", () => {
+		const sam = h.actor("sam", "human", ["read", "produce", "answer", "admin"]);
+		const before = current();
+		const setup = h.call<Proposed>("propose", {
+			edits: [
+				{
+					op: "policy",
+					base: before.version,
+					clauses: before.clauses.map((c) =>
+						c.id === "adopt-policy" ? { ...c, ask: { ...c.ask, notProducer: true } } : c,
+					),
+				},
+			],
+		});
+		expect(accept(setup).status).toBe("decided");
+		const base = current();
+		const waiting = h.call<Proposed>("propose", {
+			edits: [
+				{ op: "create", outline: "Must not be partially adopted" },
+				{
+					op: "policy",
+					base: base.version,
+					clauses: base.clauses,
+					settings: { ...base.settings, holds: { ...base.settings.holds, flakyDays: 6 } },
+				},
+			],
+		});
+		expect(accept(waiting).status).toBe("forbidden");
+		// Another admin changes the basis while the first proposal waits.
+		const other = h.call<Proposed>(
+			"propose",
+			{ edits: [{ op: "policy", base: base.version, settings: { ...base.settings, basis: "exact" } }] },
+			sam,
+		);
+		expect(accept(other).status).toBe("decided");
+		const after = current();
+		expect(accept(waiting, sam).status).toBe("conflict");
+		expect(current()).toEqual(after);
+		expect(current().settings.basis).toBe("exact");
+		expect(queue({ kind: "adopt" }).items).toMatchObject([{ q: waiting.question }]);
+		expect(h.call<{ count: number; items: unknown[] }>("find", {})).toMatchObject({ count: 0, items: [] });
+	});
+
+	test("intent-only callers without a base still cannot adopt over an intervening policy", () => {
+		const preset = h.call<Proposed>("propose", { edits: [{ op: "policy", preset: "standard" }] });
+		const unlinked = h.call<Proposed>("propose", { edits: [{ op: "policy", unlinked: "ask" }] });
+		expect(accept(unlinked).status).toBe("decided");
+		expect(accept(preset).status).toBe("conflict");
+		expect(current()).toMatchObject({ version: 2, preset: "loose", settings: { unlinked: "ask" } });
+	});
+
+	test("whole-table callers must name the version they read", () => {
+		const base = current();
+		for (const change of [{ clauses: base.clauses }, { settings: base.settings }])
+			expect(h.raw("propose", { edits: [{ op: "policy", ...change }] })).toMatchObject({
+				ok: false,
+				error: { code: "invalid" },
+			});
+		expect(current()).toEqual(base);
+	});
+});
+
 describe("changing the policy", () => {
 	test("D4: the same data works under loose, standard and strict; the switch is itself a recorded decision", () => {
 		h.call("propose", { edits: [{ op: "create", outline: "A case\n  Step > Result" }] });
@@ -249,7 +359,15 @@ describe("changing the policy", () => {
 
 	test("a policy that leaves a kind of question unowned is refused", () => {
 		const clauses = PRESETS.loose.clauses.filter((clause) => clause.kind !== "finding");
-		const reply = h.raw("propose", { edits: [{ op: "policy", clauses }] });
+		const reply = h.raw("propose", {
+			edits: [
+				{
+					op: "policy",
+					base: h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version,
+					clauses,
+				},
+			],
+		});
 		expect(reply).toMatchObject({ ok: false, error: { code: "invalid" } });
 	});
 
@@ -257,7 +375,7 @@ describe("changing the policy", () => {
 		// The help the web shows for a preset goes by this name, and a project admin cannot read the clauses.
 		const listed = () => first(h.call<{ key: string; policy: string }[]>("admin", { do: "project.list" })).policy;
 		expect(listed()).toBe("loose");
-		h.call("propose", { edits: [{ op: "policy", preset: "loose", clauses: PRESETS.strict.clauses }] });
+		h.call("propose", { edits: [{ op: "policy", base: 1, preset: "loose", clauses: PRESETS.strict.clauses }] });
 		const q = first(queue({ kind: "adopt" }).items);
 		// No reason: a policy change is an admin's under every preset, and asks for none.
 		h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
@@ -546,7 +664,13 @@ describe("unlinked tests", () => {
 		const file = "tests/checkout/coupon.spec.ts";
 		const changeClauses = (change: (clauses: Clause[]) => Clause[]) => {
 			const proposed = h.call<Proposed>("propose", {
-				edits: [{ op: "policy", clauses: change(structuredClone(PRESETS.standard.clauses)) }],
+				edits: [
+					{
+						op: "policy",
+						base: h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version,
+						clauses: change(structuredClone(PRESETS.standard.clauses)),
+					},
+				],
 			});
 			const asked = first(queue({ kind: "adopt", on: proposed.proposal }).items);
 			return first(

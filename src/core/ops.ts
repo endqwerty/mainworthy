@@ -101,6 +101,7 @@ export const Edit = z.discriminatedUnion("op", [
 	}),
 	z.object({
 		op: z.literal("policy"),
+		base: z.number().int().positive().optional().describe("Required with clauses or settings."),
 		preset: z.string().optional(),
 		clauses: z.array(Clause).optional(),
 		settings: PolicySettings.optional(),

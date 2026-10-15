@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { Policy, PolicySettings, Unlinked } from "../../core/kinds.ts";
 import { PRESET_NAMES, presetOf } from "../../core/presets.ts";
 import { assertPositionals } from "../args.ts";
@@ -42,7 +43,9 @@ export const policyCommand: AdapterCommand = {
 		const action = args.positionals[0];
 		if (action === "show") {
 			assertPositionals(args, 1, 1, policyCommand.usage);
-			const policy = Policy.parse(await client.call("admin", { do: "policy.show", project: await client.project() }));
+			const policy = Policy.extend({ version: z.number().int().positive() }).parse(
+				await client.call("admin", { do: "policy.show", project: await client.project() }),
+			);
 			if (args.has("json")) printJson(policy, args.bool("compact"));
 			else printPolicy(policy);
 			return 0;

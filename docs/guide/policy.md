@@ -203,16 +203,16 @@ In Settings, open Policy and choose "Edit clauses". This needs a person with ins
 
 Invalid conditions, duplicate clause ids, invalid rule answers, missing final `always` clauses, and holds outside 1 to 365 days prevent preview and apply. Preview reads questions without changing the policy or recording decisions. It shows clause matching, who may answer, rule answers, and which runs list the question. It does not replay decisions, check a particular person's permissions, execute rules, or predict a gate result. Existing decisions stay recorded. Hold and basis changes affect future decisions and runs.
 
-A refused request keeps your draft in the open editor. If the policy changed while you edited, applying asks you to cancel and reopen from the current policy. Cancel discards the draft. Leaving Settings or reloading also discards it.
+A refused request keeps your draft in the open editor. If the policy changes while you edit, a notice marks your opened version as out of date. Apply sends that version, and the server refuses a stale proposal or acceptance. Cancel and reopen to start from the current policy. A waiting proposal cannot replace a newer policy when accepted later. Cancel discards the draft. Leaving Settings or reloading also discards it.
 
-From the command line, send a policy edit to `mainworthy propose`. The edit carries the whole clause list, so start from what `mainworthy policy show --json` prints, change a clause, and send it back. This example, with the clauses cut to `[...]`, makes a reason mandatory for findings and shortens the flaky hold to 7 days:
+From the command line, send a policy edit to `mainworthy propose`. The edit carries the whole clause list, so start from what `mainworthy policy show --json` prints, change a clause, and send it back. Include its `version` as `base` when sending clauses or settings. This example, with the clauses cut to `[...]`, makes a reason mandatory for findings and shortens the flaky hold to 7 days:
 
 ```
-$ mainworthy propose --json '{"edits":[{"op":"policy","preset":"standard","clauses":[...],"settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":7,"infraThisTargetOnly":true}}}]}'
+$ mainworthy propose --json '{"edits":[{"op":"policy","base":1,"preset":"standard","clauses":[...],"settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":7,"infraThisTargetOnly":true}}}]}'
 {"proposal":"P-9","question":"Q-9","conflicts":[],"status":"open","needs":"an admin","cases":[]}
 ```
 
-An admin accepts it like any policy change. Mainworthy refuses a policy in which some kind of question has no last clause that matches `always`:
+Use the version you read in place of `1`. Preset-only and `unlinked` edits may omit `base`; the proposal records the policy version current when it is made. An admin accepts it like any policy change. Mainworthy refuses a policy in which some kind of question has no last clause that matches `always`:
 
 ```
 invalid: every kind must end with a clause that always matches; missing for: finding
