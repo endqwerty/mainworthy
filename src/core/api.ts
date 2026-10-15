@@ -24,7 +24,6 @@ import type {
 } from "./ops.ts";
 import type { CredentialInput, CredentialSummary, InvitationInput, SessionInput } from "./people.ts";
 import type { REPLIES } from "./replies.ts";
-
 import type { TrackerInput, TrackerStatusInput } from "./tracker.ts";
 
 type In<S extends z.ZodType> = z.input<S>;

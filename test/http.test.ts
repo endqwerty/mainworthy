@@ -11,6 +11,7 @@ import { Client } from "../src/cli/client.ts";
 import { seed } from "../src/cli/seed.ts";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import { ERROR_CODES, type ErrorCode } from "../src/core/api.ts";
+import { TrackerReceipt } from "../src/core/tracker.ts";
 import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { OP_LIST, OPS } from "../src/server/ops/index.ts";
@@ -18,6 +19,7 @@ import { invoke } from "../src/server/ops/registry.ts";
 import { Readers } from "../src/server/readers.ts";
 import { type Instance, open, start } from "../src/server/start.ts";
 import type { TrackerPort } from "../src/server/trackers/port.ts";
+import { deliverTrackerRequests } from "../src/server/trackers/requests.ts";
 import { PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
 import { authenticator } from "./people-support.ts";
 
@@ -50,7 +52,17 @@ function boot(
 			proxy: null,
 		},
 		() => ({ ui: null }),
-		options.patience ? { patience: options.patience } : {},
+		{
+			...(options.patience ? { patience: options.patience } : {}),
+			trackerPort: {
+				createDefect: async () => {
+					throw new Error("Unexpected tracker delivery");
+				},
+				getItem: async () => {
+					throw new Error("Unexpected tracker delivery");
+				},
+			},
+		},
 	);
 	running.push(instance);
 	return instance;
@@ -223,6 +235,73 @@ async function replySweep(instance: Instance, project: string) {
 		return reply.result;
 	};
 	return { checked, seen, counts };
+}
+
+async function sweepTrackerReplies(
+	instance: Instance,
+	checked: Awaited<ReturnType<typeof replySweep>>["checked"],
+	project: string,
+) {
+	instance.app.config.github = { project, repository: "example/schema", token: "schema-test-credential" };
+	const report = z.object({ results: z.array(z.number()).min(1) }).parse(
+		await checked("report", {
+			target: { session: "tracker-schema" },
+			results: [{ test: { key: "tracker-schema" }, outcome: "fail" }],
+		}),
+	);
+	const result = report.results[0];
+	const id = "schema-tracker-create";
+	expect(await checked("tracker", { do: "create", result, cmd: id })).toEqual({
+		id,
+		result,
+		state: "queued",
+		issue: null,
+		error: null,
+	});
+	await checked("tracker-status", { id });
+	const entered = Promise.withResolvers<void>();
+	const reply = Promise.withResolvers<void>();
+	const issue = {
+		ref: "github:example/schema#42",
+		url: "https://github.com/example/schema/issues/42",
+		state: "open",
+	} as const;
+	const sending = deliverTrackerRequests(instance.app, {
+		createDefect: async () => {
+			entered.resolve();
+			await reply.promise;
+			return issue;
+		},
+		getItem: async () => {
+			throw new Error("No linked request expected");
+		},
+	});
+	await entered.promise;
+	try {
+		expect(TrackerReceipt.parse(await checked("tracker-status", { id })).state).toBe("sending");
+	} finally {
+		reply.resolve();
+		await sending;
+	}
+	expect(await checked("tracker-status", { id })).toEqual({ id, result, state: "complete", issue, error: null });
+	const failed = "schema-tracker-failed";
+	await checked("tracker", { do: "link", result, key: "404", cmd: failed });
+	await deliverTrackerRequests(instance.app, {
+		createDefect: async () => {
+			throw new Error("No create request expected");
+		},
+		getItem: async () => {
+			throw new Error("Tracker unavailable");
+		},
+	});
+	expect(await checked("tracker-status", { id: failed })).toEqual({
+		id: failed,
+		result,
+		state: "failed",
+		issue: null,
+		error: "The tracker request failed; check the tracker before creating another issue.",
+	});
+	await checked("tracker-status", { id: "schema-tracker-absent" }, {}, "not_found");
 }
 
 /** A plain socket to the instance: what the server sent on it, and whether the server has closed it. */
@@ -1732,6 +1811,7 @@ describe("the surface", () => {
 		await checked("invitation", { do: "create", name: "schema-person" });
 		await checked("invitation", { do: "list" });
 		await checked("invitation", { do: "revoke", id: 1 });
+		await sweepTrackerReplies(instance, checked, "scratch");
 		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());
 		console.log(`all-operation sweep: ${sweep.counts.success} real HTTP replies; Zod and Ajv`);
 	});
@@ -1934,6 +2014,7 @@ describe("the surface", () => {
 		for (const op of OP_LIST) await checked(op.name, [], {}, "invalid");
 		await checked("get", { refs: ["C-99999"] }, {}, "not_found");
 		await checked("get", { refs: ["C-1"] }, bearer("wrong-token"), "unauthenticated");
+		await sweepTrackerReplies(instance, checked, "demo");
 		const total = sweep.counts.success + sweep.counts.error + empty.counts.success + empty.counts.error;
 		expect(total).toBeGreaterThanOrEqual(236);
 		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());

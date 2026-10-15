@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -408,4 +408,82 @@ test("stopping persists the in-flight tracker reply and leaves queued requests f
 			ok: true,
 			result: { state: "complete", issue: item },
 		});
+});
+
+test("a tracker delivery rejected during HTTP drain does not create an unhandled rejection", async () => {
+	directory = mkdtempSync(join(tmpdir(), "mainworthy-tracker-reject-"));
+	const config = { ...defaultConfig({}), owner: "robin", dataDir: directory, port: 0, github };
+	const entered = Promise.withResolvers<void>();
+	const trackerReply = Promise.withResolvers<TrackerItem>();
+	instance = start(config, () => ({ ui: null }), {
+		readers: 1,
+		trackerPort: {
+			...port,
+			createDefect: () => {
+				entered.resolve();
+				return trackerReply.promise;
+			},
+		},
+	});
+	const current = instance;
+	const post = (operation: string, input: unknown) =>
+		fetch(`${current.url}/api/p/scratch/${operation}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(input),
+		});
+	await post("report", {
+		target: { session: "reject-during-stop" },
+		results: [{ test: { key: "checkout" }, outcome: "fail" }],
+	});
+	const result = current.app.db.raw.query<{ id: number }, []>("SELECT id FROM results").get()?.id;
+	expect(await (await post("tracker", { do: "create", result, cmd: "tracker-stop-reject" })).json()).toMatchObject({
+		ok: true,
+		result: { state: "queued" },
+	});
+	const logged = spyOn(console, "error").mockImplementation(() => undefined);
+	const minute = current.minute();
+	await entered.promise;
+	const pool = current.app.readers;
+	if (!pool) throw new Error("No reader pool");
+	const reading = Promise.withResolvers<void>();
+	const readReply = Promise.withResolvers<void>();
+	const run = pool.run.bind(pool);
+	const reads = spyOn(pool, "run").mockImplementation(async (call, fallback) => {
+		reading.resolve();
+		await readReply.promise;
+		return run(call, fallback);
+	});
+	const http = post("find", { in: "cases" });
+	await reading.promise;
+	const write = spyOn(current.app.db, "run").mockImplementationOnce(() => {
+		throw new Error("tracker reply write failed");
+	});
+	const stopping = current.stop();
+	const outcome = stopping.then(
+		() => "stopped",
+		(error: unknown) => String(error),
+	);
+	try {
+		trackerReply.resolve(item);
+		await minute;
+		expect(logged.mock.calls).toContainEqual([
+			"[mainworthy] sending tracker requests failed:",
+			expect.objectContaining({ message: "tracker reply write failed" }),
+		]);
+		expect(await Promise.race([outcome, Bun.sleep(20).then(() => "draining")])).toBe("draining");
+		readReply.resolve();
+		expect(await (await http).json()).toMatchObject({ ok: true, result: { items: [] } });
+		expect(await outcome).toBe("stopped");
+	} finally {
+		write.mockRestore();
+		reads.mockRestore();
+		logged.mockRestore();
+		readReply.resolve();
+		await http;
+		await outcome;
+		await pool.stop();
+		current.app.close();
+		instance = undefined;
+	}
 });
