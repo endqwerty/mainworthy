@@ -16,7 +16,7 @@
 		"test": "bun scripts/check.ts test",
 		"check": "bun scripts/check.ts",
 		"prebuild": "bun scripts/licences.ts --check-bun",
-		"build": "NODE_ENV=production bun build --compile --minify --sourcemap --banner '/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */' src/cli/main.ts src/server/read-worker.ts --outfile dist/mainworthy"
+		"build": "NODE_ENV=production bun build --compile --minify --sourcemap --banner '/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */' src/cli/main.ts src/server/read-worker.ts src/cli/demo-worker.ts --outfile dist/mainworthy"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/core": "^2.3.1",

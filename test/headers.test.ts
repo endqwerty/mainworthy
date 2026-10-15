@@ -6,6 +6,8 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { Client } from "../src/cli/client.ts";
+import { seed } from "../src/cli/seed.ts";
 import { SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { type Instance, start } from "../src/server/start.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
@@ -872,9 +874,52 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			expect(carried(api)).toEqual(expected(OTHER, false));
 			// The executable serves its files itself: it has no bundler behind it and so no socket of one.
 			expect(readdirSync(data).filter((name) => name.startsWith("mainworthy-ui-"))).toEqual([]);
+			// Leave a small demo for a second start, so the compiled reset worker must actually run.
+			await seed(new Client({ url, token: TOKEN, project: "scratch" }), {
+				project: "demo",
+				cases: 30,
+				days: 0,
+				unlinkedFiles: 0,
+			});
 		} finally {
 			child.kill("SIGTERM");
 			await child.exited;
+		}
+		const restarted = Bun.spawn([executable, "serve"], {
+			cwd: data,
+			env: {
+				PATH: process.env.PATH ?? "",
+				HOME: data,
+				USER: "robin",
+				MAINWORTHY_DATA: data,
+				MAINWORTHY_PORT: "0",
+				MAINWORTHY_MODE: "server",
+				MAINWORTHY_OWNER_TOKEN: TOKEN,
+				MAINWORTHY_READERS: "1",
+				MAINWORTHY_DEMO: "demo",
+			},
+			stdout: "pipe",
+			stderr: "inherit",
+			stdin: "ignore",
+		});
+		try {
+			const reader = restarted.stdout.getReader();
+			const decoder = new TextDecoder();
+			let printed = "";
+			while (!printed.includes('demo "demo" seeded again')) {
+				const chunk = await reader.read();
+				if (chunk.done) throw new Error("the compiled executable stopped before refreshing its demo");
+				printed += decoder.decode(chunk.value, { stream: true });
+			}
+			reader.releaseLock();
+			expect(printed).toContain("2000 cases");
+			const url = /http:\/\/127\.0\.0\.1:\d+/.exec(printed)?.[0] ?? "";
+			expect((await fetch(`${url}/healthz`)).status).toBe(200);
+			const demo = new Client({ url, token: TOKEN, project: "demo" });
+			expect((await demo.call("find", { limit: 1 })).items).toHaveLength(1);
+		} finally {
+			restarted.kill("SIGTERM");
+			await restarted.exited;
 		}
 	}, 30_000);
 });

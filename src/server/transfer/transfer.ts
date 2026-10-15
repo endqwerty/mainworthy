@@ -610,8 +610,13 @@ export function removeBootstrap(db: Db): void {
  * No operation offers this. `mainworthy serve` calls it for the demo it seeds again (`MAINWORTHY_DEMO`, in
  * `src/cli/demo.ts`), and only for a project `mainworthy seed` made.
  */
-export function removeProject(db: Db, key: string): ArchiveCounts {
+export function removeProject(
+	db: Db,
+	key: string,
+	progress: (step: string, ms: number) => void = () => {},
+): ArchiveCounts {
 	return importTransaction(db, () => {
+		const began = performance.now();
 		const id = projectLiteral(db, key);
 		const shadow = new Set(
 			TableKind.array()
@@ -631,16 +636,25 @@ export function removeProject(db: Db, key: string): ArchiveCounts {
 			})
 			// A table that finds its rows through a parent goes first, while the parent's rows are still there.
 			.sort((a, b) => Number(!(a.name in PROJECT_PARENT)) - Number(!(b.name in PROJECT_PARENT)));
+		progress("discover tables", performance.now() - began);
 		// Counted before any row goes: a delete can take rows of another table with it (ON DELETE CASCADE).
 		const tables = Object.fromEntries(
-			statements.map(({ name, rows }) => [
-				name,
-				db.raw.query<{ n: number }, []>(`SELECT count(*) AS n ${rows}`).get()?.n ?? 0,
-			]),
+			statements.map(({ name, rows }) => {
+				const start = performance.now();
+				const n = db.raw.query<{ n: number }, []>(`SELECT count(*) AS n ${rows}`).get()?.n ?? 0;
+				progress(`count ${name}`, performance.now() - start);
+				return [name, n];
+			}),
 		);
 		db.raw.exec("PRAGMA defer_foreign_keys = ON");
-		for (const { rows } of statements) db.raw.exec(`DELETE ${rows}`);
+		for (const { name, rows } of statements) {
+			const start = performance.now();
+			db.raw.exec(`DELETE ${rows}`);
+			progress(`delete ${name}`, performance.now() - start);
+		}
+		const checking = performance.now();
 		const foreign = db.raw.query<{ table: string; parent: string }, []>("PRAGMA foreign_key_check").get();
+		progress("check foreign keys", performance.now() - checking);
 		if (foreign)
 			throw new OpError(
 				"internal",
