@@ -4,8 +4,10 @@ import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { CLI_ENTRY } from "../src/cli/test-support.ts";
 import type { SessionInfo } from "../src/core/api.ts";
 import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
+import { PersonalTokenCreated, PersonalTokenRow } from "../src/core/people.ts";
 import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { databasePath } from "../src/server/kernel/app.ts";
 import { SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
@@ -20,6 +22,7 @@ import {
 	holdGate,
 	invite,
 	joined,
+	must,
 	OWNER,
 	PUBLIC,
 	type Sent,
@@ -1442,5 +1445,130 @@ describe("a sign-in body the server cannot read", () => {
 		} finally {
 			logged.mockRestore();
 		}
+	});
+});
+
+describe("a person's own command-line token", () => {
+	test("the local owner creates an expiring token without a browser sign-in", async () => {
+		const w = world({ mode: "local" });
+		const made = PersonalTokenCreated.parse(await w.ok("credential", { do: "token.create", label: "Local CLI" }, {}));
+		expect(made).toMatchObject({ actor: OWNER, expiresAt: T0 + 30 * DAY });
+		expect(await w.status(bearer(made.token))).toBe(200);
+		expect(await w.ok("credential", { do: "token.revoke", id: made.id }, {})).toMatchObject({ revoked: true });
+		expect(await w.status(bearer(made.token))).toBe(401);
+	});
+
+	test("a non-admin creates once, uses current grants, lists only their tokens and revokes them", async () => {
+		const w = world();
+		const cookie = await joined(w, "personal", FIRST, { can: ["read", "produce"], project: "scratch" });
+		const headers = { cookie, origin: w.instance.url };
+		const input = { do: "token.create", label: "Laptop CLI", cmd: "personal-token-once" };
+		const made = await w.op<{ id: number; actor: string; token: string; expiresAt: number }>(
+			"credential",
+			input,
+			headers,
+		);
+		expect(made.status).toBe(200);
+		const token = PersonalTokenCreated.parse(must(made));
+		expect(token).toMatchObject({ actor: "personal", expiresAt: T0 + 30 * DAY });
+		expect(token.token).toMatch(/^cb_[0-9A-Za-z]{32}$/);
+		const cli = Bun.spawn([process.execPath, CLI_ENTRY, "credential", "--json", '{"do":"token.list"}'], {
+			env: { ...process.env, MAINWORTHY_URL: w.instance.url, MAINWORTHY_TOKEN: token.token },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [stdout, stderr, code] = await Promise.all([
+			new Response(cli.stdout).text(),
+			new Response(cli.stderr).text(),
+			cli.exited,
+		]);
+		expect([code, stderr]).toEqual([0, ""]);
+		expect(PersonalTokenRow.array().parse(JSON.parse(stdout))).toMatchObject([{ id: token.id, label: "Laptop CLI" }]);
+		await w.ok("admin", { do: "project.create", key: "other", name: "Other" });
+		expect(said(await w.post("/api/p/other/find", {}, bearer(token.token)))).toBe("404 not_found");
+
+		expect(w.disk().includes(Buffer.from(token.token))).toBe(false);
+		expect(said(await w.op("credential", input, headers))).toBe("409 conflict");
+		const listed = await w.ok<{ id: number; label: string; revoked: boolean }[]>(
+			"credential",
+			{ do: "token.list" },
+			headers,
+		);
+		expect(listed).toMatchObject([{ id: token.id, label: "Laptop CLI", revoked: false }]);
+		expect(listed).toHaveLength(1);
+		expect(listed).toMatchObject([{ lastUsedAt: T0 }]);
+		expect(w.rows("SELECT outcome FROM commands WHERE id = 'personal-token-once'")).toEqual([
+			{ outcome: '"(reply not kept: it held a secret)"' },
+		]);
+		expect(JSON.stringify(listed)).not.toContain(token.token);
+		expect(said(await w.op("credential", { do: "token.revoke", id: 1 }, headers))).toBe("404 not_found");
+		const use = () =>
+			w.post("/api/p/scratch/propose", { edits: [{ op: "create", outline: "CLI case" }] }, bearer(token.token));
+		expect((await use()).status).toBe(200);
+		await w.ok("admin", { do: "grant.set", actor: "personal", project: "scratch", can: ["read"] });
+		expect(said(await use())).toBe("403 forbidden");
+		await w.ok("admin", { do: "grant.remove", actor: "personal", project: "scratch" });
+		expect(said(await w.post("/api/p/scratch/find", { cases: {} }, bearer(token.token)))).toBe("404 not_found");
+		expect(await w.ok<{ revoked: boolean }>("credential", { do: "token.revoke", id: token.id }, headers)).toEqual({
+			revoked: true,
+		});
+		expect(await w.status(bearer(token.token))).toBe(401);
+		expect(await w.status(headers)).toBe(200);
+		expect(await w.ok("credential", { do: "token.list" }, headers)).toMatchObject([{ id: token.id, revoked: true }]);
+	});
+
+	test("expiry is bounded, caller identity cannot be supplied, and token sign-ins cannot renew themselves", async () => {
+		const w = world();
+		const cookie = await joined(w, "expiry-person", FIRST);
+		const headers = { cookie, origin: w.instance.url };
+		for (const expires of ["0d", "never", "366d", "9999w"])
+			expect(said(await w.op("credential", { do: "token.create", label: "No", expires }, headers))).toBe("400 invalid");
+		for (const extra of [{ actor: OWNER }, { can: ["admin"] }, { project: "other" }])
+			expect(said(await w.op("credential", { do: "token.create", label: "No", ...extra }, headers))).toBe(
+				"400 invalid",
+			);
+		const token = await w.ok<{ id: number; token: string; expiresAt: number }>(
+			"credential",
+			{ do: "token.create", label: "Short", expires: "1h" },
+			headers,
+		);
+		expect(token.expiresAt).toBe(T0 + HOUR);
+		expect(said(await w.op("credential", { do: "token.create", label: "Renew" }, bearer(token.token)))).toBe(
+			"403 forbidden",
+		);
+		const signed = await w.post("/api/login", { token: token.token });
+		expect(said(await w.op("credential", { do: "token.create", label: "Renew" }, { cookie: signed.cookie }))).toBe(
+			"403 forbidden",
+		);
+		w.clock.advance(HOUR);
+		expect(await w.status(bearer(token.token))).toBe(401);
+		expect(await w.ok("credential", { do: "token.list" }, headers)).toMatchObject([{ id: token.id, expired: true }]);
+		const longest = await w.ok<{ expiresAt: number }>(
+			"credential",
+			{ do: "token.create", label: "Longest", expires: "365d" },
+			headers,
+		);
+		expect(longest.expiresAt).toBe(T0 + HOUR + 365 * DAY);
+		const another = await w.ok<{ token: string }>("credential", { do: "token.create", label: "Forget" }, headers);
+		await w.ok("admin", { do: "actor.forget", name: "expiry-person" });
+		expect(await w.status(bearer(another.token))).toBe(401);
+	});
+
+	test("a passkey session can create, and the owner's last token stays", async () => {
+		const w = world();
+		const invitation = await invite(w, { name: "passkey-cli", can: ["read"], project: "scratch" });
+		const options = await w.post<{ passkey: RegistrationOptions }>("/api/login/challenge", {
+			invitation: invitation.code,
+		});
+		if (!options.body.ok) throw new Error(options.text);
+		const accepted = await w.post("/api/login", {
+			invitation: invitation.code,
+			passkey: authenticator().register(options.body.result.passkey),
+		});
+		expect(accepted.status).toBe(200);
+		expect(
+			said(await w.op("credential", { do: "token.create", label: "Passkey CLI" }, { cookie: accepted.cookie })),
+		).toBe("200");
+		expect(said(await w.op("credential", { do: "token.revoke", id: 1 }))).toBe("400 invalid");
 	});
 });

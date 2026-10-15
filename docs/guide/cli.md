@@ -149,7 +149,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy tracker-status` | Read a tracker request's delivery state and its verified issue reference. |
 | `mainworthy admin` | Projects, actors, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. |
 | `mainworthy session` | Your browser sessions: list them, and end one. An admin who is a person lists and ends anyone's. |
-| `mainworthy credential` | How a person signs in: list your password and passkeys, register a passkey, remove one. An agent is refused: it signs in with a token only. A password is set in the web UI, never here. |
+| `mainworthy credential` | Your password, passkeys and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default. |
 | `mainworthy invitation` | Invite a person with a link, since there is no mail: make one, list them, revoke one. The link is shown once. |
 
 ### Flags every command takes

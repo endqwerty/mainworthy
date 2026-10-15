@@ -2094,6 +2094,20 @@ describe("the surface", () => {
 				),
 			);
 		await checked("credential", { do: "list" }, headers);
+		const personalInvite = z
+			.object({ code: z.string() })
+			.parse(await checked("invitation", { do: "create", name: "personal-schema" }));
+		const personalLogin = await post(instance, "/api/login", {
+			invitation: personalInvite.code,
+			password: "a schema password",
+		});
+		if (!personalLogin.cookie) throw new Error("No personal session cookie");
+		const personalHeaders = { cookie: personalLogin.cookie.split(";")[0] ?? "", origin: instance.url };
+		const personal = z
+			.object({ id: z.number() })
+			.parse(await checked("credential", { do: "token.create", label: "Schema CLI" }, personalHeaders));
+		await checked("credential", { do: "token.list" }, personalHeaders);
+		await checked("credential", { do: "token.revoke", id: personal.id }, personalHeaders);
 		// Keep a second key so removing the first is allowed.
 		const second = (await checked("credential", { do: "passkey.begin" }, headers)) as RegistrationOptions;
 		await checked(

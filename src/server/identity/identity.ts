@@ -16,7 +16,7 @@ import type { App, Config } from "../kernel/app.ts";
 import type { CallerReference } from "../kernel/caller.ts";
 import type { Actor } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
-import { conflict, invalid, notFound } from "../kernel/errors.ts";
+import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
 import { CONTEXT, clearChallenges } from "./challenges.ts";
 import { credentialSummary, dropUserHandle, forgetCredentialsOf } from "./credentials.ts";
@@ -189,6 +189,17 @@ const Q = {
 	),
 	// Every token of an actor, revoked or not, and the erasure of its label and where it was last used from.
 	tokensOf: sql<{ actor: number }, { id: number }>("SELECT id FROM tokens WHERE actor = $actor"),
+	personalTokens: sql<
+		{ actor: number },
+		{
+			id: number;
+			label: string;
+			created_at: number;
+			expires_at: number | null;
+			last_used_at: number | null;
+			revoked_at: number | null;
+		}
+	>("SELECT id, label, created_at, expires_at, last_used_at, revoked_at FROM tokens WHERE actor = $actor ORDER BY id"),
 	forgetTokenDetails: sql<{ actor: number }>(
 		"UPDATE tokens SET last_used_addr = NULL, label = '' WHERE actor = $actor",
 	),
@@ -827,7 +838,7 @@ export function createToken(
 		lastsMs?: number;
 		madeBy?: number;
 	},
-): { secret: string; actor: string; expiresAt: number | null } {
+): { id: number; secret: string; actor: string; expiresAt: number | null } {
 	if (input.kind === "rule") throw invalid("a rule does not hold a token");
 	mustBeName(input.actor);
 	const db = app.db;
@@ -849,7 +860,7 @@ export function createToken(
 		db.run(Q.setGrant, { actor: actor.id, project: input.project, can: JSON.stringify(input.can) });
 	const secret = newSecret();
 	const expiresAt = input.lastsMs === undefined ? null : at + input.lastsMs;
-	db.run(Q.insertToken, {
+	const made = db.run(Q.insertToken, {
 		actor: actor.id,
 		hash: hashToken(secret),
 		label: input.label,
@@ -858,7 +869,7 @@ export function createToken(
 		by: input.madeBy ?? null,
 		source: null,
 	});
-	return { secret, actor: actor.name, expiresAt };
+	return { id: made.lastId, secret, actor: actor.name, expiresAt };
 }
 
 /** Whether the actor's grant on exactly this project lists exactly these capabilities. */
@@ -970,9 +981,61 @@ export function lastTokenOf(db: Db, id: number, now: number): string | null {
 
 export function revokeToken(app: App, id: number): boolean {
 	const at = app.now();
+	const owner = app.config.owner;
+	if (app.config.mode === "server" && lastTokenOf(app.db, id, at) === owner) {
+		throw invalid(
+			`token ${id} is the last one ${owner} can sign in with, and ${owner} owns this instance. As ${owner}, make ${owner} another token first (mainworthy token new --human ${owner}), then revoke this one`,
+		);
+	}
 	const revoked = app.db.run(Q.revokeToken, { id, at }).changes > 0;
 	if (revoked) endSessionsOnToken(app.db, id, at);
 	return revoked;
+}
+
+export const tokenOwner = (db: Db, id: number): number | null => db.get(Q.tokenById, { id })?.actor ?? null;
+
+export function listPersonalTokens(app: App, actor: number) {
+	const now = app.now();
+	return app.db.all(Q.personalTokens, { actor }).map((row) => {
+		const noted = notedUse(app, "token", row.id);
+		return {
+			id: row.id,
+			label: row.label,
+			createdAt: row.created_at,
+			expiresAt: row.expires_at,
+			expired: row.expires_at !== null && now >= row.expires_at,
+			lastUsedAt: noted === null ? row.last_used_at : Math.max(row.last_used_at ?? 0, noted),
+			revoked: row.revoked_at !== null,
+		};
+	});
+}
+
+export function createPersonalToken(
+	app: App,
+	input: {
+		actor: Actor;
+		session: number | null;
+		context: string | null;
+		label: string;
+		lastsMs: number;
+	},
+) {
+	const session = listSessions(app, app.db, input.actor.id).find((row) => row.id === input.session);
+	if (input.context === null || (input.context !== CONTEXT.local && (!session || session.openedWith === "token")))
+		throw forbidden(
+			"make a personal token from a browser signed in with a password or a passkey, or as the local owner",
+		);
+	const created = createToken(app, {
+		actor: input.actor.name,
+		kind: "human",
+		can: [],
+		project: 0,
+		label: input.label,
+		lastsMs: input.lastsMs,
+		madeBy: input.actor.id,
+	});
+	if (created.expiresAt === null) throw new Error("a personal token must expire");
+	return { id: created.id, actor: created.actor, token: created.secret, expiresAt: created.expiresAt };
 }
 
 /** The minute job removes ended invitations and erases old token addresses, preserving token revocation. */

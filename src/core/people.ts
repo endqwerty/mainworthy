@@ -67,6 +67,27 @@ export const SessionRow = z.object({
 });
 export type SessionRow = z.infer<typeof SessionRow>;
 
+export const PERSONAL_TOKEN_LASTS = { default: "30d", mostMs: 365 * 86_400_000 } as const;
+
+export const PersonalTokenCreated = z.object({
+	id: z.number().int(),
+	actor: z.string(),
+	token: z.string(),
+	expiresAt: z.number(),
+});
+export type PersonalTokenCreated = z.infer<typeof PersonalTokenCreated>;
+
+export const PersonalTokenRow = z.object({
+	id: z.number().int(),
+	label: z.string(),
+	createdAt: z.number(),
+	expiresAt: z.number().nullable(),
+	expired: z.boolean(),
+	lastUsedAt: z.number().nullable(),
+	revoked: z.boolean(),
+});
+export type PersonalTokenRow = z.infer<typeof PersonalTokenRow>;
+
 export const CredentialInput = z.discriminatedUnion("do", [
 	z.object({
 		do: z.literal("list"),
@@ -87,6 +108,24 @@ export const CredentialInput = z.discriminatedUnion("do", [
 		id: z.number().int().describe("The credential, from the list. The last one a person has is not removed."),
 		cmd,
 	}),
+	z.strictObject({
+		do: z.literal("token.create"),
+		label: z.string().trim().min(1).max(60).describe("What you use this token for."),
+		expires: z
+			.string()
+			.default(PERSONAL_TOKEN_LASTS.default)
+			.refine(
+				(text) => {
+					const ms = durationMs(text);
+					return ms !== null && ms <= PERSONAL_TOKEN_LASTS.mostMs;
+				},
+				{ error: `how long it lasts: ${DURATION_FORMAT}; at most 365d` },
+			)
+			.describe("Default: 30d. At most 365d. A password or passkey session creates your own token, shown once."),
+		cmd,
+	}),
+	z.strictObject({ do: z.literal("token.list") }),
+	z.strictObject({ do: z.literal("token.revoke"), id: z.number().int(), cmd }),
 ]);
 export type CredentialInput = z.infer<typeof CredentialInput>;
 
