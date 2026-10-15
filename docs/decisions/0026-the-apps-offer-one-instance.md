@@ -24,7 +24,8 @@ the instance it is served from, so it has no such option to hide.
 
 **Licensing is not shown in the apps.** The repository's licence files are for GitHub and for anyone who takes the
 code. Showing the licence and the notices in the iPhone app and the docs is a backlog item, with what distributing
-the executable needs (issue #234).
+the executable needs (issue #234). Reversed the same day: the web UI and the diagram pages need their notices
+where they are served, and the apps show the licence again (decision 0025).
 
 ## Turned down
 

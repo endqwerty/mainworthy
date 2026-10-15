@@ -14,12 +14,14 @@ COPY skill ./skill
 COPY docs/guide ./docs/guide
 COPY docs/diagrams ./docs/diagrams
 COPY docs/ui/screenshots ./docs/ui/screenshots
+# The licence files, which /docs serves too.
+COPY LICENSE NOTICE THIRD-PARTY-NOTICES.md ./
 RUN NODE_ENV=production bun build --compile --minify --sourcemap src/cli/main.ts src/server/read-worker.ts --outfile /out/mainworthy
 
 FROM debian:bookworm-slim
 RUN useradd --system --uid 10001 --home-dir /data mainworthy && mkdir -p /data && chown mainworthy:mainworthy /data
 COPY --from=build /out/mainworthy /usr/local/bin/mainworthy
-COPY LICENSE NOTICE THIRD-PARTY-NOTICES.md /usr/share/doc/mainworthy/
+COPY --from=build /app/LICENSE /app/NOTICE /app/THIRD-PARTY-NOTICES.md /usr/share/doc/mainworthy/
 # The commit /healthz reports, for a plain `docker build` or `docker compose build`: `--build-arg MAINWORTHY_COMMIT=$(git rev-parse HEAD)`.
 # Here, after the compile stage, so a new commit does not invalidate the cached layers above. Empty means unknown;
 # the server then tries SOURCE_COMMIT, which Coolify sets on the running container and does not pass to the build.

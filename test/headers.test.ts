@@ -583,6 +583,8 @@ describe("the web UI from source: Bun's development bundle, passed on with the h
 		// If Bun stops writing a script into the page, the development policy can lose its hash and this test says so.
 		expect(inline.length).toBeGreaterThan(0);
 		expect(carried(reply)).toEqual(expected(developmentPage(inline.map(sha256)), true));
+		// The bundle carries code from others without their notices; the page names where they are (decision 0025).
+		expect(html).toContain('<link rel="license" href="/docs/licence"');
 		const files = [...html.matchAll(/(?:src|href)="(\/_bun\/[^"]+)"/g)].map((match) => match[1] ?? "");
 		expect(files.some((file) => file.endsWith(".js"))).toBe(true);
 		expect(files.some((file) => file.endsWith(".css"))).toBe(true);
@@ -831,7 +833,9 @@ describe("the executable, built the way `bun run build` builds it", () => {
 			expect(page.headers.get("cache-control")).toBe("no-cache");
 			// The built page has no script of its own in it: that is what lets its policy refuse every inline script.
 			expect(html).not.toMatch(/<script(?![^>]*\ssrc=)/);
-			const files = [...html.matchAll(/(?:src|href)="(\/[^"]+)"/g)].map((match) => match[1] ?? "");
+			// The licence page is a page of the docs, not a file of the build (decision 0025).
+			expect(html).toContain('<link rel="license" href="/docs/licence"');
+			const files = [...html.matchAll(/(?:src|href)="(\/(?!docs\/)[^"]+)"/g)].map((match) => match[1] ?? "");
 			expect(files.map((file) => file.replace(/^.*\./, "")).sort()).toEqual(["css", "js", "svg"]);
 			for (const file of files) {
 				const asset = await fetch(`${url}${file}`);

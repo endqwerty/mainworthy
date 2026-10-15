@@ -34,7 +34,7 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<!-- The copyright line, which the system reads. The App Store listing takes the same line (ios/README.md). -->
+	<!-- The copyright line the app shows under You, About, and the system reads. -->
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright 2026 Daniel Yang</string>
 	<key>NSLocalNetworkUsageDescription</key>

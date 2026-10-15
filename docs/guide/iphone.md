@@ -134,6 +134,10 @@ end a change or run tests again.
 
 The list is yours on the instance, whichever project is open. Pull down to refresh. Other people's sessions,
 passwords and passkeys are managed in the web app.
+
+**You**, **About** also shows the app's version and the server's, the licence (Apache License 2.0), **Licences**,
+which opens the page [Licence](./licence.md) on the instance, and the copyright line.
+
 ## Browse and write cases
 
 1. Open **Cases**. It works like the Files app: **All cases**, the top folders, and the most used tags, with
