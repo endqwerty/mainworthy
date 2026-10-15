@@ -50,7 +50,10 @@ async function archive(task: z.infer<typeof ArchiveTask>): Promise<void> {
 				const fd = openSync(task.path, "w", 0o600);
 				try {
 					const encoder = new TextEncoder();
-					const counts = exportArchive(db, (chunk) => writeBytes(fd, encoder.encode(chunk)), { now: task.now });
+					const counts = exportArchive(db, (chunk) => writeBytes(fd, encoder.encode(chunk)), {
+						now: task.now,
+						...(task.project === undefined ? {} : { project: task.project }),
+					});
 					reply = { ok: true, counts, owner: null, events: [] };
 				} finally {
 					closeSync(fd);

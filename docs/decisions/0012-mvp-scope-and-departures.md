@@ -173,8 +173,9 @@ not the same things done worse.
    step of random sequences of reports, corrections, plans, answers, withdrawals, reopened runs and expiries.
 9. **A review now names its exact commit as well as the case version and change key** (decision 0030, issue #49).
    A new commit under the same pull request needs another review. The MVP originally kept only the change key.
-10. **The export is the whole instance,** as newline-delimited JSON, imported into an empty instance. Per-project
-    export and merge are deferred (#50). Tokens are not exported.
+10. **An export contains the instance or one selected project,** as newline-delimited JSON, imported into an empty
+    instance (decision 0050, issue #50). Import into an instance that already holds data remains deferred.
+    Tokens and other sign-in credentials are not exported.
 11. **Operations:** fifteen, not eighteen. `announce`, `attach` and `trace` are deferred (#42, #51, #41).
     `timeline` was added so the case page's one timeline is reachable from every surface. `transfer` is two
     streaming HTTP routes and two CLI commands instead of an operation, because an archive does not fit in a

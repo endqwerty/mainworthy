@@ -7,14 +7,18 @@ import type { AdapterCommand } from "./types.ts";
 
 export const exportCommand: AdapterCommand = {
 	name: "export",
-	summary: "Stream the instance's lossless archive to a file. A .gz suffix enables gzip.",
-	usage: "export --out <file> [--json]",
+	summary: "Stream an instance or project archive to a file. A .gz suffix enables gzip.",
+	usage: "export --out <file> [--project <key>] [--json]",
 	flags: [{ name: "out", kind: "string", description: "Archive destination. Use .gz for gzip." }],
 	async run(args, client) {
 		assertPositionals(args, 0, 0, exportCommand.usage);
 		const out = args.value("out");
 		if (!out) throw new CliError("invalid", "export needs --out <file>");
-		const response = await client.request("/api/export");
+		const project = args.value("project");
+		if (project === "") throw new CliError("invalid", "export needs a nonempty project key");
+		const response = await client.request(
+			project === undefined ? "/api/export" : `/api/export?project=${encodeURIComponent(project)}`,
+		);
 		if (!response.ok) unwrap(await readEnvelope(response));
 		if (response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/x-ndjson") {
 			await response.body?.cancel();

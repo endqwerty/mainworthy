@@ -45,7 +45,28 @@ $ tail -n 1 mainworthy.ndjson
 
 You can read it with any tool that reads text, search it with `grep`, and keep it in version control if the data suits that.
 
-The archive holds everything except three things. It leaves out tokens, because they are credentials, and the search index, which Mainworthy rebuilds on import. It also leaves out which changes have ended: after an import every change is open, and the questions that were closed when one ended stay closed. If a failure on such a change is reported again, say once more that the change ended (`mainworthy change`). Anyone who reads the archive reads your cases and decisions, so store it as you would the data itself.
+The archive leaves out tokens, sessions, passwords, passkeys, invitations and the search index, which Mainworthy rebuilds on import. It also leaves out which changes have ended: after an import every change is open, and the questions that were closed when one ended stay closed. If a failure on such a change is reported again, say once more that the change ended (`mainworthy change`). Anyone who reads the archive reads your cases and decisions, so store it as you would the data itself.
+
+## Export one project
+
+An instance admin can select a project by its key:
+
+```
+$ mainworthy export --project shop --out shop.ndjson.gz
+exported to shop.ndjson.gz
+```
+
+The archive keeps that project's cases and versions, results, runs, questions, decisions, policies and command history.
+Case aliases and custom field definitions in the policy travel with the project.
+It preserves their IDs, head hashes and verdicts. It includes actors who acted in the project, signed its decisions,
+or have a grant on it, and the people those actors act on behalf of. The policy's rule actor travels too. Their organisations, project grants and global
+grants travel with them. Other projects, their grants, instance metadata and commands outside the project stay out.
+Tokens and other sign-in credentials never travel.
+
+The HTTP equivalent is `GET /api/export?project=shop`, with the same instance admin requirement as a full export.
+An unknown key is an error. Without `--project`, the command exports the whole instance, even when
+`MAINWORTHY_PROJECT` is set. Import either archive into a fresh instance with the command below.
+Import into an instance that already has data is still deferred.
 
 ## Bring cases from another tool
 
@@ -128,7 +149,7 @@ of earlier revisions or results are not supported by these case importers.
 
 ## Import into a new instance
 
-An import loads an archive into a new instance and makes it a copy of the one that exported it. It does not merge. The server keeps answering reads during the import; writes wait until it finishes.
+An import loads an archive into a new instance. A full archive restores every project, and a project archive restores only its selected project. It does not merge. The server keeps answering reads during the import; writes wait until it finishes.
 
 1. Start a new instance and make nothing in it.
 2. Run `mainworthy import` with the archive.

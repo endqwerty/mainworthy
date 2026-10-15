@@ -37,9 +37,15 @@ type Header = z.infer<typeof Header>;
 const TableName = z.object({ name: z.string() });
 const TableKind = z.object({ schema: z.string(), name: z.string(), type: z.string() });
 const Column = z.object({ name: z.string(), pk: Count });
-const ForeignKey = z.object({ table: z.string() });
+const ForeignKey = z.object({ table: z.string(), from: z.string() });
 const ConstraintError = z.object({ code: z.string().startsWith("SQLITE_CONSTRAINT"), message: z.string() });
-type Table = { name: string; columns: string[]; primary: string[]; parents: string[] };
+type Table = {
+	name: string;
+	columns: string[];
+	primary: string[];
+	parents: string[];
+	references: z.infer<typeof ForeignKey>[];
+};
 
 /**
  * The tables an archive never holds. Identity tables keep what lets somebody in. A token's, a session's and an
@@ -113,6 +119,7 @@ function discoverTables(db: Db): Table[] {
 				.sort((a, b) => a.pk - b.pk)
 				.map((column) => column.name),
 			parents: [...new Set(foreignKeys.map((foreign) => foreign.table))].sort(),
+			references: foreignKeys,
 		});
 	}
 	const ordered: Table[] = [];
@@ -130,8 +137,77 @@ function discoverTables(db: Db): Table[] {
 	return ordered;
 }
 
+/** Tables whose project is held by a parent rather than their own row. Unknown unscoped tables fail closed. */
+const PROJECT_PARENT: Readonly<Record<string, { column: string; table: string }>> = {
+	answers: { column: "question", table: "questions" },
+	versions: { column: "case_id", table: "cases" },
+	placements: { column: "case_id", table: "cases" },
+	covers: { column: "requirement", table: "requirements" },
+	run_tests: { column: "run", table: "runs" },
+	slots: { column: "run", table: "runs" },
+	slot_results: { column: "run", table: "runs" },
+	depends_on: { column: "run", table: "runs" },
+};
+
+function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<string, string> {
+	// Read the ID as text: SQLite IDs need not fit in a JavaScript number. The key is always a bound parameter.
+	const project = db.raw
+		.query<{ id: string }, [string]>("SELECT CAST(id AS TEXT) AS id FROM projects WHERE key = ?")
+		.get(key);
+	if (!project) throw new OpError("not_found", `project ${key} not found`);
+	const id = literal(project.id);
+	const filters = new Map<string, string>();
+	for (const table of metadata) {
+		if (["actors", "orgs", "grants"].includes(table.name)) continue;
+		if (table.name === "meta") filters.set(table.name, "WHERE 0");
+		else if (table.name === "projects") filters.set(table.name, `WHERE id = ${id}`);
+		else if (table.columns.includes("project")) filters.set(table.name, `WHERE project = ${id}`);
+		else {
+			const parent = PROJECT_PARENT[table.name];
+			if (!parent) throw invalid(`project export has no ownership rule for table ${table.name}`);
+			filters.set(
+				table.name,
+				`WHERE ${identifier(parent.column)} IN (SELECT id FROM ${identifier(parent.table)} WHERE project = ${id})`,
+			);
+		}
+	}
+	// Declared actor references plus the schema's intentional non-FK references. Keep actors who have access,
+	// even if they have not yet acted, and follow on_behalf_of so historical delegation still has its person.
+	const implicit: Readonly<Record<string, string>> = {
+		commands: "actor",
+		policies: "actor",
+		results: "actor",
+		questions: "owner",
+		runs: "created_by",
+	};
+	const actors = [
+		`SELECT actor FROM grants WHERE project IN (0, ${id})`,
+		`SELECT id FROM actors WHERE kind = 'rule' AND org IN (SELECT org FROM projects WHERE id = ${id})`,
+	];
+	for (const table of metadata) {
+		const filter = filters.get(table.name);
+		if (!filter || table.name === "meta") continue;
+		const columns = new Set(table.references.filter((ref) => ref.table === "actors").map((ref) => ref.from));
+		const extra = implicit[table.name];
+		if (extra) columns.add(extra);
+		for (const column of columns) actors.push(`SELECT ${identifier(column)} FROM ${identifier(table.name)} ${filter}`);
+	}
+	actors.push(
+		`SELECT json_extract(s.value, '$.by') FROM decisions d, json_each(d.signers) s WHERE d.project = ${id} AND s.type = 'object'`,
+	);
+	const included = `WITH RECURSIVE included(id) AS (${actors.join(" UNION ")} UNION SELECT a.on_behalf_of FROM actors a JOIN included i ON a.id = i.id WHERE a.on_behalf_of IS NOT NULL) SELECT id FROM included`;
+	filters.set("actors", `WHERE id IN (${included})`);
+	filters.set(
+		"orgs",
+		`WHERE id IN (SELECT org FROM projects WHERE id = ${id} UNION SELECT org FROM actors WHERE id IN (${included}))`,
+	);
+	filters.set("grants", `WHERE project IN (0, ${id}) AND actor IN (${included})`);
+	return filters;
+}
+
 /**
- * Streams a whole migrated instance as NDJSON inside one consistent read snapshot. Rows follow primary keys;
+ * Streams a migrated instance, or one project and its referenced identity, inside one consistent read snapshot.
+ * Rows follow primary keys;
  * JSON-typed TEXT remains text, and SQLite serializes integers exactly, including values outside JS's safe range.
  * Tokens, sessions, passwords, passkeys and invitations never travel (`UNEXPORTED`). The FTS index is omitted and
  * rebuilt during import. The header names the archive version, not the schema version (`ARCHIVE_VERSION`).
@@ -139,17 +215,23 @@ function discoverTables(db: Db): Table[] {
  * Chunks contain whole lines and are at most about 64 KiB, except for a single larger row. The synchronous
  * writer must not mutate this database connection. A writer failure propagates and releases the snapshot.
  */
-export function exportArchive(db: Db, write: (chunk: string) => void, options: { now?: number } = {}): ExportedArchive {
+export function exportArchive(
+	db: Db,
+	write: (chunk: string) => void,
+	options: { now?: number; project?: string } = {},
+): ExportedArchive {
 	const exportedAt = options.now ?? Date.now();
 	if (!Number.isSafeInteger(exportedAt) || exportedAt < 0)
 		throw invalid("exportedAt must be a nonnegative integer millisecond timestamp");
 	return db.snapshot(() => {
 		const metadata = discoverTables(db);
+		const filters = options.project === undefined ? null : projectFilters(db, metadata, options.project);
+		const filter = (table: Table): string => filters?.get(table.name) ?? where(table);
 		const tables = Object.fromEntries(
 			metadata.map((table) => [
 				table.name,
 				db.raw
-					.query<{ count: number }, []>(`SELECT count(*) AS count FROM ${identifier(table.name)} ${where(table)}`)
+					.query<{ count: number }, []>(`SELECT count(*) AS count FROM ${identifier(table.name)} ${filter(table)}`)
 					.get()?.count ?? 0,
 			]),
 		);
@@ -177,7 +259,7 @@ export function exportArchive(db: Db, write: (chunk: string) => void, options: {
 			const fields = table.columns.flatMap((column) => [literal(column), identifier(column)]);
 			const order = (table.primary.length > 0 ? table.primary : table.columns).map(identifier).join(", ");
 			const statement = db.raw.prepare<{ json: Uint8Array }, []>(
-				`SELECT CAST(json_object(${fields.join(", ")}) AS BLOB) AS json FROM ${identifier(table.name)} ${where(table)} ORDER BY ${order}`,
+				`SELECT CAST(json_object(${fields.join(", ")}) AS BLOB) AS json FROM ${identifier(table.name)} ${filter(table)} ORDER BY ${order}`,
 			);
 			try {
 				for (const row of statement.iterate()) {

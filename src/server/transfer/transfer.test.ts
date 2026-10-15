@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { harness } from "../../../test/helpers.ts";
 import { Db } from "../kernel/db.ts";
 import { OpError } from "../kernel/errors.ts";
 import { ARCHIVE_VERSION, migrate, SCHEMA_VERSION } from "../kernel/migrate.ts";
-import { exportArchive, importArchive, linesOf, linesOfStream, UNEXPORTED } from "./transfer.ts";
+import { exportArchive, importArchive, linesOf, linesOfStream, removeBootstrap, UNEXPORTED } from "./transfer.ts";
 
 // Completion checks use real migrated SQLite databases: compare every stored column, query rebuilt FTS,
 // compare the target before/after rejected input, and time actual export/import of 50,000 result rows.
@@ -550,6 +551,131 @@ afterEach(() => {
 });
 
 describe("Mainworthy instance archives", () => {
+	test("a project archive keeps every head, decision and verdict and excludes other projects", () => {
+		const from = source();
+		const selectedSettings =
+			'{ "named": "雪", "fields": { "risk": { "kind": "choice", "label": "Risk", "required": true, "choices": ["low", "high"] } } }';
+		from.raw.query("UPDATE policies SET settings = ? WHERE project = 23").run(selectedSettings);
+		const expected = dump(from);
+		from.raw.exec(`
+			INSERT INTO orgs VALUES (18, 'Unrelated organisation', 1);
+			INSERT INTO actors VALUES (80, 18, 'human', 'Unrelated person', NULL, 1, NULL);
+			INSERT INTO projects VALUES (24, 18, 'other', 'Unrelated project', 1, 1);
+			INSERT INTO folders VALUES (44, 24, NULL, 'Private folder', 'a0', 'active', 1);
+			INSERT INTO grants VALUES (80, 24, '["admin"]');
+			INSERT INTO actors VALUES (81, 17, 'human', 'Other project only', NULL, 1, NULL);
+			INSERT INTO grants VALUES (81, 24, '["read"]');
+		`);
+		const otherSettings = '{"fields":{"other_only":{"kind":"text","label":"Private field","required":false}}}';
+		insert(from, "policies", { ...fixtures.policies?.[0], project: 24, settings: otherSettings, actor: 80 });
+		const chunks: string[] = [];
+		exportArchive(from, (chunk) => chunks.push(chunk), { now: time, project: "qa" });
+		const text = chunks.join("");
+		expect(text).not.toContain("Unrelated");
+		expect(text).not.toContain("Private folder");
+		expect(text).not.toContain("Other project only");
+		expect(text).not.toContain("instance-note");
+		for (const table of UNEXPORTED) expect(text).not.toContain(`"t":"${table}"`);
+		const to = target();
+		importArchive(to, linesOf(text));
+		const actual = dump(to);
+		for (const [table, rows] of Object.entries(expected)) {
+			expect(actual[table]).toEqual(table === "meta" ? [] : rows);
+		}
+		expect(to.raw.query("SELECT head_hash, claim_hash FROM cases").all()).toEqual(
+			from.raw.query("SELECT head_hash, claim_hash FROM cases").all(),
+		);
+		expect(to.raw.query("SELECT verdict FROM runs").all()).toEqual(from.raw.query("SELECT verdict FROM runs").all());
+		expect(to.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+
+		// Inverting the selection must also exclude children that hold no project column of their own.
+		const otherChunks: string[] = [];
+		const otherCounts = exportArchive(from, (chunk) => otherChunks.push(chunk), { project: "other" });
+		for (const table of [
+			"answers",
+			"versions",
+			"placements",
+			"covers",
+			"run_tests",
+			"slots",
+			"slot_results",
+			"depends_on",
+		]) {
+			expect(otherCounts.tables[table]).toBe(0);
+		}
+		const other = target();
+		importArchive(other, linesOf(otherChunks.join("")));
+		expect(other.raw.query("SELECT key FROM projects").all()).toEqual([{ key: "other" }]);
+		expect(other.raw.query("SELECT name FROM actors ORDER BY id").all()).toEqual([
+			{ name: "Zoë 雪" },
+			{ name: "Unrelated person" },
+			{ name: "Other project only" },
+		]);
+		expect(other.raw.query("SELECT id FROM cases").all()).toEqual([]);
+		expect(other.raw.query("SELECT settings FROM policies").all()).toEqual([{ settings: otherSettings }]);
+	});
+
+	test("project identity includes signer-only actors and the people and organisations behind them", () => {
+		const from = source();
+		from.raw.exec(`
+			INSERT INTO orgs VALUES (18, 'Delegated organisation', 1);
+			INSERT INTO actors VALUES (81, 18, 'human', 'Delegating person', NULL, 1, NULL);
+			INSERT INTO actors VALUES (82, 18, 'agent', 'Signer only', 81, 1, NULL);
+			UPDATE decisions SET signers = '[{"by":82}]';
+		`);
+		const chunks: string[] = [];
+		exportArchive(from, (chunk) => chunks.push(chunk), { project: "qa" });
+		const to = target();
+		importArchive(to, linesOf(chunks.join("")));
+		expect(to.raw.query("SELECT id FROM actors ORDER BY id").all()).toEqual([
+			{ id: 70 },
+			{ id: 71 },
+			{ id: 81 },
+			{ id: 82 },
+		]);
+		expect(to.raw.query("SELECT id FROM orgs ORDER BY id").all()).toEqual([{ id: 17 }, { id: 18 }]);
+		expect(to.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+	});
+
+	test("a project export refuses a new table with no ownership rule before writing", () => {
+		const from = source();
+		from.raw.exec("CREATE TABLE unscoped_private (id INTEGER PRIMARY KEY, note TEXT)");
+		const chunks: string[] = [];
+		expect(() => exportArchive(from, (chunk) => chunks.push(chunk), { project: "qa" })).toThrow(/no ownership rule/);
+		expect(chunks).toEqual([]);
+	});
+
+	test("an untouched project keeps the rule actor for the first policy decision after restore", () => {
+		const from = harness();
+		const to = harness();
+		try {
+			const chunks: string[] = [];
+			exportArchive(from.app.db, (chunk) => chunks.push(chunk), { project: "scratch" });
+			to.app.db.transaction(() => {
+				// The harness recorded project.create; the server's untouched bootstrap records no command.
+				to.app.db.raw.exec("DELETE FROM commands");
+				removeBootstrap(to.app.db);
+				importArchive(to.app.db, linesOf(chunks.join("")));
+			});
+			expect(to.raw("propose", { edits: [{ op: "create", outline: "First case after restore" }] })).toMatchObject({
+				ok: true,
+			});
+			expect(to.app.db.raw.query("SELECT kind, name FROM actors ORDER BY id").all()).toEqual(
+				from.app.db.raw.query("SELECT kind, name FROM actors ORDER BY id").all(),
+			);
+		} finally {
+			from.close();
+			to.close();
+		}
+	});
+
+	test("an unknown project refuses export before the writer receives a byte", () => {
+		const chunks: string[] = [];
+		expect(() => exportArchive(source(), (chunk) => chunks.push(chunk), { project: "missing' OR 1=1 --" })).toThrow(
+			/project.*not found/i,
+		);
+		expect(chunks).toEqual([]);
+	});
 	test("every included table and column survives replay, including full 64-bit integers", () => {
 		const from = source();
 		const to = target();
