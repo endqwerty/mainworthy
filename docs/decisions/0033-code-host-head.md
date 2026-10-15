@@ -18,9 +18,17 @@ Only a pipeline or person can say where the head is. Agent evidence stays adviso
 CI detection supplies no head observation because an old event can name an old head.
 This does not add a code host watcher.
 
-A landing (decision 0038) moves the matching commit's scope to trunk, not the change's
-head. A later fresh head observation can move an ended change's head in either direction
-without reopening the change. The landed commit stays on trunk with its gate and evidence.
+A landing (decision 0038) sets the change's head to the landing commit and places that
+commit on trunk, even if no results have arrived or it is older than the recorded head.
+Its gate is pending until evidence arrives. While a change is merged, ordinary reports
+and explicit head observations leave its head and metadata alone (issue #302). Without
+landing metadata, it keeps the head recorded when it ended. Late evidence for the head
+still changes its gate. Landing metadata received later can select the head and place
+that commit on trunk.
+
+A closed, unmerged change continues to follow reports and head observations. It can
+be reopened on its latest head. Explicitly reopening a merged change permits head
+updates again without moving a landed commit back from trunk.
 
 ## Alternatives and choice
 

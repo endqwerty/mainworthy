@@ -473,7 +473,7 @@ export function ensureTarget(ctx: Ctx, input: TargetIn, updateExistingChange = t
 		own !== null &&
 		own.key === changeKey(ctx.db, project, ownKey(input.commit), input.repo ?? null) &&
 		!ctx.db.get(Q.humanReported, { project, what });
-	const settled = first !== undefined && (placed || advisory) && !gainsPlace;
+	const settled = first !== undefined && (placed || advisory || first.line === "trunk") && !gainsPlace;
 	const trunk = !advisory && input.pr === undefined && input.branch !== undefined && TRUNK_BRANCHES.has(input.branch);
 	if (input.head !== undefined && (trunk || (input.pr === undefined && !input.branch)))
 		throw invalid("head needs a pull request or a non-trunk branch");
@@ -560,6 +560,7 @@ export function firstCountedReport(db: Db, batch: BatchRow, target: TargetRow): 
 /**
  * A code host can say where a change's head is, in either direction. Without that observation, first-reported
  * order still decides. A known late job cannot undo a newer head observation, even after a reset.
+ * A merged change keeps its recorded head and metadata until explicitly reopened.
  */
 function upsertChange(
 	ctx: Ctx,
@@ -573,7 +574,7 @@ function upsertChange(
 	// reported yet, and then the change has no head: the first pipeline or person to report it says where its
 	// head is, and what its base, title and files are.
 	const advisory = ctx.actor.kind === "agent";
-	if (existing && (advisory || !updateExisting)) return existing;
+	if (existing && (advisory || !updateExisting || existing.ended === "merged")) return existing;
 	if (!existing) {
 		const { lastId } = ctx.db.run(Q.insertChange, {
 			project: ctx.project.id,
@@ -646,16 +647,38 @@ export function setChangeEnded(ctx: Ctx, change: ChangeRow, ended: ChangeRow["en
 	return { ...change, ended, ended_at: ended === null ? null : ctx.now, rev: ctx.seq };
 }
 
-/** A recorded landing moves only a matching head, never a different merge or rebased commit. */
+/** A landing identifies the merged head and places its commit on trunk, even before evidence arrives. */
 export function landChangeHead(
 	ctx: Ctx,
 	change: ChangeRow,
 	landing: NonNullable<ChangeInput["landing"]>,
 ): TargetRow | null {
-	if (change.head_sha !== landing.commit) return null;
+	const headChanged = change.head_sha !== landing.commit;
+	if (headChanged)
+		ctx.db.run(Q.updateChange, {
+			id: change.id,
+			base: change.base_sha,
+			head: landing.commit,
+			observed: ctx.seq,
+			title: change.title,
+			url: change.url,
+			files: change.files,
+			rev: ctx.seq,
+		});
 	const what = codeWhat(change.repo, landing.commit);
-	const target = targetsOfCommit(ctx.db, ctx.project.id, what)[0];
-	if (!target || (target.line === "trunk" && target.branch === landing.branch && target.change === null)) return null;
+	const existing = targetsOfCommit(ctx.db, ctx.project.id, what)[0];
+	if (existing && existing.line === "trunk" && existing.branch === landing.branch && existing.change === null) {
+		if (!headChanged) return null;
+		ctx.touched.add(change.key);
+		return existing;
+	}
+	const target =
+		existing ??
+		ensureTarget(ctx, {
+			commit: landing.commit,
+			...(change.repo === null ? {} : { repo: change.repo }),
+			branch: landing.branch,
+		});
 	moveCommit(ctx, target, { line: "trunk", branch: landing.branch, change: null });
 	ctx.touched.add(change.key);
 	return mustTarget(ctx.db, target.id);

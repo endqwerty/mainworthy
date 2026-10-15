@@ -103,14 +103,17 @@ about the change and are no longer asked. Nobody will act on an answer about a p
 that has ended. A failure that came with the merge fails on the line too, and is asked about
 there as its own question.
 
-If the pull request's head itself reached trunk, include its exact hash and trunk branch:
+Include the exact commit that landed and its trunk branch:
 
 ```sh
 $ mainworthy change --json '{"change":"pr:482","state":"merged","landing":{"commit":"1111111111111111111111111111111111111111","branch":"main"}}'
 ```
 
-When `landing.commit` matches the change's recorded head, all its environments move to
-trunk together. The commit keeps its one gate, and planned runs that count it are recomputed.
+`landing.commit` sets the change's head, even if that commit is older than the recorded
+head or CI has not reported it yet. Its gate is pending until results arrive. All its
+environments belong to trunk, including environments reported later. Reports that
+still name the pull request count for this head and raise unexplained failures on trunk.
+The commit keeps its one gate, and planned runs that count it are recomputed.
 Pull request answers remain attributable in history and still cover its older commits.
 They do not carry to trunk. A landed commit's automatic inherited answer ends because it no longer belongs to the change's base comparison.
 Existing trunk answers apply. If this commit gate is the
@@ -123,20 +126,28 @@ scopes but omit the move audit trail. That audit table does not change the archi
 Result-specific inherited excuses require archive schema 11. To transfer older data, upgrade
 the source database and export it again as described in [data](./data.md).
 
-A different merge or rebased hash does not move the original head. Omitting `landing`
-only ends the change. It can be supplied later by repeating `merged` with the metadata.
+A different merge or rebased hash leaves the original commit in its existing scope.
+Omitting `landing` ends the change and keeps its recorded head. You can supply the
+landing later by repeating `merged` with the metadata.
 `landing.branch` takes `main`, `master` or `trunk`. Reopening a change does not move a
 commit back from trunk.
 
-A later report with a code-host head can move even an ended change's recorded head
-in either direction. The change stays ended, and its gate follows that head. This does
-not move the landed commit back from trunk: its evidence and failures still count there.
+A merged change keeps its recorded head. Neither an ordinary report for another commit
+nor a report with `target.head` can replace it. Without landing metadata, the head stays
+on the commit recorded when the change ended. Reports still count evidence, so late
+results for that head can change its verdict. A landing sent later selects its commit
+as the head and places it on trunk.
+
+A change closed without merging continues to follow reports and code-host head
+observations. Explicitly reopening a merged change lets it follow reports again.
+A landed commit keeps its trunk scope.
 Migration 0009 stores head observations without changing archive schema 7.
 
 What stays as it was:
 
-- Without a matching landing, the verdict. The change's last commit keeps the gate it had: a failure nobody explained
-  still reads `blocked`, with no open question behind it.
+- The merged change's head. Its row and `gate --change` keep showing that commit's gate.
+  Without new landing metadata or evidence, an unexplained failure still reads
+  `blocked`, with no open question behind it.
 - Answers already given. They stay under "Settled and excused".
 - Findings about the change. A finding is about a case, and is still worth an answer.
 - A question that an open planned run shows unexplained. That run waits for the answer
