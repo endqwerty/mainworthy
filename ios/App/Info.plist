@@ -31,6 +31,9 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- The copyright line the app shows under You, About, and the system reads. -->
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright 2026 Daniel Yang</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Mainworthy connects to the instance you name. That instance may be on your own network.</string>
 	<key>UIApplicationSceneManifest</key>

@@ -100,6 +100,12 @@ final class QueueUITests: XCTestCase {
 		// Signing out is the last row of a list that grows with the app: it is scrolled to.
 		if !app.buttons["sign-out"].waitForExistence(timeout: 2) { app.swipeUp() }
 		XCTAssertTrue(app.buttons["sign-out"].waitForExistence(timeout: 5))
+		// The licence, and who holds the copyright, as the App Store listing says it.
+		let licence = NSPredicate(format: "label CONTAINS 'Apache License 2.0' OR value CONTAINS 'Apache License 2.0'")
+		XCTAssertTrue(app.descendants(matching: .any).matching(licence).firstMatch.exists)
+		XCTAssertEqual(app.staticTexts["copyright"].label, "Copyright 2026 Daniel Yang")
+		XCTAssertTrue(app.descendants(matching: .any)["licences"].exists)
+		shot("8-about")
 		app.buttons["sign-out"].tap()
 		app.buttons["Sign out"].firstMatch.tap()
 		XCTAssertTrue(app.textFields["address"].waitForExistence(timeout: 10))

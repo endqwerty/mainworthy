@@ -3,7 +3,16 @@
 // its own. What the site adds is decided here from ordinary Markdown: a link to another page becomes that page's
 // address, a link that stands alone and points at a diagram becomes the diagram itself, and a screenshot gets its
 // dark twin.
-import { DOC_PAGES, DOC_SECTIONS, DOCS_ROOT, type DocPage, docUrl, isDocSlug } from "../../core/docs.ts";
+import {
+	DOC_PAGES,
+	DOC_SECTIONS,
+	DOCS_ROOT,
+	type DocPage,
+	docUrl,
+	isDocSlug,
+	LICENCE_FILES,
+	licenceFileUrl,
+} from "../../core/docs.ts";
 
 export type Heading = { id: string; text: string; level: 2 | 3 };
 /** A stretch of a page under one heading: what the search finds and links to. */
@@ -45,11 +54,16 @@ const CALLOUTS: Record<string, string> = {
 export const diagramUrl = (name: string): string => `${DOCS_ROOT}/diagrams/${name}.html`;
 export const screenshotUrl = (name: string): string => `${DOCS_ROOT}/screenshots/${name}.png`;
 
-/** A link between pages as it is written in the Markdown (`./policy.md#presets`), as the site's address. */
+/**
+ * A link between pages as it is written in the Markdown (`./policy.md#presets`), as the site's address; and a link
+ * to a licence file at the root of the repository (`../../LICENSE`), as the address the site serves it at.
+ */
 function pageHref(target: string): string | null {
 	const match = /^\.\/([a-z0-9-]+)\.md(?:#([A-Za-z0-9_-]+))?$/.exec(target);
 	const slug = match?.[1];
-	return slug && isDocSlug(slug) ? docUrl(slug, match[2]) : null;
+	if (slug && isDocSlug(slug)) return docUrl(slug, match[2]);
+	const file = LICENCE_FILES.find((name) => target === `../../${name}`);
+	return file ? licenceFileUrl(file) : null;
 }
 
 export function renderArticle(source: string): Article {
@@ -94,7 +108,9 @@ export function renderArticle(source: string): Article {
 		if (/^https?:\/\//.test(target)) return `<a href="${target}" rel="noopener noreferrer"`;
 		const href = pageHref(target);
 		if (href) return `<a href="${href}"`;
-		problems.push(`a link to ${target}: a page links to another page (./name.md), a diagram or an https address`);
+		problems.push(
+			`a link to ${target}: a page links to another page (./name.md), a licence file (../../LICENSE), a diagram or an https address`,
+		);
 		return all;
 	});
 	for (const match of html.matchAll(/<img src="(?!\/docs\/)([^"]*)"/g))

@@ -116,6 +116,12 @@ is under the GitHub milestone `iOS app`.
   to that): a new screen copies the queue (`ios/README.md`). Builds
   go to `~/.cache/mainworthy-ios`, never into the worktree. The team that signs the app is in
   `ios/Config/Local.xcconfig`, which is not committed: never write a team id into the repository.
+- **Licences are read from the build** (decision 0025). Mainworthy is Apache-2.0. `THIRD-PARTY-NOTICES.md`
+  is written by `bun scripts/licences.ts` from the npm packages the build bundles and from `licences/` (the Bun
+  runtime and its libraries, what the diagrams embed). After adding, removing or upgrading a dependency, run it
+  and commit the result. A licence that `LICENCES` in that script does not name fails `test/licences.test.ts`:
+  whether Mainworthy may ship it is the owner's call, asked in the pull request. Upgrading Bun means reading its
+  libraries again (`licences/README.md`); the Dockerfile, CI and the notices name the same version.
 - **Budgets are tests** (`test/budgets.test.ts`, `bench/`). A change that misses a
   hot-path budget does not merge; do not raise the number.
 - **The check's wall time is a budget** (`scripts/check-plan.ts`). The check warns
@@ -166,7 +172,9 @@ is under the GitHub milestone `iOS app`.
   carry the tailnet's name and one address: the history was not rewritten.
 - The owner's name is not written in the repository (their request, 2026-10-13):
   not in docs, comments, tests, commit messages or pull requests. Write "the
-  owner"; an example person is `robin`.
+  owner"; an example person is `robin`. The one exception is the copyright line, `Copyright 2026` and their
+  legal name, in the licence files, the iPhone app's About section and the checks of those (decision 0025,
+  their request of 2026-10-14). Do not add it anywhere else.
 - The former name, Casebook, stays only in the files `test/architecture.test.ts`
   lists, each with its reason.
 - Competitor claims in `docs/competitors.md` are hypotheses until verified;

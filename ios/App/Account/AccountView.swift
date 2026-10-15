@@ -45,13 +45,19 @@ struct AccountView: View {
 						}
 					}
 					Link("Documentation", destination: workspace.docsAddress)
+					LabeledContent("Licence", value: "Apache License 2.0")
+					Link("Licences", destination: workspace.docsAddress.appending(path: "licence"))
+						.accessibilityIdentifier("licences")
 				} header: {
 					Text("About")
 				} footer: {
-					// A free Apple ID signs an app for seven days, a paid membership for a year. Either way the
+					VStack(alignment: .leading, spacing: 4) {
+						Text(Build.copyright).accessibilityIdentifier("copyright")
+						// A free Apple ID signs an app for seven days, a paid membership for a year. Either way the
 					// app stops opening on that day, and installing it again is what brings it back.
-					if let expiry = Build.signingEnds, expiry.timeIntervalSinceNow < 8 * 86_400 {
-						Text("The app's signing runs out on that day. Install it again before then: the sign-in is kept.")
+						if let expiry = Build.signingEnds, expiry.timeIntervalSinceNow < 8 * 86_400 {
+							Text("The app's signing runs out on that day. Install it again before then: the sign-in is kept.")
+						}
 					}
 				}
 				Section {
@@ -67,13 +73,18 @@ struct AccountView: View {
 	}
 }
 
-/// What this build is: its version, the commit it was built from, and when its signing runs out.
+/// What this build is: its version, the commit it was built from, its copyright, and when its signing runs out.
 enum Build {
 	static var version: String {
 		let info = Bundle.main.infoDictionary ?? [:]
 		let version = info["CFBundleShortVersionString"] as? String ?? "?"
 		let commit = info["MainworthyCommit"] as? String ?? "unknown"
 		return commit == "unknown" ? version : "\(version) (\(commit))"
+	}
+
+	/// The copyright line, from the app's Info.plist, where the App Store and the system read it too.
+	static var copyright: String {
+		Bundle.main.infoDictionary?["NSHumanReadableCopyright"] as? String ?? ""
 	}
 
 	/// When the provisioning profile the app was installed with runs out. Nil in a simulator, which has none.
