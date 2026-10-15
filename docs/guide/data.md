@@ -86,7 +86,7 @@ An automated case gets the `auto` method. A manual case gets `human`.
 
 TestRail CSV must include `ID` and `Title`. `C1234` remains an alias, so
 `mainworthy get C1234` reads the imported case. Include `Section` and `Section Depth`
-to recreate nested folders, including their parents. Text steps use `Steps` and
+to recreate nested folders, including their parents. A section that holds no case of its own has no row in TestRail's export, so a section under it is placed under the section before it: check the folders after an import. Text steps use `Steps` and
 `Expected Result`; separated steps use `Steps (Step)` and `Steps (Expected Result)`.
 A following row with an empty id and title, or the same id and title, adds a step.
 `Automation Type` uses the execution values above. If it is empty or absent,
@@ -108,6 +108,8 @@ Aliases are unique within a project and case-sensitive. They contain at most 120
 ASCII letters, digits, `_`, `.`, `:`, `/`, or `-`, and start with a letter or digit.
 An alias cannot be a bare number or start with `C-`, `Q-`, `R-`, `T-`, or `P-`,
 in either letter case, because those names belong to Mainworthy.
+
+An alias names the case to `get`, `history` and a typed result (`report` with `test: {case: "C1234"}`). A JUnit report does not read it yet: a test named `… @C1234` or with the property `mainworthy=C1234` stays unlinked, while `@C-2` links. Link such tests to the case once, or rename the annotation to the case's ref.
 
 Every source case column, including dates, descriptions, custom fields and any history
 column, stays in the case body's `fields` as JSON under `import.<format>.row.<record>`.
