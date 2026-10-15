@@ -288,7 +288,7 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 			setSignOutState("closed");
 			setStatus(
 				result === "signed-in"
-					? "No answer came back to the sign-out, and this browser is still signed in. Press Sign out again."
+					? "The sign-out did not finish, and this browser is still signed in. Press Sign out again."
 					: "Mainworthy did not answer, so the page cannot tell whether you are signed out. Your browser data was kept. Press Sign out again to retry, or clear this site's data in your browser settings before leaving a shared computer.",
 			);
 		});
