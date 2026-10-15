@@ -20,6 +20,36 @@ const Token = z.object({ token: z.string() });
 const Created = z.object({ cases: z.array(Ref) });
 const Receipt = z.object({ batch: z.number(), fresh: z.boolean(), counts: z.object({ total: z.number() }) });
 
+test("get prints folder archive and placement proposals with nullable edit fields", async () => {
+	await withInstance(async ({ client, cli, run }) => {
+		await client.call("propose", {
+			edits: [
+				{ op: "create", outline: "Movable case" },
+				{ op: "folder", name: "Empty" },
+			],
+		});
+		const proposed = z.object({ proposal: z.string() });
+		const archive = proposed.parse(
+			await client.call("propose", { edits: [{ op: "folder", folder: "Empty", archive: true }] }),
+		);
+		const place = proposed.parse(
+			await client.call("propose", { edits: [{ op: "place", cases: ["C-1"], folder: "Moved" }] }),
+		);
+		const reply = await cli(["get", archive.proposal, "--json"]);
+		expect(reply.stderr).toBe("");
+		expect(reply.code).toBe(0);
+		expect(
+			outputWith(z.array(z.object({ ref: z.string(), edits: z.array(z.record(z.string(), z.unknown())) })), reply),
+		).toEqual([{ ref: archive.proposal, edits: [{ op: "folder", name: null, archive: true }] }]);
+		const moved = await run(["get", place.proposal, "--json"]);
+		expect(moved.code).toBe(0);
+		expect(moved.stderr).toBe("");
+		expect(
+			outputWith(z.array(z.object({ ref: z.string(), edits: z.array(z.record(z.string(), z.unknown())) })), moved),
+		).toEqual([{ ref: place.proposal, edits: [{ op: "place", cases: ["C-1"], folder: "Moved", tags: null }] }]);
+	});
+});
+
 test("actor forget requires a named confirmation, removes access, and preserves the self and owner guards", async () => {
 	await withInstance(
 		async ({ cli, run, client }) => {

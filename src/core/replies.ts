@@ -142,10 +142,10 @@ const ProposalEdit = z.discriminatedUnion("op", [
 		conflicts: z.array(z.object({ path: text, base: z.unknown(), mine: z.unknown(), theirs: z.unknown() })),
 	}),
 	z.looseObject({ op: z.literal("restore"), case: nullableText, to: whole, body: Body }),
-	z.looseObject({ op: z.literal("place"), cases: z.array(nullableText), folder: nullableText, tags: data.optional() }),
+	z.looseObject({ op: z.literal("place"), cases: z.array(nullableText), folder: nullableText, tags: data.nullable() }),
 	z.looseObject({ op: z.literal("state"), cases: z.array(nullableText), to: text }),
 	z.looseObject({ op: z.literal("cover"), case: nullableText, requirement: text, on: flag }),
-	z.looseObject({ op: z.literal("folder"), name: text.optional(), archive: flag.optional() }),
+	z.looseObject({ op: z.literal("folder"), name: nullableText, archive: flag }),
 	z.looseObject({ op: z.literal("policy"), preset: text, clauses: whole }),
 ]);
 const Proposal = z.looseObject({
@@ -354,7 +354,7 @@ export const AdminReply = z.union([
 	z.looseObject({ removed: flag }),
 	Grant.extend({ actor: text }),
 	z.looseObject({ forgotten: text, tokensRevoked: whole }),
-	Policy,
+	Policy.extend({ version: whole }),
 ]);
 export const SessionReply = z.union([z.array(SessionRow), z.looseObject({ ended: z.literal(true), current: flag })]);
 export const CredentialReply = z.union([
