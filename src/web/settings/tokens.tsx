@@ -33,7 +33,7 @@ function tokenFacts(token: Token): string {
 		token.revoked || token.expired || token.expiresAt === null ? null : untilPhrase(token.expiresAt, Date.now());
 	return [
 		`token ${token.id}`,
-		token.label,
+		...(token.label ? [token.label] : []),
 		`created ${age(token.createdAt)}${token.createdBy === null ? "" : ` by ${token.createdBy}`}`,
 		...(left ? [`expires ${left}`] : []),
 		...(token.lastUsedAt === null
