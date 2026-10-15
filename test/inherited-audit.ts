@@ -1,6 +1,26 @@
 import { aggregateSlot, type SlotFill } from "../src/core/runs.ts";
 import type { Db } from "../src/server/kernel/db.ts";
 
+/** A slot's recorded classification also covers later agent results of that cause and scope. */
+export function slotSettlement(db: Db, slot: number, result: number) {
+	return db.raw
+		.query<{ class: string; decision: number }, [number, number]>(
+			`SELECT e.class, e.decision FROM result_excuses e
+   JOIN results named ON named.id = e.result JOIN results incoming ON incoming.id = ?
+   JOIN decisions d ON d.id = e.decision JOIN questions q ON q.id = d.question
+   JOIN slots s ON s.id = e.slot JOIN targets t ON t.id = incoming.target
+   WHERE e.slot = ? AND (e.result = incoming.id OR (
+    incoming.method = 'agent' AND named.signature = incoming.signature AND
+    json_extract(q.subject, '$.scope') = CASE
+     WHEN t.line = 'session' THEN 'run:' || s.run
+     WHEN t.change IS NOT NULL THEN 'change:' || t.change
+     WHEN t.repo IS NOT NULL AND t.repo != '' THEN 'line:' || t.line || '@' || t.repo
+     ELSE 'line:' || t.line END
+   )) ORDER BY e.decision DESC LIMIT 1`,
+		)
+		.get(result, slot);
+}
+
 export function failingSlotResults(db: Db, slot: number) {
 	const rows = db.raw
 		.query<

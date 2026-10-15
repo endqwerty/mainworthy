@@ -137,6 +137,43 @@ describe("what the iOS app reads", () => {
 		expect([...seen].sort()).toEqual([...KINDS].sort());
 	});
 
+	test("a slot dispute is readable in the queue and by its ref", async () => {
+		const made = z.object({ project: z.string() }).parse(await result("POST", "/test/project", {}));
+		const planned = z
+			.object({ run: z.string() })
+			.parse(await op(made.project, "plan", { name: "Disputed slot", select: { cases: ["C-1"] } }));
+		await op(made.project, "report", {
+			run: planned.run,
+			results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "expected 10, got 12" } }],
+		});
+		const token = z.object({ token: z.string() }).parse(
+			await result("POST", "/api/admin", {
+				do: "token.create",
+				actor: `passer-${made.project}`,
+				kind: "human",
+				can: ["read", "produce"],
+				project: made.project,
+			}),
+		).token;
+		const passed = await send(
+			"POST",
+			`/api/p/${made.project}/report`,
+			{ run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] },
+			{ authorization: `Bearer ${token}` },
+		);
+		expect(passed).toMatchObject({ ok: true });
+		const inbox = await op(made.project, "inbox", { kind: "failure" });
+		holds("inbox with a slot dispute", Inbox, inbox);
+		const dispute = (await open(made.project)).find(
+			(item) => z.object({ slot: z.number(), run: z.literal(planned.run) }).safeParse(item.evidence).success,
+		);
+		if (!dispute) throw new Error("the scenario has no slot dispute");
+		holds("slot failure evidence", EVIDENCE.failure, dispute.evidence);
+		expect(dispute.evidence).toMatchObject({ branch: null, message: "expected 10, got 12", hints: ["disputed"] });
+		const [question] = z.array(z.unknown()).parse(await op(made.project, "get", { refs: [dispute.q] }));
+		holds("get a slot dispute", Question, question);
+	});
+
 	test("the documents of a proposed edit", async () => {
 		const adopt = (await open(project)).find((item) => item.kind === "adopt");
 		const ref = (adopt?.evidence as { proposal?: string } | undefined)?.proposal;

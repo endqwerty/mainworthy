@@ -34,7 +34,7 @@ import { recoverAccepted, sweep } from "../src/server/jobs.ts";
 import { type Actor, findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
 import { acceptReport } from "../src/server/ops/writes.ts";
 import { harness } from "./helpers.ts";
-import { failingSlotResults, invalidInherited } from "./inherited-audit.ts";
+import { failingSlotResults, invalidInherited, slotSettlement } from "./inherited-audit.ts";
 
 const SEEDS = Number(process.env.MAINWORTHY_SEQUENCE_SEEDS ?? 40);
 const STEPS = Number(process.env.MAINWORTHY_SEQUENCE_STEPS ?? 100);
@@ -142,7 +142,7 @@ export function sequence(seed: number, preset: string): Problem | null {
 		);
 		const excuseOf = (signature: number, scope: string, target: number, result = 0, slot?: number) =>
 			slot !== undefined
-				? rows("SELECT class, decision FROM result_excuses WHERE result = ? AND slot = ?", result, slot)[0]
+				? slotSettlement(h.app.db, slot, result)
 				: rows(
 						`SELECT class, decision FROM (SELECT class, decision FROM excuses WHERE project = ? AND signature = ? AND scope = ? AND target IN (0, ?) ORDER BY (target != 0) DESC, decision DESC LIMIT 1) UNION ALL SELECT class, decision FROM result_excuses WHERE result = ? AND slot IS NULL ORDER BY decision DESC LIMIT 1`,
 						project,

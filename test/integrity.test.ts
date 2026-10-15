@@ -2427,6 +2427,82 @@ describe("what a decision may change", () => {
 		expect(gate({ commit: "otherscope1" }).verdict).toBe("passed");
 	});
 
+	test.each(["pass", "fail"])("agent %s reports never end a person's slot settlement", (agentOutcome) => {
+		usePolicy("standard");
+		seed(1, ["auto", "agent", "human"]);
+		const ci = h.actor("pipeline", "ci", ["read", "record"]);
+		const agent = h.actor("explorer", "agent", ["read", "produce"]);
+		const target = { commit: "agentslot2", branch: "main" };
+		const planned = plan({
+			name: "Exploration",
+			select: {},
+			accepts: { commit: target.commit },
+			require: exercise(["auto", "agent"]),
+		});
+		const result = (outcome: string) => ({
+			test: { key: "one" },
+			annotation: { case: "C-1", version: 1 },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "shared cause" } } : {}),
+		});
+		report({ target, results: [result(agentOutcome === "pass" ? "fail" : "pass")] }, ci);
+		if (agentOutcome === "pass") expect(decide(open("failure"), { is: "infra" }).status).toBe("decided");
+		report({ target, results: [result(agentOutcome)] }, agent);
+		const dispute = open("failure");
+		expect(dispute.title).toStartWith("Disputed C-1");
+		const settled = decide(dispute, { is: "flaky" });
+		expect(settled.status).toBe("decided");
+		const ledger = rows("SELECT * FROM decisions WHERE kind = 'failure'");
+		const standing = rows("SELECT * FROM result_excuses");
+		for (const [index, outcome] of [agentOutcome, "pass", "fail"].entries()) {
+			report({ target, attempt: index + 2, results: [result(outcome)] }, agent);
+			expect(rows("SELECT * FROM decisions WHERE kind = 'failure'")).toEqual(ledger);
+			expect(rows("SELECT * FROM result_excuses")).toEqual(standing);
+			expect(h.call<{ state: string; decision: { id: number } }[]>("get", { refs: [dispute.q] })).toMatchObject([
+				{ state: "decided", decision: { id: settled.decision } },
+			]);
+			expect(gate({ run: planned.run })).toMatchObject({ verdict: "passed", tally: { disputed: 0 } });
+			expect(gate({ commit: target.commit }).verdict).toBe("passed");
+		}
+		// Replacing the classification recomputes the slot against the latest agent results too.
+		expect(decide(dispute, { is: "infra" }).status).toBe("decided");
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
+	test("an agent's new failure after a mistaken settlement needs its own answer", () => {
+		usePolicy("standard");
+		seed(1, ["auto", "agent"]);
+		const ci = h.actor("pipeline", "ci", ["read", "record"]);
+		const agent = h.actor("explorer", "agent", ["read", "produce"]);
+		const target = { commit: "agentwrong2", branch: "main" };
+		const planned = plan({
+			name: "Exploration",
+			select: {},
+			accepts: { commit: target.commit },
+			require: exercise(["auto", "agent"]),
+		});
+		const result = (outcome: string) => ({
+			test: { key: "one" },
+			annotation: { case: "C-1", version: 1 },
+			outcome,
+			...(outcome === "fail" ? { failure: { message: "shared cause" } } : {}),
+		});
+		report({ target, results: [result("pass")] }, ci);
+		report({ target, results: [result("fail")] }, agent);
+		const prior = open("failure");
+		expect(decide(prior, { is: "mistaken" }).status).toBe("decided");
+		const ledger = rows("SELECT * FROM decisions WHERE kind = 'failure'");
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+		report({ target, attempt: 2, results: [result("fail")] }, agent);
+		const asked = open("failure");
+		expect(asked.title).toStartWith("Disputed C-1");
+		expect(asked.q).not.toBe(prior.q);
+		expect(rows("SELECT * FROM decisions WHERE kind = 'failure'")).toEqual(ledger);
+		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
+		expect(decide(asked, { is: "flaky" }).status).toBe("decided");
+		expect(gate({ run: planned.run }).verdict).toBe("passed");
+	});
+
 	test("two slots sharing results require independent settlements and expiry leaves the cause answer intact", () => {
 		usePolicy("standard");
 		seed(2, ["human", "auto"]);
@@ -2509,35 +2585,38 @@ describe("what a decision may change", () => {
 		expect(recoverDisputes(h.app)).toBe(0);
 	});
 
-	test("a late result renews only its slot settlement and a correcting pass closes the dispute", () => {
-		usePolicy("standard");
-		seed(2, ["human", "auto"]);
-		const ci = h.actor("pipeline", "ci", ["read", "record"]);
-		const passer = h.actor("passer", "human", ["read", "produce"]);
-		const target = { commit: "lateslot01", branch: "main" };
-		const planned = plan({ name: "Late results", select: {}, accepts: { commit: target.commit } });
-		const result = (outcome: string) => ({
-			test: { key: "one" },
-			annotation: { case: "C-1", version: 1 },
-			outcome,
-			...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
-		});
-		report({ target, results: [result("fail")] }, ci);
-		expect(decide(open("failure"), { is: "infra" }).status).toBe("decided");
-		report({ target, results: [result("pass")] }, passer);
-		const prior = open("failure");
-		expect(decide(prior, { is: "infra" }).status).toBe("decided");
-		report({ target, attempt: 2, results: [result("fail")] }, ci);
-		const renewed = open("failure");
-		expect(renewed.q).not.toBe(prior.q);
-		expect(decide(prior, { is: "flaky" }).status).toBe("conflict");
-		expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
-		expect(gate({ commit: target.commit })).toMatchObject({ verdict: "passed", tally: { excused: 1 } });
-		report({ target, attempt: 3, results: [result("pass")] }, ci);
-		expect(first(slots(planned.run)).state).toBe("satisfied");
-		expect(gate({ run: planned.run })).toMatchObject({ tally: { pass: 1, disputed: 0 }, open: [] });
-		expect(decide(renewed, { is: "flaky" }).status).toBe("conflict");
-	});
+	test.each(["ci", "human"] as const)(
+		"a late %s result renews only its slot settlement and a correcting pass closes the dispute",
+		(kind) => {
+			usePolicy("standard");
+			seed(2, ["human", "auto"]);
+			const ci = h.actor("producer", kind, kind === "ci" ? ["read", "record"] : ["read", "produce"]);
+			const passer = h.actor("passer", "human", ["read", "produce"]);
+			const target = { commit: "lateslot01", branch: "main" };
+			const planned = plan({ name: "Late results", select: {}, accepts: { commit: target.commit } });
+			const result = (outcome: string) => ({
+				test: { key: "one" },
+				annotation: { case: "C-1", version: 1 },
+				outcome,
+				...(outcome === "fail" ? { failure: { message: "same cause" } } : {}),
+			});
+			report({ target, results: [result("fail")] }, ci);
+			expect(decide(open("failure"), { is: "infra" }).status).toBe("decided");
+			report({ target, results: [result("pass")] }, passer);
+			const prior = open("failure");
+			expect(decide(prior, { is: "infra" }).status).toBe("decided");
+			report({ target, attempt: 2, results: [result("fail")] }, ci);
+			const renewed = open("failure");
+			expect(renewed.q).not.toBe(prior.q);
+			expect(decide(prior, { is: "flaky" }).status).toBe("conflict");
+			expect(gate({ run: planned.run })).toMatchObject({ verdict: "blocked", tally: { disputed: 1 } });
+			expect(gate({ commit: target.commit })).toMatchObject({ verdict: "passed", tally: { excused: 1 } });
+			report({ target, attempt: 3, results: [result("pass")] }, ci);
+			expect(first(slots(planned.run)).state).toBe("satisfied");
+			expect(gate({ run: planned.run })).toMatchObject({ tally: { pass: 1, disputed: 0 }, open: [] });
+			expect(decide(renewed, { is: "flaky" }).status).toBe("conflict");
+		},
+	);
 
 	test("an attributed cause cannot conceal another unsettled cause in the same disputed slot", () => {
 		usePolicy("standard");

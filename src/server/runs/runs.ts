@@ -801,7 +801,7 @@ export function unexplainedShown(db: Db, run: RunRow): Unexplained[] {
 	} else {
 		for (const slot of db.all(Q.failingSlots, { run: run.id }))
 			for (const fill of failingFillsOf(db, slot.id))
-				if (slot.state !== "disputed" || !excuseForDisputedSlot(db, slot.id, fill.id)) note(fill);
+				if (slot.state !== "disputed" || !excuseForDisputedSlot(db, slot.id, fill.id, run.id)) note(fill);
 	}
 	return [...shown.values()];
 }
@@ -940,6 +940,12 @@ export function failingFillsOf(db: Db, slot: number): Fill[] {
 	const fills = fillsOf(db, slot);
 	const failing = new Set(aggregateFills(fills).failing);
 	return fills.filter((fill) => failing.has(fill.id));
+}
+
+export function effectiveFillsOf(db: Db, slot: number): Fill[] {
+	const fills = fillsOf(db, slot);
+	const effective = new Set(aggregateFills(fills).effective);
+	return fills.filter((fill) => effective.has(fill.id));
 }
 
 export type SlotDispute = {
@@ -1194,7 +1200,7 @@ function count(db: Db, run: RunRow): { tally: Tally; failing: Set<string>; depen
 			const causes = failingFillsOf(db, slot.id);
 			const excuses = causes.map((fill) =>
 				disputed
-					? excuseForDisputedSlot(db, slot.id, fill.id)
+					? excuseForDisputedSlot(db, slot.id, fill.id, run.id)
 					: excuseForResult(db, { ...fill, project: run.project }, scopeFor(fill.target)),
 			);
 			const open = causes.filter((_, i) => !excuses[i]);

@@ -127,6 +127,14 @@ const Q = {
 		{ result: number; slot: number },
 		{ decision: number; class: "attributed" | "excused"; expires_at: number | null }
 	>("SELECT decision, class, expires_at FROM result_excuses WHERE result = $result AND slot = $slot"),
+	slotCauseExcuses: sql<
+		{ slot: number; signature: number },
+		{ decision: number; class: "attributed" | "excused"; expires_at: number | null; target: number }
+	>(
+		`SELECT e.decision, e.class, e.expires_at, r.target FROM result_excuses e
+		 JOIN results r ON r.id = e.result WHERE e.slot = $slot AND r.signature = $signature
+		 ORDER BY e.decision DESC`,
+	),
 	setResultExcuse: sql<{
 		result: number;
 		slot: number | null;
@@ -1556,7 +1564,18 @@ export function excuseForResult(
 }
 
 /** A disputed slot needs its own judgement; a cause or another slot's answer cannot settle it. */
-export const excuseForDisputedSlot = (db: Db, slot: number, result: number) => db.get(Q.slotExcuse, { result, slot });
+export function excuseForDisputedSlot(db: Db, slot: number, result: number, run: number) {
+	const exact = db.get(Q.slotExcuse, { result, slot });
+	if (exact) return exact;
+	const current = resultById(db, result);
+	if (current?.method !== "agent" || current.signature === null) return null;
+	const scope = scopeOf(mustTarget(db, current.target), run);
+	return (
+		db
+			.all(Q.slotCauseExcuses, { slot, signature: current.signature })
+			.find((prior) => scopeOf(mustTarget(db, prior.target), run) === scope) ?? null
+	);
+}
 
 /** Standing for precisely the results named by a failure decision. */
 export function setResultExcuses(

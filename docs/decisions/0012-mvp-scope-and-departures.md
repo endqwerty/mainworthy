@@ -58,11 +58,14 @@ not the same things done worse.
    by its choice of words; a person's is `human` when it names a case and `auto` when they pass on a results file.
    **What an agent reports never moves a commit's gate.** It is recorded and shown, a failure it reports is put to
    a person as a question that holds nothing, and it counts only in a planned run that asked for agents on a case
-   that admits them (decision 0009, "agent evidence in gates"). Nor can it end a person's answer: what an answer
-   about a failure stands on is the cause in its scope, and nothing about who else has reported it since.
-   Whether a slot disputes the cause (which decides who may answer and whether `mistaken` applies) is read from
-   the runs as they are, not from the report that is arriving. Nor does it make a commit current: a commit only
-   an agent has reported has no run and no gate to read (`pending`, nothing counted), is not the newest commit
+   that admits them (decision 0009, "agent evidence in gates"). Nor can it end a person's answer. A cause answer
+   stands on the cause in its scope, independently of later producers. Decision [0078](0078-settle-disputes-per-slot.md)
+   gives each slot dispute its own question, with its own producer restrictions and `mistaken` answer.
+   A later agent report never renews or ends a person's slot settlement, including a changed attempt or outcome.
+   With the same non-agent evidence and scope, the settlement covers later agent failures of that cause there.
+   A person's or pipeline's changed effective result still renews it.
+   An agent cannot make a commit current. A commit reported only by agents has no run and no gate to read
+   (`pending`, nothing counted), is not the newest commit
    of its line or change, and an agent's report never moves a change's head or rewrites its base, title or
    files. Nor does it say where a commit is: a branch or a pull request an agent names is not taken, and no
    change exists because an agent named one. Until a pipeline or a person reports a commit, what an agent found
@@ -71,7 +74,8 @@ not the same things done worse.
    is applied; the questions about the commit are asked there instead; and an answer already given about the
    commit on its own ends in the ledger like any answer whose ground has moved, with the question asked in its
    place naming the runs that rested on it, a closed one included. Each cause is asked about once for each
-   build there, and a dispute is still a dispute there, kept from the same people.
+   build there. Each disputed slot has its own question in the new scope, separate from the cause question,
+   and keeps both sides' producers from settling it under standard and strict.
    The cost: `impact` for a pull request does not show an agent's finding on a commit until the pull request's
    pipeline has reported that commit. And a pipeline's pass says nothing about a failure only an agent showed: such a question stays open
    until a person answers it.
@@ -97,9 +101,10 @@ not the same things done worse.
    elsewhere. A slot requires its own settlement even when the failure was explained before the contradictory pass.
    Under standard and strict, neither side's producers may settle, replace or withdraw that slot's answer.
    Its parties remain recorded after the result is discounted or the run closes. Ordinary cause answers keep
-   their own policy, and cannot replace a slot settlement. A later effective result renews only the slot's
-   settlement. The former integrity test, "a failure already explained is not asked about again because somebody
-   else then passed", now checks both arrival orders against this rule.
+   their own policy, and cannot replace a slot settlement. A later effective result from a person or pipeline
+   renews only the slot's settlement. An agent's result never renews or ends a person's settlement.
+   The former integrity test, "a failure already explained is not asked about again because somebody else then passed",
+   now checks both arrival orders against this rule.
 5. **Drafts live in the browser.** The design autosaves into a server-side open proposal that others see as
    "draft by Dana". With one user that buys nothing; the draft is kept on the device and survives reload and
    crash (commitment L2), and a sealed proposal goes through the same path as designed. So do the notes typed
