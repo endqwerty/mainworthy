@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { quarantineExitText, SameCodeEvidence } from "../../core/flaky.ts";
+import { SameCodeEvidence } from "../../core/flaky.ts";
 import { newStepId } from "../../core/ids.ts";
 import { CaseBody, emptyBody } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
@@ -10,7 +10,7 @@ import { proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { DiffView, ProducerGlyph } from "../ui/index.tsx";
-import { QuarantineList } from "../ui/quarantine.tsx";
+import { QuarantineList, quarantineExitText } from "../ui/quarantine.tsx";
 
 /** Only a recognisable assertion gets a comparison; an arbitrary log stays verbatim. */
 export function assertionComparison(message: string): { expected: string; observed: string } | null {

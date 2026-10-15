@@ -36,7 +36,9 @@ const Q = {
 	>(
 		`SELECT t.commit_sha, printf('%d:%s:%d:%s',r.target,b.job,r.actor,r.method) AS lane,
  r.attempt,r.outcome,r.seq,r.ord FROM results r JOIN targets t ON t.id=r.target JOIN batches b ON b.id=r.batch
- WHERE r.project=$project AND r.test=$test AND r.seq>$since AND t.line='trunk' AND t.commit_sha IS NOT NULL
+ WHERE r.project=$project AND r.test=$test AND t.line='trunk' AND t.commit_sha IS NOT NULL
+ AND NOT EXISTS (SELECT 1 FROM results first JOIN targets initial ON initial.id=first.target
+ WHERE first.project=r.project AND first.test=r.test AND initial.commit_sha=t.commit_sha AND first.seq<=$since)
  AND r.method='auto' AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects=r.id)
  ORDER BY r.seq,r.ord`,
 	),

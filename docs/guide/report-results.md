@@ -465,17 +465,27 @@ says how many quarantined failures it recorded, even when another failure blocks
 It never counts quarantine as a proven pass. Missing evidence and required jobs
 still wait.
 
+Quarantine also excuses a failure already answered as a defect. When that defect
+is the gate's only blocker, entering quarantine changes `failed` to `passed`.
+Ending quarantine leaves the defect answer in force, so the failure counts as a
+defect again.
+
 In a failure question, open **Quarantined tests**, or use the list below the detector
 settings in **Settings**, **Policy**. Enter the test ref, reason and exit rule,
 then choose **Propose quarantine**. Review and accept the proposal in the queue
 with a reason. A person with answer authority must decide under every preset.
 Agents may propose and leave advice. Detector suggestions never enter quarantine.
+To propose an end, fill **Reason to end quarantine** and choose the test's end
+button. Entry and expiry times appear in your browser's local time, including an
+expiry entered in the form.
 
 Choose one exit rule:
 
 - A person's decision, recorded through a proposal to end quarantine.
 - An expiry date. At that instant its failures count normally again, without waiting for background work.
-- One to 100 consecutive passing trunk commits after entry. Every automated lane
+- One to 100 consecutive passing trunk commits whose first result for that test
+  arrived after entry. Retrying a commit first reported before entry cannot count.
+  Every automated lane
   seen for that test on a commit must pass. Retries count once per commit. Failures,
   errors, skips and blocked results break the streak. Agent reports and change
   commits cannot satisfy it. After the streak succeeds, another failing commit

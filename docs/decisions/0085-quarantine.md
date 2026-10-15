@@ -39,8 +39,10 @@ Detector evidence remains optional context; no detector writes quarantine.
 
 Active quarantine is derived from the witnessed entry and immutable observations.
 Expiry is inactive at the exact deadline. A pass rule counts distinct trunk
-commits after entry, using counted automated evidence. Every observed lane on a
-commit must pass; a failure, error, skip or blocked lane breaks the streak. Retries
+commits whose first result for that test arrived after entry, using counted
+automated evidence. Retrying a commit first reported before entry cannot count.
+Every observed lane on a commit must pass; a failure, error, skip or blocked lane
+breaks the streak. Retries
 use their highest decisive attempt with worse same-attempt disagreement retained.
 Agent evidence, sessions and change commits cannot satisfy the exit. Once the
 threshold is reached quarantine stays ended, even after another failure. Correcting
@@ -48,7 +50,10 @@ an observation can change the derived exit because the corrected observation no
 longer stands. No current row is rewritten by a detector or a clock.
 
 Gate and planned-run classification treat only quarantined test failures as
-excused. They retain the original results and expose the quarantine count in the
+excused, including failures already answered as a defect. Quarantine takes
+precedence while it stands. If that defect is the gate's only blocker, entering
+quarantine changes its verdict from `failed` to `passed`. Ending quarantine leaves
+the defect answer in force. The original results remain, with the quarantine count in the
 gate reply and reason, including when another failure blocks the run. A gate may
 return `passed`, but its reason explicitly says how many quarantined failures were
 recorded and are not blocking. Missing evidence and required jobs still block.
