@@ -1135,6 +1135,7 @@ export function SuiteScreen() {
 					adoptedTags = received.tags;
 					adoptedCovers = received.covers;
 					queryClient.setQueryData([project, "get", { refs: [ref] }], [received]);
+					void queryClient.cancelQueries({ queryKey: [project, "find"] });
 					queryClient.setQueriesData<{
 						pages: { items: Record<string, unknown>[]; count: number | null; cursor: string | null }[];
 						pageParams: unknown[];
@@ -1527,6 +1528,7 @@ export function SuiteScreen() {
 	const selection = () => (picked.size ? [...picked] : selected ? [selected] : []);
 	function optimisticPlacement(edits: Edit[]): () => void {
 		const listKey = [project, "find", input, "pages"];
+		void queryClient.cancelQueries({ queryKey: listKey });
 		const oldList = queryClient.getQueryData<typeof list.data>(listKey);
 		const detailKey = [project, "get", { refs: [selected ?? "C-0"] }];
 		const oldDetail = queryClient.getQueryData<Api["get"]["reply"]>(detailKey);

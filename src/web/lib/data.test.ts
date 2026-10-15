@@ -177,6 +177,44 @@ test("automatic paging finishes before its one pending refresh starts", async ()
 	}
 });
 
+test("cancelling a page for an optimistic update preserves its pending refresh", async () => {
+	type Page = { value: string };
+	const key = ["scratch", "find", { in: "cases", limit: 500 }, "pages"];
+	const requests: { signal: AbortSignal; reply: (page: Page) => void }[] = [];
+	const observer = new InfiniteQueryObserver(queryClient, {
+		queryKey: key,
+		initialPageParam: "",
+		queryFn: ({ signal }) => new Promise<Page>((reply) => requests.push({ signal, reply })),
+		getNextPageParam: () => undefined,
+	});
+	const stop = observer.subscribe(() => {});
+	try {
+		requests[0]?.reply({ value: "old" });
+		await Bun.sleep(5);
+		void observer.refetch();
+		changed("scratch", { op: "propose", touched: [] });
+		void queryClient.cancelQueries({ queryKey: key });
+		queryClient.setQueryData(key, { pages: [{ value: "optimistic" }], pageParams: [""] });
+		requests[1]?.reply({ value: "old" });
+		await Bun.sleep(5);
+		expect(requests[1]?.signal.aborted).toBe(true);
+		expect(observer.getCurrentResult().data?.pages[0]?.value).toBe("optimistic");
+		expect(requests).toHaveLength(3);
+		for (let event = 0; event < 5; event++) changed("scratch", { op: "propose", touched: [] });
+		expect(requests[2]?.signal.aborted).toBe(false);
+		requests[2]?.reply({ value: "saved" });
+		await Bun.sleep(5);
+		expect(observer.getCurrentResult().data?.pages[0]?.value).toBe("saved");
+		expect(requests).toHaveLength(4);
+		requests[3]?.reply({ value: "latest" });
+		await Bun.sleep(5);
+		expect(observer.getCurrentResult().data?.pages[0]?.value).toBe("latest");
+		expect(requests).toHaveLength(4);
+	} finally {
+		stop();
+	}
+});
+
 test("invalidateProject waits for the coalesced refresh before an answer handler resumes", async () => {
 	const replies: ((value: { state: string }) => void)[] = [];
 	const observer = new InfiniteQueryObserver(queryClient, {

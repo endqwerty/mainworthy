@@ -2,6 +2,83 @@ import { expect, test } from "bun:test";
 import { parseCase } from "../../src/core/markdown.ts";
 import { browserAvailable, eventually, keyCount, openPage, paste, startServer } from "./support.ts";
 
+for (const action of ["placement", "save"] as const) {
+	test.skipIf(!browserAvailable)(
+		`a held Suite page cannot overwrite a ${action} and is followed by a fresh read`,
+		async () => {
+			const server = await startServer();
+			await server.api("propose", {
+				edits: [
+					{ op: "create", body: { title: "Local case" } },
+					{ op: "create", body: { title: "Remote case" } },
+				],
+			});
+			const h = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			try {
+				const { page } = h;
+				await page.getByRole("button", { name: "Local case", exact: true }).waitFor();
+				await page.getByRole("option").filter({ hasText: "Remote case" }).waitFor();
+				await page.evaluate(() => {
+					const send = window.fetch.bind(window);
+					let reads = 0;
+					const sending = async (input: RequestInfo | URL, init?: RequestInit) => {
+						const reply = await send(input, init);
+						if (String(input).endsWith("/find") && typeof init?.body === "string" && init.body.includes('"cases"')) {
+							const read = ++reads;
+							document.documentElement.dataset.heldReads = String(read);
+							await new Promise<void>((resolve) =>
+								window.addEventListener(read === 1 ? "test:old" : "test:fresh", () => resolve(), { once: true }),
+							);
+						}
+						return reply;
+					};
+					window.fetch = Object.assign(sending, { preconnect: window.fetch.preconnect });
+				});
+				await server.api("propose", {
+					edits: [{ op: "edit", case: "C-2", base: 1, body: { title: "Remote update" } }],
+				});
+				await page.waitForFunction(() => document.documentElement.dataset.heldReads === "1");
+				const row = page.getByRole("option").filter({ hasText: "Local case" });
+				const expected = action === "placement" ? "#localtag" : "Saved local case";
+				if (action === "placement") {
+					await page.keyboard.press("t");
+					await page.keyboard.type("localtag");
+					await page.keyboard.press("Enter");
+				} else {
+					await page.keyboard.press("e");
+					await page.getByRole("textbox", { name: "Case title", exact: true }).fill(expected);
+					await page.keyboard.press("Escape");
+					await page.waitForFunction(() => document.querySelector(".cstate .chip")?.textContent === "v2");
+					await page.getByRole("option").filter({ hasText: "Remote case" }).click();
+				}
+				const shown = action === "placement" ? row : page.getByRole("option").filter({ hasText: expected });
+				await eventually(
+					() => shown.textContent(),
+					(text) => text?.includes(expected) === true,
+				);
+				await page.evaluate(() => window.dispatchEvent(new Event("test:old")));
+				await page.waitForFunction(() => Number(document.documentElement.dataset.heldReads) >= 2);
+				await page.evaluate(
+					() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+				);
+				expect(await page.locator('#list [role="option"]').allTextContents()).toContainEqual(
+					expect.stringContaining(expected),
+				);
+				await page.evaluate(() => window.dispatchEvent(new Event("test:fresh")));
+				await page.getByRole("option").filter({ hasText: "Remote update" }).waitFor();
+				expect(await page.locator('#list [role="option"]').allTextContents()).toContainEqual(
+					expect.stringContaining(expected),
+				);
+				expect(h.errors).toEqual([]);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
+
 test.skipIf(!browserAvailable)(
 	"UI-3 capture from a case URL creates a new case without editing the selected case",
 	async () => {
