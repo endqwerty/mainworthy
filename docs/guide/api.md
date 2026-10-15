@@ -242,6 +242,7 @@ Record a review and what it found. A review with no findings is still recorded.
 | --- | --- | --- | --- |
 | `lens` | `string` | yes | The kind of review, for example adversarial-review. |
 | `about` | `string` | no | The change reviewed, for example pr:482. |
+| `patch` | `string` | no | Exact commit from impact's change.head; required for review reuse. |
 | `reviewed` | `array<string>` | no | Cases read, each as C-311@<hash>. Recorded even with no findings. |
 | `findings` | `array<object>` | no |  Default: `[]`. |
 | `findings[].on` | `string` | yes | Where: a case (C-311), a step (C-311#b7), a requirement (req:WEB-290) or a change (pr:482). |
@@ -722,7 +723,7 @@ An agent that connects over MCP gets these operations as tools, with the same in
 | --- | --- |
 | `propose` | Create or change test cases. Each edit of an existing case names the version it was made on (`base`). Reply: adopted (it is current), open (a person must accept it) or conflict. |
 | `report` | Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref. Reply: counts, the questions raised per cause of failure, and the gate. |
-| `claim` | Record a review: the cases you read (`reviewed`, as C-311@hash) and your findings. A finding already raised comes back under `known` with its answer, so you do not raise it twice. |
+| `claim` | Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers. |
 | `decide` | Answer a question from `inbox`. Pass the `evidenceHash` you saw as `onEvidence`. Reply status: decided, advised (recorded; a person decides), conflict (evidence changed) or forbidden. Failure answers: defect, test, expected, flaky, infra, and where the question's `answers` lists them, inherited and mistaken. |
 | `inbox` | List open questions (failures, proposals, findings, unlinked tests) with their evidence and `evidenceHash`, counts first. `on` narrows to one case, run or change. |
 | `get` | Read things by ref (C-, Q-, R-, T-, P-). For cases use `as: "md"` and `fields` to read less, and `unless: {ref: hash}` to skip what you already hold. |

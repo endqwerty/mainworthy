@@ -54,6 +54,17 @@ Four write. `propose` creates or changes cases, `claim` records a review and its
 
 Start with `impact`. It tells the agent which few cases matter, so it does not read the whole suite. Keep the returned cursor and pass it back as `since` on the next call. [API and agent tools](./api.md#agent-tools) lists every tool's inputs.
 
+When recording a change review with `claim`, set `about` to its change key and `patch` to the exact commit you reviewed.
+Copy that commit from `impact`'s `change.head` before reading the patch. Set `reviewed` to the case refs and hashes you read.
+For example, send `about: "pr:482"`, `patch: "cccc0001"`, and `reviewed: ["C-1@<hash>"]`.
+Keep the original `patch` value if another commit arrives while you are reviewing.
+
+`impact` marks a case reviewed only when this caller reviewed the same case version, change key, and commit.
+A different change starts unreviewed, even at the same commit. A new commit needs another review, even if the case text is unchanged.
+Passing `since` still returns those affected cases when the change moves. With an unchanged change, it returns only cases that moved or are failing.
+Reviews without `about` and `patch` remain recorded but cannot cover a change. A files-only impact request has no known head and cannot reuse reviews.
+An unchanged basis preserves the review. Use `ledger: false` to request fresh eyes.
+
 ## Install the skill
 
 A skill is a short guide that an agent loads when it needs it. Mainworthy ships one, a directory named `mainworthy`. It has a `SKILL.md` and a `references` folder with pages on writing cases, reviewing a change, reporting results and the tool inputs. It teaches the case model and the order of work: start with `impact`, read only the cases you need, record findings in one `claim`, report outcomes in one `report`, and answer a question on the evidence hash it read.

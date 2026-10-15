@@ -24,7 +24,7 @@ const tokens = (value: unknown): number => encode(JSON.stringify(value)).length;
 const TOKEN_COUNTS: Record<string, number> = {
 	propose: 1257,
 	report: 713,
-	claim: 394,
+	claim: 414,
 	decide: 313,
 	inbox: 190,
 	get: 284,

@@ -1292,6 +1292,41 @@ describe("what a session may see", () => {
 });
 
 describe("the surface", () => {
+	test("review reuse through HTTP requires the same change and exact patch", async () => {
+		const instance = boot("local");
+		const request = async <T>(op: string, input: unknown): Promise<T> => {
+			const reply = await post<T>(instance, `/api/p/scratch/${op}`, input);
+			expect(reply.status).toBe(200);
+			if (!reply.body.ok) throw new Error(JSON.stringify(reply.body.error));
+			return reply.body.result;
+		};
+		const created = await request<{ cases: { hash: string }[] }>("propose", {
+			edits: [{ op: "create", outline: "Coupon applies\n  Apply SAVE10 > Total is 90", covers: ["WEB-290"] }],
+		});
+		const report = (pr: number, commit: string) =>
+			request("report", {
+				target: { pr, commit, title: "WEB-290: fix coupon" },
+				results: [{ test: { case: "C-1" }, outcome: "pass" }],
+			});
+		type Impact = { counts: { cases: number; unreviewed: number }; cursor: string };
+		await report(482, "cccc0001");
+		await request("claim", {
+			about: "pr:482",
+			patch: "cccc0001",
+			lens: "review",
+			reviewed: created.cases.map((row) => `C-1@${row.hash}`),
+		});
+		const reviewed = await request<Impact>("impact", { change: "pr:482" });
+		expect(reviewed.counts).toMatchObject({ cases: 1, unreviewed: 0 });
+		await report(483, "cccc0001");
+		expect((await request<Impact>("impact", { change: "pr:483" })).counts).toMatchObject({ cases: 1, unreviewed: 1 });
+		await report(482, "cccc0002");
+		expect((await request<Impact>("impact", { change: "pr:482", since: reviewed.cursor })).counts).toMatchObject({
+			cases: 1,
+			unreviewed: 1,
+		});
+	});
+
 	test("every operation in the registry is a route and is in the generated API description", async () => {
 		const instance = boot("local");
 		const api = (await (await fetch(`${instance.url}/api/openapi.json`)).json()) as {

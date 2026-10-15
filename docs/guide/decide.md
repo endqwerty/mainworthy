@@ -219,9 +219,9 @@ edit by the finder. That edit follows the normal adoption policy.
 "Reject" records disagreement. "Duplicate" records that another finding covers it.
 "Defer" records that you are leaving it for later.
 
-These answers stay with the finding's basis, including its case version and change.
+These answers stay with the finding's recorded basis.
 They do not convert a review into a runtime pass or directly change a commit's gate.
-A changed patch under the same pull request does not yet invalidate a review by itself.
+A review's completion record is separate: a new commit under the same pull request needs another review, even if the case text is unchanged.
 See [agents](./agents.md) for the distinction between reviews and test results.
 
 ## Close a completed run

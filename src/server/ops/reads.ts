@@ -52,7 +52,7 @@ import {
 	testsOfCase,
 	unlinkedCount,
 } from "../evidence/evidence.ts";
-import { findingsOfCase, reviewsAtVersion, reviewsOfCase } from "../evidence/findings.ts";
+import { findingsOfCase, reviewBasis, reviewsAtVersion, reviewsOfCase } from "../evidence/findings.ts";
 import { actorLabel } from "../identity/identity.ts";
 import { type Ctx, findCommand, UNFINISHED } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
@@ -815,7 +815,7 @@ export const checkOp = defineOp({
 
 /**
  * Where to look for a change: the cases it touches, why each is in the set, its last result, whether this caller
- * already reviewed it at its current version, and the questions already open or decided. Counts first, bounded.
+ * already reviewed it at this version and change head, and the questions already open or decided. Counts first, bounded.
  */
 export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 	const project = ctx.project.id;
@@ -868,10 +868,16 @@ export function impact(ctx: Ctx, input: ImpactInput): Record<string, unknown> {
 	for (const [caseId, reasons] of why) {
 		const row = caseById(ctx.db, caseId);
 		if (row?.state !== "active") continue;
-		if (from !== null && row.rev <= from && !reasons.has("failing")) continue;
-		const reviewed = input.ledger
-			? reviewsAtVersion(ctx.db, row.id, row.head).some((review) => review.reviewer === ctx.actor.id)
-			: false;
+		if (from !== null && row.rev <= from && (change?.rev ?? 0) <= from && !reasons.has("failing")) continue;
+		const basis = change?.head_sha
+			? reviewBasis({ version: row.head_hash, about: change.key, patch: change.head_sha })
+			: null;
+		const reviewed =
+			input.ledger &&
+			basis !== null &&
+			reviewsAtVersion(ctx.db, row.id, row.head).some(
+				(review) => review.reviewer === ctx.actor.id && review.basis === basis,
+			);
 		if (!reviewed) unreviewed++;
 		if (reasons.has("failing")) failing++;
 		const last = lastResultsOfCase(ctx.db, row.id, 1)[0];
