@@ -104,6 +104,7 @@ export async function reservePort(
 }
 export async function startServer({
 	cases = 0,
+	firstProject = "scratch",
 	mode = "local",
 	preset,
 	unlinked,
@@ -111,6 +112,7 @@ export async function startServer({
 	passkeys = false,
 }: {
 	cases?: number;
+	firstProject?: string;
 	mode?: "local" | "server";
 	preset?: string;
 	/** What happens to a test with no case, when it is not what the preset starts with. */
@@ -136,6 +138,7 @@ export async function startServer({
 			MAINWORTHY_DATA: dataDir,
 			MAINWORTHY_PORT: String(port),
 			MAINWORTHY_MODE: mode,
+			MAINWORTHY_FIRST_PROJECT: firstProject,
 			MAINWORTHY_OWNER_TOKEN: token,
 			MAINWORTHY_PUBLIC_URL: passkeys ? `http://localhost:${port}` : "",
 			MAINWORTHY_READERS: process.env.MAINWORTHY_READERS ?? testReaders(),
@@ -163,9 +166,9 @@ export async function startServer({
 		}
 		if (!ready) throw new Error("Mainworthy e2e server did not become ready");
 		const api = <O extends OpName>(op: O, input: Api[O]["input"], options: { token?: string } = {}) =>
-			call(op, input, { url, project: "scratch", token: options.token ?? token });
+			call(op, input, { url, project: firstProject, token: options.token ?? token });
 		const seeded = seedData
-			? await seed(new Client({ url, token, project: "scratch" }), { project: "scratch", cases })
+			? await seed(new Client({ url, token, project: firstProject }), { project: firstProject, cases })
 			: null;
 		if (preset || unlinked) {
 			const proposed = await api("propose", {
@@ -174,7 +177,7 @@ export async function startServer({
 			const question = (await api("inbox", { kind: "adopt" })).items.find((q) => q.q === proposed.question);
 			if (question) await api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } });
 		}
-		return { url, project: "scratch", token, seeded, api, stop };
+		return { url, project: firstProject, token, seeded, api, stop };
 	} catch (error) {
 		await stop();
 		throw error;

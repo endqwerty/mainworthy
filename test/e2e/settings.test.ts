@@ -884,3 +884,68 @@ test.skipIf(!browserAvailable)(
 	},
 	30000,
 );
+
+for (const restricted of [true, false]) {
+	test.skipIf(!browserAvailable)(
+		restricted
+			? "P5: entry uses the only granted project, including roots with a query and unknown paths"
+			: "P5: entry uses an instance whose first project is not scratch",
+		async () => {
+			const server = await startServer({ mode: "server", firstProject: restricted ? "scratch" : "other" });
+			let browser: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				if (restricted) await server.api("admin", { do: "project.create", key: "other", preset: "loose" });
+				await call(
+					"propose",
+					{ edits: [{ op: "create", outline: "Only in other" }] },
+					{
+						url: server.url,
+						project: "other",
+						token: server.token,
+					},
+				);
+				const password = "a long enough password";
+				if (restricted) {
+					const made = await server.api("invitation", { do: "create", name: "pat", project: "other", can: ["read"] });
+					if (!("code" in made)) throw new Error("No invitation was made");
+					const accepted = await fetch(`${server.url}/api/login`, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ invitation: made.code, password }),
+					});
+					expect(accepted.status).toBe(200);
+				}
+				browser = await openPage(server, {
+					path: "/p/other/settings",
+					...(restricted ? { as: { name: "pat", password } } : {}),
+				});
+				const { page } = browser;
+				page.setDefaultTimeout(4000);
+				await page.getByRole("option", { name: "Your home", exact: true }).click();
+				await page.getByLabel("Home screen", { exact: true }).selectOption("queue");
+				await page.getByRole("button", { name: "Save home", exact: true }).click();
+				await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
+				for (const path of ["/", "/p/other", "/p/other/", "/?utm=1", "/nowhere"]) {
+					await page.goto(`${server.url}${path}`);
+					const screen = path === "/?utm=1" || path === "/nowhere" ? "suite" : "queue";
+					await page.waitForURL(`${server.url}/p/other/${screen}`);
+					await page.locator("#app").waitFor();
+					expect(await page.locator(".project-name").innerText()).toBe("other");
+					if (screen === "suite") {
+						await eventually(
+							() => page.locator("#lcount").innerText(),
+							(text) => text === "1 cases",
+						);
+						await page.getByRole("option").getByText("Only in other", { exact: true }).waitFor();
+					}
+					expect(await page.getByText("Cases unavailable", { exact: true }).count()).toBe(0);
+					expect(browser.errors).toEqual([]);
+				}
+			} finally {
+				await browser?.close();
+				await server.stop();
+			}
+		},
+		30_000,
+	);
+}
