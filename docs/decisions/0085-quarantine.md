@@ -73,7 +73,7 @@ hides lane folding and exit evaluation behind one effective-quarantine read.
 
 ## Archives and tradeoffs
 
-Migration 0019 adds an exported table and raises the archive version. Entries,
+Migration 0020 adds an exported table and raises the archive version. Entries,
 reasons, decisions and observations travel together; imported expiry rules use
 the destination server's clock. Older archives are refused, as before a breaking
 archive change. The edit is omitted from MCP discovery to preserve the tool token budget. It remains
