@@ -10,7 +10,17 @@ import { newStepId } from "../../core/ids.ts";
 import type { Policy } from "../../core/kinds.ts";
 import { parseCase } from "../../core/markdown.ts";
 import { type Conflict, mergeBodies } from "../../core/merge3.ts";
-import { CaseBody, emptyBody, fieldErrors, REQUIREMENT_KEY, type Step, StepId, TAG } from "../../core/model.ts";
+import {
+	CaseBody,
+	cleanPath,
+	cleanTag,
+	emptyBody,
+	fieldErrors,
+	REQUIREMENT_KEY,
+	type Step,
+	StepId,
+	TAG,
+} from "../../core/model.ts";
 import { CaseAlias, type CaseStamp, type Edit } from "../../core/ops.ts";
 import { parseOutline } from "../../core/outline.ts";
 import { clip } from "../../core/text.ts";
@@ -118,6 +128,9 @@ const Q = {
 	version: sql<{ id: number; no: number }, VersionRow>("SELECT * FROM versions WHERE case_id = $id AND no = $no"),
 	folders: sql<{ project: number }, FolderRow>("SELECT * FROM folders WHERE project = $project ORDER BY parent, rank"),
 	folderById: sql<{ id: number }, FolderRow>("SELECT * FROM folders WHERE id = $id"),
+	folderCaseTags: sql<{ project: number; folder: number }, { tags: string }>(
+		"SELECT tags FROM cases WHERE project = $project AND folder = $folder",
+	),
 	lastFolderRank: sql<{ project: number; parent: number | null }, { rank: string }>(
 		"SELECT rank FROM folders WHERE project = $project AND parent IS $parent ORDER BY rank DESC LIMIT 1",
 	),
@@ -312,15 +325,9 @@ export function folderIndex(db: Db, project: number): FolderIndex {
 		return full;
 	};
 	const byPath = new Map<string, FolderRow>();
-	for (const row of rows) byPath.set(path(row.id).toLowerCase(), row);
+	for (const row of rows) byPath.set(cleanPath(path(row.id)).join("/").toLowerCase(), row);
 	return { byId, path, byPath };
 }
-
-const cleanPath = (text: string): string[] =>
-	text
-		.split("/")
-		.map((part) => part.trim())
-		.filter((part) => part.length > 0);
 
 function folderTarget(index: FolderIndex, target: number | string): FolderTarget {
 	if (typeof target === "number") {
@@ -362,7 +369,7 @@ export const DEFAULT_FOLDER = "Unsorted";
 function cleanTags(tags: readonly string[]): string[] {
 	const out = new Set<string>();
 	for (const raw of tags) {
-		const tag = raw.trim().replace(/^#/, "").toLowerCase();
+		const tag = cleanTag(raw);
 		if (!tag) continue;
 		if (!TAG.test(tag))
 			throw invalid(`tag "${raw}": lower case letters, digits and - _ . / only, at most 40 characters`);
@@ -564,7 +571,9 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 				if (id !== null && parent && isInside(index, deepestExisting(index, parent), id)) {
 					throw invalid("a folder cannot be moved into itself or into a folder inside it");
 				}
-				resolved.push({ op: "folder", id, name: edit.name?.trim() ?? null, parent, archive: edit.archive ?? false });
+				const name = edit.name === undefined ? null : cleanPath(edit.name).join("/");
+				if (name === "") throw invalid("a folder name cannot be empty");
+				resolved.push({ op: "folder", id, name, parent, archive: edit.archive ?? false });
 				break;
 			}
 			case "cover": {
@@ -598,7 +607,7 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 		else if (edit.op === "edit") validateFields(edit.body, policy, bodyOf(ctx.db, edit.caseId, edit.head));
 	}
 
-	const facts = [`author:${ctx.actor.kind}`];
+	const facts = [`author:${ctx.actor.kind}`, ...scopeFacts(ctx.db, ctx.project.id, resolved)];
 	if (conflicts.length > 0) facts.push("conflict");
 	if (resolved.some((r) => r.op === "policy")) facts.push("policy");
 	const no = ctx.nextNo("proposal");
@@ -625,6 +634,72 @@ function isInside(index: FolderIndex, folder: number | null, ancestor: number): 
 		seen.add(at);
 	}
 	return false;
+}
+
+/** Scopes touched by the whole proposal, before and after its edits, including nested folders. */
+export function scopeFacts(db: Db, project: number, edits: readonly Resolved[]): string[] {
+	const index = folderIndex(db, project);
+	const facts = new Set<string>();
+	const folder = (path: string) => {
+		const parts = cleanPath(path.toLowerCase());
+		for (let n = 1; n <= parts.length; n++) facts.add(`folder:${parts.slice(0, n).join("/")}`);
+	};
+	const targetPath = (target: FolderTarget) => ("id" in target ? index.path(target.id) : target.path);
+	const tags = (values: readonly string[]) => {
+		for (const tag of values) facts.add(`tag:${cleanTag(tag)}`);
+	};
+	const existing = (id: number) => {
+		const row = caseById(db, id);
+		if (!row) throw notFound(`case ${id}`);
+		folder(index.path(row.folder));
+		tags(json<string[]>(row.tags));
+	};
+	for (const edit of edits) {
+		switch (edit.op) {
+			case "create":
+				folder(targetPath(edit.folder));
+				tags(edit.tags);
+				break;
+			case "edit":
+			case "restore":
+			case "cover":
+				existing(edit.caseId);
+				break;
+			case "place":
+				if (edit.folder) folder(targetPath(edit.folder));
+				if (edit.tags) tags([...(edit.tags.set ?? []), ...edit.tags.add]);
+				for (const id of edit.caseIds) existing(id);
+				break;
+			case "state":
+				for (const id of edit.caseIds) existing(id);
+				break;
+			case "folder": {
+				const row = edit.id === null ? null : index.byId.get(edit.id);
+				const parent = edit.parent === undefined ? row?.parent : edit.parent;
+				const parentPath = typeof parent === "number" ? index.path(parent) : parent ? targetPath(parent) : "";
+				const next = [parentPath, edit.name ?? row?.name].filter(Boolean).join("/");
+				folder(next);
+				if (edit.id !== null) {
+					const before = index.path(edit.id);
+					for (const child of index.byId.values()) {
+						if (!isInside(index, child.id, edit.id)) continue;
+						const path = index.path(child.id);
+						folder(path);
+						folder(next + path.slice(before.length));
+						for (const row of db.all(Q.folderCaseTags, { project, folder: child.id })) tags(json<string[]>(row.tags));
+					}
+				}
+				break;
+			}
+			case "policy":
+				break;
+			default: {
+				const _exhaustive: never = edit;
+				return _exhaustive;
+			}
+		}
+	}
+	return [...facts];
 }
 
 /** The folder a target names, or for a path that does not exist yet, the deepest part of it that does. */

@@ -23,6 +23,32 @@ An agent's answer is one of three things. It counts as a decision, it is shown a
 
 A failure that nobody has explained blocks every run that shows it, under all three presets. The policy decides who may explain it. The `blocks` column only says which runs list a question. A separate setting says whether an explicit CI declaration that no tests are required may pass an empty commit gate.
 
+## Limit agent edits by folder or tag
+
+Custom `adopt` clauses can test `folder:checkout` or `tag:critical` together with `author:agent`. Folder paths are case-insensitive and include descendants, so `folder:checkout` also matches `Checkout/Coupons`. Tags use their stored lower-case names without `#`.
+
+Write predicates in their normalised form. Folder paths use lower case, with no leading or trailing slash, empty segments, or spaces around a segment. Spaces within a name and literal `..` folder names stay. Tags use lower case without surrounding spaces or a leading `#`. Mainworthy refuses a different spelling with `invalid`, naming the clause and its normalised form. For example, write `folder:checkout` instead of `folder:checkout/` or `folder: checkout`.
+
+Folder paths and tags use Unicode NFC and contain no format characters, such as a zero-width space. A predicate that becomes empty after cleaning is invalid. New folder names and tags use the same cleaning. Existing NFD folder names keep their stored spelling, but folder lookup and scope matching normalise them, so they still match an NFC predicate.
+
+Put a clause like this after the policy and conflict clauses, before the general adoption clause. An instance admin reads the current policy with `mainworthy policy show --json` or HTTP `admin policy.show`. Submit the full clause list through `propose` with `op: "policy"` and that policy version as `base`. An admin accepts that policy change in the queue.
+
+```json
+{
+	"id": "review-checkout-agents",
+	"kind": "adopt",
+	"when": ["author:agent", "folder:checkout"],
+	"ask": { "who": "member", "agents": "none", "notProducer": false, "reason": "optional" },
+	"blocks": "nothing"
+}
+```
+
+This clause holds the whole proposal for a person. Other clauses still decide what happens outside that folder. Replace `folder:checkout` with `tag:critical` to require review for that tag. Keep the policy and conflict clauses before these scope clauses.
+
+Conditions describe the whole proposal, including the current and proposed folders and tags. Moving a case out of a folder or removing its tag still matches its original scope. Folder changes include descendant paths and the tags of cases inside them. A proposal with several edits needs every matching condition somewhere in the proposal, even if different cases supply them. Pending proposals recheck the current folders and tags when shown or answered.
+
+The presets do not add scope restrictions. Per-day limits and protection based on who wrote particular content are not available yet. Under `standard`, every agent proposal already waits for a person.
+
 ## Read the policy
 
 In Settings, open Policy (<kbd>g</kbd> <kbd>,</kbd>). It shows the preset in force, a short summary, and "Compare the policies". An instance admin also sees the clause table, its settings, and "Edit clauses".

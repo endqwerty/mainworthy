@@ -1,7 +1,7 @@
 // Reads over the suite: listing, search, selection, the folder tree and version history.
 // Every list is a bounded range read on a key from the schema; nothing here fetches everything and filters.
 import { diffBodies, summariseDiff } from "../../core/diff.ts";
-import type { CaseBody } from "../../core/model.ts";
+import { type CaseBody, cleanPath } from "../../core/model.ts";
 import type { Selection } from "../../core/ops.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json, placeholders, type SqlValue, sql } from "../kernel/db.ts";
@@ -120,16 +120,7 @@ export function subtree(index: FolderIndex, root: number): number[] {
 
 export function resolveFolderId(index: FolderIndex, target: number | string): number {
 	const row =
-		typeof target === "number"
-			? index.byId.get(target)
-			: index.byPath.get(
-					target
-						.split("/")
-						.map((part) => part.trim())
-						.filter(Boolean)
-						.join("/")
-						.toLowerCase(),
-				);
+		typeof target === "number" ? index.byId.get(target) : index.byPath.get(cleanPath(target).join("/").toLowerCase());
 	if (!row) throw notFound(`folder ${target}`);
 	return row.id;
 }

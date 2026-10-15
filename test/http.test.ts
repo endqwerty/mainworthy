@@ -12,6 +12,8 @@ import { seed } from "../src/cli/seed.ts";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import { ERROR_CODES, type ErrorCode } from "../src/core/api.ts";
 import { Policy } from "../src/core/kinds.ts";
+import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
+import { PRESETS } from "../src/core/presets.ts";
 import { TrackerReceipt } from "../src/core/tracker.ts";
 import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
@@ -304,6 +306,106 @@ async function sweepTrackerReplies(
 	});
 	await checked("tracker-status", { id: "schema-tracker-absent" }, {}, "not_found");
 }
+test("scoped agent edits wait for a person through HTTP", async () => {
+	const instance = boot("local");
+	const { checked } = await replySweep(instance, "scratch");
+	const token = await post<{ token: string }>(instance, "/api/admin", {
+		do: "token.create",
+		actor: "scoped-writer",
+		kind: "agent",
+		can: ["read", "produce", "answer"],
+	});
+	if (!token.body.ok) throw new Error("agent token missing");
+	const agent = bearer(token.body.result.token);
+	const clauses = [
+		...PRESETS.loose.clauses.slice(0, 3),
+		{
+			id: "scoped-agent",
+			kind: "adopt",
+			when: ["author:agent", "folder:checkout"],
+			ask: { who: "member", agents: "none", notProducer: false, reason: "optional" },
+			blocks: "nothing",
+		},
+		{
+			id: "tagged-agent",
+			kind: "adopt",
+			when: ["author:agent", "tag:critical"],
+			ask: { who: "member", agents: "none", notProducer: false, reason: "optional" },
+			blocks: "nothing",
+		},
+		...PRESETS.loose.clauses.slice(3),
+	];
+	const settings = {
+		...PRESETS.loose.settings,
+		fields: { risk: { kind: "choice", label: "Risk", required: true, choices: ["low", "high"] } },
+	};
+	const policy = await post<ProposeReply>(instance, "/api/p/scratch/propose", {
+		edits: [
+			{
+				op: "policy",
+				base: z.object({ version: z.number() }).parse(await checked("admin", { do: "policy.show", project: "scratch" }))
+					.version,
+				clauses,
+				settings,
+			},
+		],
+	});
+	if (!policy.body.ok) throw new Error("policy proposal missing");
+	const inbox = await post<InboxReply>(instance, "/api/p/scratch/inbox", { kind: "adopt" });
+	if (!inbox.body.ok) throw new Error("inbox missing");
+	const q = inbox.body.result.items[0];
+	if (!q) throw new Error("policy question missing");
+	const accepted = await post(instance, "/api/p/scratch/decide", {
+		q: q.q,
+		onEvidence: q.evidenceHash,
+		answer: { is: "accept" },
+	});
+	expect(accepted.body).toMatchObject({ ok: true, result: [{ status: "decided" }] });
+	expect(await checked("admin", { do: "policy.show", project: "scratch" })).toMatchObject({ clauses, settings });
+	await checked("propose", { edits: [{ op: "create", outline: "Missing risk", folder: "Other" }] }, agent, "invalid");
+	const outside = await post<ProposeReply>(
+		instance,
+		"/api/p/scratch/propose",
+		{ edits: [{ op: "create", body: { title: "Outside", fields: { risk: "low" } }, folder: "Other" }] },
+		agent,
+	);
+	expect(outside.body).toMatchObject({ ok: true, result: { status: "adopted" } });
+	const inside = await post<ProposeReply>(
+		instance,
+		"/api/p/scratch/propose",
+		{ edits: [{ op: "create", body: { title: "Inside", fields: { risk: "high" } }, folder: "Checkout/Coupons" }] },
+		agent,
+	);
+	expect(inside.body).toMatchObject({ ok: true, result: { status: "open", needs: "a member who is not an agent" } });
+	const pending = await post<InboxReply>(instance, "/api/p/scratch/inbox", { kind: "adopt" }, agent);
+	if (!pending.body.ok) throw new Error("pending question missing");
+	const edit = pending.body.result.items[0];
+	if (!edit) throw new Error("edit question missing");
+	const refused = await post(
+		instance,
+		"/api/p/scratch/decide",
+		{ q: edit.q, onEvidence: edit.evidenceHash, answer: { is: "accept" } },
+		agent,
+	);
+	expect(refused.body).toMatchObject({ ok: true, result: [{ status: "forbidden" }] });
+	const adopted = await post(instance, "/api/p/scratch/decide", {
+		q: edit.q,
+		onEvidence: edit.evidenceHash,
+		answer: { is: "accept" },
+	});
+	expect(adopted.body).toMatchObject({ ok: true, result: [{ status: "decided" }] });
+	const tagged = await checked(
+		"propose",
+		{
+			edits: [
+				{ op: "create", body: { title: "Tagged", fields: { risk: "low" } }, folder: "Other", tags: ["critical"] },
+			],
+		},
+		agent,
+	);
+	expect(tagged).toMatchObject({ status: "open", needs: "a member who is not an agent" });
+	expect(await checked("admin", { do: "policy.show", project: "scratch" })).toMatchObject({ clauses, settings });
+});
 
 /** A plain socket to the instance: what the server sent on it, and whether the server has closed it. */
 function wire(instance: Instance, payload: string) {
