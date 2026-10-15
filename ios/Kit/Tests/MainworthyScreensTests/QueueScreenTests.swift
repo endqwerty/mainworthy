@@ -177,6 +177,47 @@ struct QueueScreenTests {
 		#expect(AnswerOutbox(project: project, store: store).entries.isEmpty)
 	}
 
+	@Test("waiting answers record before dropped checks, which stop after a network failure", arguments: [false, true])
+	func waitingBeforeDroppedChecks(lookupFails: Bool) async throws {
+		let transport = SwitchableQueueTransport()
+		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
+		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let project = server.project(try await Live.project())
+		let questions = try await project.questions(open: true).questions
+		let failure = try #require(questions.first { $0.kind == .failure })
+		let finding = try #require(questions.first { $0.kind == .finding })
+		let flaky = try #require(failure.choices.first { $0.answer == "flaky" })
+		let outbox = AnswerOutbox(project: project)
+		for _ in 0..<2 {
+			let answer = try #require(project.prepareAnswer(failure, with: flaky))
+			_ = try outbox.enqueue(answer)
+			transport.offline.withLock { $0 = true }
+			await outbox.send()
+			transport.offline.withLock { $0 = false }
+			await outbox.drop(answer.command)
+		}
+		#expect(outbox.entries.map(\.status) == ["Dropped", "Dropped"])
+		let deferChoice = try #require(finding.choices.first { $0.answer == "defer" })
+		let next = try #require(project.prepareAnswer(finding, with: deferChoice))
+		_ = try outbox.enqueue(next)
+		transport.commands.withLock { $0 = [] }
+		transport.lookups.withLock { $0 = [] }
+		transport.lookupFails.withLock { $0 = lookupFails }
+		await transport.lookupGate.holdNext()
+		let sending = Task { await outbox.send() }
+		try await transport.lookupGate.waitUntilPaused()
+		#expect(outbox.entries.last?.status == "Recorded")
+		#expect(try await project.question(finding.ref)?.isOpen == false)
+		let sent = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
+		#expect(sent.map { $0["cmd"]?.string } == [next.command])
+		await transport.lookupGate.release()
+		await sending.value
+		let checked = try transport.lookups.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
+		let ids = outbox.entries.prefix(2).map { Optional($0.id) }
+		#expect(checked.map { $0["cmd"]?.string } == (lookupFails ? [ids[0], ids[0]] : ids))
+		#expect(outbox.entries.map(\.status) == ["Dropped", "Dropped", "Recorded"])
+	}
+
 	@Test("an older saved answer without delivery metadata stays dropped on none")
 	func legacyDrop() async throws {
 		let (outbox, project, _, store) = try await stuckAnswer()
@@ -828,12 +869,14 @@ final class SwitchableQueueTransport: Transport, Sendable {
 	let commandReply = Mutex<JSONValue?>(nil)
 	let gate = QueueSendGate()
 	let lookupGate = QueueSendGate()
+	let lookupFails = Mutex(false)
 	private let inner = URLSessionTransport()
 
 	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
 		if request.url?.lastPathComponent == "command", let body = request.httpBody {
 			lookups.withLock { $0.append(body) }
 			await lookupGate.pauseIfNeeded()
+			if lookupFails.withLock({ $0 }) { throw URLError(.timedOut) }
 			if let reply = commandReply.withLock({ $0 }) {
 				let body: JSONValue = ["ok": true, "result": reply]
 				return (try JSONEncoder().encode(body), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
