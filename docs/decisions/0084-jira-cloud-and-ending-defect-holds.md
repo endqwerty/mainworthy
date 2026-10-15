@@ -41,7 +41,7 @@ The server accepts an HTTPS site origin only, with no embedded credentials, path
 
 The existing minute job checks up to twenty due defect decisions, oldest deadline first. Open issues are checked again after a minute. Failed or unreadable status requests preserve the hold and retry after one, two, four, eight, sixteen, thirty-two, then at most sixty minutes. Success resets the back-off. Poll state persists over restart. Overlapping jobs share one run, the writer is free during each network wait, and shutdown stops new reads and waits for the current read before closing the database. Each completion rechecks configuration and the current decision. A random nonce in `tracker_polls` prevents a reply from an earlier archive state ending a replacement hold.
 
-Migration 0015 adds only `tracker_polls`, which is omitted from archives and cleared on import. The archive version stays unchanged. Imported live defect decisions can be polled afresh under the destination instance's process configuration. Poll rows for old decisions can remain locally, but only current defect decisions are scheduled.
+Migration 0016 adds only `tracker_polls`, which is omitted from archives and cleared on import. The archive version stays unchanged. Imported live defect decisions can be polled afresh under the destination instance's process configuration. Poll rows for old decisions can remain locally, but only current defect decisions are scheduled.
 
 ## Synthesis decision
 
