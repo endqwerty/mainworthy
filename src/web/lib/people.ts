@@ -11,6 +11,8 @@ import {
 	PersonalTokenCreated,
 	PersonalTokenRow,
 	type SessionRow,
+	TotpConfirmed,
+	TotpEnrolment,
 } from "../../core/people.ts";
 import { type CallOptions, call } from "./api.ts";
 import { CreationOptions, type Registration } from "./passkey.ts";
@@ -35,7 +37,7 @@ const SessionRows = z.array(
 const CredentialRows = z.array(
 	z.object({
 		id: z.number(),
-		kind: z.enum(["password", "passkey"]),
+		kind: z.enum(["password", "passkey", "totp"]),
 		label: z.string(),
 		createdAt: z.number(),
 		lastUsedAt: z.number().nullable(),
@@ -147,3 +149,8 @@ export const revokePersonalToken = async (id: number): Promise<{ revoked: boolea
 	z
 		.object({ revoked: z.boolean() })
 		.parse(await call("credential", { do: "token.revoke", id, cmd: crypto.randomUUID() }));
+
+export const beginTotp = async (): Promise<TotpEnrolment> =>
+	TotpEnrolment.parse(await call("credential", { do: "totp.begin" }));
+export const confirmTotp = async (challenge: string, code: string): Promise<TotpConfirmed> =>
+	TotpConfirmed.parse(await call("credential", { do: "totp.confirm", challenge, code }));

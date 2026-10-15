@@ -24,6 +24,7 @@ import { listInvitations, revokeInvitation, revokeInvitationsOf, sweepInvitation
 import { addressKey, isGeneratedSecret, prefixKey } from "./limiter.ts";
 import { publicAddress } from "./people.ts";
 import {
+	endPasswordSessions,
 	endSession,
 	endSessionById,
 	endSessionsOf,
@@ -45,7 +46,9 @@ export {
 	acceptInvitation,
 	addPasskey,
 	beginPasskey,
+	beginTotp,
 	changePassword,
+	confirmTotp,
 	createInvitation,
 	credentialOwner,
 	listCredentials,
@@ -58,6 +61,7 @@ export {
 	signInMethods,
 	signInWithPasskey,
 	signInWithPassword,
+	signInWithTotp,
 	type WhyNot,
 } from "./people.ts";
 export { manageTeams } from "./teams.ts";
@@ -393,6 +397,10 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
 			);
 		}
 		if (server && app.config.proxy === null) warnings.push(NO_PROXY_NAMED);
+		if (app.config.requireAdminMfa) {
+			for (const actor of app.db.all(Q.actors, { org }))
+				if (hasAdminGrant(app.db, actor.id)) endPasswordSessions(app.db, actor.id, at);
+		}
 		return { owner: toActor(app.db, owner, 0), generatedToken, warnings };
 	});
 }
@@ -941,7 +949,10 @@ function mustActor(db: Db, name: string): ActorRow {
 export function setGrant(app: App, input: { actor: string; project: number; can: readonly Capability[] }): void {
 	const row = mustActor(app.db, input.actor);
 	refuseGrant(row.kind, input.can);
+	const wasAdmin = hasAdminGrant(app.db, row.id);
 	app.db.run(Q.setGrant, { actor: row.id, project: input.project, can: JSON.stringify(input.can) });
+	if (app.config.requireAdminMfa && !wasAdmin && hasAdminGrant(app.db, row.id))
+		endPasswordSessions(app.db, row.id, app.now());
 }
 
 /** Takes away an actor's grant on one project (0: its grant on every project). False when it held none there. */
@@ -1125,4 +1136,8 @@ export function listActors(db: Db) {
 			can: heldCapabilities(row.kind, json<Capability[]>(grant.can)),
 		})),
 	}));
+}
+
+export function hasAdminGrant(db: Db, actor: number): boolean {
+	return db.all(Q.grants, { actor }).some((grant) => json<string[]>(grant.can).includes("admin"));
 }

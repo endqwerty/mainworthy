@@ -41,7 +41,9 @@ The app signs in to `mainworthy.com`. It does not ask for an address.
    takes no token: a token is for a script or a pipeline.
 2. Press **Sign in**.
 
-The app opens a session, as a browser does, and keeps that session in the phone's keychain. It does not keep
+An account with an enrolled authenticator requires a second sign-in step. This build does not support that step yet. It says so after the password is accepted and keeps no session. Use the web app for that account. An instance that requires a second factor for admins also refuses password-only admin sign-in in the app.
+
+After sign-in completes, the app opens a session, as a browser does, and keeps that session in the phone's keychain. It does not keep
 the password. The session appears in the web app under Settings, **Your sessions**, as "Mainworthy for
 iPhone", and you can end it there.
 

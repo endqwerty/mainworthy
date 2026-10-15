@@ -4,6 +4,20 @@ Every command of `mainworthy`, with its flags and exit codes. The tables on this
 
 `mainworthy` is one executable. With no arguments it starts the server. Almost every other command talks to a running server over HTTP, on this machine or another one. `mainworthy fmt` and `mainworthy help` need no server.
 
+## Sign in with a password and a code
+
+`login` exchanges your password and, when enrolled, an authenticator or recovery code for a personal CLI token. It ends the temporary browser session and prints the token once. Store the input secrets in private files, then run:
+
+```
+mainworthy login --url https://mainworthy.example --name robin --password-file /private/password --code-file /private/code --label laptop --expires 30d
+```
+
+The password file holds the password, with one optional final newline. The code file holds a current authenticator code or unused recovery code. Each file is limited to 4096 bytes. Neither secret is an argument or printed in an error. `--code-file` is needed only for an account with an enrolled authenticator. The command refuses plain HTTP to another machine. It ignores existing token options because you are signing in anew.
+
+Set the returned token as `MAINWORTHY_TOKEN` or keep it in a private token file. `--json` returns `id`, `actor`, `token`, and `expiresAt`. The default token lifetime is 30 days, and the maximum is one year. Delete the password and code files when you no longer need them.
+
+As the local owner, `mainworthy credential --do totp.begin` starts [authenticator enrolment](./access.md#add-an-authenticator-for-password-sign-in). `mainworthy credential --do totp.confirm --challenge <challenge> --code <code>` confirms it within five minutes and prints recovery codes once. Remote bearer tokens cannot enrol an authenticator. Use Settings in a signed-in browser instead.
+
 ## Reach a server
 
 A command finds its server in this order: the flag, then the environment variable, then the default.
@@ -64,6 +78,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | --- | --- |
 | `mainworthy serve` | Start the server and web UI. Also the default with no arguments. |
 | `mainworthy report <files...> [--format <format>] [--session <name>] [--run R-4] \| report --nothing-required [--commit <sha>] [--json]` | Upload test reports or declare no tests required, detect the CI build, and print the receipt. Use gate to check the verdict. |
+| `mainworthy login --name <name> --password-file <path> [--code-file <path>] [--label <label>] [--expires 30d] [--json]` | Sign in with a password and, when enrolled, an authenticator or recovery code. Print a personal CLI token once. |
 | `mainworthy gate [--commit <sha> \| --run R-4 \| --change pr:482] [--wait <seconds>] [--json]` | Check a commit, change or run. Exit 0 passed, 1 failed, 2 blocked, 3 pending. |
 | `mainworthy token new --agent <name> \| --ci <name> \| --human <name> [--can read,produce] [--project <key>] [--expires 90d] \| token list \| token revoke <id>` | Issue, list and revoke actor tokens. A new secret is shown once. |
 | `mainworthy invite new <name> [--can read,answer] [--project <key>] [--expires 3d] \| invite list \| invite revoke <id>` | Invite a person with a link that is shown once, list invitations, and revoke one. |
@@ -97,6 +112,14 @@ Flags of `mainworthy report`:
 - `--job <string>`: CI job name. Overrides detection.
 - `--attempt <number>`: Build attempt. Overrides detection.
 - `--nothing-required`: CI declares this commit requires no tests, if its policy allows. No files.
+
+Flags of `mainworthy login`:
+
+- `--name <string>`: Your sign-in name.
+- `--password-file <string>`: A private file holding your password. One final newline is ignored.
+- `--code-file <string>`: A private file holding a current authenticator code or unused recovery code.
+- `--label <string>`: The personal token label. Default: command line.
+- `--expires <string>`: How long the personal token lasts. Default: 30d; at most 365d.
 
 Flags of `mainworthy gate`:
 
@@ -176,7 +199,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy tracker-status` | Read a tracker request's delivery state and its verified issue reference. |
 | `mainworthy admin` | Projects, actors, teams, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. |
 | `mainworthy session` | Your browser sessions: list them, and end one. An admin who is a person lists and ends anyone's. |
-| `mainworthy credential` | Your password, passkeys and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default. |
+| `mainworthy credential` | Your password, passkeys, authenticator and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default. |
 | `mainworthy invitation` | Invite a person with a link, since there is no mail: make one, list them, revoke one. The link is shown once. |
 
 ### Flags every command takes

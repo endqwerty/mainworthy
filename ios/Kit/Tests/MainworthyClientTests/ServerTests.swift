@@ -116,6 +116,20 @@ struct ServerTests {
 		#expect(again.asked.first?.url?.host() == "mainworthy.example")
 	}
 
+	@Test("a second sign-in step says it is unsupported and stores no cookie")
+	func secondFactorIsExplicit() async {
+		let needed = #"{"ok":true,"result":{"signedIn":false,"secondFactor":{"challenge":"pending","expiresAt":1800000300000}}}"#
+		let script = Script(.json(needed))
+		let secrets = MemoryStore()
+		let client = server(script, secrets: secrets)
+		await #expect(throws: ClientError.secondFactorUnsupported) {
+			_ = try await client.signIn(.password(name: "robin", password: "a password"))
+		}
+		#expect(secrets.load() == nil)
+		#expect(client.cookieHeader == nil)
+		#expect(script.asked.count == 1)
+	}
+
 	@Test("a proof the server refuses is a refusal to show, and no session ends")
 	func signInRefused() async {
 		let refused = #"{"ok":false,"error":{"code":"unauthenticated","message":"that did not sign you in"}}"#

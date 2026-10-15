@@ -30,7 +30,7 @@ A reply that did not run has `ok: false` and an `error` with a `code` and a `mes
 | `forbidden` | 403 | The caller holds a grant on the project and lacks the capability, or the policy says no. |
 | `not_found` | 404 | No such operation, project or ref. A project the caller holds no grant on is answered the same way. |
 | `conflict` | 409 | The edit was made on an older version, the command id was used for something else, or the client's API version differs from the server's. |
-| `limited` | 429 | Too many failed attempts: wrong tokens from this address or for a token that starts as this one does, wrong passwords from this address or for this name, or refused passkeys or invitation codes from this address. The `Retry-After` header says how many seconds to wait. |
+| `limited` | 429 | Too many failed attempts: wrong tokens from this address or for a token that starts as this one does, wrong passwords from this address or for this name, wrong authenticator codes from this address or for this name, or refused passkeys or invitation codes from this address. The `Retry-After` header says how many seconds to wait. |
 | `internal` | 500 | The server failed. Nothing was written. The message is `internal error`, and the detail is in the server's log. |
 
 ## Authenticate
@@ -45,7 +45,8 @@ A browser signs in with these requests and then holds a session cookie. They are
 | --- | --- | --- |
 | `GET /api/login/methods` | none | `{"password": true, "passkey": <boolean>}`: whether this instance has passkeys. |
 | `POST /api/login` | `{"token"}` | Signs in with a token. |
-| `POST /api/login` | `{"name", "password"}` | Signs in with a name and a password. |
+| `POST /api/login` | `{"name", "password"}` | Signs in with a name and a password, or returns `{"signedIn": false, "secondFactor": {"challenge", "expiresAt"}}` when an authenticator is enrolled. No session is created yet. Keep the ceremony cookie from this response. |
+| `POST /api/login` | `{"challenge", "code"}` | Completes the password sign-in with a fresh six-digit TOTP or unused recovery code, plus the ceremony cookie from the first step. The challenge lasts five minutes and works once. A successful reply is `{"signedIn": true}` and sets the session cookie. |
 | `POST /api/login/challenge` | `{}` | The options for `navigator.credentials.get`, with a challenge that is good once, for five minutes. The reply also sets a cookie (`mainworthy_ceremony`, `HttpOnly`) that ties the challenge to the browser that asked: the answer is taken only with it. A browser sends it by itself; a script has to keep it. |
 | `POST /api/login` | `{"passkey"}` | Signs in with what the browser returned for those options: `id`, `clientDataJSON`, `authenticatorData`, `signature`, `userHandle`, each base64url. |
 | `POST /api/login/challenge` | `{"invitation"}` | Who the invitation is for, what it does (`join` or `recover`) and when it runs out, with the options for `navigator.credentials.create`, or `null` for them on an instance without passkeys. It writes no row. On an instance with passkeys, each lookup that finds the invitation makes a challenge the server keeps in memory for five minutes. A code that accepts nothing is answered `not_found`. |
@@ -58,6 +59,8 @@ A body holds one of these shapes and nothing beside it. `GET /api/session` says 
 Passwords use Unicode NFC before hashing and checking. An older password also accepts its original spelling. If that spelling is not NFC, successful sign-in refreshes its hash without ending existing sessions. Accepting a recovery invitation revokes the person's previous passwords, passkeys and tokens, and ends their existing sessions. It leaves other actors' tokens alone. See [passwords and recovery](./access.md#a-name-and-a-password-or-a-passkey) for the legacy-password behavior and the limit when concurrent responses replace the browser's cookie.
 
 A signed-in person registers a further passkey with the `credential` operation: `passkey.begin` answers the options for `navigator.credentials.create`, and `passkey.add` takes what the browser returned and a label. Both are for a browser that is signed in, and the session that begins a registration is the one that finishes it. A token is refused with `forbidden`, as it is when it tries to set a password.
+
+The `credential` operation also enrols an authenticator in the caller's session or as the local owner. `{"do": "totp.begin"}` returns `challenge`, `expiresAt`, `secret`, `uri`, and `qr` with `size` and an SVG `path`. Draw the path in a white square of that size with four modules of quiet space already included. `{"do": "totp.confirm", "challenge", "code"}` confirms a six-digit code in the same session and returns `id`, ten `recoveryCodes`, and `sessionsEnded`. These inputs refuse command ids. No secret reply is cached or replayed. Ordinary credential lists return kind `totp` and descriptive fields only. `remove` removes the authenticator and ends all the person's sessions.
 
 The same operation manages personal CLI tokens with `token.create`, `token.list`, and `token.revoke`. Creation requires a password or passkey session, or local-owner access, binds the caller as the token actor, and returns the secret once. It defaults to a 30-day expiry, with a 365-day maximum. A bearer token or a token-backed browser session cannot create one. [Make your own command-line token](./access.md#make-your-own-command-line-token) gives the inputs, replies, and CLI setup.
 
@@ -809,7 +812,7 @@ Your browser sessions: list them, and end one. An admin who is a person lists an
 
 ### credential
 
-Your password, passkeys and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default.
+Your password, passkeys, authenticator and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default.
 
 |  |  |
 | --- | --- |
@@ -827,17 +830,21 @@ Your password, passkeys and CLI tokens: list, add or remove them. Only a person 
 | `[1].do` | `"list"` | yes |  |
 | `[1].actor` | `string` | no | Whose. Absent: your own. Somebody else's is for an admin who is a person. |
 | `[2].do` | `"passkey.begin"` | yes |  |
-| `[3].do` | `"passkey.add"` | yes |  |
-| `[3].passkey` | `record<unknown>` | yes | What the browser returned for the options of passkey.begin: id, clientDataJSON, authenticatorData, publicKey, publicKeyAlgorithm, transports. |
-| `[3].label` | `string` | yes | What you call this passkey: the device it is on. |
-| `[4].do` | `"remove"` | yes |  |
-| `[4].id` | `integer` | yes | The credential, from the list. The last one a person has is not removed. |
-| `[5].do` | `"token.create"` | yes |  |
-| `[5].label` | `string` | yes | What you use this token for. |
-| `[5].expires` | `string` | no | Default: 30d. At most 365d. A password or passkey session creates your own token, shown once. Default: `"30d"`. |
-| `[6].do` | `"token.list"` | yes |  |
-| `[7].do` | `"token.revoke"` | yes |  |
-| `[7].id` | `integer` | yes |  |
+| `[3].do` | `"totp.begin"` | yes |  |
+| `[4].do` | `"totp.confirm"` | yes |  |
+| `[4].challenge` | `string` | yes |  |
+| `[4].code` | `string` | yes |  |
+| `[5].do` | `"passkey.add"` | yes |  |
+| `[5].passkey` | `record<unknown>` | yes | What the browser returned for the options of passkey.begin: id, clientDataJSON, authenticatorData, publicKey, publicKeyAlgorithm, transports. |
+| `[5].label` | `string` | yes | What you call this passkey: the device it is on. |
+| `[6].do` | `"remove"` | yes |  |
+| `[6].id` | `integer` | yes | The credential, from the list. The last one a person has is not removed. |
+| `[7].do` | `"token.create"` | yes |  |
+| `[7].label` | `string` | yes | What you use this token for. |
+| `[7].expires` | `string` | no | Default: 30d. At most 365d. A password or passkey session creates your own token, shown once. Default: `"30d"`. |
+| `[8].do` | `"token.list"` | yes |  |
+| `[9].do` | `"token.revoke"` | yes |  |
+| `[9].id` | `integer` | yes |  |
 
 </details>
 

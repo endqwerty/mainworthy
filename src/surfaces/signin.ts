@@ -30,6 +30,7 @@ import {
 	signInMethods,
 	signInWithPasskey,
 	signInWithPassword,
+	signInWithTotp,
 	type WhyNot,
 } from "../server/identity/identity.ts";
 import type { App } from "../server/kernel/app.ts";
@@ -78,6 +79,7 @@ const NO_INVITATION =
 // A body is one way of signing in and nothing beside it, so each shape refuses a member it does not name: a
 // request that carries two proofs is not judged by the one that happens to be read first.
 const WithPassword = z.strictObject({ name: z.string().min(1).max(64), password: z.string().min(1).max(512) });
+const WithTotp = z.strictObject({ challenge: z.string().min(1).max(128), code: z.string().min(1).max(128) });
 const WithPasskey = z.strictObject({ passkey: z.record(z.string(), z.unknown()) });
 const WithInvitation = z.strictObject({
 	invitation: z.string().min(1).max(128),
@@ -122,7 +124,10 @@ export function signInRoutes(app: App, tools: Tools) {
 		const reply = await answerSignIn(req, server, input);
 		// A sign-in with a passkey ends its ceremony whatever came of it: the cookie that tied the challenge to
 		// this browser is cleared with the reply, accepted, refused or told to wait.
-		if (WithPasskey.safeParse(input).success)
+		if (
+			WithPasskey.safeParse(input).success ||
+			(WithTotp.safeParse(input).success && reply.ok && reply.headers.has("set-cookie"))
+		)
 			for (const cookie of tools.ceremony.clear(req)) reply.headers.append("set-cookie", cookie);
 		return reply;
 	}
@@ -137,9 +142,24 @@ export function signInRoutes(app: App, tools: Tools) {
 		};
 		const withPassword = WithPassword.safeParse(input);
 		const withPasskey = WithPasskey.safeParse(input);
+		const withTotp = WithTotp.safeParse(input);
 		const withInvitation = WithInvitation.safeParse(input);
 		let entry: Accepted;
-		if (withPassword.success) entry = await signInWithPassword(app, withPassword.data, about);
+		if (withPassword.success) {
+			const password = await signInWithPassword(app, withPassword.data, about);
+			if (password.ok && "secondFactor" in password) {
+				const headers = new Headers();
+				for (const cookie of tools.ceremony.set(
+					req,
+					password.ceremony,
+					Math.max(1, Math.ceil((password.secondFactor.expiresAt - app.now()) / 1000)),
+				))
+					headers.append("set-cookie", cookie);
+				return tools.json({ ok: true, result: { signedIn: false, secondFactor: password.secondFactor } }, 200, headers);
+			}
+			entry = password;
+		} else if (withTotp.success)
+			entry = await signInWithTotp(app, { ...withTotp.data, ceremony: tools.ceremony.of(req) }, about);
 		else if (withPasskey.success) {
 			if (!publicAddress(app.config)) return passkeysOff();
 			entry = await signInWithPasskey(
@@ -171,6 +191,11 @@ export function signInRoutes(app: App, tools: Tools) {
 		if (entry.ok) return tools.json({ ok: true, result: { signedIn: true } }, 200, tools.cookies(req, entry.signedIn));
 		// Too many failed attempts from this address, or at this name: the wait, and nothing about which.
 		if (entry.why === "limited") return tools.limited(entry.retryAfter);
+		if (entry.why === "second-factor-required")
+			return failed(
+				"forbidden",
+				"this instance requires a second factor for admins. Sign in with a passkey, or use an existing session to enrol an authenticator in Settings, Your sign-in. The owner can bootstrap enrolment by signing in with the owner token",
+			);
 		if (entry.why === "other-session") {
 			return failed(
 				"conflict",

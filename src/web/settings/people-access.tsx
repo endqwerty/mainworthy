@@ -16,7 +16,7 @@ export function PersonAccess({ actor }: { actor: string }) {
 	const [message, setMessage] = useState("");
 	const [confirming, setConfirming] = useState<number | null>(null);
 	const rows = credentials.error ? undefined : credentials.data;
-	const onlyOne = rows?.length === 1;
+	const onlyOne = rows?.filter((row) => row.kind !== "totp").length === 1;
 
 	function changed(): Promise<void> {
 		return Promise.all([
@@ -27,7 +27,7 @@ export function PersonAccess({ actor }: { actor: string }) {
 	}
 
 	function remove(row: CredentialRow): void {
-		if (onlyOne || removing.has(row.id)) return;
+		if ((onlyOne && row.kind !== "totp") || removing.has(row.id)) return;
 		setConfirming(null);
 		setRemoving((ids) => withId(ids, row.id, true));
 		setMessage("");
@@ -68,7 +68,9 @@ export function PersonAccess({ actor }: { actor: string }) {
 						</small>
 						{confirming === row.id && (
 							<small>
-								{actor} cannot use this {row.kind} again. Sessions opened with it end.
+								{row.kind === "totp"
+									? `Removing the authenticator ends all sessions of ${actor}.`
+									: `${actor} cannot use this ${row.kind} again. Sessions opened with it end.`}
 							</small>
 						)}
 					</span>
@@ -77,7 +79,7 @@ export function PersonAccess({ actor }: { actor: string }) {
 						trigger={removing.has(row.id) ? "Removing…" : "Remove"}
 						triggerLabel={`Remove ${row.kind === "password" ? "the password" : row.label}`}
 						confirm="Remove this sign-in method"
-						disabled={onlyOne}
+						disabled={onlyOne && row.kind !== "totp"}
 						busy={removing.has(row.id)}
 						onOpen={() => {
 							if (actor === session.actor) remove(row);
