@@ -1,7 +1,7 @@
 // What the iOS app reads of the server's replies: every field it decodes, and nothing it does not.
 //
-// The server's rows have no schema of their own (issue #52), and nobody who changes a reply opens a Swift file.
-// So the app's reading is written here, in the language the server is written in:
+// The registry describes whole replies. This consumer contract lists only what the app decodes, so a server
+// change is checked against both without requiring a Swift compiler:
 //
 // - `test/ios-contract.test.ts` holds real replies to these shapes. A change that takes away or retypes a field
 //   the app reads fails there, on any machine, and names the field. A field that is added fails nothing.

@@ -22,11 +22,12 @@ import {
 import { json } from "../kernel/db.ts";
 import { type ErrorCode, INTERNAL_ERROR, noProject, OpError } from "../kernel/errors.ts";
 
-type Base<I> = {
+type Base<I, O> = {
 	name: string;
 	/** One line for a person: CLI help and the API reference. */
 	summary: string;
 	input: z.ZodType<I>;
+	output: z.ZodType<O>;
 	/** What the caller must hold. A list means any one of them; `test/architecture.test.ts` names the operations that give one. */
 	needs: Need;
 	/**
@@ -44,17 +45,17 @@ export const COMMIT: unique symbol = Symbol("commit");
 /** What `steps` may yield: `COMMIT`, or nothing, which marks a point where other requests may be served. */
 export type Pause = typeof COMMIT | undefined;
 
-type ProjectBase<I> = Base<I> & { scope: "project"; effect: "read" | "write" };
+type ProjectBase<I, O> = Base<I, O> & { scope: "project"; effect: "read" | "write" };
 /**
  * An operation on one project. A write runs in a transaction stamped with the project's next sequence number.
  * Most operations are one function, `run`. One that can take long gives `steps` instead: a generator that yields
  * between slices of work, so the server can answer reads while it runs. Driven without pausing, it is the same
  * operation; there is no second implementation.
  */
-export type ProjectOp<I, O> = ProjectBase<I> &
+export type ProjectOp<I, O> = ProjectBase<I, O> &
 	({ run: (ctx: Ctx, input: I) => O } | { steps: (ctx: Ctx, input: I) => Generator<Pause, O, void> });
 /** An operation on the instance: projects, actors, tokens. */
-export type InstanceOp<I, O> = Base<I> & {
+export type InstanceOp<I, O> = Base<I, O> & {
 	scope: "instance";
 	effect: "read" | "write";
 	run: (env: InstanceCtx, input: I) => O;

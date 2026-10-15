@@ -6,6 +6,7 @@ import { Glob } from "bun";
 import { z } from "zod";
 import { ERROR_CODES, HTTP_STATUS } from "../src/core/api.ts";
 import { needs } from "../src/core/kinds.ts";
+import { REPLIES } from "../src/core/replies.ts";
 import { Db, declaredSql } from "../src/server/kernel/db.ts";
 import { MIGRATIONS, migrate } from "../src/server/kernel/migrate.ts";
 import { MCP_OPS, OP_LIST } from "../src/server/ops/index.ts";
@@ -414,6 +415,12 @@ describe("the phone layout", () => {
 });
 
 describe("the registry", () => {
+	test("every operation registers the reply contract used by clients", () => {
+		expect(OP_LIST.map((op) => op.name).sort()).toEqual(Object.keys(REPLIES).sort());
+		for (const [name, schema] of Object.entries(REPLIES))
+			expect(OP_LIST.find((op) => op.name === name)?.output).toBe(schema);
+	});
+
 	test("every statement the server can run prepares against the schema", () => {
 		const db = new Db(":memory:");
 		migrate(db, ":memory:");

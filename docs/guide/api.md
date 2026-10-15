@@ -13,6 +13,8 @@ $ curl -s -X POST http://127.0.0.1:7357/api/p/scratch/find \
 {"ok":true,"result":{"count":0,"items":[],"cursor":null},"seq":1}
 ```
 
+The OpenAPI document at `/api/openapi.json` describes each operation's input and successful reply, including the fields inside `result`. The registry supplies both schemas. `seq` is required and is `null` for an instance operation. A field declared nullable may hold `null`; an optional field may be absent. Replies selected by an action or a ref are described as alternatives.
+
 A reply that ran has `ok: true`, the `result`, and `seq`, the project's sequence number at that point. Pass `seq` back to `since` to ask what changed after it.
 
 A reply that did not run has `ok: false` and an `error` with a `code` and a `message`:
@@ -717,20 +719,20 @@ Invite a person with a link, since there is no mail: make one, list them, revoke
 
 ## Agent tools
 
-An agent that connects over MCP gets these operations as tools, with the same inputs. [Let an agent in](./agents.md) explains how to connect one.
+An agent that connects over MCP gets these operations as tools, with the same inputs. Each tool has a compact output schema for `{ result, seq }`, the result's top-level type and its required fields. Nested fields and alternative replies are described in full by the OpenAPI document. Most input-field descriptions are in the shipped skill reference; tool schemas retain guidance for commit reuse, question answers and review filtering. [Let an agent in](./agents.md) explains how to connect one.
 
 <!-- generated:agent-tools -->
 
 | Tool | What the agent is told it is for |
 | --- | --- |
 | `propose` | Propose cases; edits need base version. Status: adopted=current, open=needs acceptance, conflict=resolve. |
-| `report` | Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref. Reply: counts, the questions raised per cause of failure, and the gate. |
+| `report` | Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref. |
 | `claim` | Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers. |
 | `decide` | Answer an inbox question with its evidenceHash as onEvidence. Replies: decided, advised (a person decides), forbidden, conflict (evidence or decision changed). Choose from the question's answers. To withdraw, send undo with ifDecision set to the reply's decision. |
-| `inbox` | List open questions (failures, proposals, findings, unlinked tests) with their evidence and `evidenceHash`, counts first. `on` narrows to one case, run or change. |
+| `inbox` | List open questions with evidence and `evidenceHash`, counts first. `on` selects a case, run or change. |
 | `get` | Read things by ref (C-, Q-, R-, T-, P-). For cases use `as: "md"` and `fields` to read less, and `unless: {ref: hash}` to skip what you already hold. |
-| `find` | Search cases by text, folder or tag (rows carry ref, title, hash, proof), or list tests (`unlinked: true`), runs, or the slots of a run. Paged by `cursor`. |
-| `impact` | Start here for a review. Given a change (`pr:482`) or changed `files`, returns the cases it touches, why, their hashes, what you already reviewed, open questions and uncovered files. Pass the returned `cursor` as `since` next time. |
+| `find` | Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slots. Page with `cursor`. |
+| `impact` | Start a review with a change (`pr:482`) or changed `files`. Returns affected cases, hashes, prior reviews, questions and uncovered files. Reuse `cursor` as `since`. |
 | `since` | What changed since an earlier `cursor`: changed cases (one-line diff, no bodies) and settled questions. If `more`, call again with the new cursor. |
 | `gate` | Is this commit, change or run tested? Returns passed, failed, blocked or pending with the reason and the open questions. |
 

@@ -5,6 +5,8 @@ import { connect } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
+import { z } from "zod";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
 import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
 import { OP_LIST, OPS } from "../src/server/ops/index.ts";
@@ -1516,6 +1518,122 @@ describe("the surface", () => {
 			ok: false,
 			error: { code: "not_found" },
 		});
+	});
+
+	test("the API description validates real replies and rejects missing or retyped result fields", async () => {
+		const instance = boot("local");
+		const api = z
+			.object({
+				paths: z.record(
+					z.string(),
+					z.object({
+						post: z.object({
+							responses: z.object({
+								"200": z.object({
+									content: z.object({ "application/json": z.object({ schema: z.record(z.string(), z.unknown()) }) }),
+								}),
+							}),
+						}),
+					}),
+				),
+				components: z.record(z.string(), z.unknown()),
+			})
+			.parse(await (await fetch(`${instance.url}/api/openapi.json`)).json());
+		const validator = new AjvJsonSchemaValidator();
+		for (const [name, input, field] of [
+			["propose", { edits: [{ op: "create", outline: "Described case" }] }, "status"],
+			["find", {}, "items"],
+			["gate", { commit: "abcdef1" }, "verdict"],
+		] as const) {
+			const schema = api.paths[`/api/p/{project}/${name}`]?.post.responses["200"].content["application/json"].schema;
+			if (!schema) throw new Error(`No reply schema for ${name}`);
+			const described = z
+				.looseObject({ type: z.literal("object").default("object") })
+				.parse({ ...schema, components: api.components });
+			const check = validator.getValidator(described);
+			const reply = (await post<Record<string, unknown>>(instance, `/api/p/scratch/${name}`, input)).body;
+			if (!reply.ok) throw new Error(JSON.stringify(reply));
+			expect(check(reply).valid, `${name} real reply`).toBe(true);
+			const { [field]: _missing, ...without } = reply.result;
+			expect(check({ ...reply, result: without }).valid, `${name} missing ${field}`).toBe(false);
+			expect(check({ ...reply, result: { ...reply.result, [field]: 42 } }).valid, `${name} wrong ${field}`).toBe(false);
+			expect(check({ ...reply, seq: "wrong" }).valid).toBe(false);
+		}
+	});
+
+	test("every operation validates real replies against its registered output", async () => {
+		const instance = boot("local");
+		const seen = new Set<string>();
+		const checked = async (name: string, input: unknown = {}): Promise<unknown> => {
+			const definition = OPS[name];
+			if (!definition) throw new Error(name);
+			const path = definition.scope === "project" ? `/api/p/scratch/${name}` : `/api/${name}`;
+			const reply = (await post(instance, path, input)).body;
+			if (!reply.ok) throw new Error(`${name}: ${JSON.stringify(reply)}`);
+			const parsed = definition.output.safeParse(reply.result);
+			expect(parsed.success ? [] : parsed.error.issues, `${name}: ${JSON.stringify(input)}`).toEqual([]);
+			seen.add(name);
+			return reply.result;
+		};
+		await checked("propose", {
+			cmd: "schema-create",
+			edits: [
+				{ op: "create", outline: "Schema case\n  Open > Visible", folder: "Checks", tags: ["api"], covers: ["API-1"] },
+			],
+		});
+		await checked("plan", { name: "Schema run", select: { cases: ["C-1"] } });
+		await checked("report", { run: "R-1", results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		await checked("report", {
+			target: { commit: "abcdef1", pr: 52 },
+			results: [
+				{ test: { key: "schema-test", file: "schema.ts" }, outcome: "fail", failure: { message: "Expected a value" } },
+			],
+		});
+		await checked("claim", {
+			lens: "review",
+			findings: [{ on: "C-1", category: "other", note: "Review the expected value" }],
+		});
+		const inbox = z
+			.object({ items: z.array(z.object({ q: z.string(), evidenceHash: z.string() })).min(1) })
+			.parse(await checked("inbox"));
+		const first = inbox.items[0];
+		if (!first) throw new Error("No question");
+		await checked("decide", { q: first.q, onEvidence: first.evidenceHash, answer: { is: "flaky" } });
+		await checked("get", { refs: ["C-1", "R-1", "T-1", "P-1", first.q] });
+		const document = z.array(z.record(z.string(), z.unknown())).parse(await checked("get", { refs: ["C-1"] }))[0];
+		if (!document) throw new Error("No case document");
+		const withoutExpected = { ...document, steps: [{ id: "aa", action: "Open" }] };
+		const nullableExpected = { ...document, steps: [{ id: "aa", action: "Open", expected: null }] };
+		expect(OPS.get?.output.safeParse([nullableExpected]).success).toBe(true);
+		expect(OPS.get?.output.safeParse([withoutExpected]).success).toBe(false);
+		expect(OPS.get?.output.safeParse([document, withoutExpected]).success).toBe(false);
+		for (const input of [
+			{ refs: ["C-1"], fields: ["title"] },
+			{ refs: ["C-1"], as: "md" },
+		])
+			await checked("get", input);
+		for (const area of ["cases", "tests", "runs", "folders", "tags", "requirements", "slots", "changes"])
+			await checked("find", { in: area, run: "R-1" });
+		await checked("impact", { change: "pr:52" });
+		await checked("since", { cursor: "s:0" });
+		await checked("gate", { run: "R-1" });
+		await checked("history", { ref: "C-1" });
+		await checked("history", { ref: "C-1", from: 1, to: 1 });
+		await checked("timeline", { ref: "C-1" });
+		await checked("check");
+		await checked("command", { cmd: "schema-create" });
+		await checked("command", { cmd: "schema-absent" });
+		await checked("change", { change: "pr:52", state: "closed" });
+		for (const action of ["project.list", "token.list", "actor.list"]) await checked("admin", { do: action });
+		await checked("admin", { do: "policy.show", project: "scratch" });
+		await checked("admin", { do: "token.create", actor: "schema-agent", kind: "agent" });
+		await checked("admin", { do: "token.list" });
+		await checked("session", { do: "list" });
+		await checked("credential", { do: "list" });
+		await checked("invitation", { do: "create", name: "schema-person" });
+		await checked("invitation", { do: "list" });
+		await checked("invitation", { do: "revoke", id: 1 });
+		expect([...seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());
 	});
 
 	test("a body that is not JSON and an input that is not valid are refused with the field named", async () => {

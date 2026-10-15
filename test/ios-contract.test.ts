@@ -28,6 +28,7 @@ import { type TestInstance, testInstance } from "../scripts/ios/instance.ts";
 import { mismatches, type Shape } from "../scripts/ios/shape.ts";
 import { generated } from "../scripts/ios/swift.ts";
 import { KINDS } from "../src/core/kinds.ts";
+import { OPS } from "../src/server/ops/index.ts";
 
 const WHAT_TO_DO =
 	"The iOS app reads this (scripts/ios/contract.ts). If the change is meant, change the contract, run `bun scripts/ios.ts gen` and see ios/README.md.";
@@ -62,6 +63,12 @@ async function send(method: "GET" | "POST", path: string, body?: unknown, header
 async function result(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
 	const reply = (await send(method, path, body)) as { ok: boolean; result?: unknown };
 	if (!reply.ok) throw new Error(`${method} ${path}: ${JSON.stringify(reply)}`);
+	const name = path.split("/").at(-1) ?? "";
+	const definition = method === "POST" ? OPS[name] : undefined;
+	if (definition) {
+		const checked = definition.output.safeParse(reply.result);
+		expect(checked.success ? [] : checked.error.issues, `${name} registry reply`).toEqual([]);
+	}
 	return reply.result;
 }
 const op = (key: string, name: string, input: unknown) => result("POST", `/api/p/${key}/${name}`, input);

@@ -637,7 +637,13 @@ export function openApi(): Record<string, unknown> {
 				responses: {
 					"200": {
 						description: "The operation ran.",
-						content: { "application/json": { schema: { $ref: "#/components/schemas/Ok" } } },
+						content: {
+							"application/json": {
+								schema: z.toJSONSchema(
+									z.object({ ok: z.literal(true), result: op.output, seq: z.number().int().nullable() }),
+								),
+							},
+						},
 					},
 					default: {
 						description: "The operation did not run.",
@@ -659,18 +665,6 @@ export function openApi(): Record<string, unknown> {
 		components: {
 			securitySchemes: { token: { type: "http", scheme: "bearer" } },
 			schemas: {
-				Ok: {
-					type: "object",
-					required: ["ok", "result"],
-					properties: {
-						ok: { const: true },
-						result: {},
-						seq: {
-							type: ["integer", "null"],
-							description: "The project's sequence number after a write; a cursor for `since`.",
-						},
-					},
-				},
 				Failed: {
 					type: "object",
 					required: ["ok", "error"],

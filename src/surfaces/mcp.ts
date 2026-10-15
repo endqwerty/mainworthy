@@ -25,71 +25,56 @@ export const TOOL_TOKEN_BUDGET = 3950;
 
 const INSTRUCTIONS =
 	"Start with impact for a change, or inbox for questions. Pass hashes back with unless and onEvidence, and reuse cursors with since. Your answers may be advice; check the reply status.";
-const PROJECT_DESCRIPTION = "Project key; omit only if there is one project.";
+const PROJECT_DESCRIPTION = "Omit only for a single project.";
 const DESCRIPTIONS = new Map([
 	["The case, for example C-311.", ""],
+	["The version this edit was made on. A stale base is merged or reported, never overwritten.", ""],
 	["The case.", ""],
-	["The question, for example Q-12.", ""],
 	["The version to restore.", ""],
+	["The folder to change. Absent when creating one.", ""],
 	["Why. Shown in the case history.", ""],
-	["The kind of review, for example adversarial-review.", ""],
+	["What was tested. Required unless `run` is given.", ""],
+	["The commit this change is based on.", ""],
+	["Paths the change touches, for impact.", ""],
+	["A planned run these results are for, for example R-4.", ""],
 	["The case this manual or agent result is for.", ""],
-	[
-		"The version this edit was made on. A stale base is merged or reported, never overwritten.",
-		"Version edited; stale bases merge or conflict.",
-	],
-	["The folder to change. Absent when creating one.", "Omit to create a folder."],
-	["The id of an earlier result of yours that this one replaces.", "Your earlier result id to replace."],
-	["The commit this change is based on.", "Base commit."],
-	["Paths the change touches, for impact.", "Changed paths for impact."],
-	["What was tested. Required unless `run` is given.", "Required unless run is set."],
-	["A planned run these results are for, for example R-4.", "Planned run, e.g. R-4."],
-	[
-		"Where: a case (C-311), a step (C-311#b7), a requirement (req:WEB-290) or a change (pr:482).",
-		"C-311, C-311#b7, req:WEB-290 or pr:482.",
-	],
-	["The change reviewed, for example pr:482.", "Change key, e.g. pr:482."],
-	["Cases read, each as C-311@<hash>. Recorded even with no findings.", "C-311@hash, even with no findings."],
-	[
-		"The evidence hash you saw. If the evidence changed since, the reply is a conflict with the new evidence.",
-		"Evidence hash from inbox; changed evidence conflicts.",
-	],
+	["The id of an earlier result of yours that this one replaces.", ""],
+	["The kind of review, for example adversarial-review.", ""],
+	["The change reviewed, for example pr:482.", ""],
+	["Cases read, each as C-311@<hash>. Recorded even with no findings.", ""],
+	["Where: a case (C-311), a step (C-311#b7), a requirement (req:WEB-290) or a change (pr:482).", ""],
+	["The question, for example Q-12.", ""],
+	["The evidence hash you saw. If the evidence changed since, the reply is a conflict with the new evidence.", ""],
 	[
 		'The answer, for example {"is":"defect"}. The allowed answers depend on the question kind.',
-		"Answer for this question kind.",
+		'Use this question\'s answers, e.g. {"is":"defect"}.',
 	],
-	["The question whose decision to withdraw.", "Question to reopen."],
-	["The cursor from the previous page.", "Page cursor."],
-	["Only questions about this case, run, test or change.", "Case, run, test or change ref."],
-	["Refs of cases (C-), questions (Q-), runs (R-), tests (T-) or proposals (P-).", "C-, Q-, R-, T- or P- refs."],
-	[
-		"For cases: any of title, pre, steps, methods, tags, covers, place, proof. Default: all.",
-		"Case fields: title, pre, steps, methods, tags, covers, place, proof; default all.",
-	],
+	["The question whose decision to withdraw.", ""],
+	["Only questions about this case, run, test or change.", ""],
+	["The cursor from the previous page.", ""],
+	["Refs of cases (C-), questions (Q-), runs (R-), tests (T-) or proposals (P-).", ""],
+	["For cases: any of title, pre, steps, methods, tags, covers, place, proof. Default: all.", ""],
 	["`md` returns a case as canonical Markdown: fewer tokens than JSON.", ""],
-	[
-		"Ref to the hash you already hold. An unchanged case comes back as {ref, unchanged: true}.",
-		"Ref to known hash; unchanged cases return {ref,unchanged:true}.",
-	],
-	["For one case: this version instead of the current one.", "One case's version; default current."],
-	["With `folder`: include its subfolders.", "Include subfolders."],
-	["For slots: the run.", "Run for slots."],
-	["For tests: only those with no case.", "Tests with no case."],
-	["A change key, for example pr:482.", "Change key, e.g. pr:482."],
-	["Changed paths, when the change is not known to Mainworthy.", "Paths if change is unknown."],
-	["A cursor from an earlier call: only what moved since.", "Change cursor; only what moved."],
-	["False for fresh eyes: do not hide what was already reviewed.", "False for a fresh review."],
-	["A cursor from any earlier read.", "Change cursor from an earlier read."],
-	[
-		"A change key, for example pr:482: the gate of its latest commit.",
-		"Change key, e.g. pr:482; latest commit's gate.",
-	],
+	["Ref to the hash you already hold. An unchanged case comes back as {ref, unchanged: true}.", ""],
+	["For one case: this version instead of the current one.", ""],
+	["With `folder`: include its subfolders.", ""],
+	["For slots: the run.", ""],
+	["For tests: only those with no case.", ""],
+	["A change key, for example pr:482.", ""],
+	["Changed paths, when the change is not known to Mainworthy.", ""],
+	["A cursor from an earlier call: only what moved since.", ""],
+	["False for fresh eyes: do not hide what was already reviewed.", "False includes already reviewed cases."],
+	["A cursor from any earlier read.", ""],
+	["A change key, for example pr:482: the gate of its latest commit.", ""],
 ]);
 const Arguments = z.looseObject({ project: z.string().min(1).optional() });
 
 type Schema = z.core.JSONSchema.JSONSchema;
 type SchemaNode = z.core.JSONSchema._JSONSchema;
-type ToolDefinition = Pick<Tool, "name" | "inputSchema"> & { description: string; annotations: ToolAnnotations };
+type ToolDefinition = Pick<Tool, "name" | "inputSchema" | "outputSchema"> & {
+	description: string;
+	annotations: ToolAnnotations;
+};
 type Call = (op: string, project: string | null, input: unknown) => Promise<Reply>;
 type ListProjects = () => Promise<string[]>;
 
@@ -228,12 +213,22 @@ export function mcpTools(): ToolDefinition[] {
 				project: { type: "string", minLength: 1, description: PROJECT_DESCRIPTION },
 			},
 		};
+		const output = z.toJSONSchema(op.output);
+		const result = {
+			...(output.type ? { type: output.type } : {}),
+			...(output.required ? { required: output.required } : {}),
+		};
+
 		tools.push({
 			name: op.name,
 			description: op.mcp,
 			inputSchema: ToolSchema.shape.inputSchema.parse(schema),
+			outputSchema: {
+				type: "object",
+				properties: { result, seq: { type: ["integer", "null"] } },
+				required: ["result", "seq"],
+			},
 			annotations: {
-				title: op.name,
 				destructiveHint: false,
 				...(op.effect === "read" ? { readOnlyHint: true, idempotentHint: true } : {}),
 				openWorldHint: false,
