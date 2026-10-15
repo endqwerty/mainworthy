@@ -19,7 +19,8 @@
 		"build": "NODE_ENV=production bun build --compile --minify --sourcemap --banner '/*! Mainworthy, Apache-2.0. Software from others is in this file; its licences and notices: /docs/licence */' src/cli/main.ts src/server/read-worker.ts --outfile dist/mainworthy"
 	},
 	"dependencies": {
-		"@modelcontextprotocol/sdk": "^1.32.1",
+		"@modelcontextprotocol/core": "^2.3.1",
+		"@modelcontextprotocol/server": "^2.3.1",
 		"@noble/hashes": "^2.4.0",
 		"@tanstack/react-query": "^5.104.2",
 		"@tanstack/react-virtual": "^3.14.15",
@@ -31,6 +32,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.15",
+		"@modelcontextprotocol/client": "^2.3.1",
 		"@types/bun": "^1.4.2",
 		"@types/react": "^19.3.0",
 		"@types/react-dom": "^19.3.0",

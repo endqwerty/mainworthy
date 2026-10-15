@@ -1,15 +1,14 @@
 import { expect, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client, InMemoryTransport, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
 import {
 	CallToolResultSchema,
 	InitializeResultSchema,
-	LATEST_PROTOCOL_VERSION,
 	ListToolsResultSchema,
 	ToolSchema,
-} from "@modelcontextprotocol/sdk/types.js";
-import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
+} from "@modelcontextprotocol/core";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { encode } from "gpt-tokenizer/encoding/o200k_base";
 import { z } from "zod";
 import { generateToolReference } from "../../scripts/gen-skill.ts";
@@ -90,11 +89,12 @@ test("schema trims preserve the registry's constraints and union choices", () =>
 	const validator = new AjvJsonSchemaValidator();
 	const compile = (schema: ReturnType<typeof mcpTools>[number]["inputSchema"]) => {
 		const { properties, required, ...base } = schema;
-		return validator.getValidator({
+		const jsonSchema: Record<string, unknown> = {
 			...base,
 			...(properties ? { properties } : {}),
 			...(required ? { required } : {}),
-		});
+		};
+		return validator.getValidator(jsonSchema);
 	};
 	const samples: Record<string, unknown[]> = {
 		propose: [
@@ -178,148 +178,160 @@ test("compact output schemas describe structured results from the registry", () 
 	).toBe(true);
 });
 
-test("an agent completes a real session, with hashes, advice, and compact reads", async () => {
-	const h = harness();
-	const actor = h.actor("reviewer", "agent", ["read", "produce"]);
-	const server = mcpServer(
-		async (op, project, input) => invoke(h.app, OPS, { op, project, input, actor: () => actor }),
-		async () => ["scratch"],
-	);
-	const client = new Client({ name: "reference-agent", version: "1" });
-	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-	const wire: string[] = [];
-	for (const transport of [clientTransport, serverTransport]) {
-		const send = transport.send.bind(transport);
-		transport.send = async (message, options) => {
-			wire.push(JSON.stringify(message));
-			await send(message, options);
-		};
-	}
-	try {
-		await server.connect(serverTransport);
-		await client.connect(clientTransport);
-		const definitions = await client.listTools();
-		expect(definitions).toEqual({ tools: mcpTools() });
-		const call = (name: string, args: Record<string, unknown>) => client.callTool({ name, arguments: args });
-		const initial = resultOf(
-			await call("impact", { files: ["tests/checkout.spec.ts"] }),
-			z.object({ cursor: z.string() }),
-		);
-		const proposed = resultOf(
-			await call("propose", {
-				edits: [
-					{
-						op: "create",
-						body: {
-							title: "Coupon total",
-							steps: [{ id: "b7", action: "Apply SAVE10 to a $100 cart", expected: "Total shows $90.00" }],
-						},
-					},
-				],
-			}),
-			z.object({
-				status: z.literal("adopted"),
-				cases: z.array(z.object({ ref: z.string(), version: z.number(), hash: z.string() })).min(1),
-			}),
-		);
-		const created = proposed.cases[0];
-		if (!created) throw new Error("No case was created");
-		// The pull request's pipeline has reported its head: that is what makes `pr:482` exist. (What an agent
-		// says about where a commit is counts for nothing until a pipeline or a person has reported the commit.)
-		h.call(
-			"report",
+test.each(["2025-11-25", "2026-07-28"])(
+	"an agent completes a %s session, with hashes, advice, and compact reads",
+	async (version) => {
+		const h = harness();
+		const actor = h.actor("reviewer", "agent", ["read", "produce"]);
+		const client = new Client(
+			{ name: "reference-agent", version: "1" },
 			{
-				target: { commit: "9f3c2ab", pr: 482, branch: "coupon-total", files: ["tests/checkout.spec.ts"] },
-				results: [{ test: { key: "tests/other.spec.ts::smoke" }, outcome: "pass" }],
+				versionNegotiation: { mode: version === "2026-07-28" ? { pin: version } : "legacy" },
 			},
-			h.actor("pipeline", "ci", ["read", "record"]),
 		);
-		const reported = resultOf(
-			await call("report", {
-				target: { commit: "9f3c2ab", pr: 482, files: ["tests/checkout.spec.ts"] },
-				results: [
-					{
-						test: { case: created.ref },
-						annotation: { case: created.ref, version: created.version },
-						outcome: "fail",
-						failure: { message: "Expected $90.00, got $100.00" },
-					},
-				],
-			}),
-			z.object({
-				counts: z.object({ fail: z.literal(1) }),
-				basis: z.object({ exact: z.literal(1) }),
-				questions: z.array(z.object({ q: z.string() })),
-			}),
+		const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+		const wire: string[] = [];
+		for (const transport of [clientTransport, serverTransport]) {
+			const send = transport.send.bind(transport);
+			transport.send = async (message, options) => {
+				wire.push(JSON.stringify(message));
+				await send(message, options);
+			};
+		}
+		const server = serveStdio(
+			() =>
+				mcpServer(
+					async (op, project, input) => invoke(h.app, OPS, { op, project, input, actor: () => actor }),
+					async () => ["scratch"],
+				),
+			{ transport: serverTransport, legacy: "serve" },
 		);
-		expect(reported.questions.length).toBeGreaterThan(0);
-		const inbox = resultOf(
-			await call("inbox", { kind: "failure" }),
-			z.object({
-				items: z.array(z.object({ q: z.string(), evidenceHash: z.string(), you: z.literal("advice") })).min(1),
-			}),
-		);
-		const question = inbox.items[0];
-		if (!question) throw new Error("No failure question was raised");
-		resultOf(
-			await call("decide", {
-				q: question.q,
-				onEvidence: question.evidenceHash,
-				answer: { is: "defect" },
-				reason: "The total is wrong.",
-			}),
-			z.array(z.object({ status: z.literal("advised") })).length(1),
-		);
-		const impact = resultOf(
-			await call("impact", { change: "pr:482", files: ["tests/checkout.spec.ts"] }),
-			z.object({ cases: z.array(z.object({ id: z.string(), hash: z.string() })), cursor: z.string() }),
-		);
-		expect(impact.cases).toContainEqual({ id: created.ref, hash: created.hash });
-		const got = resultOf(
-			await call("get", { refs: [created.ref], as: "md" }),
-			z.array(z.object({ ref: z.string(), hash: z.string(), md: z.string() })),
-		);
-		expect(got[0]?.md).toContain("> Total shows $90.00");
-		const unchanged = resultOf(
-			await call("get", { refs: [created.ref], as: "md", unless: { [created.ref]: created.hash } }),
-			z.array(z.object({ ref: z.string(), unchanged: z.literal(true), hash: z.string() })),
-		);
-		expect(unchanged).toEqual([{ ref: created.ref, unchanged: true, hash: created.hash }]);
-		resultOf(
-			await call("claim", {
-				lens: "adversarial-review",
-				about: "pr:482",
-				reviewed: [`${created.ref}@${created.hash}`],
-				findings: [],
-			}),
-			z.object({ reviewed: z.literal(1) }),
-		);
-		const changed = resultOf(
-			await call("since", { cursor: initial.cursor }),
-			z.object({ changed: z.array(z.object({ ref: z.string() })), cursor: z.string() }),
-		);
-		expect(changed.changed).toContainEqual({ ref: created.ref });
-		resultOf(
-			await call("since", { cursor: changed.cursor }),
-			z.object({ changed: z.array(z.unknown()).length(0), settled: z.array(z.unknown()).length(0) }),
-		);
-		const gate = resultOf(
-			await call("gate", { commit: "9f3c2ab" }),
-			z.object({ verdict: z.enum(["passed", "failed", "blocked", "pending"]), open: z.array(z.string()) }),
-		);
-		// What an agent reports is put to a person as a question, and never moves a commit's gate (decision 0009):
-		// the gate reads what the pipeline reported, a pass, whatever the agent found.
-		expect(gate.verdict).toBe("passed");
-		expect(gate.open).toEqual([]);
-		console.log(
-			`tokens served: ${wire.reduce((sum, message) => sum + encode(message).length, 0)}; ${wire.length} messages; definitions once; o200k_base`,
-		);
-	} finally {
-		await client.close();
-		await server.close();
-		h.close();
-	}
-});
+		try {
+			await client.connect(clientTransport);
+			const definitions = await client.listTools();
+			expect(client.getNegotiatedProtocolVersion()).toBe(version);
+			expect(definitions.tools).toEqual(mcpTools());
+			const call = (name: string, args: Record<string, unknown>) => client.callTool({ name, arguments: args });
+			const initial = resultOf(
+				await call("impact", { files: ["tests/checkout.spec.ts"] }),
+				z.object({ cursor: z.string() }),
+			);
+			const proposed = resultOf(
+				await call("propose", {
+					edits: [
+						{
+							op: "create",
+							body: {
+								title: "Coupon total",
+								steps: [{ id: "b7", action: "Apply SAVE10 to a $100 cart", expected: "Total shows $90.00" }],
+							},
+						},
+					],
+				}),
+				z.object({
+					status: z.literal("adopted"),
+					cases: z.array(z.object({ ref: z.string(), version: z.number(), hash: z.string() })).min(1),
+				}),
+			);
+			const created = proposed.cases[0];
+			if (!created) throw new Error("No case was created");
+			// The pull request's pipeline has reported its head: that is what makes `pr:482` exist. (What an agent
+			// says about where a commit is counts for nothing until a pipeline or a person has reported the commit.)
+			h.call(
+				"report",
+				{
+					target: { commit: "9f3c2ab", pr: 482, branch: "coupon-total", files: ["tests/checkout.spec.ts"] },
+					results: [{ test: { key: "tests/other.spec.ts::smoke" }, outcome: "pass" }],
+				},
+				h.actor("pipeline", "ci", ["read", "record"]),
+			);
+			const reported = resultOf(
+				await call("report", {
+					target: { commit: "9f3c2ab", pr: 482, files: ["tests/checkout.spec.ts"] },
+					results: [
+						{
+							test: { case: created.ref },
+							annotation: { case: created.ref, version: created.version },
+							outcome: "fail",
+							failure: { message: "Expected $90.00, got $100.00" },
+						},
+					],
+				}),
+				z.object({
+					counts: z.object({ fail: z.literal(1) }),
+					basis: z.object({ exact: z.literal(1) }),
+					questions: z.array(z.object({ q: z.string() })),
+				}),
+			);
+			expect(reported.questions.length).toBeGreaterThan(0);
+			const inbox = resultOf(
+				await call("inbox", { kind: "failure" }),
+				z.object({
+					items: z.array(z.object({ q: z.string(), evidenceHash: z.string(), you: z.literal("advice") })).min(1),
+				}),
+			);
+			const question = inbox.items[0];
+			if (!question) throw new Error("No failure question was raised");
+			resultOf(
+				await call("decide", {
+					q: question.q,
+					onEvidence: question.evidenceHash,
+					answer: { is: "defect" },
+					reason: "The total is wrong.",
+				}),
+				z.array(z.object({ status: z.literal("advised") })).length(1),
+			);
+			const impact = resultOf(
+				await call("impact", { change: "pr:482", files: ["tests/checkout.spec.ts"] }),
+				z.object({ cases: z.array(z.object({ id: z.string(), hash: z.string() })), cursor: z.string() }),
+			);
+			expect(impact.cases).toContainEqual({ id: created.ref, hash: created.hash });
+			const got = resultOf(
+				await call("get", { refs: [created.ref], as: "md" }),
+				z.array(z.object({ ref: z.string(), hash: z.string(), md: z.string() })),
+			);
+			expect(got[0]?.md).toContain("> Total shows $90.00");
+			const unchanged = resultOf(
+				await call("get", { refs: [created.ref], as: "md", unless: { [created.ref]: created.hash } }),
+				z.array(z.object({ ref: z.string(), unchanged: z.literal(true), hash: z.string() })),
+			);
+			expect(unchanged).toEqual([{ ref: created.ref, unchanged: true, hash: created.hash }]);
+			resultOf(
+				await call("claim", {
+					lens: "adversarial-review",
+					about: "pr:482",
+					reviewed: [`${created.ref}@${created.hash}`],
+					findings: [],
+				}),
+				z.object({ reviewed: z.literal(1) }),
+			);
+			const changed = resultOf(
+				await call("since", { cursor: initial.cursor }),
+				z.object({ changed: z.array(z.object({ ref: z.string() })), cursor: z.string() }),
+			);
+			expect(changed.changed).toContainEqual({ ref: created.ref });
+			resultOf(
+				await call("since", { cursor: changed.cursor }),
+				z.object({ changed: z.array(z.unknown()).length(0), settled: z.array(z.unknown()).length(0) }),
+			);
+			const gate = resultOf(
+				await call("gate", { commit: "9f3c2ab" }),
+				z.object({ verdict: z.enum(["passed", "failed", "blocked", "pending"]), open: z.array(z.string()) }),
+			);
+			// What an agent reports is put to a person as a question, and never moves a commit's gate (decision 0009):
+			// the gate reads what the pipeline reported, a pass, whatever the agent found.
+			expect(gate.verdict).toBe("passed");
+			expect(gate.open).toEqual([]);
+			console.log(
+				`${version} tokens served: ${wire.reduce((sum, message) => sum + encode(message).length, 0)}; ${wire.length} messages; definitions once; o200k_base`,
+			);
+		} finally {
+			await client.close();
+			await server.close();
+			h.close();
+		}
+	},
+);
 
 test("tool errors name bad fields and require a project when the choice is ambiguous", async () => {
 	const h = harness();
@@ -396,7 +408,7 @@ test("authenticated stateless HTTP answers initialize and tools/list and keeps t
 		label: "MCP test",
 	});
 	const route = mcpRoute(h.app);
-	const post = async (body: unknown, version = LATEST_PROTOCOL_VERSION): Promise<Response> => {
+	const post = async (body: unknown, version = "2025-11-25"): Promise<Response> => {
 		const req = new Request("http://127.0.0.1/mcp", {
 			method: "POST",
 			headers: {
@@ -418,7 +430,7 @@ test("authenticated stateless HTTP answers initialize and tools/list and keeps t
 			id: 1,
 			method: "initialize",
 			params: {
-				protocolVersion: LATEST_PROTOCOL_VERSION,
+				protocolVersion: "2025-11-25",
 				capabilities: {},
 				clientInfo: { name: "http-agent", version: "1" },
 			},
@@ -426,7 +438,7 @@ test("authenticated stateless HTTP answers initialize and tools/list and keeps t
 		expect(initialized.status).toBe(200);
 		expect(initialized.headers.get("mcp-session-id")).toBeNull();
 		const init = z.object({ result: InitializeResultSchema }).parse(await initialized.json()).result;
-		expect(init.protocolVersion).toBe(LATEST_PROTOCOL_VERSION);
+		expect(init.protocolVersion).toBe("2025-11-25");
 		expect(init.instructions).toContain("onEvidence");
 		expect(init.instructions?.split(/[.!?](?:\s|$)/).filter(Boolean).length).toBeLessThanOrEqual(3);
 		const listed = await post({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
@@ -454,6 +466,56 @@ test("authenticated stateless HTTP answers initialize and tools/list and keeps t
 		h.close();
 	}
 });
+
+test.each(["2025-11-25", "2026-07-28"])(
+	"a v2 HTTP client negotiates %s and discovers and calls the same tools",
+	async (version) => {
+		const h = harness();
+		const http = serve(h.app, h.owner, { ui: null, routes: { "/mcp": mcpRoute(h.app) } });
+		const { secret } = createToken(h.app, {
+			actor: "v2-reader",
+			kind: "agent",
+			can: ["read"],
+			project: 0,
+			label: "MCP v2 test",
+		});
+		const client = new Client(
+			{ name: "v2-http-agent", version: "1" },
+			{ versionNegotiation: { mode: version === "2026-07-28" ? { pin: version } : "legacy" } },
+		);
+		const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${http.port}/mcp`), {
+			requestInit: { headers: { authorization: `Bearer ${secret}` } },
+		});
+		try {
+			const unauthorized = await fetch(`http://127.0.0.1:${http.port}/mcp`, {
+				method: "POST",
+				headers: { authorization: "Bearer invalid-token", "content-type": "application/json" },
+				body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+			});
+			expect(unauthorized.status).toBe(401);
+			await unauthorized.body?.cancel();
+			await client.connect(transport);
+			expect(client.getNegotiatedProtocolVersion()).toBe(version);
+			expect((await client.listTools()).tools).toEqual(mcpTools());
+			resultOf(
+				await client.callTool({ name: "inbox", arguments: {} }),
+				z.object({ items: z.array(z.unknown()).length(0) }),
+			);
+			const refused = CallToolResultSchema.parse(
+				await client.callTool({ name: "propose", arguments: { edits: [{ op: "create", outline: "Not allowed" }] } }),
+			);
+			expect(refused.isError).toBe(true);
+			expect(refused.content).toEqual([{ type: "text", text: expect.stringContaining("forbidden:") }]);
+			const unknown = CallToolResultSchema.parse(await client.callTool({ name: "admin", arguments: {} }));
+			expect(unknown.isError).toBe(true);
+			expect(unknown.content).toEqual([{ type: "text", text: "invalid: Tool admin not found" }]);
+		} finally {
+			await client.close();
+			await http.stop(true);
+			h.close();
+		}
+	},
+);
 
 test("an HTTP tool write waits for an applying report and records token use", async () => {
 	const h = harness();
@@ -487,7 +549,7 @@ test("an HTTP tool write waits for an applying report and records token use", as
 				authorization: `Bearer ${secret}`,
 				"content-type": "application/json",
 				accept: "application/json, text/event-stream",
-				"mcp-protocol-version": LATEST_PROTOCOL_VERSION,
+				"mcp-protocol-version": "2025-11-25",
 			},
 			body: JSON.stringify({
 				jsonrpc: "2.0",
@@ -512,17 +574,19 @@ test("an HTTP tool write waits for an applying report and records token use", as
 	}
 });
 
-test("stdio forwards calls to the running HTTP instance without owning its database", async () => {
-	const h = harness();
-	const http = serve(h.app, h.owner);
-	const { secret } = createToken(h.app, {
-		actor: "stdio-reader",
-		kind: "agent",
-		can: ["read"],
-		project: 0,
-		label: "MCP test",
-	});
-	const source = `
+test.each(["2025-11-25", "2026-07-28"])(
+	"stdio %s forwards calls to the running HTTP instance without owning its database",
+	async (version) => {
+		const h = harness();
+		const http = serve(h.app, h.owner);
+		const { secret } = createToken(h.app, {
+			actor: "stdio-reader",
+			kind: "agent",
+			can: ["read"],
+			project: 0,
+			label: "MCP test",
+		});
+		const source = `
 		import { z } from "zod";
 		import { runStdio } from ${JSON.stringify(new URL("./mcp.ts", import.meta.url).pathname)};
 		const url = process.env.MAINWORTHY_MCP_TEST_URL;
@@ -540,30 +604,40 @@ test("stdio forwards calls to the running HTTP instance without owning its datab
 			return session.result.projects.map(project => project.key);
 		});
 	`;
-	const transport = new StdioClientTransport({
-		command: process.execPath,
-		args: ["-e", source],
-		env: { MAINWORTHY_MCP_TEST_URL: `http://127.0.0.1:${http.port}`, MAINWORTHY_MCP_TEST_TOKEN: secret },
-	});
-	const client = new Client({ name: "stdio-client", version: "1" });
-	try {
-		await client.connect(transport);
-		expect(await client.listTools()).toEqual({ tools: mcpTools() });
-		resultOf(
-			await client.callTool({ name: "inbox", arguments: {} }),
-			z.object({ items: z.array(z.unknown()).length(0) }),
+		const transport = new StdioClientTransport({
+			command: process.execPath,
+			args: ["-e", source],
+			env: { MAINWORTHY_MCP_TEST_URL: `http://127.0.0.1:${http.port}`, MAINWORTHY_MCP_TEST_TOKEN: secret },
+		});
+		const client = new Client(
+			{ name: "stdio-client", version: "1" },
+			{
+				versionNegotiation: { mode: version === "2026-07-28" ? { pin: version } : "legacy" },
+			},
 		);
-		const refused = CallToolResultSchema.parse(
-			await client.callTool({ name: "propose", arguments: { edits: [{ op: "create", outline: "Not allowed" }] } }),
-		);
-		expect(refused.isError).toBe(true);
-		expect(refused.content).toEqual([{ type: "text", text: expect.stringContaining("forbidden:") }]);
-	} finally {
-		await client.close();
-		await http.stop(true);
-		h.close();
-	}
-});
+		try {
+			await client.connect(transport);
+			expect(client.getNegotiatedProtocolVersion()).toBe(version);
+			expect((await client.listTools()).tools).toEqual(mcpTools());
+			resultOf(
+				await client.callTool({ name: "inbox", arguments: {} }),
+				z.object({ items: z.array(z.unknown()).length(0) }),
+			);
+			const refused = CallToolResultSchema.parse(
+				await client.callTool({ name: "propose", arguments: { edits: [{ op: "create", outline: "Not allowed" }] } }),
+			);
+			expect(refused.isError).toBe(true);
+			expect(refused.content).toEqual([{ type: "text", text: expect.stringContaining("forbidden:") }]);
+			const unknown = CallToolResultSchema.parse(await client.callTool({ name: "admin", arguments: {} }));
+			expect(unknown.isError).toBe(true);
+			expect(unknown.content).toEqual([{ type: "text", text: "invalid: Tool admin not found" }]);
+		} finally {
+			await client.close();
+			await http.stop(true);
+			h.close();
+		}
+	},
+);
 
 test("the shipped skill stays short and its tool reference matches the registry", async () => {
 	const skill = await Bun.file(new URL("../../skill/mainworthy/SKILL.md", import.meta.url)).text();

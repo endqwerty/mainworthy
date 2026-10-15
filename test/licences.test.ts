@@ -101,7 +101,8 @@ describe("the third-party notices", () => {
 		// The bundle reaches React and the agent SDK; a list without them was read from the wrong place.
 		const names = (await bundledPackages()).map((p) => p.name);
 		expect(names).toContain("react-dom");
-		expect(names).toContain("@modelcontextprotocol/sdk");
+		expect(names).toContain("@modelcontextprotocol/server");
+		expect(names).toContain("@modelcontextprotocol/core");
 	});
 
 	test("the Bun the notices list is the Bun the image and CI build with", () => {

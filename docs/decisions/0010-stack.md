@@ -109,8 +109,11 @@ TypeScript candidate is a working reference for it.
 3. **React 19**, bundled by Bun, for the web UI (decision 0011).
 4. **Zod 4** schemas are the single declaration of every operation's input; TypeScript types, the OpenAPI
    document, the MCP tool schemas and the CLI flags are derived from them.
-5. **The official MCP TypeScript SDK**, on its v1 line (1.32, protocol 2025-11-25), which is maintained but no
-   longer the current one. Moving to v2 and the 2026-07-28 protocol is one file (#61).
+5. **The official MCP TypeScript SDK**, on its v2 line (`@modelcontextprotocol/server` and
+   `@modelcontextprotocol/core` 2.3.1, protocol 2026-07-28). The serving helpers select the modern discovery
+   path or the older 2025 handshake. The HTTP adapter keeps JSON responses for older clients; stdio keeps
+   the same tools over either protocol. This replaces v1.32.1 for [issue #61](https://github.com/endqwerty/mainworthy/issues/61).
+   The registry's ten tool definitions and their token budget are unchanged.
 6. **Biome** for format and lint, **`bun test`** for tests, **playwright-core** driving the system Chromium for
    browser tests.
 
