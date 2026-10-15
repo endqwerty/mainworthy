@@ -170,6 +170,9 @@ which opens the page [Licence](./licence.md) on the instance, and the copyright 
 
 What you type stays while the app goes to the background, and when your session ends and you sign in again as yourself on the same server. **Cancel** asks before discarding a changed draft.
 A lost reply offers **Retry**, which sends the same command. Drafts do not survive closing the app.
+
+The editor keeps custom field values without editing them. A newly required field does not block edits to an older case that leaves that value unchanged. New cases must supply required values through [Markdown or a content proposal](./policy.md#custom-fields).
+
 Moving, tagging, archiving and restoring cases, changing folders, version diffs and resolving overlaps still
 need the web app. The button on a case's page opens it there.
 

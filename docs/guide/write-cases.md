@@ -203,4 +203,4 @@ See [the CLI guide](./cli.md) for command forms and flags.
 
 Canonical Markdown can carry a `fields` map in its header. Values are strings, and they survive Markdown round trips and edits that omit `fields`. A proposal that supplies the map replaces all its values, so include keys you want to keep. The web and iPhone case editors preserve these values but do not edit them.
 
-A project can define text or choice fields and require values. [Custom fields](./policy.md#custom-fields) explains how to define them. New content, including a restore, must meet the definitions in force when it is proposed and adopted. Older versions remain readable as recorded.
+A project can define text or choice fields and require values. [Custom fields](./policy.md#custom-fields) explains how to define them. New cases, restores, and changed field values must meet the definitions in force when proposed and adopted. An edit can keep unchanged values from the current case, including missing required values or choices no longer allowed. The web and iPhone editors can therefore edit older cases without filling new required fields. Older versions remain readable as recorded.

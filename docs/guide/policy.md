@@ -55,7 +55,7 @@ Press **Save field definitions** to propose and accept the change. Both the prop
 
 Field values remain strings in a case's `fields` map. A required value cannot be missing or blank. A nonblank choice value must match an allowed value exactly. An optional field can be absent or blank. Keys without definitions remain free text. Removing a definition leaves all its values in place.
 
-Definitions constrain new content when it is proposed and when it is adopted, including Markdown edits, restores, and merged edits. Changing a definition does not rewrite existing versions. An existing case with an invalid value stays readable, but its next content edit must supply valid values. A pending proposal that no longer meets the definitions is refused at adoption; reject it and propose valid content again.
+New cases and restores must meet the definitions when proposed and adopted. An edit may keep unchanged values from the current case, including missing required values and choices no longer allowed. This lets you edit an older case in the web or iPhone editor without filling newly required fields. Changed field values must meet the definitions, including after a merge or while a proposal waits for acceptance. A refusal leaves the case unchanged. Changing a definition never rewrites existing versions.
 
 Required fields cannot be combined with **Create a case for each test**. Automatic creation has no values for those fields. Choose **Ask in the queue** or **Track without a case** first. Optional definitions work with automatic creation.
 
@@ -73,7 +73,7 @@ To define fields through the CLI or HTTP API, start with `mainworthy policy show
 $ mainworthy propose --json '{"edits":[{"op":"policy","base":1,"settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"fields":{"risk":{"kind":"choice","label":"Risk","required":true,"choices":["low","high"]},"notes":{"kind":"text","label":"Notes","required":false}}}}]}'
 ```
 
-An admin who is a person accepts the resulting question in Queue or with `decide`. Sending the whole settings object without `fields` removes all definitions. The MCP tool listing omits field definitions to keep its token limit; use the CLI, HTTP API, or Settings for definition changes. Archives include the policy versions, values, proposals, and decisions.
+An admin who is a person accepts the resulting question in Queue or with `decide`. Sending a settings object without `fields` preserves the current definitions. Send `"fields": {}` to remove every definition explicitly. The MCP tool listing omits field definitions to keep its token limit; use the CLI, HTTP API, or Settings for definition changes. Archives include the policy versions, values, proposals, and decisions.
 
 ## The three presets
 

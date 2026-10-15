@@ -1205,6 +1205,73 @@ describe("project custom field definitions", () => {
 		expect(policy().settings).toHaveProperty("fields", definitions.fields);
 	});
 
+	test("settings without fields retain definitions, and an explicit empty map removes them", () => {
+		define();
+		const { fields, ...settings } = policy().settings;
+		settings.holds.flakyDays = 7;
+		expect(accept(h.call<Proposed>("propose", { edits: [{ op: "policy", settings }] }))[0]?.status).toBe("decided");
+		expect(policy().settings.fields).toEqual(fields);
+		expect(policy().settings.holds.flakyDays).toBe(7);
+		expect(
+			accept(
+				h.call<Proposed>("propose", {
+					edits: [{ op: "policy", settings: { ...settings, fields: {} } }],
+				}),
+			)[0]?.status,
+		).toBe("decided");
+		expect(policy().settings.fields).toEqual({});
+	});
+
+	test("older cases keep missing, blank and obsolete values while unrelated content changes", () => {
+		for (const fields of [{}, { risk: " " }, { risk: "obsolete", legacy: "Keep me" }])
+			h.call("propose", { edits: [{ op: "create", body: { title: "Before definitions", fields } }] });
+		define();
+		for (const ref of ["C-1", "C-2", "C-3"]) {
+			expect(
+				h.call<Proposed>("propose", {
+					edits: [{ op: "edit", case: ref, base: 1, body: { title: "Edited", pre: "Changed precondition" } }],
+				}).status,
+			).toBe("adopted");
+			expect(title(ref)).toBe("Edited");
+			// A valid optional value can change without filling a different, unchanged required value.
+			expect(
+				h.call<Proposed>("propose", {
+					edits: [
+						{
+							op: "edit",
+							case: ref,
+							base: 2,
+							body: {
+								fields: {
+									...(ref === "C-2" ? { risk: " " } : ref === "C-3" ? { risk: "obsolete", legacy: "Keep me" } : {}),
+									notes: "Added notes",
+								},
+							},
+						},
+					],
+				}).status,
+			).toBe("adopted");
+		}
+		const md = first(h.call<{ md: string }[]>("get", { refs: ["C-3"], as: "md" })).md;
+		expect(md).toContain("risk: obsolete");
+		expect(md).toContain("legacy: Keep me");
+		for (const fields of [{ risk: "bad" }, { risk: "" }, {}]) {
+			const reply = h.raw("propose", { edits: [{ op: "edit", case: "C-3", base: 3, body: { fields } }] });
+			expect(reply.ok).toBe(false);
+			if (!reply.ok) expect(reply.error.message).toContain("risk");
+		}
+		expect(
+			h.call<Proposed>("propose", {
+				edits: [{ op: "edit", case: "C-3", base: 3, body: { fields: { risk: "low", legacy: "Keep me" } } }],
+			}).status,
+		).toBe("adopted");
+		expect(
+			h.raw("propose", {
+				edits: [{ op: "edit", case: "C-3", base: 4, body: { fields: {} } }],
+			}).ok,
+		).toBe(false);
+	});
+
 	test("a pending content proposal is revalidated against definitions at adoption", () => {
 		accept(h.call<Proposed>("propose", { edits: [{ op: "policy", preset: "standard" }] }));
 		const agent = h.actor("field-writer", "agent", ["read", "produce"]);
@@ -1218,6 +1285,53 @@ describe("project custom field definitions", () => {
 		expect(h.call<{ items: unknown[] }>("find", { in: "cases" }).items).toHaveLength(0);
 	});
 
+	test("pending edits inherit unchanged old values and merge current values at adoption", () => {
+		h.call("propose", { edits: [{ op: "create", body: { title: "Before definitions" } }] });
+		accept(h.call<Proposed>("propose", { edits: [{ op: "policy", preset: "standard" }] }));
+		const agent = h.actor("field-editor", "agent", ["read", "produce"]);
+		const pending = h.call<Proposed>(
+			"propose",
+			{
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Pending title" } }],
+			},
+			agent,
+		);
+		define();
+		expect(accept(pending)[0]?.status).toBe("decided");
+		expect(title("C-1")).toBe("Pending title");
+		const stale = h.call<Proposed>(
+			"propose",
+			{
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { pre: "A stale edit" } }],
+			},
+			agent,
+		);
+		h.call("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 2, body: { fields: { risk: "low" } } }],
+		});
+		expect(accept(stale)[0]?.status).toBe("decided");
+		const md = first(h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" })).md;
+		expect(md).toContain("risk: low");
+		expect(md).toContain("A stale edit");
+		expect(title("C-1")).toBe("Pending title");
+	});
+
+	test("a pending field change must meet definitions introduced before adoption", () => {
+		h.call("propose", { edits: [{ op: "create", body: { title: "Before definitions", fields: { risk: "high" } } }] });
+		accept(h.call<Proposed>("propose", { edits: [{ op: "policy", preset: "standard" }] }));
+		const agent = h.actor("field-editor", "agent", ["read", "produce"]);
+		const pending = h.call<Proposed>(
+			"propose",
+			{
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { fields: { risk: "obsolete" } } }],
+			},
+			agent,
+		);
+		define();
+		expect(accept(pending)[0]).toMatchObject({ status: "invalid", needs: expect.stringContaining("risk") });
+		expect(first(h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" })).md).toContain("risk: high");
+	});
+
 	test("definitions never rewrite history, and Markdown, policy history and decisions survive an archive", () => {
 		h.call("propose", {
 			edits: [{ op: "create", body: { title: "Before definitions", fields: { risk: "obsolete", legacy: "Keep me" } } }],
@@ -1226,10 +1340,12 @@ describe("project custom field definitions", () => {
 		const before = h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md", version: 1 });
 		expect(before[0]?.md).toContain("risk: obsolete");
 		expect(
-			h.raw("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Still invalid" } }] }).ok,
-		).toBe(false);
+			h.call<Proposed>("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Unchanged old values" } }],
+			}).status,
+		).toBe("adopted");
 		h.call("propose", {
-			edits: [{ op: "edit", case: "C-1", base: 1, body: { fields: { risk: "low", legacy: "Keep me" } } }],
+			edits: [{ op: "edit", case: "C-1", base: 2, body: { fields: { risk: "low", legacy: "Keep me" } } }],
 		});
 		expect(h.raw("propose", { edits: [{ op: "restore", case: "C-1", to: 1 }] }).ok).toBe(false);
 		const md = first(h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" })).md;
