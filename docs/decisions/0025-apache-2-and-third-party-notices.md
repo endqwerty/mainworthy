@@ -31,7 +31,7 @@ three sources:
 | --- | --- | --- |
 | npm packages | The build's entry points are bundled and the bundler reports which files went in; a package that is installed and never imported is not shipped and not listed. The text is the licence file inside each package. | The executable; the web UI a browser loads takes some of them |
 | The Bun runtime | `bun build --compile` puts the whole runtime into the executable, with every library Bun links. The list was made from Bun's source at the release tag (`licences/README.md`). | The executable |
-| Archify and JetBrains Mono | Each diagram page embeds Archify's viewer and the font. | The diagrams at `/docs` |
+| Archify, JetBrains Mono and Basecamp's policies | Each diagram page embeds Archify's viewer and the font; the privacy policy is adapted from Basecamp's policies (CC BY 4.0) and credits them at its end. | The pages at `/docs` |
 
 The three files are at the root of the repository, for GitHub and for anyone who takes the code, and the
 container image has them in `/usr/share/doc/mainworthy/`. The iPhone app contains no code from others: only its
@@ -56,7 +56,9 @@ with nothing else (LGPL, MPL-2.0, Artistic-2.0, GPL with runtime exceptions, and
 
 **The Bun in the image is pinned to the release the notices were read from.** The Dockerfile named `oven/bun:1.4`,
 which moves with every patch release; it now names `1.4.3`, the version CI runs. A test holds the Dockerfile, CI
-and the notices to the same version, so upgrading Bun means reading its libraries again.
+and the notices to the same version, so upgrading Bun means reading its libraries again. `bun run build` uses the
+Bun of whoever runs it, and says so when that is not the one the notices list (the Codex review of #226). It does
+not refuse: someone who builds from the source for themselves gives no copy away.
 
 ## What was turned down
 

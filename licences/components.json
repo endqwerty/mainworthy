@@ -2,26 +2,47 @@
 	"bun": "1.4.3",
 	"groups": [
 		{
-			"title": "In the documentation's diagrams",
-			"ships": "Each page in `docs/diagrams/` is built by Archify and carries its viewer and the JetBrains Mono font. The executable serves the pages at `/docs`.",
+			"title": "In the documentation",
+			"ships": "The pages at `/docs`: each diagram in `docs/diagrams/` is built by Archify and carries its viewer and the JetBrains Mono font, and the privacy policy (`docs/guide/privacy.md`) is adapted from Basecamp's. The executable carries the pages.",
 			"components": [
 				{
 					"name": "Archify",
 					"version": "3.0.1",
 					"licence": "MIT",
-					"relyOn": ["MIT"],
+					"relyOn": [
+						"MIT"
+					],
 					"source": "https://github.com/tt-a1i/archify/tree/v3.0.1",
-					"texts": ["archify/LICENSE"],
+					"texts": [
+						"archify/LICENSE"
+					],
 					"note": "The viewer script and styles inside each diagram are Archify's. No brand mark from Archify's catalogue is used."
 				},
 				{
 					"name": "JetBrains Mono",
 					"version": "Google Fonts subsets, as Archify 3.0.1 embeds them",
 					"licence": "OFL-1.1",
-					"relyOn": ["OFL-1.1"],
+					"relyOn": [
+						"OFL-1.1"
+					],
 					"source": "https://github.com/JetBrains/JetBrainsMono/tree/19371302b95d218af43299bce79ddbddd0bc364d",
-					"texts": ["jetbrains-mono/OFL.txt"],
+					"texts": [
+						"jetbrains-mono/OFL.txt"
+					],
 					"note": "Each diagram also carries this licence inside the page, beside the font."
+				},
+				{
+					"name": "Basecamp policies",
+					"version": "05fb1f9ddaaf604fc5816990fa66f3ffd7f0a462",
+					"licence": "CC-BY-4.0",
+					"relyOn": [
+						"CC-BY-4.0"
+					],
+					"source": "https://github.com/basecamp/policies/tree/05fb1f9ddaaf604fc5816990fa66f3ffd7f0a462",
+					"texts": [
+						"basecamp-policies/LICENSE.md"
+					],
+					"note": "The privacy policy at `/privacy` is adapted from these policies by 37signals. The page says so at its end, with a link to the licence, and says that it was changed."
 				}
 			]
 		}
