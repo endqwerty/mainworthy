@@ -86,8 +86,8 @@ If a confirmed request loses its reply, retry the same input and `cmd` to receiv
 its recorded receipt. Reusing that id with different input is a conflict. Use
 separate ids for the preview and the confirmed import.
 
-Without `--json`, the file command exits 2 for refused records or a proposal
-waiting for acceptance. The generated `--json '<input JSON>'` operation form
+The file command exits 2 for refused records or a proposal waiting for
+acceptance, with or without `--json`. The generated `--json '<input JSON>'` operation form
 prints the full reply. Check its `refused` count and `proposal.status` yourself.
 
 ## Use the TestRail preset

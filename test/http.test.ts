@@ -240,6 +240,13 @@ async function replySweep(instance: Instance, project: string) {
 	return { checked, seen, counts, validators };
 }
 
+async function sweepCsvImportReplies(checked: Awaited<ReturnType<typeof replySweep>>["checked"], id: string) {
+	const csv = `ID,Title,Steps,Expected\n${id},Imported by the reply sweep,Open it,It opens\n`;
+	const mapping = { id: "ID", title: "Title", steps: "Steps", expected: "Expected" };
+	const preview = z.object({ confirmation: z.string() }).parse(await checked("import-csv", { csv, mapping }));
+	await checked("import-csv", { csv, mapping, confirm: preview.confirmation });
+}
+
 async function sweepTrackerReplies(
 	instance: Instance,
 	checked: Awaited<ReturnType<typeof replySweep>>["checked"],
@@ -2149,6 +2156,7 @@ describe("the surface", () => {
 		await checked("admin", { do: "team.history", team: "Schema team" });
 		await checked("admin", { do: "team.member.remove", team: "Schema team", person: "schema-person" });
 		await checked("admin", { do: "team.grant.remove", team: "Schema team", project: "scratch" });
+		await sweepCsvImportReplies(checked, "SWEEP-CSV-1");
 		await sweepTrackerReplies(instance, checked, "scratch");
 		await sweepAttachmentReplies(checked);
 		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());
@@ -2370,6 +2378,7 @@ describe("the surface", () => {
 		for (const op of OP_LIST) await checked(op.name, [], {}, "invalid");
 		await checked("get", { refs: ["C-99999"] }, {}, "not_found");
 		await checked("get", { refs: ["C-1"] }, bearer("wrong-token"), "unauthenticated");
+		await sweepCsvImportReplies(checked, "SWEEP-CSV-2");
 		await sweepTrackerReplies(instance, checked, "demo");
 		await sweepAttachmentReplies(checked);
 		const total = sweep.counts.success + sweep.counts.error + empty.counts.success + empty.counts.error;
