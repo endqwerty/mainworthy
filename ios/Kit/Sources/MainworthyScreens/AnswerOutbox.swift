@@ -32,7 +32,7 @@ public final class AnswerOutbox {
 		public var detail: String {
 			switch outcome {
 			case nil: dropped
-				? "This answer is never sent again and does not hold up later answers. Each send pass checks for an outcome. This entry stays until a recorded outcome can be cleared."
+				? "This answer is never sent again and does not hold up later answers. Each send pass checks for an outcome. If the server records it, its outcome appears here. If it never does, this entry stays."
 				: problem ?? "Saved on this device. Sends when the app can reach the server."
 			case .decided: "The server recorded this answer."
 			case .advised(let who): "Waiting for \(who)."
@@ -133,18 +133,6 @@ public final class AnswerOutbox {
 		dropProblem = nil
 		sending = true
 		defer { sending = false }
-		for entry in entries where entry.dropped {
-			guard active, !Task.isCancelled else { return }
-			let command = try? await project.answerCommand(entry.answer)
-			guard active, !Task.isCancelled else { return }
-			if case .recorded(let outcome) = command {
-				var updated = entries
-				guard let index = updated.firstIndex(where: { $0.id == entry.id }) else { continue }
-				updated[index].outcome = outcome
-				do { try save(updated); entries = updated }
-				catch { storageProblem = "The result could not be saved on this device. The dropped command was kept. \(error.shown)"; return }
-			}
-		}
 		while active, !Task.isCancelled, let entry = entries.first(where: \.waiting) {
 			var beforeSending = entries
 			guard let sendingIndex = beforeSending.firstIndex(where: { $0.id == entry.id }) else { return }
@@ -186,6 +174,20 @@ public final class AnswerOutbox {
 				return
 			}
 			if pause { return }
+		}
+		for entry in entries where entry.dropped {
+			guard active, !Task.isCancelled else { return }
+			let command: AnswerCommand
+			do { command = try await project.answerCommand(entry.answer) }
+			catch { return }
+			guard active, !Task.isCancelled else { return }
+			if case .recorded(let outcome) = command {
+				var updated = entries
+				guard let index = updated.firstIndex(where: { $0.id == entry.id }) else { continue }
+				updated[index].outcome = outcome
+				do { try save(updated); entries = updated }
+				catch { storageProblem = "The result could not be saved on this device. The dropped command was kept. \(error.shown)"; return }
+			}
 		}
 	}
 
