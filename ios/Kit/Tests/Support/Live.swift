@@ -23,8 +23,8 @@ package enum Live {
 	}
 
 	/// A server nobody is signed in to yet, with its secret kept in memory.
-	package static func server(secrets: any SecretStore = MemoryStore()) -> Server {
-		Server(instance: instance, secrets: secrets, userAgent: "Mainworthy tests")
+	package static func server(secrets: any SecretStore = MemoryStore(), transport: any Transport = URLSessionTransport()) -> Server {
+		Server(instance: instance, secrets: secrets, transport: transport, userAgent: "Mainworthy tests")
 	}
 
 	/// A server the test's person is signed in to, with a session of its own.
@@ -32,11 +32,11 @@ package enum Live {
 	/// The tests run side by side, and each signs in. The server checks two passwords at a time and lets
 	/// thirty-two more wait: one over that is refused as a wrong password is. So the tests take turns here, a
 	/// few at a time, which a slower machine needs and a fast one does not notice.
-	package static func signedIn() async throws -> Server {
+	package static func signedIn(as proof: Proof? = nil, transport: any Transport = URLSessionTransport()) async throws -> Server {
 		await turns.enter()
 		defer { Task { await turns.leave() } }
-		let server = server()
-		_ = try await server.signIn(.password(name: name, password: password))
+		let server = server(transport: transport)
+		_ = try await server.signIn(proof ?? .password(name: name, password: password))
 		return server
 	}
 

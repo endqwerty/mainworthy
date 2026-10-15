@@ -56,6 +56,7 @@ public final class AnswerOutbox {
 	private let store: any AnswerStore
 	private var readable = true
 	private var active = true
+	private var sendWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
 
 	package init(project: ProjectClient, store: any AnswerStore = MemoryAnswerStore()) {
 		self.project = project
@@ -82,7 +83,7 @@ public final class AnswerOutbox {
 	}
 
 	/// Stops new sends when the person signs out or loses the project. A reply already in flight may still arrive.
-	package func stop() { active = false }
+	package func stop() { active = false; finishWaiting() }
 	package func resume() { active = true }
 
 	/// Stops replaying the head answer, retaining its command whenever an earlier send may still arrive.
@@ -90,7 +91,7 @@ public final class AnswerOutbox {
 		guard active, readable, !sending, let entry = stuck, entry.id == id else { return }
 		do {
 			sending = true
-			defer { sending = false }
+			defer { sending = false; finishWaiting() }
 			dropProblem = nil
 			let command: AnswerCommand
 			do { command = try await project.answerCommand(entry.answer) }
@@ -132,13 +133,49 @@ public final class AnswerOutbox {
 		guard active, readable, !sending else { return }
 		dropProblem = nil
 		sending = true
-		defer { sending = false }
+		defer { sending = false; finishWaiting() }
+		guard await sendWaitingAnswers() else { return }
+		for entry in entries where entry.dropped {
+			guard active, !Task.isCancelled else { return }
+			let command: AnswerCommand
+			do { command = try await project.answerCommand(entry.answer) }
+			catch { break }
+			guard active, !Task.isCancelled else { return }
+			if case .recorded(let outcome) = command {
+				var updated = entries
+				guard let index = updated.firstIndex(where: { $0.id == entry.id }) else { continue }
+				updated[index].outcome = outcome
+				do { try save(updated); entries = updated }
+				catch { storageProblem = "The result could not be saved on this device. The dropped command was kept. \(error.shown)"; return }
+			}
+		}
+		// Answers saved during the dropped checks still belong to this pass. A failed send pauses it.
+		_ = await sendWaitingAnswers()
+	}
+
+	/// Waits for this answer's attempt, without holding its screen open for dropped-command checks.
+	package func send(_ id: String) async {
+		guard active, readable, entries.contains(where: { $0.id == id && $0.waiting }) else { return }
+		await withCheckedContinuation { continuation in
+			sendWaiters[id, default: []].append(continuation)
+			if !sending { Task { await send() } }
+		}
+	}
+
+	private func finishWaiting(for id: String? = nil) {
+		let waiters: [CheckedContinuation<Void, Never>]
+		if let id { waiters = sendWaiters.removeValue(forKey: id) ?? [] }
+		else { waiters = sendWaiters.values.flatMap { $0 }; sendWaiters.removeAll() }
+		for waiter in waiters { waiter.resume() }
+	}
+
+	private func sendWaitingAnswers() async -> Bool {
 		while active, !Task.isCancelled, let entry = entries.first(where: \.waiting) {
 			var beforeSending = entries
-			guard let sendingIndex = beforeSending.firstIndex(where: { $0.id == entry.id }) else { return }
+			guard let sendingIndex = beforeSending.firstIndex(where: { $0.id == entry.id }) else { return false }
 			beforeSending[sendingIndex].delivery = .uncertain
 			do { try save(beforeSending); entries = beforeSending }
-			catch { storageProblem = "The send could not be saved on this device. No request was sent. \(error.shown)"; return }
+			catch { storageProblem = "The send could not be saved on this device. No request was sent. \(error.shown)"; return false }
 			let delivery = WriteDelivery()
 			let outcome: AnswerOutcome?
 			let problem: String?
@@ -159,10 +196,10 @@ public final class AnswerOutbox {
 				pause = true
 			}
 			// A stopped workspace must not overwrite a new workspace using the same saved file.
-			guard active else { return }
+			guard active else { return false }
 			// Another answer can be saved while this request waits. Preserve it and any cleared outcomes.
 			var updated = entries
-			guard let index = updated.firstIndex(where: { $0.id == entry.id }) else { return }
+			guard let index = updated.firstIndex(where: { $0.id == entry.id }) else { return false }
 			updated[index].outcome = outcome
 			updated[index].problem = problem
 			updated[index].delivery = rejected ? .rejected : .uncertain
@@ -171,24 +208,12 @@ public final class AnswerOutbox {
 				entries = updated
 			} catch {
 				storageProblem = "The result could not be saved on this device. Retry sends the same command. \(error.shown)"
-				return
+				return false
 			}
-			if pause { return }
+			finishWaiting(for: entry.id)
+			if pause { return false }
 		}
-		for entry in entries where entry.dropped {
-			guard active, !Task.isCancelled else { return }
-			let command: AnswerCommand
-			do { command = try await project.answerCommand(entry.answer) }
-			catch { return }
-			guard active, !Task.isCancelled else { return }
-			if case .recorded(let outcome) = command {
-				var updated = entries
-				guard let index = updated.firstIndex(where: { $0.id == entry.id }) else { continue }
-				updated[index].outcome = outcome
-				do { try save(updated); entries = updated }
-				catch { storageProblem = "The result could not be saved on this device. The dropped command was kept. \(error.shown)"; return }
-			}
-		}
+		return active && !Task.isCancelled
 	}
 
 	public func clearOutcomes() {
