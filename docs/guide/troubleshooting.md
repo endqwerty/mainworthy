@@ -37,6 +37,13 @@ A command that could not run prints one line to standard error, the code and the
 
 No server answers at that address. Start one with `mainworthy serve`, or point the command at the right one with `--url` or `MAINWORTHY_URL`.
 
+### `connection: the server answered ... to /healthz`
+
+The server or its proxy answered the health probe, so the command prints the HTTP status. For a redirect,
+use the HTTPS destination in `--url` or `MAINWORTHY_URL`. A 5xx response or invalid JSON can mean the proxy
+is waiting for a deployment; check the instance and retry once it serves `/healthz` again. No token or
+operation is sent after a failed health probe.
+
 ### `limited: too many failed attempts`
 
 Five wrong tokens came from your address, or five wrong tokens that begin as yours does, within 15 minutes. Wait the seconds the message names and try again with the right token. Each further wrong one doubles the wait, up to 15 minutes. If you share an address with whoever is guessing, a token the server generated still works. The owner token the server made from the value of `MAINWORTHY_OWNER_TOKEN` is one somebody chose, whatever it looks like, and waits with the rest.

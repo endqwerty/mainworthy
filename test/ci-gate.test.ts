@@ -607,15 +607,20 @@ test("the change workflow refuses unknown operations and incompatible servers, a
 			[API_VERSION, 200, { ok: false, error: { code: "invalid", message: "refused" } }, 1],
 			[API_VERSION + 1, 200, { ok: true, result: {} }, 1],
 			[undefined, 404, { ok: false, error: { code: "not_found", message: "no operation named change" } }, 1],
+			[undefined, 200, { ok: true, result: { change: "pr:482", state: "merged" } }, 0],
+			[undefined, 404, { ok: false, error: { code: "not_found", message: "change pr:482 not found" } }, 0],
+			[null, 200, { ok: true, result: {} }, 1],
 		] as const) {
-			const received: string[] = [];
+			const received: { path: string; apiVersion: string | null }[] = [];
 			const server = Bun.serve({
 				hostname: "127.0.0.1",
 				port: 0,
 				fetch(req) {
 					const path = new URL(req.url).pathname;
-					received.push(path);
-					return path === "/healthz" ? Response.json({ ok: true, apiVersion }) : Response.json(body, { status });
+					received.push({ path, apiVersion: req.headers.get("x-mainworthy-api-version") });
+					return path === "/healthz"
+						? Response.json({ ok: true, version: "0.1.0", commit: "before-versions", apiVersion })
+						: Response.json(body, { status });
 				},
 			});
 			try {
@@ -638,8 +643,15 @@ test("the change workflow refuses unknown operations and incompatible servers, a
 					new Response(child.stderr).text(),
 				]);
 				expect([apiVersion, status, code, stderr]).toEqual([apiVersion, status, expected, ""]);
-				if (apiVersion !== API_VERSION) expect(received).toEqual(["/healthz"]);
-				else expect(received).toEqual(["/healthz", "/api/p/scratch/change"]);
+				const healthRequest = { path: "/healthz", apiVersion: null };
+				if (apiVersion !== API_VERSION && apiVersion !== undefined) expect(received).toEqual([healthRequest]);
+				else {
+					expect(received).toEqual([
+						healthRequest,
+						{ path: "/api/p/scratch/change", apiVersion: apiVersion === undefined ? null : String(API_VERSION) },
+					]);
+					if (apiVersion === undefined) expect(stdout).toContain("::warning::");
+				}
 				if (expected !== 0) expect(stdout).toContain("::error::");
 			} finally {
 				await server.stop(true);

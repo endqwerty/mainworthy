@@ -25,8 +25,10 @@ Other clients may omit the header. This rule does not retrofit a compatibility c
 A health check remains an availability check, so incompatibility alone does not make it fail.
 
 CI checks the API version as well as the existing operation descriptions and starts its own instance when
-incompatible. The lifecycle workflow fails visibly on incompatible instances or unknown operations. It can
-be replayed with `workflow_dispatch` after an upgrade. Only a specific missing-change reply is harmless.
+incompatible. The lifecycle workflow alone accepts a healthy instance with no `apiVersion`: it warns and
+sends the existing lifecycle request without a version header until the first versioned build deploys.
+An explicitly different version or an unknown operation fails visibly and can be replayed with
+`workflow_dispatch` after an upgrade. Only a specific missing-change reply is harmless.
 
 ## Alternatives
 
