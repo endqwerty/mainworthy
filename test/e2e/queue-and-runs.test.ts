@@ -481,10 +481,15 @@ check(
 		const run = await server.api("plan", { name: "Closing", select: {} });
 		const tester = await grant(server, "tester");
 		const h = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
+		const gate = latch();
 		try {
 			const { page } = h;
 			page.setDefaultTimeout(5000);
 			await ready(page);
+			await page.route("**/report", async (route) => {
+				await gate.held;
+				await route.continue();
+			});
 			await page.keyboard.press("p");
 			await page.keyboard.press("f");
 			await page.keyboard.type("Private note");
@@ -494,10 +499,14 @@ check(
 				{ token: tester },
 			);
 			await page.getByText("Filled by person tester", { exact: false }).waitFor();
+			gate.release();
+			// Standard closes a passing run in the same write. Slot fills alone can arrive before this read.
+			await page.locator(".run-summary").getByText("passed: 2 results proven", { exact: true }).waitFor();
 			await page.keyboard.press("Enter");
 			await page.getByText("This run is closed", { exact: false }).first().waitFor();
 			expect(await page.getByRole("textbox", { name: "Result note" }).inputValue()).toBe("Private note");
 		} finally {
+			gate.release();
 			await h.close();
 			await server.stop();
 		}
