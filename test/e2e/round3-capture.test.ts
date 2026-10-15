@@ -156,6 +156,34 @@ for (const kind of ["new", "edit"]) {
 					(count) => count === 1,
 				);
 				await titleOf(page).fill("First phrase with the rest");
+				// Select text as soon as recovery stores its version, before a deferred render can replace the
+				// editor's old event handlers. Under load, an ordinary click reached that same gap (issue #250).
+				if (kind === "edit")
+					await page.addInitScript(() => {
+						const setItem = Storage.prototype.setItem;
+						let selected = false;
+						Storage.prototype.setItem = function (key, value) {
+							setItem.call(this, key, value);
+							if (selected || !key.endsWith(":draft:scratch:C-1")) return;
+							const saved: unknown = JSON.parse(value);
+							if (
+								!saved ||
+								typeof saved !== "object" ||
+								!("base" in saved) ||
+								saved.base !== 2 ||
+								!("sent" in saved) ||
+								saved.sent !== null
+							)
+								return;
+							const title = document.querySelector('textarea[aria-label="Case title"]');
+							if (!(title instanceof HTMLTextAreaElement)) return;
+							selected = true;
+							Reflect.set(window, "recoverySelection", true);
+							title.focus();
+							title.setSelectionRange(0, 3);
+							document.dispatchEvent(new Event("selectionchange"));
+						};
+					});
 				await page.reload();
 				await titleOf(page).click();
 				await page.keyboard.press("Escape");
@@ -189,6 +217,7 @@ for (const kind of ["new", "edit"]) {
 				expect(requests.at(-1)?.cmd).not.toBe(requests[0]?.cmd ?? "");
 				expect(JSON.stringify(requests.at(-1)?.edits)).toContain("First phrase with the rest");
 				expect(await titleOf(page).inputValue()).toBe("First phrase with the rest");
+				if (kind === "edit") expect(await page.evaluate(() => Reflect.get(window, "recoverySelection"))).toBe(true);
 			} finally {
 				release();
 				await h.close();
