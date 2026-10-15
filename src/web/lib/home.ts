@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TAG } from "../../core/model.ts";
-import { call } from "./api.ts";
+import { ApiError, call } from "./api.ts";
 import { deviceKey, deviceSession } from "./device.ts";
 import { routeUrl } from "./router.ts";
 
@@ -59,16 +59,11 @@ export async function resolveHome(project: string): Promise<{ url: string; missi
 	const owner = deviceSession();
 	let missing = false;
 	if (home.kind === "run") {
-		const id = Number(home.ref.slice(2));
-		missing = true;
-		if (Number.isSafeInteger(id)) {
-			for (const state of ["planned", "change"]) {
-				const runs = await call("find", { in: "runs", state, cursor: String(id + 1), limit: 1 }, { project, owner });
-				if (runs.items.some((run) => run.ref === home.ref)) {
-					missing = false;
-					break;
-				}
-			}
+		try {
+			await call("get", { refs: [home.ref] }, { project, owner });
+		} catch (error) {
+			if (!(error instanceof ApiError && error.code === "not_found")) throw error;
+			missing = true;
 		}
 	} else if (home.kind === "search" && home.folder) {
 		const folders = await call("find", { in: "folders" }, { project, owner });

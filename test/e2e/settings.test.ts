@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import type { Api, OpName } from "../../src/core/api.ts";
 import { call } from "../../src/web/lib/api.ts";
 import { browserAvailable, eventually, openPage, type Server, startServer } from "./support.ts";
 
@@ -491,28 +492,28 @@ test.skipIf(!browserAvailable)(
 			const completed = new Promise<void>((resolve) => {
 				finish = resolve;
 			});
-			await page.route("**/api/p/scratch/find", async (route) => {
-				if (route.request().postDataJSON().in === "runs") {
+			await page.route("**/api/p/scratch/get", async (route) => {
+				if (route.request().postDataJSON().refs?.includes(planned.run)) {
 					await held;
 					await route.continue();
 					finish();
 				} else await route.continue();
 			});
 			const asked = page.waitForRequest(
-				(request) => request.url().endsWith("/find") && request.postDataJSON().in === "runs",
+				(request) => request.url().endsWith("/get") && request.postDataJSON().refs?.includes(planned.run),
 			);
 			await page.keyboard.type("gh");
 			await asked;
 			await page.keyboard.type("g,");
 			await page.waitForURL("**/p/scratch/settings");
 			const answered = page.waitForResponse(
-				(response) => response.url().endsWith("/find") && response.request().postDataJSON().in === "runs",
+				(response) => response.url().endsWith("/get") && response.request().postDataJSON().refs?.includes(planned.run),
 			);
 			release();
 			await (await answered).finished();
 			await completed;
 			await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-			await page.unroute("**/api/p/scratch/find");
+			await page.unroute("**/api/p/scratch/get");
 			await page.getByRole("option", { name: "Your home", exact: true }).waitFor();
 			expect(page.url()).toBe(`${server.url}/p/scratch/settings`);
 			await page.goto(`${server.url}/p/scratch/settings`);
@@ -553,6 +554,84 @@ test.skipIf(!browserAvailable)(
 		}
 	},
 	30000,
+);
+
+for (const secondProject of [true, false])
+	test.skipIf(!browserAvailable)(
+		secondProject
+			? "Q1: a run home in the second project opens by ref"
+			: "Q2: a run home after another project's run opens by ref",
+		async () => {
+			const server = await startServer();
+			await server.api("admin", { do: "project.create", key: "other", preset: "loose" });
+			const api = <O extends OpName>(op: O, input: Api[O]["input"], project: string) =>
+				call(op, input, { url: server.url, token: server.token, project });
+			for (const project of ["scratch", "other"])
+				await api("propose", { edits: [{ op: "create", outline: "Home case" }] }, project);
+			const before = secondProject ? "scratch" : "other";
+			const project = secondProject ? "other" : "scratch";
+			await api("plan", { name: "Earlier run", select: { cases: ["C-1"] } }, before);
+			if (secondProject) await api("plan", { name: "Another earlier run", select: { cases: ["C-1"] } }, before);
+			const planned = await api("plan", { name: "Chosen run home", select: { cases: ["C-1"] } }, project);
+			const browser = await openPage(server, { path: `/p/${project}/settings` });
+			try {
+				const { page } = browser;
+				page.setDefaultTimeout(4000);
+				await page.getByRole("option", { name: "Your home", exact: true }).click();
+				await page.getByLabel("Home screen", { exact: true }).selectOption("run");
+				await page.getByLabel("Home run", { exact: true }).fill(planned.run);
+				await page.getByRole("button", { name: "Save home", exact: true }).click();
+				await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
+				await page.goto(`${server.url}${secondProject ? `/p/${project}` : "/"}`);
+				await page.waitForURL(`**/p/${project}/runs/${planned.run.slice(2)}`);
+				await page.getByText("Chosen run home", { exact: true }).first().waitFor();
+				expect(await page.getByRole("status").filter({ hasText: "Your home was not found" }).count()).toBe(0);
+				expect(browser.errors).toEqual([]);
+			} finally {
+				await browser.close();
+				await server.stop();
+			}
+		},
+		15000,
+	);
+
+test.skipIf(!browserAvailable)(
+	"a failed home lookup on entry opens Suite with a notice",
+	async () => {
+		const server = await startServer({ cases: 1 });
+		const planned = await server.api("plan", { name: "Home run", select: { cases: ["C-1"] } });
+		const browser = await openPage(server, { path: "/p/scratch/settings" });
+		try {
+			const { page } = browser;
+			page.setDefaultTimeout(4000);
+			await page.getByRole("option", { name: "Your home", exact: true }).click();
+			await page.getByLabel("Home screen", { exact: true }).selectOption("run");
+			await page.getByLabel("Home run", { exact: true }).fill(planned.run);
+			await page.getByRole("button", { name: "Save home", exact: true }).click();
+			await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
+			await page.route(/\/api\/p\/scratch\/(?:get|find)$/, async (route) => {
+				const input = route.request().postDataJSON();
+				if (input.in === "runs" || input.refs?.includes(planned.run)) await route.abort();
+				else await route.continue();
+			});
+			await page.goto(`${server.url}/`);
+			await page.waitForURL("**/p/scratch/suite");
+			await page.getByRole("status").filter({ hasText: "Could not read your home. Opened Suite." }).waitFor();
+			await eventually(
+				() => page.locator("#lcount").innerText(),
+				(text) => text === "1 cases",
+			);
+			expect(await page.getByRole("button", { name: "Reconnect", exact: true }).count()).toBe(0);
+			await page.unroute(/\/api\/p\/scratch\/(?:get|find)$/);
+			await page.keyboard.type("gh");
+			await page.waitForURL(`**/p/scratch/runs/${planned.run.slice(2)}`);
+			await page.getByText("Home run", { exact: true }).first().waitFor();
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	15000,
 );
 
 test.skipIf(!browserAvailable)(
@@ -705,7 +784,7 @@ for (const home of [
 	{ kind: "search", text: "alpha", folder: "Gone", tag: "missing-tag" },
 ])
 	test.skipIf(!browserAvailable)(
-		`a missing ${home.kind} home opens Suite once with an explanation and no failed requests`,
+		`a missing ${home.kind} home opens Suite once with an explanation`,
 		async () => {
 			const server = await startServer({ cases: 1 });
 			const browser = await openPage(server, { path: "/p/scratch/settings" });
@@ -737,7 +816,11 @@ for (const home of [
 				await notice.waitFor();
 				expect(await notice.count()).toBe(1);
 				expect(await page.getByRole("textbox", { name: "Filter cases", exact: true }).inputValue()).toBe("");
-				expect(browser.errors).toEqual([]);
+				expect(browser.errors).toEqual(
+					home.kind === "run"
+						? Array(2).fill("Failed to load resource: the server responded with a status of 404 (Not Found)")
+						: [],
+				);
 			} finally {
 				await browser.close();
 				await server.stop();

@@ -24,7 +24,8 @@ the current project's choice through `navigate`, so leaving an editor still seal
 The browser stores the validated preference in localStorage through `deviceKey`,
 under `mainworthy:<encoded actor>:home:<project>`. This separates people sharing
 a browser and projects sharing a person. A fresh browser has no choice. The
-preference stays after sign-out, and clearing site data removes it. It does not
+preference stays when signing out with drafts kept. Explicitly clearing browser
+data at sign-out or clearing site data removes it. It does not
 follow the person to another browser or the iPhone app.
 
 `src/web/lib/home.ts` owns the schema, storage, and destination resolution.
@@ -37,13 +38,13 @@ the current URL without sealing the editor or adding history entries.
 Malformed or unreadable storage falls back to Suite. A refused write reports
 failure and leaves the previous stored choice. Before opening a run or a search
 with a folder, the resolver checks that the target exists through the existing
-read operations. A run lookup uses a cursor just above its id and a limit of one
-for each run origin, so an older run is not mistaken for a missing one. A folder
+read operations. A run lookup uses `get` with its project ref, as the run page does.
+Run numbers belong to a project and are independent of global list cursors. A folder
 lookup reads the complete folder tree. A missing target opens Suite without the
 saved filters and reports once in the status line that the home was not found.
 The saved preference stays available to change in Settings. A search with no
-matching cases is still a valid home. A failed read reports a connection error
-rather than treating the target as missing. Later Go home checks leave a newer
+matching cases is still a valid home. A failed read on entry opens Suite with a notice and keeps the preference
+so Go home can retry. A failed read from Go home reports the error without navigating. Later Go home checks leave a newer
 navigation alone. Setting home performs no server write and changes no access rights.
 
 ## Alternatives and limits
