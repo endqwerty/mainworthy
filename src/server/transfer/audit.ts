@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { type AuditInput, type AuditRecord, type AuditReference, encodeAudit } from "../../core/audit.ts";
+import {
+	type AuditInput,
+	type AuditRecord,
+	type AuditReference,
+	compareAuditRecords,
+	encodeAudit,
+} from "../../core/audit.ts";
 import type { ActorKind, Kind } from "../../core/kinds.ts";
 import type { TeamEvent } from "../../core/teams.ts";
 import type { Ctx } from "../kernel/ctx.ts";
@@ -67,6 +73,7 @@ type Version = {
 	seq: number;
 };
 type Result = Omit<Extract<AuditRecord, { type: "result" }>, "type" | "id" | "by"> & { id: number; actor: number };
+type ChangeEnd = Omit<Extract<AuditRecord, { type: "change-end" }>, "type" | "id">;
 type Team = { id: number; name: string; created_at: number };
 type TeamChange = {
 	id: number;
@@ -78,6 +85,10 @@ type TeamChange = {
 	can: string | null;
 };
 const Q = {
+	changeEnds: sql<Selection, ChangeEnd>(
+		`SELECT e.change, c.key, c.repo, e.ended AS state, e.at FROM change_ends e
+		 JOIN changes c ON c.id = e.change WHERE c.project = $project AND e.at < $to ORDER BY e.change`,
+	),
 	result: sql<{ project: number; id: number; to: number }, Result>(
 		`SELECT r.id, r.at, r.seq, r.test, r.target, r.method, r.actor, r.outcome, r.signature,
 		 t.commit_sha AS 'commit', t.repo, t.env, b.job
@@ -297,11 +308,9 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 			decision: reference(`decision:${row.decision}`, decisions.get(row.decision)?.at),
 		});
 	}
-	records.sort(
-		(a, b) =>
-			("at" in a && "at" in b ? a.at - b.at || ("seq" in a ? a.seq : 0) - ("seq" in b ? b.seq : 0) : 0) ||
-			a.id.localeCompare(b.id, "en"),
-	);
+	for (const row of ctx.db.all(Q.changeEnds, selection)) {
+		if (inRange(row.at)) records.push({ type: "change-end", id: `change-end:${row.change}`, ...row });
+	}
 	return encodeAudit(
 		{
 			mainworthy: "audit",
@@ -316,6 +325,6 @@ export function exportAudit(ctx: Ctx, input: AuditInput) {
 			evidencePayloads: "not-retained",
 			actorNames: "at-export",
 		},
-		[...contexts.values()].sort((a, b) => a.id.localeCompare(b.id, "en")).concat(records),
+		[...contexts.values(), ...records].sort(compareAuditRecords),
 	);
 }

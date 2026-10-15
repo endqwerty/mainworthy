@@ -11,7 +11,7 @@ const hash = z.string().regex(/^[a-f0-9]{12}$/);
 const id = z
 	.string()
 	.regex(
-		/^(?:decision:\d+|answer:\d+|policy:\d+|version:\d+:\d+|question:\d+|result:\d+|team:\d+|team-event:\d+|evidence:\d+:[a-f0-9]{12})$/,
+		/^(?:decision:\d+|answer:\d+|policy:\d+|version:\d+:\d+|question:\d+|result:\d+|team:\d+|team-event:\d+|change-end:\d+|evidence:\d+:[a-f0-9]{12})$/,
 	);
 export const AuditInput = z
 	.strictObject({ from: integer.default(0), to: integer.optional() })
@@ -50,6 +50,15 @@ export const AuditHeader = z.strictObject({
 });
 export type AuditHeader = z.infer<typeof AuditHeader>;
 export const AuditRecord = z.discriminatedUnion("type", [
+	z.strictObject({
+		type: z.literal("change-end"),
+		id,
+		at: integer,
+		change: integer,
+		key: z.string().min(1),
+		repo: z.string().nullable(),
+		state: z.enum(["merged", "closed"]),
+	}),
 	z.strictObject({
 		type: z.literal("question"),
 		id,
@@ -148,6 +157,28 @@ export const AuditRecord = z.discriminatedUnion("type", [
 export type AuditRecord = z.infer<typeof AuditRecord>;
 const Footer = z.strictObject({ end: z.literal(true), records: integer, sha256: z.string().regex(/^[a-f0-9]{64}$/) });
 
+function auditEvent(record: AuditRecord) {
+	switch (record.type) {
+		case "question":
+		case "evidence":
+		case "result":
+		case "team":
+			return null;
+		default:
+			return record;
+	}
+}
+
+export function compareAuditRecords(left: AuditRecord, right: AuditRecord): number {
+	const a = auditEvent(left);
+	const b = auditEvent(right);
+	if (a && b) {
+		const order = a.at - b.at || ("seq" in a ? a.seq : 0) - ("seq" in b ? b.seq : 0);
+		if (order) return order;
+	} else if (a || b) return a ? 1 : -1;
+	return left.id.localeCompare(right.id, "en");
+}
+
 export function auditChecksum(text: string): string {
 	return bytesToHex(sha256(utf8ToBytes(text)));
 }
@@ -170,6 +201,7 @@ function links(record: AuditRecord): Link[] {
 			return link(record.question, "question");
 		case "result":
 		case "team":
+		case "change-end":
 			return [];
 		case "team-event":
 			return link(record.team, "team");
@@ -198,6 +230,7 @@ const typePrefix: Record<AuditRecord["type"], string> = {
 	result: "result:",
 	team: "team:",
 	"team-event": "team-event:",
+	"change-end": "change-end:",
 	decision: "decision:",
 	answer: "answer:",
 	policy: "policy:",
@@ -206,37 +239,58 @@ const typePrefix: Record<AuditRecord["type"], string> = {
 function fail(message: string): never {
 	throw new Error(`invalid audit: ${message}`);
 }
-function parse<S extends z.ZodType>(schema: S, line: string): z.output<S> {
+function failLine(line: number, label: string, message: string): never {
+	fail(`line ${line} ${label}: ${message}`);
+}
+function parse<S extends z.ZodType>(schema: S, line: string, number: number, label: string): z.output<S> {
+	let value: unknown;
 	try {
-		const value: unknown = JSON.parse(line);
-		if (canonicalJson(value) !== line) fail("each line must be canonical JSON");
-		return schema.parse(value);
-	} catch (error) {
-		fail(error instanceof Error ? error.message : "invalid JSON");
+		value = JSON.parse(line);
+	} catch {
+		failLine(number, label, "invalid JSON");
 	}
+	const identity = z.object({ id: z.string() }).safeParse(value);
+	const location = identity.success ? `${label} ${JSON.stringify(identity.data.id).slice(1, -1)}` : label;
+	if (canonicalJson(value) !== line) failLine(number, location, "each line must be canonical JSON");
+	const parsed = schema.safeParse(value);
+	if (!parsed.success) {
+		const issue = parsed.error.issues[0];
+		const path = issue?.path.join(".");
+		failLine(number, location, `${path ? `${path}: ` : ""}${issue?.message ?? "invalid record"}`);
+	}
+	return parsed.data;
 }
 
 export function verifyAudit(text: string) {
+	if (text.startsWith("\uFEFF")) failLine(1, "header", "byte-order mark is not allowed");
 	if (!text.endsWith("\n")) fail("missing final newline or truncated footer");
 	const lines = text.slice(0, -1).split("\n");
 	const first = lines.shift();
 	const last = lines.pop();
 	if (!first || !last) fail("header and footer are required");
-	const header = parse(AuditHeader, first);
-	if (header.to <= header.from || header.to > header.exportedAt + 1) fail("invalid time range");
-	const footer = parse(Footer, last);
-	if (footer.records !== lines.length) fail("record count mismatch");
-	if (auditChecksum(`${[first, ...lines].join("\n")}\n`) !== footer.sha256) fail("checksum mismatch");
-	const records = lines.map((line) => parse(AuditRecord, line));
+	const header = parse(AuditHeader, first, 1, "header");
+	if (header.to <= header.from || header.to > header.exportedAt + 1) failLine(1, "header", "invalid time range");
+	const footerLine = lines.length + 2;
+	const footer = parse(Footer, last, footerLine, "footer");
+	if (footer.records !== lines.length) failLine(footerLine, "footer", "record count mismatch");
+	if (auditChecksum(`${[first, ...lines].join("\n")}\n`) !== footer.sha256)
+		failLine(footerLine, "footer", "checksum mismatch");
+	const records = lines.map((line, index) => parse(AuditRecord, line, index + 2, "record"));
 	const byId = new Map<string, AuditRecord>();
-	for (const record of records) {
-		if (byId.has(record.id)) fail(`duplicate id ${record.id}`);
-		if (!record.id.startsWith(typePrefix[record.type])) fail(`wrong id type ${record.id}`);
+	for (const [index, record] of records.entries()) {
+		function fail(message: string): never {
+			failLine(index + 2, `record ${record.id}`, message);
+		}
+		const previous = records[index - 1];
+		if (previous && compareAuditRecords(previous, record) > 0) fail("records out of order");
+		if (byId.has(record.id)) fail("duplicate id");
+		if (!record.id.startsWith(typePrefix[record.type])) fail("wrong id type");
 		if ("at" in record && (record.at >= header.to || (record.type !== "result" && record.at < header.from)))
-			fail(`record outside snapshot or range: ${record.id}`);
-		if ("seq" in record && record.seq > header.seq) fail(`record outside snapshot sequence: ${record.id}`);
+			fail("record outside snapshot or range");
+		if ("seq" in record && record.seq > header.seq) fail("record outside snapshot sequence");
 		if (record.type === "question" && (record.openedAt >= header.to || record.openedSeq > header.seq))
-			fail(`question outside range or sequence: ${record.id}`);
+			fail("question outside range or sequence");
+		if (record.type === "change-end" && record.id !== `change-end:${record.change}`) fail("change ending id mismatch");
 		if (record.type === "case-version") {
 			if (record.id !== `version:${record.caseId}:${record.version}`) fail("case version id mismatch");
 			if (versionHash(record.body) !== record.hash || claimHash(record.body) !== record.claimHash)
@@ -247,7 +301,10 @@ export function verifyAudit(text: string) {
 	}
 	let beforeRangeReferences = 0;
 	let unavailableDecisionEvidence = 0;
-	for (const record of records) {
+	for (const [index, record] of records.entries()) {
+		function fail(message: string): never {
+			failLine(index + 2, `record ${record.id}`, message);
+		}
 		for (const { ref, type } of links(record)) {
 			if (!ref.id.startsWith(typePrefix[type])) fail(`wrong reference type ${ref.id}`);
 			if (ref.scope === "before-range") {
@@ -377,7 +434,10 @@ export function verifyAudit(text: string) {
 			remaining.set(dependent, count);
 			if (count === 0) ready.push(dependent);
 		}
-	if (ready.length !== records.length) fail("reference cycle");
+	if (ready.length !== records.length) {
+		const index = records.findIndex((record) => (remaining.get(record.id) ?? 0) > 0);
+		failLine(index + 2, `record ${records[index]?.id}`, "reference cycle");
+	}
 	return {
 		format: 1,
 		project: header.project,
