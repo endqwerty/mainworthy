@@ -301,9 +301,9 @@ An adopted proposal cannot be withdrawn. Restore earlier case content as a new
 version instead. See [write cases](./write-cases.md#read-versions-and-restore-earlier-content).
 Withdrawing an older decision does not undo standing work made by a newer decision.
 
-## Create or link a GitHub defect
+## Create or link a tracker defect
 
-An operator can [configure GitHub Issues](./configuration.md#variables-the-server-reads) for one project and repository. Use `mainworthy tracker` or the API to create an issue from a failed or errored result. The request sends the failure message and detail, the recorded case version and its content when known, the tested target, and the reported build URL to that repository. Review what the report contains before sending it to a public repository.
+An operator can [configure GitHub Issues or Jira Cloud](./configuration.md#variables-the-server-reads) for a project and destination. Jira is used for new defects when both trackers name the same Mainworthy project. Use `mainworthy tracker` or the API to create an issue from a failed or errored result. The request sends the failure message and detail, the recorded case version and its content when known, the tested target, and the reported build URL to that destination. Review what the report contains before sending it to a public repository or shared Jira project.
 
 A test's `get` reply lists result ids in `last[].id`. A case's `timeline` reply also includes result ids, and a run slot lists them in `fills[].result`. For example, if the failed result is `123`:
 
@@ -312,18 +312,26 @@ mainworthy tracker --json '{"do":"create","result":123,"cmd":"defect-result-123"
 mainworthy tracker-status --id defect-result-123
 ```
 
-The request needs `produce`. Reading its status needs `read`. The server sends up to twenty queued requests once a minute. When stopping, it waits for the request already in flight and leaves queued requests for the next start. If saving that reply fails, the server logs the error once and finishes shutting down. A completed request returns an issue URL and the issue's state as GitHub reported it. To check an existing issue instead of creating one:
+The request needs `produce`. Reading its status needs `read`. The server sends up to twenty queued requests once a minute. When stopping, it waits for the request already in flight and leaves queued requests for the next start. If saving that reply fails, the server logs the error once and finishes shutting down. A completed request returns an issue URL and the issue's state as the tracker reported it. To check an existing issue instead of creating one:
 
 ```
 mainworthy tracker --json '{"do":"link","result":123,"key":"42","cmd":"link-result-123"}'
 mainworthy tracker-status --id link-result-123
 ```
 
-The key is the issue number in the configured repository. Pull requests are refused. Record the returned URL as the optional reference in a normal **Defect** answer. Creating or checking an issue does not answer the failure question. The answer still follows the project's policy.
+For GitHub, the key is the issue number in the configured repository. Pull requests are refused. For Jira, use the issue key in the configured project, for example `QA-42`. Record the returned URL as the optional reference in a normal **Defect** answer. Creating or checking an issue does not answer the failure question. The answer still follows the project's policy.
 
-Reuse the same `cmd` when retrying a request after a lost reply. Its first receipt still says `queued`, so use `tracker-status` to read current delivery state. A failed request is not sent again automatically. After a timeout or a request left `sending` by a restart, check GitHub before creating another request: the issue may already exist. Link that issue if you find it.
+Reuse the same `cmd` when retrying a request after a lost reply. Its first receipt still says `queued`, so use `tracker-status` to read current delivery state. A failed request is not sent again automatically. After a timeout or a request left `sending` by a restart, check the tracker before creating another request: the issue may already exist. Link that issue if you find it.
 
-Delivery requests and their status stay on this instance and are left out of archives. Record the issue reference in a decision before archiving if you need to keep it. A restored archive keeps historical command receipts but has no corresponding tracker status and does not send those requests again. Requirement mirroring and ending defect holds when an issue closes are not implemented yet. Jira and Azure DevOps remain planned adapters.
+Delivery requests and their status stay on this instance and are left out of archives. Record the issue reference in a decision before archiving if you need to keep it. A restored archive keeps historical command receipts but has no corresponding tracker status and does not send those requests again. Requirement mirroring, Azure DevOps, and GitHub Enterprise remain planned.
+
+### End a defect hold when its issue closes
+
+A defect answer whose reference is an exact issue URL or tracker reference in the configured destination is checked automatically. GitHub uses `closed`. Jira uses status category `done`, regardless of the status's display name. The server records an ending decision with a reason naming the issue, removes the old excuse, and asks the failure again if it still appears. Closure does not count as a passing test. If the issue reopens, the old hold does not return.
+
+The server checks up to twenty due defect decisions each minute. After a failed read it keeps the hold and retries with increasing delays, up to an hour. The deadline survives a restart. A reference outside the configured destination, or a reference that is not the exact issue URL or tracker reference, is not polled. GitHub references look like `github:example/shop#42`. Jira references look like `jira:https://example.atlassian.net#QA-42`.
+
+An archive keeps the defect decision and its reference but leaves out polling state. After import, live defect holds are checked afresh if their destination is configured on that instance.
 
 ## Check who may answer
 

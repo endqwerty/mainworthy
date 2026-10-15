@@ -1727,30 +1727,42 @@ function stoppedFailing(ctx: Ctx, question: QuestionRow, shown: Map<number, Set<
 export function sweepExpired(ctx: Ctx, expired: readonly DecisionRow[]): number {
 	let reopened = 0;
 	for (const decision of expired) {
-		const question = questionById(ctx.db, decision.question);
-		if (question?.state !== "decided" || question.decision !== decision.id) continue;
-		HANDLERS[question.kind].revert(ctx, question, decision);
-		insertDecision(ctx, {
-			question,
-			answer: { is: "expired" },
-			signers: [
-				{
-					by: ruleActor(ctx.db).id,
-					clause: "hold-expired",
-					policy: currentPolicy(ctx.db, ctx.project.id).version,
-					reason: null,
-				},
-			],
-			holds: [],
-			supersedes: decision.id,
-		});
-		setQuestionState(ctx, question, "open", null);
-		const closed = closeAnswered(ctx, question);
-		refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, decision.id), ...closed]);
-		closeIfGone(ctx, question.id);
-		reopened++;
+		if (endHold(ctx, decision, "expired", null)) reopened++;
 	}
 	return reopened;
+}
+
+export function endDefectHold(ctx: Ctx, decision: DecisionRow, ref: string): boolean {
+	const current = decisionById(ctx.db, decision.id);
+	if (!current || current.project !== ctx.project.id || current.kind !== "failure") return false;
+	const answer = json<{ is?: string; ref?: string }>(current.answer);
+	if (answer.is !== "defect" || answer.ref !== ref) return false;
+	return endHold(ctx, current, "outdated", `Tracker issue ${ref} is closed; the defect hold ended.`);
+}
+
+function endHold(ctx: Ctx, decision: DecisionRow, ending: "expired" | "outdated", reason: string | null): boolean {
+	const question = questionById(ctx.db, decision.question);
+	if (question?.state !== "decided" || question.decision !== decision.id) return false;
+	HANDLERS[question.kind].revert(ctx, question, decision);
+	insertDecision(ctx, {
+		question,
+		answer: { is: ending },
+		signers: [
+			{
+				by: ruleActor(ctx.db).id,
+				clause: ending === "expired" ? "hold-expired" : "tracker-closed",
+				policy: currentPolicy(ctx.db, ctx.project.id).version,
+				reason,
+			},
+		],
+		holds: [],
+		supersedes: decision.id,
+	});
+	setQuestionState(ctx, question, "open", null);
+	const closed = closeAnswered(ctx, question);
+	refold(ctx, [...runsAbout(ctx, question), ...runsDependingOn(ctx.db, decision.id), ...closed]);
+	closeIfGone(ctx, question.id);
+	return true;
 }
 
 // ── Reading ────────────────────────────────────────────────────────────────────────────────────────────────

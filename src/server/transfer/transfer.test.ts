@@ -566,6 +566,7 @@ function exportedTables(db: Db): string[] {
 				"passkey_users",
 				"change_ends",
 				"tracker_requests",
+				"tracker_polls",
 				"scope_moves",
 				"demo_projects",
 				"commit_statuses",
@@ -1208,6 +1209,7 @@ describe("Mainworthy instance archives", () => {
 			"scope_moves",
 			"sessions",
 			"tokens",
+			"tracker_polls",
 			"tracker_requests",
 		]);
 		// The list is the order they are emptied in: a table comes before every table it refers to.

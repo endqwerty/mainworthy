@@ -19,6 +19,7 @@ import { createProject } from "./ops/admin.ts";
 import { Readers, readerCount } from "./readers.ts";
 import type { StatusPort } from "./statuses/port.ts";
 import { deliverCommitStatuses, stopCommitStatuses, waitCommitStatuses } from "./statuses/statuses.ts";
+import { pollDefectHolds, stopTrackerPolls, waitTrackerPolls } from "./tracker-holds.ts";
 import type { TrackerPort } from "./trackers/port.ts";
 import { deliverTrackerRequests, stopTrackerRequests, waitTrackerRequests } from "./trackers/requests.ts";
 
@@ -121,6 +122,7 @@ export function start(
 			["ending expired sessions", app.gate.run(() => sweepSessions(app))],
 			["deleting old sign-in records", app.gate.run(() => sweepSignInRecords(app))],
 			["sending tracker requests", deliverTrackerRequests(app, options.trackerPort)],
+			["checking defect holds", pollDefectHolds(app, options.trackerPort)],
 			["posting GitHub commit statuses", deliverCommitStatuses(app, options.statusPort)],
 		] as const;
 		for (const [name, job] of jobs) {
@@ -139,9 +141,11 @@ export function start(
 			stopping ??= (async () => {
 				clearInterval(timer);
 				stopTrackerRequests(app);
+				stopTrackerPolls(app);
 				stopCommitStatuses(app);
 				await server.stop();
 				await waitTrackerRequests(app);
+				await waitTrackerPolls(app);
 				await waitCommitStatuses(app);
 				await app.readers?.stop();
 				// No request is being served any more. What was noted since the last minute is written, so a

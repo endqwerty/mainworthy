@@ -248,6 +248,11 @@ const Q = {
 		`SELECT d.* FROM decisions d JOIN questions q ON q.decision = d.id
 		 WHERE d.project = $project AND d.expires_at IS NOT NULL AND d.expires_at <= $now AND q.state = 'decided'`,
 	),
+	defects: sql<{ project: number }, DecisionRow>(
+		`SELECT d.* FROM decisions d JOIN questions q ON q.decision = d.id
+		 WHERE d.project = $project AND q.state = 'decided' AND d.kind = 'failure'
+		 AND json_extract(d.answer, '$.is') = 'defect' AND json_type(d.answer, '$.ref') = 'text'`,
+	),
 };
 
 /** Old evidence kept display names. Attribution is outside the material basis and target hashed by raise. */
@@ -493,3 +498,5 @@ export const decisionById = (db: Db, id: number): DecisionRow | null => db.get(Q
 export const decisionsOf = (db: Db, question: number): DecisionRow[] => db.all(Q.decisionsOf, { question });
 export const expiredDecisions = (db: Db, project: number, now: number): DecisionRow[] =>
 	db.all(Q.expired, { project, now });
+
+export const liveDefectDecisions = (db: Db, project: number): DecisionRow[] => db.all(Q.defects, { project });
