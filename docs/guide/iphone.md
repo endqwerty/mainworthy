@@ -76,11 +76,13 @@ A passkey does not work in the app.
    - Where the project's policy asks for a reason, the app asks for it before it records the answer.
    - **Defect in the product** asks where the defect is tracked. You can leave that empty.
 4. Back in the list, a bar says what was recorded. **Undo** withdraws the answer, with a reason where the policy
-   asks for one. Both decisions stay in the ledger.
+   asks for one. Both decisions stay in the ledger. Undo sends the decision id returned by your answer.
+   If somebody replaced that answer meanwhile, their decision stays and the app says the decision changed.
 
 You cannot answer from the list. A question is answered from its page, where its evidence is.
 
 **Decided** at the top shows what was decided and by whom. Open a question there to withdraw its decision.
+The withdrawal names the decision shown. If it changed meanwhile, read the question again before withdrawing it.
 
 The chips over the list show one kind of question. The name at the top left is the project that is open. Press
 it to open another.

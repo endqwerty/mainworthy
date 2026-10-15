@@ -66,6 +66,113 @@ const qref = (page: Awaited<ReturnType<typeof openPage>>["page"]) =>
 const ready = (page: Awaited<ReturnType<typeof openPage>>["page"]) =>
 	page.locator('[data-active="true"][data-ready="true"]').waitFor();
 
+for (const scenario of [
+	"single replacement",
+	"settled replacement",
+	"bulk replacement",
+	"partial answer",
+	"partial withdrawal",
+])
+	check(
+		`undo receipts preserve other answers and partial outcomes: ${scenario}`,
+		async () => {
+			const server = await startServer({ preset: "standard" });
+			await failures(server);
+			const h = await openPage(server, { path: "/p/scratch/queue" });
+			try {
+				const { page } = h;
+				page.setDefaultTimeout(5000);
+				await page.locator("[data-current-question]").waitFor();
+				const original = new Map<string, number>();
+				const sent: { undo: string; ifDecision?: number | undefined }[] = [];
+				let changed: string | undefined;
+				let replacement: number | null = null;
+				await page.route("**/decide", async (route) => {
+					const input = route.request().postDataJSON();
+					const replace = async () => {
+						const q = (await server.api("inbox", { state: "decided" })).items.find((q) => q.q === changed);
+						if (!q) throw Error("No decided question");
+						replacement =
+							(await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "defect" } }))[0]
+								?.decision ?? null;
+					};
+					if ("undo" in input) {
+						sent.push(z.object({ undo: z.string(), ifDecision: z.number().optional() }).parse(input));
+						if (scenario === "settled replacement" && !changed) {
+							changed = input.undo;
+							await replace();
+						}
+						if (scenario === "partial withdrawal" && sent.length === 1) {
+							changed = input.undo;
+							await route.abort();
+						} else await route.continue();
+						return;
+					}
+					if (scenario === "partial answer") input.all[0].onEvidence = "stale";
+					const response = await route.fetch({ postData: JSON.stringify(input) });
+					const reply = z
+						.object({ result: z.array(z.object({ q: z.string(), decision: z.number().nullable() })) })
+						.parse(await response.json());
+					for (const receipt of reply.result) if (receipt.decision !== null) original.set(receipt.q, receipt.decision);
+					if (scenario.endsWith("replacement") && scenario !== "settled replacement") {
+						changed = reply.result[0]?.q;
+						await replace();
+					}
+					await route.fulfill({ response });
+				});
+				if (scenario !== "single replacement" && scenario !== "settled replacement") await page.keyboard.press("*");
+				await page.keyboard.press("f");
+				await page
+					.locator(".queue-last")
+					.getByText(scenario === "partial answer" ? "evidence changed" : "recorded", { exact: false })
+					.waitFor();
+				if (scenario === "settled replacement") {
+					await page.getByRole("button", { name: "Settled", exact: true }).click();
+					await page.locator(`[data-question="${[...original.keys()][0]}"]`).click();
+					await page.locator(".queue-decision").waitFor();
+				}
+				await page.keyboard.press("u");
+				await eventually(
+					() => Promise.resolve(sent.length),
+					(count) => count === original.size,
+				);
+				if (scenario !== "partial answer")
+					await page.locator(".queue-last").getByText("withdrawal failed", { exact: false }).waitFor();
+				await eventually(
+					() => server.api("inbox", { state: "decided" }),
+					(reply) => reply.items.filter((q) => q.kind === "failure").length === (scenario === "partial answer" ? 0 : 1),
+				);
+				for (const input of sent) expect(input.ifDecision).toBe(original.get(input.undo));
+				if (scenario.endsWith("replacement")) {
+					await page.keyboard.press("u");
+					await eventually(
+						() => Promise.resolve(sent.length),
+						(count) => count === original.size + 1,
+					);
+					expect(sent.at(-1)?.undo).toBe(changed);
+					expect(sent.at(-1)?.ifDecision).toBe(original.get(changed ?? ""));
+					const rows = await server.api("get", { refs: [changed ?? ""] });
+					expect(rows[0]?.decision).toMatchObject({ id: replacement, answer: { is: "defect" } });
+				}
+				if (scenario === "partial withdrawal") {
+					await page.keyboard.press("u");
+					await eventually(
+						() => server.api("inbox", { state: "decided" }),
+						(reply) => reply.items.filter((q) => q.kind === "failure").length === 0,
+					);
+					expect(sent).toHaveLength(original.size + 1);
+					expect(sent.at(-1)?.undo).toBe(changed);
+					expect(sent.at(-1)?.ifDecision).toBe(original.get(changed ?? ""));
+				}
+				expect(h.errors).toEqual(scenario === "partial withdrawal" ? ["Failed to load resource: net::ERR_FAILED"] : []);
+			} finally {
+				await h.close();
+				await server.stop();
+			}
+		},
+		30000,
+	);
+
 for (const field of ["ref", "reason"])
 	for (const leave of ["row", "kind", "state"])
 		check(

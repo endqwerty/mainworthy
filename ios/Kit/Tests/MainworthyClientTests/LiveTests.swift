@@ -131,7 +131,7 @@ struct LiveTests {
 		let project = try await Live.signedIn().project(try await Live.project())
 		let failure = try #require(try await project.questions(open: true, kind: .failure).questions.first)
 		let flaky = try #require(failure.choices.first { $0.answer == "flaky" })
-		#expect(try await project.answer(failure, with: flaky) == .decided)
+		#expect((try await project.answer(failure, with: flaky)).isDecided)
 		#expect(try await project.questions(open: true, kind: .failure).questions.isEmpty)
 		let decided = try #require(try await project.questions(open: false).questions.first { $0.ref == failure.ref })
 		#expect(decided.decision?.label == "Flaky" && decided.decision?.by == [Live.name])
@@ -145,7 +145,7 @@ struct LiveTests {
 		let project = try await Live.signedIn().project(try await Live.project())
 		let failure = try #require(try await project.questions(open: true, kind: .failure).questions.first)
 		let defect = try #require(failure.choices.first { $0.answer == "defect" })
-		#expect(try await project.answer(failure, with: defect, reference: "  SHOP-482 ") == .decided)
+		#expect((try await project.answer(failure, with: defect, reference: "  SHOP-482 ")).isDecided)
 		let decided = try await project.questions(open: false).questions.first { $0.ref == failure.ref }
 		#expect(decided?.decision?.reference == "SHOP-482")
 	}
@@ -180,7 +180,7 @@ struct LiveTests {
 		#expect(run.verdict == "passed" && run.name == "Release check")
 		let approve = try #require(signoff.choices.first { $0.answer == "approve" })
 		#expect(try await project.answer(signoff, with: approve) == .notTaken("a reason"))
-		#expect(try await project.answer(signoff, with: approve, reason: "Checked on the release build.") == .decided)
+		#expect((try await project.answer(signoff, with: approve, reason: "Checked on the release build.")).isDecided)
 		let decided = try #require(try await project.questions(open: false, kind: .signoff).questions.first)
 		#expect(decided.decision?.reason == "Checked on the release build.")
 		// Withdrawing is a decision too, and is held to the same clause.
@@ -199,7 +199,7 @@ struct LiveTests {
 		for try await change in project.changes() {
 			heard.append(change)
 			if change == .opened {
-				#expect(try await project.answer(finding, with: deferred) == .decided)
+				#expect((try await project.answer(finding, with: deferred)).isDecided)
 			} else if change.operation == "decide" {
 				break
 			}
@@ -238,7 +238,7 @@ struct LiveTests {
 		// Read alone, it still says what this person's answer is worth, as the list says it.
 		#expect(alone.standing == listed.standing && alone.standing == .counts)
 		// What was read alone is answered like what was read in the list.
-		#expect(try await project.answer(alone, with: try #require(alone.choices.first { $0.answer == "infra" })) == .decided)
+		#expect((try await project.answer(alone, with: try #require(alone.choices.first { $0.answer == "infra" }))).isDecided)
 		#expect(try await project.question(listed.ref)?.isOpen == false)
 	}
 }

@@ -245,6 +245,19 @@ Press <kbd>u</kbd> to withdraw your latest answer, or open "Settled", select a d
 and use its withdrawal button. Your authority still depends on the current policy.
 The original decision and its withdrawal both stay in the record.
 
+Undo names the decision returned by your answer. If somebody replaced it meanwhile,
+the withdrawal conflicts and their decision stays. The withdrawal button in "Settled"
+names the decision shown there. Read the question again before withdrawing a replacement.
+For several answers, undo withdraws each decision separately. A refused answer is not
+withdrawn, and a failed withdrawal does not stop the others. The message names the failures;
+pressing <kbd>u</kbd> again retries only those, with the same decision ids.
+
+API and command-line callers can send `{"undo":"Q-12","ifDecision":31}`. The server
+compares `ifDecision` inside the transaction that withdraws the decision. Without it,
+undo deliberately withdraws whichever decision currently stands, subject to the current
+policy. Use the receipt's `decision` id when taking back a specific answer. Advice is
+not a decision receipt, and undo does not withdraw advice on an open question.
+
 Withdrawing an excuse recomputes gates that depended on it. A failure can become
 unexplained again. Withdrawing a link removes that decision's link unless a newer
 link has replaced it. Withdrawing an approval reopens its run.

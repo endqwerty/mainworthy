@@ -40,6 +40,29 @@ struct QueueScreenTests {
 		#expect(screen.busy.isEmpty)
 	}
 
+	@Test("Undo keeps its receipt when another answer replaces it", arguments: [false, true])
+	func staleUndo(fromDecided: Bool) async throws {
+		let key = try await Live.project()
+		let screen = QueueScreen(project: try await Live.signedIn().project(key))
+		await screen.show(.open, filter: nil)
+		let failure = try #require(screen.questions.first { $0.kind == .failure })
+		#expect(await screen.answer(failure, with: try #require(failure.choices.first { $0.answer == "flaky" })))
+		let undo: Question
+		if fromDecided {
+			await screen.show(.decided, filter: .failure)
+			undo = try #require(screen.questions.first)
+		} else {
+			undo = try #require(screen.notice?.undoes)
+		}
+		let other = try await Live.signedIn().project(key)
+		_ = try await other.answer(failure, with: try #require(failure.choices.first { $0.answer == "defect" }))
+		#expect(await screen.withdraw(undo) == false)
+		#expect(screen.notice?.isProblem == true)
+		#expect(screen.notice?.text.contains("decision changed") == true)
+		let standing = try #require(try await other.questions(open: false, kind: .failure).questions.first)
+		#expect(standing.decision?.label == "Defect in the product")
+	}
+
 	@Test("the decided list shows who decided, and a filter shows one kind")
 	func decidedAndFilter() async throws {
 		let screen = try await screen()

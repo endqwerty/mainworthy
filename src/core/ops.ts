@@ -300,7 +300,12 @@ export const DECIDE_MAX = 500;
 export const DecideInput = z.union([
 	OneDecision.extend({ cmd }),
 	z.object({ all: z.array(OneDecision).min(1).max(DECIDE_MAX), reason: z.string().max(1000).optional(), cmd }),
-	z.object({ undo: ref("The question whose decision to withdraw."), reason: z.string().max(1000).optional(), cmd }),
+	z.object({
+		undo: ref("The question whose decision to withdraw."),
+		ifDecision: z.number().int().positive().optional(),
+		reason: z.string().max(1000).optional(),
+		cmd,
+	}),
 ]);
 export type DecideInput = z.infer<typeof DecideInput>;
 
@@ -308,7 +313,8 @@ export type DecideReply = {
 	q: string;
 	/**
 	 * `decided`: your answer settled it. `advised`: recorded as advice; someone else decides. `conflict`: the
-	 * evidence changed, or it was already decided differently. `forbidden`: policy does not let you answer.
+	 * evidence changed, it was already decided differently, or the decision to undo changed. `forbidden`: policy
+	 * does not let you answer.
 	 */
 	status: "decided" | "advised" | "conflict" | "forbidden" | "invalid" | "already" | "reopened";
 	needs: string | null;

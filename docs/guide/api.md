@@ -351,6 +351,7 @@ Answer a question, or withdraw a decision. Policy says whether your answer settl
 | `[2].all[].reason` | `string` | no |  |
 | `[2].reason` | `string` | no |  |
 | `[3].undo` | `string` | yes | The question whose decision to withdraw. |
+| `[3].ifDecision` | `integer` | no |  |
 | `[3].reason` | `string` | no |  |
 
 </details>
@@ -724,7 +725,7 @@ An agent that connects over MCP gets these operations as tools, with the same in
 | `propose` | Create or change test cases. Each edit of an existing case names the version it was made on (`base`). Reply: adopted (it is current), open (a person must accept it) or conflict. |
 | `report` | Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref. Reply: counts, the questions raised per cause of failure, and the gate. |
 | `claim` | Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers. |
-| `decide` | Answer a question from `inbox`. Pass the `evidenceHash` you saw as `onEvidence`. Reply status: decided, advised (recorded; a person decides), conflict (evidence changed) or forbidden. Failure answers: defect, test, expected, flaky, infra, and where the question's `answers` lists them, inherited and mistaken. |
+| `decide` | Answer a question from `inbox`. Pass the `evidenceHash` you saw as `onEvidence`. Reply status: decided, advised (recorded; a person decides), conflict (evidence or decision changed), forbidden. Failure answers: defect, test, expected, flaky, infra, and where the question's `answers` lists them, inherited and mistaken. |
 | `inbox` | List open questions (failures, proposals, findings, unlinked tests) with their evidence and `evidenceHash`, counts first. `on` narrows to one case, run or change. |
 | `get` | Read things by ref (C-, Q-, R-, T-, P-). For cases use `as: "md"` and `fields` to read less, and `unless: {ref: hash}` to skip what you already hold. |
 | `find` | Search cases by text, folder or tag (rows carry ref, title, hash, proof), or list tests (`unlinked: true`), runs, or the slots of a run. Paged by `cursor`. |

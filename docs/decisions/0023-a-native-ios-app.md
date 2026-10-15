@@ -115,7 +115,8 @@ their own pull requests (issue #171).
 - **A committed Xcode project**, for the reason above.
 - **A change to `decide` so that an undo names the decision it withdraws.** Withdrawing names the question, so
   an answer somebody else gave in the same second could be the one withdrawn. The web UI has the same gap. It is
-  a server change for every client, filed as its own issue.
+  a server change for every client, filed as its own issue. Now addressed by
+  [0027](0027-undo-names-the-decision.md), with a receipt sent by both apps.
 - **Keeping an unsent answer across a restart of the app.** A write is sent again under the same command id
   while the app runs. An app that is closed mid-request shows the server's state when it opens.
 
