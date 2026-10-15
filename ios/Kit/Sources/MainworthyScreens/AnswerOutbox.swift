@@ -90,7 +90,9 @@ public final class AnswerOutbox {
 				problem = nil
 			} catch {
 				outcome = nil
-				problem = "\(error.shown) The saved answer is waiting to send."
+				let why = error.shown
+				let stop = why.last.map { ".!?".contains($0) } == true ? "" : "."
+				problem = "\(why)\(stop) The saved answer is waiting to send."
 				pause = true
 			}
 			// A stopped workspace must not overwrite a new workspace using the same saved file.
@@ -153,11 +155,22 @@ package struct FileAnswerStore: AnswerStore {
 
 	package func load() throws -> Data? {
 		guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+		try excludeFromBackup(file.deletingLastPathComponent())
+		try excludeFromBackup(file)
 		return try Data(contentsOf: file)
 	}
 
 	package func save(_ data: Data) throws {
 		try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+		try excludeFromBackup(file.deletingLastPathComponent())
 		try data.write(to: file, options: .atomic)
+		try excludeFromBackup(file)
+	}
+
+	private func excludeFromBackup(_ url: URL) throws {
+		var url = url
+		var values = URLResourceValues()
+		values.isExcludedFromBackup = true
+		try url.setResourceValues(values)
 	}
 }

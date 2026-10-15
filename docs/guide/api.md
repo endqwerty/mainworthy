@@ -54,7 +54,7 @@ A browser signs in with these requests and then holds a session cookie. They are
 | `POST /api/account/password` | `{"current"?, "next"}` | Sets or changes the password of the person whose browser session sends it. `current` is required when they have one. |
 | `POST /api/logout` | none | Ends the browser's session and clears its cookie. |
 
-A body holds one of these shapes and nothing beside it. `GET /api/session` says who is signed in, which session the request came by (`session`), whether the caller owns the instance (`owner`) and, for a person, what they sign in with (`credentials`: whether they have a password, and how many passkeys).
+A body holds one of these shapes and nothing beside it. `GET /api/session` says who is signed in, their stable numeric actor id (`actorId`), which session the request came by (`session`), whether the caller owns the instance (`owner`) and, for a person, what they sign in with (`credentials`: whether they have a password, and how many passkeys).
 
 Passwords use Unicode NFC before hashing and checking. An older password also accepts its original spelling. If that spelling is not NFC, successful sign-in refreshes its hash without ending existing sessions. Accepting a recovery invitation revokes the person's previous passwords, passkeys and tokens, and ends their existing sessions. It leaves other actors' tokens alone. See [passwords and recovery](./access.md#a-name-and-a-password-or-a-passkey) for the legacy-password behavior and the limit when concurrent responses replace the browser's cookie.
 

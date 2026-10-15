@@ -50,8 +50,19 @@ struct QueueScreenTests {
 		// A second tap cannot replace or duplicate an answer already saved.
 		#expect(await screen.answer(failure, with: try #require(failure.choices.first { $0.answer == "flaky" })) == false)
 		#expect(outbox.pendingCount == 2)
+		#expect(try URL(filePath: store.file.path).resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
+		var root = directory
+		#expect(try URL(filePath: root.path).resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
+		// A file written by an earlier build must gain the exclusion when read, too.
+		var included = URLResourceValues()
+		included.isExcludedFromBackup = false
+		var file = store.file
+		try file.setResourceValues(included)
+		try root.setResourceValues(included)
 		let reopened = AnswerOutbox(project: project, store: store)
 		#expect(reopened.entries == outbox.entries)
+		#expect(try URL(filePath: file.path).resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
+		#expect(try URL(filePath: root.path).resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
 		#expect(reopened.entries.map(\.question) == [failure.ref, finding.ref])
 		transport.commands.withLock { $0 = [] }
 		transport.offline.withLock { $0 = false }
@@ -66,8 +77,79 @@ struct QueueScreenTests {
 		let recorded = try #require(try await project.question(failure.ref))
 		#expect(recorded.decision?.reference == "SHOP-482" && recorded.decision?.reason == "Checked on the phone")
 		#expect(AnswerOutbox(project: project, store: store).entries.map(\.status) == ["Recorded", "Recorded"])
+		#expect(try URL(filePath: file.path).resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
 		reopened.clearOutcomes()
 		#expect(AnswerOutbox(project: project, store: store).entries.isEmpty)
+	}
+
+	@Test("an answer saved offline cannot replace another person's decision on unchanged evidence")
+	func decidedWhileOffline() async throws {
+		let transport = SwitchableQueueTransport()
+		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
+		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let project = server.project(try await Live.project())
+		let screen = QueueScreen(project: project)
+		await screen.show(.open, filter: nil)
+		let question = try #require(screen.questions.first { $0.kind == .failure })
+		let flaky = try #require(question.choices.first { $0.answer == "flaky" })
+		let defect = try #require(question.choices.first { $0.answer == "defect" })
+		transport.offline.withLock { $0 = true }
+		#expect(await screen.answer(question, with: flaky) == false)
+		#expect(screen.outbox.pendingCount == 1)
+		let owner = Live.server()
+		_ = try await owner.signIn(Live.owner)
+		let other = owner.project(project.key)
+		guard case .decided(let decision) = try await other.answer(question, with: defect, reference: "SHOP-1", reason: "Checked by another person") else {
+			Issue.record("the other person's answer was not recorded")
+			return
+		}
+		let before = try #require(try await other.question(question.ref))
+		#expect(!before.isOpen && before.evidenceHash == question.evidenceHash)
+		transport.offline.withLock { $0 = false }
+		await screen.outbox.send()
+		let entry = try #require(screen.outbox.entries.first)
+		#expect(entry.status == "Overtaken")
+		#expect(entry.outcome == .overtaken("the question is no longer open; read it again before answering"))
+		#expect(entry.detail.contains("Read the question again and choose an answer on its current evidence."))
+		#expect(screen.outbox.pendingCount == 0)
+		let after = try #require(try await other.question(question.ref))
+		#expect(after.ifDecision == decision && after.decision?.label == "Defect in the product")
+		#expect(after.decision?.reference == "SHOP-1" && after.decision?.reason == "Checked by another person")
+	}
+
+	@Test("an online answer queued during another send says sending until both are recorded")
+	func answerDuringSend() async throws {
+		let transport = SwitchableQueueTransport()
+		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
+		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let screen = QueueScreen(project: server.project(try await Live.project()))
+		await screen.show(.open, filter: nil)
+		let failure = try #require(screen.questions.first { $0.kind == .failure })
+		let finding = try #require(screen.questions.first { $0.kind == .finding })
+		let flaky = try #require(failure.choices.first { $0.answer == "flaky" })
+		let deferChoice = try #require(finding.choices.first { $0.answer == "defer" })
+		await transport.gate.holdNext()
+		let first = Task { await screen.answer(failure, with: flaky) }
+		await transport.gate.waitUntilPaused()
+		#expect(await screen.answer(finding, with: deferChoice) == false)
+		#expect(screen.notice?.text == "\(finding.ref): sending. Open Unsent answers to see its outcome.")
+		await transport.gate.release()
+		#expect(await first.value)
+		#expect(screen.outbox.entries.map(\.status) == ["Recorded", "Recorded"])
+	}
+
+	@Test("an uncertain server error ends its sentence before the waiting explanation", arguments: ["Something broke", "Something broke."])
+	func waitingErrorSentence(message: String) async throws {
+		let transport = SwitchableQueueTransport()
+		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
+		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let screen = QueueScreen(project: server.project(try await Live.project()))
+		await screen.show(.open, filter: nil)
+		let question = try #require(screen.questions.first { $0.kind == .failure })
+		let flaky = try #require(question.choices.first { $0.answer == "flaky" })
+		transport.serverProblem.withLock { $0 = ("internal", message) }
+		#expect(await screen.answer(question, with: flaky) == false)
+		#expect(screen.outbox.entries.first?.detail == "Something broke. The saved answer is waiting to send.")
 	}
 
 	@Test("a reply lost after recording replays the same command after a restart")
@@ -87,6 +169,7 @@ struct QueueScreenTests {
 		#expect(outbox.pendingCount == 1)
 		let observer = try await Live.signedIn().project(project.key)
 		let decision = try #require(try await observer.question(question.ref)?.ifDecision)
+		#expect(try await observer.question(question.ref)?.isOpen == false)
 		transport.loseReply.withLock { $0 = false }
 		transport.offline.withLock { $0 = false }
 		let reopened = AnswerOutbox(project: project, store: store)
@@ -96,6 +179,7 @@ struct QueueScreenTests {
 		let sent = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
 		#expect(sent.count == 4)
 		#expect(sent.allSatisfy { $0 == sent[0] && $0["cmd"]?.string == answer.command })
+		#expect(sent[0]["ifOpen"] == true)
 	}
 
 	@Test("changed evidence and refusals have separate outcomes and do not stop the next saved answer")
@@ -260,8 +344,13 @@ struct QueueScreenTests {
 		} else {
 			undo = try #require(screen.notice?.undoes)
 		}
-		let other = try await Live.signedIn().project(key)
-		_ = try await other.answer(failure, with: try #require(failure.choices.first { $0.answer == "defect" }))
+		let otherServer = try await Live.signedIn()
+		let other = otherServer.project(key)
+		// A separate API client deliberately replaces the decision, which the phone queue cannot do.
+		let replacement: [JSONValue] = try await otherServer.write("decide", in: key, [
+			"q": .string(failure.ref), "onEvidence": .string(failure.evidenceHash), "answer": ["is": "defect"],
+		])
+		#expect(replacement.first?["status"]?.string == "decided")
 		#expect(await screen.withdraw(undo) == false)
 		#expect(screen.notice?.isProblem == true)
 		#expect(screen.notice?.text == "Withdrawal of \(failure.ref) was not confirmed. Server response: the decision changed; read the question again before withdrawing.")
@@ -482,6 +571,7 @@ struct QueueScreenFailureTests {
 final class SwitchableQueueTransport: Transport, Sendable {
 	let offline = Mutex(false)
 	let loseReply = Mutex(false)
+	let serverProblem = Mutex<(code: String, message: String)?>(nil)
 	let commands = Mutex<[Data]>([])
 	let gate = QueueSendGate()
 	private let inner = URLSessionTransport()
@@ -490,6 +580,10 @@ final class SwitchableQueueTransport: Transport, Sendable {
 		if request.url?.lastPathComponent == "decide", let body = request.httpBody {
 			commands.withLock { $0.append(body) }
 			await gate.pauseIfNeeded()
+			if let problem = serverProblem.withLock({ $0 }) {
+				let body: JSONValue = ["ok": false, "error": ["code": .string(problem.code), "message": .string(problem.message)]]
+				return (try JSONEncoder().encode(body), HTTPURLResponse(url: request.url!, statusCode: problem.code == "internal" ? 500 : 403, httpVersion: nil, headerFields: nil)!)
+			}
 		}
 		if offline.withLock({ $0 }) { throw URLError(.notConnectedToInternet) }
 		let reply = try await inner.send(request)

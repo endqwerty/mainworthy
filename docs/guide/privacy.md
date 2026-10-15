@@ -2,7 +2,7 @@
 
 The privacy of your data, and it is your data, not ours, is a big deal to us. This policy says what Mainworthy keeps and why, how it is handled, and your rights with respect to it. We never sell your data, and we keep as little of it as Mainworthy can work with.
 
-*Last updated: October 14, 2026*
+*Last updated: October 15, 2026*
 
 This policy covers the instance at `mainworthy.com` and the Mainworthy iPhone app, which are run by the owner of the Mainworthy project ("we", "us"). Mainworthy is software that anyone can run. If you use an instance that somebody else runs, that person decides what happens to your data there, and you should ask them. What the software itself keeps, which is most of this page, is the same on every instance.
 
@@ -54,7 +54,7 @@ The server writes no log of requests. It logs when it starts and when something 
 
 ### The iPhone app
 
-The app talks only to `mainworthy.com`, or to the instance a build of the app from its source code names. A phone that an earlier version signed in to another instance may stay signed in there and keep talking to it. It keeps your session in the phone's keychain and your last project in its settings. It also saves queue answers, except linking tests and creating cases, in the app's files before sending them, with the question title, evidence hash, reference, reason, command id, and eventual server outcome. These files survive closing the app and signing out, separated by instance, person, and project. **Clear outcomes** removes completed answers. Waiting answers stay until sent, and removing the app deletes the files. It does not keep your password. It contains no analytics, advertising or crash-reporting code, and it tells the server only that it is "Mainworthy for iPhone" and which version. The only permission it can ask for is to reach your local network, and only when the instance it talks to is on it.
+The app talks only to `mainworthy.com`, or to the instance a build of the app from its source code names. A phone that an earlier version signed in to another instance may stay signed in there and keep talking to it. It keeps your session in the phone's keychain and your last project in its settings. It also saves queue answers, except linking tests and creating cases, in the app's files before sending them, with the question title, evidence hash, reference, reason, command id, and eventual server outcome. These files survive closing the app and signing out, separated by instance, person, and project. The app excludes these answer files from iCloud and computer backups. **Clear outcomes** removes completed answers. Waiting answers stay until sent, and removing the app deletes the files. It does not keep your password. It contains no analytics, advertising or crash-reporting code, and it tells the server only that it is "Mainworthy for iPhone" and which version. The only permission it can ask for is to reach your local network, and only when the instance it talks to is on it.
 
 ### Voluntary correspondence
 

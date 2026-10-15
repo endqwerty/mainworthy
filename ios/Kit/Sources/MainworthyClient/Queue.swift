@@ -40,6 +40,7 @@ extension ProjectClient {
 		}
 		var input: [String: JSONValue] = [
 			"q": .string(question.ref), "onEvidence": .string(question.evidenceHash), "answer": .object(answer),
+			"ifOpen": true,
 		]
 		let reason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
 		if !reason.isEmpty { input["reason"] = .string(reason) }

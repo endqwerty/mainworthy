@@ -221,8 +221,9 @@ public final class QueueScreen: ProjectScreen {
 			let id = try outbox.enqueue(prepared)
 			await outbox.send()
 			guard let outcome = outbox.entries.first(where: { $0.id == id })?.outcome else {
+				let state = outbox.sending ? "sending" : "saved on this device, waiting to send"
 				notice = Notice(
-					text: "\(question.ref): saved on this device, waiting to send. Open Unsent answers to see its outcome.",
+					text: "\(question.ref): \(state). Open Unsent answers to see its outcome.",
 					isProblem: false, undoes: nil
 				)
 				return false
