@@ -815,7 +815,7 @@ describe("Mainworthy instance archives", () => {
 			exportArchive(db, (chunk) => chunks.push(chunk), { now: time, project: "other" });
 			return chunks.join("");
 		};
-		const kept = ["meta", "orgs", "actors", "tokens", "teams", "team_members"];
+		const kept = ["meta", "orgs", "actors", "tokens", "mail_contacts", "teams", "team_members"];
 		const before = { other: other(), kept: kept.map((table) => db.raw.query(`SELECT * FROM ${table}`).all()) };
 		const removed = removeProject(db, "qa");
 		// Every table the fixture fills for the project lost its rows, the ones an archive leaves out included, and
@@ -828,7 +828,7 @@ describe("Mainworthy instance archives", () => {
 			"demo_projects",
 			"search_docs",
 		]) {
-			if (["meta", "orgs", "actors", "teams", "team_members"].includes(table)) continue;
+			if (["meta", "orgs", "actors", "mail_contacts", "teams", "team_members"].includes(table)) continue;
 			expect({ table, removed: removed.tables[table] ?? 0 }).toEqual({
 				table,
 				removed: table === "grants" ? 1 : (fixtures[table]?.length ?? 1),
