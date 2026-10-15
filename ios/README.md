@@ -84,8 +84,8 @@ app suits people who do not run their own instance.
 
 The app is under the Apache License 2.0 like the rest of the repository, copyright held by the owner
 (decision 0025). It contains no code from others, only its own and Apple's frameworks, so it carries no
-third-party notice. Its copyright line is `NSHumanReadableCopyright` in `App/Info.plist`. The app does not show
-the licence on a screen yet ([#234](https://github.com/endqwerty/mainworthy/issues/234)).
+third-party notice. It shows its copyright line, its licence and a link to the instance's page "Licence" under
+**You**, **About**; the copyright line is `NSHumanReadableCopyright` in `App/Info.plist`.
 
 What App Store Connect asks about the licence, and what to answer:
 
@@ -94,7 +94,7 @@ What App Store Connect asks about the licence, and what to answer:
 | Copyright, in the version's information | The line in `Info.plist` without the word `Copyright`: the year and the name (Apple adds the ©) |
 | App Information, License Agreement | Apple's standard licence agreement. The Apache licence covers the source; the App Store build is delivered under Apple's agreement, which the copyright holder may choose for their own build |
 
-`test/licences.test.ts` fails when `Info.plist` and `NOTICE` name different holders.
+`test/licences.test.ts` fails when `Info.plist`, `NOTICE` and the UI test name different holders.
 
 ## Work on it
 
