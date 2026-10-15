@@ -6,8 +6,9 @@ Then one answer for a change: is it worthy of `main`?
 A test case management system for software QA, built to fix what is annoying about TestRail, Qase, Jira
 (Xray, Zephyr) and Azure DevOps Test Plans. **Status: MVP (2026-10-12).** It runs, it is tested, and it is a
 preview: what is missing is listed in [decision 0012](docs/decisions/0012-mvp-scope-and-departures.md) and
-tracked in the GitHub milestones M1 to M7 (one page of them: issue #64; the order and its reasons:
-[docs/roadmap.md](docs/roadmap.md)).
+tracked in the GitHub milestones M1 to M7 and the separate `iOS app` milestone.
+[Issue #64](https://github.com/endqwerty/mainworthy/issues/64) keeps the current work order;
+[docs/roadmap.md](docs/roadmap.md) describes the phases and milestone goals.
 It was called Casebook until 2026-10-13 ([decision 0015](docs/decisions/0015-the-project-is-called-mainworthy.md)).
 
 ![The suite: cases on the left with their proof by person, pipeline and agent; the case as a document on the right](docs/ui/screenshots/suite-light.png)
