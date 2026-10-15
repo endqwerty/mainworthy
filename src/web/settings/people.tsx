@@ -1,4 +1,4 @@
-import { type FormEvent, type RefObject, useRef, useState } from "react";
+import { type FormEvent, Fragment, type RefObject, useRef, useState } from "react";
 import { z } from "zod";
 import { Capability, defaultCapabilities } from "../../core/kinds.ts";
 import { INVITATION_LASTS, type InvitationCreated, type InvitationRow } from "../../core/people.ts";
@@ -8,6 +8,7 @@ import { createInvitation, dateTime, listInvitations, revokeInvitation, until } 
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
 import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
+import { PersonAccess, TokenUse } from "./people-access.tsx";
 import "./people.css";
 
 const Actor = z.object({
@@ -51,6 +52,7 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 	// The links that were made and not dismissed yet. They are in this component's memory only: leaving the
 	// section drops them, and nothing shows one again.
 	const [created, setCreated] = useState<readonly InvitationCreated[]>([]);
+	const [inspecting, setInspecting] = useState<string | null>(null);
 	const [name, setName] = useState("");
 	const [can, setCan] = useState<Capability[]>([...STARTS_WITH]);
 	const [onProject, setOnProject] = useState("");
@@ -273,50 +275,63 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 			)}
 			{actors.error && <p role="status">{saidBy(actors.error)}</p>}
 			{people.map((person) => (
-				<div className="settings-row" key={person.name}>
-					<ProducerGlyph kind="human" />
-					<span>
-						<b>{person.name}</b>
-						<small>{held(person.grants)}</small>
-						{confirming === person.name && (
-							<small>
-								A recovery link is for somebody who lost their password or passkey. Once {person.name} accepts it, it
-								replaces every way {person.name} signs in and ends their sessions.
+				<Fragment key={person.name}>
+					<div className="settings-row settings-person">
+						<ProducerGlyph kind="human" />
+						<span>
+							<b>{person.name}</b>
+							<small>{held(person.grants)}</small>
+							{confirming === person.name && (
+								<small>
+									A recovery link is for somebody who lost their password or passkey. Once {person.name} accepts it, it
+									replaces every way {person.name} signs in and ends their sessions.
+								</small>
+							)}
+							<small className="settings-refusal" role="status">
+								{refusal?.about === person.name ? refusal.message : ""}
 							</small>
-						)}
-						<small className="settings-refusal" role="status">
-							{refusal?.about === person.name ? refusal.message : ""}
-						</small>
-					</span>
-					{!mayRecover(person.name) ? null : confirming === person.name ? (
-						<>
-							<button
-								className="out"
-								type="button"
-								aria-disabled={recovering !== null}
-								onClick={() => recover(person.name)}
-							>
-								{recovering === person.name ? "Making the link…" : "Make the recovery link"}
-							</button>
-							<button type="button" className="dim" onClick={() => setConfirming(null)}>
-								Cancel
-							</button>
-						</>
-					) : (
+						</span>
 						<button
 							className="out"
 							type="button"
-							aria-label={`Recovery link for ${person.name}`}
-							onClick={() => {
-								setRefusal(null);
-								setConfirming(person.name);
-							}}
+							aria-label={`Sessions and sign-in for ${person.name}`}
+							aria-expanded={inspecting === person.name}
+							onClick={() => setInspecting((current) => (current === person.name ? null : person.name))}
 						>
-							Recovery link
+							Sessions and sign-in
 						</button>
-					)}
-				</div>
+						{!mayRecover(person.name) ? null : confirming === person.name ? (
+							<>
+								<button
+									className="out"
+									type="button"
+									aria-disabled={recovering !== null}
+									onClick={() => recover(person.name)}
+								>
+									{recovering === person.name ? "Making the link…" : "Make the recovery link"}
+								</button>
+								<button type="button" className="dim" onClick={() => setConfirming(null)}>
+									Cancel
+								</button>
+							</>
+						) : (
+							<button
+								className="out"
+								type="button"
+								aria-label={`Recovery link for ${person.name}`}
+								onClick={() => {
+									setRefusal(null);
+									setConfirming(person.name);
+								}}
+							>
+								Recovery link
+							</button>
+						)}
+					</div>
+					{inspecting === person.name && <PersonAccess key={person.name} actor={person.name} />}
+				</Fragment>
 			))}
+			<TokenUse />
 		</>
 	);
 }

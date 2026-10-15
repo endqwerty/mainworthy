@@ -16,6 +16,7 @@ import { call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
 import { randomId } from "../lib/ids.ts";
 import { useBindings } from "../lib/keys.ts";
+import { Token } from "../lib/people.ts";
 import { navigate, projectUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, EmptyState, KeyCap, ListRow, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
@@ -38,20 +39,6 @@ const sectionsFor = (caller: { kind: string; instanceAdmin: boolean }): string[]
 	...(caller.kind === "human" ? ["Your sign-in"] : []),
 	...(caller.kind === "ci" ? [] : ["Your sessions"]),
 ];
-const Token = z.object({
-	id: z.number(),
-	actor: z.string(),
-	kind: z.string(),
-	label: z.string(),
-	createdAt: z.number(),
-	createdBy: z.string().nullable(),
-	expiresAt: z.number().nullable(),
-	expired: z.boolean(),
-	lastUsedAt: z.number().nullable(),
-	lastUsedFrom: z.string().nullable(),
-	revoked: z.boolean(),
-});
-type Token = z.infer<typeof Token>;
 const CreatedToken = z.object({ actor: z.string(), token: z.string(), can: z.array(Capability), note: z.string() });
 /**
  * How long a new token may work. Each value is a duration as `token.create` reads it (`src/core/duration.ts`);

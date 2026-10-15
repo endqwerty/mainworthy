@@ -874,6 +874,9 @@ on Chromium's virtual authenticator, with the page at `localhost`.
 | People | A new invitation starts with read, record, produce, answer and plan ticked and `admin` not, with a line under the boxes saying what `admin` gives. After an invitation that had it ticked, it is unticked again. | the same test |
 | People | Open invitations show what each person may do, who made each and when it runs out; "Revoke" removes one and the link accepts nothing. A name that signs in already is not invited as new. | the same test |
 | People | "Recovery link" asks first and says that it replaces every way the person signs in. The owner has it beside every person. Anybody else has it beside their own name only, with a sentence saying the owner makes the others, so no button is answered 403. | the same test; `people-settings.test.ts`: a person who is not an admin |
+| People | "Sessions and sign-in" opens one person's sessions, password status and passkeys. A non-owner human admin ends another person's session and removes their passkey; those browsers then receive 401, while the admin remains signed in. The last credential cannot be removed. | `people-admin.test.ts`: a non-owner admin |
+| People | "Token use" identifies each token by actor, label and id, shows status and last use with its address or "never used", and reveals no secret. | the same test |
+| People | On a phone, person controls wrap within the pane. A refused credential read shows the refusal, without claiming no password or offering Remove. | `people-admin.test.ts`: People details fit a phone |
 | People | A person who does not administer the instance has no "People" section. | `people-settings.test.ts`: a person who is not an admin |
 
 Every test asserts what the browser logged. For most that is nothing, which under the page's

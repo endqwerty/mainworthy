@@ -472,8 +472,9 @@ it, is in `src/web/CHECKS.md`; the guide describes them for a person (`docs/guid
   keeps a read for fifteen seconds, and in that time a session that ended elsewhere would stay in the list
   with a button to end it.
 
-**Not built.** An admin's view of another person's sessions and credentials, which the operations allow
-(`actor`). Signing out does not record an open draft first; it stays on the device under the person's name, as
+**Added 2026-10-14 (issue #131).** Settings, People now opens one person's sessions and credentials at a time, using the existing `actor` input. The session list shares its display and End action with "Your sessions". Detail queries include the actor in their keys, and switching people unmounts the old detail controls. Token use lists every actor kind, with the token label, id, status and last use. Loading details on demand avoids two list requests for every person on the page. Listing every person's details at once was considered and rejected for that request count and page length.
+
+**Not built.** Signing out does not record an open draft first; it stays on the device under the person's name, as
 it does when a session ends by itself.
 
 ## The three candidates

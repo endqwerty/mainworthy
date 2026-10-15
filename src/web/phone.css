@@ -238,3 +238,17 @@
 		overflow: visible;
 	}
 }
+
+:root[data-layout="phone"] .settings-person {
+	flex-wrap: wrap;
+}
+:root[data-layout="phone"] .settings-person > span:first-of-type {
+	flex-basis: calc(100% - 40px);
+}
+:root[data-layout="phone"] .settings-person-access {
+	padding-inline: 8px;
+}
+:root[data-layout="phone"] .settings-person .out,
+:root[data-layout="phone"] .settings-person-access .out {
+	min-height: 36px;
+}

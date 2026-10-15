@@ -61,18 +61,37 @@ const Created = z.object({
 }) satisfies z.ZodType<InvitationCreated>;
 
 type Options = Pick<CallOptions, "signal">;
+type SubjectOptions = Options & { actor?: string };
 
-/** The caller's own browser sessions that are alive, oldest first. */
-export const listSessions = async (options: Options = {}): Promise<SessionRow[]> =>
-	SessionRows.parse(await call("session", { do: "list" }, options));
+export const Token = z.object({
+	id: z.number(),
+	actor: z.string(),
+	kind: z.string(),
+	label: z.string(),
+	createdAt: z.number(),
+	createdBy: z.string().nullable(),
+	expiresAt: z.number().nullable(),
+	expired: z.boolean(),
+	lastUsedAt: z.number().nullable(),
+	lastUsedFrom: z.string().nullable(),
+	revoked: z.boolean(),
+});
+export type Token = z.infer<typeof Token>;
+
+export const listTokens = async (options: Options = {}): Promise<Token[]> =>
+	Token.array().parse(await call("admin", { do: "token.list" }, options));
+
+/** The caller's or a named actor's browser sessions that are alive, oldest first. */
+export const listSessions = async ({ actor, ...options }: SubjectOptions = {}): Promise<SessionRow[]> =>
+	SessionRows.parse(await call("session", { do: "list", ...(actor === undefined ? {} : { actor }) }, options));
 
 /** Ends a session. `current` says it was this browser's own: every later request is then refused. */
 export const endSession = async (id: number): Promise<{ current: boolean }> =>
 	z.object({ current: z.boolean() }).parse(await call("session", { do: "end", id }));
 
-/** The ways the caller signs in: at most one password, and their passkeys. */
-export const listCredentials = async (options: Options = {}): Promise<CredentialRow[]> =>
-	CredentialRows.parse(await call("credential", { do: "list" }, options));
+/** The ways the caller or a named person signs in: at most one password, and their passkeys. */
+export const listCredentials = async ({ actor, ...options }: SubjectOptions = {}): Promise<CredentialRow[]> =>
+	CredentialRows.parse(await call("credential", { do: "list", ...(actor === undefined ? {} : { actor }) }, options));
 
 /** The options to make a passkey for the caller, with a challenge good for five minutes and one registration. */
 export const beginPasskey = async (): Promise<CreationOptions> =>

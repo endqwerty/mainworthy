@@ -116,7 +116,7 @@ A request for evidence: which results count and what is needed before it is comp
 
 ## Session
 
-One browser that is signed in. It ends at sign-out, after 14 days without use, after 90 days, and when what it was opened with (a token, a password or a passkey) stops working. A person lists and ends their own.
+One browser that is signed in. It ends at sign-out, after 14 days without use, after 90 days, and when what it was opened with (a token, a password or a passkey) stops working. A person lists and ends their own. In Settings, People, a person who administers the instance also lists and ends anybody else's.
 
 ## Slot
 

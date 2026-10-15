@@ -245,7 +245,11 @@ A person who holds `admin` on every project can:
 - list somebody's password and passkeys with `mainworthy credential --do list --actor dana`, and remove one by its id, but not the last;
 - invite a new person, and list and revoke invitations.
 
-An admin cannot see or set anybody's password, and cannot register a passkey for somebody else. Only the owner makes a recovery link for another person. An agent that holds `admin` can do none of this. The first two are commands only: Settings shows your own sessions and ways of signing in, not somebody else's.
+An admin cannot see or set anybody's password, and cannot register a passkey for somebody else. Only the owner makes a recovery link for another person. An agent that holds `admin` can do none of this.
+
+In Settings, People, press "Sessions and sign-in" beside a person. Their sessions show what opened each browser, its recorded address and last use. "End" signs that browser out. Their password status and passkeys appear below, with when each was added and last used. "Remove" removes a password or passkey and ends sessions opened with it. The last way of signing in has a disabled button. Opening another person's details replaces the first person's and reads the new lists.
+
+People also lists "Token use" for people, agents and pipelines. Each row names the actor, the token's label and id, whether it is active, expired or revoked, and when and from where it was last used. A token with no use says "never used". This identifies the token's actor, not whoever was holding the secret. The secret is never shown. Make and revoke tokens in Settings, Tokens.
 
 ## Sign in to the web UI
 
@@ -292,7 +296,7 @@ A pipeline with only `record` cannot read cases or the queue either. Add `read` 
 
 - Policy shows who answers under the current policy. See [policy](./policy.md).
 - Tokens makes, lists and revokes tokens. An admin sees the form, and anyone else sees "An admin creates and revokes tokens."
-- People invites a person, lists and revokes open invitations, and makes a recovery link. Only a person who holds `admin` on every project has this section.
+- People invites a person, lists and revokes open invitations, and makes a recovery link. It also shows each person's sessions, password status and passkeys, with End and Remove buttons, and lists token use. Only a person who holds `admin` on every project has this section.
 - Projects lists the projects you can reach and creates a new one.
 - Connect shows the pipeline and agent connection lines, with the address of this instance.
 - Your sign-in sets or changes your password and adds and removes passkeys. Only a person has this section.
