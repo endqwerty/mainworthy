@@ -130,7 +130,16 @@ function compactSchema(schema: SchemaNode, envelope = false): SchemaNode {
 		);
 	for (const key of ["anyOf", "oneOf"] satisfies ("anyOf" | "oneOf")[]) {
 		const choices = schema[key];
-		if (choices) visible[key] = choices.filter((child) => child["x-mcp-hidden"] !== true);
+		if (!choices) continue;
+		const kept = choices.filter((child) => child["x-mcp-hidden"] !== true);
+		const only = kept.length === 1 && kept.length < choices.length ? kept[0] : undefined;
+		if (only === undefined || typeof only === "boolean") {
+			visible[key] = kept;
+			continue;
+		}
+		// Hiding left one choice: that choice is the schema, under the parent's own keys.
+		delete visible[key];
+		for (const [name, value] of Object.entries(only)) if (!(name in visible)) Object.assign(visible, { [name]: value });
 	}
 	const result = mapSchemas(visible, (child) => compactSchema(child));
 	delete result["x-mcp-hidden"];

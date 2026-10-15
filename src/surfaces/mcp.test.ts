@@ -13,6 +13,7 @@ import { encode } from "gpt-tokenizer/encoding/o200k_base";
 import { z } from "zod";
 import { generateToolReference } from "../../scripts/gen-skill.ts";
 import { harness } from "../../test/helpers.ts";
+import { FindInput } from "../core/ops.ts";
 import { REPLIES } from "../core/replies.ts";
 import { createToken, listTokens } from "../server/identity/identity.ts";
 import { MCP_OPS, OPS } from "../server/ops/index.ts";
@@ -28,7 +29,7 @@ const TOKEN_COUNTS: Record<string, number> = {
 	decide: 318,
 	inbox: 166,
 	get: 193,
-	find: 266,
+	find: 263,
 	impact: 200,
 	since: 158,
 	gate: 160,
@@ -100,6 +101,15 @@ test("report tools omit the CI-only nothing-required declaration", () => {
 	if (!tool) throw new Error("report");
 	expect(Object.keys(tool.inputSchema.properties ?? {})).toContain("results");
 	expect(Object.keys(tool.inputSchema.properties ?? {})).not.toContain("nothingRequired");
+});
+
+test("find lists deployments for CLI and HTTP but keeps MCP's earlier choices", () => {
+	const tool = mcpTools().find((entry) => entry.name === "find");
+	const choice = (tool?.inputSchema.properties as Record<string, { enum?: string[]; anyOf?: unknown }>)?.in;
+	expect(choice?.anyOf).toBeUndefined();
+	expect(choice?.enum).toContain("changes");
+	expect(choice?.enum).not.toContain("deployments");
+	expect(FindInput.parse({ in: "deployments" }).in).toBe("deployments");
 });
 
 test("report tools offer code targets and planned runs without direct build targets", () => {
