@@ -69,17 +69,17 @@ const Created = z.object({
 
 type Options = Pick<CallOptions, "signal">;
 
-/** The caller's own browser sessions that are alive, oldest first. */
-export const listSessions = async (options: Options = {}): Promise<SessionRow[]> =>
-	SessionRows.parse(await call("session", { do: "list" }, options));
+/** Browser sessions that are alive, oldest first. Another actor is for a human instance admin. */
+export const listSessions = async (options: Options = {}, actor?: string): Promise<SessionRow[]> =>
+	SessionRows.parse(await call("session", { do: "list", ...(actor === undefined ? {} : { actor }) }, options));
 
 /** Ends a session. `current` says it was this browser's own: every later request is then refused. */
 export const endSession = async (id: number): Promise<{ current: boolean }> =>
 	z.object({ current: z.boolean() }).parse(await call("session", { do: "end", id }));
 
-/** The ways the caller signs in: at most one password, and their passkeys. */
-export const listCredentials = async (options: Options = {}): Promise<CredentialRow[]> =>
-	CredentialRows.parse(await call("credential", { do: "list" }, options));
+/** The ways a person signs in: at most one password, and their passkeys. */
+export const listCredentials = async (options: Options = {}, actor?: string): Promise<CredentialRow[]> =>
+	CredentialRows.parse(await call("credential", { do: "list", ...(actor === undefined ? {} : { actor }) }, options));
 
 /** The options to make a passkey for the caller, with a challenge good for five minutes and one registration. */
 export const beginPasskey = async (): Promise<CreationOptions> =>

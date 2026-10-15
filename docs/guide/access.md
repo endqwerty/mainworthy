@@ -136,7 +136,7 @@ To replace a token without a gap, make a second one for the same actor, put it w
 
 ## See and revoke tokens
 
-Settings, Tokens, lists "Issued tokens" with each token's actor, who made it, when it was made, when and from which address it was last used, and when it ends. "Revoke" next to a token stops it at once. In server mode the last token the owner can sign in with is not revoked: make the owner another one first.
+Settings, Tokens, and Settings, People, list "Issued tokens" with each token's number, label, actor, who made it, when it was made, when and from which address it was last used, and when it ends. A token with no recorded use says "never used". The actor is who the token identifies; the list cannot tell which person held a shared token. "Revoke" next to a token stops it at once. In server mode the last token the owner can sign in with is not revoked: make the owner another one first.
 
 ```
 $ mainworthy token list
@@ -267,6 +267,10 @@ Nothing changes until the link is accepted, so a link nobody uses locks nobody o
 
 A session is one browser that is signed in. Settings, "Your sessions" lists yours: what opened each one and from which address, the browser as it named itself, when and from where it was last used, and when it ends at the latest. "this browser" marks the one you are looking at. "End" signs that browser out. On your own it is the same as signing out.
 
+A person who administers the instance can inspect another person in Settings, **People**. Beside their name, open **Sign-in details**. It lists their sessions with the same details and **End** button as your own sessions. Ending this browser's session opens the sign-out dialog.
+
+The details also say whether the person has a password and list their passkeys, with their names, when they were added, and their last use. **Remove** removes a password or passkey and ends the sessions that used it. The person's last password or passkey stays; they must add another before you can remove it. You cannot set their password or add a passkey for them. Recovery links keep the rules described above.
+
 A script lists them and ends one:
 
 ```
@@ -366,7 +370,7 @@ A pipeline with only `record` cannot read cases or the queue either. Add `read` 
 
 - Policy shows who answers under the current policy. See [policy](./policy.md).
 - Tokens makes, lists and revokes tokens. An admin sees the form, and anyone else sees "An admin creates and revokes tokens."
-- People invites a person, lists and revokes open invitations, makes a recovery link, and forgets a person after confirmation. Only a person who holds `admin` on every project has this section.
+- People invites a person, lists and revokes open invitations, makes a recovery link, and forgets a person after confirmation. Sign-in details lists and ends each person's sessions and lists and removes their password and passkeys. Issued tokens lists token use and revokes tokens. Only a person who holds `admin` on every project has this section.
 - Projects lists the projects you can reach and creates a new one.
 - Connect shows the pipeline and agent connection lines, with the address of this instance.
 - Your sign-in sets or changes your password and adds and removes passkeys. Only a person has this section.

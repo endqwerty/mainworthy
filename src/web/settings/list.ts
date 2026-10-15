@@ -11,10 +11,10 @@ import { useApp } from "../ui/context.tsx";
  * The key starts with the project, as every query's does, so that what the app does to a project's queries
  * (read them again on focus, drop them when the person changes) reaches these too.
  */
-export function useList<Row>(name: string, read: (options: { signal: AbortSignal }) => Promise<Row[]>) {
+export function useList<Row>(name: string, read: (options: { signal: AbortSignal }) => Promise<Row[]>, actor?: string) {
 	const { project } = useApp();
 	return useQuery({
-		queryKey: [project, name, { do: "list" }],
+		queryKey: [project, name, { do: "list", ...(actor === undefined ? {} : { actor }) }],
 		queryFn: ({ signal }) => read({ signal }),
 		refetchOnMount: "always",
 	});
