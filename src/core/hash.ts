@@ -35,9 +35,13 @@ function digest(text: string): string {
 	return bytesToHex(sha256(utf8ToBytes(text))).slice(0, 12);
 }
 
-/** Hashes the whole body in title/pre/steps/methods/automate/fields order; step keys are id/action/expected, field keys sorted. */
+/** Hashes the whole body in title/pre/steps/methods/automate/fields order; inline step keys are id/action/expected, pins are id/use, field keys sorted. */
 export function versionHash(body: CaseBody): string {
-	const steps = body.steps.map(({ id, action, expected }) => ({ id, action, expected }));
+	const steps = body.steps.map((step) =>
+		step.use
+			? { id: step.id, use: { fragment: step.use.fragment, version: step.use.version } }
+			: { id: step.id, action: step.action, expected: step.expected },
+	);
 	return digest(
 		`{"title":${JSON.stringify(body.title)},"pre":${JSON.stringify(body.pre)},"steps":${JSON.stringify(steps)},"methods":${JSON.stringify(body.methods)},"automate":${JSON.stringify(body.automate)},"fields":${canonicalJson(body.fields)}}`,
 	);
@@ -47,15 +51,19 @@ function trimLineEnds(text: string): string {
 	return text.replace(/[^\S\n]+(?=\n|$)/g, "");
 }
 
-/** Hashes only preconditions and ordered action/expected claims, with whitespace at each line end removed. */
+/** Hashes only preconditions and ordered action/expected claims or fragment pins, with whitespace at each line end removed. */
 export function claimHash(body: CaseBody): string {
 	return digest(
 		JSON.stringify({
 			pre: trimLineEnds(body.pre),
-			steps: body.steps.map((step) => ({
-				action: trimLineEnds(step.action),
-				expected: step.expected === null ? null : trimLineEnds(step.expected),
-			})),
+			steps: body.steps.map((step) =>
+				step.use
+					? { use: { fragment: step.use.fragment, version: step.use.version } }
+					: {
+							action: trimLineEnds(step.action),
+							expected: step.expected === null ? null : trimLineEnds(step.expected),
+						},
+			),
 		}),
 	);
 }

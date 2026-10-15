@@ -8,6 +8,31 @@ import Testing
 @Suite("The Suite screen", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`"))
 @MainActor
 struct SuiteScreenTests {
+	@Test("shared steps remain read-only until the native editor can preserve their pins")
+	func sharedFragmentsStayPinned() async throws {
+		let key = try await Live.project()
+		let server = try await Live.signedIn()
+		let fragment: JSONValue = try await server.write("propose", in: key, ["edits": [[
+			"op": "create", "kind": "fragment", "body": ["title": "Sign in", "steps": [["id": "ab", "action": "Open sign in", "expected": "Signed in"]]],
+		]]])
+		let fragmentRef = try #require(fragment["cases"]?.array?.first?["ref"]?.string)
+		let user: JSONValue = try await server.write("propose", in: key, ["edits": [[
+			"op": "create", "body": ["title": "Uses sign in", "steps": [["id": "cd", "use": ["fragment": .string(fragmentRef), "version": 1]]]],
+		]]])
+		let userRef = try #require(user["cases"]?.array?.first?["ref"]?.string)
+		let client = server.project(key)
+		for ref in [fragmentRef, userRef] {
+			let opened = try await client.caseDocument(ref)
+			#expect(opened.content.steps.first?.action == "Open sign in")
+			let screen = SuiteScreen(project: client)
+			await screen.edit(opened)
+			#expect(screen.editor == nil)
+			#expect(screen.notice == "Edit fragments and their pins in the web editor.")
+			let editor = CaseEditorScreen(project: client, source: .edit(opened))
+			#expect(!editor.maySave)
+		}
+	}
+
 	@Test("an existing case can be edited after a required field is introduced")
 	func requiredFieldOnOlderCase() async throws {
 		let key = try await Live.project()

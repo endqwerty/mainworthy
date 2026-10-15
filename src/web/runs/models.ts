@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CaseBody, MethodKind } from "../../core/model.ts";
+import { CaseBody, ExpandedStep, MethodKind } from "../../core/model.ts";
 import { Obligation, SlotState, Tally, TargetMatch, Verdict } from "../../core/runs.ts";
 
 export const Run = z.object({
@@ -42,6 +42,7 @@ export const Slot = z.object({
 });
 export type Slot = z.infer<typeof Slot>;
 export const RunCase = CaseBody.extend({
+	steps: z.array(ExpandedStep),
 	fields: z.record(z.string(), z.string()).default({}),
 	ref: z.string(),
 	version: z.number(),

@@ -79,6 +79,7 @@ public struct CaseDocument: Equatable, Sendable {
 	public let ref: String
 	public let version: Int
 	public let isHistorical: Bool
+	public let hasSharedSteps: Bool
 	public let content: CaseContent
 	public let tags: [String]
 	/// Placement is current even when the document is an older version.
@@ -88,6 +89,7 @@ public struct CaseDocument: Equatable, Sendable {
 
 	init(_ wire: Wire.SuiteDocument, isHistorical: Bool = false) {
 		self.isHistorical = isHistorical
+		hasSharedSteps = wire.kind == "fragment" || wire.hasFragments == true
 		ref = wire.ref
 		version = wire.version
 		content = CaseContent(

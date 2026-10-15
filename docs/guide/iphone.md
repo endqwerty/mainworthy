@@ -7,6 +7,10 @@ The app has the queue, planned runs, the cases, changes and your sessions (issue
 inviting people, tokens and the project's policy, is not in the app: open the instance in the phone's browser,
 which gets [a layout of its own](./keyboard.md#on-a-phone).
 
+Cases that use shared fragments can be read and run in the app. Edit fragments
+and their pins in the web editor. The native editor keeps these documents read-only
+until it can preserve their references.
+
 ## Install the app
 
 There is no App Store entry. You build the app from the repository and install it over a cable. You need a Mac

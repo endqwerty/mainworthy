@@ -286,6 +286,7 @@ public final class SuiteScreen: ProjectScreen {
 		editor = CaseEditorScreen(project: project, source: .create(folder: folder))
 	}
 	public func edit(_ opened: CaseDocument) async {
+		guard !opened.hasSharedSteps else { notice = "Edit fragments and their pins in the web editor."; return }
 		guard !opened.isHistorical, editor == nil, !preparingEditor else { return }
 		editorReads += 1
 		let mine = editorReads

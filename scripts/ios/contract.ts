@@ -477,6 +477,8 @@ export const SuiteTags = struct("SuiteTags", "The project's tags from find.", {
 	items: list(struct("SuiteTag", "One tag and its active case count.", { tag: text, n: whole })),
 });
 export const SuiteDocument = struct("SuiteDocument", "A case from get, at the version that was requested.", {
+	kind: maybe(text),
+	hasFragments: maybe(flag),
 	ref: text,
 	version: whole,
 	title: text,
