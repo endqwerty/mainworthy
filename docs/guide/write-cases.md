@@ -71,6 +71,7 @@ server what became of that save the next time the draft is open. If the save mad
 says "Your last save is recorded as version N", and the save is not sent again. If it is not recorded yet, it
 may still be on its way, so the page sends that same save again: the server records it once, however many
 copies of it arrive. Either way, anything you typed after it is sent when you leave.
+You can select text while that answer arrives. Later text stays on the version that save made.
 A tab closed before it hears back sends nothing more: the draft stays on this device, and the page asks when
 you open it again.
 

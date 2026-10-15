@@ -1237,10 +1237,9 @@ export function SuiteScreen() {
 					});
 					if (draftRef.current?.id === snapshot.id) {
 						draftRef.current = next;
-						if (keepTitleFocus) {
-							flushSync(() => setDraftState(next));
-							focusDraft(next);
-						} else setDraftState(next);
+						// Events from the old editor must not put the draft back on its earlier version.
+						flushSync(() => setDraftState(next));
+						if (keepTitleFocus) focusDraft(next);
 						setSelected(ref);
 						if (
 							readRoute().project === project &&
