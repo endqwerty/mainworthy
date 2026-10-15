@@ -36,7 +36,8 @@ Every ordinary control must be reachable.
 Pointer-only overlay backdrops have keyboard alternatives through Escape and the visible close or menu controls.
 
 Target checks require 24 by 24 CSS pixels. Checkbox and radio targets include their associated labels.
-Links inside paragraphs use the inline-text exception in criterion 2.5.8. The live status check records a
+Links inside paragraphs use the inline-text exception in criterion 2.5.8. Run progress dots use its Equivalent
+exception: each dot selects the same slot as its full-size row in Run slots. The live status check records a
 real case proposal and observes its message in a polite, atomic status region. These checks cannot establish
 what a screen reader actually says, whether a label makes sense, or whether the reading order is useful.
 
@@ -82,7 +83,7 @@ result wherever human assessment supplies the missing evidence.
 | 2.2.2 Pause, stop, hide | A | Not evaluated | Person | Automatically refreshed lists and announcements need review during reading and editing. |
 | 2.3.1 Flashes | A | Supports | Inspection | First-party controls contain no flashing content. |
 | 2.4.1 Bypass blocks | A | Not evaluated | Person | Assess bypassing repeated sidebar content with screen-reader landmarks and keyboard navigation. |
-| 2.4.2 Page title | A | Partially supports | Axe, Person | The document names Mainworthy; whether the current screen and case are sufficiently identified needs review. |
+| 2.4.2 Page title | A | Partially supports | Axe, Inspection | The page title is always "Mainworthy", whatever the screen. It does not identify the current screen or case. |
 | 2.4.3 Focus order | A | Not evaluated | Script, Person | Traversal reaches controls; logical order, restoration, and phone pane changes need human assessment. |
 | 2.4.4 Link purpose | A | Not evaluated | Axe, Person | Links have accessible names; their purpose in a screen-reader links list needs review. |
 | 2.4.5 Multiple ways | AA | Partially supports | Inspection, Person | Navigation, search, palette, and direct addresses exist; a person must assess their coverage. |
@@ -94,7 +95,7 @@ result wherever human assessment supplies the missing evidence.
 | 2.5.3 Label in name | A | Partially supports | Axe, Person | Automated label-in-name checks pass; speech-input commands need human testing. |
 | 2.5.4 Motion actuation | A | Not applicable | Inspection | No action uses device or user motion. |
 | 2.5.7 Dragging movements | AA | Not evaluated | Person | Folder moves have keyboard and palette alternatives; their full equivalence needs a task-based check. |
-| 2.5.8 Minimum target size | AA | Supports | Axe, Script | Scanned targets meet 24 by 24 CSS pixels, including label targets, with the inline-link exception. |
+| 2.5.8 Minimum target size | AA | Supports | Axe, Script | Scanned targets meet 24 by 24 CSS pixels, including label targets, with the inline-link exception and equivalent full-size rows for run progress dots. |
 | 3.1.1 Page language | A | Supports | Axe | The document declares English. |
 | 3.1.2 Language of parts | AA | Not evaluated | Person | First-party wording is English; handling mixed-language case content needs review. |
 | 3.2.1 On focus | A | Not evaluated | Script, Person | Phone focus can reveal another pane; a person must assess whether these changes preserve context. |

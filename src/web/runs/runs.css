@@ -56,10 +56,11 @@
 	flex: none;
 }
 .run-dot {
-	height: 24px;
-	min-width: 24px;
+	height: 14px;
+	min-height: 0;
+	min-width: 6px;
 	flex: 1;
-	max-width: 24px;
+	max-width: 16px;
 	border-radius: 2px;
 	background: var(--line);
 }

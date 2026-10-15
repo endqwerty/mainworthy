@@ -182,6 +182,33 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
+	"closing the phone drawer with its keyboard button returns focus to Menu",
+	async () => {
+		const server = await startServer({ cases: 1 });
+		const phone = await openPage(server, { device: "phone" });
+		try {
+			const { page } = phone;
+			const menu = page.getByRole("button", { name: "Menu", exact: true });
+			const close = page.locator("#side").getByRole("button", { name: "Close menu", exact: true });
+			await menu.focus();
+			await page.keyboard.press("Enter");
+			await page.locator('#app[data-menu="open"]').waitFor();
+			expect(await close.evaluate((node) => node === document.activeElement)).toBe(true);
+			await page.keyboard.press("Enter");
+			await page.locator('#app[data-menu="closed"]').waitFor();
+			expect(await menu.evaluate((node) => node === document.activeElement)).toBe(true);
+			await page.keyboard.press("Tab");
+			expect(await actions(page).evaluate((node) => node === document.activeElement)).toBe(true);
+			expect(phone.errors).toEqual([]);
+		} finally {
+			await phone.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+test.skipIf(!browserAvailable)(
 	"on a phone the sidebar is a drawer, and Actions offers the actions of what is shown",
 	async () => {
 		const server = await startServer({ cases: 40 });

@@ -392,6 +392,52 @@ check(
 	30000,
 );
 
+check(
+	"a 158-case run shows every progress dot without scrolling on desktop",
+	async () => {
+		const server = await startServer();
+		await cases(server, 158);
+		const run = await server.api("plan", { name: "Large run", select: {} });
+		const h = await openPage(server, { path: `/p/scratch/runs/${run.run.slice(2)}` });
+		try {
+			const { page } = h;
+			await ready(page);
+			expect(page.viewportSize()).toEqual({ width: 1440, height: 900 });
+			const strip = await page.locator(".run-strip").evaluate((node) => {
+				const box = node.getBoundingClientRect();
+				const dots = [...node.querySelectorAll(".run-dot")];
+				const top = box.top + node.clientTop;
+				return {
+					dots: dots.length,
+					clientHeight: node.clientHeight,
+					scrollHeight: node.scrollHeight,
+					visible: dots.filter((dot) => {
+						const rect = dot.getBoundingClientRect();
+						return rect.top >= top && rect.bottom <= top + node.clientHeight;
+					}).length,
+				};
+			});
+			console.info(`STRIP ${JSON.stringify(strip)}`);
+			expect(strip.scrollHeight).toBe(strip.clientHeight);
+			expect(strip).toMatchObject({ dots: 158, visible: 158 });
+			await page.locator(".run-dot").last().click();
+			const slots = page.getByRole("listbox", { name: "Run slots", exact: true });
+			expect(await slots.getByRole("option", { selected: true }).locator(".ref").innerText()).toBe("C-158");
+			const first = slots.getByRole("option").first();
+			const target = await first.boundingBox();
+			expect(target?.width).toBeGreaterThanOrEqual(24);
+			expect(target?.height).toBeGreaterThanOrEqual(24);
+			await first.click();
+			expect(await page.locator(".run-dot.on").getAttribute("aria-label")).toBe("Slot 1: C-1, missing");
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
 for (const action of ["Escape", "Backspace", "pause", "key", "pass", "invalid"])
 	check(
 		`R4B-2 step mark can recover after ${action}`,
