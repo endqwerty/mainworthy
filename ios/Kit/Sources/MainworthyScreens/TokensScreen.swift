@@ -24,7 +24,7 @@ public final class TokensScreen {
 	public var notice: String? {
 		switch action {
 		case .none: nil
-		case .sending(let token): "Checking revocation of \(token.name)…"
+		case .sending(let token): "Revoking \(token.name)…"
 		case .unknown(let token, let why): "Outcome unknown for \(token.name). \(why) Check again to learn the result."
 		case .revoked(let token): "Revoked \(token.name)."
 		case .alreadyRevoked(let token): "Already revoked \(token.name)."
