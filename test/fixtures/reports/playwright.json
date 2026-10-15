@@ -1,0 +1,354 @@
+{
+	"config": {
+		"argv": ["/opt/homebrew/Cellar/node/26.11.1/bin/node", "/workspace/node_modules/playwright/cli.js", "test"],
+		"configFile": "/workspace/playwright.config.cjs",
+		"rootDir": "/workspace",
+		"failOnFlakyTests": false,
+		"forbidOnly": false,
+		"fullyParallel": false,
+		"globalSetup": null,
+		"globalTeardown": null,
+		"globalTimeout": 0,
+		"grep": {},
+		"grepInvert": null,
+		"maxFailures": 0,
+		"metadata": {
+			"actualWorkers": 1
+		},
+		"preserveOutput": "always",
+		"projects": [
+			{
+				"outputDir": "/workspace/test-results",
+				"repeatEach": 1,
+				"retries": 1,
+				"metadata": {
+					"actualWorkers": 1
+				},
+				"id": "chromium",
+				"name": "chromium",
+				"testDir": "/workspace",
+				"testIgnore": [],
+				"testMatch": ["sample.spec.cjs"],
+				"timeout": 30000
+			}
+		],
+		"quiet": false,
+		"reporter": [
+			[
+				"json",
+				{
+					"outputFile": "playwright.json"
+				}
+			]
+		],
+		"reportSlowTests": {
+			"max": 5,
+			"threshold": 300000
+		},
+		"shard": null,
+		"tags": [],
+		"updateSnapshots": "missing",
+		"updateSourceMethod": "patch",
+		"version": "1.63.0",
+		"workers": 1,
+		"webServer": null
+	},
+	"suites": [
+		{
+			"title": "sample.spec.cjs",
+			"file": "sample.spec.cjs",
+			"column": 0,
+			"line": 0,
+			"specs": [],
+			"suites": [
+				{
+					"title": "checkout",
+					"file": "sample.spec.cjs",
+					"line": 2,
+					"column": 6,
+					"specs": [
+						{
+							"title": "passes @C-1@v1",
+							"ok": true,
+							"tags": ["C-1@v1"],
+							"tests": [
+								{
+									"timeout": 30000,
+									"annotations": [],
+									"expectedStatus": "passed",
+									"projectId": "chromium",
+									"projectName": "chromium",
+									"results": [
+										{
+											"workerIndex": 0,
+											"parallelIndex": 0,
+											"status": "passed",
+											"duration": 4,
+											"errors": [],
+											"stdout": [],
+											"stderr": [],
+											"retry": 0,
+											"startTime": "2026-10-15T04:41:47.168Z",
+											"annotations": [],
+											"attachments": []
+										}
+									],
+									"status": "expected"
+								}
+							],
+							"id": "8aa1cfe786b44e0de529-4173360b92d616aee981",
+							"file": "sample.spec.cjs",
+							"line": 2,
+							"column": 31
+						},
+						{
+							"title": "fails",
+							"ok": false,
+							"tags": [],
+							"tests": [
+								{
+									"timeout": 30000,
+									"annotations": [],
+									"expectedStatus": "passed",
+									"projectId": "chromium",
+									"projectName": "chromium",
+									"results": [
+										{
+											"workerIndex": 0,
+											"parallelIndex": 0,
+											"status": "failed",
+											"duration": 5,
+											"error": {
+												"message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m",
+												"stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n    at /workspace/sample.spec.cjs:2:103",
+												"location": {
+													"file": "/workspace/sample.spec.cjs",
+													"column": 103,
+													"line": 2
+												},
+												"snippet": "  1 | const {test,expect}=require('@playwright/test');\n> 2 | test.describe('checkout',()=>{test('passes @C-1@v1',()=>expect(1).toBe(1));test('fails',()=>expect(1).toBe(2));test.skip('skipped',()=>{});test('retry',({},info)=>expect(info.retry).toBe(1));});\n    |                                                                                                       ^\n  3 |"
+											},
+											"errors": [
+												{
+													"location": {
+														"file": "/workspace/sample.spec.cjs",
+														"column": 103,
+														"line": 2
+													},
+													"message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n\n  1 | const {test,expect}=require('@playwright/test');\n> 2 | test.describe('checkout',()=>{test('passes @C-1@v1',()=>expect(1).toBe(1));test('fails',()=>expect(1).toBe(2));test.skip('skipped',()=>{});test('retry',({},info)=>expect(info.retry).toBe(1));});\n    |                                                                                                       ^\n  3 |\n    at /workspace/sample.spec.cjs:2:103"
+												}
+											],
+											"stdout": [],
+											"stderr": [],
+											"retry": 0,
+											"startTime": "2026-10-15T04:41:47.198Z",
+											"annotations": [],
+											"attachments": [
+												{
+													"name": "error-context",
+													"contentType": "text/markdown",
+													"path": "/workspace/test-results/sample-checkout-fails-chromium/error-context.md"
+												}
+											],
+											"errorLocation": {
+												"file": "/workspace/sample.spec.cjs",
+												"column": 103,
+												"line": 2
+											}
+										},
+										{
+											"workerIndex": 1,
+											"parallelIndex": 0,
+											"status": "failed",
+											"duration": 14,
+											"error": {
+												"message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m",
+												"stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n    at /workspace/sample.spec.cjs:2:103",
+												"location": {
+													"file": "/workspace/sample.spec.cjs",
+													"column": 103,
+													"line": 2
+												},
+												"snippet": "  1 | const {test,expect}=require('@playwright/test');\n> 2 | test.describe('checkout',()=>{test('passes @C-1@v1',()=>expect(1).toBe(1));test('fails',()=>expect(1).toBe(2));test.skip('skipped',()=>{});test('retry',({},info)=>expect(info.retry).toBe(1));});\n    |                                                                                                       ^\n  3 |"
+											},
+											"errors": [
+												{
+													"location": {
+														"file": "/workspace/sample.spec.cjs",
+														"column": 103,
+														"line": 2
+													},
+													"message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n\n  1 | const {test,expect}=require('@playwright/test');\n> 2 | test.describe('checkout',()=>{test('passes @C-1@v1',()=>expect(1).toBe(1));test('fails',()=>expect(1).toBe(2));test.skip('skipped',()=>{});test('retry',({},info)=>expect(info.retry).toBe(1));});\n    |                                                                                                       ^\n  3 |\n    at /workspace/sample.spec.cjs:2:103"
+												}
+											],
+											"stdout": [],
+											"stderr": [],
+											"retry": 1,
+											"startTime": "2026-10-15T04:41:47.706Z",
+											"annotations": [],
+											"attachments": [
+												{
+													"name": "error-context",
+													"contentType": "text/markdown",
+													"path": "/workspace/test-results/sample-checkout-fails-chromium-retry1/error-context.md"
+												}
+											],
+											"errorLocation": {
+												"file": "/workspace/sample.spec.cjs",
+												"column": 103,
+												"line": 2
+											}
+										}
+									],
+									"status": "unexpected"
+								}
+							],
+							"id": "8aa1cfe786b44e0de529-6f69887a102ccb4be4f7",
+							"file": "sample.spec.cjs",
+							"line": 2,
+							"column": 76
+						},
+						{
+							"title": "skipped",
+							"ok": true,
+							"tags": [],
+							"tests": [
+								{
+									"timeout": 30000,
+									"annotations": [
+										{
+											"type": "skip",
+											"location": {
+												"file": "/workspace/sample.spec.cjs",
+												"line": 2,
+												"column": 117
+											}
+										}
+									],
+									"expectedStatus": "skipped",
+									"projectId": "chromium",
+									"projectName": "chromium",
+									"results": [
+										{
+											"workerIndex": 2,
+											"parallelIndex": 0,
+											"status": "skipped",
+											"duration": 0,
+											"errors": [],
+											"stdout": [],
+											"stderr": [],
+											"retry": 0,
+											"startTime": "2026-10-15T04:41:48.244Z",
+											"annotations": [
+												{
+													"type": "skip",
+													"location": {
+														"file": "/workspace/sample.spec.cjs",
+														"line": 2,
+														"column": 117
+													}
+												}
+											],
+											"attachments": []
+										}
+									],
+									"status": "skipped"
+								}
+							],
+							"id": "8aa1cfe786b44e0de529-23c7444def22c05a2df3",
+							"file": "sample.spec.cjs",
+							"line": 2,
+							"column": 117
+						},
+						{
+							"title": "retry",
+							"ok": true,
+							"tags": [],
+							"tests": [
+								{
+									"timeout": 30000,
+									"annotations": [],
+									"expectedStatus": "passed",
+									"projectId": "chromium",
+									"projectName": "chromium",
+									"results": [
+										{
+											"workerIndex": 2,
+											"parallelIndex": 0,
+											"status": "failed",
+											"duration": 22,
+											"error": {
+												"message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m1\u001b[39m\nReceived: \u001b[31m0\u001b[39m",
+												"stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m1\u001b[39m\nReceived: \u001b[31m0\u001b[39m\n    at /workspace/sample.spec.cjs:2:183",
+												"location": {
+													"file": "/workspace/sample.spec.cjs",
+													"column": 183,
+													"line": 2
+												},
+												"snippet": "  1 | const {test,expect}=require('@playwright/test');\n> 2 | test.describe('checkout',()=>{test('passes @C-1@v1',()=>expect(1).toBe(1));test('fails',()=>expect(1).toBe(2));test.skip('skipped',()=>{});test('retry',({},info)=>expect(info.retry).toBe(1));});\n    |                                                                                                                                                                                       ^\n  3 |"
+											},
+											"errors": [
+												{
+													"location": {
+														"file": "/workspace/sample.spec.cjs",
+														"column": 183,
+														"line": 2
+													},
+													"message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m1\u001b[39m\nReceived: \u001b[31m0\u001b[39m\n\n  1 | const {test,expect}=require('@playwright/test');\n> 2 | test.describe('checkout',()=>{test('passes @C-1@v1',()=>expect(1).toBe(1));test('fails',()=>expect(1).toBe(2));test.skip('skipped',()=>{});test('retry',({},info)=>expect(info.retry).toBe(1));});\n    |                                                                                                                                                                                       ^\n  3 |\n    at /workspace/sample.spec.cjs:2:183"
+												}
+											],
+											"stdout": [],
+											"stderr": [],
+											"retry": 0,
+											"startTime": "2026-10-15T04:41:48.245Z",
+											"annotations": [],
+											"attachments": [
+												{
+													"name": "error-context",
+													"contentType": "text/markdown",
+													"path": "/workspace/test-results/sample-checkout-retry-chromium/error-context.md"
+												}
+											],
+											"errorLocation": {
+												"file": "/workspace/sample.spec.cjs",
+												"column": 183,
+												"line": 2
+											}
+										},
+										{
+											"workerIndex": 3,
+											"parallelIndex": 0,
+											"status": "passed",
+											"duration": 4,
+											"errors": [],
+											"stdout": [],
+											"stderr": [],
+											"retry": 1,
+											"startTime": "2026-10-15T04:41:48.799Z",
+											"annotations": [],
+											"attachments": []
+										}
+									],
+									"status": "flaky"
+								}
+							],
+							"id": "8aa1cfe786b44e0de529-3ecee652c6588d06ef3b",
+							"file": "sample.spec.cjs",
+							"line": 2,
+							"column": 140
+						}
+					]
+				}
+			]
+		}
+	],
+	"errors": [],
+	"stats": {
+		"startTime": "2026-10-15T04:41:46.658Z",
+		"duration": 2182.344,
+		"expected": 1,
+		"skipped": 1,
+		"unexpected": 1,
+		"flaky": 1
+	}
+}

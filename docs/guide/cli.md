@@ -44,7 +44,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | Command | What it does |
 | --- | --- |
 | `mainworthy serve` | Start the server and web UI. Also the default with no arguments. |
-| `mainworthy report <files...> [--session <name>] [--run R-4] [--json]` | Upload JUnit files, detect the CI build, and print the receipt. Use gate to check the verdict. |
+| `mainworthy report <files...> [--format <format>] [--session <name>] [--run R-4] [--json]` | Upload test reports, detect the CI build, and print the receipt. Use gate to check the verdict. |
 | `mainworthy gate [--commit <sha> \| --run R-4 \| --change pr:482] [--wait <seconds>] [--json]` | Check a commit, change or run. Exit 0 passed, 1 failed, 2 blocked, 3 pending. |
 | `mainworthy token new --agent <name> \| --ci <name> \| --human <name> [--can read,produce] [--project <key>] [--expires 90d] \| token list \| token revoke <id>` | Issue, list and revoke actor tokens. A new secret is shown once. |
 | `mainworthy invite new <name> [--can read,answer] [--project <key>] [--expires 3d] \| invite list \| invite revoke <id>` | Invite a person with a link that is shown once, list invitations, and revoke one. |
@@ -69,6 +69,7 @@ Flags of `mainworthy report`:
 - `--pr <number>`: Pull request number.
 - `--base <string>`: Base commit of the change.
 - `--env <string>`: Test environment.
+- `--format <string>`: Report format: auto (default), junit, playwright, jest, vitest, pytest (pytest-json-report), trx.
 - `--session <string>`: Named test session with no build identity.
 - `--run <string>`: Planned run these results are for.
 - `--job <string>`: CI job name. Overrides detection.

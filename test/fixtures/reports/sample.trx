@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010" id="run-1" name="sample">
+  <Results>
+    <UnitTestResult testId="pass" executionId="one" testName="Pass @C-1@v1" duration="00:00:00.0125000" outcome="Passed" />
+    <UnitTestResult testId="fail" executionId="two" testName="Fail" duration="00:00:00.0080000" outcome="Failed"><Output><ErrorInfo><Message>Expected &lt;2&gt;, received 1</Message><StackTrace><![CDATA[at Checkout.Fail() in tests/Checkout.cs:line 8]]></StackTrace></ErrorInfo></Output></UnitTestResult>
+    <UnitTestResult testId="skip" executionId="three" testName="Skipped" duration="00:00:00" outcome="NotExecuted" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest id="pass" name="Pass @C-1@v1"><TestMethod codeBase="tests.dll" className="Shop.Checkout" name="Pass" /></UnitTest>
+    <UnitTest id="fail" name="Fail"><TestMethod codeBase="tests.dll" className="Shop.Checkout" name="Fail" /></UnitTest>
+    <UnitTest id="skip" name="Skipped"><TestMethod codeBase="tests.dll" className="Shop.Checkout" name="Skipped" /></UnitTest>
+  </TestDefinitions>
+  <ResultSummary outcome="Failed"><Counters total="3" executed="2" passed="1" failed="1" notExecuted="1" /></ResultSummary>
+</TestRun>

@@ -1,0 +1,69 @@
+{
+	"created": 1700000000,
+	"duration": 0.024,
+	"exitcode": 1,
+	"root": "/workspace",
+	"summary": {
+		"passed": 1,
+		"failed": 1,
+		"skipped": 1,
+		"error": 1,
+		"total": 4,
+		"collected": 4
+	},
+	"tests": [
+		{
+			"nodeid": "tests/test_sample.py::TestCheckout::test_pass",
+			"outcome": "passed",
+			"setup": {
+				"duration": 0.001,
+				"outcome": "passed"
+			},
+			"call": {
+				"duration": 0.012,
+				"outcome": "passed"
+			},
+			"teardown": {
+				"duration": 0.001,
+				"outcome": "passed"
+			}
+		},
+		{
+			"nodeid": "tests/test_sample.py::TestCheckout::test_fail",
+			"outcome": "failed",
+			"call": {
+				"duration": 0.008,
+				"outcome": "failed",
+				"crash": {
+					"path": "tests/test_sample.py",
+					"lineno": 8,
+					"message": "assert 1 == 2"
+				},
+				"longrepr": "test_sample.py:8: AssertionError: assert 1 == 2"
+			}
+		},
+		{
+			"nodeid": "tests/test_sample.py::test_skip",
+			"outcome": "skipped",
+			"setup": {
+				"duration": 0.001,
+				"outcome": "skipped",
+				"longrepr": ["tests/test_sample.py", 10, "Skipped: unavailable"]
+			}
+		},
+		{
+			"nodeid": "tests/test_sample.py::test_setup_error",
+			"outcome": "error",
+			"setup": {
+				"duration": 0.001,
+				"outcome": "failed",
+				"crash": {
+					"path": "tests/test_sample.py",
+					"lineno": 14,
+					"message": "fixture unavailable"
+				},
+				"longrepr": "RuntimeError: fixture unavailable"
+			}
+		}
+	]
+}

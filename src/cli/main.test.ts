@@ -681,6 +681,72 @@ test("JUnit parser warnings go only to stderr", async () => {
 	});
 });
 
+test("native Playwright JSON reaches the same report operation as JUnit", async () => {
+	await withInstance(async ({ cli }) => {
+		const file = new URL("../../test/fixtures/reports/playwright.json", import.meta.url).pathname;
+		const result = await cli(["report", file, "--commit", COMMIT, "--json"]);
+		expect(result.stderr).toBe("");
+		expect(result.code).toBe(0);
+		expect(JSON.parse(result.stdout).counts).toEqual({ total: 4, pass: 2, fail: 1, skip: 1, error: 0, blocked: 0 });
+	});
+});
+
+test("all native formats use the real report receipt, preserve unlinked tests, and reject bad inputs without writes", async () => {
+	await withInstance(async ({ run, instance, directory }) => {
+		const reportFile = (name: string) => new URL(`../../test/fixtures/reports/${name}`, import.meta.url).pathname;
+		const native = ["jest.json", "vitest.json", "pytest.json", "sample.trx"];
+		for (const file of native) {
+			const result = await run(["report", reportFile(file), "--commit", COMMIT, "--job", file, "--json"]);
+			expect(result.code).toBe(0);
+			expect(result.stderr).toBe("");
+			const receipt = JSON.parse(result.stdout);
+			expect(receipt.counts.total).toBe(file === "pytest.json" ? 4 : 3);
+			expect(receipt.counts.fail).toBe(1);
+			expect(receipt.unlinked).toBe(file === "pytest.json" ? 4 : 3);
+			const repeated = await run(["report", reportFile(file), "--commit", COMMIT, "--job", file, "--json"]);
+			expect(repeated.code).toBe(0);
+			expect(JSON.parse(repeated.stdout).fresh).toBe(false);
+		}
+		const bad = join(directory, "bad.json");
+		await writeFile(bad, '{"testResults":null}');
+		for (const argv of [
+			["report", reportFile("playwright.json"), bad, "--commit", COMMIT],
+			["report", reportFile("jest.json"), "--format", "pytest", "--commit", COMMIT],
+			["report", reportFile("jest.json"), "--format", "not-a-format", "--commit", COMMIT],
+		]) {
+			const result = await run(argv);
+			expect(result.code).toBe(4);
+			expect(result.stderr).toContain("invalid:");
+		}
+		expect(instance.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM batches").get()?.n).toBe(4);
+		const mixed = await run([
+			"report",
+			RED_XML,
+			reportFile("jest.json"),
+			"--commit",
+			COMMIT,
+			"--job",
+			"mixed",
+			"--json",
+		]);
+		expect(mixed.code).toBe(0);
+		expect(JSON.parse(mixed.stdout).counts.total).toBe(5);
+		const explicit = await run([
+			"report",
+			reportFile("vitest.json"),
+			"--format",
+			"vitest",
+			"--commit",
+			COMMIT,
+			"--job",
+			"explicit",
+			"--json",
+		]);
+		expect(explicit.code).toBe(0);
+		expect(JSON.parse(explicit.stdout).counts.total).toBe(3);
+	});
+});
+
 test("an adapter rejects operation flags it cannot translate", async () => {
 	await withInstance(async ({ run }) => {
 		await run(["new"], { input: "Coupon applies\nApply SAVE10 > Total is 90.00" });

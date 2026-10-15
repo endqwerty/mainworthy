@@ -26,6 +26,7 @@
 		"fractional-indexing": "^4.0.0",
 		"react": "^19.3.0",
 		"react-dom": "^19.3.0",
+		"saxes": "6.0.0",
 		"zod": "^4.6.6"
 	},
 	"devDependencies": {

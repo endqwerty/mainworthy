@@ -7,6 +7,7 @@ build bundles and from this directory (decision 0025). The directory holds what 
 | --- | --- |
 | `components.json` | What the pages at `/docs` carry from others (Archify, JetBrains Mono, Basecamp's policies), and the Bun release the executable is built with |
 | `archify/`, `jetbrains-mono/`, `basecamp-policies/` | Their licence files, from their repositories at the versions named |
+| `npm/saxes@6.0.0/LICENSE` | The unchanged licence from [saxes v6.0.0](https://github.com/lddubeau/saxes/blob/v6.0.0/LICENSE); npm's package omits the file. The notice generator uses `npm/<name>@<version>/` only when the installed package has no licence file. |
 | `bun-1.4.3/components.json` | Every part of Bun 1.4.3 that is or may be linked into its Linux binary, with its licence files |
 | `bun-1.4.3/texts/` | Those licence files, exactly as each project publishes them, each text once |
 | `bun-1.4.3/audit.tsv` | The audit's decision for each of 444 parts it looked at, linked or not, and why |

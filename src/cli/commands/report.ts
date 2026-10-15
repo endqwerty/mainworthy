@@ -1,5 +1,5 @@
 import { ReportInput, type ReportReceipt, type TargetIn } from "../../core/ops.ts";
-import { parseJUnit } from "../../surfaces/formats/junit.ts";
+import { parseReport, ReportFormat } from "../../surfaces/formats/report.ts";
 import { assertPositionals } from "../args.ts";
 import { line, printJson, warning } from "../output.ts";
 import { detectedTarget, reportTarget, TARGET_FLAGS } from "../target.ts";
@@ -68,10 +68,15 @@ export function printReceipt(input: {
 
 export const reportCommand: AdapterCommand = {
 	name: "report",
-	summary: "Upload JUnit files, detect the CI build, and print the receipt. Use gate to check the verdict.",
-	usage: "report <files...> [--session <name>] [--run R-4] [--json]",
+	summary: "Upload test reports, detect the CI build, and print the receipt. Use gate to check the verdict.",
+	usage: "report <files...> [--format <format>] [--session <name>] [--run R-4] [--json]",
 	flags: [
 		...TARGET_FLAGS,
+		{
+			name: "format",
+			kind: "string",
+			description: "Report format: auto (default), junit, playwright, jest, vitest, pytest (pytest-json-report), trx.",
+		},
 		{ name: "session", kind: "string", description: "Named test session with no build identity." },
 		{ name: "run", kind: "string", description: "Planned run these results are for." },
 		{ name: "job", kind: "string", description: "CI job name. Overrides detection." },
@@ -82,8 +87,9 @@ export const reportCommand: AdapterCommand = {
 		const detected = detectedTarget();
 		const target = reportTarget(args, detected);
 		const results: ReportInput["results"] = [];
+		const format = ReportFormat.parse(args.value("format") ?? "auto");
 		for (const file of args.positionals) {
-			const parsed = parseJUnit(await Bun.file(file).text(), { file });
+			const parsed = parseReport(await Bun.file(file).text(), { file, format });
 			results.push(...parsed.results);
 			for (const message of parsed.warnings) warning(message);
 		}
