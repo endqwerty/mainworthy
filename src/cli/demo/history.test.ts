@@ -33,7 +33,9 @@ describe("the demo's history", () => {
 
 	test("every day of it has a pipeline's report on main, and the days reach back as far as was asked", () => {
 		for (const days of [1, 10, 14, 30]) {
-			const nights = of(history(days), "pipeline").filter((event) => event.target.branch === "main");
+			const nights = of(history(days), "pipeline").filter(
+				(event) => event.target.branch === "main" && event.step !== "qreport",
+			);
 			const dates = nights.map((event) => Math.floor(event.at / DAY));
 			expect(dates).toEqual(Array.from({ length: days }, (_, n) => Math.floor(SINCE / DAY) - days + n));
 		}
@@ -143,5 +145,17 @@ describe("the demo's history", () => {
 		const events = history(14, 1, tiny);
 		expect(of(events, "pipeline").length).toBeGreaterThanOrEqual(14);
 		for (const event of of(events, "pipeline")) expect(event.failures).toEqual([]);
+	});
+	test("a quarantine covers a report before a person ends it", () => {
+		const events = history();
+		const [entry, exit] = of(events, "quarantine");
+		const covered = of(events, "pipeline").find((event) => event.step === "qreport");
+		expect(entry).toMatchObject({ active: true, step: "qenter" });
+		expect(exit).toMatchObject({ active: false, case: entry?.case });
+		expect(covered).toMatchObject({
+			failures: [{ case: entry?.case, message: "Intermittent response during quarantine example" }],
+		});
+		expect(entry?.at).toBeLessThan(covered?.at ?? 0);
+		expect(exit?.at).toBeGreaterThan(covered?.at ?? Number.POSITIVE_INFINITY);
 	});
 });

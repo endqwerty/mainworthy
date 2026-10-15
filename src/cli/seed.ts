@@ -5,6 +5,7 @@
 import { z } from "zod";
 import type { Api } from "../core/api.ts";
 import { type ActorKind, type Capability, PolicySettings } from "../core/kinds.ts";
+import { ProposeReply } from "../core/ops.ts";
 import type { Client } from "./client.ts";
 import { type DemoCase, demoCases, random } from "./demo/cases.ts";
 import { DEMO_FIELDS, demoAliases, demoFields } from "./demo/fields.ts";
@@ -388,6 +389,37 @@ async function fill(client: Client, options: SeedOptions, issued: number[]): Pro
 					edits: [{ op: "state", cases: event.cases.map(refOf), to: "archived" }],
 				});
 				break;
+			case "quarantine": {
+				const prior = await owner.call("command", { cmd: id(event.step) });
+				let proposed: Api["propose"]["reply"];
+				if (prior.state === "done") proposed = ProposeReply.parse(prior.reply);
+				else {
+					const test = caseOf(event.case).test;
+					const rows = z.array(UnlinkedTest).parse((await owner.call("find", { in: "tests", text: test?.key })).items);
+					const ref = rows.find((row) => row.key === test?.key)?.ref;
+					if (!ref) throw new CliError("internal", "the demo quarantine requires its reported test");
+					const [detail] = z
+						.array(z.object({ quarantine: z.object({ decision: z.number() }).nullable() }))
+						.parse(await owner.call("get", { refs: [ref] }));
+					proposed = await write(owner, "propose", event.step, event.at, {
+						edits: [
+							{
+								op: "quarantine",
+								test: ref,
+								base: detail?.quarantine?.decision ?? null,
+								exit: event.active ? { kind: "person" } : null,
+							},
+						],
+						reason: event.reason,
+					});
+				}
+				if (proposed.question)
+					await answer([proposed.question], `${event.step}a`, event.at, {
+						answer: { is: "accept" },
+						reason: event.reason,
+					});
+				break;
+			}
 			case "review": {
 				const on = caseOf(event.finding.case).steps[0]?.id;
 				const claimed = await write(agent, "claim", event.step, event.at, {

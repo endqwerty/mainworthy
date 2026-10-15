@@ -465,10 +465,11 @@ says how many quarantined failures it recorded, even when another failure blocks
 It never counts quarantine as a proven pass. Missing evidence and required jobs
 still wait.
 
-Quarantine also excuses a failure already answered as a defect. When that defect
-is the gate's only blocker, entering quarantine changes `failed` to `passed`.
-Ending quarantine leaves the defect answer in force, so the failure counts as a
-defect again.
+Quarantine covers results reported after its entry decision and before its exit,
+in the server's order. It leaves earlier results unchanged. Ending quarantine
+preserves the verdicts of results reported while it stood. A covered failure is
+excused even if an independent defect answer applies to it. Ending quarantine
+leaves that answer and the earlier result's coverage in force.
 
 In a failure question, open **Quarantined tests**, or use the list below the detector
 settings in **Settings**, **Policy**. Enter the test ref, reason and exit rule,
@@ -482,16 +483,23 @@ expiry entered in the form.
 Choose one exit rule:
 
 - A person's decision, recorded through a proposal to end quarantine.
-- An expiry date. At that instant its failures count normally again, without waiting for background work.
+- An expiry date. The first result reported at or after that instant counts
+  normally. Earlier results stay excused.
 - One to 100 consecutive passing trunk commits whose first result for that test
   arrived after entry. Retrying a commit first reported before entry cannot count.
   Every automated lane
   seen for that test on a commit must pass. Retries count once per commit. Failures,
   errors, skips and blocked results break the streak. Agent reports and change
   commits cannot satisfy it. After the streak succeeds, another failing commit
-  does not restart quarantine. A later failure at the same or a later counted attempt on a
-  commit in that streak can invalidate it and make quarantine active again.
-  Correcting an observation can also change the exit.
+  does not restart quarantine, including a later failure on a commit in the
+  qualifying streak. The result that completes the count ends quarantine.
+  Later results count normally, even within the same report.
+
+A correction replaces the earlier observation in its commit's evidence and can
+change that commit's verdict. Its quarantine coverage depends on when the server
+receives the correction. Before a pass count is reached, corrections can change
+the streak. After the exit, they cannot reopen quarantine or change another
+result's coverage. Planned runs use the same coverage, even if created later.
 
 For the API and command line, read the test with `get`. Use the last quarantine's
 `decision` as `base`, or null before the first quarantine. A changed base refuses
@@ -510,6 +518,7 @@ quarantine, or use `{"kind":"person"}` or `{"kind":"expiry","at":1800000000000}`
 for the other rules. The expiry is UTC milliseconds. A new quarantine can begin
 with a new decision after an earlier one ends.
 
-Quarantine entries and the observations behind their exit rules travel in archives.
-This schema requires archives created after quarantine was introduced. Imported
-expiry rules use the destination server's clock.
+Quarantine entries, recorded result coverage, and pass-count exits travel in
+archives. This schema requires archives exported with this build. Imported
+expiry rules use the destination server's clock. Earlier covered results keep
+their coverage there too.
