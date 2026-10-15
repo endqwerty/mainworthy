@@ -89,6 +89,9 @@ export function setEmail(
 		forgetContact(app.db, actor);
 		return { email: null, verified: false };
 	}
+	// The verified address on file, entered again: nothing changes, so nothing is mailed and it stays verified.
+	const current = app.db.get(Q.get, { actor });
+	if (current?.email === email && current.verified_at !== null) return { email, verified: true };
 	const url = requireMail(app);
 	const owner = app.db.get(Q.owner, { email });
 	if (owner && owner.actor !== actor) throw conflict("that email address is already assigned");

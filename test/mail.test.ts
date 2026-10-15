@@ -121,6 +121,31 @@ for (const email of ["replacement@example.com", null]) {
 	});
 }
 
+test("entering the verified address again changes nothing and mails nothing", async () => {
+	const box = await mailbox();
+	const w = box.w;
+	try {
+		const { cookie } = await verified(w, box.messages);
+		const before = box.messages.length;
+		expect(
+			must(
+				await w.op<{ email: string | null; verified: boolean }>(
+					"credential",
+					{ do: "email.set", email: "Robin@Example.com" },
+					{ cookie },
+				),
+			),
+		).toEqual({ email: "robin@example.com", verified: true });
+		await waitMail(w.instance.app);
+		expect(box.messages).toHaveLength(before);
+		expect(
+			must(await w.op<{ email: string | null; verified: boolean }>("credential", { do: "email.get" }, { cookie })),
+		).toEqual({ email: "robin@example.com", verified: true });
+	} finally {
+		await box.close();
+	}
+});
+
 test("a stored recovery address can be removed after mail is switched off", async () => {
 	const box = await mailbox();
 	const w = box.w;
