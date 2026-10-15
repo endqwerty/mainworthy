@@ -35,12 +35,11 @@ TestFlight opens for 90 days, and the TestFlight app shows when it ends.
 
 ## Sign in
 
-1. The address is `mainworthy.com` until you change it. For another instance, type the address you open it at in
-   a browser, such as `mainworthy.example`; the app adds `https://`. An instance on your own network is reached by
-   its address and port, such as `192.168.1.20:7357`.
-2. Type your name and your password. Set a password in the web app under Settings, **Your sign-in**. The app
+The app signs in to `mainworthy.com`. It does not ask for an address.
+
+1. Type your name and your password. Set a password in the web app under Settings, **Your sign-in**. The app
    takes no token: a token is for a script or a pipeline.
-3. Press **Sign in**.
+2. Press **Sign in**.
 
 The app opens a session, as a browser does, and keeps that session in the phone's keychain. It does not keep
 the password. The session appears in the web app under Settings, **Your sessions**, as "Mainworthy for
@@ -63,7 +62,7 @@ With a paid membership:
 
 The phone then offers the login saved for `mainworthy.com` on the sign-in screen, and offers to save one after a
 sign-in. Apple reads the site's list when the app is installed, so install the app again after the instance
-lists it. An instance at another address is not tied to the app: the fields still take a login you pick by hand.
+lists it.
 
 A passkey does not work in the app.
 

@@ -108,6 +108,9 @@ function gen(): void {
 async function serve(): Promise<void> {
 	const server = await testInstance();
 	console.log(`Mainworthy for the iOS tests · ${server.url}`);
+	// The app does not ask which instance (issue #233): a launch argument names this one, in Xcode under the scheme's
+	// Run, Arguments, or with `xcrun simctl launch booted <bundle id> -instance <address>`.
+	console.log(`launch the app with the arguments -instance ${server.url}`);
 	console.log(`sign in as ${server.person.name} with the password "${server.person.password}"`);
 	console.log(`or as the owner, ${server.owner.name}, with the password "${server.owner.password}"`);
 	console.log(`POST /test/project with the token ${server.token} makes a filled project. Ctrl-C stops it.`);

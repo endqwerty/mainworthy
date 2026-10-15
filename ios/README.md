@@ -36,6 +36,20 @@ until**. Run the command again before then. The sign-in is kept in the phone's k
 
 `bun scripts/ios.ts install --dry-run` builds and signs and installs nothing.
 
+### Another instance
+
+The app signs in to `mainworthy.com` and does not ask for an address: running Mainworthy elsewhere is a future
+item for the apps (issue #233). A build from source for another instance names it in `ios/Config/Local.xcconfig`:
+
+```
+MAINWORTHY_INSTANCE = 192.168.1.20:7357
+```
+
+Write the host and its port with no scheme: `//` starts a comment in that file. A host on the phone's own network
+(a private address, `localhost`, a `.local` name) is reached over http, any other over https. A launch argument
+wins over the setting, `-instance <address>`, which is how the screen tests point the app at the server they
+start. Saved logins are offered only for `mainworthy.com`, the site the app's entitlements name.
+
 ## Send it to TestFlight
 
 A paid team can send the app to App Store Connect, and TestFlight installs it on the team's phones with no cable.
@@ -90,7 +104,7 @@ What App Store Connect asks about the licence, and what to answer:
 | `bun scripts/ios.ts uitest [filter]` | The app in a simulator, driven through its screens. Prints where its screenshots are | 80 s |
 | `bun scripts/ios.ts build` | Builds the app for a simulator | 20 s |
 | `bun scripts/ios.ts gen` | Writes the Swift that is made from the TypeScript | 1 s |
-| `bun scripts/ios.ts serve` | Starts the tests' Mainworthy and prints how to sign in, to try the app by hand | |
+| `bun scripts/ios.ts serve` | Starts the tests' Mainworthy and prints how to sign in and the launch argument that points the app at it, to try the app by hand | |
 | `bun scripts/ios.ts project` | Writes `ios/Mainworthy.xcodeproj`, to open in Xcode | 1 s |
 | `bun scripts/ios.ts upload [--dry-run]` | Builds for release and sends it to TestFlight ([above](#send-it-to-testflight)) | 35 s and the upload |
 

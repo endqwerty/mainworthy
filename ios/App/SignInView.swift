@@ -6,7 +6,7 @@ struct SignInView: View {
 	@FocusState private var focus: Field?
 
 	private enum Field {
-		case address, name, password
+		case name, password
 	}
 
 	var body: some View {
@@ -18,21 +18,6 @@ struct SignInView: View {
 							.foregroundStyle(Color.fail)
 							.accessibilityIdentifier("sign-in-notice")
 					}
-				}
-				Section {
-					TextField("mainworthy.example", text: $form.address)
-						.keyboardType(.URL)
-						.textContentType(.URL)
-						.textInputAutocapitalization(.never)
-						.autocorrectionDisabled()
-						.focused($focus, equals: .address)
-						.submitLabel(.next)
-						.onSubmit { focus = .name }
-						.accessibilityIdentifier("address")
-				} header: {
-					Text("Instance")
-				} footer: {
-					Text("The address you open Mainworthy at in a browser.")
 				}
 				Section {
 					// The two content types, with the associated domain the app's entitlements name, are what lets

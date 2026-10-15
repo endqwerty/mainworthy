@@ -22,12 +22,15 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>MainworthyCommit</key>
 	<string>$(MAINWORTHY_COMMIT)</string>
+	<key>MainworthyInstance</key>
+	<string>$(MAINWORTHY_INSTANCE)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<!-- An instance is reached over https. Plain http is let through to this device's own network only: an
-		     instance on a home server by its address, and the one a test starts on the Mac that runs the simulator. -->
+		     instance a build from source names on a home server, and the one a test starts on the Mac that runs
+		     the simulator. -->
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
@@ -35,7 +38,7 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright 2026 Daniel Yang</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Mainworthy connects to the instance you name. That instance may be on your own network.</string>
+	<string>Mainworthy connects to the instance it was built for. That instance may be on your own network.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

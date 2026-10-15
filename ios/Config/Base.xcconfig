@@ -16,6 +16,10 @@ MAINWORTHY_BUNDLE_ID = com.mainworthy.app.dev
 // one only for a paid developer membership: a personal team's build fails with it. So it is off here, and a
 // paid team turns it on in Local.xcconfig with `CODE_SIGN_ENTITLEMENTS = App/Mainworthy.entitlements`.
 MAINWORTHY_WEBCREDENTIALS_DOMAIN = mainworthy.com
+// The instance the app signs in to. The app does not ask (issue #233): a build from source for another instance
+// names it in Local.xcconfig, as a host with its port and no scheme, `192.168.1.20:7357` (`//` starts a comment
+// here). A host on the device's own network is reached over http, any other over https.
+MAINWORTHY_INSTANCE = mainworthy.com
 // The commit the app was built from, for the About screen. The script passes it; Xcode's own Run leaves it so.
 MAINWORTHY_COMMIT = unknown
 

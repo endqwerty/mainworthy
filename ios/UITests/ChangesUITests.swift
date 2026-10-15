@@ -27,9 +27,7 @@ final class ChangesUITests: XCTestCase {
 	}
 
 	@MainActor private func signIn(_ app: XCUIApplication) throws {
-		let address = app.textFields["address"]
-		XCTAssertTrue(address.waitForExistence(timeout: 20))
-		address.replaceText(try XCTUnwrap(environment["MAINWORTHY_TEST_URL"]))
+		XCTAssertTrue(app.textFields["name"].waitForExistence(timeout: 20))
 		app.textFields["name"].tap()
 		app.textFields["name"].typeText(environment["MAINWORTHY_TEST_NAME"] ?? "")
 		app.secureTextFields["password"].tap()
@@ -41,7 +39,7 @@ final class ChangesUITests: XCTestCase {
 	@MainActor func testAChangeUnblocksAndThisDevicesSessionIsMarked() async throws {
 		let project = try await makeProject()
 		let app = XCUIApplication()
-		app.launchArguments = ["-forget"]
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
 		app.launch()
 		try signIn(app)
 		app.buttons["project-menu"].tap()

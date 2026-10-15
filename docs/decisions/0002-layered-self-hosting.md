@@ -3,7 +3,9 @@
 - Date: 2026-10-10
 - Status: accepted (requirement set by the owner). Amended 2026-10-12: a container is
   acceptable for every layer (decision 0009, answer 14), and the Server layer runs
-  on SQLite; a server database is added for the Cloud layer (decision 0010).
+  on SQLite; a server database is added for the Cloud layer (decision 0010). Amended
+  2026-10-14: the apps offer one instance, `mainworthy.com`, and do not ask for another
+  (decision 0026); running elsewhere stays possible from the code.
 
 ## Decision
 

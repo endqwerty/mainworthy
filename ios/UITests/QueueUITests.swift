@@ -33,12 +33,10 @@ final class QueueUITests: XCTestCase {
 	}
 
 	@MainActor private func signIn(_ app: XCUIApplication) throws {
-		let address = app.textFields["address"]
-		XCTAssertTrue(address.waitForExistence(timeout: 20))
-		// A device that has signed in nowhere offers the hosted instance, and asks for no token.
-		XCTAssertEqual(address.value as? String, "mainworthy.com")
+		XCTAssertTrue(app.textFields["name"].waitForExistence(timeout: 20))
+		// The screen asks for a name and a password: not which instance (issue #233), and no token.
+		XCTAssertFalse(app.textFields["address"].exists)
 		XCTAssertFalse(app.secureTextFields["token"].exists || app.buttons["Token"].exists)
-		address.replaceText(try XCTUnwrap(environment["MAINWORTHY_TEST_URL"]))
 		app.textFields["name"].tap()
 		app.textFields["name"].typeText(environment["MAINWORTHY_TEST_NAME"] ?? "")
 		app.secureTextFields["password"].tap()
@@ -51,7 +49,7 @@ final class QueueUITests: XCTestCase {
 	@MainActor func testAPersonSignsInAnswersAQuestionAndTakesItBack() async throws {
 		let project = try await makeProject()
 		let app = XCUIApplication()
-		app.launchArguments = ["-forget"]
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
 		app.launch()
 		try signIn(app)
 
@@ -102,6 +100,7 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(app.buttons["sign-out"].waitForExistence(timeout: 5))
 		app.buttons["sign-out"].tap()
 		app.buttons["Sign out"].firstMatch.tap()
-		XCTAssertTrue(app.textFields["address"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.textFields["name"].waitForExistence(timeout: 10))
+		XCTAssertFalse(app.textFields["address"].exists)
 	}
 }
