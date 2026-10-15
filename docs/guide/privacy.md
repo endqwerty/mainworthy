@@ -15,7 +15,7 @@ Our guiding principle is to collect only what Mainworthy needs to work. Here is 
 An account is a name and a way to sign in. We do not ask for an email address, a real name or anything else about you. You are invited by somebody who already has an account, and you choose how you sign in:
 
 - **A password.** We store it as an argon2id hash, never the password itself.
-- **A passkey.** We store its public key, its credential id, a counter, the label you gave it and when it was made and last used. The private key never leaves your device.
+- **A passkey.** We store its public key, its credential id, a counter, the label you gave it and when it was made and last used. Mainworthy never receives the private key: where it is kept, and whether it syncs between your devices, is up to your device or password manager.
 - **A token**, for scripts and pipelines. We store a SHA-256 hash of it, its label, when it was made and last used, and the network address it was last used from.
 
 An invitation is stored as a hash of its code, with who it is for and who made it.
@@ -24,11 +24,11 @@ An invitation is stored as a hash of its code, with who it is for and who made i
 
 When you sign in, we keep a record of the session so that you can see where you are signed in and end a session that is not yours: when it started and was last used, what the browser or app calls itself (its user agent, up to 256 characters), and the network address it was opened from and last used from. We keep only the latest address, never a history of addresses.
 
-A session ends when you sign out, after 14 days without use, or after 90 days. We delete its record 30 days after it ends.
+A session ends when you sign out, after 14 days without use, or after 90 days. We delete its record 30 days after it ends. A session that stopped working because its token was revoked is only marked ended when one of those limits passes, so its record can stay up to about 44 days after the token was revoked ([#227](https://github.com/endqwerty/mainworthy/issues/227)).
 
 ### Failed sign-ins
 
-To slow down anybody guessing passwords, the server remembers failed sign-in attempts: the network address they came from and the name that was typed. This is kept in the server's memory only, never written to disk or a log, and forgotten 15 minutes after the last failure or when the server restarts.
+To slow down anybody guessing passwords, the server remembers failed sign-in attempts: the network address they came from and the name that was typed. This is kept in the server's memory only, never written to disk or a log. The server stops using them at most 30 minutes after the last failed attempt, and its memory is cleared when it restarts.
 
 ### Product interactions
 
@@ -52,6 +52,10 @@ The app talks only to the instance you type in, which is `mainworthy.com` unless
 
 If you contact us through GitHub, that conversation is kept by GitHub, under [GitHub's privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
 
+### Why we may keep it
+
+We keep your account, your sessions and your content because you asked us to provide Mainworthy to you, and we keep the records of sign-ins and failed attempts because we have a legitimate interest in keeping accounts secure. We use none of it for anything else.
+
 ## When we access or disclose your information
 
 **To provide the service.** We use a few providers to run `mainworthy.com`:
@@ -72,7 +76,7 @@ We apply the same rights to everyone, wherever they are:
 - **Right to know.** This page lists what we collect and why.
 - **Right of access and portability.** An admin can export everything in an instance as a text file that any tool can read ([Your data](./data.md)). We will export what we hold about you on request.
 - **Right to correction.** Ask us to correct anything about you that is wrong.
-- **Right to erasure.** Ask us to forget you. We then replace your name with a pseudonym, revoke your passwords, passkeys, tokens and invitations, erase their hashes and keys, and end your sessions, whose records are deleted 30 days later. The history still says that one person did each thing, without saying who. Text that you typed into cases and notes stays, because Mainworthy cannot yet erase part of its history.
+- **Right to erasure.** Ask us to forget you. We then replace your name with a pseudonym, revoke your passwords, passkeys, tokens and invitations, erase your password's hash and your passkeys' public keys, and end your sessions, whose records are deleted 30 days later. The history still says that one person did each thing, without saying who. Three things stay for now: text that you typed into cases and notes, because Mainworthy cannot yet erase part of its history ([#40](https://github.com/endqwerty/mainworthy/issues/40)); your old name in the server's record of the replies it sent ([#228](https://github.com/endqwerty/mainworthy/issues/228)); and the records of your tokens and invitations, without anything that signs in ([#227](https://github.com/endqwerty/mainworthy/issues/227)).
 - **Right to restrict processing and to object.** Ask us, and we will tell you what we can do.
 - **Right to complain.** You can complain to the data protection authority where you live.
 - **Right to non-discrimination.** Exercising these rights never costs you anything.
@@ -89,9 +93,9 @@ We keep information only for as long as it is needed:
 
 | What | How long |
 | --- | --- |
-| Failed sign-in attempts | 15 minutes, in memory only |
-| A passkey sign-in in progress | 5 minutes, in memory only |
-| A session's record | 30 days after the session ends |
+| Failed sign-in attempts | Used for at most 30 minutes; in memory only, until the server restarts |
+| A passkey sign-in in progress | Usable for 5 minutes; in memory only, until the server restarts |
+| A session's record | 30 days after the session ends (see [sessions](#sessions)) |
 | Your account and content | As long as the instance exists |
 
 Mainworthy does not yet delete old content, the records of revoked tokens with the address each was last used from, or the records of invitations. We are working on it, and until then we will delete such records by hand if you ask.
@@ -108,7 +112,7 @@ Mainworthy is a tool for software teams and is not meant for children under 16. 
 
 We may update this policy to comply with the law and to reflect what Mainworthy does. Every change is in the [history of this page on GitHub](https://github.com/endqwerty/mainworthy/commits/main/docs/guide/privacy.md), and we update the date at the top whenever we change it.
 
-Have a question, a concern or a request about your data? Open an issue in the [Mainworthy repository on GitHub](https://github.com/endqwerty/mainworthy/issues). Issues there are public, so do not put personal information in one: say that you want to reach us privately, and we will give you a private way to do so.
+Have a question, a concern or a request about your data? We do not yet have a private contact address ([#231](https://github.com/endqwerty/mainworthy/issues/231)). Until we do, open an issue in the [Mainworthy repository on GitHub](https://github.com/endqwerty/mainworthy/issues). Issues there are public, so do not put personal information in one: say that you want to reach us privately, and we will give you a private way to do so.
 
 ---
 
