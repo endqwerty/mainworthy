@@ -130,9 +130,9 @@ Rejecting sign-off leaves the run open. You cannot approve a run that no longer 
 A run that accepts a commit keeps receiving qualifying results after it closes,
 including reports that name the run. While a report waits to be applied, its gate
 is `pending`. Once all accepted reports are applied, Mainworthy asks for sign-off
-again if a report added qualifying results to the run. A report for another
-repository or environment the run excludes, or with no qualifying slot results,
-leaves its approval in place. The ledger keeps a replaced approval and records
+again if a report added or corrected qualifying results in the run. A report for
+another repository or environment the run excludes, or with no qualifying slot
+results, leaves its approval in place. The ledger keeps a replaced approval and records
 that it no longer holds. A passing run can close again under its policy; a run with
 missing proof or unexplained failures stays open and cannot be approved.
 
