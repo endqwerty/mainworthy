@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-export type Screen = "suite" | "case" | "queue" | "runs" | "changes" | "settings";
+export type Screen = "suite" | "case" | "queue" | "runs" | "changes" | "tests" | "settings";
 export type Route = { project: string; screen: Screen; ref: string | null; folder: string | null };
 const changed = "mainworthy:route";
 let entry: "initial" | "navigation" | "history" = "initial";
@@ -28,7 +28,7 @@ export function readRoute(): Route {
 	const project = parts[0] === "p" ? (parts[1] ?? "scratch") : "scratch";
 	const segment = parts[2];
 	const screen: Screen =
-		segment === "queue" || segment === "runs" || segment === "changes" || segment === "settings"
+		segment === "queue" || segment === "runs" || segment === "changes" || segment === "tests" || segment === "settings"
 			? segment
 			: parts[3] === "c"
 				? "case"
@@ -41,7 +41,9 @@ export function readRoute(): Route {
 				? `Q-${value}`
 				: screen === "runs"
 					? `R-${value}`
-					: value
+					: screen === "tests"
+						? `T-${value}`
+						: value
 		: null;
 	return { project, screen, ref, folder: new URLSearchParams(location.search).get("folder") };
 }
@@ -63,7 +65,7 @@ export function routeUrl({
 	const suffix = ref
 		? screen === "case"
 			? `/c/${ref.replace(/^C-/, "")}`
-			: `/${encodeURIComponent(ref.replace(/^[QR]-/, ""))}`
+			: `/${encodeURIComponent(ref.replace(/^[QRT]-/, ""))}`
 		: "";
 	return `/p/${encodeURIComponent(project)}/${screen === "case" ? "suite" : screen}${suffix}${folder ? `?folder=${encodeURIComponent(folder)}` : ""}`;
 }
@@ -81,7 +83,9 @@ export function refUrl({ project, ref }: { project: string; ref: string }): stri
 			? "queue"
 			: ref.startsWith("R-")
 				? "runs"
-				: "changes";
+				: /^T-\d+$/.test(ref)
+					? "tests"
+					: "changes";
 	return routeUrl({ project, screen, ref });
 }
 /** Changes selection without a document load. Editors receive a leave event before the URL changes. */

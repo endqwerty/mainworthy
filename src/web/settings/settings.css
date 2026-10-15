@@ -240,11 +240,11 @@
 	}
 }
 
-#app:has(.queue-pane, .run-pane, .changes-pane, .settings-pane) #tree,
-#app:has(.queue-pane, .run-pane, .changes-pane, .settings-pane) #side > .sech.side {
+#app:has(.queue-pane, .run-pane, .changes-pane, .tests-pane, .settings-pane) #tree,
+#app:has(.queue-pane, .run-pane, .changes-pane, .tests-pane, .settings-pane) #side > .sech.side {
 	display: none;
 }
-#app:has(.queue-pane, .run-pane, .changes-pane, .settings-pane) .sfoot {
+#app:has(.queue-pane, .run-pane, .changes-pane, .tests-pane, .settings-pane) .sfoot {
 	margin-top: auto;
 }
 

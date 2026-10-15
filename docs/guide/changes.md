@@ -31,9 +31,42 @@ stay in the ledger as outdated and failures are evaluated in the named scope.
 Every environment shares the same commit gate.
 
 The list says "Latest commit's verdict". The detail shows the gate's reason and
-nonzero counts, followed by "Open questions", "Settled and excused", "Impact",
+nonzero counts, followed by "Open questions", "Settled and excused", "Results", "Impact",
 and "Uncovered files" when there are uncovered paths.
 Impact lists related cases and review information. It is not a code coverage measurement.
+
+## Read the results behind the verdict
+
+"Results" lists every test the latest commit's gate counted, linked to a case or tracked
+without one, so the counts above are not taken on trust. Each row says how the gate
+counted the test, its name, file, job, attempt, duration and who reported it, and the
+failure message when it failed. A failure links to its question, and a row links to its
+case, to the CI build when the report named one, and to [the test's own page](./report-results.md#read-what-each-test-did).
+
+| The row says | The gate counts it as | Why |
+| --- | --- | --- |
+| unexplained | `unexplained` | It failed and nobody has said why. Its question blocks the gate. |
+| needs a fix | `attributed` | It failed and a decision says the change must be fixed. |
+| excused | `excused` | It failed and a decision says it does not block, for example flaky. "quarantined" when a quarantine excuses it. |
+| could not run | `missing` | The runner reported it blocked. |
+| skipped | `skipped` | The runner chose not to run it. It proves nothing. |
+| passed | `pass` | It passed. |
+
+Failures come first. Choose a count above the list, or one of the buttons over it, to show
+only the tests counted that way, and type in the filter to find a test by name or file.
+The rows add up to the counts: a test reported by two jobs is listed once for each, and a
+retried test is listed with the attempt the gate counts.
+
+The command line and the API give the same rows:
+
+```sh
+$ mainworthy find --in results --change pr:482
+$ mainworthy find --in results --commit 1111111111111111111111111111111111111111 --state unexplained
+```
+
+`--state` takes the words in the second column. `--unlinked` keeps the tests with no
+case and `--text` filters by name or file. The reply's `tally` counts every row, whatever
+the filter. A planned run's results are its slots: `mainworthy find --in slots --run R-2`.
 
 The diagram follows the default policy, which requires counted evidence. A project can separately allow an explicit [CI declaration that no tests are required](./policy.md#reports-with-no-tests).
 
@@ -43,7 +76,7 @@ The diagram follows the default policy, which requires counted evidence. A proje
 
 `passed` means counted evidence exists, or the project's policy accepts an applied CI declaration that no tests are required.
 No current failure, dispute, missing requirement, or blocking question prevents passage. Read "Settled and excused"
-to see whether a decision excused a failure. Passed does not mean every test passed.
+to see whether a decision excused a failure, and "Results" to see each test. Passed does not mean every test passed.
 
 `failed` means a decision attributes a failure to the target.
 Fix the product, fix the test, or update the case and test for an intended change.

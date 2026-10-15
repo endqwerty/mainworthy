@@ -637,13 +637,16 @@ Search and list: cases (by text, folder, tag), tests, runs, slots of a run, fold
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `in` | `"cases" \| "tests" \| "runs" \| "folders" \| "tags" \| "requirements" \| "slots" \| "changes" \| "deployments"` | no |  Default: `"cases"`. |
+| `in` | `"cases" \| "tests" \| "runs" \| "folders" \| "tags" \| "requirements" \| "slots" \| "changes" \| "deployments" \| "results"` | no |  Default: `"cases"`. |
 | `text` | `string` | no |  |
 | `folder` | `integer \| string` | no |  |
 | `deep` | `boolean` | no | With `folder`: include its subfolders. |
 | `tags` | `array<string>` | no |  |
 | `state` | `string` | no |  |
 | `run` | `string` | no | For slots: the run. |
+| `commit` | `string` | no | For results: the commit. |
+| `change` | `string` | no | For results: a change key (pr:482). |
+| `repo` | `string` | no |  |
 | `unlinked` | `boolean` | no | For tests: only those with no case. |
 | `limit` | `integer` | no |  |
 | `cursor` | `string` | no | The cursor from the previous page. |

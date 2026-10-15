@@ -1153,6 +1153,83 @@ function baseRunOf(db: Db, target: TargetRow): RunRow | null {
 	return what === target.what ? null : db.get(Q.changeRun, { project: target.project, what });
 }
 
+/** How a commit's gate counts one of its tests: the tally key it adds to, and what a failure's key rests on. */
+export type CountedTest = {
+	test: number;
+	result: number;
+	target: number;
+	outcome: string;
+	signature: number | null;
+	standing: Exclude<keyof Tally, "disputed">;
+	/** The decision that excuses or attributes a failure: an answer about its cause or this result, or a quarantine. */
+	excuse: { decision: number; expires: number | null; quarantined: boolean } | null;
+	/** The scope a failure is answered in: the run's own for a change run. */
+	scope: string;
+};
+
+type Counting = {
+	quarantineFor: ReturnType<typeof quarantineLookup>;
+	scopeFor: (target: number) => string;
+};
+
+function counting(db: Db, run: RunRow): Counting {
+	// A failure is answered in the scope of the target it was seen on. For a change run that is the run's own
+	// scope. A planned run that names no repository can count the same commit in two of them: each of its causes
+	// is then classified in its own repository's scope, so one repository's answer never covers the other's failure.
+	const scopes = new Map<number, string>();
+	return {
+		quarantineFor: quarantineLookup(db, run.project),
+		scopeFor: (target) => {
+			let found = scopes.get(target);
+			if (found === undefined) {
+				found = scopeOf(mustTarget(db, target), run.id);
+				scopes.set(target, found);
+			}
+			return found;
+		},
+	};
+}
+
+function standingOf(
+	db: Db,
+	run: RunRow,
+	{ quarantineFor, scopeFor }: Counting,
+	row: ReturnType<typeof countedTestsOf>[number],
+): CountedTest {
+	const scope = scopeFor(row.target);
+	const counted = (standing: CountedTest["standing"], excuse: CountedTest["excuse"] = null): CountedTest => ({
+		...row,
+		standing,
+		excuse,
+		scope,
+	});
+	if (row.outcome === "pass") return counted("pass");
+	if (row.outcome === "skip") return counted("skipped");
+	if (row.outcome === "blocked") return counted("missing");
+	const quarantine = quarantineFor(row.result);
+	if (quarantine)
+		return counted("excused", { decision: quarantine.decision, expires: quarantine.expires_at, quarantined: true });
+	if (row.signature === null) return counted("unexplained");
+	const excuse = excuseForResult(
+		db,
+		{ id: row.result, project: run.project, signature: row.signature, target: row.target },
+		scope,
+	);
+	if (!excuse) return counted("unexplained");
+	return counted(excuse.class === "attributed" ? "attributed" : "excused", {
+		decision: excuse.decision,
+		expires: excuse.expires_at,
+		quarantined: false,
+	});
+}
+
+/** Every test a commit's gate counts, one row per test and lane, as `count` counts it. A planned run has none. */
+export function countedTests(db: Db, run: RunRow): CountedTest[] {
+	if (run.origin !== "change") return [];
+	const context = counting(db, run);
+	return countedTestsOf(db, run.id).map((row) => standingOf(db, run, context, row));
+}
+
 /**
  * What a run shows right now: its tally, the causes it shows with no excuse in force, and the decisions its
  * excused failures rest on. Read from the results and the excuses; nothing is stored.
@@ -1162,51 +1239,21 @@ function count(
 	run: RunRow,
 ): { tally: Tally; failing: Set<string>; depends: Map<number, number | null>; quarantined: number } {
 	let quarantined = 0;
-	const quarantineFor = quarantineLookup(db, run.project);
+	const context = counting(db, run);
+	const { quarantineFor, scopeFor } = context;
 	const tally: Tally = emptyTally();
 	const failing = new Set<string>();
 	const depends = new Map<number, number | null>();
-	// A failure is answered in the scope of the target it was seen on. For a change run that is the run's own
-	// scope. A planned run that names no repository can count the same commit in two of them: each of its causes
-	// is then classified in its own repository's scope, so one repository's answer never covers the other's failure.
-	const scopes = new Map<number, string>();
-	const scopeFor = (target: number): string => {
-		let found = scopes.get(target);
-		if (found === undefined) {
-			found = scopeOf(mustTarget(db, target), run.id);
-			scopes.set(target, found);
-		}
-		return found;
-	};
-	const classify = (signature: number | null, target: number, n: number, result: number): void => {
-		const quarantine = quarantineFor(result);
-		if (quarantine) {
-			tally.excused += n;
-			quarantined += n;
-			depends.set(quarantine.decision, quarantine.expires_at);
-			return;
-		}
-		if (signature === null) {
-			tally.unexplained += n;
-			return;
-		}
-		const excuse = excuseForResult(db, { id: result, project: run.project, signature, target }, scopeFor(target));
-		if (!excuse) {
-			failing.add(causeKey(signature, scopeFor(target)));
-			tally.unexplained += n;
-			return;
-		}
-		depends.set(excuse.decision, excuse.expires_at);
-		if (excuse.class === "attributed") tally.attributed += n;
-		else tally.excused += n;
-	};
 
 	if (run.origin === "change") {
 		for (const row of countedTestsOf(db, run.id)) {
-			if (row.outcome === "pass") tally.pass += 1;
-			else if (row.outcome === "skip") tally.skipped += 1;
-			else if (row.outcome === "blocked") tally.missing += 1;
-			else classify(row.signature, row.target, 1, row.result);
+			const counted = standingOf(db, run, context, row);
+			tally[counted.standing] += 1;
+			if (counted.excuse) {
+				depends.set(counted.excuse.decision, counted.excuse.expires);
+				if (counted.excuse.quarantined) quarantined += 1;
+			} else if (counted.standing === "unexplained" && row.signature !== null)
+				failing.add(causeKey(row.signature, counted.scope));
 		}
 	} else {
 		for (const row of db.all(Q.slotGroups, { run: run.id })) {
@@ -1618,28 +1665,29 @@ function refoldLaneOf(ctx: Ctx, commit: RunRow, id: number): void {
  * The gate of a commit, a run or a change. One row read and two comparisons: an unapplied upload or an expired
  * hold makes the answer `pending` whatever the stored verdict says, so a stale green is never served.
  */
-export function gate(
-	ctx: Ctx,
-	input: {
-		commit?: string | undefined;
-		run?: string | undefined;
-		change?: string | undefined;
-		repo?: string | undefined;
-	},
-): GateStatus {
-	let run: RunRow | null = null;
-	if (input.run) run = mustRun(ctx.db, ctx.project.id, input.run);
-	else {
-		let what: string | null = null;
-		if (input.commit) what = targetByCommit(ctx.db, ctx.project.id, input.commit, input.repo)?.what ?? null;
-		else if (input.change) {
-			// The head of this change in its own repository, never a commit of the same name in another.
-			const change = changeByKey(ctx.db, ctx.project.id, input.change);
-			if (change?.head_sha) what = codeWhat(change.repo, change.head_sha);
-		} else throw invalid("gate needs a commit, a run or a change");
-		run = what ? ctx.db.get(Q.changeRun, { project: ctx.project.id, what }) : null;
-	}
+export function gate(ctx: Ctx, input: GateTarget): GateStatus {
+	const run = gateRun(ctx, input);
 	return run ? gateOf(ctx, run) : nothingCounted();
+}
+
+type GateTarget = {
+	commit?: string | undefined;
+	run?: string | undefined;
+	change?: string | undefined;
+	repo?: string | undefined;
+};
+
+/** The run whose gate a commit, a run or a change has. Null for a commit nothing a gate counts was reported for. */
+export function gateRun(ctx: Ctx, input: GateTarget): RunRow | null {
+	if (input.run) return mustRun(ctx.db, ctx.project.id, input.run);
+	let what: string | null = null;
+	if (input.commit) what = targetByCommit(ctx.db, ctx.project.id, input.commit, input.repo)?.what ?? null;
+	else if (input.change) {
+		// The head of this change in its own repository, never a commit of the same name in another.
+		const change = changeByKey(ctx.db, ctx.project.id, input.change);
+		if (change?.head_sha) what = codeWhat(change.repo, change.head_sha);
+	} else throw invalid("gate needs a commit, a run or a change");
+	return what ? ctx.db.get(Q.changeRun, { project: ctx.project.id, what }) : null;
 }
 
 /** The gate of a commit no pipeline or person has reported: nothing is proven. An agent's report does not change that. */

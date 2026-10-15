@@ -50,6 +50,7 @@ The layout follows the pointer, not the width of the window. A browser worked wi
 | <kbd>g</kbd> <kbd>q</kbd> | Go to Queue |
 | <kbd>g</kbd> <kbd>r</kbd> | Go to Runs |
 | <kbd>g</kbd> <kbd>c</kbd> | Go to Changes |
+| <kbd>g</kbd> <kbd>t</kbd> | Go to Tests |
 | <kbd>g</kbd> <kbd>,</kbd> | Go to Settings |
 | <kbd>g</kbd> <kbd>p</kbd> | Switch project. Lists the projects you can read. Type part of a name or a key and press <kbd>↵</kbd>. The screen you are on stays open. The key is there when you can read more than one project. |
 | <kbd>g</kbd> <kbd>d</kbd> | Docs for this screen. Opens the page about the screen you are on, in a new tab. |
@@ -175,6 +176,13 @@ To say which step failed, type its number and then <kbd>f</kbd>. [Planned runs](
 | <kbd>j</kbd> | Next change |
 | <kbd>k</kbd> | Previous change |
 | <kbd>↵</kbd> | Open blocking question in the queue |
+
+## Tests
+
+| Key | What it does |
+| --- | --- |
+| <kbd>j</kbd> | Next test |
+| <kbd>k</kbd> | Previous test |
 
 ## Settings
 

@@ -81,6 +81,7 @@ export const SCREEN_DOCS = {
 	queue: "decide",
 	runs: "runs",
 	changes: "changes",
+	tests: "report-results",
 	settings: "customize",
 } as const satisfies Record<string, DocSlug>;
 

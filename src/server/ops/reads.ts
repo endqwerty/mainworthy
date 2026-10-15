@@ -22,13 +22,16 @@ import {
 	TimelineInput,
 } from "../../core/ops.ts";
 import { REPLIES } from "../../core/replies.ts";
-import { toItem, toItemFor } from "../decisions/decisions.ts";
+import { emptyTally } from "../../core/runs.ts";
+import { openFailureQuestion, toItem, toItemFor } from "../decisions/decisions.ts";
 import {
+	decisionById,
 	ledgerPage,
 	mustQuestion,
 	openCountOn,
 	openCounts,
 	type QuestionRow,
+	questionById,
 	questionRef,
 	questionsChangedSince,
 	questionsOn,
@@ -36,6 +39,7 @@ import {
 	refsOf,
 } from "../decisions/questions.ts";
 import {
+	batchById,
 	caseIdsOfFile,
 	changeById,
 	changeByKey,
@@ -44,9 +48,11 @@ import {
 	lastResultsOfCase,
 	lastResultsOfTest,
 	listTests,
+	mustTarget,
 	proofOf,
 	type ResultRow,
 	recentChanges,
+	resultById,
 	signatureById,
 	testById,
 	testRef,
@@ -63,11 +69,14 @@ import { json } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
 import { currentPolicy, policyName } from "../policy/policy.ts";
 import {
+	type CountedTest,
+	countedTests,
 	failingTestsOf,
 	fillsOf,
 	flippedIn,
 	gate,
 	gateOf,
+	gateRun,
 	mustRun,
 	type RunRow,
 	recentRuns,
@@ -333,6 +342,8 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 
 function resultView(ctx: Ctx, row: ResultRow): Record<string, unknown> {
 	const test = testById(ctx.db, row.test);
+	const target = mustTarget(ctx.db, row.target);
+	const batch = batchById(ctx.db, row.batch);
 	return {
 		id: row.id,
 		test: test ? testRef(test) : null,
@@ -350,6 +361,10 @@ function resultView(ctx: Ctx, row: ResultRow): Record<string, unknown> {
 		atStep: row.at_step,
 		signature: row.signature !== null ? (signatureById(ctx.db, row.signature)?.text ?? null) : null,
 		corrects: row.corrects,
+		commit: target.commit_sha,
+		change: target.change !== null ? (changeById(ctx.db, target.change)?.key ?? null) : null,
+		job: batch?.job ?? "",
+		build: batch?.build_url ?? null,
 	};
 }
 
@@ -436,7 +451,126 @@ export const getOp = defineOp({
 
 // ── find ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-type Found = { count: number | null; items: Record<string, unknown>[]; cursor: string | null };
+type Found = {
+	count: number | null;
+	items: Record<string, unknown>[];
+	cursor: string | null;
+	tally?: Record<string, number>;
+};
+
+/** How a gate counts a result, problems first: the order `find --in results` lists them in. */
+const STANDINGS: readonly CountedTest["standing"][] = [
+	"unexplained",
+	"attributed",
+	"excused",
+	"missing",
+	"skipped",
+	"pass",
+];
+const isStanding = (text: string): text is CountedTest["standing"] => STANDINGS.some((standing) => standing === text);
+
+/**
+ * The tests a commit's gate counted, each as it counts it: one row per test and lane, so the rows add up to the
+ * gate's tally. Ordered problems first, then by when the result arrived; the cursor is the last row's place in
+ * that order, so a page is not shifted by results that arrive while someone reads.
+ */
+function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
+	if (!input.commit && !input.change && !input.run) throw invalid("results need a commit, a change or a run");
+	const wanted = input.state;
+	if (wanted !== undefined && !isStanding(wanted))
+		throw invalid(`"${wanted}" is not how a gate counts a result: use one of ${STANDINGS.join(", ")}`);
+	const run = gateRun(ctx, input);
+	if (run?.origin === "planned")
+		throw invalid(
+			`${runRef(run)} is a planned run: its results are in its slots (find --in slots --run ${runRef(run)})`,
+		);
+	const counted = run ? countedTests(ctx.db, run) : [];
+	const tally: Record<string, number> = { ...emptyTally() };
+	for (const row of counted) tally[row.standing] = (tally[row.standing] ?? 0) + 1;
+
+	const rank = (row: CountedTest): number => STANDINGS.indexOf(row.standing);
+	const text = input.text?.toLowerCase();
+	const matching = counted
+		.filter((row) => {
+			if (wanted !== undefined && row.standing !== wanted) return false;
+			if (!text && !input.unlinked) return true;
+			const test = testById(ctx.db, row.test);
+			if (!test) return false;
+			if (input.unlinked && caseOfCount(ctx, row, test) !== null) return false;
+			return !text || `${test.name} ${test.key} ${test.file ?? ""}`.toLowerCase().includes(text);
+		})
+		.sort((a, b) => rank(a) - rank(b) || a.result - b.result);
+	const after = input.cursor ? parseResultCursor(input.cursor) : null;
+	const rest = after
+		? matching.filter((row) => rank(row) > after.rank || (rank(row) === after.rank && row.result > after.result))
+		: matching;
+	const page = rest.slice(0, limit);
+	const last = page.at(-1);
+	return {
+		count: matching.length,
+		items: page.map((row) => countedView(ctx, row)),
+		cursor: rest.length > limit && last ? `${rank(last)}.${last.result}` : null,
+		tally,
+	};
+}
+
+function parseResultCursor(cursor: string): { rank: number; result: number } {
+	const match = /^(\d+)\.(\d+)$/.exec(cursor.trim());
+	if (!match) throw invalid(`"${cursor}" is not a cursor of results`);
+	return { rank: Number(match[1]), result: Number(match[2]) };
+}
+
+function countedView(ctx: Ctx, row: CountedTest): Record<string, unknown> {
+	const result = resultById(ctx.db, row.result);
+	const test = testById(ctx.db, row.test);
+	if (!result || !test) throw new Error(`result ${row.result} of a counted test is missing`);
+	const linked = caseOfCount(ctx, row, test);
+	const view = resultView(ctx, result);
+	return {
+		result: result.id,
+		test: testRef(test),
+		name: test.name,
+		file: test.file,
+		case: linked ? caseRef(linked) : null,
+		outcome: result.outcome,
+		standing: row.standing,
+		quarantined: row.excuse?.quarantined ?? false,
+		question: questionOfCount(ctx, row),
+		attempt: result.attempt,
+		durationMs: result.duration_ms,
+		message: result.message,
+		job: view.job,
+		by: view.by,
+		at: result.at,
+		commit: view.commit,
+		build: view.build,
+	};
+}
+
+/** The case a counted result is evidence for: the one it claimed, else the one its test is linked to. */
+function caseOfCount(ctx: Ctx, row: CountedTest, test: { case_id: number | null }): CaseRow | null {
+	const claimed = resultById(ctx.db, row.result)?.basis_case ?? null;
+	const id = claimed ?? test.case_id;
+	return id !== null ? caseById(ctx.db, id) : null;
+}
+
+/** The question a failure's standing comes from: the one that decided it, or the open one it waits for. */
+function questionOfCount(ctx: Ctx, row: CountedTest): string | null {
+	if (row.excuse) {
+		const decision = decisionById(ctx.db, row.excuse.decision);
+		const question = decision ? questionById(ctx.db, decision.question) : null;
+		return question ? questionRef(question) : null;
+	}
+	if (row.standing !== "unexplained" || row.signature === null) return null;
+	const signature = signatureById(ctx.db, row.signature);
+	if (!signature) return null;
+	const open = openFailureQuestion(ctx.db, ctx.project.id, {
+		signature: signature.hash,
+		scope: row.scope,
+		target: row.target,
+	});
+	return open ? questionRef(open) : null;
+}
 
 function caseRow(ctx: Ctx, row: CaseRow, rich: boolean): Record<string, unknown> {
 	const base: Record<string, unknown> = {
@@ -489,6 +623,8 @@ export function find(ctx: Ctx, input: FindInput): Found {
 	const limit = input.limit ?? 100;
 	const project = ctx.project.id;
 	switch (input.in) {
+		case "results":
+			return countedResults(ctx, input, limit);
 		case "deployments": {
 			const rows = deployments(ctx.db, {
 				project,

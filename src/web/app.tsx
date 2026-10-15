@@ -29,6 +29,7 @@ import { SignIn } from "./signin/index.tsx";
 import { INVITE_PATH, Invitation } from "./signin/invite.tsx";
 import { MailEntry } from "./signin/mail.tsx";
 import { SuiteScreen } from "./suite/index.tsx";
+import { TestsScreen } from "./tests/index.tsx";
 import { AppContext, type PaletteItem, type PaletteOptions } from "./ui/context.tsx";
 import { DocLink, KeyCap, openDocs, ProducerGlyph, StatusLine } from "./ui/index.tsx";
 
@@ -40,6 +41,7 @@ const screens = {
 	queue: QueueScreen,
 	runs: RunsScreen,
 	changes: ChangesScreen,
+	tests: TestsScreen,
 	settings: SettingsScreen,
 } satisfies Record<Screen, typeof SuiteScreen>;
 type Place = { screen: Screen; label: string; icon: string; key: string };
@@ -49,6 +51,7 @@ const navigation: Place[] = [
 	{ screen: "queue", label: "Queue", icon: "◎", key: "g q" },
 	{ screen: "runs", label: "Runs", icon: "▷", key: "g r" },
 	{ screen: "changes", label: "Changes", icon: "↗", key: "g c" },
+	{ screen: "tests", label: "Tests", icon: "≡", key: "g t" },
 ];
 /** Not a place of the work, so not in the navigation: it is in the sidebar's footer, beside who is signed in. */
 const settings: Place = { screen: "settings", label: "Settings", icon: "⚙︎", key: "g ," };

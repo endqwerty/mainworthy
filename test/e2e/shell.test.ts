@@ -35,6 +35,7 @@ test.skipIf(!browserAvailable)(
 				["gq", "queue"],
 				["gr", "runs"],
 				["gc", "changes"],
+				["gt", "tests"],
 				["g,", "settings"],
 			]) {
 				if (!keys || !route) continue;
@@ -44,7 +45,7 @@ test.skipIf(!browserAvailable)(
 				expect(await page.locator("#list").count()).toBe(1);
 				expect(await page.locator("#tree").count()).toBe(route === "suite" ? 1 : 0);
 			}
-			// The navigation is the four places the work is done. Settings and the docs are in the footer:
+			// The navigation is the five places the work is done. Settings and the docs are in the footer:
 			// Settings beside who is signed in, the docs beside the keys and the theme.
 			const nav = page.getByRole("navigation", { name: "Main" });
 			expect(await nav.getByRole("link").allInnerTexts()).toEqual([
@@ -52,6 +53,7 @@ test.skipIf(!browserAvailable)(
 				expect.stringContaining("Queue"),
 				expect.stringContaining("Runs"),
 				expect.stringContaining("Changes"),
+				expect.stringContaining("Tests"),
 			]);
 			const footer = page.locator(".sfoot");
 			const settings = footer.getByRole("link", { name: "Settings", exact: true });
