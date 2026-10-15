@@ -25,6 +25,7 @@ Mainworthy keeps your test cases, the results that people, pipelines and agents 
 ### Use it
 
 - [Write cases](./write-cases.md). Write cases as outlines, keep their versions, and resolve edits that overlap. Use folders, tags, and search to find the cases you need.
+- [Import cases from CSV](./import-cases.md). Preview a CSV file, map its columns to case content and project fields, then confirm one import.
 - [Report results](./report-results.md). Send a test report from a runner or CI, then read the gate for the tested commit. Keep the pipeline's identity, retries, and case links with its results.
 - [Decide in the queue](./decide.md). Read the evidence behind a question and record an answer with one key. Use the answer's stated consequence to decide what the gate needs next.
 - [Planned runs](./runs.md). Choose cases for a run, record results against their pinned versions, and close with a verdict. Accept CI evidence so you do not repeat work already shown.

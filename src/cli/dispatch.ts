@@ -9,6 +9,7 @@ import { gateCommand } from "./commands/gate.ts";
 import { getCommand } from "./commands/get.ts";
 import { healthCommand } from "./commands/health.ts";
 import { importCommand } from "./commands/import.ts";
+import { csvImportCommand } from "./commands/import-csv.ts";
 import { inviteCommand } from "./commands/invite.ts";
 import { loginCommand } from "./commands/login.ts";
 import { mcpCommand } from "./commands/mcp.ts";
@@ -41,6 +42,7 @@ export const ADAPTER_COMMANDS: ReadonlyMap<string, AdapterCommand> = new Map(
 		checkCommand,
 		exportCommand,
 		importCommand,
+		csvImportCommand,
 		mcpCommand,
 		openCommand,
 		healthCommand,

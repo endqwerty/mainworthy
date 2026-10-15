@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Attachment, AttachmentReply } from "./attachments.ts";
+import { CsvImportRow } from "./csv.ts";
 import { SameCodeEvidence } from "./flaky.ts";
 import { ActorKind, Policy, Unlinked } from "./kinds.ts";
 import { Automate, CaseBody, MethodKind, Step } from "./model.ts";
@@ -407,6 +408,16 @@ export const CredentialReply = z.union([
 ]);
 export const InvitationReply = z.union([InvitationCreated, z.array(InvitationRow), z.object({ revoked: flag })]);
 
+export const CsvImportReply = z.object({
+	headers: z.array(text),
+	rows: z.array(CsvImportRow),
+	create: whole,
+	refused: whole,
+	confirmation: text.nullable(),
+	proposal: ProposeReply.nullable(),
+});
+export type CsvImportReply = z.infer<typeof CsvImportReply>;
+
 /** Reply contracts shared by clients and registered beside each operation's input on the server. */
 export const REPLIES = {
 	attach: Attachment,
@@ -414,6 +425,7 @@ export const REPLIES = {
 	tracker: TrackerReceipt,
 	"tracker-status": TrackerReceipt,
 	propose: ProposeReply,
+	"import-csv": CsvImportReply,
 	report: ReportReceipt,
 	claim: ClaimReply,
 	plan: PlanReply,

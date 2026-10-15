@@ -3,6 +3,7 @@
 
 import type { z } from "zod";
 import type { AttachInput, AttachmentReadInput } from "./attachments.ts";
+import type { CsvImportInput } from "./csv.ts";
 import type { Unlinked } from "./kinds.ts";
 import type {
 	AdminInput,
@@ -35,6 +36,7 @@ type Inputs = {
 	tracker: In<typeof TrackerInput>;
 	"tracker-status": In<typeof TrackerStatusInput>;
 	propose: In<typeof ProposeInput>;
+	"import-csv": In<typeof CsvImportInput>;
 	report: In<typeof ReportInput>;
 	claim: In<typeof ClaimInput>;
 	plan: In<typeof PlanInput>;

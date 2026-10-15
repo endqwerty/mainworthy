@@ -23,6 +23,7 @@ import customize from "../../../docs/guide/customize.md" with { type: "text" };
 import data from "../../../docs/guide/data.md" with { type: "text" };
 import decide from "../../../docs/guide/decide.md" with { type: "text" };
 import glossary from "../../../docs/guide/glossary.md" with { type: "text" };
+import importCases from "../../../docs/guide/import-cases.md" with { type: "text" };
 import index from "../../../docs/guide/index.md" with { type: "text" };
 import iphone from "../../../docs/guide/iphone.md" with { type: "text" };
 import keyboard from "../../../docs/guide/keyboard.md" with { type: "text" };
@@ -72,6 +73,7 @@ export const PAGES: Readonly<Record<DocSlug, string>> = {
 	concepts,
 	quickstart,
 	"write-cases": writeCases,
+	"import-cases": importCases,
 	"report-results": reportResults,
 	decide,
 	runs,

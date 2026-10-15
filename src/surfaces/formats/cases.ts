@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { csvExecution, parseCsv } from "../../core/csv.ts";
 import { type CaseBody, emptyBody, REQUIREMENT_KEY, TAG } from "../../core/model.ts";
 import { CaseAlias, type Edit, ProposeInput } from "../../core/ops.ts";
 
@@ -7,68 +8,6 @@ export type CaseImportFormat = z.infer<typeof CaseImportFormat>;
 type Create = Extract<Edit, { op: "create" }>;
 type ImportedCase = Create & { body: CaseBody; aliases: string[] };
 type Row = Record<string, string>;
-
-/** RFC 4180 records, including doubled quotes and multiline cells. No delimiter or encoding guesses. */
-function csv(text: string): string[][] {
-	const rows: string[][] = [];
-	let row: string[] = [];
-	let cell = "";
-	let state: "plain" | "quoted" | "closed" = "plain";
-	for (let i = 0; i < text.length; i++) {
-		const char = text[i];
-		if (state === "quoted") {
-			if (char === '"') {
-				if (text[i + 1] === '"') {
-					cell += '"';
-					i++;
-				} else state = "closed";
-			} else cell += char;
-			continue;
-		}
-		if (char === "," || char === "\n" || char === "\r") {
-			row.push(cell);
-			cell = "";
-			state = "plain";
-			if (char !== ",") {
-				if (char === "\r" && text[i + 1] === "\n") i++;
-				if (row.some((value) => value !== "")) rows.push(row);
-				row = [];
-			}
-		} else if (char === '"' && cell === "" && state === "plain") state = "quoted";
-		else {
-			if (state === "closed" || char === '"')
-				throw new Error(`CSV record ${rows.length + 1}: unexpected character beside a quote`);
-			cell += char;
-		}
-	}
-	if (state === "quoted") throw new Error(`CSV record ${rows.length + 1}: unclosed quoted cell`);
-	row.push(cell);
-	if (row.some((value) => value !== "")) rows.push(row);
-	return rows;
-}
-
-function execution(value: string): Pick<ReturnType<typeof emptyBody>, "methods" | "automate"> {
-	switch (value.trim().toLowerCase()) {
-		case "auto":
-		case "automated":
-			return { methods: ["auto"], automate: "none" };
-		case "wanted":
-		case "to-be-automated":
-			return { methods: ["human"], automate: "wanted" };
-		case "not-applicable":
-			return { methods: ["human"], automate: "not-applicable" };
-		case "":
-		case "manual":
-		case "human":
-		case "none":
-		case "is-not-automated":
-			return { methods: ["human"], automate: "none" };
-		default:
-			throw new Error(
-				`unknown execution type ${JSON.stringify(value)}; use manual, automated, to-be-automated or not-applicable`,
-			);
-	}
-}
 
 /** Qase examples use numbered lines, JSON strings in v2 classic steps, and tabs for child steps. */
 function qaseColumn(text: string, encoded: boolean): { key: string; value: string }[] {
@@ -113,7 +52,7 @@ function qaseSteps(row: Row, v2: boolean): ReturnType<typeof emptyBody>["steps"]
 /** Sources and supported export variants are recorded in decision 0047. Parsing completes before propose runs. */
 export function parseCaseImport(text: string, format: CaseImportFormat, prefix = "QASE"): Create[] {
 	if (text.length > 32 * 1024 * 1024) throw new Error("case CSV is larger than 32 MB");
-	const records = csv(text.replace(/^\uFEFF/, "").replace(/^sep=,\r?\n/, ""));
+	const records = parseCsv(text.replace(/^\uFEFF/, "").replace(/^sep=,\r?\n/, ""));
 	const headers = records.shift();
 	if (!headers?.length || headers.some((key) => !key.trim()) || new Set(headers).size !== headers.length)
 		throw new Error("CSV needs unique, nonempty column headers");
@@ -193,7 +132,7 @@ export function parseCaseImport(text: string, format: CaseImportFormat, prefix =
 				kind = row["Automation Type"] || (/^(automated|manual)$/i.test(row.Type ?? "") ? row.Type : "") || "";
 			const body = {
 				...emptyBody(title),
-				...execution(kind),
+				...csvExecution(kind),
 				pre: row[format === "testrail" ? "Preconditions" : "preconditions"] ?? "",
 				fields: { [`import.${format}.row.${i + 2}`]: JSON.stringify(row) },
 			};

@@ -91,6 +91,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy check [--limit <number>] [--json]` | Print suite problems grouped by rule. Exit 0 with none, 1 with problems. |
 | `mainworthy export --out <file> [--project <key>] [--json]` | Stream an instance or project archive to a file. A .gz suffix enables gzip. |
 | `mainworthy import <file> [--format csv\|testrail\|qase] [--case-prefix QASE] [--json]` | Import an archive into a fresh instance, or propose cases from CSV, TestRail or Qase. |
+| `mainworthy import-csv <file> [--mapping '<column mapping JSON>'] [--preset testrail] [--confirm hash] [--cmd id] [--json]` | Preview a mapped CSV file, then import it with the preview's confirmation. |
 | `mainworthy mcp` | Serve MCP on stdin/stdout, forwarding tools to the running HTTP server. |
 | `mainworthy open [--json]` | Print the web UI URL of the running instance. |
 | `mainworthy health [--url <url>] [--json]` | Check that the server answers. Exit 0 when it does, 1 when it does not. |
@@ -171,6 +172,13 @@ Flags of `mainworthy import`:
 - `--format <string>`: Case CSV format: csv, testrail or qase. Omit for a Mainworthy archive.
 - `--case-prefix <string>`: Qase source project key for foreign aliases. Defaults to QASE.
 
+Flags of `mainworthy import-csv`:
+
+- `--mapping <string>`: Column mapping JSON. Required unless --preset testrail is given.
+- `--preset <string>`: testrail uses the documented TestRail column names.
+- `--confirm <string>`: The confirmation returned by the preview. Omit to preview.
+- `--cmd <string>`: An idempotency key for retrying this request.
+
 ### One command per operation
 
 Every operation of the API is also a command with the same name. Give its input as flags, or whole as `--json '<input JSON>'`. Where a command for people has the same name, the operation form is the one that runs when you pass `--json` input.
@@ -180,6 +188,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy attach` | Append a screenshot or small file to a result you recorded. Supply the file as base64. |
 | `mainworthy attachment` | List a result's attachments, or read one as base64 with its file name and safe content type. |
 | `mainworthy propose` | Create or change cases, folders, links or the policy. Saving and proposing are the same call; policy decides what happens next. |
+| `mainworthy import-csv` | Preview mapped CSV cases, then confirm one import proposal. Existing foreign aliases are refused. |
 | `mainworthy report` | Record results: a parsed CI report, one manual result, or an agent's batch. The producer is the token's actor. |
 | `mainworthy claim` | Record a review and what it found. A review with no findings is still recorded. |
 | `mainworthy change` | Say that a change ended (merged, or closed without merging) or is open again. An ended change is not asked about. |

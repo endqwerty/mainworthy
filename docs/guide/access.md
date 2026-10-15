@@ -23,7 +23,7 @@ A grant lists capabilities, and a capability is permission to call a group of op
 | --- | --- | --- |
 | `read` | `attachment`, `inbox`, `get`, `find`, `impact`, `since`, `gate`, `history`, `timeline`, `check`, `command`, `tracker-status` | a person, an agent |
 | `record` | `attach`, `report`, `change`, `gate` | a person, a pipeline |
-| `produce` | `propose`, `claim`, `tracker`, `decide` | a person, an agent |
+| `produce` | `propose`, `import-csv`, `claim`, `tracker`, `decide` | a person, an agent |
 | `answer` | none by itself; it makes an answer count where the policy asks a member | a person |
 | `plan` | `plan` | a person |
 | `admin` | `admin`, `invitation` | a person |
