@@ -24,6 +24,12 @@ Capture the prepared input, rather than serializing every evidence type in a Que
 
 Linking tests and creating cases keep their existing MappingSubmission flow outside this outbox. Their sheet says a connection is required and the answer is not saved in Unsent answers. An uncertain reply keeps the same command in memory for Retry. Closing the app loses that command and the mapping choices.
 
-Other queue answers and their outcomes survive closing the app, unlike case-editor drafts. Reopening the app still needs the server to identify the signed-in person before their workspace opens. There is no background delivery while the app is closed. Removing the app removes these files. Outcomes stay until the person presses **Clear outcomes**. Waiting answers cannot be cleared because a lost reply may already have recorded them. A reply that stays uncertain holds later answers in that project.
+Other queue answers and their outcomes survive closing the app, unlike case-editor drafts. Reopening the app still needs the server to identify the signed-in person before their workspace opens. There is no background delivery while the app is closed. Removing the app removes these files. Outcomes stay until the person presses **Clear outcomes**, which keeps waiting answers.
 
 The existing decide operation and its reply suffice. The session reply adds actorId so a new person cannot inherit saved answers by reusing a forgotten name. The app requires this field and therefore needs an updated server. There is no migration or new operation.
+
+## Recover a stuck answer (issue #321)
+
+An uncertain reply pauses later answers in that project. The first waiting entry shows its problem and offers **Keep trying** or **Drop saved answer**. Retrying sends the same command and input. Dropping asks the existing `command` operation first: `none` removes that entry, `done` saves its recorded answer outcome, and `begun` keeps it with an explanation. An offline or unreadable lookup keeps the entry too. Later entries stay in their saved order and resume only after the removal or outcome has been saved on the device.
+
+AnswerOutbox owns recovery and shares its sending guard with ordinary delivery, so a reconnect cannot replay the answer during its lookup. Answers saved while the lookup waits are preserved. A stopped workspace ignores its reply. Moving recovery into the view was rejected because it would split ownership of the durable queue and its concurrency rules. The generated AnswerCommand contract reads recorded DecideReply values and rejects a done reply that does not contain exactly the saved question's outcome. No server operation or stored-file format changes.

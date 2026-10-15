@@ -82,6 +82,161 @@ struct QueueScreenTests {
 		#expect(AnswerOutbox(project: project, store: store).entries.isEmpty)
 	}
 
+	@Test("dropping a stuck answer checks its command and preserves the next answer", arguments: [false, true])
+	func dropStuckAnswer(recorded: Bool) async throws {
+		let transport = SwitchableQueueTransport()
+		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
+		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let project = server.project(try await Live.project())
+		let questions = try await project.questions(open: true).questions
+		let failure = try #require(questions.first { $0.kind == .failure })
+		let finding = try #require(questions.first { $0.kind == .finding })
+		let flaky = try #require(failure.choices.first { $0.answer == "flaky" })
+		let deferChoice = try #require(finding.choices.first { $0.answer == "defer" })
+		let first = try #require(project.prepareAnswer(failure, with: flaky))
+		let next = try #require(project.prepareAnswer(finding, with: deferChoice))
+		let store = MemoryAnswerStore()
+		let outbox = AnswerOutbox(project: project, store: store)
+		_ = try outbox.enqueue(first)
+		_ = try outbox.enqueue(next)
+		if recorded { transport.loseReply.withLock { $0 = true } }
+		else { transport.serverProblem.withLock { $0 = ("internal", "The answer could not be recorded.") } }
+		await outbox.send()
+		#expect(outbox.pendingCount == 2)
+		transport.loseReply.withLock { $0 = false }
+		transport.offline.withLock { $0 = false }
+		transport.serverProblem.withLock { $0 = nil }
+		transport.commands.withLock { $0 = [] }
+		// Recovery must work on an entry restored from disk, with the original command.
+		let reopened = AnswerOutbox(project: project, store: store)
+		await reopened.drop(first.command)
+		#expect(reopened.pendingCount == 0)
+		let checked = try transport.lookups.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
+		#expect(checked == [["cmd": .string(first.command)]])
+		let sent = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
+		#expect(sent.map { $0["cmd"]?.string } == [next.command])
+		#expect(try await project.question(finding.ref)?.isOpen == false)
+		if recorded {
+			let decision = try #require(try await project.question(failure.ref)?.ifDecision)
+			#expect(reopened.entries.first?.outcome == .decided(decision))
+			#expect(reopened.entries.map(\.status) == ["Recorded", "Recorded"])
+		} else {
+			#expect(reopened.entries.map(\.id) == [next.command])
+			#expect(reopened.entries.first?.status == "Recorded")
+			#expect(try await project.question(failure.ref)?.isOpen == true)
+		}
+		#expect(AnswerOutbox(project: project, store: store).entries == reopened.entries)
+	}
+
+	func stuckAnswer() async throws -> (AnswerOutbox, ProjectClient, SwitchableQueueTransport, SwitchableAnswerStore) {
+		let transport = SwitchableQueueTransport()
+		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
+		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let project = server.project(try await Live.project())
+		let question = try #require(try await project.questions(open: true, kind: .failure).questions.first)
+		let choice = try #require(question.choices.first { $0.answer == "flaky" })
+		let store = SwitchableAnswerStore()
+		let outbox = AnswerOutbox(project: project, store: store)
+		_ = try outbox.enqueue(try #require(project.prepareAnswer(question, with: choice)))
+		transport.serverProblem.withLock { $0 = ("internal", "The answer could not be recorded.") }
+		await outbox.send()
+		#expect(outbox.stuck?.detail == "The answer could not be recorded. The saved answer is waiting to send.")
+		transport.serverProblem.withLock { $0 = nil }
+		transport.commands.withLock { $0 = [] }
+		return (outbox, project, transport, store)
+	}
+
+	@Test("dropping keeps the answer when the command cannot be settled", arguments: ["offline", "begun", "unreadable", "wrong question", "empty reply", "storage"])
+	func dropCannotSettle(problem: String) async throws {
+		let (outbox, project, transport, store) = try await stuckAnswer()
+		let entry = try #require(outbox.stuck)
+		let before = store.data
+		switch problem {
+		case "offline": transport.offline.withLock { $0 = true }
+		case "begun": transport.commandReply.withLock { $0 = ["state": "begun"] }
+		case "unreadable": transport.commandReply.withLock { $0 = ["state": "done"] }
+		case "wrong question": transport.commandReply.withLock { $0 = ["state": "done", "reply": [["q": "Q-999", "status": "decided", "decision": 42]]] }
+		case "empty reply": transport.commandReply.withLock { $0 = ["state": "done", "reply": []] }
+		case "storage": store.fail = true
+		default: Issue.record("unknown test problem")
+		}
+		await outbox.drop(entry.id)
+		#expect(outbox.entries == [entry])
+		#expect(store.data == before)
+		#expect(!outbox.sending)
+		#expect(transport.commands.withLock { $0.isEmpty })
+		if problem == "offline" {
+			#expect(outbox.dropProblem?.hasPrefix("The command could not be checked. The saved answer was kept. The server could not be reached.") == true)
+		} else if problem == "begun" {
+			#expect(outbox.dropProblem == "The server is still recording this answer. It was kept. Keep trying to ask again.")
+		} else if problem == "storage" {
+			#expect(outbox.storageProblem?.hasPrefix("The saved answer could not be updated on this device. It was kept.") == true)
+		} else {
+			#expect(outbox.dropProblem?.hasPrefix("The command could not be checked. The saved answer was kept. The reply could not be read.") == true)
+		}
+		transport.offline.withLock { $0 = false }
+		transport.commandReply.withLock { $0 = nil }
+		store.fail = false
+		await outbox.send()
+		#expect(outbox.entries.first?.status == "Recorded")
+		#expect(try await project.question(entry.question)?.isOpen == false)
+	}
+
+	@Test("dropping serializes with sending and preserves saves made during lookup", arguments: [false, true])
+	func dropDuringLookup(stopped: Bool) async throws {
+		let (outbox, project, transport, store) = try await stuckAnswer()
+		let first = try #require(outbox.stuck)
+		let question = try #require(try await project.questions(open: true, kind: .finding).questions.first)
+		let choice = try #require(question.choices.first { $0.answer == "defer" })
+		let next = try #require(project.prepareAnswer(question, with: choice))
+		await transport.lookupGate.holdNext()
+		let dropping = Task { await outbox.drop(first.id) }
+		await transport.lookupGate.waitUntilPaused()
+		#expect(outbox.sending)
+		await outbox.send()
+		await outbox.drop(first.id)
+		_ = try outbox.enqueue(next)
+		outbox.clearOutcomes()
+		if stopped { outbox.stop() }
+		await transport.lookupGate.release()
+		await dropping.value
+		if stopped {
+			#expect(outbox.entries.map(\.id) == [first.id, next.command])
+			#expect(outbox.pendingCount == 2)
+			#expect(transport.commands.withLock { $0.isEmpty })
+		} else {
+			#expect(outbox.entries.map(\.id) == [next.command])
+			#expect(outbox.entries.first?.status == "Recorded")
+		}
+		#expect(AnswerOutbox(project: project, store: store).entries == outbox.entries)
+		#expect(try await project.question(first.question)?.isOpen == true)
+	}
+
+	@Test("dropping cannot interrupt an answer already being sent")
+	func dropDuringSend() async throws {
+		let (outbox, _, transport, _) = try await stuckAnswer()
+		let entry = try #require(outbox.stuck)
+		await transport.gate.holdNext()
+		let sending = Task { await outbox.send() }
+		await transport.gate.waitUntilPaused()
+		await outbox.drop(entry.id)
+		#expect(transport.lookups.withLock { $0.isEmpty })
+		#expect(outbox.entries == [entry])
+		await transport.gate.release()
+		await sending.value
+		#expect(outbox.entries.first?.status == "Recorded")
+	}
+
+	@MainActor final class SwitchableAnswerStore: AnswerStore {
+		var data: Data?
+		var fail = false
+		func load() throws -> Data? { data }
+		func save(_ data: Data) throws {
+			if fail { throw CocoaError(.fileWriteOutOfSpace) }
+			self.data = data
+		}
+	}
+
 	@Test("an answer saved offline cannot replace another person's decision on unchanged evidence")
 	func decidedWhileOffline() async throws {
 		let transport = SwitchableQueueTransport()
@@ -573,10 +728,21 @@ final class SwitchableQueueTransport: Transport, Sendable {
 	let loseReply = Mutex(false)
 	let serverProblem = Mutex<(code: String, message: String)?>(nil)
 	let commands = Mutex<[Data]>([])
+	let lookups = Mutex<[Data]>([])
+	let commandReply = Mutex<JSONValue?>(nil)
 	let gate = QueueSendGate()
+	let lookupGate = QueueSendGate()
 	private let inner = URLSessionTransport()
 
 	func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+		if request.url?.lastPathComponent == "command", let body = request.httpBody {
+			lookups.withLock { $0.append(body) }
+			await lookupGate.pauseIfNeeded()
+			if let reply = commandReply.withLock({ $0 }) {
+				let body: JSONValue = ["ok": true, "result": reply]
+				return (try JSONEncoder().encode(body), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+			}
+		}
 		if request.url?.lastPathComponent == "decide", let body = request.httpBody {
 			commands.withLock { $0.append(body) }
 			await gate.pauseIfNeeded()

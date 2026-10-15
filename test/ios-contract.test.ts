@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { Glob } from "bun";
 import { z } from "zod";
 import {
+	AnswerCommand,
 	ChangeEvent,
 	ChangeGate,
 	ChangeImpact,
@@ -301,6 +302,27 @@ describe("what the iOS app reads", () => {
 		const withdrawn = await decide({ undo: failure.q, ifDecision: current });
 		holds("decide, undo", DecideReply, withdrawn);
 		expect(withdrawn).toMatchObject({ status: "reopened" });
+	});
+
+	test("a saved answer's command before sending and after its reply is recorded", async () => {
+		const made = z.object({ project: z.string() }).parse(await result("POST", "/test/project", {}));
+		const failure = (await open(made.project)).find((item) => item.kind === "failure");
+		if (!failure) throw new Error("the scenario has no failure question");
+		const cmd = "ios-saved-answer-contract";
+		const missing = await op(made.project, "command", { cmd });
+		holds("unrecorded answer command", AnswerCommand, missing);
+		expect(missing).toMatchObject({ state: "none" });
+		const reply = await op(made.project, "decide", {
+			cmd,
+			q: failure.q,
+			onEvidence: failure.evidenceHash,
+			ifOpen: true,
+			answer: { is: "flaky" },
+		});
+		expect(reply).toMatchObject([{ q: failure.q, status: "decided" }]);
+		const recorded = await op(made.project, "command", { cmd });
+		holds("recorded answer command", AnswerCommand, recorded);
+		expect(recorded).toMatchObject({ state: "done", reply });
 	});
 
 	test("an event of the change stream", async () => {

@@ -39,7 +39,12 @@ public final class AnswerOutbox {
 	public private(set) var entries: [Entry] = []
 	public private(set) var sending = false
 	public private(set) var storageProblem: String?
+	public private(set) var dropProblem: String?
 	public var pendingCount: Int { entries.filter { $0.outcome == nil }.count }
+	public var stuck: Entry? {
+		guard let first = entries.first(where: { $0.outcome == nil }), first.problem != nil else { return nil }
+		return first
+	}
 	private let project: ProjectClient
 	private let store: any AnswerStore
 	private var readable = true
@@ -73,9 +78,47 @@ public final class AnswerOutbox {
 	package func stop() { active = false }
 	package func resume() { active = true }
 
+	/// Drops only an unrecorded head answer. A lost reply is recovered before later answers are sent.
+	public func drop(_ id: String) async {
+		guard active, readable, !sending, let entry = stuck, entry.id == id else { return }
+		do {
+			sending = true
+			defer { sending = false }
+			dropProblem = nil
+			let command: AnswerCommand
+			do { command = try await project.answerCommand(entry.answer) }
+			catch {
+				guard active else { return }
+				dropProblem = "The command could not be checked. The saved answer was kept. \(error.shown)"
+				return
+			}
+			guard active, !Task.isCancelled else { return }
+			var updated = entries
+			guard let index = updated.firstIndex(where: { $0.id == id }) else { return }
+			switch command {
+			case .notRecorded: updated.remove(at: index)
+			case .recorded(let outcome):
+				updated[index].outcome = outcome
+				updated[index].problem = nil
+			case .recording:
+				dropProblem = "The server is still recording this answer. It was kept. Keep trying to ask again."
+				return
+			}
+			do {
+				try save(updated)
+				entries = updated
+			} catch {
+				storageProblem = "The saved answer could not be updated on this device. It was kept. \(error.shown)"
+				return
+			}
+		}
+		await send()
+	}
+
 	/// Sends in saved order. An uncertain reply pauses the queue; its original command is safe to retry.
 	public func send() async {
 		guard active, readable, !sending else { return }
+		dropProblem = nil
 		sending = true
 		defer { sending = false }
 		while active, !Task.isCancelled, let entry = entries.first(where: { $0.outcome == nil }) {

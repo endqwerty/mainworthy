@@ -231,6 +231,12 @@ enum Wire {
 		let evidence: String?
 	}
 
+	/// The recorded reply of a saved answer's command.
+	struct AnswerCommand: Decodable, Equatable, Sendable {
+		let state: String
+		let reply: [DecideReply]?
+	}
+
 	/// One step of a case.
 	struct Step: Decodable, Equatable, Sendable {
 		/// Short, unique within its case and never used again, so a result or an edit can name the step.

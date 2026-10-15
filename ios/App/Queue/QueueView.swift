@@ -227,6 +227,7 @@ private struct UnsentAnswersView: View {
 				Text("Answers stay on this device when the app closes. Keep the app open to send them when the connection returns.")
 					.font(.subheadline).foregroundStyle(.secondary)
 				if let problem = screen.outbox.storageProblem { Text(problem).foregroundStyle(Color.fail) }
+				if let problem = screen.outbox.dropProblem { Text(problem).foregroundStyle(Color.fail) }
 				Button(screen.outbox.sending ? "Sending…" : "Send waiting answers") {
 					Task { await screen.refresh() }
 				}
@@ -241,9 +242,21 @@ private struct UnsentAnswersView: View {
 						Text(entry.status).font(.subheadline.weight(.semibold))
 						Text(entry.detail).font(.subheadline).foregroundStyle(.secondary)
 					}
+					.accessibilityIdentifier("saved-answer-\(entry.question)")
 					NavigationLink("Read \(entry.question)", value: entry.question)
+					if screen.outbox.stuck?.id == entry.id {
+						Button("Keep trying") { Task { await screen.refresh() } }
+							.disabled(screen.outbox.sending)
+							.accessibilityIdentifier("retry-saved-answer")
+						Button("Drop saved answer", role: .destructive) {
+							Task { await screen.outbox.drop(entry.id) }
+						}
+						.disabled(screen.outbox.sending)
+						.accessibilityIdentifier("drop-saved-answer")
+						Text("Drop checks the server first. An answer already recorded stays here with its outcome. Later answers are kept and sending resumes in order.")
+							.font(.footnote).foregroundStyle(.secondary)
+					}
 				}
-				.accessibilityIdentifier("saved-answer-\(entry.question)")
 			}
 			if screen.outbox.entries.contains(where: { $0.outcome != nil }) {
 				Button("Clear outcomes") { screen.outbox.clearOutcomes() }
