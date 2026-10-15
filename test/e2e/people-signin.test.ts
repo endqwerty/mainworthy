@@ -548,7 +548,7 @@ for (const recovery of ["first check", "fallback check", "no answer"] as const)
 				const stored = () => page.evaluate(() => localStorage.getItem("mainworthy:robin:draft:scratch:C-1") ?? "");
 				expect(await stored()).toContain("Draft after failed clear");
 				await advanceClock(local, 366 * 24 * 60 * 60 * 1000);
-				await page.keyboard.press("Tab");
+				await step.press("Escape");
 				await page.keyboard.press("g");
 				await page.keyboard.press("q");
 				await page.locator("#signin-name").waitFor();

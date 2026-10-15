@@ -83,6 +83,43 @@ test("a case expands its pinned fragment, retaining the editable pin and source 
 	expect(view()).toMatchObject({ version: 1, steps: [{ action: "Enter a password" }, {}] });
 });
 
+test("source steps are returned only for a case version with fragment pins", () => {
+	createFragment();
+	h.call("propose", {
+		edits: [{ op: "create", body: { title: "Plain case", steps: [{ id: "ef", action: "Pay", expected: "Receipt" }] } }],
+	});
+	for (const ref of ["C-1", "C-2"]) {
+		for (const fields of [undefined, ["steps"]]) {
+			const reply = h.call<Record<string, unknown>[]>("get", { refs: [ref], fields });
+			expect(REPLIES.get.safeParse(reply).success).toBe(true);
+			expect(reply[0]).toMatchObject({
+				ref,
+				hasFragments: false,
+				steps: [{ action: ref === "C-1" ? "Enter a password" : "Pay" }],
+			});
+			expect(reply[0]).not.toHaveProperty("sourceSteps");
+		}
+	}
+	h.call("propose", {
+		edits: [
+			{ op: "edit", case: "C-2", base: 1, body: { steps: [{ id: "cd", use: { fragment: "C-1", version: 1 } }] } },
+		],
+	});
+	const pinned = h.call("get", { refs: ["C-2"] });
+	expect(REPLIES.get.safeParse(pinned).success).toBe(true);
+	expect(pinned).toMatchObject([
+		{
+			ref: "C-2",
+			hasFragments: true,
+			sourceSteps: [{ id: "cd", use: { fragment: "C-1", version: 1 } }],
+			steps: [{ action: "Enter a password" }],
+		},
+	]);
+	const historical = view("C-2", 1);
+	expect(historical).toMatchObject({ version: 1, hasFragments: false, steps: [{ action: "Pay" }] });
+	expect(historical).not.toHaveProperty("sourceSteps");
+});
+
 test("custom fields and fragment users are returned only when selected", () => {
 	createFragment();
 	createUser();

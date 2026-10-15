@@ -153,3 +153,64 @@ test.skipIf(!browserAvailable)(
 	},
 	15_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"the fragment picker excludes archived fragments, including historical versions",
+	async () => {
+		const server = await startServer();
+		await server.api("propose", {
+			edits: [
+				{
+					op: "create",
+					kind: "fragment",
+					body: { title: "Active setup", steps: [{ id: "ab", action: "Open", expected: null }] },
+				},
+				{
+					op: "create",
+					kind: "fragment",
+					body: { title: "Retired setup", steps: [{ id: "cd", action: "Sign in", expected: null }] },
+				},
+				{ op: "create", body: { title: "Checkout", steps: [{ id: "ef", action: "Pay", expected: null }] } },
+			],
+		});
+		await server.api("propose", { edits: [{ op: "state", cases: ["C-2"], to: "archived" }] });
+		const h = await openPage(server, { path: "/p/scratch/suite/c/3" });
+		try {
+			const { page } = h;
+			page.setDefaultTimeout(3000);
+			await page.getByRole("button", { name: "Checkout", exact: true }).click();
+			await page.getByText("Insert fragment", { exact: true }).click();
+			const insert = page.getByRole("button", { name: "Insert pinned fragment", exact: true });
+			await page.getByLabel("Fragment ref", { exact: true }).fill("C-2");
+			const archived = page
+				.getByRole("status")
+				.filter({ hasText: "This fragment is archived. Restore it before inserting a pin." });
+			await archived.waitFor();
+			expect(await insert.isDisabled()).toBe(true);
+			expect(await page.getByText("Retired setup · pins v1", { exact: true }).count()).toBe(0);
+			const historical = page.waitForResponse(
+				(response) => response.url().endsWith("/get") && response.request().postDataJSON()?.version === 1,
+			);
+			await page.getByLabel("Fragment version", { exact: true }).fill("1");
+			await historical;
+			await archived.waitFor();
+			expect(await insert.isDisabled()).toBe(true);
+			await page.getByLabel("Fragment ref", { exact: true }).fill("C-1");
+			await page.getByText("Active setup · pins v1", { exact: true }).waitFor();
+			expect(await insert.isEnabled()).toBe(true);
+			await insert.click();
+			await page.getByRole("button", { name: "Remove fragment", exact: true }).waitFor();
+			await page.getByLabel("Case title", { exact: true }).press("Escape");
+			const saved = await eventually(
+				async () => CaseView.parse((await server.api("get", { refs: ["C-3"] }))[0]),
+				(view) => view.version === 2,
+			);
+			expect(saved.sourceSteps?.[1]?.use).toEqual({ fragment: "C-1", version: 1 });
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	15_000,
+);
