@@ -104,7 +104,7 @@ Propose cases at their base version. Status: adopted=current, open=needs accepta
 
 ## report
 
-Report results for tested `target` or planned `run`.
+Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref.
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |

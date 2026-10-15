@@ -335,7 +335,7 @@ export const reportOp = defineOp({
 	needs: "record",
 	scope: "project",
 	effect: "write",
-	mcp: "Report results for tested `target` or planned `run`.",
+	mcp: "Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref.",
 	steps: reportSteps,
 });
 
