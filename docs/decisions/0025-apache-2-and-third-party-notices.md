@@ -18,9 +18,9 @@ in the work, and it says outright that a contribution comes in under the same li
 text and a NOTICE file that whoever passes Mainworthy on must keep.
 
 **The copyright holder is the owner, by their legal name.** It is written in `NOTICE`, in the
-iPhone app's `Info.plist` (`NSHumanReadableCopyright`, which the app shows under You, About) and in the files
-and tests that check those lines (`docs/guide/licence.md`, `README.md`, `test/licences.test.ts`, the app's UI
-test). This is the one exception to the rule that the owner's name is not written in the repository, at the
+iPhone app's `Info.plist` (`NSHumanReadableCopyright`, which the app shows under You, About) and in the tests
+that check those lines (`test/licences.test.ts`, the app's UI test); every other page links to `NOTICE`, and a
+test lists the files that hold the name. This is the one exception to the rule that the owner's name is not written in the repository, at the
 owner's request on 2026-10-14. Everywhere else the rule stands.
 
 **Every licence that applies is shipped in full, generated from what the build bundles.** `THIRD-PARTY-NOTICES.md`
@@ -29,7 +29,7 @@ three sources:
 
 | Source | How it is found | Where it ships |
 | --- | --- | --- |
-| npm packages | The build's entry points are bundled and the bundler reports which files went in; a package that is installed and never imported is not shipped and not listed. The text is the licence file inside each package. | The executable, and the web UI a browser loads |
+| npm packages | The build's entry points are bundled and the bundler reports which files went in; a package that is installed and never imported is not shipped and not listed. The text is the licence file inside each package. | The executable; the web UI a browser loads takes some of them |
 | The Bun runtime | `bun build --compile` puts the whole runtime into the executable, with every library Bun links. The list was made from Bun's source at the release tag (`licences/README.md`). | The executable |
 | Archify and JetBrains Mono | Each diagram page embeds Archify's viewer and the font. | The diagrams at `/docs` |
 
