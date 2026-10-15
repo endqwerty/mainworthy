@@ -154,7 +154,7 @@ $ mainworthy policy empty nothing-required
 empty reports: nothing-required; proposal P-4 and decision 5 are both recorded
 ```
 
-This uses the same proposal and admin decision as other policy changes. It requires `produce` and `admin` on the project. Settings has no control for this setting. To restore the default, run `mainworthy policy empty pending`. Choosing any preset also restores `pending`.
+This uses the same proposal and admin decision as other policy changes. It requires `produce` and `admin` on the project. Settings has no control for this setting. To restore the default, run `mainworthy policy empty pending`. Choosing any preset also restores `pending`, and resets the same-code detector settings to their defaults.
 
 With the setting enabled, a CI actor sends `mainworthy report --nothing-required`, with the tested commit supplied or detected. The declaration stays in the report record. A human or agent token cannot send it. An empty JUnit file alone is not a declaration.
 
