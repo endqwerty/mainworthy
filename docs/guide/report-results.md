@@ -67,6 +67,8 @@ Otherwise the command uses the Git checkout's top level, or its working director
 outside Git. Run the command in the source checkout that produced the report,
 including when the report file is stored elsewhere. This keeps keys stable
 between checkouts. The JSON reporters normally omit `rootDir`.
+The command refuses a relative `rootDir`, a filesystem root, or a source path
+outside the chosen root. It exits with code 4 and names the report file and root.
 
 Keep source paths and suite names stable. Switching exporters can change those
 values, so compare their keys before switching an existing pipeline. An

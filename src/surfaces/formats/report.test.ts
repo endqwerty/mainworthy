@@ -466,3 +466,50 @@ test("Jest Windows paths use the report root before the CLI root", () => {
 		name: "adds @C-1@v2",
 	});
 });
+
+test.each([
+	["/home/robin/project/tests/a.js", "/home/robin/other", "outside root"],
+	["/home/robin", "/home/robin/project", "outside root"],
+	["../tests/a.js", "/home/robin/project", "outside root"],
+	["tests/../../a.js", "/home/robin/project", "outside root"],
+	["C:/Users/robin/repo/tests/a.js", "C:/Users/robin/other", "outside root"],
+	["D:/repo/tests/a.js", "C:/repo", "source path and root must be on the same drive"],
+	["//server/share/repo/tests/a.js", "C:/repo", "source path and root must be on the same drive"],
+	["/home/robin/project/tests/a.js", "C:/repo", "source path and root must be on the same drive"],
+	["/home/robin/project/tests/a.js", "relative/root", "root must be absolute"],
+	["C:/repo/tests/a.js", "C:repo", "root must be absolute"],
+	["/home/robin/project/tests/a.js", "/", "filesystem root"],
+	["/home/robin/project/tests/a.js", "/project/..", "filesystem root"],
+	["C:/repo/tests/a.js", "C:/", "filesystem root"],
+	["//server/share/tests/a.js", "//server/share/", "filesystem root"],
+])("Jest refuses source %s with root %s", (name, rootDir, reason) => {
+	const report = jestReport();
+	const suite = report.testResults[0];
+	if (!suite) throw new Error("missing suite");
+	suite.name = name;
+	expect(() =>
+		parseReport(JSON.stringify({ ...report, rootDir }), { file: "refused.json", rootDir: "/valid/cli/root" }),
+	).toThrow(`refused.json: Jest/Vitest ${reason}: ${rootDir}`);
+});
+
+test.each([
+	["c:\\WORK\\repo\\tests\\sample.js", "C:/work/repo"],
+	["\\\\server\\share\\repo\\tests\\sample.js", "//server/share/repo"],
+])("Jest keeps contained Windows source %s relative to %s", (name, rootDir) => {
+	const report = jestReport();
+	const suite = report.testResults[0];
+	if (!suite) throw new Error("missing suite");
+	suite.name = name;
+	expect(parseReport(JSON.stringify({ ...report, rootDir }), { file: "windows.json" }).results[0]?.test).toEqual({
+		key: "tests/sample.js::math::adds @C-1@v2",
+		file: "tests/sample.js",
+		name: "adds @C-1@v2",
+	});
+});
+
+test.each(["jest", "vitest"] as const)("real %s report refuses a source outside the CLI root", async (format) => {
+	const text = await fixture(`real-${format}.json`);
+	expect(() => parseReport(text, { file: "other-checkout.json", rootDir: "/home/robin/other" })).toThrow(
+		"other-checkout.json: Jest/Vitest outside root: /home/robin/other",
+	);
+});
