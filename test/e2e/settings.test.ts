@@ -656,11 +656,14 @@ import { PRESETS } from "../../src/core/presets.ts";
 			await server.api("propose", {
 				edits: [{ op: "create", body: { title: "Field values", fields: { risk: "high", legacy: "keep" } } }],
 			});
-			const current = Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" }));
+			const current = Policy.extend({ version: z.number().int().positive() }).parse(
+				await server.api("admin", { do: "policy.show", project: "scratch" }),
+			);
 			const changed = await server.api("propose", {
 				edits: [
 					{
 						op: "policy",
+						base: current.version,
 						settings: {
 							...current.settings,
 							fields: {
@@ -1224,3 +1227,57 @@ for (const restricted of [true, false]) {
 		30_000,
 	);
 }
+
+(browserAvailable ? test : test.skip)(
+	"field definitions keep their draft when a concurrent policy change conflicts",
+	async () => {
+		for (const stage of ["propose", "decide"] as const) {
+			const server = await fixture({ preset: "loose", mode: "server" });
+			let view: Awaited<ReturnType<typeof openPage>> | null = null;
+			try {
+				view = await openPage(server, { path: "/p/scratch/settings" });
+				const { page } = view;
+				page.setDefaultTimeout(3000);
+				await page.getByRole("button", { name: "Add custom field", exact: true }).click();
+				await page.getByLabel("Field key 1", { exact: true }).fill("notes");
+				await page.getByLabel("Field label 1", { exact: true }).fill("Keep this draft");
+				let sentBase: unknown;
+				await page.route("**/api/p/scratch/propose", async (route) => {
+					sentBase = route.request().postDataJSON().edits[0].base;
+					if (stage === "propose") await changeElsewhere();
+					await route.continue();
+				});
+				async function changeElsewhere() {
+					const other = await server.api("propose", { edits: [{ op: "policy", preset: "standard" }] });
+					const q = (await server.api("inbox", { kind: "adopt" })).items.find((item) => item.q === other.question);
+					if (!q) throw new Error("Policy review missing");
+					await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+				}
+				if (stage === "decide")
+					await page.route("**/api/p/scratch/decide", async (route) => {
+						await changeElsewhere();
+						await route.continue();
+					});
+				await page.getByRole("button", { name: "Save field definitions", exact: true }).click();
+				await page
+					.locator("#detail .settings-message")
+					.getByText("The policy changed while you edited.", { exact: false })
+					.waitFor();
+				expect(sentBase).toBe(1);
+				expect(await page.getByLabel("Field label 1", { exact: true }).inputValue()).toBe("Keep this draft");
+				expect(Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" }))).toMatchObject({
+					preset: "standard",
+					settings: { basis: "exact-or-assumed" },
+				});
+				expect((await server.api("inbox", { kind: "adopt" })).items).toHaveLength(stage === "decide" ? 1 : 0);
+				expect(view.errors).toEqual(
+					stage === "propose" ? ["Failed to load resource: the server responded with a status of 409 (Conflict)"] : [],
+				);
+			} finally {
+				await view?.close();
+				await server.stop();
+			}
+		}
+	},
+	30000,
+);

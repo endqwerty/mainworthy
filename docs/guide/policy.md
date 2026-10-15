@@ -51,7 +51,7 @@ The last line holds the settings. The basis is which evidence a planned run acce
 
 An instance admin can define a project's fields in **Settings**, **Policy**, under **Custom fields**. Add a field, give it a key and label, choose **Text** or **Choice**, and mark **Required** if it needs a value. For a choice, enter one allowed value per line. Keys must be unique. Choices must be nonblank, unique, and fit on one line.
 
-Press **Save field definitions** to propose and accept the change. Both the proposal and the admin's decision stay in the record. Definitions belong to the project and survive a switch of preset. If another edit changes the definitions while you type, **Reload field definitions** replaces your unsaved form with the current definitions before you can save.
+Press **Save field definitions** to propose and accept the change. Both the proposal and the admin's decision stay in the record. Definitions belong to the project and survive a switch of preset. Saving sends the version of the policy read by the browser. A policy change during saving causes a conflict and keeps your field draft. Review the current policy before trying again. If another edit changes the definitions while you type, **Reload field definitions** replaces your unsaved form with the current definitions before you can save.
 
 Field values remain strings in a case's `fields` map. A required value cannot be missing or blank. A nonblank choice value must match an allowed value exactly. An optional field can be absent or blank. Keys without definitions remain free text. Removing a definition leaves all its values in place.
 
@@ -67,10 +67,10 @@ $ mainworthy propose --json '{"edits":[{"op":"edit","case":"C-1","base":1,"body"
 
 A supplied `fields` map replaces that map. Include every value you want to keep; omitting `fields` preserves the base version's values. Use `mainworthy get --json '{"refs":["C-1"],"as":"md"}'` to read them. The ordinary JSON case reply omits custom field values.
 
-To define fields through the CLI or HTTP API, start with `mainworthy policy show --json`. Keep its settings and add a `fields` map, then propose the whole settings object:
+To define fields through the CLI or HTTP API, start with `mainworthy policy show --json`. Keep its settings and add a `fields` map, then propose the whole settings object. Use its `version` as `base` in place of `1`:
 
 ```
-$ mainworthy propose --json '{"edits":[{"op":"policy","settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"fields":{"risk":{"kind":"choice","label":"Risk","required":true,"choices":["low","high"]},"notes":{"kind":"text","label":"Notes","required":false}}}}]}'
+$ mainworthy propose --json '{"edits":[{"op":"policy","base":1,"settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"fields":{"risk":{"kind":"choice","label":"Risk","required":true,"choices":["low","high"]},"notes":{"kind":"text","label":"Notes","required":false}}}}]}'
 ```
 
 An admin who is a person accepts the resulting question in Queue or with `decide`. Sending the whole settings object without `fields` removes all definitions. The MCP tool listing omits field definitions to keep its token limit; use the CLI, HTTP API, or Settings for definition changes. Archives include the policy versions, values, proposals, and decisions.
@@ -234,7 +234,7 @@ To change them, start from the current settings and send a policy edit. Keep the
 other settings as they are. This example uses the other defaults:
 
 ```json
-{"edits":[{"op":"policy","settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"flakyDetection":{"enabled":true,"windowDays":7,"minFlips":3}}}]}
+{"edits":[{"op":"policy","base":1,"settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"flakyDetection":{"enabled":true,"windowDays":7,"minFlips":3}}}]}
 ```
 
 Send it through `mainworthy propose --json` and have an admin accept the policy

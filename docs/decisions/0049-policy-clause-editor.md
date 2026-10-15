@@ -18,7 +18,7 @@ A policy proposal records the version it was made on in its resolved edit. Seali
 
 Edits carrying clauses or settings must send `base`, the version returned by `policy.show`. These fields replace entire values and cannot safely infer the version a caller read. Preset switches and changes to `unlinked` can omit `base`: they express an action against the current policy, and sealing records that version. Older waiting proposals without a recorded base conflict on acceptance and must be proposed again.
 
-The editor keeps its opened version and sends it with Apply. Event-driven policy reads show a notice if that version changes, including while previewing. A conflict keeps the draft open. Fields disabled in the editor, including answers on clauses answered by people, round-trip unchanged.
+The clause editor keeps its opened version and sends it with Apply. The custom field editor preserves the other settings from its browser read and sends that policy version as its base. Both proposal and adoption conflicts keep its field draft. Event-driven policy reads show a notice if that version changes, including while previewing. A conflict keeps the draft open. Fields disabled in the editor, including answers on clauses answered by people, round-trip unchanged.
 
 ## Alternatives
 

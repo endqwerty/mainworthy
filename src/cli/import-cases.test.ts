@@ -37,12 +37,15 @@ test("CSV imports 2,000 cases through propose and every foreign alias resolves o
 
 test("vendor CSV imports keep aliases, folders, source metadata and proposal history", async () => {
 	await withInstance(async ({ run, client, directory }) => {
-		const policy = Policy.parse(await client.call("admin", { do: "policy.show", project: "scratch" }));
+		const policy = Policy.extend({ version: z.number().int().positive() }).parse(
+			await client.call("admin", { do: "policy.show", project: "scratch" }),
+		);
 		const proposed = z.object({ question: z.string() }).parse(
 			await client.call("propose", {
 				edits: [
 					{
 						op: "policy",
+						base: policy.version,
 						settings: { ...policy.settings, fields: { risk: { kind: "text", label: "Risk", required: false } } },
 					},
 				],
