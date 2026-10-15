@@ -24,6 +24,199 @@ import { PRESET_GUIDE, PRESET_SUMMARY } from "../../src/core/policy-guide.ts";
 import { PRESETS } from "../../src/core/presets.ts";
 
 (browserAvailable ? test : test.skip)(
+	"policy clause drafts validate and preview without writing, then record an accepting decision",
+	async () => {
+		const server = await fixture({ preset: "loose", mode: "server" });
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("report", {
+				target: { commit: "abcdef01", branch: "main" },
+				results: [
+					{
+						test: { key: "tests/cart.ts::total", file: "tests/cart.ts" },
+						outcome: "fail",
+						failure: { message: "wrong total" },
+					},
+				],
+			});
+			const before = Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" }));
+			view = await openPage(server, { path: "/p/scratch/settings" });
+			const { page } = view;
+			page.setDefaultTimeout(3000);
+			await page.getByRole("button", { name: "Edit clauses", exact: true }).click();
+			const mapTrack = page.getByRole("row", { name: "Clause map-track", exact: true });
+			await mapTrack.getByLabel("Rule answer").fill("{");
+			await page.getByText('Rule answers must be valid JSON, for example {"is":"accept"}.', { exact: true }).waitFor();
+			await mapTrack.getByLabel("Rule answer").fill('{"is":"approve"}');
+			await page.getByText("Clause map-track needs a valid map rule answer.", { exact: true }).waitFor();
+			await mapTrack.getByLabel("Rule answer").fill('{"is":"track"}');
+			const failure = page.getByRole("row", { name: "Clause failure-any", exact: true });
+			await failure.getByLabel("Conditions").fill("scope:change");
+			await page
+				.getByText("every kind must end with a clause that always matches; missing for: failure", { exact: true })
+				.waitFor();
+			expect(await page.getByRole("button", { name: "Preview recent questions" }).isDisabled()).toBe(true);
+			expect(await page.getByRole("button", { name: "Apply policy" }).isDisabled()).toBe(true);
+			await failure.getByLabel("Conditions").fill("always");
+			await failure.getByLabel("Who answers").selectOption("admin");
+			await failure.getByLabel("Reason").selectOption("required");
+			await page.getByRole("button", { name: "Add clause", exact: true }).click();
+			const added = page.getByRole("row", { name: `Clause clause-${before.clauses.length + 1}`, exact: true });
+			await added.getByLabel("Clause id").fill("failure-flaky");
+			const flaky = page.getByRole("row", { name: "Clause failure-flaky", exact: true });
+			await flaky.getByLabel("Conditions").fill("answer:flaky");
+			await flaky.getByLabel("Exclude producer").check();
+			const beforeFailure = before.clauses.findIndex((clause) => clause.id === "failure-any");
+			for (let i = beforeFailure; i < before.clauses.length; i++)
+				await flaky.getByRole("button", { name: "Move up", exact: true }).click();
+			await page.getByLabel("Flaky hold in days").fill("7");
+			await page.getByLabel("Policy change reason").fill("Admins explain failures with a reason.");
+			await page.getByRole("button", { name: "Preview recent questions" }).click();
+			const preview = page.getByRole("table", { name: "Policy preview" });
+			await preview
+				.getByRole("cell", {
+					name: "failure-any: An admin, with a reason; agents advise · lists release runs",
+					exact: true,
+				})
+				.first()
+				.waitFor();
+			await preview
+				.getByRole("cell", { name: "failure-flaky: A person who did not report it · lists no runs", exact: true })
+				.waitFor();
+			await preview
+				.getByRole("cell", {
+					name: 'map-track: By rule: Track without a case {"is":"track"} · lists no runs',
+					exact: true,
+				})
+				.first()
+				.waitFor();
+			await page.setViewportSize({ width: 390, height: 844 });
+			expect(
+				await page.locator("#detail .pane-scroll").evaluate((element) => element.scrollWidth - element.clientWidth),
+			).toBe(0);
+			await page
+				.getByRole("heading", { name: "Edit clauses · first match wins", exact: true })
+				.scrollIntoViewIfNeeded();
+			await page.setViewportSize({ width: 1440, height: 900 });
+			await page
+				.getByRole("heading", { name: "Edit clauses · first match wins", exact: true })
+				.scrollIntoViewIfNeeded();
+			expect(Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" }))).toEqual(before);
+			expect((await server.api("inbox", { state: "decided", kind: "adopt" })).items).toEqual([]);
+			let firstProposal = true;
+			await page.route("**/api/p/scratch/propose", async (route) => {
+				const response = await route.fetch();
+				if (!firstProposal) return route.fulfill({ response });
+				firstProposal = false;
+				return route.fulfill({
+					status: 200,
+					contentType: "application/json",
+					body: JSON.stringify({ ok: false, error: { code: "invalid", message: "Proposal reply was unavailable" } }),
+				});
+			});
+			await page.getByRole("button", { name: "Apply policy" }).click();
+			await page.locator("#detail").getByText("Proposal reply was unavailable", { exact: true }).waitFor();
+			expect(await page.getByLabel("Flaky hold in days").inputValue()).toBe("7");
+			expect((await server.api("inbox", { kind: "adopt" })).items).toHaveLength(1);
+			await page.getByRole("button", { name: "Apply policy" }).click();
+			await page.getByText("Custom policy is in force.", { exact: false }).waitFor();
+			await page.unroute("**/api/p/scratch/propose");
+			const after = Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" }));
+			expect(after.clauses.find((clause) => clause.id === "failure-any")?.ask).toEqual({
+				who: "admin",
+				agents: "advise",
+				notProducer: false,
+				reason: "required",
+			});
+			expect(after.settings).toEqual({ ...before.settings, holds: { ...before.settings.holds, flakyDays: 7 } });
+			expect(after.clauses[beforeFailure]).toMatchObject({
+				id: "failure-flaky",
+				when: ["answer:flaky"],
+				ask: { notProducer: true },
+			});
+			const decision = (await server.api("inbox", { state: "decided", kind: "adopt" })).items[0]?.decision;
+			expect((await server.api("inbox", { kind: "adopt" })).items).toHaveLength(0);
+			expect(decision).toMatchObject({
+				by: ["robin"],
+				answer: { is: "accept" },
+				reason: "Admins explain failures with a reason.",
+			});
+			// A policy changed in another window must not be silently replaced by an older whole-table draft.
+			await page.getByRole("button", { name: "Edit clauses", exact: true }).click();
+			await page.getByLabel("Flaky hold in days").fill("8");
+			await page.getByLabel("Policy change reason").fill("Keep this draft.");
+			await page.route("**/api/p/scratch/inbox", (route) =>
+				route.fulfill({
+					status: 200,
+					contentType: "application/json",
+					body: JSON.stringify({ ok: false, error: { code: "invalid", message: "Preview temporarily unavailable" } }),
+				}),
+			);
+			await page.getByRole("button", { name: "Preview recent questions" }).click();
+			await page.getByText("Preview temporarily unavailable", { exact: true }).waitFor();
+			expect(await page.getByLabel("Flaky hold in days").inputValue()).toBe("8");
+			await page.unroute("**/api/p/scratch/inbox");
+			const changed = await server.api("propose", { edits: [{ op: "policy", preset: "standard" }] });
+			const q = (await server.api("inbox", { kind: "adopt" })).items.find((item) => item.q === changed.question);
+			if (!q) throw new Error("Policy review missing");
+			await server.api("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } });
+			await page.getByRole("button", { name: "Apply policy" }).click();
+			await page
+				.getByText(
+					"The policy changed while you edited. Your draft is kept. Cancel and reopen the editor to start from the current policy.",
+					{ exact: true },
+				)
+				.waitFor();
+			expect(await page.getByLabel("Flaky hold in days").inputValue()).toBe("8");
+			expect(Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" })).preset).toBe(
+				"standard",
+			);
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"the policy editor explains rights and refuses automatic changes for agents or admins without produce",
+	async () => {
+		const server = await fixture({ preset: "loose", mode: "server" });
+		try {
+			for (const kind of ["human", "agent"] as const) {
+				const created = z.object({ token: z.string() }).parse(
+					await server.api("admin", {
+						do: "token.create",
+						actor: `${kind}-reader`,
+						kind,
+						can: kind === "human" ? ["read", "admin"] : ["read", "produce", "answer", "admin"],
+					}),
+				);
+				const view = await openPage({ ...server, token: created.token }, { path: "/p/scratch/settings" });
+				try {
+					const { page } = view;
+					await page.getByRole("button", { name: "Edit clauses", exact: true }).waitFor();
+					expect(await page.getByRole("button", { name: "Edit clauses", exact: true }).isDisabled()).toBe(true);
+					expect(await page.getByLabel("Policy preset").isDisabled()).toBe(true);
+					await page
+						.getByText("Changing policy here needs a person with produce and admin on this project.", { exact: false })
+						.waitFor();
+					expect(view.errors).toEqual([]);
+				} finally {
+					await view.close();
+				}
+			}
+			expect(Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" })).preset).toBe("loose");
+		} finally {
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+(browserAvailable ? test : test.skip)(
 	"settings records policy decisions, scopes and revokes tokens, and switches projects",
 	async () => {
 		const server = await fixture({ preset: "loose", mode: "server" });

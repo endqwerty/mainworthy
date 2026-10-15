@@ -23,7 +23,7 @@ Two words recur below. An instance admin holds the `admin` capability on every p
 | The policy preset | Settings, Policy, "Preset", or `mainworthy policy use` | An admin on the project who also holds `produce` | [Policy](./policy.md) |
 | What happens to a test with no case | Settings, Policy, "Tests with no case", or `mainworthy policy tests` | The same | [Policy](./policy.md#tests-with-no-case) |
 | When a report with no tests passes | `mainworthy policy empty pending` or `mainworthy policy empty nothing-required` | The same | [Policy](./policy.md#reports-with-no-tests) |
-| Single clauses, the flaky hold, the evidence basis, same-code detector settings | `mainworthy propose` with a policy edit. Settings has no control for these | The same | [Policy](./policy.md#change-single-clauses) |
+| Single clauses, the flaky hold, the evidence basis, same-code detector settings | Settings, Policy, "Edit clauses", or `mainworthy propose` with a policy edit | In Settings, a person with instance `admin` and project `produce`. The command line can propose for another admin to accept | [Policy](./policy.md#change-single-clauses) |
 | Custom field definitions | Settings, Policy, "Custom fields", or a `propose` policy edit | An instance admin who holds `produce` in Settings; a project admin through `propose` | [Policy](./policy.md#custom-fields) |
 | Projects | Settings, Projects, "Create a project", or `mainworthy admin` | An instance admin | [Policy](./policy.md#choose-a-preset-for-a-new-project) |
 | What each person, agent or pipeline may do | `mainworthy actor grant` and `actor ungrant`. Settings shows tokens only | An instance admin who is a person | [People, agents and pipelines](./access.md) |
@@ -144,7 +144,7 @@ Some things look like settings and are not. Each of these is the same on every i
 - The four verdicts, `passed`, `failed`, `blocked` and `pending`, and the exit codes 0 to 3 of `mainworthy gate`.
 - The six capabilities (`read`, `record`, `produce`, `answer`, `plan`, `admin`) and the kinds of actor. You cannot define a role of your own.
 - A pipeline holds `read` and `record` at most, whatever its grant says.
-- Three named presets. A policy with different clauses is called `custom`, and no screen edits clauses.
+- Three named presets. A policy with different clauses is called `custom`. Settings edits its clauses under Policy.
 - The shape of a case: a title, preconditions, steps with expected results, methods, an automation intent, tags, a folder and the requirements it covers. A case can carry free `fields` of text in its Markdown, and project definitions can require values or limit them to a choice. The case editor does not show or edit field values; use Markdown or a `propose` body. [Policy](./policy.md#custom-fields) explains the definitions.
 - Sign-in is by token, or for a person by a name and a password or a passkey, which an admin's invitation link sets up. There is no single sign-on, no second factor beside a password, and no mail: a lost password is replaced through a recovery link. A password is 12 to 256 characters and has no other rule. A token works until you revoke it or until the end you gave it.
 - The database is one SQLite file.
