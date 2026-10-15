@@ -1,6 +1,7 @@
 import { type InfiniteData, useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import type { Api } from "../../core/api.ts";
+import { ATTACHMENT_LIMITS, AttachmentInput, attachmentBytes } from "../../core/attachments.ts";
 import type { ReportReceipt } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
@@ -8,6 +9,7 @@ import { deviceKey, deviceSession, sessionCurrent } from "../lib/device.ts";
 import { randomId } from "../lib/ids.ts";
 import { type Binding, useBindings } from "../lib/keys.ts";
 import { navigate, refUrl, routeUrl } from "../lib/router.ts";
+import { ResultAttachments } from "../ui/attachments.tsx";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, KeyCap, ListRow, ProducerGlyph } from "../ui/index.tsx";
 import { type Fill, outcomeName, Run, RunCase, type RunOutcome, Slot, tallyText } from "./models.ts";
@@ -43,6 +45,7 @@ function storedNote(key: string): string {
 }
 
 type LocalFill = { fill: Fill; questions: ReportReceipt["questions"]; pending: boolean };
+type PendingAttachment = AttachmentInput & { key: string };
 type LastResult = { slot: Slot; outcome: RunOutcome; previous: Fill | null; ready: Promise<ReportReceipt> };
 
 export function RunCockpit({ runRef }: { runRef: string }) {
@@ -99,6 +102,49 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		window.addEventListener("storage", changed);
 		return () => window.removeEventListener("storage", changed);
 	}, [notePrefix]);
+	const pendingFiles = useRef(new Map<number, PendingAttachment[]>());
+	const consumedFiles = useRef(new Set<PendingAttachment>());
+	const readingFiles = useRef(new Set<number>());
+	const [, refreshFiles] = useState(0);
+	async function addFiles(slotId: number, files: File[]) {
+		if (!sessionCurrent(owner) || files.length === 0) return;
+		if (readingFiles.current.has(slotId)) {
+			setStatus("Wait for this slot's files to finish reading.");
+			return;
+		}
+		readingFiles.current.add(slotId);
+		refreshFiles((value) => value + 1);
+		try {
+			const existing = pendingFiles.current.get(slotId) ?? [];
+			if (files.some((file) => file.size > ATTACHMENT_LIMITS.file))
+				throw new Error("Each attachment must be at most 4 MiB.");
+			if (existing.length + files.length > ATTACHMENT_LIMITS.perResult)
+				throw new Error("A result may carry at most 20 attachments.");
+			const total =
+				existing.reduce((sum, file) => sum + attachmentBytes(file.data), 0) +
+				files.reduce((sum, file) => sum + file.size, 0);
+			if (total > ATTACHMENT_LIMITS.report) throw new Error("Attachments for a result must total at most 16 MiB.");
+			const added: PendingAttachment[] = [];
+			for (const file of files) {
+				const bytes = new Uint8Array(await file.arrayBuffer());
+				let binary = "";
+				for (let offset = 0; offset < bytes.length; offset += 8192)
+					binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+				added.push({
+					...AttachmentInput.parse({ name: file.name || "screenshot.png", data: btoa(binary) }),
+					key: randomId(),
+				});
+			}
+			if (!sessionCurrent(owner)) return;
+			pendingFiles.current.set(slotId, [...(pendingFiles.current.get(slotId) ?? []), ...added]);
+			setStatus("Attachment added to this slot's next result. Keep this page open until you record it.");
+		} catch (error) {
+			setStatus(error instanceof Error ? error.message : "The file could not be read.");
+		} finally {
+			readingFiles.current.delete(slotId);
+			refreshFiles((value) => value + 1);
+		}
+	}
 	const noteRef = useRef<HTMLInputElement>(null);
 	const [last, setLast] = useState<LastResult | null>(null);
 	const writes = useRef(new Map<number, Promise<ReportReceipt>>());
@@ -211,6 +257,14 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			setStatus("This run is closed. No result was recorded; your note is kept.");
 			return null;
 		}
+		if (readingFiles.current.has(slot.id)) {
+			setStatus("Wait for this slot's attachments to finish reading before recording.");
+			return null;
+		}
+		const files = restores
+			? []
+			: (pendingFiles.current.get(slot.id) ?? []).filter((file) => !consumedFiles.current.has(file));
+
 		const slotId = slot.id;
 		slot = slots.find((item) => item.id === slotId) ?? slot;
 		if (external(slot)) {
@@ -219,6 +273,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 			);
 			return null;
 		}
+		for (const file of files) consumedFiles.current.add(file);
 		const previous = slot.fills.find((fill) => fill.by === session.actor && fill.method === method) ?? null;
 		const fill: Fill = {
 			result: -Date.now(),
@@ -304,6 +359,14 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 					results: [
 						{
 							...resultInput,
+							...(files.length
+								? {
+										attachments: files.map(({ key: _key, ...file }) => ({
+											...file,
+											...(atStep ? { at: atStep } : {}),
+										})),
+									}
+								: {}),
 							...(atStep ? { steps: [{ step: atStep, outcome: "fail" }] } : {}),
 							...(corrects !== undefined && corrects > 0 ? { corrects } : {}),
 						},
@@ -316,6 +379,14 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 				throw new Error(receipt.rejected[0]?.reason ?? receipt.declined?.[0]?.reason ?? "The result was not recorded.");
 			const saved = { ...fill, result: receipt.results[0], atStep: atStep ?? null };
 			latest.current.set(slot.id, saved);
+			if (files.length) {
+				for (const file of files) consumedFiles.current.delete(file);
+				pendingFiles.current.set(
+					slot.id,
+					(pendingFiles.current.get(slot.id) ?? []).filter((file) => !files.includes(file)),
+				);
+				refreshFiles((value) => value + 1);
+			}
 			// The server has it: the device's copy of the note has done its work. A note typed for this slot while
 			// the request was on its way is newer than what was recorded, and stays.
 			if (storedNote(`${notePrefix}${slot.id}`) === text) setNoteOf(slot.id, "");
@@ -331,6 +402,7 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 		writes.current.set(slot.id, request);
 		void request.catch((error: unknown) => {
 			if (!sessionCurrent(owner)) return;
+			for (const file of files) consumedFiles.current.delete(file);
 			if (consumedNotes.current.get(slot.id) === text) consumedNotes.current.delete(slot.id);
 			if (consumedSteps.current.get(slot.id) === marked) consumedSteps.current.delete(slot.id);
 			if (writes.current.get(slot.id) !== request) return;
@@ -644,6 +716,13 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 						className={`run-note ${noting ? "failing" : ""}`}
 						ref={noteRef}
 						aria-label="Result note"
+						onPaste={(event) => {
+							const files = [...event.clipboardData.files];
+							if (current && files.length) {
+								event.preventDefault();
+								void addFiles(current.id, files);
+							}
+						}}
 						value={note}
 						disabled={!canRecord && !noting && !note}
 						placeholder={
@@ -671,6 +750,47 @@ export function RunCockpit({ runRef }: { runRef: string }) {
 							}
 						}}
 					/>
+					{current && (
+						<div className="run-attachment-picker">
+							<label>
+								Attach a file
+								<input
+									type="file"
+									multiple
+									aria-label="Attach a file"
+									disabled={!canRecord}
+									onChange={(event) => {
+										const files = [...(event.target.files ?? [])];
+										event.target.value = "";
+										void addFiles(current.id, files);
+									}}
+								/>
+							</label>
+							<span className="dim">
+								Paste a screenshot into the note. 4 MiB per file, 16 MiB per result. Unrecorded files stay only on this
+								page.
+							</span>
+							<ul>
+								{(pendingFiles.current.get(current.id) ?? []).map((file) => (
+									<li key={file.key}>
+										{file.name}{" "}
+										<button
+											type="button"
+											onClick={() => {
+												pendingFiles.current.set(
+													current.id,
+													(pendingFiles.current.get(current.id) ?? []).filter((item) => item !== file),
+												);
+												refreshFiles((value) => value + 1);
+											}}
+										>
+											Remove {file.name}
+										</button>
+									</li>
+								))}
+							</ul>
+						</div>
+					)}
 					<div className="run-control-hint">
 						{step ? `Step ${step} marked. ` : ""}
 						<KeyCap>2</KeyCap> <KeyCap>f</KeyCap> fails step 2.{" "}
@@ -739,6 +859,7 @@ function RunDocument({ slot, active, step }: { slot: Slot; active: boolean; step
 				<div className="run-evidence" key={fill.result}>
 					<ProducerGlyph kind={fill.method} /> {fill.outcome} by {fill.by} · basis {fill.admitted} · {age(fill.at)}
 					{fill.note && <p>{fill.note}</p>}
+					<ResultAttachments result={fill.result} />
 				</div>
 			))}
 		</article>

@@ -1,6 +1,7 @@
 // OPS: the complete list of operations. Add one here and it exists on HTTP, in the OpenAPI document, in the CLI
 // and (when it has an `mcp` description) as an agent tool. There is no other place to add a capability.
 import { adminOp } from "./admin.ts";
+import { attachmentOp, attachOp } from "./attachments.ts";
 import { credentialOp, invitationOp, sessionOp } from "./people.ts";
 import {
 	checkOp,
@@ -19,6 +20,8 @@ import { trackerOp, trackerStatusOp } from "./trackers.ts";
 import { changeOp, claimOp, decideOp, planOp, proposeOp, reportOp } from "./writes.ts";
 
 const list: AnyOp[] = [
+	attachOp,
+	attachmentOp,
 	// produce evidence
 	proposeOp,
 	reportOp,

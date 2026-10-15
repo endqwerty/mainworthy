@@ -91,6 +91,7 @@ Flags of `mainworthy report`:
 - `--head <string>`: Current change head read from the code host. Never inferred from CI.
 - `--env <string>`: Test environment.
 - `--format <string>`: Report format: auto (default), junit, playwright, jest, vitest, pytest (pytest-json-report), trx.
+- `--attachments <string>`: Read JUnit attachment files inside this directory. Unavailable or disallowed files are skipped with a warning.
 - `--session <string>`: Named test session with no build identity.
 - `--run <string>`: Planned run these results are for.
 - `--job <string>`: CI job name. Overrides detection.
@@ -153,6 +154,8 @@ Every operation of the API is also a command with the same name. Give its input 
 
 | Command | What it does |
 | --- | --- |
+| `mainworthy attach` | Append a screenshot or small file to a result you recorded. Supply the file as base64. |
+| `mainworthy attachment` | List a result's attachments, or read one as base64 with its file name and safe content type. |
 | `mainworthy propose` | Create or change cases, folders, links or the policy. Saving and proposing are the same call; policy decides what happens next. |
 | `mainworthy report` | Record results: a parsed CI report, one manual result, or an agent's batch. The producer is the token's actor. |
 | `mainworthy claim` | Record a review and what it found. A review with no findings is still recorded. |

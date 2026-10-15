@@ -12,6 +12,7 @@ import type { Draft, DraftConflict } from "../lib/drafts.ts";
 import { proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { bodyOf, CaseView, editDraft } from "../suite/model.ts";
+import { ResultAttachments } from "../ui/attachments.tsx";
 import { useApp } from "../ui/context.tsx";
 import { age, DiffView, EmptyState, KeyCap, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
 import { useCaseBindings } from "./bindings.ts";
@@ -553,6 +554,7 @@ function TimelineRow({ entry }: { entry: Exclude<Entry, { t: "version" }> }) {
 					{kind === "agent" ? " · agent" : ""}
 				</b>{" "}
 				<span className="why">{text}</span>
+				{entry.t === "result" && <ResultAttachments result={entry.id} />}
 			</div>
 			<span className="age">{age(entry.at)}</span>
 		</div>

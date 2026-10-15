@@ -89,6 +89,53 @@ An archive does not say which project is a demo. After an import every project r
 
 <!-- generated:operations -->
 
+### attach
+
+Append a screenshot or small file to a result you recorded. Supply the file as base64.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/p/<project>/attach` |
+| Command | `mainworthy attach` |
+| Needs | `record` |
+| Effect | writes |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>attach</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `result` | `integer` | yes |  |
+| `attachment` | `object` | yes |  |
+| `attachment.name` | `string` | yes |  |
+| `attachment.data` | `string` | yes |  |
+| `attachment.at` | `string` | no |  |
+
+</details>
+
+### attachment
+
+List a result's attachments, or read one as base64 with its file name and safe content type.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/p/<project>/attachment` |
+| Command | `mainworthy attachment` |
+| Needs | `read` |
+| Effect | reads |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>attachment</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `result` | `integer` | yes |  |
+| `id` | `integer` | no |  |
+
+</details>
+
 ### propose
 
 Create or change cases, folders, links or the policy. Saving and proposing are the same call; policy decides what happens next.
@@ -235,6 +282,10 @@ Record results: a parsed CI report, one manual result, or an agent's batch. The 
 | `results[].test[1].file` | `string` | no |  |
 | `results[].test[2].case` | `string` | yes | The case this manual or agent result is for. |
 | `results[].outcome` | `"pass" \| "fail" \| "skip" \| "blocked" \| "error"` | yes |  |
+| `results[].attachments` | `array<object>` | no |  |
+| `results[].attachments[].name` | `string` | yes |  |
+| `results[].attachments[].data` | `string` | yes |  |
+| `results[].attachments[].at` | `string` | no |  |
 | `results[].durationMs` | `integer` | no |  |
 | `results[].failure` | `object` | no |  |
 | `results[].failure.message` | `string` | yes |  |

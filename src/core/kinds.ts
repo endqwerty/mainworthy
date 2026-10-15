@@ -13,8 +13,8 @@ export const ActorKind = z.enum(["human", "agent", "ci", "rule"]);
 export type ActorKind = z.infer<typeof ActorKind>;
 
 /**
- * What a grant may hold. `record` is a pipeline's whole job: put results on the record, say that a change
- * ended, and read the verdict.
+ * What a grant may hold. `record` is a pipeline's whole job: put results and attachments on the
+ * record, say that a change ended, and read the verdict.
  * `produce` is everything a producer does (cases, results, reviews, answers) and so includes it.
  */
 export const Capability = z.enum(["read", "record", "produce", "answer", "plan", "admin"]);

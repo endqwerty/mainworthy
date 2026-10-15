@@ -65,6 +65,13 @@ leave the field, then press the outcome key.
 Type a step number before <kbd>f</kbd> to mark the failed step.
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between slots.
 The run keeps unfinished notes on this device until the result is recorded.
+Paste a screenshot into **Result note** or choose **Attach a file** before
+recording. Pending files stay with their slot while you move between slots, but
+are lost if you close or reload the page. A saved result shows its images and file
+downloads. Each file may be at most 4 MiB, and a result may hold 20 files and 16 MiB.
+See [attachments](./report-results.md#attach-screenshots-and-small-files) for report
+uploads, access and retention.
+
 See [the keyboard guide](./keyboard.md) for all run keys.
 
 Blocked and skipped results record that the case was not proven. They do not satisfy

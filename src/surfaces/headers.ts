@@ -44,8 +44,8 @@ const PAGE: Policy = {
 	// One style sheet from this origin. React writes an element's styles through the style object, which a
 	// policy does not refuse; nothing in the app writes a `style` attribute or a `<style>` element.
 	"style-src": "'self'",
-	// The icon. The bundle has no image in a `data:` address and loads none from elsewhere.
-	"img-src": "'self'",
+	// The icon and raster result attachments read through the authenticated API.
+	"img-src": "'self' blob:",
 	// The API and the change stream. This is what stops a script, should one ever run in the page, from sending
 	// what it reads to another host.
 	"connect-src": "'self'",

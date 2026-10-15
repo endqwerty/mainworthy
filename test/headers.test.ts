@@ -22,7 +22,7 @@ import { withHeadersOnEvery } from "../src/surfaces/with-headers.ts";
 import sourceUi from "../src/web/index.html";
 
 const PAGE =
-	"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+	"default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 const OTHER = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const HASH = "ES8VF47udzjVFFPh4RhgcgjUrADRd1Ef0GD9UagS2mY=";
 /** The page's policy as Bun's development bundle needs it: `PAGE` with two directives widened. */
@@ -41,7 +41,7 @@ describe("the policy", () => {
 	test("the development page differs in three things: scripts from a blob, its inline scripts by hash, inline styles", () => {
 		expect(contentSecurityPolicy({ kind: "development-page", inlineScripts: [HASH] })).toBe(developmentPage([HASH]));
 		expect(developmentPage([HASH])).toBe(
-			`default-src 'none'; script-src 'self' blob: 'sha256-${HASH}'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+			`default-src 'none'; script-src 'self' blob: 'sha256-${HASH}'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
 		);
 	});
 

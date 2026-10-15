@@ -2,6 +2,7 @@
 // then listen. The same function is the Local layer on a laptop and the Server layer in a container; only the
 // configuration differs (decision 0002).
 import { type Extra, type Patience, serve, VERSION } from "../surfaces/http.ts";
+import { attachmentHashes } from "./evidence/attachments.ts";
 import {
 	bootstrap,
 	flushUses,
@@ -90,6 +91,7 @@ export function start(
 	const { app, owner } = opened;
 	let server: ReturnType<typeof serve>;
 	try {
+		app.blobs.prune(attachmentHashes(app.db));
 		recoverAccepted(app);
 		server = serve(app, owner, extra(app, owner), options.patience);
 	} catch (error) {

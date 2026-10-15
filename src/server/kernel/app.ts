@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Envelope } from "../../core/api.ts";
 import { DURATION_FORMAT, durationMs } from "../../core/duration.ts";
 import { type AddressRanges, parseAddressRanges } from "./address.ts";
+import { type BlobStore, diskBlobs, memoryBlobs } from "./blobs.ts";
 import type { CallerReference } from "./caller.ts";
 import { Db } from "./db.ts";
 import { migrate } from "./migrate.ts";
@@ -117,6 +118,7 @@ function writeGate(): WriteGate {
 }
 
 export type App = {
+	blobs: BlobStore;
 	/** The one connection that writes. Use it only inside a command (see `invoke`) or under `gate`. */
 	db: Db;
 	/**
@@ -154,6 +156,7 @@ export function openApp(config: Config, options: { memory?: boolean; now?: () =>
 	const reader = options.memory || options.reader ? db : new Db(path, { reader: true });
 	const listeners = new Set<(event: ChangeEvent) => void>();
 	return {
+		blobs: options.memory ? memoryBlobs() : diskBlobs(config.dataDir),
 		db,
 		reader,
 		readers: null,

@@ -2,6 +2,7 @@
 // typed from this map, so a call site that sends the wrong shape does not compile.
 
 import type { z } from "zod";
+import type { AttachInput, AttachmentReadInput } from "./attachments.ts";
 import type { Unlinked } from "./kinds.ts";
 import type {
 	AdminInput,
@@ -29,6 +30,8 @@ import type { TrackerInput, TrackerStatusInput } from "./tracker.ts";
 type In<S extends z.ZodType> = z.input<S>;
 
 type Inputs = {
+	attach: In<typeof AttachInput>;
+	attachment: In<typeof AttachmentReadInput>;
 	tracker: In<typeof TrackerInput>;
 	"tracker-status": In<typeof TrackerStatusInput>;
 	propose: In<typeof ProposeInput>;

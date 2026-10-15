@@ -1,5 +1,6 @@
 import { caseAnnotation } from "../../core/case-annotation.ts";
 import type { ResultIn } from "../../core/ops.ts";
+import type { ParsedResult } from "./native.ts";
 
 type Attributes = Partial<Record<"name" | "file" | "classname" | "time" | "status" | "message" | "value", string>>;
 type KeyDigest = { first: number; second: number; firstPower: number; secondPower: number; length: number };
@@ -7,7 +8,7 @@ type DamageSpan = { from: number; to: number; problem: NonNullable<ResultIn["fai
 type CaseElement = {
 	kind: "case";
 	tag: string;
-	result: ResultIn;
+	result: ParsedResult;
 	retries: number;
 	integrity: "intact" | "damaged";
 	previous: CaseElement | null;
@@ -34,8 +35,17 @@ type Element =
 	| CaseElement
 	| FailureElement
 	| SuiteElement
+	| {
+			kind: "output";
+			tag: string;
+			result: ParsedResult;
+			line: string;
+			overflow: boolean;
+			previous: OutputElement | null;
+	  }
 	| { kind: "ignored"; tag: string; propertyCase: CaseElement | null }
 	| { kind: "other"; tag: string };
+type OutputElement = Extract<Element, { kind: "output" }>;
 type Warn = (message: string, offset: number) => void;
 
 /** How much of a test's file name a result keeps. Two longer names that begin alike read as one name. */
@@ -279,8 +289,8 @@ function applyDamage(results: ResultIn[], spans: DamageSpan[]): void {
 export function parseJUnit(
 	xml: string,
 	options?: { file?: string },
-): { results: ResultIn[]; suites: number; warnings: string[] } {
-	const results: ResultIn[] = [];
+): { results: ParsedResult[]; suites: number; warnings: string[] } {
+	const results: ParsedResult[] = [];
 	const warnings: string[] = [];
 	let suites = 0;
 	const encoder = new TextEncoder();
@@ -334,6 +344,18 @@ export function parseJUnit(
 	let reportProblem: NonNullable<ResultIn["failure"]> | null = null;
 	let currentCase: CaseElement | null = null;
 	let currentFailure: FailureElement | null = null;
+	let currentOutput: OutputElement | null = null;
+	const addPath = (result: ParsedResult, path: string) => {
+		result.attachmentPaths ??= [];
+		const paths = result.attachmentPaths;
+		if (paths.length < 21 && !paths.includes(path)) paths.push(path);
+	};
+	const outputLine = (element: OutputElement) => {
+		const match = /^\s*\[\[ATTACHMENT\|([^\]\r\n]+)\]\]\s*$/.exec(element.line);
+		if (!element.overflow && match?.[1]) addPath(element.result, match[1]);
+		element.line = "";
+		element.overflow = false;
+	};
 	let ignoredDepth = 0;
 	let rootSeen = false;
 	let position = xml.charCodeAt(0) === 0xfeff ? 1 : 0;
@@ -373,6 +395,11 @@ export function parseJUnit(
 				}
 				currentFailure = element.previous;
 				break;
+			case "output":
+				outputLine(element);
+				currentOutput = element.previous;
+				ignoredDepth--;
+				break;
 			case "ignored":
 				ignoredDepth--;
 				break;
@@ -385,8 +412,22 @@ export function parseJUnit(
 		}
 	};
 	const text = (from: number, to: number, cdata = false) => {
-		if (from === to || ignoredDepth > 0) return;
+		if (from === to || (ignoredDepth > 0 && currentOutput === null)) return;
 		const value = xml.slice(from, to);
+		if (currentOutput !== null) {
+			const decoded = cdata ? value : decode(value, from, () => {});
+			let offset = 0;
+			while (offset < decoded.length) {
+				const newline = decoded.indexOf("\n", offset);
+				const end = newline < 0 ? decoded.length : newline + 1;
+				const remaining = Math.max(0, 4098 - currentOutput.line.length);
+				currentOutput.overflow ||= end - offset > remaining;
+				currentOutput.line += decoded.slice(offset, Math.min(end, offset + remaining));
+				if (newline >= 0) outputLine(currentOutput);
+				offset = end;
+			}
+			return;
+		}
 		let decoded = value;
 		if (cdata) {
 			const invalid = invalidCharacter.exec(value);
@@ -396,6 +437,7 @@ export function parseJUnit(
 			if (delimiter >= 0) warnMalformed("Unexpected CDATA closing delimiter", from + delimiter);
 			decoded = decode(value, from, warnMalformed);
 		}
+
 		if (currentFailure?.report !== null && currentFailure !== null && ignoredDepth === 0) {
 			appendFailure(currentFailure, decoded);
 		} else if (stack.length === 0 && /[^ \t\r\n]/.test(value)) {
@@ -531,13 +573,30 @@ export function parseJUnit(
 				: {};
 		let element: Element = { kind: "other", tag };
 		// `casebook` is the property's name from before the project was renamed (decision 0015).
-		if (name === "property" && propertyCase !== null && (attrs.name === "mainworthy" || attrs.name === "casebook")) {
+		if (name === "property" && propertyCase !== null && /^attachment(?:\.\d+)?$/.test(attrs.name ?? "")) {
+			if (attrs.value?.trim()) addPath(propertyCase.result, attrs.value.trim());
+		} else if (
+			name === "property" &&
+			propertyCase !== null &&
+			(attrs.name === "mainworthy" || attrs.name === "casebook")
+		) {
 			const claim = caseAnnotation(attrs.value ?? "");
 			if (claim !== undefined) propertyCase.result.annotation = claim;
 		} else if (ignoredDepth === 0) {
 			const retry =
 				name === "flakyFailure" || name === "rerunFailure" || name === "flakyError" || name === "rerunError";
-			if (name === "system-out" || name === "system-err" || name === "properties" || retry) {
+			if ((name === "system-out" || name === "system-err") && currentCase !== null) {
+				element = {
+					kind: "output",
+					tag,
+					result: currentCase.result,
+					line: "",
+					overflow: false,
+					previous: currentOutput,
+				};
+				currentOutput = element;
+				ignoredDepth++;
+			} else if (name === "system-out" || name === "system-err" || name === "properties" || retry) {
 				if (retry && currentCase !== null) currentCase.retries++;
 				element = { kind: "ignored", tag, propertyCase: name === "properties" ? currentCase : null };
 				ignoredDepth++;
@@ -575,7 +634,7 @@ export function parseJUnit(
 				const file = attrs.file ? normalisePath(attrs.file) : suite?.file;
 				const prefix = keyPart(file || normalisePath(attrs.classname ?? ""));
 				const status = attrs.status?.toLowerCase();
-				const result: ResultIn = {
+				const result: ParsedResult = {
 					test: {
 						key: testKey(prefix, suite, keyPart(stableName(nameText)), prefixDigests, start, warn),
 						name: limited(nameText, 500, "Test name", start),

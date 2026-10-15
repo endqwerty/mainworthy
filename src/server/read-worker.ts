@@ -12,6 +12,7 @@ import { parentPort, workerData } from "node:worker_threads";
 import { z } from "zod";
 import { type ArchiveReply, ArchiveTask } from "./archives.ts";
 import { databasePath, openApp } from "./kernel/app.ts";
+import { diskBlobs } from "./kernel/blobs.ts";
 import { CallerReference } from "./kernel/caller.ts";
 import { Db } from "./kernel/db.ts";
 import type { Reply } from "./ops/registry.ts";
@@ -54,6 +55,7 @@ async function archive(task: z.infer<typeof ArchiveTask>): Promise<void> {
 					const counts = exportArchive(db, (chunk) => writeBytes(fd, encoder.encode(chunk)), {
 						now: task.now,
 						...(task.project === undefined ? {} : { project: task.project }),
+						blobs: diskBlobs(data.dataDir),
 					});
 					reply = { ok: true, counts, owner: null, events: [] };
 				} finally {
@@ -80,7 +82,7 @@ async function archive(task: z.infer<typeof ArchiveTask>): Promise<void> {
 			const target = app;
 			const restored = target.db.savepoint(() => {
 				removeBootstrap(target.db);
-				const counts = importArchive(target.db, fileLines(task.path));
+				const counts = importArchive(target.db, fileLines(task.path), { blobs: target.blobs });
 				return { counts, owner: task.mode === "local" ? bootstrap(target).owner : null };
 			});
 			const events: Extract<z.infer<typeof ArchiveReply>, { ok: true }>["events"] = [];
