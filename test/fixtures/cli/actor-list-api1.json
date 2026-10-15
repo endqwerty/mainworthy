@@ -1,0 +1,25 @@
+{
+	"ok": true,
+	"result": [
+		{
+			"name": "policy",
+			"kind": "rule",
+			"disabled": false,
+			"createdAt": 1792071561525,
+			"grants": []
+		},
+		{
+			"name": "robin",
+			"kind": "human",
+			"disabled": false,
+			"createdAt": 1792071561525,
+			"grants": [
+				{
+					"project": "*",
+					"can": ["read", "record", "produce", "answer", "plan", "admin"]
+				}
+			]
+		}
+	],
+	"seq": null
+}

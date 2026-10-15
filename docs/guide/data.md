@@ -52,14 +52,14 @@ The archive is text, one JSON object per line. The first line describes the arch
 
 ```
 $ head -n 1 mainworthy.ndjson | cut -c 1-80
-{"mainworthy":"archive","format":1,"schema":11,"exportedAt":1791875678677,"tables
+{"mainworthy":"archive","format":1,"schema":12,"exportedAt":1791875678677,"tables
 $ tail -n 1 mainworthy.ndjson
 {"end":true,"rows":67,"sha256":"ca0a5d4d76fe0de47415d595159393df3fad4fc517e4227325a4e5b5ca6b9cf7"}
 ```
 
 You can read it with any tool that reads text, search it with `grep`, and keep it in version control if the data suits that.
 
-The archive holds attachment bytes along with the database records. It leaves out tokens, sessions, passwords, passkeys, invitations and the search index, which Mainworthy rebuilds on import. Tracker delivery requests do not travel, so restoring an archive never sends an issue again. It also leaves out which changes have ended: after an import every change is open, and the questions that were closed when one ended stay closed. If a failure on such a change is reported again, say once more that the change ended (`mainworthy change`). It also leaves out which project is a [demo](./customize.md#a-project-of-demo-data): an imported demo keeps its data and its dates, and accepts no more writes dated in the past. Anyone who reads the archive reads your cases and decisions, so store it as you would the data itself.
+The archive holds attachment bytes along with the database records, and actors, personal and team grants, memberships and team history. It leaves out tokens, sessions, passwords, passkeys, passkey handles, invitations and the search index, which Mainworthy rebuilds on import. Tracker delivery requests do not travel, so restoring an archive never sends an issue again. It also leaves out which changes have ended: after an import every change is open, and the questions that were closed when one ended stay closed. If a failure on such a change is reported again, say once more that the change ended (`mainworthy change`). It also leaves out which project is a [demo](./customize.md#a-project-of-demo-data): an imported demo keeps its data and its dates, and accepts no more writes dated in the past. Anyone who reads the archive reads your cases and decisions, so store it as you would the data itself.
 
 ## Export one project
 
@@ -75,6 +75,7 @@ Case aliases and custom field definitions in the policy travel with the project.
 It preserves their IDs, head hashes and verdicts. It includes actors who acted in the project, signed its decisions,
 or have a grant on it, and the people those actors act on behalf of. The policy's rule actor travels too. Their organisations, project grants and global
 grants travel with them. Other projects, their grants, instance metadata and commands outside the project stay out.
+Relevant teams, their memberships, grants on this project or every project, and history for that scope travel too. Other project team grants and their events stay out.
 Tokens and other sign-in credentials never travel.
 
 The HTTP equivalent is `GET /api/export?project=shop`, with the same instance admin requirement as a full export.
@@ -191,9 +192,9 @@ A fresh instance is one that has only its first project, `scratch`, with no edit
 
 An archive imports into a build with the same archive version as the one that wrote it. The database schema may be newer: an added nullable column can stay compatible, and import fills a missing nullable, non-key column with NULL, even if it has a default. Missing required columns and unknown columns are refused. A migration that adds or removes exported tables, removes or renames exported columns, adds a column with a non-NULL default, or writes exported data changes the archive version. This includes backfills and transforms that leave the table shape unchanged. An archive with a newer version is refused with a message to upgrade; one with an older version is refused because Mainworthy cannot yet transform it. Use matching archive versions on both sides.
 
-Attachments change the archive version to 11. To move older data forward, upgrade the original database and take a fresh export. If only an older archive remains, restore it with a matching older build first, then upgrade that database and export again.
+Attachments change the archive version to 11, and teams, memberships, team grants and their history change it to 12. To move older data forward, upgrade the original database and take a fresh export. If only an older archive remains, restore it with a matching older build first, then upgrade that database and export again.
 
-Explicit empty-report declarations add a column to archived batches in schema 7. Import an older archive with the build that wrote it before upgrading that instance. Upgrading its SQLite database preserves existing records and adds the declaration column.
+Explicit empty-report declarations add a column to archived batches in schema 7. Import an older archive with the build that wrote it before upgrading that instance. Upgrading its SQLite database preserves existing records and adds the new tables and columns.
 
 After an import in server mode, the tokens are gone, because the archive carries none. It carries no password, passkey or invitation either: an archive holds nothing that signs somebody in. The people, agents and pipelines are still there with their grants. Restart the server to sign in: with no owner token configured it prints a new one, and with `MAINWORTHY_OWNER_TOKEN` set it takes that value. Then make new tokens for the others with `mainworthy token new`, and as the owner invite each person again with `mainworthy invite new <name>`, which for a person who exists prints a recovery link. In local mode, Mainworthy refreshes the owner and you can carry on.
 

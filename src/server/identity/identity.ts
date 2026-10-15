@@ -1,4 +1,4 @@
-// Actors, grants and tokens, and who a request is. Owns the tables `orgs`, `actors`, `grants` and `tokens`.
+// Actors, grants and tokens, and who a request is. Owns actors, personal and team grants, memberships, their history, and tokens.
 // There is no seat here: an actor is a free row with capabilities (principle P8).
 //
 // This file is the interface of the module. `sessions.ts` (the table `sessions`), `uses.ts` (when a token or a
@@ -36,6 +36,7 @@ import {
 	sessionOwner,
 	sweepSessions,
 } from "./sessions.ts";
+import { dropTeamMemberships, teamCapabilities, teamsOf } from "./teams.ts";
 import { clearUses, flushUses, forgetNotedAddresses, lastAddress, notedUse, noteUse } from "./uses.ts";
 
 // What the sign-in routes and the operations of a signed-in person need of them.
@@ -59,6 +60,7 @@ export {
 	signInWithPassword,
 	type WhyNot,
 } from "./people.ts";
+export { manageTeams } from "./teams.ts";
 // What the server's start and the archive need of the module's other files.
 export {
 	clearChallenges,
@@ -476,7 +478,7 @@ function ensureActor(db: Db, input: { org: number; kind: ActorKind; name: string
 }
 
 function toActor(db: Db, row: ActorRow, project: number): Actor {
-	const granted: Capability[] = [];
+	const granted: Capability[] = row.kind === "human" ? teamCapabilities(db, row.id, project) : [];
 	for (const grant of db.all(Q.grants, { actor: row.id })) {
 		if (grant.project !== 0 && grant.project !== project) continue;
 		granted.push(...json<Capability[]>(grant.can));
@@ -1100,6 +1102,7 @@ export function forgetActor(app: App, name: string): { forgotten: string; tokens
 	// A disabled actor's sessions are refused anyway. Ending them says why in each row, and keeps them ended if
 	// the row of the actor is ever changed by hand.
 	endSessionsOf(db, row.id, at);
+	dropTeamMemberships(db, row.id);
 	// The same for what a person signed in with and for a link that would still let them in. The handle their
 	// passkeys were filed under is deleted: it named the person to an authenticator, and names nobody now.
 	forgetCredentialsOf(db, row.id, at);
@@ -1116,6 +1119,7 @@ export function listActors(db: Db) {
 		kind: row.kind,
 		disabled: row.disabled_at !== null,
 		createdAt: row.created_at,
+		teams: teamsOf(db, row.id),
 		grants: db.all(Q.grants, { actor: row.id }).map((grant) => ({
 			project: grant.project,
 			can: heldCapabilities(row.kind, json<Capability[]>(grant.can)),

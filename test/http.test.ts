@@ -483,6 +483,43 @@ function readersOf(instance: Instance): Readers {
 	return instance.app.readers;
 }
 
+test("reader threads resolve current team grants from the credential reference", async () => {
+	const instance = bootReaders(1);
+	const pool = readersOf(instance);
+	await pool.ready();
+	const made = await post<{ token: string }>(instance, "/api/admin", {
+		do: "token.create",
+		actor: "team-reader",
+		kind: "human",
+		can: ["read"],
+	});
+	if (!made.body.ok) throw new Error("no token");
+	for (const input of [
+		{ do: "grant.remove", actor: "team-reader" },
+		{ do: "team.create", name: "Readers" },
+		{ do: "team.grant.set", team: "Readers", project: "scratch", can: ["read"] },
+		{ do: "team.member.add", team: "Readers", person: "team-reader" },
+	])
+		expect((await post(instance, "/api/admin", input)).status).toBe(200);
+	const session = sessionOf(
+		instance.app,
+		new Request(`${instance.url}/api/p/scratch/find`, { headers: bearer(made.body.result.token) }),
+		instance.owner,
+	);
+	const caller = session?.reference?.();
+	if (!caller) throw new Error("no reader credential reference");
+	const call = { op: "find", project: "scratch", input: {}, caller, clockOffset: 0 };
+	const fallback = () => {
+		throw new Error("the real reader must run");
+	};
+	expect(await pool.run(call, fallback)).toMatchObject({ ok: true });
+	expect(
+		(await post(instance, "/api/admin", { do: "team.member.remove", team: "Readers", person: "team-reader" })).status,
+	).toBe(200);
+	// The same credential reference resolves the reduced authority in the next snapshot.
+	expect(await pool.run(call, fallback)).toMatchObject({ ok: false, error: { code: "not_found" } });
+});
+
 describe("graceful stop", () => {
 	for (const count of [0, 2]) {
 		test(`a waiting write receives its reply and the event stream ends, with ${count} readers`, async () => {
@@ -2104,6 +2141,14 @@ describe("the surface", () => {
 		await checked("invitation", { do: "create", name: "schema-person" });
 		await checked("invitation", { do: "list" });
 		await checked("invitation", { do: "revoke", id: 1 });
+		await checked("admin", { do: "team.create", name: "Schema team" });
+		await checked("admin", { do: "team.grant.set", team: "Schema team", project: "scratch", can: ["read"] });
+		await checked("admin", { do: "team.member.add", team: "Schema team", person: "schema-person" });
+		await checked("admin", { do: "team.list" });
+		await checked("admin", { do: "actor.list" });
+		await checked("admin", { do: "team.history", team: "Schema team" });
+		await checked("admin", { do: "team.member.remove", team: "Schema team", person: "schema-person" });
+		await checked("admin", { do: "team.grant.remove", team: "Schema team", project: "scratch" });
 		await sweepTrackerReplies(instance, checked, "scratch");
 		await sweepAttachmentReplies(checked);
 		expect([...sweep.seen].sort()).toEqual(OP_LIST.map((op) => op.name).sort());

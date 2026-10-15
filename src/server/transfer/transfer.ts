@@ -56,7 +56,7 @@ type Table = {
  * `passkey_users` holds the handle a person's passkeys are filed under. An export leaves them out and an import
  * empties them, in this order, so a table comes before the one it refers to. This one list serves both, and
  * `test/architecture.test.ts` holds it to the schema: a table of identity that is neither listed here nor one
- * of the three an archive is meant to hold fails there.
+ * of the tables an archive is meant to hold fails there.
  *
  * `change_ends` says which changes have ended (decision 0022), and it does not travel either: a change that
  * arrives in an archive is open, and the questions that were closed when it ended stay closed.
@@ -169,8 +169,15 @@ function projectFilters(db: Db, metadata: readonly Table[], key: string): Map<st
 		.get(key);
 	if (!project) throw new OpError("not_found", `project ${key} not found`);
 	const id = literal(project.id);
-	const filters = new Map<string, string>();
+	const teams = `SELECT team FROM team_grants WHERE project IN (0, ${id}) UNION SELECT team FROM team_events WHERE project IN (0, ${id})`;
+	const filters = new Map<string, string>([
+		["teams", `WHERE id IN (${teams})`],
+		["team_members", `WHERE team IN (${teams})`],
+		["team_grants", `WHERE team IN (${teams}) AND project IN (0, ${id})`],
+		["team_events", `WHERE team IN (${teams}) AND (project IS NULL OR project IN (0, ${id}))`],
+	]);
 	for (const table of metadata) {
+		if (filters.has(table.name)) continue;
 		if (["actors", "orgs", "grants"].includes(table.name)) continue;
 		if (table.name === "meta") filters.set(table.name, "WHERE 0");
 		else if (table.name === "projects") filters.set(table.name, `WHERE id = ${id}`);
@@ -542,6 +549,7 @@ export function removeBootstrap(db: Db): void {
 		first.seq !== 1 ||
 		count("SELECT count(*) AS n FROM commands") !== 0 ||
 		count("SELECT count(*) AS n FROM actors") !== 2 ||
+		count("SELECT count(*) AS n FROM teams") !== 0 ||
 		count("SELECT count(*) AS n FROM policies WHERE version <> 1 OR preset <> 'loose'") !== 0
 	) {
 		throw new OpError("conflict", "import needs a fresh instance; existing projects or user data will not be replaced");

@@ -75,7 +75,7 @@ Set `MAINWORTHY_URL` to your instance's address and `MAINWORTHY_TOKEN` to the to
 $ mainworthy find --json '{"in":"cases","limit":10}'
 ```
 
-The token acts as you, with your current grants on each project. Making it changes no grants.
+The token acts as you, with your current personal and team grants on each project. Making it changes no grants.
 A grant removed from you is removed from every token of yours. Forgetting you stops them all.
 Changing your password does not revoke tokens. Do not give a personal token to an agent or a pipeline that needs its own identity.
 
@@ -98,6 +98,28 @@ A command id prevents a repeated creation. Its secret reply is never saved, and 
 Creation accepts no actor, project, or grants. It requires a password or passkey browser session, or local-owner access.
 A bearer token and a browser signed in with a token cannot make a personal token.
 There is no instance setting to disable personal tokens. An admin who is a person may revoke another person's token by id, as with other credentials.
+
+## Teams
+
+A team is a named set of grants. A person's effective permissions are their own grants plus the grants of every team they belong to. Grants on one project and on every project add up. Removing a person from one team takes away that team's contribution immediately, including requests waiting to run. A personal grant or another team's grant still applies.
+
+In Settings, People, use **New team name** and **Create team**, then choose the team under **Team to manage**. Choose **Grant on**, tick **Team permissions**, and press **Set team grant**. This replaces that team's grant on the chosen project, so tick everything it should keep. **Remove grant** removes just that project grant. Select **Person to add** and press **Add team member**; **Remove member** takes a person out in one step. Each person's row shows their own grants and a separate line for each team's grants.
+
+Only a person who administers the instance manages teams. Agents, pipelines and the policy cannot join. Another admin changes your membership or the grants of a team you belong to. The owner keeps every capability independently and cannot join a team. A team with `admin` on every project lets every member administer the instance.
+
+The API uses the existing `admin` operation, at `POST /api/admin`. The same actions are available through the generated command line:
+
+```
+$ mainworthy admin --do team.create --name Quality
+$ mainworthy admin --do team.grant.set --team Quality --project checkout --can read,produce
+$ mainworthy admin --do team.member.add --team Quality --person sam
+$ mainworthy admin --do team.list
+$ mainworthy admin --do team.history --team Quality
+$ mainworthy admin --do team.member.remove --team Quality --person sam
+$ mainworthy admin --do team.grant.remove --team Quality --project checkout
+```
+
+Leave out `--project` for a grant on every project. `mainworthy actor list` labels grants received from a team. With an older API-version-1 server that omits team membership, the CLI and People still show personal grants. `team.history` lists creation, membership changes and grant changes with the person who made each change, its time, and the affected person or project. Repeating an action with the same `cmd` returns its original reply without adding another event. Forgetting a person removes their memberships and shows their pseudonym in team history. Teams, grants, memberships and this history travel in an [archive](./data.md#export-everything).
 
 ## Make a token
 
@@ -380,13 +402,13 @@ A pipeline with only `record` cannot read cases or the queue either. Add `read` 
 
 - Policy shows who answers under the current policy. See [policy](./policy.md).
 - Tokens makes, lists and revokes tokens. An admin sees the form, and anyone else sees "An admin creates and revokes tokens."
-- People invites a person, lists and revokes open invitations, makes a recovery link, and forgets a person after confirmation. Sign-in details lists and ends each person's sessions and lists and removes their password and passkeys. Issued tokens lists token use and revokes tokens. Only a person who holds `admin` on every project has this section.
+- People invites a person, lists and revokes open invitations, makes a recovery link, manages teams and their grants, and forgets a person after confirmation. Sign-in details lists and ends each person's sessions and lists and removes their password and passkeys. Issued tokens lists token use and revokes tokens. Only a person who holds `admin` on every project has this section.
 - Projects lists the projects you can reach and creates a new one.
 - Connect shows the pipeline and agent connection lines, with the address of this instance.
 - Your sign-in sets or changes your password and adds and removes passkeys. Only a person has this section.
 - Your sessions lists the browsers you are signed in on and ends any of them.
 
-Settings does not show grants. Use `mainworthy actor list` and `actor grant`.
+People shows personal grants and the grants received from each team. To change a personal grant, use `mainworthy actor grant`.
 
 ## See also
 
