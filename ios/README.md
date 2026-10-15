@@ -36,6 +36,32 @@ until**. Run the command again before then. The sign-in is kept in the phone's k
 
 `bun scripts/ios.ts install --dry-run` builds and signs and installs nothing.
 
+## Send it to TestFlight
+
+A paid team can send the app to App Store Connect, and TestFlight installs it on the team's phones with no cable.
+A build from TestFlight opens for 90 days.
+
+1. Once: in [App Store Connect](https://appstoreconnect.apple.com) accept the agreements it shows, then Apps, +,
+   New App, with the bundle ID that `ios/Config/Local.xcconfig` names (`com.mainworthy.app.` and the team's id).
+   In the app's TestFlight tab, add yourself to an internal group.
+2. Send a build:
+
+	```
+	$ bun scripts/ios.ts upload
+	```
+
+3. Apple processes it for a few minutes. Then the TestFlight app on the phone offers it.
+
+The command builds for release, signs for distribution with the Apple ID in Xcode under Settings, Accounts, and
+uploads. The first time, Xcode makes the team's distribution certificate. The build number is the minute it was
+built, in UTC (`202610141530`): App Store Connect takes each number once and wants each one higher than the last.
+The app's version is `MARKETING_VERSION` in `Config/Base.xcconfig`. `Info.plist` answers the question about
+encryption, and `App/PrivacyInfo.xcprivacy` says what the app keeps and why, so App Store Connect asks neither.
+
+`bun scripts/ios.ts upload --dry-run` builds and signs the same and writes the `.ipa` to the cache instead of
+sending it. Testers outside the team need Apple's beta review first, and issue #210 says what else is left before the
+app suits people who do not run their own instance.
+
 ## Work on it
 
 | Command | What it does | Time |
@@ -46,6 +72,7 @@ until**. Run the command again before then. The sign-in is kept in the phone's k
 | `bun scripts/ios.ts gen` | Writes the Swift that is made from the TypeScript | 1 s |
 | `bun scripts/ios.ts serve` | Starts the tests' Mainworthy and prints how to sign in, to try the app by hand | |
 | `bun scripts/ios.ts project` | Writes `ios/Mainworthy.xcodeproj`, to open in Xcode | 1 s |
+| `bun scripts/ios.ts upload [--dry-run]` | Builds for release and sends it to TestFlight ([above](#send-it-to-testflight)) | 35 s and the upload |
 
 Builds go to `~/.cache/mainworthy-ios`, never into the repository: `test/architecture.test.ts` reads every file
 here. There is one simulator, named Mainworthy, so one `uitest` runs at a time on a machine: a second one,

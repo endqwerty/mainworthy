@@ -86,6 +86,11 @@ command, `bun scripts/ios.ts install`, and the sign-in survives it. The team tha
 certificate on the Mac into a file that is not committed (`ios/Config/Local.xcconfig`): the repository is public.
 The bundle identifier ends in the team's id, because an identifier belongs to one team for good.
 
+*2026-10-14:* the owner's team became a paid one, and `bun scripts/ios.ts upload` sends the app to TestFlight (issue
+#210). It is the same build signed for distribution, with the same bundle identifier, from a Mac whose Xcode has the
+Apple ID: an upload from CI would need an App Store Connect key, and nobody needs it yet. The App Store, and
+testers outside the team, stay deferred with that issue.
+
 **The Xcode project is not committed.** `ios/project.yml` is the project, and XcodeGen writes
 `Mainworthy.xcodeproj` from it before every build. A project file is hard to edit by hand and to merge.
 

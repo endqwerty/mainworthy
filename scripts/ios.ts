@@ -7,6 +7,7 @@
 //   bun scripts/ios.ts build                  build the app for a simulator
 //   bun scripts/ios.ts uitest [filter]        the app in a simulator, driven through its screens
 //   bun scripts/ios.ts install [--dry-run]    build, sign and install on the iPhone that is connected
+//   bun scripts/ios.ts upload [--dry-run]     build for the App Store and send it to App Store Connect, for TestFlight
 //
 // What is built goes to ~/.cache/mainworthy-ios, never into the repository: a test here reads every file in it.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -173,7 +174,10 @@ async function simulator(): Promise<string> {
 async function xcodebuild(args: string[], env: Record<string, string> = {}): Promise<void> {
 	const log = join(CACHE, "xcodebuild.log");
 	mkdirSync(CACHE, { recursive: true });
-	const built = [...args, "-project", PROJECT, "-scheme", "Mainworthy", `MAINWORTHY_COMMIT=${await commit()}`];
+	// An export takes an archive that is built already, and refuses a project or a scheme.
+	const built = args.includes("-exportArchive")
+		? args
+		: [...args, "-project", PROJECT, "-scheme", "Mainworthy", `MAINWORTHY_COMMIT=${await commit()}`];
 	const done = await ran("xcodebuild", built, {
 		env,
 		quiet: true,
@@ -181,7 +185,9 @@ async function xcodebuild(args: string[], env: Record<string, string> = {}): Pro
 	writeFileSync(log, done.output);
 	const shown = done.output
 		.split("\n")
-		.filter((line) => /error: |Test Case .* (passed|failed)|: error|\*\* [A-Z ]+ \*\*|Executed \d+ tests?,/.test(line));
+		.filter((line) =>
+			/error: |Test Case .* (passed|failed)|: error|\*\* [A-Z ]+ \*\*|Executed \d+ tests?,|^Uploaded /.test(line),
+		);
 	console.log([...new Set(shown)].join("\n"));
 	if (done.status !== 0) stop(`xcodebuild failed (exit ${done.status}); all it printed is in ${log}`);
 }
@@ -346,13 +352,35 @@ async function phone(named: string | undefined): Promise<Phone> {
 	}
 }
 
+/** Writes `ios/Config/Local.xcconfig` from this Mac's development certificate, unless it is there already. */
+async function local(): Promise<void> {
+	if (existsSync(LOCAL)) return;
+	const id = await team();
+	writeFileSync(
+		LOCAL,
+		[
+			"// Written by `bun scripts/ios.ts` from the development certificate on this Mac. Not committed.",
+			`DEVELOPMENT_TEAM = ${id}`,
+			"// A bundle identifier belongs to one team for good, so this one ends in the team's own id.",
+			`MAINWORTHY_BUNDLE_ID = com.mainworthy.app.${id}`,
+			"// A paid team can tie the app to mainworthy.com, so the sign-in screen is offered its saved logins:",
+			"// CODE_SIGN_ENTITLEMENTS = App/Mainworthy.entitlements",
+			"",
+		].join("\n"),
+	);
+	console.log("wrote ios/Config/Local.xcconfig with the team of this Mac's development certificate");
+}
+
+/** A setting of `ios/Config/Local.xcconfig` that is not commented out. */
+function setting(name: string): string | undefined {
+	return readFileSync(LOCAL, "utf8").match(new RegExp(`^${name}\\s*=\\s*(\\S+)`, "m"))?.[1];
+}
+
 /**
  * The app as Apple names it, `<team>.<bundle identifier>`, from Local.xcconfig, where that file signs it with the
  * entitlements that tie it to mainworthy.com (a paid team only, `ios/Config/Base.xcconfig`). Null otherwise.
  */
 function appleApp(): string | null {
-	const text = readFileSync(LOCAL, "utf8");
-	const setting = (name: string) => text.match(new RegExp(`^${name}\\s*=\\s*(\\S+)`, "m"))?.[1];
 	if (!setting("CODE_SIGN_ENTITLEMENTS")) return null;
 	const team = setting("DEVELOPMENT_TEAM");
 	const bundle = setting("MAINWORTHY_BUNDLE_ID");
@@ -372,22 +400,7 @@ async function install(args: string[]): Promise<void> {
 	await needMac();
 	const dryRun = args.includes("--dry-run");
 	const named = args.includes("--device") ? args[args.indexOf("--device") + 1] : undefined;
-	if (!existsSync(LOCAL)) {
-		const id = await team();
-		writeFileSync(
-			LOCAL,
-			[
-				"// Written by `bun scripts/ios.ts install` from the development certificate on this Mac. Not committed.",
-				`DEVELOPMENT_TEAM = ${id}`,
-				"// A bundle identifier belongs to one team for good, so this one ends in the team's own id.",
-				`MAINWORTHY_BUNDLE_ID = com.mainworthy.app.${id}`,
-				"// A paid team can tie the app to mainworthy.com, so the sign-in screen is offered its saved logins:",
-				"// CODE_SIGN_ENTITLEMENTS = App/Mainworthy.entitlements",
-				"",
-			].join("\n"),
-		);
-		console.log("wrote ios/Config/Local.xcconfig with the team of this Mac's development certificate");
-	}
+	await local();
 	await project();
 	const appId = appleApp();
 	const built = join(CACHE, "phone");
@@ -427,6 +440,100 @@ async function install(args: string[]): Promise<void> {
 	);
 }
 
+/**
+ * The build number of an upload: the minute it was built, in UTC, as `202610141530`. App Store Connect takes each
+ * number once for a version and wants each one higher than the last, so it is not the commit: the same commit
+ * can be sent twice, and a branch can be behind another.
+ */
+function buildNumber(now = new Date()): string {
+	return now.toISOString().slice(0, 16).replace(/\D/g, "");
+}
+
+/**
+ * Builds the app for the App Store, signs it for distribution and sends it to App Store Connect, where TestFlight
+ * offers it to the team's testers. A paid team only, with the app made in App Store Connect first
+ * (`ios/README.md`). Xcode signs in with the Apple ID under Settings, Accounts, and makes the distribution
+ * certificate and profile the first time. With --dry-run the signed app is written to a file and nothing is sent.
+ */
+async function upload(args: string[]): Promise<void> {
+	await needMac();
+	const dryRun = args.includes("--dry-run");
+	await local();
+	await project();
+	const teamId = setting("DEVELOPMENT_TEAM") ?? stop("ios/Config/Local.xcconfig names no DEVELOPMENT_TEAM");
+	const number = buildNumber();
+	const out = join(CACHE, "upload");
+	rmSync(out, { recursive: true, force: true });
+	const archive = join(out, "Mainworthy.xcarchive");
+	console.log(`building ${number} for the App Store`);
+	await xcodebuild([
+		"archive",
+		"-configuration",
+		"Release",
+		"-destination",
+		"generic/platform=iOS",
+		"-archivePath",
+		archive,
+		"-derivedDataPath",
+		join(CACHE, "release"),
+		"-allowProvisioningUpdates",
+		`CURRENT_PROJECT_VERSION=${number}`,
+	]);
+	const options = join(out, "ExportOptions.plist");
+	writeFileSync(
+		options,
+		`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>destination</key>
+	<string>${dryRun ? "export" : "upload"}</string>
+	<key>teamID</key>
+	<string>${teamId}</string>
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
+</dict>
+</plist>
+`,
+	);
+	try {
+		await xcodebuild([
+			"-exportArchive",
+			"-archivePath",
+			archive,
+			"-exportOptionsPlist",
+			options,
+			"-exportPath",
+			join(out, "export"),
+			"-allowProvisioningUpdates",
+		]);
+	} catch (error) {
+		// xcodebuild's one line says it could not download the app's information; the reason is in the log.
+		if (error instanceof Stop && readFileSync(join(CACHE, "xcodebuild.log"), "utf8").includes("App record with"))
+			stop(
+				`App Store Connect has no app ${setting("MAINWORTHY_BUNDLE_ID")}: make it once at https://appstoreconnect.apple.com, Apps, +, New App, with that bundle ID, then run this again`,
+			);
+		throw error;
+	}
+	if (dryRun) {
+		console.log(
+			`built and signed for the App Store: ${join(out, "export", "Mainworthy.ipa")}\nnothing was sent (--dry-run)`,
+		);
+		return;
+	}
+	console.log(
+		[
+			`sent build ${number} to App Store Connect.`,
+			"Apple processes it for a few minutes, then TestFlight offers it to the app's internal testers.",
+			"The first build of a version asks you there about export compliance unless Info.plist answers it (it does).",
+		].join("\n"),
+	);
+}
+
 const COMMANDS: Record<string, (args: string[]) => void | Promise<void>> = {
 	gen: () => gen(),
 	serve: () => serve(),
@@ -435,6 +542,7 @@ const COMMANDS: Record<string, (args: string[]) => void | Promise<void>> = {
 	build: () => build(),
 	uitest: (args) => uitest(args[0]),
 	install: (args) => install(args),
+	upload: (args) => upload(args),
 };
 
 const [command = "", ...args] = process.argv.slice(2);
