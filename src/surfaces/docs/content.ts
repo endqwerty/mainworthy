@@ -27,6 +27,7 @@ import index from "../../../docs/guide/index.md" with { type: "text" };
 import iphone from "../../../docs/guide/iphone.md" with { type: "text" };
 import keyboard from "../../../docs/guide/keyboard.md" with { type: "text" };
 import policy from "../../../docs/guide/policy.md" with { type: "text" };
+import privacy from "../../../docs/guide/privacy.md" with { type: "text" };
 import quickstart from "../../../docs/guide/quickstart.md" with { type: "text" };
 import reportResults from "../../../docs/guide/report-results.md" with { type: "text" };
 import runs from "../../../docs/guide/runs.md" with { type: "text" };
@@ -74,6 +75,7 @@ export const PAGES: Readonly<Record<DocSlug, string>> = {
 	iphone,
 	customize,
 	policy,
+	privacy,
 	access,
 	configuration,
 	data,

@@ -231,8 +231,11 @@ export function docsHandler(version: string): (req: Request) => Promise<Response
 	};
 }
 
-/** The routes to hand to `serve` as `open`. */
-export function docsRoutes(version: string): Record<string, (req: Request) => Promise<Response>> {
+/**
+ * The routes to hand to `serve` as `open`. `/privacy` is the address the App Store listing gives for the privacy
+ * policy, which is a page of the documentation.
+ */
+export function docsRoutes(version: string): Record<string, (req: Request) => Response | Promise<Response>> {
 	const handler = docsHandler(version);
-	return { [DOCS_ROOT]: handler, [`${DOCS_ROOT}/*`]: handler };
+	return { [DOCS_ROOT]: handler, [`${DOCS_ROOT}/*`]: handler, "/privacy": () => redirect(docUrl("privacy")) };
 }

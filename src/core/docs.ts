@@ -32,6 +32,7 @@ const SECTIONS = [
 			{ slug: "access", title: "People, agents and pipelines" },
 			{ slug: "configuration", title: "Configuration" },
 			{ slug: "data", title: "Your data" },
+			{ slug: "privacy", title: "Privacy" },
 		],
 	},
 	{

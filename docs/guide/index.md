@@ -39,6 +39,7 @@ Mainworthy keeps your test cases, the results that people, pipelines and agents 
 - [People, agents and pipelines](./access.md). Decide who may do what in each project, give a person, an agent or a pipeline a token, and take it away again. Making tokens and changing grants needs an instance admin, who holds `admin` on every project. Some of it only a person may do, and a token for a person who already exists is made by that person or by the owner.
 - [Configuration](./configuration.md). Run a Mainworthy instance on your machine or on a server, and set where it listens, where it keeps its data and who owns it. The server reads its settings from environment variables. There is no configuration file.
 - [Your data](./data.md). Find your data, export it to a text file, back it up and move it to another machine. Your cases, results and decisions are yours, and you can take them out at any time.
+- [Privacy](./privacy.md). The privacy of your data, and it is your data, not ours, is a big deal to us. This policy says what Mainworthy keeps and why, how it is handled, and your rights with respect to it. We never sell your data, and we keep as little of it as Mainworthy can work with.
 
 ### Reference
 

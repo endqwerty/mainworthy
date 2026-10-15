@@ -233,6 +233,8 @@ describe("the site", () => {
 			["/docs/index", "/docs"],
 			["/docs/policy.md", "/docs/policy"],
 			["/docs/policy/", "/docs/policy"],
+			// The address the App Store listing gives for the privacy policy.
+			["/privacy", "/docs/privacy"],
 		]) {
 			const response = await get(from ?? "");
 			expect(response.status, from).toBe(308);
