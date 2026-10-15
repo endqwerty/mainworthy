@@ -1,14 +1,16 @@
 import { z } from "zod";
-import { SameCodeEvidence } from "../../core/flaky.ts";
+import { quarantineExitText, SameCodeEvidence } from "../../core/flaky.ts";
 import { newStepId } from "../../core/ids.ts";
 import { CaseBody, emptyBody } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
+import { QuarantineEdit } from "../../core/ops.ts";
 import { parseOutline } from "../../core/outline.ts";
 import { useQueryOp } from "../lib/data.ts";
 import { proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { DiffView, ProducerGlyph } from "../ui/index.tsx";
+import { QuarantineList } from "../ui/quarantine.tsx";
 
 /** Only a recognisable assertion gets a comparison; an arbitrary log stays verbatim. */
 export function assertionComparison(message: string): { expected: string; observed: string } | null {
@@ -48,6 +50,7 @@ export const FindingEvidence = z.object({
 });
 const AdoptEvidence = z.object({ proposal: z.string(), author: z.string(), reason: z.string().nullable() });
 const ProposalEdit = z.discriminatedUnion("op", [
+	QuarantineEdit,
 	z.object({ op: z.literal("create"), body: CaseBody, folder: z.string(), tags: z.array(z.string()) }),
 	z.object({
 		op: z.literal("edit"),
@@ -178,6 +181,14 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 											</p>
 										))}
 									</div>
+								);
+							case "quarantine":
+								return (
+									<p key={editKey}>
+										{edit.test}:{" "}
+										{edit.exit === null ? "End quarantine" : `Quarantine. Exit rule: ${quarantineExitText(edit.exit)}`}.
+										A person must decide with a reason.
+									</p>
 								);
 							case "policy":
 								return (
@@ -389,6 +400,7 @@ export function QuestionEvidence({ question, full }: { question: QuestionItem; f
 							</li>
 						))}
 					</ul>
+					{full && <QuarantineList testRef={evidence.tests[0]?.t ?? ""} />}
 				</>
 			);
 		}

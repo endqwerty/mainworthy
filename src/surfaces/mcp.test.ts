@@ -240,6 +240,26 @@ test("report tools offer code targets and planned runs without direct build targ
 	expect(validate({ run: "R-1", results }).valid).toBe(true);
 });
 
+test("quarantine edits stay available in the registry and out of MCP discovery", () => {
+	const tool = mcpTools().find((tool) => tool.name === "propose");
+	const op = MCP_OPS.find((op) => op.name === "propose");
+	if (!tool || !op) throw new Error("missing propose");
+	const input = {
+		edits: [{ op: "quarantine", test: "T-1", base: null, exit: { kind: "person" } }],
+		reason: "Unreliable checkout",
+	};
+	expect(op.input.safeParse(input).success).toBe(true);
+	expect(JSON.stringify(tool.inputSchema)).not.toContain('"quarantine"');
+	const { properties, required, ...base } = tool.inputSchema;
+	const schema: Record<string, unknown> = {
+		...base,
+		...(properties ? { properties } : {}),
+		...(required ? { required } : {}),
+	};
+	const validator = new AjvJsonSchemaValidator().getValidator(schema);
+	expect(validator(input).valid).toBe(false);
+});
+
 test("schema trims preserve the registry's constraints and union choices", () => {
 	const validator = new AjvJsonSchemaValidator();
 	const compile = (schema: ReturnType<typeof mcpTools>[number]["inputSchema"]) => {

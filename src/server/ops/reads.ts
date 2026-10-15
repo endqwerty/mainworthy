@@ -2,6 +2,7 @@
 // the same reads serve the web UI and an agent whose every token is counted (decision 0006).
 import type { z } from "zod";
 import { diffBodies, summariseDiff } from "../../core/diff.ts";
+import { QuarantineExit } from "../../core/flaky.ts";
 import { printCase } from "../../core/markdown.ts";
 import type { CaseBody, MethodKind } from "../../core/model.ts";
 import {
@@ -21,7 +22,6 @@ import {
 	TimelineInput,
 } from "../../core/ops.ts";
 import { REPLIES } from "../../core/replies.ts";
-import type { Tally } from "../../core/runs.ts";
 import { toItem, toItemFor } from "../decisions/decisions.ts";
 import {
 	ledgerPage,
@@ -55,6 +55,7 @@ import {
 } from "../evidence/evidence.ts";
 import { findingsOfCase, reviewBasis, reviewsAtVersion, reviewsOfCase } from "../evidence/findings.ts";
 import { sameCodeEvidence } from "../evidence/flaky.ts";
+import { effectiveQuarantine, quarantineEntries, quarantineEntry } from "../evidence/quarantine.ts";
 import { deployments } from "../evidence/releases.ts";
 import { actorLabel } from "../identity/identity.ts";
 import { type Ctx, findCommand, UNFINISHED } from "../kernel/ctx.ts";
@@ -211,7 +212,8 @@ export function runView(ctx: Ctx, run: RunRow): Record<string, unknown> {
 		verdict: status.verdict,
 		reason: status.reason,
 		stale: status.stale,
-		tally: json<Tally>(run.tally),
+		tally: status.tally,
+		...(status.quarantined ? { quarantined: status.quarantined } : {}),
 		open: status.open,
 		accepts: json(run.accepts),
 		require: json(run.require),
@@ -227,6 +229,7 @@ export function runView(ctx: Ctx, run: RunRow): Record<string, unknown> {
 							name: test?.name ?? null,
 							file: test?.file ?? null,
 							case: linked ? caseRef(linked) : null,
+							quarantine: test ? quarantineView(ctx, test.id) : null,
 							cause: row.signature !== null ? (signatureById(ctx.db, row.signature)?.text ?? null) : null,
 							flipped: row.flipped === 1,
 						};
@@ -299,6 +302,8 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 					return { op: edit.op, name: edit.name, archive: edit.archive };
 				case "policy":
 					return { op: edit.op, preset: edit.policy.preset, clauses: edit.policy.clauses.length };
+				case "quarantine":
+					return edit;
 				default: {
 					const _exhaustive: never = edit;
 					return _exhaustive;
@@ -338,6 +343,19 @@ function resultView(ctx: Ctx, row: ResultRow): Record<string, unknown> {
 	};
 }
 
+function quarantineView(ctx: Ctx, test: number) {
+	const entry = quarantineEntry(ctx.db, ctx.project.id, test);
+	return entry
+		? {
+				decision: entry.decision,
+				reason: entry.reason,
+				by: who(ctx, entry.actor).name,
+				since: entry.at,
+				exit: entry.exit_rule === null ? null : QuarantineExit.parse(json<unknown>(entry.exit_rule)),
+				active: effectiveQuarantine(ctx.db, entry, ctx.now),
+			}
+		: null;
+}
 export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 	return input.refs.map((text) => {
 		const kind = text.trim().slice(0, 2).toUpperCase();
@@ -359,6 +377,7 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 				file: test.file,
 				case: linked ? caseRef(linked) : null,
 				flips: flipCount(ctx.db, test.project, test.id),
+				quarantine: quarantineView(ctx, test.id),
 				sameCode: sameCodeEvidence(ctx.db, {
 					project: test.project,
 					test: test.id,
@@ -522,6 +541,37 @@ export function find(ctx: Ctx, input: FindInput): Found {
 			};
 		}
 		case "tests": {
+			if (input.state === "quarantined") {
+				const active = quarantineEntries(ctx.db, project)
+					.filter((entry) => effectiveQuarantine(ctx.db, entry, ctx.now))
+					.flatMap((entry) => {
+						const test = testById(ctx.db, entry.test);
+						return test ? [test] : [];
+					})
+					.filter(
+						(test) =>
+							(!input.text || `${test.key} ${test.name}`.toLowerCase().includes(input.text.toLowerCase())) &&
+							(!input.unlinked || test.case_id === null),
+					);
+				const after = active.filter((test) => !input.cursor || test.id < Number(input.cursor));
+				const page = after.slice(0, limit);
+				return {
+					count: active.length,
+					items: page.map((test) => {
+						const linked = test.case_id === null ? null : caseById(ctx.db, test.case_id);
+						return {
+							ref: testRef(test),
+							kind: test.kind,
+							name: test.name,
+							file: test.file,
+							key: test.key,
+							case: linked ? caseRef(linked) : null,
+							quarantine: quarantineView(ctx, test.id),
+						};
+					}),
+					cursor: after.length > limit ? String(page.at(-1)?.id) : null,
+				};
+			}
 			const rows = listTests(ctx.db, {
 				project,
 				unlinked: input.unlinked ?? false,
@@ -541,6 +591,7 @@ export function find(ctx: Ctx, input: FindInput): Found {
 						file: test.file,
 						key: test.key,
 						case: linked ? caseRef(linked) : null,
+						quarantine: quarantineView(ctx, test.id),
 					};
 				}),
 				cursor: rows.length > limit ? String(page.at(-1)?.id ?? "") : null,

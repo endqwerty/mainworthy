@@ -47,6 +47,18 @@ const body = `{
 }`;
 
 const fixtures: Record<string, Row[]> = {
+	quarantines: [
+		{
+			project: 23,
+			test: 501,
+			decision: 401,
+			actor: 71,
+			reason: "Intermittent checkout",
+			exit_rule: '{"kind":"passes","count":3}',
+			at: time,
+			seq: 1,
+		},
+	],
 	attachments: [
 		{
 			id: 901,

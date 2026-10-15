@@ -53,6 +53,7 @@ import {
 	targetsWithCommit,
 	testById,
 } from "../evidence/evidence.ts";
+import { quarantineCaseIds, quarantineEntries, quarantineLookup } from "../evidence/quarantine.ts";
 import { buildWhat } from "../evidence/releases.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
@@ -105,6 +106,13 @@ export type SlotRow = {
 };
 
 const Q = {
+	dependencies: sql<{ run: number }, { decision: number }>("SELECT decision FROM depends_on WHERE run=$run"),
+	quarantineTestRuns: sql<{ test: number }, { id: number }>(
+		"SELECT DISTINCT run AS id FROM run_tests WHERE test=$test",
+	),
+	quarantineCaseRuns: sql<{ caseId: number }, { id: number }>(
+		"SELECT DISTINCT run AS id FROM slots WHERE case_id=$caseId",
+	),
 	emptyChangeRuns: sql<{ project: number }, { id: number }>(
 		`SELECT id FROM runs WHERE project = $project AND origin = 'change'
 		 AND json_extract(tally, '$.pass') + json_extract(tally, '$.excused') = 0`,
@@ -787,12 +795,13 @@ export type Unexplained = { signature: number; target: number; scope: string };
  * The failures a run shows that no decision explains, one per cause and target. Read when a run is recomputed, to
  * make sure each of them has a question somebody can answer.
  */
-export function unexplainedShown(db: Db, run: RunRow): Unexplained[] {
+export function unexplainedShown(db: Db, run: RunRow, now: number): Unexplained[] {
+	const quarantined = quarantineLookup(db, run.project, now);
 	const shown = new Map<string, Unexplained>();
 	const note = (result: { id: number; signature: number | null; target: number }): void => {
 		if (result.signature === null) return;
 		const scope = scopeIn(db, run, result.target);
-		if (!excuseForResult(db, { ...result, project: run.project }, scope))
+		if (!quarantined(result.id) && !excuseForResult(db, { ...result, project: run.project }, scope))
 			shown.set(`${result.signature}:${result.target}`, { signature: result.signature, target: result.target, scope });
 	};
 	if (run.origin === "change") {
@@ -1146,7 +1155,13 @@ function baseRunOf(db: Db, target: TargetRow): RunRow | null {
  * What a run shows right now: its tally, the causes it shows with no excuse in force, and the decisions its
  * excused failures rest on. Read from the results and the excuses; nothing is stored.
  */
-function count(db: Db, run: RunRow): { tally: Tally; failing: Set<string>; depends: Map<number, number | null> } {
+function count(
+	db: Db,
+	run: RunRow,
+	now: number,
+): { tally: Tally; failing: Set<string>; depends: Map<number, number | null>; quarantined: number } {
+	let quarantined = 0;
+	const quarantineFor = quarantineLookup(db, run.project, now);
 	const tally: Tally = emptyTally();
 	const failing = new Set<string>();
 	const depends = new Map<number, number | null>();
@@ -1163,6 +1178,13 @@ function count(db: Db, run: RunRow): { tally: Tally; failing: Set<string>; depen
 		return found;
 	};
 	const classify = (signature: number | null, target: number, n: number, result: number): void => {
+		const quarantine = quarantineFor(result);
+		if (quarantine) {
+			tally.excused += n;
+			quarantined += n;
+			depends.set(quarantine.decision, quarantine.expires_at);
+			return;
+		}
 		if (signature === null) {
 			tally.unexplained += n;
 			return;
@@ -1198,11 +1220,15 @@ function count(db: Db, run: RunRow): { tally: Tally; failing: Set<string>; depen
 		for (const slot of db.all(Q.failingSlots, { run: run.id })) {
 			const disputed = slot.state === "disputed";
 			const causes = failingFillsOf(db, slot.id);
-			const excuses = causes.map((fill) =>
-				disputed
-					? excuseForDisputedSlot(db, slot.id, fill.id, run.id)
-					: excuseForResult(db, { ...fill, project: run.project }, scopeFor(fill.target)),
+			const excuses = causes.map(
+				(fill) =>
+					quarantineFor(fill.id) ??
+					(disputed
+						? excuseForDisputedSlot(db, slot.id, fill.id, run.id)
+						: excuseForResult(db, { ...fill, project: run.project }, scopeFor(fill.target))),
 			);
+			const quarantinedCauses = excuses.filter((excuse) => excuse && "quarantined" in excuse).length;
+			quarantined += quarantinedCauses;
 			const open = causes.filter((_, i) => !excuses[i]);
 			for (const fill of open) {
 				if (fill.signature === null) continue;
@@ -1216,7 +1242,7 @@ function count(db: Db, run: RunRow): { tally: Tally; failing: Set<string>; depen
 			else if (open.length > 0 || causes.length === 0) {
 				if (disputed) tally.disputed += 1;
 				else tally.unexplained += 1;
-			} else if (disputed) tally.pass += 1;
+			} else if (disputed && quarantinedCauses === 0) tally.pass += 1;
 			else tally.excused += 1;
 		}
 	}
@@ -1236,11 +1262,11 @@ function count(db: Db, run: RunRow): { tally: Tally; failing: Set<string>; depen
 		}
 		tally.missing += jobs.filter((job) => !reported.has(job)).length;
 	}
-	return { tally, failing, depends };
+	return { tally, failing, depends, quarantined };
 }
 
 /** The causes a run shows with no excuse in force, by `causeKey`: what an open failure question is about. */
-export const unexplainedIn = (db: Db, run: RunRow): Set<string> => count(db, run).failing;
+export const unexplainedIn = (db: Db, run: RunRow, now: number): Set<string> => count(db, run, now).failing;
 
 /**
  * Recomputes a run's tally, the questions blocking it and its verdict from the facts, and stores them. Called in
@@ -1255,7 +1281,7 @@ export function retally(
 ): Retallied {
 	const run = runById(ctx.db, runId);
 	if (!run) throw new Error(`run ${runId} is missing`);
-	const { tally, failing, depends } = count(ctx.db, run);
+	const { tally, failing, depends } = count(ctx.db, run, ctx.now);
 
 	// The questions whose answers this run is waiting for. A failure question is one of them exactly when this run
 	// shows its cause unexplained: the run is blocked by that failure whatever the policy says a question may hold,
@@ -1625,10 +1651,28 @@ export const nothingCounted = (): GateStatus => ({
 	stale: false,
 });
 
+export function quarantineRuns(db: Db, project: number, tests?: ReadonlySet<number>): Set<number> {
+	const ids = new Set<number>();
+	for (const entry of quarantineEntries(db, project)) {
+		if (tests && !tests.has(entry.test)) continue;
+		for (const row of db.all(Q.quarantineTestRuns, { test: entry.test })) ids.add(row.id);
+		const test = testById(db, entry.test);
+		const cases = new Set(quarantineCaseIds(db, project, entry.test));
+		if (test?.case_id != null) cases.add(test.case_id);
+		for (const caseId of cases) for (const row of db.all(Q.quarantineCaseRuns, { caseId })) ids.add(row.id);
+	}
+	return ids;
+}
 export function gateOf(ctx: Ctx, run: RunRow): GateStatus {
-	const tally = json<Tally>(run.tally);
+	const entries = new Set(quarantineEntries(ctx.db, run.project).map((entry) => entry.decision));
+	const affected =
+		entries.size > 0 && ctx.db.all(Q.dependencies, { run: run.id }).some((row) => entries.has(row.decision));
+	const current = affected ? count(ctx.db, run, ctx.now) : null;
+	const tally = current?.tally ?? json<Tally>(run.tally);
 	const open = json<string[]>(run.blocking);
-	const expired = run.next_expiry !== null && run.next_expiry <= ctx.now;
+	const expired = current
+		? [...current.depends.values()].some((at) => at !== null && at <= ctx.now)
+		: run.next_expiry !== null && run.next_expiry <= ctx.now;
 	const facts = {
 		tally,
 		blocking: open.length,
@@ -1640,7 +1684,12 @@ export function gateOf(ctx: Ctx, run: RunRow): GateStatus {
 	return {
 		run: runRef(run),
 		verdict: now,
-		reason: explainVerdict(facts),
+		reason:
+			explainVerdict(facts) +
+			(current?.quarantined
+				? `; ${current.quarantined} quarantined ${current.quarantined === 1 ? "failure" : "failures"} recorded, not blocking`
+				: ""),
+		...(current?.quarantined ? { quarantined: current.quarantined } : {}),
 		tally: { ...tally },
 		open,
 		url: null,

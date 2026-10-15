@@ -117,7 +117,8 @@ export type Resolved =
 	| { op: "restore"; caseId: number; to: number; body: CaseBody }
 	| { op: "folder"; id: number | null; name: string | null; parent: FolderTarget | null | undefined; archive: boolean }
 	| { op: "cover"; caseId: number; key: string; title: string | null; on: boolean }
-	| { op: "policy"; base: number; policy: Policy };
+	| { op: "policy"; base: number; policy: Policy }
+	| Extract<Edit, { op: "quarantine" }>;
 
 const Q = {
 	caseByNo: sql<{ project: number; no: number }, CaseRow>("SELECT * FROM cases WHERE project = $project AND no = $no"),
@@ -455,6 +456,8 @@ export type Sealed = {
  * carries, both sides kept, for its author to resolve (decision 0004).
  */
 export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string | undefined }): Sealed | null {
+	if (input.edits.some((edit) => edit.op === "quarantine") && (input.edits.length !== 1 || !input.reason?.trim()))
+		throw invalid("a quarantine edit stands alone and needs a reason");
 	const index = folderIndex(ctx.db, ctx.project.id);
 	const resolved: Resolved[] = [];
 	const conflicts: Sealed["conflicts"] = [];
@@ -583,6 +586,9 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 				resolved.push({ op: "cover", caseId: row.id, key, title: edit.title ?? null, on: edit.on });
 				break;
 			}
+			case "quarantine":
+				resolved.push(edit);
+				break;
 			case "policy": {
 				if (resolved.some((edit) => edit.op === "policy")) throw invalid("send only one policy edit per proposal");
 				const current = currentPolicy(ctx.db, ctx.project.id);
@@ -610,6 +616,7 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 	const facts = [`author:${ctx.actor.kind}`, ...scopeFacts(ctx.db, ctx.project.id, resolved)];
 	if (conflicts.length > 0) facts.push("conflict");
 	if (resolved.some((r) => r.op === "policy")) facts.push("policy");
+	if (resolved.some((r) => r.op === "quarantine")) facts.push("quarantine");
 	const no = ctx.nextNo("proposal");
 	const { lastId } = ctx.db.run(Q.insertProposal, {
 		project: ctx.project.id,
@@ -692,6 +699,7 @@ export function scopeFacts(db: Db, project: number, edits: readonly Resolved[]):
 				break;
 			}
 			case "policy":
+			case "quarantine":
 				break;
 			default: {
 				const _exhaustive: never = edit;
@@ -888,6 +896,8 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 				ctx.touched.add(caseRef(mustRow(edit.caseId)));
 				break;
 			}
+			case "quarantine":
+				throw invalid("quarantine is applied by its decision handler");
 			case "policy": {
 				const current = currentPolicy(ctx.db, ctx.project.id);
 				if (edit.base === undefined)

@@ -338,3 +338,10 @@ It makes no certification claim.
 - [People, agents and pipelines](./access.md) for who holds `answer` and `admin`.
 - [Let an agent in](./agents.md#what-agent-work-is-worth) for what an agent's work is worth under each preset.
 - [Decide in the queue](./decide.md) for answering a question.
+
+
+Quarantine is separate from the flaky hold and detector thresholds. Its proposal
+always asks a person with answer authority and a reason, including under `loose`.
+The quarantine list appears below the detector settings. See
+[quarantine an unreliable test](./report-results.md#quarantine-an-unreliable-test)
+for entry and exit rules.

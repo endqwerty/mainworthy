@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { ATTACHMENT_LIMITS, AttachmentInput, attachmentBytes } from "./attachments.ts";
 import { DURATION_FORMAT, DURATION_PATTERN } from "./duration.ts";
+import { QuarantineExit } from "./flaky.ts";
 import {
 	ActorKind,
 	AdoptAnswer,
@@ -51,7 +52,16 @@ export const CaseAlias = z
 	.trim()
 	.regex(/^(?![CQRTP]-)(?!\d+$)[a-z0-9][a-z0-9_.:/-]{0,119}$/i);
 
+export const QuarantineEdit = z
+	.object({
+		op: z.literal("quarantine"),
+		test: z.string().regex(/^T-\d+$/),
+		base: z.number().int().positive().nullable(),
+		exit: QuarantineExit.nullable(),
+	})
+	.meta({ "x-mcp-hidden": true });
 export const Edit = z.discriminatedUnion("op", [
+	QuarantineEdit,
 	z.object({
 		op: z.literal("create"),
 		/** The case as structured content, as canonical Markdown, or as free text in the capture outline. */
@@ -255,6 +265,7 @@ export const QuestionBrief = z.object({
 });
 export type QuestionBrief = z.infer<typeof QuestionBrief>;
 export const GateStatus = z.object({
+	quarantined: z.number().int().nonnegative().optional(),
 	run: z.string().nullable(),
 	verdict: Verdict,
 	reason: z.string(),

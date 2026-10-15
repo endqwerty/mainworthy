@@ -1,0 +1,427 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { type AuditRecord, AuditReply, verifyAudit } from "../src/core/audit.ts";
+import type { Quarantine } from "../src/core/flaky.ts";
+import type { GateStatus, InboxReply, ProposeReply } from "../src/core/ops.ts";
+import { effectiveQuarantine, quarantineEntries } from "../src/server/evidence/quarantine.ts";
+import { Db } from "../src/server/kernel/db.ts";
+import { migrate } from "../src/server/kernel/migrate.ts";
+import { pollDefectHolds } from "../src/server/tracker-holds.ts";
+import { exportArchive, importArchive } from "../src/server/transfer/transfer.ts";
+import { ciReport, type Harness, harness } from "./helpers.ts";
+
+let h: Harness;
+beforeEach(() => {
+	h = harness({ unlinked: "track" });
+});
+afterEach(() => h.close());
+const report = (commit: string, fail = true, branch = "main", attempt = 1) =>
+	h.call("report", ciReport({ commit, n: 1, branch, attempt, ...(fail ? { fail: { 0: "expected green" } } : {}) }));
+const gate = (commit: string) => h.call<GateStatus>("gate", { commit });
+function quarantine(exit: unknown, base: number | null = null) {
+	const p = h.call<ProposeReply>("propose", {
+		edits: [{ op: "quarantine", test: "T-1", base, exit }],
+		reason: "Unreliable checkout",
+	});
+	const q = h.call<InboxReply>("inbox", { kind: "adopt" }).items.find((q) => q.q === p.question);
+	if (!q) throw new Error("quarantine proposal was not queued for a person");
+	return h.call<{ status: string; decision: number }[]>("decide", {
+		q: q.q,
+		onEvidence: q.evidenceHash,
+		answer: { is: "accept" },
+		reason: "Keep failures visible while repairing the test",
+	})[0];
+}
+
+describe("quarantine", () => {
+	test("a person's decision excuses one test and makes quarantined failures explicit", () => {
+		report("aaaa0001");
+		expect(gate("aaaa0001").verdict).toBe("blocked");
+		expect(quarantine({ kind: "person" })?.status).toBe("decided");
+		expect(gate("aaaa0001")).toMatchObject({ verdict: "passed", quarantined: 1, tally: { excused: 1, pass: 0 } });
+		expect(gate("aaaa0001").reason).toContain("1 quarantined failure recorded, not blocking");
+		const list = h.call<{ items: { ref: string; quarantine: Quarantine }[]; count: number }>("find", {
+			in: "tests",
+			state: "quarantined",
+		});
+		expect(list.count).toBe(1);
+		expect(list.items[0]).toMatchObject({
+			ref: "T-1",
+			quarantine: {
+				reason: "Keep failures visible while repairing the test",
+				by: "robin",
+				exit: { kind: "person" },
+				active: true,
+			},
+		});
+		const entry = list.items[0]?.quarantine;
+		if (!entry) throw new Error("missing quarantine entry");
+		const d = quarantine(null, entry.decision);
+		expect(d?.status).toBe("decided");
+		expect(gate("aaaa0001").verdict).toBe("blocked");
+	});
+	test("expiry blocks again at its deadline without a sweep", () => {
+		report("aaaa0001");
+		quarantine({ kind: "expiry", at: 1_800_000_001_000 });
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		h.advance(1_800_000_001_000 - h.app.now() - 1);
+		expect(gate("aaaa0001")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+	});
+	test("distinct passing trunk commits exit permanently, while change passes do not", () => {
+		report("aaaa0001");
+		quarantine({ kind: "passes", count: 2 });
+		report("aaaa0002", false, "feature");
+		report("aaaa0003", false);
+		report("aaaa0003", false, "main", 2);
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		report("aaaa0004", false);
+		expect(gate("aaaa0001").verdict).toBe("blocked");
+		report("aaaa0005");
+		expect(gate("aaaa0005").verdict).toBe("blocked");
+	});
+});
+
+describe("quarantine boundaries", () => {
+	test("agents propose and advise but never decide, even with answer and admin grants", () => {
+		report("aaaa0001");
+		const agent = h.actor("reviewer", "agent", ["read", "produce", "answer", "admin"]);
+		const proposed = h.call<ProposeReply>(
+			"propose",
+			{
+				edits: [{ op: "quarantine", test: "T-1", base: null, exit: { kind: "person" } }],
+				reason: "Observed retry flips",
+			},
+			agent,
+		);
+		expect(proposed.status).toBe("open");
+		const q = h.call<InboxReply>("inbox", { kind: "adopt" }).items.find((q) => q.q === proposed.question);
+		if (!q) throw new Error("missing proposal");
+		const input = { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "Looks unreliable" };
+		expect(h.call<{ status: string }[]>("decide", input, agent)[0]?.status).toBe("advised");
+		expect(gate("aaaa0001").verdict).toBe("blocked");
+		expect(h.call<{ status: string }[]>("decide", { ...input, reason: " " })[0]?.status).toBe("invalid");
+		expect(h.call<{ status: string }[]>("decide", input)[0]?.status).toBe("decided");
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		const detail = h.call<{ quarantine: { decision: number } }[]>("get", { refs: ["T-1"] })[0];
+		const end = h.call<ProposeReply>(
+			"propose",
+			{ edits: [{ op: "quarantine", test: "T-1", base: detail?.quarantine.decision, exit: null }], reason: "End it" },
+			agent,
+		);
+		const endQ = h.call<InboxReply>("inbox", { kind: "adopt" }).items.find((q) => q.q === end.question);
+		if (!endQ) throw new Error("missing exit proposal");
+		expect(
+			h.call<{ status: string }[]>(
+				"decide",
+				{ q: endQ.q, onEvidence: endQ.evidenceHash, answer: { is: "accept" }, reason: "End" },
+				agent,
+			)[0]?.status,
+		).toBe("advised");
+		expect(gate("aaaa0001").verdict).toBe("passed");
+	});
+	test("a stale proposal cannot replace a newer quarantine decision", () => {
+		report("aaaa0001");
+		const stale = h.call<ProposeReply>("propose", {
+			edits: [{ op: "quarantine", test: "T-1", base: null, exit: { kind: "person" } }],
+			reason: "Earlier draft",
+		});
+		quarantine({ kind: "passes", count: 2 });
+		const q = h.call<InboxReply>("inbox", { kind: "adopt" }).items.find((q) => q.q === stale.question);
+		if (!q) throw new Error("missing stale question");
+		expect(
+			h.raw("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "Earlier" }),
+		).toMatchObject({ ok: true, result: [{ status: "conflict" }] });
+		expect(gate("aaaa0001").verdict).toBe("passed");
+	});
+	test("another test with the same cause still blocks and keeps the quarantine visible", () => {
+		h.call("report", ciReport({ commit: "aaaa0001", n: 2, fail: { 0: "expected green", 1: "expected green" } }));
+		quarantine({ kind: "person" });
+		expect(gate("aaaa0001")).toMatchObject({
+			verdict: "blocked",
+			quarantined: 1,
+			tally: { excused: 1, unexplained: 1 },
+		});
+		expect(gate("aaaa0001").reason).toContain("1 quarantined failure recorded, not blocking");
+	});
+	test("new failure signatures stay quarantined but required jobs still wait", () => {
+		report("aaaa0001");
+		quarantine({ kind: "person" });
+		const input = ciReport({ commit: "aaaa0002", n: 1, fail: { 0: "connection timeout" } });
+		h.call("report", input);
+		h.call("propose", { edits: [{ op: "create", outline: "Jobs case" }] });
+		const planned = h.call<{ run: string }>("plan", {
+			name: "All jobs",
+			select: { cases: ["C-1"] },
+			accepts: { commit: "aaaa0002" },
+			require: [
+				{ id: "exercise", kind: "exercise", methods: ["auto"], minActors: 1, basis: "exact-or-assumed" },
+				{ id: "jobs", kind: "jobs", jobs: ["e2e", "unit"] },
+			],
+		});
+		expect(gate("aaaa0002")).toMatchObject({ verdict: "passed", quarantined: 1 });
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "pending",
+			tally: { missing: 2 },
+		});
+	});
+	test("skips and failures reset the pass streak, while two clean commits end it", () => {
+		report("aaaa0001");
+		quarantine({ kind: "passes", count: 2 });
+		report("aaaa0002", false);
+		const skip = ciReport({ commit: "aaaa0003", n: 1 });
+		h.call("report", { ...skip, results: skip.results.map((row) => ({ ...row, outcome: "skip" })) });
+		report("aaaa0004", false);
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		report("aaaa0005");
+		report("aaaa0006", false);
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		report("aaaa0007", false);
+		expect(gate("aaaa0001").verdict).toBe("blocked");
+	});
+	test("a failing lane on a trunk commit prevents a clean commit", () => {
+		report("aaaa0001");
+		quarantine({ kind: "passes", count: 2 });
+		report("aaaa0002", false);
+		h.call("report", ciReport({ commit: "aaaa0002", job: "other-job", n: 1, fail: { 0: "expected green" } }));
+		report("aaaa0003", false);
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		report("aaaa0004", false);
+		expect(gate("aaaa0001").verdict).toBe("blocked");
+	});
+	test("same-attempt disagreement keeps the failure, higher attempts can pass", () => {
+		report("aaaa0001");
+		quarantine({ kind: "passes", count: 2 });
+		report("aaaa0002");
+		report("aaaa0002", false);
+		report("aaaa0003", false);
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		report("aaaa0003");
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		report("aaaa0002", false, "main", 2);
+		report("aaaa0003", false, "main", 2);
+		expect(gate("aaaa0001").verdict).toBe("blocked");
+	});
+	test("agent reports do not satisfy a pass rule", () => {
+		report("aaaa0001");
+		quarantine({ kind: "passes", count: 1 });
+		const agent = h.actor("reporting-agent", "agent", ["read", "produce"]);
+		h.call("report", ciReport({ commit: "aaaa0002", n: 1 }), agent);
+		expect(gate("aaaa0001").verdict).toBe("passed");
+		report("aaaa0003", false);
+		expect(gate("aaaa0001").verdict).toBe("blocked");
+	});
+	test("entry is project scoped and rejects missing tests, manual tests, mixed edits and missing reasons", () => {
+		report("aaaa0001");
+		for (const input of [
+			{ edits: [{ op: "quarantine", test: "T-1", base: null, exit: { kind: "person" } }] },
+			{ edits: [{ op: "quarantine", test: "T-99", base: null, exit: { kind: "person" } }], reason: "Missing" },
+			{ edits: [{ op: "quarantine", test: "T-1", base: null, exit: { kind: "expiry", at: 1 } }], reason: "Expired" },
+			{ edits: [{ op: "quarantine", test: "T-1", base: null, exit: { kind: "passes", count: 0 } }], reason: "Invalid" },
+			{
+				edits: [
+					{ op: "quarantine", test: "T-1", base: null, exit: { kind: "person" } },
+					{ op: "create", outline: "Other edit" },
+				],
+				reason: "Mixed",
+			},
+		])
+			expect(h.raw("propose", input).ok).toBe(false);
+		h.call("propose", { edits: [{ op: "create", outline: "Manual case" }] });
+		h.call("report", { target: { session: "manual" }, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		expect(
+			h.raw("propose", {
+				edits: [{ op: "quarantine", test: "T-2", base: null, exit: { kind: "person" } }],
+				reason: "Manual",
+			}),
+		).toMatchObject({ ok: false, error: { code: "invalid" } });
+		quarantine({ kind: "person" });
+		const other = harness({ project: "other", unlinked: "track" });
+		try {
+			other.call("report", ciReport({ commit: "aaaa0001", n: 1, fail: { 0: "expected green" } }));
+			expect(other.call<GateStatus>("gate", { commit: "aaaa0001" }).verdict).toBe("blocked");
+		} finally {
+			other.close();
+		}
+	});
+	test("planned runs excuse quarantined automated failures and block again at expiry", () => {
+		h.call("propose", { edits: [{ op: "create", body: { title: "Checkout", methods: ["auto"] } }] });
+		const planned = h.call<{ run: string }>("plan", {
+			name: "Checkout regression",
+			select: { cases: ["C-1"] },
+			accepts: { commit: "aaaa0001" },
+		});
+		const input = ciReport({ commit: "aaaa0001", n: 1, fail: { 0: "expected green" } });
+		h.call("report", {
+			...input,
+			results: input.results.map((row) => ({ ...row, annotation: { case: "C-1", version: 1 } })),
+		});
+		expect(h.call<GateStatus>("gate", { run: planned.run }).verdict).toBe("blocked");
+		quarantine({ kind: "expiry", at: 1_800_000_001_000 });
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "passed",
+			quarantined: 1,
+			tally: { excused: 1, pass: 0 },
+		});
+		h.advance(1000);
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "blocked",
+			tally: { unexplained: 1 },
+		});
+		expect(h.call<{ tally: GateStatus["tally"] }[]>("get", { refs: [planned.run] })[0]?.tally.unexplained).toBe(1);
+	});
+});
+
+test("archives retain quarantine decisions, exit rules and observations", () => {
+	report("aaaa0001");
+	quarantine({ kind: "passes", count: 2 });
+	report("aaaa0002", false);
+	let archive = "";
+	exportArchive(
+		h.app.db,
+		(chunk) => {
+			archive += chunk;
+		},
+		{ now: 1_800_000_000_500 },
+	);
+	expect(archive).toContain('"quarantines"');
+	const imported = new Db(":memory:");
+	try {
+		migrate(imported, ":memory:");
+		importArchive(imported, archive.trimEnd().split("\n"));
+		const entry = quarantineEntries(imported, 1)[0];
+		if (!entry) throw new Error("quarantine did not survive archive import");
+		expect(entry).toMatchObject({
+			actor: h.owner.id,
+			reason: "Keep failures visible while repairing the test",
+			exit_rule: '{"kind":"passes","count":2}',
+		});
+		expect(effectiveQuarantine(imported, entry, h.app.now())).toBe(true);
+	} finally {
+		imported.close();
+	}
+	report("aaaa0003", false);
+	expect(gate("aaaa0001").verdict).toBe("blocked");
+});
+
+test("audit keeps each quarantine test and exit rule after its standing is replaced", () => {
+	report("aaaa0001");
+	const entry = quarantine({ kind: "passes", count: 2 });
+	if (!entry) throw new Error("missing entry decision");
+	const ending = quarantine(null, entry.decision);
+	if (!ending) throw new Error("missing exit decision");
+	const file = AuditReply.parse(h.call("audit", {})).ndjson;
+	expect(verifyAudit(file).unavailableDecisionEvidence).toBe(0);
+	const records: AuditRecord[] = file
+		.trimEnd()
+		.split("\n")
+		.slice(1, -1)
+		.map((line) => JSON.parse(line));
+	for (const [decision, base, exit] of [
+		[entry.decision, null, { kind: "passes", count: 2 }],
+		[ending.decision, entry.decision, null],
+	] as const) {
+		expect(records.find((record) => record.id === `decision:${decision}`)).toMatchObject({
+			type: "decision",
+			kind: "adopt",
+			answer: { is: "accept" },
+			effects: { quarantine: { op: "quarantine", test: "T-1", base, exit } },
+			signers: [{ by: { name: "robin", kind: "human" }, reason: "Keep failures visible while repairing the test" }],
+		});
+	}
+});
+
+for (const mixed of [false, true]) {
+	test(`quarantine excuses only automated failures in a disputed slot, mixed=${mixed}`, () => {
+		h.call("propose", { edits: [{ op: "create", outline: "Checkout regression" }] });
+		const planned = h.call<{ run: string }>("plan", {
+			name: "Disputed checkout",
+			select: { cases: ["C-1"] },
+			accepts: { commit: "aaaa0001" },
+		});
+		const input = ciReport({ commit: "aaaa0001", n: 1, fail: { 0: "expected green" } });
+		h.call("report", {
+			...input,
+			results: input.results.map((row) => ({ ...row, annotation: { case: "C-1", version: 1 } })),
+		});
+		h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		if (mixed) {
+			const tester = h.actor("tester", "human", ["read", "produce"]);
+			h.call(
+				"report",
+				{
+					run: planned.run,
+					results: [{ test: { case: "C-1" }, outcome: "fail", failure: { message: "Manual failure" } }],
+				},
+				tester,
+			);
+		}
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "blocked",
+			tally: { disputed: 1 },
+		});
+		quarantine({ kind: "expiry", at: 1_800_000_001_000 });
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: mixed ? "blocked" : "passed",
+			quarantined: 1,
+			tally: mixed ? { disputed: 1, excused: 0 } : { disputed: 0, excused: 1, pass: 0 },
+		});
+		expect(
+			h.call<{ items: { state: string }[] }>("find", { in: "slots", run: planned.run }).items.map((slot) => slot.state),
+		).toEqual(["disputed"]);
+		h.advance(1000);
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "blocked",
+			tally: { disputed: 1 },
+		});
+	});
+}
+
+for (const endBeforeClosure of [false, true]) {
+	test(`tracker closure and quarantine exit preserve each other's decisions, exitFirst=${endBeforeClosure}`, async () => {
+		h.app.config.github = { project: "scratch", repository: "acme/web", token: "local-test-tracker-credential" };
+		report("aaaa0001");
+		const failure = h.call<InboxReply>("inbox", { kind: "failure" }).items[0];
+		if (!failure) throw new Error("missing failure question");
+		const defect = h.call<{ status: string; decision: number }[]>("decide", {
+			q: failure.q,
+			onEvidence: failure.evidenceHash,
+			answer: { is: "defect", ref: "https://github.com/acme/web/issues/42" },
+			reason: "Tracked checkout defect",
+		})[0];
+		expect(defect?.status).toBe("decided");
+		expect(gate("aaaa0001")).toMatchObject({ verdict: "failed", tally: { attributed: 1 } });
+		const entry = quarantine({ kind: "person" });
+		if (!entry) throw new Error("missing quarantine decision");
+		expect(gate("aaaa0001")).toMatchObject({ verdict: "passed", quarantined: 1 });
+		if (endBeforeClosure) {
+			quarantine(null, entry.decision);
+			expect(gate("aaaa0001")).toMatchObject({ verdict: "failed", tally: { attributed: 1 } });
+		}
+		const issue = { ref: "github:acme/web#42", url: "https://github.com/acme/web/issues/42", state: "closed" } as const;
+		expect(await pollDefectHolds(h.app, { createDefect: async () => issue, getItem: async () => issue })).toBe(1);
+		const file = AuditReply.parse(h.call("audit", {})).ndjson;
+		const records: AuditRecord[] = file
+			.trimEnd()
+			.split("\n")
+			.slice(1, -1)
+			.map((line) => JSON.parse(line));
+		expect(
+			records.find((record) => record.type === "decision" && record.prior?.id === `decision:${defect?.decision}`),
+		).toMatchObject({
+			type: "decision",
+			answer: { is: "outdated" },
+			signers: [{ by: { name: "policy", kind: "rule" }, clause: "tracker-closed" }],
+		});
+		if (!endBeforeClosure) {
+			expect(gate("aaaa0001")).toMatchObject({ verdict: "passed", quarantined: 1, tally: { excused: 1 } });
+			expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine).toMatchObject({
+				decision: entry.decision,
+				active: true,
+			});
+			quarantine(null, entry.decision);
+		}
+		expect(gate("aaaa0001")).toMatchObject({
+			verdict: "blocked",
+			tally: { unexplained: 1, attributed: 0, excused: 0 },
+		});
+	});
+}

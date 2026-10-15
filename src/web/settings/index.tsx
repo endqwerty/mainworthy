@@ -17,6 +17,7 @@ import { useBindings } from "../lib/keys.ts";
 import { navigate, projectUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { DocLink, EmptyState, KeyCap, ListRow, SectionHeading, Select } from "../ui/index.tsx";
+import { QuarantineList } from "../ui/quarantine.tsx";
 import { CustomFields } from "./fields.tsx";
 import { YourHome } from "./home.tsx";
 import { People } from "./people.tsx";
@@ -451,6 +452,7 @@ function SettingsWorkbench() {
 										{policy.settings.flakyDetection.windowDays} days suggest investigation. Suggestions excuse no
 										failure. Change these settings through a <DocLink page="policy">policy edit</DocLink>.
 									</p>
+									<QuarantineList />
 								</>
 							)}
 						</>

@@ -455,3 +455,49 @@ Forgetting a person keeps their files and file names, just as it keeps typed
 notes. Avoid personal information in screenshots and diagnostics. There is no
 attachment deletion or retention control yet. See [your data](./data.md) for
 storage and backups and [privacy](./privacy.md) for erasure requests.
+
+
+## Quarantine an unreliable test
+
+Quarantine applies to one automated test throughout its project. Its failures stay
+in history and in the run's failing-test list. The gate counts them as excused and
+says how many quarantined failures it recorded, even when another failure blocks.
+It never counts quarantine as a proven pass. Missing evidence and required jobs
+still wait.
+
+In a failure question, open **Quarantined tests**, or use the list below the detector
+settings in **Settings**, **Policy**. Enter the test ref, reason and exit rule,
+then choose **Propose quarantine**. Review and accept the proposal in the queue
+with a reason. A person with answer authority must decide under every preset.
+Agents may propose and leave advice. Detector suggestions never enter quarantine.
+
+Choose one exit rule:
+
+- A person's decision, recorded through a proposal to end quarantine.
+- An expiry date. At that instant its failures count normally again, without waiting for background work.
+- One to 100 consecutive passing trunk commits after entry. Every automated lane
+  seen for that test on a commit must pass. Retries count once per commit. Failures,
+  errors, skips and blocked results break the streak. Agent reports and change
+  commits cannot satisfy it. After the streak succeeds, another failing commit
+  does not restart quarantine.
+
+For the API and command line, read the test with `get`. Use the last quarantine's
+`decision` as `base`, or null before the first quarantine. A changed base refuses
+an older proposal. Send the quarantine edit by itself:
+
+```sh
+mainworthy propose --json '{"edits":[{"op":"quarantine","test":"T-1","base":null,"exit":{"kind":"passes","count":3}}],"reason":"Retry outcomes disagree on unchanged code"}'
+mainworthy find --json '{"in":"tests","state":"quarantined"}'
+mainworthy get T-1 --json
+```
+
+The quarantine edit is available through HTTP, the CLI and the web UI; MCP discovery
+omits it. The list returns each test's reason, person, entry time, decision and exit rule.
+`get` retains the last entry after it ends. Set `exit` to null to propose ending
+quarantine, or use `{"kind":"person"}` or `{"kind":"expiry","at":1800000000000}`
+for the other rules. The expiry is UTC milliseconds. A new quarantine can begin
+with a new decision after an earlier one ends.
+
+Quarantine entries and the observations behind their exit rules travel in archives.
+This schema requires archives created after quarantine was introduced. Imported
+expiry rules use the destination server's clock.
