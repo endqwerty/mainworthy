@@ -148,7 +148,8 @@ const REFERENCE = /"\$(ref|dynamicRef|recursiveRef|id|anchor|dynamicAnchor|recur
 
 /**
  * `collapse` is decided once for the whole document: a reference anywhere in it could point into a union by path or
- * by anchor, so a document with one keeps every union.
+ * by anchor, so a document with one keeps every union as it is, hidden choices included, since removing one would
+ * also move the index of the choices after it.
  */
 export function compactSchema(
 	schema: SchemaNode,
@@ -168,7 +169,7 @@ export function compactSchema(
 		);
 	for (const key of ["anyOf", "oneOf"] satisfies ("anyOf" | "oneOf")[]) {
 		const choices = schema[key];
-		if (choices) visible[key] = choices.filter((child) => child["x-mcp-hidden"] !== true);
+		if (choices && collapse) visible[key] = choices.filter((child) => child["x-mcp-hidden"] !== true);
 	}
 	const result = mapSchemas(visible, (child) => compactSchema(child, false, collapse));
 	delete result["x-mcp-hidden"];
