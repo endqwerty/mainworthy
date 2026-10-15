@@ -39,6 +39,7 @@ import { actorLabel, ruleActor } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { type Db, json } from "../kernel/db.ts";
 import { conflict, OpError } from "../kernel/errors.ts";
+import { complete } from "../kernel/steps.ts";
 import { claimMint } from "../kernel/witness.ts";
 import { clauseFor, currentPolicy, policyAt } from "../policy/policy.ts";
 import {
@@ -66,7 +67,7 @@ import {
 	unexplainedIn,
 	unexplainedShown,
 } from "../runs/runs.ts";
-import { caseById, caseRef, proposalById, resolvedOf, scopeFacts } from "../suite/suite.ts";
+import { caseById, caseRef, proposalById, resolvedOf, scopeFactsSteps } from "../suite/suite.ts";
 import { disputeParties, HANDLERS, runsAbout } from "./kinds.ts";
 import {
 	addQuestionParties,
@@ -179,6 +180,10 @@ function blockedRuns(blocks: Blocks, runs: Raise["runs"]): number[] {
  * standing decision about the cause is looked at, never only the newest question's.
  */
 export function raise(ctx: Ctx, r: Raise): Raised {
+	return complete(raiseSteps(ctx, r));
+}
+
+export function* raiseSteps(ctx: Ctx, r: Raise): Generator<undefined, Raised, void> {
 	const fingerprint = contentHash({ kind: r.kind, key: r.key });
 	// A cause seen in two hundred environments is raised two hundred times in one command, once for each: that
 	// is work. The same cause on the same target over and over is a circle.
@@ -194,7 +199,7 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 	const basis = contentHash(r.material);
 	const hash = seenHash(basis, r.target);
 	const latest = latestByFingerprint(ctx.db, ctx.project.id, fingerprint);
-	if (!latest) return open(ctx, r, fingerprint, hash, basis, 0, null);
+	if (!latest) return yield* openSteps(ctx, r, fingerprint, hash, basis, 0, null);
 	const occurrence = { hash: basis, target: r.target, facts: r.facts, now: ctx.now };
 	const standing = standingOn(ctx, fingerprint);
 	for (const { question, decision } of standing) {
@@ -235,11 +240,11 @@ export function raise(ctx: Ctx, r: Raise): Raised {
 		});
 		if (clause.ask.who === "rule" && !heldOpen(ctx, question, basis) && !overruled(ctx, question, clause.answer)) {
 			setQuestionAsk(ctx, question, clause.ask);
-			raised = settleByRule(ctx, question, clause.id, clause.answer);
+			raised = yield* settleByRuleSteps(ctx, question, clause.id, clause.answer);
 		} else raised = { s: "attached", question };
 	} else {
 		// Asked again. It follows the question whose answer just ended, so that answer's chain runs on through it.
-		raised = open(ctx, r, fingerprint, hash, basis, latest.epoch + 1, (ended ?? latest).id);
+		raised = yield* openSteps(ctx, r, fingerprint, hash, basis, latest.epoch + 1, (ended ?? latest).id);
 	}
 	// The runs that counted a failure as excused by a decision withdrawn above: an earlier commit of the change,
 	// a run planned on it, a run since closed. The question asked in its place names them, and they are recomputed
@@ -348,7 +353,7 @@ function overruled(ctx: Ctx, question: QuestionRow | null, ruleAnswer: unknown):
 	return false;
 }
 
-function open(
+function* openSteps(
 	ctx: Ctx,
 	r: Raise,
 	fingerprint: string,
@@ -356,7 +361,7 @@ function open(
 	basis: string,
 	epoch: number,
 	prior: number | null,
-): Raised {
+): Generator<undefined, Raised, void> {
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	const found = clauseFor(policy, { kind: r.kind, facts: new Set(r.facts) });
 	// Where the clause is a rule that a person has overruled on this question, a person is asked.
@@ -380,18 +385,27 @@ function open(
 		rank: -(priorityOf(r.kind, clause.blocks) * 1_000_000_000_000 + ctx.seq * 1000 + (ctx.ord() % 1000)),
 		refs: r.refs,
 	});
-	if (clause.ask.who === "rule") return settleByRule(ctx, question, clause.id, clause.answer);
+	if (clause.ask.who === "rule") return yield* settleByRuleSteps(ctx, question, clause.id, clause.answer);
 	return { s: "open", question };
 }
 
 function settleByRule(ctx: Ctx, question: QuestionRow, clause: string, answer: unknown): Raised {
+	return complete(settleByRuleSteps(ctx, question, clause, answer));
+}
+
+function* settleByRuleSteps(
+	ctx: Ctx,
+	question: QuestionRow,
+	clause: string,
+	answer: unknown,
+): Generator<undefined, Raised, void> {
 	const parsed = ANSWERS[question.kind].safeParse(answer);
 	if (!parsed.success)
 		throw new Error(`clause ${clause} gives an answer that a ${question.kind} question does not accept`);
 	const policy = currentPolicy(ctx.db, ctx.project.id).version;
 	const signer: Signer = { by: ruleActor(ctx.db).id, clause, policy, reason: null };
 	try {
-		const settled = ctx.db.savepoint(() => settle(ctx, question, [signer], parsed.data as AnyAnswer));
+		const settled = yield* ctx.db.savepointSteps(() => settleSteps(ctx, question, [signer], parsed.data as AnyAnswer));
 		return {
 			s: "decided",
 			question: questionById(ctx.db, question.id) ?? question,
@@ -475,10 +489,14 @@ const reply = (q: QuestionRow, status: DecideReply["status"], more: Partial<Deci
  * One actor's answer to one question. Policy decides what it is worth: it may settle the question, be recorded as
  * advice, or be refused. The same call at every strictness and from every surface.
  */
-export function answer(
+export function answer(ctx: Ctx, input: Parameters<typeof answerSteps>[1]): DecideReply {
+	return complete(answerSteps(ctx, input));
+}
+
+export function* answerSteps(
 	ctx: Ctx,
 	input: { q: string; onEvidence: string; answer: unknown; reason?: string | undefined; ifOpen?: boolean | undefined },
-): DecideReply {
+): Generator<undefined, DecideReply, void> {
 	const question = mustQuestion(ctx.db, ctx.project.id, input.q);
 	if (input.ifOpen && question.state !== "open") {
 		return reply(question, "conflict", { needs: "the question is no longer open; read it again before answering" });
@@ -509,7 +527,7 @@ export function answer(
 	}
 
 	const policy = currentPolicy(ctx.db, ctx.project.id);
-	const facts = factsNow(ctx.db, question);
+	const facts = yield* factsNowSteps(ctx.db, question);
 	if (question.kind === "failure" && !applicableAnswers(question.kind, facts).includes(given.is)) {
 		return reply(question, "invalid", {
 			needs: `one of ${applicableAnswers(question.kind, facts).join(", ")}: \`${given.is}\` does not apply to this failure`,
@@ -549,7 +567,7 @@ export function answer(
 	}
 	const signer: Signer = { by: ctx.actor.id, clause: clause.id, policy: policy.version, reason: input.reason ?? null };
 	try {
-		const settled = ctx.db.savepoint(() => {
+		const settled = yield* ctx.db.savepointSteps(function* () {
 			// The facts this answer is given under stay with the question while the answer is in force: an answer
 			// given to a dispute is still an answer to a dispute after it has set the disputed result aside, or
 			// the run has closed on it, and changing or withdrawing it is held to the same clause.
@@ -558,7 +576,7 @@ export function answer(
 				const parties = facts.has("hint:disputed") ? [...new Set([...kept, ...disputeParties(ctx, question)])] : kept;
 				setQuestionFacts(ctx, question, [...facts], parties);
 			}
-			return settle(ctx, question, [signer], given);
+			return yield* settleSteps(ctx, question, [signer], given);
 		});
 		return reply(question, "decided", { decision: settled.decision.id, effects: settled.effects });
 	} catch (error) {
@@ -589,12 +607,12 @@ function askedAgain(ctx: Ctx, question: QuestionRow): string | null {
  * A decision that replaces an earlier one on the same question first withdraws what the earlier one did; the
  * earlier row is never edited, and the new row names it in `supersedes`.
  */
-function settle(
+function* settleSteps(
 	ctx: Ctx,
 	question: QuestionRow,
 	signers: Signer[],
 	given: AnyAnswer,
-): { decision: DecisionRow; effects: Record<string, unknown> } {
+): Generator<undefined, { decision: DecisionRow; effects: Record<string, unknown> }, void> {
 	const handler = HANDLERS[question.kind];
 	let supersedes: number | null = null;
 	if (question.state === "decided" && question.decision !== null) {
@@ -621,7 +639,7 @@ function settle(
 		signers.map((signer) => signer.by),
 		decision.expires_at,
 	);
-	const effects = handler.effect(ctx, witness, question, given, { raise, ruleTakesUnlinked });
+	const effects = yield* handler.effect(ctx, witness, question, given, { raise, ruleTakesUnlinked });
 	setDecisionEffects(ctx, decision.id, effects);
 	const about = runsAbout(ctx, question);
 	if (Array.isArray(effects.reask) && effects.reask.length > 0) askAgain(ctx, question, effects.reask as number[]);
@@ -804,26 +822,28 @@ function askAgain(ctx: Ctx, question: QuestionRow, targets: readonly number[]): 
 		return run && (key === null || unexplainedIn(ctx.db, run, ctx.now).has(key)) ? [run] : [];
 	});
 	const newest = latestByFingerprint(ctx.db, ctx.project.id, question.fingerprint) ?? question;
-	open(
-		ctx,
-		{
-			kind: question.kind,
-			key: "",
-			subject,
-			title: question.title,
-			producer: question.producer,
-			evidence: { ...shown, targets: pending },
-			material: null,
-			facts: facts ?? [],
-			refs: [...refsOf(ctx.db, question.id).filter((about) => !/^R-\d+$/.test(about)), ...runs.map(runRef)],
-			runs,
-			target: latest,
-		},
-		question.fingerprint,
-		seenHash(question.basis, latest),
-		question.basis,
-		newest.epoch + 1,
-		question.id,
+	complete(
+		openSteps(
+			ctx,
+			{
+				kind: question.kind,
+				key: "",
+				subject,
+				title: question.title,
+				producer: question.producer,
+				evidence: { ...shown, targets: pending },
+				material: null,
+				facts: facts ?? [],
+				refs: [...refsOf(ctx.db, question.id).filter((about) => !/^R-\d+$/.test(about)), ...runs.map(runRef)],
+				runs,
+				target: latest,
+			},
+			question.fingerprint,
+			seenHash(question.basis, latest),
+			question.basis,
+			newest.epoch + 1,
+			question.id,
+		),
 	);
 }
 
@@ -1769,13 +1789,17 @@ function endHold(ctx: Ctx, decision: DecisionRow, ending: "expired" | "outdated"
 
 /** Current clause facts. Only a slot question asks about a dispute; cause answers retain their own policy. */
 export function factsNow(db: Db, question: QuestionRow): Set<string> {
+	return complete(factsNowSteps(db, question));
+}
+
+function* factsNowSteps(db: Db, question: QuestionRow): Generator<undefined, Set<string>, void> {
 	const facts = new Set(json<{ facts?: string[] }>(question.evidence).facts ?? []);
 	if (question.kind === "adopt" && question.state !== "decided") {
 		const subject = json<{ proposal: number }>(question.subject);
 		const proposal = proposalById(db, subject.proposal);
 		if (proposal) {
 			for (const fact of facts) if (fact.startsWith("folder:") || fact.startsWith("tag:")) facts.delete(fact);
-			for (const fact of scopeFacts(db, question.project, resolvedOf(proposal))) facts.add(fact);
+			for (const fact of yield* scopeFactsSteps(db, question.project, resolvedOf(proposal))) facts.add(fact);
 		}
 	}
 	if (question.kind !== "failure") return facts;

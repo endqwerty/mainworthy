@@ -196,23 +196,42 @@ export class Db {
 	 * it wrote is undone, the rest of the transaction stands, and the error is rethrown for the caller to turn into
 	 * a reply. This is how one refused answer in a batch of decisions leaves the others in place.
 	 */
-	savepoint<T>(fn: () => T): T {
-		if (this.depth === 0) return this.transaction(fn);
+	*savepointSteps<T>(fn: () => Generator<undefined, T, void>): Generator<undefined, T, void> {
+		if (this.depth === 0) {
+			this.begin();
+			try {
+				const out = yield* fn();
+				this.commit();
+				return out;
+			} finally {
+				this.rollback();
+			}
+		}
 		const name = `sp_${this.depth}`;
 		const callbacks = this.committed.length;
 		this.raw.exec(`SAVEPOINT ${name}`);
 		this.depth++;
+		let released = false;
 		try {
-			const out = fn();
+			const out = yield* fn();
 			this.raw.exec(`RELEASE ${name}`);
+			released = true;
 			return out;
-		} catch (error) {
-			this.exec(`ROLLBACK TO ${name}; RELEASE ${name}`);
-			this.committed.length = callbacks;
-			throw error;
 		} finally {
+			if (!released) {
+				this.exec(`ROLLBACK TO ${name}; RELEASE ${name}`);
+				this.committed.length = callbacks;
+			}
 			this.depth--;
 		}
+	}
+
+	savepoint<T>(fn: () => T): T {
+		// biome-ignore lint/correctness/useYield: synchronous callers drain the same savepoint implementation.
+		const steps = this.savepointSteps(function* () {
+			return fn();
+		});
+		for (let step = steps.next(); ; step = steps.next()) if (step.done) return step.value;
 	}
 
 	/** Runs `fn` against one consistent snapshot, so a read that spans several statements never sees half a write. */

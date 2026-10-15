@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parseCase } from "../src/core/markdown.ts";
+import type { DecideReply, Edit, ProposeReply } from "../src/core/ops.ts";
+import { defaultConfig } from "../src/server/kernel/app.ts";
+import { OPS } from "../src/server/ops/index.ts";
+import { invoke, invokeAsync, type Reply } from "../src/server/ops/registry.ts";
+import { open } from "../src/server/start.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -37,6 +45,357 @@ const storedBody = () => {
 	if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
 	return parsed.doc.body;
 };
+
+describe("atomic bulk proposals", () => {
+	const count = 450;
+	const creates = (): Edit[] =>
+		Array.from({ length: count }, (_, i) => ({ op: "create", outline: `Bulk case ${i}\n  Check > Pass` }));
+	const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+	const disk = () => {
+		const dir = mkdtempSync(join(tmpdir(), "mainworthy-bulk-"));
+		const config = defaultConfig({ MAINWORTHY_DATA: dir, MAINWORTHY_OWNER: "robin" });
+		const instance = open(config);
+		const call = (op: string, input: unknown = {}) => ({ op, input, project: "scratch", actor: () => instance.owner });
+		const raw = (op: string, input: unknown = {}) => invoke(instance.app, OPS, call(op, input));
+		return {
+			...instance,
+			config,
+			call,
+			raw,
+			close() {
+				instance.app.close();
+				rmSync(dir, { recursive: true, force: true });
+			},
+		};
+	};
+	const result = <T>(reply: Reply): T => {
+		if (!reply.ok) throw new Error(JSON.stringify(reply.error));
+		return reply.result as T;
+	};
+	const storedCount = (instance: ReturnType<typeof disk>, table: "cases" | "versions" | "decisions") =>
+		instance.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n ?? 0;
+	const acceptance = (instance: ReturnType<typeof disk>, proposed: ProposeReply) => {
+		const question = result<{ evidenceHash: string }[]>(instance.raw("get", { refs: [proposed.question] }))[0];
+		return {
+			q: proposed.question,
+			onEvidence: question?.evidenceHash,
+			answer: { is: "accept" },
+			reason: "Reviewed all cases",
+		};
+	};
+	const strict = (instance: ReturnType<typeof disk>) => {
+		const policy = result<ProposeReply>(instance.raw("propose", { edits: [{ op: "policy", preset: "strict" }] }));
+		expect(result<DecideReply[]>(instance.raw("decide", acceptance(instance, policy)))[0]?.status).toBe("decided");
+	};
+
+	test("sealing a bulk proposal that needs review also answers reads before publishing it", async () => {
+		const instance = disk();
+		try {
+			strict(instance);
+			let done = false;
+			const sealing = invokeAsync(instance.app, OPS, instance.call("propose", { edits: creates() }));
+			void sealing.then(() => {
+				done = true;
+			});
+			let during = false;
+			while (!done) {
+				await tick();
+				if (done) break;
+				during = true;
+				expect(result(instance.raw("find"))).toMatchObject({ count: 0 });
+				expect(instance.raw("get", { refs: ["P-2"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+			}
+			const proposed = result<ProposeReply>(await sealing);
+			expect(proposed).toMatchObject({ proposal: "P-2", status: "open", cases: [] });
+			expect(result<unknown[]>(instance.raw("get", { refs: [proposed.proposal] }))[0]).toMatchObject({ ref: "P-2" });
+			expect(during).toBe(true);
+		} finally {
+			await instance.app.gate.run(() => {});
+			instance.close();
+		}
+	});
+
+	test("a bulk save answers reads between slices and publishes the complete proposal and decision once", async () => {
+		const instance = disk();
+		try {
+			const events: unknown[] = [];
+			instance.app.subscribe((event) => events.push(event));
+			let done = false;
+			const saving = invokeAsync(
+				instance.app,
+				OPS,
+				instance.call("propose", { edits: creates(), cmd: "bulk-save-01" }),
+			);
+			void saving.then(() => {
+				done = true;
+			});
+			let partial = false;
+			while (!done) {
+				await tick();
+				const written = storedCount(instance, "cases");
+				if (written === 0 || written === count) continue;
+				partial = true;
+				expect(result(instance.raw("find"))).toMatchObject({ count: 0, items: [] });
+				expect(instance.raw("get", { refs: ["P-1"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+				expect(result(instance.raw("inbox"))).toMatchObject({ items: [] });
+				expect(events).toHaveLength(0);
+			}
+			const saved = result<ProposeReply>(await saving);
+			expect(saved.status).toBe("adopted");
+			expect(saved.cases).toHaveLength(count);
+			expect(result(instance.raw("find"))).toMatchObject({ count });
+			expect(storedCount(instance, "versions")).toBe(count);
+			expect(storedCount(instance, "decisions")).toBe(1);
+			expect(events).toHaveLength(1);
+			expect(partial).toBe(true);
+			expect(
+				result<ProposeReply>(
+					await invokeAsync(instance.app, OPS, instance.call("propose", { edits: creates(), cmd: "bulk-save-01" })),
+				),
+			).toEqual(saved);
+			expect(storedCount(instance, "versions")).toBe(count);
+		} finally {
+			await instance.app.gate.run(() => {});
+			instance.close();
+		}
+	});
+
+	test("accepting a bulk proposal answers reads without exposing half its cases or a decided question", async () => {
+		const instance = disk();
+		try {
+			strict(instance);
+			const proposed = result<ProposeReply>(instance.raw("propose", { edits: creates() }));
+			expect(proposed.status).toBe("open");
+			const question = result<{ evidenceHash: string }[]>(instance.raw("get", { refs: [proposed.question] }))[0];
+			let done = false;
+			const accepting = invokeAsync(
+				instance.app,
+				OPS,
+				instance.call("decide", {
+					q: proposed.question,
+					onEvidence: question?.evidenceHash,
+					answer: { is: "accept" },
+					reason: "Reviewed all cases",
+				}),
+			);
+			void accepting.then(() => {
+				done = true;
+			});
+			let partial = false;
+			while (!done) {
+				await tick();
+				const written = storedCount(instance, "cases");
+				if (written === 0 || written === count) continue;
+				partial = true;
+				expect(result(instance.raw("find"))).toMatchObject({ count: 0 });
+				expect(result(instance.raw("find", { text: "Bulk" }))).toMatchObject({ count: 0 });
+				expect(result<unknown[]>(instance.raw("get", { refs: [proposed.question] }))[0]).toMatchObject({
+					state: "open",
+				});
+			}
+			expect(result<DecideReply[]>(await accepting)[0]).toMatchObject({
+				status: "decided",
+				effects: { cases: expect.any(Array) },
+			});
+			expect(result(instance.raw("find"))).toMatchObject({ count });
+			expect(result<unknown[]>(instance.raw("get", { refs: [proposed.question] }))[0]).toMatchObject({
+				state: "decided",
+			});
+			expect(partial).toBe(true);
+		} finally {
+			await instance.app.gate.run(() => {});
+			instance.close();
+		}
+	});
+
+	test.each(["edit", "place", "state"] as const)(
+		"a bulk %s keeps every case at its previous state between slices",
+		async (op) => {
+			const instance = disk();
+			try {
+				const created = result<ProposeReply>(instance.raw("propose", { edits: creates() }));
+				const refs = created.cases.map((row) => row.ref);
+				const edits: Edit[] =
+					op === "edit"
+						? refs.map((ref) => ({ op: "edit", case: ref, base: 1, body: { title: `Changed ${ref}` } }))
+						: op === "place"
+							? [{ op, cases: refs, tags: { add: ["changed"] }, folder: "Moved" }]
+							: [{ op, cases: refs, to: "archived" }];
+				const condition = op === "edit" ? "head = 2" : op === "place" ? "tags = '[\"changed\"]'" : "state = 'archived'";
+				let done = false;
+				const saving = invokeAsync(instance.app, OPS, instance.call("propose", { edits }));
+				void saving.then(() => {
+					done = true;
+				});
+				let partial = false;
+				while (!done) {
+					await tick();
+					const changed =
+						instance.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM cases WHERE ${condition}`).get()
+							?.n ?? 0;
+					if (changed === 0 || changed === count) continue;
+					partial = true;
+					expect(result(instance.raw("find"))).toMatchObject({ count });
+					expect(result<unknown[]>(instance.raw("get", { refs: ["C-1", `C-${count}`] }))).toMatchObject([
+						{ title: "Bulk case 0", version: 1, tags: [], state: "active" },
+						{ title: `Bulk case ${count - 1}`, version: 1, tags: [], state: "active" },
+					]);
+				}
+				expect(result<ProposeReply>(await saving).status).toBe("adopted");
+				expect(
+					instance.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM cases WHERE ${condition}`).get()?.n,
+				).toBe(count);
+				expect(partial).toBe(true);
+			} finally {
+				await instance.app.gate.run(() => {});
+				instance.close();
+			}
+		},
+	);
+
+	test("a late adoption conflict rolls back earlier slices and leaves the next batched answer usable", async () => {
+		const instance = disk();
+		try {
+			strict(instance);
+			const edits = creates();
+			edits.push({ op: "create", outline: "Last case", aliases: ["bulk:last"] });
+			const pending = result<ProposeReply>(instance.raw("propose", { edits }));
+			const competitor = result<ProposeReply>(
+				instance.raw("propose", { edits: [{ op: "create", outline: "Alias holder", aliases: ["bulk:last"] }] }),
+			);
+			expect(result<DecideReply[]>(instance.raw("decide", acceptance(instance, competitor)))[0]?.status).toBe(
+				"decided",
+			);
+			const next = result<ProposeReply>(instance.raw("propose", { edits: [{ op: "create", outline: "Next answer" }] }));
+			const replies = result<DecideReply[]>(
+				await invokeAsync(
+					instance.app,
+					OPS,
+					instance.call("decide", {
+						all: [acceptance(instance, pending), acceptance(instance, next)],
+					}),
+				),
+			);
+			expect(replies.map((reply) => reply.status)).toEqual(["conflict", "decided"]);
+			expect(replies[0]?.needs).toBe("case alias bulk:last is already in use");
+			expect(result(instance.raw("find"))).toMatchObject({ count: 2 });
+			expect(storedCount(instance, "versions")).toBe(2);
+			expect(storedCount(instance, "decisions")).toBe(3);
+			expect(result<unknown[]>(instance.raw("get", { refs: [pending.question] }))[0]).toMatchObject({ state: "open" });
+			expect(result<CaseView[]>(instance.raw("get", { refs: ["C-1", "C-2"] })).map((row) => row.title)).toEqual([
+				"Alias holder",
+				"Next answer",
+			]);
+		} finally {
+			await instance.app.gate.run(() => {});
+			instance.close();
+		}
+	});
+
+	test.each(["propose", "decide"])(
+		"a process killed between %s slices leaves no partial adoption after restart",
+		async (op) => {
+			const instance = disk();
+			let child: ReturnType<typeof Bun.spawn> | undefined;
+			try {
+				let input: unknown = { edits: creates(), cmd: "bulk-crash-01" };
+				let pending: ProposeReply | undefined;
+				if (op === "decide") {
+					strict(instance);
+					pending = result<ProposeReply>(instance.raw("propose", { edits: creates() }));
+					input = { ...acceptance(instance, pending), cmd: "bulk-crash-01" };
+				}
+				const before = storedCount(instance, "decisions");
+				const module = (path: string) => JSON.stringify(new URL(path, import.meta.url).href);
+				const running = Bun.spawn(
+					[
+						process.execPath,
+						"-e",
+						`
+import { OPS } from ${module("../src/server/ops/index.ts")};
+import { invokeAsync } from ${module("../src/server/ops/registry.ts")};
+import { open } from ${module("../src/server/start.ts")};
+const { config, op, input } = JSON.parse(await Bun.stdin.text());
+const { app, owner } = open(config);
+const operation = OPS[op];
+if (!("steps" in operation)) throw new Error("the bulk operation has no slices");
+const paused = { ...operation, *steps(ctx, input) {
+	const steps = operation.steps(ctx, input);
+	for (let step = steps.next(); ; step = steps.next()) {
+		if (step.done) return step.value;
+		const count = app.db.raw.query("SELECT count(*) AS n FROM cases").get().n;
+		if (count > 0 && count < ${count}) {
+			process.stdout.write("PARTIAL " + count + "\\n");
+			for (;;) yield;
+		}
+		yield step.value;
+	}
+} };
+await invokeAsync(app, { ...OPS, [op]: paused }, { op, project: "scratch", input, actor: () => owner });
+throw new Error("the operation completed without a partial adoption slice");
+`,
+					],
+					{ stdin: new Blob([JSON.stringify({ config: instance.config, op, input })]), stdout: "pipe", stderr: "pipe" },
+				);
+				child = running;
+				let timer: ReturnType<typeof setTimeout> | undefined;
+				try {
+					const output = await Promise.race([
+						running.stdout.getReader().read(),
+						new Promise<never>((_, reject) => {
+							timer = setTimeout(() => reject(new Error("no adoption slice within five seconds")), 5000);
+						}),
+					]);
+					expect(new TextDecoder().decode(output.value)).toMatch(/^PARTIAL \d+\n$/);
+				} finally {
+					clearTimeout(timer);
+				}
+				child.kill("SIGKILL");
+				await child.exited;
+				const restarted = open(instance.config);
+				try {
+					const raw = (operation: string, body: unknown = {}) =>
+						invoke(restarted.app, OPS, {
+							op: operation,
+							project: "scratch",
+							input: body,
+							actor: () => restarted.owner,
+						});
+					expect(result(raw("find"))).toMatchObject({ count: 0 });
+					for (const table of ["cases", "versions", "placements", "search_docs", "commands"]) {
+						expect(restarted.app.db.raw.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n).toBe(
+							0,
+						);
+					}
+					expect(restarted.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM decisions").get()?.n).toBe(
+						before,
+					);
+					if (pending)
+						expect(result<unknown[]>(raw("get", { refs: [pending.question] }))[0]).toMatchObject({ state: "open" });
+					else expect(raw("get", { refs: ["P-1"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+					const retried = raw(op, input);
+					expect(retried.ok).toBe(true);
+					expect(raw(op, input)).toEqual(retried);
+					expect(result(raw("find"))).toMatchObject({ count });
+					expect(restarted.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM versions").get()?.n).toBe(
+						count,
+					);
+					expect(restarted.app.db.raw.query<{ n: number }, []>("SELECT count(*) AS n FROM decisions").get()?.n).toBe(
+						before + 1,
+					);
+				} finally {
+					restarted.app.close();
+				}
+			} finally {
+				if (child) {
+					child.kill("SIGKILL");
+					await child.exited;
+				}
+				instance.close();
+			}
+		},
+	);
+});
 
 describe("capture", () => {
 	test("an outline becomes C-1, version 1, with steps, expected results, a tag and a requirement", () => {

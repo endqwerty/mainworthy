@@ -150,6 +150,10 @@ Moves, tag changes, and archiving appear in history without creating a new body 
 Archived cases leave the active suite. Their recorded history remains available.
 Use [the API](./api.md) to return an archived case to active state.
 
+While a large bulk change is saved or accepted, you can keep reading the suite.
+Each read sees the complete state before or after the change. No part of a proposal becomes current on its own.
+A save queued behind that change still waits for it to finish.
+
 Press <kbd>/</kbd> to focus "Filter cases". Type words to filter the current list.
 Use the sidebar's tags to narrow the suite by tag.
 

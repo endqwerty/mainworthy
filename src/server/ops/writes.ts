@@ -22,7 +22,7 @@ import { REPLIES } from "../../core/replies.ts";
 import type { TargetMatch } from "../../core/runs.ts";
 import { clip } from "../../core/text.ts";
 import {
-	answer,
+	answerSteps,
 	askAgainAbout,
 	askWhereCommitIs,
 	type Raise,
@@ -30,6 +30,7 @@ import {
 	raise,
 	raiseFailure,
 	raiseFailures,
+	raiseSteps,
 	refold,
 	stopAskingAbout,
 	undo,
@@ -63,6 +64,7 @@ import { actorByName, actorLabel } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
 import { conflict, forbidden, invalid, notFound } from "../kernel/errors.ts";
+import { complete } from "../kernel/steps.ts";
 import { currentPolicy } from "../policy/policy.ts";
 import {
 	applyBatchSteps,
@@ -87,7 +89,7 @@ import {
 } from "../runs/runs.ts";
 import { enrollCommitStatus } from "../statuses/statuses.ts";
 import { selectCases } from "../suite/read.ts";
-import { type CaseRow, caseRef, mustCase, seal } from "../suite/suite.ts";
+import { type CaseRow, caseRef, mustCase, sealSteps } from "../suite/suite.ts";
 import { COMMIT, defineOp, type Pause } from "./registry.ts";
 
 export const announceOp = defineOp({
@@ -105,10 +107,14 @@ export const announceOp = defineOp({
 // ── propose ────────────────────────────────────────────────────────────────────────────────────────────────
 
 export function propose(ctx: Ctx, input: ProposeInput): ProposeReply {
+	return complete(proposeSteps(ctx, input));
+}
+
+export function* proposeSteps(ctx: Ctx, input: ProposeInput): Generator<undefined, ProposeReply, void> {
 	for (const edit of input.edits) if (edit.op === "quarantine") validateQuarantineEdit(ctx, edit);
-	const sealed = seal(ctx, { edits: input.edits, reason: input.reason });
+	const sealed = yield* sealSteps(ctx, { edits: input.edits, reason: input.reason });
 	if (!sealed) return { proposal: null, status: "adopted", question: null, needs: null, cases: [], conflicts: [] };
-	const raised = raiseAdopt(ctx, { raise }, sealed);
+	const raised = yield* raiseAdopt(ctx, { raise: raiseSteps }, sealed);
 	const base = {
 		proposal: `P-${sealed.proposal.no}`,
 		question: questionRef(raised.question),
@@ -145,7 +151,7 @@ export const proposeOp = defineOp({
 	scope: "project",
 	effect: "write",
 	mcp: "Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected.",
-	run: propose,
+	steps: proposeSteps,
 });
 
 // ── report ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -545,9 +551,17 @@ export const planOp = defineOp({
 // ── decide ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 export function decide(ctx: Ctx, input: DecideInput): DecideReply[] {
+	return complete(decideSteps(ctx, input));
+}
+
+export function* decideSteps(ctx: Ctx, input: DecideInput): Generator<undefined, DecideReply[], void> {
 	if ("undo" in input) return [undo(ctx, { q: input.undo, ifDecision: input.ifDecision, reason: input.reason })];
-	if ("all" in input) return input.all.map((one) => answer(ctx, { ...one, reason: one.reason ?? input.reason }));
-	return [answer(ctx, input)];
+	if ("all" in input) {
+		const replies: DecideReply[] = [];
+		for (const one of input.all) replies.push(yield* answerSteps(ctx, { ...one, reason: one.reason ?? input.reason }));
+		return replies;
+	}
+	return [yield* answerSteps(ctx, input)];
 }
 
 export const decideOp = defineOp({
@@ -560,7 +574,7 @@ export const decideOp = defineOp({
 	scope: "project",
 	effect: "write",
 	mcp: "Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person decides, forbidden, invalid, already, reopened, conflict=evidence or decision changed. Choose from answers. Withdraw with undo and ifDecision=reply.decision.",
-	run: decide,
+	steps: decideSteps,
 });
 
 export type { Raise };

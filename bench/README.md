@@ -87,6 +87,22 @@ drives it from this one: sixteen readers (a case, a folder page, a test's histor
 one client sending 10,000-result reports back to back and one saving a case. This is the measurement to trust for
 reads under load: `run.ts` keeps its clients on the server's thread.
 
+Add `bulk 5000` after the reader count to replace the report writer with back-to-back bulk creation,
+agent proposals that edit those cases, and a person's acceptance. For example:
+
+```sh
+bun bench/external.ts <dataset directory> 20 8 bulk 5000
+```
+
+The sixteen readers and short-save client stay the same. The output includes the create, propose, and adopt
+sample counts and latencies, read p95, and save acknowledgement p50 and p95. Every accepted batch must name
+all cases at version 2. After the load window, the client reads back every case to check its version and title,
+and checks each batch's folder count. A rejection, incomplete batch, or incorrect saved version fails the run.
+The server uses production mode and a free port. Its disposable database copy stays beside the source dataset
+and is removed when the server stops. Use the same benchmark script and dataset for both revisions, alternate
+at least five runs per revision, and report each median and range. See
+[decision 0082](../docs/decisions/0082-atomic-bulk-proposal-slices.md) for the bulk comparison and remaining save limit.
+
 On the full dataset (100,000 cases, 1,050,120 results, 50,000 open questions), 20 s windows, 2026-10-12, a
 16-thread desktop shared with other work:
 
