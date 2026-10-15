@@ -31,8 +31,9 @@ A result is only worth something if you know which version of which case it was 
 Mainworthy does not ask you to look at every red test. It turns evidence into questions, one for each cause.
 
 A failure message is reduced to a signature, so occurrences of the same cause share a question.
-If one report has an assertion signature in more than 50 distinct tests across more than five reported files,
-Mainworthy splits that cause by file. Each question names its file with "Split by file".
+If a commit's reports together have an assertion signature in more than 50 distinct tests across more than five
+reported files, Mainworthy splits that cause by file in the report that crosses those limits and in later reports.
+Each question names its file with "Split by file". Earlier results and answers keep their grouping and effects.
 Timeouts and infrastructure failures stay grouped. There are five kinds of question: a proposed edit to a case, a test with no case, a failed result, a finding from a review, and closing a run.
 
 Every open question waits in one place, the queue. [Decide in the queue](./decide.md) lists the answers each kind takes.

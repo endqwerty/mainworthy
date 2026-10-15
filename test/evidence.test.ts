@@ -143,6 +143,214 @@ describe("a red report", () => {
 			failure: { message },
 		})),
 	});
+	const assertionShard = (shard: number, n = 40) => {
+		const report = genericReport(n);
+		return {
+			...report,
+			job: `shard-${shard}`,
+			results: report.results.map((result) => ({
+				...result,
+				test: { key: `shard-${shard}/${result.test.key}`, file: `shard-${shard}/${result.test.file}` },
+			})),
+		};
+	};
+
+	test.each([{ order: [0, 1, 2, 3, 4, 5] }, { order: [5, 4, 3, 2, 1, 0] }])(
+		"a broad assertion spread across six CI shards splits as reports accumulate: %j",
+		({ order }) => {
+			const applied = order.map((shard) => {
+				const report = assertionShard(shard);
+				return { report, receipt: h.call<ReportReceipt>("report", report) };
+			});
+			expect(first(applied).receipt.questions).toHaveLength(1);
+			for (const { receipt } of applied.slice(1)) {
+				expect(receipt.questions).toHaveLength(6);
+				expect(receipt.questions.every((q) => q.title.startsWith("Split by file (shard-"))).toBe(true);
+			}
+			expect(queue().counts.failure).toBe(31);
+			expect(gate("broad001").tally).toMatchObject({ unexplained: 240, excused: 0 });
+			const file = first(queue().items.filter((q) => q.title.includes("/file-0.test.ts): assertion failed")));
+			expect(decide(file, { is: "flaky" })?.status).toBe("decided");
+			expect(gate("broad001").tally).toMatchObject({ unexplained: 233, excused: 7 });
+			for (const { report, receipt } of applied) {
+				expect(h.call<ReportReceipt>("report", report)).toEqual({ ...receipt, fresh: false });
+			}
+			expect(count("results")).toBe(240);
+			expect(count("batches")).toBe(6);
+		},
+	);
+
+	test("a split across shards preserves the earlier generic answer and its results", () => {
+		const receipt = h.call<ReportReceipt>("report", assertionShard(0));
+		const question = first(queue().items);
+		expect(decide(question, { is: "flaky", reason: "the first shard's evidence" })?.status).toBe("decided");
+		const earlier = h.app.db.raw.query("SELECT * FROM results ORDER BY id").all();
+		const decisions = h.app.db.raw.query("SELECT * FROM decisions WHERE kind = 'failure' ORDER BY id").all();
+		const excuses = h.app.db.raw.query("SELECT * FROM excuses ORDER BY decision").all();
+		const next = h.call<ReportReceipt>("report", assertionShard(1));
+		expect(next.questions).toHaveLength(6);
+		expect(next.questions.every((q) => q.state === "open")).toBe(true);
+		expect(gate("broad001").tally).toMatchObject({ unexplained: 40, excused: 40 });
+		expect(h.app.db.raw.query("SELECT * FROM results ORDER BY id LIMIT 40").all()).toEqual(earlier);
+		expect(h.app.db.raw.query("SELECT * FROM decisions WHERE kind = 'failure' ORDER BY id").all()).toEqual(decisions);
+		expect(h.app.db.raw.query("SELECT * FROM excuses ORDER BY decision").all()).toEqual(excuses);
+		expect(h.call<InboxReply>("inbox", { state: "decided", kind: "failure" }).items[0]).toMatchObject({
+			q: question.q,
+			title: "assertion failed",
+		});
+		expect(h.call<ReportReceipt>("report", assertionShard(0))).toEqual({ ...receipt, fresh: false });
+	});
+
+	test.each([false, true])(
+		"a stable shard order reuses the first shard's file causes on later commits, answered=%j",
+		(answered) => {
+			const commits = answered ? ["c0000001", "c0000002"] : ["c1000001", "c1000002", "c1000003"];
+			const firstShards: ReportReceipt[] = [];
+			for (const commit of commits) {
+				for (let shard = 0; shard < 6; shard++) {
+					const report = assertionShard(shard);
+					const receipt = h.call<ReportReceipt>("report", { ...report, target: { ...report.target, commit } });
+					if (shard === 0) firstShards.push(receipt);
+				}
+				if (answered && commit === commits[0]) {
+					const generic = first(queue().items.filter((q) => q.title === "assertion failed"));
+					expect(decide(generic, { is: "flaky" })?.status).toBe("decided");
+				}
+			}
+			expect(first(firstShards).questions).toMatchObject([{ title: "assertion failed", tests: 40, state: "open" }]);
+			for (const receipt of firstShards.slice(1)) {
+				expect(receipt.questions).toHaveLength(6);
+				expect(
+					receipt.questions.every((q) => q.title.startsWith("Split by file (shard-0/") && q.state === "open"),
+				).toBe(true);
+			}
+			expect(gate(first(commits)).tally).toMatchObject({
+				excused: answered ? 40 : 0,
+				unexplained: answered ? 200 : 240,
+			});
+			for (const commit of commits.slice(1)) {
+				expect(gate(commit).tally).toMatchObject({ excused: 0, unexplained: 240 });
+			}
+			expect(queue().counts.failure).toBe(answered ? 36 : 37);
+			const generic = h.call<InboxReply>("inbox", { kind: "failure", state: answered ? "decided" : "open" }).items;
+			expect(generic.find((q) => q.title === "assertion failed")?.evidence.tests).toHaveLength(40);
+		},
+	);
+
+	test("a null-file cause seen only before the split is reused on later commits", () => {
+		const report = genericReport(1);
+		const missing = {
+			...report,
+			job: "without-file",
+			results: [{ test: { key: "without-file" }, outcome: "fail", failure: { message: "assertion failed" } }],
+		};
+		const receipt = h.call<ReportReceipt>("report", missing);
+		expect(decide(first(queue().items), { is: "flaky" })?.status).toBe("decided");
+		h.call("report", assertionShard(0));
+		h.call("report", assertionShard(1));
+		expect(gate("broad001").tally).toMatchObject({ excused: 41, unexplained: 40 });
+		expect(h.call<ReportReceipt>("report", missing)).toEqual({ ...receipt, fresh: false });
+		const next = h.call<ReportReceipt>("report", { ...missing, target: { ...missing.target, commit: "broad002" } });
+		expect(next.questions).toMatchObject([
+			{ title: "Split by file (no file reported): assertion failed", tests: 1, state: "open" },
+		]);
+		expect(gate("broad002").tally).toMatchObject({ excused: 0, unexplained: 1 });
+	});
+
+	test("new files in small later shards count earlier split results under the original cause", () => {
+		h.call("report", assertionShard(0));
+		h.call("report", assertionShard(1));
+		const receipt = h.call<ReportReceipt>("report", assertionShard(2, 1));
+		expect(receipt.questions[0]).toMatchObject({
+			title: "Split by file (shard-2/file-0.test.ts): assertion failed",
+			tests: 1,
+		});
+		expect(gate("broad001").tally.unexplained).toBe(81);
+	});
+
+	test("cross-report thresholds count distinct tests and keep different assertions separate", () => {
+		const report = assertionShard(0);
+		h.call("report", report);
+		const retry = h.call<ReportReceipt>("report", { ...report, attempt: 2 });
+		expect(retry.questions).toHaveLength(1);
+		expect(retry.questions[0]?.title).toBe("assertion failed");
+		const other = assertionShard(1);
+		const distinct = h.call<ReportReceipt>("report", {
+			...other,
+			results: other.results.map((result) => ({ ...result, failure: { message: "expected eight, got nine" } })),
+		});
+		expect(distinct.questions).toHaveLength(1);
+		expect(distinct.questions[0]?.title).toBe("expected eight, got nine");
+		const atLimit = h.call<ReportReceipt>("report", assertionShard(2, 10));
+		expect(atLimit.questions).toHaveLength(1);
+		expect(atLimit.questions[0]?.title).toBe("assertion failed");
+		const overLimit = h.call<ReportReceipt>("report", assertionShard(3, 1));
+		expect(overLimit.questions[0]?.title).toBe("Split by file (shard-3/file-0.test.ts): assertion failed");
+	});
+
+	test("the guard combines environments of one repository and commit, not other commits or repositories", () => {
+		h.call("report", assertionShard(0));
+		const other = assertionShard(1);
+		for (const target of [
+			{ ...other.target, commit: "broad002" },
+			{ ...other.target, repo: "acme/other" },
+		]) {
+			const receipt = h.call<ReportReceipt>("report", { ...other, target });
+			expect(receipt.questions).toHaveLength(1);
+			expect(receipt.questions[0]?.title).toBe("assertion failed");
+		}
+		const receipt = h.call<ReportReceipt>("report", { ...other, target: { ...other.target, env: "another" } });
+		expect(receipt.questions).toHaveLength(6);
+		expect(h.call<GateStatus>("gate", { commit: "broad001", repo: "acme/web" }).tally.unexplained).toBe(80);
+	});
+
+	test("five reported files and missing files across shards do not cross the file threshold", () => {
+		const report = genericReport(30, 5);
+		h.call("report", report);
+		const sameFiles = h.call<ReportReceipt>("report", {
+			...report,
+			job: "another",
+			results: report.results.map((result) => ({
+				...result,
+				test: { ...result.test, key: `${result.test.key} extra` },
+			})),
+		});
+		expect(sameFiles.questions[0]?.title).toBe("assertion failed");
+		const missingFiles = h.call<ReportReceipt>("report", {
+			...report,
+			job: "missing",
+			results: Array.from({ length: 20 }, (_, i) => ({
+				test: { key: `without-file-${i}` },
+				outcome: "fail",
+				failure: { message: "assertion failed" },
+			})),
+		});
+		expect(missingFiles.questions[0]?.title).toBe("assertion failed");
+		const sixthFile = h.call<ReportReceipt>("report", assertionShard(1, 1));
+		expect(sixthFile.questions[0]?.title).toBe("Split by file (shard-1/file-0.test.ts): assertion failed");
+		expect(gate("broad001").tally.unexplained).toBe(81);
+	});
+
+	test("the guard counts applied reports even when acceptance order is reversed", () => {
+		const inTx = <T>(fn: (ctx: ReturnType<typeof makeCtx>) => T): T =>
+			h.app.db.transaction(() => {
+				const project = findProject(h.app.db, "scratch");
+				if (!project) throw new Error("no project");
+				const ctx = makeCtx(h.app, project, h.owner, true);
+				const out = fn(ctx);
+				stampSeq(ctx);
+				return out;
+			});
+		const firstBatch = inTx((ctx) => acceptReport(ctx, assertionShard(0))).batch;
+		const secondBatch = inTx((ctx) => acceptReport(ctx, assertionShard(1))).batch;
+		const firstApplied = inTx((ctx) => processBatch(ctx, secondBatch.id));
+		expect(firstApplied.questions).toHaveLength(1);
+		expect(firstApplied.questions[0]?.title).toBe("assertion failed");
+		const secondApplied = inTx((ctx) => processBatch(ctx, firstBatch.id));
+		expect(secondApplied.questions).toHaveLength(6);
+		expect(gate("broad001")).toMatchObject({ verdict: "blocked", stale: false, tally: { unexplained: 80 } });
+		expect(recoverAccepted(h.app)).toBe(0);
+	});
 
 	test("a broad assertion is split by file, and one answer excuses only that file", () => {
 		const report = genericReport();
