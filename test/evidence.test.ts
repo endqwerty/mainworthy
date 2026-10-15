@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { Client } from "../src/cli/client.ts";
+import { SameCodeEvidence } from "../src/core/flaky.ts";
+import { Policy } from "../src/core/kinds.ts";
 import type { ClaimReply, CommandFate, DecideReply, GateStatus, InboxReply, ReportReceipt } from "../src/core/ops.ts";
 import { stakes } from "../src/core/stakes.ts";
 import { recoverAccepted, sweep } from "../src/server/jobs.ts";
@@ -374,6 +376,305 @@ describe("a red report", () => {
 		expect(queue().counts.open).toBe(0);
 		expect(count("questions WHERE state = 'dissolved'")).toBe(1);
 		expect(count("flips")).toBe(1);
+	});
+});
+
+describe("same-code detector suggestions", () => {
+	const sameCode = () =>
+		SameCodeEvidence.parse(h.call<Record<string, unknown>[]>("get", { refs: ["T-1"] })[0]?.sameCode);
+	const report = (attempt: number, message?: string, job = "e2e") =>
+		h.call<ReportReceipt>(
+			"report",
+			ciReport({ commit: "detector1", n: 1, attempt, job, fail: message ? { 0: message } : {} }),
+		);
+
+	test("shows assertion evidence without silently excusing the current failure", () => {
+		report(1, "expected 1, got 2");
+		report(2);
+		const failing = report(3, "expected 1, got 2");
+		expect(sameCode()).toMatchObject({
+			enabled: true,
+			windowDays: 14,
+			minFlips: 2,
+			signals: [
+				{
+					class: "assertion",
+					flips: 2,
+					suggested: true,
+				},
+			],
+		});
+		expect(sameCode().signals[0]?.samples[0]).toMatchObject({
+			commit: "detector1",
+			job: "e2e",
+			first: { id: 2, outcome: "pass", attempt: 2 },
+			second: { id: 3, outcome: "fail", attempt: 3 },
+		});
+		expect(failing.gate?.verdict).toBe("blocked");
+		expect(count("excuses")).toBe(0);
+		expect(queue().items[0]?.evidence.tests).toMatchObject([
+			{ sameCode: { signals: [{ class: "assertion", suggested: true }] } },
+		]);
+	});
+
+	test("keeps assertion, timeout and infrastructure evidence separate", () => {
+		report(1);
+		report(2, "expected 1, got 2");
+		report(3);
+		report(4, "ECONNRESET");
+		report(5);
+		report(6, "TimeoutError: waiting for element");
+		report(7);
+		expect(sameCode()).toMatchObject({
+			signals: [
+				{ class: "assertion", flips: 2, suggested: true },
+				{ class: "timeout", flips: 2, suggested: true },
+				{ class: "infra", flips: 2, suggested: true },
+			],
+		});
+	});
+
+	test("different assertion causes do not pool flips toward the threshold", () => {
+		report(1, "expected 1, got 2");
+		report(2);
+		report(3, "expected 3, got 4");
+		expect(sameCode().signals).toMatchObject([
+			{ signature: { text: "expected 1, got 2" }, class: "assertion", flips: 1, suggested: false },
+			{ signature: { text: "expected 3, got 4" }, class: "assertion", flips: 1, suggested: false },
+		]);
+	});
+
+	test("a file-split cause counts its own flips and keeps the original cause's history separate", () => {
+		const input = ciReport({ commit: "splitflip1", n: 0 });
+		const tests = Array.from({ length: 60 }, (_, i) => ({
+			key: `file-${i % 6}.test.ts::test ${i}`,
+			file: `file-${i % 6}.test.ts`,
+		}));
+		const chosen = first(tests);
+		const send = (attempt: number, outcome: "pass" | "fail", broad = false) =>
+			h.call<ReportReceipt>("report", {
+				...input,
+				attempt,
+				results: (broad ? tests : [chosen]).map((test) => ({
+					test,
+					outcome,
+					...(outcome === "fail" ? { failure: { message: "assertion failed" } } : {}),
+				})),
+			});
+		send(1, "pass");
+		send(2, "fail");
+		send(3, "pass");
+		const splitReport = send(4, "fail", true);
+		expect(splitReport.questions).toHaveLength(6);
+		expect(sameCode().signals).toMatchObject([
+			{ signature: { text: "assertion failed" }, class: "assertion", flips: 2, suggested: true },
+			{
+				signature: { text: "Split by file (file-0.test.ts): assertion failed" },
+				class: "assertion",
+				flips: 1,
+				suggested: false,
+			},
+		]);
+		const fileZero = () => queue().items.find((q) => q.title === "Split by file (file-0.test.ts): assertion failed");
+		expect(first(z.array(z.unknown()).parse(fileZero()?.evidence.tests))).toMatchObject({
+			t: "T-1",
+			sameCode: { signals: [{ flips: 1, suggested: false }] },
+		});
+		const otherFile = queue().items.find((q) => q.title === "Split by file (file-1.test.ts): assertion failed");
+		expect(otherFile?.evidence.tests).toHaveLength(10);
+		expect(otherFile?.evidence.tests).not.toContainEqual(expect.objectContaining({ sameCode: expect.anything() }));
+		send(5, "pass");
+		const retry = send(6, "fail");
+		expect(retry.questions[0]?.title).toBe("Split by file (file-0.test.ts): assertion failed");
+		expect(sameCode().signals).toMatchObject([
+			{ signature: { text: "assertion failed" }, flips: 2, suggested: true },
+			{ signature: { text: "Split by file (file-0.test.ts): assertion failed" }, flips: 3, suggested: true },
+		]);
+		const snapshot = first(
+			z.array(z.object({ sameCode: SameCodeEvidence.optional() }).passthrough()).parse(fileZero()?.evidence.tests),
+		).sameCode;
+		expect(snapshot?.signals).toHaveLength(1);
+		expect(snapshot?.signals[0]).toMatchObject({
+			signature: { text: "Split by file (file-0.test.ts): assertion failed" },
+			flips: 3,
+			suggested: true,
+		});
+		expect(retry.gate).toMatchObject({ verdict: "blocked", tally: { unexplained: 60, excused: 0 } });
+	});
+
+	test("a different job and an older attempt do not add detector evidence", () => {
+		report(2, "expected 1, got 2");
+		report(3, undefined, "unit");
+		report(1);
+		expect(sameCode()).toMatchObject({ signals: [] });
+		report(3);
+		expect(sameCode()).toMatchObject({ signals: [{ class: "assertion", flips: 1, suggested: false }] });
+	});
+
+	test("a skipped retry does not hide a decisive flip, and replaying a batch adds nothing", () => {
+		report(1, "expected 1, got 2");
+		const skipped = ciReport({ commit: "detector1", n: 1, attempt: 2 });
+		h.call("report", { ...skipped, results: skipped.results.map((r) => ({ ...r, outcome: "skip" })) });
+		report(3);
+		report(3);
+		expect(sameCode()).toMatchObject({ signals: [{ class: "assertion", flips: 1, suggested: false }] });
+	});
+
+	test("project settings change thresholds, disable suggestions, and expire old evidence", () => {
+		const configure = (flakyDetection: { enabled: boolean; windowDays: number; minFlips: number }) => {
+			const policy = Policy.parse(h.call("admin", { do: "policy.show", project: "scratch" }));
+			const proposed = h.call<{ question: string }>("propose", {
+				edits: [{ op: "policy", settings: { ...policy.settings, flakyDetection } }],
+			});
+			const q = h.call<InboxReply["items"]>("get", { refs: [proposed.question] })[0];
+			if (!q) throw new Error("policy question missing");
+			expect(decide(q, { is: "accept" })?.status).toBe("decided");
+		};
+		report(1, "expected 1, got 2");
+		report(2);
+		report(3, "expected 1, got 2");
+		configure({ enabled: true, windowDays: 1, minFlips: 3 });
+		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 2, suggested: false }]);
+		configure({ enabled: false, windowDays: 1, minFlips: 1 });
+		expect(sameCode()).toEqual({ enabled: false, windowDays: 1, minFlips: 1, signals: [] });
+		const other = harness({ project: "other" });
+		try {
+			expect(
+				Policy.parse(other.call("admin", { do: "policy.show", project: "other" })).settings.flakyDetection,
+			).toEqual({ enabled: true, windowDays: 14, minFlips: 2 });
+		} finally {
+			other.close();
+		}
+
+		expect(count("flips")).toBe(2);
+		configure({ enabled: true, windowDays: 1, minFlips: 1 });
+		expect(sameCode().signals).toMatchObject([{ flips: 2, suggested: true }]);
+		h.advance(86_400_001);
+		expect(sameCode().signals).toEqual([]);
+		expect(gate("detector1").verdict).toBe("blocked");
+	});
+
+	test("invalid detector settings are refused without changing the policy", () => {
+		const policy = Policy.parse(h.call("admin", { do: "policy.show", project: "scratch" }));
+		for (const bad of [
+			{ enabled: "yes" },
+			{ minFlips: 0 },
+			{ minFlips: 101 },
+			{ windowDays: 0 },
+			{ windowDays: 366 },
+		]) {
+			expect(
+				h.raw("propose", {
+					edits: [
+						{
+							op: "policy",
+							settings: { ...policy.settings, flakyDetection: { ...policy.settings.flakyDetection, ...bad } },
+						},
+					],
+				}),
+			).toMatchObject({ ok: false, error: { code: "invalid" } });
+		}
+		expect(Policy.parse(h.call("admin", { do: "policy.show", project: "scratch" })).settings.flakyDetection).toEqual({
+			enabled: true,
+			windowDays: 14,
+			minFlips: 2,
+		});
+	});
+
+	test("one producer cannot create a flip with another producer's result", () => {
+		report(1, "expected 1, got 2");
+		const pipeline = h.actor("other-pipeline", "ci", ["record"]);
+		h.call("report", ciReport({ commit: "detector1", n: 1, attempt: 2 }), pipeline);
+		expect(sameCode().signals).toEqual([]);
+		report(2);
+		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 1 }]);
+	});
+
+	test("same-attempt disagreement is not a retry flip", () => {
+		report(1, "expected 1, got 2");
+		report(1);
+		expect(sameCode().signals).toEqual([]);
+		report(2);
+		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 1 }]);
+	});
+
+	test("a later same-attempt failure removes a pass from detector evidence", () => {
+		report(1, "expected 1, got 2");
+		report(2);
+		expect(sameCode().signals).toMatchObject([{ flips: 1 }]);
+		report(2, "expected 1, got 2");
+		expect(sameCode().signals).toEqual([]);
+		report(3);
+		expect(sameCode().signals).toMatchObject([
+			{ flips: 1, samples: [{ first: { outcome: "fail", attempt: 2 }, second: { outcome: "pass", attempt: 3 } }] },
+		]);
+	});
+
+	test("counts every flip but bounds concrete examples to three per failure cause", () => {
+		for (const attempt of [1, 2, 3, 4, 5]) report(attempt, attempt % 2 === 1 ? "expected 1, got 2" : undefined);
+		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 4, suggested: true }]);
+		expect(sameCode().signals[0]?.samples).toHaveLength(3);
+	});
+
+	test("different environments, repositories and commits do not cross", () => {
+		report(1, "expected 1, got 2");
+		const pass = ciReport({ commit: "detector1", n: 1, attempt: 2 });
+		for (const target of [
+			{ ...pass.target, env: "staging" },
+			{ ...pass.target, repo: "acme/other" },
+			{ ...pass.target, commit: "detector2" },
+		])
+			h.call("report", { ...pass, target });
+		expect(sameCode().signals).toEqual([]);
+		report(2);
+		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 1 }]);
+	});
+
+	test("a corrected observation stops supporting a suggestion", () => {
+		const initial = report(1, "expected 1, got 2");
+		report(2);
+		expect(sameCode().signals).toMatchObject([{ flips: 1 }]);
+		const corrected = ciReport({ commit: "detector1", n: 1, attempt: 3 });
+		h.call("report", { ...corrected, results: corrected.results.map((r) => ({ ...r, corrects: initial.results[0] })) });
+		expect(sameCode().signals).toEqual([]);
+	});
+
+	test("agents and session targets do not become same-code suggestions", () => {
+		const agent = h.actor("review-bot", "agent", ["read", "produce"]);
+		for (const attempt of [1, 2, 3])
+			h.call(
+				"report",
+				ciReport({ commit: "detector1", n: 1, attempt, fail: attempt === 2 ? {} : { 0: "expected 1, got 2" } }),
+				agent,
+			);
+		expect(sameCode().signals).toEqual([]);
+		for (const attempt of [1, 2, 3]) {
+			const input = ciReport({
+				commit: "detector1",
+				n: 1,
+				attempt,
+				fail: attempt === 2 ? {} : { 0: "expected 1, got 2" },
+			});
+			h.call("report", { ...input, target: { session: "manual-session" } });
+		}
+		expect(sameCode().signals).toEqual([]);
+		report(1);
+		report(2, "expected 1, got 2");
+		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 1 }]);
+	});
+
+	test("policies stored before detection settings still read with defaults", () => {
+		const policy = Policy.parse(h.call("admin", { do: "policy.show", project: "scratch" }));
+		const { flakyDetection: _, ...legacy } = policy.settings;
+		h.app.db.raw.query("UPDATE policies SET settings = ?").run(JSON.stringify(legacy));
+		expect(Policy.parse(h.call("admin", { do: "policy.show", project: "scratch" })).settings.flakyDetection).toEqual({
+			enabled: true,
+			minFlips: 2,
+			windowDays: 14,
+		});
+		report(1);
+		report(2, "expected 1, got 2");
+		expect(sameCode().signals).toMatchObject([{ class: "assertion", flips: 1 }]);
 	});
 });
 

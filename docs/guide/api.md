@@ -162,6 +162,10 @@ Create or change cases, folders, links or the policy. Saving and proposing are t
 | `edits[][policy].clauses[].blocks` | `"nothing" \| "change" \| "release" \| "all"` | yes |  |
 | `edits[][policy].settings` | `object` | no |  |
 | `edits[][policy].settings.fields` | `record<object>` | no |  |
+| `edits[][policy].settings.flakyDetection` | `object` | no |  Default: `{"enabled":true,"windowDays":14,"minFlips":2}`. |
+| `edits[][policy].settings.flakyDetection.enabled` | `boolean` | yes |  |
+| `edits[][policy].settings.flakyDetection.windowDays` | `integer` | yes |  |
+| `edits[][policy].settings.flakyDetection.minFlips` | `integer` | yes |  |
 | `edits[][policy].settings.unlinked` | `"ask" \| "track" \| "create"` | yes |  |
 | `edits[][policy].settings.basis` | `"exact" \| "exact-or-assumed"` | yes |  |
 | `edits[][policy].settings.holds` | `object` | yes |  |
@@ -773,11 +777,11 @@ An agent that connects over MCP gets these operations as tools, with the same in
 | Tool | What the agent is told it is for |
 | --- | --- |
 | `propose` | Propose cases at their base version. Status: adopted=current, open=needs acceptance, conflict=resolve, rejected. |
-| `report` | Record test results in one batch. Give `target` (the commit tested) or `run` (a planned run). Each result names a test by `key` or a case by ref. |
+| `report` | Record results for target or run. |
 | `claim` | Review cases (`reviewed`, C-311@hash) at change `about` and commit `patch`. Record findings; `known` returns prior findings and answers. |
 | `decide` | Answer inbox using evidenceHash as onEvidence. Status: decided, advised=person decides, forbidden, invalid, already, reopened, conflict=evidence or decision changed. Choose from answers. Withdraw with undo and ifDecision=reply.decision. |
-| `inbox` | List open questions with evidence and `evidenceHash`, counts first. `on` selects a case, run or change. |
-| `get` | Read refs (C-, Q-, R-, T-, P-). For cases, `as: "md"` and `fields` read less; `unless: {ref: hash}` skips unchanged cases. |
+| `inbox` | Open questions and evidenceHash; filter with on. |
+| `get` | Read refs. For cases: as, fields, unless. |
 | `find` | Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slots. Page with `cursor`. |
 | `impact` | Start a review with a change (`pr:482`) or changed `files`. Returns affected cases, hashes, prior reviews, questions and uncovered files. Reuse `cursor` as `since`. |
 | `since` | What changed since an earlier `cursor`: changed cases (one-line diff, no bodies) and settled questions. If `more`, call again with the new cursor. |

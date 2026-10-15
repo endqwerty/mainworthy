@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SameCodeEvidence } from "../../core/flaky.ts";
 import { newStepId } from "../../core/ids.ts";
 import { CaseBody, emptyBody } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
@@ -24,7 +25,7 @@ export const MapEvidence = z.object({ file: z.string(), tests: z.array(Test), co
 export const FailureEvidence = z.object({
 	message: z.string().nullable(),
 	sample: z.number().nullable().optional(),
-	tests: z.array(Test),
+	tests: z.array(Test.extend({ sameCode: SameCodeEvidence.optional() })),
 	count: z.number(),
 	target: z.string(),
 	branch: z.string().nullable(),
@@ -321,6 +322,33 @@ export function questionReadMessage(question: QuestionItem): string | null {
 	return null;
 }
 
+function SameCodeSignals({ evidence }: { evidence: SameCodeEvidence }) {
+	return evidence.signals.map((signal) => (
+		<details key={signal.signature.id} className="same-code-evidence">
+			<summary>
+				{signal.class === "infra" ? "Infrastructure" : signal.class === "timeout" ? "Timeout" : "Assertion"}:{" "}
+				{signal.flips} same-code outcome changes in {evidence.windowDays} days.
+				{signal.suggested
+					? signal.class === "infra"
+						? " Review infrastructure."
+						: " Review for flakiness."
+					: ` Suggestion threshold: ${evidence.minFlips}.`}
+			</summary>
+			<p>{signal.signature.text}</p>
+			<p>This evidence alone excuses no failure. Most recent examples:</p>
+			<ul>
+				{signal.samples.map((sample) => (
+					<li key={sample.second.id}>
+						{sample.commit.slice(0, 12)} · {sample.job || "unnamed job"} · {sample.env || "default environment"} ·
+						producer {sample.actor}: result {sample.first.id} ({sample.first.outcome}, attempt {sample.first.attempt})
+						to result {sample.second.id} ({sample.second.outcome}, attempt {sample.second.attempt})
+					</li>
+				))}
+			</ul>
+		</details>
+	));
+}
+
 export function QuestionEvidence({ question, full }: { question: QuestionItem; full: boolean }) {
 	switch (question.kind) {
 		case "failure": {
@@ -357,6 +385,7 @@ export function QuestionEvidence({ question, full }: { question: QuestionItem; f
 						{evidence.tests.slice(0, full ? undefined : 3).map((test) => (
 							<li key={test.t}>
 								<span className="ref">{test.t}</span> {test.name} {test.case && <RefLink refValue={test.case} />}
+								{test.sameCode && <SameCodeSignals evidence={test.sameCode} />}
 							</li>
 						))}
 					</ul>

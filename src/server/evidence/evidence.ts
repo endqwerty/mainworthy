@@ -301,8 +301,15 @@ const Q = {
 		"SELECT DISTINCT target, run FROM results WHERE project = $project AND signature = $signature AND actor = $actor",
 	),
 	resultById: sql<{ id: number }, ResultRow>("SELECT * FROM results WHERE id = $id"),
-	previousOnTarget: sql<{ target: number; test: number }, { id: number; outcome: Outcome }>(
-		"SELECT id, outcome FROM results WHERE target = $target AND test = $test ORDER BY attempt DESC, id DESC LIMIT 1",
+	previousOnTarget: sql<
+		{ target: number; test: number; actor: number; job: string; method: string },
+		{ id: number; outcome: Outcome; attempt: number }
+	>(
+		`SELECT r.id, r.outcome, r.attempt FROM results r JOIN batches b ON b.id = r.batch
+		 WHERE r.target = $target AND r.test = $test AND r.actor = $actor AND b.job = $job
+		   AND r.method = $method AND r.outcome IN ('pass', 'fail', 'error')
+		   AND NOT EXISTS (SELECT 1 FROM results c WHERE c.corrects = r.id)
+		 ORDER BY r.attempt DESC, CASE WHEN r.outcome = 'pass' THEN 0 ELSE 1 END DESC, r.id DESC LIMIT 1`,
 	),
 	insertFlip: sql<{ project: number; test: number; target: number; first: number; second: number; seq: number }>(
 		"INSERT INTO flips (project, test, target, first_result, second_result, seq) VALUES ($project, $test, $target, $first, $second, $seq)",
@@ -725,7 +732,7 @@ export type Applied = {
 	signature: SignatureRow | null;
 	message: string | null;
 	corrects: number | null;
-	/** True when an earlier result of this test on the same target had the other outcome. */
+	/** True when a higher decisive attempt changes outcome within one producer, job, method and target. */
 	flipped: boolean;
 	/** True when this test was first seen in this batch. */
 	fresh: boolean;
@@ -879,7 +886,13 @@ export function* applySteps(
 			signature = ensureSignature(ctx, { message, ...(input.failure?.detail ? { detail: input.failure.detail } : {}) });
 		}
 
-		const previous = ctx.db.get(Q.previousOnTarget, { target: batch.target, test: test.id });
+		const previous = ctx.db.get(Q.previousOnTarget, {
+			target: batch.target,
+			test: test.id,
+			actor: batch.actor,
+			job: batch.job,
+			method,
+		});
 		const ord = ctx.ord();
 		const { lastId } = ctx.db.run(Q.insertResult, {
 			project,
@@ -910,6 +923,7 @@ export function* applySteps(
 		const decisive = (o: Outcome) => (o === "pass" ? "pass" : o === "fail" || o === "error" ? "fail" : null);
 		const flipped =
 			previous !== null &&
+			previous.attempt < attempt &&
 			corrects === null &&
 			decisive(previous.outcome) !== null &&
 			decisive(input.outcome) !== null &&

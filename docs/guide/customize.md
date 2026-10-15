@@ -22,7 +22,7 @@ Two words recur below. An instance admin holds the `admin` capability on every p
 | --- | --- | --- | --- |
 | The policy preset | Settings, Policy, "Preset", or `mainworthy policy use` | An admin on the project who also holds `produce` | [Policy](./policy.md) |
 | What happens to a test with no case | Settings, Policy, "Tests with no case", or `mainworthy policy tests` | The same | [Policy](./policy.md#tests-with-no-case) |
-| Single clauses, the flaky hold, the evidence basis | `mainworthy propose` with a policy edit. Settings has no control for these | The same | [Policy](./policy.md#change-single-clauses) |
+| Single clauses, the flaky hold, the evidence basis, same-code detector settings | `mainworthy propose` with a policy edit. Settings has no control for these | The same | [Policy](./policy.md#change-single-clauses) |
 | Custom field definitions | Settings, Policy, "Custom fields", or a `propose` policy edit | An instance admin who holds `produce` in Settings; a project admin through `propose` | [Policy](./policy.md#custom-fields) |
 | Projects | Settings, Projects, "Create a project", or `mainworthy admin` | An instance admin | [Policy](./policy.md#choose-a-preset-for-a-new-project) |
 | What each person, agent or pipeline may do | `mainworthy actor grant` and `actor ungrant`. Settings shows tokens only | An instance admin who is a person | [People, agents and pipelines](./access.md) |
@@ -114,7 +114,7 @@ Some things look like settings and are not. Each of these is the same on every i
 - Sign-in is by token, or for a person by a name and a password or a passkey, which an admin's invitation link sets up. There is no single sign-on, no second factor beside a password, and no mail: a lost password is replaced through a recovery link. A password is 12 to 256 characters and has no other rule. A token works until you revoke it or until the end you gave it.
 - The database is one SQLite file.
 
-These are not built yet: a flaky-test detector, a requirements coverage matrix, sign-off by a named role or by two people, attachments, a gate check posted to your code host, importers from other tools, and reports or dashboards.
+These are not built yet: stable-trunk flakiness detection, quarantine entry and exit, a requirements coverage matrix, sign-off by a named role or by two people, attachments, a gate check posted to your code host, importers from other tools, and reports or dashboards.
 
 ## See also
 

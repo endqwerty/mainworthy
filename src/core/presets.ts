@@ -1,6 +1,7 @@
 // The policy presets: three clause lists over one model (principle P5). A team's strictness is which list is in
 // force. `strict` is a fixture that proves the same data works under a policy where a person answers everything;
 // the regulated preset proper needs the `gap` kind and role sign-off, which are not built yet.
+import { FlakyDetectionSettings } from "./flaky.ts";
 import { type Ask, Clause, KINDS, type Kind, type Policy, type PolicySettings } from "./kinds.ts";
 
 const rule: Ask = { who: "rule", agents: "none", notProducer: false, reason: "optional" };
@@ -11,6 +12,7 @@ const author: Ask = { who: "author", agents: "none", notProducer: false, reason:
 const admin: Ask = { who: "admin", agents: "none", notProducer: false, reason: "optional" };
 
 const settings: PolicySettings = {
+	flakyDetection: FlakyDetectionSettings.parse(undefined),
 	unlinked: "track",
 	basis: "exact-or-assumed",
 	holds: { flakyDays: 14, infraThisTargetOnly: true },
