@@ -45,6 +45,58 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
+	"the Suite finishes paging and refreshes while changes arrive during every read",
+	async () => {
+		const server = await startServer({ cases: 1001 });
+		const h = await openPage(server, { path: "/p/scratch/queue" });
+		try {
+			const { page } = h;
+			await page.addInitScript(() => {
+				const Native = window.EventSource;
+				window.EventSource = class extends Native {
+					private timer: ReturnType<typeof setInterval>;
+					constructor(url: string | URL, init?: EventSourceInit) {
+						super(url, init);
+						this.timer = setInterval(() => {
+							this.onmessage?.(new MessageEvent("message", { data: '{"op":"propose","touched":[]}' }));
+						}, 10);
+					}
+					override close() {
+						clearInterval(this.timer);
+						super.close();
+					}
+				};
+				const send = window.fetch.bind(window);
+				const sending = async (input: RequestInfo | URL, init?: RequestInit) => {
+					const reply = await send(input, init);
+					if (String(input).endsWith("/find") && typeof init?.body === "string" && init.body.includes('"cases"'))
+						await new Promise((resolve) => setTimeout(resolve, 60));
+					return reply;
+				};
+				window.fetch = Object.assign(sending, { preconnect: window.fetch.preconnect });
+			});
+			await page.goto(`${server.url}/p/scratch/suite`);
+			await page.waitForFunction(
+				() => document.querySelector('[data-testid="case-list"]')?.getAttribute("data-loaded") === "1001",
+				undefined,
+				{ timeout: 4000 },
+			);
+			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-total")).toBe("1001");
+			await server.api("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated while reading" } }],
+			});
+			await page.getByRole("option").filter({ hasText: "Updated while reading" }).waitFor({ timeout: 4000 });
+			expect(await page.locator('[data-testid="case-list"]').getAttribute("data-loaded")).toBe("1001");
+			expect(h.errors).toEqual([]);
+		} finally {
+			await h.close();
+			await server.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
 	"an ordinary edit preserves custom fields omitted from JSON case reads",
 	async () => {
 		const server = await startServer();

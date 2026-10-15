@@ -105,6 +105,10 @@ In server mode the last token the owner can sign in with is kept, whoever asks, 
 
 ## The web UI
 
+### A list is loading while reports or edits arrive
+
+Suite keeps loading the remaining cases while changes arrive. The web app lets a page or refresh finish before reading the list again, and combines changes during that read into one refresh. The newest changes can appear after the current load finishes. Queue and Runs use the same behaviour.
+
 ### A key does nothing
 
 Keys other than <kbd>⌘</kbd> combinations and <kbd>Esc</kbd> are off while you type in a field. Press <kbd>Esc</kbd> to leave the case editor, the filter or a run's note. In Settings, click outside the field. Press <kbd>?</kbd> to see the keys that work on the current screen. The full list is on the [keyboard](./keyboard.md) page.

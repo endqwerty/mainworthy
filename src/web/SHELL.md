@@ -44,7 +44,10 @@ Parse generic row data with Zod at the screen boundary. Core schemas are shared.
 `queryClient` is the shared QueryClient. `invalidateProject(project)` refetches, and
 `changed(project, change)` refetches what an event of the stream touched. Both ask a
 first read that was still on its way once more when it lands: its reply may be from
-before the change (issue #87). Nothing outside `lib/data.ts` calls
+before the change (issue #87). List queries end their key with `"pages"`. Their active
+read finishes before one coalesced refresh, yielding to automatic next-page reads
+so Suite can finish under continuous changes (issue #199). Awaiting
+`invalidateProject` also waits for that refresh. Nothing outside `lib/data.ts` calls
 `queryClient.invalidateQueries`; keep it so.
 The shell owns exactly one event stream for the current project. Streams,
 window focus and reconnect invalidate cached reads; edits also invalidate.
