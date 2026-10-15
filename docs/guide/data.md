@@ -141,7 +141,7 @@ project before creating that marker. Question and evidence context always appear
 inside the file.
 
 Recorded evidence is `{ state: "recorded", hash, ref }`. A decision made before
-migration 15 has `{ state: "not-recorded" }` because its exact seen-evidence hash was
+migration 16 has `{ state: "not-recorded" }` because its exact seen-evidence hash was
 not retained. Its material `basis` remains available. A policy change or case version
 reaches its evidence through the adopting decision. The initial policy has none.
 

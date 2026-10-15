@@ -33,7 +33,7 @@ hash-only evidence records supply reference context. Mutable question titles,
 evidence payloads, and current question state are not presented as historical facts.
 
 Decision creation now retains the question's exact seen-evidence hash in
-`decisions.on_evidence`. Migration `0015_decision_evidence.sql` leaves this column null on older decisions.
+`decisions.on_evidence`. Migration `0016_decision_evidence.sql` leaves this column null on older decisions.
 An export marks their evidence `not-recorded` and verification reports their count.
 It never infers an old hash from today's question or from a coincident answer.
 Answers already retain their exact evidence hashes. Case and policy changes refer
