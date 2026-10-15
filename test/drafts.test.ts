@@ -82,11 +82,11 @@ test("a window removes its own draft, and leaves a draft another window owns", (
 	expect(stored()).toEqual(theirs);
 });
 
-test("taking a draft over drops the request its owner sent; a draft whose owner is gone keeps it", () => {
+test("taking a draft over keeps the request its owner sent, as does claiming a closed owner's draft", () => {
 	another({ sent: request });
-	// "Take over here": the owner is there and still has the request, and settles it.
+	// The new owner must settle the same request, even while the former owner is still waiting for it.
 	const taken = claimDraft({ project, draft: draft({ owner: "another-window", sent: request }), takeOver: true });
-	expect(taken).toMatchObject({ owner: draftOwner(), sent: null });
+	expect(taken).toMatchObject({ owner: draftOwner(), sent: request });
 	expect(taken.cmd).not.toBe("draft-cmd-01");
 	expect(stored()).toEqual(taken);
 	// Opening a draft nobody is there for: its request may have been recorded, and only asking again can tell.

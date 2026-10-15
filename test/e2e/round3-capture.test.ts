@@ -470,7 +470,7 @@ check(
 );
 
 check(
-	"A-2 a second window never treats another window's pending edit as its own retry",
+	"A-2 taking over reconciles the pending edit before sending later text",
 	async () => {
 		const server = await startServer();
 		await server.api("propose", { edits: [{ op: "create", outline: "Pending windows\n  Open cart" }] });
@@ -513,10 +513,16 @@ check(
 			await b.getByRole("button", { name: "Take over here", exact: true }).click();
 			await titleOf(b).fill("Title from B");
 			await b.keyboard.press("Escape");
-			await b.locator(".conflict-card").waitFor();
-			expect(new Set(ids).size).toBe(ids.length);
+			const saved = await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.version === 3,
+			);
+			expect(ids).toHaveLength(2);
+			expect(new Set(ids).size).toBe(2);
 			expect(await titleOf(b).inputValue()).toBe("Title from B");
-			expect((await server.api("get", { refs: ["C-1"] }))[0]?.title).toBe("Title from A");
+			expect(saved[0]).toMatchObject({ title: "Title from B", version: 3 });
+			expect((await server.api("get", { refs: ["C-1"], version: 2 }))[0]?.title).toBe("Title from A");
+			expect((await server.api("inbox", { kind: "adopt" })).items).toHaveLength(0);
 		} finally {
 			release();
 			await h.close();

@@ -102,7 +102,7 @@ export function claimDraft({
 }): Draft {
 	const stored = readDraft({ project, id: draft.id }) ?? draft;
 	if (stored.owner === draftOwner() || (!takeOver && draftOwnedElsewhere(stored))) return stored;
-	const claimed = { ...stored, owner: draftOwner(), cmd: randomId(), sent: takeOver ? null : stored.sent };
+	const claimed = { ...stored, owner: draftOwner(), cmd: randomId() };
 	storeDraft({ project, draft: claimed });
 	return claimed;
 }
