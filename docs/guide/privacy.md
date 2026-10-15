@@ -24,7 +24,7 @@ An invitation is stored as a hash of its code, with who it is for and who made i
 
 When you sign in, we keep a record of the session so that you can see where you are signed in and end a session that is not yours: when it started and was last used, what the browser or app calls itself (its user agent, up to 256 characters), and the network address it was opened from and last used from. We keep only the latest address, never a history of addresses.
 
-A session ends when you sign out, after 14 days without use, or after 90 days. We delete its record 30 days after it ends. A session that stopped working another way, for example because its token was revoked, is only marked ended when the server later finds that one of those limits has passed, and its record is deleted 30 days after that, so it can stay well beyond 30 days ([#227](https://github.com/endqwerty/mainworthy/issues/227)).
+A session ends when you sign out, after 14 days without use, or after 90 days. Once a session has been ended for 30 days, the server deletes its record: it looks for such records every minute while it runs, so a record can outlast the 30 days while the server is stopped. A session that stopped working another way, for example because its token was revoked, is only marked ended when the server later finds that one of those limits has passed, and its 30 days start then, so its record can stay well beyond 30 days after it stopped working ([#227](https://github.com/endqwerty/mainworthy/issues/227)).
 
 ### Failed sign-ins
 
@@ -76,7 +76,7 @@ We apply the same rights to everyone, wherever they are:
 - **Right to know.** This page lists what we collect and why.
 - **Right of access and portability.** An admin can export everything in an instance as a text file that any tool can read ([Your data](./data.md)). We will export what we hold about you on request.
 - **Right to correction.** Ask us to correct anything about you that is wrong.
-- **Right to erasure.** Ask us to forget you. We then replace your name with a pseudonym, revoke your passwords, passkeys, tokens and invitations, erase your password's hash and your passkeys' public keys, and end your sessions, whose records are deleted 30 days later. The history still says that one person did each thing, without saying who. Three things stay for now: text that you typed into cases and notes, because Mainworthy cannot yet erase part of its history ([#40](https://github.com/endqwerty/mainworthy/issues/40)); your old name in the server's record of the replies it sent ([#228](https://github.com/endqwerty/mainworthy/issues/228)); and the records of your tokens, invitations, passwords and passkeys, with the labels they were given, when they were made and used, and each passkey's credential id, but nothing that signs in ([#227](https://github.com/endqwerty/mainworthy/issues/227), [#228](https://github.com/endqwerty/mainworthy/issues/228)).
+- **Right to erasure.** Ask us to forget you. We then replace your name with a pseudonym, revoke your passwords, passkeys, tokens and invitations, erase your password's hash and your passkeys' public keys, and end your sessions, whose records are then deleted as [sessions](#sessions) describes. The history still says that one person did each thing, without saying who. Three things stay for now: text that you typed into cases and notes, because Mainworthy cannot yet erase part of its history ([#40](https://github.com/endqwerty/mainworthy/issues/40)); your old name in the server's record of the replies it sent ([#228](https://github.com/endqwerty/mainworthy/issues/228)); and the records of your tokens, invitations, passwords and passkeys, with the labels they were given, when they were made and used, and each passkey's credential id, but nothing that signs in ([#227](https://github.com/endqwerty/mainworthy/issues/227), [#228](https://github.com/endqwerty/mainworthy/issues/228)).
 - **Right to restrict processing and to object.** Ask us, and we will tell you what we can do.
 - **Right to complain.** You can complain to the data protection authority where you live.
 - **Right to non-discrimination.** Exercising these rights never costs you anything.
@@ -95,7 +95,7 @@ We keep information only for as long as it is needed:
 | --- | --- |
 | Failed sign-in attempts | Used for at most 30 minutes; in memory only, until the server restarts |
 | A passkey sign-in in progress | Usable for 5 minutes; in memory only, until the server restarts |
-| A session's record | 30 days after the session ends (see [sessions](#sessions)) |
+| A session's record | Deleted once the session has been ended for 30 days, by the running server (see [sessions](#sessions)) |
 | Your account and content | As long as the instance exists |
 
 Mainworthy does not yet delete old content, the records of revoked tokens with the address each was last used from, or the records of invitations. We are working on it, and until then we will delete such records by hand if you ask.
