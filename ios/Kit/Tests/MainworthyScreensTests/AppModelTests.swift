@@ -292,7 +292,7 @@ final class Held: Transport, @unchecked Sendable {
 				for await _ in gate.stream { break }
 			}
 			return reply(
-				#"{"ok":true,"result":{"actor":"robin","kind":"human","can":[],"mode":"server","via":"cookie","session":1,"owner":true,"version":"0.1.0","projects":[]}}"#
+				#"{"ok":true,"result":{"actor":"robin","actorId":1,"kind":"human","can":[],"mode":"server","via":"cookie","session":1,"owner":true,"version":"0.1.0","projects":[]}}"#
 			)
 		default:
 			return reply(#"{"ok":true,"result":{}}"#)

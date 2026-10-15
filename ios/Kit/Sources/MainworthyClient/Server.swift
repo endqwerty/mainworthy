@@ -146,11 +146,13 @@ package final class Server: Sendable {
 		try await exchange("POST", Server.path(operation, project), body: input, attempts: 2)
 	}
 
-	/// An operation that writes. It is sent under a new command id, and sent again under the same id when the
-	/// connection fails: the server runs a command once and answers a repeat with the first reply.
-	package func write<Reply: Decodable>(_ operation: String, in project: String?, _ input: JSONValue) async throws -> Reply {
+	/// An operation that writes. A saved command keeps its id across restarts; other writes get a new one.
+	/// Retries use the same id: the server runs a command once and answers a repeat with the first reply.
+	package func write<Reply: Decodable>(
+		_ operation: String, in project: String?, _ input: JSONValue, command: String = UUID().uuidString.lowercased()
+	) async throws -> Reply {
 		var body = input.object ?? [:]
-		body["cmd"] = .string(UUID().uuidString.lowercased())
+		body["cmd"] = .string(command)
 		return try await exchange("POST", Server.path(operation, project), body: .object(body), attempts: 3)
 	}
 

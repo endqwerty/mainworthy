@@ -117,7 +117,7 @@ struct QuestionView: View {
 		.background(Color(.systemGroupedBackground))
 		.safeAreaInset(edge: .bottom) {
 			// A refusal is said where the answer was given: the list's own bar is under this page.
-			if let notice = screen.notice, notice.isProblem {
+			if let notice = screen.notice, notice.isProblem || screen.hasPendingAnswer(question.ref) {
 				Text(notice.text)
 					.font(.subheadline)
 					.foregroundStyle(Color.fail)
@@ -172,6 +172,10 @@ struct QuestionView: View {
 
 	private func answers(_ question: Question) -> some View {
 		VStack(alignment: .leading, spacing: 8) {
+			if screen.hasPendingAnswer(question.ref) {
+				Label("Your saved answer is waiting to send. See Unsent answers in the Queue for its outcome.", systemImage: "tray.and.arrow.up")
+					.font(.subheadline).foregroundStyle(.secondary)
+			}
 			Text([needs(question), readOnlyNote].compactMap { $0 }.joined(separator: " "))
 				.font(.subheadline)
 				.foregroundStyle(.secondary)
@@ -191,7 +195,7 @@ struct QuestionView: View {
 					.background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 12))
 				}
 				.buttonStyle(.plain)
-				.disabled(!canGive(choice, to: question) || screen.busy.contains(question.ref))
+				.disabled(!canGive(choice, to: question) || screen.busy.contains(question.ref) || screen.hasPendingAnswer(question.ref))
 				.opacity(canGive(choice, to: question) ? 1 : 0.5)
 				.accessibilityIdentifier("answer-\(choice.answer)")
 			}

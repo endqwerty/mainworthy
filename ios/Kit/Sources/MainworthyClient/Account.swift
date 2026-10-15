@@ -3,6 +3,7 @@ import Foundation
 /// Who is signed in, and what they may open.
 public struct Account: Equatable, Sendable {
 	public let name: String
+	package let actorId: Int
 	public let isOwner: Bool
 	/// The version of the server, for the About screen.
 	public let serverVersion: String
@@ -11,13 +12,15 @@ public struct Account: Equatable, Sendable {
 
 	init(_ wire: Wire.SessionInfo) {
 		name = wire.actor
+		actorId = wire.actorId
 		isOwner = wire.owner
 		serverVersion = wire.version
 		projects = wire.projects.map(Project.init).filter { $0.may(.read) }
 	}
 
-	public init(name: String, isOwner: Bool = false, serverVersion: String = "", projects: [Project]) {
+	public init(name: String, actorId: Int = 0, isOwner: Bool = false, serverVersion: String = "", projects: [Project]) {
 		self.name = name
+		self.actorId = actorId
 		self.isOwner = isOwner
 		self.serverVersion = serverVersion
 		self.projects = projects

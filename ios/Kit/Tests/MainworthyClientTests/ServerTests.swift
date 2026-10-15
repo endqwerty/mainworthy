@@ -41,7 +41,7 @@ final class Script: Transport {
 private let unauthenticated = #"{"ok":false,"error":{"code":"unauthenticated","message":"a token is required"}}"#
 private let signedIn = #"{"ok":true,"result":{"signedIn":true}}"#
 private let session = """
-	{"ok":true,"result":{"actor":"robin","kind":"human","can":[],"mode":"server","via":"cookie","session":7,
+	{"ok":true,"result":{"actor":"robin","actorId":1,"kind":"human","can":[],"mode":"server","via":"cookie","session":7,
 	"owner":true,"version":"0.1.0","projects":[
 	{"key":"shop","name":"Shop","policy":"standard","can":["read","produce","answer"]},
 	{"key":"sealed","name":"Sealed","policy":"strict","can":["record"]}]}}
@@ -102,7 +102,7 @@ struct ServerTests {
 		let script = Script(.json(signedIn, headers: ["Set-Cookie": cookies]), .json(session))
 		let secrets = MemoryStore()
 		let account = try await server(script, secrets: secrets).signIn(.password(name: "robin", password: "a secret"))
-		#expect(account.name == "robin" && account.isOwner)
+		#expect(account.name == "robin" && account.actorId == 1 && account.isOwner)
 		// A project the person holds a grant on and may not read is not one the app shows.
 		#expect(account.projects.map(\.key) == ["shop"])
 		#expect(account.projects[0].may(.answer) && !account.projects[0].may(.admin))

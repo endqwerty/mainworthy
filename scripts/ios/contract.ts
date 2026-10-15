@@ -27,6 +27,7 @@ export const SignInReply = struct("SignInReply", "Whether a password completed s
 
 export const SessionInfo = struct("SessionInfo", "`GET /api/session`: who the caller is and what they may open.", {
 	actor: [text, "The caller's name."],
+	actorId: [whole, "The caller's stable actor id. A new person reusing a forgotten name has another id."],
 	kind: text,
 	can: [list(text), "What the caller may do on the instance, not in a project."],
 	mode: text,

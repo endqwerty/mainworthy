@@ -11,6 +11,9 @@ struct MappingSheet: View {
 	var body: some View {
 		NavigationStack {
 			Form {
+				Section {
+					Text("Linking tests and creating cases need a connection. These answers are not saved in Unsent answers. Keep the app open and retry if the reply is uncertain.")
+				}
 				Section("Tests and cases affected") {
 					Text(screen.question.title).font(.headline)
 					if case .unlinked(let evidence) = screen.question.evidence, evidence.count != screen.tests.count {

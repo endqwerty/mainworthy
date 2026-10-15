@@ -16,6 +16,14 @@ struct QueueView: View {
 				.navigationBarTitleDisplayMode(.inline)
 				.toolbar {
 					ProjectMenu(workspace: workspace)
+					ToolbarItem(placement: .topBarTrailing) {
+						NavigationLink {
+							UnsentAnswersView(screen: screen)
+						} label: {
+							Label("Unsent answers (\(screen.outbox.pendingCount))", systemImage: "tray.and.arrow.up")
+						}
+						.accessibilityIdentifier("unsent-answers")
+					}
 					ToolbarItem(placement: .principal) {
 						Picker("Show", selection: showing) {
 							Text("Open").tag(QueueScreen.Showing.open)
@@ -207,5 +215,42 @@ extension String {
 	/// A sentence that begins lower case, begun with a capital.
 	var capitalizedFirst: String {
 		prefix(1).uppercased() + dropFirst()
+	}
+}
+
+private struct UnsentAnswersView: View {
+	let screen: QueueScreen
+
+	var body: some View {
+		List {
+			Section {
+				Text("Answers stay on this device when the app closes. Keep the app open to send them when the connection returns.")
+					.font(.subheadline).foregroundStyle(.secondary)
+				if let problem = screen.outbox.storageProblem { Text(problem).foregroundStyle(Color.fail) }
+				Button(screen.outbox.sending ? "Sending…" : "Send waiting answers") {
+					Task { await screen.refresh() }
+				}
+				.disabled(screen.outbox.sending || screen.outbox.pendingCount == 0)
+				.accessibilityIdentifier("send-waiting-answers")
+			}
+			ForEach(screen.outbox.entries) { entry in
+				Section {
+					VStack(alignment: .leading, spacing: 6) {
+						Text("\(entry.question): \(entry.title)").font(.headline)
+						Text(entry.label)
+						Text(entry.status).font(.subheadline.weight(.semibold))
+						Text(entry.detail).font(.subheadline).foregroundStyle(.secondary)
+					}
+					NavigationLink("Read \(entry.question)", value: entry.question)
+				}
+				.accessibilityIdentifier("saved-answer-\(entry.question)")
+			}
+			if screen.outbox.entries.contains(where: { $0.outcome != nil }) {
+				Button("Clear outcomes") { screen.outbox.clearOutcomes() }
+			}
+		}
+		.navigationTitle("Unsent answers")
+		.navigationBarTitleDisplayMode(.inline)
+		.toolbar(.hidden, for: .tabBar)
 	}
 }

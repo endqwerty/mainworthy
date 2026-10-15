@@ -109,8 +109,9 @@ public final class AppModel {
 	private func open(_ server: Server, as account: Account) {
 		attempt += 1
 		self.server = server
-		if let kept = suspended, kept.isOn(server), kept.account.name == account.name {
+		if let kept = suspended, kept.isOn(server), kept.account.actorId == account.actorId {
 			// The session was renewed for the same person: their screens, and what they typed in them, come back.
+			kept.resumeAnswers()
 			phase = .signedIn(kept)
 			Task { await kept.refreshAccount() }
 		} else {
@@ -139,6 +140,7 @@ public final class AppModel {
 	/// editor's draft or a run's notes are not thrown away because a session ran out.
 	private func sessionEnded() {
 		guard case .signedIn(let workspace) = phase else { return }
+		workspace.pauseAnswers()
 		suspended = workspace
 		attempt += 1
 		// It is renewed where it was opened, which a session the device kept from an older build may place on another

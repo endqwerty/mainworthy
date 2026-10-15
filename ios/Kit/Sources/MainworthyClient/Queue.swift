@@ -21,13 +21,20 @@ extension ProjectClient {
 	package func answer(
 		_ question: Question, with choice: Choice, reference: String = "", reason: String = ""
 	) async throws -> AnswerOutcome {
-		guard choice.takes != .more, question.choices.contains(choice) else {
+		guard let answer = prepareAnswer(question, with: choice, reference: reference, reason: reason) else {
 			return .notTaken("an answer this build can give; open the question in the web app")
 		}
+		return try await send(answer)
+	}
+
+	/// Captures the complete answer once, before the device saves it or sends it.
+	package func prepareAnswer(
+		_ question: Question, with choice: Choice, reference: String = "", reason: String = ""
+	) -> PreparedAnswer? {
+		guard choice.takes != .more, question.choices.contains(choice) else { return nil }
 		var answer: [String: JSONValue] = ["is": .string(choice.answer)]
 		let reference = reference.trimmingCharacters(in: .whitespacesAndNewlines)
 		if choice.takes == .reference, !reference.isEmpty { answer["ref"] = .string(reference) }
-		// Accepting a finding that suggests an edit makes the edit a proposal by its finder, as the web does.
 		if case .finding(let finding) = question.evidence, choice.answer == "accept" {
 			answer["apply"] = .bool(finding.suggestion != nil)
 		}
@@ -36,7 +43,11 @@ extension ProjectClient {
 		]
 		let reason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
 		if !reason.isEmpty { input["reason"] = .string(reason) }
-		let reply = try await decide(.object(input))
+		return PreparedAnswer(question: question.ref, title: question.title, label: choice.label, input: .object(input))
+	}
+
+	package func send(_ answer: PreparedAnswer) async throws -> AnswerOutcome {
+		let reply = try await decide(answer.input, command: answer.command)
 		return try AnswerOutcome(reply)
 	}
 
@@ -54,8 +65,8 @@ extension ProjectClient {
 	}
 
 	/// `decide` answers with one reply for each question it was sent. The app sends one.
-	private func decide(_ input: JSONValue) async throws -> Wire.DecideReply {
-		let replies: [Wire.DecideReply] = try await server.write("decide", in: key, input)
+	private func decide(_ input: JSONValue, command: String = UUID().uuidString.lowercased()) async throws -> Wire.DecideReply {
+		let replies: [Wire.DecideReply] = try await server.write("decide", in: key, input, command: command)
 		guard let reply = replies.first else { throw ClientError.unreadable }
 		return reply
 	}
@@ -124,5 +135,22 @@ extension AnswerOutcome {
 		case "conflict": .overtaken(reply.needs ?? "the question changed")
 		default: .notTaken(reply.needs ?? "another answer (\(reply.status))")
 		}
+	}
+}
+
+/// A captured answer. Replaying it changes neither the evidence nor the command id.
+package struct PreparedAnswer: Codable, Equatable, Sendable {
+	package let command: String
+	package let question: String
+	package let title: String
+	package let label: String
+	let input: JSONValue
+
+	init(question: String, title: String, label: String, input: JSONValue) {
+		command = UUID().uuidString.lowercased()
+		self.question = question
+		self.title = title
+		self.label = label
+		self.input = input
 	}
 }

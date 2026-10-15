@@ -29,6 +29,7 @@ public final class Workspace {
 
 	/// Every screen of the open project. What the change stream tells of, each of them reads again.
 	private var screens: [any ProjectScreen] = []
+	private var outboxes: [String: AnswerOutbox] = [:]
 	private let server: Server
 	private let remembered: Remembered
 	private let onSignedOut: () -> Void
@@ -39,6 +40,7 @@ public final class Workspace {
 		self.remembered = remembered
 		self.onSignedOut = onSignedOut
 		instanceName = server.instance.name
+		for project in account.projects { outboxes[project.key] = makeOutbox(project.key) }
 		let last = account.projects.first { $0.key == remembered.project }
 		if let first = last ?? account.projects.first { open(first) }
 	}
@@ -47,7 +49,9 @@ public final class Workspace {
 		guard project != self.project else { return }
 		self.project = project
 		remembered.project = project.key
-		let queue = QueueScreen(project: server.project(project.key))
+		let outbox = outboxes[project.key] ?? makeOutbox(project.key)
+		outboxes[project.key] = outbox
+		let queue = QueueScreen(project: server.project(project.key), outbox: outbox)
 		self.queue = queue
 		let runs = RunsScreen(project: server.project(project.key), permission: project, person: account.name)
 		self.runs = runs
@@ -62,6 +66,12 @@ public final class Workspace {
 	/// taken away, or renamed, while the app was in the background.
 	public func refreshAccount() async {
 		guard let fresh = try? await server.account() else { return }
+		for key in Array(outboxes.keys) where !fresh.projects.contains(where: { $0.key == key }) {
+			outboxes.removeValue(forKey: key)?.stop()
+		}
+		for project in fresh.projects where outboxes[project.key] == nil {
+			outboxes[project.key] = makeOutbox(project.key)
+		}
 		account = fresh
 		if let open = project, let now = fresh.projects.first(where: { $0.key == open.key }) {
 			project = now
@@ -90,13 +100,26 @@ public final class Workspace {
 			do {
 				for try await _ in server.project(key).changes() {
 					failures = 0
-					for screen in screens { await screen.refresh() }
+					await refreshScreens()
 				}
 			} catch {}
 			failures += 1
 			guard (try? await Task.sleep(for: .seconds(min(30, 2 << min(failures, 4))))) != nil else { return }
-			for screen in screens { await screen.refresh() }
+			await refreshScreens()
 		}
+	}
+
+	private func makeOutbox(_ key: String) -> AnswerOutbox {
+		AnswerOutbox(
+			project: server.project(key),
+			store: FileAnswerStore(instance: server.instance, person: account.actorId, project: key)
+		)
+	}
+
+	private func refreshScreens() async {
+		// All accessible projects send, including a project left while its answer was waiting.
+		for key in outboxes.keys.sorted() { await outboxes[key]?.send() }
+		for screen in screens { await screen.refresh() }
 	}
 
 	/// Where the web app shows something, for what this build does not do: a question (Q-12), a run (R-4), a
@@ -122,7 +145,16 @@ public final class Workspace {
 		self.server === server
 	}
 
+	func pauseAnswers() {
+		for outbox in outboxes.values { outbox.stop() }
+	}
+
+	func resumeAnswers() {
+		for outbox in outboxes.values { outbox.resume() }
+	}
+
 	public func signOut() async {
+		pauseAnswers()
 		await server.signOut()
 		onSignedOut()
 	}

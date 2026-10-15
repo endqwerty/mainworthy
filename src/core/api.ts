@@ -123,6 +123,8 @@ export type Envelope<T> =
  */
 export type SessionInfo = {
 	actor: string;
+	/** Stable identity for device data; a forgotten name can be reused by another actor. */
+	actorId: number;
 	kind: "human" | "agent" | "ci" | "rule";
 	can: string[];
 	mode: "local" | "server";
