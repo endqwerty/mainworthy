@@ -41,7 +41,9 @@ export const actorCommand: AdapterCommand = {
 				.parse(await client.call("admin", input));
 			if (args.has("json")) printJson(result, args.bool("compact"));
 			else
-				line(`Forgotten as ${result.forgotten}. ${result.tokensRevoked} tokens revoked. History and typed text stay.`);
+				line(
+					`Forgotten as ${result.forgotten}. ${result.tokensRevoked} ${result.tokensRevoked === 1 ? "token" : "tokens"} revoked. History and typed text stay.`,
+				);
 			return 0;
 		}
 		if (action === "list") {

@@ -126,7 +126,7 @@ In Settings, open **People** and find **Forget a person** below the list of peop
 3. Type their name in **Type the name to confirm**.
 4. Press **Forget this person**. **Cancel forgetting** clears the selection without changing anything.
 
-The page reads the people and invitations again and removes any invitation link it was showing for that person. If no reply comes back, it says that the result is unknown and reads the lists again. Retrying the same confirmation uses the same command id.
+The page shows the pseudonym and the number of tokens revoked. It reads the people and invitations again and removes any invitation link it was showing for that person. If no reply comes back, it reads the lists again. If the person is no longer listed, the page says so and clears the confirmation. Otherwise, retrying the same confirmation uses the same command id.
 
 From the command line, `mainworthy actor forget dana` prints the warning and makes no change. After reading it, repeat the name to confirm:
 

@@ -14,7 +14,7 @@ export function ForgetPerson({
 	changed,
 }: {
 	people: readonly string[];
-	changed: (name: string) => Promise<void>;
+	changed: (name: string) => Promise<boolean | null>;
 }) {
 	const { session, project } = useApp();
 	const id = useId();
@@ -30,13 +30,17 @@ export function ForgetPerson({
 		setBusy(true);
 		setMessage("");
 		let reread = true;
+		let uncertain = false;
 		try {
-			Forgotten.parse(await call("admin", { do: "actor.forget", ...target }, { project }));
+			const result = Forgotten.parse(await call("admin", { do: "actor.forget", ...target }, { project }));
 			setTarget(null);
 			setConfirmation("");
-			setMessage("The person was forgotten. History and typed text stay.");
+			setMessage(
+				`Forgotten as ${result.forgotten}. ${result.tokensRevoked} ${result.tokensRevoked === 1 ? "token" : "tokens"} revoked. History and typed text stay.`,
+			);
 		} catch (error) {
 			reread = !(error instanceof ApiError);
+			uncertain = reread;
 			setMessage(
 				saidOfWrite(
 					error,
@@ -44,7 +48,14 @@ export function ForgetPerson({
 				),
 			);
 		} finally {
-			if (reread) await changed(target.name);
+			if (reread) {
+				const stillListed = await changed(target.name);
+				if (uncertain && stillListed === false) {
+					setTarget(null);
+					setConfirmation("");
+					setMessage("No answer came back. The person is no longer listed. The confirmation was cleared.");
+				}
+			}
 			setBusy(false);
 		}
 	}

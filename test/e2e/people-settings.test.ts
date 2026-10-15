@@ -41,6 +41,7 @@ test.skipIf(!browserAvailable)(
 	"People forgets a person only after confirmation and ends their access",
 	async () => {
 		await person("forget-web", ["read"]);
+		await server.api("admin", { do: "token.create", actor: "forget-web", kind: "human" });
 		const admin = await openPage(server, { path: "/p/scratch/settings" });
 		const other = await openPage(server, { as: { name: "forget-web", password: OLD } });
 		try {
@@ -80,7 +81,10 @@ test.skipIf(!browserAvailable)(
 			);
 			await confirm.click();
 			expect((await retried).postDataJSON().cmd).toBe(lostCommand);
-			await page.getByRole("status").filter({ hasText: "The person was forgotten." }).waitFor();
+			await page
+				.getByRole("status")
+				.filter({ hasText: "Forgotten as forgotten-3. 1 token revoked. History and typed text stay." })
+				.waitFor();
 			expect(await rows(page).filter({ hasText: "forget-web" }).count()).toBe(0);
 			await other.page.reload();
 			await other.page.locator("#signin-name").waitFor();
@@ -88,6 +92,41 @@ test.skipIf(!browserAvailable)(
 		} finally {
 			await admin.close();
 			await other.close();
+		}
+	},
+	20_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"People clears the confirmation when a lost reply is followed by a list without the person",
+	async () => {
+		await person("forget-lost-reply", ["read"]);
+		const admin = await openPage(server, { path: "/p/scratch/settings" });
+		try {
+			const { page } = admin;
+			page.setDefaultTimeout(3000);
+			await section(page, "People");
+			await page.getByLabel("Person to forget", { exact: true }).selectOption("forget-lost-reply");
+			await page.getByLabel("Type the name to confirm", { exact: true }).fill("forget-lost-reply");
+			await page.route("**/api/admin", async (route) => {
+				if (route.request().postDataJSON().do !== "actor.forget") return route.continue();
+				await route.fetch();
+				await route.abort();
+			});
+			await page.getByRole("button", { name: "Forget this person", exact: true }).click();
+			await page
+				.getByRole("status")
+				.filter({ hasText: "No answer came back. The person is no longer listed. The confirmation was cleared." })
+				.waitFor();
+			expect(await page.getByLabel("Person to forget", { exact: true }).inputValue()).toBe("");
+			expect(await page.getByLabel("Type the name to confirm", { exact: true }).inputValue()).toBe("");
+			expect(await rows(page).filter({ hasText: "forget-lost-reply" }).count()).toBe(0);
+			expect(
+				await page.getByRole("button", { name: "Forget this person", exact: true }).getAttribute("aria-disabled"),
+			).toBe("true");
+			expect(admin.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
+		} finally {
+			await admin.close();
 		}
 	},
 	20_000,
