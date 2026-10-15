@@ -113,7 +113,7 @@ export function start(
 		stop() {
 			stopping ??= (async () => {
 				clearInterval(timer);
-				await server.stop(true);
+				await server.stop();
 				await app.readers?.stop();
 				// No request is being served any more. What was noted since the last minute is written, so a
 				// session used a moment ago is not found idle by the next start.
