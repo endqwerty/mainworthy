@@ -16,7 +16,6 @@ import {
 } from "./ops.ts";
 import { CredentialRow, InvitationCreated, InvitationRow, SessionRow } from "./people.ts";
 import { Obligation, TargetMatch, Verdict } from "./runs.ts";
-
 import { TrackerReceipt } from "./tracker.ts";
 
 const text = z.string();

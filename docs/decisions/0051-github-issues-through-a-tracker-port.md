@@ -22,7 +22,7 @@ The caller uses the returned issue URL as the reference in an ordinary `defect` 
 
 The `trackers` module owns `tracker_requests`. The `tracker` operation snapshots the failed result, its recorded case version, and its build URL. The minute job claims queued work under the write gate, releases the gate, calls the port, then records the outcome under the gate. Delivery uses a random request nonce so a response cannot attach to a replacement row after an archive operation. Overlapping minute jobs share one delivery run.
 
-Credentials are process configuration. No operation accepts a tracker token, and no database row holds one. `tracker_requests` is `UNEXPORTED` because an archive must not replay delivery on another instance. Restoring an archive discards delivery status, including completed references that have not been recorded in a decision. Existing command receipts remain historical and do not recreate those requests. Migration 0019 changes no exported table, so the archive version stays unchanged.
+Credentials are process configuration. No operation accepts a tracker token, and no database row holds one. `tracker_requests` is `UNEXPORTED` because an archive must not replay delivery on another instance. Restoring an archive discards delivery status, including completed references that have not been recorded in a decision. Existing command receipts remain historical and do not recreate those requests. Migration 0006 changes no exported table, so the archive version stays unchanged.
 
 ## Synthesis decision
 

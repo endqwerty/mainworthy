@@ -124,8 +124,11 @@ export function deliverTrackerRequests(app: App, port?: TrackerPort): Promise<nu
 	return work;
 }
 
-export async function stopTrackerRequests(app: App): Promise<void> {
+export function stopTrackerRequests(app: App): void {
 	stopping.add(app);
+}
+
+export async function waitTrackerRequests(app: App): Promise<void> {
 	await active.get(app);
 }
 
