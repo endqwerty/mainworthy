@@ -21,7 +21,7 @@ import slotExcuses from "./migrations/0017_slot_excuses.sql" with { type: "text"
 import trackerPolls from "./migrations/0018_tracker_polls.sql" with { type: "text" };
 import grantRoles from "./migrations/0019_grant_roles.sql" with { type: "text" };
 
-import fragments from "./migrations/0019_fragments.sql" with { type: "text" };
+import fragments from "./migrations/0020_fragments.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.

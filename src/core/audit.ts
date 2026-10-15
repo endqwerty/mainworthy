@@ -3,7 +3,7 @@ import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { z } from "zod";
 import { canonicalJson, claimHash, versionHash } from "./hash.ts";
 import { ActorKind, Capability, Clause, Kind, PolicySettings } from "./kinds.ts";
-import { CaseBody, MethodKind, Step } from "./model.ts";
+import { CaseBody, FragmentStep, InlineStep, MethodKind } from "./model.ts";
 import { TeamEvent, TeamGrant } from "./teams.ts";
 
 const integer = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -148,7 +148,7 @@ export const AuditRecord = z.discriminatedUnion("type", [
 		by: Actor,
 		parent: Reference.nullable(),
 		decision: Reference,
-		body: CaseBody.strict().extend({ steps: z.array(Step.strict()) }),
+		body: CaseBody.strict().extend({ steps: z.array(z.union([InlineStep.strict(), FragmentStep.strict()])) }),
 		hash,
 		claimHash: hash,
 		reason: z.string().nullable(),
