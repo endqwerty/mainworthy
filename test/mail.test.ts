@@ -6,6 +6,7 @@ import { z } from "zod";
 import { clearChallenges, queueMail, waitMail } from "../src/server/identity/identity.ts";
 import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { defaultConfig } from "../src/server/kernel/app.ts";
+import { ARCHIVE_VERSION } from "../src/server/kernel/migrate.ts";
 import { fakeSmtp } from "./mail-support.ts";
 import {
 	authenticator,
@@ -396,7 +397,7 @@ test("archives preserve verified contacts and import invalidates all mail links"
 		await waitMail(w.instance.app);
 		const reset = linkCode(box.messages.at(-1)?.text ?? "", "reset");
 		const exported = await (await fetch(`${w.instance.url}/api/export`, { headers: { cookie } })).text();
-		expect(JSON.parse(exported.split("\n")[0] ?? "").schema).toBe(19);
+		expect(JSON.parse(exported.split("\n")[0] ?? "").schema).toBe(ARCHIVE_VERSION);
 		expect(exported).toContain("owner-mail@example.com");
 		expect(exported).not.toContain(reset);
 		expect(exported).not.toContain(verify);
