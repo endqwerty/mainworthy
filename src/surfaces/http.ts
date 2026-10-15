@@ -2,6 +2,7 @@
 // the session, the change stream and the generated API description. Nothing here knows what an operation does.
 import { z } from "zod";
 import { ERROR_CODES, HTTP_STATUS } from "../core/api.ts";
+import { API_VERSION, API_VERSION_HEADER, VERSION } from "../core/version.ts";
 import {
 	admit,
 	credentialSummary,
@@ -24,7 +25,20 @@ import { SIGN_IN_BODY_LIMIT, signInRoutes } from "./signin.ts";
 import { uiSurface } from "./ui.ts";
 import { keepingPolicyOnEvery, withHeaders, withHeadersOnEvery } from "./with-headers.ts";
 
-export const VERSION = "0.1.0";
+export { VERSION } from "../core/version.ts";
+
+function incompatibleRequest(req: Request): Response | null {
+	const version = req.headers.get(API_VERSION_HEADER);
+	return version !== null && version !== String(API_VERSION)
+		? jsonResponse(
+				{
+					ok: false,
+					error: { code: "invalid", message: `incompatible API version; server requires API ${API_VERSION}` },
+				},
+				409,
+			)
+		: null;
+}
 
 /**
  * A JSON reply. `extra` may be a `Headers` object, which is how a reply carries more than one `Set-Cookie`: each
@@ -385,6 +399,8 @@ const tooLarge = (limit: number): Response =>
  * under the timeout again until it is given a session in its turn.)
  */
 function sessionFor(app: App, owner: Actor, req: Request, server: Listener): Session | Response {
+	const incompatible = incompatibleRequest(req);
+	if (incompatible) return incompatible;
 	// The address the connection came from decides, in local mode, whether the request started on this machine,
 	// and in every mode where the request is counted as coming from.
 	const admission = admit(app, factsOf(app, req, owner, server.requestIP(req)?.address ?? null));
@@ -762,7 +778,7 @@ export function serve(app: App, owner: Actor, extra: Extra = { ui: null }, patie
 		limited,
 	});
 	const routes: Record<string, unknown> = {
-		"/healthz": () => jsonResponse({ ok: true, version: VERSION, commit: app.config.commit }),
+		"/healthz": () => jsonResponse({ ok: true, version: VERSION, apiVersion: API_VERSION, commit: app.config.commit }),
 		"/.well-known/apple-app-site-association": () =>
 			app.config.appleApps?.length
 				? jsonResponse({ webcredentials: { apps: app.config.appleApps } })

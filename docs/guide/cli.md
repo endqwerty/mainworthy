@@ -18,11 +18,29 @@ A command finds its server in this order: the flag, then the environment variabl
 
 Prefer `MAINWORTHY_TOKEN` to `--token`: an argument is in the process list of the machine while the command runs, and in the shell's history afterwards. `--token-file <path>` (or `MAINWORTHY_TOKEN_FILE`) reads the token from a file instead, which suits a pipeline that mounts a secret as a file. The file holds the token and nothing else; the whitespace around it, a final newline included, is dropped. The token may have at most 512 characters, the server's limit. The whole file, including whitespace, may have at most 4096 bytes. An empty, unreadable or oversized file, or one with more than a token, stops the command locally with exit code 4. The error names the file and never quotes its contents. Giving the token two ways at once (`--token` with `--token-file`, or both variables) is refused. A flag wins over a variable.
 
-`health`, `fmt`, `help` and a command's `--help` need no token. They ignore token flags and variables, including unreadable token files and conflicting token options. `serve` uses the [server configuration](./configuration.md#variables-the-server-reads), not the client token options.
+`health`, `version`, `fmt`, `help` and a command's `--help` need no token. They ignore token flags and variables, including unreadable token files and conflicting token options. `serve` uses the [server configuration](./configuration.md#variables-the-server-reads), not the client token options.
 
 A command that is about to send a token to a plain `http://` address on another machine says so once on standard error, before the first request, and goes on: the token travels unencrypted, so use an `https://` address. The addresses of this machine (`localhost`, `127.0.0.1` and the rest of `127.0.0.0/8`, `[::1]`) and `https://` addresses get no warning, and neither does a command that sends no token. Standard output is not touched, so `--json` output stays clean.
 
 [Configuration](./configuration.md) explains local and server mode. [People, agents and pipelines](./access.md) explains tokens.
+
+## CLI and server versions
+
+`mainworthy version` prints the CLI's software version and required API version without contacting a server.
+`mainworthy version --json` prints `{"version":"0.1.0","apiVersion":1}`.
+`mainworthy health --json` reports the server's `apiVersion` and whether it is `compatible` with this CLI.
+Health still exits 0 for a healthy server with an incompatible or unknown API version. It checks availability.
+
+Before its first authenticated request, the CLI reads `/healthz` without sending a token.
+The server must advertise the same API version as the CLI. Software versions and build commits may differ.
+An absent, malformed or different API version stops the command with `incompatible` and exit code 4, before it sends an operation.
+Use a CLI and server with the same API version to retry. Servers from before this contract need an upgrade.
+Every subsequent request carries `X-Mainworthy-API-Version`. A server with a different API version refuses it before reading or writing project data.
+This also catches a server upgrade after the first probe.
+
+Before 1.0, adding or removing an operation, or an incompatible change to its inputs, replies, capabilities or meaning, increments the API version.
+There is no promise to support the previous API version. Clients from before this check cannot detect a version mismatch.
+The [API reference](./api.md) describes the operations themselves.
 
 ## Ask a command what it takes
 
@@ -60,6 +78,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy mcp` | Serve MCP on stdin/stdout, forwarding tools to the running HTTP server. |
 | `mainworthy open [--json]` | Print the web UI URL of the running instance. |
 | `mainworthy health [--url <url>] [--json]` | Check that the server answers. Exit 0 when it does, 1 when it does not. |
+| `mainworthy version [--json]` | Print the CLI version and the API version it requires. No server is contacted. |
 | `mainworthy help` | List every operation and adapter. |
 
 Flags of `mainworthy report`:

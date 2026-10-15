@@ -2196,12 +2196,22 @@ describe("/healthz and the commit", () => {
 	}
 
 	test("it names the commit the process was told, with no sign-in", async () => {
-		expect(await healthz({ MAINWORTHY_COMMIT: SHA })).toEqual({ ok: true, version: "0.1.0", commit: SHA });
+		expect(await healthz({ MAINWORTHY_COMMIT: SHA })).toEqual({
+			ok: true,
+			version: "0.1.0",
+			apiVersion: 1,
+			commit: SHA,
+		});
 	});
 
 	test("it says null when no commit is known", async () => {
-		expect(await healthz({})).toEqual({ ok: true, version: "0.1.0", commit: null });
-		expect(await healthz({ MAINWORTHY_COMMIT: "" })).toEqual({ ok: true, version: "0.1.0", commit: null });
+		expect(await healthz({})).toEqual({ ok: true, version: "0.1.0", apiVersion: 1, commit: null });
+		expect(await healthz({ MAINWORTHY_COMMIT: "" })).toEqual({
+			ok: true,
+			version: "0.1.0",
+			apiVersion: 1,
+			commit: null,
+		});
 	});
 
 	test("MAINWORTHY_COMMIT wins over SOURCE_COMMIT, which Coolify sets, and an unusable first value falls through", async () => {
@@ -2227,8 +2237,18 @@ describe("/healthz and the commit", () => {
 			"<script>alert(1)</script>",
 		];
 		for (const value of refused) {
-			expect(await healthz({ MAINWORTHY_COMMIT: value })).toEqual({ ok: true, version: "0.1.0", commit: null });
-			expect(await healthz({ SOURCE_COMMIT: value })).toEqual({ ok: true, version: "0.1.0", commit: null });
+			expect(await healthz({ MAINWORTHY_COMMIT: value })).toEqual({
+				ok: true,
+				version: "0.1.0",
+				apiVersion: 1,
+				commit: null,
+			});
+			expect(await healthz({ SOURCE_COMMIT: value })).toEqual({
+				ok: true,
+				version: "0.1.0",
+				apiVersion: 1,
+				commit: null,
+			});
 		}
 	});
 });
@@ -2498,4 +2518,18 @@ describe("request size", () => {
 			(await post(instance, "/api/p/scratch/find", {}, { authorization: "Bearer owner-secret-0123456789" })).status,
 		).toBe(200);
 	});
+});
+
+test("a mismatched CLI contract is refused before an operation writes", async () => {
+	const instance = boot("local");
+	const input = { do: "project.create", key: "contract-test", preset: "loose" };
+	const refused = await post(instance, "/api/admin", input, { "x-mainworthy-api-version": "2" });
+	expect(refused.status).toBe(409);
+	expect(refused.body).toMatchObject({
+		ok: false,
+		error: { code: "invalid", message: "incompatible API version; server requires API 1" },
+	});
+	const accepted = await post(instance, "/api/admin", input, { "x-mainworthy-api-version": "1" });
+	expect(accepted.status).toBe(200);
+	expect(accepted.body).toMatchObject({ ok: true });
 });

@@ -2,6 +2,7 @@ import { closeSync, openSync, readSync } from "node:fs";
 import { z } from "zod";
 import { type Api, type Envelope, ERROR_CODES, type OpName, type SessionInfo } from "../core/api.ts";
 import { Unlinked } from "../core/kinds.ts";
+import { API_VERSION, API_VERSION_HEADER, ApiHealth } from "../core/version.ts";
 import { TOKEN_MAX } from "../server/identity/identity.ts";
 import { OPS } from "../server/ops/index.ts";
 import type { Reply } from "../server/ops/registry.ts";
@@ -137,6 +138,7 @@ export function unwrap(reply: Envelope<unknown>): unknown {
 /** A typed HTTP client; every operation uses the registry's scope and the shared input/reply map. */
 export class Client {
 	readonly url: string;
+	private compatibilityPromise: Promise<void> | undefined;
 	private sessionPromise: Promise<SessionInfo> | undefined;
 
 	/** `notice` is shared by the clients of one run, so what is said once is said once for the run. */
@@ -168,11 +170,29 @@ export class Client {
 		);
 	}
 
+	private async compatible(): Promise<void> {
+		let response: Response;
+		try {
+			response = await fetch(`${this.url}/healthz`, { redirect: "error", signal: AbortSignal.timeout(5000) });
+		} catch {
+			throw new CliError("connection", `cannot connect to ${this.url}; start the server with mainworthy serve`);
+		}
+		const health = ApiHealth.safeParse(await response.json().catch(() => null));
+		if (!response.ok || !health.success || health.data.apiVersion !== API_VERSION)
+			throw new CliError(
+				"incompatible",
+				`CLI requires API ${API_VERSION}; the server at ${this.url} does not advertise it; use a CLI and server with the same API version (mainworthy version; mainworthy health --json)`,
+			);
+	}
+
 	/** Request bodies and response bodies remain streams for archive transfer. */
 	async request(path: string, init: RequestInit = {}): Promise<Response> {
+		if (this.options.token) this.warnOfPlainHttp();
+		this.compatibilityPromise ??= this.compatible();
+		await this.compatibilityPromise;
 		const headers = new Headers(init.headers);
+		headers.set(API_VERSION_HEADER, String(API_VERSION));
 		if (this.options.token) {
-			this.warnOfPlainHttp();
 			headers.set("authorization", `Bearer ${this.options.token}`);
 		}
 		try {
