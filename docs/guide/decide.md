@@ -333,6 +333,10 @@ Answering the reopened question as a defect again with the same closed issue end
 
 An archive keeps the defect decision and its reference but leaves out polling state. After import, live defect holds are checked afresh if their destination is configured on that instance.
 
+If a check fails, the defect decision in the queue and the failure's case history show when the tracker first became unreadable and a short reason. The same warning is in `decision.trackerError` in the question's `get` reply and the decided `inbox` reply. A successful read clears it. The server logs one warning per failing issue until a successful read clears the failure, including when several holds name that issue. Retries and restarts do not repeat the warning.
+
+For HTTP 401, ask the operator to renew the tracker token in the server configuration and restart the server. For HTTP 403 or 404, check the account's permissions and the issue key. If the issue moved to another key, withdraw the old defect answer and answer the failure again with the new key's canonical issue URL or tracker reference. If Jira returns status category `undefined`, set the issue's status category to `new`, `indeterminate`, or `done` in Jira. The hold stays until a successful check finds the referenced issue closed, or you withdraw or replace the answer.
+
 ## Check who may answer
 
 The question says whom it needs. Your token's capabilities and the project's policy

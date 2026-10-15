@@ -58,3 +58,13 @@ Keep the existing port and registry. The caller does not need to manage subscrip
 Polling can learn a closure late, especially after failed reads or with more than twenty due decisions. It never guesses closure from a failed read. The limit counts decisions rather than distinct issues, so several holds on one issue can cause several reads. No live tracker account was used for local verification.
 
 The owner's question of who may send to a tracker is unchanged. Today anyone with `produce` can queue a defect, including an agent. Sending can disclose failure and case content to the configured destination. Requirement mirroring, Azure DevOps, and GitHub Enterprise remain outside this slice.
+
+## Unreadable holds
+
+Issue #328 adds a diagnostic to existing question replies, without a new operation. The trackers module stores a typed failure code and the first failure time as JSON in `tracker_polls.error`. Successful reads clear both. Read operations compose `decision.trackerError` onto question items for `get`, the decided queue, and case timelines. The queue decision and case history show the same sentence. The coordinator publishes changes so an open page reads again.
+
+Adapters classify HTTP 401, 403, and 404, an issue returned under a different key, and Jira status category `undefined`. Messages come from a fixed vocabulary. Response bodies, transport exceptions, credentials, and returned keys never enter diagnostics or logs. Changed keys require a fresh answer. An undefined category requires a Jira status configuration change. Neither error counts as closure.
+
+The coordinator groups current failures by project, destination, and issue key to log once per failure episode, even when several decisions name the same issue. Stored failures suppress repeats after restart. A successful read clears that decision's failure; a later failure logs again once no current hold on that issue remains failed. Existing plain-text errors show a generic warning until the next check establishes a timestamp and typed reason.
+
+The alternative was to add diagnostics to the decisions module's item builder. That would make decisions import trackers against the module map. Composing the read reply in operations keeps SQL and polling state in trackers and standing decisions in decisions. We accept that diagnostics describe current local polling state and are not ledger events or archive content.
