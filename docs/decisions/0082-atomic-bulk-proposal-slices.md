@@ -15,15 +15,22 @@ expose part of its adoption. Making each slice a separate committed edit would b
 
 ## Decision
 
-Keep the proposal and its adoption in one SQLite write transaction. Yield to the event loop after at most 200
-case visits when resolving case edits, validating custom fields, collecting per-case policy scope facts, or
-applying creates, content edits, placements, restores, and state changes. A single move or state edit can name many cases, so its inner case loop yields too. The operation
+Keep the proposal and its adoption in one SQLite write transaction. Yield to the event loop after about 200
+case visits per loop when resolving case edits, validating custom fields, collecting per-case policy scope facts,
+or applying creates, content edits, placements, restores, and state changes. A single move or state edit can name
+many cases, so its inner case loop yields too. The operation
 registry already drives generators while retaining a transaction when they yield without `COMMIT`.
 
 `proposeSteps` seals through `sealSteps`, then raises the ordinary adoption question through `raiseSteps`.
 Automatic and explicit acceptance share the same decision settlement and `adoptSteps`. Each standing writer
 still receives the decision's witness. Synchronous callers drain those same generators with `complete`.
 There is one implementation of each domain operation.
+
+Confirmed CSV imports delegate to `proposeSteps` after the same preview and confirmation checks. Answers that
+create cases for unlinked tests or apply accepted findings use `sealSteps` and `raiseSteps` too. Linking the
+created cases yields between slices. Applying a finding also yields once, so a batch of single-case suggestions
+answers reads while retaining the transaction and each answer's savepoint.
+Accepting a policy that creates cases for existing unlinked tests delegates through the same sliced handlers.
 
 Decision effects now return generators. A generator savepoint holds the same SQL savepoint across its yields.
 If an acceptance fails after earlier slices wrote cases, the savepoint rolls those cases and the decision back.
@@ -38,7 +45,9 @@ command can be retried unchanged and applies once. A reply lost after commit is 
 
 This does not add a pending state, migration, archive format, operation, or second way to mint a witness.
 Parsing, schema validation, hashing, JSON serialization, folder-tree expansion, the final commit, and unusually
-large individual case bodies still run synchronously. Slices bound case-loop work, not every possible main-thread pause.
+large individual case bodies still run synchronously. Each loop counts its own visits, so phase handovers can
+visit about 400 cases between yields. Writing a question's references is also synchronous. Slices reduce
+case-loop pauses without bounding every possible main-thread pause.
 
 ## Alternatives and save acknowledgement
 
@@ -68,7 +77,16 @@ remains open. Items 2 and 3 are measured by the existing read mix. Item 4, the l
   Retrying and replaying the command creates exactly the intended versions and one adoption decision.
 
 The first two adoption regressions failed before the production change with `Expected: true; Received: false`:
-no read ran while adoption was partially applied. The nine atomic bulk checks now pass.
+no read ran while adoption was partially applied. Those nine original atomic bulk checks pass.
+
+Three more registry checks cover case creation from unlinked tests, including a policy answer, and a batch of
+accepted findings. They require reads to answer during partial creation while the cases and questions retain
+their complete previous state.
+`test/http.test.ts` imports 5,000 CSV rows with four reader workers and eight reading clients. Reads answer
+during adoption and see only zero or all 5,000 cases. A storage failure on the last row leaves no cases,
+versions, search rows, proposal, decision, or command reply. Retrying the same command imports once.
+Before routing these paths through generators, all four regressions failed because no read answered during
+partial creation. They pass with the sliced paths.
 
 ## Mixed-load measurement
 

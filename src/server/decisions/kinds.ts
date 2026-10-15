@@ -51,6 +51,7 @@ import {
 	resolvedOf,
 	type Sealed,
 	seal,
+	sealSteps,
 } from "../suite/suite.ts";
 import type { Raise, Raised } from "./decisions.ts";
 import {
@@ -65,8 +66,9 @@ import {
 
 type Tools = {
 	raise: (ctx: Ctx, r: Raise) => Raised;
+	raiseSteps: (ctx: Ctx, r: Raise) => Generator<undefined, Raised, void>;
 	/** After a policy change: lets the new policy's rule answer the open questions about tests with no case. */
-	ruleTakesUnlinked: (ctx: Ctx) => number;
+	ruleTakesUnlinkedSteps: (ctx: Ctx) => Generator<undefined, number, void>;
 };
 
 type Handler<K extends Kind> = {
@@ -178,7 +180,7 @@ const adoptHandler: Handler<"adopt"> = {
 		const effects = { cases: adopted.cases, created: adopted.created, policyVersion: adopted.policyVersion };
 		if (adopted.policyVersion === null) return effects;
 		reconsiderEmptyReports(ctx);
-		const ruled = tools.ruleTakesUnlinked(ctx);
+		const ruled = yield* tools.ruleTakesUnlinkedSteps(ctx);
 		return ruled > 0 ? { ...effects, ruled } : effects;
 	},
 	revert() {
@@ -284,19 +286,20 @@ const mapHandler: Handler<"map"> = {
 					body: { title: test.name, methods: ["auto"] },
 					folder,
 				}));
-				const sealed = seal(ctx, { edits, reason: `Cases for the tests in ${file}` });
+				const sealed = yield* sealSteps(ctx, { edits, reason: `Cases for the tests in ${file}` });
 				if (!sealed) return { linked: [] };
-				const raised = raiseAdopt(ctx, tools, sealed);
+				const raised = yield* raiseAdopt(ctx, { raise: tools.raiseSteps }, sealed);
 				if (raised.s !== "decided")
 					throw invalid("the new cases need a person to adopt them first; accept that proposal, then link");
 				const created = (raised.effects.created ?? []) as string[];
 				const linked: Relinked[] = [];
-				tests.forEach((test, i) => {
+				for (const [i, test] of tests.entries()) {
 					const row = created[i] ? findCase(ctx.db, ctx.project.id, created[i]) : null;
-					if (!row) return;
+					if (!row) continue;
 					linked.push([test.id, null, null]);
 					linkTest(ctx, witness, test, row.id);
-				});
+					if ((i + 1) % 200 === 0) yield;
+				}
 				return { linked, created };
 			}
 			case "track":
@@ -527,9 +530,11 @@ const findingHandler: Handler<"finding"> = {
 		// The suggestion becomes a proposal authored by the finder, and meets the same adopt policy as any edit.
 		const finder = evidence.finderId !== undefined ? actorById(ctx.db, evidence.finderId, ctx.project.id) : ctx.actor;
 		const asFinder: Ctx = { ...ctx, actor: finder };
-		const sealed = seal(asFinder, { edits: [edit], reason: `From finding ${question.title}` });
+		const sealed = yield* sealSteps(asFinder, { edits: [edit], reason: `From finding ${question.title}` });
 		if (!sealed) return { applied: false };
-		const raised = raiseAdopt(asFinder, tools, sealed);
+		const raised = yield* raiseAdopt(asFinder, { raise: tools.raiseSteps }, sealed);
+		// A batch can apply many single-case suggestions, each too small for the case-loop slices.
+		yield;
 		return {
 			proposal: `P-${sealed.proposal.no}`,
 			adopt: `Q-${raised.question.no}`,

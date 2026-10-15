@@ -6,7 +6,7 @@ import { conflict, invalid } from "../kernel/errors.ts";
 import { currentPolicy } from "../policy/policy.ts";
 import { findCase } from "../suite/suite.ts";
 import { defineOp } from "./registry.ts";
-import { propose } from "./writes.ts";
+import { proposeSteps } from "./writes.ts";
 
 export const csvImportOp = defineOp({
 	name: "import-csv",
@@ -17,7 +17,7 @@ export const csvImportOp = defineOp({
 	scope: "project",
 	effect: "write",
 	mcp: null,
-	run(ctx, input): CsvImportReply {
+	*steps(ctx, input): Generator<undefined, CsvImportReply, void> {
 		const policy = currentPolicy(ctx.db, ctx.project.id);
 		let plan: ReturnType<typeof mapCsv>;
 		try {
@@ -59,7 +59,7 @@ export const csvImportOp = defineOp({
 			if (!row.body || !row.alias) throw new Error("a validated CSV row has no case body or alias");
 			return { op: "create", body: row.body, folder: row.folder, aliases: [row.alias] };
 		});
-		reply.proposal = propose(ctx, { edits, reason: "Import mapped CSV" });
+		reply.proposal = yield* proposeSteps(ctx, { edits, reason: "Import mapped CSV" });
 		return reply;
 	},
 });

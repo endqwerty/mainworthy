@@ -389,10 +389,6 @@ function* openSteps(
 	return { s: "open", question };
 }
 
-function settleByRule(ctx: Ctx, question: QuestionRow, clause: string, answer: unknown): Raised {
-	return complete(settleByRuleSteps(ctx, question, clause, answer));
-}
-
 function* settleByRuleSteps(
 	ctx: Ctx,
 	question: QuestionRow,
@@ -426,7 +422,7 @@ function* settleByRuleSteps(
  * leaves it. Only `map` questions: a proposal or a run that waited for a person under the old policy still waits
  * for one under the new, because no later report asks about those again.
  */
-function ruleTakesUnlinked(ctx: Ctx): number {
+function* ruleTakesUnlinkedSteps(ctx: Ctx): Generator<undefined, number, void> {
 	const policy = currentPolicy(ctx.db, ctx.project.id);
 	if (!policy.clauses.some((clause) => clause.kind === "map" && clause.ask.who === "rule")) return 0;
 	let taken = 0;
@@ -439,7 +435,7 @@ function ruleTakesUnlinked(ctx: Ctx): number {
 		if (clause.ask.who !== "rule") continue;
 		if (heldOpen(ctx, question, question.basis) || overruled(ctx, question, clause.answer)) continue;
 		setQuestionAsk(ctx, question, clause.ask);
-		if (settleByRule(ctx, question, clause.id, clause.answer).s === "decided") taken++;
+		if ((yield* settleByRuleSteps(ctx, question, clause.id, clause.answer)).s === "decided") taken++;
 	}
 	return taken;
 }
@@ -639,7 +635,7 @@ function* settleSteps(
 		signers.map((signer) => signer.by),
 		decision.expires_at,
 	);
-	const effects = yield* handler.effect(ctx, witness, question, given, { raise, ruleTakesUnlinked });
+	const effects = yield* handler.effect(ctx, witness, question, given, { raise, raiseSteps, ruleTakesUnlinkedSteps });
 	setDecisionEffects(ctx, decision.id, effects);
 	const about = runsAbout(ctx, question);
 	if (Array.isArray(effects.reask) && effects.reask.length > 0) askAgain(ctx, question, effects.reask as number[]);
