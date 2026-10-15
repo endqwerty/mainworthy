@@ -34,7 +34,7 @@ function encodeLine(text: string): string {
 		else if (char === "\r") output += "\\r";
 		else if (char === "^") output += "\\^";
 		else if (index === 0 && char === " ") output += "\\s";
-		else if (index === 0 && (char === ">" || char === "-" || char === "#")) output += `\\${char}`;
+		else if (index === 0 && (char === ">" || char === "-" || char === "#" || char === "!")) output += `\\${char}`;
 		else if (char.charCodeAt(0) < 32 || char === "\u2028" || char === "\u2029")
 			output += `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
 		else output += char;
@@ -54,7 +54,7 @@ function decodeLine(text: string): string {
 		if (next === "u" && /^[0-9a-f]{4}$/i.test(text.slice(index + 2, index + 6))) {
 			output += String.fromCharCode(Number.parseInt(text.slice(index + 2, index + 6), 16));
 			index += 5;
-		} else if (next === "t" || next === "r" || next === "s" || "\\^>-#".includes(next)) {
+		} else if (next === "t" || next === "r" || next === "s" || "\\^>-#!".includes(next)) {
 			output += next === "t" ? "\t" : next === "r" ? "\r" : next === "s" ? " " : next;
 			index++;
 		} else output += char;
@@ -67,7 +67,7 @@ export function printCase(doc: CaseDoc): string {
 	const { body } = doc;
 	const lines = ["---"];
 	if (doc.ref !== null) lines.push(`id: ${scalar(doc.ref)}`);
-	lines.push("kind: case", `title: ${scalar(body.title)}`, `methods: [${body.methods.join(", ")}]`);
+	lines.push(`kind: ${doc.kind ?? "case"}`, `title: ${scalar(body.title)}`, `methods: [${body.methods.join(", ")}]`);
 	if (body.automate !== "none") lines.push(`automate: ${body.automate}`);
 	lines.push(`covers: [${doc.covers.map(scalar).join(", ")}]`, `tags: [${doc.tags.map(scalar).join(", ")}]`);
 	const fieldKeys = Object.keys(body.fields).sort();
@@ -81,6 +81,10 @@ export function printCase(doc: CaseDoc): string {
 	}
 	lines.push("## Steps");
 	for (const step of body.steps) {
+		if (step.use) {
+			lines.push(`- !use ${step.use.fragment}@v${step.use.version} ^${step.id}`);
+			continue;
+		}
 		const [first = "", ...rest] = step.action.split("\n");
 		lines.push(`- ${encodeLine(first)} ^${step.id}`);
 		for (const line of rest) lines.push(`  ${encodeLine(line)}`);
@@ -219,8 +223,9 @@ export function parseCase(text: string, defaults: Pick<CaseDoc["body"], "fields"
 		const entry = header.get(key);
 		return entry ? readArray({ text: entry.value, line: entry.line, errors }) : fallback;
 	}
-	if (headerString({ key: "kind", fallback: "case" }) !== "case") {
-		errors.push({ line: header.get("kind")?.line ?? 1, message: "kind must be case" });
+	const kind = headerString({ key: "kind", fallback: "case" });
+	if (kind !== "case" && kind !== "fragment") {
+		errors.push({ line: header.get("kind")?.line ?? 1, message: "kind must be case or fragment" });
 	}
 	const taken = new Set<string>();
 	for (let index = end + 1; index < lines.length; index++) {
@@ -269,7 +274,13 @@ export function parseCase(text: string, defaults: Pick<CaseDoc["body"], "fields"
 					const match = trailingId.exec(raw);
 					const id = match?.[1] ?? newStepId(taken, () => 0);
 					taken.add(id);
-					pending = { id, action: [decodeLine(raw.slice(2, match ? match.index : undefined))], expected: null, line };
+					const content = raw.slice(2, match ? match.index : undefined);
+					const use = /^!use (C-[1-9]\d*)@v([1-9]\d*)$/.exec(content);
+					if (use) {
+						steps.push({ id, action: "", expected: null, use: { fragment: use[1] ?? "", version: Number(use[2]) } });
+						stepLines.push(line);
+					} else if (content.startsWith("!use ")) errors.push({ line, message: "Expected !use C-1@v1" });
+					else pending = { id, action: [decodeLine(content)], expected: null, line };
 				} else if (pending && /^ {2}>(?: |$)/.test(raw)) {
 					pending.expected ??= [];
 					pending.expected.push(decodeLine(raw.startsWith("  > ") ? raw.slice(4) : ""));
@@ -292,6 +303,7 @@ export function parseCase(text: string, defaults: Pick<CaseDoc["body"], "fields"
 	finishStep();
 	if (!seenSteps) errors.push({ line: end + 2, message: "Missing ## Steps section" });
 	const candidate = {
+		...(kind === "fragment" ? { kind } : {}),
 		ref: header.has("id") ? headerString({ key: "id", fallback: "" }) : null,
 		body: {
 			title: headerString({ key: "title", fallback: "" }),

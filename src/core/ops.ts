@@ -18,7 +18,7 @@ import {
 	SignoffAnswer,
 	Unlinked,
 } from "./kinds.ts";
-import { Automate, CaseBody, MethodKind } from "./model.ts";
+import { Automate, CaseBody, CaseKind, MethodKind } from "./model.ts";
 import { Obligation, TargetMatch, Verdict } from "./runs.ts";
 import { TeamInput } from "./teams.ts";
 
@@ -62,8 +62,21 @@ export const QuarantineEdit = z
 	.meta({ "x-mcp-hidden": true });
 export const Edit = z.discriminatedUnion("op", [
 	QuarantineEdit,
+	z
+		.object({
+			op: z.literal("fragment"),
+			fragment: z.string(),
+			from: z.number().int().positive(),
+			to: z.number().int().positive(),
+			cases: z
+				.array(z.object({ case: z.string(), base: z.number().int().positive() }))
+				.min(1)
+				.max(5000),
+		})
+		.meta({ "x-mcp-hidden": true }),
 	z.object({
 		op: z.literal("create"),
+		kind: CaseKind.optional().meta({ "x-mcp-hidden": true }),
 		/** The case as structured content, as canonical Markdown, or as free text in the capture outline. */
 		body: CaseBody.partial().optional(),
 		md: z.string().optional(),

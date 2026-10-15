@@ -426,7 +426,12 @@ export function SuiteScreen() {
 	}, [project, copyCase, view, owner]);
 
 	useEffect(() => {
-		if (view) knownStepIds({ project, id: view.ref, ids: [...view.usedStepIds, ...view.steps.map((step) => step.id)] });
+		if (view)
+			knownStepIds({
+				project,
+				id: view.ref,
+				ids: [...view.usedStepIds, ...(view.sourceSteps ?? view.steps).map((step) => step.id)],
+			});
 	}, [view, project]);
 	const newId = draft?.ref === null ? draft.id : null;
 	const rows = useMemo(() => {
@@ -517,7 +522,7 @@ export function SuiteScreen() {
 		const ended = gone.current?.draft;
 		return ended && ended === draftRef.current ? ended : null;
 	}
-	function change(next: Draft, focus = false): void {
+	function change(next: Draft, focus = false, selectionOnly = false): void {
 		if (!sessionCurrent(owner)) return;
 		// Another window's draft that it removed is not stored again from here. The person's own text still is.
 		if (endingDraft()?.id === next.id && next.owner !== windowId) return;
@@ -529,11 +534,13 @@ export function SuiteScreen() {
 			return;
 		}
 		const prior = draftRef.current;
+		if (selectionOnly && prior?.id === next.id) next = { ...prior, caret: next.caret };
 		if (prior?.id === next.id) {
 			if (next.base < prior.base) return;
 			if (next.base === prior.base)
 				next = {
 					...prior,
+					kind: next.kind,
 					body: next.body,
 					tags: next.tags,
 					covers: next.covers,
@@ -544,8 +551,8 @@ export function SuiteScreen() {
 		}
 		const contentChanged =
 			prior &&
-			JSON.stringify([prior.body, prior.tags, prior.covers, prior.folder]) !==
-				JSON.stringify([next.body, next.tags, next.covers, next.folder]);
+			JSON.stringify([prior.body, prior.tags, prior.covers, prior.folder, prior.kind]) !==
+				JSON.stringify([next.body, next.tags, next.covers, next.folder, next.kind]);
 		const stored = readDraft({ project, id: next.id });
 		if (!mayWrite(next.id)) {
 			if (stored && (!prior || prior.id !== stored.id)) {
@@ -597,7 +604,7 @@ export function SuiteScreen() {
 		if (
 			snapshot.ref === null &&
 			!snapshot.body.title.trim() &&
-			!snapshot.body.steps.some((step) => step.action.trim())
+			!snapshot.body.steps.some((step) => step.use || step.action.trim())
 		) {
 			removeOwnedDraft(snapshot.id);
 			setCaptures((previous) => {
@@ -960,7 +967,7 @@ export function SuiteScreen() {
 		let body: CaseBody = {
 			...cleaned.body,
 			steps: cleaned.body.steps
-				.filter((step) => step.action.trim())
+				.filter((step) => step.use || step.action.trim())
 				.map((step) => ({ ...step, expected: step.expected || null })),
 		};
 		const fingerprint = JSON.stringify({ body, tags: cleaned.tags, covers: cleaned.covers, folder: snapshot.folder });
@@ -1003,6 +1010,7 @@ export function SuiteScreen() {
 						? [
 								{
 									op: "create",
+									kind: snapshot.kind ?? "case",
 									body,
 									...(snapshot.folder ? { folder: snapshot.folder } : {}),
 									tags: cleaned.tags,
@@ -1218,7 +1226,7 @@ export function SuiteScreen() {
 					const normalizedBody = {
 						...normalized.body,
 						steps: normalized.body.steps
-							.filter((step) => step.action.trim())
+							.filter((step) => step.use || step.action.trim())
 							.map((step) => ({ ...step, expected: step.expected || null })),
 					};
 					const more =
@@ -1387,7 +1395,8 @@ export function SuiteScreen() {
 		const previous = draftRef.current;
 		const retain =
 			previous?.ref === null &&
-			(previous.body.title.trim().length > 0 || previous.body.steps.some((step) => step.action.trim().length > 0));
+			(previous.body.title.trim().length > 0 ||
+				previous.body.steps.some((step) => step.use || step.action.trim().length > 0));
 		if (previous && retain) setCaptures((prior) => new Map([...prior, [previous.id, previous]]));
 		void sealDraft();
 		const selectedRow = cases.find((item) => item.ref === selected);

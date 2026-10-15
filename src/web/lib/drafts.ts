@@ -1,11 +1,16 @@
 import { z } from "zod";
-import { CaseBody, Step } from "../../core/model.ts";
+import { CaseBody, CaseKind, FragmentStep, InlineStep, StepId } from "../../core/model.ts";
 import { ProposeInput } from "../../core/ops.ts";
 import { deviceKey, deviceSession, sessionCurrent } from "./device.ts";
 import { draftOwnedElsewhere, draftOwner, randomId } from "./ids.ts";
 
 export const DraftBody = CaseBody.extend({
-	steps: z.array(Step.extend({ action: z.string(), expected: z.string().nullable() })),
+	steps: z.array(
+		z.union([
+			InlineStep.extend({ action: z.string(), expected: z.string().nullable(), use: z.never().optional() }),
+			FragmentStep,
+		]),
+	),
 });
 export const DraftConflict = z.object({
 	q: z.string(),
@@ -45,6 +50,7 @@ export const Draft = z
 	.object({
 		id: z.string(),
 		ref: z.string().nullable(),
+		kind: CaseKind.optional(),
 		base: z.number(),
 		body: DraftBody,
 		original: CaseBody,
@@ -165,7 +171,7 @@ export function knownStepIds({
 		let stored: string[] = [];
 		try {
 			const raw = localStorage.getItem(key);
-			if (raw) stored = z.array(Step.shape.id).parse(JSON.parse(raw));
+			if (raw) stored = z.array(StepId).parse(JSON.parse(raw));
 		} catch {}
 		taken = new Set(stored);
 		seenSteps.set(key, taken);

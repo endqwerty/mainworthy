@@ -845,6 +845,11 @@ function RunDocument({ slot, active, step }: { slot: Slot; active: boolean; step
 								<span className="sn">{index + 1}</span>
 								<div>
 									{entry.action}
+									{entry.source && (
+										<div className="dim">
+											From {entry.source.fragment} v{entry.source.version}
+										</div>
+									)}
 									{entry.expected && <div className="rx">&gt; {entry.expected}</div>}
 								</div>
 							</li>

@@ -96,8 +96,10 @@ import {
 	caseById,
 	caseRef,
 	coversOf,
+	expandSteps,
 	findCase,
 	folderIndex,
+	fragmentUsers,
 	mustCase,
 	type ProposalRow,
 	proposalByNo,
@@ -176,10 +178,17 @@ export function caseView(
 		hash: stored.hash,
 		claim: stored.claim_hash,
 		state: row.state,
+		kind: row.kind,
 	};
 	if (want.has("title")) out.title = body.title;
 	if (want.has("pre")) out.pre = body.pre;
-	if (want.has("steps")) out.steps = body.steps;
+	if (want.has("steps")) {
+		out.steps = expandSteps(ctx.db, ctx.project.id, body);
+		out.sourceSteps = body.steps;
+		out.hasFragments = body.steps.some((step) => Boolean(step.use));
+	}
+	out.fields = body.fields;
+	if (row.kind === "fragment") out.users = fragmentUsers(ctx.db, ctx.project.id, caseRef(row));
 	if (want.has("methods")) {
 		out.methods = body.methods;
 		out.automate = body.automate;
@@ -401,6 +410,7 @@ export function get(ctx: Ctx, input: GetInput): Record<string, unknown>[] {
 			if (!stored) throw notFound(`${caseRef(row)} version ${version}`);
 			const md = printCase({
 				ref: caseRef(row),
+				kind: row.kind,
 				body: json<CaseBody>(stored.body),
 				tags: json<string[]>(row.tags),
 				covers: coversOf(ctx.db, row.id),

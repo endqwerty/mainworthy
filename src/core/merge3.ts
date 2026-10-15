@@ -233,6 +233,11 @@ export function mergeBodies({ base, mine, theirs }: { base: CaseBody; mine: Case
 		const ours = local.get(id);
 		const other = remote.get(id);
 		if (!ours && !other) continue;
+		if ((before?.use || ours?.use || other?.use) && ours && other) {
+			const step = mergeField({ path: `steps.${id}`, base: before, mine: ours, theirs: other, conflicts });
+			if (step) kept.set(id, { ...step });
+			continue;
+		}
 		if (!before) {
 			if (ours && other) {
 				const action = mergeField<string | undefined>({

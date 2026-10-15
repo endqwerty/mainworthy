@@ -23,6 +23,8 @@ import grantRoles from "./migrations/0019_grant_roles.sql" with { type: "text" }
 import mailContacts from "./migrations/0020_mail_contacts.sql" with { type: "text" };
 import quarantines from "./migrations/0021_quarantines.sql" with { type: "text" };
 
+import fragments from "./migrations/0022_fragments.sql" with { type: "text" };
+
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
  * Versions are contiguous from 1, and a branch takes the next free number when it lands.
@@ -54,6 +56,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 19, name: "grant_roles", sql: grantRoles, archive: true },
 	{ version: 20, name: "mail_contacts", sql: mailContacts, archive: true },
 	{ version: 21, name: "quarantines", sql: quarantines, archive: true },
+	{ version: 22, name: "fragments", sql: fragments, archive: true },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;

@@ -1,7 +1,7 @@
 // What the server made of a merge a conflict card sent, and the draft that is left once that is known.
 import { z } from "zod";
 import { mergeBodies } from "../../core/merge3.ts";
-import { CaseBody } from "../../core/model.ts";
+import { CaseBody, type Step } from "../../core/model.ts";
 import { type Draft, DraftBody, type DraftConflict, hasTypedMerge } from "./drafts.ts";
 import { randomId } from "./ids.ts";
 
@@ -14,7 +14,7 @@ export function recordable(body: z.infer<typeof DraftBody>): CaseBody {
 	return CaseBody.parse({
 		...body,
 		steps: body.steps
-			.filter((step) => step.action.trim())
+			.filter((step) => step.use || step.action.trim())
 			.map((step) => ({ ...step, expected: step.expected || null })),
 	});
 }
@@ -27,7 +27,7 @@ function heldText(body: Draft["body"]): Draft["body"] {
 	return {
 		...body,
 		steps: body.steps
-			.filter((step) => step.action.trim() || step.expected?.trim())
+			.filter((step) => step.use || step.action.trim() || step.expected?.trim())
 			.map((step) => ({ ...step, expected: step.expected || null })),
 	};
 }
@@ -36,7 +36,7 @@ function heldText(body: Draft["body"]): Draft["body"] {
  * draft that holds one stays on the device when everything else in it is recorded (issue #86).
  */
 export function holdsUnfinishedStep(body: Draft["body"]): boolean {
-	return heldText(body).steps.some((step) => !step.action.trim());
+	return heldText(body).steps.some((step) => !step.use && !step.action.trim());
 }
 /**
  * A draft's text carried onto `recorded`, a version the page has read: what was typed since `sent` (the body the
@@ -65,7 +65,7 @@ export function carried({
 	const taken = new Set([...sent.steps, ...live.steps, ...recorded.steps].map((step) => step.id));
 	const steps = live.steps.flatMap((step) => {
 		const theirs = standing.get(step.id);
-		if (step.action.trim() || sentIds.has(step.id) || !theirs) return [step];
+		if (step.use || step.action.trim() || sentIds.has(step.id) || !theirs) return [step];
 		if (!step.expected?.trim() || step.expected === theirs.expected) return [];
 		const id = newId(taken);
 		taken.add(id);
@@ -199,7 +199,8 @@ export function allRecorded({
 export function nextMine({ merged, sent }: { merged: Draft["body"]; sent: CaseBody }): CaseBody {
 	return CaseBody.parse({
 		...merged,
-		steps: merged.steps.flatMap((step) => {
+		steps: merged.steps.flatMap((step): Step[] => {
+			if (step.use) return [step];
 			const action = step.action.trim() ? step.action : sent.steps.find((was) => was.id === step.id)?.action;
 			return action ? [{ ...step, action, expected: step.expected || null }] : [];
 		}),
