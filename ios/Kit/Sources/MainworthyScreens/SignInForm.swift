@@ -2,10 +2,11 @@ import Foundation
 import MainworthyClient
 import Observation
 
-/// The sign-in form: where the instance is, and a name with a password.
+/// The sign-in form: a name with a password, for the instance the app was built for. It does not ask which
+/// instance (issue #233).
 @MainActor @Observable
 public final class SignInForm {
-	public var address: String
+	public let instance: Instance
 	public var name = ""
 	public var password = ""
 	/// What the form says above its fields: why the person is here again, or why the last attempt failed.
@@ -16,26 +17,21 @@ public final class SignInForm {
 	private let onSignedIn: (Server, Account) -> Void
 
 	init(
-		address: String, notice: String?, connect: @escaping (Instance) -> Server,
+		instance: Instance, notice: String?, connect: @escaping (Instance) -> Server,
 		onSignedIn: @escaping (Server, Account) -> Void
 	) {
-		self.address = address
+		self.instance = instance
 		self.notice = notice
 		self.connect = connect
 		self.onSignedIn = onSignedIn
 	}
 
 	public var canSubmit: Bool {
-		!isWorking && !address.trimmingCharacters(in: .whitespaces).isEmpty
-			&& !name.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
+		!isWorking && !name.trimmingCharacters(in: .whitespaces).isEmpty && !password.isEmpty
 	}
 
 	public func submit() async {
 		guard canSubmit else { return }
-		guard let instance = Instance(address: address) else {
-			notice = "That is not an address. Write it as you would in a browser: mainworthy.example"
-			return
-		}
 		isWorking = true
 		defer { isWorking = false }
 		let server = connect(instance)

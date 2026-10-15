@@ -20,6 +20,8 @@ public final class AppModel {
 	private let secrets: any SecretStore
 	private let transport: any Transport
 	private let userAgent: String
+	/// The instance the sign-in form signs in to. A session the device already holds may be for another.
+	private let instance: Instance
 	private let remembered: Remembered
 	private var server: Server?
 	private var watching: Task<Void, Never>?
@@ -37,8 +39,9 @@ public final class AppModel {
 	///
 	/// - Parameters:
 	///   - version: The app's version, which the server shows beside the session it opens.
+	///   - instance: The instance the build names, or the one a test of the screens started.
 	///   - forgetting: Start signed out, with nothing remembered. A test of the screens asks for it.
-	public static func live(version: String, forgetting: Bool = false) -> AppModel {
+	public static func live(version: String, instance: Instance, forgetting: Bool = false) -> AppModel {
 		let secrets = KeychainStore(service: "com.mainworthy.app")
 		if forgetting {
 			secrets.save(nil)
@@ -46,14 +49,18 @@ public final class AppModel {
 		}
 		return AppModel(
 			secrets: secrets, transport: URLSessionTransport(), userAgent: "Mainworthy for iPhone \(version)",
-			defaults: .standard
+			instance: instance, defaults: .standard
 		)
 	}
 
-	package init(secrets: any SecretStore, transport: any Transport, userAgent: String, defaults: UserDefaults) {
+	package init(
+		secrets: any SecretStore, transport: any Transport, userAgent: String, instance: Instance,
+		defaults: UserDefaults
+	) {
 		self.secrets = secrets
 		self.transport = transport
 		self.userAgent = userAgent
+		self.instance = instance
 		remembered = Remembered(defaults)
 	}
 
@@ -101,7 +108,6 @@ public final class AppModel {
 	private func open(_ server: Server, as account: Account) {
 		attempt += 1
 		self.server = server
-		remembered.address = server.instance.name
 		if let kept = suspended, kept.isOn(server), kept.account.name == account.name {
 			// The session was renewed for the same person: their screens, and what they typed in them, come back.
 			phase = .signedIn(kept)
@@ -150,7 +156,7 @@ public final class AppModel {
 
 	private func form(saying notice: String? = nil) -> SignInForm {
 		SignInForm(
-			address: remembered.address, notice: notice,
+			instance: instance, notice: notice,
 			connect: { [weak self, secrets, transport, userAgent] instance in
 				// A session that ended is renewed on the server the workspace that waits for it holds.
 				if let kept = self?.server, self?.suspended != nil, kept.instance == instance { return kept }
@@ -161,21 +167,13 @@ public final class AppModel {
 	}
 }
 
-/// What the device remembers that is no secret: the address last signed in to, and the project last open.
+/// What the device remembers that is no secret: the project last open.
 @MainActor
 final class Remembered {
-	/// The address the form shows on a device that has signed in nowhere yet.
-	static let defaultAddress = "mainworthy.com"
-
 	private let defaults: UserDefaults
 
 	init(_ defaults: UserDefaults) {
 		self.defaults = defaults
-	}
-
-	var address: String {
-		get { defaults.string(forKey: "mainworthy.address") ?? Remembered.defaultAddress }
-		set { defaults.set(newValue, forKey: "mainworthy.address") }
 	}
 
 	var project: String? {
@@ -184,7 +182,6 @@ final class Remembered {
 	}
 
 	func forget() {
-		defaults.removeObject(forKey: "mainworthy.address")
 		defaults.removeObject(forKey: "mainworthy.project")
 	}
 }

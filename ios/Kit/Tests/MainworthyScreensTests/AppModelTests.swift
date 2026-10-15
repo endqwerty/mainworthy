@@ -19,8 +19,11 @@ struct AppModelTests {
 			defaults.removePersistentDomain(forName: name)
 		}
 
-		@MainActor func app() -> AppModel {
-			AppModel(secrets: secrets, transport: URLSessionTransport(), userAgent: "Mainworthy tests", defaults: defaults)
+		@MainActor func app(at instance: Instance = Live.instance) -> AppModel {
+			AppModel(
+				secrets: secrets, transport: URLSessionTransport(), userAgent: "Mainworthy tests", instance: instance,
+				defaults: defaults
+			)
 		}
 	}
 
@@ -46,9 +49,8 @@ struct AppModelTests {
 		let app = device.app()
 		await app.start()
 		let form = try form(app)
-		// It offers the hosted instance, and asks for a name and a password before it signs anybody in.
-		#expect(form.address == "mainworthy.com" && !form.canSubmit)
-		form.address = Live.address
+		// It signs in to the instance the app was given, and asks for a name and a password before it signs anybody in.
+		#expect(form.instance == Live.instance && !form.canSubmit)
 		form.name = Live.name
 		form.password = "not the password"
 		#expect(form.canSubmit)
@@ -70,8 +72,8 @@ struct AppModelTests {
 
 		await kept.signOut()
 		let back = try self.form(again)
-		// The address is remembered, and nothing that signs anybody in.
-		#expect(back.address == Live.instance.name && back.name.isEmpty && back.password.isEmpty)
+		// Nothing that signs anybody in is kept.
+		#expect(back.instance == Live.instance && back.name.isEmpty && back.password.isEmpty)
 		#expect(device.secrets.load() == nil)
 		let third = device.app()
 		await third.start()
@@ -83,7 +85,6 @@ struct AppModelTests {
 		let app = Device().app()
 		await app.start()
 		let form = try form(app)
-		form.address = Live.address
 		form.name = Live.ownerName
 		form.password = Live.ownerPassword
 		await form.submit()
@@ -98,7 +99,6 @@ struct AppModelTests {
 		let app = device.app()
 		await app.start()
 		let form = try form(app)
-		form.address = Live.address
 		form.name = Live.name
 		form.password = Live.password
 		await form.submit()
@@ -123,7 +123,6 @@ struct AppModelTests {
 		let app = device.app()
 		await app.start()
 		let form = try form(app)
-		form.address = Live.address
 		form.name = Live.name
 		form.password = Live.password
 		await form.submit()
@@ -141,7 +140,6 @@ struct AppModelTests {
 		let app = device.app()
 		await app.start()
 		let form = try form(app)
-		form.address = Live.address
 		form.name = Live.name
 		form.password = Live.password
 		await form.submit()
@@ -175,7 +173,6 @@ struct AppModelTests {
 		let app = device.app()
 		await app.start()
 		let form = try form(app)
-		form.address = Live.address
 		form.name = Live.name
 		form.password = Live.password
 		await form.submit()
@@ -202,7 +199,6 @@ struct AppModelTests {
 		let app = device.app()
 		await app.start()
 		let form = try form(app)
-		form.address = Live.address
 		form.name = Live.name
 		form.password = Live.password
 		await form.submit()
@@ -223,7 +219,6 @@ struct AppModelTests {
 		let app = Device().app()
 		await app.start()
 		let form = try form(app)
-		form.address = Live.address
 		form.name = Live.name
 		form.password = Live.password
 		await form.submit()
@@ -236,17 +231,13 @@ struct AppModelTests {
 		#expect(try self.workspace(app) !== workspace)
 	}
 
-	@Test("an address that is no address, and one that is no Mainworthy, are said so")
-	func badAddress() async throws {
-		let app = Device().app()
+	@Test("an instance that does not answer is said so")
+	func unreachable() async throws {
+		let app = Device().app(at: try #require(Instance(address: "127.0.0.1:9")))
 		await app.start()
 		let form = try form(app)
-		form.address = "not an address"
 		form.name = "robin"
 		form.password = "a password"
-		await form.submit()
-		#expect(form.notice?.hasPrefix("That is not an address.") == true)
-		form.address = "127.0.0.1:9"
 		await form.submit()
 		#expect(form.notice?.hasPrefix("The server could not be reached.") == true)
 	}
@@ -305,7 +296,9 @@ struct AppModelLateReplyTests {
 		let name = "mainworthy-tests-\(UUID().uuidString)"
 		let defaults = try #require(UserDefaults(suiteName: name))
 		defer { defaults.removePersistentDomain(forName: name) }
-		let app = AppModel(secrets: secrets, transport: transport, userAgent: "Mainworthy tests", defaults: defaults)
+		let app = AppModel(
+			secrets: secrets, transport: transport, userAgent: "Mainworthy tests", instance: instance, defaults: defaults
+		)
 
 		// The app starts and asks who is signed in. Before the server answers, the person gives up and signs out.
 		transport.holding = true
