@@ -1591,3 +1591,36 @@ test("an incompatible or unversioned server receives no CLI operation or credent
 		}
 	}
 });
+
+test("health probe diagnostics distinguish redirects, HTTP failures and invalid JSON", async () => {
+	const received: { path: string; token: string | null }[] = [];
+	let response = new Response(null, { status: 301, headers: { location: "https://mainworthy.example" } });
+	const server = Bun.serve({
+		hostname: "127.0.0.1",
+		port: 0,
+		fetch(req) {
+			received.push({ path: new URL(req.url).pathname, token: req.headers.get("authorization") });
+			return response.clone();
+		},
+	});
+	try {
+		await withInstance(async ({ run }) => {
+			for (const [reply, message] of [
+				[response, "redirect to https://mainworthy.example: use https"],
+				[new Response("proxy unavailable", { status: 503 }), "the server answered 503 to /healthz"],
+				[new Response("proxy page"), "the server answered 200 to /healthz with invalid JSON"],
+			] as const) {
+				response = reply;
+				received.length = 0;
+				const result = await run(["find", "--url", `http://127.0.0.1:${server.port}`, "--token", "private-token"]);
+				expect(result.code).toBe(4);
+				expect(result.stderr).toContain(message);
+				expect(result.stderr).not.toContain("start the server");
+				expect(result.stderr).not.toContain("incompatible:");
+				expect(received).toEqual([{ path: "/healthz", token: null }]);
+			}
+		});
+	} finally {
+		await server.stop(true);
+	}
+});

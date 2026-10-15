@@ -173,12 +173,30 @@ export class Client {
 	private async compatible(): Promise<void> {
 		let response: Response;
 		try {
-			response = await fetch(`${this.url}/healthz`, { redirect: "error", signal: AbortSignal.timeout(5000) });
+			response = await fetch(`${this.url}/healthz`, { redirect: "manual", signal: AbortSignal.timeout(5000) });
 		} catch {
 			throw new CliError("connection", `cannot connect to ${this.url}; start the server with mainworthy serve`);
 		}
-		const health = ApiHealth.safeParse(await response.json().catch(() => null));
-		if (!response.ok || !health.success || health.data.apiVersion !== API_VERSION)
+		if (response.status >= 300 && response.status < 400) {
+			const location = response.headers.get("location");
+			throw new CliError(
+				"connection",
+				`the server answered ${response.status} to /healthz${location ? `; redirect to ${location}: use https or set --url to the destination` : "; a redirect without a Location header"}`,
+			);
+		}
+		if (!response.ok)
+			throw new CliError("connection", `the server answered ${response.status} to /healthz at ${this.url}`);
+		let body: unknown;
+		try {
+			body = await response.json();
+		} catch {
+			throw new CliError(
+				"connection",
+				`the server answered ${response.status} to /healthz with invalid JSON at ${this.url}`,
+			);
+		}
+		const health = ApiHealth.safeParse(body);
+		if (!health.success || health.data.apiVersion !== API_VERSION)
 			throw new CliError(
 				"incompatible",
 				`CLI requires API ${API_VERSION}; the server at ${this.url} does not advertise it; use a CLI and server with the same API version (mainworthy version; mainworthy health --json)`,

@@ -308,9 +308,14 @@ the steps are kept below for an instance that has none.
   0022, since 2026-10-13). A failure nobody explained on it is then no longer asked about. Before this, such a
   question stayed in the queue until a person answered it: the one about pull request 150 outlived its merge.
   For a pull request that ended earlier, or whose event was missed: `gh workflow run change.yml -f pull=150
-  -f state=merged`. The workflow checks the instance's API version first. An incompatible instance or an unknown
-  operation fails the job and needs a replay after the instance is upgraded. Only the specific reply that the
-  named change was never reported is accepted as a harmless 404.
+  -f state=merged`. The workflow checks the instance's API version first. While the first build with API
+  versions waits to deploy (the tip of `main` must stand still for ten minutes), the running instance still
+  answers `/healthz` without `apiVersion`. The workflow warns and sends the lifecycle request without the
+  version header, as before, so pull requests closed in that window need no manual replay when the request
+  succeeds. An instance that names a different API version, or an unknown operation, fails the job and needs
+  a replay after the instance is upgraded. Only the specific reply that the named change was never reported
+  is accepted as a harmless 404. The gate job still starts its own instance for an unversioned server: its
+  report and gate commands require an advertised API version.
 - **A push to `main` reports too**, as the workflow runs on it.
 
 What can go wrong, and what the job does: the instance is down (its own Mainworthy, a warning); the instance is an
