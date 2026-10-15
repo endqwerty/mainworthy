@@ -38,6 +38,7 @@ The layout follows the pointer, not the width of the window. A browser worked wi
 
 | Key | What it does |
 | --- | --- |
+| <kbd>g</kbd> <kbd>h</kbd> | Go home. Opens [your chosen home](./customize.md#choose-your-home) in this project. Suite is the default. |
 | <kbd>g</kbd> <kbd>s</kbd> | Go to Suite |
 | <kbd>g</kbd> <kbd>q</kbd> | Go to Queue |
 | <kbd>g</kbd> <kbd>r</kbd> | Go to Runs |

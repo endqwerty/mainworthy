@@ -16,8 +16,9 @@ import {
 	setDevicePerson,
 	suspendDeviceSession,
 } from "./lib/device.ts";
+import { homeUrl } from "./lib/home.ts";
 import { useBindings, useKeyboard, useKeyRegistry } from "./lib/keys.ts";
-import { navigate, projectUrl, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
+import { navigate, projectUrl, readRoute, refUrl, routeUrl, type Screen, useRoute } from "./lib/router.ts";
 import { signOut } from "./lib/signin.ts";
 import { PhoneBar, usePhoneShell } from "./phone.tsx";
 import { QueueScreen } from "./queue/index.tsx";
@@ -146,6 +147,14 @@ export function App() {
 			if (person.current !== null && person.current !== info.actor) queryClient.clear();
 			person.current = info.actor;
 			setDevicePerson(info.actor);
+			// This is still the entry address, before the shell mounts. Keep it an initial visit so Suite restores drafts.
+			const first = info.projects[0];
+			const requested = readRoute().project;
+			if (!location.pathname.startsWith("/p/")) {
+				if (first) history.replaceState(null, "", homeUrl(first.key));
+			} else if (/^\/p\/[^/]+\/?$/.test(location.pathname) && info.projects.some((entry) => entry.key === requested)) {
+				history.replaceState(null, "", homeUrl(requested));
+			}
 			setAuth({ kind: "ready", session: info });
 		} catch (error) {
 			if (!sessionUnchanged(owner)) return;
@@ -374,6 +383,12 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 				list: true,
 				handler: () => navigate(routeUrl({ project, screen: item.screen })),
 			})),
+			{
+				key: "g h",
+				label: "Go home",
+				list: true,
+				handler: () => navigate(homeUrl(project)),
+			},
 			// It goes somewhere and records nothing, so a phone offers it while the list is shown, as it does a screen.
 			...(switchable ? [{ key: "g p", label: "Switch project", list: true, handler: pickProject }] : []),
 			{
@@ -421,12 +436,6 @@ function Workbench({ info, refreshSession }: { info: SessionInfo; refreshSession
 		[project, route.screen, palette, help, openPalette, closePalette, account, leave, phone, switchable, pickProject],
 	);
 	useBindings(globalKeys);
-	useEffect(() => {
-		if (!location.pathname.startsWith("/p/")) {
-			const first = info.projects[0];
-			if (first) navigate(routeUrl({ project: first.key, screen: "suite" }), { replace: true });
-		}
-	}, [info]);
 	const priorities = inInput
 		? ["enter", "tab", "shift+enter", "mod+enter", "escape", "mod+k"]
 		: route.screen === "suite" || route.screen === "case"

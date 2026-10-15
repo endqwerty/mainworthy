@@ -20,6 +20,7 @@ import { navigate, projectUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, EmptyState, KeyCap, ListRow, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
 import { CustomFields } from "./fields.tsx";
+import { YourHome } from "./home.tsx";
 import { People } from "./people.tsx";
 import { YourSessions } from "./sessions.tsx";
 import { YourSignIn } from "./signin.tsx";
@@ -38,6 +39,7 @@ const sectionsFor = (caller: { kind: string; instanceAdmin: boolean }): string[]
 	...(caller.instanceAdmin && caller.kind === "human" ? ["People"] : []),
 	"Projects",
 	"Connect",
+	"Your home",
 	...(caller.kind === "human" ? ["Your sign-in"] : []),
 	...(caller.kind === "ci" ? [] : ["Your sessions"]),
 ];
@@ -291,6 +293,7 @@ function SettingsWorkbench() {
 					<span className="dim">{project}</span>
 				</div>
 				<div className="pane-scroll detail-body">
+					{section === "Your home" && <YourHome />}
 					{!mayRead && <p role="status">Your session may not read this project.</p>}
 					{section === "Policy" && mayRead && currentProject && (
 						<>
