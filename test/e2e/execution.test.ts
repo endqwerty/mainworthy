@@ -36,6 +36,45 @@ async function cases(server: Server, count: number) {
 }
 
 (browserAvailable ? test : test.skip)(
+	"a release cockpit names the build and records against its artifact",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await cases(server, 1);
+			await server.api("announce", {
+				deploy: "rc3",
+				env: "staging",
+				digest: `sha256:${"a".repeat(64)}`,
+				code: [{ repo: "acme/web", commit: "1".repeat(40) }],
+			});
+			const planned = await server.api("plan", {
+				name: "Release smoke",
+				select: { cases: ["C-1"] },
+				accepts: { build: "rc3", env: "staging" },
+			});
+			view = await openPage(server, { path: "/p/scratch/runs" });
+			await view.page.getByText("Accepts results for build rc3 in staging.", { exact: true }).waitFor();
+			await view.page.keyboard.press("Enter");
+			await view.page.waitForURL(`**/runs/${planned.run.slice(2)}`);
+			await view.page.getByText("Accepts results for build rc3 in staging.", { exact: true }).waitFor();
+			await view.page.waitForSelector('[data-run-document="C-1"][data-ready="true"]');
+			await view.page.keyboard.press("p");
+			const gate = await eventually(
+				() => server.api("gate", { run: planned.run }),
+				(result) => result.verdict === "passed",
+			);
+			expect(gate).toMatchObject({ verdict: "passed", tally: { pass: 1, missing: 0 } });
+			const deployments = await server.api("find", { in: "deployments" });
+			expect(deployments.items).toMatchObject([{ build: "rc3", env: "staging" }]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+);
+
+(browserAvailable ? test : test.skip)(
 	"J5: keyboard execution, complete next DOM, fixed controls and real results",
 	async () => {
 		const server = await fixture();

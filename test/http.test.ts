@@ -1150,7 +1150,7 @@ describe("a pipeline's token", () => {
 			.query("SELECT count(*) AS n FROM cases c JOIN projects p ON p.id = c.project WHERE p.key = ?")
 			.get(project);
 
-	test("issued with no list of capabilities, it records and attaches its own evidence, says when a change ended and reads the gate, under every preset", async () => {
+	test("issued with no list of capabilities, it records and attaches evidence, ends changes, announces deploys and reads gates under every preset", async () => {
 		const instance = boot("server", OWNER);
 		for (const preset of ["loose", "standard", "strict"]) {
 			await admin(instance, { do: "project.create", key: preset, preset });
@@ -1209,9 +1209,24 @@ describe("a pipeline's token", () => {
 			// Saying that a change ended is also allowed (decision 0022); here there is no such change to end.
 			const ended = await post(instance, `/api/p/${preset}/change`, { change: "pr:404", state: "merged" }, ci);
 			expect(ended.status).toBe(404);
+			expect(
+				(
+					await post(
+						instance,
+						`/api/p/${preset}/announce`,
+						{
+							deploy: "pipeline-build",
+							env: "staging",
+							digest: `sha256:${"a".repeat(64)}`,
+							code: [{ repo: "acme/web", commit: "1".repeat(40) }],
+						},
+						ci,
+					)
+				).body,
+			).toMatchObject({ ok: true, result: { build: "pipeline-build", by: `pipeline-${preset}` } });
 			// Every other operation of the registry, whatever it is: one added later is refused here too.
 			for (const op of OP_LIST) {
-				if (op.name === "attach" || op.name === "report" || op.name === "gate" || op.name === "change") continue;
+				if (["attach", "report", "gate", "change", "announce"].includes(op.name)) continue;
 				const path = op.scope === "project" ? `/api/p/${preset}/${op.name}` : `/api/${op.name}`;
 				const reply = await post(instance, path, op.name === "propose" ? create : {}, ci);
 				expect(`${preset} ${op.name}: ${reply.status}`).toBe(`${preset} ${op.name}: 403`);
@@ -1964,6 +1979,13 @@ describe("the surface", () => {
 				expect.objectContaining({ key: "schema-demo", demo: true }),
 			]),
 		});
+		await checked("announce", {
+			deploy: "schema-build",
+			env: "staging",
+			digest: `sha256:${"a".repeat(64)}`,
+			code: [{ repo: "acme/web", commit: "1".repeat(40) }],
+		});
+		await checked("find", { in: "deployments" });
 		await checked("propose", {
 			cmd: "schema-create",
 			edits: [
@@ -2171,6 +2193,13 @@ describe("the surface", () => {
 		const seeded = await seed(client, { project: "demo", cases: 24, days: 0, unlinkedFiles: 8 });
 		const sweep = await replySweep(instance, "demo");
 		const { checked } = sweep;
+		await checked("announce", {
+			deploy: "schema-build",
+			env: "staging",
+			digest: `sha256:${"a".repeat(64)}`,
+			code: [{ repo: "acme/web", commit: "1".repeat(40) }],
+		});
+		await checked("find", { in: "deployments" });
 		const rows = z.object({ items: z.array(z.record(z.string(), z.unknown())), cursor: z.string().nullable() });
 		for (const ref of seeded.cases) {
 			const doc = z.array(z.object({ hash: z.string() })).parse(await checked("get", { refs: [ref] }))[0];

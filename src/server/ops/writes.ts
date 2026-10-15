@@ -3,6 +3,7 @@
 import { contentHash } from "../../core/hash.ts";
 import type { ActorKind } from "../../core/kinds.ts";
 import {
+	AnnounceInput,
 	ChangeInput,
 	type ChangeReply,
 	ClaimInput,
@@ -18,6 +19,7 @@ import {
 	type ReportReceipt,
 } from "../../core/ops.ts";
 import { REPLIES } from "../../core/replies.ts";
+import type { TargetMatch } from "../../core/runs.ts";
 import { clip } from "../../core/text.ts";
 import {
 	answer,
@@ -55,6 +57,7 @@ import {
 	unlinkedInFile,
 } from "../evidence/evidence.ts";
 import { insertFinding, insertReview, reviewBasis, reviewedAt } from "../evidence/findings.ts";
+import { announce } from "../evidence/releases.ts";
 import { actorByName, actorLabel } from "../identity/identity.ts";
 import type { Ctx } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
@@ -84,6 +87,18 @@ import { enrollCommitStatus } from "../statuses/statuses.ts";
 import { selectCases } from "../suite/read.ts";
 import { type CaseRow, caseRef, mustCase, seal } from "../suite/suite.ts";
 import { COMMIT, defineOp, type Pause } from "./registry.ts";
+
+export const announceOp = defineOp({
+	name: "announce",
+	summary: "Announce a deployment and bind its build label to an attested artifact. Pipelines and human admins only.",
+	input: AnnounceInput,
+	output: REPLIES.announce,
+	needs: "record",
+	scope: "project",
+	effect: "write",
+	mcp: null,
+	run: announce,
+});
 
 // ── propose ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -146,16 +161,10 @@ export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; f
 	// An explicit head observation waits for batch deduplication: retrying an old report must not move it again.
 	if (input.target) target = ensureTarget(ctx, input.target, !("head" in input.target));
 	else if (run) {
-		const accepts = json<{ commit?: string; repo?: string; env?: string }>(run.accepts);
-		target = accepts.commit
-			? ensureTarget(ctx, {
-					commit: accepts.commit,
-					...(accepts.repo ? { repo: accepts.repo } : {}),
-					...(accepts.env ? { env: accepts.env } : {}),
-				})
-			: ensureTarget(ctx, { session: runRef(run) });
+		const accepts = json<TargetMatch>(run.accepts);
+		target = "self" in accepts ? ensureTarget(ctx, { session: runRef(run) }) : ensureTarget(ctx, accepts);
 	} else throw invalid("a report needs a target (what was tested) or a run");
-	if (run && !runAccepts(run, target)) {
+	if (run && !runAccepts(ctx.db, run, target)) {
 		throw invalid(
 			`${runRef(run)} counts ${describeAccepts(run)}, and this report is for another target. Report it without \`run\` to record it for its own target.`,
 		);

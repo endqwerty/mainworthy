@@ -28,7 +28,7 @@ const TOKEN_COUNTS: Record<string, number> = {
 	decide: 318,
 	inbox: 166,
 	get: 193,
-	find: 263,
+	find: 266,
 	impact: 200,
 	since: 158,
 	gate: 160,
@@ -100,6 +100,22 @@ test("report tools omit the CI-only nothing-required declaration", () => {
 	if (!tool) throw new Error("report");
 	expect(Object.keys(tool.inputSchema.properties ?? {})).toContain("results");
 	expect(Object.keys(tool.inputSchema.properties ?? {})).not.toContain("nothingRequired");
+});
+
+test("report tools offer code targets and planned runs without direct build targets", () => {
+	const tool = mcpTools().find((entry) => entry.name === "report");
+	if (!tool) throw new Error("report");
+	const { properties, required, ...base } = tool.inputSchema;
+	const schema: Record<string, unknown> = {
+		...base,
+		...(properties ? { properties } : {}),
+		...(required ? { required } : {}),
+	};
+	const validate = new AjvJsonSchemaValidator().getValidator(schema);
+	const results = [{ test: { case: "C-1" }, outcome: "pass" }];
+	expect(validate({ target: { build: "rc3", env: "staging" }, results }).valid).toBe(false);
+	expect(validate({ target: { commit: "abcdef1" }, results }).valid).toBe(true);
+	expect(validate({ run: "R-1", results }).valid).toBe(true);
 });
 
 test("schema trims preserve the registry's constraints and union choices", () => {

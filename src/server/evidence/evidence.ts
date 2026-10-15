@@ -16,6 +16,7 @@ import { invalid } from "../kernel/errors.ts";
 import { decisionOf, type Witness } from "../kernel/witness.ts";
 import { type CaseRow, caseById, caseRef, findCase, versionOf } from "../suite/suite.ts";
 import { recordAttachments } from "./attachments.ts";
+import { buildWhat } from "./releases.ts";
 
 export type TestRow = {
 	id: number;
@@ -439,6 +440,24 @@ export const codeWhat = (repo: string | undefined | null, commit: string): strin
  */
 export function ensureTarget(ctx: Ctx, input: TargetIn, updateExistingChange = true): TargetRow {
 	const project = ctx.project.id;
+	if ("build" in input) {
+		const what = buildWhat(ctx.db, project, input.build, input.env);
+		const env = input.env ?? "";
+		const found = ctx.db.get(Q.target, { project, what, env });
+		if (found) return found;
+		const { lastId } = ctx.db.run(Q.insertTarget, {
+			project,
+			what,
+			env,
+			repo: null,
+			commit: null,
+			branch: null,
+			line: "release",
+			change: null,
+			seq: ctx.seq,
+		});
+		return mustTarget(ctx.db, lastId);
+	}
 	if ("session" in input) {
 		const what = `session:${input.session}`;
 		const found = ctx.db.get(Q.target, { project, what, env: "" });
@@ -712,6 +731,7 @@ export const recentChanges = (db: Db, project: number, limit: number): ChangeRow
 /** Where a failure on this target is answered: per change, on trunk, or within the run it was typed into. */
 export function scopeOf(target: TargetRow, run: number | null): string {
 	if (target.line === "session") return run !== null ? `run:${run}` : `session:${target.id}`;
+	if (target.line === "release") return target.what;
 	if (target.change !== null) return `change:${target.change}`;
 	// A line belongs to a repository: what was decided about one repository's trunk says nothing about another's.
 	return target.repo ? `line:${target.line}@${target.repo}` : `line:${target.line}`;

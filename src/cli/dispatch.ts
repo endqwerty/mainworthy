@@ -2,6 +2,7 @@ import { VERSION } from "../core/version.ts";
 import { type Args, GLOBAL_FLAGS, hasJsonInput, parseArgs } from "./args.ts";
 import { Client, clientOptions } from "./client.ts";
 import { actorCommand } from "./commands/actor.ts";
+import { announceCommand } from "./commands/announce.ts";
 import { checkCommand } from "./commands/check.ts";
 import { exportCommand } from "./commands/export.ts";
 import { fmtCommand } from "./commands/fmt.ts";
@@ -28,6 +29,7 @@ import { line } from "./output.ts";
 
 export const ADAPTER_COMMANDS: ReadonlyMap<string, AdapterCommand> = new Map(
 	[
+		announceCommand,
 		reportCommand,
 		loginCommand,
 		gateCommand,

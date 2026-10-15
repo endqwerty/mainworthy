@@ -232,6 +232,11 @@ An unlinked automated test still counts toward the commit gate.
 
 ## Read the result's basis
 
+To report execution of a deployed artifact, use `--build <label> --env <environment>`.
+This selects the announced artifact instead of a commit detected from CI or Git.
+The label must already be bound by `announce`. Check its planned release run with
+`gate --run`, as described in [release runs](./runs.md#plan-a-release-run).
+
 `exact` means the result names a case version, or a run pins that version.
 `assumed` means a link or case annotation identifies the case, and Mainworthy uses
 its current version without a version claim from the runner.

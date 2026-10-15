@@ -134,7 +134,9 @@ function RunListing() {
 						<p>
 							{"self" in selected.accepts
 								? "Counts only its own results; proves nothing about a build."
-								: `Accepts results for commit ${selected.accepts.commit}.`}
+								: "build" in selected.accepts
+									? `Accepts results for build ${selected.accepts.build}${selected.accepts.env ? ` in ${selected.accepts.env}` : ""}.`
+									: `Accepts results for commit ${selected.accepts.commit}.`}
 						</p>
 						<button className="out" type="button" onClick={() => open(selected.ref)}>
 							<KeyCap>Enter</KeyCap> Open cockpit

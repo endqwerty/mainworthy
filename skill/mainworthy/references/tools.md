@@ -109,17 +109,19 @@ Record test results in one batch. Give `target` (the commit tested) or `run` (a 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `target` | `object` | no | What was tested. Required unless `run` is given. |
-| `target[1].commit` | `string` | yes |  |
-| `target[1].head` | `string` | no | Current code host head. |
-| `target[1].repo` | `string` | no |  |
-| `target[1].branch` | `string` | no |  |
+| `target[1].build` | `string` | yes | For CLI and HTTP. MCP's report schema omits the build target; use a planned run. |
 | `target[1].env` | `string` | no |  |
-| `target[1].pr` | `integer` | no |  |
-| `target[1].base` | `string` | no | The commit this change is based on. |
-| `target[1].title` | `string` | no |  |
-| `target[1].url` | `string` | no |  |
-| `target[1].files` | `array<string>` | no | Paths the change touches, for impact. |
-| `target[2].session` | `string` | yes |  |
+| `target[2].commit` | `string` | yes |  |
+| `target[2].head` | `string` | no | Current code host head. |
+| `target[2].repo` | `string` | no |  |
+| `target[2].branch` | `string` | no |  |
+| `target[2].env` | `string` | no |  |
+| `target[2].pr` | `integer` | no |  |
+| `target[2].base` | `string` | no | The commit this change is based on. |
+| `target[2].title` | `string` | no |  |
+| `target[2].url` | `string` | no |  |
+| `target[2].files` | `array<string>` | no | Paths the change touches, for impact. |
+| `target[3].session` | `string` | yes |  |
 | `run` | `string` | no | A planned run these results are for, for example R-4. |
 | `job` | `string` | no |  |
 | `attempt` | `integer` | no |  |
@@ -231,7 +233,7 @@ Search cases by text, folder or tag; list tests (`unlinked: true`), runs or slot
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `in` | `"cases" \| "tests" \| "runs" \| "folders" \| "tags" \| "requirements" \| "slots" \| "changes"` | no |  Default: `"cases"`. |
+| `in` | `"cases" \| "tests" \| "runs" \| "folders" \| "tags" \| "requirements" \| "slots" \| "changes" \| "deployments"` | no |  Default: `"cases"`. |
 | `text` | `string` | no |  |
 | `folder` | `integer \| string` | no |  |
 | `deep` | `boolean` | no | With `folder`: include its subfolders. |

@@ -7,6 +7,7 @@ import type { CsvImportInput } from "./csv.ts";
 import type { Unlinked } from "./kinds.ts";
 import type {
 	AdminInput,
+	AnnounceInput,
 	ChangeInput,
 	CheckInput,
 	ClaimInput,
@@ -35,6 +36,7 @@ type Inputs = {
 	attachment: In<typeof AttachmentReadInput>;
 	tracker: In<typeof TrackerInput>;
 	"tracker-status": In<typeof TrackerStatusInput>;
+	announce: In<typeof AnnounceInput>;
 	propose: In<typeof ProposeInput>;
 	"import-csv": In<typeof CsvImportInput>;
 	report: In<typeof ReportInput>;

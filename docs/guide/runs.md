@@ -157,3 +157,51 @@ $ mainworthy plan --json '{"name":"Checkout smoke","select":{"tags":["checkout"]
 The reply names the run, its slot count, and how many slots evidence already filled.
 Use `mainworthy gate --run R-2` to read its verdict.
 See [the CLI guide](./cli.md) for selection, methods, assignments, and other plan inputs.
+
+## Plan a release run
+
+After a successful deployment, announce its build label, artifact digest and source
+commit from the deploy step. Use a pipeline token or a human admin's token:
+
+```sh
+$ mainworthy announce --deploy 1.4-rc3 --env staging --digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --repo acme/web --commit 1111111111111111111111111111111111111111 --cmd deploy-staging-rc3-1
+$ mainworthy plan --json '{"name":"Release smoke","select":{"tags":["smoke"]},"accepts":{"build":"1.4-rc3","env":"staging"}}'
+```
+
+The plan reply gives a run ref. Report against that artifact and check the release
+gate with the returned ref:
+
+```sh
+$ mainworthy report smoke.xml --build 1.4-rc3 --env staging
+$ mainworthy gate --run R-2
+```
+
+Use the artifact's actual SHA-256 digest and the full source commit. For an artifact
+built from several repositories, send `code` as an array of `{repo, commit}` through
+`announce --json`. Mainworthy records who attests the source and when. It trusts
+that caller's statement and does not validate an external provenance signature.
+
+Once bound, a build label cannot name a different digest. To announce another
+deployment of that build, supply `--deploy`, `--env` and a new `--cmd`. Retrying an
+unchanged request with the same `cmd` records nothing twice. Use
+`mainworthy find --in deployments` to read deployment history and the attestation.
+The newest announcements come first, with a cursor for the next page.
+
+When a report target or plan names an environment, announce that build label there
+first. Otherwise Mainworthy returns `invalid` and lists the environments it was
+deployed to. A deployment under another label does not qualify that label.
+
+A release run counts the exact artifact digest and its selected environment.
+Omit `env` from the plan to accept that artifact in any environment. Two labels
+bound to the same digest name the same artifact. Existing qualifying results fill
+slots at planning time, and reports arriving while the run is open fill them too.
+If you deploy the selected label to another environment later, results already
+recorded there for the same digest can fill a new run, including reports under
+another deployed label. Results need not postdate the deployment announcement.
+A refused report stores no results. After announcing its deployment, send it again.
+Results from an attested source commit do not count as artifact execution.
+
+Open the run in the web app to record manual results against its pinned cases.
+Recording by run alone uses that run's build and environment. MCP's report schema omits the build target; use a planned run with `run`. A gate with missing
+evidence stays pending, and failures and sign-off use the same rules as other
+planned runs. The web and iPhone planners do not yet offer a build picker.

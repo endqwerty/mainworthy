@@ -144,6 +144,90 @@ test("actor forget requires a named confirmation, removes access, and preserves 
 	);
 });
 
+test("announce binds an artifact through HTTP and release reports use its build instead of a detected commit", async () => {
+	await withInstance(async ({ cli, run, client }) => {
+		const sourceCommit = "1".repeat(40);
+		const digest = `sha256:${"a".repeat(64)}`;
+		const announced = await cli([
+			"announce",
+			"--deploy",
+			"rc3",
+			"--env",
+			"staging",
+			"--digest",
+			digest,
+			"--repo",
+			"acme/web",
+			"--commit",
+			sourceCommit,
+			"--cmd",
+			"deploy-http-1",
+		]);
+		expect([announced.code, announced.stderr]).toEqual([0, ""]);
+		expect(JSON.parse(announced.stdout)).toMatchObject({
+			build: "rc3",
+			digest,
+			env: "staging",
+			code: [{ repo: "acme/web", commit: sourceCommit }],
+		});
+		await client.call("propose", { edits: [{ op: "create", outline: "Checkout\n  Open cart > Empty" }] });
+		const undeployed = 'build rc3 has not been deployed to "prodution"; deployed environments: "staging"';
+		await expect(
+			client.call("report", {
+				target: { build: "rc3", env: "prodution" },
+				results: [{ test: { case: "C-1" }, outcome: "pass" }],
+			}),
+		).rejects.toThrow(undeployed);
+		await expect(
+			client.call("plan", {
+				name: "Typo release",
+				select: { cases: ["C-1"] },
+				accepts: { build: "rc3", env: "prodution" },
+			}),
+		).rejects.toThrow(undeployed);
+		const planned = await client.call("plan", {
+			name: "Release",
+			select: { cases: ["C-1"] },
+			accepts: { build: "rc3", env: "staging" },
+		});
+		const sent = await run(["report", RED_XML, "--build", "rc3", "--env", "staging"], {
+			env: {
+				GITHUB_ACTIONS: "true",
+				GITHUB_SHA: sourceCommit,
+				GITHUB_REPOSITORY: "acme/web",
+				GITHUB_REF: "refs/heads/main",
+			},
+		});
+		expect([sent.code, sent.stderr]).toEqual([0, ""]);
+		expect(sent.stdout).toContain('scratch @ build "rc3" (staging)');
+		expect(sent.stdout).toContain("use gate --run with a planned release run");
+		await client.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		const gate = await run(["gate", "--run", planned.run]);
+		expect([gate.code, gate.stderr]).toEqual([0, ""]);
+		expect(gate.stdout).toContain("passed: 1 result proven");
+		const events = await run(["find", "--in", "deployments"]);
+		expect(JSON.parse(events.stdout)).toMatchObject({
+			items: [
+				{ build: "rc3", digest, env: "staging", attestation: { by: expect.any(String), at: expect.any(Number) } },
+			],
+		});
+		const rebound = await run([
+			"announce",
+			"--deploy",
+			"rc3",
+			"--env",
+			"production",
+			"--digest",
+			`sha256:${"b".repeat(64)}`,
+		]);
+		expect([rebound.code, rebound.stderr]).toEqual([4, expect.stringContaining("conflict:")]);
+		const mixed = await run(["report", RED_XML, "--build", "rc3", "--commit", sourceCommit]);
+		expect([mixed.code, mixed.stderr]).toEqual([4, expect.stringContaining("--build cannot be combined")]);
+		const mixedHead = await run(["report", RED_XML, "--build", "rc3", "--head", sourceCommit]);
+		expect([mixedHead.code, mixedHead.stderr]).toEqual([4, expect.stringContaining("--build cannot be combined")]);
+	});
+});
+
 test("red report, blocked gate, generated decision, passed gate without another report", async () => {
 	await withInstance(async ({ cli, instance }) => {
 		const report = await cli([

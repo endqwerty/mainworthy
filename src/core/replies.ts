@@ -5,6 +5,8 @@ import { SameCodeEvidence } from "./flaky.ts";
 import { ActorKind, Policy, Unlinked } from "./kinds.ts";
 import { Automate, CaseBody, MethodKind, Step } from "./model.ts";
 import {
+	AnnounceReply,
+	ArtifactCode,
 	ChangeReply,
 	ClaimReply,
 	CommandFate,
@@ -203,6 +205,19 @@ const ChangeSummary = z.looseObject({
 	verdict: Verdict.nullable(),
 	reason: nullableText,
 });
+const Deployment = z.looseObject({
+	id: whole,
+	build: text,
+	digest: text,
+	env: text,
+	actor: whole,
+	at: number,
+	code: ArtifactCode,
+	attested_by: whole,
+	attested_at: number,
+	by: text,
+	attestation: z.object({ by: text, at: number }),
+});
 const Settled = z.looseObject({ q: text, kind: text, title: text, answer: data.nullable(), by: texts });
 
 const GetRow: z.ZodType<Record<string, unknown>> = z.union([
@@ -221,6 +236,7 @@ const FindRow: z.ZodType<Record<string, unknown>> = z.union([
 	Slot,
 	TestSummary,
 	ChangeSummary,
+	Deployment,
 	z.looseObject({ id: whole, parent: whole.nullable(), name: text, path: text, state: text, cases: whole }),
 	z.looseObject({ tag: text, n: whole }),
 	z.looseObject({ key: text, title: nullableText, cases: whole }),
@@ -424,6 +440,7 @@ export const REPLIES = {
 	attachment: AttachmentReply,
 	tracker: TrackerReceipt,
 	"tracker-status": TrackerReceipt,
+	announce: AnnounceReply,
 	propose: ProposeReply,
 	"import-csv": CsvImportReply,
 	report: ReportReceipt,
