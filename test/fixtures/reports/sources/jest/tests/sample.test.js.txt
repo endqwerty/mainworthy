@@ -1,0 +1,10 @@
+jest.retryTimes(1);
+let attempts = 0;
+describe('checkout', () => {
+  test('passes @C-1@v1', () => expect(1).toBe(1));
+  test('fails', () => expect(1).toBe(2));
+  test.skip('skipped', () => {});
+  test.todo('todo');
+  test.each([1, 2])('parameter %i', n => expect(n).toBeGreaterThan(0));
+  test('retry', () => expect(++attempts).toBe(2));
+});

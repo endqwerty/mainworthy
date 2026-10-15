@@ -1,0 +1,30 @@
+import pytest
+
+def test_pass():
+    assert 1 == 1
+
+class TestCart:
+    def test_numbers(self):
+        assert 1 == 2
+
+    def test_names(self):
+        assert "robin" == "sam"
+
+@pytest.mark.skip(reason="not ready")
+def test_skip():
+    pass
+
+@pytest.mark.xfail(reason="todo")
+def test_todo():
+    assert False
+
+@pytest.mark.parametrize("n", [1, 2])
+def test_parameter(n):
+    assert n > 0
+
+@pytest.fixture
+def broken():
+    raise RuntimeError("fixture boom")
+
+def test_fixture_error(broken):
+    pass

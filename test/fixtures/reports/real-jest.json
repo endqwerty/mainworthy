@@ -1,0 +1,168 @@
+{
+	"numFailedTestSuites": 1,
+	"numFailedTests": 1,
+	"numPassedTestSuites": 0,
+	"numPassedTests": 4,
+	"numPendingTestSuites": 0,
+	"numPendingTests": 1,
+	"numRuntimeErrorTestSuites": 0,
+	"numTodoTests": 1,
+	"numTotalTestSuites": 1,
+	"numTotalTests": 7,
+	"openHandles": [],
+	"snapshot": {
+		"added": 0,
+		"didUpdate": false,
+		"failure": false,
+		"filesAdded": 0,
+		"filesRemoved": 0,
+		"filesRemovedList": [],
+		"filesUnmatched": 0,
+		"filesUpdated": 0,
+		"matched": 0,
+		"total": 0,
+		"unchecked": 0,
+		"uncheckedKeysByFile": [],
+		"unmatched": 0,
+		"updated": 0
+	},
+	"startTime": 1792040850012,
+	"success": false,
+	"testResults": [
+		{
+			"assertionResults": [
+				{
+					"ancestorTitles": ["checkout"],
+					"duration": 2,
+					"failing": false,
+					"failureDetails": [],
+					"failureMessages": [],
+					"fullName": "checkout passes @C-1@v1",
+					"invocations": 1,
+					"location": null,
+					"numPassingAsserts": 1,
+					"retryMessages": [],
+					"retryReasons": [],
+					"status": "passed",
+					"title": "passes @C-1@v1",
+					"startAt": 1792040850387
+				},
+				{
+					"ancestorTitles": ["checkout"],
+					"duration": 0,
+					"failing": false,
+					"failureDetails": [
+						{
+							"matcherResult": {
+								"actual": 1,
+								"expected": 2,
+								"message": "\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m",
+								"name": "toBe",
+								"pass": false
+							}
+						}
+					],
+					"failureMessages": [
+						"Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m2\u001b[39m\nReceived: \u001b[31m1\u001b[39m\n    at Object.toBe (/home/robin/project/tests/sample.test.js:5:33)\n    at Promise.finally.completed (/runner/cache/node_modules/jest-circus/build/jestAdapterInit.js:1834:28)\n    at new Promise (<anonymous>)\n    at callAsyncCircusFn (/runner/cache/node_modules/jest-circus/build/jestAdapterInit.js:1774:10)\n    at _callCircusTest (/runner/cache/node_modules/jest-circus/build/jestAdapterInit.js:1167:40)\n    at _runTestInContext (/runner/cache/node_modules/jest-circus/build/jestAdapterInit.js:1103:3)\n    at rerunTest (/runner/cache/node_modules/jest-circus/build/jestAdapterInit.js:977:7)\n    at _runTestsForDescribeBlockOnce (/runner/cache/node_modules/jest-circus/build/jestAdapterInit.js:1033:5)\n    at _runTestsForDescribeBlock (/runner/cache/node_modules/jest-circus/build/jestAdapterInit.js:824:5)\n    at _runTestsForDescribeBlockOnce (/runner/cache/node_modules/jest-circus/build/jestAdapterInit.js:1003:11)\n    at _runTestsForDescribeBlock (/runner/cache/node_modules/jest-circus/build/jestAdapterInit.js:824:5)\n    at run (/runner/cache/node_modules/jest-circus/build/jestAdapterInit.js:789:3)\n    at runAndTransformResultsToJestFormat (/runner/cache/node_modules/jest-circus/build/jestAdapterInit.js:2300:21)\n    at jestAdapter (/runner/cache/node_modules/jest-circus/build/runner.js:111:19)\n    at runTestInternal (/runner/cache/node_modules/jest-runner/build/index.js:247:16)\n    at runTest (/runner/cache/node_modules/jest-runner/build/index.js:315:7)"
+					],
+					"fullName": "checkout fails",
+					"invocations": 2,
+					"location": null,
+					"numPassingAsserts": 0,
+					"retryMessages": [],
+					"retryReasons": [],
+					"status": "failed",
+					"title": "fails",
+					"startAt": 1792040850395
+				},
+				{
+					"ancestorTitles": ["checkout"],
+					"duration": null,
+					"failing": false,
+					"failureDetails": [],
+					"failureMessages": [],
+					"fullName": "checkout skipped",
+					"invocations": 1,
+					"location": null,
+					"numPassingAsserts": 0,
+					"retryMessages": [],
+					"retryReasons": [],
+					"status": "pending",
+					"title": "skipped",
+					"startAt": 1792040850393
+				},
+				{
+					"ancestorTitles": ["checkout"],
+					"duration": null,
+					"failing": false,
+					"failureDetails": [],
+					"failureMessages": [],
+					"fullName": "checkout todo",
+					"invocations": 1,
+					"location": null,
+					"numPassingAsserts": 0,
+					"retryMessages": [],
+					"retryReasons": [],
+					"status": "todo",
+					"title": "todo",
+					"startAt": 1792040850393
+				},
+				{
+					"ancestorTitles": ["checkout"],
+					"duration": 0,
+					"failing": false,
+					"failureDetails": [],
+					"failureMessages": [],
+					"fullName": "checkout parameter 1",
+					"invocations": 1,
+					"location": null,
+					"numPassingAsserts": 1,
+					"retryMessages": [],
+					"retryReasons": [],
+					"status": "passed",
+					"title": "parameter 1",
+					"startAt": 1792040850393
+				},
+				{
+					"ancestorTitles": ["checkout"],
+					"duration": 1,
+					"failing": false,
+					"failureDetails": [],
+					"failureMessages": [],
+					"fullName": "checkout parameter 2",
+					"invocations": 1,
+					"location": null,
+					"numPassingAsserts": 1,
+					"retryMessages": [],
+					"retryReasons": [],
+					"status": "passed",
+					"title": "parameter 2",
+					"startAt": 1792040850393
+				},
+				{
+					"ancestorTitles": ["checkout"],
+					"duration": 0,
+					"failing": false,
+					"failureDetails": [],
+					"failureMessages": [],
+					"fullName": "checkout retry",
+					"invocations": 2,
+					"location": null,
+					"numPassingAsserts": 1,
+					"retryMessages": [],
+					"retryReasons": [],
+					"status": "passed",
+					"title": "retry",
+					"startAt": 1792040850395
+				}
+			],
+			"endTime": 1792040850412,
+			"message": "\u001b[1m\u001b[31m  \u001b[1m● \u001b[22m\u001b[1mcheckout › fails\u001b[39m\u001b[22m\n\n    \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\n    Expected: \u001b[32m2\u001b[39m\n    Received: \u001b[31m1\u001b[39m\n\n\u001b[2m      3 | describe('checkout', () => {\u001b[22m\n\u001b[2m      4 |   test('passes @C-1@v1', () => expect(1).toBe(1));\u001b[22m\n\u001b[2m    > 5 |   test('fails', () => expect(1).toBe(2));\u001b[22m\n\u001b[2m        |                                 ^\u001b[22m\n\u001b[2m      6 |   test.skip('skipped', () => {});\u001b[22m\n\u001b[2m      7 |   test.todo('todo');\u001b[22m\n\u001b[2m      8 |   test.each([1, 2])('parameter %i', n => expect(n).toBeGreaterThan(0));\u001b[22m\n\n\u001b[2m      \u001b[2mat Object.toBe (\u001b[22m\u001b[2m\u001b[0m\u001b[36mtests/sample.test.js\u001b[39m\u001b[0m\u001b[2m:5:33)\u001b[22m\u001b[2m\u001b[22m\n",
+			"name": "/home/robin/project/tests/sample.test.js",
+			"startTime": 1792040850138,
+			"status": "failed",
+			"summary": ""
+		}
+	],
+	"wasInterrupted": false
+}

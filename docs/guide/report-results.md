@@ -46,7 +46,7 @@ selects TRX, and a `.json` extension makes invalid JSON an input error.
 | Playwright | `PLAYWRIGHT_JSON_OUTPUT_FILE=results.json playwright test --reporter=json` | `mainworthy report results.json` |
 | Jest | `jest --json --outputFile=results.json` | `mainworthy report results.json` |
 | Vitest | `vitest run --reporter=json --outputFile=results.json` | `mainworthy report results.json` |
-| pytest with `pytest-json-report` installed | `pytest --json-report --json-report-file=results.json` | `mainworthy report results.json --format pytest` |
+| pytest with `pytest-json-report` installed | `pytest --json-report --json-report-file=results.json` | `mainworthy report results.json` |
 | .NET | `dotnet test --logger "trx;LogFileName=results.trx"` | `mainworthy report TestResults/results.trx` |
 
 Pytest's built-in report export is JUnit XML (`pytest --junitxml=results.xml`).
@@ -61,6 +61,12 @@ in the test key, so Chromium and Firefox results stay separate. TRX uses the
 class in `TestDefinitions` when present and the test name; its assembly path
 is not a source file. A TRX test without a definition keeps its name as its key.
 The report's filename and TRX execution IDs do not enter test keys.
+
+Jest and Vitest source paths are relative to the report's `rootDir` when present.
+Otherwise the command uses the Git checkout's top level, or its working directory
+outside Git. Run the command in the source checkout that produced the report,
+including when the report file is stored elsewhere. This keeps keys stable
+between checkouts. The JSON reporters normally omit `rootDir`.
 
 Keep source paths and suite names stable. Switching exporters can change those
 values, so compare their keys before switching an existing pipeline. An
@@ -177,8 +183,9 @@ counts as a pass; an unexpected pass counts as a failure.
 Jest and Vitest JSON contain the final assertion outcome and duration, but their
 standard JSON reporters do not export a retry count. Mainworthy does not invent
 one. The pytest adapter sums setup, call, and teardown durations and keeps setup
-or teardown failures as errors. Expected pytest failures are skipped. TRX keeps
-each execution and its duration; ambiguous or unfinished outcomes count as errors.
+or teardown failures as errors. Its failure message uses `crash.message` when
+available and keeps the traceback in the details. Expected pytest failures are skipped.
+TRX keeps each execution and its duration; ambiguous or unfinished outcomes count as errors.
 
 ## Give a pipeline its own token
 

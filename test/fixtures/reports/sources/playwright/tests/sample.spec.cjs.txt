@@ -1,0 +1,9 @@
+const { test, expect } = require('@playwright/test');
+test.describe('checkout', () => {
+  test('passes @C-1@v1', () => expect(1).toBe(1));
+  test('fails', () => expect(1).toBe(2));
+  test.skip('skipped', () => {});
+  test.fixme('todo', () => {});
+  for (const n of [1, 2]) test(`parameter ${n}`, () => expect(n).toBeGreaterThan(0));
+  test('retry', ({}, info) => expect(info.retry).toBe(1));
+});

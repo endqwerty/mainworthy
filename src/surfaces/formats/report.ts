@@ -10,7 +10,10 @@ export const ReportFormat = z.enum(["auto", "junit", "playwright", "jest", "vite
 export type ReportFormat = z.infer<typeof ReportFormat>;
 
 /** Detects each file independently; JUnit still uses its existing parser and diagnostics. */
-export function parseReport(text: string, options: { file: string; format?: ReportFormat }): ParsedReport {
+export function parseReport(
+	text: string,
+	options: { file: string; format?: ReportFormat; rootDir?: string },
+): ParsedReport {
 	const format = options.format ?? "auto";
 	if (format === "junit") return parseJUnit(text, { file: options.file });
 	const trimmed = text.replace(/^\uFEFF/, "").trimStart();
@@ -47,7 +50,7 @@ export function parseReport(text: string, options: { file: string; format?: Repo
 					break;
 				case "jest":
 				case "vitest":
-					parsed = parseJest(value);
+					parsed = parseJest(value, options.rootDir ?? process.cwd());
 					break;
 				case "pytest":
 					parsed = parsePytest(value);
@@ -63,7 +66,7 @@ export function parseReport(text: string, options: { file: string; format?: Repo
 			error instanceof z.ZodError
 				? error.issues
 						.slice(0, 5)
-						.map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+						.map((issue) => `${issue.path.join(".") || "report"}: ${issue.message}`)
 						.join("; ")
 				: error instanceof Error
 					? error.message

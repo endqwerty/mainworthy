@@ -42,6 +42,13 @@ export function parsePytest(value: unknown): ParsedReport {
 		const stages = [test.setup, test.call, test.teardown].filter((stage) => stage !== undefined);
 		if (!stages.length) throw new Error(`pytest test ${test.nodeid} has no completed stage`);
 		const broken = stages.filter((stage) => stage.outcome === "failed");
+		const failures = broken.map((stage) => {
+			const detail = typeof stage.longrepr === "string" ? stage.longrepr : (stage.longrepr?.join(":") ?? "");
+			return {
+				message: stage.crash?.message.trim() || detail.trim().split(/\r?\n/).at(-1),
+				detail: detail || stage.crash?.message,
+			};
+		});
 		const error = test.outcome === "error" || test.setup?.outcome === "failed" || test.teardown?.outcome === "failed";
 		const outcome = error
 			? "error"
@@ -59,14 +66,12 @@ export function parsePytest(value: unknown): ParsedReport {
 				suites: names,
 				outcome,
 				durationMs: stages.reduce((sum, stage) => sum + stage.duration, 0) * 1000,
-				detail: broken
-					.map((stage) =>
-						stage.longrepr === undefined
-							? stage.crash?.message
-							: typeof stage.longrepr === "string"
-								? stage.longrepr
-								: stage.longrepr.join(":"),
-					)
+				message: failures
+					.map((failure) => failure.message)
+					.filter(Boolean)
+					.join("\n"),
+				detail: failures
+					.map((failure) => failure.detail)
 					.filter(Boolean)
 					.join("\n"),
 			}),

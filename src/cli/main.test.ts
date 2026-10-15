@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
@@ -1375,6 +1375,50 @@ test("the help says to prefer the variable to --token, and offers a file", async
 			expect(help.stdout).toContain("--token-file");
 			expect(help.stdout).toContain("MAINWORTHY_TOKEN");
 			expect(help.stdout).toMatch(/process list/);
+		}
+	});
+});
+
+test("real report outputs use git top level or cwd for stable Jest and Vitest keys", async () => {
+	await withInstance(async ({ cli, run, instance, directory }) => {
+		const expected = ["passes @C-1@v1", "fails", "skipped", "todo", "parameter 1", "parameter 2", "retry"].map(
+			(name) => ({ key: `tests/sample.test.js::checkout::${name}`, file: "tests/sample.test.js" }),
+		);
+		for (const checkout of ["git", "plain"]) {
+			const folder = join(directory, checkout);
+			await mkdir(join(folder, "nested"), { recursive: true });
+			const root = await realpath(folder);
+			const nested = join(root, "nested");
+			if (checkout === "git") expect(Bun.spawnSync(["git", "init", "--quiet", root]).exitCode).toBe(0);
+			for (const format of ["jest", "vitest"]) {
+				const fixture = new URL(`../../test/fixtures/reports/real-${format}.json`, import.meta.url);
+				const file = join(directory, `${checkout}-${format}.json`);
+				await writeFile(file, (await Bun.file(fixture).text()).replaceAll("/home/robin/project", root));
+				const command = checkout === "git" && format === "jest" ? cli : run;
+				const result = await command(
+					["report", file, "--session", "real-tools", "--job", `${checkout}-${format}`, "--json"],
+					{
+						cwd: checkout === "git" ? nested : root,
+					},
+				);
+				expect(result.stderr).toBe("");
+				expect(result.code).toBe(0);
+				expect(JSON.parse(result.stdout).counts).toEqual({ total: 7, pass: 4, fail: 1, skip: 2, error: 0, blocked: 0 });
+				expect(
+					instance.app.db.raw.query<{ key: string; file: string }, []>("SELECT key, file FROM tests ORDER BY id").all(),
+				).toEqual(expected);
+			}
+		}
+		for (const [format, counts] of [
+			["pytest", { total: 8, pass: 3, fail: 2, skip: 2, error: 1, blocked: 0 }],
+			["playwright", { total: 7, pass: 4, fail: 1, skip: 2, error: 0, blocked: 0 }],
+		] as const) {
+			const file = new URL(`../../test/fixtures/reports/real-${format}.json`, import.meta.url).pathname;
+			const result = await run(["report", file, "--session", "real-tools", "--job", format, "--json"]);
+			expect(result.stderr).toBe("");
+			expect(result.code).toBe(0);
+			expect(JSON.parse(result.stdout).counts).toEqual(counts);
+			if (format === "pytest") expect(JSON.parse(result.stdout).questions).toHaveLength(3);
 		}
 	});
 });

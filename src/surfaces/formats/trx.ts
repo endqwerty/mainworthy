@@ -44,6 +44,7 @@ export function parseTRX(xml: string): ParsedReport {
 		throw new Error("TRX document types are not supported");
 	});
 	parser.on("opentag", (tag) => {
+		if (stack.length >= 32) throw new Error("TRX nesting exceeds 32 elements");
 		if (!root) {
 			if (
 				tag.local !== "TestRun" ||

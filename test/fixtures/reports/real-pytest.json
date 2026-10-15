@@ -1,0 +1,142 @@
+{
+	"created": 1792040854.644007,
+	"duration": 0.052587032318115234,
+	"exitcode": 1,
+	"root": "/home/robin/project",
+	"environment": {},
+	"summary": { "passed": 3, "failed": 2, "skipped": 1, "xfailed": 1, "error": 1, "total": 8, "collected": 8 },
+	"collectors": [
+		{ "nodeid": "", "outcome": "passed", "result": [{ "nodeid": ".", "type": "Dir" }] },
+		{
+			"nodeid": "tests/test_sample.py::TestCart",
+			"outcome": "passed",
+			"result": [
+				{ "nodeid": "tests/test_sample.py::TestCart::test_numbers", "type": "Function", "lineno": 6 },
+				{ "nodeid": "tests/test_sample.py::TestCart::test_names", "type": "Function", "lineno": 9 }
+			]
+		},
+		{
+			"nodeid": "tests/test_sample.py",
+			"outcome": "passed",
+			"result": [
+				{ "nodeid": "tests/test_sample.py::test_pass", "type": "Function", "lineno": 2 },
+				{ "nodeid": "tests/test_sample.py::TestCart", "type": "Class" },
+				{ "nodeid": "tests/test_sample.py::test_skip", "type": "Function", "lineno": 12 },
+				{ "nodeid": "tests/test_sample.py::test_todo", "type": "Function", "lineno": 16 },
+				{ "nodeid": "tests/test_sample.py::test_parameter[1]", "type": "Function", "lineno": 20 },
+				{ "nodeid": "tests/test_sample.py::test_parameter[2]", "type": "Function", "lineno": 20 },
+				{ "nodeid": "tests/test_sample.py::test_fixture_error", "type": "Function", "lineno": 28 }
+			]
+		},
+		{ "nodeid": "tests", "outcome": "passed", "result": [{ "nodeid": "tests/test_sample.py", "type": "Module" }] },
+		{ "nodeid": ".", "outcome": "passed", "result": [{ "nodeid": "tests", "type": "Dir" }] }
+	],
+	"tests": [
+		{
+			"nodeid": "tests/test_sample.py::test_pass",
+			"lineno": 2,
+			"outcome": "passed",
+			"keywords": ["test_pass", "test_sample.py", "tests", "pytest", ""],
+			"setup": { "duration": 0.00012337499999998114, "outcome": "passed" },
+			"call": { "duration": 7.308299999997381e-5, "outcome": "passed" },
+			"teardown": { "duration": 8.025000000000393e-5, "outcome": "passed" }
+		},
+		{
+			"nodeid": "tests/test_sample.py::TestCart::test_numbers",
+			"lineno": 6,
+			"outcome": "failed",
+			"keywords": ["test_numbers", "TestCart", "test_sample.py", "tests", "pytest", ""],
+			"setup": { "duration": 0.00010354099999998478, "outcome": "passed" },
+			"call": {
+				"duration": 0.00032087499999999824,
+				"outcome": "failed",
+				"crash": { "path": "/home/robin/project/tests/test_sample.py", "lineno": 8, "message": "assert 1 == 2" },
+				"traceback": [{ "path": "tests/test_sample.py", "lineno": 8, "message": "AssertionError" }],
+				"longrepr": "self = <test_sample.TestCart object at 0x10aab33d0>\n\n    def test_numbers(self):\n>       assert 1 == 2\nE       assert 1 == 2\n\ntests/test_sample.py:8: AssertionError"
+			},
+			"teardown": { "duration": 0.00029000000000001247, "outcome": "passed" }
+		},
+		{
+			"nodeid": "tests/test_sample.py::TestCart::test_names",
+			"lineno": 9,
+			"outcome": "failed",
+			"keywords": ["test_names", "TestCart", "test_sample.py", "tests", "pytest", ""],
+			"setup": { "duration": 0.00019695799999996932, "outcome": "passed" },
+			"call": {
+				"duration": 0.0004375000000000351,
+				"outcome": "failed",
+				"crash": {
+					"path": "/home/robin/project/tests/test_sample.py",
+					"lineno": 11,
+					"message": "AssertionError: assert 'robin' == 'sam'\n  \n  - sam\n  + robin"
+				},
+				"traceback": [{ "path": "tests/test_sample.py", "lineno": 11, "message": "AssertionError" }],
+				"longrepr": "self = <test_sample.TestCart object at 0x10aab3280>\n\n    def test_names(self):\n>       assert \"robin\" == \"sam\"\nE       AssertionError: assert 'robin' == 'sam'\nE         \nE         - sam\nE         + robin\n\ntests/test_sample.py:11: AssertionError"
+			},
+			"teardown": { "duration": 0.00014645899999998768, "outcome": "passed" }
+		},
+		{
+			"nodeid": "tests/test_sample.py::test_skip",
+			"lineno": 12,
+			"outcome": "skipped",
+			"keywords": ["test_skip", "skip", "pytestmark", "test_sample.py", "tests", "pytest", ""],
+			"setup": {
+				"duration": 7.291700000000567e-5,
+				"outcome": "skipped",
+				"longrepr": "('/home/robin/project/tests/test_sample.py', 13, 'Skipped: not ready')"
+			},
+			"teardown": { "duration": 6.279200000003371e-5, "outcome": "passed" }
+		},
+		{
+			"nodeid": "tests/test_sample.py::test_todo",
+			"lineno": 16,
+			"outcome": "xfailed",
+			"keywords": ["test_todo", "xfail", "pytestmark", "test_sample.py", "tests", "pytest", ""],
+			"setup": { "duration": 7.262499999999283e-5, "outcome": "passed" },
+			"call": {
+				"duration": 8.787500000001502e-5,
+				"outcome": "skipped",
+				"crash": { "path": "/home/robin/project/tests/test_sample.py", "lineno": 19, "message": "assert False" },
+				"traceback": [{ "path": "tests/test_sample.py", "lineno": 19, "message": "AssertionError" }],
+				"longrepr": "@pytest.mark.xfail(reason=\"todo\")\n    def test_todo():\n>       assert False\nE       assert False\n\ntests/test_sample.py:19: AssertionError"
+			},
+			"teardown": { "duration": 0.000100333000000008, "outcome": "passed" }
+		},
+		{
+			"nodeid": "tests/test_sample.py::test_parameter[1]",
+			"lineno": 20,
+			"outcome": "passed",
+			"keywords": ["test_parameter[1]", "parametrize", "pytestmark", "1", "test_sample.py", "tests", "pytest", ""],
+			"setup": { "duration": 0.00010637499999999189, "outcome": "passed" },
+			"call": { "duration": 5.912499999999321e-5, "outcome": "passed" },
+			"teardown": { "duration": 5.479200000002571e-5, "outcome": "passed" }
+		},
+		{
+			"nodeid": "tests/test_sample.py::test_parameter[2]",
+			"lineno": 20,
+			"outcome": "passed",
+			"keywords": ["test_parameter[2]", "parametrize", "pytestmark", "2", "test_sample.py", "tests", "pytest", ""],
+			"setup": { "duration": 6.908300000002532e-5, "outcome": "passed" },
+			"call": { "duration": 5.300000000002525e-5, "outcome": "passed" },
+			"teardown": { "duration": 5.104200000000114e-5, "outcome": "passed" }
+		},
+		{
+			"nodeid": "tests/test_sample.py::test_fixture_error",
+			"lineno": 28,
+			"outcome": "error",
+			"keywords": ["test_fixture_error", "test_sample.py", "tests", "pytest", ""],
+			"setup": {
+				"duration": 7.804200000000039e-5,
+				"outcome": "failed",
+				"crash": {
+					"path": "/home/robin/project/tests/test_sample.py",
+					"lineno": 27,
+					"message": "RuntimeError: fixture boom"
+				},
+				"traceback": [{ "path": "tests/test_sample.py", "lineno": 27, "message": "RuntimeError" }],
+				"longrepr": "@pytest.fixture\n    def broken():\n>       raise RuntimeError(\"fixture boom\")\nE       RuntimeError: fixture boom\n\ntests/test_sample.py:27: RuntimeError"
+			},
+			"teardown": { "duration": 0.00016379199999999594, "outcome": "passed" }
+		}
+	]
+}
