@@ -324,7 +324,8 @@ test.skipIf(!browserAvailable)(
 			const cdp = await h.context.newCDPSession(page);
 			await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
 			await page.setViewportSize({ width: 390, height: 844 });
-			await visit("/p/scratch/queue", "#top");
+			// The list is scanned once its rows are in: before that it is an empty listbox, which axe reports.
+			await visit("/p/scratch/queue", ".pane-scroll [role=option]");
 			expect(await page.locator("html").getAttribute("data-layout")).toBe("phone");
 			await scan("phone-queue");
 			if (await page.getByRole("button", { name: "Back to the list", exact: true }).isVisible())
