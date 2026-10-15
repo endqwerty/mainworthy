@@ -405,6 +405,7 @@ describe("the phone layout", () => {
 			"src/web/app.tsx: All keys",
 			"src/web/app.tsx: Close palette / keys",
 			"src/web/app.tsx: Docs for this screen",
+			"src/web/app.tsx: Go home",
 			// One binding for each of the five screens: the label is a template, and "…" stands for the screen.
 			"src/web/app.tsx: Go to …",
 			"src/web/app.tsx: Jump to or run",

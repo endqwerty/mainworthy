@@ -48,7 +48,7 @@ import {
 	refusedStatus,
 	sameBody,
 } from "../lib/merges.ts";
-import { navigate, readRoute, refUrl, routeEntry, routeUrl } from "../lib/router.ts";
+import { navigate, readRoute, refUrl, routeEntry, routeUrl, WENT } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, ProofStrip } from "../ui/index.tsx";
 import { useSuiteBindings } from "./bindings.ts";
@@ -107,8 +107,14 @@ export function SuiteScreen() {
 		.getAll("tag")
 		.filter((tag) => TAG.test(tag))
 		.join(",");
-	const [text, setText] = useState("");
-	const [search, setSearch] = useState("");
+	const search = new URLSearchParams(location.search).get("text") ?? "";
+	const [text, setText] = useState(search);
+	useEffect(() => setText(search), [search]);
+	useEffect(() => {
+		const arrived = () => setText(new URLSearchParams(location.search).get("text") ?? "");
+		window.addEventListener(WENT, arrived);
+		return () => window.removeEventListener(WENT, arrived);
+	}, []);
 	const [draftStored, setDraftStored] = useState(true);
 	const [draft, setDraftState] = useState<Draft | null>(() => {
 		const saved =
@@ -465,9 +471,15 @@ export function SuiteScreen() {
 		overscan: 12,
 	});
 	useEffect(() => {
-		const timer = setTimeout(() => setSearch(text), 80);
+		if (text === search) return;
+		const timer = setTimeout(() => {
+			const params = new URLSearchParams(location.search);
+			if (text) params.set("text", text);
+			else params.delete("text");
+			navigate(`${location.pathname}${params.size ? `?${params}` : ""}`, { replace: true, seal: false });
+		}, 80);
 		return () => clearTimeout(timer);
-	}, [text]);
+	}, [text, search]);
 	useEffect(() => {
 		if (list.hasNextPage && !list.isFetching) void list.fetchNextPage();
 	}, [list.hasNextPage, list.isFetching, list.fetchNextPage]);

@@ -420,3 +420,237 @@ import { PRESETS } from "../../src/core/presets.ts";
 	},
 	20000,
 );
+
+test.skipIf(!browserAvailable)(
+	"a person's home opens on entry and by key, with explicit links preserved",
+	async () => {
+		const server = await startServer({ cases: 2 });
+		await server.api("propose", {
+			edits: [
+				{ op: "folder", name: "HomeFolder" },
+				{ op: "create", folder: "HomeFolder", tags: ["home-tag"], outline: "home-query match" },
+				{ op: "create", folder: "HomeFolder", outline: "home-query without the tag" },
+				{ op: "create", tags: ["home-tag"], outline: "home-query outside the folder" },
+			],
+		});
+		const browser = await openPage(server, { path: "/p/scratch/settings" });
+		try {
+			const { page } = browser;
+			page.setDefaultTimeout(4000);
+			await page.getByRole("option", { name: "Your home", exact: true }).click();
+			await page.getByLabel("Home screen", { exact: true }).selectOption("queue");
+			await page.getByRole("button", { name: "Save home", exact: true }).click();
+			await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
+			for (const path of ["/", "/p/scratch"]) {
+				await page.goto(`${server.url}${path}`);
+				await page.waitForURL("**/p/scratch/queue");
+			}
+			await page.goto(`${server.url}/p/scratch/suite/c/1`);
+			await page.locator(".ctitle").waitFor();
+			await page.keyboard.press("e");
+			await page.getByRole("textbox", { name: "Case title", exact: true }).fill("Home navigation seals this draft");
+			await page.keyboard.press("Control+k");
+			await page.getByRole("textbox", { name: "Jump to or run" }).fill("Go home");
+			await page.keyboard.press("Enter");
+			await page.waitForURL("**/p/scratch/queue");
+			await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.title === "Home navigation seals this draft",
+			);
+			await page.keyboard.type("gs");
+			await page.waitForURL("**/p/scratch/suite");
+			await page.keyboard.type("gh");
+			await page.waitForURL("**/p/scratch/queue");
+			await page.keyboard.type("g,");
+			await page.getByRole("option", { name: "Your home", exact: true }).click();
+			const planned = await server.api("plan", { name: "Home run", select: { cases: ["C-1"] } });
+			await page.getByLabel("Home screen", { exact: true }).selectOption("run");
+			await page.getByLabel("Home run", { exact: true }).fill(planned.run);
+			await page.keyboard.press("Tab");
+			expect(await page.evaluate(() => document.activeElement?.textContent?.trim())).toBe("Save home");
+			await page.keyboard.press("Enter");
+			await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
+			await page.goto(`${server.url}/`);
+			await page.waitForURL(`**/p/scratch/runs/${planned.run.slice(2)}`);
+			await page.getByText("Home run", { exact: true }).first().waitFor();
+			await page.goto(`${server.url}/p/scratch/settings`);
+			await page.getByRole("option", { name: "Your home", exact: true }).click();
+			await page.getByLabel("Home screen", { exact: true }).selectOption("search");
+			await page.getByLabel("Home search text", { exact: true }).fill("home-query");
+			await page.getByLabel("Home search folder", { exact: true }).fill("HomeFolder");
+			await page.getByLabel("Home search tag", { exact: true }).fill("home-tag");
+			await page.getByRole("button", { name: "Save home", exact: true }).click();
+			await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
+			await page.getByLabel("Home search text", { exact: true }).fill("unsaved change");
+			expect(await page.getByRole("status").filter({ hasText: "Home saved" }).count()).toBe(0);
+			await page.getByLabel("Home search text", { exact: true }).fill("home-query");
+			await page.getByRole("button", { name: "Save home", exact: true }).click();
+			await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
+			await page.goto(`${server.url}/`);
+			await page.getByRole("textbox", { name: "Filter cases", exact: true }).waitFor();
+			expect(await page.getByRole("textbox", { name: "Filter cases", exact: true }).inputValue()).toBe("home-query");
+			await eventually(
+				() => page.locator("#lcount").innerText(),
+				(text) => text === "1 cases",
+			);
+			await page.getByRole("textbox", { name: "Filter cases", exact: true }).fill("changed-filter");
+			await page.waitForURL("**/suite?text=changed-filter&folder=HomeFolder&tag=home-tag");
+			await page.keyboard.press("Tab");
+			await page.keyboard.type("gh");
+			await page.waitForURL("**/suite?text=home-query&folder=HomeFolder&tag=home-tag");
+			expect(await page.getByRole("textbox", { name: "Filter cases", exact: true }).inputValue()).toBe("home-query");
+			await page.keyboard.type("gq");
+			await page.keyboard.press("Control+k");
+			await page.getByRole("textbox", { name: "Jump to or run" }).fill("Go home");
+			await page.keyboard.press("Enter");
+			await page.waitForURL("**/suite?text=home-query&folder=HomeFolder&tag=home-tag");
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+test.skipIf(!browserAvailable)(
+	"a phone edits its home through Settings and opens a run home on its detail",
+	async () => {
+		const server = await startServer({ cases: 1 });
+		const planned = await server.api("plan", { name: "Phone home run", select: { cases: ["C-1"] } });
+		const phone = await openPage(server, { device: "phone", path: "/p/scratch/settings" });
+		try {
+			const { page } = phone;
+			page.setDefaultTimeout(4000);
+			await page.getByRole("option", { name: "Your home", exact: true }).tap();
+			await page.getByLabel("Home screen", { exact: true }).selectOption("run");
+			await page.getByLabel("Home run", { exact: true }).fill(planned.run);
+			await page.getByRole("button", { name: "Save home", exact: true }).tap();
+			await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
+			expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+			await page.goto(`${server.url}/`);
+			await page.waitForURL(`**/p/scratch/runs/${planned.run.slice(2)}`);
+			await eventually(
+				() => page.locator("#app").getAttribute("data-pane"),
+				(pane) => pane === "detail",
+			);
+			await page.getByRole("button", { name: "Back to the list", exact: true }).tap();
+			await page.getByRole("button", { name: "Actions", exact: true }).tap();
+			await page.getByRole("option").filter({ hasText: "Go home" }).tap();
+			expect(await page.locator("#app").getAttribute("data-pane")).toBe("detail");
+			expect(phone.errors).toEqual([]);
+		} finally {
+			await phone.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+test.skipIf(!browserAvailable)(
+	"home is personal to a project and browser, and a refused save keeps the previous home",
+	async () => {
+		const server = await startServer({ mode: "server" });
+		await server.api("admin", { do: "project.create", key: "other", preset: "loose" });
+		const made = z
+			.object({ token: z.string() })
+			.parse(await server.api("admin", { do: "token.create", actor: "home-reader", kind: "human", can: ["read"] }));
+		const browser = await openPage(server, { path: "/p/scratch/settings" });
+		try {
+			const { page } = browser;
+			page.setDefaultTimeout(4000);
+			await page.getByRole("option", { name: "Your home", exact: true }).click();
+			await page.getByLabel("Home screen", { exact: true }).selectOption("queue");
+			await page.getByRole("button", { name: "Save home", exact: true }).click();
+			await page.getByRole("status").filter({ hasText: "Home saved" }).waitFor();
+			const homeKey = await page.evaluate(() => Object.keys(localStorage).find((key) => key.includes(":home:")));
+			if (!homeKey) throw new Error("Missing home preference");
+			await page.getByLabel("Home screen", { exact: true }).selectOption("search");
+			await page.getByLabel("Home search tag", { exact: true }).fill("INVALID TAG");
+			await page.getByRole("button", { name: "Save home", exact: true }).click();
+			await page.getByRole("status").filter({ hasText: "a search with a valid tag" }).waitFor();
+			await page.keyboard.type("gh");
+			await page.waitForURL("**/p/scratch/queue");
+			await page.goto(`${server.url}/p/other`);
+			await page.waitForURL("**/p/other/suite");
+			await browser.context.request.post(`${server.url}/api/login`, { data: { token: made.token } });
+			await page.goto(`${server.url}/`);
+			await page.waitForURL("**/p/scratch/suite");
+			await browser.context.request.post(`${server.url}/api/login`, { data: { token: server.token } });
+			await page.goto(`${server.url}/p/scratch`);
+			await page.waitForURL("**/p/scratch/queue");
+			const fresh = await openPage(server, { path: "/p/scratch" });
+			try {
+				await fresh.page.waitForURL("**/p/scratch/suite");
+			} finally {
+				await fresh.close();
+			}
+			for (const invalid of [
+				"{",
+				"null",
+				'{"kind":"run","ref":"https://example.com"}',
+				'{"kind":"search","text":[],"folder":"","tag":""}',
+			]) {
+				await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: homeKey, value: invalid });
+				await page.goto(`${server.url}/p/scratch`);
+				await page.waitForURL("**/p/scratch/suite");
+			}
+			await page.evaluate((key) => {
+				localStorage.setItem(key, JSON.stringify({ kind: "queue" }));
+				const setItem = Storage.prototype.setItem;
+				Storage.prototype.setItem = function (name, value) {
+					if (name === key) throw new DOMException("The store refused", "QuotaExceededError");
+					setItem.call(this, name, value);
+				};
+			}, homeKey);
+			await page.keyboard.type("g,");
+			await page.getByRole("option", { name: "Your home", exact: true }).click();
+			await page.getByLabel("Home screen", { exact: true }).selectOption("suite");
+			await page.getByRole("button", { name: "Save home", exact: true }).click();
+			await page.getByRole("status").filter({ hasText: "could not save your home" }).waitFor();
+			await page.keyboard.type("gh");
+			await page.waitForURL("**/p/scratch/queue");
+			await page.evaluate((key) => {
+				const getItem = Storage.prototype.getItem;
+				Storage.prototype.getItem = function (name) {
+					if (name === key) throw new DOMException("The store refused", "SecurityError");
+					return getItem.call(this, name);
+				};
+			}, homeKey);
+			await page.keyboard.type("gh");
+			await page.waitForURL("**/p/scratch/suite");
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+test.skipIf(!browserAvailable)(
+	"entering at a Suite home restores the person's unsealed capture",
+	async () => {
+		const server = await startServer();
+		const browser = await openPage(server);
+		try {
+			const { page } = browser;
+			page.setDefaultTimeout(4000);
+			await page.keyboard.press("c");
+			await page.keyboard.type("Home capture");
+			await page.keyboard.press("Enter");
+			await page.keyboard.type("An unfinished step");
+			await page.evaluate(() => history.replaceState(null, "", "/"));
+			await page.reload();
+			await page.waitForURL("**/p/scratch/suite");
+			const step = page.getByRole("textbox", { name: "Step 1", exact: true });
+			await step.waitFor();
+			expect(await step.inputValue()).toBe("An unfinished step");
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+			await server.stop();
+		}
+	},
+	30000,
+);

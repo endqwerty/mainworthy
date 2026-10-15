@@ -46,6 +46,8 @@ Clearing takes effect in other open tabs and survives a reload. It leaves the th
 
 The pending choice stays only in the tab making the attempt and does not survive a reload. It cannot clear data when a later session expires or another tab signs out. A session that expires keeps your drafts, as does signing in again as the same person. If the browser cannot clear its storage after a confirmed sign-out, the app warns you to clear the site's data in your browser settings.
 
+Your personal home is stored separately for each signed-in name and project. It does not sync to other browsers. Signing out keeps this preference. Clearing the site's browser data removes it.
+
 ### Logs
 
 The server writes no log of requests. It logs when it starts and when something fails, and a failed sign-in is logged without the name, the address or the password.

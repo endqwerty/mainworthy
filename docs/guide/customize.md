@@ -12,7 +12,7 @@ Settings sit at five levels. The level tells you who is affected when you change
 - A project is its own set of cases, runs, queue and policy. One instance can hold several. A person, an agent or a pipeline can have different rights in each.
 - A case says which producers may test it: people, the pipeline, agents, or any mix.
 - A run says what it needs before it is complete. You choose that when you plan the run.
-- Your browser keeps your theme. Nobody else sees it.
+- Your browser keeps your theme, sidebar choice, and personal home. Each person has a separate home for each project.
 
 Two words recur below. An instance admin holds the `admin` capability on every project. A project admin holds it on one project. The owner is the person the instance names as its owner, your user name by default, and the owner always holds every capability.
 
@@ -32,6 +32,7 @@ Two words recur below. An instance admin holds the `admin` capability on every p
 | What a run asks for | Runs, <kbd>n</kbd>, or `mainworthy plan` for methods, people and required jobs | Anyone with `plan` | [Planned runs](./runs.md) |
 | Folders and tags | Suite | Anyone with `produce`. The policy decides whether the edit applies at once | [Write cases](./write-cases.md#organize-the-suite) |
 | Which methods a case admits | The case's "Can be exercised by" section, or `methods` in its Markdown | Anyone with `produce`, under the same rule | [Let an agent in](./agents.md#what-agent-work-is-worth) |
+| Your home | Settings, Your home | You, for yourself in this browser and project | [This page](#choose-your-home) |
 | The theme | The "Theme" button at the bottom of the sidebar | You, in your own browser | This page |
 | The sidebar, open or collapsed | The button beside "Mainworthy" at the top of the sidebar, or <kbd>[</kbd> | You, in your own browser | [This page](#the-sidebar) |
 | Where the server listens, its mode, data directory and reader threads | Environment variables | Whoever starts the server | [Configuration](./configuration.md) |
@@ -101,6 +102,18 @@ Press the button or <kbd>[</kbd> again to open the sidebar. The choice stays in 
 In the Suite, <kbd>z</kbd> sets the list to 340 px and gives the case the rest, which widens the case further in a window wider than about 900 px. The two work together. In a narrower window the list is under 340 px already, so <kbd>z</kbd> takes width from the case. In a window narrower than 760 px <kbd>z</kbd> changes nothing, because the case is under the list.
 
 A phone has no strip. There, **Menu** opens the sidebar over the pane ([Keyboard](./keyboard.md)).
+
+## Choose your home
+
+Open Settings with <kbd>g</kbd> <kbd>,</kbd>, then choose **Your home**. Pick Suite, Queue, a run, or a saved search, and press **Save home**. Suite is the default.
+
+For a run, enter its ref, such as `R-12`. For a saved search, enter the search text, folder path, tag, or any combination. The search applies all the filters you enter and reads the current cases each time. Leave a field empty to leave that filter out. This saves one home search per project, not a named search library.
+
+Press <kbd>g</kbd> <kbd>h</kbd>, or choose **Go home** in the palette, to open your home. On a phone, **Actions** offers Go home while either pane is shown. Opening the instance at `/` uses your first accessible project's home. Opening `/p/<project>` uses that project's home. A link to a screen, case, question, or run keeps its own destination.
+
+The preference is stored in this site's localStorage, separately for your signed-in name and each project. It stays after sign-out and follows you when you sign back into the same browser. It does not follow you across browsers or into the iPhone app. Clearing the site's browser data removes it. Nobody else's home or project data changes when you save yours.
+
+A browser that cannot read the preference opens Suite. If saving fails, the form says so and keeps your previous home. If a run is unavailable or a search finds nothing, open Settings and choose another home.
 
 ## What is fixed today
 
