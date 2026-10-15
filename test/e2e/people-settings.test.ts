@@ -409,6 +409,7 @@ test.skipIf(!browserAvailable)(
 			expect(await invitation("tess", "recover")).toBeUndefined();
 			await page.getByRole("button", { name: "Make the recovery link" }).click();
 			await link.waitFor();
+			expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Copy link");
 			await page.getByText("every password, passkey and token they had stops working", { exact: false }).waitFor();
 			expect(await invitation("tess", "recover")).toMatchObject({ state: "open" });
 			expect(await shows((await link.inputValue()).split("#")[1] ?? "")).toBe(200);
@@ -565,4 +566,61 @@ test.skipIf(!browserAvailable)(
 		}
 	},
 	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"a recovery confirmation takes focus and Cancel or Escape returns it to the same person's button",
+	async () => {
+		await person("recovery-focus");
+		const browser = await openPage(server, { path: "/p/scratch/settings" });
+		try {
+			const { page } = browser;
+			await section(page, "People");
+			const confirm = page.getByRole("button", { name: "Make the recovery link", exact: true });
+			const cancel = page.getByRole("button", { name: "Cancel", exact: true });
+			for (const name of ["robin", "recovery-focus"]) {
+				const trigger = page.getByRole("button", { name: `Recovery link for ${name}`, exact: true });
+				for (const dismiss of ["Cancel", "Escape on confirm", "Escape on Cancel"]) {
+					await trigger.focus();
+					await trigger.press("Enter");
+					await confirm.waitFor();
+					expect(await confirm.evaluate((button) => button === document.activeElement)).toBe(true);
+					if (dismiss === "Cancel") await cancel.click();
+					else await (dismiss === "Escape on confirm" ? confirm : cancel).press("Escape");
+					await trigger.waitFor();
+					expect(await trigger.evaluate((button) => button === document.activeElement)).toBe(true);
+					expect(await confirm.count()).toBe(0);
+				}
+			}
+			expect(await page.locator(".settings-invitation").count()).toBe(0);
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
+		}
+	},
+	20_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"a recovery confirmation's Cancel has a 44 pixel target on a phone",
+	async () => {
+		const phone = await openPage(server, { device: "phone", path: "/p/scratch/settings" });
+		try {
+			const { page } = phone;
+			await section(page, "People");
+			await page.getByRole("button", { name: "Recovery link for robin", exact: true }).tap();
+			const cancel = page.getByRole("button", { name: "Cancel", exact: true });
+			const target = await cancel.boundingBox();
+			if (!target) throw new Error("Cancel is not visible");
+			expect(target.width).toBeGreaterThanOrEqual(44);
+			expect(target.height).toBeGreaterThanOrEqual(44);
+			await cancel.tap();
+			const trigger = page.getByRole("button", { name: "Recovery link for robin", exact: true });
+			expect(await trigger.evaluate((button) => button === document.activeElement)).toBe(true);
+			expect(phone.errors).toEqual([]);
+		} finally {
+			await phone.close();
+		}
+	},
+	20_000,
 );

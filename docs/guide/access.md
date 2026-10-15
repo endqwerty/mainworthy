@@ -280,6 +280,8 @@ Failed attempts are counted. The fifth wrong password for one name within 15 min
 
 The sign-in page has no "forgot password", because there is no mail to send one by. A recovery link replaces it. In Settings, People, "People who sign in" lists each person. The owner sees "Recovery link" beside every person. Another person who administers the instance sees it beside their own name only. Somebody who does not administer has no People section and asks the owner. Press it, read what it replaces, and press "Make the recovery link". The link is shown once, as an invitation's is.
 
+Opening the confirmation moves focus to **Make the recovery link**. **Cancel** or <kbd>Esc</kbd> closes the confirmation and returns focus to that person's **Recovery link** button.
+
 From the command line, invite the person again. For a person who exists, the link is a recovery:
 
 ```
@@ -302,6 +304,8 @@ A session is one browser that is signed in. Settings, "Your sessions" lists your
 A person who administers the instance can inspect another person in Settings, **People**. Beside their name, open **Sign-in details**. It lists their sessions with the same details and **End** button as your own sessions. For another person, **End** asks you to confirm with **End this session** or **Cancel**. Ending this browser's session opens the sign-out dialog.
 
 The details also say whether the person has a password and list their passkeys, with their names, when they were added, and their last use. **Remove** removes a password or passkey and ends the sessions that used it. For another person, it first asks you to confirm with **Remove this sign-in method** or **Cancel**. The person's last password or passkey stays; they must add another before you can remove it. You cannot set their password or add a passkey for them. Recovery links keep the rules described above.
+
+These confirmations move focus to **End this session** or **Remove this sign-in method** when they open. **Cancel** or <kbd>Esc</kbd> closes the confirmation and returns focus to the original **End** or **Remove** button. Cancel has a target of at least 44 by 44 pixels on a phone, as it does for a recovery link.
 
 A script lists them and ends one:
 

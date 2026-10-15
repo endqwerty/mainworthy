@@ -9,6 +9,7 @@ import { queryKey, useQueryOp } from "../lib/data.ts";
 import { createInvitation, dateTime, listInvitations, revokeInvitation, until } from "../lib/people.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
+import { InlineConfirmation } from "./inline-confirmation.tsx";
 import { saidBy, saidOfWrite, useList, withId } from "./list.ts";
 import { PersonAccess } from "./people-access.tsx";
 import { ForgetPerson } from "./people-forget.tsx";
@@ -319,32 +320,20 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 						>
 							Sign-in details
 						</button>
-						{!mayRecover(person.name) ? null : confirming === person.name ? (
-							<>
-								<button
-									className="out"
-									type="button"
-									aria-disabled={recovering !== null}
-									onClick={() => recover(person.name)}
-								>
-									{recovering === person.name ? "Making the link…" : "Make the recovery link"}
-								</button>
-								<button type="button" className="dim" onClick={() => setConfirming(null)}>
-									Cancel
-								</button>
-							</>
-						) : (
-							<button
-								className="out"
-								type="button"
-								aria-label={`Recovery link for ${person.name}`}
-								onClick={() => {
+						{mayRecover(person.name) && (
+							<InlineConfirmation
+								open={confirming === person.name}
+								trigger="Recovery link"
+								triggerLabel={`Recovery link for ${person.name}`}
+								confirm={recovering === person.name ? "Making the link…" : "Make the recovery link"}
+								busy={recovering !== null}
+								onOpen={() => {
 									setRefusal(null);
 									setConfirming(person.name);
 								}}
-							>
-								Recovery link
-							</button>
+								onCancel={() => setConfirming(null)}
+								onConfirm={() => recover(person.name)}
+							/>
 						)}
 					</div>
 					{expanded.has(person.name) && <PersonAccess actor={person.name} />}

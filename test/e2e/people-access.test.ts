@@ -200,3 +200,76 @@ test.skipIf(!browserAvailable)(
 	},
 	25_000,
 );
+
+for (const device of ["desktop", "phone"] as const) {
+	test.skipIf(!browserAvailable)(
+		`People inline confirmations keep focus and cancel without writes on ${device}`,
+		async () => {
+			const actor = `confirmation-${device}`;
+			await person(actor);
+			const other = await openPage(server, { as: { name: actor, password: PASSWORD }, path: "/p/scratch/settings" });
+			const admin = await openPage(server, { path: "/p/scratch/settings", device });
+			try {
+				await passkey(other, `${actor} key`);
+				const { page } = admin;
+				page.setDefaultTimeout(3000);
+				await page.getByRole("option", { name: "People", exact: true }).click();
+				await page.getByRole("button", { name: `Sign-in details for ${actor}`, exact: true }).click();
+				const details = page.getByRole("region", { name: `Sign-in details for ${actor}`, exact: true });
+				const sessions = details.getByRole("region", { name: `Sessions for ${actor}`, exact: true });
+				const mutations: string[] = [];
+				page.on("request", (request) => {
+					if (!/\/api\/(credential|session)$/.test(request.url()) || request.method() !== "POST") return;
+					const input = request.postDataJSON();
+					if (input.do === "remove" || input.do === "end") mutations.push(input.do);
+				});
+				for (const action of [
+					{
+						trigger: details.getByRole("button", { name: "Remove the password", exact: true }),
+						confirm: "Remove this sign-in method",
+					},
+					{
+						trigger: details.getByRole("button", { name: `Remove ${actor} key`, exact: true }),
+						confirm: "Remove this sign-in method",
+					},
+					{ trigger: sessions.getByRole("button", { name: /^End the session/ }), confirm: "End this session" },
+				]) {
+					const confirm = details.getByRole("button", { name: action.confirm, exact: true });
+					const cancel = details.getByRole("button", { name: "Cancel", exact: true });
+					for (const dismiss of ["Cancel", "Escape on confirm", "Escape on Cancel"]) {
+						if (device === "phone") await action.trigger.tap();
+						else {
+							await action.trigger.focus();
+							await action.trigger.press("Enter");
+						}
+						await confirm.waitFor();
+						if (device === "phone") {
+							const target = await cancel.boundingBox();
+							if (!target) throw new Error("Cancel is not visible");
+							expect(target.width).toBeGreaterThanOrEqual(44);
+							expect(target.height).toBeGreaterThanOrEqual(44);
+							expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+						}
+						expect(await confirm.evaluate((button) => button === document.activeElement)).toBe(true);
+						if (dismiss === "Cancel") {
+							if (device === "phone") await cancel.tap();
+							else await cancel.click();
+						} else await (dismiss === "Escape on confirm" ? confirm : cancel).press("Escape");
+						await action.trigger.waitFor();
+						expect(await action.trigger.evaluate((button) => button === document.activeElement)).toBe(true);
+						expect(await confirm.count()).toBe(0);
+					}
+				}
+				expect(mutations).toEqual([]);
+				expect(await server.api("credential", { do: "list", actor })).toHaveLength(2);
+				expect(await server.api("session", { do: "list", actor })).toHaveLength(1);
+				expect(admin.errors).toEqual([]);
+				expect(other.errors).toEqual([]);
+			} finally {
+				await other.close();
+				await admin.close();
+			}
+		},
+		30_000,
+	);
+}
