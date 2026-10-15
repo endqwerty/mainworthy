@@ -3,8 +3,10 @@
 <plist version="1.0">
 <!-- What App Store Connect asks of every upload. The app tracks nobody. It sends the name a person signs in with
      and what they write to the instance they name, which is mainworthy.com, run by the owner, unless they change it:
-     so a user id and the person's content are collected, linked to them, for the app to work
-     (docs/guide/privacy.md). It keeps its instance and its last project in UserDefaults (AppModel.swift), read by
+     so a user id and the person's content are collected, linked to them, for the app to work, and so is
+     what each session records for security (the app's name and version, and the network address it was used from:
+     other data, as Apple says to declare an address by what it is used for; it is not used for location).
+     docs/guide/privacy.md says the same in words. It keeps its instance and its last project in UserDefaults (AppModel.swift), read by
      this app alone: reason CA92.1. -->
 <dict>
 	<key>NSPrivacyTracking</key>
@@ -28,6 +30,18 @@
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypeOtherUserContent</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherDataTypes</string>
 			<key>NSPrivacyCollectedDataTypeLinked</key>
 			<true/>
 			<key>NSPrivacyCollectedDataTypeTracking</key>
