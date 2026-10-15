@@ -62,6 +62,10 @@ export type HistoryEvent = Base &
 		  }
 		/** A step added to the end of a case. */
 		| { kind: "edit"; case: number; add: { action: string; expected: string }; reason: string }
+		/** The pipeline says a pull request merged: it ended, and is not asked about any more (decision 0022). */
+		| { kind: "end"; pr: number }
+		/** Cases a person archived, because something else covers them now. */
+		| { kind: "archive"; cases: number[]; reason: string }
 		/** The agent's review of a pull request, with one finding. */
 		| {
 				kind: "review";
@@ -272,6 +276,7 @@ export function demoHistory(options: {
 				failures: broke.map((index) => ({ case: index, message })),
 				jitter: rng(),
 			});
+			let last = at;
 			if (broke.length > 0) {
 				const testWasWrong = rng() < 0.35;
 				events.push({
@@ -284,15 +289,18 @@ export function demoHistory(options: {
 						? "The test still expected the old behaviour. Updated in the next commit."
 						: "The change broke this. Fixed in the next commit.",
 				});
+				last = at + between(rng, 30, 55) * MINUTE;
 				events.push({
 					kind: "pipeline",
-					at: at + between(rng, 30, 55) * MINUTE,
+					at: last,
 					step: `p${number}c2`,
 					target: { ...target, commit: hex(rng) },
 					failures: [],
 					jitter: rng(),
 				});
 			}
+			// It merges a quarter of an hour after its last report. Drawn from nothing, so the rest stays as it was.
+			events.push({ kind: "end", at: last + 15 * MINUTE, step: `p${number}m`, pr: number });
 			merged.push(number);
 			at += between(rng, 65, 110) * MINUTE;
 		}
@@ -312,6 +320,17 @@ export function demoHistory(options: {
 			edit++;
 		}
 	}
+
+	// ── Two cases archived halfway through, from the end of the cases no edit reaches. Drawn from nothing. ──
+	const retired = editable.slice(Math.max(edit, editable.length - 2));
+	if (retired.length > 0)
+		events.push({
+			kind: "archive",
+			at: dayStart(since, Math.max(1, Math.ceil(days / 2))) + 17 * HOUR + 50 * MINUTE,
+			step: "retire",
+			cases: retired,
+			reason: "The API checks cover these now.",
+		});
 
 	// ── The runs: planned in the morning and worked through in three sittings that day. ──
 	runs.forEach((run, index) => {

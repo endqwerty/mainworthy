@@ -179,6 +179,8 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 				madeBy: env.actor.id,
 			});
 			return {
+				// The token's id, which `token.revoke` takes: whoever made it can revoke exactly this one.
+				id: created.id,
 				actor: created.actor,
 				token: created.secret,
 				// What the token's holder may do on the project asked about, as the registry will see it.
