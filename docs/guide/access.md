@@ -59,6 +59,46 @@ Leave out `--project` to change the grant on every project. Only a person change
 
 The owner is the person named by `MAINWORTHY_OWNER`. See [configuration](./configuration.md).
 
+## Make your own command-line token
+
+Sign in with your password or a passkey, then open Settings, **Your sign-in**, **Your command-line tokens**.
+You need no admin capability. As the local owner, you can make one without signing in.
+
+1. Enter a **Token label** that says where you use it.
+2. Choose a **Token lifetime**. The default is 30 days, and the longest is one year.
+3. Choose **Create personal token**, then **Copy personal token**. Store the token in your shell or script's secret store.
+4. Choose **Dismiss personal token** when you have stored it. Leaving the section also clears the secret from the page.
+
+Set `MAINWORTHY_URL` to your instance's address and `MAINWORTHY_TOKEN` to the token, then run the CLI:
+
+```
+$ mainworthy find --json '{"in":"cases","limit":10}'
+```
+
+The token acts as you, with your current grants on each project. Making it changes no grants.
+A grant removed from you is removed from every token of yours. Forgetting you stops them all.
+Changing your password does not revoke tokens. Do not give a personal token to an agent or a pipeline that needs its own identity.
+
+The list shows only your tokens, including any an admin made for you, with their ids, labels, creation and last-use times, expiry, and revocation.
+Choose **Revoke** beside a token to stop it immediately. Your password or passkey session stays signed in.
+The owner's last working token stays until another is made.
+A missing creation reply may mean a token was made but its secret was lost. Check the list, revoke that token, and make another.
+
+The same list and revocation work from the CLI:
+
+```
+$ mainworthy credential --json '{"do":"token.list"}'
+$ mainworthy credential --json '{"do":"token.revoke","id":2}'
+```
+
+The `credential` operation accepts `token.create` with `label`, optional `expires` such as `12h` or `30d`, and optional `cmd`.
+The reply holds `id`, `actor`, `token`, and `expiresAt`, a Unix timestamp in milliseconds.
+An expiry is required internally, defaults to `30d`, and cannot exceed `365d`.
+A command id prevents a repeated creation. Its secret reply is never saved, and a retry receives `conflict`.
+Creation accepts no actor, project, or grants. It requires a password or passkey browser session, or local-owner access.
+A bearer token and a browser signed in with a token cannot make a personal token.
+There is no instance setting to disable personal tokens. An admin who is a person may revoke another person's token by id, as with other credentials.
+
 ## Make a token
 
 A token is a secret that stands for one actor. An agent or a pipeline sends it with each request, and a person types it to sign in.
@@ -78,13 +118,13 @@ Use `--human` for a person and `--ci` for a pipeline. Add `--project <key>` to l
 
 Mainworthy shows a token once and keeps only a hash, so it cannot show it again. If you lose one, revoke it and make another.
 
-Who may make a token depends on whose it is. Anyone who administers makes a token for an agent or a pipeline. A person who administers adds a new person. A token for a person who already exists is made by that person or by the owner, and a token for the owner by the owner alone, because whoever holds a person's token acts under that person's name. A name that starts with `forgotten-` is refused.
+The Tokens section and `token new` command need admin capability. For your own token without admin, use **Your sign-in** as described above. Who may make an admin-issued token depends on whose it is. Anyone who administers makes a token for an agent or a pipeline. A person who administers adds a new person. A token for a person who already exists is made by that person or by the owner, and a token for the owner by the owner alone, because whoever holds a person's token acts under that person's name. A name that starts with `forgotten-` is refused.
 
 Making a token for a name that exists adds a token to that actor and does not change its grants. Naming a different `--can` for an existing actor is refused. Use `actor grant` for that.
 
 ## Give a token an end
 
-A token works until you revoke it, unless you give it an end. `--expires` takes a whole number and `h`, `d` or `w`:
+An admin-issued token works until you revoke it, unless you give it an end. A personal token always has an end. `--expires` takes a whole number and `h`, `d` or `w`:
 
 ```
 $ mainworthy token new --ci github-actions --project scratch --expires 90d

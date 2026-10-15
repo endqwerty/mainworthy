@@ -4,7 +4,14 @@
 // type by `satisfies`, so a field the core gains or renames fails the type-check here.
 import { z } from "zod";
 import type { Capability } from "../../core/kinds.ts";
-import type { CredentialRow, InvitationCreated, InvitationRow, SessionRow } from "../../core/people.ts";
+import {
+	type CredentialRow,
+	type InvitationCreated,
+	type InvitationRow,
+	PersonalTokenCreated,
+	PersonalTokenRow,
+	type SessionRow,
+} from "../../core/people.ts";
 import { type CallOptions, call } from "./api.ts";
 import { CreationOptions, type Registration } from "./passkey.ts";
 
@@ -127,3 +134,16 @@ export function until(at: number, now = Date.now()): string {
 /** A date and a time as this browser writes them, for when a link runs out. */
 export const dateTime = (at: number): string =>
 	new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+export const listPersonalTokens = async (options: Options = {}): Promise<PersonalTokenRow[]> =>
+	PersonalTokenRow.array().parse(await call("credential", { do: "token.list" }, options));
+
+export const createPersonalToken = async (label: string, expires: string): Promise<PersonalTokenCreated> =>
+	PersonalTokenCreated.parse(
+		await call("credential", { do: "token.create", label, expires, cmd: crypto.randomUUID() }),
+	);
+
+export const revokePersonalToken = async (id: number): Promise<{ revoked: boolean }> =>
+	z
+		.object({ revoked: z.boolean() })
+		.parse(await call("credential", { do: "token.revoke", id, cmd: crypto.randomUUID() }));

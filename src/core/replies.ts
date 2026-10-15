@@ -15,7 +15,14 @@ import {
 	QuestionItem,
 	ReportReceipt,
 } from "./ops.ts";
-import { CredentialRow, InvitationCreated, InvitationRow, SessionRow } from "./people.ts";
+import {
+	CredentialRow,
+	InvitationCreated,
+	InvitationRow,
+	PersonalTokenCreated,
+	PersonalTokenRow,
+	SessionRow,
+} from "./people.ts";
 import { Obligation, TargetMatch, Verdict } from "./runs.ts";
 import { TrackerReceipt } from "./tracker.ts";
 
@@ -361,6 +368,9 @@ export const AdminReply = z.union([
 export const SessionReply = z.union([z.array(SessionRow), z.looseObject({ ended: z.literal(true), current: flag })]);
 export const CredentialReply = z.union([
 	z.array(CredentialRow),
+	PersonalTokenCreated,
+	z.array(PersonalTokenRow),
+	z.object({ revoked: flag }),
 	z.object({
 		challenge: text,
 		rp: z.object({ id: text, name: text }),

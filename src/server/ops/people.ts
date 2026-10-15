@@ -16,17 +16,21 @@ import {
 	addPasskey,
 	beginPasskey,
 	createInvitation,
+	createPersonalToken,
 	credentialOwner,
 	endSessionById,
 	invitedPerson,
 	KIND_NOUN,
 	listCredentials,
 	listInvitations,
+	listPersonalTokens,
 	listSessions,
 	mayActFor,
 	removeCredential,
 	revokeInvitation,
+	revokeToken,
 	sessionOwner,
+	tokenOwner,
 } from "../identity/identity.ts";
 import type { Actor } from "../kernel/ctx.ts";
 import { forbidden, invalid, notFound } from "../kernel/errors.ts";
@@ -100,7 +104,7 @@ export const credentialOp = defineInstanceOp({
 	name: "credential",
 	output: REPLIES.credential,
 	summary:
-		"How a person signs in: list your password and passkeys, register a passkey, remove one. An agent is refused: it signs in with a token only. A password is set in the web UI, never here.",
+		"Your password, passkeys and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default.",
 	input: CredentialInput,
 	needs: "self",
 	scope: "instance",
@@ -132,12 +136,29 @@ export const credentialOp = defineInstanceOp({
 			case "remove":
 				own(env, credentialOwner(db, input.id), `credential ${input.id}`);
 				return removeCredential(env.app, input.id);
+			case "token.create": {
+				const lastsMs = durationMs(input.expires);
+				if (lastsMs === null) throw invalid("expires: invalid duration");
+				return createPersonalToken(env.app, {
+					actor: env.actor,
+					session: env.session,
+					context: env.context,
+					label: input.label,
+					lastsMs,
+				});
+			}
+			case "token.list":
+				return listPersonalTokens(env.app, env.actor.id);
+			case "token.revoke":
+				own(env, tokenOwner(db, input.id), `token ${input.id}`);
+				return { revoked: revokeToken(env.app, input.id) };
 			default: {
 				const _exhaustive: never = input;
 				throw invalid(`unknown credential action ${JSON.stringify(_exhaustive)}`);
 			}
 		}
 	},
+	secret: (input) => input.do === "token.create",
 });
 
 export const invitationOp = defineInstanceOp({

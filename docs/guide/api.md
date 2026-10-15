@@ -57,6 +57,8 @@ A body holds one of these shapes and nothing beside it. `GET /api/session` says 
 
 A signed-in person registers a further passkey with the `credential` operation: `passkey.begin` answers the options for `navigator.credentials.create`, and `passkey.add` takes what the browser returned and a label. Both are for a browser that is signed in, and the session that begins a registration is the one that finishes it. A token is refused with `forbidden`, as it is when it tries to set a password.
 
+The same operation manages personal CLI tokens with `token.create`, `token.list`, and `token.revoke`. Creation requires a password or passkey session, or local-owner access, binds the caller as the token actor, and returns the secret once. It defaults to a 30-day expiry, with a 365-day maximum. A bearer token or a token-backed browser session cannot create one. [Make your own command-line token](./access.md#make-your-own-command-line-token) gives the inputs, replies, and CLI setup.
+
 ## Send a write twice safely
 
 A write takes `cmd`, an id you choose for that one request. Sent again unchanged, the server returns the first reply and writes nothing. Sent again with other content, it is refused with `conflict`. If you lost the reply, ask the `command` operation what became of the id.
@@ -712,7 +714,7 @@ Your browser sessions: list them, and end one. An admin who is a person lists an
 
 ### credential
 
-How a person signs in: list your password and passkeys, register a passkey, remove one. An agent is refused: it signs in with a token only. A password is set in the web UI, never here.
+Your password, passkeys and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default.
 
 |  |  |
 | --- | --- |
@@ -735,6 +737,12 @@ How a person signs in: list your password and passkeys, register a passkey, remo
 | `[3].label` | `string` | yes | What you call this passkey: the device it is on. |
 | `[4].do` | `"remove"` | yes |  |
 | `[4].id` | `integer` | yes | The credential, from the list. The last one a person has is not removed. |
+| `[5].do` | `"token.create"` | yes |  |
+| `[5].label` | `string` | yes | What you use this token for. |
+| `[5].expires` | `string` | no | Default: 30d. At most 365d. A password or passkey session creates your own token, shown once. Default: `"30d"`. |
+| `[6].do` | `"token.list"` | yes |  |
+| `[7].do` | `"token.revoke"` | yes |  |
+| `[7].id` | `integer` | yes |  |
 
 </details>
 

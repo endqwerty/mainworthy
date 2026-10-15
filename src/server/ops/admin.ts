@@ -10,7 +10,6 @@ import {
 	createToken,
 	forgetActor,
 	KIND_NOUN,
-	lastTokenOf,
 	listActors,
 	listTokens,
 	orgId,
@@ -177,18 +176,8 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 				lastUsedFrom: row.last_used_addr,
 				revoked: row.revoked_at !== null,
 			}));
-		case "token.revoke": {
-			// In server mode a token is the owner's one way in, and the owner is who repairs the instance when
-			// everything else is wrong. The last one that works is kept whoever asks, the owner included: the
-			// button is one click. A token past its end is not another way in. (In local mode the owner is whoever
-			// sits at the machine, and holds a token only for a script.)
-			if (env.app.config.mode === "server" && lastTokenOf(db, input.id, env.now) === owner) {
-				throw invalid(
-					`token ${input.id} is the last one ${owner} can sign in with, and ${owner} owns this instance. As ${owner}, make ${owner} another token first (mainworthy token new --human ${owner}), then revoke this one`,
-				);
-			}
+		case "token.revoke":
 			return { revoked: revokeToken(env.app, input.id) };
-		}
 		case "actor.list":
 			return actorsWithGrants(db);
 		case "grant.set":

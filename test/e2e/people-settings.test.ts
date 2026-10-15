@@ -473,3 +473,71 @@ test.skipIf(!browserAvailable)(
 	},
 	40_000,
 );
+
+test.skipIf(!browserAvailable)(
+	"a non-admin creates a command-line token, dismisses its secret and revokes it under Your sign-in",
+	async () => {
+		await person("personal-web", ["read"]);
+		const browser = await openPage(server, {
+			as: { name: "personal-web", password: OLD },
+			path: "/p/scratch/settings",
+		});
+		try {
+			const { page } = browser;
+			page.setDefaultTimeout(8000);
+			await browser.context.grantPermissions(["clipboard-read", "clipboard-write"]);
+			await section(page, "Your sign-in");
+			await page.getByLabel("Token label", { exact: true }).fill("Laptop CLI");
+			expect(await page.getByLabel("Token lifetime", { exact: true }).inputValue()).toBe("30d");
+			await page.getByRole("button", { name: "Create personal token", exact: true }).click();
+			const secret = page.getByLabel("Your new command-line token", { exact: true });
+			await secret.waitFor();
+			const token = await secret.inputValue();
+			expect(token).toMatch(/^cb_[0-9A-Za-z]{32}$/);
+			expect(await secret.getAttribute("type")).toBe("password");
+			await page.getByRole("button", { name: "Copy personal token", exact: true }).click();
+			await page.getByRole("status").filter({ hasText: "Token copied." }).waitFor();
+			expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(token);
+			const reply = await fetch(`${server.url}/api/session`, { headers: { authorization: `Bearer ${token}` } });
+			expect(reply.status).toBe(200);
+			expect(await reply.json()).toMatchObject({ ok: true, result: { actor: "personal-web" } });
+			await page.getByRole("button", { name: "Dismiss personal token", exact: true }).click();
+			expect(await secret.count()).toBe(0);
+			await section(page, "Your sessions");
+			await section(page, "Your sign-in");
+			await page.locator(".settings-personal-token", { hasText: "Laptop CLI" }).waitFor();
+			expect(await secret.count()).toBe(0);
+			await page.getByRole("button", { name: "Revoke personal token Laptop CLI", exact: true }).click();
+			await page
+				.locator(".settings-personal-token", { hasText: "Laptop CLI" })
+				.getByText(/Revoked/)
+				.waitFor();
+			expect((await fetch(`${server.url}/api/session`, { headers: { authorization: `Bearer ${token}` } })).status).toBe(
+				401,
+			);
+			expect(await page.locator("#app").count()).toBe(1);
+
+			await page.route("**/api/credential", async (route) => {
+				if (route.request().postDataJSON().do !== "token.create") return route.continue();
+				await route.fetch();
+				await route.abort();
+			});
+			await page.getByLabel("Token label", { exact: true }).fill("Lost CLI");
+			await page.getByRole("button", { name: "Create personal token", exact: true }).click();
+			await page.getByRole("status").filter({ hasText: "If the token was created, its secret is lost." }).waitFor();
+			await page.locator(".settings-personal-token", { hasText: "Lost CLI" }).waitFor();
+			expect(await secret.count()).toBe(0);
+			expect(await page.getByLabel("Token label", { exact: true }).inputValue()).toBe("Lost CLI");
+			await page.unroute("**/api/credential");
+			await page.getByRole("button", { name: "Revoke personal token Lost CLI", exact: true }).click();
+			await page
+				.locator(".settings-personal-token", { hasText: "Lost CLI" })
+				.getByText(/Revoked/)
+				.waitFor();
+			expect(browser.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
+		} finally {
+			await browser.close();
+		}
+	},
+	30_000,
+);

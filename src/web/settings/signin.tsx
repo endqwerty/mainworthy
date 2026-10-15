@@ -9,6 +9,7 @@ import { NO_ANSWER, setPassword, signInMethods } from "../lib/signin.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, PASSWORD_RULES, PasswordCount, SectionHeading } from "../ui/index.tsx";
 import { saidBy, useList, withId } from "./list.ts";
+import { YourTokens } from "./tokens.tsx";
 import "./people.css";
 
 const ended = (count: number): string => (count === 0 ? "" : ` ${count} other session${count === 1 ? "" : "s"} ended.`);
@@ -57,8 +58,7 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
 		<>
 			<h2>Your sign-in</h2>
 			<p className="dim">
-				How {session.actor} signs in to this instance. A token you hold keeps working whatever is set here.{" "}
-				<DocLink page="access">Passwords and passkeys</DocLink>
+				How {session.actor} signs in to this instance. <DocLink page="access">Passwords and passkeys</DocLink>
 			</p>
 			<SectionHeading>Password</SectionHeading>
 			{session.via === "cookie" ? (
@@ -118,6 +118,7 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
 			<p className="settings-message" role="status">
 				{message}
 			</p>
+			<YourTokens />
 		</>
 	);
 }
