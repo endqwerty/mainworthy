@@ -146,6 +146,11 @@ test("a union left with one choice after hiding is that choice, still compacted"
 		$ref: "#/$defs/a/anyOf/0/$defs/s",
 	});
 	expect(outside).toMatchObject({ $defs: { a: { anyOf: [{ $defs: { s: { type: "string" } } }] } } });
+	// So does a dynamic reference, and an anchor a reference could name.
+	for (const reference of [{ $dynamicRef: "#/$defs/a/anyOf/0" }, { $anchor: "here" }]) {
+		const kept = node({ $defs: { a: { anyOf: [{ type: "string" }, { type: "null", ...hidden }] } }, ...reference });
+		expect(kept).toMatchObject({ $defs: { a: { anyOf: [{ type: "string" }] } } });
+	}
 	// A reference that points through the union stays valid because the union stays.
 	const pointed = { $defs: { s: { type: "string" } }, $ref: "#/anyOf/0/$defs/s" };
 	expect(node({ anyOf: [pointed, { type: "null", ...hidden }] })).toMatchObject({
