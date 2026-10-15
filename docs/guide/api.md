@@ -359,7 +359,7 @@ Say that a change ended (merged, or closed without merging) or is open again. An
 | --- | --- | --- | --- |
 | `change` | `string` | yes | The change, for example pr:482. |
 | `state` | `"merged" \| "closed" \| "open"` | yes | How the change ended: merged, or closed without merging. open: it is open again. |
-| `landing` | `object` | no | For merged: the exact commit that reached trunk and its branch. A matching head moves to trunk; its failures are judged there again. |
+| `landing` | `object` | no | For merged: the exact commit that reached trunk and its branch. That commit becomes the change's head and moves to trunk; its failures are judged there again. |
 | `landing.commit` | `string` | yes |  |
 | `landing.branch` | `"main" \| "master" \| "trunk"` | yes |  |
 

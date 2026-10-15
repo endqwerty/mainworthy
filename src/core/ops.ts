@@ -420,7 +420,7 @@ export const ChangeInput = z.object({
 		})
 		.optional()
 		.describe(
-			"For merged: the exact commit that reached trunk and its branch. A matching head moves to trunk; its failures are judged there again.",
+			"For merged: the exact commit that reached trunk and its branch. That commit becomes the change's head and moves to trunk; its failures are judged there again.",
 		),
 	cmd,
 });
