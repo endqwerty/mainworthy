@@ -392,6 +392,15 @@ export const ChangeInput = z.object({
 	state: z
 		.enum(["merged", "closed", "open"])
 		.describe("How the change ended: merged, or closed without merging. open: it is open again."),
+	landing: z
+		.object({
+			commit: z.string().min(1).max(300),
+			branch: z.enum(["main", "master", "trunk"]),
+		})
+		.optional()
+		.describe(
+			"For merged: the exact commit that reached trunk and its branch. A matching head moves to trunk; its failures are judged there again.",
+		),
 	cmd,
 });
 export type ChangeInput = z.infer<typeof ChangeInput>;

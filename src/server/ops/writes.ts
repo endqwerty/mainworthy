@@ -43,6 +43,7 @@ import {
 	ensureTarget,
 	firstCountedReport,
 	keepReceipt,
+	landChangeHead,
 	markProcessed,
 	mustTarget,
 	NO_FILE,
@@ -62,6 +63,7 @@ import {
 	applyBatchSteps,
 	defaultObligations,
 	describeAccepts,
+	ensureChangeRun,
 	failuresShown,
 	gateOf,
 	mustRun,
@@ -155,6 +157,7 @@ export function acceptReport(ctx: Ctx, input: ReportInput): { batch: BatchRow; f
 			`${runRef(run)} counts ${describeAccepts(run)}, and this report is for another target. Report it without \`run\` to record it for its own target.`,
 		);
 	}
+	refreshCommitScope(ctx, target);
 
 	const accepted = accept(ctx, { target, run: run?.id ?? null, report: input, nonce: input.cmd ?? `${ctx.seq}` });
 	if (accepted.fresh) {
@@ -426,18 +429,29 @@ export const claimOp = defineOp({
 
 // ── change ─────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** Scope changes preserve the exact gate and recompute every planned run that counts the commit. */
+function refreshCommitScope(ctx: Ctx, target: TargetRow): void {
+	const run = ensureChangeRun(ctx, target, false);
+	if (!run || !ctx.recompute.has(run.id) || target.commit_sha === null) return;
+	askWhereCommitIs(ctx, target);
+	refold(ctx, [run.id, ...plannedCounting(ctx.db, ctx.project.id, target.commit_sha)], { dissolveStale: true });
+}
+
 export function changeEnds(ctx: Ctx, input: ChangeInput): ChangeReply {
 	// Where a change is, is said by a pipeline or a person, as where a commit is (see `resolveTarget`).
 	if (ctx.actor.kind === "agent")
 		throw forbidden("whether a change ended is said by a pipeline or a person: an agent's word about it is not taken");
+	if (input.landing && input.state !== "merged") throw invalid("a landing is reported only for a merged change");
 	const key = input.change.toUpperCase().startsWith("PR:") ? input.change.toLowerCase() : input.change;
 	const change = changeByKey(ctx.db, ctx.project.id, key);
 	if (!change) throw notFound(`change ${input.change}`);
 	const ended = input.state === "open" ? null : input.state;
-	if (change.ended === ended) return { change: change.key, state: input.state, questions: [], already: true };
-	const now = setChangeEnded(ctx, change, ended);
-	const questions = ended === null ? askAgainAbout(ctx, now) : stopAskingAbout(ctx, now);
-	return { change: now.key, state: input.state, questions, already: false };
+	const same = change.ended === ended;
+	const now = same ? change : setChangeEnded(ctx, change, ended);
+	const questions = same ? [] : ended === null ? askAgainAbout(ctx, now) : stopAskingAbout(ctx, now);
+	const landed = input.landing ? landChangeHead(ctx, now, input.landing) : null;
+	if (landed) refreshCommitScope(ctx, landed);
+	return { change: now.key, state: input.state, questions, already: same && landed === null };
 }
 
 export const changeOp = defineOp({

@@ -20,6 +20,9 @@ A report identifies the tested commit. Branch or pull request metadata groups
 commits into a change. For example, `pr:482` identifies a pull request.
 The change shows the latest counted commit's gate. A commit gate names one commit.
 An older report arriving late does not move the change back to an earlier commit.
+A commit first reported by hash alone gains its scope when a pipeline or person later
+names its branch or pull request. Its former answers stay in the ledger as outdated;
+failures are evaluated in the named scope. Every environment shares the same commit gate.
 
 The list says "Latest commit's verdict". The detail shows the gate's reason and
 nonzero counts, followed by "Open questions", "Settled and excused", "Impact",
@@ -94,9 +97,26 @@ about the change and are no longer asked. Nobody will act on an answer about a p
 that has ended. A failure that came with the merge fails on the line too, and is asked about
 there as its own question.
 
+If the pull request's head itself reached trunk, include its exact hash and trunk branch:
+
+```sh
+$ mainworthy change --json '{"change":"pr:482","state":"merged","landing":{"commit":"1111111111111111111111111111111111111111","branch":"main"}}'
+```
+
+When `landing.commit` matches the change's recorded head, all its environments move to
+trunk together. The commit keeps its one gate, and planned runs that count it are recomputed.
+Pull request answers remain attributable in history and still cover its older commits.
+They do not carry to trunk. Existing trunk answers apply, and unexplained failures raise
+trunk questions immediately, even before another report arrives.
+
+A different merge or rebased hash does not move the original head. Omitting `landing`
+only ends the change. It can be supplied later by repeating `merged` with the metadata.
+`landing.branch` takes `main`, `master` or `trunk`. Reopening a change does not move a
+commit back from trunk.
+
 What stays as it was:
 
-- The verdict. The change's last commit keeps the gate it had: a failure nobody explained
+- Without a matching landing, the verdict. The change's last commit keeps the gate it had: a failure nobody explained
   still reads `blocked`, with no open question behind it.
 - Answers already given. They stay under "Settled and excused".
 - Findings about the change. A finding is about a case, and is still worth an answer.
@@ -104,7 +124,8 @@ What stays as it was:
   whatever became of the change.
 
 A report that arrives after the end, from a job that finished late, is recorded and counted.
-It raises no question.
+It raises no question in the ended scope. A landed head is now on trunk, so its late
+failures are evaluated and asked about there.
 
 When a pull request is opened again, say so, and what its newest commit shows unexplained
 is asked about at once:

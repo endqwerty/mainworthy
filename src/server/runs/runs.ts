@@ -304,6 +304,9 @@ const Q = {
 	newestChangeRun: sql<{ project: number; scope: string }, { id: number | null }>(
 		"SELECT max(id) AS id FROM runs WHERE project = $project AND scope = $scope",
 	),
+	placeChangeRun: sql<{ id: number; scope: string; change: number | null; name: string; rev: number }>(
+		"UPDATE runs SET scope = $scope, change = $change, name = $name, rev = $rev WHERE id = $id",
+	),
 	failingSlotRows: sql<{ run: number }, SlotRow>(
 		"SELECT * FROM slots WHERE run = $run AND state IN ('failing', 'disputed') ORDER BY rank",
 	),
@@ -426,7 +429,17 @@ const acceptsOf = (run: RunRow): TargetMatch => json<TargetMatch>(run.accepts);
 export function ensureChangeRun(ctx: Ctx, target: TargetRow, create = true): RunRow | null {
 	if (target.line === "session" || target.commit_sha === null) return null;
 	const found = ctx.db.get(Q.changeRun, { project: ctx.project.id, what: target.what });
-	if (found || !create) return found;
+	if (found) {
+		const scope = scopeOf(target, null);
+		if (found.scope === scope && found.change === target.change) return found;
+		const change = target.change !== null ? changeById(ctx.db, target.change) : null;
+		const name = `${target.commit_sha.slice(0, 7)} on ${change?.key ?? target.branch ?? target.line}`;
+		ctx.db.run(Q.placeChangeRun, { id: found.id, scope, change: target.change, name, rev: ctx.seq });
+		ctx.recompute.add(found.id);
+		ctx.touched.add(runRef(found));
+		return { ...found, scope, change: target.change, name, rev: ctx.seq };
+	}
+	if (!create) return null;
 	const change = target.change !== null ? changeById(ctx.db, target.change) : null;
 	const where = change ? change.key : (target.branch ?? target.line);
 	const no = ctx.nextNo("run");
@@ -986,8 +999,8 @@ export function newestInScope(db: Db, project: number, scope: string): RunRow | 
 
 /**
  * The scope in which a failure seen on this target is answered, for this run: the target's own (its pull request,
- * its line, or the run it was typed into). Every target of a commit shares the scope the commit was first
- * reported in; a planned run that counts one commit in two repositories has one scope for each.
+ * its line, or the run it was typed into). Every environment of a commit shares its current scope;
+ * a planned run that counts one commit in two repositories has one scope for each.
  */
 const scopeIn = (db: Db, run: RunRow, target: number): string => scopeOf(mustTarget(db, target), run.id);
 

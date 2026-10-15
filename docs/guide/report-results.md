@@ -326,12 +326,22 @@ jobs:
           MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}
           PULL: ${{ github.event.pull_request.number }}
           STATE: ${{ github.event.action == 'reopened' && 'open' || (github.event.pull_request.merged && 'merged' || 'closed') }}
+          MERGED_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
         run: |
+          payload=$(jq -nc --arg change "pr:$PULL" --arg state "$STATE" --arg commit "$MERGED_COMMIT" --arg branch "$BASE_BRANCH" '
+            {change: $change, state: $state} +
+            (if $state == "merged" and $commit != "" and (["main", "master", "trunk"] | index($branch)) != null
+             then {landing: {commit: $commit, branch: $branch}} else {} end)')
           curl -fsS -X POST "$MAINWORTHY_URL/api/p/$MAINWORTHY_PROJECT/change" \
             -H "authorization: Bearer $MAINWORTHY_TOKEN" -H 'content-type: application/json' \
-            -d "{\"change\":\"pr:$PULL\",\"state\":\"$STATE\"}"
+            -d "$payload"
 ```
 
 With `mainworthy` on the job's path, the step is `mainworthy change --change "pr:$PULL" --state "$STATE"`.
+For a merged change whose head reached trunk unchanged, use `change --json` with the
+same payload as the workflow. The workflow sends GitHub's merged hash and base branch;
+a matching head moves to trunk and its failures are evaluated there again. A different
+merge or rebased hash leaves the original head's scope alone.
 The call is answered `not_found` for a pull request that never sent a report.
 [Changes and the gate](./changes.md#when-a-change-ends) says what ending a change does.

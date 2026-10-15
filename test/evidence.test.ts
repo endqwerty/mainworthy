@@ -1118,6 +1118,130 @@ describe("which answers apply", () => {
 });
 
 describe("a change that ends", () => {
+	test("a fast-forward landing moves every environment into trunk without carrying pull request answers", () => {
+		const commit = "landed001";
+		const report = ciReport({ commit, branch: "feature", pr: 68, n: 1, fail: { 0: "same cause" } });
+		h.call("report", { ...report, target: { ...report.target, env: "one" } });
+		h.call("report", { ...report, target: { ...report.target, env: "two" } });
+		const asked = first(queue().items);
+		decide(asked, { is: "flaky" });
+		const before = gate(commit);
+		expect(before.verdict).toBe("passed");
+		const decisions = h.app.db.raw.query("SELECT * FROM decisions").all();
+		h.call("change", { change: "pr:68", state: "merged", landing: { commit, branch: "main" } });
+		expect(h.app.db.raw.query("SELECT DISTINCT line, branch, change FROM targets").all()).toEqual([
+			{ line: "trunk", branch: "main", change: null },
+		]);
+		expect(gate(commit)).toMatchObject({ run: before.run, verdict: "blocked", tally: { unexplained: 2, excused: 0 } });
+		expect(first(queue().items).evidence.scope).toBe("line:trunk@acme/web");
+		expect(h.app.db.raw.query("SELECT * FROM decisions").all()).toEqual(decisions);
+		expect(h.app.db.raw.query("SELECT before_scope, after_scope, actor FROM scope_moves").all()).toEqual([
+			{ before_scope: "change:1", after_scope: "line:trunk@acme/web", actor: h.owner.id },
+		]);
+		expect(h.call("change", { change: "pr:68", state: "merged", landing: { commit, branch: "main" } })).toMatchObject({
+			already: true,
+		});
+		expect(count("scope_moves")).toBe(1);
+		expect(h.call<InboxReply>("inbox", { state: "decided" }).items.map((q) => q.q)).toContain(asked.q);
+		decide(first(queue().items), { is: "defect" });
+		expect(h.call<GateStatus>("gate", { change: "pr:68" })).toMatchObject({ run: before.run, verdict: "failed" });
+		h.call("report", {
+			...report,
+			attempt: 2,
+			target: { ...report.target, branch: "main", pr: undefined, env: "three" },
+		});
+		expect(gate(commit)).toMatchObject({ run: before.run, verdict: "failed", tally: { attributed: 3, excused: 0 } });
+		expect(count("runs")).toBe(1);
+	});
+
+	test("a merge with another hash leaves the original commit's scope and decisions alone", () => {
+		h.call("report", ciReport({ commit: "landed002", branch: "feature", pr: 68, n: 1, fail: { 0: "same cause" } }));
+		decide(first(queue().items), { is: "flaky" });
+		h.call("change", { change: "pr:68", state: "merged", landing: { commit: "merge0002", branch: "main" } });
+		expect(gate("landed002").verdict).toBe("passed");
+		expect(h.app.db.raw.query("SELECT DISTINCT line FROM targets").all()).toEqual([{ line: "change" }]);
+	});
+
+	test("a landing received after the end still moves the head, and reopening does not move it back", () => {
+		h.call("report", ciReport({ commit: "landed003", branch: "feature", pr: 68, n: 1, fail: { 0: "same cause" } }));
+		h.call("change", { change: "pr:68", state: "merged" });
+		h.call("change", { change: "pr:68", state: "merged", landing: { commit: "landed003", branch: "main" } });
+		expect(first(queue().items).evidence.scope).toBe("line:trunk@acme/web");
+		h.call("change", { change: "pr:68", state: "open" });
+		expect(queue().items.map((q) => q.evidence.scope)).toEqual(["line:trunk@acme/web"]);
+	});
+
+	test("a commit first reported by hash gains its branch scope and keeps one exact gate", () => {
+		const report = ciReport({ commit: "placed068", branch: "feature", n: 1, fail: { 0: "same cause" } });
+		h.call("report", { ...report, target: { commit: report.target.commit, repo: report.target.repo } });
+		decide(first(queue().items), { is: "flaky" });
+		const before = gate("placed068");
+		h.call("report", report);
+		expect(gate("placed068")).toMatchObject({ run: before.run, verdict: "blocked" });
+		expect(first(queue().items).about).toContain("branch:feature");
+		expect(count("runs")).toBe(1);
+	});
+
+	test("a landing uses trunk's existing answer while older pull request commits keep their answer", () => {
+		const fail = { 0: "same cause" };
+		h.call("report", ciReport({ commit: "trunk0068", n: 1, fail }));
+		decide(first(queue().items), { is: "defect" });
+		h.call("report", ciReport({ commit: "older0068", branch: "feature", pr: 68, n: 1, fail }));
+		decide(first(queue().items), { is: "flaky" });
+		h.call("report", ciReport({ commit: "newer0068", branch: "feature", pr: 68, n: 1, fail }));
+		expect(gate("newer0068").verdict).toBe("passed");
+		h.call("change", { change: "pr:68", state: "merged", landing: { commit: "newer0068", branch: "main" } });
+		expect(gate("newer0068").verdict).toBe("failed");
+		expect(gate("older0068").verdict).toBe("passed");
+		expect(queue().items).toEqual([]);
+	});
+
+	test("a landing recomputes a planned run and replaces its old failure question", () => {
+		h.call("propose", { edits: [{ op: "create", outline: "Checkout works" }] });
+		h.call("report", {
+			target: { commit: "planned68", repo: "acme/web", branch: "feature", pr: 68 },
+			results: [
+				{
+					test: { key: "checkout" },
+					annotation: { case: "C-1", version: 1 },
+					outcome: "fail",
+					failure: { message: "same cause" },
+				},
+			],
+		});
+		const planned = h.call<{ run: string }>("plan", { name: "Release", select: {}, accepts: { commit: "planned68" } });
+		const asked = first(queue().items);
+		h.call("change", { change: "pr:68", state: "merged", landing: { commit: "planned68", branch: "main" } });
+		const again = first(queue().items);
+		expect(again.q).not.toBe(asked.q);
+		expect(again.evidence.scope).toBe("line:trunk@acme/web");
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({ verdict: "blocked", open: [again.q] });
+		expect(h.call<{ state: string }[]>("get", { refs: [asked.q] })[0]?.state).toBe("dissolved");
+	});
+
+	test("landing metadata is refused for an open change or an agent and moves only its repository", () => {
+		const report = ciReport({ commit: "repos0068", branch: "feature", pr: 68, n: 1, fail: { 0: "same cause" } });
+		h.call("report", report);
+		h.call("report", { ...report, target: { ...report.target, repo: "example/other" } });
+		const landing = { commit: "repos0068", branch: "main" };
+		expect(h.raw("change", { change: "pr:68", state: "open", landing })).toMatchObject({
+			ok: false,
+			error: { code: "invalid" },
+		});
+		const agent = h.actor("reviewer", "agent", ["read", "produce"]);
+		expect(h.raw("change", { change: "pr:68", state: "merged", landing }, agent)).toMatchObject({
+			ok: false,
+			error: { code: "forbidden" },
+		});
+		expect(count("scope_moves")).toBe(0);
+		h.call("change", { change: "pr:68", state: "merged", landing });
+		expect(h.app.db.raw.query("SELECT repo, line FROM targets ORDER BY id").all()).toEqual([
+			{ repo: "acme/web", line: "trunk" },
+			{ repo: "example/other", line: "change" },
+		]);
+		expect(count("scope_moves")).toBe(1);
+	});
+
 	type Ended = { change: string; state: string; questions: string[]; already: boolean };
 	const end = (change: string, state: "merged" | "closed" | "open", as = h.owner) =>
 		h.call<Ended>("change", { change, state }, as);
