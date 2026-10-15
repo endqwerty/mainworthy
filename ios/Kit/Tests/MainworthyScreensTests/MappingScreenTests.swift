@@ -40,6 +40,23 @@ struct MappingScreenTests {
 		#expect(try await project.cases(text: "Shipping accepts an address").items.count == 1)
 	}
 
+	@Test("a refused mapping reply gives the server reason without blaming the connection")
+	func refusedReply() async throws {
+		let transport = SwitchableQueueTransport()
+		let server = Server(instance: Live.instance, secrets: MemoryStore(), transport: transport)
+		_ = try await server.signIn(.password(name: Live.name, password: Live.password))
+		let queue = QueueScreen(project: server.project(try await Live.project()))
+		await queue.refresh()
+		let question = try #require(queue.questions.first { $0.kind == .map })
+		let draft = queue.mapping(question, creating: true)
+		draft.reason = "Keep my choices"
+		transport.serverProblem.withLock { $0 = ("forbidden", "decide needs decide on this project") }
+		#expect(await draft.submit() == false)
+		#expect(draft.notice == "Decide needs decide on this project Your choices are kept here.")
+		#expect(!draft.isRetrying && !draft.locked && draft.reason == "Keep my choices")
+		#expect(queue.outbox.pendingCount == 0)
+	}
+
 	@Test("rebuilding a sheet keeps its confirmed answer and notice")
 	func confirmedDraft() async throws {
 		let (_, _, queue, question) = try await setup()
@@ -52,7 +69,7 @@ struct MappingScreenTests {
 
 	@Test("the recorded answer stays current until another answer replaces it", arguments: [false, true])
 	func recordedAnswerIsCurrent(creating: Bool) async throws {
-		let (_, project, queue, question) = try await setup()
+		let (server, project, queue, question) = try await setup()
 		await queue.open(question.ref)
 		let draft = queue.mapping(question, creating: creating)
 		if !creating {
@@ -65,7 +82,11 @@ struct MappingScreenTests {
 		#expect(draft.isCurrent(recorded))
 		await queue.refresh()
 		#expect(draft.isCurrent(try #require(queue.current(question.ref))))
-		_ = try await project.answer(recorded, with: try #require(question.choices.first { $0.answer == "track" }))
+		// A separate API client deliberately replaces the decision, which the phone queue cannot do.
+		let replacement: [JSONValue] = try await server.write("decide", in: project.key, [
+			"q": .string(recorded.ref), "onEvidence": .string(recorded.evidenceHash), "answer": ["is": "track"],
+		])
+		#expect(replacement.first?["status"]?.string == "decided")
 		let replaced = try #require(try await project.question(question.ref))
 		#expect(replaced.decision?.label == "Track without a case")
 		#expect(!draft.isCurrent(replaced))
@@ -161,6 +182,8 @@ struct MappingScreenTests {
 		#expect(adopted.first?["status"]?.string == "decided")
 		#expect(await draft.submit() == false)
 		#expect(draft.notice?.contains("cannot be created and linked in one answer") == true)
+		#expect(draft.notice?.contains("need a connection") == false)
+		#expect(draft.notice?.contains("not saved in Unsent answers") == false)
 		#expect(!draft.locked && draft.reason == "Keep this work" && draft.tests.count == 1)
 	}
 

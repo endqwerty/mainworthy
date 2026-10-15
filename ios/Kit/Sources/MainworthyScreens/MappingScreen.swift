@@ -123,7 +123,11 @@ public final class MappingScreen {
 			return outcome.isDecided
 		} catch {
 			if case ClientError.refused = error { sent = nil }
-			notice = "Linking tests and creating cases need a connection. This answer is not saved in Unsent answers. " + error.shown + (sent != nil ? " Retry to learn the result of the same command. Your choices are kept here." : " Your choices are kept here.")
+			if sent != nil {
+				notice = "Linking tests and creating cases need a connection. This answer is not saved in Unsent answers. " + error.shown + " Retry to learn the result of the same command. Your choices are kept here."
+			} else {
+				notice = error.shown + " Your choices are kept here."
+			}
 			return false
 		}
 	}
