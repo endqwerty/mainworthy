@@ -15,7 +15,8 @@ the screen asks for a name and a password. The instance is `MAINWORTHY_INSTANCE`
 `mainworthy.com`, and a build from source names another in `Local.xcconfig` (`ios/README.md`, "Another instance").
 The screen tests pass the server they start as a launch argument, `-instance <address>`. The client is unchanged:
 `Instance` and `Server` reach any address, and a session the phone already holds for another instance still works
-until it is signed out.
+until it is signed out. When the server ends such a session, the sign-in form renews it on that instance, so the
+password goes where the session was opened and the screens that wait for it come back (the verifier's finding).
 
 **The guide stops telling a person how to point the app elsewhere.** The pages for whoever runs an instance stay
 (configuration, quickstart, your data): they are how someone who takes the code runs it, and the web UI is always

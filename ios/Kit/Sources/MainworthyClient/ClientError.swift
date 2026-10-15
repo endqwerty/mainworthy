@@ -26,7 +26,7 @@ public enum ClientError: Error, Equatable, Sendable {
 			}
 		case .refused(_, let message): message.prefix(1).uppercased() + message.dropFirst()
 		case .unreadable:
-			"The reply could not be read. Check the address, or install a newer build of the app: the server may be ahead of it."
+			"The reply could not be read. Install a newer build of the app: the server may be ahead of it."
 		}
 	}
 }
