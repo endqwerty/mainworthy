@@ -15,6 +15,8 @@ import {
 	actorByName,
 	addPasskey,
 	beginPasskey,
+	beginTotp,
+	confirmTotp,
 	createInvitation,
 	createPersonalToken,
 	credentialOwner,
@@ -61,9 +63,8 @@ function own(env: InstanceCtx, owner: number | null, what: string): void {
 }
 
 /** Where the caller is signed in, for a passkey registration; a caller with a token is refused. */
-function signedInAt(env: InstanceCtx): string {
-	if (env.context === null)
-		throw forbidden("a passkey is registered from a browser that is signed in, not with a token");
+function signedInAt(env: InstanceCtx, what = "a passkey"): string {
+	if (env.context === null) throw forbidden(`${what} is registered from a browser that is signed in, not with a token`);
 	return env.context;
 }
 
@@ -104,7 +105,7 @@ export const credentialOp = defineInstanceOp({
 	name: "credential",
 	output: REPLIES.credential,
 	summary:
-		"Your password, passkeys and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default.",
+		"Your password, passkeys, authenticator and CLI tokens: list, add or remove them. Only a person may call. A password is set in the web UI. A personal token is shown once and expires after 30d by default.",
 	input: CredentialInput,
 	needs: "self",
 	scope: "instance",
@@ -124,6 +125,16 @@ export const credentialOp = defineInstanceOp({
 			// context, and another session of the same person does not complete it. A token is no place to sign in
 			// from, so it begins and finishes none, as it sets no password: a way in that a script could add would
 			// outlive the token.
+			case "totp.begin":
+				return beginTotp(env.app, { actor: env.actor.id, context: signedInAt(env, "an authenticator") });
+			case "totp.confirm":
+				return confirmTotp(env.app, {
+					actor: env.actor.id,
+					session: env.session,
+					context: signedInAt(env, "an authenticator"),
+					challenge: input.challenge,
+					code: input.code,
+				});
 			case "passkey.begin":
 				return beginPasskey(env.app, { actor: env.actor.id, context: signedInAt(env) });
 			case "passkey.add":
@@ -158,7 +169,7 @@ export const credentialOp = defineInstanceOp({
 			}
 		}
 	},
-	secret: (input) => input.do === "token.create",
+	secret: (input) => input.do === "token.create" || input.do === "totp.begin" || input.do === "totp.confirm",
 });
 
 export const invitationOp = defineInstanceOp({

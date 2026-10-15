@@ -119,6 +119,12 @@ const Q = {
 	endById: sql<{ id: number; at: number; why: EndedWhy }>(
 		"UPDATE sessions SET ended_at = $at, ended_why = $why WHERE id = $id AND ended_at IS NULL",
 	),
+	endPasswordOf: sql<{ actor: number; at: number }>(
+		"UPDATE sessions SET ended_at = $at, ended_why = 'ended' WHERE actor = $actor AND ended_at IS NULL AND credential IN (SELECT id FROM credentials WHERE kind = 'password')",
+	),
+	endOthers: sql<{ actor: number; keep: number; at: number }>(
+		"UPDATE sessions SET ended_at = $at, ended_why = 'ended' WHERE actor = $actor AND id != $keep AND ended_at IS NULL",
+	),
 	endOf: sql<{ actor: number; at: number; why: EndedWhy }>(
 		"UPDATE sessions SET ended_at = $at, ended_why = $why WHERE actor = $actor AND ended_at IS NULL",
 	),
@@ -343,4 +349,12 @@ export function sweepSessions(app: App): { expired: number; deleted: number } {
 		}
 		return { expired, deleted: app.db.run(Q.drop, { before: now - KEPT_MS }).changes };
 	});
+}
+
+export function endOtherSessions(db: Db, actor: number, keep: number | null, at: number): number {
+	return db.run(Q.endOthers, { actor, keep: keep ?? 0, at }).changes;
+}
+
+export function endPasswordSessions(db: Db, actor: number, at: number): number {
+	return db.run(Q.endPasswordOf, { actor, at }).changes;
 }

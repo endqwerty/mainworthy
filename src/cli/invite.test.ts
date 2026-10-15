@@ -5,6 +5,8 @@ import { expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
+import { PersonalTokenCreated, TotpConfirmed, TotpEnrolment } from "../core/people.ts";
+import { totpCode } from "../server/identity/totp.ts";
 import { outputWith, withInstance } from "./test-support.ts";
 
 test("serve does not start with a public address it cannot use for passkeys, and says why before it opens the data", async () => {
@@ -131,4 +133,61 @@ test("with no public address the link is relative and the command says what to p
 		expect(listed.code).toBe(0);
 		expect(listed.stdout).toContain('"name": "sam"');
 	});
+});
+
+test("login completes TOTP with a recovery code and prints a personal token once", async () => {
+	await withInstance(
+		async ({ instance, directory, client, cli, run }) => {
+			instance.app.config.passwordCost = { memoryCost: 8, timeCost: 1 };
+			const password = "a private CLI passphrase";
+			const made = Invited.parse(await client.call("invitation", { do: "create", name: "cli-totp" }));
+			const post = (path: string, body: unknown, cookie?: string) =>
+				fetch(`${instance.url}${path}`, {
+					method: "POST",
+					headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+					body: JSON.stringify(body),
+				});
+			const accepted = await post("/api/login", { invitation: made.code, password });
+			const cookie = accepted.headers.getSetCookie()[0]?.split(";")[0];
+			const begun = TotpEnrolment.parse(
+				(await (await post("/api/credential", { do: "totp.begin" }, cookie)).json()).result,
+			);
+			const confirmed = TotpConfirmed.parse(
+				(
+					await (
+						await post(
+							"/api/credential",
+							{
+								do: "totp.confirm",
+								challenge: begun.challenge,
+								code: totpCode(begun.secret, Math.floor(Date.now() / 30_000)),
+							},
+							cookie,
+						)
+					).json()
+				).result,
+			);
+			const passwordFile = join(directory, "password");
+			const codeFile = join(directory, "recovery");
+			await Bun.write(passwordFile, `${password}\n`);
+			await Bun.write(codeFile, confirmed.recoveryCodes[0] ?? "");
+			const args = ["login", "--name", "cli-totp", "--password-file", passwordFile, "--code-file", codeFile, "--json"];
+			const signed = await cli(args);
+			expect(signed.code).toBe(0);
+			expect(signed.stderr).toBe("");
+			const token = outputWith(PersonalTokenCreated, signed);
+			expect(token.actor).toBe("cli-totp");
+			expect(signed.stdout).not.toContain(password);
+			expect(signed.stdout).not.toContain(begun.secret);
+			expect(signed.stdout).not.toContain(confirmed.recoveryCodes[0] ?? "no-code");
+			const me = await fetch(`${instance.url}/api/session`, { headers: { authorization: `Bearer ${token.token}` } });
+			expect(me.status).toBe(200);
+			expect((await me.json()).result.actor).toBe("cli-totp");
+			const reused = await run(args);
+			expect(reused.code).toBe(4);
+			expect(reused.stdout).toBe("");
+			expect(reused.stderr).toContain("that did not sign you in");
+		},
+		{ mode: "server" },
+	);
 });

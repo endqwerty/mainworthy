@@ -1,4 +1,4 @@
-// What a person signs in with: a password or a passkey. Owns the tables `credentials` and `passkey_users`.
+// What a person signs in with: a password, a passkey, or a TOTP second factor. Owns the tables `credentials` and `passkey_users`.
 //
 // A row is one secret and is never changed into another. A new password is a new row and the old one is
 // revoked, which erases what it held. A password's hash may be refreshed after a legacy sign-in, and a
@@ -9,7 +9,7 @@ import { z } from "zod";
 import { type Db, sql } from "../kernel/db.ts";
 import { ALGORITHMS, type Passkey } from "./webauthn.ts";
 
-export type CredentialKind = "password" | "passkey";
+export type CredentialKind = "password" | "passkey" | "totp";
 export type CredentialRow = {
 	id: number;
 	actor: number;
@@ -17,7 +17,7 @@ export type CredentialRow = {
 	/** A passkey's credential id. Null for a password. */
 	handle: string | null;
 	/**
-	 * A password's argon2id string, or a passkey's JSON (`StoredPasskey`). Empty once the row is revoked. It
+	 * A password's argon2id string, a passkey's JSON (`StoredPasskey`), or a TOTP secret, replay counter and recovery hashes. Empty once revoked. It
 	 * goes to the code that checks a sign-in and to nothing a caller of the server sees.
 	 */
 	data: string;
@@ -99,6 +99,17 @@ export function insertPassword(db: Db, input: { actor: number; hash: string; at:
 		at: input.at,
 	}).lastId;
 }
+
+export function insertTotp(db: Db, input: { actor: number; data: string; at: number }): number {
+	return db.run(Q.insert, { ...input, kind: "totp", handle: null, label: "Authenticator" }).lastId;
+}
+
+export function updateTotp(db: Db, row: CredentialRow, data: string, at: number): boolean {
+	return row.kind === "totp" && db.run(Q.counted, { id: row.id, was: row.data, data, at }).changes === 1;
+}
+
+export const liveTotp = (db: Db, actor: number): CredentialRow | null =>
+	liveCredentials(db, actor).find((row) => row.kind === "totp") ?? null;
 
 /** The row a credential id was registered under, at any time and whether or not it still works; else null. */
 export const passkeyByCredentialId = (db: Db, credentialId: string): CredentialRow | null =>

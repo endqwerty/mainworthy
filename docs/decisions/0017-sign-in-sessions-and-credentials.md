@@ -585,7 +585,9 @@ boundary, and no new operation or stored-data format is needed.
 
 ## Deferred
 
-Each of these is an issue and is not built in the four pull requests: OIDC (#114); TOTP (#115);
+TOTP second-factor enrolment, recovery codes, password sign-in and the admin requirement are built in [decision 0072](0072-password-second-factor.md).
+
+Each of these is an issue and is not built in the four pull requests: OIDC (#114);
 teams and roles for each project (#30); a chain of trusted proxies, and the two proxy settings on the owner's
 instance (#116); a person's own CLI token (#117); mail for invitations and recovery (#122).
 

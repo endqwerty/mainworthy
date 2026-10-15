@@ -181,6 +181,22 @@ $ mainworthy admin --json '{"do":"actor.forget","name":"dana"}'
 
 The raw operation remains available. The page and shorter command are described in [Forget a person](#forget-a-person).
 
+## Add an authenticator for password sign-in
+
+In Settings, open **Your sign-in**, then choose **Add an authenticator**.
+
+1. Scan the QR code with a TOTP authenticator, or enter the setup key by hand. Mainworthy generates the QR code on the instance without contacting another service.
+2. Enter the six-digit **Authenticator code** and choose **Confirm authenticator** within five minutes.
+3. Save the ten recovery codes somewhere private, then choose **I saved the recovery codes**. Mainworthy shows these codes once. Each code works once with your password.
+
+Your other sessions end when you confirm. Your current session stays signed in. The next password sign-in shows **One more step**. Enter a fresh authenticator code or an unused recovery code. The password alone opens no session. A passkey with user verification needs no extra code.
+
+Authenticator codes change every 30 seconds. Mainworthy allows the previous and next 30-second step for clock differences and refuses a code already used. Wait for a new code if you just confirmed enrolment. Wrong codes count toward the same failed-attempt limit as other sign-ins. Re-entering the right password does not clear failed-code attempts.
+
+The credential list identifies your authenticator without showing its setup key or recovery codes. **Remove** removes it and ends all your sessions. To replace lost recovery codes, remove the authenticator and enrol again from a session you can still open. Otherwise, ask the owner for a recovery invitation. An instance that requires a second factor for admins keeps an admin's authenticator while that person still has a password. An admin recovery invitation on such an instance must be accepted with a passkey.
+
+The [configuration](./configuration.md#require-a-second-factor-for-admins) page describes the admin requirement. The [command line](./cli.md#sign-in-with-a-password-and-a-code) also supports the second step. The current iPhone build explains when a second step is required and asks you to use the web app.
+
 ## Forget a person
 
 In Settings, open **People** and find **Forget a person** below the list of people.

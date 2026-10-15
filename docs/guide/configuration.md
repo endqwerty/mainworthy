@@ -37,6 +37,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_OWNER_TOKEN` | none | A token for the owner, 20 to 512 characters. Server mode needs one to sign in. |
 | `MAINWORTHY_SESSION_IDLE` | `14d` | How long a browser stays signed in without being used. A whole number and `h`, `d` or `w`: `12h`, `14d`, `2w`. |
 | `MAINWORTHY_SESSION_MAX` | `90d` | How long a browser stays signed in at most, however much it is used. The same form. |
+| `MAINWORTHY_REQUIRE_ADMIN_MFA` | `false` | `true` requires a second factor for password sign-in by anyone with `admin` on any project. See [require a second factor for admins](#require-a-second-factor-for-admins). Other nonempty values except `false` stop startup. |
 | `MAINWORTHY_PUBLIC_URL` | none | The address people open the instance at, such as `https://mainworthy.example`. A passkey belongs to its host name, and an invitation link starts with it. Without it there are no passkeys and `mainworthy invite` prints a link with no host. |
 | `MAINWORTHY_APPLE_APPS` | none | The iPhone apps whose sign-in screen the phone may offer the logins it keeps for this site, each as a team id and a bundle identifier (`ABCDE12345.com.mainworthy.app`), separated by commas. The server lists them at `/.well-known/apple-app-site-association`. Without it that address is not found. See [the iPhone app](./iphone.md#sign-in). |
 | `MAINWORTHY_TRUSTED_PROXY` | none | The addresses or CIDR ranges of the proxy in front, comma-separated. Set it together with the next one, or neither. |
@@ -199,3 +200,11 @@ The same file is the command line: `./dist/mainworthy gate`. The variables above
 - [People, agents and pipelines](./access.md) for the owner's token and other tokens.
 - [Your data](./data.md) for the data directory, backups and moving machines.
 - [What you can customize](./customize.md) for settings that are not environment variables.
+
+## Require a second factor for admins
+
+Set `MAINWORTHY_REQUIRE_ADMIN_MFA=true` and restart the instance. Before enabling it, give each admin a verified passkey or [enrol an authenticator](./access.md#add-an-authenticator-for-password-sign-in).
+
+A password with no enrolled authenticator then opens no admin session. A verified passkey still signs in without a code. An invitation that would sign an admin in must include a verified passkey. The owner can sign in with the owner token to enrol an authenticator when no other session is available. Tokens and local-owner access keep their existing authority.
+
+Each start with this setting ends every admin password session, including sessions that previously completed a second step. The admin signs in again. Giving `admin` to a person also ends their existing password sessions, so a session opened before the grant cannot acquire admin access without the second factor. Passkey sessions remain signed in.

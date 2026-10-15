@@ -2,6 +2,7 @@
 // in yet when most of them are called, and a password never goes through an operation (decision 0017). What a
 // refusal means to the page is for the page to say; these throw the `ApiError` as the server sent it.
 import { z } from "zod";
+import { PasswordEntry } from "../../core/people.ts";
 import { ApiError, exchange, session } from "./api.ts";
 import { clearDevicePerson, type DeviceSession, deviceSession } from "./device.ts";
 import { type Assertion, CreationOptions, type Registration, RequestOptions } from "./passkey.ts";
@@ -31,8 +32,11 @@ const signIn = async (body: SignIn): Promise<void> => {
 /** With a token: the owner, an instance with no people yet, and whoever was handed one. */
 export const signInWithToken = (token: string): Promise<void> => signIn({ token });
 
-export const signInWithPassword = (input: { name: string; password: string }): Promise<void> =>
-	signIn({ name: input.name, password: input.password });
+export const signInWithPassword = async (input: { name: string; password: string }): Promise<PasswordEntry> =>
+	PasswordEntry.parse(await exchange("/api/login", { body: { name: input.name, password: input.password } }));
+export const signInWithTotp = async (challenge: string, code: string): Promise<void> => {
+	await exchange("/api/login", { body: { challenge, code } });
+};
 
 /** With what `presentPasskey` returned for the options of `passkeySignInOptions`. */
 export const signInWithPasskey = (passkey: Assertion): Promise<void> => signIn({ passkey });

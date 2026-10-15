@@ -21,6 +21,10 @@ const Project = struct("Project", "A project the caller holds a grant on.", {
 	can: [list(text), "What the caller may do in this project."],
 });
 
+export const SignInReply = struct("SignInReply", "Whether a password completed sign-in or needs a second step.", {
+	signedIn: flag,
+});
+
 export const SessionInfo = struct("SessionInfo", "`GET /api/session`: who the caller is and what they may open.", {
 	actor: [text, "The caller's name."],
 	kind: text,
@@ -481,6 +485,7 @@ export const SuiteProposeReply = struct("SuiteProposeReply", "What came of creat
 
 /** Every shape the app decodes by name. `gen` writes one Swift type for each, and for each struct inside it. */
 export const SHAPES: readonly Shape[] = [
+	SignInReply,
 	SessionInfo,
 	Inbox,
 	...Object.values(EVIDENCE),

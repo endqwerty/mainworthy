@@ -14,7 +14,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { App, Config } from "../kernel/app.ts";
 import { type Db, sql } from "../kernel/db.ts";
-import { conflict, invalid, notFound } from "../kernel/errors.ts";
+import { conflict, forbidden, invalid, notFound, OpError } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
 import { CONTEXT, findChallenge, issueChallenge, spendChallenge } from "./challenges.ts";
 import {
@@ -24,17 +24,20 @@ import {
 	ensureUserHandle,
 	insertPasskey,
 	insertPassword,
+	insertTotp,
 	liveCredentials,
 	livePassword,
+	liveTotp,
 	noteCredentialUse,
 	passkeyByCredentialId,
 	rehashPassword,
 	revokeCredential,
 	revokeCredentialsOf,
 	storedPasskey,
+	updateTotp,
 	userHandleOf,
 } from "./credentials.ts";
-import { revokeTokensOf, type SignedIn } from "./identity.ts";
+import { hasAdminGrant, revokeTokensOf, type SignedIn } from "./identity.ts";
 import {
 	type InvitationPurpose,
 	type InvitationRow,
@@ -47,6 +50,7 @@ import {
 import { accountKey, addressKey, type LimiterAnswer } from "./limiter.ts";
 import { dummyHash, hashPassword, type PasswordMatch, PasswordWorkBusy, verifyPassword } from "./passwords.ts";
 import {
+	endOtherSessions,
 	endSession,
 	endSessionsOf,
 	endSessionsOn,
@@ -55,6 +59,17 @@ import {
 	openSessionOnCredential,
 	restSession,
 } from "./sessions.ts";
+import {
+	acceptTotp,
+	findTotp,
+	issueTotp,
+	newTotpSecret,
+	provisioning,
+	readTotp,
+	recoveryCodes,
+	secretHash,
+	spendTotp,
+} from "./totp.ts";
 import {
 	type Assertion,
 	type AssertionOptions,
@@ -151,6 +166,8 @@ export type WhyNot =
 	/** The person has no password that works. */
 	| "no-password"
 	| "wrong-password"
+	| "wrong-code"
+	| "second-factor-required"
 	/** Too many passwords are being checked at this moment. */
 	| "busy"
 	/** What was judged outside the gate was not what the commit found: changed, revoked, forgotten or imported over. */
@@ -272,7 +289,7 @@ export async function signInWithPassword(
 	app: App,
 	input: { name: string; password: string },
 	about: About,
-): Promise<Entry> {
+): Promise<Entry | { ok: true; secondFactor: { challenge: string; expiresAt: number }; ceremony: string }> {
 	const limiter = limiterOf(app);
 	const account = accountKey(input.name);
 	const keys = counted(addressKey(about.address), account);
@@ -306,6 +323,23 @@ export async function signInWithPassword(
 		const now = app.db.get(Q.personByName, { name: input.name });
 		const current = now ? livePassword(app.db, now.id) : null;
 		if (!now || !current || current.data !== stored.data) return no("changed-meanwhile");
+		const factor = liveTotp(app.db, now.id);
+		if (factor) {
+			const ceremony = newSessionSecret();
+			return {
+				ok: true,
+				secondFactor: issueTotp(app, {
+					kind: "sign-in",
+					name: now.name,
+					password: current.data,
+					rehashed,
+					factor: factor.id,
+					context: CONTEXT.browser(secretHash(ceremony)),
+				}),
+				ceremony,
+			} as const;
+		}
+		if (app.config.requireAdminMfa && hasAdminGrant(app.db, now.id)) return no("second-factor-required");
 		const opened = openOn(app, current, cookie, about);
 		if (!opened) throw new Stop(no("changed-meanwhile"));
 		if (rehashed === null) noteCredentialUse(app.db, current.id, app.now());
@@ -617,7 +651,16 @@ export function credentialOwner(db: Db, id: number): number | null {
 export function removeCredential(app: App, id: number): { removed: true; sessionsEnded: number } {
 	const row = credentialById(app.db, id);
 	if (!row || row.revoked_at !== null) throw notFound(`credential ${id}`);
-	if (liveCredentials(app.db, row.actor).length <= 1) {
+	if (
+		row.kind === "totp" &&
+		app.config.requireAdminMfa &&
+		hasAdminGrant(app.db, row.actor) &&
+		livePassword(app.db, row.actor)
+	)
+		throw forbidden(
+			"this instance requires a second factor for admins with a password; remove the password first to use only passkeys",
+		);
+	if (row.kind !== "totp" && liveCredentials(app.db, row.actor).filter((held) => held.kind !== "totp").length <= 1) {
 		const name = app.db.get(Q.nameOf, { id: row.actor })?.name ?? "this person";
 		throw invalid(
 			`this is the last way ${name} signs in, so it stays. Add a passkey or set a password first, then remove this one. If it is lost, an admin can make a recovery link (mainworthy invite new ${name})`,
@@ -625,7 +668,10 @@ export function removeCredential(app: App, id: number): { removed: true; session
 	}
 	const at = app.now();
 	revokeCredential(app.db, id, at);
-	return { removed: true, sessionsEnded: endSessionsOn(app.db, id, at) };
+	return {
+		removed: true,
+		sessionsEnded: row.kind === "totp" ? endSessionsOf(app.db, row.actor, at, "ended") : endSessionsOn(app.db, id, at),
+	};
 }
 
 // ── An invitation ──────────────────────────────────────────────────────────────────────────────────────────
@@ -794,6 +840,8 @@ export async function acceptInvitation(
 		const now = judge(app.db);
 		if (!now.ok) return now;
 		const { invitation, person, registration } = now;
+		if (!registration && app.config.requireAdminMfa && hasAdminGrant(app.db, person.id))
+			return no("second-factor-required");
 		// Who the browser holds, on committed rows and before anything is written: nothing else writes while this
 		// holds the gate. The name is the one that person has now.
 		const held = elsewhere(person);
@@ -827,4 +875,93 @@ export async function acceptInvitation(
 		if (registration) spendChallenge(app, registration.challenge);
 		return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } } as const;
 	});
+}
+
+const factorKey = (name: string): string => `totp:${name}`;
+function factorAttempt(app: App, name: string, address: string | null) {
+	const limiter = limiterOf(app);
+	const account = factorKey(name);
+	const keys = counted(addressKey(address), account);
+	const answer = limiter.check(keys, app.now());
+	return { limiter, account, keys, answer };
+}
+
+export async function signInWithTotp(
+	app: App,
+	input: { challenge: string; code: string; ceremony: string | null },
+	about: About,
+): Promise<Entry> {
+	const initial = findTotp(app, input.challenge, "sign-in");
+	if (!initial || input.ceremony === null || initial.context !== CONTEXT.browser(secretHash(input.ceremony)))
+		return byAddress(app, about.address).wrong(no("challenge"));
+	const attempt = factorAttempt(app, initial.name, about.address);
+	if (attempt.answer.kind === "blocked") return waiting(attempt.answer);
+	const cookie = newSessionSecret();
+	return commit(app, () => {
+		const held = findTotp(app, input.challenge, "sign-in");
+		if (!held || held !== initial) return no("challenge");
+		const person = app.db.get(Q.personByName, { name: held.name });
+		const password = person ? livePassword(app.db, person.id) : null;
+		const factor = person ? liveTotp(app.db, person.id) : null;
+		if (!password || password.data !== held.password || !factor || factor.id !== held.factor)
+			return no("changed-meanwhile");
+		const currentLimit = attempt.limiter.check(attempt.keys, app.now());
+		if (currentLimit.kind === "blocked") return waiting(currentLimit);
+		const stored = readTotp(factor.data);
+		const next = stored ? acceptTotp(stored, input.code, app.now()) : null;
+		if (!next) {
+			attempt.limiter.failed(attempt.keys, app.now());
+			return no("wrong-code");
+		}
+		const opened = openOn(app, password, cookie, about);
+		if (!opened || !updateTotp(app.db, factor, JSON.stringify(next), app.now()))
+			throw new Stop(no("changed-meanwhile"));
+		if (held.rehashed === null) noteCredentialUse(app.db, password.id, app.now());
+		else if (!rehashPassword(app.db, password, held.rehashed, app.now())) throw new Stop(no("changed-meanwhile"));
+		spendTotp(app, input.challenge);
+		attempt.limiter.succeeded([attempt.account]);
+		about.proven?.();
+		return { ok: true, signedIn: { cookie, expiresAt: opened.expiresAt } } as const;
+	});
+}
+
+export function beginTotp(app: App, input: { actor: number; context: string }) {
+	const person = mustBePerson(app.db, input.actor);
+	if (liveTotp(app.db, person.id))
+		throw conflict("an authenticator is enrolled already; remove it before enrolling another");
+	const secret = newTotpSecret();
+	return {
+		...issueTotp(app, { kind: "enrol", actor: person.id, name: person.name, context: input.context, secret }),
+		...provisioning(secret, person.name),
+	};
+}
+
+export function confirmTotp(
+	app: App,
+	input: { actor: number; session: number | null; context: string; challenge: string; code: string },
+) {
+	const person = mustBePerson(app.db, input.actor);
+	const held = findTotp(app, input.challenge, "enrol");
+	if (!held || held.actor !== person.id || held.name !== person.name || held.context !== input.context)
+		throw invalid("this authenticator enrolment ended; begin again in the same session");
+	if (liveTotp(app.db, person.id)) throw conflict("an authenticator is enrolled already");
+	const attempt = factorAttempt(app, person.name, null);
+	if (attempt.answer.kind === "blocked")
+		throw new OpError("limited", `wait ${attempt.answer.retryAfterSeconds} seconds before trying another code`);
+	const stored = acceptTotp({ secret: held.secret, lastStep: -1, recovery: [] }, input.code, app.now());
+	if (!stored) {
+		attempt.limiter.failed(attempt.keys, app.now());
+		throw invalid("that authenticator code was not accepted");
+	}
+	const recovery = recoveryCodes();
+	const at = app.now();
+	const id = insertTotp(app.db, {
+		actor: person.id,
+		data: JSON.stringify({ ...stored, recovery: recovery.hashes }),
+		at,
+	});
+	const sessionsEnded = endOtherSessions(app.db, person.id, input.session, at);
+	spendTotp(app, input.challenge);
+	attempt.limiter.succeeded([attempt.account]);
+	return { id, recoveryCodes: recovery.codes, sessionsEnded };
 }

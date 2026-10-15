@@ -4,6 +4,11 @@
 /// not here. Nothing outside this module sees these types: each is turned into one of the app's own where
 /// it is decoded.
 enum Wire {
+	/// Whether a password completed sign-in or needs a second step.
+	struct SignInReply: Decodable, Equatable, Sendable {
+		let signedIn: Bool
+	}
+
 	/// A project the caller holds a grant on.
 	struct Project: Decodable, Equatable, Sendable {
 		let key: String

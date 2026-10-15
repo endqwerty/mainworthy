@@ -50,6 +50,7 @@ export type Config = {
 	 * (`publicAddress` in the identity module, which knows what a browser takes).
 	 */
 	publicUrl?: string;
+	requireAdminMfa?: boolean;
 	/**
 	 * The iPhone apps whose sign-in screen may be offered the logins a phone keeps for this instance's site:
 	 * `MAINWORTHY_APPLE_APPS`, each a team id and a bundle identifier (`ABCDE12345.com.mainworthy.app`). They are
@@ -280,6 +281,7 @@ export function defaultConfig(env: Record<string, string | undefined>): Config {
 		proxy: proxyOf(env),
 		...(env.MAINWORTHY_PUBLIC_URL ? { publicUrl: env.MAINWORTHY_PUBLIC_URL } : {}),
 		appleApps: appleAppsOf(env),
+		requireAdminMfa: adminMfaOf(env),
 		...githubOf(env),
 	};
 }
@@ -306,4 +308,11 @@ function githubOf(env: Record<string, string | undefined>): Pick<Config, "github
 		throw new Error("MAINWORTHY_GITHUB_REPOSITORY must be owner/repository on github.com.");
 	if (!/^[!-~]{1,512}$/.test(token)) throw new Error("MAINWORTHY_GITHUB_TOKEN must be a token without whitespace.");
 	return { github: { project, repository, token }, ...(statuses === "1" ? { githubStatuses: true } : {}) };
+}
+
+function adminMfaOf(env: Record<string, string | undefined>): boolean {
+	const value = env.MAINWORTHY_REQUIRE_ADMIN_MFA;
+	if (value === undefined || value === "" || value === "false") return false;
+	if (value === "true") return true;
+	throw new Error("MAINWORTHY_REQUIRE_ADMIN_MFA must be true or false");
 }

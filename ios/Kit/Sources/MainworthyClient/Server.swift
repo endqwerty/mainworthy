@@ -82,7 +82,9 @@ package final class Server: Sendable {
 			switch proof {
 			case .password(let name, let password): ["name": .string(name), "password": .string(password)]
 			}
-		let (_, response) = try await send("POST", "/api/login", body: body, attempts: 1, asSignedIn: false)
+		let (data, response) = try await send("POST", "/api/login", body: body, attempts: 1, asSignedIn: false)
+		guard let reply = try? JSONDecoder().decode(Body<Wire.SignInReply>.self, from: data) else { throw ClientError.unreadable }
+		guard reply.result.signedIn else { throw ClientError.secondFactorUnsupported }
 		guard let given = Server.sessionCookie(in: response) else { throw ClientError.unreadable }
 		cookie.withLock { $0 = given }
 		Server.store.withLock { _ in

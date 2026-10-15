@@ -1,6 +1,9 @@
 // A person gets in and out through the pages: an invitation accepted with a password, sign-out from the shell,
 // and the sign-in page with a name and a password. The owner's token still signs a browser in from the same page.
+
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { z } from "zod";
+import { totpCode } from "../../src/server/identity/totp.ts";
 import { advanceClock, browserAvailable, openPage, type PageHarness, type Server, startServer } from "./support.ts";
 
 let server: Server;
@@ -824,6 +827,64 @@ test.skipIf(!browserAvailable)(
 		} finally {
 			await browser?.close();
 			await local.stop();
+		}
+	},
+	30_000,
+);
+
+test.skipIf(!browserAvailable)(
+	"Settings enrols TOTP and password sign-in waits for an authenticator or recovery code",
+	async () => {
+		const password = "the browser TOTP password";
+		const made = await server.api("invitation", { do: "create", name: "totp-browser", can: ["read"] });
+		if (!("code" in made)) throw new Error("no invitation");
+		await fetch(`${server.url}/api/login`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ invitation: made.code, password }),
+		});
+		const browser = await openPage(server, { path: "/p/scratch/settings", as: { name: "totp-browser", password } });
+		try {
+			const { page, context } = browser;
+			page.setDefaultTimeout(5000);
+			await page.getByRole("option", { name: "Your sign-in", exact: true }).click();
+			await page.getByRole("button", { name: "Add an authenticator", exact: true }).click();
+			await page.getByRole("img", { name: "Authenticator QR code", exact: true }).waitFor();
+			const secret = await page.getByTestId("totp-setup-key").innerText();
+			const clockReply = await fetch(`${server.url}/test/clock`, {
+				method: "POST",
+				headers: { authorization: `Bearer ${server.token}`, "content-type": "application/json" },
+				body: JSON.stringify({ advanceMs: 0 }),
+			});
+			const ahead = z.object({ result: z.object({ ahead: z.number() }) }).parse(await clockReply.json()).result.ahead;
+			await page
+				.getByLabel("Authenticator code", { exact: true })
+				.fill(totpCode(secret, Math.floor((Date.now() + ahead) / 30_000)));
+			await page.getByRole("button", { name: "Confirm authenticator", exact: true }).click();
+			const recoveryCodes = page.getByRole("list", { name: "Recovery codes", exact: true });
+			await recoveryCodes.waitFor();
+			const recovery = await recoveryCodes.locator("li").first().innerText();
+			expect(await recoveryCodes.locator("li").count()).toBe(10);
+			await page.getByRole("button", { name: "I saved the recovery codes", exact: true }).click();
+			await recoveryCodes.waitFor({ state: "detached" });
+			expect(await page.getByRole("button", { name: "Remove the password", exact: true }).isDisabled()).toBe(true);
+			await page.getByRole("button", { name: "Sign out", exact: true }).click();
+			await page.getByRole("button", { name: "Sign out and keep drafts", exact: true }).click();
+			await page.locator("#signin-name").fill("totp-browser");
+			await page.locator("#signin-password").fill(password);
+			await page.getByRole("button", { name: "Sign in", exact: true }).click();
+			await page.getByRole("heading", { name: "One more step", exact: true }).waitFor();
+			expect((await context.cookies()).some((cookie) => cookie.name === "mainworthy_sid")).toBe(false);
+			await page.getByLabel("Authenticator or recovery code", { exact: true }).fill("bad-code");
+			await page.getByRole("button", { name: "Verify code", exact: true }).click();
+			await page.getByRole("status").filter({ hasText: "That code did not sign you in." }).waitFor();
+			expect(await page.getByLabel("Authenticator or recovery code", { exact: true }).inputValue()).toBe("bad-code");
+			await page.getByLabel("Authenticator or recovery code", { exact: true }).fill(recovery);
+			await page.getByRole("button", { name: "Verify code", exact: true }).click();
+			await page.locator("#app").waitFor();
+			expect(browser.errors).toEqual([]);
+		} finally {
+			await browser.close();
 		}
 	},
 	30_000,

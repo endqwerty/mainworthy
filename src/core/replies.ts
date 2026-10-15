@@ -23,6 +23,8 @@ import {
 	PersonalTokenCreated,
 	PersonalTokenRow,
 	SessionRow,
+	TotpConfirmed,
+	TotpEnrolment,
 } from "./people.ts";
 import { Obligation, TargetMatch, Verdict } from "./runs.ts";
 import { TeamReply, TeamSource } from "./teams.ts";
@@ -374,6 +376,8 @@ export const AdminReply = z.union([
 ]);
 export const SessionReply = z.union([z.array(SessionRow), z.looseObject({ ended: z.literal(true), current: flag })]);
 export const CredentialReply = z.union([
+	TotpEnrolment,
+	TotpConfirmed,
 	z.array(CredentialRow),
 	PersonalTokenCreated,
 	z.array(PersonalTokenRow),

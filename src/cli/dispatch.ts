@@ -10,6 +10,7 @@ import { getCommand } from "./commands/get.ts";
 import { healthCommand } from "./commands/health.ts";
 import { importCommand } from "./commands/import.ts";
 import { inviteCommand } from "./commands/invite.ts";
+import { loginCommand } from "./commands/login.ts";
 import { mcpCommand } from "./commands/mcp.ts";
 import { newCommand } from "./commands/new.ts";
 import { openCommand } from "./commands/open.ts";
@@ -27,6 +28,7 @@ import { line } from "./output.ts";
 export const ADAPTER_COMMANDS: ReadonlyMap<string, AdapterCommand> = new Map(
 	[
 		reportCommand,
+		loginCommand,
 		gateCommand,
 		tokenCommand,
 		inviteCommand,
@@ -126,7 +128,10 @@ export async function runCli(argv: readonly string[], ui: unknown): Promise<numb
 		return 0;
 	}
 	const client = new Client(
-		clientOptions(args, name === "health" || name === "fmt" || name === "version" ? "none" : "token"),
+		clientOptions(
+			args,
+			name === "login" || name === "health" || name === "fmt" || name === "version" ? "none" : "token",
+		),
 	);
 	if (generated && (!adapter || hasJsonInput(tokens) || machineOnly(adapter, args)))
 		return runGenerated(generated, args, client);

@@ -23,6 +23,7 @@ import {
 	SessionEnd,
 	SessionInfo,
 	SessionRow,
+	SignInReply,
 } from "../scripts/ios/contract.ts";
 import { type TestInstance, testInstance } from "../scripts/ios/instance.ts";
 import { mismatches, type Shape } from "../scripts/ios/shape.ts";
@@ -111,6 +112,7 @@ describe("what the iOS app reads", () => {
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify(server.person),
 		});
+		holds("POST /api/login", SignInReply, (await signedIn.json()).result);
 		const cookie = (signedIn.headers.getSetCookie()[0] ?? "").split(";")[0] ?? "";
 		// The app reads the cookie from the header as text: this is the pattern it looks for (`Server.swift`).
 		expect(cookie).toMatch(/^mainworthy_sid=[A-Za-z0-9_-]{43}$/);

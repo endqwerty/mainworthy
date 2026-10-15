@@ -6,6 +6,8 @@ import { Glob } from "bun";
 import { PASSWORD_LENGTH, whyNotPassword } from "../../core/people.ts";
 import { dummyHash, hashPassword, PasswordWorkBusy, verifyPassword } from "./passwords.ts";
 
+import { acceptTotp, totpCode } from "./totp.ts";
+
 const CHEAP = { memoryCost: 8, timeCost: 1 };
 
 describe("what a password may be", () => {
@@ -145,4 +147,23 @@ describe("how many at once", () => {
 		spies.splice(0)[0]?.mockRestore();
 		expect(await hashPassword("x".repeat(12), CHEAP)).toMatch(/^\$argon2id\$/);
 	});
+});
+
+test("TOTP matches RFC 6238 SHA-1 vectors at six digits and refuses replay", () => {
+	const secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+	for (const [seconds, code] of [
+		[59, "287082"],
+		[1111111109, "081804"],
+		[1111111111, "050471"],
+		[1234567890, "005924"],
+		[2000000000, "279037"],
+		[20000000000, "353130"],
+	] as const)
+		expect(totpCode(secret, Math.floor(seconds / 30))).toBe(code);
+	const stored = { secret, lastStep: -1, recovery: [] };
+	const accepted = acceptTotp(stored, "287082", 59_000);
+	expect(accepted?.lastStep).toBe(1);
+	if (!accepted) throw new Error("no TOTP accepted");
+	expect(acceptTotp(accepted, "287082", 59_000)).toBeNull();
+	for (const code of ["28708", "2870820", " 287082", "abcdef"]) expect(acceptTotp(stored, code, 59_000)).toBeNull();
 });

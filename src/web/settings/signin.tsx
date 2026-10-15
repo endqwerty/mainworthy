@@ -8,6 +8,7 @@ import { addPasskey, beginPasskey, listCredentials, removeCredential } from "../
 import { NO_ANSWER, setPassword, signInMethods } from "../lib/signin.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, PASSWORD_RULES, PasswordCount, SectionHeading } from "../ui/index.tsx";
+import { Authenticator } from "./authenticator.tsx";
 import { saidBy, useList, withId } from "./list.ts";
 import { YourTokens } from "./personal-tokens.tsx";
 import "./people.css";
@@ -28,7 +29,7 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
 	const [message, setMessage] = useState("");
 	const rows = credentials.data ?? [];
 	// The server keeps a person's last way of signing in, whoever asks. The button says so before it is pressed.
-	const onlyOne = rows.length === 1;
+	const onlyOne = rows.filter((row) => row.kind !== "totp").length === 1;
 	/** The list, and what the session says of it. A session that rested on what was removed ends here. */
 	const changed = (): Promise<void> => Promise.all([credentials.refetch(), refreshSession()]).then(() => {});
 
@@ -82,6 +83,8 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
 			)}
 			{methods.data?.passkey && !passkeysAvailable() && <p className="dim">This browser has no passkeys.</p>}
 			{methods.data?.passkey && passkeysAvailable() && <PasskeyForm onAdded={changed} />}
+			<SectionHeading>Authenticator</SectionHeading>
+			<Authenticator enrolled={rows.some((row) => row.kind === "totp")} onChanged={changed} />
 			<SectionHeading>Ways you sign in</SectionHeading>
 			{credentials.error && <p role="status">{saidBy(credentials.error)}</p>}
 			{rows.map((row) => {
@@ -101,7 +104,7 @@ export function YourSignIn({ passwordRef }: { passwordRef: RefObject<HTMLInputEl
 						<button
 							className="out"
 							type="button"
-							disabled={onlyOne}
+							disabled={onlyOne && row.kind !== "totp"}
 							aria-disabled={removing.has(row.id)}
 							aria-label={`Remove ${row.kind === "password" ? "the password" : row.label}`}
 							onClick={() => remove(row)}

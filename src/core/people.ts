@@ -94,6 +94,12 @@ export const CredentialInput = z.discriminatedUnion("do", [
 		actor: actor.optional().describe("Whose. Absent: your own. Somebody else's is for an admin who is a person."),
 	}),
 	z.object({ do: z.literal("passkey.begin") }),
+	z.strictObject({ do: z.literal("totp.begin") }),
+	z.strictObject({
+		do: z.literal("totp.confirm"),
+		challenge: z.string().min(1).max(128),
+		code: z.string().regex(/^\d{6}$/),
+	}),
 	z.object({
 		do: z.literal("passkey.add"),
 		passkey: z
@@ -132,7 +138,7 @@ export type CredentialInput = z.infer<typeof CredentialInput>;
 /** One way a person signs in. Never the hash, the key or the passkey's credential id. */
 export const CredentialRow = z.object({
 	id: z.number(),
-	kind: z.enum(["password", "passkey"]),
+	kind: z.enum(["password", "passkey", "totp"]),
 	label: z.string(),
 	createdAt: z.number(),
 	lastUsedAt: z.number().nullable(),
@@ -211,3 +217,23 @@ export const CredentialSummary = z.object({
 	passkeys: z.number(),
 });
 export type CredentialSummary = z.infer<typeof CredentialSummary>;
+
+export const TotpEnrolment = z.object({
+	challenge: z.string(),
+	expiresAt: z.number(),
+	secret: z.string(),
+	uri: z.string(),
+	qr: z.object({ size: z.number().int().positive(), path: z.string() }),
+});
+export type TotpEnrolment = z.infer<typeof TotpEnrolment>;
+export const TotpConfirmed = z.object({
+	id: z.number().int(),
+	recoveryCodes: z.array(z.string()),
+	sessionsEnded: z.number().int(),
+});
+export type TotpConfirmed = z.infer<typeof TotpConfirmed>;
+export const PasswordEntry = z.union([
+	z.object({ signedIn: z.literal(true) }),
+	z.object({ signedIn: z.literal(false), secondFactor: z.object({ challenge: z.string(), expiresAt: z.number() }) }),
+]);
+export type PasswordEntry = z.infer<typeof PasswordEntry>;
