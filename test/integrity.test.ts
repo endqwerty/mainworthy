@@ -2465,16 +2465,18 @@ describe("what a decision may change", () => {
 			"SELECT result, decision, class, expires_at FROM result_excuses",
 		);
 		expect(before).toHaveLength(1);
-		const earlier = MIGRATIONS.find((migration) => migration.version === 13);
-		if (!earlier) throw new Error("missing migration 13");
+		const earlier = MIGRATIONS.find((migration) => migration.name === "result_excuses");
+		const slots = MIGRATIONS.find((migration) => migration.name === "slot_excuses");
+		if (!earlier || !slots) throw new Error("missing the result or slot excuse migration");
 		h.app.db.exec("DROP TABLE result_excuses; DROP INDEX changes_base;");
 		h.app.db.exec(earlier.sql);
 		for (const row of before)
 			h.app.db.raw
 				.query("INSERT INTO result_excuses (result, decision, class, expires_at) VALUES (?, ?, ?, ?)")
 				.run(row.result, row.decision, row.class, row.expires_at);
-		h.app.db.raw.query("UPDATE meta SET value = '13' WHERE key = 'schema_version'").run();
-		expect(migrate(h.app.db, ":memory:")).toMatchObject({ from: 13, to: 14 });
+		// Only the slot migration runs: the tables of migrations between the two are already here.
+		h.app.db.raw.query("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(slots.version - 1));
+		expect(migrate(h.app.db, ":memory:")).toMatchObject({ from: slots.version - 1, to: slots.version });
 		expect(rows("SELECT result, decision, class, expires_at, slot FROM result_excuses")).toEqual(
 			before.map((row) => ({ ...row, slot: null })),
 		);
