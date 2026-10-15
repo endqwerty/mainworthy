@@ -17,6 +17,7 @@ import { OP_LIST, OPS } from "../src/server/ops/index.ts";
 import { invoke } from "../src/server/ops/registry.ts";
 import { Readers } from "../src/server/readers.ts";
 import { type Instance, open, start } from "../src/server/start.ts";
+import type { TrackerPort } from "../src/server/trackers/port.ts";
 import { PATIENCE, type Patience, sessionOf } from "../src/surfaces/http.ts";
 import { authenticator } from "./people-support.ts";
 
@@ -254,7 +255,7 @@ const lanAddress = Object.values(networkInterfaces())
 	.flat()
 	.find((entry) => entry?.family === "IPv4" && !entry.internal)?.address;
 
-function bootReaders(count: number, patience: Patience = PATIENCE): Instance {
+function bootReaders(count: number, patience: Patience = PATIENCE, trackerPort?: TrackerPort): Instance {
 	const dataDir = mkdtempSync(join(tmpdir(), "mainworthy-http-readers-"));
 	dirs.push(dataDir);
 	const instance = start(
@@ -270,7 +271,7 @@ function bootReaders(count: number, patience: Patience = PATIENCE): Instance {
 			proxy: null,
 		},
 		() => ({ ui: null }),
-		{ readers: count, patience },
+		{ readers: count, patience, ...(trackerPort ? { trackerPort } : {}) },
 	);
 	running.push(instance);
 	return instance;
@@ -367,7 +368,10 @@ describe("graceful stop", () => {
 
 describe("reads on other cores through HTTP", () => {
 	test("every registered read has the same reply as inline, including refusals", async () => {
-		const instance = bootReaders(2);
+		const noNetwork = async () => {
+			throw new Error("Tracker network is disabled in this test.");
+		};
+		const instance = bootReaders(2, PATIENCE, { createDefect: noNetwork, getItem: noNetwork });
 		const pool = readersOf(instance);
 		await pool.ready();
 		await post(instance, "/api/p/scratch/propose", {
@@ -391,6 +395,23 @@ describe("reads on other cores through HTTP", () => {
 				},
 			],
 		});
+		instance.app.config.github = {
+			project: "scratch",
+			repository: "example/shop",
+			token: "test-tracker-credential",
+		};
+		const failed = instance.app.db.raw
+			.query<{ id: number }, []>("SELECT id FROM results WHERE outcome = 'fail' LIMIT 1")
+			.get();
+		expect(
+			(
+				await post(instance, "/api/p/scratch/tracker", {
+					do: "create",
+					result: failed?.id,
+					cmd: "tracker-read-01",
+				})
+			).body,
+		).toMatchObject({ ok: true, result: { state: "queued" } });
 		const inputs: Record<string, unknown[]> = {
 			get: [{ refs: ["C-1", "T-1", "R-1", "P-1"] }, { refs: ["C-1"], as: "md" }, { refs: [] }],
 			find: [{}, { in: "folders" }, { in: "tests" }, { folder: "checkout" }, { text: "revised" }],
@@ -402,6 +423,7 @@ describe("reads on other cores through HTTP", () => {
 			timeline: [{ ref: "C-1" }],
 			check: [{}],
 			command: [{ cmd: "edit-0001" }, { cmd: "never-sent" }],
+			"tracker-status": [{ id: "tracker-read-01" }, { id: "not-a-request" }, {}],
 		};
 		const reads = OP_LIST.filter((op) => op.effect === "read");
 		expect(Object.keys(inputs).sort()).toEqual(reads.map((op) => op.name).sort());

@@ -42,7 +42,7 @@ const ConstraintError = z.object({ code: z.string().startsWith("SQLITE_CONSTRAIN
 type Table = { name: string; columns: string[]; primary: string[]; parents: string[] };
 
 /**
- * The tables an archive never holds. All but the last keep what lets somebody in. A token's, a session's and an
+ * The tables an archive never holds. Identity tables keep what lets somebody in. A token's, a session's and an
  * invitation's row holds the hash of a secret; a credential's holds a password's hash or a passkey's public key;
  * `passkey_users` holds the handle a person's passkeys are filed under. An export leaves them out and an import
  * empties them, in this order, so a table comes before the one it refers to. This one list serves both, and
@@ -52,6 +52,8 @@ type Table = { name: string; columns: string[]; primary: string[]; parents: stri
  * `change_ends` says which changes have ended (decision 0022), and it does not travel either: a change that
  * arrives in an archive is open, and the questions that were closed when it ended stay closed. Exported, the
  * table would raise the archive version and refuse every archive taken before it.
+ * `tracker_requests` is delivery state for this instance only. Importing it must never send an issue again.
+ * Tracker credentials are process configuration and never enter a table or archive.
  */
 export const UNEXPORTED: readonly string[] = [
 	"sessions",
@@ -60,6 +62,7 @@ export const UNEXPORTED: readonly string[] = [
 	"passkey_users",
 	"tokens",
 	"change_ends",
+	"tracker_requests",
 ];
 
 /** The row counts describe exported data, excluding migration metadata, credentials and the search index. */

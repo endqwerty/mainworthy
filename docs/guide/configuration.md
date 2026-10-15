@@ -43,6 +43,9 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | none | The header in which that proxy reports the visitor's address. Believed only on a connection from a proxy named above. |
 | `MAINWORTHY_READERS` | the CPU count minus 2, at least 1 and at most 8 | How many reader threads answer reads, from `0` to `8`. `0` answers them on the main thread. |
 | `MAINWORTHY_COMMIT` | none | The commit this server was built from, which `/healthz` reports. 40 lower-case hexadecimal characters, or it reads as unknown. Without it the server reads `SOURCE_COMMIT`. |
+| `MAINWORTHY_GITHUB_PROJECT` | none | The project allowed to send defects to GitHub Issues. Set all three GitHub variables together. |
+| `MAINWORTHY_GITHUB_REPOSITORY` | none | The destination on github.com, written `owner/repository`. Requests cannot choose another repository. |
+| `MAINWORTHY_GITHUB_TOKEN` | none | A token the operator provides for that repository, with Issues write permission. Keep it in the server's secret environment, outside the repository. It is never stored in the database or an archive. |
 
 A value outside the whole numbers `0` through `8` for `MAINWORTHY_READERS` stops the start with `invalid: MAINWORTHY_READERS must be an integer between 0 and 8`. A session lifetime that is not a duration stops the start too, with a line that names the variable. So does an entry of `MAINWORTHY_APPLE_APPS` that is not a team id and a bundle identifier, and a `MAINWORTHY_PUBLIC_URL` that is not such an address: write `https` and a host name with nothing after it, or `http://localhost` with its port. An IP address and plain `http` anywhere else are refused because no browser makes a passkey there. A path and a query are refused because the server wants the root address of the instance.
 
@@ -53,6 +56,8 @@ The first start creates the data directory, one owner and a project named `scrat
 A reader thread that fails to start retries after 100 ms, then doubles the wait up to 30 seconds. A thread that becomes ready resets that wait. Reads use ready threads or run inline when none is ready. The server starts without waiting for the full pool.
 
 With reader threads enabled, a background thread checkpoints the write-ahead log every half second. The writer keeps its 20,000-page automatic checkpoint fallback. After readers move on and a checkpoint completes, log reuse trims the file to at most 4 MiB. This retention limit does not change checkpoint timing or cap growth during active snapshots and large transactions. See [data and backups](./data.md).
+
+GitHub Issues is optional and currently supports one repository for one project per instance. It is available through the API and command line. See [create or link a GitHub defect](./decide.md#create-or-link-a-github-defect). A partial or malformed GitHub configuration stops the server with a message that names the variables without quoting the token.
 
 Every start gives the owner named by `MAINWORTHY_OWNER` every capability. The owner is a person: the server does not start when the name belongs to an agent, a pipeline or a person who was forgotten on this instance, or starts with `forgotten-`. If you change the name later, you get a second owner, and the first one keeps its grant. Remove its grant with `mainworthy actor ungrant`. To give the same person a new name instead, [rename the owner](#rename-the-owner). The first one keeps its tokens too, except the one that came from `MAINWORTHY_OWNER_TOKEN` when you set that variable to a new value: see the next paragraph.
 

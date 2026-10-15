@@ -16,6 +16,8 @@ import { type Actor, allProjects } from "./kernel/ctx.ts";
 import { lockInstance } from "./kernel/instance-lock.ts";
 import { createProject } from "./ops/admin.ts";
 import { Readers, readerCount } from "./readers.ts";
+import type { TrackerPort } from "./trackers/port.ts";
+import { deliverTrackerRequests, waitTrackerRequests } from "./trackers/requests.ts";
 
 export type Instance = {
 	app: App;
@@ -65,7 +67,13 @@ export function start(
 	config: Config,
 	extra: (app: App, owner: Actor) => Extra,
 	/** `now` is the instance's clock: a test passes its own, so nothing in it has to wait for time to pass. */
-	options: { firstProject?: string; readers?: number; patience?: Patience; now?: () => number } = {},
+	options: {
+		firstProject?: string;
+		readers?: number;
+		patience?: Patience;
+		now?: () => number;
+		trackerPort?: TrackerPort;
+	} = {},
 ): Instance {
 	validateBootstrap(config);
 	const count = readerCount({
@@ -106,12 +114,14 @@ export function start(
 			["writing last uses", flushUses(app)],
 			["ending expired sessions", app.gate.run(() => sweepSessions(app))],
 			["deleting old sign-in records", app.gate.run(() => sweepSignInRecords(app))],
+			["sending tracker requests", deliverTrackerRequests(app, options.trackerPort)],
 		] as const;
 		for (const [name, job] of jobs) {
 			await job.catch((error: unknown) => console.error(`[mainworthy] ${name} failed:`, error));
 		}
 	};
 	const timer = setInterval(() => void minute(), 60_000);
+	timer.unref();
 	const url = `http://${config.host === "0.0.0.0" || config.host === "::" ? "localhost" : config.host}:${server.port}`;
 	let stopping: Promise<void> | null = null;
 	return {
@@ -122,6 +132,7 @@ export function start(
 			stopping ??= (async () => {
 				clearInterval(timer);
 				await server.stop();
+				await waitTrackerRequests(app);
 				await app.readers?.stop();
 				// No request is being served any more. What was noted since the last minute is written, so a
 				// session used a moment ago is not found idle by the next start.

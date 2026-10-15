@@ -108,6 +108,7 @@ describe("the module map", () => {
 				"server/runs",
 			],
 			"server/transfer": ["server/kernel", "server/suite"],
+			"server/trackers": ["server/kernel", "server/evidence", "server/suite"],
 		};
 		const offenders: string[] = [];
 		for (const file of files) {
@@ -166,6 +167,7 @@ describe("the module map", () => {
 		],
 		"server/runs": ["runs", "run_tests", "slots", "slot_results", "depends_on"],
 		"server/decisions": ["questions", "question_refs", "answers", "decisions"],
+		"server/trackers": ["tracker_requests"],
 	};
 
 	test("a module runs SQL only on the tables it owns", () => {
@@ -225,9 +227,9 @@ describe("the module map", () => {
 		// an export carries what signs somebody in.
 		const exported = ["orgs", "actors", "grants"];
 		const identity = owners["server/identity"] ?? [];
-		// One table an archive leaves out holds no secret: which changes have ended (decision 0022). It is left
-		// out so that the archive version, and every archive taken before it, stays as it is.
-		const other = ["change_ends"];
+		// Change endings preserve the old archive version. Tracker delivery belongs to this instance and must
+		// never replay after import. Neither table holds credentials.
+		const other = ["change_ends", "tracker_requests"];
 		expect(UNEXPORTED.filter((table) => !other.includes(table)).sort()).toEqual(
 			identity.filter((table) => !exported.includes(table)).sort(),
 		);

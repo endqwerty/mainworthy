@@ -133,6 +133,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy report` | Record results: a parsed CI report, one manual result, or an agent's batch. The producer is the token's actor. |
 | `mainworthy claim` | Record a review and what it found. A review with no findings is still recorded. |
 | `mainworthy change` | Say that a change ended (merged, or closed without merging) or is open again. An ended change is not asked about. |
+| `mainworthy tracker` | Queue a defect from a failed result: create a tracker issue or validate an existing issue for linking. |
 | `mainworthy plan` | Start a run: choose cases, say which results count and what completes it. Evidence already recorded fills it at once. |
 | `mainworthy decide` | Answer a question, or withdraw a decision. Policy says whether your answer settles it, is advice, or is refused. |
 | `mainworthy inbox` | The queue: every question that needs an answer, most blocking first. With state=decided: the ledger. |
@@ -145,6 +146,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy timeline` | One timeline for a case: versions, moves, results from every producer, findings, reviews and its questions. |
 | `mainworthy check` | Check the suite for structural problems: cases with no steps or no expected result, duplicate titles, dangling links. |
 | `mainworthy command` | What became of a command you sent under an idempotency key: not recorded, begun, or done with its reply. |
+| `mainworthy tracker-status` | Read a tracker request's delivery state and its verified issue reference. |
 | `mainworthy admin` | Projects, actors, grants and tokens. There are no seats: an actor is free, and a token carries what its actor may do. |
 | `mainworthy session` | Your browser sessions: list them, and end one. An admin who is a person lists and ends anyone's. |
 | `mainworthy credential` | How a person signs in: list your password and passkeys, register a passkey, remove one. An agent is refused: it signs in with a token only. A password is set in the web UI, never here. |

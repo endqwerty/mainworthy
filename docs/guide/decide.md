@@ -269,6 +269,30 @@ An adopted proposal cannot be withdrawn. Restore earlier case content as a new
 version instead. See [write cases](./write-cases.md#read-versions-and-restore-earlier-content).
 Withdrawing an older decision does not undo standing work made by a newer decision.
 
+## Create or link a GitHub defect
+
+An operator can [configure GitHub Issues](./configuration.md#variables-the-server-reads) for one project and repository. Use `mainworthy tracker` or the API to create an issue from a failed or errored result. The request sends the failure message and detail, the recorded case version and its content when known, the tested target, and the reported build URL to that repository. Review what the report contains before sending it to a public repository.
+
+A test's `get` reply lists result ids in `last[].id`. A case's `timeline` reply also includes result ids, and a run slot lists them in `fills[].result`. For example, if the failed result is `123`:
+
+```
+mainworthy tracker --json '{"do":"create","result":123,"cmd":"defect-result-123"}'
+mainworthy tracker-status --id defect-result-123
+```
+
+The request needs `produce`. Reading its status needs `read`. The server sends up to twenty queued requests once a minute. A completed request returns an issue URL and the issue's state as GitHub reported it. To check an existing issue instead of creating one:
+
+```
+mainworthy tracker --json '{"do":"link","result":123,"key":"42","cmd":"link-result-123"}'
+mainworthy tracker-status --id link-result-123
+```
+
+The key is the issue number in the configured repository. Pull requests are refused. Record the returned URL as the optional reference in a normal **Defect** answer. Creating or checking an issue does not answer the failure question. The answer still follows the project's policy.
+
+Reuse the same `cmd` when retrying a request after a lost reply. Its first receipt still says `queued`, so use `tracker-status` to read current delivery state. A failed request is not sent again automatically. After a timeout or a request left `sending` by a restart, check GitHub before creating another request: the issue may already exist. Link that issue if you find it.
+
+Delivery requests and their status stay on this instance and are left out of archives. Record the issue reference in a decision before archiving if you need to keep it. A restored archive keeps historical command receipts but has no corresponding tracker status and does not send those requests again. Requirement mirroring and ending defect holds when an issue closes are not implemented yet. Jira and Azure DevOps remain planned adapters.
+
 ## Check who may answer
 
 The question says whom it needs. Your token's capabilities and the project's policy

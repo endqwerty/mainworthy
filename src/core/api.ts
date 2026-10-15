@@ -25,9 +25,13 @@ import type {
 import type { CredentialInput, CredentialSummary, InvitationInput, SessionInput } from "./people.ts";
 import type { REPLIES } from "./replies.ts";
 
+import type { TrackerInput, TrackerStatusInput } from "./tracker.ts";
+
 type In<S extends z.ZodType> = z.input<S>;
 
 type Inputs = {
+	tracker: In<typeof TrackerInput>;
+	"tracker-status": In<typeof TrackerStatusInput>;
 	propose: In<typeof ProposeInput>;
 	report: In<typeof ReportInput>;
 	claim: In<typeof ClaimInput>;

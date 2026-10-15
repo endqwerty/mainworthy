@@ -15,6 +15,7 @@ import {
 	timelineOp,
 } from "./reads.ts";
 import type { AnyOp } from "./registry.ts";
+import { trackerOp, trackerStatusOp } from "./trackers.ts";
 import { changeOp, claimOp, decideOp, planOp, proposeOp, reportOp } from "./writes.ts";
 
 const list: AnyOp[] = [
@@ -23,6 +24,7 @@ const list: AnyOp[] = [
 	reportOp,
 	claimOp,
 	changeOp,
+	trackerOp,
 	// request evidence
 	planOp,
 	// decide
@@ -38,6 +40,7 @@ const list: AnyOp[] = [
 	timelineOp,
 	checkOp,
 	commandOp,
+	trackerStatusOp,
 	// administer
 	adminOp,
 	// sign in as yourself

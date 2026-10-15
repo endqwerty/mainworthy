@@ -17,6 +17,8 @@ import {
 import { CredentialRow, InvitationCreated, InvitationRow, SessionRow } from "./people.ts";
 import { Obligation, TargetMatch, Verdict } from "./runs.ts";
 
+import { TrackerReceipt } from "./tracker.ts";
+
 const text = z.string();
 const number = z.number();
 const whole = z.number().int();
@@ -380,6 +382,8 @@ export const InvitationReply = z.union([InvitationCreated, z.array(InvitationRow
 
 /** Reply contracts shared by clients and registered beside each operation's input on the server. */
 export const REPLIES = {
+	tracker: TrackerReceipt,
+	"tracker-status": TrackerReceipt,
 	propose: ProposeReply,
 	report: ReportReceipt,
 	claim: ClaimReply,
