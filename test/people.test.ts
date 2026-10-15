@@ -66,6 +66,32 @@ async function tokenFor(w: World, input: Record<string, unknown>): Promise<strin
 type Listed = { id: number; openedWith: string; current: boolean; userAgent: string | null };
 
 describe("an invitation", () => {
+	test("the minute job deletes invitations 30 days after use, revocation or expiry, keeping open ones", async () => {
+		const w = world();
+		const used = await invite(w, { name: "robin", expires: "30d" });
+		const revoked = await invite(w, { name: "sam", expires: "30d" });
+		const expired = await invite(w, { name: "pat", expires: "1d" });
+		w.clock.advance(DAY);
+		expect((await w.post("/api/login", { invitation: used.code, password: FIRST })).status).toBe(200);
+		await w.ok("invitation", { do: "revoke", id: revoked.id });
+		w.clock.advance(30 * DAY - 1);
+		const open = await invite(w, { name: "lee" });
+		await w.instance.minute();
+		expect(w.rows<{ id: number }>("SELECT id FROM invitations ORDER BY id")).toEqual([
+			{ id: used.id },
+			{ id: revoked.id },
+			{ id: expired.id },
+			{ id: open.id },
+		]);
+		w.clock.advance(1);
+		await w.instance.minute();
+		expect(await w.ok("invitation", { do: "list" })).toMatchObject([{ id: open.id, state: "open" }]);
+		expect(w.rows("SELECT id FROM invitations ORDER BY id")).toEqual([{ id: open.id }]);
+		for (const ended of [used, revoked, expired])
+			expect((await w.post("/api/login", { invitation: ended.code, password: FIRST })).status).toBe(401);
+		expect((await w.post("/api/login", { invitation: open.code, password: FIRST })).status).toBe(200);
+	});
+
 	test("an admin invites a person: the code is in the reply once and nowhere in the database, the log or the stored command", async () => {
 		const w = world();
 		const logged = [spyOn(console, "warn"), spyOn(console, "error"), spyOn(console, "info"), spyOn(console, "log")];

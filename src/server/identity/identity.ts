@@ -19,12 +19,13 @@ import { conflict, invalid, notFound } from "../kernel/errors.ts";
 import { limiterOf } from "./attempts.ts";
 import { CONTEXT, clearChallenges } from "./challenges.ts";
 import { credentialSummary, dropUserHandle, forgetCredentialsOf } from "./credentials.ts";
-import { listInvitations, revokeInvitation, revokeInvitationsOf } from "./invitations.ts";
+import { listInvitations, revokeInvitation, revokeInvitationsOf, sweepInvitations } from "./invitations.ts";
 import { addressKey, isGeneratedSecret, prefixKey } from "./limiter.ts";
 import {
 	endSession,
 	endSessionById,
 	endSessionsOf,
+	endSessionsOnToken,
 	findSession,
 	hasUnendedSession,
 	listSessions,
@@ -168,6 +169,12 @@ const Q = {
 	revokeToken: sql<{ id: number; at: number }>(
 		"UPDATE tokens SET revoked_at = $at WHERE id = $id AND revoked_at IS NULL",
 	),
+	addressesToForget: sql<{ before: number }, { id: number }>(
+		"SELECT id FROM tokens WHERE revoked_at <= $before OR expires_at <= $before",
+	),
+	forgetTokenAddress: sql<{ id: number }>(
+		"UPDATE tokens SET last_used_addr = NULL WHERE id = $id AND last_used_addr IS NOT NULL",
+	),
 	// Every token that came from the environment and was not revoked, with the actor it signs in: what a new value
 	// there replaces. Whoever's it is, and not the owner's alone: the variable is one, the owner's name is another
 	// variable, and when both change in one start the old value is the token of whoever was the owner before.
@@ -307,7 +314,10 @@ export function bootstrap(app: App): { owner: Actor; generatedToken: string | nu
 				// one of them should work, and the owner's name may have changed in this same start. The sessions
 				// they opened end with them, because a session is read with its token.
 				const retired = app.db.all(Q.envTokens);
-				for (const token of retired) app.db.run(Q.revokeToken, { id: token.id, at });
+				for (const token of retired) {
+					app.db.run(Q.revokeToken, { id: token.id, at });
+					endSessionsOnToken(app.db, token.id, at);
+				}
 				app.db.run(Q.insertToken, {
 					actor: owner.id,
 					hash: hashToken(configured),
@@ -902,7 +912,25 @@ export function lastTokenOf(db: Db, id: number, now: number): string | null {
 }
 
 export function revokeToken(app: App, id: number): boolean {
-	return app.db.run(Q.revokeToken, { id, at: app.now() }).changes > 0;
+	const at = app.now();
+	const revoked = app.db.run(Q.revokeToken, { id, at }).changes > 0;
+	if (revoked) endSessionsOnToken(app.db, id, at);
+	return revoked;
+}
+
+/** The minute job removes ended invitations and erases old token addresses, preserving token revocation. */
+export function sweepSignInRecords(app: App): void {
+	const now = app.now();
+	app.db.transaction(() => {
+		const tokens = app.db.all(Q.addressesToForget, { before: now - 30 * 86_400_000 });
+		for (const token of tokens) app.db.run(Q.forgetTokenAddress, token);
+		sweepInvitations(app.db, now);
+		forgetNotedAddresses(
+			app,
+			"token",
+			tokens.map((token) => token.id),
+		);
+	});
 }
 
 /**

@@ -24,7 +24,9 @@ An invitation is stored as a hash of its code, with who it is for and who made i
 
 When you sign in, we keep a record of the session so that you can see where you are signed in and end a session that is not yours: when it started and was last used, what the browser or app calls itself (its user agent, up to 256 characters), and the network address it was opened from and last used from. We keep only the latest address, never a history of addresses.
 
-A session ends when you sign out, after 14 days without use, or after 90 days. Once a session has been ended for 30 days, the server deletes its record: it looks for such records every minute while it runs, so a record can outlast the 30 days while the server is stopped. A session that stopped working another way, for example because its token was revoked, is only marked ended when the server later finds that one of those limits has passed, and its 30 days start then, so its record can stay well beyond 30 days after it stopped working ([#227](https://github.com/endqwerty/mainworthy/issues/227)).
+A session ends when you sign out, after 14 days without use, or after 90 days. Revoking its token also records its end at once. When a token expires, the next minute job records that expiry time as the end of its sessions. The job also records earlier token revocations whose sessions an older build left unended. An earlier recorded end stays. Once a session has been ended for 30 days, the server deletes its record.
+
+The server checks retention every minute while it runs. A stopped server or a long write can delay cleanup. For token revocations and expiries, the 30 days start at the token's end, even when the job runs later.
 
 ### Failed sign-ins
 
@@ -96,9 +98,11 @@ We keep information only for as long as it is needed:
 | Failed sign-in attempts | Used for at most 30 minutes; in memory only, until the server restarts |
 | A passkey sign-in in progress | Usable for 5 minutes; in memory only, until the server restarts |
 | A session's record | Deleted once the session has been ended for 30 days, by the running server (see [sessions](#sessions)) |
+| A token's last network address | Erased 30 days after revocation or expiry, whichever happens first |
+| An invitation's record | Deleted 30 days after use, revocation or expiry, whichever happens first |
 | Your account and content | As long as the instance exists |
 
-Mainworthy does not yet delete old content, the records of revoked tokens with the address each was last used from, or the records of invitations. We are working on it, and until then we will delete such records by hand if you ask.
+The running server applies these periods in its minute job. Token records remain after their addresses are erased, including the hash, label and dates. Keeping the hash prevents a revoked configured owner token from becoming valid again after a restart. Mainworthy does not yet delete old product content. We will help with a request to delete it as described under [your rights](#your-rights-with-respect-to-your-information).
 
 ## Children
 

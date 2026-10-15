@@ -192,6 +192,108 @@ const sessions = (instance: Instance): SessionRow[] =>
 		.query<SessionRow, []>("SELECT id, ended_at, last_seen_at, created_addr, last_seen_addr FROM sessions ORDER BY id")
 		.all();
 
+describe("sign-in record retention", () => {
+	test("revocation records the end of its sessions immediately, without changing an earlier end", async () => {
+		const clock = clockAt();
+		const instance = boot({ clock });
+		const sam = await token(instance, { actor: "sam" });
+		const first = await signIn(instance, sam.token);
+		const second = await signIn(instance, sam.token);
+		await post(instance, "/api/logout", {}, { cookie: first.cookie });
+		clock.advance(HOUR);
+		expect((await admin(instance, { do: "token.revoke", id: sam.id })).status).toBe(200);
+		expect(sessions(instance)).toMatchObject([{ ended_at: T0 }, { ended_at: T0 + HOUR }]);
+		expect(await statusOf(instance, { cookie: second.cookie })).toBe(401);
+		clock.advance(30 * DAY - 1);
+		await instance.minute();
+		expect(sessions(instance)).toMatchObject([{ ended_at: T0 + HOUR }]);
+		clock.advance(1);
+		await instance.minute();
+		expect(sessions(instance)).toEqual([]);
+	});
+
+	test("the minute job erases token addresses 30 days after the earlier of revocation and expiry", async () => {
+		const clock = clockAt();
+		const instance = boot({ clock });
+		const revoked = await token(instance, { actor: "sam", expires: "60d" });
+		const expired = await token(instance, { actor: "pat", expires: "1d" });
+		const active = await token(instance, { actor: "lee" });
+		for (const made of [revoked, expired, active]) expect(await statusOf(instance, bearer(made.token))).toBe(200);
+		clock.advance(DAY);
+		await admin(instance, { do: "token.revoke", id: revoked.id });
+		clock.advance(DAY);
+		// Revoking an already expired token must not restart its retention period.
+		await admin(instance, { do: "token.revoke", id: expired.id });
+		clock.set(T0 + 31 * DAY - 1);
+		await instance.minute();
+		expect(
+			tokens(instance)
+				.filter((row) => row.id !== 1)
+				.map((row) => row.last_used_addr),
+		).toEqual([LOOPBACK, LOOPBACK, LOOPBACK]);
+		clock.advance(1);
+		await instance.minute();
+		expect(
+			tokens(instance)
+				.filter((row) => row.id !== 1)
+				.map((row) => row.last_used_addr),
+		).toEqual([null, null, LOOPBACK]);
+		await flushUses(instance.app);
+		expect((await listed(instance)).filter((row) => row.id !== 1).map((row) => row.lastUsedFrom)).toEqual([
+			null,
+			null,
+			LOOPBACK,
+		]);
+		expect(await statusOf(instance, bearer(revoked.token))).toBe(401);
+		expect(await statusOf(instance, bearer(expired.token))).toBe(401);
+	});
+
+	test("a delayed minute job uses the token's end rather than the time of the sweep", async () => {
+		const clock = clockAt();
+		const instance = boot({ clock });
+		const sam = await token(instance, { actor: "sam", expires: "1d" });
+		const { cookie } = await signIn(instance, sam.token);
+		clock.set(T0 + 31 * DAY - 1);
+		await instance.minute();
+		expect(sessions(instance)).toMatchObject([{ ended_at: T0 + DAY }]);
+		clock.advance(1);
+		await instance.minute();
+		expect(sessions(instance)).toEqual([]);
+		expect(await statusOf(instance, { cookie })).toBe(401);
+	});
+
+	test("revoking an expired token keeps its sessions' earlier expiry as their end", async () => {
+		const clock = clockAt();
+		const instance = boot({ clock });
+		const sam = await token(instance, { actor: "sam", expires: "1d" });
+		await signIn(instance, sam.token);
+		clock.advance(2 * DAY);
+		await admin(instance, { do: "token.revoke", id: sam.id });
+		expect(sessions(instance)).toMatchObject([{ ended_at: T0 + DAY }]);
+		clock.set(T0 + 31 * DAY);
+		await instance.minute();
+		expect(sessions(instance)).toEqual([]);
+	});
+
+	test("sessions left unended by an earlier build are deleted 30 days after their token's revocation", async () => {
+		const clock = clockAt();
+		const instance = boot({ clock });
+		const sam = await token(instance, { actor: "sam" });
+		await signIn(instance, sam.token);
+		clock.advance(DAY);
+		await admin(instance, { do: "token.revoke", id: sam.id });
+		await instance.app.gate.run(() =>
+			instance.app.db.raw.query("UPDATE sessions SET ended_at = NULL, ended_why = NULL").run(),
+		);
+		clock.set(T0 + 31 * DAY - 1);
+		await instance.minute();
+		expect(sessions(instance)).toMatchObject([{ ended_at: T0 + DAY }]);
+		clock.advance(1);
+		await instance.minute();
+		expect(sessions(instance)).toEqual([]);
+	});
+});
+
 /** Holds the write gate, as a long report does, until `release`. */
 function holdGate(instance: Instance): { release: () => Promise<void> } {
 	let open = (): void => {};
@@ -598,12 +700,16 @@ describe("the owner's token from the environment", () => {
 			{ id: 3, source: "generated", revoked_at: null },
 			{ id: 4, source: "env", revoked_at: null, created_by: null, expires_at: null },
 		]);
+		expect(sessions(second)).toMatchObject([{ ended_at: T0 + DAY }]);
 		await second.stop();
 
 		// The same value again changes nothing and says nothing.
 		const third = boot({ clock, dataDir, ownerToken: SECOND });
 		expect(said(third)).toEqual([]);
 		expect(tokens(third).map((row) => row.revoked_at)).toEqual([T0 + DAY, null, null, null]);
+		clock.advance(31 * DAY);
+		await third.minute();
+		expect(tokens(third)[0]?.last_used_addr).toBeNull();
 		await third.stop();
 
 		// The first value again is a token that was revoked: it is not revived, and it retires nothing.
