@@ -7,9 +7,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Envelope, SessionInfo } from "../src/core/api.ts";
-import { flushUses, sweepSessions } from "../src/server/identity/identity.ts";
+import { flushUses, removeGrant, revokeToken, sweepSessions } from "../src/server/identity/identity.ts";
 import { openSession } from "../src/server/identity/sessions.ts";
-import { type Config, databasePath, defaultConfig, type ReadPool } from "../src/server/kernel/app.ts";
+import { type Config, databasePath, defaultConfig, type ReadCall, type ReadPool } from "../src/server/kernel/app.ts";
 import { SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
 import { type Instance, start } from "../src/server/start.ts";
 import { archiveRoutes } from "../src/surfaces/archive.ts";
@@ -510,14 +510,129 @@ describe("what ends a session", () => {
 		expect(stored(instance)[1]).toMatchObject({ ended_at: expect.any(Number), ended_why: "forgotten" });
 	});
 
+	test.each(["read", "write"] as const)("the caller is resolved inside the %s snapshot", async (effect) => {
+		const instance = boot();
+		const sam = await person(instance, "sam");
+		await admin(instance, { do: "grant.set", actor: "sam", project: "scratch", can: ["read", "produce"] });
+		const drop = () => instance.app.db.transaction(() => removeGrant(instance.app, { actor: "sam", project: 1 }));
+		const snapshot = instance.app.reader.snapshot.bind(instance.app.reader);
+		const begin = instance.app.db.begin.bind(instance.app.db);
+		const hook =
+			effect === "read"
+				? spyOn(instance.app.reader, "snapshot").mockImplementationOnce((run) => {
+						drop();
+						return snapshot(run);
+					})
+				: spyOn(instance.app.db, "begin").mockImplementationOnce(() => {
+						drop();
+						begin();
+					});
+		try {
+			const reply =
+				effect === "read"
+					? await post(instance, "/api/p/scratch/find", {}, bearer(sam.token))
+					: await create(instance, "Must not be written", bearer(sam.token));
+			expect(reply.status).toBe(404);
+			expect(reply.body).toMatchObject({ ok: false, error: { code: "not_found" } });
+		} finally {
+			hook.mockRestore();
+		}
+		expect((await post(instance, "/api/p/scratch/find", {}, bearer(TOKEN))).body).toMatchObject({
+			ok: true,
+			result: { count: 0 },
+		});
+	});
+
+	test.each(["idle", "absolute"] as const)(
+		"a reader uses unflushed activity and still enforces the %s end",
+		async (end) => {
+			const clock = clockAt();
+			const instance = boot({ clock, readers: 1 });
+			const pool = instance.app.readers;
+			if (!pool) throw new Error("the reader pool did not start");
+			let dispatched: ReadCall | undefined;
+			instance.app.readers = {
+				run: (call, fallback) => {
+					dispatched = call;
+					return pool.run(call, fallback);
+				},
+				refresh: () => pool.refresh(),
+				stop: () => pool.stop(),
+			};
+			const { cookie } = await signIn(instance);
+			clock.advance(IDLE - HOUR);
+			expect(await statusOf(instance, { cookie })).toBe(200);
+			clock.advance(2 * HOUR);
+			expect(stored(instance)[0]?.last_seen_at).toBe(T0);
+			expect((await post(instance, "/api/p/scratch/find", {}, { cookie })).body).toMatchObject({
+				ok: true,
+				result: { count: 0 },
+			});
+			if (end === "absolute") {
+				for (let at = clock.now() + IDLE / 2; at < T0 + MAX; at += IDLE / 2) {
+					clock.set(at);
+					expect(await statusOf(instance, { cookie })).toBe(200);
+				}
+				clock.set(T0 + MAX - HOUR);
+				expect((await post(instance, "/api/p/scratch/find", {}, { cookie })).status).toBe(200);
+				clock.set(T0 + MAX);
+			} else clock.advance(IDLE);
+			if (!dispatched) throw new Error("the read did not reach the pool");
+			const reply = await pool.run({ ...dispatched, clockOffset: clock.now() - Date.now() }, () => {
+				throw new Error("the real reader must answer");
+			});
+			expect(reply).toMatchObject({ ok: false, error: { code: "unauthenticated" } });
+		},
+	);
+
+	test("an accepted report finishes under its actor after its token is revoked", async () => {
+		const instance = boot();
+		const made = await admin<{ token: string }>(instance, {
+			do: "token.create",
+			actor: "pipeline",
+			kind: "ci",
+			can: ["read", "record"],
+			project: "scratch",
+		});
+		const listed = await admin<{ id: number; actor: string }[]>(instance, { do: "token.list" });
+		const id = listed.body.ok ? listed.body.result.find((token) => token.actor === "pipeline")?.id : undefined;
+		if (!made.body.ok || id === undefined) throw new Error("the pipeline token was not made");
+		const token = made.body.result.token;
+		let commits = 0;
+		const unsubscribe = instance.app.subscribe((event) => {
+			if (event.op === "report" && ++commits === 1) revokeToken(instance.app, id);
+		});
+		try {
+			const report = await post(
+				instance,
+				"/api/p/scratch/report",
+				{
+					target: { commit: "accepted113", branch: "main" },
+					results: [{ test: { key: "accepted113", name: "accepted report" }, outcome: "pass" }],
+				},
+				bearer(token),
+			);
+			expect(report.status).toBe(200);
+			expect(report.body).toMatchObject({ ok: true, result: { counts: { total: 1, pass: 1 } } });
+			expect(commits).toBe(2);
+			expect(await statusOf(instance, bearer(token))).toBe(401);
+			const actor = instance.app.reader.raw
+				.query<{ name: string }, []>("SELECT a.name FROM batches b JOIN actors a ON a.id = b.actor")
+				.get();
+			expect(actor?.name).toBe("pipeline");
+		} finally {
+			unsubscribe();
+		}
+	});
+
 	test("a read that a busy reader starts after its session ended is answered 401 and carries no data", async () => {
 		const instance = boot({ readers: 1 });
 		const pool = instance.app.readers;
 		if (!pool) throw new Error("the reader pool did not start");
 		await create(instance, "Only for whoever is signed in");
 		// The one reader is busy: a call handed to the pool reaches it only after `release`. Nothing else is
-		// changed, and the call then runs in the real reader thread with the actor it was dispatched with.
-		const hold = () => {
+		// changed, and the call then resolves its credential in the real reader thread.
+		const hold = (fallbackOnly = false) => {
 			let release = (): void => {};
 			const busy = new Promise<void>((resolve) => {
 				release = resolve;
@@ -526,13 +641,17 @@ describe("what ends a session", () => {
 			const dispatched = new Promise<void>((resolve) => {
 				handed = resolve;
 			});
-			const state = { ran: 0, release: () => release(), dispatched };
+			const replies: Envelope<unknown>[] = [];
+			const state = { ran: 0, replies, release: () => release(), dispatched };
 			const held: ReadPool = {
 				run: (call, fallback) => {
 					handed();
 					return busy.then(() => {
 						state.ran++;
-						return pool.run(call, fallback);
+						return (fallbackOnly ? Promise.resolve(fallback()) : pool.run(call, fallback)).then((reply) => {
+							state.replies.push(reply);
+							return reply;
+						});
 					});
 				},
 				refresh: () => pool.refresh(),
@@ -550,6 +669,7 @@ describe("what ends a session", () => {
 		const refused = await read;
 		expect(signedOut.ran).toBe(1);
 		expect(refused.status).toBe(401);
+		expect(signedOut.replies).toMatchObject([{ ok: false, error: { code: "unauthenticated" } }]);
 		expect(refused.body).toMatchObject({ ok: false, error: { code: "unauthenticated" } });
 		expect(refused.text).not.toContain("Only for whoever is signed in");
 
@@ -562,7 +682,40 @@ describe("what ends a session", () => {
 		revoked.release();
 		const gone = await second;
 		expect(`${revoked.ran} ${gone.status}`).toBe("1 401");
+		expect(revoked.replies).toMatchObject([{ ok: false, error: { code: "unauthenticated" } }]);
 		expect(gone.text).not.toContain("Only for whoever is signed in");
+
+		// The token still works after its project grant is removed, but the queued read must see no project.
+		const pat = await person(instance, "pat");
+		const ungranted = hold();
+		const fourth = post(instance, "/api/p/scratch/find", {}, bearer(pat.token));
+		await ungranted.dispatched;
+		expect((await admin(instance, { do: "grant.remove", actor: "pat", project: "scratch" })).status).toBe(200);
+		ungranted.release();
+		const hidden = await fourth;
+		expect(hidden.status).toBe(404);
+		expect(ungranted.replies).toMatchObject([{ ok: false, error: { code: "not_found" } }]);
+		expect(hidden.text).not.toContain("Only for whoever is signed in");
+
+		// A smaller grant hides no project, but still removes permission to read it.
+		await admin(instance, { do: "grant.set", actor: "pat", project: "scratch", can: ["read", "produce"] });
+		const narrowed = hold();
+		const smaller = post(instance, "/api/p/scratch/find", {}, bearer(pat.token));
+		await narrowed.dispatched;
+		await admin(instance, { do: "grant.set", actor: "pat", project: "scratch", can: ["produce"] });
+		narrowed.release();
+		expect((await smaller).status).toBe(403);
+		expect(narrowed.replies).toMatchObject([{ ok: false, error: { code: "forbidden" } }]);
+
+		// A failed worker replays inline against current grants, too.
+		await admin(instance, { do: "grant.set", actor: "pat", project: "scratch", can: ["read"] });
+		const replayed = hold(true);
+		const fifth = post(instance, "/api/p/scratch/find", {}, bearer(pat.token));
+		await replayed.dispatched;
+		await admin(instance, { do: "grant.remove", actor: "pat", project: "scratch" });
+		replayed.release();
+		expect((await fifth).status).toBe(404);
+		expect(replayed.replies).toMatchObject([{ ok: false, error: { code: "not_found" } }]);
 
 		// And a read whose caller still stands is answered as before.
 		const standing = hold();

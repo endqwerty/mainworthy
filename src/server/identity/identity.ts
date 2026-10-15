@@ -13,6 +13,7 @@ import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import { untilPhrase } from "../../core/duration.ts";
 import { type ActorKind, Capability, heldCapabilities, whyNotGrantable } from "../../core/kinds.ts";
 import type { App, Config } from "../kernel/app.ts";
+import type { CallerReference } from "../kernel/caller.ts";
 import type { Actor } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { conflict, invalid, notFound } from "../kernel/errors.ts";
@@ -514,6 +515,8 @@ export function authenticate(app: App, secret: string, project: number): Actor |
 export type Session = {
 	/** How the caller proved itself. `cookie` is a browser's session; `local` is the owner of this machine. */
 	via: "token" | "cookie" | "local";
+	/** A credential reference, with the newest activity known when an operation is dispatched. */
+	reference?: () => CallerReference;
 	/** The caller on a project (0: the instance) as it stands now, or null once it stands no more. */
 	actor: (project: number) => Actor | null;
 	/**
@@ -531,6 +534,37 @@ export type Session = {
 	 */
 	context?: () => string | null;
 };
+
+/** Resolves all of an operation's caller state on the connection holding its snapshot or transaction. */
+export function resolveCaller(
+	app: App,
+	db: Db,
+	reference: CallerReference,
+	project: number,
+): {
+	actor: Actor;
+	session: number | null;
+	context: string | null;
+} | null {
+	switch (reference.via) {
+		case "token": {
+			const token = standingToken(db, reference.hash, app.now());
+			return token ? { actor: toActor(db, token.actor, project), session: null, context: null } : null;
+		}
+		case "cookie": {
+			const session = findSession(app, reference.hash, { db, activity: reference.activity, idleMs: reference.idleMs });
+			return session
+				? { actor: toActor(db, session.actor, project), session: session.id, context: CONTEXT.session(reference.hash) }
+				: null;
+		}
+		case "local": {
+			const actor = db.get(Q.actorById, { id: reference.actor });
+			return actor && actor.disabled_at === null
+				? { actor: toActor(db, actor, project), session: null, context: CONTEXT.local }
+				: null;
+		}
+	}
+}
 
 /**
  * What a surface read from a request, as plain values: no header names and no cookie syntax. The surface says
@@ -629,6 +663,7 @@ export function admit(app: App, facts: Facts): Admission {
 			kind: "admitted",
 			session: {
 				via: "token",
+				reference: () => ({ via: "token", hash }),
 				actor: (project) => {
 					const standing = standingToken(app.reader, hash, app.now());
 					return standing ? toActor(app.reader, standing.actor, project) : null;
@@ -646,6 +681,12 @@ export function admit(app: App, facts: Facts): Admission {
 				kind: "admitted",
 				session: {
 					via: "cookie",
+					reference: () => ({
+						via: "cookie",
+						hash,
+						activity: notedUse(app, "session", found.id) ?? 0,
+						idleMs: app.config.sessionIdleMs,
+					}),
 					id: () => findSession(app, hash)?.id ?? null,
 					// By the hash of the cookie, which is what the row stores, and never by the row's number.
 					context: () => (findSession(app, hash) ? CONTEXT.session(hash) : null),
@@ -659,7 +700,15 @@ export function admit(app: App, facts: Facts): Admission {
 	}
 	const owner = app.config.mode === "local" ? facts.localOwner : null;
 	return owner
-		? { kind: "admitted", session: { via: "local", actor: () => owner, context: () => CONTEXT.local } }
+		? {
+				kind: "admitted",
+				session: {
+					via: "local",
+					reference: () => ({ via: "local", actor: owner.id }),
+					actor: () => owner,
+					context: () => CONTEXT.local,
+				},
+			}
 		: REFUSED;
 }
 

@@ -606,7 +606,7 @@ describe("reads on other cores through HTTP", () => {
 		expect(readers.completed).toBe(before + 1);
 	});
 
-	test("a worker refuses write operations even when handed the owner's actor", async () => {
+	test("a worker refuses write operations even when handed the owner's credential reference", async () => {
 		const instance = bootReaders(1);
 		const pool = readersOf(instance);
 		await pool.ready();
@@ -615,7 +615,8 @@ describe("reads on other cores through HTTP", () => {
 				op: "propose",
 				project: "scratch",
 				input: { edits: [{ op: "create", outline: "Must not be written" }] },
-				actor: instance.owner,
+				caller: { via: "local", actor: instance.owner.id },
+				clockOffset: 0,
 			},
 			() => {
 				throw new Error("the worker must refuse the write itself");

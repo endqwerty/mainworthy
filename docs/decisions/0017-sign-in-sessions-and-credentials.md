@@ -504,7 +504,7 @@ networks, and `@simplewebauthn/server`, which would add ten direct dependencies 
 A model from another provider reviewed the design against the code before anything was built. What it changed:
 
 - It showed, with a run, that a read dispatched to a busy reader was answered after a token was revoked. The
-  reply check above closes that at the reply. Reading authority inside the read's own snapshot stays deferred.
+  reply check above closed that at the reply. Issue #113 later moved authority into the operation's snapshot, as described below.
 - The design said "a flush writes last uses" and no more. The rules of the notes above are the review's.
 - A session that expired could come back when the clock was set back. The minute timer now ends it in the
   database.
@@ -559,10 +559,28 @@ A model from another provider reviewed the design against the code before anythi
 - A holder's success clears the count of their token's first 8 characters. A token in constant use is therefore
   protected by the count of the guesser's address, and not by its own.
 
+## Authority in the operation's snapshot
+
+Issue #113 completes candidate C's credential resolution. An admitted request carries a reference to the
+hash of its token or session, or to the local owner's actor. A reader gets this reference, never a resolved
+actor. Identity resolves the credential, actor, grants and browser session context on the connection running
+the operation. Reads begin their snapshot before resolving the project or caller. Writes take their initial
+transaction before doing either. A report retains that actor over its acceptance and application commits.
+
+A cookie reference also carries the latest admitted activity known when dispatched and the idle lifetime.
+The reader uses the newer of that watermark and the session row, clamps a future use to its current time,
+and still checks absolute expiry and the token or credential the session rests on. The instance clock's
+offset from wall time travels with the call so time spent waiting counts toward expiry. A reader failure
+replays the call inline with fresh credential resolution. The final reply check still refuses a credential
+that ended while a reader was answering.
+
+This keeps identity in charge of the checks and avoids copying grants into worker memory. The in-process
+harness and startup callers keep their actor callbacks and run inline. No raw secret crosses the worker
+boundary, and no new operation or stored-data format is needed.
+
 ## Deferred
 
-Each of these is an issue and is not built in the four pull requests: reading authority inside the
-transaction or snapshot that runs the operation, reader threads included (#113); OIDC (#114); TOTP (#115);
+Each of these is an issue and is not built in the four pull requests: OIDC (#114); TOTP (#115);
 teams and roles for each project (#30); a chain of trusted proxies, and the two proxy settings on the owner's
 instance (#116); a person's own CLI token (#117); mail for invitations and recovery (#122).
 

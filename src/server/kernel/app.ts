@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Envelope } from "../../core/api.ts";
 import { DURATION_FORMAT, durationMs } from "../../core/duration.ts";
 import { type AddressRanges, parseAddressRanges } from "./address.ts";
-import type { Actor } from "./ctx.ts";
+import type { CallerReference } from "./caller.ts";
 import { Db } from "./db.ts";
 import { migrate } from "./migrate.ts";
 
@@ -91,7 +91,14 @@ export type ChangeEvent = { project: string; seq: number; op: string; actor: str
  */
 export type WriteGate = { run: <T>(fn: () => T | Promise<T>) => Promise<T> };
 
-export type ReadCall = { op: string; project: string | null; input: unknown; actor: Actor | null };
+export type ReadCall = {
+	op: string;
+	project: string | null;
+	input: unknown;
+	caller: CallerReference;
+	/** The instance clock relative to wall time, including time spent waiting for a reader. */
+	clockOffset: number;
+};
 export type ReadPool = {
 	run: (call: ReadCall, fallback: () => Envelope<unknown>) => Promise<Envelope<unknown>>;
 	refresh: () => void;

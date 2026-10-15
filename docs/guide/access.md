@@ -106,6 +106,8 @@ $ mainworthy token revoke 2
 token 2 revoked
 ```
 
+The server reads your token or session, your actor and your grants in the same snapshot that runs an operation. A read waiting for a reader sees a grant removed before it starts. A report already accepted keeps its actor and finishes even if that actor's token is then revoked.
+
 A token with no end works until somebody revokes it, so revoke one you no longer use. Revoking a token leaves the actor and its grants in place. To stop an actor on one project, use `actor ungrant`. To remove who a person was, forget the actor. Only a person who administers forgets an actor, and the owner is not forgotten. The name becomes a pseudonym, `forgotten-` and the actor's number (with `-2`, `-3` and so on added when an archive imported from an older build already holds that name), the tokens stop working, the person's passwords, passkeys and open invitations are revoked, and the history keeps what the actor did.
 
 Forgetting also clears the person's token and credential labels, including labels on revoked rows. Question evidence, saved command replies and report receipts use the pseudonym for attribution. New questions keep actor ids and resolve names when read; forgetting rewrites display names saved by older builds. This leaves the evidence hash unchanged because it covers the decision's material basis and target, not display attribution. Command ids still name the same requests, so retrying a command does not repeat the write. Replies that held secrets remain unavailable. Text in cases and notes stays as written.
