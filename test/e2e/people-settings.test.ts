@@ -85,7 +85,8 @@ test.skipIf(!browserAvailable)(
 				.getByRole("status")
 				.filter({ hasText: "Forgotten as forgotten-3. 1 token revoked. History and typed text stay." })
 				.waitFor();
-			expect(await rows(page).filter({ hasText: "forget-web" }).count()).toBe(0);
+			// The status is shown before the lists are read again, so the row goes a moment later.
+			await rows(page).filter({ hasText: "forget-web" }).waitFor({ state: "detached" });
 			await other.page.reload();
 			await other.page.locator("#signin-name").waitFor();
 			expect(admin.errors).toEqual(["Failed to load resource: net::ERR_FAILED"]);
