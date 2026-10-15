@@ -7,6 +7,7 @@ import { setDevicePerson, suspendDeviceSession } from "../src/web/lib/device.ts"
 import {
 	claimCopiedDraft,
 	discardDraftCopy,
+	draftCopyPrefix,
 	forgetDraftCopy,
 	readDraftCopies,
 	writeCopiedDraft,
@@ -29,6 +30,7 @@ Object.defineProperty(globalThis, "localStorage", {
 	},
 });
 beforeEach(() => {
+	suspendDeviceSession();
 	setDevicePerson("");
 	for (const copy of readDraftCopies({ project, id: "C-1" })) discardDraftCopy(copy.key);
 	kept.clear();
@@ -174,6 +176,77 @@ test("full device storage keeps the losing copy in the tab with its storage stat
 		for (const copy of readDraftCopies({ project, id: mine.id })) discardDraftCopy(copy.key);
 		forgetDraftCopy({ project, draft: mine });
 	}
+});
+
+test("a failed shared write removes its writing marker when storing waiting also fails", () => {
+	const mine = draft({ body: { ...body, title: "Text kept in the tab after storage fills" } });
+	const set = localStorage.setItem;
+	let full = false;
+	localStorage.setItem = (key, value) => {
+		if (key === draftKey({ project, id: mine.id })) full = true;
+		if (full) throw new DOMException("Full", "QuotaExceededError");
+		set(key, value);
+	};
+	try {
+		expect(() => writeCopiedDraft({ project, draft: mine })).toThrow("Full");
+		expect([...kept.keys()].filter((key) => key.includes(":draft-copy:"))).toEqual([]);
+		another();
+		expect(readDraftCopies({ project, id: mine.id }).map(({ draft, stored }) => ({ draft, stored }))).toEqual([
+			{ draft: mine, stored: false },
+		]);
+	} finally {
+		localStorage.setItem = set;
+		for (const copy of readDraftCopies({ project, id: mine.id })) discardDraftCopy(copy.key);
+		forgetDraftCopy({ project, draft: mine });
+	}
+});
+
+for (const afterSignIn of [false, true])
+	test(`this window recovers an interrupted writing copy ${afterSignIn ? "after signing in again" : "in this session"} without blocking later confirmation`, async () => {
+		const interrupted = draft({ body: { ...body, title: "Text from an interrupted write" } });
+		const key = `${draftCopyPrefix({ project, id: interrupted.id })}${draftOwner()}:interrupted`;
+		kept.set(key, JSON.stringify({ draft: interrupted, state: "writing" }));
+		if (afterSignIn) {
+			suspendDeviceSession();
+			setDevicePerson("");
+		}
+		const mine = draft({ body: { ...body, title: "Text typed after returning" } });
+		expect(writeCopiedDraft({ project, draft: mine })).toBe(true);
+		await new Promise((done) => setTimeout(done, 5));
+		let copyWrites = 0;
+		const set = localStorage.setItem;
+		localStorage.setItem = (key, value) => {
+			if (key.includes(":draft-copy:")) copyWrites++;
+			set(key, value);
+		};
+		try {
+			for (let index = 0; index < 10; index++)
+				expect(writeCopiedDraft({ project, draft: { ...mine, body: { ...body, title: `Later text ${index}` } } })).toBe(
+					true,
+				);
+		} finally {
+			localStorage.setItem = set;
+		}
+		expect(stored()?.body.title).toBe("Later text 9");
+		expect(copyWrites).toBe(0);
+		expect(readDraftCopies({ project, id: mine.id }).map((copy) => copy.draft.body.title)).toEqual([
+			"Text from an interrupted write",
+		]);
+		expect(readDraftCopies({ project, id: mine.id, recorded: { ...interrupted, base: 2, dirty: false } })).toEqual([]);
+		expect(kept.has(key)).toBe(false);
+	});
+
+test("another window's interrupted writing marker still protects accepted text until that write finishes", async () => {
+	const theirs = draft({ owner: "paused-window", body: { ...body, title: "The other window's text" } });
+	const key = `${draftCopyPrefix({ project, id: theirs.id })}${theirs.owner}:paused`;
+	kept.set(key, JSON.stringify({ draft: theirs, state: "writing" }));
+	const mine = draft({ body: { ...body, title: "Accepted while the other window was paused" } });
+	expect(writeCopiedDraft({ project, draft: mine })).toBe(true);
+	await new Promise((done) => setTimeout(done, 5));
+	another(theirs);
+	kept.set(key, JSON.stringify({ draft: theirs, state: "waiting" }));
+	expect(readDraftCopies({ project, id: mine.id }).map((copy) => copy.draft.body.title)).toEqual([mine.body.title]);
+	expect(stored()?.body.title).toBe("The other window's text");
 });
 
 test("the first storage turn confirms ownership and later keys do not write copies", async () => {

@@ -43,6 +43,45 @@ const back = (page: Page) => page.getByRole("button", { name: "Back to the list"
 const actions = (page: Page) => page.getByRole("button", { name: "Actions", exact: true });
 
 test.skipIf(!browserAvailable)(
+	"a preserved copy in Suite has a phone-sized Discard button",
+	async () => {
+		const server = await startServer({ cases: 1 });
+		const phone = await openPage(server, { device: "phone", path: "/p/scratch/suite/c/1" });
+		try {
+			const { page } = phone;
+			await page.locator(".ctitle").waitFor();
+			await page.keyboard.press("e");
+			await page.locator("[data-field=title]").fill("Draft held in this window");
+			await page.evaluate(() => {
+				const key = Object.keys(localStorage).find((key) => key.includes(":draft:") && key.endsWith(":C-1"));
+				if (!key) throw new Error("Missing Suite draft");
+				const draft = JSON.parse(localStorage.getItem(key) ?? "null");
+				draft.owner = "closed-window";
+				draft.body.title = "Text preserved from the other window";
+				localStorage.setItem(
+					`${key.replace(":draft:", ":draft-copy:")}:closed-window:copy`,
+					JSON.stringify({ draft, state: "lost" }),
+				);
+			});
+			await page.reload();
+			const preserved = page.getByRole("textbox", { name: "Preserved draft text", exact: true });
+			await preserved.waitFor();
+			expect(await preserved.inputValue()).toContain("Text preserved from the other window");
+			const discard = page.getByRole("button", { name: "Discard preserved copy", exact: true });
+			const target = await discard.boundingBox();
+			expect(target?.height).toBeGreaterThanOrEqual(44);
+			await discard.tap();
+			await preserved.waitFor({ state: "detached" });
+			expect(await page.locator("[data-field=title]").inputValue()).toBe("Draft held in this window");
+		} finally {
+			await phone.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+test.skipIf(!browserAvailable)(
 	"on a phone every screen shows its list, a row opens the detail, and Back returns",
 	async () => {
 		const server = await startServer({ cases: 40 });

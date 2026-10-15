@@ -19,12 +19,14 @@ function matches(copy: Draft, other: Draft): boolean {
 		content(copy) === content(other) && JSON.stringify(copy.conflict?.merged) === JSON.stringify(other.conflict?.merged)
 	);
 }
-function store(key: string, copy: Copy): void {
+function store(key: string, copy: Copy): boolean {
 	try {
 		localStorage.setItem(key, JSON.stringify(copy));
 		unstored.delete(key);
+		return true;
 	} catch {
 		unstored.set(key, { copy, owner: deviceSession() });
+		return false;
 	}
 }
 function copies(scope: { project: string; id: string }): Map<string, Copy> {
@@ -36,7 +38,14 @@ function copies(scope: { project: string; id: string }): Map<string, Copy> {
 			if (!key?.startsWith(start)) continue;
 			try {
 				const parsed = Copy.safeParse(JSON.parse(localStorage.getItem(key) ?? "null"));
-				if (parsed.success && parsed.data.draft.id === scope.id) found.set(key, parsed.data);
+				if (!parsed.success || parsed.data.draft.id !== scope.id) continue;
+				const copy = parsed.data;
+				// This window's synchronous write cannot still be running when it reads copies, including after reload.
+				if (copy.state === "writing" && copy.draft.owner === draftOwner()) {
+					copy.state = "lost";
+					store(key, copy);
+				}
+				found.set(key, copy);
 			} catch {}
 		}
 	} catch {}
@@ -104,7 +113,11 @@ function protectDraft(scope: { project: string; draft: Draft }, write: () => Dra
 	} catch (error) {
 		held.copy = { draft: { ...draft, owner: draftOwner() }, state: "waiting" };
 		held.ready = true;
-		store(held.key, held.copy);
+		if (!store(held.key, held.copy)) {
+			try {
+				localStorage.removeItem(held.key);
+			} catch {}
+		}
 		pending.set(shared, held);
 		notify();
 		throw error;
