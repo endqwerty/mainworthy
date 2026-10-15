@@ -8,7 +8,7 @@ import { HANDLERS } from "../src/server/decisions/kinds.ts";
 import { linkTest, setExcuse, testById } from "../src/server/evidence/evidence.ts";
 import { recoverAccepted, recoverDisputes, sweep } from "../src/server/jobs.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
-import { MIGRATIONS, migrate } from "../src/server/kernel/migrate.ts";
+import { MIGRATIONS } from "../src/server/kernel/migrate.ts";
 import { claimMint, decisionOf, Witness } from "../src/server/kernel/witness.ts";
 import { OPS } from "../src/server/ops/index.ts";
 import { invoke, invokeAsync } from "../src/server/ops/registry.ts";
@@ -2550,9 +2550,9 @@ describe("what a decision may change", () => {
 			h.app.db.raw
 				.query("INSERT INTO result_excuses (result, decision, class, expires_at) VALUES (?, ?, ?, ?)")
 				.run(row.result, row.decision, row.class, row.expires_at);
-		// Only the slot migration runs: the tables of migrations between the two are already here.
-		h.app.db.raw.query("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(slots.version - 1));
-		expect(migrate(h.app.db, ":memory:")).toMatchObject({ from: slots.version - 1, to: slots.version });
+		// Only the slot migration runs, in one transaction as migrate applies it: the tables of every other migration
+		// are already here, so rewinding the version would run later migrations a second time.
+		h.app.db.transaction(() => h.app.db.exec(slots.sql));
 		expect(rows("SELECT result, decision, class, expires_at, slot FROM result_excuses")).toEqual(
 			before.map((row) => ({ ...row, slot: null })),
 		);
