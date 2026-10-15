@@ -263,3 +263,102 @@ test(
 	},
 	SLOW,
 );
+
+test(
+	"health and ordinary reads answer while a refresh waits inside its reset transaction",
+	async () => {
+		await withInstance(async ({ instance, client }) => {
+			await client.call("admin", { do: "project.create", key: "older" });
+			await client.with({ project: "older" }).call("propose", {
+				cmd: "demo-older-folders-v1",
+				edits: [{ op: "folder", name: "Checkout" }],
+			});
+			await client.with({ project: "older" }).call("propose", {
+				edits: [{ op: "create", outline: "The committed demo" }],
+			});
+			let resume = () => {};
+			const paused = new Promise<void>((resolve) => {
+				resume = resolve;
+			});
+			let reached = () => {};
+			const atRemoval = new Promise<string>((resolve) => {
+				reached = () => resolve("paused");
+			});
+			const refreshing = refreshDemo(instance, "older", small, {
+				step: async (name: string) => {
+					if (name !== "removed") return;
+					reached();
+					await paused;
+				},
+			});
+			try {
+				expect(await Promise.race([atRemoval, refreshing.then(() => "finished")])).toBe("paused");
+				const health = await fetch(`${instance.url}/healthz`, { signal: AbortSignal.timeout(2_000) });
+				expect(health.status).toBe(200);
+				expect(await health.json()).toMatchObject({ ok: true });
+				expect(await titles(client, "older")).toEqual(["The committed demo"]);
+			} finally {
+				resume();
+				await refreshing;
+			}
+			expect(await titles(client, "older")).not.toContain("The committed demo");
+		});
+	},
+	SLOW,
+);
+
+test(
+	"a reset that outlasts the preflight token makes a fresh seed token afterwards",
+	async () => {
+		await withInstance(
+			async ({ instance, client }) => {
+				await refreshDemo(instance, "demo", small);
+				const clock = instance.app.now;
+				try {
+					const seeded = await refreshDemo(instance, "demo", small, {
+						step: async () => {
+							instance.app.now = () => clock() + 16 * 60_000;
+						},
+					});
+					expect(seeded.cases).toHaveLength(30);
+					expect((await titles(client, "demo")).length).toBe(28);
+					const tokens = Tokens.parse(await client.call("admin", { do: "token.list" }));
+					const seedTokens = tokens.filter((token) => token.label === "demo seed of demo");
+					expect(seedTokens).toHaveLength(2);
+					expect(seedTokens.every((token) => token.revoked)).toBe(true);
+					expect(seedTokens.at(-1)?.expired).toBe(false);
+					expect(
+						tokens.filter((token) => token.label === "demo preflight of demo").every((token) => token.revoked),
+					).toBe(true);
+				} finally {
+					instance.app.now = clock;
+				}
+			},
+			{ mode: "server" },
+		);
+	},
+	SLOW,
+);
+
+test(
+	"stopping a reset before its commit preserves the old demo and its grants",
+	async () => {
+		await withInstance(async ({ instance, client }) => {
+			await refreshDemo(instance, "demo", small);
+			await client.call("admin", { do: "token.create", actor: "helper", kind: "ci", can: ["read"], project: "demo" });
+			const before = { titles: await titles(client, "demo"), grants: await grantsOf(client, "helper") };
+			await expect(
+				refreshDemo(instance, "demo", small, {
+					step: async () => {
+						throw new Error("reset interrupted");
+					},
+				}),
+			).rejects.toThrow("reset interrupted");
+			expect({ titles: await titles(client, "demo"), grants: await grantsOf(client, "helper") }).toEqual(before);
+			expect(instance.app.db.raw.query("PRAGMA foreign_key_check").all()).toEqual([]);
+			await refreshDemo(instance, "demo", small);
+			expect(await grantsOf(client, "helper")).toEqual(before.grants);
+		});
+	},
+	SLOW,
+);

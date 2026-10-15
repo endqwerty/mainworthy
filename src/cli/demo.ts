@@ -1,5 +1,6 @@
 // A demo that is new on every start: `MAINWORTHY_DEMO=<project>` has `mainworthy serve` empty that project and
 // seed it again once it listens, so an instance that follows `main` always shows the demo of the code it runs.
+import { Worker } from "node:worker_threads";
 import { z } from "zod";
 import { Capability, type Role } from "../core/kinds.ts";
 import { createToken, manageTeams, orgId, revokeToken, setGrant } from "../server/identity/identity.ts";
@@ -30,79 +31,161 @@ const LASTS_MS = 15 * 60_000;
  * left as it is and refused. One that does not exist yet is made. The grants on the project, a team's included, are
  * kept: whoever could use the demo still can.
  *
- * The owner is given a token for this alone, which ends after a quarter of an hour and is revoked at the end.
+ * The preflight and seed each get their own token, valid for fifteen minutes and revoked when that step ends.
+ * The reset runs on its own thread without a token, so it cannot consume the seed token's lifetime.
  */
 export async function refreshDemo(
 	instance: Instance,
 	project: string,
 	size: { cases: number; unlinkedFiles: number; days?: number } = { cases: DEFAULT_SEED_CASES, unlinkedFiles: 60 },
+	options: { step?: (name: string) => Promise<void> } = {},
 ): Promise<SeedResult> {
 	const { app, owner } = instance;
-	const label = `demo seed of ${project}`;
-	const { id, secret } = await app.gate.run(() =>
-		app.db.transaction(() =>
-			createToken(app, {
-				actor: owner.name,
-				kind: "human",
-				can: [],
-				project: 0,
-				label,
-				lastsMs: LASTS_MS,
-				madeBy: owner.id,
-			}),
-		),
-	);
-	const client = new Client({ url: instance.url, token: secret, project });
-	try {
-		// What would stop the seed is asked first, so a start that cannot seed empties nothing.
-		await refuseProducers(client);
-		const projects = Projects.parse(await client.call("admin", { do: "project.list" }));
-		if (projects.some((row) => row.key === project)) {
-			// A demo seeded before projects were marked demos carries no mark. Its first write is that seed's.
-			const legacy = await client.call("command", { cmd: `demo-${project}-folders-v1` });
-			const emptied = await app.gate.run(() =>
-				app.db.transaction(() => {
-					// Only a demo is emptied. A project became one while nothing was written to it (decision 0020), so
-					// nothing in it is older than the demo. One from before the mark counts when the first thing
-					// written to it was its seed's (`firstWrite`); a command id alone proves nothing, anybody sends one.
-					const found = findProject(app.db, project);
-					const marked = found !== null && demoSince(app.db, found.id) !== null;
-					const seededBefore = legacy.state === "done" && firstWrite(app.db, project) === legacy.seq;
-					if (!marked && !seededBefore) return false;
-					const held = grantsOn(app, owner, project);
-					removeProject(app.db, project);
-					// In the same transaction the project is made again, a demo and empty, with the grants it had: who
-					// may use the demo is not part of it, and a start stopped after this keeps both. The seed fills it.
-					createProject({ app, actor: owner, now: app.now(), session: null, context: null }, { key: project });
-					const made = findProject(app.db, project);
-					if (!made || markDemo(app.db, made, app.now()) === null)
-						throw new CliError("internal", `project ${project} was made again and could not be marked a demo`);
-					for (const grant of held) {
-						const can = Capabilities.parse(grant.can);
-						if (grant.holder === "team")
-							manageTeams(app, owner, orgId(app.db), { do: "team.grant.set", team: grant.name, project, can });
-						else
-							setGrant(app, {
-								actor: grant.name,
-								project: made.id,
-								can,
-								...(grant.roles ? { roles: grant.roles } : {}),
-							});
-					}
-					return true;
+	const token = (label: string) =>
+		app.gate.run(() =>
+			app.db.transaction(() =>
+				createToken(app, {
+					actor: owner.name,
+					kind: "human",
+					can: [],
+					project: 0,
+					label,
+					lastsMs: LASTS_MS,
+					madeBy: owner.id,
 				}),
-			);
-			if (!emptied)
-				throw new CliError(
-					"conflict",
-					`MAINWORTHY_DEMO names project ${project}, which is not a demo; it is left as it is`,
-				);
+			),
+		);
+	const revoke = (id: number) => app.gate.run(() => revokeToken(app, id));
+	const preflight = await token(`demo preflight of ${project}`);
+	let exists = false;
+	let legacySeq: number | null = null;
+	const began = performance.now();
+	try {
+		const client = new Client({ url: instance.url, token: preflight.secret, project });
+		await refuseProducers(client);
+		exists = Projects.parse(await client.call("admin", { do: "project.list" })).some((row) => row.key === project);
+		if (exists) {
+			const legacy = await client.call("command", { cmd: `demo-${project}-folders-v1` });
+			if (legacy.state === "done") legacySeq = legacy.seq;
 		}
-		return await seed(client, { project, ...size });
 	} finally {
-		// The token this start made, by its id: no other token is touched.
-		await app.gate.run(() => revokeToken(app, id)).catch(() => undefined);
+		await revoke(preflight.id);
+		logStep(project, "preflight", performance.now() - began);
 	}
+	if (exists) await app.gate.run(() => resetInWorker(instance, project, legacySeq, options));
+	// Emptying can take longer than a token's lifetime. Make the seed's token only once it has ended.
+	const seeding = await token(`demo seed of ${project}`);
+	const since = performance.now();
+	try {
+		return await seed(new Client({ url: instance.url, token: seeding.secret, project }), { project, ...size });
+	} finally {
+		await revoke(seeding.id);
+		logStep(project, "seed", performance.now() - since);
+	}
+}
+
+const DemoMessage = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("progress"), step: z.string(), ms: z.number() }),
+	z.object({ kind: z.literal("pause"), step: z.literal("removed") }),
+	z.object({ kind: z.literal("done") }),
+]);
+
+function logStep(project: string, step: string, ms: number): void {
+	console.error(`[mainworthy] demo ${JSON.stringify(project)}: ${step} took ${ms.toFixed(1)} ms`);
+}
+
+async function resetInWorker(
+	instance: Instance,
+	project: string,
+	legacySeq: number | null,
+	options: { step?: (name: string) => Promise<void> },
+): Promise<void> {
+	const worker = new Worker(
+		new URL(Bun.isStandaloneExecutable ? "./cli/demo-worker.js" : "./demo-worker.ts", import.meta.url),
+		{
+			workerData: {
+				dataDir: instance.app.config.dataDir,
+				owner: instance.owner.name,
+				project,
+				legacySeq,
+				clockOffset: instance.app.now() - Date.now(),
+			},
+			name: "mainworthy-demo-reset",
+		},
+	);
+	const began = performance.now();
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		await new Promise<void>((resolve, reject) => {
+			timer = setTimeout(() => reject(new Error("demo reset exceeded ten minutes; worker stopped")), 10 * 60_000);
+			worker.on("message", (message: unknown) => {
+				const parsed = DemoMessage.safeParse(message);
+				if (!parsed.success) return reject(new Error("invalid demo reset worker reply"));
+				const reply = parsed.data;
+				if (reply.kind === "done") return resolve();
+				if (reply.kind === "progress") return logStep(project, reply.step, reply.ms);
+				void Promise.resolve()
+					.then(() => options.step?.(reply.step))
+					.then(() => worker.postMessage("continue"))
+					.catch(reject);
+			});
+			worker.once("error", reject);
+			worker.once("messageerror", reject);
+			worker.once("exit", (code) => reject(new Error(`demo reset worker exited with code ${code}`)));
+		});
+	} finally {
+		clearTimeout(timer);
+		await worker.terminate();
+		logStep(project, "reset transaction", performance.now() - began);
+	}
+}
+
+/** The worker holds the write gate and one transaction across removal, recreation and grant restoration. */
+export function resetDemoSteps(
+	app: App,
+	owner: Actor,
+	project: string,
+	legacySeq: number | null,
+	progress: (step: string, ms: number) => void,
+): Generator<undefined, void, void> {
+	return app.db.savepointSteps(function* () {
+		const began = performance.now();
+		const found = findProject(app.db, project);
+		const marked = found !== null && demoSince(app.db, found.id) !== null;
+		// Only an unmarked legacy demo needs the expensive provenance scan.
+		const seededBefore = !marked && legacySeq !== null && firstWrite(app.db, project) === legacySeq;
+		progress("check demo provenance", performance.now() - began);
+		if (!marked && !seededBefore)
+			throw new CliError(
+				"conflict",
+				`MAINWORTHY_DEMO names project ${project}, which is not a demo; it is left as it is`,
+			);
+		const grantsSince = performance.now();
+		const held = grantsOn(app, owner, project);
+		progress("save grants", performance.now() - grantsSince);
+		removeProject(app.db, project, progress);
+		yield;
+		const recreating = performance.now();
+		// A start stopped before commit keeps the old demo and grants. After commit it keeps an empty demo
+		// and those same grants, so the next start can fill it again.
+		createProject({ app, actor: owner, now: app.now(), session: null, context: null }, { key: project });
+		const made = findProject(app.db, project);
+		if (!made || markDemo(app.db, made, app.now()) === null)
+			throw new CliError("internal", `project ${project} was made again and could not be marked a demo`);
+		for (const grant of held) {
+			const can = Capabilities.parse(grant.can);
+			if (grant.holder === "team")
+				manageTeams(app, owner, orgId(app.db), { do: "team.grant.set", team: grant.name, project, can });
+			else
+				setGrant(app, {
+					actor: grant.name,
+					project: made.id,
+					can,
+					...(grant.roles ? { roles: grant.roles } : {}),
+				});
+		}
+		progress("recreate demo and grants", performance.now() - recreating);
+	});
 }
 
 /**

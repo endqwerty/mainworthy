@@ -25,6 +25,7 @@ import quarantines from "./migrations/0021_quarantines.sql" with { type: "text" 
 
 import fragments from "./migrations/0022_fragments.sql" with { type: "text" };
 import quarantineObservations from "./migrations/0023_quarantine_observations.sql" with { type: "text" };
+import projectRemovalIndexes from "./migrations/0024_project_removal_indexes.sql" with { type: "text" };
 
 /**
  * In order. A migration is never edited after it ships; a change is a new entry.
@@ -59,6 +60,7 @@ export const MIGRATIONS: readonly { version: number; name: string; sql: string; 
 	{ version: 21, name: "quarantines", sql: quarantines, archive: true },
 	{ version: 22, name: "fragments", sql: fragments, archive: true },
 	{ version: 23, name: "quarantine_observations", sql: quarantineObservations, archive: true },
+	{ version: 24, name: "project_removal_indexes", sql: projectRemovalIndexes, archive: false },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.at(-1)?.version ?? 0;
