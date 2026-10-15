@@ -419,8 +419,8 @@ export function cleanBody(input: PartialBody, base: CaseBody): CaseBody {
 	return parsed.data;
 }
 
-function fromMarkdown(md: string): { body: CaseBody; tags: string[]; covers: string[] } {
-	const parsed = parseCase(md);
+function fromMarkdown(md: string, base: CaseBody = emptyBody()): { body: CaseBody; tags: string[]; covers: string[] } {
+	const parsed = parseCase(md, { fields: base.fields });
 	if (!parsed.ok) throw invalid("the Markdown is not a valid case", { errors: parsed.errors });
 	return { body: parsed.doc.body, tags: parsed.doc.tags, covers: parsed.doc.covers };
 }
@@ -507,7 +507,7 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 				const row = lookup(edit.case);
 				if (edit.base < 1 || edit.base > row.head) throw invalid(`${caseRef(row)} has no version ${edit.base}`);
 				const base = bodyOf(ctx.db, row.id, edit.base);
-				const mine = cleanBody(edit.md !== undefined ? fromMarkdown(edit.md).body : (edit.body ?? {}), base);
+				const mine = cleanBody(edit.md !== undefined ? fromMarkdown(edit.md, base).body : (edit.body ?? {}), base);
 				const head = edit.base === row.head ? base : bodyOf(ctx.db, row.id, row.head);
 				const merge =
 					edit.base === row.head ? { merged: mine, conflicts: [] } : mergeBodies({ base, mine, theirs: head });

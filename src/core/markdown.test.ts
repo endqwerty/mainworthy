@@ -103,6 +103,22 @@ describe("canonical case Markdown", () => {
 		});
 	});
 	test.each([
+		["", { legacy: "Keep me" }],
+		["# fields: {}\n", { legacy: "Keep me" }],
+		["fields:\n", {}],
+		["fields: {}\n", {}],
+		['"fields": {}\n', {}],
+		["fields:\n  risk: low\n", { risk: "low" }],
+	])("uses fallback fields only when the header omits them: %j", (header, fields) => {
+		const text = `\uFEFF---\r\ntitle: Edited\r\n${header.replace(/\n/g, "\r\n")}---\r\n## Steps\r\n- fields: is body text ^a1\r\n`;
+		const result = parseCase(text, { fields: { legacy: "Keep me" } });
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.doc.body.fields).toEqual(fields);
+			expect(result.doc.body.steps).toEqual([{ id: "a1", action: "fields: is body text", expected: null }]);
+		}
+	});
+	test.each([
 		["Missing header", "## Steps\n- Act"],
 		["Missing close", "---\ntitle: A"],
 		["Bad scalar", '---\ntitle: "unclosed\n---\n## Steps'],

@@ -162,7 +162,7 @@ function readArray({ text, line, errors }: { text: string; line: number; errors:
 type PendingStep = { id: string; action: string[]; expected: string[] | null; line: number };
 
 /** Reads canonical cases and hand-written headers/steps, reporting source lines. Missing ids are deterministic and collision-free. */
-export function parseCase(text: string): CaseParseResult {
+export function parseCase(text: string, defaults: Pick<CaseDoc["body"], "fields"> = { fields: {} }): CaseParseResult {
 	const normalised = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
 	const lines = normalised.split("\n");
 	if (lines.at(-1) === "") lines.pop();
@@ -299,7 +299,7 @@ export function parseCase(text: string): CaseParseResult {
 			steps,
 			methods: headerArray({ key: "methods", fallback: ["human"] }),
 			automate: headerString({ key: "automate", fallback: "none" }),
-			fields: Object.fromEntries(fieldEntries),
+			fields: header.has("fields") ? Object.fromEntries(fieldEntries) : defaults.fields,
 		},
 		tags: headerArray({ key: "tags", fallback: [] }),
 		covers: headerArray({ key: "covers", fallback: [] }),

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { parseCase } from "../src/core/markdown.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -29,6 +30,13 @@ const OUTLINE = `Checkout applies a percentage coupon #checkout @WEB-290
   Open the cart with one $100.00 item
   Apply coupon SAVE10 > Total shows $90.00
   Reload the page => Coupon is still applied`;
+
+const storedBody = () => {
+	const [result] = h.call<{ md: string }[]>("get", { refs: ["C-1"], as: "md" });
+	const parsed = parseCase(result?.md ?? "");
+	if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
+	return parsed.doc.body;
+};
 
 describe("capture", () => {
 	test("an outline becomes C-1, version 1, with steps, expected results, a tag and a requirement", () => {
@@ -125,6 +133,48 @@ describe("capture", () => {
 		expect(md?.md).toContain("## Steps");
 		const again = h.call<Proposed>("propose", { edits: [{ op: "edit", case: "C-1", base: 1, md: md?.md }] });
 		expect(again.proposal).toBeNull(); // nothing changed, so nothing was proposed
+	});
+
+	test("a Markdown edit without a fields header preserves free-form values", () => {
+		h.call("propose", { edits: [{ op: "create", body: { title: "Original", fields: { legacy: "Keep me" } } }] });
+		const reply = h.call<Proposed>("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 1, md: "---\ntitle: Edited\n---\n## Steps\n" }],
+		});
+		expect(reply.status).toBe("adopted");
+		expect(storedBody()).toMatchObject({
+			title: "Edited",
+			fields: { legacy: "Keep me" },
+		});
+	});
+
+	test.each([
+		["fields:", {}],
+		["fields: {}", {}],
+		["fields:\n  risk: low", { risk: "low" }],
+	])("a Markdown edit with %s replaces the field map", (header, fields) => {
+		h.call("propose", {
+			edits: [{ op: "create", body: { title: "Original", fields: { risk: "high", legacy: "Keep me" } } }],
+		});
+		const reply = h.call<Proposed>("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 1, md: `---\ntitle: Edited\n${header}\n---\n## Steps\n` }],
+		});
+		expect(reply.status).toBe("adopted");
+		expect(storedBody().fields).toEqual(fields);
+	});
+
+	test("a stale Markdown edit without fields merges a concurrent field change", () => {
+		h.call("propose", { edits: [{ op: "create", body: { title: "Original", fields: { risk: "high" } } }] });
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { fields: { risk: "low" } } }] });
+		const reply = h.call<Proposed>("propose", {
+			edits: [{ op: "edit", case: "C-1", base: 1, md: "---\ntitle: Edited\n---\n## Steps\n" }],
+		});
+		expect(reply.status).toBe("adopted");
+		expect(reply.conflicts).toEqual([]);
+		expect(reply.cases[0]?.version).toBe(3);
+		expect(storedBody()).toMatchObject({
+			title: "Edited",
+			fields: { risk: "low" },
+		});
 	});
 });
 
