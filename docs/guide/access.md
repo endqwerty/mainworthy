@@ -334,7 +334,7 @@ Without mail, there is no reset link or invitation address field. An admin recov
 
 The public sign-in exchange is `POST /api/login`. Send `{ "resetRequest": "robin@example.com" }` to request a reset, `{ "emailVerification": "<code>" }` to verify an address, or `{ "reset": "<code>", "password": "<new password>" }` to finish a reset. A successful request replies `{ "requested": true }` for every address. A blocked request returns `429` with `Retry-After`. Successful verification replies `{ "verified": true }`, and a successful reset replies `{ "changed": true }` without a session cookie. `GET /api/login/methods` includes `mail`, which says whether the instance offers these flows.
 
-A verified address receives a notice when a password, passkey or authenticator is added, changed or removed. Mail is requested after the account change commits. Delivery failure does not undo a change or reveal SMTP details. The queue and pending links live in memory, so restart loses them. Ask for another link if none arrives. Contacts and verification status do not travel in archives.
+A verified address receives a notice when a password, passkey or authenticator is added, changed or removed. Mail is requested after the account change commits. Delivery failure does not undo a change or reveal SMTP details. The queue and pending links live in memory, so restart loses them. Ask for another link if none arrives. Archives preserve contacts and verification status. Import clears pending verification and reset links.
 
 Opening the confirmation moves focus to **Make the recovery link**. **Cancel** or <kbd>Esc</kbd> closes the confirmation and returns focus to that person's **Recovery link** button.
 

@@ -212,6 +212,43 @@ function totp(secret: string, now: number): string {
 	const digest = createHmac("sha1", key).update(counter).digest();
 	return String((digest.readUInt32BE((digest.at(-1) ?? 0) & 15) & 0x7fffffff) % 1_000_000).padStart(6, "0");
 }
+for (const grant of ["personal", "team"] as const) {
+	test(`mail reset cannot give a required admin with a ${grant} grant password-only entry`, async () => {
+		const box = await mailbox();
+		const w = box.w;
+		try {
+			const { cookie } = await verified(w, box.messages);
+			if (grant === "personal") {
+				await w.ok("admin", { do: "grant.set", actor: "robin", project: "scratch", can: ["read", "admin"] });
+			} else {
+				await w.ok("admin", { do: "team.create", name: "Admins" });
+				await w.ok("admin", { do: "team.member.add", team: "Admins", person: "robin" });
+				await w.ok("admin", { do: "team.grant.set", team: "Admins", project: "scratch", can: ["admin"] });
+			}
+			w.instance.app.config.requireAdminMfa =
+				defaultConfig({ MAINWORTHY_REQUIRE_ADMIN_MFA: "true" }).requireAdminMfa === true;
+			await w.post("/api/login", { resetRequest: "robin@example.com" });
+			await waitMail(w.instance.app);
+			const reset = linkCode(box.messages.at(-1)?.text ?? "", "reset");
+			const changed = await w.post("/api/login", { reset, password: NEXT });
+			expect(changed.status).toBe(200);
+			expect(must(changed)).toEqual({ changed: true });
+			expect(changed.setCookies).toEqual([]);
+			expect(await w.status({ cookie })).toBe(401);
+			const refused = await signIn(w, "robin", NEXT);
+			expect(refused.status).toBe(403);
+			expect(refused.cookie).not.toContain("session=");
+			expect(await w.status({ cookie: refused.cookie })).toBe(401);
+			w.instance.app.config.requireAdminMfa = false;
+			const signed = await signIn(w, "robin", NEXT);
+			expect(signed.status).toBe(200);
+			expect(await w.status({ cookie: signed.cookie })).toBe(200);
+		} finally {
+			await box.close();
+		}
+	});
+}
+
 test("reset retains TOTP and sign-in method changes notify a verified contact", async () => {
 	const box = await mailbox();
 	const w = box.w;
@@ -342,11 +379,10 @@ test("a password reset rechecks its proof after waiting at the write gate", asyn
 	}
 });
 
-test("archives omit contact ownership and import invalidates all mail links", async () => {
+test("archives preserve verified contacts and import invalidates all mail links", async () => {
 	const box = await mailbox();
 	const w = box.w;
 	try {
-		const archive = await (await fetch(`${w.instance.url}/api/export`, { headers: bearer(TOKEN) })).text();
 		const recovery = await invite(w, { name: OWNER });
 		const accepted = await w.post("/api/login", { invitation: recovery.code, password: PASSWORD });
 		const cookie = accepted.cookie;
@@ -360,16 +396,32 @@ test("archives omit contact ownership and import invalidates all mail links", as
 		await waitMail(w.instance.app);
 		const reset = linkCode(box.messages.at(-1)?.text ?? "", "reset");
 		const exported = await (await fetch(`${w.instance.url}/api/export`, { headers: { cookie } })).text();
-		expect(exported).not.toContain("owner-mail@example.com");
+		expect(JSON.parse(exported.split("\n")[0] ?? "").schema).toBe(19);
+		expect(exported).toContain("owner-mail@example.com");
+		expect(exported).not.toContain(reset);
+		expect(exported).not.toContain(verify);
 		expect(exported).not.toContain("smtp-password-private");
+		expect((await w.op("credential", { do: "email.set", email: "replacement@example.com" }, { cookie })).status).toBe(
+			200,
+		);
+		await waitMail(w.instance.app);
+		const pendingVerify = linkCode(box.messages.at(-1)?.text ?? "", "email");
 		const imported = await fetch(`${w.instance.url}/api/import`, {
 			method: "POST",
 			headers: { cookie },
-			body: archive,
+			body: exported,
 		});
 		expect(imported.status).toBe(200);
 		expect((await w.post("/api/login", { reset, password: NEXT })).status).toBe(400);
-		expect(w.rows("SELECT * FROM mail_contacts")).toEqual([]);
+		expect((await w.post("/api/login", { emailVerification: pendingVerify })).status).toBe(400);
+		expect(w.rows("SELECT email, verified_at IS NOT NULL AS verified FROM mail_contacts")).toEqual([
+			{ email: "owner-mail@example.com", verified: 1 },
+		]);
+		await w.post("/api/login", { resetRequest: "owner-mail@example.com" });
+		await waitMail(w.instance.app);
+		const restoredReset = linkCode(box.messages.at(-1)?.text ?? "", "reset");
+		expect((await w.post("/api/login", { reset: restoredReset, password: NEXT })).status).toBe(200);
+		expect((await signIn(w, OWNER, NEXT)).status).toBe(200);
 	} finally {
 		await box.close();
 	}
