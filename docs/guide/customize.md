@@ -72,7 +72,7 @@ seeded demo: 2000 cases, run R-53, 65 questions
 http://127.0.0.1:7357/p/demo/suite
 ```
 
-The demo is a shop's suite. Its cases are in 29 folders under eight areas: Checkout, Accounts, Orders, Catalog, Back office, Notifications, Mobile app and API. Each folder holds the scenarios of one feature, and each case has steps of its own. A feature that needs more cases than it has scenarios repeats them for another browser, language or kind of customer, as a real suite does. About a third of the cases have an automated test, and each test is linked to its case.
+The demo is a shop's suite. Its cases are in 29 folders under eight areas: Checkout, Accounts, Orders, Catalog, Back office, Notifications, Mobile app and API. Each folder holds the scenarios of one feature, and each case has steps of its own. The project defines two fields of its own, a priority and the team that owns a case, and the cases carry them. The back office's cases came from TestRail and keep its ids as aliases: in the default demo, `mainworthy get C5505` reads one. A feature that needs more cases than it has scenarios repeats them for another browser, language or kind of customer, as a real suite does. About a third of the cases have an automated test, and each test is linked to its case.
 
 The pipeline also reports the shop's unit tests, which no case names: 60 files under `tests/unit/`, one open question each. That is the queue a first real project has, with many rows that want the same answer. Answer them one at a time to see what that costs. Then answer them all at once: in Settings, Policy, set "Tests with no case" to "Track without a case", or run `mainworthy --project demo policy tests track`. `--unlinked-files` sets how many files there are, from 0 to 500.
 
@@ -80,9 +80,10 @@ The project holds fourteen days of history before today:
 
 - A pipeline named `pipeline` reported on `main` every night, and on one to three pull requests on most days. Two days of each week are quieter; this pattern comes from the seed, so it does not depend on the real weekday. Two nights found a defect, one night its services were down, and some pull requests failed before they were fixed. A person answered each failure the day it was reported.
 - A run was planned every other day and worked through by hand. The older ones are closed as passed. The one from two days ago found a defect and stays open, and yesterday's is half done.
-- Some cases were edited, and an agent named `reviewer` reviewed two pull requests.
+- Some cases were edited, two that the API checks now cover were archived, and an agent named `reviewer` reviewed two pull requests.
+- Each pull request merged after its last report, and the pipeline said so, so it ended and is not asked about again. Today's pull request 482 is the only one open.
 
-Today `main` fails one test, and so does pull request 482, which starts from that commit. A run named "Checkout regression" is planned on the pull request, and `reviewer` has left a finding and a proposed edit. The queue holds five questions that need judgment: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The sixty unit-test questions make 65 in all. The demo adopts the `standard` preset before its first report, set to ask about tests with no case. This keeps the pull request's failure open with the hint that it also fails on the base.
+Today `main` fails one test, and so does pull request 482, which starts from that commit. Both failures carry the trace the test runner wrote, as an attachment. A run named "Checkout regression" is planned on the pull request, and `reviewer` has left a finding and a proposed edit. The queue holds five questions that need judgment: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The sixty unit-test questions make 65 in all. The demo adopts the `standard` preset before its first report, set to ask about tests with no case. This keeps the pull request's failure open with the hint that it also fails on the base.
 
 Four flags change what is written:
 
@@ -99,9 +100,9 @@ A seeded project is a demo project, and stays one. Only a demo project accepts a
 
 The demo mark is stored by migration `0009_demo_projects.sql`, schema version 9. It is excluded from archives, so it does not change their version.
 
-`seed` needs a person who administers the instance, because it makes the project and the two actors. In server mode, give that person's token with `--token` or `MAINWORTHY_TOKEN`. The pipeline and the agent hold a grant on the demo project alone, and the two tokens `seed` used for them end after an hour.
+`seed` needs a person who administers the instance, because it makes the project and the two actors. In server mode, give that person's token with `--token` or `MAINWORTHY_TOKEN`. The pipeline and the agent hold a grant on the demo project alone. The tokens `seed` makes for them are revoked when it ends, and end after an hour if it stops before then.
 
-You cannot delete a project yet, so the demo stays until you start with a new data directory.
+You cannot delete a project yet, so the demo stays until you start with a new data directory. Or have the server seed it again on every start: with `MAINWORTHY_DEMO=demo` set, `mainworthy serve` empties the project `demo` once it listens and seeds the demo there again, so the history ends on the day of the start and whatever you changed there is gone. It does that only to a demo project; any other is left as it is, and the start says so in a line. A demo seeded before projects were marked demos counts when the first thing written to it was that seed's. Whoever holds a grant on the demo keeps it, a team included, except the demo's own `pipeline` and `reviewer`, whose grants are part of the demo and set by the seed: the project is made again with its grants in the same step that empties it, so a start that stops halfway leaves an empty demo that the next start fills. A project of that name that does not exist yet is made. The seed takes a few seconds, during which the project is partly filled. See [configuration](./configuration.md).
 
 ## Cases, folders and tags
 

@@ -7,6 +7,7 @@ import { archiveRoutes } from "../../surfaces/archive.ts";
 import { docsRoutes } from "../../surfaces/docs/site.ts";
 import { mcpRoute } from "../../surfaces/mcp.ts";
 import { type Args, assertPositionals } from "../args.ts";
+import { refreshDemo } from "../demo.ts";
 import { printError } from "../errors.ts";
 import { line, warning } from "../output.ts";
 
@@ -32,6 +33,21 @@ export function serveCommand(args: Args, ui: unknown): void {
 	line(`project "${instance.project}" · ${who} · policy: ${policy}`);
 	if (config.mode === "server" && instance.generatedToken) line(`owner token (shown once): ${instance.generatedToken}`);
 	for (const text of instance.warnings) warning(`mainworthy: ${text}`);
+	// The demo is seeded again after the server listens, so a start is not held up by it (`src/cli/demo.ts`).
+	const demo = process.env.MAINWORTHY_DEMO || undefined;
+	if (demo) {
+		const began = performance.now();
+		void refreshDemo(instance, demo).then(
+			(seeded) =>
+				line(
+					`demo "${demo}" seeded again in ${((performance.now() - began) / 1000).toFixed(1)} s: ${seeded.cases.length} cases, ${seeded.questions.length} questions`,
+				),
+			(error: unknown) =>
+				warning(
+					`mainworthy: demo "${demo}" was not seeded again: ${error instanceof Error ? error.message : String(error)}`,
+				),
+		);
+	}
 	let stopping = false;
 	const stop = (): void => {
 		if (stopping) return;

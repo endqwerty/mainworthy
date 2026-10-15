@@ -30,6 +30,9 @@ services:
       # The address people open the instance at, like https://mainworthy.example. Passkeys belong to its host
       # name and an invitation link starts with it. Empty means no passkeys and a link without a host.
       MAINWORTHY_PUBLIC_URL: ${MAINWORTHY_PUBLIC_URL:-}
+      # A project the server empties and fills with the demo again on every start (`mainworthy seed`). Only a
+      # project that command made is emptied. Empty means none.
+      MAINWORTHY_DEMO: ${MAINWORTHY_DEMO:-}
     volumes:
       - mainworthy-data:/data
 
