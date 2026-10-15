@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Policy } from "../../src/core/kinds.ts";
 import { parseCase } from "../../src/core/markdown.ts";
 import { browserAvailable, eventually, keyCount, openPage, paste, startServer } from "./support.ts";
 
@@ -233,12 +234,30 @@ test.skipIf(!browserAvailable)(
 );
 
 test.skipIf(!browserAvailable)(
-	"an ordinary edit preserves custom fields omitted from JSON case reads",
+	"an ordinary edit preserves old fields and is not blocked by a new required field",
 	async () => {
 		const server = await startServer();
 		await server.api("propose", {
 			edits: [{ op: "create", body: { title: "Field-bearing case", fields: { priority: "P1" } } }],
 		});
+		const policy = Policy.parse(await server.api("admin", { do: "policy.show", project: "scratch" }));
+		const proposed = await server.api("propose", {
+			edits: [
+				{
+					op: "policy",
+					settings: {
+						...policy.settings,
+						fields: { risk: { kind: "choice", label: "Risk", required: true, choices: ["low", "high"] } },
+					},
+				},
+			],
+		});
+		const question = (await server.api("inbox", { kind: "adopt" })).items.find((item) => item.q === proposed.question);
+		if (!question) throw new Error("Policy review question missing");
+		expect(
+			(await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "accept" } }))[0]
+				?.status,
+		).toBe("decided");
 		const browser = await openPage(server, { path: "/p/scratch/suite/c/1" });
 		try {
 			await browser.page.getByRole("button", { name: "Field-bearing case", exact: true }).waitFor();

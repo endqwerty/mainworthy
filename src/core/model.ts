@@ -85,11 +85,16 @@ export const FieldDefinition = z.discriminatedUnion("kind", [
 export const FieldDefinitions = z.record(z.string().min(1).max(80), FieldDefinition);
 export type FieldDefinitions = z.infer<typeof FieldDefinitions>;
 
-/** Undefined keys remain free text. Definitions constrain future case content, never rewrite stored versions. */
-export function fieldErrors(fields: CaseBody["fields"], definitions: FieldDefinitions): string[] {
+/** Undefined keys remain free text. An edit can keep unchanged values from its current stored head. */
+export function fieldErrors(
+	fields: CaseBody["fields"],
+	definitions: FieldDefinitions,
+	previous?: CaseBody["fields"],
+): string[] {
 	const errors: string[] = [];
 	for (const [key, definition] of Object.entries(definitions)) {
 		const value = Object.hasOwn(fields, key) ? fields[key] : undefined;
+		if (previous !== undefined && value === (Object.hasOwn(previous, key) ? previous[key] : undefined)) continue;
 		if (value === undefined || value.trim() === "") {
 			if (definition.required) errors.push(`${key}: ${definition.label} is required`);
 		} else if (definition.kind === "choice" && !definition.choices.includes(value)) {

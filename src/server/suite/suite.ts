@@ -594,7 +594,8 @@ export function seal(ctx: Ctx, input: { edits: readonly Edit[]; reason: string |
 	if (resolved.length === 0) return null;
 	const policy = resolved.findLast((edit) => edit.op === "policy")?.policy ?? currentPolicy(ctx.db, ctx.project.id);
 	for (const edit of resolved) {
-		if (edit.op === "create" || edit.op === "edit" || edit.op === "restore") validateFields(edit.body, policy);
+		if (edit.op === "create" || edit.op === "restore") validateFields(edit.body, policy);
+		else if (edit.op === "edit") validateFields(edit.body, policy, bodyOf(ctx.db, edit.caseId, edit.head));
 	}
 
 	const facts = [`author:${ctx.actor.kind}`];
@@ -646,8 +647,8 @@ export const resolvedOf = (proposal: ProposalRow): Resolved[] => json<Resolved[]
 
 export type Adopted = { cases: CaseStamp[]; created: string[]; policyVersion: number | null };
 
-function validateFields(body: CaseBody, policy: Policy): void {
-	const errors = fieldErrors(body.fields, policy.settings.fields ?? {});
+function validateFields(body: CaseBody, policy: Policy, previous?: CaseBody): void {
+	const errors = fieldErrors(body.fields, policy.settings.fields ?? {}, previous?.fields);
 	if (errors.length > 0) throw invalid(`case custom fields are not valid: ${errors.join("; ")}`, { errors });
 }
 
@@ -667,8 +668,8 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 		ctx.touched.add(caseRef(row));
 		out.cases.push({ ref: caseRef(row), version, hash });
 	};
-	const writeVersion = (row: CaseRow, body: CaseBody) => {
-		validateFields(body, policy);
+	const writeVersion = (row: CaseRow, body: CaseBody, previous?: CaseBody) => {
+		validateFields(body, policy, previous);
 		const no = row.head + 1;
 		const hash = versionHash(body);
 		insertVersion(ctx, witness, proposal, row.id, no, row.head, body, hash);
@@ -760,7 +761,7 @@ export function adopt(ctx: Ctx, witness: Witness, proposal: ProposalRow): Adopte
 					body = merge.merged;
 				}
 				body = cleanBody(body, body);
-				if (versionHash(body) !== row.head_hash) writeVersion(row, body);
+				if (versionHash(body) !== row.head_hash) writeVersion(row, body, bodyOf(ctx.db, row.id, row.head));
 				else stamp(row, row.head, row.head_hash);
 				break;
 			}

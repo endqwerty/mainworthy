@@ -114,7 +114,14 @@ export function resolvePolicy(
 		};
 	}
 	if (change.clauses !== undefined) next = { ...next, preset: change.preset ?? "custom", clauses: change.clauses };
-	if (change.settings !== undefined) next = { ...next, settings: change.settings };
+	if (change.settings !== undefined)
+		next = {
+			...next,
+			settings: {
+				...(current.settings.fields ? { fields: current.settings.fields } : {}),
+				...change.settings,
+			},
+		};
 	if (change.unlinked !== undefined) next = { ...next, settings: { ...next.settings, unlinked: change.unlinked } };
 	if (change.emptyReports !== undefined)
 		next = { ...next, settings: { ...next.settings, emptyReports: change.emptyReports } };

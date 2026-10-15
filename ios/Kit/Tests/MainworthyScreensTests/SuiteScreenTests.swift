@@ -8,6 +8,37 @@ import Testing
 @Suite("The Suite screen", .enabled(if: Live.isRunning, "needs `bun scripts/ios.ts test`"))
 @MainActor
 struct SuiteScreenTests {
+	@Test("an existing case can be edited after a required field is introduced")
+	func requiredFieldOnOlderCase() async throws {
+		let key = try await Live.project()
+		let server = Live.server()
+		_ = try await server.signIn(Live.owner)
+		let client = server.project(key)
+		let opened = try await client.caseDocument("C-1")
+		let policy: JSONValue = try await server.read("admin", in: nil, ["do": "policy.show", "project": .string(key)])
+		var settings = try #require(policy["settings"]?.object)
+		settings["fields"] = ["risk": ["kind": "choice", "label": "Risk", "required": true, "choices": ["low", "high"]]]
+		let proposed: JSONValue = try await server.write("propose", in: key, [
+			"edits": [["op": "policy", "settings": .object(settings)]],
+		])
+		let inbox: JSONValue = try await server.read("inbox", in: key, ["kind": "adopt"])
+		let question = try #require(inbox["items"]?.array?.first { $0["q"] == proposed["question"] })
+		let decided: JSONValue = try await server.write("decide", in: key, [
+			"q": try #require(question["q"]), "onEvidence": try #require(question["evidenceHash"]),
+			"answer": ["is": "accept"],
+		])
+		#expect(decided.array?.first?["status"] == "decided")
+		let editor = CaseEditorScreen(project: client, source: .edit(opened))
+		editor.content.title = "Edited without filling a new field"
+		#expect(editor.maySave)
+		guard case .adopted(let stamp) = await editor.save(), let stamp else {
+			Issue.record("the older case was not saved: \(editor.notice ?? "no notice")"); return
+		}
+		#expect(stamp.version == opened.version + 1)
+		#expect(editor.savedDocument?.content.title == "Edited without filling a new field")
+		#expect(try await client.caseDocument("C-1").content.title == "Edited without filling a new field")
+	}
+
 	@Test("an overlong title keeps all typing and creates no truncated case")
 	func longTitle() async throws {
 		let client = try await Live.signedIn().project(try await Live.project())
