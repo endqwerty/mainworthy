@@ -11,6 +11,7 @@ services:
     ports:
       - "7357:7357"
     environment:
+      MAINWORTHY_LOCK_WAIT_SECONDS: ${MAINWORTHY_LOCK_WAIT_SECONDS:-30}
       # A long random string. Leave unset to have one generated and printed once on first start.
       MAINWORTHY_OWNER_TOKEN: ${MAINWORTHY_OWNER_TOKEN:-}
       MAINWORTHY_OWNER: ${MAINWORTHY_OWNER:-owner}

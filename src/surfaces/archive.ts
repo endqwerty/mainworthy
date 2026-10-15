@@ -1,6 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { open } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HTTP_STATUS } from "../core/api.ts";
 import { runArchive } from "../server/archives.ts";
@@ -21,8 +20,10 @@ function failure(error: unknown): Response {
 	return json({ ok: false, error: { code: known.code, message: known.message } }, HTTP_STATUS[known.code]);
 }
 
-function scratch(): { path: string; remove: () => void } {
-	const directory = mkdtempSync(join(tmpdir(), "mainworthy-archive-"));
+function scratch(dataDir: string): { path: string; remove: () => void } {
+	const spool = join(dataDir, "spool");
+	mkdirSync(spool, { recursive: true, mode: 0o700 });
+	const directory = mkdtempSync(join(spool, "mainworthy-archive-"));
 	return { path: join(directory, "archive.ndjson"), remove: () => rmSync(directory, { recursive: true, force: true }) };
 }
 
@@ -79,7 +80,7 @@ export function archiveRoutes(
 			if (!allowed(session)) return failure(new OpError("forbidden", "export needs the admin capability"));
 			if (req.method !== "GET")
 				return json({ ok: false, error: { code: "invalid", message: "export requires GET" } }, 405);
-			const file = scratch();
+			const file = scratch(app.config.dataDir);
 			try {
 				await runArchive(app, { op: "export", path: file.path, now: app.now() });
 				const stream = await fileStream(file);
@@ -102,7 +103,7 @@ export function archiveRoutes(
 			if (!allowed(session)) return failure(new OpError("forbidden", "import needs the admin capability"));
 			if (req.method !== "POST")
 				return json({ ok: false, error: { code: "invalid", message: "import requires POST" } }, 405);
-			const file = scratch();
+			const file = scratch(app.config.dataDir);
 			const localOwner = owner ?? (session.via === "local" ? session.actor(0) : null);
 			try {
 				await stageBody(req, file.path);

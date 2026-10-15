@@ -13,6 +13,7 @@ import {
 import { recoverAccepted, sweep } from "./jobs.ts";
 import { type App, type Config, openApp } from "./kernel/app.ts";
 import { type Actor, allProjects } from "./kernel/ctx.ts";
+import { lockInstance } from "./kernel/instance-lock.ts";
 import { createProject } from "./ops/admin.ts";
 import { Readers, readerCount } from "./readers.ts";
 
@@ -71,14 +72,22 @@ export function start(
 	const count = readerCount({
 		MAINWORTHY_READERS: options.readers === undefined ? process.env.MAINWORTHY_READERS : String(options.readers),
 	});
-	const opened = open(config, options);
+	const unlock = lockInstance(config.dataDir);
+	let opened: ReturnType<typeof open>;
+	try {
+		opened = open(config, options);
+	} catch (error) {
+		unlock();
+		throw error;
+	}
 	const { app, owner } = opened;
-	recoverAccepted(app);
 	let server: ReturnType<typeof serve>;
 	try {
+		recoverAccepted(app);
 		server = serve(app, owner, extra(app, owner), options.patience);
 	} catch (error) {
 		app.close();
+		unlock();
 		throw error;
 	}
 	if (count > 0) {
@@ -120,6 +129,7 @@ export function start(
 				await flushUses(app).catch((error: unknown) => console.error("[mainworthy] writing last uses failed:", error));
 				await app.gate.run(() => undefined);
 				app.close();
+				unlock();
 			})();
 			return stopping;
 		},

@@ -1,4 +1,5 @@
 import { availableParallelism } from "node:os";
+import { clearTimeout, setTimeout } from "node:timers";
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
 import { type Envelope, ERROR_CODES } from "../core/api.ts";
@@ -14,8 +15,8 @@ export function readerCount(env: Record<string, string | undefined>, cores = ava
 	const value = env.MAINWORTHY_READERS;
 	if (value === undefined) return Math.min(8, Math.max(1, cores - 2));
 	const count = Number(value);
-	if (!/^\d+$/.test(value) || !Number.isSafeInteger(count))
-		throw new Error("MAINWORTHY_READERS must be a non-negative integer");
+	if (!/^\d+$/.test(value) || !Number.isSafeInteger(count) || count > 8)
+		throw new Error("MAINWORTHY_READERS must be an integer between 0 and 8");
 	return count;
 }
 
@@ -36,8 +37,13 @@ const ReplyMessage = z.object({
 });
 
 type Pending = { fallback: () => Envelope<unknown>; resolve: (reply: Envelope<unknown>) => void };
-type Slot = { worker: Worker; pending: Map<number, Pending>; ready: boolean; failed: boolean };
-type Options = { dataDir: string; count: number; spawn?: (url: URL, dataDir: string) => Worker };
+type Slot = { worker: Worker; pending: Map<number, Pending>; ready: boolean; failed: boolean; failures: number };
+type Options = {
+	dataDir: string;
+	count: number;
+	spawn?: (url: URL, dataDir: string) => Worker;
+	schedule?: (callback: () => void, delay: number) => ReturnType<typeof setTimeout>;
+};
 
 /** The worker file: beside this one from source, and under `server/` in the compiled executable. */
 const workerUrl = (): URL =>
@@ -54,10 +60,11 @@ export class Readers implements ReadPool {
 	completed = 0;
 	fallbacks = 0;
 
-	/** The thread that checkpoints the write-ahead log, so no commit on the main thread has to. */
+	/** A background checkpoint thread that reduces work on the writer. */
 	private checkpointer: Worker | null = null;
 
 	constructor(private readonly options: Options) {
+		readerCount({ MAINWORTHY_READERS: String(options.count) });
 		for (let i = 0; i < options.count; i++) this.spawn();
 		if (!options.spawn) this.checkpoints();
 	}
@@ -68,7 +75,7 @@ export class Readers implements ReadPool {
 				workerData: { dataDir: this.options.dataDir, role: "checkpoint" },
 				name: "mainworthy-checkpoint",
 			});
-			// If it stops, the writer's own high checkpoint limit takes over: slower commits, nothing lost.
+			// If it stops, the writer's own checkpoint target takes over: slower commits, nothing lost.
 			worker.on("error", (error) => console.error("[mainworthy] the checkpoint thread failed:", error));
 			this.checkpointer = worker;
 		} catch (error) {
@@ -80,15 +87,26 @@ export class Readers implements ReadPool {
 		return [...this.slots].map((slot) => slot.worker);
 	}
 
-	ready(): Promise<void> {
+	ready(timeoutMs = 5000): Promise<void> {
 		if (this.stopped || [...this.slots].filter((slot) => slot.ready).length === this.options.count)
 			return Promise.resolve();
-		return new Promise((resolve) => this.readyWaiters.add(resolve));
+		return new Promise((resolve, reject) => {
+			const done = (): void => {
+				clearTimeout(timer);
+				resolve();
+			};
+			const timer = setTimeout(() => {
+				this.readyWaiters.delete(done);
+				reject(new Error(`reader threads were not ready within ${timeoutMs} ms; reads will run inline`));
+			}, timeoutMs);
+			this.readyWaiters.add(done);
+		});
 	}
 
 	run(call: ReadCall, fallback: Pending["fallback"]): Promise<Envelope<unknown>> {
 		let chosen: Slot | undefined;
 		for (const slot of this.slots) {
+			if (!slot.ready) continue;
 			if (!chosen || slot.pending.size < chosen.pending.size) chosen = slot;
 		}
 		if (this.stopped || !chosen) return Promise.resolve(fallback());
@@ -131,19 +149,20 @@ export class Readers implements ReadPool {
 		return this.stopping;
 	}
 
-	private spawn(): void {
+	private spawn(failures = 0): void {
 		if (this.stopped) return;
 		try {
 			const url = workerUrl();
 			const worker = this.options.spawn
 				? this.options.spawn(url, this.options.dataDir)
 				: new Worker(url, { workerData: { dataDir: this.options.dataDir }, name: "mainworthy-reader" });
-			const slot: Slot = { worker, pending: new Map(), ready: false, failed: false };
+			const slot: Slot = { worker, pending: new Map(), ready: false, failed: false, failures };
 			this.slots.add(slot);
 			worker.on("message", (message: unknown) => {
 				if (slot.failed || this.stopped) return;
 				if (message === "ready") {
 					slot.ready = true;
+					slot.failures = 0;
 					if ([...this.slots].filter((item) => item.ready).length === this.options.count) this.wakeReady();
 					return;
 				}
@@ -160,7 +179,7 @@ export class Readers implements ReadPool {
 			worker.on("exit", (code) => this.failed(slot, new Error(`reader exited with code ${code}`)));
 		} catch (error) {
 			console.error("[mainworthy] reader failed; reads will run inline:", error);
-			this.replace();
+			this.replace(failures);
 		}
 	}
 
@@ -171,7 +190,7 @@ export class Readers implements ReadPool {
 		console.error("[mainworthy] reader failed; replaying its reads inline:", error);
 		this.replay(slot);
 		this.retire(slot.worker);
-		this.replace();
+		this.replace(slot.failures);
 	}
 
 	private replay(slot: Slot): void {
@@ -194,12 +213,16 @@ export class Readers implements ReadPool {
 		void exit.finally(() => this.retiring.delete(exit));
 	}
 
-	private replace(): void {
+	private replace(failures: number): void {
 		if (this.stopped) return;
-		const timer = setTimeout(() => {
-			this.replacements.delete(timer);
-			this.spawn();
-		}, 100);
+		const schedule = this.options.schedule ?? ((callback: () => void, delay: number) => setTimeout(callback, delay));
+		const timer = schedule(
+			() => {
+				this.replacements.delete(timer);
+				this.spawn(failures + 1);
+			},
+			Math.min(30_000, 100 * 2 ** Math.min(failures, 9)),
+		);
 		this.replacements.add(timer);
 	}
 

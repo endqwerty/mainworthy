@@ -14,7 +14,7 @@ function formerInstall(dir: string): { home: string; data: string } {
 	const home = mkdtempSync(join(tmpdir(), "mainworthy-former-"));
 	const live = join(home, "live");
 	const db = new Db(join(live, "casebook.db"));
-	db.deferCheckpoints();
+	db.exec("PRAGMA wal_autocheckpoint = 0");
 	db.exec("CREATE TABLE kept (value TEXT)");
 	db.exec("INSERT INTO kept VALUES ('from the log')");
 	const data = join(home, dir);
