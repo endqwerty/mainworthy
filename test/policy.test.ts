@@ -123,6 +123,290 @@ describe("the presets", () => {
 });
 
 describe("agent edits", () => {
+	const scopePolicy = (when: string[], agentFallback = false) => {
+		const clauses = [
+			...PRESETS.loose.clauses.slice(0, 3),
+			{
+				id: "adopt-scoped-agent",
+				kind: "adopt",
+				when: ["author:agent", ...when],
+				ask: { who: "member", agents: "none", notProducer: false, reason: "optional" },
+				blocks: "nothing",
+			},
+			...(agentFallback
+				? [
+						{
+							id: "adopt-other-agent",
+							kind: "adopt",
+							when: ["author:agent"],
+							ask: { who: "member", agents: "answer", notProducer: false, reason: "optional" },
+							blocks: "nothing",
+						},
+					]
+				: []),
+			...PRESETS.loose.clauses.slice(3),
+		];
+		h.call("propose", {
+			edits: [
+				{
+					op: "policy",
+					base: h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version,
+					clauses,
+				},
+			],
+		});
+		const q = first(queue({ kind: "adopt" }).items);
+		expect(
+			h.call<{ status: string }[]>("decide", {
+				q: q.q,
+				onEvidence: q.evidenceHash,
+				answer: { is: "accept" },
+			})[0]?.status,
+		).toBe("decided");
+	};
+
+	test.each([
+		["folder:cafe\u0301", "folder:café"],
+		// Lower case can make a new composable pair, so the suggested form must already be in NFC.
+		["folder:T\u0308", "folder:\u1e97"],
+		["folder:checkout\u200b", "folder:checkout"],
+		["tag:crit\u200bical", "tag:critical"],
+		["folder:checkout/", "folder:checkout"],
+		["folder:/checkout", "folder:checkout"],
+		["folder: checkout", "folder:checkout"],
+		["folder:Checkout/Coupons", "folder:checkout/coupons"],
+		["folder: checkout // Coupons / ", "folder:checkout/coupons"],
+		["folder:checkout/ .. /coupons", "folder:checkout/../coupons"],
+		["tag:Critical", "tag:critical"],
+		["tag:#critical", "tag:critical"],
+		["tag: critical ", "tag:critical"],
+		["tag: #Critical ", "tag:critical"],
+	])("a policy refuses %s and names its normalised form", (predicate, normalised) => {
+		const clauses = structuredClone(PRESETS.standard.clauses);
+		const clause = clauses.find((item) => item.id === "adopt-agent");
+		if (!clause) throw new Error("expected the agent adoption clause");
+		clause.when.push(predicate);
+		const reply = h.raw("propose", {
+			edits: [
+				{
+					op: "policy",
+					base: h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version,
+					clauses,
+				},
+			],
+		});
+		expect(reply).toMatchObject({ ok: false, error: { code: "invalid" } });
+		if (reply.ok) throw new Error(`accepted ${predicate}`);
+		expect(reply.error.message).toContain(`clause "${clause.id}"`);
+		expect(reply.error.message).toContain(JSON.stringify(predicate));
+		expect(reply.error.message).toContain(JSON.stringify(normalised));
+		expect(h.call("admin", { do: "policy.show", project: "scratch" })).toMatchObject({ preset: "loose" });
+		expect(queue().counts.open).toBe(0);
+	});
+
+	test.each(["folder:", "folder:/ /", "folder:\u200b", "tag:\u200b", "tag:", "tag:..", "tag:two words"])(
+		"a policy refuses an invalid scope predicate %s",
+		(predicate) => {
+			const clauses = structuredClone(PRESETS.standard.clauses);
+			const clause = clauses.find((item) => item.id === "adopt-agent");
+			if (!clause) throw new Error("expected the agent adoption clause");
+			clause.when.push(predicate);
+			expect(
+				h.raw("propose", {
+					edits: [
+						{
+							op: "policy",
+							base: h.call<{ version: number }>("admin", { do: "policy.show", project: "scratch" }).version,
+							clauses,
+						},
+					],
+				}),
+			).toMatchObject({
+				ok: false,
+				error: { code: "invalid" },
+			});
+		},
+	);
+
+	test.each([
+		["folder:checkout/", "Checkout/Coupons"],
+		["folder:/ checkout // COUPONS /", "Checkout/Coupons"],
+		["folder:checkout/ .. /coupons", "Checkout/../Coupons"],
+		["tag: #Critical ", "Other"],
+	])("a stored %s still holds an agent edit for a person", (predicate, folder) => {
+		h.call("propose", { edits: [{ op: "create", outline: "Original", folder, tags: ["critical"] }] });
+		scopePolicy([predicate.startsWith("tag:") ? "tag:critical" : "folder:checkout"]);
+		const policy = h.call<{ clauses: Clause[] }>("admin", { do: "policy.show", project: "scratch" });
+		const clauses = policy.clauses.map((clause) =>
+			clause.id === "adopt-scoped-agent" ? { ...clause, when: ["author:agent", predicate] } : clause,
+		);
+		h.app.db.raw.query("UPDATE policies SET clauses = ?").run(JSON.stringify(clauses));
+		const agent = h.actor("scoped-writer", "agent", ["read", "produce", "answer"]);
+		const proposed = h.call<Proposed>(
+			"propose",
+			{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Agent edit" } }] },
+			agent,
+		);
+		expect(proposed.status).toBe("open");
+		expect(title("C-1")).toBe("Original");
+		const q = first(queue({ kind: "adopt" }).items);
+		expect(
+			h.call<{ status: string }[]>("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } }, agent)[0]
+				?.status,
+		).toBe("forbidden");
+	});
+
+	test.each([
+		["folder:café", "cafe\u0301", "critical"],
+		["folder:cafe\u0301", "café", "critical"],
+		["folder:checkout\u200b", "checkout", "critical"],
+		["tag:crit\u200bical", "Other", "critical"],
+		["tag:critical", "Other", "crit\u200bical"],
+	])("a stored %s matches existing Unicode scope names", (predicate, folder, tag) => {
+		h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Original", tags: ["critical"] }] });
+		scopePolicy([predicate.startsWith("tag:") ? "tag:critical" : "folder:checkout"]);
+		const policy = h.call<{ clauses: Clause[] }>("admin", { do: "policy.show", project: "scratch" });
+		const clauses = policy.clauses.map((clause) =>
+			clause.id === "adopt-scoped-agent" ? { ...clause, when: ["author:agent", predicate] } : clause,
+		);
+		h.app.db.raw.query("UPDATE policies SET clauses = ?").run(JSON.stringify(clauses));
+		h.app.db.raw.query("UPDATE folders SET name = ? WHERE name = 'Original'").run(folder);
+		h.app.db.raw.query("UPDATE cases SET tags = ?").run(JSON.stringify([tag]));
+		const agent = h.actor("unicode-writer", "agent", ["read", "produce", "answer"]);
+		expect(
+			h.call<Proposed>(
+				"propose",
+				{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Agent edit" } }] },
+				agent,
+			).status,
+		).toBe("open");
+		expect(title("C-1")).toBe("Original");
+		const q = first(queue({ kind: "adopt" }).items);
+		expect(
+			h.call<{ status: string }[]>("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } }, agent)[0]
+				?.status,
+		).toBe("forbidden");
+	});
+
+	test("canonical folder predicates preserve spaces and literal dot-dot segments", () => {
+		scopePolicy(["folder:check out/.."]);
+		const agent = h.actor("scoped-writer", "agent", ["read", "produce"]);
+		expect(
+			h.call<Proposed>(
+				"propose",
+				{ edits: [{ op: "create", outline: "Literal", folder: "Check Out/../Coupons" }] },
+				agent,
+			).status,
+		).toBe("open");
+		expect(
+			h.call<Proposed>("propose", { edits: [{ op: "create", outline: "Other", folder: "Coupons" }] }, agent).status,
+		).toBe("adopted");
+	});
+
+	test("folder clauses hold an agent's nested and mixed proposal for a person", () => {
+		scopePolicy(["folder:checkout"]);
+		const agent = h.actor("scoped-writer", "agent", ["read", "produce", "answer"]);
+		expect(
+			h.call<Proposed>("propose", { edits: [{ op: "create", outline: "Outside", folder: "Other" }] }, agent).status,
+		).toBe("adopted");
+		const proposed = h.call<Proposed>(
+			"propose",
+			{
+				edits: [
+					{ op: "create", outline: "Allowed", folder: "Other" },
+					{ op: "create", outline: "Review me", folder: "Checkout/Coupons" },
+				],
+			},
+			agent,
+		);
+		expect(proposed.status).toBe("open");
+		expect(h.raw("get", { refs: ["C-2"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+		const q = first(queue({ kind: "adopt" }).items);
+		expect(
+			h.call<{ status: string }[]>("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } }, agent)[0]
+				?.status,
+		).toBe("forbidden");
+		expect(
+			h.call<{ status: string }[]>("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } })[0]
+				?.status,
+		).toBe("decided");
+		expect(title("C-3")).toBe("Review me");
+	});
+
+	test("tag clauses cover inline tags and prevent removing a protected tag to escape review", () => {
+		scopePolicy(["tag:critical"]);
+		const agent = h.actor("scoped-writer", "agent", ["read", "produce"]);
+		expect(h.call<Proposed>("propose", { edits: [{ op: "create", outline: "Inline #critical" }] }, agent).status).toBe(
+			"open",
+		);
+		h.call("propose", { edits: [{ op: "create", outline: "Human", tags: ["critical"] }] });
+		expect(
+			h.call<Proposed>("propose", { edits: [{ op: "place", cases: ["C-1"], tags: { remove: ["critical"] } }] }, agent)
+				.status,
+		).toBe("open");
+		expect(h.call<Proposed>("propose", { edits: [{ op: "create", outline: "Outside" }] }, agent).status).toBe(
+			"adopted",
+		);
+	});
+
+	test("folder clauses cover both sides of a move and folder renames", () => {
+		h.call("propose", {
+			edits: [
+				{ op: "create", outline: "Inside", folder: "Checkout/Coupons" },
+				{ op: "create", outline: "Outside", folder: "Other" },
+			],
+		});
+		scopePolicy(["folder:checkout"]);
+		const agent = h.actor("scoped-writer", "agent", ["read", "produce"]);
+		for (const edit of [
+			{ op: "place", cases: ["C-1"], folder: "Other" },
+			{ op: "place", cases: ["C-2"], folder: "Checkout/Coupons" },
+			{ op: "folder", folder: "Checkout", name: "Renamed" },
+			{ op: "folder", folder: "Other", name: "Checkout" },
+		])
+			expect(h.call<Proposed>("propose", { edits: [edit] }, agent).status).toBe("open");
+	});
+
+	test("renaming an ancestor requires review for protected descendants and tagged cases", () => {
+		h.call("propose", {
+			edits: [{ op: "create", outline: "Protected", folder: "Parent/Checkout", tags: ["critical"] }],
+		});
+		const agent = h.actor("scoped-writer", "agent", ["read", "produce"]);
+		for (const predicate of ["folder:parent/checkout", "tag:critical"]) {
+			scopePolicy([predicate]);
+			expect(
+				h.call<Proposed>("propose", { edits: [{ op: "folder", folder: "Parent", name: "Renamed" }] }, agent).status,
+			).toBe("open");
+		}
+	});
+
+	test("pending proposals are answered against the case's current folder and tags", () => {
+		for (const predicate of ["folder:checkout", "tag:critical"]) {
+			scopePolicy([predicate], true);
+			h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Other" }] });
+			const caseRef = predicate.startsWith("folder:") ? "C-1" : "C-2";
+			const agent = h.actor(`scoped-${caseRef}`, "agent", ["read", "produce", "answer"]);
+			const proposal = h.call<Proposed>(
+				"propose",
+				{ edits: [{ op: "edit", case: caseRef, base: 1, body: { title: "Agent title" } }] },
+				agent,
+			);
+			h.call("propose", {
+				edits: [{ op: "place", cases: [caseRef], folder: "Checkout", tags: { add: ["critical"] } }],
+			});
+			const q = queue({ kind: "adopt" }).items.find((q) => q.q === proposal.question);
+			if (!q) throw new Error("proposal question missing");
+			expect(
+				h.call<{ status: string }[]>(
+					"decide",
+					{ q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" } },
+					agent,
+				)[0]?.status,
+			).toBe("forbidden");
+			expect(title(caseRef)).toBe("Original");
+		}
+	});
+
 	test("loose: an agent's edit is adopted by the rule and marked as the agent's", () => {
 		const agent = h.actor("writer", "agent", ["read", "produce"]);
 		const reply = h.call<Proposed>(

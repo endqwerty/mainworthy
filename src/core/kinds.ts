@@ -3,7 +3,7 @@
 // queue's keys and the policy presets are checked against it.
 import { z } from "zod";
 import { FlakyDetectionSettings } from "./flaky.ts";
-import { CaseBody, FieldDefinitions } from "./model.ts";
+import { CaseBody, cleanPath, cleanTag, FieldDefinitions, TAG } from "./model.ts";
 
 export const Kind = z.enum(["adopt", "map", "failure", "finding", "signoff"]);
 export type Kind = z.infer<typeof Kind>;
@@ -313,9 +313,16 @@ export const Predicate = z.union([
 		"unlinked:track",
 		"unlinked:create",
 	]),
-	z.templateLiteral(["answer:", z.string().regex(/^[a-z]+$/)]),
+	z.string().regex(/^(?:answer:[a-z]+|(?:folder|tag):.*)$/),
 ]);
 export type Predicate = z.infer<typeof Predicate>;
+
+function normalisedPredicate(predicate: Predicate): Predicate {
+	if (predicate.startsWith("folder:"))
+		return `folder:${cleanPath(predicate.slice(7)).join("/").toLowerCase().normalize("NFC")}`;
+	if (predicate.startsWith("tag:")) return `tag:${cleanTag(predicate.slice(4))}`;
+	return predicate;
+}
 
 /**
  * How urgent an open question is and which runs it lists: nothing, the gate of its change, a release (planned
@@ -324,16 +331,32 @@ export type Predicate = z.infer<typeof Predicate>;
 export const Blocks = z.enum(["nothing", "change", "release", "all"]);
 export type Blocks = z.infer<typeof Blocks>;
 
-export const Clause = z.object({
-	id: z.string().regex(/^[a-z0-9-]+$/),
-	kind: Kind,
-	/** Every predicate must hold. The first matching clause of a kind wins. */
-	when: z.array(Predicate).min(1),
-	ask: Ask,
-	/** For `who: rule`: the answer the rule gives. */
-	answer: z.unknown().optional(),
-	blocks: Blocks,
-});
+export const Clause = z
+	.object({
+		id: z.string().regex(/^[a-z0-9-]+$/),
+		kind: Kind,
+		/** Every predicate must hold. The first matching clause of a kind wins. */
+		when: z.array(Predicate).min(1),
+		ask: Ask,
+		/** For `who: rule`: the answer the rule gives. */
+		answer: z.unknown().optional(),
+		blocks: Blocks,
+	})
+	.superRefine((clause, ctx) => {
+		for (const [index, predicate] of clause.when.entries()) {
+			const normalised = normalisedPredicate(predicate);
+			const valid = predicate.startsWith("folder:")
+				? normalised.length > 7
+				: !predicate.startsWith("tag:") || TAG.test(normalised.slice(4));
+			if (predicate !== normalised || !valid) {
+				ctx.addIssue({
+					code: "custom",
+					path: ["when", index],
+					message: `clause "${clause.id}": ${JSON.stringify(predicate)} ${valid ? "must be written in its normalised form" : "is not a valid scope predicate; normalised form"} ${JSON.stringify(normalised)}`,
+				});
+			}
+		}
+	});
 export type Clause = z.infer<typeof Clause>;
 
 /**
@@ -406,7 +429,7 @@ export function clauseOf(policy: Pick<Policy, "clauses" | "settings">, q: Facts)
 function holds(predicate: Predicate, q: Facts): boolean {
 	if (predicate === "always") return true;
 	if (predicate.startsWith("answer:")) return q.answer !== undefined && predicate === `answer:${q.answer}`;
-	return q.facts.has(predicate);
+	return q.facts.has(normalisedPredicate(predicate));
 }
 
 /**

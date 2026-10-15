@@ -58,7 +58,7 @@ import {
 	unexplainedIn,
 	unexplainedShown,
 } from "../runs/runs.ts";
-import { caseById, caseRef } from "../suite/suite.ts";
+import { caseById, caseRef, proposalById, resolvedOf, scopeFacts } from "../suite/suite.ts";
 import { disputeParties, HANDLERS, inForce, runsAbout } from "./kinds.ts";
 import {
 	addQuestionParties,
@@ -1460,6 +1460,14 @@ export function sweepExpired(ctx: Ctx, expired: readonly DecisionRow[]): number 
  */
 export function factsNow(db: Db, question: QuestionRow): Set<string> {
 	const facts = new Set(json<{ facts?: string[] }>(question.evidence).facts ?? []);
+	if (question.kind === "adopt" && question.state !== "decided") {
+		const subject = json<{ proposal: number }>(question.subject);
+		const proposal = proposalById(db, subject.proposal);
+		if (proposal) {
+			for (const fact of facts) if (fact.startsWith("folder:") || fact.startsWith("tag:")) facts.delete(fact);
+			for (const fact of scopeFacts(db, question.project, resolvedOf(proposal))) facts.add(fact);
+		}
+	}
 	if (question.kind !== "failure") return facts;
 	const subject = json<{ signature?: number; scope?: string }>(question.subject);
 	if (subject.signature === undefined || subject.scope === undefined) return facts;

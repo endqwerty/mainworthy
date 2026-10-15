@@ -49,6 +49,56 @@ describe("capture", () => {
 		expect(view?.folder.path).toBe("checkout/coupons");
 	});
 
+	test("suite writes clean Unicode folder paths and tags", () => {
+		h.call("propose", {
+			edits: [{ op: "create", outline: "Unicode", folder: " Cafe\u0301\u200b / Child ", tags: ["#Crit\u200bical"] }],
+		});
+		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]).toMatchObject({
+			folder: { path: "Café/Child" },
+			tags: ["critical"],
+		});
+		h.call("propose", {
+			edits: [{ op: "place", cases: ["C-1"], folder: "Re\u0301sume\u0301", tags: { set: ["re\u200bview"] } }],
+		});
+		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]).toMatchObject({
+			folder: { path: "Résumé" },
+			tags: ["review"],
+		});
+	});
+
+	test("folder creation and rename use the same Unicode cleaning as paths", () => {
+		h.call("propose", { edits: [{ op: "folder", name: " Cafe\u0301\u200b " }] });
+		h.call("propose", { edits: [{ op: "create", outline: "Unicode", folder: "Café" }] });
+		expect(h.call<{ items: unknown[] }>("find", { in: "folders" }).items.length).toBe(1);
+		h.call("propose", { edits: [{ op: "folder", folder: "Café", name: " Re\u0301sume\u0301\u200b " }] });
+		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]?.folder.path).toBe("Résumé");
+	});
+
+	test.each(["\u200b", " \u200b "])("a folder name empty after cleaning is refused: %s", (name) => {
+		expect(h.raw("propose", { edits: [{ op: "folder", name }] })).toMatchObject({
+			ok: false,
+			error: { code: "invalid" },
+		});
+		expect(h.call<{ items: unknown[] }>("find", { in: "folders" }).items.length).toBe(0);
+	});
+
+	test("canonical lookup reuses an existing NFD folder without rewriting it", () => {
+		h.call("propose", { edits: [{ op: "create", outline: "Original", folder: "Café" }] });
+		h.app.db.raw.query("UPDATE folders SET name = ? WHERE name = 'Café'").run("Cafe\u0301");
+		h.call("propose", { edits: [{ op: "create", outline: "Second", folder: "Café" }] });
+		expect(h.call<{ items: unknown[] }>("find", { in: "folders" }).items.length).toBe(1);
+		expect(h.call<CaseView[]>("get", { refs: ["C-1", "C-2"] }).map((view) => view.folder.path)).toEqual([
+			"Cafe\u0301",
+			"Cafe\u0301",
+		]);
+		for (const folder of ["Café", "Cafe\u0301", "Café\u200b"]) {
+			expect(h.call<{ items: { ref: string }[] }>("find", { folder }).items.map((item) => item.ref)).toEqual([
+				"C-1",
+				"C-2",
+			]);
+		}
+	});
+
 	test("the save is a recorded decision made by the policy's rule", () => {
 		h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
 		const ledger = h.call<{

@@ -57,6 +57,22 @@ export type CaseDoc = z.infer<typeof CaseDoc>;
 
 /** A tag is lower case, starts with a letter or digit, and may contain `-`, `_`, `.` and `/`. */
 export const TAG = /^[a-z0-9][a-z0-9_./-]{0,39}$/;
+/** Folder paths trim each segment and ignore empty segments; dot segments are literal names. */
+export const cleanPath = (text: string): string[] =>
+	text
+		.replace(/\p{Cf}/gu, "")
+		.normalize("NFC")
+		.split("/")
+		.map((part) => part.trim())
+		.filter((part) => part.length > 0);
+export const cleanTag = (text: string): string =>
+	text
+		.replace(/\p{Cf}/gu, "")
+		.normalize("NFC")
+		.trim()
+		.replace(/^#/, "")
+		.toLowerCase()
+		.normalize("NFC");
 /** A requirement key as typed inline after `@`: `WEB-290`, `REQ-17`. */
 export const REQUIREMENT_KEY = /^[A-Za-z][A-Za-z0-9]{0,15}-[0-9]{1,9}$/;
 
