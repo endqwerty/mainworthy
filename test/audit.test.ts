@@ -743,6 +743,12 @@ test("an audit export of a case that pins a fragment carries the pin and verifie
 					for (const step of (line.body as { steps: Record<string, unknown>[] }).steps) step.extra = true;
 		});
 		expect(() => verifyAudit(unknown)).toThrow();
+		const unknownInPin = rehash(reply.ndjson, (lines) => {
+			for (const line of lines)
+				if (line.type === "case-version" && line.case === "C-2")
+					for (const step of (line.body as { steps: { use: Record<string, unknown> }[] }).steps) step.use.extra = true;
+		});
+		expect(() => verifyAudit(unknownInPin)).toThrow();
 	} finally {
 		h.close();
 	}
