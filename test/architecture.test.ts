@@ -8,7 +8,7 @@ import { ERROR_CODES, HTTP_STATUS } from "../src/core/api.ts";
 import { needs } from "../src/core/kinds.ts";
 import { REPLIES } from "../src/core/replies.ts";
 import { Db, declaredSql } from "../src/server/kernel/db.ts";
-import { MIGRATIONS, migrate } from "../src/server/kernel/migrate.ts";
+import { MIGRATIONS, migrate, SCHEMA_VERSION, schemaVersion } from "../src/server/kernel/migrate.ts";
 import { MCP_OPS, OP_LIST } from "../src/server/ops/index.ts";
 import { UNEXPORTED } from "../src/server/transfer/transfer.ts";
 import { openApi } from "../src/surfaces/http.ts";
@@ -27,6 +27,77 @@ const layerOf = (file: string): string => {
 	const parts = file.split("/");
 	return parts[1] === "server" ? `server/${parts[2]}` : (parts[1] ?? "");
 };
+
+describe("SQL batches", () => {
+	test("a failed statement stops the batch before later writes", () => {
+		const db = new Db(":memory:");
+		try {
+			db.exec("CREATE TABLE probe (value INTEGER CHECK (value > 0))");
+			expect(() =>
+				db.exec("INSERT INTO probe VALUES (1); INSERT INTO probe VALUES (-1); INSERT INTO probe VALUES (2)"),
+			).toThrow("CHECK");
+			expect(db.raw.query("SELECT value FROM probe").all()).toEqual([{ value: 1 }]);
+		} finally {
+			db.close();
+		}
+	});
+
+	test("SQLite keeps quoted semicolons, comments and complete trigger bodies together", () => {
+		const db = new Db(":memory:");
+		try {
+			db.exec(`; -- leading comment with ; and '
+				/* ; */ CREATE TABLE "semi;""quoted" ([value;] TEXT, \`tick;\` TEXT);
+				CREATE TABLE audit (value TEXT);
+				CREATE TEMP TRIGGER "trigger;end" AFTER INSERT ON "semi;""quoted"
+				BEGIN
+					INSERT INTO audit VALUES (CASE WHEN NEW.[value;] = '雪;it''s' THEN 'BEGIN; END;' ELSE 'other' END);
+					-- END; ignored inside a comment
+					INSERT INTO audit VALUES (NEW.\`tick;\` || '/* ; */');
+				END;
+				/* between statements ; */ INSERT INTO "semi;""quoted" VALUES ('雪;it''s', '?;--');
+				INSERT INTO "semi;""quoted" VALUES ('other', 'second;')
+			`);
+			expect(db.raw.query("SELECT value FROM audit ORDER BY rowid").all()).toEqual([
+				{ value: "BEGIN; END;" },
+				{ value: "?;--/* ; */" },
+				{ value: "other" },
+				{ value: "second;/* ; */" },
+			]);
+		} finally {
+			db.close();
+		}
+	});
+
+	test("empty statements and trailing comments do not prevent the next batch", () => {
+		const db = new Db(":memory:");
+		try {
+			for (const text of [
+				"",
+				" ; ; \n",
+				"-- comment;",
+				"/* block; */",
+				"/* unterminated;",
+				"\uFEFF; -- comment\n /* ; */",
+			])
+				db.exec(text);
+			db.exec("CREATE TABLE probe (value TEXT); INSERT INTO probe VALUES ('kept'); -- trailing;\n /* comment; */");
+			expect(db.raw.query("SELECT value FROM probe").all()).toEqual([{ value: "kept" }]);
+		} finally {
+			db.close();
+		}
+	});
+
+	test("unbound parameters cannot change a batch's statement boundaries", () => {
+		const db = new Db(":memory:");
+		try {
+			db.exec("CREATE TABLE probe (value TEXT); INSERT INTO probe VALUES ('kept')");
+			expect(() => db.exec("INSERT INTO probe VALUES ($value); DELETE FROM probe")).toThrow("unbound parameters");
+			expect(db.raw.query("SELECT value FROM probe").all()).toEqual([{ value: "kept" }]);
+		} finally {
+			db.close();
+		}
+	});
+});
 
 function migrationArchiveMismatches(migrations: typeof MIGRATIONS): string[] {
 	const mismatches: string[] = [];
@@ -322,6 +393,70 @@ describe("the module map", () => {
 
 	test("migrations mark incompatible archive shapes and leave excluded changes unmarked", () => {
 		expect(migrationArchiveMismatches(MIGRATIONS)).toEqual([]);
+	});
+
+	for (const [constraint, value] of [
+		["CHECK", "''"],
+		["NOT NULL", "NULL"],
+		["UNIQUE", "'kept'"],
+		["FOREIGN KEY", "'missing'"],
+	]) {
+		test(`a migration's second-statement ${constraint} failure rolls back its rows and version`, () => {
+			const db = new Db(":memory:");
+			const migration = MIGRATIONS.at(-1);
+			if (!migration) throw new Error("expected a shipped migration");
+			const original = migration.sql;
+			try {
+				for (const earlier of MIGRATIONS.slice(0, -1)) db.exec(earlier.sql);
+				db.raw.query("INSERT INTO meta (key, value) VALUES ('schema_version', ?)").run(String(migration.version - 1));
+				db.exec(`
+					CREATE TABLE migration_parent (value TEXT PRIMARY KEY);
+					INSERT INTO migration_parent VALUES ('kept'), ('before'), ('after'), ('');
+					CREATE TABLE migration_probe (
+						value TEXT NOT NULL UNIQUE CHECK (length(value) > 0) REFERENCES migration_parent(value)
+					);
+					INSERT INTO migration_probe VALUES ('kept');
+				`);
+				migration.sql = `INSERT INTO migration_probe VALUES ('before');
+					INSERT INTO migration_probe VALUES (${value});
+					INSERT INTO migration_probe VALUES ('after');`;
+				expect(() => migrate(db, ":memory:")).toThrow(constraint);
+				expect(db.raw.query("SELECT value FROM migration_probe").all()).toEqual([{ value: "kept" }]);
+				expect(schemaVersion(db)).toBe(migration.version - 1);
+				expect(db.raw.inTransaction).toBe(false);
+				migration.sql = original;
+				expect(migrate(db, ":memory:").to).toBe(SCHEMA_VERSION);
+			} finally {
+				migration.sql = original;
+				db.close();
+			}
+		});
+	}
+
+	test("every older schema upgrades to the same fresh schema", () => {
+		const fresh = new Db(":memory:");
+		const schema = (db: Db) => db.raw.query("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name").all();
+		try {
+			migrate(fresh, ":memory:");
+			for (let version = 0; version < SCHEMA_VERSION; version++) {
+				const db = new Db(":memory:");
+				try {
+					for (const migration of MIGRATIONS.slice(0, version)) db.exec(migration.sql);
+					if (version > 0)
+						db.raw.query("INSERT INTO meta (key, value) VALUES ('schema_version', ?)").run(String(version));
+					expect(migrate(db, ":memory:"), `upgrade from schema ${version}`).toEqual({
+						from: version,
+						to: SCHEMA_VERSION,
+						backup: null,
+					});
+					expect(schema(db)).toEqual(schema(fresh));
+				} finally {
+					db.close();
+				}
+			}
+		} finally {
+			fresh.close();
+		}
 	});
 
 	for (const [name, sql] of [

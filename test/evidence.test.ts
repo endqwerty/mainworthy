@@ -1131,7 +1131,7 @@ describe("work the server does on its own", () => {
 		try {
 			const from = await configFor();
 			const seed = openApp(from);
-			seed.db.raw.exec(
+			seed.db.exec(
 				"INSERT INTO orgs (name, created_at) VALUES ('default', 0); INSERT INTO actors (org, kind, name, created_at) VALUES (1, 'human', 'robin', 0)",
 			);
 			seed.close();

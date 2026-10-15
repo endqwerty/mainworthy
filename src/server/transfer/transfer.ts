@@ -557,7 +557,7 @@ export function removeBootstrap(db: Db): void {
 	}
 	// The untouched project may have been made a demo. The mark goes with it: the project an archive puts under
 	// the same id is not one.
-	db.raw.exec("DELETE FROM demo_projects; DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
+	db.exec("DELETE FROM demo_projects; DELETE FROM policies; DELETE FROM folders; DELETE FROM projects");
 }
 
 /** Splits LF-delimited text lazily, retaining blank lines and CR bytes. A final LF creates no extra line. */

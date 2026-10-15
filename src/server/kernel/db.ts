@@ -57,7 +57,7 @@ export class Db {
 		this.raw = new Database(path, { create: true, strict: true });
 		// WAL keeps readers and the writer out of each other's way; NORMAL syncs at checkpoints, which is the
 		// durability SQLite documents as safe against application crashes in WAL mode.
-		this.raw.exec(`
+		this.exec(`
 			PRAGMA journal_mode = WAL;
 			PRAGMA synchronous = NORMAL;
 			PRAGMA foreign_keys = ON;
@@ -131,8 +131,25 @@ export class Db {
 		return this.raw.query<R, SQLQueryBindings[]>(text).all(...(params as SQLQueryBindings[]));
 	}
 
+	/** Executes a SQL batch in order, stopping at the first failure. The caller owns the transaction. */
 	exec(text: string): void {
-		this.raw.exec(text);
+		let remaining = text;
+		while (remaining.length > 0) {
+			remaining = remaining.replace(/^(?:[ \t\r\n\f;\uFEFF]|--[^\n]*(?:\n|$)|\/\*[\s\S]*?(?:\*\/|$))+/, "");
+			if (remaining.length === 0) break;
+			const statement = this.raw.prepare(remaining);
+			try {
+				if (statement.paramsCount !== 0) throw new Error("SQL batches cannot contain unbound parameters");
+				// With no parameters, sqlite3_expanded_sql is the original first statement, including trigger bodies.
+				const first = statement.toString();
+				if (first.length === 0 || !remaining.startsWith(first))
+					throw new Error("SQLite returned an unexpected SQL boundary");
+				statement.run();
+				remaining = remaining.slice(first.length);
+			} finally {
+				statement.finalize();
+			}
+		}
 	}
 
 	/**
@@ -171,7 +188,7 @@ export class Db {
 			this.raw.exec(`RELEASE ${name}`);
 			return out;
 		} catch (error) {
-			this.raw.exec(`ROLLBACK TO ${name}; RELEASE ${name}`);
+			this.exec(`ROLLBACK TO ${name}; RELEASE ${name}`);
 			throw error;
 		} finally {
 			this.depth--;
