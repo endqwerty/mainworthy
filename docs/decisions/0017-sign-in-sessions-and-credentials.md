@@ -390,8 +390,8 @@ an invitation's link once.
 - An operation of the instance is answered at `/api/<operation>` only. Before, the registry ran one under any
   project's address, `admin` included, and a client written against the wrong address worked.
 
-**Not built here.** The pages. Unicode normalisation of a password: it is compared as the bytes that were
-typed.
+**Not built here.** The pages. Password Unicode normalization, token revocation on recovery and the concurrent
+sign-in cookie limit are decided in [0067](0067-passwords-recovery-and-concurrent-sign-ins.md).
 
 **Not tried.** In a browser, passkeys were tried with Chromium's built-in test authenticator only
 (`test/e2e/people.test.ts`, `test/e2e/passkey-verifier.test.ts`). No physical security key, no synced passkey

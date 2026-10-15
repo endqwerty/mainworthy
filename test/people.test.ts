@@ -8,6 +8,7 @@ import { CLI_ENTRY } from "../src/cli/test-support.ts";
 import type { SessionInfo } from "../src/core/api.ts";
 import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
 import { PersonalTokenCreated, PersonalTokenRow } from "../src/core/people.ts";
+import { bootstrap } from "../src/server/identity/identity.ts";
 import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { databasePath } from "../src/server/kernel/app.ts";
 import { SCHEMA_VERSION } from "../src/server/kernel/migrate.ts";
@@ -399,6 +400,63 @@ describe("an invitation", () => {
 		expect((await w.post("/api/login", { invitation: code, password: SECOND })).status).toBe(200);
 	});
 
+	test.each(["end", "idle"] as const)(
+		"a concurrent sign-in whose cookie an invitation response replaces stays listed until %s",
+		async (until) => {
+			const w = world();
+			const robin = await joined(w, "robin", FIRST);
+			const pat = await joined(w, "pat", FIRST);
+			const { code } = await invite(w, { name: "sam" });
+			let release = () => {};
+			let hashed = () => {};
+			const started = new Promise<void>((resolve) => {
+				hashed = resolve;
+			});
+			const resume = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			const hash = Bun.password.hash.bind(Bun.password);
+			const held = spyOn(Bun.password, "hash").mockImplementation(async (password, options) => {
+				const made = await hash(password, options);
+				if (password === SECOND) {
+					hashed();
+					await resume;
+				}
+				return made;
+			});
+			try {
+				const accepting = w.post(
+					"/api/login",
+					{ invitation: code, password: SECOND, replace: "robin" },
+					{ cookie: robin },
+				);
+				await started;
+				const concurrent = await signIn(w, "pat", FIRST, { cookie: robin, "user-agent": "concurrent tab" });
+				expect(concurrent.status).toBe(200);
+				expect((await me(w, { cookie: concurrent.cookie })).actor).toBe("pat");
+				release();
+				const accepted = await accepting;
+				expect(accepted.status).toBe(200);
+				expect(accepted.cookie).not.toBe(concurrent.cookie);
+				expect((await me(w, { cookie: accepted.cookie })).actor).toBe("sam");
+				expect(await w.status({ cookie: robin })).toBe(401);
+				expect(await w.status({ cookie: concurrent.cookie })).toBe(200);
+				const listed = await w.ok<Listed[]>("session", { do: "list" }, { cookie: pat });
+				const lingering = listed.find((row) => row.userAgent === "concurrent tab");
+				expect(lingering).toMatchObject({ openedWith: "password", current: false });
+				if (!lingering) throw new Error("the concurrent session was not listed");
+				if (until === "end") {
+					await w.ok("session", { do: "end", id: lingering.id }, { cookie: pat });
+					expect(await w.status({ cookie: pat })).toBe(200);
+				} else w.clock.advance(14 * DAY);
+				expect(await w.status({ cookie: concurrent.cookie })).toBe(401);
+			} finally {
+				release();
+				held.mockRestore();
+			}
+		},
+	);
+
 	test("who may invite whom: a new person is any admin's to invite, a person who exists is the owner's or their own", async () => {
 		const w = world();
 		const robin = await joined(w, "robin", FIRST, { can: ["read", "admin"] });
@@ -431,6 +489,86 @@ describe("an invitation", () => {
 });
 
 describe("a name and a password", () => {
+	test("canonical password spellings sign in after joining, changing a password and recovering", async () => {
+		const w = world();
+		const first = "cafe\u0301 password for robin";
+		const second = "the next cafe\u0301 password";
+		const recovered = "recovered cafe\u0301 password";
+		const cookie = await joined(w, "robin", first);
+		expect((await signIn(w, "robin", "café password for robin")).status).toBe(200);
+		expect(
+			(await w.post("/api/account/password", { current: "café password for robin", next: second }, { cookie })).status,
+		).toBe(200);
+		expect((await signIn(w, "robin", "the next café password")).status).toBe(200);
+		const recovery = await invite(w, { name: "robin" });
+		expect((await w.post("/api/login", { invitation: recovery.code, password: recovered })).status).toBe(200);
+		expect((await signIn(w, "robin", "recovered café password")).status).toBe(200);
+	});
+
+	test("an old password keeps working and is rehashed to NFC without ending its existing sessions", async () => {
+		const w = world();
+		const typed = "cafe\u0301 password for robin";
+		const cookie = await joined(w, "robin", typed);
+		const oldHash = await Bun.password.hash(typed, { algorithm: "argon2id", memoryCost: 8, timeCost: 1 });
+		await w.instance.app.gate.run(() =>
+			w.instance.app.db.raw.query("UPDATE credentials SET data = ? WHERE kind = 'password'").run(oldHash),
+		);
+		expect((await signIn(w, "robin", "the wrong password")).status).toBe(401);
+		expect(credentials(w).map((row) => row.data)).toEqual([oldHash]);
+		const signedIn = await signIn(w, "robin", typed);
+		expect(signedIn.status).toBe(200);
+		const stored = credentials(w)[0]?.data ?? "";
+		expect(await Bun.password.verify("café password for robin", stored)).toBe(true);
+		expect(await Bun.password.verify(typed, stored)).toBe(false);
+		expect((await signIn(w, "robin", "café password for robin")).status).toBe(200);
+		expect((await signIn(w, "robin", typed)).status).toBe(200);
+		expect([await w.status({ cookie }), await w.status({ cookie: signedIn.cookie })]).toEqual([200, 200]);
+		expect(credentials(w).map((row) => ({ id: row.id, revokedAt: row.revoked_at }))).toEqual([
+			{ id: 1, revokedAt: null },
+		]);
+	});
+
+	test("a password change accepts an old password's original spelling without a preceding sign-in", async () => {
+		const w = world();
+		const typed = "cafe\u0301 password for robin";
+		const cookie = await joined(w, "robin", typed);
+		const oldHash = await Bun.password.hash(typed, { algorithm: "argon2id", memoryCost: 8, timeCost: 1 });
+		await w.instance.app.gate.run(() =>
+			w.instance.app.db.raw.query("UPDATE credentials SET data = ? WHERE kind = 'password'").run(oldHash),
+		);
+		expect(
+			(await w.post("/api/account/password", { current: typed, next: "the next cafe\u0301 password" }, { cookie }))
+				.status,
+		).toBe(200);
+		expect((await signIn(w, "robin", "the next café password")).status).toBe(200);
+		expect((await signIn(w, "robin", typed)).status).toBe(401);
+		expect(await w.status({ cookie })).toBe(200);
+	});
+
+	test("a legacy password check queued behind a change cannot rehash over the new password", async () => {
+		const w = world();
+		const typed = "cafe\u0301 password for robin";
+		await joined(w, "robin", typed);
+		const oldHash = await Bun.password.hash(typed, { algorithm: "argon2id", memoryCost: 8, timeCost: 1 });
+		const newHash = await Bun.password.hash(SECOND, { algorithm: "argon2id", memoryCost: 8, timeCost: 1 });
+		await w.instance.app.gate.run(() =>
+			w.instance.app.db.raw.query("UPDATE credentials SET data = ? WHERE kind = 'password'").run(oldHash),
+		);
+		const gate = holdGate(w.instance);
+		try {
+			const waiting = waitingAtGate(w.instance, 1);
+			const signingIn = signIn(w, "robin", typed);
+			await waiting;
+			w.instance.app.db.raw.query("UPDATE credentials SET data = ? WHERE kind = 'password'").run(newHash);
+			await gate.release();
+			expect((await signingIn).status).toBe(401);
+			expect(credentials(w).map((row) => row.data)).toEqual([newHash]);
+			expect((await signIn(w, "robin", SECOND)).status).toBe(200);
+		} finally {
+			await gate.release();
+		}
+	});
+
 	test("sign in; a wrong password, an unknown name, a forgotten person and a person with no password are the same reply, and each costs a verification", async () => {
 		const w = world();
 		await joined(w, "robin", FIRST);
@@ -687,6 +825,90 @@ describe("a name and a password", () => {
 		]);
 		// What Robin may do was not changed by recovering.
 		expect((await me(w, { cookie: accepted.cookie })).projects.map((project) => project.can)).toEqual([["read"]]);
+	});
+
+	test("accepted recovery revokes the person's personal CLI and admin-issued tokens, leaving other actors alone", async () => {
+		const w = world();
+		const cookie = await joined(w, "robin", FIRST);
+		const personal = PersonalTokenCreated.parse(
+			await w.ok("credential", { do: "token.create", label: "my CLI" }, { cookie }),
+		);
+		const issued = await tokenFor(w, { actor: "robin", kind: "human" });
+		const byToken = await w.post("/api/login", { token: personal.token });
+		const bystander = await tokenFor(w, { actor: "sam", kind: "human", can: ["read"] });
+		const otherSession = await w.post("/api/login", { token: bystander });
+		const recovery = await invite(w, { name: "robin" });
+		expect([await w.status(bearer(personal.token)), await w.status(bearer(issued))]).toEqual([200, 200]);
+		expect((await w.post("/api/login", { invitation: recovery.code })).status).toBe(400);
+		expect([await w.status(bearer(personal.token)), await w.status(bearer(issued))]).toEqual([200, 200]);
+		const accepted = await w.post("/api/login", { invitation: recovery.code, password: SECOND });
+		expect(accepted.status).toBe(200);
+		expect([
+			await w.status(bearer(personal.token)),
+			await w.status(bearer(issued)),
+			await w.status({ cookie: byToken.cookie }),
+			await w.status({ cookie }),
+			await w.status({ cookie: accepted.cookie }),
+			await w.status(bearer(bystander)),
+			await w.status({ cookie: otherSession.cookie }),
+			await w.status(bearer(TOKEN)),
+		]).toEqual([401, 401, 401, 401, 200, 200, 200, 200]);
+	});
+
+	test("a personal token revoked by recovery cannot write a proposal queued behind recovery", async () => {
+		const w = world();
+		const cookie = await joined(w, "robin", FIRST, { can: ["read", "produce"], project: "scratch" });
+		const personal = PersonalTokenCreated.parse(
+			await w.ok("credential", { do: "token.create", label: "queued CLI" }, { cookie }),
+		);
+		const recovery = await invite(w, { name: "robin" });
+		const gate = holdGate(w.instance);
+		try {
+			const recoveryQueued = waitingAtGate(w.instance, 1);
+			const accepting = w.post("/api/login", { invitation: recovery.code, password: SECOND });
+			await recoveryQueued;
+			const proposalQueued = waitingAtGate(w.instance, 1);
+			const proposal = w.post(
+				"/api/p/scratch/propose",
+				{ edits: [{ op: "create", outline: "Must not be written" }], cmd: "recovery-queued-proposal" },
+				bearer(personal.token),
+			);
+			await proposalQueued;
+			expect(await w.status(bearer(personal.token))).toBe(200);
+			await gate.release();
+			expect((await accepting).status).toBe(200);
+			expect(said(await proposal)).toBe("401 unauthenticated");
+			expect(w.rows("SELECT id FROM cases")).toEqual([]);
+			expect(w.rows("SELECT id FROM commands WHERE id = 'recovery-queued-proposal'")).toEqual([]);
+		} finally {
+			await gate.release();
+		}
+	});
+
+	test("owner recovery also revokes the configured owner token, even when it is the last one", async () => {
+		const w = world();
+		const before = await w.post("/api/login", { token: TOKEN });
+		const recovery = await invite(w, { name: OWNER });
+		expect(await w.status(bearer(TOKEN))).toBe(200);
+		const accepted = await w.post("/api/login", { invitation: recovery.code, password: SECOND });
+		expect(accepted.status).toBe(200);
+		expect([
+			await w.status(bearer(TOKEN)),
+			await w.status({ cookie: before.cookie }),
+			await w.status({ cookie: accepted.cookie }),
+		]).toEqual([401, 401, 200]);
+		const restarted = await w.instance.app.gate.run(() => bootstrap(w.instance.app));
+		expect(restarted.warnings.join("\n")).toContain("was revoked");
+		expect(await w.status(bearer(TOKEN))).toBe(401);
+		expect((await signIn(w, OWNER, SECOND)).status).toBe(200);
+		const replacement = "replacement-owner-secret-0123456789";
+		w.instance.app.config.ownerToken = replacement;
+		await w.instance.app.gate.run(() => bootstrap(w.instance.app));
+		expect([
+			await w.status(bearer(TOKEN)),
+			await w.status(bearer(replacement)),
+			await w.status({ cookie: accepted.cookie }),
+		]).toEqual([401, 200, 200]);
 	});
 });
 
@@ -1084,7 +1306,7 @@ describe("an upgrade and an import", () => {
 			expect((await post("/api/login", { invitation: invited.result.code, password: FIRST })).status).toBe(200);
 			expect((await post("/api/login", { name: "sam", password: FIRST })).status).toBe(200);
 			expect(await status({ cookie: fixture.samCookie })).toBe(401);
-			expect(await status(bearer(fixture.samToken))).toBe(200);
+			expect(await status(bearer(fixture.samToken))).toBe(401);
 		} finally {
 			await instance.stop();
 		}
@@ -1096,7 +1318,8 @@ describe("an upgrade and an import", () => {
 		// An import is taken only by an instance that holds its owner and nothing else, so the owner is the
 		// person whose ids an import gives away. The owner has a password, by a recovery link of their own.
 		const recovery = await invite(w, { name: OWNER });
-		expect((await w.post("/api/login", { invitation: recovery.code, password: FIRST })).status).toBe(200);
+		const recovered = await w.post("/api/login", { invitation: recovery.code, password: FIRST });
+		expect(recovered.status).toBe(200);
 		const before = { actor: credentials(w)[0]?.actor, credential: credentials(w)[0]?.id };
 		const logged = spyOn(console, "warn").mockImplementation(() => {});
 		const gate = holdGate(w.instance);
@@ -1104,7 +1327,7 @@ describe("an upgrade and an import", () => {
 			let waiting = waitingAtGate(w.instance, 1);
 			const importing = fetch(`${w.instance.url}/api/import`, {
 				method: "POST",
-				headers: bearer(TOKEN),
+				headers: { cookie: recovered.cookie },
 				body: archive,
 			});
 			await waiting;
@@ -1135,6 +1358,7 @@ describe("an upgrade and an import", () => {
 				"[mainworthy] sign-in refused: changed-meanwhile",
 			]);
 		} finally {
+			await gate.release();
 			logged.mockRestore();
 		}
 	});

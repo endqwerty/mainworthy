@@ -1,5 +1,5 @@
 // A password: how it is hashed and how it is checked. Owns no table and keeps no password: one comes in as an
-// argument and leaves as an argon2id string, or as yes or no. What a password may be is said in
+// argument and leaves as an argon2id string, or as a match result. What a password may be is said in
 // `src/core/people.ts`, where a page reads it too.
 //
 // Hashing is slow on purpose and runs on another thread (`Bun.password`), so whoever calls this is outside the
@@ -39,12 +39,19 @@ async function inTurn<T>(work: () => Promise<T>): Promise<T> {
 
 /** The argon2id string for a password: the algorithm, its cost, a new salt and the hash, in one text. */
 export function hashPassword(password: string, cost: Cost): Promise<string> {
-	return inTurn(() => Bun.password.hash(password, { algorithm: "argon2id", ...cost }));
+	return inTurn(() => Bun.password.hash(password.normalize("NFC"), { algorithm: "argon2id", ...cost }));
 }
 
-/** Whether `password` is the one `stored` was made from. A stored text that is no hash at all matches nothing. */
-export function verifyPassword(password: string, stored: string): Promise<boolean> {
-	return inTurn(() => Bun.password.verify(password, stored).catch(() => false));
+export type PasswordMatch = "normalized" | "legacy" | "wrong";
+
+/** A legacy match needs a new NFC hash. A stored text that is no hash at all matches nothing. */
+export function verifyPassword(password: string, stored: string): Promise<PasswordMatch> {
+	return inTurn<PasswordMatch>(async () => {
+		const normalized = password.normalize("NFC");
+		if (await Bun.password.verify(normalized, stored).catch(() => false)) return "normalized";
+		if (normalized !== password && (await Bun.password.verify(password, stored).catch(() => false))) return "legacy";
+		return "wrong";
+	});
 }
 
 const dummies = new Map<string, Promise<string>>();

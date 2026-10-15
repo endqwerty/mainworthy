@@ -1,7 +1,8 @@
 // What a person signs in with: a password or a passkey. Owns the tables `credentials` and `passkey_users`.
 //
 // A row is one secret and is never changed into another. A new password is a new row and the old one is
-// revoked, which erases what it held, and a passkey's row is only ever given a later counter. A session rests on the row that opened it
+// revoked, which erases what it held. A password's hash may be refreshed after a legacy sign-in, and a
+// passkey's row is given a later counter. A session rests on the row that opened it
 // (`sessions.ts`), so revoking a row ends those sessions. A passkey's credential id (`handle`) belongs to its
 // row for good, a revoked row included: an index of the database holds that, and nothing here works around it.
 import { z } from "zod";
@@ -66,7 +67,7 @@ const Q = {
 		"UPDATE credentials SET revoked_at = coalesce(revoked_at, $at), data = '', label = '' WHERE actor = $actor",
 	),
 	used: sql<{ id: number; at: number }>("UPDATE credentials SET last_used_at = $at WHERE id = $id"),
-	// The row is given its new counter only if it still holds what the sign-in was checked against.
+	// A refreshed password hash or passkey counter replaces only what the sign-in was checked against.
 	counted: sql<{ id: number; was: string; data: string; at: number }>(
 		`UPDATE credentials SET data = $data, last_used_at = $at
 		 WHERE id = $id AND data = $was AND revoked_at IS NULL`,
@@ -162,6 +163,11 @@ export function countPasskeyUse(
 	if (!stored) return false;
 	const data = dataOf({ ...stored, publicKey: stored.key, ...shown });
 	return db.run(Q.counted, { id: row.id, was: row.data, data, at }).changes === 1;
+}
+
+/** Refreshes a legacy password's hash without changing the credential its existing sessions rest on. */
+export function rehashPassword(db: Db, row: CredentialRow, hash: string, at: number): boolean {
+	return row.kind === "password" && db.run(Q.counted, { id: row.id, was: row.data, data: hash, at }).changes === 1;
 }
 
 /** Notes that a credential signed its person in. */

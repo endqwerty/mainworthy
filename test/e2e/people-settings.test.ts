@@ -405,10 +405,11 @@ test.skipIf(!browserAvailable)(
 
 			// The recovery link asks first, and says what it replaces.
 			await page.getByRole("button", { name: "Recovery link for tess" }).click();
-			await page.getByText("it replaces every way tess signs in", { exact: false }).waitFor();
+			await page.getByText("revokes all their tokens", { exact: false }).waitFor();
 			expect(await invitation("tess", "recover")).toBeUndefined();
 			await page.getByRole("button", { name: "Make the recovery link" }).click();
 			await link.waitFor();
+			await page.getByText("every password, passkey and token they had stops working", { exact: false }).waitFor();
 			expect(await invitation("tess", "recover")).toMatchObject({ state: "open" });
 			expect(await shows((await link.inputValue()).split("#")[1] ?? "")).toBe(200);
 			await page.getByRole("button", { name: "Dismiss link" }).click();

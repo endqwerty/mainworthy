@@ -91,7 +91,7 @@ test("invite new prints the link once, invite list never shows the code, and inv
 					`^invitation 3 for "sam" \\(a recovery: accepting it replaces every way sam signs in\\), ${UNTIL}\n`,
 				),
 			);
-			expect(recovery.stdout).toContain("every password and passkey sam had stops working");
+			expect(recovery.stdout).toContain("every password, passkey and token sam had stops working");
 
 			// What the command refuses, it refuses before it asks the server.
 			for (const argv of [
