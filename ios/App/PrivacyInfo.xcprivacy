@@ -2,11 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <!-- What App Store Connect asks of every upload. The app tracks nobody. It sends the name a person signs in with
-     and what they write to the instance they name, which is mainworthy.com, run by the owner, unless they change it:
-     so a user id and the person's content are collected, linked to them, for the app to work, and so is
+     and what they write to the instance the build names, mainworthy.com, run by the owner, unless a build from source
+     names another: so a user id and the person's content are collected, linked to them, for the app to work, and so is
      what each session records for security (the app's name and version, and the network address it was used from:
      other data, as Apple says to declare an address by what it is used for; it is not used for location).
-     docs/guide/privacy.md says the same in words. It keeps its instance and its last project in UserDefaults (AppModel.swift), read by
+     docs/guide/privacy.md says the same in words. It keeps its last project in UserDefaults (AppModel.swift), read by
      this app alone: reason CA92.1. -->
 <dict>
 	<key>NSPrivacyTracking</key>
