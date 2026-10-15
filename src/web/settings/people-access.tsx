@@ -13,6 +13,7 @@ export function PersonAccess({ actor }: { actor: string }) {
 	const credentials = useList("credential", (options) => listCredentials(options, actor), actor);
 	const [removing, setRemoving] = useState<ReadonlySet<number>>(new Set());
 	const [message, setMessage] = useState("");
+	const [confirming, setConfirming] = useState<number | null>(null);
 	const rows = credentials.error ? undefined : credentials.data;
 	const onlyOne = rows?.length === 1;
 
@@ -26,6 +27,7 @@ export function PersonAccess({ actor }: { actor: string }) {
 
 	function remove(row: CredentialRow): void {
 		if (onlyOne || removing.has(row.id)) return;
+		setConfirming(null);
 		setRemoving((ids) => withId(ids, row.id, true));
 		setMessage("");
 		void removeCredential(row.id)
@@ -63,17 +65,36 @@ export function PersonAccess({ actor }: { actor: string }) {
 							{row.kind === "passkey" && "passkey · "}added {age(row.createdAt)} ·{" "}
 							{row.lastUsedAt === null ? "never used" : `last used ${age(row.lastUsedAt)}`}
 						</small>
+						{confirming === row.id && (
+							<small>
+								{actor} cannot use this {row.kind} again. Sessions opened with it end.
+							</small>
+						)}
 					</span>
-					<button
-						className="out"
-						type="button"
-						disabled={onlyOne}
-						aria-disabled={removing.has(row.id)}
-						aria-label={`Remove ${row.kind === "password" ? "the password" : row.label}`}
-						onClick={() => remove(row)}
-					>
-						{removing.has(row.id) ? "Removing…" : "Remove"}
-					</button>
+					{confirming === row.id ? (
+						<>
+							<button className="out" type="button" disabled={onlyOne} onClick={() => remove(row)}>
+								Remove this sign-in method
+							</button>
+							<button type="button" className="dim" onClick={() => setConfirming(null)}>
+								Cancel
+							</button>
+						</>
+					) : (
+						<button
+							className="out"
+							type="button"
+							disabled={onlyOne}
+							aria-disabled={removing.has(row.id)}
+							aria-label={`Remove ${row.kind === "password" ? "the password" : row.label}`}
+							onClick={() => {
+								if (actor === session.actor) remove(row);
+								else if (!removing.has(row.id)) setConfirming(row.id);
+							}}
+						>
+							{removing.has(row.id) ? "Removing…" : "Remove"}
+						</button>
+					)}
 				</div>
 			))}
 			{rows?.length === 0 && (

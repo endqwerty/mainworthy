@@ -1,9 +1,10 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, type RefObject, useRef, useState } from "react";
 import { z } from "zod";
 import { Capability, defaultCapabilities } from "../../core/kinds.ts";
 import { INVITATION_LASTS, type InvitationCreated, type InvitationRow } from "../../core/people.ts";
 import { copySecret } from "../lib/clipboard.ts";
-import { useQueryOp } from "../lib/data.ts";
+import { queryKey, useQueryOp } from "../lib/data.ts";
 import { createInvitation, dateTime, listInvitations, revokeInvitation, until } from "../lib/people.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, DocLink, ProducerGlyph, SectionHeading, Select } from "../ui/index.tsx";
@@ -47,6 +48,7 @@ const STARTS_WITH: readonly Capability[] = defaultCapabilities("human").filter((
  */
 export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null> }) {
 	const { project, session } = useApp();
+	const client = useQueryClient();
 	const invitations = useList("invitation", listInvitations);
 	const actors = useQueryOp({ project, op: "admin", input: { do: "actor.list" } });
 	const listed = Actor.array().safeParse(actors.data);
@@ -345,7 +347,11 @@ export function People({ nameRef }: { nameRef: RefObject<HTMLInputElement | null
 				people={people.map((person) => person.name)}
 				changed={async (forgotten) => {
 					setCreated((links) => links.filter((link) => link.name !== forgotten));
-					const [, refreshed] = await Promise.all([invitations.refetch(), actors.refetch()]);
+					const [, refreshed] = await Promise.all([
+						invitations.refetch(),
+						actors.refetch(),
+						client.invalidateQueries({ queryKey: queryKey({ project, op: "admin", input: { do: "token.list" } }) }),
+					]);
 					const list = Actor.array().safeParse(refreshed.data);
 					return refreshed.isSuccess && list.success
 						? list.data.some((person) => person.name === forgotten && person.kind === "human" && !person.disabled)

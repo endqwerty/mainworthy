@@ -610,7 +610,7 @@ function TokenSettings({ actorRef }: { actorRef: React.RefObject<HTMLInputElemen
 					</div>
 				</div>
 			)}
-			<IssuedTokens />
+			<IssuedTokens canCreate />
 		</>
 	);
 }
