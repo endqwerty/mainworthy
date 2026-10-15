@@ -78,6 +78,36 @@ describe("quarantine", () => {
 		report("aaaa0005");
 		expect(gate("aaaa0005").verdict).toBe("blocked");
 	});
+	test("a retry of a commit first reported before entry does not count toward the pass exit", () => {
+		report("aaaa0001");
+		quarantine({ kind: "passes", count: 2 });
+		report("aaaa0001", false, "main", 2);
+		report("aaaa0002", false);
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(true);
+		report("aaaa0003", false);
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(false);
+	});
+	test("a same-attempt pass on a pre-entry failure cannot end quarantine", () => {
+		report("aaaa0001");
+		quarantine({ kind: "passes", count: 1 });
+		report("aaaa0001", false);
+		expect(gate("aaaa0001")).toMatchObject({ verdict: "passed", quarantined: 1, tally: { excused: 1, pass: 0 } });
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(true);
+		report("aaaa0002", false);
+		expect(gate("aaaa0001")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+	});
+	test("a commit first reported after entry counts when its retry passes as the gate does", () => {
+		report("aaaa0001");
+		quarantine({ kind: "passes", count: 1 });
+		report("aaaa0002");
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(true);
+		report("aaaa0002", false);
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(true);
+		report("aaaa0002", false, "main", 2);
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(false);
+		expect(gate("aaaa0002")).toMatchObject({ verdict: "passed", tally: { pass: 1, unexplained: 0 } });
+		expect(gate("aaaa0001")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
+	});
 });
 
 describe("quarantine boundaries", () => {

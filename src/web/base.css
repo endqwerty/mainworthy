@@ -1808,7 +1808,7 @@ button[aria-disabled="true"] {
 	border-radius: 6px;
 	overflow-wrap: anywhere;
 }
-.quarantine-list .btn {
+.quarantine-list .out {
 	white-space: normal;
 }
 .quarantine-list form {

@@ -48,14 +48,3 @@ export const Quarantine = z.object({
 	active: z.boolean(),
 });
 export type Quarantine = z.infer<typeof Quarantine>;
-export function quarantineExitText(exit: QuarantineExit | null): string {
-	if (exit === null) return "Ended by a person";
-	switch (exit.kind) {
-		case "person":
-			return "A person's decision";
-		case "expiry":
-			return `Expires ${new Date(exit.at).toISOString()}`;
-		case "passes":
-			return `${exit.count} consecutive passing trunk commits`;
-	}
-}

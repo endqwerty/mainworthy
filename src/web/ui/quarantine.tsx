@@ -1,19 +1,33 @@
 import { useState } from "react";
 import { z } from "zod";
-import { QuarantineExit as ExitSchema, Quarantine, type QuarantineExit, quarantineExitText } from "../../core/flaky.ts";
+import { QuarantineExit as ExitSchema, Quarantine, type QuarantineExit } from "../../core/flaky.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, useQueryOp } from "../lib/data.ts";
+import { dateTime } from "../lib/people.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { useApp } from "./context.tsx";
 
 const Test = z.object({ ref: z.string(), name: z.string(), quarantine: Quarantine.nullable() });
 const Page = z.object({ count: z.number(), items: z.array(Test), cursor: z.string().nullable() });
 
+export function quarantineExitText(exit: QuarantineExit | null): string {
+	if (exit === null) return "Ended by a person";
+	switch (exit.kind) {
+		case "person":
+			return "A person's decision";
+		case "expiry":
+			return `Expires ${dateTime(exit.at)}`;
+		case "passes":
+			return `${exit.count} consecutive passing trunk commits`;
+	}
+}
+
 export function QuarantineList({ testRef = "" }: { testRef?: string }) {
 	const { project, setStatus } = useApp();
 	const [cursor, setCursor] = useState<string>();
 	const [test, setTest] = useState(testRef);
 	const [reason, setReason] = useState("");
+	const [endReason, setEndReason] = useState("");
 	const [kind, setKind] = useState<"person" | "passes" | "expiry">("passes");
 	const [passes, setPasses] = useState("3");
 	const [expiry, setExpiry] = useState("");
@@ -25,7 +39,7 @@ export function QuarantineList({ testRef = "" }: { testRef?: string }) {
 		input: { in: "tests", state: "quarantined", limit: 20, ...(cursor ? { cursor } : {}) },
 	});
 	const page = Page.safeParse(list.data);
-	async function propose(ref: string, exit: QuarantineExit | null, base?: number) {
+	async function propose(ref: string, exit: QuarantineExit | null, reason: string, base?: number) {
 		setBusy(true);
 		setError(null);
 		try {
@@ -62,6 +76,17 @@ export function QuarantineList({ testRef = "" }: { testRef?: string }) {
 						{page.data.count} quarantined {page.data.count === 1 ? "test" : "tests"}
 					</p>
 					<p className="dim">To propose an end, enter a reason below, then choose the test's end button.</p>
+					{page.data.items.length > 0 && (
+						<label>
+							Reason to end quarantine{" "}
+							<input
+								className="form-input"
+								value={endReason}
+								maxLength={500}
+								onChange={(event) => setEndReason(event.target.value)}
+							/>
+						</label>
+					)}
 					<ul>
 						{page.data.items.map((row) => (
 							<li key={row.ref}>
@@ -72,14 +97,14 @@ export function QuarantineList({ testRef = "" }: { testRef?: string }) {
 									<>
 										<p>{row.quarantine.reason}</p>
 										<p className="dim">
-											Since {new Date(row.quarantine.since).toISOString()} · {row.quarantine.by} ·{" "}
+											Since {dateTime(row.quarantine.since)} · {row.quarantine.by} ·{" "}
 											{quarantineExitText(row.quarantine.exit)}
 										</p>
 										<button
-											className="btn"
+											className="out"
 											type="button"
-											disabled={busy || !reason.trim()}
-											onClick={() => void propose(row.ref, null, row.quarantine?.decision)}
+											disabled={busy || !endReason.trim()}
+											onClick={() => void propose(row.ref, null, endReason, row.quarantine?.decision)}
 										>
 											Propose ending {row.ref} quarantine
 										</button>
@@ -89,12 +114,12 @@ export function QuarantineList({ testRef = "" }: { testRef?: string }) {
 						))}
 					</ul>
 					{cursor && (
-						<button className="btn" type="button" onClick={() => setCursor(undefined)}>
+						<button className="out" type="button" onClick={() => setCursor(undefined)}>
 							First page
 						</button>
 					)}
 					{page.data.cursor && (
-						<button className="btn" type="button" onClick={() => setCursor(page.data.cursor ?? undefined)}>
+						<button className="out" type="button" onClick={() => setCursor(page.data.cursor ?? undefined)}>
 							More quarantined tests
 						</button>
 					)}
@@ -114,7 +139,7 @@ export function QuarantineList({ testRef = "" }: { testRef?: string }) {
 						setError("Choose a valid exit rule, pass count or expiry date.");
 						return;
 					}
-					void propose(test, parsed.data);
+					void propose(test, parsed.data, reason);
 				}}
 			>
 				<label>
@@ -180,7 +205,7 @@ export function QuarantineList({ testRef = "" }: { testRef?: string }) {
 						/>
 					</label>
 				)}
-				<button className="btn" type="submit" disabled={busy || !reason.trim()}>
+				<button className="out" type="submit" disabled={busy || !reason.trim()}>
 					Propose quarantine
 				</button>
 			</form>

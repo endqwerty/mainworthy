@@ -15,6 +15,9 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 			);
 			view = await openPage(server, { path: "/p/scratch/settings" });
 			const page = view.page;
+			const session = await view.context.newCDPSession(page);
+			await session.send("Emulation.setTimezoneOverride", { timezoneId: "America/Los_Angeles" });
+			await session.send("Emulation.setLocaleOverride", { locale: "en-US" });
 			page.setDefaultTimeout(8000);
 			const panel = page.getByRole("region", { name: "Quarantined tests" });
 			await panel.getByText("0 quarantined tests", { exact: true }).waitFor();
@@ -34,11 +37,6 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 			);
 			for (const [ref, exit, reason] of [
 				["T-2", { kind: "person" }, "Review the timeout before restoring its gate"],
-				[
-					"T-3",
-					{ kind: "expiry", at: Date.now() + 7 * 86400000 },
-					"Temporary quarantine while the modal test is repaired",
-				],
 			] as const) {
 				const proposal = await server.api("propose", {
 					edits: [{ op: "quarantine", test: ref, base: null, exit }],
@@ -53,11 +51,56 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 				).toBe("decided");
 			}
 			await page.goto(`${server.url}/p/scratch/settings`);
+			await panel.getByLabel("Test ref").fill("T-3");
+			await panel
+				.getByLabel("Quarantine reason", { exact: true })
+				.fill("Temporary quarantine while the modal test is repaired");
+			await panel.getByLabel("Exit rule", { exact: true }).selectOption("expiry");
+			await panel.getByLabel("Expiry date", { exact: true }).fill("2099-10-18T09:00");
+			await panel.getByRole("button", { name: "Propose quarantine", exact: true }).click();
+			await page.getByRole("heading", { name: "Quarantine T-3", exact: true }).waitFor();
+			await page.getByText("Expires Oct 18, 2099, 9:00 AM", { exact: false }).waitFor();
+			await page.locator(".queue-answers .ans").filter({ hasText: "Accept" }).click();
+			await page.getByLabel("Reason required by policy").fill("Temporary quarantine while the modal test is repaired");
+			await page.getByLabel("Reason required by policy").press("Enter");
+			await eventually(
+				() => server.api("gate", { commit: "aaaa0001" }),
+				(gate) => gate.quarantined === 3,
+			);
+			await page.goto(`${server.url}/p/scratch/settings`);
 			await panel.getByText("3 quarantined tests", { exact: true }).waitFor();
 			await panel.getByText("3 consecutive passing trunk commits", { exact: false }).waitFor();
 			await panel.getByText("A person's decision", { exact: false }).first().waitFor();
-			await panel.getByText("Expires", { exact: false }).waitFor();
+			await panel.getByText("Expires Oct 18, 2099, 9:00 AM", { exact: false }).waitFor();
 			expect(await panel.getByRole("listitem").count()).toBe(3);
+			const entries = z
+				.array(z.object({ quarantine: z.object({ since: z.number() }) }))
+				.parse(await server.api("get", { refs: ["T-1"] }));
+			const since = entries[0]?.quarantine.since;
+			if (since === undefined) throw new Error("Missing quarantine entry time");
+			const localSince = await page.evaluate(
+				(at) => new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }),
+				since,
+			);
+			await panel
+				.getByRole("listitem")
+				.filter({ hasText: "T-1 ·" })
+				.getByText(`Since ${localSince}`, { exact: false })
+				.waitFor();
+			const end = panel.getByRole("button", { name: "Propose ending T-2 quarantine" });
+			expect(await end.isDisabled()).toBe(true);
+			expect(
+				await end.evaluate((button) => ({
+					border: getComputedStyle(button).borderTopWidth,
+					opacity: getComputedStyle(button).opacity,
+				})),
+			).toEqual({ border: "1px", opacity: "0.5" });
+			await panel
+				.getByLabel("Quarantine reason", { exact: true })
+				.fill("An entry reason does not authorize ending quarantine");
+			expect(await end.isDisabled()).toBe(true);
+			await panel.getByLabel("Reason to end quarantine", { exact: true }).fill(" ");
+			expect(await end.isDisabled()).toBe(true);
 			const status = await server.api("gate", { commit: "aaaa0001" });
 			expect(status).toMatchObject({ verdict: "passed", quarantined: 3, tally: { excused: 3, pass: 0 } });
 			expect(status.reason).toContain("3 quarantined failures recorded, not blocking");
@@ -84,15 +127,17 @@ import { browserAvailable, eventually, openPage, startServer } from "./support.t
 				answer: { is: "accept" },
 				reason: "A newer quarantine decision",
 			});
-			await panel.getByLabel("Quarantine reason").fill("The test is reliable again");
+			await panel.getByLabel("Reason to end quarantine", { exact: true }).fill("The test is reliable again");
 			await panel.getByRole("button", { name: "Propose ending T-2 quarantine" }).click();
 			await panel.getByRole("alert").filter({ hasText: "Quarantine changed" }).waitFor();
-			expect(await panel.getByLabel("Quarantine reason").inputValue()).toBe("The test is reliable again");
+			expect(await panel.getByLabel("Reason to end quarantine", { exact: true }).inputValue()).toBe(
+				"The test is reliable again",
+			);
 			expect((await server.api("inbox", { kind: "adopt" })).items).toEqual([]);
 			await page.unroute("**/api/p/scratch/find");
 			await page.goto(`${server.url}/p/scratch/settings`);
 			await panel.getByText("A newer quarantine decision", { exact: true }).waitFor();
-			await panel.getByLabel("Quarantine reason").fill("The test is reliable again");
+			await panel.getByLabel("Reason to end quarantine", { exact: true }).fill("The test is reliable again");
 			await panel.getByRole("button", { name: "Propose ending T-2 quarantine" }).click();
 			await page.getByRole("heading", { name: "End quarantine T-2", exact: true }).waitFor();
 			await page.locator(".queue-answers .ans").filter({ hasText: "Accept" }).click();
