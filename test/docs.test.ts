@@ -33,6 +33,13 @@ const articles = new Map(DOC_PAGES.map((page) => [page.slug, renderArticle(PAGES
 const everything = DOC_PAGES.map((page) => PAGES[page.slug]).join("\n");
 
 describe("the pages", () => {
+	test("step choices name inline instructions and fragment pins, including the forbidden inline use field", () => {
+		const api = generatedBlocks().operations ?? "";
+		expect(api).toContain("`edits[][create].body.steps[][inline].action`");
+		expect(api).toContain("`edits[][create].body.steps[][fragment].use.fragment`");
+		expect(api).toContain("`edits[][create].body.steps[][inline].use` | `never`");
+	});
+
 	test("every page in the table of contents is a file, and every file is in the table of contents", () => {
 		expect(files).toEqual(DOC_PAGES.map((page) => `${page.slug}.md`).sort());
 		// What the server carries is the file, not a copy that could be older.

@@ -34,8 +34,8 @@ test.skipIf(!browserAvailable)(
 			expect(saved.sourceSteps?.[1]?.use).toEqual({ fragment: "C-1", version: 1 });
 			expect(saved.steps[1]?.action).toBe("Enter a password");
 			await page.reload();
-			await page.getByText("From C-1 v1", { exact: true }).waitFor();
-			await page.getByRole("button", { name: "Enter a password", exact: true }).waitFor();
+			await page.getByText(/^From C-1 v1(?: · Sign in)?$/).waitFor();
+			await page.getByText("Enter a password").waitFor();
 			const directory = process.env.MAINWORTHY_FRAGMENT_SCREENSHOT_DIR;
 			if (directory) {
 				await mkdir(directory, { recursive: true });

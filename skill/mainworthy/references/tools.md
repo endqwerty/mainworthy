@@ -37,16 +37,16 @@ Propose cases at their base version. Status: adopted=current, open=needs accepta
 | `edits[][create].body.title` | `string` | no |  |
 | `edits[][create].body.pre` | `string` | no |  |
 | `edits[][create].body.steps` | `array<object>` | no |  |
-| `edits[][create].body.steps[][1].id` | `string` | yes |  |
-| `edits[][create].body.steps[][1].action` | `string` | yes |  |
-| `edits[][create].body.steps[][1].expected` | `string \| null` | yes |  |
-| `edits[][create].body.steps[][1].use` | `unknown` | no |  |
-| `edits[][create].body.steps[][2].id` | `string` | yes |  |
-| `edits[][create].body.steps[][2].use` | `object` | yes |  |
-| `edits[][create].body.steps[][2].use.fragment` | `string` | yes |  |
-| `edits[][create].body.steps[][2].use.version` | `integer` | yes |  |
-| `edits[][create].body.steps[][2].action` | `string` | no |  Default: `""`. |
-| `edits[][create].body.steps[][2].expected` | `string \| null` | no |  Default: `null`. |
+| `edits[][create].body.steps[][inline].id` | `string` | yes |  |
+| `edits[][create].body.steps[][inline].action` | `string` | yes |  |
+| `edits[][create].body.steps[][inline].expected` | `string \| null` | yes |  |
+| `edits[][create].body.steps[][inline].use` | `never` | no |  |
+| `edits[][create].body.steps[][fragment].id` | `string` | yes |  |
+| `edits[][create].body.steps[][fragment].use` | `object` | yes |  |
+| `edits[][create].body.steps[][fragment].use.fragment` | `string` | yes |  |
+| `edits[][create].body.steps[][fragment].use.version` | `integer` | yes |  |
+| `edits[][create].body.steps[][fragment].action` | `string` | no |  Default: `""`. |
+| `edits[][create].body.steps[][fragment].expected` | `string \| null` | no |  Default: `null`. |
 | `edits[][create].body.methods` | `array<"human" \| "auto" \| "agent">` | no |  |
 | `edits[][create].body.automate` | `"none" \| "wanted" \| "not-applicable"` | no |  |
 | `edits[][create].body.fields` | `record<string>` | no |  |
@@ -64,16 +64,16 @@ Propose cases at their base version. Status: adopted=current, open=needs accepta
 | `edits[][edit].body.title` | `string` | no |  |
 | `edits[][edit].body.pre` | `string` | no |  |
 | `edits[][edit].body.steps` | `array<object>` | no |  |
-| `edits[][edit].body.steps[][1].id` | `string` | yes |  |
-| `edits[][edit].body.steps[][1].action` | `string` | yes |  |
-| `edits[][edit].body.steps[][1].expected` | `string \| null` | yes |  |
-| `edits[][edit].body.steps[][1].use` | `unknown` | no |  |
-| `edits[][edit].body.steps[][2].id` | `string` | yes |  |
-| `edits[][edit].body.steps[][2].use` | `object` | yes |  |
-| `edits[][edit].body.steps[][2].use.fragment` | `string` | yes |  |
-| `edits[][edit].body.steps[][2].use.version` | `integer` | yes |  |
-| `edits[][edit].body.steps[][2].action` | `string` | no |  Default: `""`. |
-| `edits[][edit].body.steps[][2].expected` | `string \| null` | no |  Default: `null`. |
+| `edits[][edit].body.steps[][inline].id` | `string` | yes |  |
+| `edits[][edit].body.steps[][inline].action` | `string` | yes |  |
+| `edits[][edit].body.steps[][inline].expected` | `string \| null` | yes |  |
+| `edits[][edit].body.steps[][inline].use` | `never` | no |  |
+| `edits[][edit].body.steps[][fragment].id` | `string` | yes |  |
+| `edits[][edit].body.steps[][fragment].use` | `object` | yes |  |
+| `edits[][edit].body.steps[][fragment].use.fragment` | `string` | yes |  |
+| `edits[][edit].body.steps[][fragment].use.version` | `integer` | yes |  |
+| `edits[][edit].body.steps[][fragment].action` | `string` | no |  Default: `""`. |
+| `edits[][edit].body.steps[][fragment].expected` | `string \| null` | no |  Default: `null`. |
 | `edits[][edit].body.methods` | `array<"human" \| "auto" \| "agent">` | no |  |
 | `edits[][edit].body.automate` | `"none" \| "wanted" \| "not-applicable"` | no |  |
 | `edits[][edit].body.fields` | `record<string>` | no |  |
