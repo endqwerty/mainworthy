@@ -1,7 +1,7 @@
 // What an event of the change stream does to what the page has read (`changed`, `invalidateProject`). The
 // reads are the real query client's; the server is a function this test answers by hand.
 import { afterEach, expect, test } from "bun:test";
-import { QueryObserver } from "@tanstack/react-query";
+import { InfiniteQueryObserver, notifyManager, QueryObserver } from "@tanstack/react-query";
 import { changed, invalidateProject, queryClient, queryKey } from "./data.ts";
 
 afterEach(() => {
@@ -76,5 +76,134 @@ test("a read that has landed is asked again at once, and a change to something e
 		expect(read.shown()).toBe("decided");
 	} finally {
 		read.stop();
+	}
+});
+
+for (const [screen, key] of [
+	["Suite", ["scratch", "find", { in: "cases", limit: 500 }, "pages"]],
+	["Queue", ["scratch", "inbox", { state: "open", limit: 100 }, "pages"]],
+	["Runs", ["scratch", "find", { in: "runs", limit: 100 }, "pages"]],
+	["run slots", ["scratch", "find", { in: "slots", run: "R-1", limit: 200 }, "pages"]],
+] as const) {
+	test(`${screen}: changes during first reads, paging and refreshes coalesce without cancelling progress`, async () => {
+		type Page = { value: string; next: number | undefined };
+		const requests: { page: number; signal: AbortSignal; reply: (value: Page) => void }[] = [];
+		const observer = new InfiniteQueryObserver(queryClient, {
+			queryKey: key,
+			initialPageParam: 0,
+			queryFn: ({ pageParam, signal }) =>
+				new Promise<Page>((reply) => requests.push({ page: pageParam, signal, reply })),
+			getNextPageParam: (page) => page.next,
+		});
+		const stop = observer.subscribe(() => {});
+		const tell = () => {
+			for (let i = 0; i < 5; i++) {
+				if (i % 2 === 0) changed("scratch", { op: "report", touched: [] });
+				else void invalidateProject("scratch");
+			}
+		};
+		const answer = async (index: number, value: string, next: number | undefined) => {
+			const request = requests[index];
+			if (!request) throw new Error(`Missing request ${index}`);
+			request.reply({ value, next });
+			await Bun.sleep(5);
+		};
+		const shown = () => observer.getCurrentResult().data?.pages.map((page) => page.value);
+		try {
+			tell();
+			await answer(0, "first, old", 1);
+			await answer(1, "first, current", 1);
+			expect(shown()).toEqual(["first, current"]);
+			expect(requests).toHaveLength(2);
+
+			void observer.fetchNextPage();
+			tell();
+			expect(requests[2]?.signal.aborted).toBe(false);
+			expect(requests).toHaveLength(3);
+			await answer(2, "second, old", undefined);
+			expect(shown()).toEqual(["first, current", "second, old"]);
+			expect(requests[3]?.page).toBe(0);
+			await answer(3, "first, refreshed", 1);
+			tell();
+			expect(requests[4]?.signal.aborted).toBe(false);
+			expect(requests).toHaveLength(5);
+			await answer(4, "second, refreshed", undefined);
+			expect(shown()).toEqual(["first, refreshed", "second, refreshed"]);
+			await answer(5, "first, latest", 1);
+			await answer(6, "second, latest", undefined);
+			expect(shown()).toEqual(["first, latest", "second, latest"]);
+			expect(requests).toHaveLength(7);
+		} finally {
+			stop();
+		}
+	});
+}
+
+test("automatic paging finishes before its one pending refresh starts", async () => {
+	type Page = { value: string; next: number | undefined };
+	const requests: { page: number; reply: (value: Page) => void }[] = [];
+	const observer = new InfiniteQueryObserver(queryClient, {
+		queryKey: ["scratch", "find", { in: "cases", limit: 500 }, "pages"],
+		initialPageParam: 0,
+		queryFn: ({ pageParam }) => new Promise<Page>((reply) => requests.push({ page: pageParam, reply })),
+		getNextPageParam: (page) => page.next,
+	});
+	const stop = observer.subscribe(
+		notifyManager.batchCalls((read) => {
+			if (read.hasNextPage && !read.isFetching) void observer.fetchNextPage();
+		}),
+	);
+	try {
+		for (let page = 0; page < 3; page++) {
+			expect(requests[page]?.page).toBe(page);
+			for (let event = 0; event < 5; event++) changed("scratch", { op: "propose", touched: [] });
+			requests[page]?.reply({ value: `page ${page}`, next: page < 2 ? page + 1 : undefined });
+			await Bun.sleep(10);
+		}
+		expect(observer.getCurrentResult().data?.pages.map((page) => page.value)).toEqual(["page 0", "page 1", "page 2"]);
+		expect(requests.map((request) => request.page)).toEqual([0, 1, 2, 0]);
+		for (let page = 0; page < 3; page++) {
+			requests[page + 3]?.reply({ value: `fresh ${page}`, next: page < 2 ? page + 1 : undefined });
+			await Bun.sleep(5);
+		}
+		expect(observer.getCurrentResult().data?.pages.map((page) => page.value)).toEqual([
+			"fresh 0",
+			"fresh 1",
+			"fresh 2",
+		]);
+		expect(requests.map((request) => request.page)).toEqual([0, 1, 2, 0, 1, 2]);
+	} finally {
+		stop();
+	}
+});
+
+test("invalidateProject waits for the coalesced refresh before an answer handler resumes", async () => {
+	const replies: ((value: { state: string }) => void)[] = [];
+	const observer = new InfiniteQueryObserver(queryClient, {
+		queryKey: ["scratch", "inbox", { state: "open", limit: 100 }, "pages"],
+		initialPageParam: "",
+		queryFn: () => new Promise<{ state: string }>((reply) => replies.push(reply)),
+		getNextPageParam: () => undefined,
+	});
+	const stop = observer.subscribe(() => {});
+	try {
+		replies[0]?.({ state: "open" });
+		await Bun.sleep(5);
+		void observer.refetch();
+		let resumed = false;
+		const refreshed = invalidateProject("scratch").then(() => {
+			resumed = true;
+		});
+		await Bun.sleep(5);
+		expect(resumed).toBe(false);
+		replies[1]?.({ state: "open" });
+		await Bun.sleep(5);
+		expect(resumed).toBe(false);
+		replies[2]?.({ state: "decided" });
+		await refreshed;
+		expect(resumed).toBe(true);
+		expect(observer.getCurrentResult().data?.pages[0]?.state).toBe("decided");
+	} finally {
+		stop();
 	}
 });

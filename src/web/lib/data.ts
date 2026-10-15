@@ -35,7 +35,7 @@ export function useQueryOp<O extends OpName>({
 		placeholderData: (previous) => previous,
 	});
 }
-const askedAgain = new Set<string>();
+const askedAgain = new Map<Query, Promise<void>>();
 /**
  * Reads again what `stale` says a change on the server may have made out of date.
  *
@@ -44,22 +44,32 @@ const askedAgain = new Set<string>();
  * and the reply, which the server may have read before the change, then counts as current for `staleTime`. On
  * 2026-10-13 a question settled elsewhere 10 ms after the queue first asked for it stayed "open" on the page
  * (issue #87). So a first read on its way is asked once more when it lands. It is not dropped instead: under a
- * stream of changes a first read that is dropped at each one would never show anything.
+ * stream of changes a first read that is dropped at each one would never show anything. Paged reads also
+ * finish before being asked again, including a refresh of pages already loaded. Yield after each reply so a
+ * screen can ask for its next page first; carry the one pending refresh across those reads until they finish.
  */
 function readAgain(stale: (query: Query) => boolean): Promise<void> {
-	const first = queryClient
-		.getQueryCache()
-		.findAll({ predicate: (query) => stale(query) && query.state.data === undefined && query.promise !== undefined });
-	for (const query of first) {
-		if (askedAgain.has(query.queryHash)) continue;
-		askedAgain.add(query.queryHash);
-		const again = (): void => {
-			askedAgain.delete(query.queryHash);
-			void queryClient.invalidateQueries({ queryKey: query.queryKey, exact: true });
+	const loading = queryClient.getQueryCache().findAll({
+		predicate: (query) =>
+			stale(query) &&
+			query.state.fetchStatus !== "idle" &&
+			(query.state.data === undefined || query.queryKey[3] === "pages"),
+	});
+	for (const query of loading) {
+		const reading = query.promise;
+		if (askedAgain.has(query) || !reading) continue;
+		const again = async (): Promise<void> => {
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			askedAgain.delete(query);
+			await readAgain((current) => current === query);
 		};
-		query.promise?.then(again, again);
+		askedAgain.set(query, reading.then(again, again));
 	}
-	return queryClient.invalidateQueries({ predicate: stale });
+	const waiting = [...askedAgain].filter(([query]) => stale(query)).map(([, read]) => read);
+	return Promise.all([
+		...waiting,
+		queryClient.invalidateQueries({ predicate: (query) => stale(query) && !askedAgain.has(query) }),
+	]).then(() => {});
 }
 export function invalidateProject(project: string): Promise<void> {
 	return readAgain((query) => query.queryKey[0] === project);
