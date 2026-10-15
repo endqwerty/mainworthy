@@ -1,12 +1,25 @@
 import { z } from "zod";
+import { Step } from "../src/core/model.ts";
 import { MCP_OPS } from "../src/server/ops/index.ts";
 import { mcpTools } from "../src/surfaces/mcp.ts";
 
 type Schema = z.core.JSONSchema.JSONSchema;
 type SchemaNode = z.core.JSONSchema._JSONSchema;
 
+export function inputSchemaForDocs(input: z.ZodType): Schema {
+	return z.toJSONSchema(input, {
+		io: "input",
+		unrepresentable: "any",
+		override: ({ zodSchema, jsonSchema }) => {
+			if (zodSchema === Step.options[0]) jsonSchema.title = "inline";
+			else if (zodSchema === Step.options[1]) jsonSchema.title = "fragment";
+		},
+	});
+}
+
 function schemaType(schema: SchemaNode): string {
 	if (typeof schema === "boolean") return schema ? "unknown" : "never";
+	if (schema.not && typeof schema.not === "object" && Object.keys(schema.not).length === 0) return "never";
 	if ("const" in schema) return JSON.stringify(schema.const);
 	if (schema.enum) return schema.enum.map((value) => JSON.stringify(value)).join(" | ");
 	const choices = schema.anyOf ?? schema.oneOf;
@@ -44,7 +57,8 @@ export function rows(schema: Schema, prefix = "", envelope = true): string[] {
 	}
 	for (const [index, choice] of (schema.anyOf ?? schema.oneOf ?? []).entries()) {
 		const op = choice.properties?.op;
-		const label = typeof op === "object" && typeof op.const === "string" ? op.const : String(index + 1);
+		const label =
+			typeof op === "object" && typeof op.const === "string" ? op.const : (choice.title ?? String(index + 1));
 		lines.push(...rows(choice, `${prefix}[${label}]`, envelope));
 	}
 	return lines;
@@ -71,7 +85,7 @@ export function generateToolReference(): string {
 		const project = z
 			.object({ type: z.literal("string"), description: z.string().default("") })
 			.parse(tool.inputSchema.properties?.project);
-		const schema = z.toJSONSchema(op.input, { io: "input" });
+		const schema = inputSchemaForDocs(op.input);
 		schema.properties = { ...schema.properties, project };
 		lines.push(
 			"",

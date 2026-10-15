@@ -6,7 +6,6 @@
 //
 // `test/docs.test.ts` fails when a committed table is not what this prints.
 import { readdirSync, readFileSync } from "node:fs";
-import { z } from "zod";
 import { type Flag, GLOBAL_FLAGS } from "../src/cli/args.ts";
 import { ADAPTER_COMMANDS } from "../src/cli/dispatch.ts";
 import { GENERATED_COMMANDS } from "../src/cli/generated.ts";
@@ -26,7 +25,7 @@ import { PRESET_GUIDE, PRESET_SUMMARY } from "../src/core/policy-guide.ts";
 import { PRESET_NAMES, PRESETS } from "../src/core/presets.ts";
 import { EXIT_CODE, Verdict } from "../src/core/runs.ts";
 import { MCP_OPS, OP_LIST } from "../src/server/ops/index.ts";
-import { rows } from "./gen-skill.ts";
+import { inputSchemaForDocs, rows } from "./gen-skill.ts";
 
 const GUIDE = new URL("../docs/guide/", import.meta.url);
 
@@ -199,7 +198,7 @@ function cliCommands(): string {
 function operations(): string {
 	return OP_LIST.map((op) => {
 		const path = op.scope === "project" ? `/api/p/<project>/${op.name}` : `/api/${op.name}`;
-		const schema = z.toJSONSchema(op.input, { io: "input", unrepresentable: "any" });
+		const schema = inputSchemaForDocs(op.input);
 		const inputs = rows(schema);
 		return [
 			`### ${op.name}`,

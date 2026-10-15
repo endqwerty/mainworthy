@@ -83,6 +83,114 @@ test("a case expands its pinned fragment, retaining the editable pin and source 
 	expect(view()).toMatchObject({ version: 1, steps: [{ action: "Enter a password" }, {}] });
 });
 
+test("custom fields and fragment users are returned only when selected", () => {
+	createFragment();
+	createUser();
+	for (const ref of ["C-1", "C-2"]) {
+		for (const fields of [undefined, ["title"]]) {
+			const [read] = h.call<Record<string, unknown>[]>("get", { refs: [ref], fields });
+			expect(read).toMatchObject({ ref, title: ref === "C-1" ? "Sign in" : "Checkout", version: 1 });
+			expect(read).not.toHaveProperty("fields");
+			expect(read).not.toHaveProperty("users");
+		}
+	}
+	expect(h.call("get", { refs: ["C-2"], fields: ["fields"] })).toMatchObject([
+		{ ref: "C-2", fields: { risk: "high" } },
+	]);
+	expect(h.call("get", { refs: ["C-1"], fields: ["users", "fields"] })).toMatchObject([
+		{ ref: "C-1", fields: {}, users: [{ case: "C-2", base: 1, versions: [1] }] },
+	]);
+});
+
+test("archived fragments retain existing users but refuse new pins", () => {
+	createFragment();
+	createUser();
+	expect(h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] })).toMatchObject({
+		status: "adopted",
+	});
+	expect(view("C-1")).toMatchObject({ state: "archived" });
+	expect(view()).toMatchObject({ steps: [{ action: "Enter a password" }, {}] });
+	expect(h.call("propose", { edits: [{ op: "edit", case: "C-2", base: 1, body: { title: "Edited" } }] })).toMatchObject(
+		{
+			status: "adopted",
+		},
+	);
+	expect(h.call("propose", { edits: [{ op: "restore", case: "C-2", to: 1 }] })).toMatchObject({ status: "adopted" });
+	expect(view()).toMatchObject({ version: 3, title: "Checkout", steps: [{ action: "Enter a password" }, {}] });
+	const before = h.app.db.raw.query("SELECT * FROM versions").all();
+	for (const edit of [
+		{ op: "create", body: { title: "New user", steps: [{ id: "gh", use: { fragment: "C-1", version: 1 } }] } },
+		{
+			op: "edit",
+			case: "C-2",
+			base: 3,
+			body: {
+				steps: [
+					{ id: "cd", use: { fragment: "C-1", version: 1 } },
+					{ id: "gh", use: { fragment: "C-1", version: 1 } },
+				],
+			},
+		},
+	]) {
+		expect(h.raw("propose", { edits: [edit] })).toMatchObject({
+			ok: false,
+			error: { code: "invalid", message: expect.stringContaining("C-1 is archived") },
+		});
+	}
+	expect(h.app.db.raw.query("SELECT * FROM versions").all()).toEqual(before);
+	expect(h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "active" }] })).toMatchObject({
+		status: "adopted",
+	});
+	expect(createUser("New user")).toMatchObject({ status: "adopted" });
+});
+
+test("a fragment archived while a new pin waits for acceptance refuses that adoption", () => {
+	h.close();
+	h = harness({ preset: "standard" });
+	createFragment();
+	const writer = h.actor("writer", "agent", ["read", "produce"]);
+	const pending = h.call<ProposeReply>(
+		"propose",
+		{
+			edits: [
+				{ op: "create", body: { title: "Waiting", steps: [{ id: "cd", use: { fragment: "C-1", version: 1 } }] } },
+			],
+		},
+		writer,
+	);
+	expect(pending).toMatchObject({ status: "open", question: "Q-2" });
+	h.call("propose", { edits: [{ op: "state", cases: ["C-1"], to: "archived" }] });
+	const question = h.call<{ evidenceHash: string }[]>("get", { refs: [pending.question] })[0];
+	expect(
+		h.raw("decide", { q: pending.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } }),
+	).toMatchObject({
+		ok: true,
+		result: [{ status: "invalid", needs: expect.stringContaining("C-1 is archived") }],
+	});
+	expect(h.raw("get", { refs: ["C-2"] })).toMatchObject({ ok: false, error: { code: "not_found" } });
+});
+
+test("an explicit creation kind must match its Markdown kind", () => {
+	for (const kind of ["case", "fragment"]) {
+		const other = kind === "case" ? "fragment" : "case";
+		expect(
+			h.raw("propose", {
+				edits: [{ op: "create", kind, md: `---\nkind: ${other}\ntitle: Mismatch\n---\n## Steps\n` }],
+			}),
+		).toMatchObject({
+			ok: false,
+			error: { code: "invalid", message: expect.stringContaining("kind") },
+		});
+		expect(h.call("find", { in: "cases" })).toMatchObject({ items: [] });
+	}
+	expect(
+		h.call("propose", {
+			edits: [{ op: "create", kind: "fragment", md: "---\nkind: fragment\ntitle: Matching\n---\n## Steps\n" }],
+		}),
+	).toMatchObject({ status: "adopted" });
+	expect(view("C-1")).toMatchObject({ kind: "fragment", title: "Matching" });
+});
+
 test("one batch moves selected users through one attributable decision and leaves others pinned", () => {
 	createFragment();
 	createUser();

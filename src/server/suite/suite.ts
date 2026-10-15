@@ -545,6 +545,9 @@ export function* sealSteps(ctx: Ctx, input: Parameters<typeof seal>[1]): Generat
 				break;
 			}
 			case "create": {
+				const kind = edit.md !== undefined ? markdownKind(edit.md) : (edit.kind ?? "case");
+				if (edit.kind !== undefined && edit.kind !== kind)
+					throw invalid("the creation kind must match the Markdown kind");
 				const keptAliases = [
 					...new Set(
 						(edit.aliases ?? []).map((alias) => {
@@ -570,7 +573,7 @@ export function* sealSteps(ctx: Ctx, input: Parameters<typeof seal>[1]): Generat
 				const folder = edit.folder ?? (after ? after.folder : DEFAULT_FOLDER);
 				resolved.push({
 					op: "create",
-					kind: edit.kind ?? (edit.md ? markdownKind(edit.md) : "case"),
+					kind,
 					body: cleanBody(built.body, emptyBody()),
 					folder: folderTarget(index, folder),
 					tags: cleanTags([...built.tags, ...(edit.tags ?? [])]),
@@ -694,13 +697,16 @@ export function* sealSteps(ctx: Ctx, input: Parameters<typeof seal>[1]): Generat
 	const policy = resolved.findLast((edit) => edit.op === "policy")?.policy ?? currentPolicy(ctx.db, ctx.project.id);
 	for (const edit of resolved) {
 		if (++work % SLICE === 0) yield;
-		if (edit.op === "create" || edit.op === "edit" || edit.op === "restore")
+		if (edit.op === "create" || edit.op === "edit" || edit.op === "restore") {
+			const row = edit.op === "create" ? null : caseById(ctx.db, edit.caseId);
 			validateFragments(
 				ctx.db,
 				ctx.project.id,
 				edit.body,
-				edit.op === "create" ? edit.kind : (caseById(ctx.db, edit.caseId)?.kind ?? "case"),
+				edit.op === "create" ? edit.kind : (row?.kind ?? "case"),
+				row ? bodyOf(ctx.db, row.id, row.head) : undefined,
 			);
+		}
 		if (edit.op === "create" || edit.op === "restore") validateFields(edit.body, policy);
 		else if (edit.op === "edit") validateFields(edit.body, policy, bodyOf(ctx.db, edit.caseId, edit.head));
 	}
@@ -861,7 +867,7 @@ export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): 
 	};
 	const writeVersion = (row: CaseRow, body: CaseBody, previous?: CaseBody) => {
 		validateFields(body, policy, previous);
-		validateFragments(ctx.db, ctx.project.id, body, row.kind);
+		validateFragments(ctx.db, ctx.project.id, body, row.kind, previous ?? bodyOf(ctx.db, row.id, row.head));
 		const no = row.head + 1;
 		const hash = versionHash(body);
 		insertVersion(ctx, witness, proposal, row.id, no, row.head, body, hash);
@@ -1182,13 +1188,21 @@ function markdownKind(md: string): CaseKind {
 	return parsed.doc.kind ?? "case";
 }
 
-function validateFragments(db: Db, project: number, body: CaseBody, kind: CaseKind): void {
+function validateFragments(db: Db, project: number, body: CaseBody, kind: CaseKind, previous?: CaseBody): void {
 	for (const step of body.steps) {
 		if (!step.use) continue;
+		const pin = step.use;
 		if (kind === "fragment") throw invalid("fragments cannot include fragments");
-		const target = mustCase(db, project, step.use.fragment);
-		if (target.kind !== "fragment") throw invalid(`${step.use.fragment} is not a fragment`);
-		const pinned = bodyOf(db, target.id, step.use.version);
+		const target = mustCase(db, project, pin.fragment);
+		if (target.kind !== "fragment") throw invalid(`${pin.fragment} is not a fragment`);
+		if (
+			target.state === "archived" &&
+			!previous?.steps.some(
+				(part) => part.id === step.id && part.use?.fragment === pin.fragment && part.use.version === pin.version,
+			)
+		)
+			throw invalid(`${pin.fragment} is archived; restore it before adding a pin`);
+		const pinned = bodyOf(db, target.id, pin.version);
 		if (pinned.steps.some((part) => part.use)) throw invalid("fragments cannot include fragments");
 	}
 }

@@ -234,6 +234,10 @@ Choose **Insert pinned fragment**. The editor shows the shared steps and their
 source. **Remove fragment** removes this reference from the case. Edit the
 fragment itself to change shared instructions.
 
+An archived fragment keeps its versions and existing pins. You can edit other
+content in its consumers. Restore the fragment before inserting another
+reference or moving a pin to a different version.
+
 Reading a case or running it shows the fragment steps inline, marked with the
 fragment ref and pinned version. Publishing another fragment version leaves
 existing cases unchanged. Old case versions and runs keep their original pins.
@@ -245,6 +249,8 @@ to vN**. One proposal records the selected updates and who requested them. The
 project's policy may require acceptance. Unselected cases stay pinned. If any
 selected case changes before the update is accepted, refresh and propose the
 batch again. No selected case moves from that refused batch.
+Moving a pin makes earlier results no longer current proof of the updated case,
+even when the two fragment versions have the same instructions.
 
 Markdown preserves a reference with its own step id:
 
@@ -256,3 +262,4 @@ A fragment's header uses `kind: fragment`. A literal action beginning with `!`
 is escaped as `\!` in canonical Markdown. Instance and project archives preserve
 fragment history and pins. Fragment authoring and batch updates use the web,
 HTTP `propose`, or CLI JSON; MCP discovery omits these inputs.
+When a creation supplies both `kind` and Markdown, their kinds must agree.
