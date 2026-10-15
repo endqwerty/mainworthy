@@ -66,7 +66,7 @@ describe("quarantine", () => {
 		h.advance(1_800_000_001_000 - h.app.now() - 1);
 		expect(gate("aaaa0001")).toMatchObject({ verdict: "blocked", tally: { unexplained: 1 } });
 	});
-	test("distinct passing trunk commits exit permanently, while change passes do not", () => {
+	test("distinct passing trunk commits exit despite later failing commits, while change passes do not", () => {
 		report("aaaa0001");
 		quarantine({ kind: "passes", count: 2 });
 		report("aaaa0002", false, "feature");
@@ -77,6 +77,15 @@ describe("quarantine", () => {
 		expect(gate("aaaa0001").verdict).toBe("blocked");
 		report("aaaa0005");
 		expect(gate("aaaa0005").verdict).toBe("blocked");
+	});
+	test("a same-attempt failure on the exit commit can make quarantine active again", () => {
+		report("aaaa0001");
+		quarantine({ kind: "passes", count: 1 });
+		report("aaaa0002", false);
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(false);
+		report("aaaa0002");
+		expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(true);
+		expect(gate("aaaa0002")).toMatchObject({ verdict: "passed", quarantined: 1, tally: { excused: 1, pass: 0 } });
 	});
 	test("a retry of a commit first reported before entry does not count toward the pass exit", () => {
 		report("aaaa0001");

@@ -44,10 +44,12 @@ automated evidence. Retrying a commit first reported before entry cannot count.
 Every observed lane on a commit must pass; a failure, error, skip or blocked lane
 breaks the streak. Retries
 use their highest decisive attempt with worse same-attempt disagreement retained.
-Agent evidence, sessions and change commits cannot satisfy the exit. Once the
-threshold is reached quarantine stays ended, even after another failure. Correcting
-an observation can change the derived exit because the corrected observation no
-longer stands. No current row is rewritten by a detector or a clock.
+Agent evidence, sessions and change commits cannot satisfy the exit. A failure on
+a later commit does not restart quarantine after the threshold is reached. A later
+failure at the same counted attempt on a commit in the qualifying streak can
+invalidate that streak and make quarantine active again. Correcting an observation
+can also change the derived exit because the corrected observation no longer stands.
+No current row is rewritten by a detector or a clock.
 
 Gate and planned-run classification treat only quarantined test failures as
 excused, including failures already answered as a defect. Quarantine takes

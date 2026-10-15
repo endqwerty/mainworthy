@@ -9,8 +9,9 @@ import { BUDGETS } from "../bench/contracts.ts";
 import { buildDataset, openDataset, Parameters } from "../bench/dataset.ts";
 import { measure, table } from "../bench/measure.ts";
 import { ingestWorkload, prepareRecentChanges, readWorkloads, saveWorkload } from "../bench/workloads.ts";
-import type { InboxReply } from "../src/core/ops.ts";
-import { harness } from "./helpers.ts";
+import type { Quarantine } from "../src/core/flaky.ts";
+import type { GateStatus, InboxReply, ProposeReply, ReportReceipt } from "../src/core/ops.ts";
+import { ciReport, harness } from "./helpers.ts";
 
 test("on-disk hot paths stay inside the design budgets", async () => {
 	const root = resolve(".mainworthy", "bench");
@@ -58,6 +59,55 @@ test("on-disk hot paths stay inside the design budgets", async () => {
 		rmSync(dir, { recursive: true, force: true });
 	}
 }, 20_000);
+
+test("quarantined reports stay within budget after 400 earlier trunk commits", async () => {
+	const h = harness({ unlinked: "track" });
+	try {
+		const commit = (i: number) => i.toString(16).padStart(40, "0");
+		for (let i = 1; i <= 400; i++)
+			h.call(
+				"report",
+				ciReport({ commit: commit(i), n: 1, ...(i % 3 === 0 ? { fail: { 0: "expected green" } } : {}) }),
+			);
+		const proposal = h.call<ProposeReply>("propose", {
+			edits: [{ op: "quarantine", test: "T-1", base: null, exit: { kind: "passes", count: 100 } }],
+			reason: "Repair an unreliable test",
+		});
+		const question = h.call<InboxReply>("inbox", { kind: "adopt" }).items.find((q) => q.q === proposal.question);
+		if (!question) throw new Error("missing quarantine proposal");
+		h.call("decide", {
+			q: question.q,
+			onEvidence: question.evidenceHash,
+			answer: { is: "accept" },
+			reason: "Require 100 clean commits before exit",
+		});
+		const row = await measure({
+			name: "quarantined report after 400 trunk commits",
+			budget: 100,
+			iterations: 20,
+			warmup: 0,
+			correctness: "one fresh result recorded, its gate passes, and quarantine remains active",
+			prepare: (i) => {
+				const input = ciReport({ commit: commit(401 + i), n: 1 });
+				return () => h.call<ReportReceipt>("report", input);
+			},
+			check: (result, i) => {
+				expect(result).toMatchObject({ fresh: true, counts: { total: 1, pass: 1 }, rejected: [] });
+				expect(h.call<GateStatus>("gate", { commit: commit(401 + i) })).toMatchObject({
+					verdict: "passed",
+					tally: { pass: 1, unexplained: 0 },
+				});
+				expect(h.call<{ quarantine: Quarantine }[]>("get", { refs: ["T-1"] })[0]?.quarantine.active).toBe(true);
+			},
+		});
+		console.log(`\nQuarantine history regression tripwire, milliseconds:\n${table([row])}`);
+		expect(row.errors, row.errorMessages.join("; ")).toBe(0);
+		expect(row.checked).toBe(20);
+		expect(row.p95, "a one-result report after quarantine entry must stay below 100 ms at p95").toBeLessThan(100);
+	} finally {
+		h.close();
+	}
+}, 60_000);
 
 /**
  * Counted, not timed: the work one report does must not grow with the number of questions it settles times the

@@ -489,7 +489,9 @@ Choose one exit rule:
   seen for that test on a commit must pass. Retries count once per commit. Failures,
   errors, skips and blocked results break the streak. Agent reports and change
   commits cannot satisfy it. After the streak succeeds, another failing commit
-  does not restart quarantine.
+  does not restart quarantine. A later failure at the same counted attempt on a
+  commit in that streak can invalidate it and make quarantine active again.
+  Correcting an observation can also change the exit.
 
 For the API and command line, read the test with `get`. Use the last quarantine's
 `decision` as `base`, or null before the first quarantine. A changed base refuses
