@@ -56,10 +56,15 @@ gate. It is still a failure to explain.
 
 A question asks for a judgment about recorded evidence. It is not a test result.
 Several occurrences of the same failure cause can share one question.
-An assertion cause shared by more than 50 distinct tests across more than five files in one report
-gets a question per file. Each title starts with "Split by file" and names the file.
-Your answer covers that file's cause. Later reports keep that cause separate for a file already split,
-even when they contain fewer failures. Results without a reported file get a separate group when a cause splits.
+An assertion cause shared by more than 50 distinct tests across more than five files in one commit's
+applied reports gets a question per file, starting with the report that crosses those limits.
+Reports for the same repository and commit count together, including different environments.
+Each title starts with "Split by file" and names the file. Your answer covers that file's cause.
+Earlier results keep their grouping, and earlier answers keep their effects.
+Later reports on that commit also split new files. Other commits keep that cause separate for a file
+seen before the split as well as after it, even when they contain fewer failures.
+Reports without a commit count separately.
+Results without a reported file get a separate group when a cause splits.
 The guard counts reported files, so missing file names do not help reach the threshold.
 
 Look for "blocks gate" and the runs named beside the question.

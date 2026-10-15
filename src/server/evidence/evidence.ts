@@ -283,6 +283,15 @@ const Q = {
 		"INSERT INTO signatures (project, hash, class, text, first_seq) VALUES ($project, $hash, $class, $text, $seq)",
 	),
 	splitResult: sql<{ id: number; signature: number }>("UPDATE results SET signature = $signature WHERE id = $id"),
+	assertionsOnCommit: sql<
+		{ project: number; what: string; batch: number },
+		{ test: number; file: string | null; signature: number; message: string; detail: string | null }
+	>(
+		`SELECT DISTINCT r.test, t.file, r.signature, r.message, r.detail FROM results r
+		 JOIN tests t ON t.id = r.test JOIN signatures s ON s.id = r.signature
+		 WHERE r.target IN (SELECT id FROM targets WHERE project = $project AND what = $what)
+		   AND r.batch != $batch AND s.class = 'assertion' AND r.message IS NOT NULL`,
+	),
 	insertResult: sql<{
 		project: number;
 		test: number;
@@ -1058,7 +1067,7 @@ export function* applySteps(
 			fresh,
 		});
 	}
-	yield* splitBroadAssertions(ctx, out.results);
+	yield* splitBroadAssertions(ctx, batch, out.results);
 	out.counts = countOutcomes(out.results);
 	return out;
 }
@@ -1140,10 +1149,10 @@ function fileSignature(signature: Pick<SignatureRow, "hash" | "class" | "text">,
 }
 
 /** The report is still being applied: assign its final causes before any run or decision sees the results. */
-function* splitBroadAssertions(ctx: Ctx, results: Applied[]): Generator<undefined, void, void> {
+function* splitBroadAssertions(ctx: Ctx, batch: BatchRow, results: Applied[]): Generator<undefined, void, void> {
 	const groups = new Map<
 		number,
-		{ signature: SignatureRow; tests: Set<number>; files: Set<string>; results: Applied[] }
+		{ signature: SignatureRow; tests: Set<number>; files: Set<string | null>; results: Applied[] }
 	>();
 	for (const result of results) {
 		if (result.signature?.class !== "assertion") continue;
@@ -1153,24 +1162,54 @@ function* splitBroadAssertions(ctx: Ctx, results: Applied[]): Generator<undefine
 			groups.set(result.signature.id, group);
 		}
 		group.tests.add(result.test.id);
-		if (result.test.file !== null) group.files.add(result.test.file);
+		group.files.add(result.test.file);
 		group.results.push(result);
+	}
+	if (groups.size === 0) return;
+	const target = mustTarget(ctx.db, batch.target);
+	if (target.commit_sha !== null) {
+		const byHash = new Map([...groups.values()].map((group) => [group.signature.hash, group]));
+		const hashes = new Map([...groups.values()].map((group) => [group.signature.id, group.signature.hash]));
+		// Split results retain the original failure input. Count it without changing their stored causes.
+		let scanned = 0;
+		for (const earlier of ctx.db.all(Q.assertionsOnCommit, {
+			project: ctx.project.id,
+			what: target.what,
+			batch: batch.id,
+		})) {
+			if (scanned++ > 0 && scanned % SLICE === 0) yield;
+			let hash = hashes.get(earlier.signature);
+			if (hash === undefined) {
+				hash = signatureHash(
+					normaliseFailure({
+						message: earlier.message,
+						...(earlier.detail !== null ? { detail: earlier.detail } : {}),
+					}),
+				);
+				hashes.set(earlier.signature, hash);
+			}
+			const group = byHash.get(hash);
+			if (!group) continue;
+			group.tests.add(earlier.test);
+			group.files.add(earlier.file);
+		}
 	}
 	let changed = 0;
 	for (const group of groups.values()) {
-		const broad = group.tests.size > 50 && group.files.size > 5;
+		const broad = group.tests.size > 50 && group.files.size - Number(group.files.has(null)) > 5;
 		const byFile = new Map<string | null, SignatureRow | null>();
+		if (broad) {
+			for (const file of group.files) {
+				if (changed++ > 0 && changed % SLICE === 0) yield;
+				byFile.set(file, storeSignature(ctx, fileSignature(group.signature, file)));
+			}
+		}
 		for (const result of group.results) {
 			if (changed++ > 0 && changed % SLICE === 0) yield;
 			const file = result.test.file;
 			if (!byFile.has(file)) {
 				const signature = fileSignature(group.signature, file);
-				byFile.set(
-					file,
-					broad
-						? storeSignature(ctx, signature)
-						: ctx.db.get(Q.signature, { project: ctx.project.id, hash: signature.hash }),
-				);
+				byFile.set(file, ctx.db.get(Q.signature, { project: ctx.project.id, hash: signature.hash }));
 			}
 			const split = byFile.get(file);
 			if (!split) continue;
