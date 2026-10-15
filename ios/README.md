@@ -57,9 +57,10 @@ uploads. The first time, Xcode makes the team's distribution certificate. The bu
 built, in UTC (`202610141530`): App Store Connect takes each number once and wants each one higher than the last,
 and when it has that number already, Xcode raises it; the command prints the one sent. The app's version is
 `MARKETING_VERSION` in `Config/Base.xcconfig`. `Info.plist` answers the question about encryption, so a build is
-not held for it. `App/PrivacyInfo.xcprivacy` says the app collects nothing and why it reads its own settings, which
-Apple asks of every upload; the App Privacy answers on the App Store page are a separate form, needed only for
-the App Store.
+not held for it. `App/PrivacyInfo.xcprivacy` says what the app collects (the name a person signs in with and what
+they write, for the app to work, tracking nobody) and why it reads its own settings, which Apple asks of every
+upload. The App Privacy answers on the App Store page are a separate form, needed only for the App Store, and the
+privacy policy is `https://mainworthy.com/privacy` (`docs/guide/privacy.md`).
 
 `bun scripts/ios.ts upload --dry-run` builds and signs the same and writes the `.ipa` to the cache instead of
 sending it. Testers outside the team need Apple's beta review first, and issue #210 says what else is left before the

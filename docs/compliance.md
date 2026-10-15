@@ -34,6 +34,11 @@ Read this first. These are the known gaps, in order of how soon they bite.
    report. Cost: medium. Tracked in #47.
 6. **No project licence.** The repository is public since 2026-10-13 and `UNLICENSED`: anyone can read the code,
    and nobody else has the right to use it. The owner has to choose a licence. Tracked in #34 with the name check.
+7. **The instance keeps more than it needs, in four places.** The policy at `/privacy`
+   (`docs/guide/privacy.md`, 2026-10-14) says what is kept today, gaps included. To keep only what is needed:
+   sign-in records that are never deleted (#227), a forgotten person's name in stored command replies (#228),
+   forgetting a person without the raw API (#229), and a person's drafts left in the browser after sign-out
+   (#230). The policy names no controller and no private contact address yet; the owner chooses them (#231).
 
 ## Privacy (GDPR, UK GDPR, CCPA)
 
