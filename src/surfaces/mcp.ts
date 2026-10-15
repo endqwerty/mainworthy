@@ -120,17 +120,18 @@ function mapSchemas(schema: Schema, visit: (child: SchemaNode) => SchemaNode): S
 
 function compactSchema(schema: SchemaNode, envelope = false): SchemaNode {
 	if (typeof schema === "boolean") return schema;
-	const visible = schema.properties
-		? {
-				...schema,
-				properties: Object.fromEntries(
-					Object.entries(schema.properties).filter(
-						([name, child]) =>
-							typeof child === "boolean" || child["x-mcp-hidden"] !== true || schema.required?.includes(name),
-					),
-				),
-			}
-		: schema;
+	const visible = { ...schema };
+	if (schema.properties)
+		visible.properties = Object.fromEntries(
+			Object.entries(schema.properties).filter(
+				([name, child]) =>
+					typeof child === "boolean" || child["x-mcp-hidden"] !== true || schema.required?.includes(name),
+			),
+		);
+	for (const key of ["anyOf", "oneOf"] satisfies ("anyOf" | "oneOf")[]) {
+		const choices = schema[key];
+		if (choices) visible[key] = choices.filter((child) => child["x-mcp-hidden"] !== true);
+	}
 	const result = mapSchemas(visible, (child) => compactSchema(child));
 	delete result["x-mcp-hidden"];
 	delete result.$schema;
@@ -169,7 +170,7 @@ function compactSchema(schema: SchemaNode, envelope = false): SchemaNode {
 		}
 		if (result.required?.includes("cmd")) result.required = result.required.filter((name) => name !== "cmd");
 		for (const key of ["allOf", "anyOf", "oneOf"] satisfies ("allOf" | "anyOf" | "oneOf")[]) {
-			const choices = schema[key];
+			const choices = visible[key];
 			if (choices) result[key] = choices.map((choice) => objectSchema(compactSchema(choice, true)));
 		}
 	}

@@ -177,6 +177,17 @@ export const ResultIn = z.object({
 export type ResultIn = z.infer<typeof ResultIn>;
 
 export const TargetIn = z.union([
+	z
+		.object({
+			build: z
+				.string()
+				.trim()
+				.min(1)
+				.max(120)
+				.describe("For CLI and HTTP. MCP's report schema omits the build target; use a planned run."),
+			env: z.string().trim().min(1).max(60).optional(),
+		})
+		.meta({ "x-mcp-hidden": true }),
 	z.object({
 		commit: z.string().min(7).max(64),
 		head: z.string().min(7).max(64).optional().describe("Current code host head."),
@@ -436,6 +447,40 @@ export const ChangeReply = z.object({
 });
 export type ChangeReply = z.infer<typeof ChangeReply>;
 
+// ── announce ───────────────────────────────────────────────────────────────────────────────────────────────
+
+export const ArtifactCode = z
+	.array(
+		z.object({
+			repo: z.string().trim().min(1).max(200),
+			commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/, "use a full lowercase commit hash"),
+		}),
+	)
+	.min(1)
+	.max(100);
+export const AnnounceInput = z.object({
+	deploy: z.string().trim().min(1).max(120).describe("Build label. Its artifact binding cannot change."),
+	env: z.string().trim().min(1).max(60).describe("Environment deployed to."),
+	digest: z
+		.string()
+		.regex(/^sha256:[0-9a-f]{64}$/)
+		.optional()
+		.describe("Artifact digest. Required for a new build label."),
+	code: ArtifactCode.optional().describe("Source repositories and full commits. Required with a new artifact."),
+	cmd,
+});
+export type AnnounceInput = z.infer<typeof AnnounceInput>;
+export const AnnounceReply = z.object({
+	deployment: z.number().int(),
+	build: z.string(),
+	digest: z.string(),
+	env: z.string(),
+	code: ArtifactCode,
+	by: z.string(),
+	at: z.number(),
+});
+export type AnnounceReply = z.infer<typeof AnnounceReply>;
+
 // ── plan ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const Selection = z.object({
@@ -544,7 +589,9 @@ export const GetInput = z.object({
 export type GetInput = z.infer<typeof GetInput>;
 
 export const FindInput = z.object({
-	in: z.enum(["cases", "tests", "runs", "folders", "tags", "requirements", "slots", "changes"]).default("cases"),
+	in: z
+		.enum(["cases", "tests", "runs", "folders", "tags", "requirements", "slots", "changes", "deployments"])
+		.default("cases"),
 	text: z.string().max(200).optional(),
 	folder: FolderRef.optional(),
 	deep: z.boolean().optional().describe("With `folder`: include its subfolders."),

@@ -52,6 +52,7 @@ import {
 	targetsWithCommit,
 	testById,
 } from "../evidence/evidence.ts";
+import { buildWhat } from "../evidence/releases.ts";
 import { type Ctx, ref } from "../kernel/ctx.ts";
 import { type Db, json, sql } from "../kernel/db.ts";
 import { invalid, notFound } from "../kernel/errors.ts";
@@ -470,9 +471,14 @@ export function ensureChangeRun(ctx: Ctx, target: TargetRow, create = true): Run
  * environment, where it names them) and nothing else, whether or not the result was typed into it: naming a run
  * does not make evidence about another build count for it. A `self` run counts only what is typed into it.
  */
-function matches(run: RunRow, target: TargetRow, typedInto: number | null): boolean {
+function matches(db: Db, run: RunRow, target: TargetRow, typedInto: number | null): boolean {
 	const accepts = acceptsOf(run);
 	if ("self" in accepts) return typedInto === run.id;
+	if ("build" in accepts)
+		return (
+			target.what === buildWhat(db, run.project, accepts.build) &&
+			(accepts.env === undefined || accepts.env === target.env)
+		);
 	if (target.commit_sha === null) return false;
 	// One commit, by its whole hash: an abbreviation was settled when the run was planned (`resolveCommit`).
 	return (
@@ -492,32 +498,36 @@ export function runsFor(ctx: Ctx, target: TargetRow, typedInto: number | null, p
 	const change = ensureChangeRun(ctx, target, producer !== "agent");
 	if (change) out.push(change);
 	for (const run of ctx.db.all(Q.receivingPlanned, { project: ctx.project.id, commit: target.commit_sha })) {
-		if (matches(run, target, typedInto)) out.push(run);
+		if (matches(ctx.db, run, target, typedInto)) out.push(run);
 	}
 	return out;
 }
 
 /** Whether a result typed into this run on this target would count for it. The report is refused when not. */
-export const runAccepts = (run: RunRow, target: TargetRow): boolean =>
-	run.origin === "change" ? run.accepts_what === target.what : matches(run, target, run.id);
+export const runAccepts = (db: Db, run: RunRow, target: TargetRow): boolean =>
+	run.origin === "change" ? run.accepts_what === target.what : matches(db, run, target, run.id);
 
 /** What a run counts, in words, for the refusal. */
 export function describeAccepts(run: RunRow): string {
 	const accepts = acceptsOf(run);
 	if ("self" in accepts) return "only results recorded in it";
+	if ("build" in accepts) return `build ${accepts.build}${accepts.env ? ` (${accepts.env})` : ""}`;
 	const more = [accepts.repo, accepts.env].filter((part) => part !== undefined);
 	return `commit ${accepts.commit}${more.length > 0 ? ` (${more.join(", ")})` : ""}`;
 }
 
 /**
- * The targets a run that accepts a commit counts: one per environment reported for it, and for a planned run that
- * names no repository, one per repository that has that commit.
+ * The targets counted by a run's commit or artifact, narrowed to its selected environment and repository.
  */
 function targetsOfRun(db: Db, run: RunRow): TargetRow[] {
 	const accepts = acceptsOf(run);
+	if ("build" in accepts)
+		return targetsOfCommit(db, run.project, buildWhat(db, run.project, accepts.build)).filter((target) =>
+			matches(db, run, target, null),
+		);
 	if (!("commit" in accepts)) return [];
 	if (run.origin === "change") return run.accepts_what ? targetsOfCommit(db, run.project, run.accepts_what) : [];
-	return targetsWithCommit(db, run.project, accepts.commit).filter((target) => matches(run, target, null));
+	return targetsWithCommit(db, run.project, accepts.commit).filter((target) => matches(db, run, target, null));
 }
 
 /**
@@ -1335,6 +1345,7 @@ export function plan(
 	// A commit that exists in two repositories is refused here unless the run says which: the run would otherwise
 	// count evidence about either.
 	if ("commit" in accepts) targetByCommit(ctx.db, ctx.project.id, accepts.commit, accepts.repo);
+	else if ("build" in accepts) buildWhat(ctx.db, ctx.project.id, accepts.build, accepts.env);
 	else if (input.require.some((o) => o.kind === "jobs")) {
 		throw invalid("a run that counts only what is typed into it cannot wait for a job: plan it for a commit");
 	}
@@ -1397,12 +1408,12 @@ export function plan(
  */
 function inheritAccepted(ctx: Ctx, run: RunRow): void {
 	const accepts = acceptsOf(run);
-	if (!("commit" in accepts)) return;
+	if ("self" in accepts) return;
 	for (const batch of acceptedBatches(ctx.db)) {
 		if (batch.project !== run.project) continue;
 		const target = mustTarget(ctx.db, batch.target);
-		if (target.commit_sha !== accepts.commit) continue;
-		if (matches(run, target, batch.run) || firstCountedReport(ctx.db, batch, target))
+		if ("commit" in accepts && target.commit_sha !== accepts.commit) continue;
+		if (matches(ctx.db, run, target, batch.run) || ("commit" in accepts && firstCountedReport(ctx.db, batch, target)))
 			ctx.db.run(Q.accepted, { id: run.id, seq: batch.seq });
 	}
 }

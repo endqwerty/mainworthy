@@ -4,11 +4,12 @@ import { z } from "zod";
 import { MethodKind } from "./model.ts";
 
 /**
- * Which targets count toward a run: one commit, or `self`. `self` counts only results typed into the run; it
- * proves nothing about a build. The server settles an abbreviated hash when the run is planned, so a stored
- * `commit` is the whole hash.
+ * Which targets count toward a run: one commit, an announced build's artifact, or `self`. A build label is
+ * immutable. `self` counts only results typed into the run and proves nothing about a build. The server settles
+ * an abbreviated commit when the run is planned, so a stored `commit` is the whole hash.
  */
 export const TargetMatch = z.union([
+	z.object({ build: z.string().trim().min(1).max(120), env: z.string().trim().min(1).max(60).optional() }),
 	z.object({ commit: z.string().min(7), repo: z.string().optional(), env: z.string().optional() }),
 	z.object({ self: z.literal(true) }),
 ]);

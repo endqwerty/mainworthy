@@ -174,6 +174,11 @@ of earlier revisions or results are not supported by these case importers.
 
 ## Import into a new instance
 
+Build bindings, artifact provenance and deployment history travel in archives.
+Archives exported before those tables were added cannot import into this build.
+Restore such an archive with the build that exported it. Existing databases
+upgrade in place when the current server starts.
+
 An import loads an archive into a new instance. A full archive restores every project, and a project archive restores only its selected project. It does not merge. The server keeps answering reads during the import; writes wait until it finishes.
 
 1. Start a new instance and make nothing in it.

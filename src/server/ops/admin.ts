@@ -231,10 +231,10 @@ export function admin(env: InstanceCtx, input: AdminInput): unknown {
 			}
 			const forgotten = forgetActor(env.app, input.name);
 			forgetQuestionNames(db, input.name, forgotten.forgotten);
-			// These write replies name people in grant.actor, report.questions[].by and claim.known[].by.
+			// These write replies name people in grant.actor, report.questions[].by, claim.known[].by and announce.by.
 			// Requests are digests; their binding to a command id must survive forgetting, as must free text.
 			const rewrite = (op: string, reply: string): string => {
-				const field = op === "admin" ? "actor" : op === "report" || op === "claim" ? "by" : null;
+				const field = op === "admin" ? "actor" : op === "report" || op === "claim" || op === "announce" ? "by" : null;
 				if (field === null || !reply.includes(JSON.stringify(input.name))) return reply;
 				return JSON.stringify(
 					JSON.parse(reply, (key, value: unknown) =>

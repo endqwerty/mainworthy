@@ -295,17 +295,19 @@ Record results: a parsed CI report, one manual result, or an agent's batch. The 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `target` | `object` | no | What was tested. Required unless `run` is given. |
-| `target[1].commit` | `string` | yes |  |
-| `target[1].head` | `string` | no | Current code host head. |
-| `target[1].repo` | `string` | no |  |
-| `target[1].branch` | `string` | no |  |
+| `target[1].build` | `string` | yes | For CLI and HTTP. MCP's report schema omits the build target; use a planned run. |
 | `target[1].env` | `string` | no |  |
-| `target[1].pr` | `integer` | no |  |
-| `target[1].base` | `string` | no | The commit this change is based on. |
-| `target[1].title` | `string` | no |  |
-| `target[1].url` | `string` | no |  |
-| `target[1].files` | `array<string>` | no | Paths the change touches, for impact. |
-| `target[2].session` | `string` | yes |  |
+| `target[2].commit` | `string` | yes |  |
+| `target[2].head` | `string` | no | Current code host head. |
+| `target[2].repo` | `string` | no |  |
+| `target[2].branch` | `string` | no |  |
+| `target[2].env` | `string` | no |  |
+| `target[2].pr` | `integer` | no |  |
+| `target[2].base` | `string` | no | The commit this change is based on. |
+| `target[2].title` | `string` | no |  |
+| `target[2].url` | `string` | no |  |
+| `target[2].files` | `array<string>` | no | Paths the change touches, for impact. |
+| `target[3].session` | `string` | yes |  |
 | `run` | `string` | no | A planned run these results are for, for example R-4. |
 | `job` | `string` | no |  |
 | `attempt` | `integer` | no |  |
@@ -400,6 +402,32 @@ Say that a change ended (merged, or closed without merging) or is open again. An
 
 </details>
 
+### announce
+
+Announce a deployment and bind its build label to an attested artifact. Pipelines and human admins only.
+
+|  |  |
+| --- | --- |
+| HTTP | `POST /api/p/<project>/announce` |
+| Command | `mainworthy announce` |
+| Needs | `record` |
+| Effect | writes |
+| Agent tool | no |
+
+<details>
+<summary>Input of <code>announce</code></summary>
+
+| Property | Type | Required | Description |
+| --- | --- | --- | --- |
+| `deploy` | `string` | yes | Build label. Its artifact binding cannot change. |
+| `env` | `string` | yes | Environment deployed to. |
+| `digest` | `string` | no | Artifact digest. Required for a new build label. |
+| `code` | `array<object>` | no | Source repositories and full commits. Required with a new artifact. |
+| `code[].repo` | `string` | yes |  |
+| `code[].commit` | `string` | yes |  |
+
+</details>
+
 ### tracker
 
 Queue a defect from a failed result: create a tracker issue or validate an existing issue for linking.
@@ -449,10 +477,12 @@ Start a run: choose cases, say which results count and what completes it. Eviden
 | `select.tags` | `array<string>` | no |  |
 | `select.text` | `string` | no |  |
 | `accepts` | `object` | no | Which results count. Default: only results recorded in this run. |
-| `accepts[1].commit` | `string` | yes |  |
-| `accepts[1].repo` | `string` | no |  |
+| `accepts[1].build` | `string` | yes |  |
 | `accepts[1].env` | `string` | no |  |
-| `accepts[2].self` | `true` | yes |  |
+| `accepts[2].commit` | `string` | yes |  |
+| `accepts[2].repo` | `string` | no |  |
+| `accepts[2].env` | `string` | no |  |
+| `accepts[3].self` | `true` | yes |  |
 | `require` | `array<object>` | no |  |
 | `require[][1].id` | `string` | yes |  |
 | `require[][1].kind` | `"exercise"` | yes |  |
@@ -568,7 +598,7 @@ Search and list: cases (by text, folder, tag), tests, runs, slots of a run, fold
 
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
-| `in` | `"cases" \| "tests" \| "runs" \| "folders" \| "tags" \| "requirements" \| "slots" \| "changes"` | no |  Default: `"cases"`. |
+| `in` | `"cases" \| "tests" \| "runs" \| "folders" \| "tags" \| "requirements" \| "slots" \| "changes" \| "deployments"` | no |  Default: `"cases"`. |
 | `text` | `string` | no |  |
 | `folder` | `integer \| string` | no |  |
 | `deep` | `boolean` | no | With `folder`: include its subfolders. |

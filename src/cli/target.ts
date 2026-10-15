@@ -63,6 +63,12 @@ export function detectedTarget(): ReturnType<typeof detectTarget> {
 
 /** Explicit session targets have no build identity; commit flags override detected CI/Git metadata. */
 export function reportTarget(args: Args, detected: ReturnType<typeof detectTarget>): TargetIn | undefined {
+	const build = args.value("build");
+	if (build !== undefined) {
+		if (args.has("session") || TARGET_FLAGS.some((flag) => flag.name !== "env" && args.has(flag.name)))
+			throw new CliError("invalid", "--build cannot be combined with commit, branch, PR, base, head or session flags");
+		return TargetIn.parse({ build, ...(args.has("env") ? { env: args.value("env") } : {}) });
+	}
 	const session = args.value("session");
 	if (session !== undefined) {
 		if (TARGET_FLAGS.some((flag) => args.has(flag.name)))

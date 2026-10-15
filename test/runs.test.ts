@@ -1,8 +1,12 @@
 // Three producers, one run: planned runs, slots and what may fill them (fixtures E1, E3, E5, E7 in the design).
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { DecideReply, GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
+import type { AnnounceReply, DecideReply, GateStatus, InboxReply, PlanReply, ReportReceipt } from "../src/core/ops.ts";
+import { recoverAccepted } from "../src/server/jobs.ts";
 import { findProject, makeCtx, stampSeq } from "../src/server/kernel/ctx.ts";
+import { Db } from "../src/server/kernel/db.ts";
+import { migrate } from "../src/server/kernel/migrate.ts";
 import { acceptReport, processBatch } from "../src/server/ops/writes.ts";
+import { exportArchive, importArchive, linesOf } from "../src/server/transfer/transfer.ts";
 import { type Harness, harness } from "./helpers.ts";
 
 let h: Harness;
@@ -555,5 +559,259 @@ describe("an agent's evidence", () => {
 		expect(claimed).toMatchObject({ reviewed: 1, opened: [] });
 		expect(first(slots("R-1")).state).toBe("missing");
 		expect(h.call<GateStatus>("gate", { run: "R-1" }).verdict).toBe("pending");
+	});
+});
+
+describe("deploy announcements and release runs", () => {
+	const digest = `sha256:${"a".repeat(64)}`;
+	const code = [{ repo: "acme/web", commit: "1".repeat(40) }];
+	beforeEach(() => {
+		h = harness();
+		seed(1);
+	});
+
+	test("a pipeline binds a build to attested code and records each deployment; a command retry writes nothing", () => {
+		const ci = h.actor("deploy", "ci", ["record"]);
+		const input = { deploy: "1.4-rc3", env: "staging", digest, code, cmd: "deploy-rc3-1" };
+		const announced = h.call<AnnounceReply>("announce", input, ci);
+		expect(announced).toMatchObject({ build: "1.4-rc3", digest, env: "staging", code, by: "deploy" });
+		expect(h.call<AnnounceReply>("announce", input, ci)).toEqual(announced);
+		h.call("announce", { deploy: "1.4-rc3", env: "production" }, ci);
+		const deployments = h.call<{ items: { env: string; build: string }[] }>("find", { in: "deployments" });
+		expect(deployments.items.map(({ env, build }) => [env, build])).toEqual([
+			["production", "1.4-rc3"],
+			["staging", "1.4-rc3"],
+		]);
+		const page = h.call<{ items: { env: string }[]; cursor: string }>("find", { in: "deployments", limit: 1 });
+		expect(page.items.map((event) => event.env)).toEqual(["production"]);
+		expect(
+			h.call<{ items: { env: string }[]; cursor: null }>("find", { in: "deployments", cursor: page.cursor, limit: 1 }),
+		).toMatchObject({ items: [{ env: "staging" }], cursor: null });
+		expect(
+			h.raw("announce", { deploy: "1.4-rc3", env: "staging", digest: `sha256:${"b".repeat(64)}`, code }, ci),
+		).toMatchObject({ ok: false, error: { code: "conflict" } });
+		expect(
+			h.raw(
+				"announce",
+				{ deploy: "alias", env: "staging", digest, code: [{ ...code[0], commit: "2".repeat(40) }] },
+				ci,
+			),
+		).toMatchObject({ ok: false, error: { code: "conflict" } });
+		expect(h.call<{ items: unknown[] }>("find", { in: "deployments" }).items.length).toBe(2);
+	});
+
+	test("only pipelines and admins attest artifacts; an unknown build or incomplete attestation is refused", () => {
+		const member = h.actor("tester", "human", ["record"]);
+		const agent = h.actor("reviewer", "agent", ["record", "produce"]);
+		for (const actor of [member, agent]) {
+			expect(h.raw("announce", { deploy: "rc3", env: "staging", digest, code }, actor)).toMatchObject({
+				ok: false,
+				error: { code: "forbidden" },
+			});
+		}
+		expect(h.raw("announce", { deploy: "unknown", env: "staging" })).toMatchObject({
+			ok: false,
+			error: { code: "invalid" },
+		});
+		expect(h.raw("announce", { deploy: "rc3", env: "staging", digest })).toMatchObject({
+			ok: false,
+			error: { code: "invalid" },
+		});
+		expect(h.raw("plan", { name: "release", select: { cases: ["C-1"] }, accepts: { build: "unknown" } })).toMatchObject(
+			{ ok: false, error: { code: "not_found" } },
+		);
+	});
+
+	test.each(["report", "plan"] as const)("P1: %s refuses an environment the build was never deployed to", (op) => {
+		h.call("announce", { deploy: "rc3", env: "staging", digest, code });
+		const target = { build: "rc3", env: "prodution" };
+		const reply =
+			op === "report"
+				? h.raw("report", { target, results: [{ test: { case: "C-1" }, outcome: "pass" }] })
+				: h.raw("plan", { name: "Typo release", select: { cases: ["C-1"] }, accepts: target });
+		expect(reply).toMatchObject({
+			ok: false,
+			error: {
+				code: "invalid",
+				message: 'build rc3 has not been deployed to "prodution"; deployed environments: "staging"',
+			},
+		});
+		expect(h.call<{ items: unknown[] }>("find", { in: "runs" }).items).toEqual([]);
+		const planned = h.call<PlanReply>("plan", {
+			name: "Staging",
+			select: { cases: ["C-1"] },
+			accepts: { build: "rc3", env: "staging" },
+		});
+		expect(planned).toMatchObject({ run: "R-1", already: 0 });
+		expect(h.call<GateStatus>("gate", { run: planned.run }).verdict).toBe("pending");
+		h.call("announce", { deploy: "rc3", env: "prodution" });
+		const later = h.call<PlanReply>("plan", { name: "Later deployment", select: { cases: ["C-1"] }, accepts: target });
+		expect(later.already).toBe(0);
+		h.call("report", { target, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		expect(h.call<GateStatus>("gate", { run: later.run }).verdict).toBe("passed");
+	});
+
+	test("a later deployment can count earlier results for the same artifact under another label", () => {
+		h.call("announce", { deploy: "rc3", env: "staging", digest, code });
+		h.call("announce", { deploy: "alias", env: "production", digest, code });
+		h.call("report", {
+			target: { build: "alias", env: "production" },
+			results: [{ test: { case: "C-1" }, outcome: "pass" }],
+		});
+		const plan = { name: "Production", select: { cases: ["C-1"] }, accepts: { build: "rc3", env: "production" } };
+		expect(h.raw("plan", plan)).toMatchObject({ ok: false, error: { code: "invalid" } });
+		h.call("announce", { deploy: "rc3", env: "production" });
+		const planned = h.call<PlanReply>("plan", plan);
+		expect(planned.already).toBe(1);
+		expect(h.call<GateStatus>("gate", { run: planned.run }).verdict).toBe("passed");
+	});
+
+	test("release slots count the exact artifact and environment, including earlier evidence, and gate by run", () => {
+		h.call("announce", { deploy: "rc3", env: "staging", digest, code });
+		h.call("announce", { deploy: "rc3", env: "production" });
+		const planned = h.call<PlanReply>("plan", {
+			name: "Release smoke",
+			select: { cases: ["C-1"] },
+			accepts: { build: "rc3", env: "staging" },
+		});
+		const ci = h.actor("tests", "ci", ["record"]);
+		// A pass on the attested commit proves no execution of the artifact.
+		h.call(
+			"report",
+			{
+				target: { ...code[0], branch: "main" },
+				results: [{ test: { key: "checkout" }, annotation: { case: "C-1", version: 1 }, outcome: "pass" }],
+			},
+			ci,
+		);
+		h.call("report", {
+			target: { build: "rc3", env: "production" },
+			results: [{ test: { case: "C-1" }, outcome: "pass" }],
+		});
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "pending",
+			tally: { missing: 1 },
+		});
+		// Recording by run alone must use its artifact, never a session or the attested commit.
+		h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "passed",
+			tally: { pass: 1, missing: 0 },
+		});
+		h.call("announce", { deploy: "same-artifact", env: "staging", digest, code });
+		const reuse = h.call<PlanReply>("plan", {
+			name: "Same artifact",
+			select: { cases: ["C-1"] },
+			accepts: { build: "same-artifact", env: "staging" },
+		});
+		expect(reuse.already).toBe(1);
+		expect(h.call<GateStatus>("gate", { run: reuse.run }).verdict).toBe("passed");
+		const other = h.call<PlanReply>("plan", {
+			name: "Production",
+			select: { cases: ["C-1"] },
+			accepts: { build: "rc3", env: "production" },
+		});
+		expect(other.already).toBe(1);
+	});
+
+	test("a release planned during an accepted upload stays pending, then counts the recovered failure", () => {
+		h.call("announce", { deploy: "rc3", env: "staging", digest, code });
+		const ci = h.actor("tests", "ci", ["record"]);
+		const target = { build: "rc3", env: "staging" };
+		const result = { test: { key: "checkout" }, annotation: { case: "C-1", version: 1 } };
+		h.call("report", { target, results: [{ ...result, outcome: "pass" }] }, ci);
+		const project = findProject(h.app.db, "scratch");
+		if (!project) throw new Error("no project");
+		h.app.db.transaction(() => {
+			const ctx = makeCtx(h.app, project, ci, true);
+			acceptReport(ctx, {
+				target,
+				attempt: 2,
+				results: [{ ...result, outcome: "fail", failure: { message: "artifact smoke failed" } }],
+			});
+			stampSeq(ctx);
+		});
+		const planned = h.call<PlanReply>("plan", {
+			name: "Release during upload",
+			select: { cases: ["C-1"] },
+			accepts: target,
+		});
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "pending",
+			reason: "pending: 1 report accepted and not yet applied",
+		});
+		expect(run(planned.run).state).toBe("open");
+		recoverAccepted(h.app);
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "blocked",
+			tally: { unexplained: 1 },
+		});
+		const failure = first(h.call<InboxReply>("inbox", { kind: "failure", on: planned.run }).items);
+		h.call("decide", { q: failure.q, onEvidence: failure.evidenceHash, answer: { is: "defect" } });
+		expect(h.call<GateStatus>("gate", { run: planned.run }).verdict).toBe("failed");
+	});
+
+	test("release jobs must report on the artifact in the selected environment", () => {
+		h.call("announce", { deploy: "rc3", env: "staging", digest, code });
+		h.call("announce", { deploy: "rc3", env: "production" });
+		const planned = h.call<PlanReply>("plan", {
+			name: "Release jobs",
+			select: { cases: ["C-1"] },
+			accepts: { build: "rc3", env: "staging" },
+			require: [
+				{ id: "exercise", kind: "exercise", methods: ["human", "auto"], minActors: 1, basis: "exact" },
+				{ id: "ci", kind: "jobs", jobs: ["smoke"] },
+			],
+		});
+		h.call("report", { run: planned.run, results: [{ test: { case: "C-1" }, outcome: "pass" }] });
+		const ci = h.actor("smoke", "ci", ["record"]);
+		const results = [{ test: { key: "health" }, outcome: "pass" }];
+		h.call("report", { target: { build: "rc3", env: "production" }, job: "smoke", results }, ci);
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "pending",
+			tally: { pass: 1, missing: 1 },
+		});
+		h.call("report", { target: { build: "rc3", env: "staging" }, job: "smoke", results }, ci);
+		expect(h.call<GateStatus>("gate", { run: planned.run })).toMatchObject({
+			verdict: "passed",
+			tally: { missing: 0 },
+		});
+	});
+
+	test("forgetting an announcer removes its display name from saved replies and resolves provenance by id", () => {
+		const ci = h.actor("retired-deployer", "ci", ["record"]);
+		h.call("announce", { deploy: "rc3", env: "staging", digest, code, cmd: "forgotten-deploy-1" }, ci);
+		const forgotten = h.call<{ forgotten: string }>("admin", { do: "actor.forget", name: "retired-deployer" });
+		const saved = h.app.db.raw
+			.query<{ outcome: string }, []>("SELECT outcome FROM commands WHERE id = 'forgotten-deploy-1'")
+			.get();
+		expect(JSON.parse(saved?.outcome ?? "{}")).toMatchObject({ by: forgotten.forgotten });
+		expect(h.call<{ items: unknown[] }>("find", { in: "deployments" }).items).toMatchObject([
+			{ by: forgotten.forgotten, attestation: { by: forgotten.forgotten } },
+		]);
+	});
+
+	test("an archive preserves the immutable build, its attestation and deployment history", () => {
+		h.call("announce", { deploy: "rc3", env: "staging", digest, code });
+		h.call("announce", { deploy: "rc3", env: "production" });
+		const chunks: string[] = [];
+		exportArchive(h.app.db, (chunk) => chunks.push(chunk));
+		const restored = new Db(":memory:");
+		try {
+			migrate(restored, ":memory:");
+			importArchive(restored, linesOf(chunks.join("")));
+			expect(
+				restored.raw
+					.query(
+						"SELECT b.label, a.digest, a.code, d.env FROM deployments d JOIN builds b ON b.id = d.build JOIN artifacts a ON a.id = b.artifact ORDER BY d.id",
+					)
+					.all(),
+			).toEqual([
+				{ label: "rc3", digest, code: JSON.stringify(code), env: "staging" },
+				{ label: "rc3", digest, code: JSON.stringify(code), env: "production" },
+			]);
+		} finally {
+			restored.close();
+		}
 	});
 });

@@ -55,6 +55,7 @@ import {
 } from "../evidence/evidence.ts";
 import { findingsOfCase, reviewBasis, reviewsAtVersion, reviewsOfCase } from "../evidence/findings.ts";
 import { sameCodeEvidence } from "../evidence/flaky.ts";
+import { deployments } from "../evidence/releases.ts";
 import { actorLabel } from "../identity/identity.ts";
 import { type Ctx, findCommand, UNFINISHED } from "../kernel/ctx.ts";
 import { json } from "../kernel/db.ts";
@@ -454,6 +455,24 @@ export function find(ctx: Ctx, input: FindInput): Found {
 	const limit = input.limit ?? 100;
 	const project = ctx.project.id;
 	switch (input.in) {
+		case "deployments": {
+			const rows = deployments(ctx.db, {
+				project,
+				before: input.cursor ? Number(input.cursor) : Number.MAX_SAFE_INTEGER,
+				limit: limit + 1,
+			});
+			const page = rows.slice(0, limit);
+			return {
+				count: null,
+				items: page.map((row) => ({
+					...row,
+					code: json<unknown>(row.code),
+					by: actorLabel(ctx.db, row.actor).name,
+					attestation: { by: actorLabel(ctx.db, row.attested_by).name, at: row.attested_at },
+				})),
+				cursor: rows.length > limit ? String(page.at(-1)?.id ?? "") : null,
+			};
+		}
 		case "cases": {
 			const page = listCases(ctx, {
 				folder: input.folder,

@@ -294,6 +294,9 @@ describe("the module map", () => {
 			"covers",
 		],
 		"server/evidence": [
+			"artifacts",
+			"builds",
+			"deployments",
 			"tests",
 			"targets",
 			"changes",
@@ -672,15 +675,15 @@ describe("the registry", () => {
 		expect(MCP_OPS.length).toBeLessThanOrEqual(10);
 	});
 
-	test("a pipeline's token reaches four operations: attach, report, change and gate", () => {
+	test("a pipeline's token reaches attach, report, change, announce and gate", () => {
 		// `record` is all a pipeline's token holds by default, so an operation that accepts it is one more thing a
 		// secret in a CI system can do. Adding to this list is a decision (docs/decisions/0014), not a copy of the
-		// nearest operation: `change`, which says that a pull request ended, came with decision 0022.
+		// nearest operation: `change`, which says that a pull request ended, came with decision 0022, and `announce` with decision 0046.
 		// `attach` appends only to the producer's own evidence (decision 0065). `gate` is
 		// also the one operation that accepts either of two capabilities.
 		const accepts = (capability: "record" | "read") =>
 			OP_LIST.filter((op) => needs(op.needs).includes(capability)).map((op) => op.name);
-		expect(accepts("record")).toEqual(["attach", "report", "change", "gate"]);
+		expect(accepts("record")).toEqual(["attach", "report", "change", "announce", "gate"]);
 		expect(OP_LIST.filter((op) => typeof op.needs !== "string").map((op) => op.name)).toEqual(["gate"]);
 		// What a pipeline may be let do besides: the reads, and nothing that writes.
 		expect(OP_LIST.filter((op) => accepts("read").includes(op.name) && op.effect !== "read")).toEqual([]);

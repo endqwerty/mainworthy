@@ -12,6 +12,7 @@ const count = (value: number): string => value.toLocaleString("en-US");
 function identity(target: TargetIn | undefined, receipt: ReportReceipt): string {
 	if (!target) return receipt.target;
 	if ("session" in target) return `session "${target.session}" (no build identity)`;
+	if ("build" in target) return `build "${target.build}"${target.env ? ` (${target.env})` : ""}`;
 	return `${target.commit.slice(0, 7)}${target.pr !== undefined ? `  pr #${target.pr}` : target.branch ? `  (${target.branch})` : ""}`;
 }
 
@@ -64,7 +65,9 @@ export function printReceipt(input: {
 	line(
 		gate
 			? `mainworthy gate    ${gate.verdict}: ${reason}${gate.url ? `  ${new URL(gate.url, `${input.url}/`).href}` : ""}`
-			: "mainworthy gate    pending: this session proves nothing about a build",
+			: report.target && "build" in report.target
+				? "mainworthy gate    pending: use gate --run with a planned release run"
+				: "mainworthy gate    pending: this session proves nothing about a build",
 	);
 	if (!receipt.fresh) line("  already received; nothing was written");
 }
@@ -88,6 +91,7 @@ export const reportCommand: AdapterCommand = {
 			description:
 				"Read JUnit attachment files inside this directory. Unavailable or disallowed files are skipped with a warning.",
 		},
+		{ name: "build", kind: "string", description: "Announced build label. Overrides CI/Git detection." },
 		{ name: "session", kind: "string", description: "Named test session with no build identity." },
 		{ name: "run", kind: "string", description: "Planned run these results are for." },
 		{ name: "job", kind: "string", description: "CI job name. Overrides detection." },

@@ -206,6 +206,19 @@ const fixtures: Record<string, Row[]> = {
 			first_seq: 1,
 		},
 	],
+	artifacts: [
+		{
+			id: 510,
+			project: 23,
+			digest: `sha256:${"a".repeat(64)}`,
+			code: JSON.stringify([{ repo: "acme/web", commit: "1".repeat(40) }]),
+			actor: 71,
+			at: time,
+			seq: 1,
+		},
+	],
+	builds: [{ id: 511, project: 23, label: "release-雪", artifact: 510, seq: 1 }],
+	deployments: [{ id: 512, project: 23, build: 511, env: "staging", actor: 71, at: time + 1, seq: 2 }],
 	changes: [
 		{
 			id: 503,

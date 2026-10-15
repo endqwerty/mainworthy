@@ -77,6 +77,7 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | Command | What it does |
 | --- | --- |
 | `mainworthy serve` | Start the server and web UI. Also the default with no arguments. |
+| `mainworthy announce --deploy <build> --env <env> [--digest sha256:<hash> --repo <repo> --commit <sha>]` | Announce a deployed build. A new artifact needs its digest, repository and full commit. |
 | `mainworthy report <files...> [--format <format>] [--session <name>] [--run R-4] \| report --nothing-required [--commit <sha>] [--json]` | Upload test reports or declare no tests required, detect the CI build, and print the receipt. Use gate to check the verdict. |
 | `mainworthy login --name <name> --password-file <path> [--code-file <path>] [--label <label>] [--expires 30d] [--json]` | Sign in with a password and, when enrolled, an authenticator or recovery code. Print a personal CLI token once. |
 | `mainworthy gate [--commit <sha> \| --run R-4 \| --change pr:482] [--wait <seconds>] [--json]` | Check a commit, change or run. Exit 0 passed, 1 failed, 2 blocked, 3 pending. |
@@ -98,6 +99,15 @@ Each prints text made to be read, and `--json` where it is listed prints the sam
 | `mainworthy version [--json]` | Print the CLI version and the API version it requires. No server is contacted. |
 | `mainworthy help` | List every operation and adapter. |
 
+Flags of `mainworthy announce`:
+
+- `--deploy <string>`: Build label.
+- `--env <string>`: Environment deployed to.
+- `--digest <string>`: Artifact's SHA-256 digest.
+- `--repo <string>`: Source repository.
+- `--commit <string>`: Full source commit hash.
+- `--cmd <string>`: Idempotency key for this deployment.
+
 Flags of `mainworthy report`:
 
 - `--commit <string>`: Commit tested. Overrides CI/Git detection.
@@ -108,6 +118,7 @@ Flags of `mainworthy report`:
 - `--env <string>`: Test environment.
 - `--format <string>`: Report format: auto (default), junit, playwright, jest, vitest, pytest (pytest-json-report), trx.
 - `--attachments <string>`: Read JUnit attachment files inside this directory. Unavailable or disallowed files are skipped with a warning.
+- `--build <string>`: Announced build label. Overrides CI/Git detection.
 - `--session <string>`: Named test session with no build identity.
 - `--run <string>`: Planned run these results are for.
 - `--job <string>`: CI job name. Overrides detection.
@@ -192,6 +203,7 @@ Every operation of the API is also a command with the same name. Give its input 
 | `mainworthy report` | Record results: a parsed CI report, one manual result, or an agent's batch. The producer is the token's actor. |
 | `mainworthy claim` | Record a review and what it found. A review with no findings is still recorded. |
 | `mainworthy change` | Say that a change ended (merged, or closed without merging) or is open again. An ended change is not asked about. |
+| `mainworthy announce` | Announce a deployment and bind its build label to an attested artifact. Pipelines and human admins only. |
 | `mainworthy tracker` | Queue a defect from a failed result: create a tracker issue or validate an existing issue for linking. |
 | `mainworthy plan` | Start a run: choose cases, say which results count and what completes it. Evidence already recorded fills it at once. |
 | `mainworthy decide` | Answer a question, or withdraw a decision. Policy says whether your answer settles it, is advice, or is refused. |
