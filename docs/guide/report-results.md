@@ -146,12 +146,15 @@ An [imported alias](./data.md#bring-cases-from-another-tool), such as `C1234` or
 works wherever a case ref does here. Use `@C1234` in a name or `C1234` in a property.
 Add `@v1` to claim version 1 in Mainworthy, not the version in the source tool.
 Aliases keep their original letter case and resolve within the report's project.
-In a name, a native ref must use uppercase `C`, as in `@C-2`.
+In a name, native refs match without regard to letter case: `@c-2` names `C-2`.
+Mainworthy normalizes native refs to uppercase and leaves alias letter case unchanged.
 A non-native `@token` claims a case only when that alias exists in the report's project.
 Other tokens, such as `@smoke`, `@media`, and the address in `user@example.com`, are ignored when they name no alias.
 They do not hide a later native ref or drop a previously decided link.
 Trailing sentence punctuation is excluded from name claims: `@C1234.` names `C1234`.
 Use explicit metadata for an alias whose final punctuation belongs to its identifier.
+Separate claims with whitespace. Glued tokens such as `@smoke@C-2`,
+`@C-2x`, and `@C-2@v1x` do not claim a case.
 
 Name annotations work in JUnit, Playwright, Jest, Vitest and TRX test names,
 and in pytest node IDs, including parameter IDs. These formats also carry case claims outside the name:
@@ -162,12 +165,13 @@ and in pytest node IDs, including parameter IDs. These formats also carry case c
 
 Mainworthy resolves name claims when it receives the report, using the aliases in that project.
 The last valid claim in a name wins. For example, `checkout @C1234 then @C-2` names `C-2`.
+With several native refs, this changes the earlier behavior that selected the first ref.
 An unknown non-native token is ignored even after a valid claim.
 
 These properties and Playwright annotations take precedence over every claim in the name.
 When several explicit metadata claims name the case on one test, the last syntactically valid claim wins.
 An unknown alias in explicit metadata is recorded without a case, and the receipt explains why, just as for an unknown native ref.
-Metadata preserves the alias's punctuation and requires uppercase native refs too.
+Metadata preserves the alias's punctuation and requires uppercase native refs.
 A test can also use a link previously decided in [Queue](./decide.md).
 
 Mainworthy identifies a test using its file, or its class name when there is no file,
