@@ -156,6 +156,13 @@ describe("the results behind a gate", () => {
 		const q = h.call<InboxReply>("inbox", { kind: "adopt" }).items.find((item) => item.q === p.question);
 		if (!q) throw new Error("quarantine was not queued");
 		h.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "accept" }, reason: "Repairing it" });
+		// A quarantine covers what is reported while it stands: the rerun's failure is the one it excuses.
+		h.call("report", {
+			target,
+			job: "e2e",
+			attempt: 3,
+			results: [result("cart total", "fail", "expected $90, got $100")],
+		});
 		const all = results({ commit: COMMIT });
 		expect(all.tally).toEqual(gate().tally);
 		expect(all.items.find((row) => row.test === total)).toMatchObject({ standing: "excused", quarantined: true });
