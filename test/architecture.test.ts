@@ -788,6 +788,29 @@ describe("the codes of a refusal", () => {
 	});
 });
 
+/**
+ * Every text file of the checkout, tracked or not: scratch left in the tree is read too. Bun writes an executable it
+ * is building to `.<hash>-<number>.bun-build` in the directory it was started in, and removes it. `test/headers.test.ts`
+ * builds one from here beside this test, and that file holds the whole source: seen in that moment it failed a test
+ * that read it (2026-10-13, on macOS, in one check of two).
+ */
+function wholeTree(): string[] {
+	const outside = new Set([".git", "node_modules", "dist", ".mainworthy", ".casebook", "test-results"]);
+	const binary = /\.(png|jpe?g|gif|ico|gz|db|db-wal|db-shm)$/;
+	const local = /^(\.env|bench\/results-.*\.json$|\.[0-9a-f]+-[0-9a-f]+\.bun-build$)/;
+	return readdirSync(".", { withFileTypes: true })
+		.filter((entry) => !outside.has(entry.name))
+		.flatMap((entry) =>
+			entry.isDirectory() ? [...new Glob(`${entry.name}/**/*`).scanSync({ cwd: ".", dot: true })] : [entry.name],
+		)
+		.filter((file) => !binary.test(file) && !local.test(file));
+}
+
+/** The tailnet names in `text` that are not under `example.ts.net`, the one name this repository may carry. */
+export function foreignTailnetNames(text: string): string[] {
+	return (text.match(/\b(?:[\w-]+\.)+ts\.net\b/gi) ?? []).filter((name) => !/(?:^|\.)example\.ts\.net$/i.test(name));
+}
+
 describe("the project's name", () => {
 	test("the former name appears only where an install or a deployment still carries it", () => {
 		// The project was called Casebook until 2026-10-13 (decision 0015). Each file here says why it still
@@ -807,26 +830,29 @@ describe("the project's name", () => {
 			"src/server/transfer/transfer.test.ts": "an archive exported under the former name",
 			"src/server/transfer/transfer.ts": "an archive exported under the former name",
 			"src/surfaces/formats/junit.test.ts": "a report that names its case with the former property",
+			"scripts/work/release.ts": "releases the `.casebook` of an older checkout",
 			"src/surfaces/formats/junit.ts": "a report that names its case with the former property",
 			"src/web/lib/former-name.test.ts": "what a browser kept under the former name",
 			"src/web/lib/former-name.ts": "what a browser kept under the former name",
-			"t3.json": "releases the `.casebook` of an older checkout",
 			"test/architecture.test.ts": "this list",
 			"test/e2e/shell.test.ts": "what a browser kept under the former name",
 		};
-		const outside = new Set([".git", "node_modules", "dist", ".mainworthy", ".casebook", "test-results"]);
-		const binary = /\.(png|jpe?g|gif|ico|gz|db|db-wal|db-shm)$/;
-		// Bun writes an executable it is building to `.<hash>-<number>.bun-build` in the directory it was started
-		// in, and removes it. `test/headers.test.ts` builds one from here beside this test, and that file holds the
-		// whole source: seen in that moment it failed this test (2026-10-13, on macOS, in one check of two).
-		const local = /^(\.env|bench\/results-.*\.json$|\.[0-9a-f]+-[0-9a-f]+\.bun-build$)/;
-		const found = readdirSync(".", { withFileTypes: true })
-			.filter((entry) => !outside.has(entry.name))
-			.flatMap((entry) =>
-				entry.isDirectory() ? [...new Glob(`${entry.name}/**/*`).scanSync({ cwd: ".", dot: true })] : [entry.name],
-			)
-			.filter((file) => !binary.test(file) && !local.test(file))
-			.filter((file) => /casebook/i.test(readFileSync(file, "utf8")));
+		const found = wholeTree().filter((file) => /casebook/i.test(readFileSync(file, "utf8")));
 		expect(found.sort()).toEqual(Object.keys(allowed).sort());
+	});
+});
+
+describe("a public repository", () => {
+	test("no file names a tailnet: the owner's real one is written example.ts.net", () => {
+		// The repository has been public since 2026-10-13 (the owner); commits before that day still carry the
+		// real name, and the history was not rewritten.
+		expect(foreignTailnetNames("https://mainworthy.example.ts.net and example.ts.net")).toEqual([]);
+		// Built in two parts: this file is read by the check it runs.
+		const foreign = `casebook.tail1a2b3.${"ts"}.net`;
+		expect(foreignTailnetNames(`curl https://${foreign}/healthz`)).toEqual([foreign]);
+		const found = wholeTree().flatMap((file) =>
+			foreignTailnetNames(readFileSync(file, "utf8")).map((name) => `${file}: ${name}`),
+		);
+		expect(found).toEqual([]);
 	});
 });

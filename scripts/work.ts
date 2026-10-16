@@ -7,6 +7,8 @@
 //   bun scripts/work.ts board start|todo|done <n>     moves an issue's or a pull request's card on the board
 //   bun scripts/work.ts board check                   says which of the board's ids in the code no longer fit
 //   bun scripts/work.ts pr-body <n>                   checks a pull request's description and milestone
+//   bun scripts/work.ts sync-branch                   after the owner merged: moves the branch onto origin/main, if nothing on it is unmerged
+//   bun scripts/work.ts release                       gives back the worktree's disk (node_modules and the rest); refuses while it is in use
 //   bun scripts/work.ts check-time <base> <head> [--rounds=2] [--no-install] [-- <command...>]
 //                                                     times the check on both, alternately, and judges the spread
 import { realpathSync } from "node:fs";
@@ -15,7 +17,9 @@ import { check as checkBoard, isMove, move } from "./work/board.ts";
 import { compare } from "./work/check-time.ts";
 import { stopServers, waitForTests } from "./work/processes.ts";
 import { gather, problems } from "./work/pull-request.ts";
+import { release } from "./work/release.ts";
 import { make, remove } from "./work/scratch.ts";
+import { syncBranch } from "./work/sync-branch.ts";
 
 const ROOT = realpathSync(join(import.meta.dir, ".."));
 const USAGE = `usage: bun scripts/work.ts <command>
@@ -24,6 +28,8 @@ const USAGE = `usage: bun scripts/work.ts <command>
   wait-tests [--timeout=<seconds>]
   board start|todo|done <issue or pull request number> | board check
   pr-body <pull request number>
+  sync-branch
+  release
   check-time <base> <head> [--rounds=2] [--no-install] [-- <command...>]`;
 
 const fail = (message: string, code = 1): never => {
@@ -82,6 +88,12 @@ async function main(args: string[]): Promise<void> {
 			console.log(`pull request #${number}: closing words, linked issues and milestone agree`);
 			return;
 		}
+		case "sync-branch":
+			console.log(await syncBranch(ROOT));
+			return;
+		case "release":
+			console.log(await release(ROOT));
+			return;
 		case "check-time": {
 			const split = rest.indexOf("--");
 			const own = split < 0 ? rest : rest.slice(0, split);

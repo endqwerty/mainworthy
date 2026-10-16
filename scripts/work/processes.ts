@@ -1,7 +1,7 @@
 // The processes an agent starts and waits for. `pkill -f` and `pgrep -f` match a process's whole command line,
 // and the shell that runs them has the pattern in its own; they also match another agent's. These read the process
 // table, leave the caller and its parents out, and stop only a server that runs from this checkout.
-import { readlinkSync } from "node:fs";
+import { existsSync, readdirSync, readlinkSync } from "node:fs";
 import { basename } from "node:path";
 import { read, run, sleep } from "./run.ts";
 
@@ -45,19 +45,23 @@ export const outsideLineage = (procs: readonly Proc[], self: number): Proc[] => 
 	return procs.filter((proc) => !own.has(proc.pid));
 };
 
-/** The directory a process runs in, or null when it is gone or cannot be read. */
-export async function directoryOf(pid: number): Promise<string | null> {
-	try {
-		return readlinkSync(`/proc/${pid}/cwd`);
-	} catch {
-		const done = await run(["lsof", "-a", "-p", String(pid), "-d", "cwd", "-Fn"]);
-		return (
-			done.out
-				.split("\n")
-				.find((line) => line.startsWith("n"))
-				?.slice(1) ?? null
-		);
+/** The directory each process runs in, by pid, for the processes this user may look at. */
+export async function directories(): Promise<Map<number, string>> {
+	const found = new Map<number, string>();
+	if (existsSync("/proc/self/cwd")) {
+		for (const name of readdirSync("/proc").filter((entry) => /^\d+$/.test(entry))) {
+			try {
+				found.set(Number(name), readlinkSync(`/proc/${name}/cwd`));
+			} catch {}
+		}
+		return found;
 	}
+	let pid = 0;
+	for (const line of (await run(["lsof", "-a", "-d", "cwd", "-Fpn"])).out.split("\n")) {
+		if (line.startsWith("p")) pid = Number(line.slice(1));
+		else if (line.startsWith("n") && pid > 0) found.set(pid, line.slice(1));
+	}
+	return found;
 }
 
 export const within = (directory: string, root: string): boolean =>
@@ -65,12 +69,10 @@ export const within = (directory: string, root: string): boolean =>
 
 /** Stops the servers that run from `root`; returns the pids it signalled. */
 export async function stopServers(root: string, self = process.pid): Promise<number[]> {
-	const candidates = outsideLineage(await processTable(), self).filter((proc) => isServer(proc.command));
-	const mine: number[] = [];
-	for (const proc of candidates) {
-		const directory = await directoryOf(proc.pid);
-		if (directory !== null && within(directory, root)) mine.push(proc.pid);
-	}
+	const where = await directories();
+	const mine = outsideLineage(await processTable(), self)
+		.filter((proc) => isServer(proc.command) && within(where.get(proc.pid) ?? "", root))
+		.map((proc) => proc.pid);
 	for (const pid of mine) process.kill(pid, "SIGTERM");
 	return mine;
 }
@@ -91,3 +93,15 @@ export async function waitForTests(
 		await sleep(pollMs);
 	}
 }
+
+/** The servers and test workers that run from `root`, other than the caller's own lineage. */
+export async function runningIn(root: string, self = process.pid): Promise<Proc[]> {
+	const where = await directories();
+	return outsideLineage(await processTable(), self).filter(
+		(proc) => (isServer(proc.command) || isTestWorker(proc.command)) && within(where.get(proc.pid) ?? "", root),
+	);
+}
+
+/** Whether a test run other than the caller's has workers. */
+export const otherTestRuns = async (self = process.pid): Promise<boolean> =>
+	outsideLineage(await processTable(), self).some((proc) => isTestWorker(proc.command));

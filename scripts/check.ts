@@ -166,6 +166,9 @@ async function tests(capture: boolean): Promise<TestPart[]> {
 
 // What else the machine is doing, before anything of this run starts.
 const busyBefore = whole ? await busyCores(250) : 0;
+// A test run beside this one makes both slower and some tests fail for reasons outside the code.
+if (whole && (await (await import("./work/processes.ts")).otherTestRuns()))
+	console.log("NOTE: another test run is going on this machine. Wait for it with `bun scripts/work.ts wait-tests`.\n");
 const started = performance.now();
 const [testParts, ...staticParts] = await Promise.all([
 	tests(!testsOnly),
@@ -235,7 +238,7 @@ if (failedPhases.length > 0) {
 	console.log(`\n${failureLines(reports).join("\n")}`);
 }
 if (whole && over(testSeconds, LIMITS) !== "ok") {
-	const where = `scripts/check-plan.ts; AGENTS.md: "the check's wall time is a budget"`;
+	const where = `scripts/check-plan.ts; AGENTS.md: "Budgets are tests"`;
 	const took = `the tests took ${seconds(testSeconds)}; the budget is ${LIMITS.warn} s and the limit ${LIMITS.fail} s`;
 	// The limits are for a machine that is this run's alone. This run has ended: what is busy now is other work.
 	const busy = Math.max(busyBefore, await busyCores(1000));
