@@ -332,6 +332,14 @@ classes, Opus on Claude verifiers and reviewers, Astra or Fable for `hard` and
 `lead`. It is not `max`; the owner names that for a single thread or task. A model
 the owner names in a thread still wins.
 
+Deep routes only Codex and Claude: Gemini (Antigravity) left homelab's routing on
+2026-10-15, so it is never a fallback here. Deep's Claude judges run Opus, so with
+the Opus window spent and Codex as the author, `homelab route plan --profile deep
+--role verifier --author codex` names no one. Then take the verifier from
+`--profile balanced` (Claude Sonnet at high) and say in the PR that it ran at
+balanced. If no provider other than the author can verify, report the work as not
+independently verified.
+
 ## Delivery
 
 Delivery: **review-first**. The owner merges; you do not.
