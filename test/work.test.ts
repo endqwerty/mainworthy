@@ -396,8 +396,8 @@ test("sync-branch keeps a merge commit's conflict resolution that main does not 
 	await git(clone, "push", "-q", "origin", "elsewhere:main");
 	await git(clone, "checkout", "-q", "t3/thread");
 	await git(clone, "fetch", "-q", "origin");
-	// Every ordinary commit of the thread is on main, so `git cherry` says nothing; its merge commit is not.
-	expect(await git(clone, "cherry", "origin/main", "HEAD")).toBe("");
+	// Every ordinary commit of the thread is on main; its merge commit is not. (Some versions of git cherry say
+	// nothing of a merge commit, and the one on the CI runner lists it: the answer must not depend on that.)
 	const mine = await git(clone, "rev-parse", "HEAD");
 	await expect(syncBranch(clone, false)).rejects.toThrow("merge commit(s) that origin/main does not hold");
 	expect(await git(clone, "rev-parse", "HEAD")).toBe(mine);
