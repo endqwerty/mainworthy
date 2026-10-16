@@ -535,13 +535,13 @@ check(
 			const { page } = h;
 			page.setDefaultTimeout(5000);
 			await page.setViewportSize({ width: 1280, height: 800 });
-			const card = page.locator(`[data-proposal="${proposed.question}"][data-proposal-read="ready"]`);
-			await card.waitFor();
+			const edits = page.locator(`[data-proposal-evidence="${proposed.question}"][data-proposal-read="ready"]`);
+			await edits.waitFor();
 			await page.keyboard.down("a");
-			const position = await card.locator(".diff").evaluate((e) => e.scrollTop);
+			const position = await edits.evaluate((e) => e.scrollTop);
 			for (let i = 0; i < 20; i++) await page.keyboard.down("a");
 			await page.keyboard.up("a");
-			expect(await card.locator(".diff").evaluate((e) => e.scrollTop)).toBe(position);
+			expect(await edits.evaluate((e) => e.scrollTop)).toBe(position);
 			expect((await server.api("get", { refs: [proposed.question] }))[0]?.state).toBe("open");
 			await page.keyboard.press("e");
 			const title = page.getByRole("textbox", { name: "Case title", exact: true });

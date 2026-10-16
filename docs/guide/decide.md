@@ -207,6 +207,15 @@ An adoption question asks whether a proposed edit becomes current.
 Read the proposed changes beside the existing case.
 While a proposal waits, each edit is shown applied to the case as it is now, so a change made after the edit was proposed shows too.
 An edit that would be refused on its own is shown as it was proposed, and so is every edit of a decided proposal.
+A restore shows the case as it is beside the version it brings back, preconditions and fields included.
+When a case it changes moves while the proposal is open, the page reads it again, and starts its edits from the top.
+It takes no answer until it has read them.
+A page shows at most 200 edits of one proposal, so a proposal with more cannot be answered in the web app.
+A policy edit lists each setting and clause it changes, and the order of the clauses when that changes, since the first clause that matches wins.
+It also says when the policy has changed since, which makes accepting refuse it.
+A move or reorder names the case it is asked to follow, or says it goes to the end of the folder.
+Accepting applies the edits in order. A case asked to follow another lands right after it when that case is in the same folder by then, and at the end of the folder otherwise.
+A case asked to follow itself goes to the end. Cases moved together follow one another in the order given, in each folder they end up in, and with the case they follow among them they take the place where it stood.
 "Accept" makes the proposal current. "Reject" leaves the case as it is and keeps
 the proposal in history. These choices do not by themselves excuse a test failure.
 

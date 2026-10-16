@@ -228,7 +228,7 @@ export const Proposal = struct("Proposal", "`get` with a P- ref: a proposed edit
 				maybe(CaseBody),
 				"For create, edit and restore: the case as it would be. For an edit while the proposal waits: the edit applied to the case as it is now, unless `refused`; then, and once decided, as it was proposed.",
 			],
-			current: [maybe(CaseBody), "For edit: the case as it is now."],
+			current: [maybe(CaseBody), "For edit and restore: the case as it is now."],
 			folder: [maybe(text), "For create: the path of the folder the case goes into."],
 			tags: [maybe(anything), "For create: the case's tags, a list of words. Another edit writes it otherwise."],
 			covers: [maybe(list(text)), "For create: the requirements the case covers."],

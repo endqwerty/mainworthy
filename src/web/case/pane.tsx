@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { printCase } from "../../core/markdown.ts";
-import { applyMergeChoice, mergeBodies } from "../../core/merge3.ts";
-import { Automate, CaseBody, type ExpandedStep, METHOD_LABELS } from "../../core/model.ts";
+import { applyMergeChoice } from "../../core/merge3.ts";
+import { Automate, type CaseBody, type ExpandedStep, METHOD_LABELS } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
@@ -11,6 +11,7 @@ import type { DraftCopy } from "../lib/draft-copies.ts";
 import type { Draft, DraftConflict } from "../lib/drafts.ts";
 import { proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
+import { ProposalEdits } from "../queue/evidence.tsx";
 import { bodyOf, CaseView, editDraft } from "../suite/model.ts";
 import { ResultAttachments } from "../ui/attachments.tsx";
 import { useApp } from "../ui/context.tsx";
@@ -177,17 +178,17 @@ export function CasePane({
 	useCaseBindings({
 		enabled: !overlayOpen && ref !== null,
 		diff: () => openDiff(draft?.base ?? view?.version ?? 1),
-		accept: () => answerByKey("accept"),
-		reject: () => answerByKey("reject"),
+		accept: () => answerShown("accept", "key"),
+		reject: () => answerShown("reject", "key"),
 	});
 	/**
-	 * A key answers only what is on the screen (decision 0011: nothing a key acts on is clipped). A proposal is
-	 * never taller than the pane: its diff scrolls inside it, between its heading and its answer buttons. A press
-	 * first brings the whole proposal into view, then pages through a long diff, and answers only once the end
-	 * of the diff is showing. Each press that does not answer says what it did.
+	 * A key or a button answers only what is on the screen (decision 0011: nothing a key acts on is clipped), since
+	 * accepting a proposal accepts every edit in it, other cases' too. A proposal is never taller than the pane: its
+	 * edits scroll inside it, between its heading and its answer buttons. A press first brings the whole proposal
+	 * into view, then pages through long edits, and answers only once the end of the last one is showing. Each
+	 * press that does not answer says what it did.
 	 */
-	function answerByKey(answer: "accept" | "reject"): void {
-		const question = proposals[0];
+	function answerShown(answer: "accept" | "reject", via: "key" | "button", question = proposals[0]): void {
 		if (!question) return;
 		const message = proposalReadMessage(question.q);
 		if (message) {
@@ -195,14 +196,17 @@ export function CasePane({
 			setStatus(message);
 			return;
 		}
-		const key = answer === "accept" ? "a" : "r";
+		const again =
+			via === "key"
+				? `press ${answer === "accept" ? "a" : "r"} again`
+				: `choose ${answer === "accept" ? "Accept" : "Reject"} again`;
 		if (!proposalInView(question.q)) {
 			revealProposal(question.q);
-			setStatus(`${question.q} is now in view. Read it, then press ${key} again.`);
+			setStatus(`${question.q} is now in view. Read it, then ${again}.`);
 			return;
 		}
 		if (pageProposal(question.q)) {
-			setStatus(`${question.q} has more below: the next part is now in view. Press ${key} again.`);
+			setStatus(`${question.q} has more below: the next part is now in view. Read it, then ${again}.`);
 			return;
 		}
 		void answerProposal(answer, question);
@@ -392,10 +396,7 @@ export function CasePane({
 							<ProposalCard
 								key={question.q}
 								question={question}
-								current={view ? bodyOf(view) : body}
-								answer={(answer) => {
-									void answerProposal(answer, question);
-								}}
+								answer={(answer) => answerShown(answer, "button", question)}
 							/>
 						))}
 						{diffVersion && ref && <VersionDiff refName={ref} to={diffVersion} close={() => setDiffVersion(null)} />}{" "}
@@ -602,62 +603,10 @@ function VersionDiff({ refName, to, close }: { refName: string; to: number; clos
 		</div>
 	);
 }
-function ProposalCard({
-	question,
-	current,
-	answer,
-}: {
-	question: QuestionItem;
-	current: CaseBody;
-	answer: (is: "accept" | "reject") => void;
-}) {
-	const { project } = useApp();
-	const proposal = typeof question.evidence.proposal === "string" ? question.evidence.proposal : "P-0";
-	const data = useQueryOp({ project, op: "get", input: { refs: [proposal] }, enabled: proposal !== "P-0" });
-	const row = data.data?.find((item) => item.ref === proposal);
-	const edits = row && Array.isArray(row.edits) ? row.edits : [];
-	const body = edits
-		.map((edit: unknown) =>
-			z
-				.object({
-					body: CaseBody,
-					mine: CaseBody.optional(),
-					case: z.string().nullable().optional(),
-					base: z.number().optional(),
-				})
-				.safeParse(edit),
-		)
-		.find((edit) => edit.success);
-	const edit = body?.success ? body.data : null;
-	const baseQuery = useQueryOp({
-		project,
-		op: "get",
-		input: { refs: [edit?.case ?? "C-0"], ...(edit?.base ? { version: edit.base } : {}) },
-		enabled: Boolean(edit?.case && edit.base),
-	});
-	const base = CaseView.safeParse(baseQuery.data?.[0]);
-	const needsBase = Boolean(edit?.case && edit.base);
-	const ready = Boolean(
-		edit && (!needsBase || (base.success && base.data.ref === edit.case && base.data.version === edit.base)),
-	);
-	const error =
-		data.error?.message ??
-		baseQuery.error?.message ??
-		(data.data && !edit ? "The proposal edits could not be read." : null);
-	const proposed =
-		ready && edit
-			? base.success
-				? mergeBodies({ base: bodyOf(base.data), mine: edit.mine ?? edit.body, theirs: current }).merged
-				: (edit.mine ?? edit.body)
-			: null;
-
+/** A proposal in a case's timeline. It may change other cases too, and accepting it accepts all of it: it shows all. */
+function ProposalCard({ question, answer }: { question: QuestionItem; answer: (is: "accept" | "reject") => void }) {
 	return (
-		<div
-			className={`ev ${question.producer === "agent" ? "prop" : ""}`}
-			data-proposal={question.q}
-			data-proposal-read={ready ? "ready" : error ? "error" : "loading"}
-			data-proposal-error={error ?? undefined}
-		>
+		<div className={`ev ${question.producer === "agent" ? "prop" : ""}`} data-proposal={question.q}>
 			<ProducerGlyph kind={question.producer} />
 			<div>
 				<b className={question.producer === "agent" ? "agentv" : ""}>
@@ -665,10 +614,10 @@ function ProposalCard({
 					{question.producer === "agent" ? " · agent" : ""}
 				</b>
 				<p className="why">
-					Proposed, waiting for a person. {typeof row?.reason === "string" ? row.reason : question.title}
+					Proposed, waiting for a person.{" "}
+					{typeof question.evidence.reason === "string" ? question.evidence.reason : question.title}
 				</p>
-				{!ready && <p role="status">{error ?? "Reading the proposed edits…"}</p>}
-				{proposed && <DiffView before={current} after={proposed} />}
+				<ProposalEdits question={question} />
 				<div className="pbtn">
 					<button type="button" className="out" onClick={() => answer("accept")}>
 						<KeyCap>a</KeyCap> Accept
@@ -708,11 +657,11 @@ function revealProposal(q: string): void {
 		pane.scrollTop += Math.min(box.bottom - frame.bottom + 8, box.top - frame.top - 8);
 }
 
-/** Shows the next part of a proposal's diff when it has more below. False when its end is already showing. */
+/** Shows the next part of a proposal's edits when it has more below. False when its end is already showing. */
 function pageProposal(q: string): boolean {
-	const diff = proposalCard(q)?.querySelector<HTMLElement>(".diff");
-	if (!diff || diff.scrollTop + diff.clientHeight >= diff.scrollHeight - 2) return false;
-	diff.scrollTop += Math.max(40, diff.clientHeight - 32);
+	const edits = proposalCard(q)?.querySelector<HTMLElement>(".proposal-edits");
+	if (!edits || edits.scrollTop + edits.clientHeight >= edits.scrollHeight - 2) return false;
+	edits.scrollTop += Math.max(40, edits.clientHeight - 32);
 	return true;
 }
 

@@ -208,8 +208,11 @@ Under `loose`, ordinary case proposals take effect at once.
 Under `standard`, an agent's edit waits for a person. A person's ordinary edit still takes effect at once.
 Under `strict`, ordinary edits wait for a person with a reason, including edits by people.
 
-The case timeline shows the proposal and its diff. An authorized person can use
+The case timeline shows the proposal with every edit in it, the edits of other cases included,
+since accepting it accepts all of them. An authorized person can use
 <kbd>a</kbd> to accept it or <kbd>r</kbd> to reject it.
+A key, or the Accept or Reject button, first brings the proposal into view and pages through its edits.
+It answers only once the last edit is showing.
 Conflicts and policy changes have separate rules. See [policy](./policy.md).
 
 ## Write cases from the command line

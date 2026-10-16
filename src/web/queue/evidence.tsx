@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { SameCodeEvidence } from "../../core/flaky.ts";
 import { newStepId } from "../../core/ids.ts";
+import { Policy } from "../../core/kinds.ts";
 import { CaseBody, emptyBody } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
 import { QuarantineEdit } from "../../core/ops.ts";
 import { parseOutline } from "../../core/outline.ts";
 import { useQueryOp } from "../lib/data.ts";
+import { policyChanges } from "../lib/policy-changes.ts";
 import { proposalReadMessage } from "../lib/proposals.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
@@ -51,7 +53,14 @@ export const FindingEvidence = z.object({
 const AdoptEvidence = z.object({ proposal: z.string(), author: z.string(), reason: z.string().nullable() });
 const ProposalEdit = z.discriminatedUnion("op", [
 	QuarantineEdit,
-	z.object({ op: z.literal("create"), body: CaseBody, folder: z.string(), tags: z.array(z.string()) }),
+	z.object({
+		op: z.literal("create"),
+		body: CaseBody,
+		folder: z.string(),
+		tags: z.array(z.string()),
+		covers: z.array(z.string()),
+		after: z.string().nullable(),
+	}),
 	z.object({
 		op: z.literal("edit"),
 		case: z.string().nullable(),
@@ -63,22 +72,42 @@ const ProposalEdit = z.discriminatedUnion("op", [
 		conflicts: z.array(z.object({ path: z.string() }).passthrough()),
 		refused: z.string().nullable(),
 	}),
-	z.object({ op: z.literal("restore"), case: z.string().nullable(), to: z.number(), body: CaseBody }),
-	z.object({ op: z.literal("policy"), preset: z.string(), clauses: z.number() }),
+	z.object({
+		op: z.literal("restore"),
+		case: z.string().nullable(),
+		to: z.number(),
+		body: CaseBody,
+		current: CaseBody.nullable(),
+	}),
+	z.object({
+		op: z.literal("policy"),
+		preset: z.string(),
+		clauses: z.number(),
+		policy: Policy,
+		inForce: Policy,
+		stale: z.boolean(),
+	}),
 	z.object({
 		op: z.literal("place"),
 		cases: z.array(z.string().nullable()),
 		folder: z.string().nullable(),
 		tags: z
 			.object({
-				set: z.array(z.string()).optional(),
+				set: z.array(z.string()).nullish(),
 				add: z.array(z.string()).optional(),
 				remove: z.array(z.string()).optional(),
 			})
 			.nullable(),
+		after: z.string().optional(),
 	}),
 	z.object({ op: z.literal("state"), cases: z.array(z.string().nullable()), to: z.string() }),
-	z.object({ op: z.literal("folder"), name: z.string().optional(), archive: z.boolean().optional() }),
+	z.object({
+		op: z.literal("folder"),
+		folder: z.string().nullable(),
+		name: z.string().nullable(),
+		parent: z.string().optional(),
+		archive: z.boolean(),
+	}),
 	z.object({ op: z.literal("cover"), case: z.string().nullable(), requirement: z.string(), on: z.boolean() }),
 ]);
 const Proposal = z.object({
@@ -86,8 +115,25 @@ const Proposal = z.object({
 	author: z.string(),
 	kind: z.string(),
 	reason: z.string().nullable(),
+	count: z.number(),
 	edits: z.array(ProposalEdit),
 });
+
+/** What a place edit does to its cases' tags: `set` (or their tags with `add`), less `remove`. */
+function tagChange(tags: {
+	set?: string[] | null | undefined;
+	add?: string[] | undefined;
+	remove?: string[] | undefined;
+}): string {
+	const remove = tags.remove ?? [];
+	if (tags.set) return `tags become ${tags.set.filter((tag) => !remove.includes(tag)).join(", ") || "none"}`;
+	return [
+		tags.add?.length ? `adds tags ${tags.add.join(", ")}` : "",
+		remove.length ? `removes tags ${remove.join(", ")}` : "",
+	]
+		.filter(Boolean)
+		.join(", ");
+}
 const Document = CaseBody.extend({
 	fields: z.record(z.string(), z.string()).default({}),
 	ref: z.string(),
@@ -112,6 +158,25 @@ export function RefLink({ refValue }: { refValue: string }) {
 }
 
 function ProposalEvidence({ question }: { question: QuestionItem }) {
+	const parsed = AdoptEvidence.safeParse(question.evidence);
+	return (
+		<div className={question.producer === "agent" ? "prop" : "ev"}>
+			{parsed.success && (
+				<p>
+					<ProducerGlyph kind={question.producer} /> {parsed.data.author} proposes {parsed.data.proposal}
+					{parsed.data.reason && `: ${parsed.data.reason}`}
+				</p>
+			)}
+			<ProposalEdits question={question} />
+		</div>
+	);
+}
+
+/**
+ * Every edit of a proposal, wherever it is answered (the Queue, a case's timeline). It is marked read only once all
+ * of them are on the page, and `proposalReadMessage` refuses an answer until then.
+ */
+export function ProposalEdits({ question }: { question: QuestionItem }) {
 	const { project } = useApp();
 	const parsed = AdoptEvidence.safeParse(question.evidence);
 	const read = useQueryOp({
@@ -121,22 +186,26 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 		enabled: parsed.success,
 	});
 	const proposal = Proposal.safeParse(read.data?.find((row) => parsed.success && row.ref === parsed.data.proposal));
+	const short = proposal.success && proposal.data.edits.length < proposal.data.count ? proposal.data : null;
 	const error = !parsed.success
 		? "The proposal evidence could not be read."
-		: (read.error?.message ?? (read.data && !proposal.success ? "The proposal edits could not be read." : null));
+		: (read.error?.message ??
+			(read.data && !proposal.success
+				? "The proposal edits could not be read."
+				: short
+					? `This proposal has ${short.count} edits, and a page shows the first ${short.edits.length}. Accepting applies all of them, so it cannot be answered here.`
+					: null));
+	// While it is read again, what it shows may no longer be what accepting writes: a case it changes has moved.
+	const ready = proposal.success && !error && !read.isFetching;
 	return (
 		<div
-			className={question.producer === "agent" ? "prop" : "ev"}
+			className="proposal-edits"
+			// Edits that change while open start again from the top, so what changed is read before an answer.
+			key={proposal.success ? JSON.stringify(proposal.data.edits) : "unread"}
 			data-proposal-evidence={question.q}
-			data-proposal-read={proposal.success ? "ready" : error ? "error" : "loading"}
+			data-proposal-read={ready ? "ready" : error ? "error" : "loading"}
 			data-proposal-error={error ?? undefined}
 		>
-			{parsed.success && (
-				<p>
-					<ProducerGlyph kind={question.producer} /> {parsed.data.author} proposes {parsed.data.proposal}
-					{parsed.data.reason && `: ${parsed.data.reason}`}
-				</p>
-			)}
 			{error && <p role="status">{error}</p>}
 			{proposal.success
 				? proposal.data.edits.map((edit) => {
@@ -168,7 +237,12 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 							case "create":
 								return (
 									<div key={editKey}>
-										<p>New case in {edit.folder || "the root"}</p>
+										<p>
+											New case in {edit.folder || "the root"}
+											{edit.after && ` · asked to follow ${edit.after}`}
+											{edit.tags.length > 0 && ` · tags ${edit.tags.join(", ")}`}
+											{edit.covers.length > 0 && ` · covers ${edit.covers.join(", ")}`}
+										</p>
 										<DiffView before={emptyBody()} after={edit.body} />
 									</div>
 								);
@@ -178,13 +252,7 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 										<p>
 											Restore {edit.case} from version {edit.to} as a new version.
 										</p>
-										<h3>{edit.body.title}</h3>
-										{edit.body.steps.map((step) => (
-											<p key={step.id}>
-												{step.action}
-												{step.expected && ` > ${step.expected}`}
-											</p>
-										))}
+										<DiffView before={edit.current ?? emptyBody()} after={edit.body} />
 									</div>
 								);
 							case "quarantine":
@@ -195,20 +263,39 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 										A person must decide with a reason.
 									</p>
 								);
-							case "policy":
+							case "policy": {
+								const changes = policyChanges(edit.inForce, edit.policy);
 								return (
-									<p key={editKey}>
-										Use {edit.preset}, with {edit.clauses} policy clauses. The proposal and accepting decision are both
-										recorded.
-									</p>
+									<div key={editKey}>
+										<p>
+											Use {edit.preset}, with {edit.clauses} policy clauses. The proposal and accepting decision are
+											both recorded.
+										</p>
+										{edit.stale && (
+											<p className="queue-warning">
+												The policy changed after this proposal was made, so accepting refuses it.
+											</p>
+										)}
+										{changes.length ? (
+											<ul>
+												{changes.map((line) => (
+													<li key={line}>{line}</li>
+												))}
+											</ul>
+										) : (
+											<p>The policy stays as it is.</p>
+										)}
+									</div>
 								);
+							}
 							case "place":
 								return (
 									<p key={editKey}>
 										{edit.cases.join(", ")}
 										{edit.folder !== null && ` moves to ${edit.folder || "the root"}`}
-										{edit.tags &&
-											` · tags: ${[...(edit.tags.set ?? []), ...(edit.tags.add ?? [])].join(", ") || "removed"}`}
+										{edit.after !== undefined &&
+											(edit.after ? ` · asked to follow ${edit.after}` : " · placed at the end of its folder")}
+										{edit.tags && ` · ${tagChange(edit.tags)}`}
 									</p>
 								);
 							case "state":
@@ -220,8 +307,11 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 							case "folder":
 								return (
 									<p key={editKey}>
-										Folder {edit.name ?? "change"}
-										{edit.archive ? " is archived" : " is updated"}.
+										{edit.folder === null ? `New folder ${edit.name ?? ""}` : `Folder ${edit.folder}`}
+										{edit.folder !== null && edit.name !== null && ` is renamed ${edit.name}`}
+										{edit.parent !== undefined &&
+											` ${edit.folder === null ? "in" : "moves to"} ${edit.parent || "the root"}`}
+										{edit.folder !== null && edit.archive && " is archived"}.
 									</p>
 								);
 							case "cover":

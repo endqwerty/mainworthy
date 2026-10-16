@@ -421,7 +421,15 @@ async function recordedDecisions(server: Server, ref: string) {
 				edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Person's newer title" } }],
 			});
 			await view.page.keyboard.press("a");
-			await view.page.locator(".queue-last").getByText("The evidence changed.", { exact: false }).waitFor();
+			// The answer is refused either way. The page refuses it itself while it reads the proposal again after the
+			// change, or it sends it and the server refuses the old evidence: which depends on whether the change's event
+			// arrived before the key.
+			await view.page
+				.locator(".queue-last")
+				.getByText("The evidence changed.", { exact: false })
+				.or(view.page.getByText("Still reading the proposal.", { exact: false }))
+				.first()
+				.waitFor();
 			await view.page.locator(`[data-question="${proposed.question}"]`).waitFor();
 			await view.page
 				.locator(".queue-evidence .prop")

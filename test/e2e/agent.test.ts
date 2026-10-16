@@ -215,11 +215,11 @@ import { z } from "zod";
 					card.evaluate((element) => {
 						const box = element.getBoundingClientRect();
 						const frame = element.closest(".pane-scroll")?.getBoundingClientRect();
-						const diff = element.querySelector(".diff");
+						const edits = element.querySelector(".proposal-edits");
 						return {
 							whole: frame !== undefined && box.top >= frame.top - 1 && box.bottom <= frame.bottom + 1,
 							fits: frame !== undefined && box.height <= frame.height,
-							atEnd: diff !== null && diff.scrollTop + diff.clientHeight >= diff.scrollHeight - 2,
+							atEnd: edits !== null && edits.scrollTop + edits.clientHeight >= edits.scrollHeight - 2,
 						};
 					});
 				const open = async () => (await server.api("inbox", { kind: "adopt" })).items.map((q) => q.q);
@@ -256,4 +256,339 @@ import { z } from "zod";
 		}
 	},
 	60000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"a case's proposal card shows every edit of the proposal, the other cases' too, before a click accepts it",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", {
+				edits: [
+					{ op: "create", outline: "First case\n  Open > Shown" },
+					{ op: "create", outline: "Second case\n  Open > Shown", tags: ["keep", "old"] },
+				],
+			});
+			const writer = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "writer",
+					kind: "agent",
+					can: ["read", "produce"],
+					project: "scratch",
+				}),
+			).token;
+			const proposed = await server.api(
+				"propose",
+				{
+					edits: [
+						{
+							op: "edit",
+							case: "C-1",
+							base: 1,
+							body: {
+								title: "Sign in with a passkey",
+								steps: Array.from({ length: 35 }, (_, i) => ({
+									id: `n${i}`,
+									action: `Rewritten step ${i + 1}`,
+									expected: `Rewritten result ${i + 1}`,
+								})),
+							},
+						},
+						{ op: "edit", case: "C-2", base: 1, body: { title: "Pay by voucher" } },
+						{ op: "state", cases: ["C-1"], to: "archived" },
+						{ op: "place", cases: ["C-2"], tags: { remove: ["old"] } },
+						{ op: "create", outline: "Refund by voucher", tags: ["refunds"], covers: ["WEB-900"] },
+						{ op: "place", cases: ["C-1"], after: "C-2" },
+						{ op: "folder", name: "Later", archive: true },
+						{ op: "policy", unlinked: "create" },
+					],
+				},
+				{ token: writer },
+			);
+			expect(proposed.status).toBe("open");
+			// The second case's page: before, its card showed the first edit's body, which is the first case's.
+			view = await openPage(server, { path: "/p/scratch/suite/c/2" });
+			const page = view.page;
+			await page.setViewportSize({ width: 1280, height: 800 });
+			page.setDefaultTimeout(5000);
+			const card = page.locator(`[data-proposal="${proposed.question}"]`);
+			await card.waitFor();
+			// What the card says the proposal leaves: its text without the words a diff strikes out.
+			const proposedText = () =>
+				card.evaluate((element) => {
+					const copy = element.cloneNode(true) as HTMLElement;
+					for (const struck of copy.querySelectorAll("del")) struck.remove();
+					return copy.textContent ?? "";
+				});
+			const shown = [
+				"Sign in with a passkey",
+				"Pay by voucher",
+				"C-1 becomes archived",
+				"C-2 · removes tags old",
+				"tags refunds · covers WEB-900",
+				"Refund by voucher",
+				"C-1 · asked to follow C-2",
+				"New folder Later.",
+				"Setting unlinked: track becomes create",
+			];
+			const text = await eventually(proposedText, (value) => shown.every((part) => value.includes(part))).catch(
+				proposedText,
+			);
+			for (const part of shown) expect(text).toContain(part);
+			// A folder made by a proposal is made active, whatever the edit says of archiving.
+			expect(text).not.toContain("is archived");
+			const open = async () => (await server.api("inbox", { kind: "adopt" })).items.map((q) => q.q);
+			// The last edits are below the end of the card's scrolling edits. A click on Accept pages through them,
+			// as the key does, and accepts only once the last one is showing.
+			const atEnd = () =>
+				card
+					.locator(".proposal-edits")
+					.evaluate((edits) => edits.scrollTop + edits.clientHeight >= edits.scrollHeight - 2);
+			const accept = card.getByRole("button", { name: "Accept" });
+			let clicks = 0;
+			for (; clicks < 30 && !(await atEnd()); clicks++) {
+				await accept.click();
+				await page.waitForTimeout(60);
+				expect(await open()).toEqual([proposed.question ?? ""]);
+			}
+			expect(clicks).toBeGreaterThan(1);
+			await accept.click();
+			await eventually(open, (items) => items.length === 0);
+			const cases = await server.api("get", { refs: ["C-1", "C-2", "C-3"] });
+			expect(cases.map((row) => [row.title, row.state, row.tags, row.covers])).toEqual([
+				["Sign in with a passkey", "archived", [], []],
+				["Pay by voucher", "active", ["keep"], []],
+				["Refund by voucher", "active", ["refunds"], ["WEB-900"]],
+			]);
+			const policy = z
+				.object({ settings: z.object({ unlinked: z.string() }) })
+				.parse(await server.api("admin", { do: "policy.show", project: "scratch" }));
+			expect(policy.settings.unlinked).toBe("create");
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"a case's proposal card shows what accepting writes: all a restore brings back, and the case's newer version",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			await server.api("propose", { edits: [{ op: "create", outline: "Checkout\n  Open > Original result" }] });
+			await server.api("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 1, body: { pre: "Before precondition", fields: { risk: "low" } } }],
+			});
+			await server.api("propose", {
+				edits: [{ op: "edit", case: "C-1", base: 2, body: { pre: "Current precondition", fields: { risk: "high" } } }],
+			});
+			const writer = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "writer",
+					kind: "agent",
+					can: ["read", "produce"],
+					project: "scratch",
+				}),
+			).token;
+			const restore = await server.api(
+				"propose",
+				{ edits: [{ op: "restore", case: "C-1", to: 2 }] },
+				{ token: writer },
+			);
+			expect(restore.status).toBe("open");
+			view = await openPage(server, { path: "/p/scratch/suite/c/1" });
+			const page = view.page;
+			page.setDefaultTimeout(5000);
+			const proposedText = (q: string) => () =>
+				page.locator(`[data-proposal="${q}"]`).evaluate((element) => {
+					const copy = element.cloneNode(true) as HTMLElement;
+					for (const struck of copy.querySelectorAll("del")) struck.remove();
+					return copy.textContent ?? "";
+				});
+			// Before, a restore showed its title and steps: not the precondition or the field it brings back.
+			const restored = await eventually(proposedText(restore.question ?? ""), (text) =>
+				text.includes("Before precondition"),
+			).catch(proposedText(restore.question ?? ""));
+			expect(restored).toContain("Before precondition");
+			expect(restored).toContain("low");
+			expect(restored).not.toContain("Current precondition");
+			const question = (await server.api("inbox", { kind: "adopt" })).items[0];
+			if (!question) throw new Error("No restore question");
+			await server.api("decide", { q: question.q, onEvidence: question.evidenceHash, answer: { is: "reject" } });
+
+			const renamed = await server.api(
+				"propose",
+				{ edits: [{ op: "edit", case: "C-1", base: 3, body: { title: "Checkout with a voucher" } }] },
+				{ token: writer },
+			);
+			expect(renamed.status).toBe("open");
+			await page.locator(`[data-proposal-evidence="${renamed.question}"][data-proposal-read="ready"]`).waitFor();
+			// A person changes the case while the card is open. Accepting merges the title onto that version, and
+			// the card shows it so: before, it kept the version it first read.
+			const steps = z
+				.array(z.object({ id: z.string(), action: z.string(), expected: z.string().nullable() }))
+				.parse((await server.api("get", { refs: ["C-1"] }))[0]?.steps);
+			await server.api("propose", {
+				edits: [
+					{
+						op: "edit",
+						case: "C-1",
+						base: 3,
+						body: { steps: steps.map((step) => ({ ...step, expected: "New person result" })) },
+					},
+				],
+			});
+			const merged = await eventually(proposedText(renamed.question ?? ""), (text) =>
+				text.includes("New person result"),
+			).catch(proposedText(renamed.question ?? ""));
+			expect(merged).toContain("Checkout with a voucher");
+			expect(merged).toContain("New person result");
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
+);
+
+(browserAvailable ? test : test.skip)(
+	"a case's proposal card is not answered while it is short of edits, read again, or changed above where it was read",
+	async () => {
+		const server = await fixture();
+		let view: Awaited<ReturnType<typeof openPage>> | null = null;
+		try {
+			const steps = Array.from({ length: 40 }, (_, i) => `  Step ${i + 1} > Result ${i + 1}`);
+			await server.api("propose", { edits: [{ op: "create", outline: ["Checkout", ...steps].join("\n") }] });
+			const writer = z.object({ token: z.string() }).parse(
+				await server.api("admin", {
+					do: "token.create",
+					actor: "writer",
+					kind: "agent",
+					can: ["read", "produce"],
+					project: "scratch",
+				}),
+			).token;
+			const proposed = await server.api(
+				"propose",
+				{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Checkout with a voucher" } }] },
+				{ token: writer },
+			);
+			if (!proposed.question || !proposed.proposal) throw new Error("No proposal");
+			const q = proposed.question;
+			view = await openPage(server);
+			const page = view.page;
+			page.setDefaultTimeout(5000);
+			await page.setViewportSize({ width: 1280, height: 800 });
+			const decides: string[] = [];
+			page.on("request", (request) => {
+				if (request.url().endsWith("/decide")) decides.push(request.url());
+			});
+			// A reply that holds fewer edits than the proposal has (one holds 200 at most) is not answered.
+			await page.route("**/get", async (route) => {
+				const input = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
+				if (!input.refs.includes(proposed.proposal ?? "")) return route.continue();
+				const reply = await route.fetch();
+				const envelope = z.object({ result: z.array(z.record(z.string(), z.unknown())) }).parse(await reply.json());
+				const rows = envelope.result.map((row) => ({ ...row, count: Number(row.count) + 1 }));
+				await route.fulfill({ response: reply, json: { ...envelope, ok: true, result: rows } });
+			});
+			await page.goto(`${server.url}/p/scratch/suite/c/1`);
+			const edits = page.locator(`[data-proposal-evidence="${q}"]`);
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-read="error"]`).waitFor();
+			expect(await edits.getAttribute("data-proposal-error")).toBe(
+				"This proposal has 2 edits, and a page shows the first 1. Accepting applies all of them, so it cannot be answered here.",
+			);
+			const accept = page.locator(`[data-proposal="${q}"]`).getByRole("button", { name: "Accept" });
+			for (let i = 0; i < 3; i++) await accept.click();
+			expect(decides).toEqual([]);
+			await page.unroute("**/get");
+			await page.reload();
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-read="ready"]`).waitFor();
+
+			const atEnd = () =>
+				edits.evaluate((element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 2);
+			const pageToEnd = async () => {
+				for (let clicks = 0; clicks < 30 && !(await atEnd()); clicks++) {
+					await accept.click();
+					await page.waitForTimeout(60);
+				}
+				expect(await atEnd()).toBe(true);
+			};
+			const changeStep = async (index: number, expected: string) => {
+				const [row] = await server.api("get", { refs: ["C-1"] });
+				const body = z
+					.object({
+						version: z.number(),
+						steps: z.array(z.object({ id: z.string(), action: z.string(), expected: z.string().nullable() })),
+					})
+					.parse(row);
+				await server.api("propose", {
+					edits: [
+						{
+							op: "edit",
+							case: "C-1",
+							base: body.version,
+							body: { steps: body.steps.map((step, i) => (i === index ? { ...step, expected } : step)) },
+						},
+					],
+				});
+			};
+			// Read to its end, then a person changes the first step: the card starts again from the top.
+			await pageToEnd();
+			await changeStep(0, "Newly critical result");
+			await page.locator(`[data-proposal="${q}"]`).getByText("Newly critical result").waitFor();
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-read="ready"]`).waitFor();
+			expect(await edits.evaluate((element) => element.scrollTop)).toBe(0);
+			await accept.click();
+			expect(decides).toEqual([]);
+
+			// While the card is read again after a change, it is not answered.
+			await pageToEnd();
+			let held = () => {};
+			const hold = new Promise<void>((resolve) => {
+				held = resolve;
+			});
+			let reads = 0;
+			await page.route("**/get", async (route) => {
+				const input = z.object({ refs: z.array(z.string()) }).parse(route.request().postDataJSON());
+				if (input.refs.includes(proposed.proposal ?? "")) {
+					reads++;
+					await hold;
+				}
+				await route.continue();
+			});
+			await changeStep(39, "Last result, changed");
+			await eventually(
+				async () => reads,
+				(n) => n > 0,
+			);
+			await page.locator(`[data-proposal-evidence="${q}"][data-proposal-read="loading"]`).waitFor();
+			for (let i = 0; i < 3; i++) await accept.click();
+			expect(decides).toEqual([]);
+			held();
+			await page.locator(`[data-proposal="${q}"]`).getByText("Last result, changed").waitFor();
+			await pageToEnd();
+			await accept.click();
+			const [adopted] = await eventually(
+				() => server.api("get", { refs: ["C-1"] }),
+				(rows) => rows[0]?.title === "Checkout with a voucher",
+			);
+			const kept = z.array(z.object({ expected: z.string().nullable() })).parse(adopted?.steps);
+			expect([kept[0]?.expected, kept[39]?.expected]).toEqual(["Newly critical result", "Last result, changed"]);
+			expect(view.errors).toEqual([]);
+		} finally {
+			await view?.page.unroute("**/get").catch(() => {});
+			await view?.close();
+			await server.stop();
+		}
+	},
+	30000,
 );

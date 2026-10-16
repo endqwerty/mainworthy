@@ -687,6 +687,192 @@ describe("editing", () => {
 		expect(h.call<CaseView[]>("get", { refs: ["C-1"] })[0]).toMatchObject({ title: "Mine and theirs", version: 3 });
 	});
 
+	test("a proposal read after its case moved shows the body that accepting it writes", () => {
+		const s = harness({ preset: "standard" });
+		try {
+			s.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
+			const agent = s.actor("writer", "agent", ["read", "produce"]);
+			const proposed = s.call<Proposed>(
+				"propose",
+				{ edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Coupon: percentage" } }] },
+				agent,
+			);
+			expect(proposed.status).toBe("open");
+			s.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { pre: "Signed in as robin" } }] });
+			const [read] = s.call<{ edits: { head: number; body: { title: string; pre: string } }[] }[]>("get", {
+				refs: [proposed.proposal],
+			});
+			expect(read?.edits[0]).toMatchObject({
+				head: 2,
+				body: { title: "Coupon: percentage", pre: "Signed in as robin" },
+			});
+			const [question] = s.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
+			s.call("decide", { q: proposed.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
+			expect(s.call<CaseView[]>("get", { refs: ["C-1"] })[0]).toMatchObject({
+				version: 3,
+				title: "Coupon: percentage",
+				pre: "Signed in as robin",
+			});
+		} finally {
+			s.close();
+		}
+	});
+
+	test("a proposal read says how many edits it has when the reply holds only the first 200", () => {
+		const edits = Array.from({ length: 250 }, (_, i) => ({ op: "create", outline: `Case ${i}` }));
+		const s = harness({ preset: "standard" });
+		try {
+			const agent = s.actor("writer", "agent", ["read", "produce"]);
+			const proposed = s.call<Proposed>("propose", { edits }, agent);
+			const [read] = s.call<{ count: number; edits: unknown[] }[]>("get", { refs: [proposed.proposal] });
+			expect([read?.count, read?.edits.length]).toEqual([250, 200]);
+		} finally {
+			s.close();
+		}
+	});
+
+	test("a proposal read names the case a move asks to follow, and ranking places it by the guide's rule", () => {
+		const s = harness({ preset: "standard" });
+		try {
+			s.call("propose", {
+				edits: [
+					{ op: "create", outline: "One", folder: "A" },
+					{ op: "create", outline: "Two", folder: "A" },
+					{ op: "create", outline: "Three", folder: "B" },
+					{ op: "create", outline: "Four", folder: "B" },
+				],
+			});
+			const agent = s.actor("writer", "agent", ["read", "produce"]);
+			const proposed = s.call<Proposed>(
+				"propose",
+				{
+					edits: [
+						{ op: "place", cases: ["C-3"], folder: "A", after: "C-1" },
+						// C-3 is in A once the edit before it is applied, so C-4 lands after it.
+						{ op: "place", cases: ["C-4"], folder: "A", after: "C-3" },
+						// A case placed after itself goes to the end of its folder.
+						{ op: "place", cases: ["C-2"], after: "C-2" },
+						// An anchor in another folder puts the case at the end too.
+						{ op: "place", cases: ["C-1"], folder: "B", after: "C-2" },
+					],
+				},
+				agent,
+			);
+			expect(proposed.status).toBe("open");
+			const [read] = s.call<{ edits: { after?: string }[] }[]>("get", { refs: [proposed.proposal] });
+			expect(read?.edits.map((edit) => edit.after)).toEqual(["C-1", "C-3", "C-2", "C-2"]);
+			const [question] = s.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
+			s.call("decide", { q: proposed.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
+			const order = (folder: string) =>
+				s.call<{ items: { ref: string }[] }>("find", { in: "cases", folder }).items.map((item) => item.ref);
+			expect([order("A"), order("B")]).toEqual([["C-3", "C-4", "C-2"], ["C-1"]]);
+		} finally {
+			s.close();
+		}
+	});
+
+	test("a move after a folder edit, and a move with its anchor, land by the guide's rule", () => {
+		const s = harness({ preset: "standard" });
+		try {
+			s.call("propose", {
+				edits: [
+					{ op: "create", outline: "One", folder: "A" },
+					{ op: "create", outline: "Two", folder: "A" },
+					{ op: "create", outline: "Three", folder: "B" },
+					{ op: "create", outline: "Four", folder: "B" },
+					{ op: "create", outline: "Five", folder: "B" },
+				],
+			});
+			const agent = s.actor("writer", "agent", ["read", "produce"]);
+			const proposed = s.call<Proposed>(
+				"propose",
+				{
+					edits: [
+						// Once A is renamed, "Renamed" is A, so C-3 lands after C-1 there.
+						{ op: "folder", folder: "A", name: "Renamed" },
+						{ op: "place", cases: ["C-3"], folder: "Renamed", after: "C-1" },
+						// C-5 moves with C-4, its anchor, so the two land where C-5 stood.
+						{ op: "place", cases: ["C-4", "C-5"], after: "C-5" },
+					],
+				},
+				agent,
+			);
+			const [read] = s.call<{ edits: { after?: string }[] }[]>("get", { refs: [proposed.proposal] });
+			expect(read?.edits.map((edit) => edit.after)).toEqual([undefined, "C-1", "C-5"]);
+			const [question] = s.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
+			s.call("decide", { q: proposed.question, onEvidence: question?.evidenceHash, answer: { is: "accept" } });
+			const order = (folder: string) =>
+				s.call<{ items: { ref: string }[] }>("find", { in: "cases", folder }).items.map((item) => item.ref);
+			expect([order("Renamed"), order("B")]).toEqual([
+				["C-1", "C-3", "C-2"],
+				["C-4", "C-5"],
+			]);
+		} finally {
+			s.close();
+		}
+	});
+
+	test("cases from two folders moved together each go where the guide says in their own folder", () => {
+		for (const after of [null, "C-1"]) {
+			const s = harness();
+			try {
+				s.call("propose", {
+					edits: [
+						{ op: "create", outline: "One", folder: "A" },
+						...["Two", "Three", "Four", "Five", "Six"].map((title) => ({
+							op: "create",
+							outline: title,
+							folder: "B",
+						})),
+					],
+				});
+				s.call("propose", { edits: [{ op: "place", cases: ["C-1", "C-2"], after }] });
+				const order = (folder: string) =>
+					s.call<{ items: { ref: string }[] }>("find", { in: "cases", folder }).items.map((item) => item.ref);
+				// C-1 is the only case in A. C-1 is not in B, so C-2 goes to the end of B: a rank made in A does not
+				// place a case in B.
+				expect([order("A"), order("B")]).toEqual([["C-1"], ["C-3", "C-4", "C-5", "C-6", "C-2"]]);
+			} finally {
+				s.close();
+			}
+		}
+	});
+
+	test("a proposal that moves two folders into each other can be read and rejected", () => {
+		const s = harness({ preset: "standard" });
+		try {
+			s.call("propose", {
+				edits: [
+					{ op: "create", outline: "One", folder: "A" },
+					{ op: "create", outline: "Two", folder: "B" },
+				],
+			});
+			const agent = s.actor("writer", "agent", ["read", "produce"]);
+			const proposed = s.call<Proposed>(
+				"propose",
+				{
+					edits: [
+						{ op: "folder", folder: "A", parent: "B" },
+						{ op: "folder", folder: "B", parent: "A" },
+						{ op: "place", cases: ["C-2"], folder: "Missing" },
+					],
+				},
+				agent,
+			);
+			const [read] = s.call<{ edits: unknown[] }[]>("get", { refs: [proposed.proposal] });
+			expect(read?.edits).toHaveLength(3);
+			const [question] = s.call<{ evidenceHash: string }[]>("get", { refs: [proposed.question] });
+			const [reply] = s.call<{ status: string }[]>("decide", {
+				q: proposed.question,
+				onEvidence: question?.evidenceHash,
+				answer: { is: "reject" },
+			});
+			expect(reply?.status).toBe("decided");
+		} finally {
+			s.close();
+		}
+	});
+
 	test("restore makes a new version and keeps the history", () => {
 		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Changed" } }] });
 		const reply = h.call<Proposed>("propose", { edits: [{ op: "restore", case: "C-1", to: 1 }] });

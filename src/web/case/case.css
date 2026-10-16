@@ -171,8 +171,8 @@
 	padding: 4px;
 }
 
-/* A proposal fits in the pane whatever its length: the diff scrolls between the heading and the answers. */
-[data-proposal] .diff {
+/* A proposal fits in the pane whatever its length: its edits scroll between the heading and the answers. */
+[data-proposal] .proposal-edits {
 	max-height: min(46vh, 420px);
 	overflow: auto;
 }
