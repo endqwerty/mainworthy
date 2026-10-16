@@ -210,8 +210,8 @@ If the case changed after the edit was proposed, the proposed changes include th
 the proposal in history. These choices do not by themselves excuse a test failure.
 
 An edit conflict needs a merged body, rather than a plain acceptance.
-If accepting is refused now, the queue says why. For example, someone changed a field the edit changes too.
-Reject the edit and propose it again on the newer version.
+If accepting is refused now, the queue says why.
+If someone changed a field the edit changes too after it was proposed, reject the edit and propose it again on the newer version.
 Resolve it in the case's conflict card. See [write cases](./write-cases.md#resolve-simultaneous-edits).
 The merged body is another proposal and still follows the adoption policy.
 
