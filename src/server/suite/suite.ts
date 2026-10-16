@@ -405,23 +405,34 @@ function cleanCovers(keys: readonly string[]): string[] {
 	return [...out].sort();
 }
 
+/** What adopting an edit does now: writes `body`, or is refused, with the sentence and the fields that refuse it. */
+export type Adoption =
+	| { body: CaseBody; refused: null }
+	| { body: CaseBody; refused: { message: string; paths: string[] } };
+
 /**
- * What adopting an edit writes to its case now: the body proposed, or, when the case has a newer version than the
- * proposal was made on, that body merged with the newer version. `conflicts` are the fields the merge cannot
- * settle, for which adopting is refused. A proposal is read through this too, so it shows what accepting writes.
+ * What adopting an edit does to its case now. When the case has a newer version than the proposal was made on, the
+ * body proposed is merged with it. Adopting checks this and nothing else, and a waiting proposal is read through it
+ * too, so what a reader is shown is what accepting does.
  */
-export function adoptedBody(
-	db: Db,
-	row: CaseRow,
-	edit: Extract<Resolved, { op: "edit" }>,
-): { body: CaseBody; conflicts: Conflict[] } {
-	if (row.head === edit.head) return { body: cleanBody(edit.body, edit.body), conflicts: [] };
+export function adoption(db: Db, row: CaseRow, edit: Extract<Resolved, { op: "edit" }>): Adoption {
+	if (edit.conflicts.length > 0) {
+		const message = `${caseRef(row)} has an unresolved conflict; its author must resolve it`;
+		return { body: edit.body, refused: { message, paths: edit.conflicts.map((c) => c.path) } };
+	}
+	if (row.head === edit.head) return { body: cleanBody(edit.body, edit.body), refused: null };
+	if (edit.exact)
+		return { body: edit.body, refused: { message: `${caseRef(row)} changed; redo the fragment batch`, paths: [] } };
 	const merge = mergeBodies({
 		base: bodyOf(db, row.id, edit.base),
 		mine: edit.mine,
 		theirs: bodyOf(db, row.id, row.head),
 	});
-	return { body: cleanBody(merge.merged, merge.merged), conflicts: merge.conflicts };
+	if (merge.conflicts.length > 0) {
+		const message = `${caseRef(row)} changed after this proposal was made; redo the proposal on version ${row.head}`;
+		return { body: merge.merged, refused: { message, paths: merge.conflicts.map((c) => c.path) } };
+	}
+	return { body: cleanBody(merge.merged, merge.merged), refused: null };
 }
 
 /**
@@ -959,21 +970,8 @@ export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): 
 			}
 			case "edit": {
 				const row = mustRow(edit.caseId);
-				if (edit.conflicts.length > 0) {
-					throw conflict(`${caseRef(row)} has an unresolved conflict; its author must resolve it`, {
-						paths: edit.conflicts.map((c) => c.path),
-					});
-				}
-				if (edit.exact && row.head !== edit.head) throw conflict(`${caseRef(row)} changed; redo the fragment batch`);
-				const { body, conflicts } = adoptedBody(ctx.db, row, edit);
-				if (conflicts.length > 0) {
-					throw conflict(
-						`${caseRef(row)} changed after this proposal was made; redo the proposal on version ${row.head}`,
-						{
-							paths: conflicts.map((c) => c.path),
-						},
-					);
-				}
+				const { body, refused } = adoption(ctx.db, row, edit);
+				if (refused) throw conflict(refused.message, refused.paths.length > 0 ? { paths: refused.paths } : undefined);
 				if (versionHash(body) !== row.head_hash) writeVersion(row, body, bodyOf(ctx.db, row.id, row.head));
 				else stamp(row, row.head, row.head_hash);
 				break;

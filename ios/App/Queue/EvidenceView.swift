@@ -176,7 +176,7 @@ private struct ProposalEvidence: View {
 					}
 				}
 			}
-			// Once the cases are read, each says its own conflicts, as they are now.
+			// Once the cases are read, each says whether accepting is refused now, and why.
 			ForEach(isRead ? [] : edit.conflicts, id: \.caseRef) { conflict in
 				Label(
 					"\(conflict.caseRef) changed since this edit was made: \(conflict.fields.joined(separator: ", ")). Its author resolves it in the web app.",
@@ -198,7 +198,7 @@ private struct ProposalEvidence: View {
 			// The answers stay off until this is read: nobody accepts an edit they were not shown.
 			switch screen.documents(of: question) {
 			case .read(let documents):
-				ForEach(documents) { document in EditedCaseView(document: document) }
+				ForEach(documents) { document in EditedCaseView(document: document, waits: question.isOpen) }
 			case .failed(let why):
 				Panel {
 					Label("What the edit changes could not be read. \(why)", systemImage: "exclamationmark.triangle")
@@ -223,6 +223,8 @@ private struct ProposalEvidence: View {
 /// it is, and the case as accepting would leave it. A new case is read as it would be.
 private struct EditedCaseView: View {
 	let document: EditedCase
+	/// Whether the proposal still waits for an answer. A decided one is set against the case as it is now.
+	let waits: Bool
 	@State private var side = Side.changes
 
 	private enum Side: Hashable {
@@ -248,14 +250,11 @@ private struct EditedCaseView: View {
 				.pickerStyle(.segmented)
 				.padding(.top, 4)
 				.accessibilityIdentifier("edit-side")
-				if !document.conflicts.isEmpty {
-					Label(
-						"\(ref) changed since this edit was made, in the same \(document.conflicts.count == 1 ? "field" : "fields") as the edit: \(document.conflicts.joined(separator: ", ")). Accepting is refused until its author resolves that in the web app.",
-						systemImage: "exclamationmark.triangle"
-					)
+				if let refused = document.refused {
+					Label("Accepting is refused now: \(refused).", systemImage: "exclamationmark.triangle")
 					.font(.subheadline)
 					.foregroundStyle(Color.warn)
-					.accessibilityIdentifier("edit-conflict")
+					.accessibilityIdentifier("edit-refused")
 				}
 				Text(caption(ref))
 					.font(.footnote)
@@ -276,16 +275,13 @@ private struct EditedCaseView: View {
 	}
 
 	private func caption(_ ref: String) -> String {
-		switch side {
-		case .changes:
-			document.conflicts.isEmpty
-				? "The steps as accepting would leave them, with what changes marked. Unmarked steps stay as they are."
-				: "The steps as the edit has them, with what changes marked. Unmarked steps stay as they are."
-		case .current: "\(ref) as it is now. Rejecting leaves it so."
-		case .proposed:
-			document.conflicts.isEmpty
-				? "\(ref) as accepting would leave it."
-				: "\(ref) as the edit has it. Accepting is refused while the fields above conflict."
+		switch (side, waits && document.refused == nil) {
+		case (.changes, true): "The steps as accepting would leave them, with what changes marked. Unmarked steps stay as they are."
+		case (.changes, false): "The steps as the edit has them, set against the case as it is now. Unmarked steps stay as they are."
+		case (.current, true): "\(ref) as it is now. Rejecting leaves it so."
+		case (.current, false): "\(ref) as it is now."
+		case (.proposed, true): "\(ref) as accepting would leave it."
+		case (.proposed, false): "\(ref) as the edit has it."
 		}
 	}
 

@@ -89,8 +89,7 @@ To answer from a question's page, follow these steps:
    **Current** shows the case as it is now, which **Reject** keeps.
    **Proposed** shows the case as **Accept** would leave it.
    If someone changed the case after the edit was proposed, **Proposed** keeps their change.
-   If they changed a field the edit changes too, the page names that field.
-   **Accept** is then refused until the edit's author resolves it in the web app.
+   If accepting is refused now, for example because they changed a field the edit changes too, the page says why.
 3. Press an answer. Each answer has a sentence that says what it does.
 4. If the project's policy asks for a reason, enter the reason before the app records the answer.
    **Defect in the product** asks where the defect is tracked. You can leave that field empty.

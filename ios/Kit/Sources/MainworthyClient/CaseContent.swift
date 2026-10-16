@@ -63,9 +63,9 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 	/// Where a new case goes: its folder's path, its tags and the requirements it covers. An edit to a case
 	/// that exists changes none of them.
 	public let placement: Placement?
-	/// The fields this edit and a newer version of the case both changed. While there are any, accepting is
-	/// refused and `after` is not what the case would become. Empty when the edit merges or the case is new.
-	public let conflicts: [String]
+	/// Why accepting is refused now, in the server's words, when it is. `after` is then what the edit has, not what
+	/// the case would become. Nil when accepting writes `after`, for a new case, and for a decided proposal.
+	public let refused: String?
 
 	public struct Placement: Equatable, Sendable {
 		public let folder: String
@@ -81,14 +81,14 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 
 	public init(
 		id: Int, caseRef: String?, before: CaseContent?, after: CaseContent, placement: Placement? = nil,
-		conflicts: [String] = []
+		refused: String? = nil
 	) {
 		self.id = id
 		self.caseRef = caseRef
 		self.before = before
 		self.after = after
 		self.placement = placement
-		self.conflicts = conflicts
+		self.refused = refused
 	}
 
 	/// What the edit changes, part by part, in the order of the case as it would be.

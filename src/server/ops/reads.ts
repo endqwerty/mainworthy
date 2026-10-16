@@ -31,6 +31,7 @@ import {
 	mustQuestion,
 	openCountOn,
 	openCounts,
+	openQuestionsOn,
 	type QuestionRow,
 	questionById,
 	questionRef,
@@ -101,7 +102,7 @@ import {
 	versionList,
 } from "../suite/read.ts";
 import {
-	adoptedBody,
+	adoption,
 	bodyOf,
 	type CaseRow,
 	caseById,
@@ -273,7 +274,8 @@ export function runView(ctx: Ctx, run: RunRow): Record<string, unknown> {
 
 /**
  * A proposal as a reviewer needs it: per edit, the case by ref, the body proposed, the body it would replace, and
- * for a conflict both sides of each field, so the diff can be drawn without another read.
+ * for a conflict both sides of each field, so the diff can be drawn without another read. While the proposal waits,
+ * an edit's body is what accepting writes now, and `refused` says why accepting is refused, if it is.
  */
 function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> {
 	const index = folderIndex(ctx.db, proposal.project);
@@ -281,6 +283,9 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 		const row = caseById(ctx.db, id);
 		return row ? caseRef(row) : null;
 	};
+	const waiting = openQuestionsOn(ctx.db, proposal.project, `P-${proposal.no}`).some(
+		(question) => question.kind === "adopt",
+	);
 	const edits = resolvedOf(proposal)
 		.slice(0, 200)
 		.map((edit) => {
@@ -295,17 +300,18 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 					};
 				case "edit": {
 					const row = caseById(ctx.db, edit.caseId);
-					// What accepting writes now, which differs from what was proposed once the case has moved on.
-					const adopted = row && edit.conflicts.length === 0 ? adoptedBody(ctx.db, row, edit) : null;
+					// While it waits, what accepting does now: once the case has moved on, that is not what was proposed.
+					const now = row && waiting ? adoption(ctx.db, row, edit) : null;
 					return {
 						op: edit.op,
 						case: refOf(edit.caseId),
 						base: edit.base,
 						head: row?.head ?? edit.head,
-						body: adopted?.body ?? edit.body,
+						body: now?.body ?? edit.body,
 						mine: edit.mine,
 						current: row ? bodyOf(ctx.db, row.id, row.head) : null,
-						conflicts: adopted?.conflicts ?? edit.conflicts,
+						conflicts: edit.conflicts,
+						refused: now?.refused?.message ?? null,
 					};
 				}
 				case "restore":

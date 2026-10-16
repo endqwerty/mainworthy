@@ -229,9 +229,9 @@ export const Proposal = struct("Proposal", "`get` with a P- ref: a proposed edit
 			folder: [maybe(text), "For create: the path of the folder the case goes into."],
 			tags: [maybe(anything), "For create: the case's tags, a list of words. Another edit writes it otherwise."],
 			covers: [maybe(list(text)), "For create: the requirements the case covers."],
-			conflicts: [
-				maybe(list(struct("EditFieldConflict", "A field an edit cannot be merged on.", { path: text }))),
-				"For edit: the fields both this edit and a newer version changed. Accepting is refused while there are any.",
+			refused: [
+				maybe(text),
+				"For edit, while the proposal waits: why accepting it is refused now, as a sentence. Null when it is not.",
 			],
 		}),
 	),

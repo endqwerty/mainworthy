@@ -699,40 +699,69 @@ describe("editing", () => {
 });
 
 describe("a proposal that waits while its case moves on", () => {
-	test("reads as what accepting it writes: merged with the newer version, as the merge on accepting does", () => {
+	type Read = {
+		edits: { body: { title: string; steps: { id: string }[] }; current: { title: string }; refused: string | null }[];
+	};
+	let agent: ReturnType<Harness["actor"]>;
+	beforeEach(() => {
 		h.close();
 		h = harness({ preset: "standard" });
 		h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
-		const agent = h.actor("helper", "agent", ["read", "produce"]);
+		agent = h.actor("helper", "agent", ["read", "produce"]);
+	});
+	const proposeAsAgent = (body: Record<string, unknown>) => {
+		const waiting = h.call<Proposed>("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body }] }, agent);
+		expect(waiting.status).toBe("open");
+		return waiting;
+	};
+	const retitle = (title: string, base: number) =>
+		h.call<Proposed>("propose", { edits: [{ op: "edit", case: "C-1", base, body: { title } }] });
+	const read = (proposal: string | null) => h.call<Read[]>("get", { refs: [proposal] })[0]?.edits[0];
+	const accept = (question: string | null) => {
+		const [item] = h.call<{ evidenceHash: string }[]>("get", { refs: [question] });
+		return h.call<{ status: string; needs: string | null }[]>("decide", {
+			q: question,
+			onEvidence: item?.evidenceHash,
+			answer: { is: "accept" },
+		})[0];
+	};
+
+	test("reads as what accepting it writes: merged with the newer version, as the merge on accepting does", () => {
 		const [view] = h.call<CaseView[]>("get", { refs: ["C-1"] });
 		const reordered = [...(view?.steps ?? [])].reverse();
-		const waiting = h.call<Proposed>(
-			"propose",
-			{ edits: [{ op: "edit", case: "C-1", base: 1, body: { steps: reordered } }] },
-			agent,
-		);
-		expect(waiting.status).toBe("open");
-		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated by a person" } }] });
+		const waiting = proposeAsAgent({ steps: reordered });
+		retitle("Updated by a person", 1);
 
-		type Read = { edits: { body: { title: string; steps: { id: string }[] }; current: { title: string } }[] };
-		const [read] = h.call<Read[]>("get", { refs: [waiting.proposal] });
-		expect(read?.edits[0]?.current.title).toBe("Updated by a person");
-		expect(read?.edits[0]?.body.title).toBe("Updated by a person");
-		expect(read?.edits[0]?.body.steps.map((step) => step.id)).toEqual(reordered.map((step) => step.id));
+		const edit = read(waiting.proposal);
+		expect(edit?.current.title).toBe("Updated by a person");
+		expect(edit?.body.title).toBe("Updated by a person");
+		expect(edit?.body.steps.map((step) => step.id)).toEqual(reordered.map((step) => step.id));
+		expect(edit?.refused).toBeNull();
 
-		const question = h
-			.call<{ items: { q: string; evidenceHash: string }[] }>("inbox")
-			.items.find((item) => item.q === waiting.question);
-		const decided = h.call<{ status: string }[]>("decide", {
-			q: question?.q,
-			onEvidence: question?.evidenceHash,
-			answer: { is: "accept" },
-		});
-		expect(decided[0]?.status).toBe("decided");
+		expect(accept(waiting.question)?.status).toBe("decided");
 		const [accepted] = h.call<CaseView[]>("get", { refs: ["C-1"] });
 		expect({ title: accepted?.title, steps: accepted?.steps.map((step) => step.id) }).toEqual({
-			title: read?.edits[0]?.body.title,
-			steps: read?.edits[0]?.body.steps.map((step) => step.id),
+			title: edit?.body.title,
+			steps: edit?.body.steps.map((step) => step.id),
+		});
+	});
+
+	test("says that accepting is refused, in the words accepting refuses with, when the newer version cannot merge", () => {
+		const waiting = proposeAsAgent({ title: "Retitled by the agent" });
+		retitle("Retitled by a person", 1);
+		const refusal = "C-1 changed after this proposal was made; redo the proposal on version 2";
+		expect(read(waiting.proposal)?.refused).toBe(refusal);
+		expect(accept(waiting.question)).toMatchObject({ status: "conflict", needs: refusal });
+	});
+
+	test("once decided, reads as it was proposed: a later version adds nothing to it and refuses nothing", () => {
+		const waiting = proposeAsAgent({ title: "Retitled by the agent" });
+		expect(accept(waiting.question)?.status).toBe("decided");
+		retitle("Retitled again", 2);
+		expect(read(waiting.proposal)).toMatchObject({
+			body: { title: "Retitled by the agent" },
+			current: { title: "Retitled again" },
+			refused: null,
 		});
 	});
 });

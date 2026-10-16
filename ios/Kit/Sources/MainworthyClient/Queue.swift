@@ -132,7 +132,7 @@ extension ProjectClient {
 				else { throw ClientError.unreadable }
 				return EditedCase(
 					id: index, caseRef: ref, before: CaseContent(current), after: CaseContent(body),
-					conflicts: part.conflicts?.map(\.path) ?? []
+					refused: part.refused
 				)
 			default:
 				return nil
