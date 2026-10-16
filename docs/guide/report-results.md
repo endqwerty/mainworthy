@@ -78,7 +78,7 @@ The command refuses a relative `rootDir`, a filesystem root, or a source path
 outside the chosen root. It exits with code 4 and names the report file and root.
 
 Keep source paths and suite names stable. Switching exporters can change those
-values, so compare their keys before switching an existing pipeline. An
+values. Before switching an existing pipeline, compare the exporters' keys. An
 unlinked native test follows the same project policy as an unlinked JUnit test.
 
 Native reports with unknown statuses, malformed test details, or errors outside
@@ -270,8 +270,8 @@ The label must already be bound by `announce`. Check its planned release run wit
 `gate --run`, as described in [release runs](./runs.md#plan-a-release-run).
 
 `exact` means the result names a case version, or a run pins that version.
-`assumed` means a link or case annotation identifies the case, and Mainworthy uses
-its current version without a version claim from the runner.
+`assumed` means a link or case annotation identifies the case. Mainworthy then uses
+the case's current version without a version claim from the runner.
 `unresolved` means the result has no resolved case and version.
 
 These words describe the connection to the case, not whether the outcome is trustworthy.
@@ -320,7 +320,7 @@ through a [policy edit](./policy.md#same-code-detector-settings).
 
 Playwright retries become one logical test result. The highest numbered decisive
 execution supplies its outcome and failure. A skipped retry does not erase an
-earlier failure. Its duration sums all executions, and a pass after retries has
+earlier failure. The logical result's duration sums all executions, and a pass after retries has
 the same `passed after N retries` note as JUnit. An expected Playwright failure
 counts as a pass. An unexpected pass counts as a failure.
 

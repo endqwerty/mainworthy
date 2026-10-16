@@ -17,7 +17,7 @@ An upgrade runs each database migration in its own transaction. If any statement
 
 On `SIGTERM` or `SIGINT`, the server stops accepting connections and closes its change streams. Requests already in flight have five seconds to send their replies before the server closes the remaining connections. The server then stops the reader threads and closes the database. A request that outlasts this wait can lose its reply. If you retry a write, send the same command id, `cmd`, so the write is not applied twice. The CLI and web UI send command ids.
 
-With reader threads enabled, a background thread checkpoints every half second, and the writer keeps a 20,000-page automatic checkpoint fallback. Once read snapshots finish and a checkpoint completes, the next write can reuse the log and trim it to at most 4 MiB. The retention limit does not change when checkpoints happen. Active snapshots and large transactions can grow the log past 4 MiB, so keep room for them as well as the database.
+With reader threads enabled, a background thread checkpoints every half second. The writer keeps a 20,000-page automatic checkpoint fallback. Once read snapshots finish and a checkpoint completes, the next write can reuse the log and trim it to at most 4 MiB. The retention limit does not change when checkpoints happen. Active snapshots and large transactions can grow the log past 4 MiB, so keep room for them as well as the database.
 
 Before this limit, Bun's own SQLite on Linux, including the container, defaulted to no retention limit, `-1`. On a Mac, Bun uses Apple's libsqlite3, whose default was `32768`, or 32 KiB. The 4 MiB limit is a new bound in the container and a looser one on a Mac.
 
@@ -63,7 +63,7 @@ You can read the archive with any tool that reads text or search it with `grep`.
 
 The archive holds attachment bytes along with the database records, and actors, personal and team grants, memberships, team history, recovery addresses and their verification status. It leaves out tokens, sessions, passwords, passkeys, authenticators, passkey handles and invitations. It also leaves out the search index. Mainworthy rebuilds that index on import. Tracker delivery requests are excluded, so restoring an archive never sends an issue again.
 
-The archive leaves out which changes have ended. After an import every change is open, and the questions that were closed when a change ended stay closed. If a failure on such a change is reported again, use `mainworthy change` to record again that the change ended.
+The archive leaves out which changes have ended. After an import every change is open. Questions that were closed when a change ended stay closed. If a failure on such a change is reported again, use `mainworthy change` to record again that the change ended.
 
 The archive also leaves out which project is a [demo](./customize.md#a-project-of-demo-data). An imported demo keeps its data and its dates, and accepts no more writes dated in the past. Anyone who reads the archive reads your cases and decisions, so store it as you would the data itself.
 
@@ -79,7 +79,7 @@ exported to shop.ndjson.gz
 The archive keeps that project's cases and versions, results and their attachment bytes, runs, questions, decisions, policies and command history.
 Case aliases and custom field definitions in the policy are included in the archive.
 The archive preserves IDs, head hashes and verdicts. It includes actors who acted in the project, signed its decisions,
-or have a grant on it, and the people those actors act on behalf of. The policy's rule actor travels too. Their organisations, project grants and global
+or have a grant on it. The archive also includes the people those actors act on behalf of. The policy's rule actor travels too. Their organisations, project grants and global
 grants travel with them. Other projects, their grants, instance metadata and commands outside the project stay out.
 Relevant teams, their memberships, grants on this project or every project, and history for that scope travel too. Other project team grants and their events stay out.
 Recovery addresses and their verification status travel for the included people. Pending verification and reset links never travel. Tokens and other sign-in credentials never travel.
@@ -103,7 +103,7 @@ milliseconds or ISO timestamps with a timezone. Omit both for all retained histo
 through the server's current snapshot. An end later than the snapshot time plus one
 millisecond is refused. The export uses the selected project's admin capability and
 writes a private file atomically. The file is plain NDJSON. The operation buffers
-the reply in memory, so select a smaller period for large histories.
+the reply in memory. For large histories, select a smaller period.
 
 The registry equivalent is `audit { from, to }` at `POST /api/p/<project>/audit`.
 Its JSON reply contains `format`, `project`, `records`, `sha256`, and `ndjson`.
@@ -132,7 +132,8 @@ Context records come first, sorted by id using English collation. Events follow,
 ordered by time, sequence, and id using the same collation. Events without a
 sequence sort as sequence zero. Verification refuses records outside this order.
 English collation uses JavaScript's `a.localeCompare(b, "en")` rather than character order.
-It compares the digit runs in an id as text but puts `:` before digits, so `version:1:2` comes before `version:12:1`.
+It compares the digit runs in an id as text but puts `:` before digits.
+For example, `version:1:2` comes before `version:12:1`.
 A verifier in another language needs the same Unicode collation, using ICU with locale `en` and default strength.
 This file order does not imply that timestamps follow reference dependencies.
 Each record has a `type` and a unique `id`:
@@ -164,12 +165,22 @@ reaches its evidence through the adopting decision. The initial policy has none.
 
 The footer is `{ end: true, records, sha256 }`. `records` counts context and event
 records, excluding the header and footer. `sha256` covers every preceding UTF-8 byte,
-including LFs. Verification refuses a leading byte-order mark and rejects unsupported
-formats, unknown keys, noncanonical lines, records out of order, duplicate ids,
-unresolved or wrongly typed references, invalid range markers,
-reference cycles, skipped case or policy predecessors, decisions or answers before
-their question's opening sequence, inconsistent evidence hashes, and changed case
-body hashes. Record errors name the line and record id when it can be read.
+including LFs. Verification refuses a leading byte-order mark. It also rejects the following:
+
+- Unsupported formats.
+- Unknown keys.
+- Noncanonical lines.
+- Records out of order.
+- Duplicate ids.
+- Unresolved or wrongly typed references.
+- Invalid range markers.
+- Reference cycles.
+- Skipped case or policy predecessors.
+- Decisions or answers before their question's opening sequence.
+- Inconsistent evidence hashes.
+- Changed case body hashes.
+
+Record errors name the line and record id when it can be read.
 Demo projects can date writes out of order, so a predecessor can appear later in
 the event list. If a time range excludes a required demo predecessor that has a later
 date, export fails and asks you to widen `--to`.
@@ -214,8 +225,8 @@ The file must use UTF-8, comma separators and a header row. Quoted cells may con
 commas, doubled quotes and line breaks. Each file is limited to 32 MB and 5,000 cases.
 Mainworthy parses the whole file before sending it. It refuses the entire proposal
 if the file is malformed or an alias is already in use. Imports create cases. They do not update
-cases with matching foreign ids. Keep the proposal receipt if a connection fails,
-and check the project before sending a file again, especially one without ids.
+cases with matching foreign ids. If a connection fails, keep the proposal receipt.
+Before sending a file again, check the project, especially if the file has no ids.
 
 For a spreadsheet, use these exact headers. Only `title` is required.
 
@@ -300,7 +311,7 @@ imported 67 rows across 36 tables
 Import replaced the bootstrap rows. Your previous session may no longer exist. The configured local owner was refreshed.
 ```
 
-A `.gz` suffix tells the command to decompress. The import checks the whole archive before it keeps anything: every row count, the checksum, each column and each link between records. If any check fails, nothing changes.
+A `.gz` suffix tells the command to decompress. Before keeping anything, the import checks every row count, the checksum, each column and each link between records in the archive. If any check fails, nothing changes.
 
 An instance that already has data refuses an import and keeps what it has:
 
@@ -309,7 +320,7 @@ $ mainworthy import mainworthy.ndjson.gz
 conflict: import needs a fresh instance; existing projects or user data will not be replaced
 ```
 
-A fresh instance is one that has only its first project, `scratch`, with no edits and no policy change, and only its owner. Making a token for a new person, agent or pipeline adds an actor, and that is enough to make the instance non-fresh. There is no merge yet, so to bring an archive into an instance that has data, start a new instance.
+A fresh instance has only its first project, `scratch`, and its owner. That project has no edits and no policy change. Making a token for a new person, agent or pipeline adds an actor, and that is enough to make the instance non-fresh. There is no merge yet. To bring an archive into an instance that has data, start a new instance.
 
 An archive imports into a build with the same archive version as the one that wrote it. The database schema may be newer. An added nullable column can stay compatible. Import fills a missing nullable, non-key column with NULL, even if the column has a default. Import refuses missing required columns and unknown columns.
 
@@ -339,7 +350,7 @@ In local mode, Mainworthy refreshes the owner and you can carry on.
 
 ## Back up
 
-Run an export on a schedule, from any machine that can reach the server, and keep the files somewhere other than the server.
+Run an export on a schedule, from any machine that can reach the server. Keep the files somewhere other than the server.
 
 ```
 $ MAINWORTHY_URL=https://mainworthy.example.com MAINWORTHY_TOKEN=<token> \

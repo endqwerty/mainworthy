@@ -35,13 +35,13 @@ A decision about that cause may still hold. To check the decision, follow these 
 1. Look at the decided questions in the queue to find who answered the failure question.
 2. If the answer no longer applies, withdraw the answer.
 
-If the change has ended, Mainworthy records later reports without asking about their failures unless an open planned run needs an answer. Open the change in **Changes** to inspect the results its gate counted. See [report results](./report-results.md) and [changes and the gate](./changes.md).
+If the change has ended, Mainworthy records later reports. It asks about their failures only if an open planned run needs an answer. Open the change in **Changes** to inspect the results its gate counted. See [report results](./report-results.md) and [changes and the gate](./changes.md).
 
 ### A result did not fill a slot in my planned run
 
 Check the result against these requirements:
 
-- The result matches the run's accepted commit, build, and environment, or names the run if the run accepts only its own results.
+- If the run accepts only its own results, the result names the run. Otherwise, the result matches the run's accepted commit, build, and environment.
 - The result identifies the slot's case and meets the run's basis rule. Depending on the run, the rule requires an exact version, an assumed version, or the same case content.
 - The result's method is one the run accepts.
 - For a result from a person or an agent, the case allows that method.
@@ -143,7 +143,7 @@ A browser's requests must come from the same address the server sees itself at. 
 
 ### The owner token was never shown
 
-In server mode, the server prints a generated owner token at startup if the owner has no working token and no owner token is configured. This happens on the first start and the start after an import.
+In server mode, if the owner has no working token and no owner token is configured, the server prints a generated owner token at startup. This happens on the first start and the start after an import.
 
 If the owner has a token that you lost, follow these steps:
 

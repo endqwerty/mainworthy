@@ -24,7 +24,7 @@ claim of WCAG conformance.
 
 ### Start
 
-- [How Mainworthy works](./concepts.md). Mainworthy records cases, results and decisions. A failed test raises a question, and the evidence and decisions together determine the gate's verdict.
+- [How Mainworthy works](./concepts.md). Mainworthy records cases, results and decisions. A failed test raises a question. The evidence and decisions together determine the gate's verdict.
 - [Quickstart](./quickstart.md). Start a local instance, write one case, and upload a failing test result. Then answer its question and read the gate in about ten minutes.
 
 ### Use it

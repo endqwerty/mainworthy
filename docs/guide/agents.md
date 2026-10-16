@@ -73,9 +73,12 @@ An agent gets ten tools. The following six tools read data.
 - `since` returns what changed after a cursor.
 - `gate` returns `passed`, `failed`, `blocked` or `pending` for a commit, change or run.
 
-The other four tools write data. `propose` creates or changes cases, `claim`
-records a review and its findings, `report` records results, and `decide` answers
-a question.
+The other four tools write data:
+
+- `propose` creates or changes cases.
+- `claim` records a review and its findings.
+- `report` records results.
+- `decide` answers a question.
 
 Start with `impact` to find the relevant cases without reading the whole suite.
 Keep the returned cursor. On the next `impact` call, pass that cursor as `since`.
@@ -166,8 +169,8 @@ default grant of `read` and `produce`, an agent's failure answer is advised unde
 ```
 
 An answer counts only if the clause lets agents answer and the agent holds `answer`.
-The presets allow agents to settle duplicate findings under `loose` and unlinked-test
-questions under `loose` and `standard`. The latter applies only when the project asks
+The presets allow agents to settle duplicate findings under `loose`. Under `loose` and `standard`,
+agents can settle unlinked-test questions. That permission applies only when the project asks
 about tests with no case. An agent may also withdraw its own conflicting proposal
 without holding `answer`.
 

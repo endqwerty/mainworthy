@@ -33,8 +33,8 @@ until**. Run the command again before that day. You stay signed in.
 
 ### From TestFlight
 
-With a paid Apple developer membership you can send the app to TestFlight instead, and install it from there on
-your phone and your team's phones, with no cable. Before running `bun scripts/ios.ts upload` on the Mac, make the app
+With a paid Apple developer membership you can send the app to TestFlight instead.
+You can then install it from TestFlight on your phone and your team's phones, with no cable. Before running `bun scripts/ios.ts upload` on the Mac, make the app
 once in App Store Connect. The repository's `ios/README.md` has the steps under "Send it to TestFlight". A build from
 TestFlight opens for 90 days, and the TestFlight app shows when it ends.
 
@@ -47,7 +47,7 @@ To sign in, follow these steps:
 1. Type your name and your password.
 2. Press **Sign in**.
 
-An account with an enrolled authenticator requires a second sign-in step. The app cannot complete that step. After accepting your password, it says that you need the web app and keeps no session. Sign in to that account in the web app. An instance that requires a second factor for admins also refuses password-only admin sign-in in the app.
+An account with an enrolled authenticator requires a second sign-in step. The app cannot complete that step. After accepting your password, the app says that you need the web app and keeps no session. Sign in to that account in the web app. An instance that requires a second factor for admins also refuses password-only admin sign-in in the app.
 
 After sign-in completes, the app opens a session, as a browser does, and keeps that session in the phone's keychain. It does not keep
 the password. The session appears in the web app under Settings, **Your sessions**, as "Mainworthy for
@@ -56,7 +56,7 @@ iPhone", and you can end it there.
 ### Fill the password from 1Password or the phone's passwords
 
 The name and password fields take what the phone's AutoFill offers. The phone offers the login it keeps for
-`mainworthy.com` only when the app is tied to that site, and Apple allows that only for an app signed by a paid
+`mainworthy.com` only when the app is tied to that site. Apple allows that tie only for an app signed by a paid
 Apple developer membership. For an app installed with a free Apple ID, press the key above the
 keyboard and search for the login yourself.
 
@@ -104,10 +104,10 @@ it to open another.
 
 To give one answer to several questions of one kind, follow these steps:
 
-1. In **Queue**, press **Select** at the top right. Each open question gets a circle, the tabs give way to a bar
-   that says what is selected, and **Done** at the top right ends it.
+1. In **Queue**, press **Select** at the top right. Each open question gets a circle. The tabs give way to a bar
+   that says what is selected. **Done** at the top right ends selection.
 2. Press questions to select them. A selection holds one kind, such as unlinked tests or failures, and at most
-   500 questions. Select a question or choose a kind's chip before pressing **Select All** at the top left. It
+   500 questions. Select a question or choose a kind's chip before pressing **Select All** at the top left. The button
    selects eligible questions of that kind from the list, up to the limit, and then reads **Deselect All**. A question that cannot join appears faint.
    Press it to read why. It may be another kind, require a decision you cannot make, or have an answer
    waiting to send. Proposals and findings with a suggested edit need an answer on their own page,
@@ -143,10 +143,10 @@ To link each test in a question to a case, follow these steps:
 10. Press **Done** to return to the question.
 
 To make cases instead, press **Create cases** on the question. Review the test names before recording.
-The server makes one automated case per test, with that test's name, and links it. It chooses the folder from the test file.
-If the policy requires somebody to adopt new cases first, the server refuses this answer. Create and adopt the cases in **Cases**, then link them here.
+The server makes one automated case per test, with that test's name, and links the test to it. It chooses the folder from the test file.
+If the policy requires somebody to adopt new cases first, the server refuses this answer. Create and adopt the cases in **Cases**, then link the tests here.
 
-Linking tests and creating cases need a connection. These answers are not saved in **Unsent answers**. Keep the app open and use **Retry** after a network drop. Closing the app loses these choices and any uncertain mapping command.
+Linking tests and creating cases need a connection. These answers are not saved in **Unsent answers**. Keep the app open. After a network drop, use **Retry**. Closing the app loses these choices and any uncertain mapping command.
 
 Closing the sheet keeps your case choices, search and reason in the current workspace. Those choices also stay after a refusal or changed question.
 If the evidence changed, press **Review current tests** before answering on the new evidence.
@@ -203,14 +203,14 @@ To inspect a change and the results its gate counted, follow these steps:
 4. Read **Results** to see every test the gate on the page counted, including tests tracked without a case. Each row
    shows how the gate counted the test: unexplained, needs a fix, excused, could not run, skipped, or passed. The row also shows its case or
    **no case**, its file, job, attempt, duration, who reported it and the failure message. The counts above the list
-   choose which results appear, and the field under them filters by test name or file. A row's question opens that question, and
+   choose which results appear. The field under the counts filters by test name or file. A row's question opens that question, and
    **Open the build** opens the CI build when the report named one. Press a row to open its test.
-   **Show more** reads the next hundred. If the results changed since the first page, the app says so and
+   **Show more** reads the next hundred. If the results changed since the first page, the app says so.
    **Read them again** starts from the top.
 
 The head, gate, failing tests and affected cases are checked against the commits named in the replies. If the
-head moves during a read, the app tries again once. If it moves again, the app says so and keeps the previous
-page, if one was read. Pull down to try again.
+head moves during a read, the app tries again once. If the head moves again, the app says so and keeps any
+previous page it read. Pull down to try again.
 
 A merged or closed change is marked as ended. Its gate keeps the last verdict its head had. The app does not
 end a change or run tests again.
@@ -247,7 +247,7 @@ Being an admin of one project is not enough. To revoke a token, follow these ste
    Revocation stops the token and ends sessions opened with it. The app signs in with a password, so its own
    session stays signed in.
    The screen says **Revoked**, **Already revoked**, or shows the server's refusal reason.
-   If the reply is lost or unreadable, it says **Outcome unknown** and pauses further revocations.
+   If the reply is lost or unreadable, the screen says **Outcome unknown** and pauses further revocations.
    Press **Check again** to send the saved command again and learn its result without revoking twice.
 
 The pending command stays when you leave this screen or switch projects. Keep the app open until its outcome
@@ -301,8 +301,13 @@ If another edit overlaps, **Both edits are kept** shows each overlapping field w
 2. Review **Merged case**.
 3. Press **Record merge**.
 
-You can keep an action from one side and its expected result from the other, keep or remove a step, and
-choose the order when both sides reordered steps. The app combines changes that do not overlap automatically.
+You can make these choices:
+
+- Keep an action from one side and its expected result from the other.
+- Keep or remove a step.
+- Choose the order when both sides reordered steps.
+
+The app combines changes that do not overlap automatically.
 If the case changes again, a new conflict keeps your merge for another choice.
 The policy can leave the merge waiting for acceptance in the Queue. A refused answer keeps your draft and choices.
 If the question was answered elsewhere or no longer applies, recording stops and the notice offers **Cancel**.
@@ -364,7 +369,7 @@ To start a pass immediately, press **Send waiting answers and check dropped**.
 If the server records the dropped command, its outcome appears here. **Clear outcomes** can then remove that entry.
 If the server never records the command, the entry stays. There is no time limit that proves a request cannot still arrive.
 If the server is still recording the command, cannot be reached, or gives an unreadable command reply,
-dropping keeps the waiting answer and explains why.
+the app keeps the waiting answer and explains why you cannot drop it.
 
 An answer refused after an earlier timeout stays **Waiting to send** with the refusal text and blocks later answers. If you drop it, it becomes **Dropped** because the earlier attempt may still arrive. While a waiting answer holds the queue, Dropped entries are not checked.
 
