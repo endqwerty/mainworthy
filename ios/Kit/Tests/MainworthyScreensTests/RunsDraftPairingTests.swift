@@ -113,6 +113,29 @@ actor ReviewFailPinnedRead: Transport {
         let after = try #require(run.slots.first { $0.id == slot.id })
         #expect(after.ownFill(by:Live.name) == nil && after.fills.map(\.method) == [.pipeline])
     }
+    @Test("after the owner is renamed, refreshing the account keeps their own slots theirs")
+    func renamedPersonKeepsOwnSlots() async throws {
+        let key = try await Live.project()
+        let server = try await Live.signedIn()
+        let project = Project(key:key,name:key,can:["read","produce","plan"])
+        let defaultsName = "renamed-person-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName:defaultsName))
+        defer { defaults.removePersistentDomain(forName:defaultsName) }
+        // The app still holds the name the person had when it opened the project; the server answers with the
+        // name they have now, as it does after `MAINWORTHY_OWNER_WAS` renames the owner.
+        let workspace = Workspace(server:server,account:Account(name:"former-name",projects:[project]),remembered:Remembered(defaults),onSignedOut:{})
+        let list = try #require(workspace.runs); await list.refresh()
+        let run = list.open(try #require(list.runs.first)); await run.refresh()
+        let slot = try #require(run.firstUnfilled)
+        await run.execute(slot)
+        guard case .read(let shown) = run.document else { Issue.record("no slot"); return }
+        _ = try await server.project(key).report(shown,outcome:.pass,note:"",failedStep:nil,corrects:nil)
+        await run.refresh()
+        #expect(run.isLeftToOthers(slot))
+        await workspace.refreshAccount()
+        #expect(workspace.account.name == Live.name)
+        #expect(!run.isLeftToOthers(slot))
+    }
     @Test("Undo of a Pass with an unused step mark corrects to skipped, and of a Fail restores the Pass without a step")
     func undoNonFailure() async throws {
         let (_,run,_) = try await setup()

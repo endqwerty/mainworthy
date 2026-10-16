@@ -24,7 +24,7 @@ public final class RunsScreen: ProjectScreen {
 	public private(set) var savedPlan: SavedPlan?
 	public private(set) var permission: Project
 	private let project: ProjectClient
-	private let person: String
+	private var person: String
 	private var next: String?
 	private var reads = 0
 	private var opened: [String: OpenRunScreen] = [:]
@@ -35,9 +35,11 @@ public final class RunsScreen: ProjectScreen {
 		self.person = person
 	}
 
-	package func updatePermission(_ permission: Project) {
+	/// What the person may do, and their name, as the account says now: a rename of the owner keeps the session.
+	package func updateSignedIn(_ permission: Project, as person: String) {
 		self.permission = permission
-		for screen in opened.values { screen.updatePermission(permission) }
+		self.person = person
+		for screen in opened.values { screen.updateSignedIn(permission, as: person) }
 	}
 
 	public func open(_ run: PlannedRun) -> OpenRunScreen {

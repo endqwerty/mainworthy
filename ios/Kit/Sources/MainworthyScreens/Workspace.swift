@@ -79,7 +79,7 @@ public final class Workspace {
 		account = fresh
 		if let open = project, let now = fresh.projects.first(where: { $0.key == open.key }) {
 			project = now
-			runs?.updatePermission(now)
+			runs?.updateSignedIn(now, as: fresh.name)
 		} else if let first = fresh.projects.first {
 			open(first)
 		} else {
