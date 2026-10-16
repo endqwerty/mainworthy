@@ -180,7 +180,15 @@ const Run = z.looseObject({
 });
 const ProposalEdit = z.discriminatedUnion("op", [
 	QuarantineEdit,
-	z.looseObject({ op: z.literal("create"), body: Body, folder: text, tags: texts, covers: texts }),
+	z.looseObject({
+		op: z.literal("create"),
+		body: Body,
+		folder: text,
+		tags: texts,
+		covers: texts,
+		/** The case the new case is asked to follow, or null for the end of its folder. */
+		after: nullableText,
+	}),
 	z.looseObject({
 		op: z.literal("edit"),
 		case: nullableText,
@@ -190,13 +198,38 @@ const ProposalEdit = z.discriminatedUnion("op", [
 		mine: Body,
 		current: Body.nullable(),
 		conflicts: z.array(z.object({ path: text, base: z.unknown(), mine: z.unknown(), theirs: z.unknown() })),
+		/** Why accepting this edit on its own would be refused now, while the proposal waits; else null. */
+		refused: nullableText,
 	}),
-	z.looseObject({ op: z.literal("restore"), case: nullableText, to: whole, body: Body }),
-	z.looseObject({ op: z.literal("place"), cases: z.array(nullableText), folder: nullableText, tags: data.nullable() }),
+	z.looseObject({ op: z.literal("restore"), case: nullableText, to: whole, body: Body, current: Body.nullable() }),
+	z.looseObject({
+		op: z.literal("place"),
+		cases: z.array(nullableText),
+		folder: nullableText,
+		tags: data.nullable(),
+		/** For a move or a position: the case the cases are asked to follow, or "" for the end of the folder. */
+		after: text.optional(),
+	}),
 	z.looseObject({ op: z.literal("state"), cases: z.array(nullableText), to: text }),
 	z.looseObject({ op: z.literal("cover"), case: nullableText, requirement: text, on: flag }),
-	z.looseObject({ op: z.literal("folder"), name: nullableText, archive: flag }),
-	z.looseObject({ op: z.literal("policy"), preset: text, clauses: whole }),
+	z.looseObject({
+		op: z.literal("folder"),
+		/** The folder it changes, or null when it makes one. */
+		folder: nullableText,
+		name: nullableText,
+		/** Where it moves the folder ("" for the top), absent when it stays where it is. */
+		parent: text.optional(),
+		archive: flag,
+	}),
+	z.looseObject({
+		op: z.literal("policy"),
+		preset: text,
+		clauses: whole,
+		/** The whole policy accepting writes, the one in force, and whether accepting refuses it as stale. */
+		policy: Policy,
+		inForce: Policy,
+		stale: flag,
+	}),
 ]);
 const Proposal = z.looseObject({
 	ref: text.regex(/^P-\d+$/),
@@ -204,6 +237,8 @@ const Proposal = z.looseObject({
 	kind: ActorKind,
 	reason: nullableText,
 	at: number,
+	/** How many edits the proposal has; `edits` holds the first 200. */
+	count: whole,
 	edits: z.array(ProposalEdit),
 });
 const Slot = z.looseObject({

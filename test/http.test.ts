@@ -16,6 +16,7 @@ import { Policy } from "../src/core/kinds.ts";
 import type { InboxReply, ProposeReply } from "../src/core/ops.ts";
 import { InboxReply as InboxSchema, ReportReceipt } from "../src/core/ops.ts";
 import { PRESETS } from "../src/core/presets.ts";
+import { REPLIES } from "../src/core/replies.ts";
 import { TrackerReceipt } from "../src/core/tracker.ts";
 import type { RegistrationOptions } from "../src/server/identity/webauthn.ts";
 import { type Config, defaultConfig, SESSION_LIFETIMES } from "../src/server/kernel/app.ts";
@@ -2596,7 +2597,12 @@ describe("the surface", () => {
 		]) {
 			const result = z.object({ proposal: z.string().nullable() }).parse(await checked("propose", { edits: [edit] }));
 			if (result.proposal) {
-				await checked("get", { refs: [result.proposal] });
+				const [read] = z
+					.array(z.record(z.string(), z.unknown()))
+					.parse(await checked("get", { refs: [result.proposal] }));
+				// What the web reads of a proposal is declared, so the validator and the OpenAPI document type it: a
+				// loose object would let a count that is not a number through.
+				expect(REPLIES.get.safeParse([{ ...read, count: "many" }]).success).toBe(false);
 				// The CLI uses this same validator before printing the proposal.
 				expect(await client.call("get", { refs: [result.proposal] })).toEqual(
 					z.array(z.record(z.string(), z.unknown())).parse(await checked("get", { refs: [result.proposal] })),
