@@ -248,7 +248,7 @@ before closing the database.
 
 Step timings go to stderr, for example `[mainworthy] demo "demo": delete results took 12.3 ms`. The log names
 the provenance check, grant capture, table discovery, every table count and delete, foreign-key check,
-recreation with grants, the reset transaction, and the seed. Migration 23 adds plain foreign-key child indexes
+recreation with grants, the reset transaction, and the seed. Migration 24 adds plain foreign-key child indexes
 so removing demo rows does not repeatedly scan unrelated projects. It changes no archive data or version.
 [Decision 0087](decisions/0087-responsive-demo-refresh.md) records the tradeoff.
 

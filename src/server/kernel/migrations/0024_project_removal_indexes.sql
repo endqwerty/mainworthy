@@ -18,6 +18,8 @@ CREATE INDEX quarantines_test_fk ON quarantines (test);
 CREATE INDEX questions_prior_fk ON questions (prior);
 CREATE INDEX result_excuses_slot_fk ON result_excuses (slot);
 CREATE INDEX result_excuses_result_fk ON result_excuses (result);
+CREATE INDEX results_quarantine_decision_fk ON results (quarantine_decision);
+CREATE INDEX results_quarantine_exit_fk ON results (quarantine_exit);
 CREATE INDEX results_corrects_fk ON results (corrects);
 CREATE INDEX results_signature_fk ON results (signature);
 CREATE INDEX results_test_fk ON results (test);

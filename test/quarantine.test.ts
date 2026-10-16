@@ -151,11 +151,24 @@ describe("quarantine", () => {
 			.query<{ detail: string }, []>(`EXPLAIN QUERY PLAN ${statement}`)
 			.all()
 			.map((row) => row.detail);
+		expect(plan[0]).toBe("SEARCH r USING INDEX results_test (project=? AND test=? AND seq>?)");
 		const initial = plan.indexOf("SEARCH initial USING COVERING INDEX targets_commit (project=? AND commit_sha=?)");
 		const first = plan.indexOf("SEARCH first USING INDEX results_target (target=? AND test=?)");
 		expect(initial).toBeGreaterThanOrEqual(0);
 		expect(first).toBeGreaterThan(initial);
 	});
+	test("the pass-exit plan looks up the recorded decision without scanning result history", () => {
+		const statement = declaredSql().find((text) =>
+			text.startsWith("SELECT id,seq,ord FROM results WHERE quarantine_exit="),
+		);
+		if (!statement) throw new Error("missing quarantine exit statement");
+		const plan = h.app.db.raw
+			.query<{ detail: string }, []>(`EXPLAIN QUERY PLAN ${statement}`)
+			.all()
+			.map((row) => row.detail);
+		expect(plan).toEqual(["SEARCH results USING INDEX results_quarantine_exit_fk (quarantine_exit=?)"]);
+	});
+
 	test("a person's decision excuses one test and makes quarantined failures explicit", () => {
 		report("aaaa0001");
 		expect(gate("aaaa0001").verdict).toBe("blocked");
