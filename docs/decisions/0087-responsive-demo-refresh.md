@@ -126,8 +126,10 @@ Dropping only the duplicates is smaller but does not meet the ingestion goal. Ke
 retains write and storage costs for a rare whole-project reset. A new public project-removal operation or
 committed deletion stages would add scope or expose a partly removed project. Keep one checked bulk
 transaction in the kernel so callers do not coordinate enforcement, rollback, and the final check themselves.
-Archive import already deletes children before parents and validates its full result; it shares this
-transaction rather than keeping removal-only indexes for import.
+Archive import already deletes children before parents and validates its full result. It calls the same checked
+transaction, but the server runs the import inside a savepoint, where SQLite cannot turn enforcement off: there it
+keeps per-row checking and gains only the final check. Measured on a 477,722-row archive, it is no slower than with
+the removal-only indexes, so import does not need them either.
 
 A graceful stop during seeding waits for the seed to finish and then revokes its token. During reset it
 still skips making that seed token. Both the deployment notes and the user guide now say this.
