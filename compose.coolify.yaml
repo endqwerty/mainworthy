@@ -39,9 +39,10 @@ services:
 
   # Until 2026-10-16 this deployment kept its data in the volume `casebook-data`, from when the project was called
   # Casebook. On the first start with this file the step copies it to `mainworthy-data`; Coolify has stopped the
-  # old container by then. It copies the database last, under a temporary name it then renames, so a copy that
-  # stopped half-way is made again, and once `mainworthy-data` holds a database it copies nothing.
-  # docs/deploy.md, "An instance made before the rename", says when to remove it.
+  # old container by then. `.carrying` marks a copy that has begun: while it is there, the next start empties
+  # `mainworthy-data` and copies again. A copy that fails stops the step, and the app does not start. Once the
+  # copy is whole, a start copies nothing. test/compose-coolify.test.ts runs this script; docs/deploy.md, "An
+  # instance made before the rename", says when to remove it.
   carry-data:
     image: busybox:1.37
     restart: "no"
@@ -53,11 +54,14 @@ services:
       - sh
       - -euc
       - |
-        if [ -e /to/mainworthy.db ]; then echo "carry-data: mainworthy-data holds a database, nothing to copy"; exit 0; fi
+        if [ -e /to/mainworthy.db ] && [ ! -e /to/.carrying ]; then echo "carry-data: mainworthy-data holds a database, nothing to copy"; exit 0; fi
         if [ ! -e /from/mainworthy.db ]; then echo "carry-data: casebook-data holds no database, nothing to copy"; exit 0; fi
-        find /from -mindepth 1 -maxdepth 1 ! -name mainworthy.db -exec cp -a {} /to/ \;
-        cp -a /from/mainworthy.db /to/.mainworthy.db.carry
-        mv /to/.mainworthy.db.carry /to/mainworthy.db
+        touch /to/.carrying
+        for f in /to/* /to/.[!.]* /to/..?*; do
+          if [ -e "$$f" ] && [ "$$f" != /to/.carrying ]; then rm -rf "$$f"; fi
+        done
+        cp -a /from/. /to/
+        rm /to/.carrying
         echo "carry-data: copied casebook-data to mainworthy-data"
 
   tailscale:

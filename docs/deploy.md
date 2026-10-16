@@ -417,13 +417,15 @@ The instance on Coolify kept its names from before the rename until 2026-10-16: 
 node `casebook`, the volume `casebook-data` and the Coolify variables `CASEBOOK_OWNER_TOKEN` and
 `CASEBOOK_OWNER`. `compose.coolify.yaml` now names all of them `mainworthy`, and the deploy that first runs it
 carries the data over by itself: Coolify stops the old container, the one-shot service `carry-data` copies
-`casebook-data` into `mainworthy-data` (the database last, so an interrupted copy is made again), and the app
-starts once it has finished. A later start finds a database in `mainworthy-data` and copies nothing. Before
-that deploy, three things were changed in Coolify (on 2026-10-16), the first two because the file needs them:
+`casebook-data` into `mainworthy-data`, and the app starts once it has finished. A copy that is interrupted is
+made again from an empty volume at the next start; a copy that fails stops the deploy, and the app does not
+start until somebody looks. A later start finds a whole copy and copies nothing. Before that deploy, four things
+were changed in Coolify (on 2026-10-16), the first three because the file needs them:
 
 - the variables `MAINWORTHY_OWNER_TOKEN` and `MAINWORTHY_OWNER`, with the values of the old ones;
 - the domain `https://mainworthy.com` on the service `mainworthy` as well as on `casebook` (Coolify keys a
   domain by the service's name; without it the public address would lose its route);
+- the variable `TS_HOSTNAME`, which held `casebook`, was emptied, so the file's default names the node;
 - the Coolify project and application were renamed `mainworthy`.
 
 After that deploy has run and `https://mainworthy.com` answers with the data, delete the old variables and the
