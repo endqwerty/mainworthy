@@ -9,7 +9,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** The oldest Bun the project runs on. AGENTS.md says the same, and the workflow and the Dockerfile install it. */
+/** The oldest Bun the project runs on. AGENTS.md names it, and the workflow and the Dockerfile install it. */
 export const OLDEST_BUN = "1.4.0";
 
 const dependencies = (root: string): string[] => {

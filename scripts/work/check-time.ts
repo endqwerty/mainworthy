@@ -4,7 +4,7 @@
 // two trees: a rebase that left the tree as it was verified needs no round at all.
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { isTestWorker, outsideLineage, processTable } from "./processes.ts";
+import { otherTestRuns } from "./processes.ts";
 import { read, run } from "./run.ts";
 import { make, remove } from "./scratch.ts";
 
@@ -12,9 +12,6 @@ export const sameTree = async (a: string, b: string, repo?: string): Promise<boo
 	const tree = (rev: string): Promise<string> => read(["git", "rev-parse", `${rev}^{tree}`], repo ? { cwd: repo } : {});
 	return (await tree(a)) === (await tree(b));
 };
-
-const otherTestsRun = async (): Promise<boolean> =>
-	outsideLineage(await processTable(), process.pid).some((proc) => isTestWorker(proc.command));
 
 /** The seconds the check reports for its tests (or, with no separate tests line, in all). */
 export function checkSeconds(output: string): number | null {
@@ -86,7 +83,7 @@ export async function compare(
 ): Promise<string> {
 	if (await sameTree(base, head, options.repo))
 		return `${base} and ${head} have the same tree: nothing to time, and a verdict on one holds for the other.`;
-	if (await (options.busy ?? otherTestsRun)())
+	if (await (options.busy ?? otherTestRuns)())
 		throw new Error(
 			"another test run is going, and a time taken beside it says nothing. Wait with `bun scripts/work.ts wait-tests`.",
 		);

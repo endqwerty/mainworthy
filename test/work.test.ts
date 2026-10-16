@@ -20,8 +20,10 @@ import {
 	within,
 } from "../scripts/work/processes.ts";
 import { closing, type Facts, problems } from "../scripts/work/pull-request.ts";
+import { RELEASED, release } from "../scripts/work/release.ts";
 import { run } from "../scripts/work/run.ts";
 import { MARKER, make, refusal, remove } from "../scripts/work/scratch.ts";
+import { syncBranch } from "../scripts/work/sync-branch.ts";
 
 const made: string[] = [];
 const directory = (): string => {
@@ -275,4 +277,68 @@ test("a revision with the tree that was verified needs no timing; two that diffe
 	await expect(compare("HEAD~1", "HEAD", { ...options, busy: async () => true }, () => {})).rejects.toThrow(
 		"another test run",
 	);
+});
+
+test("release gives the disk back, and refuses while a server or a test run works from the checkout", async () => {
+	const root = directory();
+	for (const name of RELEASED) mkdirSync(join(root, name, "inner"), { recursive: true });
+	mkdirSync(join(root, "src"));
+	const server = decoy(root, ["src/cli/main.ts", "serve"], root);
+	await Bun.sleep(300);
+	// 2026-10-12: two children released the worktree under a lead and a builder that were still running.
+	await expect(release(root)).rejects.toThrow(`pid ${server.pid}`);
+	expect(existsSync(join(root, "node_modules", "inner"))).toBe(true);
+	server.kill();
+	await Bun.sleep(300);
+	expect(await release(root)).toContain("released node_modules");
+	expect(RELEASED.filter((name) => existsSync(join(root, name)))).toEqual([]);
+	expect(existsSync(join(root, "src"))).toBe(true);
+});
+
+async function clonePair(): Promise<{
+	origin: string;
+	clone: string;
+	git: (cwd: string, ...args: string[]) => Promise<string>;
+}> {
+	const origin = directory();
+	const clone = directory();
+	const git = async (cwd: string, ...args: string[]): Promise<string> => {
+		const done = await run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", ...args], { cwd });
+		if (done.status !== 0) throw new Error(`git ${args.join(" ")}: ${done.err}`);
+		return done.out.trim();
+	};
+	await git(origin, "init", "-q", "--bare", "-b", "main");
+	await git(clone, "clone", "-q", origin, ".");
+	writeFileSync(join(clone, "a.txt"), "base\n");
+	await git(clone, "add", ".");
+	await git(clone, "commit", "-q", "-m", "base");
+	await git(clone, "push", "-q", "origin", "main");
+	await git(clone, "checkout", "-q", "-b", "t3/thread");
+	return { origin, clone, git };
+}
+
+test("sync-branch moves a branch whose commits were merged by rebase, and refuses one with work that was not", async () => {
+	const { clone, git } = await clonePair();
+	writeFileSync(join(clone, "b.txt"), "change\n");
+	await git(clone, "add", ".");
+	await git(clone, "commit", "-q", "-m", "the thread's change");
+	await git(clone, "push", "-q", "origin", "t3/thread");
+	// Not merged yet: a reset would lose the commit.
+	const mine = await git(clone, "rev-parse", "HEAD");
+	await expect(syncBranch(clone)).rejects.toThrow("1 commit(s) of t3/thread are not on origin/main");
+	expect(await git(clone, "rev-parse", "HEAD")).toBe(mine);
+	// The owner merges by rebase: main gets the same change under another id.
+	await git(clone, "checkout", "-q", "main");
+	await git(clone, "cherry-pick", mine);
+	await git(clone, "commit", "-q", "--amend", "-m", "the thread's change, rebased");
+	await git(clone, "push", "-q", "origin", "main");
+	await git(clone, "checkout", "-q", "t3/thread");
+	writeFileSync(join(clone, "dirty.txt"), "not committed\n");
+	await expect(syncBranch(clone)).rejects.toThrow("uncommitted changes");
+	rmSync(join(clone, "dirty.txt"));
+	expect(await syncBranch(clone)).toBe("t3/thread is at origin/main and pushed");
+	expect(await git(clone, "rev-list", "--count", "origin/main..HEAD")).toBe("0");
+	expect(await git(clone, "rev-parse", "HEAD")).toBe(await git(clone, "rev-parse", "origin/main"));
+	await git(clone, "checkout", "-q", "main");
+	await expect(syncBranch(clone)).rejects.toThrow("main is not a thread's branch");
 });
