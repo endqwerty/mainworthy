@@ -67,10 +67,15 @@ struct SuiteEditorView: View {
 					}
 					.disabled(editor.busy).accessibilityIdentifier("editor-cancel")
 				}
-				ToolbarItemGroup(placement: .confirmationAction) {
-					if !editor.locked { EditButton().accessibilityIdentifier("editor-reorder") }
-					if !editor.settled {
+				// Saving commits the edit and is the prominent action; reordering the steps is a plain one beside it.
+				if !editor.locked {
+					ToolbarItem(placement: .topBarTrailing) { EditButton().accessibilityIdentifier("editor-reorder") }
+					ToolbarSpacer(.fixed, placement: .topBarTrailing)
+				}
+				if !editor.settled {
+					ToolbarItem(placement: .confirmationAction) {
 						Button(editor.isRetrying ? "Retry" : editor.conflict != nil ? "Record merge" : "Save") { Task { await screen.saveEditor() } }
+							.buttonStyle(.glassProminent)
 							.disabled(!editor.maySave).accessibilityIdentifier("editor-save")
 					}
 				}

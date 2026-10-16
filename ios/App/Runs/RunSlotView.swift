@@ -46,7 +46,8 @@ struct RunSlotView: View {
 								} label: {
 									Text(outcome.label).font(.headline).frame(maxWidth: .infinity, minHeight: 48)
 								}
-								.buttonStyle(.glassProminent).tint(tint(outcome)).disabled(screen.busy)
+								// The panel is glass; its buttons are not, so there is one layer of it.
+								.buttonStyle(.borderedProminent).tint(tint(outcome)).disabled(screen.busy)
 								.accessibilityIdentifier("record-\(outcome.rawValue)")
 							}
 						}
