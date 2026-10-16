@@ -25,7 +25,7 @@ public final class OpenRunScreen: ProjectScreen {
 	public var failedStep: String? { draftSlot.flatMap { drafts[$0]?.failedStep } }
 	public private(set) var permission: Project
 	private let project: ProjectClient
-	private let person: String
+	private var person: String
 	private var reads = 0
 	private var acceptedRead = 0
 	private var latestRead: Task<Bool, Never>?
@@ -71,7 +71,10 @@ public final class OpenRunScreen: ProjectScreen {
 		self.person = person
 	}
 
-	package func updatePermission(_ permission: Project) { self.permission = permission }
+	package func updateSignedIn(_ permission: Project, as person: String) {
+		self.permission = permission
+		self.person = person
+	}
 	package func planned(_ sentence: String) { notice = sentence }
 	public var firstUnfilled: RunSlot? { slots.first { $0.fills.isEmpty && $0.caseRef != nil } }
 	public var isReadOnly: Bool { !permission.may(.produce) }
