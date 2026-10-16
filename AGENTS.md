@@ -80,7 +80,7 @@ issue and GitHub's workflows move both. A task the owner gave in a thread needs 
   Progress by hand and read the links again when the pull request below has merged.
 - **Stopping without finishing.** `board todo <number>` and say on the issue what is left (also for a pull request
   closed unmerged).
-- **After the merge** both cards are Done; close a still-open issue with a comment linking the pull request.
+- **After the merge** both cards are Done; close a still-open issue with a comment linking the pull request. A problem found on the way gets its own issue.
 - **Only the owner** changes the board's workflows (in the browser), a renamed or added milestone (the view's filter,
   `docs/roadmap.md` and #64 together), and approves `gh auth refresh -h github.com -s project` (the `project` scope).
 
