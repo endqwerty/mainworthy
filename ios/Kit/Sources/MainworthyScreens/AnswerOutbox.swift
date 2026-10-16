@@ -35,8 +35,11 @@ public final class AnswerOutbox {
 		public var members: [SavedQuestion] {
 			answer.members.map { SavedQuestion(question: $0.question, title: $0.title, outcome: outcomes?[$0.question]) }
 		}
-		/// What became of an answer to one question. For several, each member says.
-		public var outcome: AnswerOutcome? { answer.members.count == 1 ? outcomes?[question] : nil }
+		/// Whether the server's reply to the whole command was read: each question has its outcome.
+		public var finished: Bool { outcomes != nil }
+		/// What became of an answer to one question, for tests. A screen asks `finished`, or each member: this is
+		/// nil for an answer to several questions, finished or not (the verifier's finding of 2026-10-16).
+		package var outcome: AnswerOutcome? { answer.members.count == 1 ? outcomes?[question] : nil }
 		public var waiting: Bool { outcomes == nil && delivery != .dropped }
 		public var dropped: Bool { outcomes == nil && delivery == .dropped }
 
