@@ -754,6 +754,26 @@ describe("a proposal that waits while its case moves on", () => {
 		expect(accept(waiting.question)).toMatchObject({ status: "conflict", needs: refusal });
 	});
 
+	test("says that accepting is refused when the body no longer meets the policy's field definitions", () => {
+		const setFields = (choices: string[]) => {
+			const policy = h.call<{ version: number; settings: Record<string, unknown> }>("admin", {
+				do: "policy.show",
+				project: "scratch",
+			});
+			const fields = { risk: { kind: "choice", label: "Risk", required: false, choices } };
+			const reply = h.call<Proposed>("propose", {
+				edits: [{ op: "policy", base: policy.version, settings: { ...policy.settings, fields } }],
+			});
+			if (reply.question) expect(accept(reply.question)?.status).toBe("decided");
+		};
+		setFields(["low", "high"]);
+		const waiting = proposeAsAgent({ fields: { risk: "high" } });
+		setFields(["low"]);
+		const refusal = read(waiting.proposal)?.refused;
+		expect(refusal).toStartWith("case custom fields are not valid:");
+		expect(accept(waiting.question)).toMatchObject({ status: "invalid", needs: refusal });
+	});
+
 	test("once decided, reads as it was proposed: a later version adds nothing to it and refuses nothing", () => {
 		const waiting = proposeAsAgent({ title: "Retitled by the agent" });
 		expect(accept(waiting.question)?.status).toBe("decided");

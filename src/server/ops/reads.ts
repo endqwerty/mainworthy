@@ -103,6 +103,7 @@ import {
 } from "../suite/read.ts";
 import {
 	adoption,
+	adoptionPolicy,
 	bodyOf,
 	type CaseRow,
 	caseById,
@@ -286,59 +287,59 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 	const waiting = openQuestionsOn(ctx.db, proposal.project, `P-${proposal.no}`).some(
 		(question) => question.kind === "adopt",
 	);
-	const edits = resolvedOf(proposal)
-		.slice(0, 200)
-		.map((edit) => {
-			switch (edit.op) {
-				case "create":
-					return {
-						op: edit.op,
-						body: edit.body,
-						folder: "id" in edit.folder ? index.path(edit.folder.id) : edit.folder.path,
-						tags: edit.tags,
-						covers: edit.covers,
-					};
-				case "edit": {
-					const row = caseById(ctx.db, edit.caseId);
-					// While it waits, what accepting does now: once the case has moved on, that is not what was proposed.
-					const now = row && waiting ? adoption(ctx.db, row, edit) : null;
-					return {
-						op: edit.op,
-						case: refOf(edit.caseId),
-						base: edit.base,
-						head: row?.head ?? edit.head,
-						body: now?.body ?? edit.body,
-						mine: edit.mine,
-						current: row ? bodyOf(ctx.db, row.id, row.head) : null,
-						conflicts: edit.conflicts,
-						refused: now?.refused?.message ?? null,
-					};
-				}
-				case "restore":
-					return { op: edit.op, case: refOf(edit.caseId), to: edit.to, body: edit.body };
-				case "place":
-					return {
-						op: edit.op,
-						cases: edit.caseIds.map(refOf),
-						folder: edit.folder ? ("id" in edit.folder ? index.path(edit.folder.id) : edit.folder.path) : null,
-						tags: edit.tags,
-					};
-				case "state":
-					return { op: edit.op, cases: edit.caseIds.map(refOf), to: edit.to };
-				case "cover":
-					return { op: edit.op, case: refOf(edit.caseId), requirement: edit.key, on: edit.on };
-				case "folder":
-					return { op: edit.op, name: edit.name, archive: edit.archive };
-				case "policy":
-					return { op: edit.op, preset: edit.policy.preset, clauses: edit.policy.clauses.length };
-				case "quarantine":
-					return edit;
-				default: {
-					const _exhaustive: never = edit;
-					return _exhaustive;
-				}
+	const resolved = resolvedOf(proposal);
+	const policy = waiting ? adoptionPolicy(ctx.db, proposal.project, resolved) : null;
+	const edits = resolved.slice(0, 200).map((edit) => {
+		switch (edit.op) {
+			case "create":
+				return {
+					op: edit.op,
+					body: edit.body,
+					folder: "id" in edit.folder ? index.path(edit.folder.id) : edit.folder.path,
+					tags: edit.tags,
+					covers: edit.covers,
+				};
+			case "edit": {
+				const row = caseById(ctx.db, edit.caseId);
+				// While it waits, what accepting does now: once the case has moved on, that is not what was proposed.
+				const now = row && policy ? adoption(ctx.db, row, edit, policy) : null;
+				return {
+					op: edit.op,
+					case: refOf(edit.caseId),
+					base: edit.base,
+					head: row?.head ?? edit.head,
+					body: now?.body ?? edit.body,
+					mine: edit.mine,
+					current: row ? bodyOf(ctx.db, row.id, row.head) : null,
+					conflicts: edit.conflicts,
+					refused: now?.refused?.message ?? null,
+				};
 			}
-		});
+			case "restore":
+				return { op: edit.op, case: refOf(edit.caseId), to: edit.to, body: edit.body };
+			case "place":
+				return {
+					op: edit.op,
+					cases: edit.caseIds.map(refOf),
+					folder: edit.folder ? ("id" in edit.folder ? index.path(edit.folder.id) : edit.folder.path) : null,
+					tags: edit.tags,
+				};
+			case "state":
+				return { op: edit.op, cases: edit.caseIds.map(refOf), to: edit.to };
+			case "cover":
+				return { op: edit.op, case: refOf(edit.caseId), requirement: edit.key, on: edit.on };
+			case "folder":
+				return { op: edit.op, name: edit.name, archive: edit.archive };
+			case "policy":
+				return { op: edit.op, preset: edit.policy.preset, clauses: edit.policy.clauses.length };
+			case "quarantine":
+				return edit;
+			default: {
+				const _exhaustive: never = edit;
+				return _exhaustive;
+			}
+		}
+	});
 	const label = who(ctx, proposal.author);
 	return {
 		ref: `P-${proposal.no}`,
