@@ -13,12 +13,13 @@ could expire before the seed began.
 
 Add migration 24 with plain leading-column indexes for every foreign key into a table `removeProject` deletes.
 The schema audit includes self references and columns whose existing partial indexes serve some queries.
-The migration changes indexes only, so `archive` is false.
+The migration adds 36 indexes, including the two observation decision refs added by migration 23.
+It changes indexes only, so `archive` is false and the archive version stays 23.
 
-The 34 indexes cost storage and maintenance on writes. In the reviewer's two-demo fixture with about
-195,000 results, they added 15.0 MB, about 25% of the compacted database. That is a fixture measurement,
-not a prediction for every instance. Keep the quarantine history query's commit-target lookup first with
-`CROSS JOIN`, so the new test index cannot make each result scan all earlier results of that test.
+The indexes cost storage and maintenance on writes. In the reviewer's two-demo fixture with about
+195,000 results, the original 34 indexes added 15.0 MB, about 25% of the compacted database. That measurement
+excludes the two observation indexes added after migration 23 and is not a prediction for every instance.
+Keep the quarantine history query's commit-target lookup first with `CROSS JOIN`, so the new test index cannot make each result scan all earlier results of that test.
 
 Run provenance checks and the reset on a dedicated worker connection while the parent holds its write gate.
 Keep removal, recreation, the demo mark, and retained grants in one transaction, using `savepointSteps` to
