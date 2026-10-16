@@ -221,3 +221,5 @@ storage and any cache pass the same job suite.
   decision are in; change it here and say why.
 - User-visible changes go in `CHANGELOG.md`; design decisions in
   `docs/decisions/`.
+
+<!-- A probe of the CI scope (pull request 358); this pull request is closed without merging. -->
