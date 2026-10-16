@@ -100,6 +100,27 @@ struct ValueTests {
 			.added(remove),
 			.removed(reload),
 		])
+		#expect(edit.summary == "Changes the title, the preconditions and 1 step, adds 1 step, removes 1 step.")
+	}
+
+	@Test("an edit says in a sentence what it does to the case, and a new case says nothing")
+	func editSummary() {
+		let open = Step(id: "a1", action: "Open the cart", expected: nil)
+		let remove = Step(id: "d4", action: "Remove the coupon", expected: "Total returns to $100.00")
+		let added = EditedCase(
+			id: 0, caseRef: "C-1", before: CaseContent(title: "T", steps: [open]),
+			after: CaseContent(title: "T", steps: [open, remove])
+		)
+		#expect(added.summary == "Adds 1 step.")
+		let automated = EditedCase(
+			id: 0, caseRef: "C-1", before: CaseContent(title: "T", steps: [open, remove]),
+			after: CaseContent(title: "T", steps: [], automate: "wanted")
+		)
+		#expect(automated.summary == "Changes the automation, removes 2 steps.")
+		let same = EditedCase(id: 0, caseRef: "C-1", before: CaseContent(title: "T"), after: CaseContent(title: "T"))
+		#expect(same.summary == "Changes nothing.")
+		let created = EditedCase(id: 0, caseRef: nil, before: nil, after: CaseContent(title: "New", steps: [open]))
+		#expect(created.summary == nil)
 	}
 
 	@Test("a removed step is shown where it stood, and a new case is all additions")

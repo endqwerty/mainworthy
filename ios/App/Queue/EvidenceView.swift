@@ -159,14 +159,21 @@ private struct ProposalEvidence: View {
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 12) {
-			Panel("Proposed edit") {
-				Text("\(edit.author) proposes \(edit.proposal)").font(.subheadline.weight(.medium))
-				if let reason = edit.reason { Text(reason).textSelection(.enabled) }
-				ForEach(Array(edit.summaries.enumerated()), id: \.offset) { _, line in
-					Text(line).font(.subheadline).foregroundStyle(.secondary)
-				}
-				if edit.count > edit.summaries.count {
-					Text("and \(edit.count - edit.summaries.count) more").font(.footnote).foregroundStyle(.secondary)
+			Panel("Why") {
+				Text(edit.reason ?? "No reason was given.")
+					.foregroundStyle(edit.reason == nil ? .secondary : .primary)
+					.textSelection(.enabled)
+				Text("Proposed by \(edit.author)").font(.footnote).foregroundStyle(.secondary)
+			}
+			// A proposal shown whole says all of this in its cases below. One that is not is listed in short.
+			if !edit.isShownWhole {
+				Panel("What it does") {
+					ForEach(Array(edit.summaries.enumerated()), id: \.offset) { _, line in
+						Text(line).font(.subheadline)
+					}
+					if edit.count > edit.summaries.count {
+						Text("and \(edit.count - edit.summaries.count) more").font(.footnote).foregroundStyle(.secondary)
+					}
 				}
 			}
 			ForEach(edit.conflicts, id: \.caseRef) { conflict in
@@ -207,73 +214,234 @@ private struct ProposalEvidence: View {
 	}
 }
 
-/// A case as an edit would leave it, with what changes marked.
+/// One case of a proposal. An edit to a case that exists can be read three ways: what it changes, the case as
+/// it is, and the case as accepting would leave it. A new case is read as it would be.
 private struct EditedCaseView: View {
 	let document: EditedCase
+	@State private var side = Side.changes
+
+	private enum Side: Hashable {
+		case changes, current, proposed
+	}
 
 	var body: some View {
-		Panel(document.caseRef ?? "New case") {
-			if !document.changes.contains(where: { if case .title = $0 { true } else { false } }) {
-				Text(document.after.title).font(.body.weight(.medium))
-			}
-			ForEach(Array(document.changes.enumerated()), id: \.offset) { _, change in
-				switch change {
-				case .title(let from, let to):
-					if let from { line(from, mark: "−", tint: .fail, struck: true) }
-					line(to, mark: "+", tint: .pass).fontWeight(.medium)
-				case .pre(let from, let to):
-					if !from.isEmpty { line("Before: \(from)", mark: "−", tint: .fail, struck: true) }
-					if !to.isEmpty { line("Before: \(to)", mark: "+", tint: .pass) }
-				case .placed(let placement):
-					line("In \(placement.folder.isEmpty ? "no folder" : placement.folder)", mark: "+", tint: .pass)
-					if !placement.tags.isEmpty {
-						line("Tags: \(placement.tags.joined(separator: ", "))", mark: "+", tint: .pass)
-					}
-					if !placement.covers.isEmpty {
-						line("Covers: \(placement.covers.joined(separator: ", "))", mark: "+", tint: .pass)
-					}
-				case .methods(let from, let to):
-					if !from.isEmpty { line("Run by: \(from.joined(separator: ", "))", mark: "−", tint: .fail, struck: true) }
-					line("Run by: \(to.joined(separator: ", "))", mark: "+", tint: .pass)
-				case .automate(let from, let to):
-					if !from.isEmpty { line("Automation: \(from)", mark: "−", tint: .fail, struck: true) }
-					line("Automation: \(to)", mark: "+", tint: .pass)
-				case .fields(let from, let to):
-					if !from.isEmpty { line("Fields: \(fields(from))", mark: "−", tint: .fail, struck: true) }
-					line("Fields: \(fields(to))", mark: "+", tint: .pass)
-				case .kept(let step):
-					line(text(step), mark: " ", tint: .secondary)
-				case .added(let step):
-					line(text(step), mark: "+", tint: .pass)
-				case .removed(let step):
-					line(text(step), mark: "−", tint: .fail, struck: true)
-				case .changed(let from, let to):
-					line(text(from), mark: "−", tint: .fail, struck: true)
-					line(text(to), mark: "+", tint: .pass)
+		if let before = document.before, let ref = document.caseRef {
+			Panel {
+				HStack(spacing: 6) {
+					Tag(text: "Edit", tint: .accentColor)
+					RefText(ref)
+				}
+				Text(before.title).font(.headline)
+				if let summary = document.summary {
+					Text(summary).font(.subheadline).accessibilityIdentifier("edit-summary")
+				}
+				Picker("Show", selection: $side) {
+					Text("Changes").tag(Side.changes)
+					Text("Current").tag(Side.current)
+					Text("Proposed").tag(Side.proposed)
+				}
+				.pickerStyle(.segmented)
+				.padding(.top, 4)
+				.accessibilityIdentifier("edit-side")
+				Text(caption(ref))
+					.font(.footnote)
+					.foregroundStyle(.secondary)
+				Divider()
+				switch side {
+				case .changes: changes(before)
+				case .current: CaseContentView(content: before)
+				case .proposed: CaseContentView(content: document.after)
 				}
 			}
+		} else {
+			Panel {
+				Tag(text: "New case", tint: .pass)
+				CaseContentView(content: document.after, placement: document.placement)
+			}
 		}
 	}
 
-	private func fields(_ fields: [String: String]) -> String {
-		fields.isEmpty ? "none" : fields.sorted { $0.key < $1.key }.map { "\($0.key) = \($0.value)" }.joined(separator: ", ")
-	}
-
-	private func text(_ step: Step) -> String {
-		step.expected.map { "\(step.action)\n> \($0)" } ?? step.action
-	}
-
-	private func line(_ text: String, mark: String, tint: Color, struck: Bool = false) -> some View {
-		HStack(alignment: .firstTextBaseline, spacing: 8) {
-			Text(mark).font(.callout.monospaced()).foregroundStyle(tint)
-			Text(text)
-				.font(.callout)
-				.strikethrough(struck)
-				.foregroundStyle(mark == " " ? Color.primary : tint)
-				.frame(maxWidth: .infinity, alignment: .leading)
+	private func caption(_ ref: String) -> String {
+		switch side {
+		case .changes: "The steps as accepting would leave them, with what changes marked. Unmarked steps stay as they are."
+		case .current: "\(ref) as it is now. Rejecting leaves it so."
+		case .proposed: "\(ref) as accepting would leave it."
 		}
-		.accessibilityElement(children: .ignore)
-		.accessibilityLabel("\(mark == "+" ? "Added" : mark == "−" ? "Removed" : "Unchanged"): \(text)")
+	}
+
+	@ViewBuilder private func changes(_ before: CaseContent) -> some View {
+		ForEach(Array(document.changes.enumerated()), id: \.offset) { _, change in
+			switch change {
+			case .title(let from, let to): ChangedPart(name: "Title", from: from, to: to)
+			case .pre(let from, let to): ChangedPart(name: "Preconditions", from: from, to: to)
+			case .methods(let from, let to): ChangedPart(name: "Who may run it", from: methods(from), to: methods(to))
+			case .automate(let from, let to): ChangedPart(name: "Automation", from: from, to: to)
+			case .fields(let from, let to):
+				ForEach(Set(from.keys).union(to.keys).filter { from[$0] != to[$0] }.sorted(), id: \.self) { key in
+					ChangedPart(name: key, from: from[key], to: to[key])
+				}
+			// Only a new case is placed, and a new case is not shown as changes.
+			case .placed: EmptyView()
+			case .kept(let step): StepRow(number: number(step, in: document.after), step: step, mark: nil)
+			case .added(let step): StepRow(number: number(step, in: document.after), step: step, mark: .added)
+			case .removed(let step): StepRow(number: number(step, in: before), step: step, mark: .removed)
+			case .changed(let from, let to):
+				StepRow(number: number(to, in: document.after), step: to, mark: .changed(from: from))
+			}
+		}
+	}
+
+	private func number(_ step: Step, in content: CaseContent) -> Int {
+		(content.steps.firstIndex { $0.id == step.id } ?? 0) + 1
+	}
+
+	private func methods(_ methods: [String]) -> String {
+		methods.isEmpty ? "nobody" : methods.map { CaseMethod(rawValue: $0)?.label ?? $0 }.joined(separator: ", ")
+	}
+}
+
+/// A part of a case other than a step that an edit changes: what it is now, and what it would be.
+private struct ChangedPart: View {
+	let name: String
+	let from: String?
+	let to: String?
+
+	var body: some View {
+		VStack(alignment: .leading, spacing: 4) {
+			Text(name).font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+			ChangeSide(label: "Current", tint: .fail) { Text(said(from)).strikethrough() }
+			ChangeSide(label: "Proposed", tint: .pass) { Text(said(to)) }
+		}
+		.padding(.vertical, 4)
+	}
+
+	private func said(_ value: String?) -> String {
+		guard let value, !value.isEmpty else { return "none" }
+		return value
+	}
+}
+
+/// One step in the list of changes, by the number it has in the case it is shown in.
+private struct StepRow: View {
+	let number: Int
+	let step: Step
+	let mark: Mark?
+
+	enum Mark {
+		case added, removed
+		case changed(from: Step)
+	}
+
+	var body: some View {
+		HStack(alignment: .firstTextBaseline, spacing: 10) {
+			Text("\(number)")
+				.font(.subheadline.weight(.semibold).monospacedDigit())
+				.foregroundStyle(tint ?? .secondary)
+				.frame(minWidth: 20, alignment: .trailing)
+			VStack(alignment: .leading, spacing: 6) {
+				switch mark {
+				case nil:
+					StepText(step: step)
+				case .added:
+					Tag(text: "Added", tint: .pass)
+					StepText(step: step).foregroundStyle(Color.pass)
+				case .removed:
+					Tag(text: "Removed", tint: .fail)
+					StepText(step: step, struck: true).foregroundStyle(Color.fail)
+				case .changed(let from):
+					Tag(text: "Changed", tint: .warn)
+					ChangeSide(label: "Current", tint: .fail) { StepText(step: from, struck: true) }
+					ChangeSide(label: "Proposed", tint: .pass) { StepText(step: step) }
+				}
+			}
+			.frame(maxWidth: .infinity, alignment: .leading)
+		}
+		.padding(8)
+		.background((tint ?? .clear).opacity(0.08), in: .rect(cornerRadius: 8))
+		.accessibilityIdentifier("edit-step-\(number)")
+	}
+
+	private var tint: Color? {
+		switch mark {
+		case nil: nil
+		case .added: .pass
+		case .removed: .fail
+		case .changed: .warn
+		}
+	}
+}
+
+/// One side of a change, said in words: "Current" or "Proposed".
+private struct ChangeSide<Content: View>: View {
+	let label: String
+	let tint: Color
+	@ViewBuilder let content: Content
+
+	var body: some View {
+		VStack(alignment: .leading, spacing: 2) {
+			Text(label).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+			content.foregroundStyle(tint)
+		}
+	}
+}
+
+/// A step's action, and under it what must be true afterwards.
+private struct StepText: View {
+	let step: Step
+	var struck = false
+
+	var body: some View {
+		VStack(alignment: .leading, spacing: 2) {
+			Text(step.action).strikethrough(struck)
+			if let expected = step.expected {
+				Text("Expected: \(expected)").font(.subheadline).strikethrough(struck).opacity(0.85)
+			}
+		}
+	}
+}
+
+/// A case read whole: its title, preconditions, numbered steps, who may run it, and where a new one goes.
+private struct CaseContentView: View {
+	let content: CaseContent
+	var placement: EditedCase.Placement?
+
+	var body: some View {
+		VStack(alignment: .leading, spacing: 12) {
+			Text(content.title).font(.body.weight(.semibold))
+			if !content.pre.isEmpty { part("Preconditions") { Text(content.pre) } }
+			part("Steps") {
+				if content.steps.isEmpty { Text("No steps").foregroundStyle(.secondary) }
+				ForEach(Array(content.steps.enumerated()), id: \.element.id) { index, step in
+					HStack(alignment: .firstTextBaseline, spacing: 10) {
+						Text("\(index + 1)")
+							.font(.subheadline.weight(.semibold).monospacedDigit())
+							.foregroundStyle(.secondary)
+							.frame(minWidth: 20, alignment: .trailing)
+						StepText(step: step)
+					}
+				}
+			}
+			part("Who may run it") { MethodBadges(methods: content.methods) }
+			if content.automate != "none" { part("Automation") { Text(content.automate) } }
+			if !content.fields.isEmpty {
+				part("Fields") {
+					ForEach(content.fields.sorted { $0.key < $1.key }, id: \.key) { key, value in Text("\(key): \(value)") }
+				}
+			}
+			if let placement {
+				part("Folder") { Text(placement.folder.isEmpty ? "No folder" : placement.folder) }
+				if !placement.tags.isEmpty { part("Tags") { Text(placement.tags.joined(separator: ", ")) } }
+				if !placement.covers.isEmpty { part("Covers") { Text(placement.covers.joined(separator: ", ")) } }
+			}
+		}
+		.textSelection(.enabled)
+	}
+
+	private func part(_ name: String, @ViewBuilder content: () -> some View) -> some View {
+		VStack(alignment: .leading, spacing: 4) {
+			Text(name).font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+			content()
+		}
 	}
 }
 
