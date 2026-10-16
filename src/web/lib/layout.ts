@@ -23,3 +23,5 @@ function subscribe(listener: () => void): () => void {
 export function usePhone(): boolean {
 	return useSyncExternalStore(subscribe, () => media.matches);
 }
+
+// A probe of the CI scope (pull request 358); this pull request is closed without merging.
