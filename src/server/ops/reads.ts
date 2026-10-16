@@ -101,6 +101,7 @@ import {
 	versionList,
 } from "../suite/read.ts";
 import {
+	adoptedBody,
 	bodyOf,
 	type CaseRow,
 	caseById,
@@ -294,15 +295,17 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 					};
 				case "edit": {
 					const row = caseById(ctx.db, edit.caseId);
+					// What accepting writes now, which differs from what was proposed once the case has moved on.
+					const adopted = row && edit.conflicts.length === 0 ? adoptedBody(ctx.db, row, edit) : null;
 					return {
 						op: edit.op,
 						case: refOf(edit.caseId),
 						base: edit.base,
 						head: row?.head ?? edit.head,
-						body: edit.body,
+						body: adopted?.body ?? edit.body,
 						mine: edit.mine,
 						current: row ? bodyOf(ctx.db, row.id, row.head) : null,
-						conflicts: edit.conflicts,
+						conflicts: adopted?.conflicts ?? edit.conflicts,
 					};
 				}
 				case "restore":

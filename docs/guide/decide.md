@@ -205,10 +205,12 @@ See [answer during a network drop](./iphone.md#answer-during-a-network-drop).
 
 An adoption question asks whether a proposed edit becomes current.
 Read the proposed changes beside the existing case.
+If the case changed after the edit was proposed, the proposed changes include that newer change, as accepting keeps it.
 "Accept" makes the proposal current. "Reject" leaves the case as it is and keeps
 the proposal in history. These choices do not by themselves excuse a test failure.
 
 An edit conflict needs a merged body, rather than a plain acceptance.
+If someone later changes a field that a waiting edit changes too, the queue names that field and accepting is refused.
 Resolve it in the case's conflict card. See [write cases](./write-cases.md#resolve-simultaneous-edits).
 The merged body is another proposal and still follows the adoption policy.
 

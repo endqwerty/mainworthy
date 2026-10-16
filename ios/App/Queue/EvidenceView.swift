@@ -176,7 +176,8 @@ private struct ProposalEvidence: View {
 					}
 				}
 			}
-			ForEach(edit.conflicts, id: \.caseRef) { conflict in
+			// Once the cases are read, each says its own conflicts, as they are now.
+			ForEach(isRead ? [] : edit.conflicts, id: \.caseRef) { conflict in
 				Label(
 					"\(conflict.caseRef) changed since this edit was made: \(conflict.fields.joined(separator: ", ")). Its author resolves it in the web app.",
 					systemImage: "exclamationmark.triangle"
@@ -212,6 +213,10 @@ private struct ProposalEvidence: View {
 		// Read again when the question's evidence changes: the edit's case may be another one by then.
 		.task(id: question) { await screen.readDocuments(of: question) }
 	}
+
+	private var isRead: Bool {
+		if case .read = screen.documents(of: question) { true } else { false }
+	}
 }
 
 /// One case of a proposal. An edit to a case that exists can be read three ways: what it changes, the case as
@@ -243,6 +248,15 @@ private struct EditedCaseView: View {
 				.pickerStyle(.segmented)
 				.padding(.top, 4)
 				.accessibilityIdentifier("edit-side")
+				if !document.conflicts.isEmpty {
+					Label(
+						"\(ref) changed since this edit was made, in the same \(document.conflicts.count == 1 ? "field" : "fields") as the edit: \(document.conflicts.joined(separator: ", ")). Accepting is refused until its author resolves that in the web app.",
+						systemImage: "exclamationmark.triangle"
+					)
+					.font(.subheadline)
+					.foregroundStyle(Color.warn)
+					.accessibilityIdentifier("edit-conflict")
+				}
 				Text(caption(ref))
 					.font(.footnote)
 					.foregroundStyle(.secondary)
@@ -263,9 +277,15 @@ private struct EditedCaseView: View {
 
 	private func caption(_ ref: String) -> String {
 		switch side {
-		case .changes: "The steps as accepting would leave them, with what changes marked. Unmarked steps stay as they are."
+		case .changes:
+			document.conflicts.isEmpty
+				? "The steps as accepting would leave them, with what changes marked. Unmarked steps stay as they are."
+				: "The steps as the edit has them, with what changes marked. Unmarked steps stay as they are."
 		case .current: "\(ref) as it is now. Rejecting leaves it so."
-		case .proposed: "\(ref) as accepting would leave it."
+		case .proposed:
+			document.conflicts.isEmpty
+				? "\(ref) as accepting would leave it."
+				: "\(ref) as the edit has it. Accepting is refused while the fields above conflict."
 		}
 	}
 
@@ -287,6 +307,11 @@ private struct EditedCaseView: View {
 			case .removed(let step): StepRow(number: number(step, in: before), step: step, mark: .removed)
 			case .changed(let from, let to):
 				StepRow(number: number(to, in: document.after), step: to, mark: .changed(from: from))
+			case .moved(let from, let to):
+				StepRow(
+					number: number(to, in: document.after), step: to,
+					mark: .moved(from: from, was: number(from, in: before))
+				)
 			}
 		}
 	}
@@ -330,6 +355,8 @@ private struct StepRow: View {
 	enum Mark {
 		case added, removed
 		case changed(from: Step)
+		/// From the step's number in the case as it is, and as it was there.
+		case moved(from: Step, was: Int)
 	}
 
 	var body: some View {
@@ -352,6 +379,14 @@ private struct StepRow: View {
 					Tag(text: "Changed", tint: .warn)
 					ChangeSide(label: "Current", tint: .fail) { StepText(step: from, struck: true) }
 					ChangeSide(label: "Proposed", tint: .pass) { StepText(step: step) }
+				case .moved(let from, let was):
+					Tag(text: "Moved from step \(was)", tint: .accentColor)
+					if from == step {
+						StepText(step: step)
+					} else {
+						ChangeSide(label: "Current", tint: .fail) { StepText(step: from, struck: true) }
+						ChangeSide(label: "Proposed", tint: .pass) { StepText(step: step) }
+					}
 				}
 			}
 			.frame(maxWidth: .infinity, alignment: .leading)
@@ -367,6 +402,7 @@ private struct StepRow: View {
 		case .added: .pass
 		case .removed: .fail
 		case .changed: .warn
+		case .moved: .accentColor
 		}
 	}
 }

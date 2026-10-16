@@ -698,6 +698,45 @@ describe("editing", () => {
 	});
 });
 
+describe("a proposal that waits while its case moves on", () => {
+	test("reads as what accepting it writes: merged with the newer version, as the merge on accepting does", () => {
+		h.close();
+		h = harness({ preset: "standard" });
+		h.call("propose", { edits: [{ op: "create", outline: OUTLINE }] });
+		const agent = h.actor("helper", "agent", ["read", "produce"]);
+		const [view] = h.call<CaseView[]>("get", { refs: ["C-1"] });
+		const reordered = [...(view?.steps ?? [])].reverse();
+		const waiting = h.call<Proposed>(
+			"propose",
+			{ edits: [{ op: "edit", case: "C-1", base: 1, body: { steps: reordered } }] },
+			agent,
+		);
+		expect(waiting.status).toBe("open");
+		h.call("propose", { edits: [{ op: "edit", case: "C-1", base: 1, body: { title: "Updated by a person" } }] });
+
+		type Read = { edits: { body: { title: string; steps: { id: string }[] }; current: { title: string } }[] };
+		const [read] = h.call<Read[]>("get", { refs: [waiting.proposal] });
+		expect(read?.edits[0]?.current.title).toBe("Updated by a person");
+		expect(read?.edits[0]?.body.title).toBe("Updated by a person");
+		expect(read?.edits[0]?.body.steps.map((step) => step.id)).toEqual(reordered.map((step) => step.id));
+
+		const question = h
+			.call<{ items: { q: string; evidenceHash: string }[] }>("inbox")
+			.items.find((item) => item.q === waiting.question);
+		const decided = h.call<{ status: string }[]>("decide", {
+			q: question?.q,
+			onEvidence: question?.evidenceHash,
+			answer: { is: "accept" },
+		});
+		expect(decided[0]?.status).toBe("decided");
+		const [accepted] = h.call<CaseView[]>("get", { refs: ["C-1"] });
+		expect({ title: accepted?.title, steps: accepted?.steps.map((step) => step.id) }).toEqual({
+			title: read?.edits[0]?.body.title,
+			steps: read?.edits[0]?.body.steps.map((step) => step.id),
+		});
+	});
+});
+
 describe("organising", () => {
 	test("a bulk move and retag of 300 cases is one proposal, one decision, one point on the clock", () => {
 		const edits = Array.from({ length: 300 }, (_, i) => ({ op: "create", outline: `Case ${i}`, folder: "inbox" }));

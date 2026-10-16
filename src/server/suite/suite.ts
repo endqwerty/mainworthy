@@ -406,6 +406,25 @@ function cleanCovers(keys: readonly string[]): string[] {
 }
 
 /**
+ * What adopting an edit writes to its case now: the body proposed, or, when the case has a newer version than the
+ * proposal was made on, that body merged with the newer version. `conflicts` are the fields the merge cannot
+ * settle, for which adopting is refused. A proposal is read through this too, so it shows what accepting writes.
+ */
+export function adoptedBody(
+	db: Db,
+	row: CaseRow,
+	edit: Extract<Resolved, { op: "edit" }>,
+): { body: CaseBody; conflicts: Conflict[] } {
+	if (row.head === edit.head) return { body: cleanBody(edit.body, edit.body), conflicts: [] };
+	const merge = mergeBodies({
+		base: bodyOf(db, row.id, edit.base),
+		mine: edit.mine,
+		theirs: bodyOf(db, row.id, row.head),
+	});
+	return { body: cleanBody(merge.merged, merge.merged), conflicts: merge.conflicts };
+}
+
+/**
  * Makes a body storable: trims text, drops empty steps, gives every step a valid id that is unique in the case,
  * and guarantees at least one method. Ids already on the steps are kept, because results and findings point at them.
  */
@@ -940,30 +959,21 @@ export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): 
 			}
 			case "edit": {
 				const row = mustRow(edit.caseId);
-				let body = edit.body;
 				if (edit.conflicts.length > 0) {
 					throw conflict(`${caseRef(row)} has an unresolved conflict; its author must resolve it`, {
 						paths: edit.conflicts.map((c) => c.path),
 					});
 				}
 				if (edit.exact && row.head !== edit.head) throw conflict(`${caseRef(row)} changed; redo the fragment batch`);
-				if (row.head !== edit.head) {
-					const merge = mergeBodies({
-						base: bodyOf(ctx.db, row.id, edit.base),
-						mine: edit.mine,
-						theirs: bodyOf(ctx.db, row.id, row.head),
-					});
-					if (merge.conflicts.length > 0) {
-						throw conflict(
-							`${caseRef(row)} changed after this proposal was made; redo the proposal on version ${row.head}`,
-							{
-								paths: merge.conflicts.map((c) => c.path),
-							},
-						);
-					}
-					body = merge.merged;
+				const { body, conflicts } = adoptedBody(ctx.db, row, edit);
+				if (conflicts.length > 0) {
+					throw conflict(
+						`${caseRef(row)} changed after this proposal was made; redo the proposal on version ${row.head}`,
+						{
+							paths: conflicts.map((c) => c.path),
+						},
+					);
 				}
-				body = cleanBody(body, body);
 				if (versionHash(body) !== row.head_hash) writeVersion(row, body, bodyOf(ctx.db, row.id, row.head));
 				else stamp(row, row.head, row.head_hash);
 				break;

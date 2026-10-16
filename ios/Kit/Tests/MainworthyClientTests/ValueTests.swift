@@ -148,12 +148,28 @@ struct ValueTests {
 			.fields(from: [:], to: ["risk": "high"]),
 			.added(first),
 		])
-		// Steps that changed places are each shown once, in the new order.
+		// Steps that changed places are each shown once, in the new order, and the one that moved says so.
 		let swapped = EditedCase(
 			id: 0, caseRef: "C-1", before: CaseContent(title: "T", steps: [first, second]),
 			after: CaseContent(title: "T", steps: [second, first])
 		)
-		#expect(swapped.changes == [.kept(second), .kept(first)])
+		#expect(swapped.changes == [.kept(second), .moved(from: first, to: first)])
+		#expect(swapped.summary == "Moves 1 step.")
+		// A step taken from the end to the start is the one that moved; the others keep their order.
+		let rotated = EditedCase(
+			id: 0, caseRef: "C-1", before: CaseContent(title: "T", steps: [first, second, third]),
+			after: CaseContent(title: "T", steps: [third, first, second])
+		)
+		#expect(rotated.changes == [.moved(from: third, to: third), .kept(first), .kept(second)])
+		// A step removed beside one that moved is still said once, where it stood among those that stayed. Of two
+		// steps that swapped, one moved; here the first step went to the end.
+		let edited = Step(id: "c3", action: "Third, edited", expected: nil)
+		let mixed = EditedCase(
+			id: 0, caseRef: "C-1", before: CaseContent(title: "T", steps: [first, second, third]),
+			after: CaseContent(title: "T", steps: [edited, first])
+		)
+		#expect(mixed.changes == [.removed(second), .changed(from: third, to: edited), .moved(from: first, to: first)])
+		#expect(mixed.summary == "Changes 1 step, removes 1 step, moves 1 step.")
 	}
 
 	@Test("an edit that changes no step still shows what it changes")

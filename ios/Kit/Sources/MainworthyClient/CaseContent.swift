@@ -63,6 +63,9 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 	/// Where a new case goes: its folder's path, its tags and the requirements it covers. An edit to a case
 	/// that exists changes none of them.
 	public let placement: Placement?
+	/// The fields this edit and a newer version of the case both changed. While there are any, accepting is
+	/// refused and `after` is not what the case would become. Empty when the edit merges or the case is new.
+	public let conflicts: [String]
 
 	public struct Placement: Equatable, Sendable {
 		public let folder: String
@@ -76,12 +79,16 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 		}
 	}
 
-	public init(id: Int, caseRef: String?, before: CaseContent?, after: CaseContent, placement: Placement? = nil) {
+	public init(
+		id: Int, caseRef: String?, before: CaseContent?, after: CaseContent, placement: Placement? = nil,
+		conflicts: [String] = []
+	) {
 		self.id = id
 		self.caseRef = caseRef
 		self.before = before
 		self.after = after
 		self.placement = placement
+		self.conflicts = conflicts
 	}
 
 	/// What the edit changes, part by part, in the order of the case as it would be.
@@ -104,9 +111,14 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 		// A step keeps its id for good, so two versions are set side by side by id and nothing is guessed.
 		let old = before?.steps ?? []
 		let kept = Set(after.steps.map(\.id))
+		let inPlace = EditedCase.inPlace(old.map(\.id), after.steps.map(\.id))
 		var passed = 0
 		for step in after.steps {
 			if let at = old.firstIndex(where: { $0.id == step.id }) {
+				guard inPlace.contains(step.id) else {
+					changes.append(.moved(from: old[at], to: step))
+					continue
+				}
 				// The steps that stood before this one and are gone, where they stood.
 				for gone in old[passed..<max(passed, at)] where !kept.contains(gone.id) { changes.append(.removed(gone)) }
 				passed = max(passed, at + 1)
@@ -127,6 +139,7 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 		var changed = 0
 		var added = 0
 		var removed = 0
+		var moved = 0
 		for change in changes {
 			switch change {
 			case .title: parts.append("the title")
@@ -137,6 +150,9 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 			case .changed: changed += 1
 			case .added: added += 1
 			case .removed: removed += 1
+			case .moved(let from, let to):
+				moved += 1
+				if from != to { changed += 1 }
 			case .placed, .kept: break
 			}
 		}
@@ -146,9 +162,39 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 		if !parts.isEmpty { clauses.append("changes \(EditedCase.list(parts))") }
 		if added > 0 { clauses.append("adds \(steps(added))") }
 		if removed > 0 { clauses.append("removes \(steps(removed))") }
+		if moved > 0 { clauses.append("moves \(steps(moved))") }
 		guard !clauses.isEmpty else { return "Changes nothing." }
 		let sentence = clauses.joined(separator: ", ")
 		return sentence.prefix(1).uppercased() + sentence.dropFirst() + "."
+	}
+
+	/// The steps of both versions that keep their order: the longest run of them that both versions hold in the
+	/// same order. Any other step of both moved, so a reorder is said with as few moves as it takes.
+	private static func inPlace(_ old: [String], _ new: [String]) -> Set<String> {
+		let both = Set(old).intersection(new)
+		let a = old.filter(both.contains)
+		let b = new.filter(both.contains)
+		var longest = Array(repeating: Array(repeating: 0, count: b.count + 1), count: a.count + 1)
+		for i in a.indices.reversed() {
+			for j in b.indices.reversed() {
+				longest[i][j] = a[i] == b[j] ? longest[i + 1][j + 1] + 1 : max(longest[i + 1][j], longest[i][j + 1])
+			}
+		}
+		var run: Set<String> = []
+		var i = 0
+		var j = 0
+		while i < a.count, j < b.count {
+			if a[i] == b[j] {
+				run.insert(a[i])
+				i += 1
+				j += 1
+			} else if longest[i + 1][j] >= longest[i][j + 1] {
+				i += 1
+			} else {
+				j += 1
+			}
+		}
+		return run
 	}
 
 	private static func list(_ items: [String]) -> String {
@@ -167,5 +213,7 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 		case added(Step)
 		case removed(Step)
 		case changed(from: Step, to: Step)
+		/// A step of both versions that moved among the others, and may have changed too.
+		case moved(from: Step, to: Step)
 	}
 }
