@@ -797,7 +797,7 @@ describe("the project's name", () => {
 			"AGENTS.md": "says what the project was called, and releases the `.casebook` of an older checkout",
 			"CHANGELOG.md": "the entry for the rename",
 			"README.md": "says what the project was called",
-			"compose.coolify.yaml": "the names the existing deployment stored",
+			"compose.coolify.yaml": "carries the existing deployment's volume over to its new name",
 			"docs/decisions/0014-pipeline-token-and-ci-instance.md": "the address of the existing deployment",
 			"docs/decisions/0015-the-project-is-called-mainworthy.md": "the decision",
 			"docs/deploy.md": "the existing deployment's names, and how to move them",
