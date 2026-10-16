@@ -251,7 +251,8 @@ private struct SelectionMode: ViewModifier {
 					ToolbarItem(placement: .topBarLeading) { selectAll }
 					ToolbarItem(placement: .status) { status }
 					ToolbarSpacer(.flexible, placement: .bottomBar)
-					ToolbarItem(placement: .bottomBar) { answer }
+					// The button is glass of its own: the bar's glass behind it would show as a wider capsule.
+					ToolbarItem(placement: .bottomBar) { answer }.sharedBackgroundVisibility(.hidden)
 				}
 			}
 			.sheet(item: $asking) { chosen in
@@ -288,7 +289,7 @@ private struct SelectionMode: ViewModifier {
 					? "No answer fits all \(selection.count)"
 					: "\(first.kind.counted(selection.count)) selected"
 			} else {
-				"Select questions of one kind"
+				"Select questions"
 			}
 		return Text(text)
 			.font(.subheadline.weight(selection.isEmpty ? .regular : .semibold))
@@ -432,59 +433,80 @@ private struct UnsentAnswersView: View {
 		Binding(get: { chosen != nil }, set: { if !$0 { chosen = nil } })
 	}
 
+	@ViewBuilder private func entryRows(_ entry: AnswerOutbox.Entry) -> some View {
+		VStack(alignment: .leading, spacing: 6) {
+			Text(entry.questions.count == 1 ? "\(entry.question): \(entry.title)" : "\(entry.label) for \(entry.title)")
+				.font(.headline)
+			if entry.questions.count == 1 { Text(entry.label) }
+			Text(entry.status).font(.subheadline.weight(.semibold))
+			Text(entry.detail).font(.subheadline).foregroundStyle(.secondary)
+		}
+		.accessibilityIdentifier("saved-answer-\(entry.question)")
+		if entry.questions.count == 1 {
+			NavigationLink("Read \(entry.question)", value: entry.question)
+		} else {
+			ForEach(entry.members, id: \.question) { member in
+				NavigationLink(value: member.question) {
+					VStack(alignment: .leading, spacing: 2) {
+						Text("\(member.question): \(member.title)").lineLimit(2)
+						if let outcome = member.outcome {
+							Text(AnswerOutbox.Entry.status(of: outcome)).font(.footnote).foregroundStyle(.secondary)
+						}
+					}
+				}
+			}
+		}
+		if screen.outbox.stuck?.id == entry.id {
+			Button("Keep trying") { Task { await screen.refresh() } }
+				.disabled(screen.outbox.sending)
+				.accessibilityIdentifier("retry-saved-answer")
+			Button("Drop saved answer", role: .destructive) {
+				chosen = entry
+			}
+			.disabled(screen.outbox.sending)
+			.accessibilityIdentifier("drop-saved-answer")
+			Text("Drop checks the server first. Only definite rejections can be removed now. An answer that may still arrive stays as Dropped, never sends again, and is checked on each send pass until its recorded outcome can be cleared. Later answers resume in order.")
+				.font(.footnote).foregroundStyle(.secondary)
+		}
+	}
+
 	var body: some View {
+		let outbox = screen.outbox
+		let waiting = outbox.entries.filter { !$0.finished }
+		let replied = outbox.entries.filter(\.finished)
 		List {
 			Section {
+				if waiting.isEmpty {
+					Text("Nothing is waiting to send.").accessibilityIdentifier("nothing-waiting")
+				}
 				Text("Answers stay on this device when the app closes. Keep the app open to send them when the connection returns.")
 					.font(.subheadline).foregroundStyle(.secondary)
-				if let problem = screen.outbox.storageProblem { Text(problem).foregroundStyle(Color.fail) }
-				if let problem = screen.outbox.dropProblem { Text(problem).foregroundStyle(Color.fail) }
-				Button(screen.outbox.sending ? "Sending…" : screen.outbox.hasDropped ? "Send waiting answers and check dropped" : "Send waiting answers") {
-					Task { await screen.refresh() }
+				if let problem = outbox.storageProblem { Text(problem).foregroundStyle(Color.fail) }
+				if let problem = outbox.dropProblem { Text(problem).foregroundStyle(Color.fail) }
+				if !waiting.isEmpty {
+					Button(outbox.sending ? "Sending…" : outbox.hasDropped ? "Send waiting answers and check dropped" : "Send waiting answers") {
+						Task { await screen.refresh() }
+					}
+					.disabled(outbox.sending)
+					.accessibilityIdentifier("send-waiting-answers")
 				}
-				.disabled(screen.outbox.sending || (screen.outbox.pendingCount == 0 && !screen.outbox.hasDropped))
-				.accessibilityIdentifier("send-waiting-answers")
+			} header: {
+				if !waiting.isEmpty { Text("No reply yet") }
 			}
-			ForEach(screen.outbox.entries) { entry in
+			ForEach(waiting) { entry in
+				Section { entryRows(entry) }
+			}
+			if !replied.isEmpty {
 				Section {
-					VStack(alignment: .leading, spacing: 6) {
-						Text(entry.questions.count == 1 ? "\(entry.question): \(entry.title)" : "\(entry.label) for \(entry.title)")
-							.font(.headline)
-						if entry.questions.count == 1 { Text(entry.label) }
-						Text(entry.status).font(.subheadline.weight(.semibold))
-						Text(entry.detail).font(.subheadline).foregroundStyle(.secondary)
-					}
-					.accessibilityIdentifier("saved-answer-\(entry.question)")
-					if entry.questions.count == 1 {
-						NavigationLink("Read \(entry.question)", value: entry.question)
-					} else {
-						ForEach(entry.members, id: \.question) { member in
-							NavigationLink(value: member.question) {
-								VStack(alignment: .leading, spacing: 2) {
-									Text("\(member.question): \(member.title)").lineLimit(2)
-									if let outcome = member.outcome {
-										Text(AnswerOutbox.Entry.status(of: outcome)).font(.footnote).foregroundStyle(.secondary)
-									}
-								}
-							}
-						}
-					}
-					if screen.outbox.stuck?.id == entry.id {
-						Button("Keep trying") { Task { await screen.refresh() } }
-							.disabled(screen.outbox.sending)
-							.accessibilityIdentifier("retry-saved-answer")
-						Button("Drop saved answer", role: .destructive) {
-							chosen = entry
-						}
-						.disabled(screen.outbox.sending)
-						.accessibilityIdentifier("drop-saved-answer")
-						Text("Drop checks the server first. Only definite rejections can be removed now. An answer that may still arrive stays as Dropped, never sends again, and is checked on each send pass until its recorded outcome can be cleared. Later answers resume in order.")
-							.font(.footnote).foregroundStyle(.secondary)
-					}
+					Text("Each says what the server did with it. Clearing them removes them from this device.")
+						.font(.subheadline).foregroundStyle(.secondary)
+					Button("Clear outcomes") { outbox.clearOutcomes() }
+				} header: {
+					Text("Replied").accessibilityIdentifier("replied-header")
 				}
-			}
-			if screen.outbox.entries.contains(where: \.finished) {
-				Button("Clear outcomes") { screen.outbox.clearOutcomes() }
+				ForEach(replied) { entry in
+					Section { entryRows(entry) }
+				}
 			}
 		}
 		.navigationTitle("Unsent answers")
