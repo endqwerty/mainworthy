@@ -130,7 +130,10 @@ extension ProjectClient {
 			case "edit":
 				guard let body = part.body, let current = part.current, let ref = part.case
 				else { throw ClientError.unreadable }
-				return EditedCase(id: index, caseRef: ref, before: CaseContent(current), after: CaseContent(body))
+				return EditedCase(
+					id: index, caseRef: ref, before: CaseContent(current), after: CaseContent(body),
+					conflicts: part.conflicts?.map(\.path) ?? []
+				)
 			default:
 				return nil
 			}

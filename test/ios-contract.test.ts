@@ -247,6 +247,17 @@ describe("what the iOS app reads", () => {
 		holds(`get ${ref}`, Proposal, rows[0]);
 		// The app shows what an edit changes by setting the two documents side by side.
 		expect(rows[0]).toMatchObject({ edits: [{ op: "edit", body: {}, current: {} }] });
+		// A person changes the case meanwhile. What the app shows as proposed is what accepting writes: with it.
+		const edited = z.object({ edits: z.array(z.object({ case: z.string(), base: z.number() })) }).parse(rows[0])
+			.edits[0];
+		await op(project, "propose", {
+			edits: [{ op: "edit", case: edited?.case, base: edited?.base, body: { title: "Retitled meanwhile" } }],
+		});
+		const [later] = (await op(project, "get", { refs: [ref] })) as unknown[];
+		holds(`get ${ref} after its case moved on`, Proposal, later);
+		expect(later).toMatchObject({
+			edits: [{ body: { title: "Retitled meanwhile" }, current: { title: "Retitled meanwhile" }, conflicts: [] }],
+		});
 	});
 
 	test("one question read by its ref, and a proposal that makes a case", async () => {
@@ -654,6 +665,9 @@ describe("what the iPhone conflict resolver reads", () => {
 			.parse(await op(key, "propose", edit("Mine")));
 		const [proposal] = z.array(z.unknown()).parse(await op(key, "get", { refs: [overlap.proposal] }));
 		holds("get conflict proposal", ConflictProposal, proposal);
+		// The queue reads the same reply and says which fields stop it being accepted.
+		holds("get conflict proposal, as the queue reads it", Proposal, proposal);
+		expect(proposal).toMatchObject({ edits: [{ conflicts: [{ path: "title" }] }] });
 		holds("base custom fields", ConflictBaseFields, await op(key, "history", { ref, from: 1, to: 1 }));
 		expect(proposal).toMatchObject({ edits: [{ base: 1, mine: { title: "Mine" }, current: { title: "Current" } }] });
 		const [q] = z
