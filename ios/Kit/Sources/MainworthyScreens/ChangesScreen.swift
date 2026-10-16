@@ -68,7 +68,9 @@ public final class ChangesScreen: ProjectScreen {
 			detailLoading = .done
 			// The results shown are the shown gate's: a gate of another run gets results of its own.
 			if results?.change != key || results?.run != fresh.gate.run {
-				results = ChangeResults(project: project, change: key, run: fresh.gate.run)
+				// Another run of the same change keeps what the person chose to see.
+				let query = results?.change == key ? results?.query : nil
+				results = ChangeResults(project: project, change: key, run: fresh.gate.run, query: query ?? .init())
 			}
 		} catch is CancellationError {
 		} catch {

@@ -21,7 +21,7 @@ struct ChangeResultsPanel: View {
 		.task(id: results.text) {
 			guard results.loading == .done else { return }
 			do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-			await results.read()
+			await results.search()
 		}
 	}
 
@@ -75,7 +75,7 @@ struct ChangeResultsPanel: View {
 		}
 		.buttonStyle(.plain)
 		.accessibilityAddTraits(chosen ? .isSelected : [])
-		.accessibilityIdentifier("results-\(standing?.word ?? "all")")
+		.accessibilityIdentifier("results-\(standing?.rawValue ?? "all")")
 	}
 }
 

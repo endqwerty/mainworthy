@@ -1,4 +1,4 @@
-// Written by `bun scripts/ios.ts gen` from src/core/kinds.ts. Do not edit it: change that file and run the command again.
+// Written by `bun scripts/ios.ts gen` from src/core/kinds.ts, src/core/runs.ts, src/core/model.ts and src/core/ops.ts. Do not edit it: change that file and run the command again.
 
 /// The words of the queue: what each answer is called and what it does, as every other client says them.
 enum Vocabulary {
@@ -59,4 +59,45 @@ enum Vocabulary {
 			"reject": "Leaves the run open.",
 		],
 	]
+}
+
+/// How many answers one `decide` request carries: the most one saved answer, and so one selection, holds.
+package let decideMax = 500
+
+/// How a commit's gate counts one result, problems first: the order `find --in results` lists them in.
+public enum ResultStanding: String, CaseIterable, Sendable {
+	case unexplained
+	case attributed
+	case excused
+	case missing
+	case skipped
+	case pass
+
+	/// What every client calls it.
+	public var label: String {
+		switch self {
+		case .unexplained: "unexplained"
+		case .attributed: "needs a fix"
+		case .excused: "excused"
+		case .missing: "could not run"
+		case .skipped: "skipped"
+		case .pass: "passed"
+		}
+	}
+}
+
+/// A way a case is run: by a person, by a pipeline's automated test, or by an agent.
+public enum CaseMethod: String, CaseIterable, Sendable {
+	case human
+	case auto
+	case agent
+
+	/// What every client calls it.
+	public var label: String {
+		switch self {
+		case .human: "Person"
+		case .auto: "Pipeline"
+		case .agent: "Agent"
+		}
+	}
 }

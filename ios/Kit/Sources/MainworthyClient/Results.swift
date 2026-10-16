@@ -1,46 +1,5 @@
 import Foundation
 
-/// How a commit's gate counts a result (decision 0087). The order is the server's: problems first.
-public enum ResultStanding: Hashable, Sendable, CaseIterable {
-	case unexplained, attributed, excused, missing, skipped, pass
-
-	init?(_ word: String) {
-		switch word {
-		case "unexplained": self = .unexplained
-		case "attributed": self = .attributed
-		case "excused": self = .excused
-		case "missing": self = .missing
-		case "skipped": self = .skipped
-		case "pass": self = .pass
-		default: return nil
-		}
-	}
-
-	/// The server's word, which a filter sends and a tally is keyed by.
-	public var word: String {
-		switch self {
-		case .unexplained: "unexplained"
-		case .attributed: "attributed"
-		case .excused: "excused"
-		case .missing: "missing"
-		case .skipped: "skipped"
-		case .pass: "pass"
-		}
-	}
-
-	/// What it is called, as the web app's Results call it.
-	public var label: String {
-		switch self {
-		case .unexplained: "unexplained"
-		case .attributed: "needs a fix"
-		case .excused: "excused"
-		case .missing: "could not run"
-		case .skipped: "skipped"
-		case .pass: "passed"
-		}
-	}
-}
-
 /// One test as a commit's gate counted it, with a case or tracked without one.
 public struct CountedResult: Identifiable, Equatable, Sendable {
 	/// A result is counted once for each job that reported it.
@@ -73,7 +32,7 @@ public struct CountedResult: Identifiable, Equatable, Sendable {
 		file = wire.file
 		caseRef = wire.case
 		outcome = wire.outcome
-		standing = ResultStanding(wire.standing)
+		standing = ResultStanding(rawValue: wire.standing)
 		quarantined = wire.quarantined
 		question = wire.question
 		attempt = wire.attempt
@@ -86,12 +45,12 @@ public struct CountedResult: Identifiable, Equatable, Sendable {
 }
 
 /// A page of what a change's gate counted, with the whole tally whatever the page holds.
-public struct CountedPage: Equatable, Sendable {
-	public let rows: [CountedResult]
+package struct CountedPage: Equatable, Sendable {
+	package let rows: [CountedResult]
 	/// How many rows match the filter, when the server said.
-	public let count: Int?
+	package let count: Int?
 	/// Every row the gate counts, by standing.
-	public let tally: [ResultStanding: Int]
+	package let tally: [ResultStanding: Int]
 	package let next: String?
 
 	/// The results of a commit nothing a gate counts was reported for.
@@ -118,8 +77,8 @@ public struct TestSummary: Identifiable, Equatable, Sendable {
 	}
 }
 
-public struct TestPage: Equatable, Sendable {
-	public let tests: [TestSummary]
+package struct TestPage: Equatable, Sendable {
+	package let rows: [TestSummary]
 	package let next: String?
 }
 
@@ -177,7 +136,7 @@ private func webAddress(_ text: String?) -> URL? {
 
 /// A page that was asked for after the list it continues changed: a retry, a decision or a link moved a row.
 /// The server refuses it rather than skip or repeat that row, and the list is read again from its start.
-public struct ResultsMoved: Error, Equatable, Sendable {}
+package struct ResultsMoved: Error, Equatable, Sendable {}
 
 extension ProjectClient {
 	/// A page of what a gate's run counted, problems first. The run is the one a change's gate names, so the
@@ -186,7 +145,7 @@ extension ProjectClient {
 		of run: String, standing: ResultStanding? = nil, text: String = "", after cursor: String? = nil
 	) async throws -> CountedPage {
 		var input: [String: JSONValue] = ["in": "results", "run": .string(run), "limit": 100]
-		if let standing { input["state"] = .string(standing.word) }
+		if let standing { input["state"] = .string(standing.rawValue) }
 		let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
 		if !words.isEmpty { input["text"] = .string(words) }
 		if let cursor { input["cursor"] = .string(cursor) }
@@ -198,7 +157,7 @@ extension ProjectClient {
 		}
 		var tally: [ResultStanding: Int] = [:]
 		for (word, count) in wire.tally {
-			if let standing = ResultStanding(word) { tally[standing] = count }
+			if let standing = ResultStanding(rawValue: word) { tally[standing] = count }
 		}
 		return CountedPage(rows: wire.items.map(CountedResult.init), count: wire.count, tally: tally, next: wire.cursor)
 	}
@@ -211,7 +170,7 @@ extension ProjectClient {
 		if unlinked { input["unlinked"] = true }
 		if let cursor { input["cursor"] = .string(cursor) }
 		let wire: Wire.TestList = try await server.read("find", in: key, .object(input))
-		return TestPage(tests: wire.items.map(TestSummary.init), next: wire.cursor)
+		return TestPage(rows: wire.items.map(TestSummary.init), next: wire.cursor)
 	}
 
 	/// One test and its latest results, or nil when the project has no such test.

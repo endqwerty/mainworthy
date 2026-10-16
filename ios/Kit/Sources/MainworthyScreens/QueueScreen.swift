@@ -56,8 +56,8 @@ public final class QueueScreen: ProjectScreen {
 	public var typed: [String: Typed] = [:]
 	private var mappings: [String: MappingScreen] = [:]
 
-	/// The most questions one selection holds. Each answer is saved and sent on its own (decision 0088).
-	public static let selectionLimit = 100
+	/// The most questions one selection holds: what one saved answer, sent as one request, carries (decision 0088).
+	public static let selectionLimit = decideMax
 	/// The key under which the reference and reason of an answer to the selection are kept in `typed`.
 	public static let selectionTyping = "selection"
 	/// Whether the list selects questions instead of opening them.
@@ -151,7 +151,7 @@ public final class QueueScreen: ProjectScreen {
 	public func refresh() async {
 		await outbox.send()
 		for entry in outbox.entries {
-			if case .decided = entry.outcome { typed[entry.question] = nil }
+			for member in entry.members where member.outcome?.isDecided == true { typed[member.question] = nil }
 		}
 		await read()
 	}
@@ -228,13 +228,8 @@ public final class QueueScreen: ProjectScreen {
 		guard busy.insert(question.ref).inserted else { return false }
 		defer { busy.remove(question.ref) }
 		do {
-			guard let prepared = project.prepareAnswer(question, with: choice, reference: reference, reason: reason) else {
-				notice = Notice(text: "This answer needs the web app.", isProblem: true, undoes: nil)
-				return false
-			}
-			let id = try outbox.enqueue(prepared)
-			await outbox.send(id)
-			guard let outcome = outbox.entries.first(where: { $0.id == id })?.outcome else {
+			let saved = try await outbox.record([question], with: choice, reference: reference, reason: reason)
+			guard let outcome = saved.outcomes?[question.ref] else {
 				let state = outbox.sending ? "sending" : "saved on this device, waiting to send"
 				notice = Notice(
 					text: "\(question.ref): \(state). Open Unsent answers to see its outcome.",
@@ -270,7 +265,7 @@ public final class QueueScreen: ProjectScreen {
 	}
 
 	public func hasPendingAnswer(_ ref: String) -> Bool {
-		outbox.entries.contains { $0.question == ref && $0.waiting }
+		outbox.entries.contains { $0.waiting && $0.questions.contains(ref) }
 	}
 
 	/// Withdraws the decision on a question: the answer just given ("Undo"), or one in the decided list.
@@ -389,17 +384,18 @@ public final class QueueScreen: ProjectScreen {
 		}
 	}
 
-	/// How many tests these unlinked questions name, for what "Create cases" makes.
-	public static func tests(in questions: [Question]) -> Int {
+	/// How many cases "Create cases" makes for these unlinked questions: one for each test of each file, also the
+	/// tests past the first fifty that a question names.
+	public static func casesCreated(by questions: [Question]) -> Int {
 		questions.reduce(0) { sum, question in
-			if case .unlinked(let tests) = question.evidence { sum + tests.count } else { sum }
+			if case .unlinked(let unlinked) = question.evidence { sum + unlinked.count } else { sum }
 		}
 	}
 
-	/// Gives one answer to these selected questions, as they were shown when the person chose it. Each answer is
-	/// saved on the device and sent on its own, on the evidence the person saw: a question whose evidence changed
-	/// since is refused by the server, never answered on its new evidence. So each question gets its own decision
-	/// and its own outcome. Returns whether any of them was decided.
+	/// Gives one answer to these selected questions, as they were shown when the person chose it: one saved answer,
+	/// sent as one request on the evidence the person saw. A question whose evidence changed since is refused by
+	/// the server, never answered on its new evidence, and each question gets its own decision and its own
+	/// outcome. Returns whether any of them was decided.
 	@discardableResult
 	public func answerAll(
 		_ chosen: [Question], with choice: Choice, reference: String = "", reason: String = ""
@@ -426,66 +422,48 @@ public final class QueueScreen: ProjectScreen {
 		guard busy.isDisjoint(with: refs) else { return false }
 		busy.formUnion(refs)
 		defer { busy.subtract(refs) }
-		var prepared: [(question: Question, answer: PreparedAnswer)] = []
-		for question in chosen {
-			guard let own = question.choices.first(where: { $0.answer == choice.answer }),
-				let answer = project.prepareAnswer(question, with: own, reference: reference, reason: reason)
-			else {
-				notice = Notice(text: "Nothing was recorded: \(question.ref) needs the web app.", isProblem: true, undoes: nil)
-				return false
-			}
-			prepared.append((question, answer))
-		}
-		var saved: [(question: Question, id: String)] = []
-		var unsaved: String?
+		let saved: AnswerOutbox.Entry
 		do {
-			for item in prepared { saved.append((item.question, try outbox.enqueue(item.answer))) }
+			saved = try await outbox.record(chosen, with: choice, reference: reference, reason: reason)
 		} catch {
-			// What was saved before the failure is sent: it is on the device, and leaving it would hide it.
-			unsaved = "\(chosen.count - saved.count) of \(chosen.count) answers could not be saved and were not sent. \(error.shown)"
-			if saved.isEmpty {
-				notice = Notice(text: unsaved ?? "", isProblem: true, undoes: nil)
-				return false
-			}
+			notice = Notice(text: "Nothing was recorded. \(error.shown)", isProblem: true, undoes: nil)
+			return false
 		}
-		for item in saved { await outbox.send(item.id) }
+		selected = []
+		guard let outcomes = saved.outcomes else {
+			// The whole answer waits on the device: nothing is claimed of any question.
+			let state = outbox.sending ? "sending" : "saved on this device, waiting to send"
+			notice = Notice(
+				text: "\(first.kind.counted(chosen.count)): \(state). Open Unsent answers to see the outcome.",
+				isProblem: false, undoes: nil
+			)
+			return false
+		}
 		var decided: [Question] = []
 		var refused: [String] = []
 		var advised = 0
-		var waiting = 0
-		for item in saved {
-			switch outbox.entries.first(where: { $0.id == item.id })?.outcome {
+		for question in chosen {
+			switch outcomes[question.ref] {
 			case .decided(let decision)?:
-				typed[item.question.ref] = nil
-				var undoable = item.question
+				typed[question.ref] = nil
+				var undoable = question
 				undoable.ifDecision = decision
 				decided.append(undoable)
 			case .advised?: advised += 1
-			case .overtaken(let why)?: refused.append("\(item.question.ref): \(why)")
-			case .notTaken(let why)?: refused.append("\(item.question.ref): the server asks for \(why)")
-			case nil: waiting += 1
+			case .overtaken(let why)?: refused.append("\(question.ref): \(why)")
+			case .notTaken(let why)?: refused.append("\(question.ref): the server asks for \(why)")
+			case nil: refused.append("\(question.ref): no reply")
 			}
 		}
-		if refused.isEmpty, waiting == 0 { typed[QueueScreen.selectionTyping] = nil }
+		if refused.isEmpty { typed[QueueScreen.selectionTyping] = nil }
 		var parts: [String] = []
-		if !decided.isEmpty {
-			parts.append("\(first.kind.counted(decided.count)): \(choice.label).")
-		}
+		if !decided.isEmpty { parts.append("\(first.kind.counted(decided.count)): \(choice.label).") }
 		if advised > 0 { parts.append("\(advised) recorded as advice.") }
-		if waiting > 0 {
-			parts.append("\(waiting) saved on this device, waiting to send. Open Unsent answers to see their outcome.")
-		}
 		if !refused.isEmpty {
 			parts.append("Not recorded, read \(refused.count == 1 ? "it" : "them") again: \(refused.joined(separator: "; ")).")
 		}
-		if let unsaved { parts.append(unsaved) }
-		selected = []
-		// The list is read again once the server answered: what it decided leaves the list. The notice is set after
-		// the read, which says nothing of a failure here: an answer still waiting is the reason the read fails.
-		if waiting < saved.count { await read() }
-		notice = Notice(
-			text: parts.joined(separator: " "), isProblem: !refused.isEmpty || unsaved != nil, undoes: nil, undoesAll: decided
-		)
+		await read()
+		notice = Notice(text: parts.joined(separator: " "), isProblem: !refused.isEmpty, undoes: nil, undoesAll: decided)
 		return !decided.isEmpty
 	}
 

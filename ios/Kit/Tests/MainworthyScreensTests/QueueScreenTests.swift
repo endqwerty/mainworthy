@@ -67,10 +67,10 @@ struct QueueScreenTests {
 		await reopened.send()
 		#expect(reopened.entries.map(\.status) == ["Recorded", "Recorded"])
 		let sent = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
-		#expect(sent.map { $0["q"]?.string } == [failure.ref, finding.ref])
+		#expect(sent.map { decisions($0).map { $0["q"]?.string } } == [[failure.ref], [finding.ref]])
 		#expect(sent.map { $0["cmd"]?.string } == outbox.entries.map { Optional($0.id) })
-		#expect(sent[0]["onEvidence"]?.string == failure.evidenceHash)
-		#expect(sent[0]["answer"]?["ref"]?.string == "SHOP-482")
+		#expect(decisions(sent[0]).first?["onEvidence"]?.string == failure.evidenceHash)
+		#expect(decisions(sent[0]).first?["answer"]?["ref"]?.string == "SHOP-482")
 		#expect(sent[0]["reason"]?.string == "Checked on the phone")
 		let recorded = try #require(try await project.question(failure.ref))
 		#expect(recorded.decision?.reference == "SHOP-482" && recorded.decision?.reason == "Checked on the phone")
@@ -534,7 +534,7 @@ struct QueueScreenTests {
 		let sent = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
 		#expect(sent.count == 4)
 		#expect(sent.allSatisfy { $0 == sent[0] && $0["cmd"]?.string == answer.command })
-		#expect(sent[0]["ifOpen"] == true)
+		#expect(decisions(sent[0]).allSatisfy { $0["ifOpen"] == true })
 	}
 
 	@Test("changed evidence and refusals have separate outcomes and do not stop the next saved answer")
@@ -546,7 +546,9 @@ struct QueueScreenTests {
 		// Restore an answer saved against older evidence, then let the real server judge it.
 		var captured = try #require(try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(refused)).object)
 		var input = try #require(captured["input"]?.object)
-		input["onEvidence"] = "older-evidence"
+		var decision = try #require(input["all"]?.array?.first?.object)
+		decision["onEvidence"] = "older-evidence"
+		input["all"] = [.object(decision)]
 		captured["input"] = .object(input)
 		captured["command"] = .string(UUID().uuidString.lowercased())
 		let stale = try JSONDecoder().decode(PreparedAnswer.self, from: JSONEncoder().encode(JSONValue.object(captured)))
@@ -616,7 +618,7 @@ struct QueueScreenTests {
 		if stopped { await resumed.send() }
 		#expect(resumed.entries.map(\.status) == ["Recorded", "Recorded"])
 		let sent = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
-		#expect(sent.map { $0["q"]?.string } == (stopped ? [failure.ref, failure.ref, finding.ref] : [failure.ref, finding.ref]))
+		#expect(sent.map { decisions($0).first?["q"]?.string } == (stopped ? [failure.ref, failure.ref, finding.ref] : [failure.ref, finding.ref]))
 	}
 
 	@Test("opening another project does not strand a saved answer when the stream reconnects")
@@ -1019,4 +1021,9 @@ private final class LateAnswerTransport: Transport, Sendable {
 	func lines(_ request: URLRequest) async throws -> (AsyncThrowingStream<String, any Error>, HTTPURLResponse) {
 		try await inner.lines(request)
 	}
+}
+
+/// The answers a `decide` request carried: each of an `all`, or the one of an earlier build's request.
+func decisions(_ request: JSONValue) -> [JSONValue] {
+	request["all"]?.array ?? [request]
 }

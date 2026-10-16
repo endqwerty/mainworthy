@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { printCase } from "../../core/markdown.ts";
 import { applyMergeChoice, mergeBodies } from "../../core/merge3.ts";
-import { Automate, CaseBody, type ExpandedStep } from "../../core/model.ts";
+import { Automate, CaseBody, type ExpandedStep, METHOD_LABELS } from "../../core/model.ts";
 import type { QuestionItem } from "../../core/ops.ts";
 import { call } from "../lib/api.ts";
 import { invalidateProject, queryClient, queryKey, useQueryOp } from "../lib/data.ts";
@@ -965,7 +965,7 @@ function CaseProperties({
 							}
 						/>
 						<ProducerGlyph kind={kind} />
-						{kind === "human" ? "Person" : kind === "auto" ? "Pipeline" : "Agent"}
+						{METHOD_LABELS[kind]}
 					</label>
 				))}
 			</div>

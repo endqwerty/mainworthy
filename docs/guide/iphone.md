@@ -98,21 +98,22 @@ it to open another.
 
 1. In **Queue**, press **Select** at the end of the row of kinds. Each open question gets a circle.
 2. Press questions to select them. A selection holds one kind, such as unlinked tests or failures, and at most
-   100 questions. **Select all** selects every listed question of that kind; with a kind's chip chosen, it
+   500 questions. **Select all** selects every listed question of that kind; with a kind's chip chosen, it
    selects that kind. A question that cannot join is drawn faint and, when pressed, says why: another kind, a
    proposal or a finding with a suggested edit (these are answered on their own page, where the edit is shown),
    one the policy does not let you settle, or one with an answer still waiting to send.
 3. Press **Answer all** and choose an answer. Only the answers every selected question takes are offered.
    **Link to a case** is not among them: each test needs its own case, so link one question at a time.
-   **Create cases** makes and links one automated case for each test of the selected questions.
+   **Create cases** makes and links one automated case for each test of the selected questions, and the
+   confirmation says how many.
 4. Confirm. Where the policy asks for a reason, or the answer takes a defect reference, the app asks first, and
    the same reason and reference go to every selected question.
 
-Each question gets its own decision on the evidence it was listed with. The answers are saved on this device and
-sent one by one, as in [Answer during a network drop](#answer-during-a-network-drop). The bar under the list says
-how many were recorded and names any question that was decided or changed meanwhile: read that one again.
-**Undo** withdraws every decision the answer made, with one reason where the policy asks for one. Press **Done**
-to leave Select.
+Each question gets its own decision on the evidence it was listed with. The answer is saved on this device and sent
+as one request, as in [Answer during a network drop](#answer-during-a-network-drop): **Unsent answers** shows it as
+one entry with each of its questions. The bar under the list says how many were recorded and names any question
+that was decided or changed meanwhile: read that one again. **Undo** withdraws every decision the answer made,
+one question after another, with one reason where the policy asks for one. Press **Done** to leave Select.
 
 ## Link tests to cases
 

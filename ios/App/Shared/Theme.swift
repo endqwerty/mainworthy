@@ -111,25 +111,14 @@ struct Panel<Content: View>: View {
 	}
 }
 
-/// A way a case is run, as a case's `methods` and its results name it: `human`, `auto`, `agent`. Each is drawn
-/// with the producer's symbol, so a person, a pipeline and an agent look the same on every screen.
-enum Method: String, CaseIterable {
-	case human, auto, agent
-
+/// A way a case is run, drawn with the producer's symbol, so a person, a pipeline and an agent look the same on
+/// every screen. Its name is the generated `label`, as every client says it.
+extension CaseMethod {
 	var producer: Producer {
 		switch self {
 		case .human: .person
 		case .auto: .pipeline
 		case .agent: .agent
-		}
-	}
-
-	/// What it is called on a badge.
-	var name: String {
-		switch self {
-		case .human: "Person"
-		case .auto: "Pipeline"
-		case .agent: "Agent"
 		}
 	}
 
@@ -149,9 +138,9 @@ struct MethodBadges: View {
 
 	var body: some View {
 		HStack(spacing: 8) {
-			ForEach(Method.allCases, id: \.self) { method in
+			ForEach(CaseMethod.allCases, id: \.self) { method in
 				let allowed = methods.contains(method.rawValue)
-				Label(method.name, systemImage: method.producer.symbol)
+				Label(method.label, systemImage: method.producer.symbol)
 					.font(.subheadline.weight(allowed ? .semibold : .regular))
 					.strikethrough(!allowed)
 					.foregroundStyle(allowed ? method.producer.tint : Color.secondary.opacity(0.6))
@@ -220,7 +209,7 @@ private struct ProofChip: View {
 	let proof: CaseProof
 
 	var body: some View {
-		let method = Method(rawValue: proof.method)
+		let method = CaseMethod(rawValue: proof.method)
 		let tint = proof.current ? proof.outcome.tint : .secondary
 		HStack(spacing: 3) {
 			Image(systemName: method?.producer.symbol ?? "questionmark")
@@ -234,7 +223,7 @@ private struct ProofChip: View {
 		.background(tint.opacity(0.12), in: .capsule)
 		.accessibilityElement(children: .ignore)
 		.accessibilityLabel(
-			"\(method?.name ?? proof.method): \(proof.outcome.said)\(proof.current ? "" : " on an earlier version")"
+			"\(method?.label ?? proof.method): \(proof.outcome.said)\(proof.current ? "" : " on an earlier version")"
 		)
 		.accessibilityIdentifier("proof-\(proof.method)")
 	}

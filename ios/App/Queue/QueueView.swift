@@ -309,9 +309,9 @@ private struct SelectionBar: View {
 
 	private func message(for chosen: Chosen) -> String {
 		let makes = chosen.choice.answer == "create"
-			? " The server makes and links one automated case for each of their \(QueueScreen.tests(in: chosen.questions)) tests."
+			? " The server makes and links \(QueueScreen.casesCreated(by: chosen.questions)) automated cases, one for each of their tests."
 			: ""
-		return "\(chosen.choice.help)\(makes) Each question gets its own decision, and Undo withdraws them together."
+		return "\(chosen.choice.help)\(makes) They are sent together. Each question gets its own decision, and Undo withdraws them together."
 	}
 }
 
@@ -417,13 +417,27 @@ private struct UnsentAnswersView: View {
 			ForEach(screen.outbox.entries) { entry in
 				Section {
 					VStack(alignment: .leading, spacing: 6) {
-						Text("\(entry.question): \(entry.title)").font(.headline)
-						Text(entry.label)
+						Text(entry.questions.count == 1 ? "\(entry.question): \(entry.title)" : "\(entry.label) for \(entry.title)")
+							.font(.headline)
+						if entry.questions.count == 1 { Text(entry.label) }
 						Text(entry.status).font(.subheadline.weight(.semibold))
 						Text(entry.detail).font(.subheadline).foregroundStyle(.secondary)
 					}
 					.accessibilityIdentifier("saved-answer-\(entry.question)")
-					NavigationLink("Read \(entry.question)", value: entry.question)
+					if entry.questions.count == 1 {
+						NavigationLink("Read \(entry.question)", value: entry.question)
+					} else {
+						ForEach(entry.members, id: \.question) { member in
+							NavigationLink(value: member.question) {
+								VStack(alignment: .leading, spacing: 2) {
+									Text("\(member.question): \(member.title)").lineLimit(2)
+									if let outcome = member.outcome {
+										Text(AnswerOutbox.Entry.status(of: outcome)).font(.footnote).foregroundStyle(.secondary)
+									}
+								}
+							}
+						}
+					}
 					if screen.outbox.stuck?.id == entry.id {
 						Button("Keep trying") { Task { await screen.refresh() } }
 							.disabled(screen.outbox.sending)
@@ -445,7 +459,10 @@ private struct UnsentAnswersView: View {
 		.navigationTitle("Unsent answers")
 		.navigationBarTitleDisplayMode(.inline)
 		.toolbar(.hidden, for: .tabBar)
-		.confirmationDialog("Drop saved answer for \(chosen?.question ?? "this question")?", isPresented: confirming,
+		.confirmationDialog(
+			chosen.map { $0.questions.count == 1 ? "Drop saved answer for \($0.question)?" : "Drop the saved answer for \($0.questions.count) questions?" }
+				?? "Drop saved answer?",
+			isPresented: confirming,
 			titleVisibility: .visible, presenting: chosen
 		) { entry in
 			Button("Drop saved answer", role: .destructive) {
