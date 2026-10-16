@@ -372,37 +372,36 @@ test("sync-branch moves a branch whose commits were merged by rebase, and refuse
 	await expect(syncBranch(clone)).rejects.toThrow("main is not a thread's branch");
 });
 
-test("sync-branch keeps a merge commit's conflict resolution that main does not hold", async () => {
+test("sync-branch keeps a merge commit that main does not hold", async () => {
 	const { clone, git } = await clonePair();
-	const commit = async (content: string, message: string) => {
-		writeFileSync(join(clone, "x.txt"), content);
+	const commit = async (file: string, message: string) => {
+		writeFileSync(join(clone, file), `${message}\n`);
 		await git(clone, "add", ".");
 		await git(clone, "commit", "-q", "-m", message);
+		return git(clone, "rev-parse", "HEAD");
 	};
 	await git(clone, "checkout", "-q", "main");
-	await commit("base\n", "x");
-	await git(clone, "checkout", "-q", "-b", "b");
-	await commit("b\n", "b");
-	await git(clone, "checkout", "-q", "-b", "a", "main");
-	await commit("a\n", "a");
-	// The thread and main each merge b into a, with their own resolution of the conflict.
-	const merge = async (branch: string, resolution: string) => {
-		await git(clone, "checkout", "-q", "-B", branch, "a");
-		await run(["git", "merge", "b"], { cwd: clone });
-		await commit(resolution, `merge b: ${resolution.trim()}`);
-	};
-	await merge("t3/thread", "topic resolution\n");
-	await merge("elsewhere", "main resolution\n");
-	await git(clone, "push", "-q", "origin", "elsewhere:main");
+	await commit("x.txt", "x");
+	await git(clone, "push", "-q", "origin", "main");
+	await git(clone, "checkout", "-q", "-b", "side", "main");
+	const side = await commit("s.txt", "s1");
+	await git(clone, "checkout", "-q", "-B", "t3/thread", "main");
+	const mine = await commit("t.txt", "t1");
+	await git(clone, "merge", "-q", "--no-ff", "-m", "merge side", "side");
+	// The owner's rebase merge: the thread's ordinary commits land under new ids, with one more change after them.
+	await git(clone, "checkout", "-q", "-B", "landed", "main");
+	await git(clone, "cherry-pick", side, mine);
+	await commit("extra.txt", "extra");
+	await git(clone, "push", "-q", "origin", "landed:main");
 	await git(clone, "checkout", "-q", "t3/thread");
 	await git(clone, "fetch", "-q", "origin");
-	// Every ordinary commit of the thread is on main; its merge commit is not. (Some versions of git cherry say
-	// nothing of a merge commit, and the one on the CI runner lists it: the answer must not depend on that.)
-	const mine = await git(clone, "rev-parse", "HEAD");
+	// Every ordinary commit of the thread is on main under another id; its merge commit is not, and the trees differ.
+	// (Whether `git cherry` lists a merge commit differs between versions of git: the answer must not depend on it.)
+	const head = await git(clone, "rev-parse", "HEAD");
 	await expect(syncBranch(clone, false)).rejects.toThrow("merge commit(s) that origin/main does not hold");
-	expect(await git(clone, "rev-parse", "HEAD")).toBe(mine);
+	expect(await git(clone, "rev-parse", "HEAD")).toBe(head);
 	// A branch that holds the same tree as main loses nothing.
-	await commit("main resolution\n", "the same content");
+	await commit("extra.txt", "extra");
 	expect(await syncBranch(clone, false)).toBe("t3/thread is at origin/main");
 });
 
