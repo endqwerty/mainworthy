@@ -228,3 +228,14 @@ private struct ProofChip: View {
 		.accessibilityIdentifier("proof-\(proof.method)")
 	}
 }
+
+extension View {
+	/// A bar that floats over the foot of a page, as glass like the system's own bars, so the content scrolls
+	/// under it. Placed with `safeAreaBar`, which gives the content's edge the same treatment as under a toolbar.
+	func floatingBar() -> some View {
+		padding(12)
+			.glassEffect(.regular, in: .rect(cornerRadius: 22))
+			.padding(.horizontal, 12)
+			.padding(.bottom, 6)
+	}
+}

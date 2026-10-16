@@ -115,17 +115,14 @@ struct QuestionView: View {
 			.padding(16)
 		}
 		.background(Color(.systemGroupedBackground))
-		.safeAreaInset(edge: .bottom) {
+		.safeAreaBar(edge: .bottom) {
 			// A refusal is said where the answer was given: the list's own bar is under this page.
 			if let notice = screen.notice, notice.isProblem || screen.hasPendingAnswer(question.ref) {
 				Text(notice.text)
 					.font(.subheadline)
 					.foregroundStyle(Color.fail)
 					.frame(maxWidth: .infinity, alignment: .leading)
-					.padding(12)
-					.background(.regularMaterial, in: .rect(cornerRadius: 14))
-					.padding(.horizontal, 12)
-					.padding(.bottom, 6)
+					.floatingBar()
 					.accessibilityIdentifier("question-notice")
 			}
 		}

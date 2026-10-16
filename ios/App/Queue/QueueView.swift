@@ -12,10 +12,14 @@ struct QueueView: View {
 	/// Whether Select is offered: on the open questions, to a person who may answer.
 	private var canSelect: Bool { screen.showing == .open && workspace.project?.may(.produce) == true }
 
-	private var selectButton: some View {
-		Button(screen.isSelecting ? "Done" : "Select") { screen.select(!screen.isSelecting) }
-			.fontWeight(screen.isSelecting ? .semibold : .regular)
-			.accessibilityIdentifier("queue-select")
+	@ViewBuilder private var selectButton: some View {
+		if screen.isSelecting {
+			Button("Done") { screen.select(false) }
+				.buttonStyle(.glassProminent)
+				.accessibilityIdentifier("queue-select")
+		} else {
+			Button("Select") { screen.select(true) }.accessibilityIdentifier("queue-select")
+		}
 	}
 
 	private var unsentLink: some View {
@@ -41,21 +45,25 @@ struct QueueView: View {
 				// The tab says Queue. The bar keeps its room for the project, Unsent answers and Select, as Photos
 				// and Files keep Select at the top right; Open and Decided are the segmented control under it.
 				.navigationTitle("Queue")
+				.navigationBarTitleDisplayMode(.inline)
 				.toolbar(removing: .title)
 				.toolbar {
-					ProjectMenu(workspace: workspace)
-					ToolbarItem(placement: .topBarTrailing) { unsentLink }
-					if canSelect { ToolbarItem(placement: .topBarTrailing) { selectButton } }
+					// While selecting, the bar holds only what selecting needs, as Photos and Files do.
+					if !screen.isSelecting {
+						ProjectMenu(workspace: workspace)
+						ToolbarItem(placement: .topBarTrailing) { unsentLink }
+					}
+					if canSelect {
+						// A text action stands apart from the symbol beside it, so the two do not read as one button.
+						ToolbarSpacer(.fixed, placement: .topBarTrailing)
+						ToolbarItem(placement: .topBarTrailing) { selectButton }
+					}
 				}
+				.modifier(SelectionMode(screen: screen))
 				.navigationDestination(for: String.self) { ref in
 					QuestionView(ref: ref, screen: screen, workspace: workspace) { path.removeAll() }
 				}
-				.safeAreaInset(edge: .bottom) {
-					VStack(spacing: 0) {
-						NoticeBar(screen: screen)
-						if screen.isSelecting { SelectionBar(screen: screen) }
-					}
-				}
+				.safeAreaBar(edge: .bottom) { NoticeBar(screen: screen) }
 		}
 		.task { await screen.show(screen.showing, filter: screen.filter) }
 	}
@@ -216,8 +224,9 @@ private struct SelectableRow: View {
 	}
 }
 
-/// What is selected, and the answers every selected question takes.
-private struct SelectionBar: View {
+/// Selecting, as Photos and Files select: the tab bar gives way to a bottom toolbar that says what is selected and
+/// holds the answer, Select All is at the top left, and Done at the top right ends it.
+private struct SelectionMode: ViewModifier {
 	let screen: QueueScreen
 	@State private var asking: Chosen?
 	@State private var confirming: Chosen?
@@ -234,70 +243,87 @@ private struct SelectionBar: View {
 		var what: String { questions.first.map { $0.kind.counted(questions.count) } ?? "the selected questions" }
 	}
 
-	var body: some View {
+	func body(content: Content) -> some View {
+		content
+			.toolbar(screen.isSelecting ? .hidden : .automatic, for: .tabBar)
+			.toolbar {
+				if screen.isSelecting {
+					ToolbarItem(placement: .topBarLeading) { selectAll }
+					ToolbarItem(placement: .status) { status }
+					ToolbarSpacer(.flexible, placement: .bottomBar)
+					ToolbarItem(placement: .bottomBar) { answer }
+				}
+			}
+			.sheet(item: $asking) { chosen in
+				let typing = screen.typing(QueueScreen.selectionTyping)
+				AnswerSheet(
+					title: chosen.choice.label, help: "\(chosen.choice.help) It goes to each of the \(chosen.what).",
+					action: "Record", wantsReference: chosen.choice.takes == .reference,
+					wantsReason: chosen.questions.contains(where: \.wantsReason), reference: typing.reference,
+					reason: typing.reason
+				) { reference, reason in
+					Task { await screen.answerAll(chosen.questions, with: chosen.choice, reference: reference, reason: reason) }
+				}
+			}
+			.confirmationDialog(
+				"\(confirming?.choice.label ?? "Answer") for \(confirming?.what ?? "the selected questions")?",
+				isPresented: isConfirming, titleVisibility: .visible, presenting: confirming
+			) { chosen in
+				Button(chosen.choice.label) {
+					confirming = nil
+					Task { await screen.answerAll(chosen.questions, with: chosen.choice) }
+				}
+				.accessibilityIdentifier("bulk-confirm")
+				Button("Cancel", role: .cancel) { confirming = nil }
+			} message: { chosen in
+				Text(message(for: chosen))
+			}
+	}
+
+	/// Select All, of the selection's kind or the kind the list shows; Deselect All once all of them are selected.
+	@ViewBuilder private var selectAll: some View {
 		let selection = screen.selection
 		let all = screen.selectable
-		VStack(alignment: .leading, spacing: 10) {
-			HStack {
-				Text(selection.first.map { "\($0.kind.counted(selection.count)) selected" }
-					?? "Select questions of one kind to give them one answer.")
-					.font(.subheadline.weight(selection.isEmpty ? .regular : .semibold))
-					.foregroundStyle(selection.isEmpty ? .secondary : .primary)
-					.accessibilityIdentifier("selection-count")
-				Spacer(minLength: 8)
-				if all.count > selection.count, let kind = all.first?.kind {
-					Button("Select all \(kind.counted(all.count))") { screen.selectAll() }
-						.font(.subheadline)
-						.accessibilityIdentifier("select-all")
-				} else if !selection.isEmpty {
-					Button("Clear") { screen.clearSelection() }.font(.subheadline).accessibilityIdentifier("select-clear")
-				}
-			}
-			if !selection.isEmpty {
-				Menu {
-					ForEach(screen.sharedChoices) { choice in
-						Button(choice.label) { choose(choice) }.accessibilityIdentifier("bulk-\(choice.answer)")
-					}
-				} label: {
-					Label("Answer \(selection.count == 1 ? "it" : "all \(selection.count)")", systemImage: "checkmark.bubble")
-						.frame(maxWidth: .infinity)
-				}
-				.buttonStyle(.borderedProminent)
-				.disabled(screen.sharedChoices.isEmpty || !screen.busy.isDisjoint(with: screen.selected))
-				.accessibilityIdentifier("bulk-answer")
-				if screen.sharedChoices.isEmpty {
-					Text("No answer is taken by every selected question.").font(.footnote).foregroundStyle(.secondary)
-				}
-			}
+		if all.count > selection.count {
+			Button("Select All") { screen.selectAll() }
+				.accessibilityLabel("Select all \(all.first.map { $0.kind.counted(all.count) } ?? "")")
+				.accessibilityIdentifier("select-all")
+		} else if !selection.isEmpty {
+			Button("Deselect All") { screen.clearSelection() }.accessibilityIdentifier("select-clear")
 		}
-		.padding(12)
-		.background(.regularMaterial, in: .rect(cornerRadius: 14))
-		.padding(.horizontal, 12)
-		.padding(.bottom, 6)
-		.sheet(item: $asking) { chosen in
-			let typing = screen.typing(QueueScreen.selectionTyping)
-			AnswerSheet(
-				title: chosen.choice.label, help: "\(chosen.choice.help) It goes to each of the \(chosen.what).",
-				action: "Record", wantsReference: chosen.choice.takes == .reference,
-				wantsReason: chosen.questions.contains(where: \.wantsReason), reference: typing.reference,
-				reason: typing.reason
-			) { reference, reason in
-				Task { await screen.answerAll(chosen.questions, with: chosen.choice, reference: reference, reason: reason) }
+	}
+
+	private var status: some View {
+		let selection = screen.selection
+		let text: String =
+			if let first = selection.first {
+				screen.sharedChoices.isEmpty
+					? "No answer fits all \(selection.count)"
+					: "\(first.kind.counted(selection.count)) selected"
+			} else {
+				"Select questions of one kind"
 			}
-		}
-		.confirmationDialog(
-			"\(confirming?.choice.label ?? "Answer") for \(confirming?.what ?? "the selected questions")?",
-			isPresented: isConfirming, titleVisibility: .visible, presenting: confirming
-		) { chosen in
-			Button(chosen.choice.label) {
-				confirming = nil
-				Task { await screen.answerAll(chosen.questions, with: chosen.choice) }
+		return Text(text)
+			.font(.subheadline.weight(selection.isEmpty ? .regular : .semibold))
+			.foregroundStyle(selection.isEmpty ? .secondary : .primary)
+			.fixedSize()
+			.accessibilityIdentifier("selection-count")
+	}
+
+	private var answer: some View {
+		Menu {
+			ForEach(screen.sharedChoices) { choice in
+				Button(choice.label) { choose(choice) }.accessibilityIdentifier("bulk-\(choice.answer)")
 			}
-			.accessibilityIdentifier("bulk-confirm")
-			Button("Cancel", role: .cancel) { confirming = nil }
-		} message: { chosen in
-			Text(message(for: chosen))
+		} label: {
+			// In a toolbar a label shows its symbol alone: the word says what this does.
+			Text("Answer").fontWeight(.semibold)
 		}
+		.menuStyle(.button)
+		.buttonStyle(.glassProminent)
+		.tint(.accentColor)
+		.disabled(screen.selection.isEmpty || screen.sharedChoices.isEmpty || !screen.busy.isDisjoint(with: screen.selected))
+		.accessibilityIdentifier("bulk-answer")
 	}
 
 	private var isConfirming: Binding<Bool> {
@@ -365,10 +391,7 @@ private struct NoticeBar: View {
 				.foregroundStyle(.secondary)
 				.accessibilityLabel("Dismiss")
 			}
-			.padding(12)
-			.background(.regularMaterial, in: .rect(cornerRadius: 14))
-			.padding(.horizontal, 12)
-			.padding(.bottom, 6)
+			.floatingBar()
 			.transition(.move(edge: .bottom).combined(with: .opacity))
 			.sheet(item: $asking) { question in
 				let typing = screen.typing(QueueScreen.withdrawing(question.ref))

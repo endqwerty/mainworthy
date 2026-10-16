@@ -13,7 +13,8 @@ and their pins in the web editor. The app's editor cannot change fragments or ca
 
 There is no App Store entry. You build the app from the repository and install it over a cable. You need a Mac
 with Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and Bun. Add an Apple ID in Xcode under
-Settings, Accounts. A free Apple ID will do. To install the app, follow these steps:
+Settings, Accounts. A free Apple ID will do. The app needs iOS 26 or later: it supports the current iOS and
+the one before it. To install the app, follow these steps:
 
 1. Connect the iPhone to the Mac with a cable.
 2. Unlock the phone.
@@ -103,14 +104,15 @@ it to open another.
 
 To give one answer to several questions of one kind, follow these steps:
 
-1. In **Queue**, press **Select** at the top right. Each open question gets a circle, and **Done** ends it.
+1. In **Queue**, press **Select** at the top right. Each open question gets a circle, the tabs give way to a bar
+   that says what is selected, and **Done** at the top right ends it.
 2. Press questions to select them. A selection holds one kind, such as unlinked tests or failures, and at most
-   500 questions. Select a question or choose a kind's chip before pressing **Select all**. It selects eligible
-   questions of that kind from the list, up to the limit. A question that cannot join appears faint.
+   500 questions. Select a question or choose a kind's chip before pressing **Select All** at the top left. It
+   selects eligible questions of that kind from the list, up to the limit, and then reads **Deselect All**. A question that cannot join appears faint.
    Press it to read why. It may be another kind, require a decision you cannot make, or have an answer
    waiting to send. Proposals and findings with a suggested edit need an answer on their own page,
    where you can read the edit.
-3. Press **Answer all**. Only the answers every selected question takes are offered.
+3. Press **Answer** in the bar at the bottom. Only the answers every selected question takes are offered.
 4. Choose an answer.
    To **Link to a case**, answer one question at a time and choose a case for each test.
    **Create cases** makes and links one automated case for each test of the selected questions, and the

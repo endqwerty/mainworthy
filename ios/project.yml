@@ -6,7 +6,7 @@
 # simulator.
 name: Mainworthy
 options:
-  deploymentTarget: { iOS: "18.0" }
+  deploymentTarget: { iOS: "26.0" }
   createIntermediateGroups: true
   developmentLanguage: en
 configFiles:

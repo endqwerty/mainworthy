@@ -12,7 +12,7 @@ import PackageDescription
 
 let package = Package(
 	name: "Kit",
-	platforms: [.iOS(.v18), .macOS(.v15)],
+	platforms: [.iOS("26.0"), .macOS("26.0")],
 	products: [
 		.library(name: "MainworthyKit", targets: ["MainworthyClient", "MainworthyScreens"]),
 	],
