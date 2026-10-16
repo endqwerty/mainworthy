@@ -1,6 +1,6 @@
 # Policy
 
-Decide how strict a project is, read its policy, and switch it. A policy says who must answer each kind of question and what an agent's answer is worth.
+A policy says who must answer each kind of question and what an agent's answer is worth. Its clauses determine how strict a project is.
 
 ![Settings with the policy preset, the compare table and the clause table](../ui/screenshots/settings-light.png)
 
@@ -10,9 +10,18 @@ A policy is a table of clauses. Each clause covers one kind of question: a propo
 
 [Diagram: who answers a question under a policy](../diagrams/policy-routing.html)
 
-The `when` column holds the conditions a clause tests. `always` matches every question of its kind. The others describe the question: `author:agent` for an edit by an agent, `conflict` for an edit that clashes with a newer version, `policy` for a change to the policy itself, `scope:change` for a failure on a change, `hint:disputed` for two reports that disagree, and `verdict:passed` for a run that passed. `answer:reject` matches only once someone picks that answer. `unlinked:track` and `unlinked:create` test the project's choice for [tests with no case](#tests-with-no-case).
+The `when` column holds the conditions a clause tests. `always` matches every question of its kind. Other conditions describe the question:
 
-"Who answers" is one of these.
+- `author:agent` matches an edit by an agent.
+- `conflict` matches an edit that clashes with a newer version.
+- `policy` matches a change to the policy itself.
+- `scope:change` matches a failure on a change.
+- `hint:disputed` matches two reports that disagree.
+- `verdict:passed` matches a run that passed.
+
+`answer:reject` matches only once someone picks that answer. `unlinked:track` and `unlinked:create` test the project's choice for [tests with no case](#tests-with-no-case).
+
+"Who answers" has one of these values:
 
 - A rule. Nobody is asked. The policy gives its answer at once and records it as a decision. A person with the `answer` capability can still overrule it.
 - A member. A person with the `answer` capability.
@@ -22,7 +31,7 @@ The `when` column holds the conditions a clause tests. `always` matches every qu
 
 An agent's answer is one of three things. It counts as a decision, it is shown as advice and a person decides, or it is refused. The table also says whether a person who produced the evidence may answer, and whether the answer needs a reason.
 
-An unexplained failure with no quarantine cover blocks the runs that count it, under all three presets. The policy decides who may explain it. The `blocks` column only says which runs list a question. A separate setting says whether an explicit CI declaration that no tests are required may pass an empty commit gate.
+An unexplained failure with no quarantine cover blocks the runs that count it, under all three presets. The policy decides who may explain it. The `blocks` column says only which runs list a question. A separate setting says whether an explicit CI declaration that no tests are required may pass an empty commit gate.
 
 ## Limit agent edits by folder or tag
 
@@ -32,7 +41,12 @@ Write predicates in their normalised form. Folder paths use lower case, with no 
 
 Folder paths and tags use Unicode NFC and contain no format characters, such as a zero-width space. A predicate that becomes empty after cleaning is invalid. New folder names and tags use the same cleaning. Existing NFD folder names keep their stored spelling, but folder lookup and scope matching normalise them, so they still match an NFC predicate.
 
-Put a clause like this after the policy and conflict clauses, before the general adoption clause. An instance admin reads the current policy with `mainworthy policy show --json` or HTTP `admin policy.show`. Submit the full clause list through `propose` with `op: "policy"` and that policy version as `base`. An admin accepts that policy change in the queue.
+To add a scope restriction, have an instance admin read the current policy and follow these steps:
+
+1. Read the policy with `mainworthy policy show --json` or HTTP `admin policy.show`.
+2. Add a clause like the example below after the policy and conflict clauses, before the general adoption clause.
+3. Submit the full clause list through `propose` with `op: "policy"` and the policy version you read as `base`.
+4. Have an admin accept the policy change in the queue.
 
 ```json
 {
@@ -52,7 +66,7 @@ The presets do not add scope restrictions. Per-day limits and protection based o
 
 ## Read the policy
 
-In Settings, open Policy (<kbd>g</kbd> <kbd>,</kbd>). It shows the preset in force, a short summary, and "Compare the policies". An instance admin also sees the clause table, its settings, and "Edit clauses".
+Open Settings with <kbd>g</kbd> <kbd>,</kbd>, then open Policy. The page shows the preset in force, a short summary, and "Compare the policies". An instance admin also sees the clause table, its settings, and "Edit clauses".
 
 From the command line:
 
@@ -82,13 +96,20 @@ The last line holds the settings. The basis is which evidence a planned run acce
 
 ## Custom fields
 
-An instance admin can define a project's fields in **Settings**, **Policy**, under **Custom fields**. Add a field, give it a key and label, choose **Text** or **Choice**, and mark **Required** if it needs a value. For a choice, enter one allowed value per line. Keys must be unique. Choices must be nonblank, unique, and fit on one line.
+An instance admin can define a project's fields in **Settings**, **Policy**, under **Custom fields**. To define a field, follow these steps:
 
-Press **Save field definitions** to propose and accept the change. Both the proposal and the admin's decision stay in the record. Definitions belong to the project and survive a switch of preset. Saving sends the version of the policy read by the browser. A policy change during saving causes a conflict and keeps your field draft. Review the current policy before trying again. If another edit changes the definitions while you type, **Reload field definitions** replaces your unsaved form with the current definitions before you can save.
+1. Add a field.
+2. Give the field a unique key and a label.
+3. Choose **Text** or **Choice**.
+4. For a choice, enter one allowed value per line. Values must be nonblank, unique, and fit on one line.
+5. If the field needs a value, mark **Required**.
+6. Press **Save field definitions** to propose and accept the change.
+
+Both the proposal and the admin's decision stay in the record. Definitions belong to the project and survive a switch of preset. Saving sends the version of the policy read by the browser. A policy change during saving causes a conflict and keeps your field draft. Review the current policy before trying again. If another edit changes the definitions while you type, choose **Reload field definitions** before saving. Reloading replaces your unsaved form with the current definitions.
 
 Field values remain strings in a case's `fields` map. A required value cannot be missing or blank. A nonblank choice value must match an allowed value exactly. An optional field can be absent or blank. Keys without definitions remain free text. Removing a definition leaves all its values in place.
 
-New cases and restores must meet the definitions when proposed and adopted. An edit may keep unchanged values from the current case, including missing required values and choices no longer allowed. This lets you edit an older case in the web or iPhone editor without filling newly required fields. Changed field values must meet the definitions, including after a merge or while a proposal waits for acceptance. A refusal leaves the case unchanged. Changing a definition never rewrites existing versions.
+New cases and restores must meet the definitions when proposed and adopted. An edit may keep unchanged values from the current case, including missing required values and choices no longer allowed. Keeping unchanged values lets you edit an older case in the web or iPhone editor without filling newly required fields. Changed field values must meet the definitions, including after a merge or while a proposal waits for acceptance. A refusal leaves the case unchanged. Changing a definition never rewrites existing versions.
 
 Required fields cannot be combined with **Create a case for each test**. Automatic creation has no values for those fields. Choose **Ask in the queue** or **Track without a case** first. Optional definitions work with automatic creation.
 
@@ -98,7 +119,7 @@ The case editor does not edit field values yet. Use canonical Markdown or a `pro
 $ mainworthy propose --json '{"edits":[{"op":"edit","case":"C-1","base":1,"body":{"fields":{"risk":"high","legacy":"keep this value"}}}]}'
 ```
 
-A supplied `fields` map replaces that map. Include every value you want to keep; omitting `fields` preserves the base version's values. Use `mainworthy get --json '{"refs":["C-1"],"as":"md"}'` to read them. The ordinary JSON case reply omits custom field values.
+A supplied `fields` map replaces the case's map. Include every value you want to keep. Omitting `fields` preserves the base version's values. Use `mainworthy get --json '{"refs":["C-1"],"as":"md"}'` to read them. The ordinary JSON case reply omits custom field values.
 
 To define fields through the CLI or HTTP API, start with `mainworthy policy show --json`. Keep its settings and add a `fields` map, then propose the whole settings object. Use its `version` as `base` in place of `1`:
 
@@ -106,7 +127,7 @@ To define fields through the CLI or HTTP API, start with `mainworthy policy show
 $ mainworthy propose --json '{"edits":[{"op":"policy","base":1,"settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"fields":{"risk":{"kind":"choice","label":"Risk","required":true,"choices":["low","high"]},"notes":{"kind":"text","label":"Notes","required":false}}}}]}'
 ```
 
-An admin who is a person accepts the resulting question in Queue or with `decide`. Sending a settings object without `fields` preserves the current definitions. Send `"fields": {}` to remove every definition explicitly. The MCP tool listing omits field definitions to keep its token limit; use the CLI, HTTP API, or Settings for definition changes. Archives include the policy versions, values, proposals, and decisions.
+An admin who is a person accepts the resulting question in Queue or with `decide`. Sending a settings object without `fields` preserves the current definitions. Send `"fields": {}` to remove every definition explicitly. The MCP tool listing omits field definitions to keep its token limit. To change definitions, use the CLI, HTTP API, or Settings. Archives include the policy versions, values, proposals, and decisions.
 
 ## The three presets
 
@@ -200,6 +221,8 @@ The API policy edit is `{"op":"policy","emptyReports":"nothing-required"}`. The 
 
 ## Switch the policy
 
+To switch presets in Settings, follow these steps:
+
 1. Open Settings, then Policy.
 2. Choose a preset in "Preset".
 
@@ -223,19 +246,22 @@ $ mainworthy policy use strict
 policy proposal P-2: open Q-2 needs an admin
 ```
 
-An admin finds it in Queue under "Proposals". Reading the clause table needs `admin` on every project, which is more than switching needs.
+An admin finds it in Queue under "Proposals". Reading the clause table needs `admin` on every project. Switching needs `admin` only on the project being changed.
 
-A policy change rewrites nothing that is recorded. Results, decisions and cases stay as they were. What changes is who may answer, whether a reason is needed, and whether an empty declaration passes. That holds for the next question and for every question that is still open: an open question now waits for whoever the new policy names. One kind of question is answered at the change: where the new policy has a rule for [tests with no case](#tests-with-no-case), the rule answers the open questions about them, and under `create` that makes their cases.
+A policy change rewrites nothing that is recorded. Results, decisions and cases stay as they were. What changes is who may answer, whether a reason is needed, and whether an empty declaration passes. The new policy applies to future and open questions. Each open question waits for whoever the new policy names. If the new policy has a rule for [tests with no case](#tests-with-no-case), that rule answers the open questions about them. Under `create`, the rule also makes their cases.
 
 ## Change single clauses
 
 In Settings, open Policy and choose "Edit clauses". This needs a person with instance `admin`, to read the full policy, and `produce` on the project. A project admin can still use the existing preset and tests-with-no-case controls.
 
-1. Edit the clause's conditions, who may answer, agent permissions, reason requirement, producer restriction, or which runs list it. Write conditions one per line. For a rule, write its answer as JSON, for example `{"is":"accept"}`.
+To edit the policy, follow these steps:
+
+1. Edit the clause's conditions, who may answer, agent permissions, reason requirement, producer restriction, or which runs list the question. Write conditions one per line. For a rule, write its answer as JSON, for example `{"is":"accept"}`.
 2. Add, remove, or move clauses with the row controls. The first matching clause wins. Each kind must end with a clause whose only condition is `always`.
 3. Set the flaky hold, evidence basis, and infrastructure hold below the table. The draft keeps the current choice for tests with no case.
 4. Choose "Preview recent questions" to compare the draft with the policy in force when you opened the editor. The sample contains up to 20 open questions in queue order and 20 most recently settled questions. Each question shows matching for its current facts and its applicable answer choices.
-5. Give a policy change reason, then choose "Apply policy". Mainworthy records the proposal and its accepting decision through the same operations as a preset switch.
+5. Give a policy change reason.
+6. Choose "Apply policy". Mainworthy records the proposal and its accepting decision through the same operations as a preset switch.
 
 Invalid conditions, duplicate clause ids, invalid rule answers, missing final `always` clauses, and holds outside 1 to 365 days prevent preview and apply. Preview reads questions without changing the policy or recording decisions. It shows clause matching, who may answer, rule answers, and which runs list the question. It does not replay decisions, check a particular person's permissions, execute rules, or predict a gate result. Existing decisions stay recorded. Hold and basis changes affect future decisions and runs.
 
@@ -254,7 +280,7 @@ $ mainworthy propose --json '{"edits":[{"op":"policy","base":1,"preset":"standar
 {"proposal":"P-9","question":"Q-9","conflicts":[],"status":"open","needs":"an admin","cases":[]}
 ```
 
-Use the version you read in place of `1`. Preset-only, `unlinked` and `emptyReports` edits may omit `base`; the proposal records the policy version current when it is made. An admin accepts it like any policy change. Mainworthy refuses a policy in which some kind of question has no last clause that matches `always`:
+Use the version you read in place of `1`. Preset-only, `unlinked` and `emptyReports` edits may omit `base`. The proposal records the policy version current when it is made. An admin accepts it like any policy change. Mainworthy refuses a policy in which some kind of question has no last clause that matches `always`:
 
 ```
 invalid: every kind must end with a clause that always matches; missing for: finding
@@ -272,16 +298,21 @@ Every preset starts with detection enabled, a 14-day window, and a threshold of
 two outcome changes per test and failure signature. A file-split signature has its
 own count, separate from the original cause.
 
-To change them, start from the current settings and send a policy edit. Keep the
-other settings as they are. Use the `version` you read as `base` in place of `1`.
+To change the detector settings, follow these steps:
+
+1. Read the current policy with `mainworthy policy show --json`.
+2. Change the detector values and keep the other settings as they are.
+3. Use the `version` you read as `base` in place of `1`.
+4. Send the policy edit through `mainworthy propose --json`.
+5. Have an admin accept the policy question.
+
 This example uses the other defaults:
 
 ```json
 {"edits":[{"op":"policy","base":1,"settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"flakyDetection":{"enabled":true,"windowDays":7,"minFlips":3}}}]}
 ```
 
-Send it through `mainworthy propose --json` and have an admin accept the policy
-question. `windowDays` accepts 1 to 365 days, and `minFlips` accepts 1 to 100.
+`windowDays` accepts 1 to 365 days, and `minFlips` accepts 1 to 100.
 `enabled: false` hides current detector suggestions without deleting observations.
 Changing these values affects current test-detail reads and future failure-question
 occurrences. Existing questions keep the snapshot recorded with their evidence.
@@ -300,11 +331,11 @@ for entry and exit rules.
 
 ## What custom means
 
-A policy is `custom` when its clauses are not exactly those of a preset. A preset's name can stay on the stored policy after you edit its clauses, so Mainworthy compares the clauses and not the name. Settings and `mainworthy policy show` then say `custom`, the preset summary and the compare table's marked column go away, and the switch between two presets is hidden. Choosing a preset in "Preset", or `mainworthy policy use`, replaces every clause with that preset's.
+A policy is `custom` when its clauses are not exactly those of a preset. The stored policy can keep a preset's name after you edit its clauses. Mainworthy therefore compares the clauses rather than the name. Settings and `mainworthy policy show` display `custom`. Settings hides the preset summary, the compare table's marked column, and the switch between two presets. Choosing a preset in "Preset", or using `mainworthy policy use`, replaces every clause with that preset's.
 
 ## Choose a preset for a new project
 
-Choose the first policy when you create a project. In Settings, open Projects and pick "Initial policy" under "Create a project". It defaults to `loose`. You can switch later without migrating anything.
+Choose the first policy when you create a project. In Settings, open Projects and pick "Initial policy" under "Create a project". The initial policy defaults to `loose`. You can switch later without migrating anything. Choose a preset to match your review needs:
 
 - Start with `loose` when one person or a small trusted team writes the cases, and ordinary edits should take effect at once.
 - Use `standard` when agents propose edits and a person should read each one first.
@@ -328,7 +359,7 @@ In a custom policy, set the clause's `ask` to:
 }
 ```
 
-Read the current version with `admin` action `policy.show` and include it as `base` alongside the full clause list in a `propose` policy edit.
+Read the current version with `admin` action `policy.show`. Include that version as `base` alongside the full clause list in a `propose` policy edit.
 Have an admin accept that proposal under the current policy.
 A proposal and its acceptance are refused if a role clause has no eligible holder in the project.
 Assign the role first to an actor with `produce` and `answer` whose kind the clause permits to answer.
@@ -338,7 +369,7 @@ While no eligible holder exists, every policy proposal that keeps the role claus
 Assign an eligible holder again or remove the role clause in the proposal.
 The clause editor preserves existing role selectors. Introduce a new role selector through a policy proposal in the API or CLI.
 Use this `ask` on an adoption clause to require a reviewer who did not write the proposal.
-The reviewer opens the question and answers with a reason. Someone without the role gets `forbidden`; a blank reason gets `invalid`.
+The reviewer opens the question and answers with a reason. Someone without the role gets `forbidden`. A blank reason gets `invalid`.
 The queue says which role is needed. The same check applies to the web UI, iPhone app, CLI, API and MCP.
 An admin has no implicit role. A role does not override `notProducer` or the clause's rules for agents.
 An agent can hold a role, and its answer counts with `agents: "answer"` when it meets the other conditions.

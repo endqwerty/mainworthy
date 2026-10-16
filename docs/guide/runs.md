@@ -7,11 +7,13 @@ the run with a verdict. Let CI results fill slots so you do not repeat completed
 
 ## Plan a run in the web app
 
+To plan a run, follow these steps.
+
 1. Press <kbd>g</kbd> <kbd>r</kbd> to open Runs.
 2. Press <kbd>n</kbd>.
 3. Enter a "Run name".
 4. Choose "All active cases", "By folder", "By tag", or "By search" under "Cases".
-5. Supply the folder, tag, or search text when needed.
+5. If your selection needs a folder, tag, or search text, enter that value.
 6. Choose which results the run accepts.
 7. Choose "Plan run".
 
@@ -20,7 +22,8 @@ The planner shows the number of matching cases.
 "Accept results for a commit" also accepts qualifying results already reported for
 that commit and results that arrive later. Enter the tested commit's hash.
 
-A run planned for a commit counts one commit. When you plan it, Mainworthy resolves an abbreviated hash against known commits.
+A run planned for a commit counts one commit.
+When you plan the run, Mainworthy resolves an abbreviated hash against known commits.
 If the commit is not known yet, use the full hash your pipeline will report.
 Mainworthy refuses an ambiguous abbreviation.
 
@@ -30,7 +33,7 @@ Mainworthy refuses an ambiguous abbreviation.
 
 When you plan the run, each selected case gets a slot pinned to its current version.
 Editing, moving, or archiving the case later does not change that slot's version.
-Read the pinned document in the run, rather than the latest document in Suite.
+To exercise the selected version, read the pinned document in the run.
 
 By default, a run asks for a person or an automated test, with one passing actor.
 It accepts exact or assumed evidence under `loose` and `standard`.
@@ -49,25 +52,33 @@ Use [the CLI](./cli.md) or [the API](./api.md) for those settings.
 
 ## Record results by hand
 
+To record a result, follow these steps.
+
 1. Select an unfilled slot.
 2. Exercise the pinned case's steps.
 3. Press the key for the outcome.
 
 <kbd>p</kbd> records "Pass". <kbd>b</kbd> records "Blocked".
 <kbd>s</kbd> records "Skip". These keys move you to the next missing slot.
-<kbd>f</kbd> focuses "Result note". Enter the failure details, then press <kbd>Enter</kbd>
-to record "Fail" and move on.
+To record a failure, follow these steps.
+
+1. Press <kbd>f</kbd> to focus "Result note".
+2. Enter the failure details.
+3. Press <kbd>Enter</kbd> to record "Fail" and move on.
 
 While the note has the focus, the outcome keys type letters and <kbd>Enter</kbd> records
-"Fail". To record another outcome with a note, type the note, press <kbd>Esc</kbd> to
-leave the field, then press the outcome key.
+"Fail". To record another outcome with a note, follow these steps.
+
+1. Type the note.
+2. Press <kbd>Esc</kbd> to leave the field.
+3. Press the outcome key.
 
 Type a step number before <kbd>f</kbd> to mark the failed step.
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between slots.
 If browser storage is available, the run keeps unfinished notes on this device until the server records the result.
-Paste a screenshot into **Result note** or choose **Attach a file** before
-recording. Pending files stay with their slot while you move between slots, but
-are lost if you close or reload the page. A saved result shows its images and file
+Before recording the result, paste a screenshot into **Result note** or choose **Attach a file**.
+Pending files stay with their slot while you move between slots.
+Closing or reloading the page discards pending files. A saved result shows its images and file
 downloads. Each file may be at most 4 MiB, and a result may hold 20 files and 16 MiB.
 See [attachments](./report-results.md#attach-screenshots-and-small-files) for report
 uploads, access, and retention.
@@ -104,7 +115,8 @@ Add named jobs when the run must receive reports from all parts of a pipeline.
 Each required job needs an applied pipeline report that ran something.
 A report containing only skipped or blocked results does not meet the requirement.
 An agent's report under the same job name does not meet it either.
-A `nothingRequired` declaration never satisfies a required job or a case slot, even when the project's policy allows an empty commit gate to pass.
+A `nothingRequired` declaration never satisfies a required job or a case slot.
+That restriction applies even when the project's policy allows an empty commit gate to pass.
 A run that counts only its own results cannot require CI jobs.
 
 Use this CLI form for one case, one commit, and a required `tests` job:
@@ -118,9 +130,10 @@ A required job is separate from the evidence each case slot needs.
 
 ## Resolve a disputed slot
 
-A counted pass and fail from different producers make a slot disputed.
+A counted pass and a counted fail from different producers make a slot disputed.
 A later write from another producer does not silently replace the disagreement.
-Open its separate "Disputed" question in Queue and choose the appropriate failure answer.
+To settle the dispute, open the slot's separate "Disputed" question in Queue.
+Choose the appropriate failure answer.
 Each slot, cause, and scope has its own question. An earlier answer about the cause
 continues to apply elsewhere, but does not settle this slot. The order of that
 answer and the contradictory result makes no difference.
@@ -128,8 +141,7 @@ answer and the contradictory result makes no difference.
 A settlement applies to the named failures in this slot. Another run that counts
 the same results needs its own settlement. A later effective result from a person
 or pipeline renews the question. An agent's report never renews or ends a person's
-settlement, even if its attempt or outcome changes. While the scope and the evidence from people
-and pipelines stay the same, the classification covers later agent failures of that cause in this slot.
+settlement, even if its attempt or outcome changes. While the scope and evidence from people and pipelines stay the same, the classification covers later agent failures of that cause in this slot.
 A different cause needs its own settlement. Withdrawing or expiring an answer leaves
 this slot disputed again.
 Neither action withdraws the cause's answer or changes an unrelated commit gate.
@@ -161,7 +173,11 @@ A passing run can close again under its policy.
 A run with missing proof or unexplained failures stays open and cannot be approved.
 
 A run that counts only results recorded in it takes no more results after closing.
-To reopen one, find its sign-off in Queue's "Settled" view and withdraw that approval.
+To reopen the run, follow these steps.
+
+1. Find the run's sign-off in Queue's "Settled" view.
+2. Withdraw that approval.
+
 Newer decisions and the current policy still control who may withdraw it.
 
 ## Plan a run from the command line
@@ -176,16 +192,24 @@ See [the CLI guide](./cli.md) for selection, methods, assignments, and other pla
 
 ## Plan a release run
 
-After a successful deployment, announce its build label, artifact digest, and source
-commit from the deploy step. Use a pipeline token or a human admin's token:
+Plan a release run after a successful deployment.
+
+1. From the deploy step, announce the build label, artifact digest, and source commit. Use a pipeline token or a human admin's token.
+2. Plan a run that accepts the build.
+
+For example, use these commands:
 
 ```sh
 $ mainworthy announce --deploy 1.4-rc3 --env staging --digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --repo acme/web --commit 1111111111111111111111111111111111111111 --cmd deploy-staging-rc3-1
 $ mainworthy plan --json '{"name":"Release smoke","select":{"tags":["smoke"]},"accepts":{"build":"1.4-rc3","env":"staging"}}'
 ```
 
-The plan reply gives a run ref. Report against that artifact and check the release
-gate with the returned ref:
+The plan reply gives a run ref. To record and check the release evidence, follow these steps.
+
+1. Report against the artifact.
+2. Check the release gate with the returned run ref.
+
+For example, use these commands:
 
 ```sh
 $ mainworthy report smoke.xml --build 1.4-rc3 --env staging
@@ -204,8 +228,7 @@ unchanged request with the same `cmd` records nothing twice. Use
 The newest announcements come first, with a cursor for the next page.
 
 When a report target or plan names an environment, announce that build label there
-first. Otherwise Mainworthy returns `invalid` and lists the environments it was
-deployed to. A deployment under another label does not qualify that label.
+first. Otherwise Mainworthy returns `invalid` and lists the environments where that label was deployed. A deployment under another label does not qualify that label.
 
 A release run counts the exact artifact digest and its selected environment.
 Omit `env` from the plan to accept that artifact in any environment. Two labels
@@ -219,6 +242,6 @@ Results from an attested source commit do not count as artifact execution.
 
 Open the run in the web app to record manual results against its pinned cases.
 Recording by run alone uses that run's build and environment.
-MCP's report schema omits the build target. Use a planned run with `run`.
+MCP's report schema omits the build target. To report through MCP, supply a planned run in `run`.
 A gate with missing evidence stays pending, and failures and sign-off use the same rules as other
 planned runs. The web and iPhone planners do not yet offer a build picker.

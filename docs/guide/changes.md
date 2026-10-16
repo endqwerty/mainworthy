@@ -7,6 +7,8 @@ Use the same gate from the command line to decide whether CI can continue.
 
 ## Open a change
 
+To inspect a change's verdict, follow these steps.
+
 1. Press <kbd>g</kbd> <kbd>c</kbd> to open Changes.
 2. Select a change from the list.
 3. Read its verdict and reason.
@@ -41,9 +43,11 @@ Impact lists related cases and review information. It is not a code coverage mea
 "Results" lists every test the latest commit's gate counted, linked to a case or tracked
 without one. Each row says how the gate counted the test and names who reported it.
 It also shows the file, job, duration, and failure message when present, and the attempt
-number after the first attempt. The test's name opens [its own page](./report-results.md#read-what-each-test-did).
+number after the first attempt. The test's name opens [the test's page](./report-results.md#read-what-each-test-did).
 A row links to its case and failure question when available, and to the CI build
 when the report supplied an HTTP or HTTPS URL.
+
+Each result row uses one of the following labels.
 
 | The row says | The gate counts it as | Why |
 | --- | --- | --- |
@@ -54,12 +58,13 @@ when the report supplied an HTTP or HTTPS URL.
 | skipped | `skipped` | The runner chose not to run it. It proves nothing. |
 | passed | `pass` | It passed. |
 
-Failures come first. Choose a count above the list, or one of the buttons over it, to show
-only the tests counted that way, and type in the filter to find a test by name or file.
+Failures come first. To filter by how the gate counts tests, choose a count or a
+button above the list. To find a test by name or file, type in the filter.
 The rows add up to the counts. Results from different producers, jobs, or environments
 have separate rows, even for the same test. A retried test shows the attempt the gate counts.
 
-The command line and the API give the same rows:
+The command line and the API return the same rows. For example, these commands
+list results for a change or unexplained results for a commit:
 
 ```sh
 $ mainworthy find --in results --change pr:482
@@ -81,8 +86,9 @@ The diagram follows the default policy, which requires counted evidence. A proje
 ## Act on the verdict
 
 `passed` means counted evidence exists, or the project's policy accepts an applied CI declaration that no tests are required.
-No current failure, dispute, missing requirement, or blocking question prevents passage. Read "Settled and excused"
-to see whether a decision excused a failure, and "Results" to see each test. Passed does not mean every test passed.
+No current failure, dispute, missing requirement, or blocking question prevents
+passage. Read "Settled and excused" to see whether a decision excused a failure.
+Read "Results" to see each test. Passed does not mean every test passed.
 
 `failed` means a decision attributes a failure to the target.
 Fix the product, fix the test, or update the case and test for an intended change.
@@ -100,6 +106,13 @@ A planned run can also wait for a required job or an unfilled slot.
 An unexplained failure can make a run blocked even when it also has missing results.
 The reason names the condition that currently determines the verdict.
 See [runs](./runs.md) for planned-run requirements.
+
+A quarantined automated test keeps its failures in the run and history. The gate's
+reason says how many quarantined failures were recorded and are not blocking,
+including when other evidence keeps the gate blocked or pending. The `quarantined`
+field gives that count when nonzero. A passing verdict with quarantined failures
+therefore does not claim those tests passed. See
+[quarantine an unreliable test](./report-results.md#quarantine-an-unreliable-test).
 
 ## Read the gate in CI or a shell
 
@@ -129,8 +142,8 @@ Use `--json` for structured output. [The CLI guide](./cli.md) lists every flag.
 
 ## When a change ends
 
-A pull request ends when it is merged, or closed without merging. Tell Mainworthy, and it
-stops asking about the change:
+A pull request ends when it is merged or closed without merging. To stop questions
+about the change, report that the pull request ended:
 
 ```sh
 $ mainworthy change --change pr:482 --state merged --compact
@@ -138,9 +151,8 @@ $ mainworthy change --change pr:482 --state merged --compact
 ```
 
 `--state` takes `merged`, `closed` or `open`. The reply lists the failure questions that were open
-about the change and are no longer asked. Nobody will act on an answer about a pull request
-that has ended. A failure that came with the merge fails on the line too, and is asked about
-there as its own question.
+about the change and are no longer asked. Nobody will act on an answer about a pull request that has ended. A failure
+introduced by the merge also appears on trunk and raises its own question there.
 
 Include the exact commit that landed and its trunk branch:
 
@@ -154,7 +166,8 @@ environments belong to trunk, including environments reported later. Reports tha
 still name the pull request count for this head and raise unexplained failures on trunk.
 The commit keeps its one gate, and planned runs that count it are recomputed.
 Pull request answers remain attributable in history and still cover its older commits.
-They do not carry to trunk. A landed commit's automatic inherited answer ends because it no longer belongs to the change's base comparison.
+They do not carry to trunk. A landed commit's automatic inherited answer ends because the commit no longer
+belongs to the change's base comparison.
 Existing trunk answers apply. If this commit gate is the
 newest run in trunk, its unexplained failures raise trunk questions immediately, even
 before another report arrives. An older gate can remain blocked without an open
@@ -180,7 +193,7 @@ A change closed without merging continues to follow reports and code-host head
 observations. Explicitly reopening a merged change lets it follow reports again.
 A landed commit keeps its trunk scope.
 
-What stays as it was:
+The following records remain after a change ends.
 
 - The merged change's head. Its row and `gate --change` keep showing that commit's gate.
   Without new landing metadata or evidence, an unexplained failure still reads
@@ -194,8 +207,8 @@ A report that arrives after the end, from a job that finished late, is recorded 
 It raises no question in the ended scope. A landed head is now on trunk, so its late
 failures are evaluated and asked about there.
 
-When a pull request is opened again, say so, and what its newest commit shows unexplained
-is asked about at once:
+When a pull request reopens, report the new state. Unexplained failures on its
+newest commit raise questions at once:
 
 ```sh
 $ mainworthy change --change pr:482 --state open
@@ -245,22 +258,37 @@ See [decide](./decide.md#explain-a-failure) for duration and later occurrences.
 
 ## Publish the gate as a GitHub commit status
 
-Give a fine-grained personal access token **Commit statuses: write** permission for the repository. A classic token with the `repo:status` scope also works. The token's user needs push access to that repository. Keep the token in the server's secret environment as `MAINWORTHY_GITHUB_TOKEN`. Set these server variables too:
+The token's user needs push access to the repository. Use either a fine-grained
+personal access token with **Commit statuses: write** permission or a classic
+token with the `repo:status` scope. If you also send GitHub defect requests, a
+fine-grained token needs **Issues: write** permission.
 
-```sh
-MAINWORTHY_GITHUB_PROJECT=scratch
-MAINWORTHY_GITHUB_REPOSITORY=example/shop
-MAINWORTHY_PUBLIC_URL=https://mainworthy.example
-MAINWORTHY_GITHUB_STATUSES=1
-```
+To enable status publication, follow these steps.
 
-See [configuration](./configuration.md) for the shared GitHub variables. If you also send GitHub defect requests, a fine-grained token needs **Issues: write** permission.
+1. Create a token with the required permissions for the repository.
+2. Store the token in the server's secret environment as `MAINWORTHY_GITHUB_TOKEN`.
+3. Set the following server variables:
 
-Restart the server, then report results with that repository and the full, lowercase, forty-character commit hash. A report from a pipeline or a person enrolls the commit. Reports accepted before publication was enabled are not enrolled. Agent-only reports do not enroll a commit.
+   ```sh
+   MAINWORTHY_GITHUB_PROJECT=scratch
+   MAINWORTHY_GITHUB_REPOSITORY=example/shop
+   MAINWORTHY_PUBLIC_URL=https://mainworthy.example
+   MAINWORTHY_GITHUB_STATUSES=1
+   ```
+
+4. Restart the server.
+5. Report results with that repository and the full, lowercase, forty-character commit hash.
+
+See [configuration](./configuration.md) for the shared GitHub variables.
+
+A report from a pipeline or a person enrolls the commit. Reports accepted before
+publication was enabled are not enrolled. Agent-only reports do not enroll a commit.
 
 On the pull request, look for `mainworthy/gate` among the status checks. It shows the gate's reason, shortened to 140 characters, and links to the change on the instance. A trunk commit links to its run. GitHub shows success for `passed`, failure for `failed`, error for `blocked`, and pending for `pending`.
 
-Later decisions, withdrawals, reports, and expired holds post a newer status in the same context without rerunning CI. GitHub displays the latest status for that context. A commit gets at most one publication attempt per minute. Intermediate changes combine into the latest verdict; unchanged accepted content sends nothing. The job handles up to twenty commits per run, with shared rolling limits of twenty posts per minute and 240 per hour. Failed and uncertain attempts count toward both limits.
+Later decisions, withdrawals, reports, and expired holds post a newer status in the same context without rerunning CI. GitHub displays the latest status for that context. A commit gets at most one publication attempt per minute. Intermediate changes combine into the latest verdict. Unchanged accepted
+content sends nothing. The job handles up to twenty commits per run. Shared rolling limits allow
+twenty posts per minute and 240 per hour. Failed and uncertain attempts count toward both limits.
 
 If GitHub refuses a post, is unreachable, or its reply is lost, Mainworthy retries the current gate with exponential back-off. The delay starts at one minute, doubles after each unsuccessful attempt, and stops growing at one hour. After sixteen consecutive failed or uncertain attempts, that commit stops delivery with one fixed diagnostic. A new counted report resumes it, subject to any existing delay. Check connectivity, repository access, and Commit statuses write permission before reporting again. A successful post resets the attempt count.
 
@@ -271,11 +299,3 @@ After thirty days without a gate-payload change or a new counted report, an acce
 Status delivery, shared limits, and enrollment are excluded from archives. Imported history does not publish statuses until a new counted report enrolls a commit. The token stays in process configuration.
 
 The published status is separate from the workflow step that ran `mainworthy gate`. A later decision can make `mainworthy/gate` green while that earlier step stays red. Choose required status checks accordingly, and keep runner setup failures and missing reports as CI failures.
-
-
-A quarantined automated test keeps its failures in the run and history. The gate's
-reason says how many quarantined failures were recorded and are not blocking,
-including when other evidence keeps the gate blocked or pending. The `quarantined`
-field gives that count when nonzero. A passing verdict with quarantined failures
-therefore does not claim those tests passed. See
-[quarantine an unreliable test](./report-results.md#quarantine-an-unreliable-test).

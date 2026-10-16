@@ -40,11 +40,11 @@ One row of a policy. For a kind of question and a set of conditions, the clause 
 
 ## Decision
 
-A recorded answer that settles a question, with who gave it, on what evidence and under which clause. Only a decision changes what is current. A decision can be withdrawn, and both stay in the record.
+A recorded answer that settles a question, with who gave it, on what evidence and under which clause. Only a decision changes what is current. The decision and any withdrawal both stay in the record.
 
 ## Draft
 
-What you have typed into a case and not yet recorded as a version. A draft is kept on your device, per person. See [write cases](./write-cases.md).
+What you have typed into a case and not yet recorded as a version. Mainworthy keeps drafts on your device, separately for each person. See [write cases](./write-cases.md).
 
 ## Finding
 
@@ -52,7 +52,7 @@ Something a review noticed about a case, reported by a person or an agent. A fin
 
 ## Gate
 
-The answer to "is this tested?" for a commit, a change or a run. It has four verdicts. `mainworthy gate` prints it and exits with its code. See [changes and the gate](./changes.md).
+The answer to "is this tested?" for a commit, a change or a run. A gate has four verdicts. `mainworthy gate` prints the verdict and exits with the corresponding code. See [changes and the gate](./changes.md).
 
 ## Grant
 
@@ -60,7 +60,7 @@ The list of capabilities an actor holds on one project, or on every project. See
 
 ## Invitation
 
-A link an admin hands a person so that they can choose a password or register a passkey. It works once and runs out. For a person who already exists, the invitation is a recovery link. Accepting it replaces every way they signed in. See [people, agents and pipelines](./access.md#sign-in-as-yourself).
+A link that an admin gives a person to choose a password or register a passkey. An invitation works once and expires. For an existing person, the invitation is a recovery link. Accepting a recovery link replaces every way that person signed in. See [people, agents and pipelines](./access.md#sign-in-as-yourself).
 
 ## Job
 
@@ -100,7 +100,7 @@ Something that needs an answer: a proposed edit, a test with no case, a failed r
 
 ## Queue
 
-The one list of open questions for a project, most blocking first. Open it with <kbd>g</kbd> <kbd>q</kbd>.
+The one list of open questions for a project, with the most blocking questions first. <kbd>g</kbd> <kbd>q</kbd> opens the queue.
 
 ## Result
 
@@ -112,11 +112,11 @@ The policy acting by itself. Where a clause assigns an answer to a rule, Mainwor
 
 ## Run
 
-A request for evidence that specifies which results count and what it needs before it is complete. A change run exists for each reported commit. A planned run is started by hand.
+A request for evidence that specifies which results count and what is needed before the run is complete. A change run exists for each reported commit. A planned run is started by hand.
 
 ## Session
 
-One signed-in browser. By default, its session ends after 14 days without use or 90 days in total. Sign-out, ending the session, or revoking its token or credential also ends it. A person can list and end their own sessions. See [configuration](./configuration.md) for lifetime settings.
+One signed-in browser. By default, its session ends after 14 days without use or 90 days in total. Signing out, explicitly ending the session, or revoking the session's token or credential also ends the session. A person can list and end their own sessions. See [configuration](./configuration.md) for lifetime settings.
 
 ## Slot
 
@@ -140,4 +140,4 @@ What a gate says: `passed`, `failed`, `blocked` or `pending`. See [how Mainworth
 
 ## Version
 
-One recorded state of a case's content. Every edit to the content that takes effect makes the next version. A move, a tag or archiving is recorded in the case's history and makes no version. You can compare two versions and restore an old one.
+One recorded state of a case's content. Every edit to the content that takes effect makes the next version. Moving, tagging, or archiving a case adds a history entry without a new version. You can compare two versions and restore an old one.

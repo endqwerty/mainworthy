@@ -9,13 +9,17 @@ import dialog, and this operation is not an MCP tool.
 
 ## Preview the file
 
-Save the file as UTF-8 CSV with a header row. The file can contain up to 5,000
-cases and 8 MiB. Each record is one case. Quoted cells can contain commas,
+The file can contain up to 5,000 cases and 8 MiB. Each record is one case. Quoted cells can contain commas,
 doubled quotes, and line breaks. A multiline steps cell becomes one action block.
 
-Every case needs a foreign id and a title. Map the destination names to your
-CSV column headers. For example, with `Source ID`, `Name`, `Action`, `Result`,
-and `Path` headers, run:
+To preview the import, follow these steps.
+
+1. Save the file as UTF-8 CSV with a header row.
+2. Give every case a foreign id and a title.
+3. Map the destination names to your CSV column headers.
+4. Run `mainworthy import-csv` with that mapping.
+
+For a file with `Source ID`, `Name`, `Action`, `Result`, and `Path` headers, use this command:
 
 ```sh
 mainworthy import-csv cases.csv --project checkout \
@@ -47,8 +51,8 @@ Use `fields` to map your project's custom field keys to source columns:
 ```
 
 Create the field definitions in **Settings**, **Fields** before importing.
-A missing definition, an invalid choice, or a missing required value refuses
-the record. The importer does not add definitions or invent priority values.
+The importer refuses a record with a missing definition, an invalid choice, or a missing required value.
+The importer does not add definitions or invent priority values.
 The importer ignores columns you do not map, including source history and dates.
 
 The execution values `manual` and `human` select the `human` method.
@@ -60,8 +64,13 @@ The importer refuses unknown values.
 
 ## Confirm the reviewed import
 
-After reviewing the full reply, repeat the same file and mapping with its
-`confirmation` value. Use a new command id for this confirmed request:
+To confirm the import, follow these steps.
+
+1. Review the full preview reply.
+2. Choose a new command id for the confirmed request.
+3. Repeat the same file and mapping with the returned `confirmation` value and the new command id.
+
+For example, use this command:
 
 ```sh
 mainworthy import-csv cases.csv --project checkout \
@@ -82,7 +91,7 @@ A foreign id becomes a case alias, so `mainworthy get C1234` and tests annotated
 with `@C1234` resolve the imported case. Aliases follow the rules in
 [Your data](./data.md). Existing aliases and duplicate ids within the file are
 refused. Reimporting never updates a case or creates a duplicate with that alias.
-This protects changes made in Mainworthy after the first import.
+Changes made in Mainworthy after the first import remain intact.
 
 If a confirmed request loses its reply, retry the same input and `cmd` to receive
 its recorded receipt. Reusing that id with different input is a conflict. Use
@@ -110,8 +119,8 @@ such as priority. Without a custom mapping, priority and other extra columns
 are ignored.
 
 `Section Depth` reconstructs nested paths in source order. Each parent section needs a row.
-The export cannot name an empty parent that has no case row,
-so inspect the preview's folder paths before confirming.
+The export cannot name an empty parent that has no case row.
+Before confirming, inspect the preview's folder paths.
 
 This preset accepts one record per case. Separate-row steps are refused as
 missing or duplicate ids. For the existing importer that joins TestRail's
@@ -120,8 +129,12 @@ separate-row steps and retains every source row, see
 
 ## Call the operation directly
 
-Send `POST /api/p/<project>/import-csv` with `csv` containing the file text and
-`mapping` containing the column mapping, or `preset: "testrail"`. Omit `confirm`
-for the dry run. Send the same input with the returned confirmation to import.
+To import through HTTP, follow these steps.
+
+1. Send `POST /api/p/<project>/import-csv` with the file text in `csv` and no `confirm` value.
+   Include the column mapping in `mapping`, or use `preset: "testrail"`.
+2. Review the dry-run reply.
+3. Send the same input with the returned confirmation in `confirm`.
+
 The generated CLI form is `mainworthy import-csv --json '<input JSON>'`.
 See the [API reference](./api.md) for authentication and reply envelopes.
