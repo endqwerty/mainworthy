@@ -452,7 +452,7 @@ private struct UnsentAnswersView: View {
 					}
 				}
 			}
-			if screen.outbox.entries.contains(where: { $0.outcome != nil }) {
+			if screen.outbox.entries.contains(where: \.finished) {
 				Button("Clear outcomes") { screen.outbox.clearOutcomes() }
 			}
 		}

@@ -179,6 +179,19 @@ final class QueueUITests: XCTestCase {
 		app.buttons["queue-select"].tap()
 		XCTAssertFalse(count.exists)
 		XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'question-Q-'")).firstMatch.exists)
+
+		// The answer is one saved entry for its four questions, and once recorded it can be cleared.
+		app.buttons["unsent-answers"].tap()
+		XCTAssertTrue(app.navigationBars["Unsent answers"].waitForExistence(timeout: 10))
+		let entry = app.staticTexts.matching(NSPredicate(format: "label == %@", "Track without a case for 4 questions")).firstMatch
+		XCTAssertTrue(entry.waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts["Recorded"].exists)
+		let clear = app.buttons["Clear outcomes"]
+		for _ in 0..<3 where !clear.exists { app.swipeUp() }
+		shot("bulk-unsent")
+		XCTAssertTrue(clear.exists, "a recorded answer to several questions can be cleared")
+		clear.tap()
+		XCTAssertFalse(entry.waitForExistence(timeout: 2))
 	}
 
 	@MainActor func testSavedAnswerSurvivesClosingAndShowsItsOutcome() async throws {

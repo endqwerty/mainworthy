@@ -20,8 +20,8 @@ interface cannot scale that way, and an architecture review (two independent des
 ## Decision
 
 **Results and tests read what the web reads.** A change's page gets **Results** from `find --in results`, with the
-tally's counts as filters and a text filter, a hundred rows a page. A page refused because the results changed
-(`conflict`, decision 0087) reads the first page again. **Cases** gets **Automated tests** from `find --in
+tally's counts as filters and a text filter, a hundred rows a page. A later page refused because the results
+changed (`conflict`, decision 0087) is not added; the panel says so and **Read them again** reads the first page. **Cases** gets **Automated tests** from `find --in
 tests`, with **Only tests with no case**, and a test's page from `get T-n`. The three replies are in the app's
 contract (`scripts/ios/contract.ts`), held to real replies by `test/ios-contract.test.ts`. One `PagedList` owns
 the paging of both lists: the query its rows answer, the next cursor, and which read may still change them, so a
