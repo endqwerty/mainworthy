@@ -1,7 +1,7 @@
 // What the check workflow runs for a change (`scripts/ci-scope.ts`, decision 0090). A job that is skipped when it
 // was needed lets a change land untested, so the paths each job reads are held here to the files that decide them.
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Glob } from "bun";
@@ -129,9 +129,70 @@ test("the image job runs for every file the Dockerfile copies", () => {
 test("the static job runs for every file the type-check and the lint read", () => {
 	const tsconfig = JSON.parse(readFileSync("tsconfig.json", "utf8")) as { include: string[] };
 	for (const directory of tsconfig.include) expect(covers(STATIC, `${directory}/a.ts`), directory).toBe(true);
-	const biome = JSON.parse(readFileSync("biome.json", "utf8")) as { files: { includes: string[] } };
+	const biome = JSON.parse(readFileSync("biome.json", "utf8")) as {
+		files: { includes: string[] };
+		vcs?: { useIgnoreFile?: boolean };
+	};
 	for (const pattern of biome.files.includes.filter((one) => !one.startsWith("!")))
 		expect(covers(STATIC, pattern.replace("**", "a/b.ts")), pattern).toBe(true);
+	// A pattern biome cannot parse in `.gitignore` fails the lint (the verifier's finding of 2026-10-16).
+	if (biome.vcs?.useIgnoreFile) expect(covers(STATIC, ".gitignore")).toBe(true);
+	for (const file of ["tsconfig.json", "biome.json", "package.json", "bun.lock"])
+		expect(covers(STATIC, file), file).toBe(true);
+});
+
+// Each entry at the top of the repository, and the jobs a change to it runs. A new one is decided here, in review:
+// a configuration file a job reads goes into that job's paths in scripts/ci-scope.ts. Every one of these runs every
+// test, except the files that only the tests naming them read.
+test("every entry at the top of the repository has the jobs it needs", () => {
+	const listed = Bun.spawnSync(["git", "ls-files"], { stdout: "pipe" }).stdout.toString();
+	// An export has no git: then the entries of the tree, without what git ignores.
+	const entries = listed
+		? [
+				...new Set(
+					listed
+						.split("\n")
+						.filter(Boolean)
+						.map((file) => file.split("/")[0] ?? ""),
+				),
+			]
+		: readdirSync(".").filter(
+				(name) => !["node_modules", ".mainworthy", "test-results", "dist", ".git"].includes(name),
+			);
+	const jobs = (entry: string): string => {
+		const file = existsSync(entry) && statSync(entry).isDirectory() ? `${entry}/a-file.ts` : entry;
+		const chosen = plan([file], tests);
+		const names = (["static", "image", "ios"] as const).filter((job) => chosen.jobs[job]);
+		return [...names, chosen.tests === "all" ? "tests" : "named tests"].join(" ");
+	};
+	expect(Object.fromEntries(entries.sort().map((entry) => [entry, jobs(entry)]))).toEqual({
+		".dockerignore": "image tests",
+		".github": "named tests",
+		".gitignore": "static tests",
+		"AGENTS.md": "named tests",
+		"CHANGELOG.md": "named tests",
+		Dockerfile: "image tests",
+		LICENSE: "image tests",
+		NOTICE: "image tests",
+		"README.md": "named tests",
+		"THIRD-PARTY-NOTICES.md": "image tests",
+		bench: "static tests",
+		"biome.json": "static image tests",
+		"bun.lock": "static image ios tests",
+		"bunfig.toml": "static ios tests",
+		"compose.coolify.yaml": "tests",
+		"compose.yaml": "tests",
+		docs: "named tests",
+		ios: "ios named tests",
+		licences: "tests",
+		"package.json": "static image ios tests",
+		scripts: "static tests",
+		skill: "image tests",
+		src: "static image ios tests",
+		"t3.json": "static tests",
+		test: "static tests",
+		"tsconfig.json": "static image ios tests",
+	});
 });
 
 test("the iPhone app's job runs for every module its script loads, and none of them is the web UI's", () => {

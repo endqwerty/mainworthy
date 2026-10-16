@@ -18,9 +18,9 @@ Each job runs when a file it reads changed:
 
 | Job | Runs for a change to |
 |---|---|
-| `static` | `src/`, `test/`, `bench/`, `scripts/`, a JSON file at the root, `bun.lock` |
+| `static` | `src/`, `test/`, `bench/`, `scripts/`, a JSON file at the root, `.gitignore` (the lint reads it), `bun.lock`, `bunfig.toml` |
 | `image` | what the Dockerfile copies, the Dockerfile and `.dockerignore` |
-| `ios` | `ios/`, `scripts/ios.ts`, `scripts/ios/`, `src/` except `src/web/`, the packages, `bunfig.toml` |
+| `ios` | `ios/`, `scripts/ios.ts`, `scripts/ios/`, `src/` except `src/web/`, the packages, `tsconfig.json`, `bunfig.toml` |
 | tests | everything, unless every changed file is prose, another workflow or the iPhone app (below) |
 
 The tests run whole unless every changed file is one that no code of the product, the tests or the scripts
@@ -43,8 +43,11 @@ one). Running `bun scripts/ci-scope.ts` locally says what CI would run for the b
 ## What holds it
 
 `test/ci-scope.test.ts` holds the `image` paths to the Dockerfile's COPY lines, the `static` paths to
-`tsconfig.json` and `biome.json`, and the `ios` paths to every module `scripts/ios.ts` loads, none of which is the
-web UI's. Narrowing the tests rests on one assumption, that only a test reads those files and names them when it
+`tsconfig.json` and `biome.json` (with `.gitignore`, which the lint reads), and the `ios` paths to every module
+`scripts/ios.ts` loads, none of which is the web UI's. It also lists every entry at the top of the repository with
+the jobs a change to it runs, so a new configuration file is placed in review. The verifier of the first version
+found two that were missing: `.gitignore` for the lint, and `tsconfig.json`, whose paths Bun reads to start the
+iPhone app's server. Narrowing the tests rests on one assumption, that only a test reads those files and names them when it
 does. The test lists every module outside the tests whose code names one, so a new reader is seen in review.
 
 ## Considered
