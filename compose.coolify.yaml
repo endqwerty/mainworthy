@@ -33,36 +33,6 @@ services:
       MAINWORTHY_DEMO: ${MAINWORTHY_DEMO-demo}
     volumes:
       - mainworthy-data:/data
-    depends_on:
-      carry-data:
-        condition: service_completed_successfully
-
-  # Until 2026-10-16 this deployment kept its data in the volume `casebook-data`, from when the project was called
-  # Casebook. On the first start with this file the step copies it to `mainworthy-data`; Coolify has stopped the
-  # old container by then. `.carrying` marks a copy that has begun: while it is there, the next start empties
-  # `mainworthy-data` and copies again. A copy that fails stops the step, and the app does not start. Once the
-  # copy is whole, a start copies nothing. test/compose-coolify.test.ts runs this script; docs/deploy.md, "An
-  # instance made before the rename", says when to remove it.
-  carry-data:
-    image: busybox:1.37
-    restart: "no"
-    exclude_from_hc: true
-    volumes:
-      - casebook-data:/from:ro
-      - mainworthy-data:/to
-    entrypoint:
-      - sh
-      - -euc
-      - |
-        if [ -e /to/mainworthy.db ] && [ ! -e /to/.carrying ]; then echo "carry-data: mainworthy-data holds a database, nothing to copy"; exit 0; fi
-        if [ ! -e /from/mainworthy.db ]; then echo "carry-data: casebook-data holds no database, nothing to copy"; exit 0; fi
-        touch /to/.carrying
-        for f in /to/* /to/.[!.]* /to/..?*; do
-          if [ -e "$$f" ] && [ "$$f" != /to/.carrying ]; then rm -rf "$$f"; fi
-        done
-        cp -a /from/. /to/
-        rm /to/.carrying
-        echo "carry-data: copied casebook-data to mainworthy-data"
 
   tailscale:
     image: tailscale/tailscale:stable
@@ -99,6 +69,4 @@ configs:
 
 volumes:
   mainworthy-data:
-  # Read once by carry-data, above.
-  casebook-data:
   tailscale-state:
