@@ -16,6 +16,25 @@ private func makeProject() async throws -> String {
 	return try JSONDecoder().decode(Reply.self, from: data).result.project
 }
 
+/// Reports three more tests with no case, each in its own file, so the project asks about four.
+private func reportUnlinkedTests(in project: String) async throws {
+	let environment = ProcessInfo.processInfo.environment
+	let address = try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])
+	var request = URLRequest(url: try XCTUnwrap(URL(string: "\(address)/api/p/\(project)/report")))
+	request.httpMethod = "POST"
+	request.setValue("Bearer \(environment["MAINWORTHY_TEST_TOKEN"] ?? "")", forHTTPHeaderField: "Authorization")
+	request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+	let results = ["search", "wishlist", "returns"].map { file in
+		#"{"test":{"key":"tests/\#(file).spec.ts::\#(file)","name":"The \#(file) page opens","file":"tests/\#(file).spec.ts"},"outcome":"pass"}"#
+	}
+	let commit = String(repeating: "5", count: 40)
+	request.httpBody = Data(
+		#"{"target":{"commit":"\#(commit)","repo":"acme/shop","branch":"main"},"job":"more","results":[\#(results.joined(separator: ","))]}"#.utf8
+	)
+	let (_, response) = try await URLSession.shared.data(for: request)
+	XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+}
+
 /// The app in a simulator, against the Mainworthy `bun scripts/ios.ts uitest` starts: a person signs in and
 /// works the queue through the screens, as on a phone.
 final class QueueUITests: XCTestCase {
@@ -111,6 +130,55 @@ final class QueueUITests: XCTestCase {
 		XCTAssertFalse(app.staticTexts["Question changed"].exists)
 		XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Current answer:'")).firstMatch.exists)
 		shot("map-created")
+	}
+
+	@MainActor func testSelectSeveralUnlinkedTestsAndAnswerThemTogether() async throws {
+		let project = try await makeProject()
+		try await reportUnlinkedTests(in: project)
+		let app = XCUIApplication()
+		app.launchArguments = ["-forget", "-instance", try XCTUnwrap(environment["MAINWORTHY_TEST_URL"])]
+		app.launch()
+		try signIn(app)
+		selectProject(project, in: app)
+		XCTAssertTrue(app.staticTexts["1 test in tests/search.spec.ts has no case"].waitForExistence(timeout: 10))
+		app.buttons["queue-select"].tap()
+		let count = app.staticTexts["selection-count"]
+		XCTAssertTrue(count.waitForExistence(timeout: 5))
+		XCTAssertEqual(count.label, "Select questions of one kind to give them one answer.")
+		let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'select-Q-'"))
+		let unlinked = rows.matching(NSPredicate(format: "label CONTAINS 'has no case'"))
+		XCTAssertEqual(unlinked.count, 4)
+		unlinked.element(boundBy: 0).tap()
+		XCTAssertEqual(count.label, "1 unlinked selected")
+		// A failure is another kind: it says so and stays out.
+		let failure = rows.matching(NSPredicate(format: "label CONTAINS 'expected $90.00'")).firstMatch
+		failure.tap()
+		XCTAssertTrue(app.staticTexts["notice"].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts["notice"].label.hasSuffix("one answer is for one kind."), app.staticTexts["notice"].label)
+		XCTAssertEqual(count.label, "1 unlinked selected")
+		app.buttons["select-all"].tap()
+		XCTAssertEqual(count.label, "4 unlinked selected")
+		shot("bulk-selected")
+		app.buttons["bulk-answer"].tap()
+		XCTAssertFalse(app.buttons["bulk-link"].exists)
+		app.buttons["bulk-track"].tap()
+		let confirm = app.buttons["bulk-confirm"].firstMatch
+		XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+		shot("bulk-confirm")
+		confirm.tap()
+		let notice = app.staticTexts["notice"]
+		let recorded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "4 unlinked: Track without a case."), object: notice)
+		XCTAssertEqual(XCTWaiter.wait(for: [recorded], timeout: 15), .completed, notice.label)
+		XCTAssertEqual(unlinked.count, 0)
+		shot("bulk-recorded")
+		app.buttons["undo-all"].tap()
+		let withdrawn = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "4 decisions are withdrawn."), object: notice)
+		XCTAssertEqual(XCTWaiter.wait(for: [withdrawn], timeout: 15), .completed, notice.label)
+		let back = XCTNSPredicateExpectation(predicate: NSPredicate(format: "count == 4"), object: unlinked)
+		XCTAssertEqual(XCTWaiter.wait(for: [back], timeout: 10), .completed)
+		app.buttons["queue-select"].tap()
+		XCTAssertFalse(count.exists)
+		XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'question-Q-'")).firstMatch.exists)
 	}
 
 	@MainActor func testSavedAnswerSurvivesClosingAndShowsItsOutcome() async throws {
