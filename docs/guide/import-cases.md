@@ -5,7 +5,7 @@ confirm one import.
 
 Use `mainworthy import-csv` or the same `import-csv` operation through HTTP.
 You need `produce` on the project. The web app does not yet have a mapped CSV
-import dialog, and this operation is not an MCP tool.
+import dialog. This operation is not an MCP tool.
 
 ## Preview the file
 

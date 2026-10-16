@@ -131,8 +131,8 @@ To read a version diff, follow these steps.
 2. To compare another version with its preceding version, select that version in the timeline.
 3. Choose "Close" to dismiss the diff.
 
-The first version of a case has nothing before it. Asking for its diff opens nothing,
-and the status line at the bottom of the window says that there is no earlier version.
+The first version of a case has nothing before it. Asking for its diff opens nothing.
+The status line at the bottom of the window says that there is no earlier version.
 
 In Suite, <kbd>u</kbd> first undoes the latest placement action when one is available.
 Otherwise, on a recorded case with more than one version, it restores the preceding
@@ -232,7 +232,8 @@ Canonical Markdown can carry a `fields` map in its header. Values are strings an
 When editing an existing case, omitting the `fields` header keeps the values from the edit's base version.
 Concurrent field changes merge under the ordinary edit rules.
 A proposal that supplies the map replaces all its values, so include keys you want to keep.
-An explicit empty header, either `fields:` with no entries or `fields: {}`, clears the values unless a required field prevents it.
+Unless a required field prevents it, an explicit empty header clears the values.
+The empty header can be either `fields:` with no entries or `fields: {}`.
 The web and iPhone case editors preserve these values but do not edit them.
 
 A project can define text or choice fields and require values.

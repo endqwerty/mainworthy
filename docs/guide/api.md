@@ -44,7 +44,7 @@ When an operation does not run, its reply has `ok: false` and an `error` with a
 | `forbidden` | 403 | The caller lacks the required capability, or the operation or policy refuses the action. |
 | `not_found` | 404 | No such operation, project, or ref. The server returns the same code for a project the caller has no grant on. |
 | `conflict` | 409 | The edit was made on an older version, the command id was used for something else, or the client's API version differs from the server's. |
-| `limited` | 429 | Too many failed attempts: wrong tokens from this address or for a token that starts as this one does, wrong passwords from this address or for this name, wrong authenticator codes from this address or for this name, or refused passkeys or invitation codes from this address. The `Retry-After` header says how many seconds to wait. |
+| `limited` | 429 | There have been too many failed attempts. These can be wrong tokens from this address or for a token that starts as this one does. They can also be wrong passwords or authenticator codes from this address or for this name. Refused passkeys or invitation codes from this address also count. The `Retry-After` header says how many seconds to wait. |
 | `internal` | 500 | The server failed. The message is `internal error`, and the detail is in the server's log. A report can commit in stages, so a failure does not prove that nothing was written. |
 
 ## Authenticate

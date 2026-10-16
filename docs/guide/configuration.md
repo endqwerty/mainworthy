@@ -51,11 +51,11 @@ project "scratch" · you are robin@this-machine · policy: loose
 | `MAINWORTHY_SMTP_USER` | none | SMTP username. Set it with the password, or leave both unset for an unauthenticated relay. |
 | `MAINWORTHY_SMTP_PASSWORD` | none | SMTP password, read only from the process environment. It never enters the database, archives, replies or logs. |
 | `MAINWORTHY_MAIL_FROM` | none | A single sender email address, such as `mainworthy@example.com`. Display names and address lists are refused. |
-| `MAINWORTHY_APPLE_APPS` | none | The iPhone apps whose sign-in screen the phone may offer the logins it keeps for this site, each as a team id and a bundle identifier (`ABCDE12345.com.mainworthy.app`), separated by commas. The server lists them at `/.well-known/apple-app-site-association`. Without it that address is not found. See [the iPhone app](./iphone.md#sign-in). |
+| `MAINWORTHY_APPLE_APPS` | none | The iPhone apps whose sign-in screen may offer the logins the phone keeps for this site. List each app as a team id and a bundle identifier (`ABCDE12345.com.mainworthy.app`). Separate the entries with commas. The server lists them at `/.well-known/apple-app-site-association`. Without it that address is not found. See [the iPhone app](./iphone.md#sign-in). |
 | `MAINWORTHY_TRUSTED_PROXY` | none | The addresses or CIDR ranges of the proxy in front, comma-separated. Set it together with the next one, or neither. |
 | `MAINWORTHY_CLIENT_ADDRESS_HEADER` | none | The header in which that proxy reports the visitor's address. Believed only on a connection from a proxy named above. |
 | `MAINWORTHY_READERS` | the CPU count minus 2, at least 1 and at most 8 | How many reader threads answer reads, from `0` to `8`. `0` answers them on the main thread. |
-| `MAINWORTHY_DEMO` | none | A demo project the server empties and fills with the demo again on every start, once it listens: a demo that shows what this build does. Only a demo project is emptied, a project that `mainworthy seed` made. See [a project of demo data](./customize.md#a-project-of-demo-data). |
+| `MAINWORTHY_DEMO` | none | A demo project the server empties and fills with the demo again on every start, once it listens. The demo shows what this build does. Only a demo project is emptied, a project that `mainworthy seed` made. See [a project of demo data](./customize.md#a-project-of-demo-data). |
 | `MAINWORTHY_COMMIT` | none | The commit this server was built from, which `/healthz` reports. It must have 40 lower-case hexadecimal characters. If absent or invalid, the server tries `SOURCE_COMMIT`, then reports unknown. |
 | `MAINWORTHY_GITHUB_PROJECT` | none | The project allowed to send defects and optional gate commit statuses to GitHub. Set the project, repository, and token together. |
 | `MAINWORTHY_GITHUB_REPOSITORY` | none | The destination on github.com, written `owner/repository`. Requests cannot choose another repository. |
@@ -103,7 +103,7 @@ Mail delivery starts after the identity transaction commits. At most 100 message
 
 ### Rename the owner
 
-The owner's name comes from `MAINWORTHY_OWNER`, or `USER` when unset, or `owner` when neither is set. To rename an owner currently named `owner` to `robin`:
+The owner's name comes from `MAINWORTHY_OWNER`. When that variable is unset, the name comes from `USER`. When neither is set, the name is `owner`. To rename an owner currently named `owner` to `robin`:
 
 Before renaming the owner, record any browser drafts under the old name. Then follow these steps:
 
@@ -136,7 +136,7 @@ When the new name is already somebody's, the start renames nobody and says so. T
 
 Nobody else's name can be changed.
 
-A start that is refused for the owner's name or the owner's token changes no actor and no token. If the server is newer than the database, it has already brought the database up to date by then, and it left a copy of the database as it was beside it, named `mainworthy.db.v<N>.bak`.
+A start that is refused for the owner's name or the owner's token changes no actor and no token. If the server is newer than the database, it has already brought the database up to date by then. It also left a copy of the original database beside it, named `mainworthy.db.v<N>.bak`.
 
 For the first server-mode sign-in, use the owner's token. Later you can set up a password or passkey. If you set `MAINWORTHY_OWNER_TOKEN`, the server adds that value as a token for the owner. Otherwise, a start on which the owner has no working token prints a generated one. The first start and a start after an import do this.
 
@@ -169,7 +169,7 @@ Prefer `MAINWORTHY_TOKEN` or `--token-file` to `--token`. The process list and t
 
 ## Run one container with one volume
 
-Mainworthy runs as one container with one volume. The container runs the single executable as an unprivileged user, in server mode, on port 7357, and keeps its data in `/data`. Nothing else, such as a separate database, is needed. The source tree has a `Dockerfile` and a `compose.yaml`, and Compose builds the image from them.
+Mainworthy runs as one container with one volume. The container runs the single executable as an unprivileged user, in server mode, on port 7357. It keeps its data in `/data`. Nothing else, such as a separate database, is needed. The source tree has a `Dockerfile` and a `compose.yaml`, and Compose builds the image from them.
 
 ```
 $ docker compose up -d
@@ -215,11 +215,11 @@ A signed-in browser is unaffected. A correct server-generated token also works w
 
 Password sign-in shares the address count. The server counts a wrong password by the address and account name, including a wrong current password entered when changing it. Names count the same regardless of capitalisation, and unknown names count like existing names. While an address or name is blocked, the server does not check passwords, so the right one waits too. Refused passkey answers and invitation codes count by address alone. Valid passkeys and invitation codes still work from a blocked address.
 
-Behind a proxy every connection comes from the proxy, so the server cannot tell visitors apart unless you tell it where to look. Set `MAINWORTHY_TRUSTED_PROXY` to the proxy's address as the server sees it, and `MAINWORTHY_CLIENT_ADDRESS_HEADER` to the header the proxy writes the visitor's address in. Choose a header that the proxy sets and visitors cannot control. Otherwise, a visitor could choose the address Mainworthy counts. The header must hold one address and nothing else. The server refuses startup if only one variable is set, an address or range is invalid, or the header name is invalid. The startup message identifies the invalid setting.
+Behind a proxy every connection comes from the proxy, so the server cannot tell visitors apart unless you tell it where to look. Set `MAINWORTHY_TRUSTED_PROXY` to the proxy's address as the server sees it. Set `MAINWORTHY_CLIENT_ADDRESS_HEADER` to the header the proxy writes the visitor's address in. Choose a header that the proxy sets and visitors cannot control. Otherwise, a visitor could choose the address Mainworthy counts. The header must hold one address and nothing else. The server refuses startup if only one variable is set, an address or range is invalid, or the header name is invalid. The startup message identifies the invalid setting.
 
-With neither set, what happens depends on the proxy's address. A loopback or private address, such as a proxy on the same machine or the same Docker network, is not counted at all, and wrong tokens are counted only by their first 8 characters. A server-mode start says so in one line. A public proxy address has one shared count for every visitor behind it. One visitor's wrong tokens can block your chosen owner token for all visitors until the wait ends. Setting the two variables fixes both.
+With neither set, what happens depends on the proxy's address. A loopback or private address, such as a proxy on the same machine or the same Docker network, is not counted at all. For those addresses, wrong tokens are counted only by their first 8 characters. A server-mode start says so in one line. A public proxy address has one shared count for every visitor behind it. One visitor's wrong tokens can block your chosen owner token for all visitors until the wait ends. Setting the two variables fixes both.
 
-The server closes a connection nobody has signed in on after three minutes of silence, and answers a sign-in whose body has not arrived within five seconds with 408. A request with a valid token or session is not timed out, so a long reply is not cut off.
+After three minutes of silence, the server closes a connection nobody has signed in on. If a sign-in's body has not arrived within five seconds, the server answers with 408. A request with a valid token or session is not timed out, so a long reply is not cut off.
 
 The server accepts a request body of up to 64 MiB for an operation. A proxy with a lower limit rejects a large report. `mainworthy export` and `mainworthy import` stream archives of up to 8 GiB, so give those paths the same room.
 
@@ -241,7 +241,7 @@ In server mode everything that reads or changes a project needs a token or a sig
 
 ## Build the single executable
 
-`bun run build` compiles the server, the web UI, the command line and the MCP endpoint into one file, `dist/mainworthy`, tens of megabytes in size. It needs Bun and the source tree, and the result needs neither. The file carries the Bun that built it: with a Bun other than the one `THIRD-PARTY-NOTICES.md` lists, the build says so, and the notices do not describe that runtime.
+`bun run build` compiles the server, the web UI, the command line and the MCP endpoint into one file, `dist/mainworthy`, tens of megabytes in size. It needs Bun and the source tree, and the result needs neither. The file carries the Bun that built it. If you build with a Bun other than the one `THIRD-PARTY-NOTICES.md` lists, the build says so. The notices then do not describe that runtime.
 
 ```
 $ ./dist/mainworthy

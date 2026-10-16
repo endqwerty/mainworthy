@@ -3,8 +3,8 @@
 This page lists the web app's keys by screen. <kbd>?</kbd> lists the keys for the current screen.
 The bar at the bottom shows common actions.
 
-Tab shows a focus indicator on controls. Buttons and form controls have targets of at least 24 CSS pixels,
-except run progress dots, which select the same slots as their full-size list rows.
+Tab shows a focus indicator on controls. Except for run progress dots, buttons and form controls have targets of at least 24 CSS pixels.
+Run progress dots select the same slots as their full-size list rows.
 Links within sentences use their text as the target. Links to the docs are underlined in both themes.
 On a phone, a case's proposal status wraps so its question link stays visible when it takes focus.
 The [web accessibility assessment](https://github.com/endqwerty/mainworthy/blob/main/docs/accessibility.md)
@@ -15,7 +15,7 @@ records the automated coverage and remaining manual checks, including screen-rea
 - A sequence such as <kbd>g</kbd> <kbd>q</kbd> means one key followed by the other. You have a little under a second to press the second key.
 - <kbd>⌘</kbd> is Command on macOS and Ctrl everywhere else.
 - While you type in a field, the available keys are <kbd>⌘</kbd> combinations, <kbd>Esc</kbd>, and the case editor keys. <kbd>Esc</kbd> leaves the case editor, the filter, and a run's note. A field in Settings keeps the focus until you click or tab outside it.
-- A choice list, such as a case's automation, a token's producer, or a run's cases, opens with <kbd>↓</kbd>, <kbd>↑</kbd>, <kbd>Home</kbd>, <kbd>End</kbd>, <kbd>Page Up</kbd>, <kbd>Page Down</kbd>, or <kbd>↵</kbd>. The list changes nothing until you choose an option with the arrow keys and <kbd>↵</kbd>, or with the mouse. Choosing an option changes the value once and returns the keys to the screen. Typing a letter selects an option starting with that letter and commits the choice.
+- Choice lists include a case's automation, a token's producer, and a run's cases. A choice list opens with <kbd>↓</kbd>, <kbd>↑</kbd>, <kbd>Home</kbd>, <kbd>End</kbd>, <kbd>Page Up</kbd>, <kbd>Page Down</kbd>, or <kbd>↵</kbd>. The list changes nothing until you choose an option with the arrow keys and <kbd>↵</kbd>, or with the mouse. Choosing an option changes the value once and returns the keys to the screen. Typing a letter selects an option starting with that letter and commits the choice.
 - While the palette or the list of keys is open, only <kbd>Esc</kbd> and <kbd>⌘</kbd> <kbd>K</kbd> work. In the palette, <kbd>↑</kbd> and <kbd>↓</kbd> choose a row and <kbd>↵</kbd> runs it. <kbd>Tab</kbd> moves from the field to the rows, where <kbd>↵</kbd> runs the focused row.
 - The sign-out dialog starts with the focus on **Sign out and keep drafts**. <kbd>Tab</kbd> and <kbd>Shift</kbd> <kbd>Tab</kbd> move among its three choices. <kbd>↵</kbd> or <kbd>Space</kbd> presses the focused choice. **Stay signed in**, or <kbd>Esc</kbd>, closes it and keeps you signed in. While the dialog is open, the screen's keys and <kbd>⌘</kbd> <kbd>K</kbd> do not run.
 - <kbd>↵</kbd> and <kbd>Space</kbd> press a button you reached with <kbd>Tab</kbd>. <kbd>↵</kbd> follows a link you reached that way. Everywhere else, <kbd>↵</kbd> and <kbd>Space</kbd> run the screen's actions. This rule includes list rows and a button you clicked with the mouse, until focus leaves the button.

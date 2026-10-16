@@ -235,7 +235,7 @@ Omit `env` from the plan to accept that artifact in any environment. Two labels
 bound to the same digest name the same artifact. Existing qualifying results fill
 slots at planning time, and reports arriving while the run is open fill them too.
 If you deploy the selected label to another environment later, results already
-recorded there for the same digest can fill a new run, including reports under
+recorded there for the same digest can fill a new run. Those results can come from reports under
 another deployed label. Results need not postdate the deployment announcement.
 A refused report stores no results. After announcing its deployment, send it again.
 Results from an attested source commit do not count as artifact execution.
@@ -243,5 +243,5 @@ Results from an attested source commit do not count as artifact execution.
 Open the run in the web app to record manual results against its pinned cases.
 Recording by run alone uses that run's build and environment.
 MCP's report schema omits the build target. To report through MCP, supply a planned run in `run`.
-A gate with missing evidence stays pending, and failures and sign-off use the same rules as other
+A gate with missing evidence stays pending. Failures and sign-off use the same rules as other
 planned runs. The web and iPhone planners do not yet offer a build picker.

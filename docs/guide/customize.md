@@ -8,7 +8,7 @@ Mainworthy has settings for the instance, each project, cases, runs, and your br
 
 Settings sit at five levels. The level tells you who is affected when you change a setting:
 
-- The instance is one running server and its data. The server's address, mode, data directory and reader threads belong here, and so do people, agents, pipelines and their tokens. You set the server through environment variables. You set the rest in Settings or with the `mainworthy` command.
+- The instance is one running server and its data. The server's address, mode, data directory and reader threads belong here. People, agents, pipelines and their tokens belong here too. You set the server through environment variables. You set the rest in Settings or with the `mainworthy` command.
 - A project is its own set of cases, runs, queue and policy. One instance can hold several. A person, an agent or a pipeline can have different rights in each.
 - A case says which producers may test it: people, the pipeline, agents, or any mix.
 - A run says what it needs before it is complete. You choose that when you plan the run.
@@ -70,7 +70,7 @@ On a phone, switch projects with these steps:
 2. Tap the current project.
 3. Tap the destination project.
 
-**Actions** offers "Switch project" as well. With a keyboard attached, <kbd>g</kbd> <kbd>p</kbd> opens the list, and <kbd>↑</kbd> <kbd>↓</kbd> and <kbd>↵</kbd> choose from it, as on a desktop.
+**Actions** offers "Switch project" as well. With a keyboard attached, <kbd>g</kbd> <kbd>p</kbd> opens the list. Use <kbd>↑</kbd> <kbd>↓</kbd> and <kbd>↵</kbd> to choose from the list, as on a desktop.
 
 The palette also finds a project when you type a word of its name. Open the palette with <kbd>⌘</kbd> <kbd>K</kbd>. Settings, Projects lists the same projects, and a press on one opens its Settings.
 
@@ -90,13 +90,13 @@ The pipeline also reports the shop's unit tests. No case names those tests. Ther
 
 The project holds fourteen days of history before today:
 
-- A pipeline named `pipeline` reported on `main` every night, and on one to three pull requests on most days. Two days of each week are quieter. The seed determines this pattern independently of the real weekday. Two nights found a defect, one night its services were down, and some pull requests failed before they were fixed. A person answered each failure the day it was reported.
+- A pipeline named `pipeline` reported on `main` every night, and on one to three pull requests on most days. Two days of each week are quieter. The seed determines this pattern independently of the real weekday. Two nights found a defect. On one night, the services used by the tests were down. Some pull requests failed before they were fixed. A person answered each failure the day it was reported.
 - A run was planned every other day and worked through by hand. The older ones are closed as passed. The one from two days ago found a defect and stays open, and yesterday's is half done.
-- Some cases were edited, two that the API checks now cover were archived, and an agent named `reviewer` reviewed two pull requests.
+- Some cases were edited. Two cases that the API checks now cover were archived. An agent named `reviewer` reviewed two pull requests.
 - One automated test was quarantined, failed while covered, and left quarantine after a person checked its repair.
 - Each pull request merged after its last report. The pipeline reported that the change ended, so Mainworthy no longer asks about that change. Today's pull request 482 is the only one open.
 
-Today `main` fails one test, and so does pull request 482, which starts from that commit. Both failures carry the trace the test runner wrote, as an attachment. A run named "Checkout regression" is planned on the pull request, and `reviewer` has left a finding and a proposed edit. The queue holds five questions that need judgment: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The sixty unit-test questions make 65 in all. The demo adopts the `standard` preset before its first report, set to ask about tests with no case. This keeps the pull request's failure open with the hint that it also fails on the base.
+Today `main` fails one test. Pull request 482 starts from that commit and fails the same test. Both failures carry the trace the test runner wrote, as an attachment. A run named "Checkout regression" is planned on the pull request, and `reviewer` has left a finding and a proposed edit. The queue holds five questions that need judgment: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The sixty unit-test questions make 65 in all. The demo adopts the `standard` preset before its first report, set to ask about tests with no case. This keeps the pull request's failure open with the hint that it also fails on the base.
 
 Four flags change what is written:
 
@@ -117,7 +117,7 @@ You cannot delete a project yet, so the demo stays until you start with a new da
 
 Personal and team grants on the demo stay. The seed sets its own `pipeline` and `reviewer` grants again. The reset empties and recreates the project with its grants in one transaction. A stop before commit preserves the old demo and grants. A stop after commit leaves an empty demo that the next start fills.
 
-The reset runs on a worker thread, so `/healthz` and ordinary reads keep answering. Writes, including administration lists and sign-in, wait for its transaction to finish. Reads see the old demo until the empty demo and its grants commit together. The reset checks all foreign keys before committing and rolls back if any reference is invalid.
+The reset runs on a worker thread, so `/healthz` and ordinary reads keep answering. Writes, including administration lists and sign-in, wait for its transaction to finish. Reads see the old demo until the empty demo and its grants commit together. Before committing, the reset checks all foreign keys. If any reference is invalid, the reset rolls back.
 
 The seed then fills the project through the API, so readers can see it partly filled. The server creates the seed's fifteen-minute token after the reset and revokes it when seeding ends. A graceful stop during reset skips that token. A stop during seeding waits for the seed to finish and revoke its token.
 
@@ -125,7 +125,7 @@ After ten minutes, the reset requests its worker to stop. The worker can stop on
 
 ## Cases, folders and tags
 
-Folders nest. A tag is lower case, starts with a letter or digit, and can hold `-`, `_`, `.` and `/`. Moving a case or changing its tags is an edit like any other, so under `strict` it waits for a person.
+Folders nest. A tag is lower case, starts with a letter or digit, and can hold `-`, `_`, `.` and `/`. Moving a case or changing its tags is an edit like any other. Under `strict`, that edit waits for a person.
 
 A case lists the methods that may produce evidence for it. People are the default. Add agents so an agent's result can count in a run that asks for agents. An automated test does not depend on the list of methods. Its result can fill a slot through a link to the case or the case's ref in the test's name. A case keeps at least one method.
 
@@ -137,7 +137,7 @@ Press "Theme" at the bottom of the sidebar to switch between light and dark. Unt
 
 To make room for what you are reading, press the button beside "Mainworthy" at the top of the sidebar, or <kbd>[</kbd>. The sidebar becomes a strip 64 px wide. The strip keeps the project, the search, the five screens and the footer, each as an icon. It does not show the folders and tags of the Suite.
 
-The pane on the right takes the width the sidebar gave up. That is the pane where you read a case, a question, a run or a change. The list keeps its width. In a window narrower than about 900 px the panes are at their least width and do not all fit beside the open sidebar, so part of the width goes to fitting them in first. In a window narrower than 760 px the list is above the other pane, and both get wider.
+The pane on the right takes the width the sidebar gave up. That is the pane where you read a case, a question, a run or a change. The list keeps its width. In a window narrower than about 900 px the panes are at their least width and do not all fit beside the open sidebar. Part of the width goes to fitting them in first. In a window narrower than 760 px the list is above the other pane, and both get wider.
 
 Press the button or <kbd>[</kbd> again to open the sidebar. The choice stays in this browser, so a reload and your next visit find the sidebar as you left it. If the browser cannot save the choice, the sidebar still collapses for this visit but opens again on reload.
 
@@ -161,7 +161,7 @@ Press <kbd>g</kbd> <kbd>h</kbd>, or choose **Go home** in the palette, to open y
 
 The browser stores your home preference separately for your signed-in name and each project. **Sign out and keep drafts** preserves the preference for your next sign-in in that browser. **Sign out and clear browser data** removes the preference. Clearing the site's data in your browser also removes the preference. The preference does not follow you across browsers or into the iPhone app. Saving your home changes nobody else's home or project data.
 
-A browser that cannot read the preference opens Suite. If saving fails, the form says so and keeps your previous home. If the saved run or search folder no longer exists, Mainworthy opens Suite and tells you that your home was not found. Open Settings to choose another home. If the lookup fails on entry, Mainworthy opens Suite with a notice and keeps your saved home so you can try **Go home** again. A search that matches no cases still opens with its saved filters.
+A browser that cannot read the preference opens Suite. If saving fails, the form says so and keeps your previous home. If the saved run or search folder no longer exists, Mainworthy opens Suite and tells you that your home was not found. Open Settings to choose another home. If the lookup fails on entry, Mainworthy opens Suite with a notice. Mainworthy keeps your saved home so you can try **Go home** again. A search that matches no cases still opens with its saved filters.
 
 ## What is fixed today
 

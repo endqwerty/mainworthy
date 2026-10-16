@@ -29,7 +29,7 @@ The `when` column holds the conditions a clause tests. `always` matches every qu
 - A named role, written as `role:approver`. An actor with `answer` and that role on the project, subject to the clause's rules for agents.
 - The author. The person who wrote the proposal, or an admin.
 
-An agent's answer is one of three things. It counts as a decision, it is shown as advice and a person decides, or it is refused. The table also says whether a person who produced the evidence may answer, and whether the answer needs a reason.
+An agent's answer either counts as a decision, is shown as advice for a person to decide, or is refused. The table also says whether a person who produced the evidence may answer, and whether the answer needs a reason.
 
 An unexplained failure with no quarantine cover blocks the runs that count it, under all three presets. The policy decides who may explain it. The `blocks` column says only which runs list a question. A separate setting says whether an explicit CI declaration that no tests are required may pass an empty commit gate.
 
@@ -39,9 +39,9 @@ Custom `adopt` clauses can test `folder:checkout` or `tag:critical` together wit
 
 Write predicates in their normalised form. Folder paths use lower case, with no leading or trailing slash, empty segments, or spaces around a segment. Spaces within a name and literal `..` folder names stay. Tags use lower case without surrounding spaces or a leading `#`. Mainworthy refuses a different spelling with `invalid`, naming the clause and its normalised form. For example, write `folder:checkout` instead of `folder:checkout/` or `folder: checkout`.
 
-Folder paths and tags use Unicode NFC and contain no format characters, such as a zero-width space. A predicate that becomes empty after cleaning is invalid. New folder names and tags use the same cleaning. Existing NFD folder names keep their stored spelling, but folder lookup and scope matching normalise them, so they still match an NFC predicate.
+Folder paths and tags use Unicode NFC and contain no format characters, such as a zero-width space. A predicate that becomes empty after cleaning is invalid. New folder names and tags use the same cleaning. Existing NFD folder names keep their stored spelling. Folder lookup and scope matching normalise those names, so they still match an NFC predicate.
 
-To add a scope restriction, have an instance admin read the current policy and follow these steps:
+To add a scope restriction, have an instance admin follow these steps:
 
 1. Read the policy with `mainworthy policy show --json` or HTTP `admin policy.show`.
 2. Add a clause like the example below after the policy and conflict clauses, before the general adoption clause.
@@ -92,7 +92,7 @@ signoff  always                    member       refused         nothing
 basis: exact-or-assumed; flaky hold: 14 days; tests with no case: track; empty reports: pending
 ```
 
-The last line holds the settings. The basis is which evidence a planned run accepts for a slot by default, and `strict` raises it to `exact`. The flaky hold is how many days a "Flaky" answer carries forward. The other settings describe tests with no case and empty reports.
+The last line holds the settings. The basis is which evidence a planned run accepts for a slot by default. The `strict` preset raises the basis to `exact`. The flaky hold is how many days a "Flaky" answer carries forward. The other settings describe tests with no case and empty reports.
 
 ## Custom fields
 
@@ -121,7 +121,7 @@ $ mainworthy propose --json '{"edits":[{"op":"edit","case":"C-1","base":1,"body"
 
 A supplied `fields` map replaces the case's map. Include every value you want to keep. Omitting `fields` preserves the base version's values. Use `mainworthy get --json '{"refs":["C-1"],"as":"md"}'` to read them. The ordinary JSON case reply omits custom field values.
 
-To define fields through the CLI or HTTP API, start with `mainworthy policy show --json`. Keep its settings and add a `fields` map, then propose the whole settings object. Use its `version` as `base` in place of `1`:
+To define fields through the CLI or HTTP API, start with `mainworthy policy show --json`. Keep its settings and add a `fields` map, then propose the whole settings object. Use the policy's `version` as `base` in place of `1`:
 
 ```
 $ mainworthy propose --json '{"edits":[{"op":"policy","base":1,"settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":14,"infraThisTargetOnly":true},"fields":{"risk":{"kind":"choice","label":"Risk","required":true,"choices":["low","high"]},"notes":{"kind":"text","label":"Notes","required":false}}}}]}'
@@ -131,13 +131,13 @@ An admin who is a person accepts the resulting question in Queue or with `decide
 
 ## The three presets
 
-`loose` is the default. Ordinary case edits take effect at once, and a test needs no case. A rule excuses a failure already present on the base while its evidence holds. A person answers other failures and findings. A run that passed closes by itself.
+`loose` is the default. Ordinary case edits take effect at once. A test needs no case. A rule excuses a failure already present on the base while its evidence holds. A person answers other failures and findings. A run that passed closes by itself.
 
-`standard` holds an agent's edit for a person. A person's own edit still takes effect at once, and a test needs no case. Two reports that disagree go to a person who did not produce either one.
+`standard` holds an agent's edit for a person. A person's own edit still takes effect at once. A test needs no case. Two reports that disagree go to a person who did not produce either one.
 
 `strict` requires a person and a reason for ordinary case edits, failures, findings and closing passed runs. It starts by asking about tests with no case too, but you can choose to track them instead. No agent gives a counted answer, except to reject its own conflicting proposal. Custom clauses can require a named role. Two-person approval, frozen evidence, gap waivers and a regulated preset are not built yet.
 
-All three send a change to the policy to an admin, and send a conflicting edit back to its author. The presets differ most in what they ask of people, so this table, built from the presets themselves, shows who answers each question.
+All three send a change to the policy to an admin, and send a conflicting edit back to its author. The presets differ most in what they ask of people. This table is built from the presets themselves and shows who answers each question.
 
 <!-- generated:policy-presets -->
 
@@ -174,7 +174,7 @@ A pipeline reports tests that no case names. What happens to them is one choice 
 | Choice | What happens |
 | --- | --- |
 | Track without a case (`track`) | The tests are kept without cases and nobody is asked. They still gate the build. `loose` and `standard` start here. |
-| Create a case for each test (`create`) | Each test gets a case named after it, in a folder named after its file's directory, and is linked to it. Nobody is asked. |
+| Create a case for each test (`create`) | Each test gets a case named after it and is linked to that case. The case's folder is named after the directory of the test's file. Nobody is asked. |
 | Ask in the queue (`ask`) | Each file with such tests is one question in the queue. It blocks nothing. `strict` starts here. |
 
 In Settings, open Policy and choose under "Tests with no case". From the command line:
@@ -184,7 +184,7 @@ $ mainworthy policy tests create
 tests with no case: create; proposal P-3 and decision 4 are both recorded; 12 open questions answered by the rule
 ```
 
-The change is a proposal and a decision like any policy change, so it needs `produce` and `admin` on the project. It takes effect for the questions that are already open: the rule answers every open question about a file at once, and the line above says how many. A question that a person took back from the rule stays with people.
+The change is a proposal and a decision like any policy change, so it needs `produce` and `admin` on the project. It takes effect for the questions that are already open. The rule answers every open question about a file at once, and the line above says how many. A question that a person took back from the rule stays with people.
 
 `create` makes cases the way a person's edit does, so it works where the policy adopts a pipeline's new case by rule. `strict` has a person adopt every new case, and refuses `create`:
 
@@ -192,7 +192,7 @@ The change is a proposal and a decision like any policy change, so it needs `pro
 invalid: under this policy a person adopts every new case, so a rule cannot create cases for tests: choose ask or track
 ```
 
-Under `create`, anyone who can report results can add cases, one for each test name they send. A report still cannot change or remove a case. Under `standard` an agent's report is the exception: an agent's new case waits for a person, so the rule makes none and the file's question stays open.
+Under `create`, anyone who can report results can add cases, one for each test name they send. A report still cannot change or remove a case. Under `standard` an agent's report is the exception. An agent's new case waits for a person, so the rule makes none and the file's question stays open.
 
 A link holds for the tests it names. When another test turns up in the same file, Mainworthy asks about or creates a case for only the new test. A "track" answer covers the file as it was. Mainworthy checks the file again when its tests with no case change. Under `track` the rule answers again and you see no question.
 
@@ -237,7 +237,7 @@ $ mainworthy policy use standard
 policy: standard; proposal P-1 and decision 1 are both recorded
 ```
 
-You hold the right to switch when you have `produce`, to propose, and `admin` on the project, to accept. A switch is a proposal, and accepting it is a decision. Both stay in the record, and you can find them in Queue under "Settled". No agent can accept one, whatever its grant says.
+To switch, you need `produce` on the project to propose the change and `admin` on the project to accept it. A switch is a proposal, and accepting it is a decision. Both stay in the record, and you can find them in Queue under "Settled". No agent can accept one, whatever its grant says.
 
 If you cannot accept it yourself, the proposal stays open for an admin:
 
@@ -252,7 +252,7 @@ A policy change rewrites nothing that is recorded. Results, decisions and cases 
 
 ## Change single clauses
 
-In Settings, open Policy and choose "Edit clauses". This needs a person with instance `admin`, to read the full policy, and `produce` on the project. A project admin can still use the existing preset and tests-with-no-case controls.
+In Settings, open Policy and choose "Edit clauses". The clause editor needs a person with instance `admin` to read the full policy, and `produce` on the project. A project admin can still use the existing preset and tests-with-no-case controls.
 
 To edit the policy, follow these steps:
 
@@ -265,11 +265,11 @@ To edit the policy, follow these steps:
 
 Invalid conditions, duplicate clause ids, invalid rule answers, missing final `always` clauses, and holds outside 1 to 365 days prevent preview and apply. Preview reads questions without changing the policy or recording decisions. It shows clause matching, who may answer, rule answers, and which runs list the question. It does not replay decisions, check a particular person's permissions, execute rules, or predict a gate result. Existing decisions stay recorded. Hold and basis changes affect future decisions and runs.
 
-A refused request keeps your draft in the open editor. If the policy changes while you edit, a notice marks your opened version as out of date. Apply sends that version, and the server refuses a stale proposal or acceptance. Cancel and reopen to start from the current policy. A waiting proposal cannot replace a newer policy when accepted later. Cancel discards the draft. Leaving Settings or reloading also discards it.
+A refused request keeps your draft in the open editor. If the policy changes while you edit, a notice marks your opened version as out of date. Apply sends that version, and the server refuses a stale proposal or acceptance. To start from the current policy, cancel and reopen the editor. A waiting proposal cannot replace a newer policy when accepted later. Cancel discards the draft. Leaving Settings or reloading also discards it.
 
 A conflict during acceptance leaves the proposal's adoption question open in Queue. Reject that question before sending a replacement, including after a failed save in Settings. A waiting proposal made before policy versions also needs rejection and a new proposal from the current policy.
 
-From the command line, send a policy edit to `mainworthy propose`. The edit carries the whole clause list, so start from what `mainworthy policy show --json` prints, change a clause, and send it back. Include its `version` as `base` when sending clauses or settings.
+From the command line, send a policy edit to `mainworthy propose`. The edit carries the whole clause list. Start from what `mainworthy policy show --json` prints, change a clause, and send the list back. Include the policy's `version` as `base` when sending clauses or settings.
 
 Send only one policy edit per proposal. Combine its clause and setting changes in that edit. MCP has no tool to read the policy version. Before using MCP `propose` with clauses or settings, read it through `mainworthy policy show --json` or the HTTP `admin` operation with `{"do":"policy.show","project":"<key>"}`. The read requires instance admin. If neither is available, ask an instance admin for the current policy and version. Do not guess `base`.
 

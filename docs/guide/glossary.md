@@ -72,7 +72,7 @@ How a case may be exercised, by a person, an automated test or an agent. The cas
 
 ## Passkey
 
-A key that a device or a password manager holds for one site and unlocks with a fingerprint, a face or a PIN. A person signs in with it in place of a password. It belongs to the host name of the instance.
+A key that a device or a password manager holds for one site. A fingerprint, a face or a PIN unlocks the passkey. A person signs in with it in place of a password. It belongs to the host name of the instance.
 
 ## Pipeline
 

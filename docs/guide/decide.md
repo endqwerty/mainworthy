@@ -42,7 +42,7 @@ Under its title, each open question says what leaving it costs. These are exampl
 - "Blocks nothing. Left alone, these tests still run and still gate the build, and no case gets credit for them."
 
 The runs a failure lists are the ones it was listed under as its results arrived. Open a
-run to read its gate as it is now: an older commit's run can pass again while a newer
+run to read its gate as it is now. An older commit's run can pass again while a newer
 commit keeps the question open.
 
 A failure stops blocking a gate when a decision explains the failure or another result replaces the failing result.
@@ -62,8 +62,8 @@ A planned run's disputed slot has a separate "Disputed" question for each cause
 and scope. Explaining the cause leaves that dispute waiting for its own answer,
 even when the cause was explained first. Under `standard` and `strict`, someone who reported neither side settles the dispute. The cause answer still applies in other slots,
 runs and scopes where that answer already held. See [disputed slots](./runs.md#resolve-a-disputed-slot).
-An assertion cause shared by more than 50 distinct tests across more than five files in one commit's
-applied reports gets a question per file, starting with the report that crosses those limits.
+An assertion cause can be shared by more than 50 distinct tests across more than five files in one commit's
+applied reports. Such a cause gets a question per file, starting with the report that crosses those limits.
 Reports for the same repository and commit count together, including different environments.
 Each title starts with "Split by file" and names the file. Your answer covers that file's cause.
 Earlier results keep their grouping, and earlier answers keep their effects.
@@ -188,7 +188,7 @@ The queue offers an answer only when every selected question takes it.
 "Link to a case" asks for a case for each test, so answer one question at a time.
 An answer that needs a defect reference or a reason asks once and gives the same text to all.
 Record or cancel that answer before changing the selection.
-Advice is about the question shown, so <kbd>↵</kbd> does not take it while a selection exists.
+Advice is about the question shown. While a selection exists, <kbd>↵</kbd> does not take advice.
 
 Each question gets its own decision. To withdraw all those decisions, press <kbd>u</kbd>, as you would for one decision.
 A refused question returns to the list, for example if its evidence changed while you were choosing an answer.
@@ -198,7 +198,7 @@ In a phone browser, open a question and choose **Actions** for "Select question"
 The rows have no box there.
 
 The iPhone app has its own **Select**. See [answer several questions at once](./iphone.md#answer-several-questions-at-once).
-The app saves an answer on the device before sending it, and **Unsent answers** in Queue shows what has not reached the server.
+The app saves an answer on the device before sending it. **Unsent answers** in Queue shows what has not reached the server.
 See [answer during a network drop](./iphone.md#answer-during-a-network-drop).
 
 ## Review a proposal
@@ -240,8 +240,8 @@ To give every file the same answer from now on, change the project's choice inst
 Open Policy in Settings. Under "Tests with no case", choose "Track without a case" or "Create a case for each test". The rule then answers every open question about a file at once.
 
 A link holds for the tests it names. A test that turns up later in the same file is a new
-question, and the earlier links stay. "Track without a case" is about the file as it was:
-the file is asked about again when its tests with no case change.
+question, and the earlier links stay. "Track without a case" is about the file as it was.
+When the file's tests with no case change, the file is asked about again.
 
 These choices settle the mapping question. They do not turn a failed result into a pass.
 An already recorded result keeps its original basis. Link decisions affect later results.

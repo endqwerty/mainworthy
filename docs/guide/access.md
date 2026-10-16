@@ -34,7 +34,7 @@ A pipeline holds `read` and `record` at most, whatever its grant lists.
 
 <!-- /generated -->
 
-`produce` includes `record`. You need `produce` to send an answer. The [policy](./policy.md#what-a-policy-is) decides whose answer counts. A member clause needs `answer`, an admin clause needs `admin`, and an author clause allows the proposal's author or an admin who is a person, subject to its other restrictions.
+`produce` includes `record`. You need `produce` to send an answer. The [policy](./policy.md#what-a-policy-is) decides whose answer counts. A member clause needs `answer`. An admin clause needs `admin`. Subject to its other restrictions, an author clause allows the proposal's author or an admin who is a person.
 
 A new person gets all six capabilities, a new agent gets `read` and `produce`, and a new pipeline gets `record`. These defaults apply only when you make a token for a name that does not exist yet and give no `--can`.
 
@@ -204,7 +204,7 @@ An admin-issued token works until you revoke it, unless you give it an expiry. A
 $ mainworthy token new --ci github-actions --project scratch --expires 90d
 ```
 
-In Settings, Tokens, choose "Expires" before you create the token: never, 30 days, 90 days or 1 year. A token past its end is refused exactly as a revoked one is, and so is a browser that signed in with it.
+In Settings, Tokens, choose "Expires" before you create the token: never, 30 days, 90 days or 1 year. A token past its end is refused exactly as a revoked one is. A browser that signed in with the expired token is also refused.
 
 To replace a token without a gap, follow these steps:
 
@@ -216,7 +216,7 @@ Two tokens of one actor work side by side. Each start of the server names every 
 
 ## See and revoke tokens
 
-Settings, Tokens, and Settings, People, show "Issued tokens". The list includes each token's number, label, actor, issuer, creation time, last-use time and address, and expiry. A token with no recorded use says "never used". Forgetting a person reads this list again, so their tokens show the forgotten name and revoked state. The actor is who the token identifies. The list cannot tell which person held a shared token. "Revoke" next to a token stops it at once. In server mode the last token the owner can sign in with is not revoked: make the owner another one first.
+Settings, Tokens, and Settings, People, show "Issued tokens". The list includes each token's number, label, actor, issuer, creation time, last-use time and address, and expiry. A token with no recorded use says "never used". Forgetting a person reads this list again, so their tokens show the forgotten name and revoked state. The actor is who the token identifies. The list cannot tell which person held a shared token. "Revoke" next to a token stops it at once. In server mode the last token the owner can sign in with is not revoked. Make the owner another one first.
 
 ```
 $ mainworthy token list
@@ -305,7 +305,7 @@ In Settings, open People. This section is visible to a person who holds `admin` 
 4. Choose how long the link works, from 12 hours to 30 days. Three days is the start.
 5. Press "Make invitation link".
 
-The link appears once, masked, with "Copy link". Copy it and hand it to the person. "Dismiss link" takes it off the page, and so does leaving the section. Nothing shows it again. If no answer comes back when you make a link, the page says so and reads its lists again. A person who is in them was invited, and that link is lost: a recovery link is then their way in.
+The link appears once, masked, with "Copy link". Copy it and hand it to the person. "Dismiss link" takes it off the page, and so does leaving the section. Nothing shows it again. If no answer comes back when you make a link, the page says so and reads its lists again. A person who is in the lists was invited, but the invitation link is lost. A recovery link is then their way in.
 
 With mail enabled, the form also offers **Send to email address, optional**. The CLI accepts `mainworthy invite new robin --email robin@example.com`, and the API accepts `email` on `invitation` with `do: "create"`. The recipient gets the same single-use link and expiry. The reply still shows the link once so you can deliver it yourself if mail fails. Sending an invitation does not verify or save a recovery address.
 
@@ -339,7 +339,7 @@ Open the link. The page says "You are invited as dana" and until when the link w
    - For a passkey, tick "Make a passkey on this device". Give the passkey a name. The default is the name of your browser.
 2. Press "Accept and sign in". You are signed in and the app opens.
 
-The page takes the code out of the address bar as soon as it has read it. The address you see, and the one Back returns to, has no code, so copying that address does not copy the invitation. The browser's own record of the address first opened still holds the whole link. The code is the part after the `#`. The browser does not send that part of the address to the server. If you reload the page, open the original link again.
+The page takes the code out of the address bar as soon as it has read it. The address you see, and the one Back returns to, has no code. Copying that address does not copy the invitation. The browser's own record of the address first opened still holds the whole link. The code is the part after the `#`. The browser does not send that part of the address to the server. If you reload the page, open the original link again.
 
 If the browser is signed in as somebody else, the page names them and asks before signing them out. The fields stay disabled until the page knows who is signed in and you answer. If the request fails or takes more than twenty seconds, the page says so and keeps the fields disabled. **Try again** checks once more and keeps the invitation.
 
@@ -357,7 +357,7 @@ A script accepts an invitation with `POST /api/login`. [API](./api.md#sign-in-as
 
 Mainworthy normalizes passwords to Unicode NFC before hashing and checking them. An accented letter such as `é` matches the same letter entered as `e` followed by a combining accent, including from an iPhone keyboard. Compatibility characters such as full-width letters stay distinct. Passkeys and the PIN or biometric check that unlocks them are unchanged.
 
-A password stored before this change still accepts its original spelling. For an older non-NFC spelling, the first successful sign-in with that spelling refreshes its hash, after which canonical spellings both work. Until then, a different spelling may fail. Refreshing the hash keeps existing sessions signed in. Changing a password accepts the original spelling of an older password too.
+A password stored before this change still accepts its original spelling. For an older non-NFC spelling, the first successful sign-in with that spelling refreshes its hash. After that refresh, canonical spellings both work. Until then, a different spelling may fail. Refreshing the hash keeps existing sessions signed in. Changing a password accepts the original spelling of an older password too.
 
 Sign in on the sign-in page with your name and password, or choose "Sign in with a passkey". A wrong name or password gets the same message: "That name and password did not sign you in." A wrong token and a refused passkey each have their own message. After too many failed attempts, the page says how long to wait.
 
@@ -371,7 +371,7 @@ A password manager such as 1Password can generate a password, fill both new-pass
 
 To add a passkey, give it a name under "Passkeys" in the same section and press "Add a passkey". "Ways you sign in" lists your password and each passkey with when it was last used, and "Remove" beside each. Your last way of signing in has no working "Remove".
 
-Failed attempts are counted. The fifth wrong password for one name within 15 minutes blocks password sign-in for that name for one second, from every address. Each further wrong password doubles the wait, up to 15 minutes. A blocked sign-in is answered `limited` and is not looked at, so the right password waits too. A name nobody has is counted the same way, so the count does not say which names exist. A passkey is not held up by a block on the name. [Troubleshooting](./troubleshooting.md#limited-too-many-failed-attempts) says what to do.
+Failed attempts are counted. The fifth wrong password for one name within 15 minutes blocks password sign-in for that name for one second, from every address. Each further wrong password doubles the wait, up to 15 minutes. A blocked sign-in is answered `limited`. The credentials are not checked, so the right password waits too. A name nobody has is counted the same way, so the count does not say which names exist. A passkey is not held up by a block on the name. [Troubleshooting](./troubleshooting.md#limited-too-many-failed-attempts) says what to do.
 
 ### A lost password or passkey
 
@@ -387,11 +387,11 @@ To set a recovery address, follow these steps:
 
 The link works once for 24 hours. Until you verify, the address cannot receive reset links or sign-in method notices. The instance owner can set an address under a person's **Sign-in details**, but the person who holds that mailbox must still verify it. As with recovery invitations, another admin cannot change someone else's recovery address. The API uses `credential` with `do: "email.get"` or `do: "email.set"`, an optional `actor`, and `email` on set. Set `email` to `null` to remove it. Changing it needs a signed-in browser for your own address, or the instance owner for somebody else's.
 
-As with adding a passkey, the browser session is sufficient without re-entering an existing credential. With mail enabled, replacing or removing a verified address sends a notice to the previous address. That notice contains no verification or reset code and asks you to contact an instance admin if you did not make the change. You can remove a stored address through the API even after mail is switched off, when no notice can be sent.
+As with adding a passkey, the browser session is sufficient without re-entering an existing credential. With mail enabled, replacing or removing a verified address sends a notice to the previous address. That notice contains no verification or reset code. If you did not make the change, the notice asks you to contact an instance admin. You can remove a stored address through the API even after mail is switched off, when no notice can be sent.
 
 Without mail, there is no reset link or invitation address field. An admin recovery invitation remains available. In Settings, People, "People who sign in" lists each person. The owner sees "Recovery link" beside every person. Another person who administers the instance sees it beside their own name only. Somebody who does not administer has no People section and asks the owner. Press it, read what it replaces, and press "Make the recovery link". The link is shown once, as an invitation's is.
 
-The public sign-in exchange is `POST /api/login`. Send `{ "resetRequest": "robin@example.com" }` to request a reset, `{ "emailVerification": "<code>" }` to verify an address, or `{ "reset": "<code>", "password": "<new password>" }` to finish a reset. A successful request replies `{ "requested": true }` for every address. A blocked request returns `429` with `Retry-After`. Successful verification replies `{ "verified": true }`, and a successful reset replies `{ "changed": true }` without a session cookie. `GET /api/login/methods` includes `mail`, which says whether the instance offers these flows.
+The public sign-in exchange is `POST /api/login`. To request a reset, send `{ "resetRequest": "robin@example.com" }`. To verify an address, send `{ "emailVerification": "<code>" }`. To finish a reset, send `{ "reset": "<code>", "password": "<new password>" }`. A successful request replies `{ "requested": true }` for every address. A blocked request returns `429` with `Retry-After`. Successful verification replies `{ "verified": true }`, and a successful reset replies `{ "changed": true }` without a session cookie. `GET /api/login/methods` includes `mail`, which says whether the instance offers these flows.
 
 A verified address receives a notice when a password, passkey or authenticator is added, changed or removed, and when account recovery replaces sign-in methods. Replacing or removing that address sends a notice to the previous verified mailbox. Mail is requested after the account change commits. Delivery failure does not undo a change or reveal SMTP details. The queue and pending links live in memory, so restart loses them. Ask for another link if none arrives. Archives preserve contacts and verification status. Import clears pending verification and reset links.
 
@@ -486,11 +486,17 @@ To sign out, press **Sign out** at the bottom of the sidebar, or <kbd>g</kbd> <k
 - **Sign out and clear browser data** removes your name, case drafts, queue answers, and run notes from this browser. The warning explains that unsaved text in every open tab will be lost and cannot be recovered.
 - **Stay signed in**, or <kbd>Esc</kbd>, closes the dialog without signing out or clearing data.
 
-<kbd>Tab</kbd> moves among the choices, and <kbd>↵</kbd> or <kbd>Space</kbd> presses the focused button. Signing out ends the session on the server, so a copy of the cookie stops working too. If no answer comes back, the page checks whether the browser is still signed in, with a second check if the first gets no answer. If either check confirms that the session ended, the page applies your choice and shows the sign-in page.
+<kbd>Tab</kbd> moves among the choices, and <kbd>↵</kbd> or <kbd>Space</kbd> presses the focused button. Signing out ends the session on the server, so a copy of the cookie stops working too. If no answer comes back, the page checks whether the browser is still signed in. If the first check gets no answer, the page checks a second time. If either check confirms that the session ended, the page applies your choice and shows the sign-in page.
 
 If a check finds you still signed in, the attempt ends and keeps your browser data. If neither check answers, the page says it cannot tell whether you are signed out and that your browser data was kept. In both cases, the choice to clear ends with that attempt. Press **Sign out** again to choose and retry. Before leaving a shared computer when Mainworthy cannot answer, clear the site's data in your browser settings. A pending choice stays only in the tab making the attempt and does not survive a reload. A later expiry or sign-out in another tab does not apply that old choice. A session that expires keeps your drafts. In local mode there is nothing to sign out of, and no button.
 
-A session ends after 14 days without use and after 90 days in any case. It also ends when the token you signed in with is revoked or reaches its end, when the password or passkey you signed in with is removed or replaced, and when your actor is forgotten. Each of these sends you back to the sign-in page. [Configuration](./configuration.md#variables-the-server-reads) says how to change the two lifetimes.
+A session ends after 14 days without use and after 90 days in any case. It also ends in these cases:
+
+- The token you signed in with is revoked or reaches its end.
+- The password or passkey you signed in with is removed or replaced.
+- Your actor is forgotten.
+
+Each of these sends you back to the sign-in page. [Configuration](./configuration.md#variables-the-server-reads) says how to change the two lifetimes.
 
 The owner's token comes from the server. If you set `MAINWORTHY_OWNER_TOKEN`, that value is the token. If you did not, the server prints one on its first start:
 
@@ -502,9 +508,9 @@ owner token (shown once): <token>
 
 The second line says who the owner is and how people sign in. Server mode signs nobody in on its own. In local mode the line reads `you are robin@this-machine`, because there you are the owner.
 
-Copy the owner token when it appears. If you miss the token, set `MAINWORTHY_OWNER_TOKEN` to a new value of 20 to 512 characters. Restart the server to add that value as a token. A new value also revokes every token previously issued through that variable. At startup, the server names those tokens in one log line. The server refuses a value that matches a revoked or expired token, or somebody else's token. At startup, it names the reason in one line and leaves the token unchanged. With no value set, a start on which the owner holds no token that works prints a new one, as the first start does. In the container, `docker compose logs` has the line.
+Copy the owner token when it appears. If you miss the token, set `MAINWORTHY_OWNER_TOKEN` to a new value of 20 to 512 characters. Restart the server to add that value as a token. A new value also revokes every token previously issued through that variable. At startup, the server names those tokens in one log line. The server refuses a value that matches a revoked or expired token, or somebody else's token. At startup, it names the reason in one line and leaves the token unchanged. If no value is set and the owner holds no working token, the server prints a new token at startup, as on its first start. In the container, `docker compose logs` has the line.
 
-The command line needs no token in local mode on the same machine. In server mode, give it one with `MAINWORTHY_TOKEN`, or `--token-file` for a token in a file. `--token` works too, but an argument appears in the process list and the shell's history. Prefer the variable. The command warns once on standard error if it is about to send a token to plain `http://` on another machine: [use an `https://` address](./cli.md#give-the-token-in-the-environment-or-in-a-file).
+The command line needs no token in local mode on the same machine. In server mode, give it one with `MAINWORTHY_TOKEN`, or `--token-file` for a token in a file. `--token` works too, but an argument appears in the process list and the shell's history. Prefer the variable. If the command is about to send a token to plain `http://` on another machine, it warns once on standard error. [Use an `https://` address](./cli.md#give-the-token-in-the-environment-or-in-a-file).
 
 ## What a pipeline can never do
 

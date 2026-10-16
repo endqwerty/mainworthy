@@ -44,8 +44,8 @@ Impact lists related cases and review information. It is not a code coverage mea
 without one. Each row says how the gate counted the test and names who reported it.
 It also shows the file, job, duration, and failure message when present, and the attempt
 number after the first attempt. The test's name opens [the test's page](./report-results.md#read-what-each-test-did).
-A row links to its case and failure question when available, and to the CI build
-when the report supplied an HTTP or HTTPS URL.
+A row links to its case and failure question when available.
+It also links to the CI build when the report supplied an HTTP or HTTPS URL.
 
 Each result row uses one of the following labels.
 
@@ -235,8 +235,8 @@ job, target, and test. A pass from a different job cannot clear that failure.
 
 A commit reported only by an agent has no counted commit gate.
 Reading its gate returns pending with nothing proven.
-An agent's results are recorded and visible, and failures can raise questions,
-but they do not move the change's counted head or its commit verdict.
+An agent's results are recorded and visible, and failures can raise questions.
+Those results do not move the change's counted head or its commit verdict.
 
 Agent results count only in a planned run that asks for agents on a case that
 admits them. A review is still not a runtime pass. See [agents](./agents.md).
@@ -292,7 +292,8 @@ twenty posts per minute and 240 per hour. Failed and uncertain attempts count to
 
 If GitHub refuses a post, is unreachable, or its reply is lost, Mainworthy retries the current gate with exponential back-off. The delay starts at one minute, doubles after each unsuccessful attempt, and stops growing at one hour. After sixteen consecutive failed or uncertain attempts, that commit stops delivery with one fixed diagnostic. A new counted report resumes it, subject to any existing delay. Check connectivity, repository access, and Commit statuses write permission before reporting again. A successful post resets the attempt count.
 
-An HTTP 429 pauses status posts for every commit, including newly enrolled commits. An HTTP 403 does so only when `x-ratelimit-remaining` is zero or `retry-after` is valid. Mainworthy waits for the longest of the exponential delay and applicable headers. It uses `x-ratelimit-reset` only with remaining zero or a valid `retry-after`, and caps each header-derived pause at one day. Repeated rate-limit replies increase the shared delay too, even across different commits. Other 403 replies, including missing permission, use the ordinary per-commit back-off, starting at one minute. The pause, attempt counts, and rolling limits survive a restart. No response body or exception text is stored or logged. GitHub allows 1,000 statuses per commit and context, so repeated changes or uncertain retries can eventually exhaust that limit.
+An HTTP 429 pauses status posts for every commit, including newly enrolled commits. An HTTP 403 does so only when `x-ratelimit-remaining` is zero or `retry-after` is valid. Mainworthy waits for the longest of the exponential delay and applicable headers. It uses `x-ratelimit-reset` only with remaining zero or a valid `retry-after`.
+Mainworthy caps each header-derived pause at one day. Repeated rate-limit replies increase the shared delay too, even across different commits. Other 403 replies, including missing permission, use the ordinary per-commit back-off, starting at one minute. The pause, attempt counts, and rolling limits survive a restart. No response body or exception text is stored or logged. GitHub allows 1,000 statuses per commit and context, so repeated changes or uncertain retries can eventually exhaust that limit.
 
 After thirty days without a gate-payload change or a new counted report, an accepted commit stops automatic reconciliation. GitHub keeps its last status. Later decisions on that commit publish only after another counted report resumes reconciliation. Failed deliveries stop after the sixteen-attempt bound, even if the gate changes. Decisions alone do not resume a stopped commit.
 
