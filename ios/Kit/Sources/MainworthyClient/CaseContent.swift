@@ -119,6 +119,42 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 		return changes
 	}
 
+	/// What an edit to a case that exists does, in a sentence: "Changes the title and 1 step, adds 2 steps." Nil
+	/// for a new case, which is all new.
+	public var summary: String? {
+		guard before != nil else { return nil }
+		var parts: [String] = []
+		var changed = 0
+		var added = 0
+		var removed = 0
+		for change in changes {
+			switch change {
+			case .title: parts.append("the title")
+			case .pre: parts.append("the preconditions")
+			case .methods: parts.append("who may run it")
+			case .automate: parts.append("the automation")
+			case .fields: parts.append("the fields")
+			case .changed: changed += 1
+			case .added: added += 1
+			case .removed: removed += 1
+			case .placed, .kept: break
+			}
+		}
+		func steps(_ count: Int) -> String { "\(count) \(count == 1 ? "step" : "steps")" }
+		if changed > 0 { parts.append(steps(changed)) }
+		var clauses: [String] = []
+		if !parts.isEmpty { clauses.append("changes \(EditedCase.list(parts))") }
+		if added > 0 { clauses.append("adds \(steps(added))") }
+		if removed > 0 { clauses.append("removes \(steps(removed))") }
+		guard !clauses.isEmpty else { return "Changes nothing." }
+		let sentence = clauses.joined(separator: ", ")
+		return sentence.prefix(1).uppercased() + sentence.dropFirst() + "."
+	}
+
+	private static func list(_ items: [String]) -> String {
+		items.count < 2 ? items.joined() : items.dropLast().joined(separator: ", ") + " and " + items[items.count - 1]
+	}
+
 	public enum Change: Equatable, Sendable {
 		case title(from: String?, to: String)
 		case pre(from: String, to: String)

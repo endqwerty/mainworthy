@@ -324,10 +324,25 @@ final class QueueUITests: XCTestCase {
 		XCTAssertTrue(failure.waitForExistence(timeout: 10))
 		XCTAssertTrue(notice.label.hasSuffix("the decision is withdrawn."), notice.label)
 
-		// An agent's edit is shown as what it changes, before anybody accepts it.
+		// An agent's edit is shown as what it changes, before anybody accepts it: why, in a sentence what it does,
+		// and the steps with the new one marked.
 		app.staticTexts["Edit: A percentage coupon lowers the total"].tap()
-		XCTAssertTrue(app.staticTexts["Remove the coupon\n> Total returns to $100.00"].waitForExistence(timeout: 10))
+		XCTAssertTrue(app.staticTexts["edit-summary"].waitForExistence(timeout: 10))
+		XCTAssertEqual(app.staticTexts["edit-summary"].label, "Adds 1 step.")
+		XCTAssertTrue(app.staticTexts["Check removing the coupon as well as adding it."].exists)
+		XCTAssertTrue(app.staticTexts["Added"].exists && app.staticTexts["Remove the coupon"].exists)
+		XCTAssertTrue(app.staticTexts["Expected: Total returns to $100.00"].exists)
 		shot("5-proposal")
+		// The case as it is, which rejecting keeps, and as accepting would leave it.
+		app.segmentedControls["edit-side"].buttons["Current"].tap()
+		XCTAssertTrue(app.staticTexts["Apply the coupon SAVE10"].waitForExistence(timeout: 5))
+		XCTAssertFalse(app.staticTexts["Remove the coupon"].exists)
+		shot("5-proposal-current")
+		app.segmentedControls["edit-side"].buttons["Proposed"].tap()
+		XCTAssertTrue(app.staticTexts["Remove the coupon"].waitForExistence(timeout: 5))
+		XCTAssertFalse(app.staticTexts["Added"].exists)
+		shot("5-proposal-proposed")
+		app.swipeUp()
 		app.buttons["answer-reject"].tap()
 		XCTAssertTrue(notice.waitForExistence(timeout: 10))
 		XCTAssertTrue(notice.label.hasSuffix(": Reject."), notice.label)
