@@ -112,9 +112,10 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 		let old = before?.steps ?? []
 		let kept = Set(after.steps.map(\.id))
 		let inPlace = EditedCase.inPlace(old.map(\.id), after.steps.map(\.id))
+		let place = Dictionary(old.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
 		var passed = 0
 		for step in after.steps {
-			if let at = old.firstIndex(where: { $0.id == step.id }) {
+			if let at = place[step.id] {
 				guard inPlace.contains(step.id) else {
 					changes.append(.moved(from: old[at], to: step))
 					continue
@@ -169,30 +170,30 @@ public struct EditedCase: Identifiable, Equatable, Sendable {
 	}
 
 	/// The steps of both versions that keep their order: the longest run of them that both versions hold in the
-	/// same order. Any other step of both moved, so a reorder is said with as few moves as it takes.
+	/// same order. Any other step of both moved, so a reorder is said with as few moves as it takes. Step ids are
+	/// unique, so this is the longest rising run of the steps' old places, taken in their new order: found in
+	/// n log n, in memory that grows with the steps, however long a case is.
 	private static func inPlace(_ old: [String], _ new: [String]) -> Set<String> {
-		let both = Set(old).intersection(new)
-		let a = old.filter(both.contains)
-		let b = new.filter(both.contains)
-		var longest = Array(repeating: Array(repeating: 0, count: b.count + 1), count: a.count + 1)
-		for i in a.indices.reversed() {
-			for j in b.indices.reversed() {
-				longest[i][j] = a[i] == b[j] ? longest[i + 1][j + 1] + 1 : max(longest[i + 1][j], longest[i][j + 1])
+		let place = Dictionary(old.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+		let both = new.compactMap { id in place[id].map { (id: id, place: $0) } }
+		// `ends[k]` is the step that ends the run of length k + 1 with the lowest old place; `before` links a run back.
+		var ends: [Int] = []
+		var before = Array(repeating: -1, count: both.count)
+		for (index, step) in both.enumerated() {
+			var low = 0
+			var high = ends.count
+			while low < high {
+				let middle = (low + high) / 2
+				if both[ends[middle]].place < step.place { low = middle + 1 } else { high = middle }
 			}
+			if low > 0 { before[index] = ends[low - 1] }
+			if low == ends.count { ends.append(index) } else { ends[low] = index }
 		}
 		var run: Set<String> = []
-		var i = 0
-		var j = 0
-		while i < a.count, j < b.count {
-			if a[i] == b[j] {
-				run.insert(a[i])
-				i += 1
-				j += 1
-			} else if longest[i + 1][j] >= longest[i][j + 1] {
-				i += 1
-			} else {
-				j += 1
-			}
+		var at = ends.last ?? -1
+		while at >= 0 {
+			run.insert(both[at].id)
+			at = before[at]
 		}
 		return run
 	}

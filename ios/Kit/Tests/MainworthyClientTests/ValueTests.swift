@@ -153,7 +153,7 @@ struct ValueTests {
 			id: 0, caseRef: "C-1", before: CaseContent(title: "T", steps: [first, second]),
 			after: CaseContent(title: "T", steps: [second, first])
 		)
-		#expect(swapped.changes == [.kept(second), .moved(from: first, to: first)])
+		#expect(swapped.changes == [.moved(from: second, to: second), .kept(first)])
 		#expect(swapped.summary == "Moves 1 step.")
 		// A step taken from the end to the start is the one that moved; the others keep their order.
 		let rotated = EditedCase(
@@ -162,13 +162,20 @@ struct ValueTests {
 		)
 		#expect(rotated.changes == [.moved(from: third, to: third), .kept(first), .kept(second)])
 		// A step removed beside one that moved is still said once, where it stood among those that stayed. Of two
-		// steps that swapped, one moved; here the first step went to the end.
+		// steps that swapped, one moved; here the third step went to the start.
 		let edited = Step(id: "c3", action: "Third, edited", expected: nil)
 		let mixed = EditedCase(
 			id: 0, caseRef: "C-1", before: CaseContent(title: "T", steps: [first, second, third]),
 			after: CaseContent(title: "T", steps: [edited, first])
 		)
-		#expect(mixed.changes == [.removed(second), .changed(from: third, to: edited), .moved(from: first, to: first)])
+		#expect(mixed.changes == [.moved(from: third, to: edited), .kept(first), .removed(second)])
+		// However long a case is, a step that moved is found without a table of every pair of steps.
+		let many = (0..<20_000).map { Step(id: "s\($0)", action: "Step \($0)", expected: nil) }
+		let long = EditedCase(
+			id: 0, caseRef: "C-1", before: CaseContent(title: "T", steps: many),
+			after: CaseContent(title: "T", steps: [many[19_999]] + many.dropLast())
+		)
+		#expect(long.summary == "Moves 1 step.")
 		#expect(mixed.summary == "Changes 1 step, removes 1 step, moves 1 step.")
 	}
 
