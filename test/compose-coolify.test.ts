@@ -32,7 +32,12 @@ function volumes() {
 
 function carry(from: string, to: string) {
 	const compose = Bun.YAML.parse(readFileSync("compose.coolify.yaml", "utf8")) as Compose;
-	const [shell, flags, script] = compose.services["carry-data"].entrypoint;
+	const [shell, flags, script] = compose.services["carry-data"]?.entrypoint ?? [];
+	if (shell === undefined || flags === undefined || script === undefined) {
+		throw new Error(
+			"compose.coolify.yaml: the service carry-data has no entrypoint of a shell, its flags and a script",
+		);
+	}
 	// Compose reads `$$` as one `$`; the paths are the two mounts.
 	const local = script
 		.replaceAll("$$", "$")
