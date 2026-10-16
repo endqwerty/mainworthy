@@ -1,43 +1,43 @@
 # How it is built
 
-A short look under the hood for people who run or extend Mainworthy: the parts, how a request travels through them, and the rules the design holds itself to. You do not need this page to use the product.
+Mainworthy runs as one server process with a SQLite database. This page explains how its operations record evidence and decisions, and which rules the tests hold the design to.
 
 [Diagram: the surfaces, the operations and the record](../diagrams/architecture.html)
 
 ## One process, one file
 
-An instance is one process and one SQLite file. The server, the web UI, the command line and the agent endpoint are a single executable. There is no second service to run and no database server to look after.
+An instance runs as one process. It keeps its records in one SQLite database and attachment bytes in a `blobs` directory beside it. The executable includes the server, the web UI, the command line, the documentation and the MCP endpoint. It needs no separate database server.
 
-The file has one writer. A write waits its turn in a queue, and reads run on their own threads with read-only connections, so a long write never holds up a page. [Configuration](./configuration.md) says how many reader threads a server starts.
+The database has one writer. Writes wait their turn in a queue. By default, reads use separate threads with read-only connections so they can continue during a long write. [Configuration](./configuration.md) says how many reader threads a server starts.
 
 ## One list of operations
 
-Everything the product can do is one of nineteen operations, such as `propose`, `report`, `decide` and `gate`. The HTTP routes, the OpenAPI document, the commands of `mainworthy` and the agent tools are all made from that one list. Every operation is an HTTP route and a command. Ten of them, marked in the list, are also agent tools.
+The operation registry lists the product's operations, such as `propose`, `report`, `decide` and `gate`. The HTTP routes, the OpenAPI document, the commands of `mainworthy` and the agent tools all come from that list. Every operation is an HTTP route and a command. Ten of them, marked in the list, are also agent tools.
 
-Each operation does the same things in the same order. It checks that the caller may run it. It checks the input. For a write it opens a transaction, takes the project's next sequence number, runs, commits, and tells listening clients what changed. [API and agent tools](./api.md) lists the operations.
+The registry checks the input and the caller's permission. A project write runs in a transaction with the project's next sequence number. After a commit, the server tells listening clients what changed. Some writes use more than one transaction. A report first commits its receipt, then applies its results. [API and agent tools](./api.md) lists the operations.
 
 ## A record that only grows
 
-Versions, results, answers and decisions are never updated. A correction is a new row that names the row it replaces.
+Case versions, observations and decisions retain their history. A correction records what it replaces instead of overwriting the earlier content. Automatic [demo refreshes](./customize.md#a-project-of-demo-data) replace the demo project's history at startup.
 
-Each project has one clock. Every write gets the next sequence number and stamps its rows with it. "What changed since I last looked" is one range read, and the number is the cursor an agent passes back.
+Each project has a sequence counter. A project transaction takes the next number and stamps its changes with it. Clients use that number as a cursor to read subsequent changes through `since`.
 
 ## One way to change what is current
 
-The head version of a case, the case a test belongs to, how a failure counts, whether a run is closed and the policy in force are the things Mainworthy treats as current. The code has exactly one way to change each of them: a function that needs proof of a recorded decision. The database refuses a row that cites a decision the record does not hold.
+The current case version, test links, failure classifications, run closure and policy are the state that decisions control. Functions that establish that state require proof of a recorded decision. Dedicated withdrawal handlers reverse a decision's effects when it ends. The database refuses a row that cites a decision the record does not hold.
 
-So no path through the product, and no bug that takes a shortcut, can change what is current without a row that says who decided, on what evidence, under which clause of the policy. A verdict is worked out from the evidence and from what is current, so it changes only when evidence arrives or a decision is recorded. [How Mainworthy works](./concepts.md) explains what this means when you use it.
+The recorded decision names who decided, on what evidence and under which policy clause. Tests check that the modules use these writers. A verdict follows the evidence and the decisions still in force. It can also change when a decision's hold expires. [How Mainworthy works](./concepts.md) explains what this means when you use it.
 
 ## What happens when a pipeline reports
 
 [Diagram: one red build, from upload to a green gate](../diagrams/red-build.html)
 
 1. `mainworthy report` reads the JUnit XML and the commit, branch and pull request from the CI environment.
-2. The server stores the results first. From that moment the gate for the commit reads `pending`, so nobody is served the verdict from before the upload.
-3. The server applies the results in slices of 200, so a report of ten thousand results does not freeze anyone's screen.
-4. Each failure is reduced to its cause, and each cause raises one question, unless a decision about it still holds.
-5. The verdict is worked out. When someone answers the question, it is worked out again in the same transaction.
+2. The server stores the report durably before applying it. From that moment the gate for the commit reads `pending` until application finishes.
+3. The server applies the results in slices of 200 and yields between slices to answer other requests.
+4. Mainworthy groups failures by cause. A cause on an open change raises a question unless a decision about it still holds. A planned run can also require an answer after the change ends.
+5. The server computes the verdict. When someone answers a failure question, it computes the affected verdicts again in the same transaction.
 
 ## The rules are tests
 
-The design rules are checked on every change: a module may not reach into another's tables, nothing but the decision code may change what is current, and the agent tools may not grow past ten. Each thing that must never happen, such as a green gate with nothing proven, has a test of its own. So does the speed of the paths people wait on.
+Tests check the module boundaries, the writers that require proof of a decision, and the limit of ten agent tools. Gate tests check that a gate with nothing proven stays pending, unless the policy accepts a declaration that no tests were required. Latency tests check the paths people wait on.

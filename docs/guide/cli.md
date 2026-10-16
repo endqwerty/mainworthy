@@ -1,12 +1,16 @@
 # Command line
 
-Every command of `mainworthy`, with its flags and exit codes. The tables on this page are read from the program, so they match the version you are running.
+Every `mainworthy` command, with its flags and exit codes. The program generates
+the tables on this page for the version that serves these docs.
 
 `mainworthy` is one executable. With no arguments it starts the server. Almost every other command talks to a running server over HTTP, on this machine or another one. `mainworthy fmt`, `mainworthy audit verify <file>`, and `mainworthy help` need no server.
 
 ## Sign in with a password and a code
 
-`login` exchanges your password and, when enrolled, an authenticator or recovery code for a personal CLI token. It ends the temporary browser session and prints the token once. Store the input secrets in private files, then run:
+`login` exchanges your password for a personal CLI token. If you have an enrolled
+authenticator, it also needs an authenticator or recovery code. The command prints
+the token once and tries to end the temporary session. Store the input secrets in
+private files, then run:
 
 ```
 mainworthy login --url https://mainworthy.example --name robin --password-file /private/password --code-file /private/code --label laptop --expires 30d
@@ -14,7 +18,10 @@ mainworthy login --url https://mainworthy.example --name robin --password-file /
 
 The password file holds the password, with one optional final newline. The code file holds a current authenticator code or unused recovery code. Each file is limited to 4096 bytes. Neither secret is an argument or printed in an error. `--code-file` is needed only for an account with an enrolled authenticator. The command refuses plain HTTP to another machine. It ignores existing token options because you are signing in anew.
 
-Set the returned token as `MAINWORTHY_TOKEN` or keep it in a private token file. `--json` returns `id`, `actor`, `token`, and `expiresAt`. The default token lifetime is 30 days, and the maximum is one year. Delete the password and code files when you no longer need them.
+Set the returned token as `MAINWORTHY_TOKEN` or keep it in a private token file.
+`--json` returns `id`, `actor`, `token`, and `expiresAt`. The default token lifetime
+is 30 days, and the maximum is 365 days. Delete the password and code files when
+you no longer need them.
 
 As the local owner, `mainworthy credential --do totp.begin` starts [authenticator enrolment](./access.md#add-an-authenticator-for-password-sign-in). `mainworthy credential --do totp.confirm --challenge <challenge> --code <code>` confirms it within five minutes and prints recovery codes once. Remote bearer tokens cannot enrol an authenticator. Use Settings in a signed-in browser instead.
 
@@ -26,15 +33,29 @@ A command finds its server in this order: the flag, then the environment variabl
 | --- | --- | --- | --- |
 | Server address | `--url` | `MAINWORTHY_URL` | `http://127.0.0.1:7357` |
 | Token | `--token`, or `--token-file` | `MAINWORTHY_TOKEN`, or `MAINWORTHY_TOKEN_FILE` | none: a server in local mode on this machine asks for none |
-| Project | `--project` | `MAINWORTHY_PROJECT` | the only project, when there is one |
+| Project | `--project` | `MAINWORTHY_PROJECT` | the only project the caller can access, when there is one |
 
 ### Give the token in the environment or in a file
 
-Prefer `MAINWORTHY_TOKEN` to `--token`: an argument is in the process list of the machine while the command runs, and in the shell's history afterwards. `--token-file <path>` (or `MAINWORTHY_TOKEN_FILE`) reads the token from a file instead, which suits a pipeline that mounts a secret as a file. The file holds the token and nothing else; the whitespace around it, a final newline included, is dropped. The token may have at most 512 characters, the server's limit. The whole file, including whitespace, may have at most 4096 bytes. An empty, unreadable or oversized file, or one with more than a token, stops the command locally with exit code 4. The error names the file and never quotes its contents. Giving the token two ways at once (`--token` with `--token-file`, or both variables) is refused. A flag wins over a variable.
+Prefer `MAINWORTHY_TOKEN` to `--token`. An argument appears in the machine's process
+list while the command runs and in the shell's history afterwards.
+`--token-file <path>` or `MAINWORTHY_TOKEN_FILE` reads the token from a file, such as
+a secret file mounted by a pipeline. The CLI removes surrounding whitespace,
+including a final newline. The token may have at most 512 characters, the server's
+limit. The whole file, including whitespace, may have at most 4096 bytes.
+
+An empty, unreadable, or oversized file, or one with more than a token, stops the
+command locally with exit code 4. The error names the file without quoting its
+contents. The command refuses `--token` together with `--token-file`. If neither
+flag is present, it refuses both token variables being set. A flag wins over a variable.
 
 `health`, `version`, `fmt`, `help` and a command's `--help` need no token. They ignore token flags and variables, including unreadable token files and conflicting token options. `serve` uses the [server configuration](./configuration.md#variables-the-server-reads), not the client token options.
 
-A command that is about to send a token to a plain `http://` address on another machine says so once on standard error, before the first request carrying the token, and goes on: the token travels unencrypted, so use an `https://` address. The addresses of this machine (`localhost`, `127.0.0.1` and the rest of `127.0.0.0/8`, `[::1]`) and `https://` addresses get no warning, and neither does a command that sends no token. Standard output is not touched, so `--json` output stays clean.
+A command warns once on standard error before it sends a token to a plain `http://`
+address on another machine, then continues. The token travels unencrypted, so use
+an `https://` address. Loopback addresses (`localhost`, `127.0.0.0/8`, and `[::1]`),
+`https://` addresses, and commands that send no token get no warning.
+The warning does not affect standard output, so `--json` remains valid JSON.
 
 [Configuration](./configuration.md) explains local and server mode. [People, agents and pipelines](./access.md) explains tokens.
 

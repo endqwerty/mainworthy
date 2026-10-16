@@ -1,6 +1,6 @@
 # What you can customize
 
-See everything a team can adjust in Mainworthy, who may adjust it, and where to do it. Use this page to find the right setting, then follow the link to the page that explains it.
+Find what your team can adjust in Mainworthy, who may adjust it, and where to do it. Follow each link for instructions.
 
 [Diagram: what you can customize, and where](../diagrams/customize-map.html)
 
@@ -27,8 +27,10 @@ Two words recur below. An instance admin holds the `admin` capability on every p
 | Same-code detector settings | `mainworthy propose` with a policy edit. Settings shows the current values | An admin on the project who also holds `produce` | [Policy](./policy.md#same-code-detector-settings) |
 | Custom field definitions | Settings, Policy, "Custom fields", or a `propose` policy edit | An instance admin who holds `produce` in Settings; a project admin through `propose` | [Policy](./policy.md#custom-fields) |
 | Projects | Settings, Projects, "Create a project", or `mainworthy admin` | An instance admin | [Policy](./policy.md#choose-a-preset-for-a-new-project) |
-| What each person, agent or pipeline may do | `mainworthy actor grant` and `actor ungrant`. Settings shows tokens only | An instance admin who is a person | [People, agents and pipelines](./access.md) |
-| Tokens | Settings, Tokens, or `mainworthy token new`, `list` and `revoke` | An instance admin. A token for a person who exists: that person or the owner | [People, agents and pipelines](./access.md#make-a-token) |
+| What each person, agent or pipeline may do | `mainworthy actor grant` and `actor ungrant`. Settings, People shows people's personal and team grants and manages teams | An instance admin who is a person | [People, agents and pipelines](./access.md) |
+| Named roles | `mainworthy actor grant --roles` | An instance admin who is a person | [Named roles](./access.md#named-roles) |
+| Admin-issued tokens | Settings, Tokens, or `mainworthy token new`, `list` and `revoke` | An instance admin. A token for an existing person needs that person or the owner | [Make a token](./access.md#make-a-token) |
+| Your personal command-line tokens | Settings, Your sign-in, Your command-line tokens | You, signed in with a password or passkey, or as the local owner | [Make your own command-line token](./access.md#make-your-own-command-line-token) |
 | How an agent connects | Settings, Connect, then `mainworthy mcp` or the `/mcp` address | Whoever holds an agent token | [Let an agent in](./agents.md) |
 | What a run asks for | Runs, <kbd>n</kbd>, or `mainworthy plan` for methods, people and required jobs | Anyone with `plan` | [Planned runs](./runs.md) |
 | Folders and tags | Suite | Anyone with `produce`. The policy decides whether the edit applies at once | [Write cases](./write-cases.md#organize-the-suite) |
@@ -42,9 +44,9 @@ Two words recur below. An instance admin holds the `admin` capability on every p
 
 ## Policy is the largest setting
 
-The policy decides who answers each kind of question and what an agent's answer is worth. It changes how much your team trusts an edit, a failure explanation or an agent without changing any data. The three presets run from `loose` to `strict`. [Policy](./policy.md) compares them and shows how to switch.
+The policy decides who answers each kind of question and what an agent's answer is worth. It controls review of edits, failure explanations and agent answers. The three presets run from `loose` to `strict`. [Policy](./policy.md) compares them and shows how to switch.
 
-A policy change is not a private setting. It is a proposal that an admin who is a person accepts, and both stay in the record.
+A policy change applies to the whole project. An admin who is a person accepts the proposal, and both the proposal and decision stay in the record.
 
 ## Projects
 
@@ -56,9 +58,9 @@ A project key is lower-case letters, digits and hyphens, up to 40 characters, an
 
 The sidebar names the project you are in, under "Mainworthy". When you can read more than one project, the name is a button. Press it, or <kbd>g</kbd> <kbd>p</kbd>, and Mainworthy lists your projects, each with its key and its policy. The choice starts on the first project you are not in, so <kbd>↵</kbd> goes there. To find another, type part of its name or its key.
 
-You stay on the screen you were on: from Queue you arrive in the other project's Queue. A case, question or run that was open stays behind, because its ref belongs to one project, and Back returns to it. With the sidebar collapsed, the button shows the first letter of the project's name.
+You stay on the same screen. From Queue you arrive in the other project's Queue. A case, question or run that was open stays behind because its ref belongs to one project. Back returns to it. With the sidebar collapsed, the button shows the first letter of the project's name.
 
-On a phone the project's line is in the menu: tap **Menu**, then the project, then the one to go to. **Actions** offers "Switch project" as well. With a keyboard attached, <kbd>g</kbd> <kbd>p</kbd> opens the list, and <kbd>↑</kbd> <kbd>↓</kbd> and <kbd>↵</kbd> choose from it, as on a desktop.
+On a phone, tap **Menu**, then the current project, then the project to go to. **Actions** offers "Switch project" as well. With a keyboard attached, <kbd>g</kbd> <kbd>p</kbd> opens the list, and <kbd>↑</kbd> <kbd>↓</kbd> and <kbd>↵</kbd> choose from it, as on a desktop.
 
 The palette (<kbd>⌘</kbd> <kbd>K</kbd>) finds a project too, once you type a word of its name. Settings, Projects lists the same projects, and a press on one opens its Settings.
 
@@ -68,19 +70,20 @@ To look around before you write a case of your own, fill a project with the demo
 
 ```
 $ mainworthy seed demo
-seeded demo: 2000 cases, run R-53, 65 questions
+seeded demo: 2000 cases, run R-54, 65 questions
 http://127.0.0.1:7357/p/demo/suite
 ```
 
 The demo is a shop's suite. Its cases are in 29 folders under eight areas: Checkout, Accounts, Orders, Catalog, Back office, Notifications, Mobile app and API. Each folder holds the scenarios of one feature, and each case has steps of its own. The project defines two fields of its own, a priority and the team that owns a case, and the cases carry them. The back office's cases came from TestRail and keep its ids as aliases: in the default demo, `mainworthy get C5505` reads one. A feature that needs more cases than it has scenarios repeats them for another browser, language or kind of customer, as a real suite does. About a third of the cases have an automated test, and each test is linked to its case.
 
-The pipeline also reports the shop's unit tests, which no case names: 60 files under `tests/unit/`, one open question each. That is the queue a first real project has, with many rows that want the same answer. Answer them one at a time to see what that costs. Then answer them all at once: in Settings, Policy, set "Tests with no case" to "Track without a case", or run `mainworthy --project demo policy tests track`. `--unlinked-files` sets how many files there are, from 0 to 500.
+The pipeline also reports the shop's unit tests, which no case names. There are 60 files under `tests/unit/`, one open question each. Try [selecting several rows in the queue](./decide.md) to answer them together. To track every test without a case, open Settings, Policy and set "Tests with no case" to "Track without a case", or run `mainworthy --project demo policy tests track`. `--unlinked-files` sets how many files there are, from 0 to 500.
 
 The project holds fourteen days of history before today:
 
 - A pipeline named `pipeline` reported on `main` every night, and on one to three pull requests on most days. Two days of each week are quieter; this pattern comes from the seed, so it does not depend on the real weekday. Two nights found a defect, one night its services were down, and some pull requests failed before they were fixed. A person answered each failure the day it was reported.
 - A run was planned every other day and worked through by hand. The older ones are closed as passed. The one from two days ago found a defect and stays open, and yesterday's is half done.
 - Some cases were edited, two that the API checks now cover were archived, and an agent named `reviewer` reviewed two pull requests.
+- One automated test was quarantined, failed while covered, and left quarantine after a person checked its repair.
 - Each pull request merged after its last report, and the pipeline said so, so it ended and is not asked about again. Today's pull request 482 is the only one open.
 
 Today `main` fails one test, and so does pull request 482, which starts from that commit. Both failures carry the trace the test runner wrote, as an attachment. A run named "Checkout regression" is planned on the pull request, and `reviewer` has left a finding and a proposed edit. The queue holds five questions that need judgment: the failing test on `main` and on the pull request, the finding, the proposed edit, and a test that has no case. The sixty unit-test questions make 65 in all. The demo adopts the `standard` preset before its first report, set to ask about tests with no case. This keeps the pull request's failure open with the hint that it also fails on the base.
@@ -92,19 +95,23 @@ Four flags change what is written:
 - `--days` sets how many days of history, from 0 to 90. With 0 the demo holds today and nothing before it.
 - `--unlinked-files` sets how many files of unit tests have no case, from 0 to 500. The default is 60; use 0 to leave only the five questions above.
 
-The history ends on the day you run the command. It does not move forward afterwards: a demo seeded a month ago shows the fourteen days before that day.
+The history ends on the day you run the command. It does not move forward afterwards. A demo seeded a month ago shows the history ending on that day.
 
-You name the project each time. `seed` makes it when the instance has none of that name, and it does not read `--project` or `MAINWORTHY_PROJECT`. It fills a project nothing was written to, and refuses any other, so it cannot add the demo to your own work. If a seed stops halfway, send the same command again with the same flags: it finishes the rest and writes nothing twice.
+You name the project each time. `seed` makes it when the instance has none of that name, and it does not read `--project` or `MAINWORTHY_PROJECT`. It fills a project nothing was written to, and refuses any other, so it cannot add the demo to your own work. If a seed stops halfway, send the same command again with the same flags. It finishes the rest and writes nothing twice.
 
-A seeded project is a demo project, and stays one. Only a demo project accepts a write that says when it happened, which is how the demo comes to hold days it was not there for. Every other project records the server's clock, and no flag or token changes that. [The API page](./api.md#say-when-a-write-happened) has the detail.
-
-The demo mark is stored by migration `0009_demo_projects.sql`, schema version 9. It is excluded from archives, so it does not change their version.
+A seeded project is a demo project, and stays one. Only a demo project accepts a write that says when it happened. Those writes give the demo its history. Every other project records the server's clock, and no flag or token changes that. Archives exclude the demo mark. [The API page](./api.md#say-when-a-write-happened) has the details.
 
 `seed` needs a person who administers the instance, because it makes the project and the two actors. In server mode, give that person's token with `--token` or `MAINWORTHY_TOKEN`. The pipeline and the agent hold a grant on the demo project alone. The tokens `seed` makes for them are revoked when it ends, and end after an hour if it stops before then.
 
-You cannot delete a project yet, so the demo stays until you start with a new data directory. Or have the server seed it again on every start: with `MAINWORTHY_DEMO=demo` set, `mainworthy serve` empties the project `demo` once it listens and seeds the demo there again, so the history ends on the day of the start and whatever you changed there is gone. It does that only to a demo project; any other is left as it is, and the start says so in a line. A demo seeded before projects were marked demos counts when the first thing written to it was that seed's. Whoever holds a grant on the demo keeps it, a team included, except the demo's own `pipeline` and `reviewer`, whose grants are part of the demo and set by the seed: the project is made again with its grants in the same step that empties it, so a stop before commit preserves the old demo and grants. A stop after commit leaves an empty demo that the next start fills. A project of that name that does not exist yet is made.
+You cannot delete a project yet, so the demo stays until you start with a new data directory. To seed it again on every start, set `MAINWORTHY_DEMO=demo`. Once `mainworthy serve` listens, it empties the project `demo` and seeds it again. The history ends on the day of the start, and whatever you changed there is gone. The server empties only a demo project and leaves any other project unchanged, with a log line that says so. A demo seeded before projects were marked demos counts when its first write came from that seed. The server creates the project if it does not exist.
 
-The reset runs on a worker thread, so `/healthz` and ordinary reads keep answering. Writes, including administration lists and sign-in, wait for its transaction to finish. Reads see the old demo until the empty demo and its grants commit together. The reset checks all foreign keys before committing and rolls back if any reference is invalid. The seed then fills it through the API, during which the project is partly filled. Its fifteen-minute token is made after the reset and revoked when seeding ends. A graceful stop during reset skips that token; a stop during seeding waits for the seed to finish and its token cleanup. After ten minutes, the reset requests its worker to stop. It can stop only between SQLite statements, so a running statement must finish before rollback releases waiting writes. Each reset step and the seed log their elapsed time. See [configuration](./configuration.md).
+Personal and team grants on the demo stay. The seed sets its own `pipeline` and `reviewer` grants again. The reset empties and recreates the project with its grants in one transaction. A stop before commit preserves the old demo and grants. A stop after commit leaves an empty demo that the next start fills.
+
+The reset runs on a worker thread, so `/healthz` and ordinary reads keep answering. Writes, including administration lists and sign-in, wait for its transaction to finish. Reads see the old demo until the empty demo and its grants commit together. The reset checks all foreign keys before committing and rolls back if any reference is invalid.
+
+The seed then fills the project through the API, so readers can see it partly filled. The server creates the seed's fifteen-minute token after the reset and revokes it when seeding ends. A graceful stop during reset skips that token. A stop during seeding waits for the seed to finish and revoke its token.
+
+After ten minutes, the reset requests its worker to stop. It can stop only between SQLite statements, so a running statement must finish before rollback releases waiting writes. Each reset step and the seed log their elapsed time. See [configuration](./configuration.md).
 
 ## Cases, folders and tags
 
@@ -118,11 +125,11 @@ Press "Theme" at the bottom of the sidebar to switch between light and dark. Unt
 
 ## The sidebar
 
-To make room for what you are reading, collapse the sidebar: press the button beside "Mainworthy" at its top, or <kbd>[</kbd>. The sidebar becomes a strip 64 px wide. The strip keeps the project, the search, the four screens and the footer, each as an icon. It does not show the folders and tags of the Suite.
+To make room for what you are reading, press the button beside "Mainworthy" at the top of the sidebar, or <kbd>[</kbd>. The sidebar becomes a strip 64 px wide. The strip keeps the project, the search, the five screens and the footer, each as an icon. It does not show the folders and tags of the Suite.
 
 The pane on the right takes the width the sidebar gave up. That is the pane where you read a case, a question, a run or a change. The list keeps its width. In a window narrower than about 900 px the panes are at their least width and do not all fit beside the open sidebar, so part of the width goes to fitting them in first. In a window narrower than 760 px the list is above the other pane, and both get wider.
 
-Press the button or <kbd>[</kbd> again to open the sidebar. The choice stays in this browser, so a reload and your next visit find the sidebar as you left it. A browser that stores nothing for the site still collapses the sidebar, and opens with it open.
+Press the button or <kbd>[</kbd> again to open the sidebar. The choice stays in this browser, so a reload and your next visit find the sidebar as you left it. If the browser cannot save the choice, the sidebar still collapses for this visit but opens again on reload.
 
 In the Suite, <kbd>z</kbd> sets the list to 340 px and gives the case the rest, which widens the case further in a window wider than about 900 px. The two work together. In a narrower window the list is under 340 px already, so <kbd>z</kbd> takes width from the case. In a window narrower than 760 px <kbd>z</kbd> changes nothing, because the case is under the list.
 
@@ -136,7 +143,7 @@ For a run, enter its ref in this project, such as `R-12`. For a saved search, en
 
 Press <kbd>g</kbd> <kbd>h</kbd>, or choose **Go home** in the palette, to open your home. On a phone, **Actions** offers Go home while either pane is shown. Opening the instance at `/` uses your first accessible project's home. Opening `/p/<project>` or `/p/<project>/` without a query uses that project's home. A project address with filters or a link to an invitation, screen, case, question, or run keeps its own destination. Other paths outside `/p/`, such as `/?utm=1` and `/nowhere`, open Suite in your first accessible project.
 
-The preference is stored in this site's localStorage, separately for your signed-in name and each project. **Sign out and keep drafts** keeps it for when you sign back into the same browser. **Sign out and clear browser data** removes it. It does not follow you across browsers or into the iPhone app. Clearing the site's browser data removes it. Nobody else's home or project data changes when you save yours.
+The browser stores the preference separately for your signed-in name and each project. **Sign out and keep drafts** keeps it for when you sign back into the same browser. **Sign out and clear browser data**, or clearing the site's data in your browser, removes it. The preference does not follow you across browsers or into the iPhone app. Saving your home changes nobody else's home or project data.
 
 A browser that cannot read the preference opens Suite. If saving fails, the form says so and keeps your previous home. If the saved run or search folder no longer exists, Mainworthy opens Suite and tells you that your home was not found. Open Settings to choose another home. If the lookup fails on entry, Mainworthy opens Suite with a notice and keeps your saved home so you can try **Go home** again. A search that matches no cases still opens with its saved filters.
 
@@ -146,14 +153,14 @@ Some things look like settings and are not. Each of these is the same on every i
 
 - The five kinds of question: a proposed edit, a test with no case, a failed result, a finding and closing a run. Each takes the answers [Decide in the queue](./decide.md) lists, on the keys it lists.
 - The four verdicts, `passed`, `failed`, `blocked` and `pending`, and the exit codes 0 to 3 of `mainworthy gate`.
-- The six capabilities (`read`, `record`, `produce`, `answer`, `plan`, `admin`) and the kinds of actor. You cannot define a role of your own.
+- The six capabilities (`read`, `record`, `produce`, `answer`, `plan`, `admin`) and the kinds of actor. [Named roles](./access.md#named-roles) can require a particular reviewer but do not add capabilities.
 - A pipeline holds `read` and `record` at most, whatever its grant says.
 - Three named presets. A policy with different clauses is called `custom`. Settings edits its clauses under Policy.
 - The shape of a case: a title, preconditions, steps with expected results, methods, an automation intent, tags, a folder and the requirements it covers. A case can carry free `fields` of text in its Markdown, and project definitions can require values or limit them to a choice. The case editor does not show or edit field values; use Markdown or a `propose` body. [Policy](./policy.md#custom-fields) explains the definitions.
-- Sign-in is by token, or for a person by a name and a password or a passkey, which an admin's invitation link sets up. A password can require an authenticator code. There is no single sign-on or mail: a lost password is replaced through a recovery link. A password is 12 to 256 characters and has no other rule. A token works until you revoke it or until the end you gave it.
+- Sign-in uses a token, or a person uses a name and password or a passkey set up through an admin's invitation. A password can require an authenticator code. There is no single sign-on. With [mail configured](./configuration.md#turn-on-mail), a person can reset a lost password through their verified email address. Without mail, the owner can make a [recovery invitation](./access.md#a-lost-password-or-passkey). A password is 12 to 256 characters and has no other rule. A token works until you revoke it or until the end you gave it.
 - The database is one SQLite file.
 
-These are not built yet: stable-trunk flakiness detection, quarantine entry and exit, a requirements coverage matrix, two-person approval, frozen evidence, gap waivers, importers from other tools, and reports or dashboards.
+Stable-trunk flakiness detection, a requirements coverage matrix, two-person approval, frozen evidence, gap waivers and dashboards are not built yet. [Same-code detection and quarantine](./report-results.md#quarantine-an-unreliable-test) are available, as are [CSV imports](./import-cases.md).
 
 ## See also
 

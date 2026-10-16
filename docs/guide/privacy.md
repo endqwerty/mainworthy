@@ -1,28 +1,30 @@
 # Privacy
 
-The privacy of your data, and it is your data, not ours, is a big deal to us. This policy says what Mainworthy keeps and why, how it is handled, and your rights with respect to it. We never sell your data, and we keep as little of it as Mainworthy can work with.
+This policy explains what Mainworthy keeps, why we keep it, how we handle it and your rights over your data. We never sell your data, and we keep as little of it as Mainworthy can work with.
 
 *Last updated: October 15, 2026*
 
-This policy covers the instance at `mainworthy.com` and the Mainworthy iPhone app, which are run by the owner of the Mainworthy project ("we", "us"). Mainworthy is software that anyone can run. If you use an instance that somebody else runs, that person decides what happens to your data there, and you should ask them. What the software itself keeps, which is most of this page, is the same on every instance.
+This policy covers the instance at `mainworthy.com` and the Mainworthy iPhone app, which are run by the owner of the Mainworthy project ("we", "us"). Mainworthy is software that anyone can run. If you use an instance that somebody else runs, that person decides what happens to your data there, and you should ask them. Most of this page describes what the software itself keeps on every instance.
 
 ## What we collect and why
 
-Our guiding principle is to collect only what Mainworthy needs to work. Here is what that means in practice.
-
 ### Identity and access
 
-An account is a name and a way to sign in. We do not ask for an email address, a real name or anything else about you. You are invited by somebody who already has an account, and you choose how you sign in:
+An account is a name and a way to sign in. We do not require an email address or a real name. If the instance has mail enabled, you can add a recovery email address. We store the address and whether and when you verified it, so we can send recovery links and notices about changes to your sign-in methods.
+
+Somebody who already has an account invites you, and you choose how you sign in:
 
 - **A password.** We store it as an argon2id hash, never the password itself.
-- **A passkey.** We store its public key, its credential id, a counter, the label you gave it and when it was made and last used. Mainworthy never receives the private key: where it is kept, and whether it syncs between your devices, is up to your device or password manager.
+- **A passkey.** We store its public key, its credential id, a counter, the label you gave it and when it was made and last used. Mainworthy never receives the private key. Your device or password manager decides where it keeps that key and whether it syncs between devices.
 - **A token**, for scripts and pipelines. We store a SHA-256 hash of it, its label, when it was made and last used, and the network address it was last used from.
 
-An invitation is stored as a hash of its code, with who it is for and who made it.
+If you add an authenticator as a second sign-in step, we store its shared secret, the last accepted time step and SHA-256 hashes of its unused recovery codes. The shared secret is not encrypted by Mainworthy. Removing the authenticator erases the secret and recovery-code hashes.
+
+We store an invitation as a hash of its code, with who it is for and who made it. Email verification and password reset links stay in server memory only. A verification link works once for 24 hours, and a reset link works once for 15 minutes. Restarting the server clears them.
 
 ### Sessions
 
-When you sign in, we keep a record of the session so that you can see where you are signed in and end a session that is not yours: when it started and was last used, what the browser or app calls itself (its user agent, up to 256 characters), and the network address it was opened from and last used from. We keep only the latest address, never a history of addresses.
+When you sign in, we keep a session record so that you can see where you are signed in and end a session that is not yours. The record holds when the session started and was last used, what the browser or app calls itself (its user agent, up to 256 characters), and its opening and latest network addresses. We keep no history of addresses between those two.
 
 A session ends when you sign out, after 14 days without use, or after 90 days. Revoking its token also records its end at once. When a token expires, the next minute job records that expiry time as the end of its sessions. The job also records earlier token revocations whose sessions an older build left unended. An earlier recorded end stays. Once a session has been ended for 30 days, the server deletes its record.
 
@@ -30,7 +32,7 @@ The server checks retention every minute while it runs. A stopped server or a lo
 
 ### Failed sign-ins
 
-To slow down anybody guessing passwords, the server remembers failed sign-in attempts: the network address they came from and the name that was typed. This is kept in the server's memory only, never written to disk or a log. The server stops using them at most 30 minutes after the last failed attempt, and its memory is cleared when it restarts.
+To slow down anybody guessing passwords, the server remembers failed sign-in attempts: the network address they came from and the name that was typed. The server keeps these attempts in memory only, never on disk or in a log. The server stops using them at most 30 minutes after the last failed attempt, and its memory is cleared when it restarts.
 
 ### Product interactions
 
@@ -54,7 +56,11 @@ The server writes no log of requests. It logs when it starts and when something 
 
 ### The iPhone app
 
-The app talks only to `mainworthy.com`, or to the instance a build of the app from its source code names. A phone that an earlier version signed in to another instance may stay signed in there and keep talking to it. It keeps your session in the phone's keychain and your last project in its settings. It also saves queue answers, except linking tests and creating cases, in the app's files before sending them, with the question title, evidence hash, reference, reason, command id, and eventual server outcome. These files survive closing the app and signing out, separated by instance, person, and project. The app excludes these answer files from iCloud and computer backups. **Clear outcomes** removes completed answers. Waiting answers stay until sent, and removing the app deletes the files. It does not keep your password. It contains no analytics, advertising or crash-reporting code, and it tells the server only that it is "Mainworthy for iPhone" and which version. The only permission it can ask for is to reach your local network, and only when the instance it talks to is on it.
+The app talks only to `mainworthy.com`, or to the instance a build of the app from its source code names. A phone that an earlier version signed in to another instance may stay signed in there and keep talking to it. It keeps your session in the phone's keychain and your last project in its settings.
+
+It also saves queue answers, except linking tests and creating cases, in the app's files before sending them, with each question's title, evidence hash, reference and reason, the command id, and the eventual server outcomes. These files survive closing the app and signing out, separated by instance, person, and project. The app excludes these answer files from iCloud and computer backups. **Clear outcomes** removes completed answers and keeps waiting and Dropped answers. A Dropped answer stays until the server records an outcome that you can clear. There is no automatic expiry. Removing the app deletes the files.
+
+It does not keep your password. It contains no analytics, advertising or crash-reporting code. Its user agent tells the server that it is "Mainworthy for iPhone" and which version. The only permission it can ask for is to reach your local network, and only when the instance it talks to is on it.
 
 ### Voluntary correspondence
 
@@ -62,7 +68,7 @@ If you contact us through GitHub, that conversation is kept by GitHub, under [Gi
 
 ### Why we may keep it
 
-We keep your account, your sessions and your content because you asked us to provide Mainworthy to you, and we keep the records of sign-ins and failed attempts because we have a legitimate interest in keeping accounts secure. We use none of it for anything else.
+We keep your account, your sessions and your content because you asked us to provide Mainworthy to you. We keep the records of sign-ins and failed attempts because we have a legitimate interest in keeping accounts secure. We use none of it for anything else.
 
 ## When we access or disclose your information
 
@@ -82,9 +88,13 @@ The server and its database are ours, not a cloud provider's.
 We apply the same rights to everyone, wherever they are:
 
 - **Right to know.** This page lists what we collect and why.
-- **Right of access and portability.** An admin can export everything in an instance as a text file that any tool can read ([Your data](./data.md)). We will export what we hold about you on request.
+- **Right of access and portability.** An instance admin can export everything in an instance as a text file that any tool can read ([Your data](./data.md)). We will export what we hold about you on request.
 - **Right to correction.** Ask us to correct anything about you that is wrong.
-- **Right to erasure.** Ask us to forget you. We then replace your name with a pseudonym, including attribution in question evidence, saved command replies and report receipts. New question evidence stores actor ids and resolves names when read. We revoke your passwords, passkeys, tokens and invitations, erase your password's hash and your passkeys' public keys, and clear your token and credential labels, including labels on previously revoked rows. We end your sessions, whose records are then deleted as [sessions](#sessions) describes. The history still says that one person did each thing, without saying who. Attachments and their file names also stay when a person is forgotten. Screenshots and files can contain personal information; Mainworthy does not scan or redact them, and has no attachment deletion control yet. Four other things stay for now: text that you typed into cases and notes, because Mainworthy cannot yet erase part of its history ([#40](https://github.com/endqwerty/mainworthy/issues/40)); a fingerprint (a SHA-256 hash) of each request sent with a command id, which keeps a retried request from being recorded twice and lets someone who holds the database confirm a name they already guess; your name in replies and questions saved before 2026-10-14, if you were forgotten before then; and the records of your tokens, passwords and passkeys, with when they were made and used and each passkey's credential id, but nothing that signs in. Your invitations are deleted 30 days after they end, and your tokens' network addresses 30 days after the tokens end ([Data retention](#data-retention)).
+- **Right to erasure.** Ask us to forget you. We then replace your name with a pseudonym, including attribution in question evidence, saved command replies and report receipts. New question evidence stores actor ids and resolves names when read. We revoke your passwords, passkeys, authenticators, tokens and invitations. We erase your password's hash, your passkeys' public keys and your authenticator's secret and recovery-code hashes. We clear your token and credential labels, including labels on previously revoked rows. We also delete your recovery email address. We end your sessions, whose records are then deleted as [sessions](#sessions) describes. The history still says that one person did each thing, without saying who.
+
+  Attachments and their file names also stay when a person is forgotten. Screenshots and files can contain personal information. Mainworthy does not scan or redact them, and has no attachment deletion control yet. Text you typed into cases and notes stays because Mainworthy cannot yet erase part of its history ([#40](https://github.com/endqwerty/mainworthy/issues/40)).
+
+  A fingerprint (a SHA-256 hash) of each request sent with a command id also stays. It prevents a retried request from being recorded twice and lets someone who holds the database confirm a name they already guess. Your name stays in replies and questions saved before 2026-10-14 if you were forgotten before then. Records of your tokens, passwords, passkeys and authenticators stay, including when they were made and used and each passkey's credential id, but nothing that signs in. Your invitations are deleted 30 days after they end, and your tokens' network addresses 30 days after the tokens end ([Data retention](#data-retention)).
 - **Right to restrict processing and to object.** Ask us, and we will tell you what we can do.
 - **Right to complain.** You can complain to the data protection authority where you live.
 - **Right to non-discrimination.** Exercising these rights never costs you anything.
@@ -93,7 +103,7 @@ You can do some of this yourself. Under Settings, **Your sessions** lists every 
 
 ## How we secure your data
 
-Every connection to `mainworthy.com` is encrypted with TLS. Passwords are stored as argon2id hashes, and tokens, session cookies and invitation codes as SHA-256 hashes, so none of them can be read back from the database. The database itself is not encrypted by Mainworthy. It is protected by the server it lives on. An export never contains a password, a passkey, a token, a session or an invitation.
+Every connection to `mainworthy.com` is encrypted with TLS. Passwords are stored as argon2id hashes, and tokens, session cookies and invitation codes as SHA-256 hashes, so none of them can be read back from the database. The database itself is not encrypted by Mainworthy. It is protected by the server it lives on. An export never contains a password, a passkey, an authenticator, a token, a session or an invitation. Recovery email addresses and their verification status do travel in exports.
 
 ## Data retention
 
@@ -102,7 +112,10 @@ We keep information only for as long as it is needed:
 | What | How long |
 | --- | --- |
 | Failed sign-in attempts | Used for at most 30 minutes; in memory only, until the server restarts |
-| A passkey sign-in in progress | Usable for 5 minutes; in memory only, until the server restarts |
+| A passkey sign-in or authenticator step in progress | Usable for 5 minutes; in memory only, until the server restarts |
+| An email verification link | Usable once for 24 hours; in memory only, until the server restarts |
+| A password reset link | Usable once for 15 minutes; in memory only, until the server restarts |
+| A recovery email address | Until you remove or replace it, or your account is forgotten |
 | A session's record | Deleted once the session has been ended for 30 days, by the running server (see [sessions](#sessions)) |
 | A token's last network address | Erased 30 days after revocation or expiry, whichever happens first |
 | An invitation's record | Deleted 30 days after use, revocation or expiry, whichever happens first |
@@ -122,7 +135,7 @@ Mainworthy is a tool for software teams and is not meant for children under 16. 
 
 We may update this policy to comply with the law and to reflect what Mainworthy does. Every change is in the [history of this page on GitHub](https://github.com/endqwerty/mainworthy/commits/main/docs/guide/privacy.md), and we update the date at the top whenever we change it.
 
-Have a question, a concern or a request about your data? We do not yet have a private contact address ([#231](https://github.com/endqwerty/mainworthy/issues/231)). Until we do, open an issue in the [Mainworthy repository on GitHub](https://github.com/endqwerty/mainworthy/issues). Issues there are public, so do not put personal information in one: say that you want to reach us privately, and we will give you a private way to do so.
+Have a question, a concern or a request about your data? We do not yet have a private contact address ([#231](https://github.com/endqwerty/mainworthy/issues/231)). Until we do, open an issue in the [Mainworthy repository on GitHub](https://github.com/endqwerty/mainworthy/issues). Issues there are public, so do not put personal information in one. Say that you want to reach us privately, and we will give you a private way to do so.
 
 ---
 

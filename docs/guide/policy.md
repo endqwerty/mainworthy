@@ -6,7 +6,7 @@ Decide how strict a project is, read its policy, and switch it. A policy says wh
 
 ## What a policy is
 
-A policy is a table of clauses. Each clause covers one kind of question: a proposed edit, a test with no case, a failed result, a finding, or closing a run. For that kind it says who answers, whether they give a reason, and what an agent's answer is worth. Mainworthy reads the clauses of a kind from the top and uses the first one that matches.
+A policy is a table of clauses. Each clause covers one kind of question: a proposed edit, a test with no case, a failed result, a finding, or closing a run. The clause says who answers, whether they give a reason, and what an agent's answer is worth. Mainworthy reads the clauses of a kind from the top and uses the first one that matches.
 
 [Diagram: who answers a question under a policy](../diagrams/policy-routing.html)
 
@@ -22,7 +22,7 @@ The `when` column holds the conditions a clause tests. `always` matches every qu
 
 An agent's answer is one of three things. It counts as a decision, it is shown as advice and a person decides, or it is refused. The table also says whether a person who produced the evidence may answer, and whether the answer needs a reason.
 
-A failure that nobody has explained blocks every run that shows it, under all three presets. The policy decides who may explain it. The `blocks` column only says which runs list a question. A separate setting says whether an explicit CI declaration that no tests are required may pass an empty commit gate.
+An unexplained failure with no quarantine cover blocks the runs that count it, under all three presets. The policy decides who may explain it. The `blocks` column only says which runs list a question. A separate setting says whether an explicit CI declaration that no tests are required may pass an empty commit gate.
 
 ## Limit agent edits by folder or tag
 
@@ -62,13 +62,19 @@ policy: loose
 kind     when                      who answers  agent's answer  blocks   rule's answer
 adopt    conflict & answer:reject  author       counts          nothing
 adopt    policy                    admin        refused         nothing
+adopt    conflict                  author       refused         nothing
 adopt    always                    rule         refused         nothing  {"is":"accept"}
 map      unlinked:track            rule         refused         nothing  {"is":"track"}
 map      unlinked:create           rule         refused         nothing  {"is":"create"}
 map      always                    member       counts          nothing
+failure  hint:disputed             member       advice          all
+failure  scope:change & inherited  rule         refused         change   {"is":"inherited"}
 failure  scope:change              member       advice          change
 failure  always                    member       advice          release
+finding  answer:duplicate          member       counts          nothing
+finding  always                    member       advice          nothing
 signoff  verdict:passed            rule         refused         nothing  {"is":"approve"}
+signoff  always                    member       refused         nothing
 basis: exact-or-assumed; flaky hold: 14 days; tests with no case: track; empty reports: pending
 ```
 
@@ -104,11 +110,11 @@ An admin who is a person accepts the resulting question in Queue or with `decide
 
 ## The three presets
 
-`loose` is the default. Edits take effect at once, a test needs no case, and a person answers failures and findings. A run that passed closes by itself.
+`loose` is the default. Ordinary case edits take effect at once, and a test needs no case. A rule excuses a failure already present on the base while its evidence holds. A person answers other failures and findings. A run that passed closes by itself.
 
 `standard` holds an agent's edit for a person. A person's own edit still takes effect at once, and a test needs no case. Two reports that disagree go to a person who did not produce either one.
 
-`strict` asks a person for every edit, test with no case, failure, finding and passed run, and the person gives a reason. No agent answers any of them. Custom clauses can require a named role. Two-person approval, frozen evidence, gap waivers and a regulated preset are not built yet.
+`strict` requires a person and a reason for ordinary case edits, failures, findings and closing passed runs. It starts by asking about tests with no case too, but you can choose to track them instead. No agent gives a counted answer, except to reject its own conflicting proposal. Custom clauses can require a named role. Two-person approval, frozen evidence, gap waivers and a regulated preset are not built yet.
 
 All three send a change to the policy to an admin, and send a conflicting edit back to its author. The presets differ most in what they ask of people, so this table, built from the presets themselves, shows who answers each question.
 
@@ -167,7 +173,7 @@ invalid: under this policy a person adopts every new case, so a rule cannot crea
 
 Under `create`, anyone who can report results can add cases, one for each test name they send. A report still cannot change or remove a case. Under `standard` an agent's report is the exception: an agent's new case waits for a person, so the rule makes none and the file's question stays open.
 
-A link holds for the tests it names. When another test turns up in the same file, only the new test is asked about or given a case. A "track" answer is about the file as it was, so the file is looked at again when its tests with no case change. Under `track` the rule answers again and you see nothing.
+A link holds for the tests it names. When another test turns up in the same file, Mainworthy asks about or creates a case for only the new test. A "track" answer covers the file as it was. Mainworthy checks the file again when its tests with no case change. Under `track` the rule answers again and you see no question.
 
 A custom policy reads the choice only if its clauses test `unlinked:track` or `unlinked:create`. Settings offers the choice under a preset.
 
@@ -237,9 +243,11 @@ A refused request keeps your draft in the open editor. If the policy changes whi
 
 A conflict during acceptance leaves the proposal's adoption question open in Queue. Reject that question before sending a replacement, including after a failed save in Settings. A waiting proposal made before policy versions also needs rejection and a new proposal from the current policy.
 
-From the command line, send a policy edit to `mainworthy propose`. The edit carries the whole clause list, so start from what `mainworthy policy show --json` prints, change a clause, and send it back. Include its `version` as `base` when sending clauses or settings. This example, with the clauses cut to `[...]`, makes a reason mandatory for findings and shortens the flaky hold to 7 days:
+From the command line, send a policy edit to `mainworthy propose`. The edit carries the whole clause list, so start from what `mainworthy policy show --json` prints, change a clause, and send it back. Include its `version` as `base` when sending clauses or settings.
 
-Send only one policy edit per proposal. Combine its clause and setting changes in that edit. MCP has no tool to read the policy version. Before using MCP `propose` with clauses or settings, read it through `mainworthy policy show --json` or the HTTP `admin` operation with `{"do":"policy.show","project":"<key>"}`. The read requires instance admin. If neither is available, ask an instance admin for the current policy and version; do not guess `base`.
+Send only one policy edit per proposal. Combine its clause and setting changes in that edit. MCP has no tool to read the policy version. Before using MCP `propose` with clauses or settings, read it through `mainworthy policy show --json` or the HTTP `admin` operation with `{"do":"policy.show","project":"<key>"}`. The read requires instance admin. If neither is available, ask an instance admin for the current policy and version. Do not guess `base`.
+
+This example shortens the flaky hold to 7 days. Replace `[...]` with your full clause list, including the changed clause if you also want to require reasons for findings.
 
 ```
 $ mainworthy propose --json '{"edits":[{"op":"policy","base":1,"preset":"standard","clauses":[...],"settings":{"unlinked":"track","emptyReports":"pending","basis":"exact-or-assumed","holds":{"flakyDays":7,"infraThisTargetOnly":true}}}]}'
@@ -253,7 +261,7 @@ invalid: every kind must end with a clause that always matches; missing for: fin
 ```
 
 The settings are sent whole: `unlinked`, `emptyReports`, the basis, the holds, custom field definitions in `fields`, and `flakyDetection`.
-Omitting `emptyReports` selects `pending`. Omitting `fields` clears the definitions. Omitting `flakyDetection` selects its defaults.
+Omitting `emptyReports` selects `pending`. Omitting `fields` keeps the current definitions. Send `"fields": {}` to remove them. Omitting `flakyDetection` selects its defaults.
 The flaky hold takes 1 to 365 days. `infraThisTargetOnly` is true when an "Infrastructure" answer covers only the build it was given for.
 
 ## Same-code detector settings
@@ -284,6 +292,12 @@ which controls how long a person's `flaky` answer carries forward. Infrastructur
 and timeout observations have their own counts and never raise the assertion count.
 See [report results](./report-results.md#preserve-attempts-and-retries) for what a flip counts.
 
+Quarantine is separate from the flaky hold and detector thresholds. Its proposal
+always asks a person with answer authority and a reason, including under `loose`.
+The quarantine list appears below the detector settings. See
+[quarantine an unreliable test](./report-results.md#quarantine-an-unreliable-test)
+for entry and exit rules.
+
 ## What custom means
 
 A policy is `custom` when its clauses are not exactly those of a preset. A preset's name can stay on the stored policy after you edit its clauses, so Mainworthy compares the clauses and not the name. Settings and `mainworthy policy show` then say `custom`, the preset summary and the compare table's marked column go away, and the switch between two presets is hidden. Choosing a preset in "Preset", or `mainworthy policy use`, replaces every clause with that preset's.
@@ -292,7 +306,7 @@ A policy is `custom` when its clauses are not exactly those of a preset. A prese
 
 Choose the first policy when you create a project. In Settings, open Projects and pick "Initial policy" under "Create a project". It defaults to `loose`. You can switch later without migrating anything.
 
-- Start with `loose` when one person or a small trusted team writes the cases, and you want the queue to hold only failures.
+- Start with `loose` when one person or a small trusted team writes the cases, and ordinary edits should take effect at once.
 - Use `standard` when agents propose edits and a person should read each one first.
 - Use `strict` when each answer needs a person and a recorded reason, for example when someone else audits the queue.
 
@@ -338,10 +352,3 @@ It makes no certification claim.
 - [People, agents and pipelines](./access.md) for who holds `answer` and `admin`.
 - [Let an agent in](./agents.md#what-agent-work-is-worth) for what an agent's work is worth under each preset.
 - [Decide in the queue](./decide.md) for answering a question.
-
-
-Quarantine is separate from the flaky hold and detector thresholds. Its proposal
-always asks a person with answer authority and a reason, including under `loose`.
-The quarantine list appears below the detector settings. See
-[quarantine an unreliable test](./report-results.md#quarantine-an-unreliable-test)
-for entry and exit rules.

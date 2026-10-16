@@ -1,22 +1,24 @@
 # Quickstart
 
 Start a local instance, write one case, and upload a failing test result.
-Then answer its question and read the gate, in about ten minutes.
+Then answer its question and read the gate in about ten minutes.
 
 ## Start a local instance
 
-You need the `mainworthy` command. From the source tree, `bun run build` makes it as
-one file, `dist/mainworthy`, and `bun src/cli/main.ts` is the same command without a
-build. See [configuration](./configuration.md#build-the-single-executable).
+You need the `mainworthy` command. From the source tree, install Bun 1.4 or newer,
+then run `bun install` and `bun run build`. The executable is `dist/mainworthy`.
+Use that path wherever this tutorial says `mainworthy`, or add `dist` to your `PATH`.
+You can also use `bun src/cli/main.ts` without a build.
+See [configuration](./configuration.md#build-the-single-executable).
 
 To run the server from the source tree, use `bun run start` in place of
 `mainworthy serve`. It serves the same web UI as the executable. `bun src/cli/main.ts serve`
 by itself, and `bun run dev`, serve the web UI as a development bundle that reloads when
-the code changes, under a looser page policy: that is for working on Mainworthy, not for
-using it.
+the code changes. The development bundle uses a looser page policy for work on Mainworthy.
 
-This tutorial uses a fresh temporary data directory and port `7701`, so it does not
-touch an instance you already run. Run the commands in a shell on your own machine.
+This tutorial uses a fresh temporary data directory and port `7701`. If that port is
+in use, choose another and use it in every address below. Run the commands in a shell
+on your own machine.
 
 1. Start the server in your first terminal.
 
@@ -35,7 +37,7 @@ project "scratch" · you are robin@this-machine · policy: loose
 
 2. Open `http://127.0.0.1:7701`.
 
-Local mode signs you in as the owner. Keep the first terminal open.
+Local mode signs you in as the owner. You see the empty Suite. Keep the first terminal open.
 
 3. Point a second terminal at this instance.
 
@@ -145,7 +147,7 @@ exit code: 0
 ```
 
 The failed result remains recorded. The decision explains why it does not block.
-No second upload was needed. See [decide](./decide.md) and [changes](./changes.md)
+You do not need a second upload. See [decide](./decide.md) and [changes](./changes.md)
 for answers that require a fix instead.
 
 ## Stop the tutorial instance

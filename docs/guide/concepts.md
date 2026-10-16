@@ -1,6 +1,6 @@
 # How Mainworthy works
 
-The whole product in one page: what it records, how a failed test becomes a question, and how evidence and decisions together give a verdict. Read it once and the screens and commands will make sense.
+Mainworthy records cases, results and decisions. A failed test raises a question, and the evidence and decisions together determine the gate's verdict.
 
 [Diagram: how Mainworthy works](../diagrams/overview.html)
 
@@ -8,11 +8,11 @@ The whole product in one page: what it records, how a failed test becomes a ques
 
 Mainworthy keeps three things, and keeps them apart.
 
-- **Cases** say what the software should do. A case is a title and steps, each with an expected result. Every edit to that content is a new version, and old versions stay. Moving a case, tagging it or archiving it is recorded in its history without a new version.
+- **Cases** say what the software should do. A case has a title and steps with expected results. Steps can include pinned versions of [shared steps](./write-cases.md). Every edit to that content is a new version, and old versions stay. Moving a case, tagging it or archiving it is recorded in its history without a new version.
 - **Results** say what was observed. A person pressing <kbd>p</kbd> in a run, a pipeline uploading JUnit XML and an agent reporting a batch all produce the same kind of record.
 - **Decisions** say what people made of it. "This failure is a product bug." "This edit is accepted." Each one names who decided and on what evidence.
 
-Nothing in the record is edited in place. A change of mind is a new row that names the one it replaces, so you can always see what was believed and when.
+Corrections preserve the earlier record. A change of mind adds a decision that names the one it replaces, so the retained history shows what people decided and when. Automatic [demo refreshes](./customize.md#a-project-of-demo-data) replace the demo project's history at startup.
 
 ## Evidence comes with its basis
 
@@ -62,22 +62,22 @@ The gate is the answer for a commit, a change or a run. It has four verdicts, an
 | `blocked` | 2 | A decision. A failure has no explanation yet, or two results disagree. |
 | `pending` | 3 | Evidence. A report has not arrived or is still being applied, or nothing was proven. |
 
-The verdict is worked out from the evidence and the decisions in force, so it changes when either does. When you answer a failure in the queue, it is worked out again at once: a flaky test you excuse turns the gate green without the pipeline running again. A retry that passes turns it green too, with no decision at all. [Changes and the gate](./changes.md) has the details.
+The verdict is worked out from the evidence and the decisions in force, so it changes when either does. When you answer a failure in the queue, Mainworthy computes the verdict again at once. Excusing a flaky failure can turn the gate green without another pipeline run, if nothing else blocks it. A passing retry can do the same without a decision. [Changes and the gate](./changes.md) has the details.
 
 ## Policy says who answers
 
-How strict a project is depends on its policy: a table that says, for each kind of question, who must answer and what an agent's answer is worth. Under `loose`, the default, your own edits take effect at once and a person is asked about failures. Under `standard` an agent's edit waits for a person. Under `strict` a person answers everything and gives a reason.
+A project's policy says who must answer each kind of question and what an agent's answer is worth. Under `loose`, the default, case edits take effect at once. A rule excuses failures already present on the base while their evidence holds, and a person answers other failures. Under `standard` an agent's edit waits for a person. Under `strict` a person approves case edits, answers failures and findings, and closes runs, with a reason. The policy can still track tests without cases by rule.
 
 The data is the same under all three. You can switch without migrating anything. [Policy](./policy.md) compares them.
 
 ## People, pipelines and agents use the same operations
 
-The web UI, the `mainworthy` command, the HTTP API and an agent's tools are four ways to call one list of operations. There is no feature that exists in the UI and not in the API. An agent's tools are ten of the nineteen operations. For another one, such as planning a run, an agent uses the command line or the API.
+The web UI, the `mainworthy` command, the HTTP API and an agent's tools are four ways to call one list of operations. Changes to project records use those operations, whichever client sends them. Ten operations are also agent tools. For another one, such as planning a run, an agent uses the command line or the API.
 
-What a caller may do depends on who it is. A person, an agent and a pipeline each hold capabilities on a project. A pipeline can record results and read the gate, and can be let read. It can never edit, answer, plan or administer, whatever it is granted. An agent's report is shown and asked about but never moves a commit's gate. [People, agents and pipelines](./access.md) explains grants and tokens.
+What a caller may do depends on who it is. A person, an agent and a pipeline each hold capabilities on a project. A pipeline can report results, announce deployments, mark changes as ended and read the gate. It can also hold `read` for project data. It can never edit, answer, plan or administer, whatever it is granted. An agent's report is shown and asked about but never moves a commit's gate. [People, agents and pipelines](./access.md) explains grants and tokens.
 
 ## Where to go next
 
-- Try it: the [quickstart](./quickstart.md).
-- Adjust it: [what you can customize](./customize.md).
-- Look up a word: the [glossary](./glossary.md).
+- Follow the [quickstart](./quickstart.md).
+- See [what you can customize](./customize.md).
+- Look up words in the [glossary](./glossary.md).

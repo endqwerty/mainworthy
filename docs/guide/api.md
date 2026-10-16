@@ -1,10 +1,15 @@
 # API and agent tools
 
-Every operation Mainworthy has, with its address, the capability it needs and its input. The web UI, the command line and an agent's tools all call these same operations. The command line and the HTTP API reach every operation. An agent's tools are ten of them.
+Every Mainworthy operation, with its address, required capability, and input.
+The web UI, command line, and agent tools call these operations. The command line
+and HTTP API reach every operation. MCP exposes ten of them as agent tools.
 
 ## Call an operation
 
-An operation is one `POST` with a JSON body. An operation on a project is at `/api/p/<project>/<operation>`. An operation on the instance (`admin`, `session`, `credential` and `invitation`) is at `/api/<operation>`, and only there: under a project's address it is answered `not_found`, with the address to use.
+An operation is one `POST` with a JSON body. An operation on a project is at
+`/api/p/<project>/<operation>`. An operation on the instance (`admin`, `session`,
+`credential`, and `invitation`) is at `/api/<operation>`. At a project's address,
+the server returns `not_found` with the correct address.
 
 ```
 $ curl -s -X POST http://127.0.0.1:7357/api/p/scratch/find \
@@ -15,7 +20,10 @@ $ curl -s -X POST http://127.0.0.1:7357/api/p/scratch/find \
 
 The OpenAPI document at `/api/openapi.json` describes each operation's input and successful reply, including the fields inside `result`. The registry supplies both schemas. `seq` is required and is `null` for an instance operation. A field declared nullable may hold `null`; an optional field may be absent. Replies selected by an action or a ref are described as alternatives.
 
-A reply that ran has `ok: true`, the `result`, and `seq`, the project's sequence number at that point. Pass `seq` back to `since` to ask what changed after it.
+A successful operation returns `ok: true`, `result`, and `seq`, the project's
+sequence number at that point. To ask what changed after sequence 12, call `since`
+with `{"cursor":"s:12"}`. When `since` returns `more: true`, pass its returned
+`cursor` to the next call until `more` is false.
 
 A reply that did not run has `ok: false` and an `error` with a `code` and a `message`:
 
@@ -26,12 +34,12 @@ A reply that did not run has `ok: false` and an `error` with a `code` and a `mes
 | Code | HTTP status | Meaning |
 | --- | --- | --- |
 | `invalid` | 400 | The input is wrong. `details` says which field. |
-| `unauthenticated` | 401 | No token, or one the server does not know. A name, a password, a passkey's answer or an invitation code that was looked at and refused, whatever was wrong with it. |
-| `forbidden` | 403 | The caller holds a grant on the project and lacks the capability, or the policy says no. |
+| `unauthenticated` | 401 | The caller supplied no working credentials. Refused names, passwords, passkey answers, and invitation codes get the same reply, regardless of the reason. |
+| `forbidden` | 403 | The caller lacks the required capability, or the operation or policy refuses the action. |
 | `not_found` | 404 | No such operation, project or ref. A project the caller holds no grant on is answered the same way. |
 | `conflict` | 409 | The edit was made on an older version, the command id was used for something else, or the client's API version differs from the server's. |
 | `limited` | 429 | Too many failed attempts: wrong tokens from this address or for a token that starts as this one does, wrong passwords from this address or for this name, wrong authenticator codes from this address or for this name, or refused passkeys or invitation codes from this address. The `Retry-After` header says how many seconds to wait. |
-| `internal` | 500 | The server failed. Nothing was written. The message is `internal error`, and the detail is in the server's log. |
+| `internal` | 500 | The server failed. The message is `internal error`, and the detail is in the server's log. A report can commit in stages, so a failure does not prove that nothing was written. |
 
 ## Authenticate
 
@@ -39,34 +47,66 @@ Send a token as `Authorization: Bearer <token>`. A server in local mode trusts r
 
 ## Sign in as a person
 
-A browser signs in with these requests and then holds a session cookie. They are not operations: nobody is signed in yet, and a password never passes through an operation. Each `POST` refuses a request that a browser makes from another site's page and accepts one that names no site (a script, `curl`); `GET /api/login/methods` answers anybody. Each takes JSON and answers with the same envelope as an operation, without `seq`. [People, agents and pipelines](./access.md#sign-in-as-yourself) says what they are for.
+These routes handle sign-in, recovery, and password changes outside the operation
+registry. A successful sign-in sets a session cookie. Each `POST` refuses requests
+from another site's page and allows scripts such as `curl` that send no site headers.
+`GET /api/login/methods` answers anybody. The `POST` requests take JSON, except that
+logout needs no body. Replies use the operation envelope without `seq`.
+[People, agents and pipelines](./access.md#sign-in-as-yourself) describes the sign-in steps.
 
 | Request | Body | What it does |
 | --- | --- | --- |
-| `GET /api/login/methods` | none | `{"password": true, "passkey": <boolean>}`: whether this instance has passkeys. |
+| `GET /api/login/methods` | none | Returns `{"password": true, "passkey": <boolean>, "mail": <boolean>}`. The booleans say whether the instance offers passkeys and mail. |
 | `POST /api/login` | `{"token"}` | Signs in with a token. |
 | `POST /api/login` | `{"name", "password"}` | Signs in with a name and a password, or returns `{"signedIn": false, "secondFactor": {"challenge", "expiresAt"}}` when an authenticator is enrolled. No session is created yet. Keep the ceremony cookie from this response. |
 | `POST /api/login` | `{"challenge", "code"}` | Completes the password sign-in with a fresh six-digit TOTP or unused recovery code, plus the ceremony cookie from the first step. The challenge lasts five minutes and works once. A successful reply is `{"signedIn": true}` and sets the session cookie. |
-| `POST /api/login/challenge` | `{}` | The options for `navigator.credentials.get`, with a challenge that is good once, for five minutes. The reply also sets a cookie (`mainworthy_ceremony`, `HttpOnly`) that ties the challenge to the browser that asked: the answer is taken only with it. A browser sends it by itself; a script has to keep it. |
+| `POST /api/login/challenge` | `{}` | Returns the options for `navigator.credentials.get` in `result.passkey`. The challenge works once for five minutes. The reply sets an `HttpOnly` cookie, `mainworthy_ceremony` over HTTP or `__Host-mainworthy_ceremony` over HTTPS. The answer must carry that cookie. A browser sends it automatically. A script must keep it. |
 | `POST /api/login` | `{"passkey"}` | Signs in with what the browser returned for those options: `id`, `clientDataJSON`, `authenticatorData`, `signature`, `userHandle`, each base64url. |
 | `POST /api/login/challenge` | `{"invitation"}` | Who the invitation is for, what it does (`join` or `recover`) and when it runs out, with the options for `navigator.credentials.create`, or `null` for them on an instance without passkeys. It writes no row. On an instance with passkeys, each lookup that finds the invitation makes a challenge the server keeps in memory for five minutes. A code that accepts nothing is answered `not_found`. |
-| `POST /api/login` | `{"invitation", "password"?, "passkey"?, "label"?, "replace"?}` | Accepts an invitation with a password, a passkey or both, and signs in. `passkey` is what the browser returned for the options above: `id`, `clientDataJSON`, `authenticatorData`, `publicKey`, `publicKeyAlgorithm`, `transports`. In a browser that is signed in as somebody else it is refused with `conflict`, with that person's name in `details.signedInAs`, until `replace` is that name (`"replace": "robin"`): the page asks about them first, and their session in this browser ends when the invitation is accepted. A name that is not the person the browser is signed in as now is refused the same way, with the name it would have had to be. `replace` that is not a name (`true`) is refused with `invalid`. |
+| `POST /api/login` | `{"invitation", "password"?, "passkey"?, "label"?, "replace"?}` | Accepts an invitation with a password, a passkey, or both, and signs in. `passkey` holds `id`, `clientDataJSON`, `authenticatorData`, `publicKey`, `publicKeyAlgorithm`, and `transports` from the browser. If the browser is signed in as another person, the reply is `conflict` with their name in `details.signedInAs`. Sending that name as `replace` signs them out of this browser when the invitation is accepted. Any other name is refused the same way, with the name the browser is signed in as. A `replace` that is not a string, such as `true`, returns `invalid`. |
+| `POST /api/login` | `{"resetRequest":"robin@example.com"}` | Requests a password-reset email for a verified address. Returns `{"requested":true}` whether or not the address matches an account. Requires mail. |
+| `POST /api/login` | `{"emailVerification":"<code>"}` | Verifies a recovery email address. Returns `{"verified":true}` on success. The code works once for 24 hours. Requires mail. |
+| `POST /api/login` | `{"reset":"<code>","password":"<new password>"}` | Replaces the password and ends existing sessions. Returns `{"changed":true}` without signing in. The code works once for 15 minutes. An enrolled authenticator remains required. Requires mail. |
 | `POST /api/account/password` | `{"current"?, "next"}` | Sets or changes the password of the person whose browser session sends it. `current` is required when they have one. |
 | `POST /api/logout` | none | Ends the browser's session and clears its cookie. |
 
-A body holds one of these shapes and nothing beside it. `GET /api/session` says who is signed in, their stable numeric actor id (`actorId`), which session the request came by (`session`), whether the caller owns the instance (`owner`) and, for a person, what they sign in with (`credentials`: whether they have a password, and how many passkeys).
+A body holds one of these shapes and no other fields. `GET /api/session` returns
+who is signed in, their numeric actor id (`actorId`), the current session id
+(`session`), and whether they own the instance (`owner`). For a person,
+`credentials` says whether they have a password and how many passkeys they have.
+An archive import can replace actor ids.
 
 Passwords use Unicode NFC before hashing and checking. An older password also accepts its original spelling. If that spelling is not NFC, successful sign-in refreshes its hash without ending existing sessions. Accepting a recovery invitation revokes the person's previous passwords, passkeys and tokens, and ends their existing sessions. It leaves other actors' tokens alone. See [passwords and recovery](./access.md#a-name-and-a-password-or-a-passkey) for the legacy-password behavior and the limit when concurrent responses replace the browser's cookie.
 
-A signed-in person registers a further passkey with the `credential` operation: `passkey.begin` answers the options for `navigator.credentials.create`, and `passkey.add` takes what the browser returned and a label. Both are for a browser that is signed in, and the session that begins a registration is the one that finishes it. A token is refused with `forbidden`, as it is when it tries to set a password.
+A signed-in person registers another passkey with the `credential` operation.
+`passkey.begin` returns the options for `navigator.credentials.create`.
+`passkey.add` takes the browser's answer and a label. The session that begins
+registration must also finish it. A bearer token cannot register a passkey or
+set a password. Both requests return `forbidden`.
 
-The `credential` operation also enrols an authenticator in the caller's session or as the local owner. `{"do": "totp.begin"}` returns `challenge`, `expiresAt`, `secret`, `uri`, and `qr` with `size` and an SVG `path`. Draw the path in a white square of that size with four modules of quiet space already included. `{"do": "totp.confirm", "challenge", "code"}` confirms a six-digit code in the same session and returns `id`, ten `recoveryCodes`, and `sessionsEnded`. These inputs refuse command ids. No secret reply is cached or replayed. Ordinary credential lists return kind `totp` and descriptive fields only. `remove` removes the authenticator and ends all the person's sessions.
+The `credential` operation also enrols an authenticator in the caller's session
+or as the local owner. `{"do": "totp.begin"}` returns `challenge`, `expiresAt`,
+`secret`, `uri`, and `qr` with `size` and an SVG `path`. The QR path fits a white
+square of that size with four modules of quiet space already included.
+`{"do": "totp.confirm", "challenge", "code"}` confirms a six-digit code in the
+same session and returns `id`, ten `recoveryCodes`, and `sessionsEnded`.
+These inputs refuse command ids, and the server never caches or replays their
+secret replies. Ordinary credential lists return kind `totp` and descriptive
+fields only. `remove` removes the authenticator and ends all the person's sessions.
 
 The same operation manages personal CLI tokens with `token.create`, `token.list`, and `token.revoke`. Creation requires a password or passkey session, or local-owner access, binds the caller as the token actor, and returns the secret once. It defaults to a 30-day expiry, with a 365-day maximum. A bearer token or a token-backed browser session cannot create one. [Make your own command-line token](./access.md#make-your-own-command-line-token) gives the inputs, replies, and CLI setup.
 
 ## Send a write twice safely
 
-A write takes `cmd`, an id you choose for that one request. Sent again unchanged, the server returns the first reply and writes nothing. Sent again with other content, it is refused with `conflict`. If you lost the reply, ask the `command` operation what became of the id.
+For a write whose input accepts `cmd`, choose an id for that request. If you send
+the same completed request again, the server returns its saved reply and writes
+nothing. Reusing the id with different content returns `conflict`. If you lost
+the reply, ask the `command` operation what became of the id. A report that began
+but did not finish resumes when retried with the same id and input.
+
+Secret replies are an exception. Token and invitation creation keep the command's
+record but do not save its secret reply. Retrying the same id returns `conflict`
+without repeating the write. Authenticator enrolment refuses command ids.
 
 ## Say when a write happened
 
@@ -1013,7 +1053,14 @@ Invite a person with a link: make one, list them, revoke one. Optionally send it
 
 ## Agent tools
 
-An agent that connects over MCP gets these operations as tools, with the same inputs. Each tool has a compact output schema for `{ result, seq }`, the result's top-level type and its required fields. Nested fields and alternative replies are described in full by the OpenAPI document. Most input-field descriptions are in the shipped skill reference; tool schemas retain guidance for commit reuse, question answers and review filtering. [Let an agent in](./agents.md) explains how to connect one.
+An agent that connects over MCP gets the tools below. Tool discovery omits some
+API inputs, including attachments, quarantine edits, direct build targets, and
+the CI declaration that no tests are required. Each tool has a compact output
+schema for `{ result, seq }`, the result's top-level type, and its required fields.
+The OpenAPI document describes nested fields and alternative replies in full.
+The shipped skill reference describes most input fields. Tool schemas retain
+guidance for commit reuse, question answers, and review filtering.
+[Let an agent in](./agents.md) explains how to connect one.
 
 <!-- generated:agent-tools -->
 

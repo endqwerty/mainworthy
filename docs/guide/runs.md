@@ -1,7 +1,7 @@
 # Planned runs
 
 Choose cases for a run, record results against their pinned versions, and close
-with a verdict. Accept CI evidence so you do not repeat work already shown.
+the run with a verdict. Let CI results fill slots so you do not repeat completed work.
 
 ![A planned run with CI results, unfilled slots, and the selected case](../ui/screenshots/runs-light.png)
 
@@ -20,15 +20,15 @@ The planner shows the number of matching cases.
 "Accept results for a commit" also accepts qualifying results already reported for
 that commit and results that arrive later. Enter the tested commit's hash.
 
-A run counts one commit. An abbreviated hash is resolved against known commits at
-planning time. If none is known yet, use the full hash your pipeline will report.
-An ambiguous abbreviation is refused.
+A run planned for a commit counts one commit. When you plan it, Mainworthy resolves an abbreviated hash against known commits.
+If the commit is not known yet, use the full hash your pipeline will report.
+Mainworthy refuses an ambiguous abbreviation.
 
 [Diagram: a planned run from plan to close](../diagrams/planned-run.html)
 
 ## Understand what each slot requests
 
-Each selected case gets a slot pinned to its current version when you plan the run.
+When you plan the run, each selected case gets a slot pinned to its current version.
 Editing, moving, or archiving the case later does not change that slot's version.
 Read the pinned document in the run, rather than the latest document in Suite.
 
@@ -64,13 +64,13 @@ leave the field, then press the outcome key.
 
 Type a step number before <kbd>f</kbd> to mark the failed step.
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between slots.
-The run keeps unfinished notes on this device until the result is recorded.
+If browser storage is available, the run keeps unfinished notes on this device until the server records the result.
 Paste a screenshot into **Result note** or choose **Attach a file** before
 recording. Pending files stay with their slot while you move between slots, but
 are lost if you close or reload the page. A saved result shows its images and file
 downloads. Each file may be at most 4 MiB, and a result may hold 20 files and 16 MiB.
 See [attachments](./report-results.md#attach-screenshots-and-small-files) for report
-uploads, access and retention.
+uploads, access, and retention.
 
 See [the keyboard guide](./keyboard.md) for all run keys.
 
@@ -102,7 +102,7 @@ Use the reporting operation if your workflow needs several producers on one slot
 
 Add named jobs when the run must receive reports from all parts of a pipeline.
 Each required job needs an applied pipeline report that ran something.
-A report made only of skipped or blocked results does not meet the requirement.
+A report containing only skipped or blocked results does not meet the requirement.
 An agent's report under the same job name does not meet it either.
 A `nothingRequired` declaration never satisfies a required job or a case slot, even when the project's policy allows an empty commit gate to pass.
 A run that counts only its own results cannot require CI jobs.
@@ -121,15 +121,15 @@ A required job is separate from the evidence each case slot needs.
 A counted pass and fail from different producers make a slot disputed.
 A later write from another producer does not silently replace the disagreement.
 Open its separate "Disputed" question in Queue and choose the appropriate failure answer.
-Each slot, cause and scope has its own question. An earlier answer about the cause
+Each slot, cause, and scope has its own question. An earlier answer about the cause
 continues to apply elsewhere, but does not settle this slot. The order of that
 answer and the contradictory result makes no difference.
 
 A settlement applies to the named failures in this slot. Another run that counts
 the same results needs its own settlement. A later effective result from a person
 or pipeline renews the question. An agent's report never renews or ends a person's
-settlement, even if its attempt or outcome changes. With the same non-agent evidence
-and scope, the classification covers later agent failures of that cause in this slot.
+settlement, even if its attempt or outcome changes. While the scope and the evidence from people
+and pipelines stay the same, the classification covers later agent failures of that cause in this slot.
 A different cause needs its own settlement. Withdrawing or expiring an answer leaves
 this slot disputed again.
 Neither action withdraws the cause's answer or changes an unrelated commit gate.
@@ -151,13 +151,14 @@ Under `strict`, an authorized person approves with a reason in Queue.
 Rejecting sign-off leaves the run open. You cannot approve a run that no longer passes.
 
 A run that accepts a commit keeps receiving qualifying results after it closes,
-including reports that name the run. While a report waits to be applied, its gate
-is `pending`. Once all accepted reports are applied, Mainworthy asks for sign-off
-again if a report added or corrected qualifying results in the run. A report for
-another repository or environment the run excludes, or with no qualifying slot
-results, leaves its approval in place. The ledger keeps a replaced approval and records
-that it no longer holds. A passing run can close again under its policy; a run with
-missing proof or unexplained failures stays open and cannot be approved.
+including reports that name the run. While a report waits for the server to apply it, the run's gate
+is `pending`. Once the server applies all accepted reports, Mainworthy asks for sign-off
+again if a report added or corrected qualifying results in the run.
+Reports with no qualifying slot results leave the run's approval in place.
+That includes reports for repositories or environments the run excludes.
+The ledger keeps the replaced approval and records that it no longer holds.
+A passing run can close again under its policy.
+A run with missing proof or unexplained failures stays open and cannot be approved.
 
 A run that counts only results recorded in it takes no more results after closing.
 To reopen one, find its sign-off in Queue's "Settled" view and withdraw that approval.
@@ -175,7 +176,7 @@ See [the CLI guide](./cli.md) for selection, methods, assignments, and other pla
 
 ## Plan a release run
 
-After a successful deployment, announce its build label, artifact digest and source
+After a successful deployment, announce its build label, artifact digest, and source
 commit from the deploy step. Use a pipeline token or a human admin's token:
 
 ```sh
@@ -197,7 +198,7 @@ built from several repositories, send `code` as an array of `{repo, commit}` thr
 that caller's statement and does not validate an external provenance signature.
 
 Once bound, a build label cannot name a different digest. To announce another
-deployment of that build, supply `--deploy`, `--env` and a new `--cmd`. Retrying an
+deployment of that build, supply `--deploy`, `--env`, and a new `--cmd`. Retrying an
 unchanged request with the same `cmd` records nothing twice. Use
 `mainworthy find --in deployments` to read deployment history and the attestation.
 The newest announcements come first, with a cursor for the next page.
@@ -217,6 +218,7 @@ A refused report stores no results. After announcing its deployment, send it aga
 Results from an attested source commit do not count as artifact execution.
 
 Open the run in the web app to record manual results against its pinned cases.
-Recording by run alone uses that run's build and environment. MCP's report schema omits the build target; use a planned run with `run`. A gate with missing
-evidence stays pending, and failures and sign-off use the same rules as other
+Recording by run alone uses that run's build and environment.
+MCP's report schema omits the build target. Use a planned run with `run`.
+A gate with missing evidence stays pending, and failures and sign-off use the same rules as other
 planned runs. The web and iPhone planners do not yet offer a build picker.

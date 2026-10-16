@@ -1,15 +1,13 @@
 # The iPhone app
 
-Work with Mainworthy from your phone in a native app.
-This page says how to install the app, how to sign in and what it does today.
+Install the iPhone app, sign in and work with your queue, runs, cases and automated tests.
 
-The app has the queue, planned runs, the cases, the automated tests, changes and your sessions (issue #171). What an admin does,
-inviting people, tokens and the project's policy, is not in the app: open the instance in the phone's browser,
-which gets [a layout of its own](./keyboard.md#on-a-phone).
+The app has the queue, planned runs, cases, automated tests, changes and your sessions. Instance admins can
+also revoke tokens. To create tokens, invite people or change the project's policy, open the instance in the
+phone's browser. It has [a layout of its own](./keyboard.md#on-a-phone).
 
 Cases that use shared fragments can be read and run in the app. Edit fragments
-and their pins in the web editor. The native editor keeps these documents read-only
-until it can preserve their references.
+and their pins in the web editor. The app's editor cannot change fragments or cases that contain shared steps.
 
 ## Install the app
 
@@ -42,10 +40,10 @@ TestFlight opens for 90 days, and the TestFlight app shows when it ends.
 The app signs in to `mainworthy.com`. It does not ask for an address.
 
 1. Type your name and your password. Set a password in the web app under Settings, **Your sign-in**. The app
-   takes no token: a token is for a script or a pipeline.
+   does not accept tokens. Use tokens for scripts or pipelines.
 2. Press **Sign in**.
 
-An account with an enrolled authenticator requires a second sign-in step. This build does not support that step yet. It says so after the password is accepted and keeps no session. Use the web app for that account. An instance that requires a second factor for admins also refuses password-only admin sign-in in the app.
+An account with an enrolled authenticator requires a second sign-in step. The app cannot complete that step. After accepting your password, it says that you need the web app and keeps no session. Sign in to that account in the web app. An instance that requires a second factor for admins also refuses password-only admin sign-in in the app.
 
 After sign-in completes, the app opens a session, as a browser does, and keeps that session in the phone's keychain. It does not keep
 the password. The session appears in the web app under Settings, **Your sessions**, as "Mainworthy for
@@ -55,7 +53,7 @@ iPhone", and you can end it there.
 
 The name and password fields take what the phone's AutoFill offers. The phone offers the login it keeps for
 `mainworthy.com` only when the app is tied to that site, and Apple allows that only for an app signed by a paid
-Apple developer membership. An app installed with a free Apple ID is not tied to it: press the key above the
+Apple developer membership. For an app installed with a free Apple ID, press the key above the
 keyboard and search for the login yourself.
 
 With a paid membership:
@@ -98,21 +96,22 @@ it to open another.
 
 1. In **Queue**, press **Select** at the end of the row of kinds. Each open question gets a circle.
 2. Press questions to select them. A selection holds one kind, such as unlinked tests or failures, and at most
-   500 questions. **Select all** selects every listed question of that kind; with a kind's chip chosen, it
-   selects that kind. A question that cannot join is drawn faint and, when pressed, says why: another kind, a
-   proposal or a finding with a suggested edit (these are answered on their own page, where the edit is shown),
-   one the policy does not let you settle, or one with an answer still waiting to send.
+   500 questions. Select a question or choose a kind's chip before pressing **Select all**. It selects eligible
+   questions of that kind from the list, up to the limit. A question that cannot join appears faint.
+   Press it to read why. It may be another kind, require a decision you cannot make, or have an answer
+   waiting to send. Proposals and findings with a suggested edit need an answer on their own page,
+   where you can read the edit.
 3. Press **Answer all** and choose an answer. Only the answers every selected question takes are offered.
-   **Link to a case** is not among them: each test needs its own case, so link one question at a time.
+   To **Link to a case**, answer one question at a time and choose a case for each test.
    **Create cases** makes and links one automated case for each test of the selected questions, and the
    confirmation says how many.
 4. Confirm. Where the policy asks for a reason, or the answer takes a defect reference, the app asks first, and
    the same reason and reference go to every selected question.
 
 Each question gets its own decision on the evidence it was listed with. The answer is saved on this device and sent
-as one request, as in [Answer during a network drop](#answer-during-a-network-drop): **Unsent answers** shows it as
+as one request. See [Answer during a network drop](#answer-during-a-network-drop). **Unsent answers** shows it as
 one entry with each of its questions. The bar under the list says how many were recorded and names any question
-that was decided or changed meanwhile: read that one again. **Undo** withdraws every decision the answer made,
+that was decided or changed meanwhile. Read that question again. **Undo** withdraws every decision the answer made,
 one question after another, with one reason where the policy asks for one. Press **Done** to leave Select.
 
 ## Link tests to cases
@@ -167,9 +166,9 @@ Planning needs the project's `plan` capability. A selection with no cases is ref
    project's change stream. An open page stays readable when its change leaves the list.
 3. Press an open question to read its evidence and answer it, as in Queue. When you answer, the change's
    gate is read again.
-4. **Results** lists every test the gate on the page counted, with a case or tracked without one: how
-   the gate counted it (unexplained, needs a fix, excused, could not run, skipped, passed), its case or **no
-   case**, its file, job, attempt, duration, who reported it and the failure message. The counts above the list
+4. **Results** lists every test the gate on the page counted, including tests tracked without a case. Each row
+   shows how the gate counted it (unexplained, needs a fix, excused, could not run, skipped, passed), its case or
+   **no case**, its file, job, attempt, duration, who reported it and the failure message. The counts above the list
    choose what it shows, and the field under them filters by test name or file. A row's question opens it, and
    **Open the build** opens the CI build when the report named one. Press a row to open its test.
    **Show more** reads the next hundred. If the results changed since the first page, the app says so and
@@ -192,8 +191,8 @@ end a change or run tests again.
 The list is yours on the instance, whichever project is open. Pull down to refresh. Other people's sessions,
 passwords and passkeys are managed in the web app.
 
-**You**, **About** also shows the app's version and the server's, the licence (Apache License 2.0), **Licences**,
-which opens the page [Licence](./licence.md) on the instance, and the copyright line.
+Under **You**, **About** shows the app's version and the server's, the licence (Apache License 2.0) and the
+copyright line. **Licences** opens the [Licence](./licence.md) page on the instance.
 
 ## Revoke a token
 
@@ -213,7 +212,7 @@ is known. Token creation, people, and policy administration still need the web a
 
 ## Browse and write cases
 
-1. Open **Cases**. It works like the Files app: **All cases**, the top folders, and the most used tags, with
+1. Open **Cases** to see **All cases**, the top folders and the most used tags, with
    **All tags** for the rest. A folder opens as its own page with its subfolders above its own cases. Swipe from
    the left edge of the screen, or press the back button, to go up. Scroll to the end of a list to read the next
    page. Under a case's title, a chip for each way it was run shows its latest result: the icon of who ran it (a
@@ -225,7 +224,7 @@ is known. Token creation, people, and policy administration still need the web a
    searches that folder and its subfolders; in a tag, the cases with that tag. Press **Everywhere** to search the
    whole project. A case number finds that case only inside the folder or tag you search. Closing the search
    clears it.
-2. Open a case to read its version, preconditions, steps and who may run it: a badge each for **Person**,
+2. Open a case to read its version, preconditions, steps and who may run it. Badges show **Person**,
    **Pipeline** and **Agent**, struck through where the case does not allow that way. **History** lists who wrote each
    version, when and why. Saved versions are read-only. **Open current case** opens the editable page.
    Folder and tags show the current placement.
@@ -260,12 +259,14 @@ need the web app. The button on a case's page opens it there.
 
 ## Read the automated tests
 
-**Cases**, **Automated tests** lists every test a pipeline has reported, newest first, with its case or **no
-case**, and **quarantined** while it is. Search by name or file, and turn on **Only tests with no case** to see
-the tests tracked without one. Open a test to read its file, its key, its case (or that it is tracked without
-one, and its results still count for the gate), its quarantine, how often it flipped between passing and
-failing on the same code, and its latest twenty results with their commit, change, job, who reported them and
-the build. A test opened from a change's results shows the same page.
+Open **Cases**, then **Automated tests**. The list shows every test a pipeline has reported, newest first,
+with its case or **no case**, and **quarantined** while its quarantine is active. Search by name or file,
+and turn on **Only tests with no case** to see tests tracked without one.
+
+Open a test to read its file, key, linked case and quarantine. A test without a case still counts for the gate.
+The page also shows how often the test flipped between passing and failing on the same code, and its latest
+twenty results. Each result names its commit, change, job, who reported it and the build. A test opened from a
+change's results shows the same page.
 
 ## Answer during a network drop
 
@@ -275,11 +276,11 @@ Open **Unsent answers** at the top right of Queue. Each entry shows **Waiting to
 
 If an uncertain reply holds later answers in that project, the first waiting entry shows the problem and two choices. **Keep trying** sends the same answer and command again. **Drop saved answer** asks for confirmation, then checks that command with the server. A recorded answer shows its outcome. If every send attempt got a definite HTTP error reply and the command is still unrecorded, the app removes that entry.
 
-A timeout, lost connection, or unreadable reply means an earlier request may still arrive, even when the server reports no recorded command yet. Dropping that answer keeps a **Dropped** entry that never sends again and lets later answers send in order. Each send pass sends waiting answers first, then checks Dropped commands for outcomes, including after relaunch, stopping those checks after the first failed lookup. Answers saved during those checks are sent in the same pass. The screen confirms a sent answer without waiting for Dropped checks. **Send waiting answers and check dropped** starts a pass immediately. If the server records it, its outcome appears here and **Clear outcomes** can remove it. If it never does, this entry stays. There is no time limit that proves a request cannot still arrive. If the server is still recording the command, cannot be reached, or gives an unreadable command reply, Drop keeps the waiting answer and explains why.
+A timeout, lost connection, or unreadable reply means an earlier request may still arrive, even when the server reports no recorded command yet. Dropping that answer keeps a **Dropped** entry that never sends again and lets later answers send in order. Each send pass sends waiting answers first, then checks Dropped commands for outcomes, including after you reopen the app. A failed lookup stops the remaining checks for that pass. Answers saved during those checks are sent in the same pass. The screen confirms a sent answer without waiting for Dropped checks. **Send waiting answers and check dropped** starts a pass immediately. If the server records it, its outcome appears here and **Clear outcomes** can remove it. If it never does, this entry stays. There is no time limit that proves a request cannot still arrive. If the server is still recording the command, cannot be reached, or gives an unreadable command reply, Drop keeps the waiting answer and explains why.
 
-An answer refused after an earlier timeout stays **Waiting to send** with the refusal text, blocks later answers, and becomes **Dropped** if you drop it, because the earlier attempt may still arrive. While a waiting answer holds the queue, Dropped entries are not checked.
+An answer refused after an earlier timeout stays **Waiting to send** with the refusal text and blocks later answers. If you drop it, it becomes **Dropped** because the earlier attempt may still arrive. While a waiting answer holds the queue, Dropped entries are not checked.
 
-If somebody decides the question before a saved answer arrives, the saved answer becomes **Overtaken** and leaves their decision unchanged. For **Overtaken**, open **Read Q-…**, read its current evidence, and choose an answer again if one is still needed. The saved answer will not be sent again. For **Refused**, read the reason and the question before giving another answer. A lost reply keeps the same command id when retried, so it cannot record the answer twice.
+If somebody decides the question before a saved answer arrives, the saved answer becomes **Overtaken** and leaves their decision unchanged. For **Overtaken**, press **Read** and the question's ref, such as **Read Q-12**, read its current evidence, and choose an answer again if one is still needed. The saved answer will not be sent again. For **Refused**, read the reason and the question before giving another answer. A lost reply keeps the same command id when retried, so it cannot record the answer twice.
 
 Saved answers and their outcomes survive closing the app and are excluded from device backups. Signing out keeps them for you on the same instance and stops new sends from that workspace. A request already sent may complete. Other people signing in on the device have separate saved answers. Removing the app deletes them. **Clear outcomes** removes completed entries and keeps waiting and Dropped answers.
 
@@ -291,9 +292,9 @@ The app needs a connection to identify you after reopening. It sends no answers 
   Resolve an overlapping save in the open case editor, or use the button at the top right of a question to
   open it in the web app.
 - **Answer a proposal that does more than add a case or change what one says.** One that restores an earlier
-  version, moves, tags or archives cases, makes a folder or changes the policy is answered in the web app: the
-  app does not show all of what it changes. So is one with more than twenty edits. A new case and an edit to a
-  case are shown step by step, and their answers stay off until that is on the screen.
+  version, moves, tags or archives cases, makes a folder or changes the policy needs the web app. So does
+  a proposal with more than twenty edits. For a new case or a change to a case's content, read the steps
+  on the question's page before choosing an answer.
 - **Notifications.** They need a paid Apple developer membership.
 - **Start without a connection.** Reopening the app needs the server to identify you. Answers saved before closing stay on the device until you reconnect and open your workspace.
 
@@ -302,7 +303,7 @@ The app needs a connection to identify you after reopening. It sends no answers 
 | The app says | What to do |
 | --- | --- |
 | "The reply could not be read." | Update the server and install the app from matching source revisions |
-| "This build cannot show what the question is about" | The same: install the app again, or answer in the web app |
+| "This build cannot show what the question is about" | Install the app again, or answer in the web app |
 | "Your session ended. Sign in again." | The session ran out, or was ended under **Your sessions**. Sign in as yourself and the screens come back as you left them |
 | "Too many attempts." | Wait as long as it says. The server limits failed sign-ins |
 | The app does not open | Its signing ran out. Run `bun scripts/ios.ts install` again |

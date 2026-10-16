@@ -1,6 +1,8 @@
 # Let an agent in
 
-Give an AI agent its own token, connect it over MCP, and know what its edits, findings, results and answers are worth. An agent reads the suite, reviews a change, records what it found, and leaves the decisions to people.
+Give an AI agent its own token and connect it over MCP to read cases, review changes,
+and report results. The project's policy decides whether its edits and answers count
+or need a person's decision.
 
 [Diagram: an agent's session, from token to a person's decision](../diagrams/agent-access.html)
 
@@ -15,7 +17,11 @@ token for agent "reviewer" (read, record, produce)
 Shown once. It will not be shown again.
 ```
 
-`read` lets it read cases, questions and gates. `produce` lets it propose edits, record reviews and results, and send answers, and it includes `record`. Leave out `--can` and a new agent gets exactly these two. The agent does not hold `answer`, so under the policy its answer is advice or is refused. Add `answer` only where you want an agent's answer to count. [People, agents and pipelines](./access.md) covers grants and revoking.
+`read` lets it read cases, questions, and gates. `produce` lets it propose edits, record
+reviews and results, and send answers. It includes `record`. Without `--can`, a new
+agent gets `read` and `produce`. It does not hold `answer`, so its answer is advice
+or the policy refuses it. Add `answer` only where you want an agent's answer to count.
+[People, agents and pipelines](./access.md) covers grants and revocation.
 
 > [!WARNING]
 > In local mode, a client on the same machine that sends no token acts as the owner. An agent without its own token makes edits as a person, and the policy treats them that way. Always give the agent a token.
@@ -40,7 +46,9 @@ A 2026-07-28 client uses `server/discover` to learn the server's capabilities, w
 
 Settings, Connect, shows the `/mcp` address of this instance.
 
-If the instance has more than one project, name one. Every tool takes a `project` field, and the stdio form also reads `MAINWORTHY_PROJECT` and `--project`. With one project, the agent can leave it out.
+If the agent can access more than one project, name one. Every tool takes a
+`project` field. The stdio form also reads `MAINWORTHY_PROJECT` and `--project`.
+With exactly one accessible project, the agent can leave it out.
 
 ## The tools and where to start
 
@@ -69,7 +77,13 @@ An unchanged basis preserves the review. Use `ledger: false` to request fresh ey
 
 ## Install the skill
 
-A skill is a short guide that an agent loads when it needs it. Mainworthy ships one, a directory named `mainworthy`. It has a `SKILL.md` and a `references` folder with pages on writing cases, reviewing a change, reporting results and the tool inputs. It teaches the case model and the order of work: start with `impact`, read only the cases you need, record findings in one `claim`, report outcomes in one `report`, and answer a question on the evidence hash it read.
+A skill is a short guide that an agent loads when it needs it. Mainworthy ships
+one in a directory named `mainworthy`. It has a `SKILL.md` and a `references`
+folder with pages on writing cases, reviewing a change, reporting results, and
+tool inputs. The skill describes the case model and the order of work. The agent
+starts with `impact`, reads the cases it needs, records findings in one `claim`,
+and reports outcomes in one `report`. It answers a question using the evidence
+hash it read.
 
 The instance serves the skill, as one archive of the `mainworthy` directory, at `/docs/skill/mainworthy.tar.gz`. Like the rest of the documentation it needs no token. One command unpacks it into the skills directory your agent reads. For Claude Code, use `~/.claude/skills` for every project, or `.claude/skills` inside one:
 
@@ -84,7 +98,11 @@ The skill matches the version of the instance that served it, so unpack it again
 
 The policy sets the value of an agent's work. See [policy](./policy.md) for the presets.
 
-An edit that an agent proposes follows the policy for edits. Under `loose` it takes effect at once, and under `standard` and `strict` the reply is `open` and a person decides. The agent that wrote an edit can always withdraw its own conflicting proposal.
+An ordinary case edit that an agent proposes takes effect at once under `loose`.
+Under `standard` and `strict`, the reply is `open` and a person decides.
+Policy edits and [quarantine proposals](./report-results.md#quarantine-an-unreliable-test)
+need a person's decision under every preset. The agent that wrote an edit can always
+withdraw its own conflicting proposal.
 
 A finding from a review is recorded and shown. A person accepts, rejects, defers or marks it a duplicate. In the web queue, accepting a finding that carries a suggestion turns the suggestion into a proposed edit, with the agent as its author, and that edit follows the policy again. A finding never changes a gate by itself.
 
@@ -94,7 +112,8 @@ an outline line, such as `Remove the coupon > Total shows $100.00`. The claim ke
 for acceptance. Through the API, use `decide` with `answer: { is: "accept", apply: true }` to turn
 the suggestion into a proposal.
 
-A result is recorded, shown and asked about, and it does not move a commit's gate. The next section explains why.
+Mainworthy records and shows an agent's result. A failure can raise a question,
+but the result does not move a commit's gate. The next section explains why.
 
 An answer from an agent is one of three things, and the reply to `decide` says which. `decided` means the answer counts. `advised` means it is recorded as advice and a person decides. `forbidden` means the policy refuses it. With the default grant, `read` and `produce`, an agent's failure answer is advised under `loose` and `standard` and forbidden under `strict`:
 
@@ -102,11 +121,16 @@ An answer from an agent is one of three things, and the reply to `decide` says w
 [{"q":"Q-19","status":"advised","needs":"one member who is not an agent","decision":null}]
 ```
 
-An answer counts only if the clause lets agents answer and the agent holds `answer`. Under the presets that is rare. Today it covers a duplicate finding under `loose`, and an unlinked-test answer under `loose` and `standard` where the project asks about tests with no case. There is one exception: an agent may withdraw its own conflicting proposal without holding `answer`.
+An answer counts only if the clause lets agents answer and the agent holds `answer`.
+The presets allow agents to settle duplicate findings under `loose` and unlinked-test
+questions under `loose` and `standard`. The latter applies only when the project asks
+about tests with no case. An agent may also withdraw its own conflicting proposal
+without holding `answer`.
 
 ## Why an agent's report never moves a gate
 
-A gate says a commit is worthy of `main`, and an agent's word is not enough for that. A commit that only an agent has reported has no gate. It reads `pending` with nothing counted:
+A commit gate counts results from people and pipelines. If only an agent has
+reported a commit, its gate reads `pending` with nothing counted:
 
 ```
 $ mainworthy gate --commit 3333333333333333333333333333333333333333

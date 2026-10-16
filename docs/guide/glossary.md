@@ -1,18 +1,18 @@
 # Glossary
 
-The words Mainworthy uses, each in a sentence or two, with the page that says more. The words are the ones you see in the app and in command output.
+These definitions explain the words you see in Mainworthy and its command output, with links to the pages that describe them.
 
 ## Actor
 
-Whoever does something: a person, an agent, a pipeline, or a rule of the policy. Every result, edit and decision names its actor. See [people, agents and pipelines](./access.md).
+A person, an agent, a pipeline, or a rule of the policy that produces a record. Every result, edit and decision names its actor. See [people, agents and pipelines](./access.md).
 
 ## Agent
 
-An AI model that works through the agent tools with a token of its own. What an agent's edits and answers are worth depends on the policy. See [let an agent in](./agents.md).
+An AI model that uses Mainworthy with a token of its own through MCP, the command line or the API. What an agent's edits and answers are worth depends on the policy. See [let an agent in](./agents.md).
 
 ## Answer
 
-What you give a question: for a failure, one of defect, test, expected, flaky, infrastructure, already failing on base, or mistake. An answer that the policy accepts becomes a decision. See [decide in the queue](./decide.md).
+Your response to a question. For a failure, the choices include defect, test, expected, flaky, infrastructure, already failing on base, or mistake. An answer that the policy accepts becomes a decision. See [decide in the queue](./decide.md).
 
 ## Attempt
 
@@ -36,7 +36,7 @@ A commit or pull request that results were reported for, shown on the Changes sc
 
 ## Clause
 
-One row of a policy: for a kind of question under some conditions, who must answer and what an agent's answer is worth. See [policy](./policy.md).
+One row of a policy. For a kind of question and a set of conditions, the clause says who must answer and what an agent's answer is worth. See [policy](./policy.md).
 
 ## Decision
 
@@ -60,7 +60,7 @@ The list of capabilities an actor holds on one project, or on every project. See
 
 ## Invitation
 
-A link an admin hands a person so that they can choose a password or register a passkey. It works once and runs out. For a person who already exists it is a recovery: accepting it replaces every way they signed in. See [people, agents and pipelines](./access.md#sign-in-as-yourself).
+A link an admin hands a person so that they can choose a password or register a passkey. It works once and runs out. For a person who already exists, the invitation is a recovery link. Accepting it replaces every way they signed in. See [people, agents and pipelines](./access.md#sign-in-as-yourself).
 
 ## Job
 
@@ -68,7 +68,7 @@ A named part of a pipeline, such as `e2e`. A planned run can require that named 
 
 ## Method
 
-How a case may be exercised: by a person, by an automated test, or by an agent. A case declares whether people and agents may exercise it, an automated test is admitted by its link to the case, and a run says which methods it asks for.
+How a case may be exercised, by a person, an automated test or an agent. The case declares whether people and agents may exercise it. A link or a case annotation admits an automated test. The run says which methods it accepts.
 
 ## Passkey
 
@@ -76,15 +76,15 @@ A key that a device or a password manager holds for one site and unlocks with a 
 
 ## Pipeline
 
-A CI system that reports results with a token of its own. A pipeline records results, says when a change ended, and reads the gate, and may be let read. It never edits, answers, plans or administers. See [report results](./report-results.md).
+A CI system that reports results with a token of its own. A pipeline can also announce deployments, mark changes as ended and read the gate. A grant can let it read project data. It never edits, answers, plans or administers. See [report results](./report-results.md).
 
 ## Planned run
 
-A run you start by hand: a set of cases, each pinned at its current version in a slot. See [planned runs](./runs.md).
+A run you start by hand. Each selected case has a slot pinned at its current version. See [planned runs](./runs.md).
 
 ## Policy
 
-How strict a project is: the table of clauses in force. `loose`, `standard` and `strict` are the three presets. See [policy](./policy.md).
+The table of clauses that determines who answers questions in a project. `loose`, `standard` and `strict` are the three presets. See [policy](./policy.md).
 
 ## Project
 
@@ -108,15 +108,15 @@ One observation of one test or case, such as a pass or a fail, with who produced
 
 ## Rule
 
-The policy acting by itself. Where a clause says a rule answers, the answer is given at once and recorded as a decision by the rule.
+The policy acting by itself. Where a clause assigns an answer to a rule, Mainworthy records the rule's decision at once.
 
 ## Run
 
-A request for evidence: which results count and what is needed before it is complete. A change run exists for each reported commit. A planned run is started by hand.
+A request for evidence that specifies which results count and what it needs before it is complete. A change run exists for each reported commit. A planned run is started by hand.
 
 ## Session
 
-One browser that is signed in. It ends at sign-out, after 14 days without use, after 90 days, and when what it was opened with (a token, a password or a passkey) stops working. A person lists and ends their own.
+One signed-in browser. By default, its session ends after 14 days without use or 90 days in total. Sign-out, ending the session, or revoking its token or credential also ends it. A person can list and end their own sessions. See [configuration](./configuration.md) for lifetime settings.
 
 ## Slot
 
@@ -128,11 +128,11 @@ A word on a case, written `#checkout` in the outline. The sidebar lists tags, an
 
 ## Test
 
-An automated test, as a runner reported it. A test has a ref such as `T-9` and may be linked to a case.
+An automated test, as a runner reported it. A test has a ref such as `T-9` and may be linked to a case. The Tests screen lists automated tests and their latest results. See [report results](./report-results.md).
 
 ## Token
 
-A secret that names an actor and carries its grants. It is shown once, when it is made. See [people, agents and pipelines](./access.md).
+A secret that identifies an actor. The actor's current grants determine what the token can do. Mainworthy shows the token once, when it creates it. See [people, agents and pipelines](./access.md).
 
 ## Verdict
 

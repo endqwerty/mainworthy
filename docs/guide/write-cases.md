@@ -50,15 +50,15 @@ While you type, the editor keeps a private draft on this device.
 A new draft has "Private, no version yet". For an existing case, others still see
 the recorded version named beside your draft.
 
-A dirty draft is submitted when you leave, press <kbd>Cmd</kbd> <kbd>Enter</kbd>
+The editor submits a changed draft when you leave, press <kbd>Cmd</kbd> <kbd>Enter</kbd>
 on macOS or <kbd>Ctrl</kbd> <kbd>Enter</kbd> elsewhere, or pause for 30 seconds.
 The policy then decides whether the proposal becomes current or waits for review.
 There is no save button. Moving the caret or selecting text while a save finishes
-keeps that save's outcome: text waiting for review is not proposed again, and when
-the case updates before you edit, your next edit starts from the newer version.
+does not submit the text again. Text waiting for review stays in its proposal.
+If the case updates before you edit, your next edit starts from the newer version.
 
-A step is recorded once it has an action. A step with an expected result and no action yet
-is left out of the version and stays in your draft on this device, also after a reload.
+The editor records a step once it has an action. A step with an expected result and no action yet
+stays in your draft on this device, including after a reload, but stays out of the recorded version.
 Type its action, or remove the step, and leave the editor again.
 A new case with neither a title nor a step that has an action is not kept when you leave it,
 whatever else it holds.
@@ -68,11 +68,12 @@ Its expected result, if it has one, stays in your draft in the same way.
 If someone else records that step again while yours still has no action, their step replaces
 what your draft held of it, and an expected result of yours that differs from theirs stays as a new step.
 
-When the page does not hear back about a save (a reload, a closed tab, a lost connection), it asks the
-server what became of that save the next time the draft is open. If the save made a version, the status line
-says "Your last save is recorded as version N", and the save is not sent again. If it is not recorded yet, it
-may still be on its way, so the page sends that same save again: the server records it once, however many
-copies of it arrive. Either way, anything you typed after it is sent when you leave.
+If a reload, a closed tab, or a lost connection interrupts a save's reply, the page asks the
+server about that save when you next open the draft. If the save made a version, the status line
+says "Your last save is recorded as version N". The page does not send that save again.
+If the server has not recorded it yet, the save may still be on its way. The page sends the same
+save again, and the server records it once, however many copies arrive.
+Either way, the editor sends anything you typed after it when you leave.
 After a reload or reopening a closed tab, you can select text while that answer arrives.
 Later text stays on the version that save made.
 A tab closed before it hears back sends nothing more: the draft stays on this device, and the page asks when
@@ -102,10 +103,11 @@ the editor after taking over. The copy survives a reload or closing the window. 
 all its text. Ordinary takeovers carry the shared text forward and leave no preserved copy. If device
 storage is full, keep the window open until you have copied the text.
 
-Moving to a case from another case never takes its draft by itself. Opening the app straight on a case, as a link or a reload does, continues a draft whose window is not answering, as it always has. When the window that holds a draft does not
-answer, because it closed, crashed or is busy, another window that shows the draft says "This draft is held by
-a window that is not answering, or has closed". Press <kbd>e</kbd> or choose "Take over here" to continue it in
-the window you are in.
+Moving from one case to another never takes over its draft. Opening the app directly on a case,
+through a link or a reload, continues a draft whose window is not answering.
+If the window holding a draft has closed, crashed, or is busy, another window showing the draft says
+"This draft is held by a window that is not answering, or has closed".
+Press <kbd>e</kbd> or choose "Take over here" to continue the draft in the window you are in.
 
 ## Read versions and restore earlier content
 
@@ -150,13 +152,11 @@ Moves, tag changes, and archiving appear in history without creating a new body 
 Archived cases leave the active suite. Their recorded history remains available.
 Use [the API](./api.md) to return an archived case to active state.
 
-While a large bulk change is saved or accepted, you can keep reading the suite.
-Each read sees the complete state before or after the change. No part of a proposal becomes current on its own.
+While the server saves or accepts a large bulk change, you can keep reading the suite.
+Each read sees the complete state before or after the change. The proposal's changes become current together.
 A save queued behind that change still waits for it to finish.
 This includes confirmed CSV imports and a person's answers that create cases for unlinked tests or apply accepted findings.
-Cases that a policy of `unlinked: create` makes while a report is ingested are still made without a pause.
-Large case loops let reads through after about 200 case visits. This is approximate: separate loops count their
-own work, and parsing, writing question references, and committing still run without a pause.
+When the policy uses `unlinked: create`, the server creates cases during report ingestion without pausing for reads.
 
 Press <kbd>/</kbd> to focus "Filter cases". Type words to filter the current list.
 Use the sidebar's tags to narrow the suite by tag.
@@ -178,9 +178,9 @@ The current version stays current while you resolve the conflict.
 Resolving submits a new proposal. It still follows the policy for ordinary edits.
 If someone changes the case again meanwhile, the new edit merges or opens another conflict.
 
-The card stays until the page has read the case as the server recorded it, in a second tab of yours as well.
-That is your merge or a later version. A merge that waits for approval under a stricter policy has not changed the case yet.
-If the read fails, the card stays and the page says so: choose "Resolve conflict" again, or "Read the case again" in a second tab.
+The conflict card stays until the page reads your recorded merge or a later case version from the server.
+The same rule applies in a second tab. A merge waiting for approval under a stricter policy has not changed the case yet.
+If the read fails, the card stays and the page says so. Choose "Resolve conflict" again, or "Read the case again" in a second tab.
 If you leave the case in that second tab before it is read, `e` reads it first when you come back,
 and so does a click on a field or a change to a property. A property you change before that read is not
 kept: change it again once the case is shown as recorded. Until that read, the case is shown as that tab
@@ -261,7 +261,9 @@ Markdown preserves a reference with its own step id:
 
 A fragment's header uses `kind: fragment`. A literal action beginning with `!`
 is escaped as `\!` in canonical Markdown. Instance and project archives preserve
-fragment history and pins. Fragment authoring and batch updates use the web,
+fragment history and pins. Use the web editor to edit a fragment or a case with pinned fragments.
+The iPhone app reads these documents but cannot save edits to them.
+Fragment authoring and batch updates use the web,
 HTTP `propose`, or CLI JSON; MCP discovery omits these inputs.
 When a creation supplies both `kind` and Markdown, their kinds must agree.
 A missing Markdown `kind:` line means `case`, so `kind: "fragment"` also requires

@@ -1,6 +1,7 @@
 # Keyboard
 
-Every key of the web UI, by screen. In the app, <kbd>?</kbd> lists the keys of the screen you are on, and the bar at the bottom shows the ones you are most likely to want next.
+The web app's keys, by screen. <kbd>?</kbd> lists the keys for the current screen.
+The bar at the bottom shows common actions.
 
 Tab shows a focus indicator on controls. Buttons and form controls have targets of at least 24 CSS pixels,
 except run progress dots, which select the same slots as their full-size list rows.
@@ -11,26 +12,36 @@ records the automated coverage and remaining manual checks, including screen-rea
 
 ## How the keys work
 
-- Two keys in a row, such as <kbd>g</kbd> <kbd>q</kbd>, are pressed one after the other, not together. You have a little under a second for the second key.
+- A sequence such as <kbd>g</kbd> <kbd>q</kbd> means press one key, then the other. You have a little under a second for the second key.
 - <kbd>⌘</kbd> is Command on macOS and Ctrl everywhere else.
-- While you type in a field, only <kbd>⌘</kbd> combinations, <kbd>Esc</kbd> and the keys of the case editor work. <kbd>Esc</kbd> leaves the case editor, the filter and a run's note. A field in Settings keeps the focus: click outside it first.
-- A list you choose from, such as a case's automation, a token's producer or a run's cases, opens when you press <kbd>↓</kbd>, <kbd>↑</kbd>, <kbd>Home</kbd>, <kbd>End</kbd>, <kbd>Page Up</kbd>, <kbd>Page Down</kbd> or <kbd>↵</kbd> on it, and changes nothing until you choose from it: with the arrow keys and <kbd>↵</kbd>, or with the mouse. The choice is one change, and the keys go back to the screen with it. Typing a letter picks the option that starts with it, and that is a choice too. How an open list closes is the browser's. Chromium on Linux, where this was checked, takes the highlighted option when you close the list with <kbd>Esc</kbd>, <kbd>Tab</kbd> or a click outside it, so move back to the option you had if you do not want a change. If the list closes with <kbd>Esc</kbd> or <kbd>Tab</kbd> and no change, the list keeps the keys until you press <kbd>Esc</kbd> again. Where the browser cannot open a list from a key, an arrow changes the choice by one, as it does in any web page.
-- While the palette or the list of keys is open, only <kbd>Esc</kbd> and <kbd>⌘</kbd> <kbd>K</kbd> work. In the palette, <kbd>↑</kbd> and <kbd>↓</kbd> choose a row and <kbd>↵</kbd> runs it; <kbd>Tab</kbd> moves from the field to the rows, and <kbd>↵</kbd> runs the row that has the focus.
+- While you type in a field, only <kbd>⌘</kbd> combinations, <kbd>Esc</kbd>, and the keys of the case editor work. <kbd>Esc</kbd> leaves the case editor, the filter, and a run's note. A field in Settings keeps the focus until you click or tab outside it.
+- A choice list, such as a case's automation, a token's producer, or a run's cases, opens with <kbd>↓</kbd>, <kbd>↑</kbd>, <kbd>Home</kbd>, <kbd>End</kbd>, <kbd>Page Up</kbd>, <kbd>Page Down</kbd>, or <kbd>↵</kbd>. It changes nothing until you choose an option with the arrow keys and <kbd>↵</kbd>, or with the mouse. Choosing an option changes the value once and returns the keys to the screen. Typing a letter selects an option starting with it and commits that choice too.
+- While the palette or the list of keys is open, only <kbd>Esc</kbd> and <kbd>⌘</kbd> <kbd>K</kbd> work. In the palette, <kbd>↑</kbd> and <kbd>↓</kbd> choose a row and <kbd>↵</kbd> runs it. <kbd>Tab</kbd> moves from the field to the rows, where <kbd>↵</kbd> runs the focused row.
 - The sign-out dialog starts with the focus on **Sign out and keep drafts**. <kbd>Tab</kbd> and <kbd>Shift</kbd> <kbd>Tab</kbd> move among its three choices. <kbd>↵</kbd> or <kbd>Space</kbd> presses the focused choice. **Stay signed in**, or <kbd>Esc</kbd>, closes it and keeps you signed in. The screen's keys and <kbd>⌘</kbd> <kbd>K</kbd> do not run while this dialog is open.
-- <kbd>↵</kbd> and <kbd>Space</kbd> press a button that you reached with <kbd>Tab</kbd>, and <kbd>↵</kbd> follows a link you reached that way. Everywhere else they are the screen's keys. That includes a button you clicked with the mouse, until the focus moves on, and the rows of a screen's list.
+- <kbd>↵</kbd> and <kbd>Space</kbd> press a button you reached with <kbd>Tab</kbd>. <kbd>↵</kbd> follows a link you reached that way. Everywhere else they run the screen's actions. That includes a button you clicked with the mouse, until the focus moves on, and the rows of a screen's list.
+
+The browser controls how an open choice list closes. Chromium on Linux takes the highlighted option when you close it with <kbd>Esc</kbd>, <kbd>Tab</kbd>, or a click outside.
+To keep the value unchanged, move back to the original option before closing the list.
+If the list closes with <kbd>Esc</kbd> or <kbd>Tab</kbd> without a change, it keeps the keys until you press <kbd>Esc</kbd> again.
+If the browser cannot open the list from a key, an arrow changes the choice by one.
 
 ## On a phone
 
-A phone, or a tablet held upright, is worked with a finger, so the app is laid out for one there. It shows one pane at a time.
+In a phone browser, the web app shows one pane at a time. A tablet held upright usually uses the same layout.
 
-- **Menu** (☰) opens the sidebar: the screens, the project, the folders and tags of the suite, the theme and Sign out. Opening it with a keyboard moves focus into the drawer. Pressing **Close menu** returns focus to **Menu**.
+- **Menu** (☰) opens the sidebar with the screens, the project, the suite's folders and tags, the theme, and Sign out. Opening it with a keyboard moves focus into the drawer. Pressing **Close menu** returns focus to **Menu**.
 - A screen opens on its list. Tap a row to read it, and **Back** to return to the list. A link to one case, question, run or change opens on that thing.
-- **Actions** opens the palette. It lists what the keys of the screen do, but not <kbd>⌘</kbd> <kbd>K</kbd> (you are in it) or <kbd>?</kbd>, the list of keys (a phone has none to list; with a keyboard attached <kbd>?</kbd> still opens it). Tap one to run it. Tap the field at the top to search for a case or to jump to a ref.
+- **Actions** opens the palette. It lists the screen's actions, apart from opening the palette or the list of keys. Tap an action to run it. Tap the field at the top to search for a case or jump to a ref. With a keyboard attached, <kbd>?</kbd> still opens the list of keys.
 - While a list is shown, **Actions** offers what belongs to the list, such as New case, New folder, Filter and Plan run. Open a row for the actions on it, such as Edit case, an answer or Record version. Nothing is decided about a case or a question you have not opened.
-- With a keyboard attached, the keys follow the same rule. While a list is shown, the keys of the list work: <kbd>c</kbd>, <kbd>/</kbd>, <kbd>n</kbd> in Runs, <kbd>n</kbd> <kbd>f</kbd> in the Suite, and the keys under [Everywhere](#everywhere) but <kbd>[</kbd>. Once a row is open, every key of the screen works. <kbd>n</kbd> <kbd>f</kbd> opens the sidebar with the form for the folder's name, since the form is there. <kbd>Tab</kbd> into the detail shows it. While the sidebar is open, only the keys of the list work. While the palette is open, only <kbd>Esc</kbd> and <kbd>⌘</kbd> <kbd>K</kbd> do, as on the desktop, and the palette has its own <kbd>↑</kbd> <kbd>↓</kbd> to move and <kbd>↵</kbd> to run the choice. Its field does not take the focus on a phone, so the keyboard on the screen stays closed: tap the field to type in it, since a letter typed before that goes nowhere.
-- A button does what it does on a desktop: an answer in the Queue, Pass, Fail, Blocked and Skip in a run, Accept and Reject on a proposal.
+- With a keyboard attached, the keys follow the same rule. While a list is shown, its keys work. These include <kbd>c</kbd> and <kbd>/</kbd> in Suite, <kbd>n</kbd> in Runs, <kbd>n</kbd> <kbd>f</kbd> in Suite, and the keys under [Everywhere](#everywhere) except <kbd>[</kbd>. Once a row is open, every key of the screen works. <kbd>n</kbd> <kbd>f</kbd> opens the sidebar's form for a new folder. Moving focus into the detail with <kbd>Tab</kbd> shows that pane. While the sidebar is open, only the list's keys work.
+- Buttons offer the same actions as on a desktop, including answers in Queue, run outcomes, and accepting or rejecting proposals.
 
-Four things need a keyboard and have another way without one:
+While the palette is open, only <kbd>Esc</kbd> and <kbd>⌘</kbd> <kbd>K</kbd> work, as on the desktop.
+The palette uses <kbd>↑</kbd> and <kbd>↓</kbd> to move, and <kbd>↵</kbd> to run the choice.
+Its search field does not take focus on a phone, so the on-screen keyboard stays closed.
+Tap the field to type in it. Letters typed before it has focus do nothing.
+
+These keyboard actions have touch alternatives:
 
 | On a desktop | On a phone |
 | --- | --- |
@@ -39,7 +50,9 @@ Four things need a keyboard and have another way without one:
 | <kbd>Esc</kbd> leaves the case editor | **Back**, or **Actions**, then Seal and leave editor. Both record what you typed. A conflict that waits for your answer stays as it is. |
 | <kbd>Esc</kbd> closes the form for a tag, a new folder's name, or the reason the policy asks for | **Actions**, then Cancel tag, Cancel new folder, or Cancel. Nothing is recorded. |
 
-The layout follows the pointer, not the width of the window. A browser worked with a mouse keeps the desktop layout however narrow its window is. So does a tablet whose window is wider than 900 px and taller than 500 px, as most are on their side.
+The phone layout requires a touch pointer and a window at most 900 px wide or at most 500 px high.
+A browser with a mouse keeps the desktop layout at any width.
+A tablet whose window is wider than 900 px and taller than 500 px also keeps the desktop layout.
 
 ## Everywhere
 
@@ -52,10 +65,10 @@ The layout follows the pointer, not the width of the window. A browser worked wi
 | <kbd>g</kbd> <kbd>c</kbd> | Go to Changes |
 | <kbd>g</kbd> <kbd>t</kbd> | Go to Tests |
 | <kbd>g</kbd> <kbd>,</kbd> | Go to Settings |
-| <kbd>g</kbd> <kbd>p</kbd> | Switch project. Lists the projects you can read. Type part of a name or a key and press <kbd>↵</kbd>. The screen you are on stays open. The key is there when you can read more than one project. |
+| <kbd>g</kbd> <kbd>p</kbd> | Switch project. Lists the projects you can read. Type part of a name or key and press <kbd>↵</kbd>. The current screen stays open. Available when you can read more than one project. |
 | <kbd>g</kbd> <kbd>d</kbd> | Docs for this screen. Opens the page about the screen you are on, in a new tab. |
-| <kbd>g</kbd> <kbd>x</kbd> | Sign out. Opens a dialog to sign out and keep drafts, sign out and clear browser data, or stay signed in. It is there when you signed in, and not in local mode, where the owner of the machine needs no sign-in. |
-| <kbd>⌘</kbd> <kbd>K</kbd> | Jump to or run. Opens the palette: type a ref such as `C-12`, words from a case title, the name of an action, or `docs` and a word. |
+| <kbd>g</kbd> <kbd>x</kbd> | Sign out. Opens a dialog to sign out and keep drafts, sign out and clear browser data, or stay signed in. Available when you are signed in. Local mode needs no sign-in. |
+| <kbd>⌘</kbd> <kbd>K</kbd> | Jump to or run. Opens the palette. Accepts a ref such as `C-12`, words from a case title, an action name, or `docs` and a word. |
 | <kbd>?</kbd> | All keys of the current screen |
 | <kbd>[</kbd> | Collapse / expand sidebar |
 | <kbd>Esc</kbd> | Close palette / keys |
@@ -92,9 +105,9 @@ The layout follows the pointer, not the width of the window. A browser worked wi
 | <kbd>↵</kbd> | First step, when you are in the title |
 | <kbd>↵</kbd> | Next step, when you are in a step |
 | <kbd>Tab</kbd> | Expected result of the step you are on |
-| <kbd>Shift</kbd> <kbd>↵</kbd> | Next new case: records this one and starts another |
+| <kbd>Shift</kbd> <kbd>↵</kbd> | Next new case. Records this one and starts another |
 | <kbd>⌘</kbd> <kbd>↵</kbd> | Record version now |
-| <kbd>Esc</kbd> | Seal and leave editor: records the version and leaves |
+| <kbd>Esc</kbd> | Seal and leave editor. Records the version and leaves |
 
 [Write cases](./write-cases.md) explains the outline you type and when a version is recorded.
 
@@ -106,9 +119,9 @@ The layout follows the pointer, not the width of the window. A browser worked wi
 | <kbd>k</kbd> or <kbd>↑</kbd> | Previous question |
 | <kbd>Space</kbd> | All evidence of the question, or back to the short view |
 | <kbd>x</kbd> | Select question, to answer several of one kind at once |
-| <kbd>*</kbd> | Select all of this kind: every listed question of the selection's kind, or clears the selection when they are all selected |
+| <kbd>*</kbd> | Select all of this kind. Selects every listed question of the selection's kind, or the current question's kind if nothing is selected. Clears the selection when they are all selected. |
 | <kbd>Esc</kbd> | Clear selection |
-| <kbd>↵</kbd> | Take advice: gives the answer an agent advised |
+| <kbd>↵</kbd> | Take advice. Gives the answer an agent advised |
 | <kbd>u</kbd> | Undo answer |
 
 The answer keys depend on the kind of question. The queue shows the ones that apply to the question you are on, each with what it does.
@@ -192,10 +205,10 @@ To say which step failed, type its number and then <kbd>f</kbd>. [Planned runs](
 | <kbd>k</kbd> | Previous setting |
 | <kbd>n</kbd> | New token, in the Tokens section |
 | <kbd>n</kbd> | New project, in the Projects section |
-| <kbd>n</kbd> | New invitation, in the People section: the caret goes to the person's name |
+| <kbd>n</kbd> | New invitation, in the People section. Focuses the person's name. |
 | <kbd>n</kbd> | New password, in the Your sign-in section |
 
-Settings has no key that ends a session or removes a passkey: <kbd>Tab</kbd> reaches "End" and "Remove".
+Settings has no key that ends a session or removes a passkey. <kbd>Tab</kbd> reaches "End" and "Remove".
 
 ## The sign-in page and an invitation
 
@@ -204,7 +217,9 @@ These two pages open before you are signed in, so the keys above do not work on 
 | Key | What it does |
 | --- | --- |
 | <kbd>Tab</kbd> | Next field or button, in the order they are on the page |
-| <kbd>↵</kbd> | Sends the form the caret is in: sign in, or accept the invitation |
+| <kbd>↵</kbd> | Send the current form to sign in or accept the invitation |
 | <kbd>Space</kbd> | Ticks "Make a passkey on this device" on an invitation, when the caret is on it |
 
-The caret starts in the name on the sign-in page and in the password on an invitation. When the browser is signed in as somebody else, an invitation first asks whether to sign them out, and the caret starts on "Continue". A button that was pressed keeps the keyboard focus while its request runs and after a refusal, so the next <kbd>↵</kbd> tries again.
+The caret starts in the name on the sign-in page and in the password on an invitation.
+If the browser is signed in as somebody else, an invitation first asks whether to sign them out. Focus starts on **Continue**.
+A pressed button keeps keyboard focus while its request runs and after a refusal. The next <kbd>↵</kbd> tries again.
