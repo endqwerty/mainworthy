@@ -59,7 +59,12 @@ is under the GitHub milestone `iOS app`.
   a shard with no report fails it, and so does a test
   file in which every test was skipped. An `image` job builds the container and
   asks it for `/docs`; the gate job fails with it. An `ios` job on a macOS runner runs the
-  iPhone app's package tests and builds the app; the gate job fails with it too. On GitHub the workflow takes about four
+  iPhone app's package tests and builds the app; the gate job fails with it too. A first job, `scope`, runs only the jobs a change needs
+  (`scripts/ci-scope.ts`, decision 0090): a change to prose, another workflow or the iPhone app runs, of the tests,
+  the two that read every file and the ones that name a changed file; a change to `src/web` skips the `ios` job.
+  `bun scripts/ci-scope.ts` says what CI would run for the branch. A new job gets its paths there, held by
+  `test/ci-scope.test.ts` to the Dockerfile and the configuration; code outside the tests that reads prose or
+  `ios/` breaks the narrowing, and that test lists it. On GitHub the whole workflow takes about four
   minutes (2026-10-12, two runs: 4 min 24 s and 3 min 49 s; it was about 12 in one job).
 - **A failure says what to do.** The suite passes on macOS as on Linux (issue #103, 2026-10-13), so a failure
   on either is the change's. A test that depends on the system (a key, a tool of the shell, what the browser

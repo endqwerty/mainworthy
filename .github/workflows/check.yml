@@ -20,6 +20,11 @@
 # and builds the app (ios/README.md). Nothing reports to it either. What the app reads of a reply is checked
 # before that, in the shards (test/ios-contract.test.ts); this job is where the Swift is compiled.
 #
+# `scope` decides first what the change needs (scripts/ci-scope.ts, decision 0090): each of the other jobs runs when
+# a file it reads changed, and the tests run whole unless every changed file is one that only the tests naming it
+# read (prose, the iPhone app, another workflow); then one runner runs those tests and the ones that read every file.
+# A job the change does not need is skipped, and the gate counts a skip as a pass only when `scope` asked for it.
+#
 # `gate` is the job to require on the branch. It fails when the gate does not pass, when a report is missing,
 # and when the type-check, the lint, the image or the iPhone app failed.
 name: check
@@ -33,7 +38,36 @@ permissions:
   contents: read
 
 jobs:
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      static: ${{ steps.scope.outputs.static }}
+      image: ${{ steps.scope.outputs.image }}
+      ios: ${{ steps.scope.outputs.ios }}
+      matrix: ${{ steps.scope.outputs.matrix }}
+      shards: ${{ steps.scope.outputs.shards }}
+      files: ${{ steps.scope.outputs.files }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A pull request's merge commit and its parents; a push to main is compared with the commit before it,
+          # which can be several commits back.
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 0 }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - name: What the change needs
+        id: scope
+        env:
+          # A pull request is tested as its merge commit, whose first parent is the base it is merged into. A push
+          # is compared with what the branch held before it; a new branch has no such commit, and everything runs.
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || github.event.before }}
+        run: bun scripts/ci-scope.ts "--base=$BASE"
+
   static:
+    needs: scope
+    if: ${{ needs.scope.outputs.static == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -46,6 +80,8 @@ jobs:
       - run: bun run lint
 
   image:
+    needs: scope
+    if: ${{ needs.scope.outputs.image == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -63,6 +99,8 @@ jobs:
         run: docker logs mainworthy
 
   ios:
+    needs: scope
+    if: ${{ needs.scope.outputs.ios == 'true' }}
     runs-on: macos-latest
     timeout-minutes: 15
     steps:
@@ -79,21 +117,15 @@ jobs:
 
   tests:
     name: ${{ matrix.name }}
+    needs: scope
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       # Every shard runs to its end: the gate reads all of them.
       fail-fast: false
-      matrix:
-        # The shard count is CI_SHARDS in scripts/check-plan.ts; the names are the ones the gate job lists.
-        include:
-          - { name: tests-1, phase: "--only=parallel --shard=1/6" }
-          - { name: tests-2, phase: "--only=parallel --shard=2/6" }
-          - { name: tests-3, phase: "--only=parallel --shard=3/6" }
-          - { name: tests-4, phase: "--only=parallel --shard=4/6" }
-          - { name: tests-5, phase: "--only=parallel --shard=5/6" }
-          - { name: tests-6, phase: "--only=parallel --shard=6/6" }
-          - { name: quiet, phase: "--only=quiet" }
+      # The CI_SHARDS shards of scripts/check-plan.ts and the quiet tests, or the files the change needs, in one
+      # runner for each phase (`matrix` in scripts/ci-scope.ts). The gate job is given the same names.
+      matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -107,7 +139,10 @@ jobs:
       - name: Tests
         # A failing test does not end the job here: its report is uploaded and the gate decides.
         continue-on-error: true
-        run: bun scripts/check.ts test ${{ matrix.phase }} --junit=test-results/${{ matrix.name }}.xml
+        env:
+          # Empty for a shard; the test files of the phase that the change needs otherwise, apart by spaces.
+          FILES: ${{ matrix.files }}
+        run: bun scripts/check.ts test ${{ matrix.phase }} --junit=test-results/${{ matrix.name }}.xml $FILES
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -122,7 +157,7 @@ jobs:
           retention-days: 7
 
   gate:
-    needs: [static, tests, image, ios]
+    needs: [scope, static, tests, image, ios]
     # Also when a shard or the lint failed: Mainworthy is told what ran, and this job is the one that fails.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -156,15 +191,25 @@ jobs:
           # What this tag may reach is the tailnet's access rules: this instance's port 443 and nothing else.
           tags: tag:ci
       - name: Report every shard to Mainworthy, then the gate
+        # Without a scope there are no shards to read, and the last step fails on it.
+        if: ${{ needs.scope.result == 'success' }}
         env:
           # Set these in the repository to report to a deployed Mainworthy. Without them the job starts its own.
           # The token is given to this step and no other: not to the install, not to another job.
           MAINWORTHY_URL: ${{ vars.MAINWORTHY_URL }}
           MAINWORTHY_TOKEN: ${{ secrets.MAINWORTHY_TOKEN }}
           MAINWORTHY_PROJECT: ${{ vars.MAINWORTHY_PROJECT }}
-        run: bun scripts/ci-gate.ts test-results tests-1 tests-2 tests-3 tests-4 tests-5 tests-6 quiet
-      - name: The type-check, the lint, the image, the iPhone app and every shard's job passed
+          SHARDS: ${{ needs.scope.outputs.shards }}
+          FILES: ${{ needs.scope.outputs.files }}
+        run: bun scripts/ci-gate.ts test-results $SHARDS ${FILES:+"--files=$FILES"}
+      - name: The scope, the type-check, the lint, the image, the iPhone app and every shard's job passed
         # A shard's job succeeds with failing tests, which the gate judges. It fails when it could not be set up
-        # or left nothing to upload, and after a re-run the gate above would then read its older attempt's.
+        # or left nothing to upload, and after a re-run the gate above would then read its older attempt's. A job
+        # the scope did not ask for is skipped, and passes only then.
         if: always()
-        run: test "${{ needs.static.result }}" = success && test "${{ needs.image.result }}" = success && test "${{ needs.ios.result }}" = success && test "${{ needs.tests.result }}" = success
+        run: |
+          test "${{ needs.scope.result }}" = success
+          test "${{ needs.tests.result }}" = success
+          test "${{ needs.static.result }}" = success || test "${{ needs.scope.outputs.static }}:${{ needs.static.result }}" = false:skipped
+          test "${{ needs.image.result }}" = success || test "${{ needs.scope.outputs.image }}:${{ needs.image.result }}" = false:skipped
+          test "${{ needs.ios.result }}" = success || test "${{ needs.scope.outputs.ios }}:${{ needs.ios.result }}" = false:skipped

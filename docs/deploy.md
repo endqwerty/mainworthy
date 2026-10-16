@@ -315,6 +315,9 @@ the steps are kept below for an instance that has none.
   to the gate. Re-run the shard's own job (`gh run rerun <run> --job <id>`): `gate` runs again after it and reads
   the other shards' reports from the earlier attempt. A test that fails now and then is still a defect to fix,
   not to retry (`AGENTS.md`).
+- **A change that touches no code reports fewer tests.** The `scope` job runs only what a change needs
+  (decision 0090). For a change to prose, another workflow or the iPhone app, one shard named `tests` reports the
+  test files it chose, and the gate on the instance judges those. The job's summary page lists them.
 
   Which attempt the gate reads is decided by the attempt's number (issue #124). Each shard uploads its report as
   `results-<shard>-attempt-<n>`, the `gate` job downloads every artifact of the run into a directory of its own

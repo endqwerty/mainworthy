@@ -24,6 +24,7 @@ import {
 	testArgs,
 	testReaders,
 } from "../scripts/check-plan.ts";
+import { matrix, outputs } from "../scripts/ci-scope.ts";
 import { OLDEST_BUN, unready } from "../scripts/preflight.ts";
 import { parseJUnit, TEST_FILE_LIMIT } from "../src/surfaces/formats/junit.ts";
 
@@ -78,14 +79,31 @@ test("the check's budget is the one the owner set, and a warning comes first", (
 	]);
 });
 
-test("the workflow runs every shard of the plan and its gate reads every one of them", () => {
+test("the workflow runs the shards the scope names and its gate reads every one of them", () => {
 	const workflow = readFileSync(".github/workflows/check.yml", "utf8");
 	const shards = Array.from({ length: CI_SHARDS }, (_, i) => `tests-${i + 1}`);
-	for (const [i, name] of shards.entries())
-		expect(workflow).toContain(`{ name: ${name}, phase: "--only=parallel --shard=${i + 1}/${CI_SHARDS}" }`);
-	expect(workflow).toContain('{ name: quiet, phase: "--only=quiet" }');
-	expect([...workflow.matchAll(/- \{ name: /g)]).toHaveLength(CI_SHARDS + 1);
-	expect(workflow).toContain(`run: bun scripts/ci-gate.ts test-results ${shards.join(" ")} quiet\n`);
+	expect(matrix("all")).toEqual([
+		...shards.map((name, i) => ({ name, phase: `--only=parallel --shard=${i + 1}/${CI_SHARDS}`, files: "" })),
+		{ name: "quiet", phase: "--only=quiet", files: "" },
+	]);
+	const all = Object.fromEntries(
+		outputs({ why: "", jobs: { static: true, image: true, ios: true }, tests: "all" }).map((line) =>
+			line.split(/=(.*)/s),
+		),
+	);
+	expect(all.shards).toBe(`${shards.join(" ")} quiet`);
+	expect(all.files).toBe("");
+	// The tests job takes its runners, and the gate its shard names and files, from the scope job's outputs.
+	// What GitHub replaces in the workflow's text, written so that it is not read as a placeholder of this file.
+	const expression = (name: string): string => `$\{{ ${name} }}`;
+	expect(workflow).toContain(`matrix: ${expression("fromJSON(needs.scope.outputs.matrix)")}`);
+	expect(workflow).toContain(`SHARDS: ${expression("needs.scope.outputs.shards")}`);
+	expect(workflow).toContain(`FILES: ${expression("needs.scope.outputs.files")}`);
+	expect(workflow).toContain(`run: bun scripts/ci-gate.ts test-results $SHARDS $\{FILES:+"--files=$FILES"}\n`);
+	expect(workflow).toContain(`FILES: ${expression("matrix.files")}`);
+	expect(workflow).toContain(
+		`run: bun scripts/check.ts test ${expression("matrix.phase")} --junit=test-results/${expression("matrix.name")}.xml $FILES\n`,
+	);
 });
 
 // Issue #124. The name the workflow gives a shard's artifact and the name the gate looks for are written in two
@@ -112,8 +130,17 @@ test("a shard's artifact is named for its attempt and downloaded into its own di
 	// the lint and the image.
 	expect(upload?.["if-no-files-found"]).toBe("error");
 	const last = jobs.gate.steps.at(-1)?.run ?? "";
-	for (const job of ["static", "image", "tests"])
+	for (const job of ["scope", "static", "image", "ios", "tests"])
 		expect(last).toContain(`test "${expression(`needs.${job}.result`)}" = success`);
+	// A job the scope skipped passes only when the scope said it was not needed.
+	for (const job of ["static", "image", "ios"]) {
+		expect(last).toContain(
+			`test "${expression(`needs.${job}.result`)}" = success || test "${expression(`needs.scope.outputs.${job}`)}:${expression(`needs.${job}.result`)}" = false:skipped\n`,
+		);
+		expect(readFileSync(".github/workflows/check.yml", "utf8")).toContain(
+			`if: ${expression(`needs.scope.outputs.${job} == 'true'`)}`,
+		);
+	}
 
 	const named = (shard: string, attempt: string): string =>
 		String(upload?.name).replace(expression("matrix.name"), shard).replace(expression("github.run_attempt"), attempt);
@@ -157,7 +184,7 @@ test("the workflow gives the pipeline's token to the one step that reports, and 
 	);
 	expect(holders).toEqual(["gate: Report every shard to Mainworthy, then the gate"]);
 	// No secret in an environment every step of a job or of the workflow would share.
-	expect(Object.keys(workflow.jobs)).toEqual(["static", "image", "ios", "tests", "gate"]);
+	expect(Object.keys(workflow.jobs)).toEqual(["scope", "static", "image", "ios", "tests", "gate"]);
 	expect(
 		[workflow.env, ...Object.values(workflow.jobs).map((job) => job.env)].filter((env) => env !== undefined),
 	).toEqual([]);
