@@ -13,7 +13,8 @@ public final class ChangesScreen: ProjectScreen {
 	public private(set) var detail: ChangeDetails?
 	public private(set) var detailLoading = Loading.first
 	public private(set) var notice: String?
-	/// What the gate of the open change's head counted, read when its page asks.
+	/// What the gate of the open change's head counted, read when its page asks. It is made for the run of the
+	/// gate the page shows, and made again when a read of the page finds another run.
 	public private(set) var results: ChangeResults?
 	private var selected: String?
 	private var selectedChange: ChangeSummary?
@@ -26,7 +27,7 @@ public final class ChangesScreen: ProjectScreen {
 	public func open(_ key: String) async {
 		guard key != selected || detailLoading != .done else { return }
 		selectedChange = changes.first { $0.key == key } ?? (selected == key ? selectedChange : nil)
-		if selected != key { results = ChangeResults(project: project, change: key) }
+		if selected != key { results = nil }
 		selected = key
 		detail = nil
 		detailLoading = .first
@@ -50,6 +51,7 @@ public final class ChangesScreen: ProjectScreen {
 		}
 		guard mine == reads else { return }
 		if selected != nil { await readDetail() }
+		guard mine == reads else { return }
 		await results?.refresh()
 	}
 
@@ -64,6 +66,10 @@ public final class ChangesScreen: ProjectScreen {
 			detail = fresh
 			selectedChange = fresh.change
 			detailLoading = .done
+			// The results shown are the shown gate's: a gate of another run gets results of its own.
+			if results?.change != key || results?.run != fresh.gate.run {
+				results = ChangeResults(project: project, change: key, run: fresh.gate.run)
+			}
 		} catch is CancellationError {
 		} catch {
 			guard mine == detailReads else { return }

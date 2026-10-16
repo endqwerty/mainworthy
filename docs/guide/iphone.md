@@ -96,7 +96,7 @@ it to open another.
 
 ## Answer several questions at once
 
-1. In **Queue**, press **Select**. Each open question gets a circle.
+1. In **Queue**, press **Select** at the end of the row of kinds. Each open question gets a circle.
 2. Press questions to select them. A selection holds one kind, such as unlinked tests or failures, and at most
    100 questions. **Select all** selects every listed question of that kind; with a kind's chip chosen, it
    selects that kind. A question that cannot join is drawn faint and, when pressed, says why: another kind, a
@@ -166,7 +166,7 @@ Planning needs the project's `plan` capability. A selection with no cases is ref
    project's change stream. An open page stays readable when its change leaves the list.
 3. Press an open question to read its evidence and answer it, as in Queue. When you answer, the change's
    gate is read again.
-4. **Results** lists every test the gate of the change's head counted, with a case or tracked without one: how
+4. **Results** lists every test the gate on the page counted, with a case or tracked without one: how
    the gate counted it (unexplained, needs a fix, excused, could not run, skipped, passed), its case or **no
    case**, its file, job, attempt, duration, who reported it and the failure message. The counts above the list
    choose what it shows, and the field under them filters by test name or file. A row's question opens it, and

@@ -376,32 +376,36 @@ public final class QueueScreen: ProjectScreen {
 		selected = []
 	}
 
-	/// The answers every selected question takes, in the order the first shows them. Linking a test asks for a
-	/// case for each test, so it is given to one question at a time on its page.
-	public var sharedChoices: [Choice] {
-		let chosen = selection
-		guard let first = chosen.first else { return [] }
+	/// The answers every selected question takes, in the order the first shows them.
+	public var sharedChoices: [Choice] { QueueScreen.sharedChoices(of: selection) }
+
+	/// The answers every one of these questions takes. Linking a test asks for a case for each test, so it is given
+	/// to one question at a time on its page.
+	public static func sharedChoices(of questions: [Question]) -> [Choice] {
+		guard let first = questions.first else { return [] }
 		return first.choices.filter { choice in
 			(choice.takes == .nothing || choice.takes == .reference)
-				&& chosen.allSatisfy { question in question.choices.contains { $0.answer == choice.answer } }
+				&& questions.allSatisfy { question in question.choices.contains { $0.answer == choice.answer } }
 		}
 	}
 
-	/// How many tests the selected unlinked questions name, for what "Create cases" makes.
-	public var selectedTests: Int {
-		selection.reduce(0) { sum, question in
+	/// How many tests these unlinked questions name, for what "Create cases" makes.
+	public static func tests(in questions: [Question]) -> Int {
+		questions.reduce(0) { sum, question in
 			if case .unlinked(let tests) = question.evidence { sum + tests.count } else { sum }
 		}
 	}
 
-	/// Gives one answer to every selected question. Each answer is saved on the device and sent on its own, on
-	/// the evidence its question was listed with, so each question gets its own decision and its own outcome.
-	/// Returns whether any of them was decided.
+	/// Gives one answer to these selected questions, as they were shown when the person chose it. Each answer is
+	/// saved on the device and sent on its own, on the evidence the person saw: a question whose evidence changed
+	/// since is refused by the server, never answered on its new evidence. So each question gets its own decision
+	/// and its own outcome. Returns whether any of them was decided.
 	@discardableResult
-	public func answerSelection(with choice: Choice, reference: String = "", reason: String = "") async -> Bool {
-		let chosen = selection
-		guard let first = chosen.first, chosen.count == selected.count else {
-			notice = Notice(text: "Select the questions again: the list changed.", isProblem: true, undoes: nil)
+	public func answerAll(
+		_ chosen: [Question], with choice: Choice, reference: String = "", reason: String = ""
+	) async -> Bool {
+		guard let first = chosen.first, chosen.allSatisfy({ selected.contains($0.ref) }) else {
+			notice = Notice(text: "Nothing was recorded: the selection changed. Select the questions again.", isProblem: true, undoes: nil)
 			return false
 		}
 		for question in chosen {
@@ -410,7 +414,7 @@ public final class QueueScreen: ProjectScreen {
 				return false
 			}
 		}
-		guard sharedChoices.contains(where: { $0.answer == choice.answer }) else {
+		guard QueueScreen.sharedChoices(of: chosen).contains(where: { $0.answer == choice.answer }) else {
 			notice = Notice(text: "Nothing was recorded: not every selected question takes this answer.", isProblem: true, undoes: nil)
 			return false
 		}

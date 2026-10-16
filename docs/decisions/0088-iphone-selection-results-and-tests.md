@@ -30,7 +30,13 @@ needs a case for each test. A selection holds at most 100 questions.
 **Each answer of a selection is its own saved answer.** The app saves one answer per question in the device's
 outbox (decision 0074) and sends them in order, each with its own command id, its question's evidence and
 `ifOpen`. Each question gets its own decision and its own outcome in **Unsent answers**, and **Undo** withdraws
-the ones that were decided.
+the ones that were decided. An answer goes on the questions as they were shown when the person chose it: the
+confirmation keeps them, and a question whose evidence changed behind it is refused by the server and named,
+never answered on evidence nobody saw (the verifier's first finding of 2026-10-16).
+
+**Results are the shown gate's.** The Results panel reads by the run that the gate on the page names, not by the
+change, so a report of a newer head between the two reads cannot put that head's results under the older head's
+verdict (the verifier's third finding). A read of the page that finds another run makes a new panel.
 
 ## Turned down
 
@@ -38,8 +44,11 @@ the ones that were decided.
   outbox saves, replays and recovers one answer per command, and its rules for a lost reply took several rounds
   of review (decision 0074, issue #321). One command for many questions would need an entry with an outcome for
   each question and new rules for dropping it. The web's reason against splitting, that a request failing part
-  way leaves some questions answered under one undo, holds on the phone either way: the server decides each
-  question of an `all` request on its own too. The cost is one request per question, which is why a selection
+  way leaves some questions answered under one undo, mostly holds on the phone either way: the server decides
+  each question of an `all` request on its own too, and refuses one whose evidence changed while it decides the
+  rest. The difference is an unexpected failure inside the server, which rolls back the whole of one `all`
+  request but only the answer it hit when each is sent alone; the phone then shows that one as waiting or
+  refused and the rest as recorded. The cost is one request per question, which is why a selection
   holds 100 and not the 500 one request carries.
 - **SwiftUI's own edit mode for the list.** Its selection gives no way to say why a row cannot join, and a
   disabled row is silent when pressed.

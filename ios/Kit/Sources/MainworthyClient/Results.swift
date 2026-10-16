@@ -93,6 +93,9 @@ public struct CountedPage: Equatable, Sendable {
 	/// Every row the gate counts, by standing.
 	public let tally: [ResultStanding: Int]
 	package let next: String?
+
+	/// The results of a commit nothing a gate counts was reported for.
+	package static let none = CountedPage(rows: [], count: 0, tally: [:], next: nil)
 }
 
 /// An automated test the project has seen, with a case or without one.
@@ -177,11 +180,12 @@ private func webAddress(_ text: String?) -> URL? {
 public struct ResultsMoved: Error, Equatable, Sendable {}
 
 extension ProjectClient {
-	/// A page of what the gate of a change's head counted, problems first.
+	/// A page of what a gate's run counted, problems first. The run is the one a change's gate names, so the
+	/// results are of the commit whose verdict is shown, even after the change has a newer head.
 	package func results(
-		of change: String, standing: ResultStanding? = nil, text: String = "", after cursor: String? = nil
+		of run: String, standing: ResultStanding? = nil, text: String = "", after cursor: String? = nil
 	) async throws -> CountedPage {
-		var input: [String: JSONValue] = ["in": "results", "change": .string(change), "limit": 100]
+		var input: [String: JSONValue] = ["in": "results", "run": .string(run), "limit": 100]
 		if let standing { input["state"] = .string(standing.word) }
 		let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
 		if !words.isEmpty { input["text"] = .string(words) }

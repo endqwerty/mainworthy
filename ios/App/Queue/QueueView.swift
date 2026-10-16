@@ -24,13 +24,7 @@ struct QueueView: View {
 						}
 						.accessibilityIdentifier("unsent-answers")
 					}
-					if screen.showing == .open, workspace.project?.may(.produce) == true {
-						ToolbarItem(placement: .topBarTrailing) {
-							Button(screen.isSelecting ? "Done" : "Select") { screen.select(!screen.isSelecting) }
-								.fontWeight(screen.isSelecting ? .semibold : .regular)
-								.accessibilityIdentifier("queue-select")
-						}
-					}
+
 					ToolbarItem(placement: .principal) {
 						Picker("Show", selection: showing) {
 							Text("Open").tag(QueueScreen.Showing.open)
@@ -89,7 +83,18 @@ struct QueueView: View {
 							.task { await screen.more() }
 					}
 				} header: {
-					Filters(screen: screen)
+					HStack(spacing: 8) {
+						Filters(screen: screen)
+						// Beside the kinds, not in the navigation bar, where it would push out Open and Decided.
+						if screen.showing == .open, workspace.project?.may(.produce) == true {
+							Button(screen.isSelecting ? "Done" : "Select") { screen.select(!screen.isSelecting) }
+								.font(.subheadline.weight(screen.isSelecting ? .semibold : .regular))
+								.padding(.trailing, 16)
+								.accessibilityIdentifier("queue-select")
+						}
+					}
+					.listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 0))
+					.textCase(nil)
 				} footer: {
 					if screen.showing == .open { Text(screen.counts.phrase.capitalizedFirst) }
 				}
@@ -123,8 +128,6 @@ private struct Filters: View {
 			.padding(.vertical, 6)
 		}
 		.scrollIndicators(.hidden)
-		.listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 0))
-		.textCase(nil)
 	}
 
 	private func chip(_ name: String, count: Int, kind: Kind?) -> some View {
@@ -209,8 +212,20 @@ private struct SelectableRow: View {
 /// What is selected, and the answers every selected question takes.
 private struct SelectionBar: View {
 	let screen: QueueScreen
-	@State private var asking: Choice?
-	@State private var confirming: Choice?
+	@State private var asking: Chosen?
+	@State private var confirming: Chosen?
+
+	/// An answer with the questions as they were shown when the person chose it. What a sheet or a dialog sends
+	/// later is sent on those: the list may read newer evidence behind it, and an answer must not land on
+	/// evidence its giver did not see.
+	private struct Chosen: Identifiable {
+		let id = UUID()
+		let choice: Choice
+		let questions: [Question]
+
+		/// "12 failures", for the questions the answer goes to.
+		var what: String { questions.first.map { $0.kind.counted(questions.count) } ?? "the selected questions" }
+	}
 
 	var body: some View {
 		let selection = screen.selection
@@ -252,35 +267,30 @@ private struct SelectionBar: View {
 		.background(.regularMaterial, in: .rect(cornerRadius: 14))
 		.padding(.horizontal, 12)
 		.padding(.bottom, 6)
-		.sheet(item: $asking) { choice in
+		.sheet(item: $asking) { chosen in
 			let typing = screen.typing(QueueScreen.selectionTyping)
 			AnswerSheet(
-				title: choice.label, help: "\(choice.help) It goes to each of the \(what).", action: "Record",
-				wantsReference: choice.takes == .reference, wantsReason: screen.selection.contains(where: \.wantsReason),
-				reference: typing.reference, reason: typing.reason
+				title: chosen.choice.label, help: "\(chosen.choice.help) It goes to each of the \(chosen.what).",
+				action: "Record", wantsReference: chosen.choice.takes == .reference,
+				wantsReason: chosen.questions.contains(where: \.wantsReason), reference: typing.reference,
+				reason: typing.reason
 			) { reference, reason in
-				Task { await screen.answerSelection(with: choice, reference: reference, reason: reason) }
+				Task { await screen.answerAll(chosen.questions, with: chosen.choice, reference: reference, reason: reason) }
 			}
 		}
 		.confirmationDialog(
-			"\(confirming?.label ?? "Answer") for \(what)?", isPresented: isConfirming, titleVisibility: .visible,
-			presenting: confirming
-		) { choice in
-			Button(choice.label) {
+			"\(confirming?.choice.label ?? "Answer") for \(confirming?.what ?? "the selected questions")?",
+			isPresented: isConfirming, titleVisibility: .visible, presenting: confirming
+		) { chosen in
+			Button(chosen.choice.label) {
 				confirming = nil
-				Task { await screen.answerSelection(with: choice) }
+				Task { await screen.answerAll(chosen.questions, with: chosen.choice) }
 			}
 			.accessibilityIdentifier("bulk-confirm")
 			Button("Cancel", role: .cancel) { confirming = nil }
-		} message: { choice in
-			Text(message(for: choice))
+		} message: { chosen in
+			Text(message(for: chosen))
 		}
-	}
-
-	/// "12 failures", for the questions the answer goes to.
-	private var what: String {
-		let selection = screen.selection
-		return selection.first.map { $0.kind.counted(selection.count) } ?? "the selected questions"
 	}
 
 	private var isConfirming: Binding<Bool> {
@@ -289,18 +299,19 @@ private struct SelectionBar: View {
 
 	private func choose(_ choice: Choice) {
 		screen.dismissNotice()
-		if choice.takes == .reference || screen.selection.contains(where: \.wantsReason) {
-			asking = choice
+		let chosen = Chosen(choice: choice, questions: screen.selection)
+		if choice.takes == .reference || chosen.questions.contains(where: \.wantsReason) {
+			asking = chosen
 		} else {
-			confirming = choice
+			confirming = chosen
 		}
 	}
 
-	private func message(for choice: Choice) -> String {
-		let makes = choice.answer == "create"
-			? " The server makes and links one automated case for each of their \(screen.selectedTests) tests."
+	private func message(for chosen: Chosen) -> String {
+		let makes = chosen.choice.answer == "create"
+			? " The server makes and links one automated case for each of their \(QueueScreen.tests(in: chosen.questions)) tests."
 			: ""
-		return "\(choice.help)\(makes) Each question gets its own decision, and Undo withdraws them together."
+		return "\(chosen.choice.help)\(makes) Each question gets its own decision, and Undo withdraws them together."
 	}
 }
 
