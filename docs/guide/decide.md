@@ -12,8 +12,8 @@ Use the answer's stated consequence to decide what the gate needs next.
 3. Read its evidence and the text beside each available answer.
 4. Press the answer key.
 
-Questions are listed with what blocks most first, then the newest first. A test with no case
-comes after every other question, however new it is: it is worth resolving, and nothing waits for it.
+The queue lists the questions that block most first, then the newest first.
+A test with no case comes after every other question, however new it is. It blocks nothing.
 
 Use <kbd>j</kbd> and <kbd>k</kbd> to move between questions.
 Press <kbd>Space</kbd> to expand the evidence.
@@ -30,7 +30,7 @@ and the count beside Queue in the sidebar is red only while one is open.
 A failure is the one kind of question that blocks anything. While nobody has explained a
 failure, no gate that counts it passes. An earlier occurrence of the same cause that someone
 answered for another build stays excused there. Every other kind leaves things as they are until
-someone answers: a proposed edit waits, a finding stays on record, and a test with no case
+someone answers. A proposed edit waits, a finding stays on record, and a test with no case
 still runs and still gates the build.
 
 Under its title, each open question says what leaving it costs. For example:
@@ -152,7 +152,7 @@ For example, "The failure was a mistake" applies to a disputed planned-run resul
 
 A key records the answer immediately unless the answer needs another field.
 "Link to a case" opens a case picker for each test. "Defect in the product" lets you
-enter an optional defect reference: <kbd>Enter</kbd> records the defect with it and
+enter an optional defect reference. <kbd>Enter</kbd> records the defect with it and
 <kbd>Escape</kbd> records the defect without one. If the policy requires a reason, enter it before
 submitting. The queue keeps unfinished reference and reason text on this device.
 
@@ -169,13 +169,30 @@ Select the questions, then give one answer. It goes to every selected question i
 - <kbd>*</kbd> selects every listed question of the selection's kind, or of the question shown when nothing is selected. Pressed again, it clears the selection.
 - <kbd>Esc</kbd> clears the selection.
 
-A selection is of one kind: one answer means the same thing to every question in it. A question you cannot settle is not selected, and neither is a row of another kind; the status line says why. Neither is a proposal, or a finding that suggests an edit: an answer to one counts only once its edits are on screen, and only the question shown has them there. Answer those one at a time. "Select all" takes the questions listed so far. Press "More questions" first to take the rest. A selection holds at most 500 questions, the most one answer sends; the status line says how many were left out.
+A selection contains one kind of question, so one answer means the same thing to every question in it.
+You cannot select a question you cannot settle or a row of another kind. The status line says why.
+Proposals and findings that suggest edits need their edits on screen before an answer counts.
+Answer those one at a time.
 
-The bar above the list counts the selection. The answers under the evidence are then the selection's, and the line above them says when the question shown is not one of them. An answer is offered only when every selected question takes it. "Link to a case" asks for a case for each test, so it is given to one question at a time. An answer that needs a defect reference or a reason asks once and gives the same text to all. While it asks, the selection cannot change: record the answer, or cancel it, first. Advice is about the question shown, so <kbd>↵</kbd> does not take it while a selection exists.
+"Select all" takes the questions listed so far. Press "More questions" first to include the rest.
+A selection holds at most 500 questions, the most one answer sends. The status line says how many it left out.
+
+The bar above the list counts the selection. The answers under the evidence apply to the selection.
+The line above them says when the question shown is not one of the selected questions.
+The queue offers an answer only when every selected question takes it.
+"Link to a case" asks for a case for each test, so answer one question at a time.
+An answer that needs a defect reference or a reason asks once and gives the same text to all.
+Record or cancel that answer before changing the selection.
+Advice is about the question shown, so <kbd>↵</kbd> does not take it while a selection exists.
 
 Each question gets its own decision. Press <kbd>u</kbd> to withdraw them all, as you would one. One that was refused, for example because its evidence changed while you were choosing, comes back to the list, and the others stay answered.
 
-On a phone, open a question and select from **Actions**: "Select question", "Select all of this kind" and "Clear selection". The rows have no box there.
+In a phone browser, open a question and choose **Actions** for "Select question", "Select all of this kind", or "Clear selection".
+The rows have no box there.
+
+The iPhone app has its own **Select**. See [answer several questions at once](./iphone.md#answer-several-questions-at-once).
+The app saves an answer on the device before sending it, and **Unsent answers** in Queue shows what has not reached the server.
+See [answer during a network drop](./iphone.md#answer-during-a-network-drop).
 
 ## Review a proposal
 
@@ -190,7 +207,12 @@ The merged body is another proposal and still follows the adoption policy.
 
 ## Give an unlinked test a home
 
-An unlinked-test question asks how to keep a test that has no case. A project asks it when its policy says "Ask in the queue" for tests with no case. Otherwise a rule tracks the tests or makes their cases, and you find its answers under "Settled". A rule leaves a file's question open in two cases: a person took the rule's answer back or answered against it, or, under `standard` with "Create a case for each test", an agent reported the tests and its new cases wait for a person. See [policy](./policy.md#tests-with-no-case).
+An unlinked-test question asks how to keep a test that has no case.
+A project asks it when its policy says "Ask in the queue" for tests with no case.
+Otherwise a rule tracks the tests or makes their cases. Find its answers under "Settled".
+A rule leaves a file's question open if a person took back its answer or answered against it.
+Under `standard` with "Create a case for each test", an agent's reported tests also wait for a person to adopt their new cases.
+See [policy](./policy.md#tests-with-no-case).
 "Link to a case" makes future results count for the chosen case.
 "Create cases" creates one case per test and links each test to its case.
 It works where the policy adopts your new case by rule: under `loose`, and for a person
@@ -259,7 +281,7 @@ edit by the finder. That edit follows the normal adoption policy.
 
 These answers stay with the finding's recorded basis.
 They do not convert a review into a runtime pass or directly change a commit's gate.
-A review's completion record is separate: a new commit under the same pull request needs another review, even if the case text is unchanged.
+A review's completion record is separate. A new commit under the same pull request needs another review, even if the case text is unchanged.
 See [agents](./agents.md) for the distinction between reviews and test results.
 
 ## Close a completed run
@@ -303,7 +325,14 @@ Withdrawing an older decision does not undo standing work made by a newer decisi
 
 ## Create or link a tracker defect
 
-An operator can [configure GitHub Issues or Jira Cloud](./configuration.md#variables-the-server-reads) for a project and destination. When both trackers name the same Mainworthy project, Jira is used for new defects and for links, so a link then takes a Jira key; the existing holds of either tracker are still checked. Use `mainworthy tracker` or the API to create an issue from a failed or errored result. The request sends the failure message and detail, the recorded case version and its content when known, the tested target, and the reported build URL to that destination. Review what the report contains before sending it to a public repository or shared Jira project.
+An operator can [configure GitHub Issues or Jira Cloud](./configuration.md#variables-the-server-reads) for a project and destination.
+If both trackers name the same Mainworthy project, Mainworthy uses Jira for new defects and links.
+A link then takes a Jira key. Mainworthy still checks existing holds from either tracker.
+
+Use `mainworthy tracker` or the API to create an issue from a failed or errored result.
+The request sends the failure message and detail, the tested target, and the reported build URL to that destination.
+It also sends the recorded case version and its content when known.
+Review what the report contains before sending it to a public repository or shared Jira project.
 
 A test's `get` reply lists result ids in `last[].id`. A case's `timeline` reply also includes result ids, and a run slot lists them in `fills[].result`. For example, if the failed result is `123`:
 
@@ -312,30 +341,62 @@ mainworthy tracker --json '{"do":"create","result":123,"cmd":"defect-result-123"
 mainworthy tracker-status --id defect-result-123
 ```
 
-The request needs `produce`. Reading its status needs `read`. The server sends up to twenty queued requests once a minute. When stopping, it waits for the request already in flight and leaves queued requests for the next start. If saving that reply fails, the server logs the error once and finishes shutting down. A completed request returns an issue URL and the issue's state as the tracker reported it. To check an existing issue instead of creating one:
+The request needs `produce`. Reading its status needs `read`.
+The server sends up to twenty queued requests once a minute.
+When stopping, it waits for the request already in flight and leaves queued requests for the next start.
+If saving that reply fails, the server logs the error once and finishes shutting down.
+A completed request returns an issue URL and the issue's state as the tracker reported it.
+To check an existing issue instead of creating one:
 
 ```
 mainworthy tracker --json '{"do":"link","result":123,"key":"42","cmd":"link-result-123"}'
 mainworthy tracker-status --id link-result-123
 ```
 
-For GitHub, when only GitHub is configured for the project, the key is the issue number in the configured repository. Pull requests are refused. For Jira, use the issue key in the configured project, for example `QA-42`. Record the returned URL as the optional reference in a normal **Defect** answer. Creating or checking an issue does not answer the failure question. The answer still follows the project's policy.
+If only GitHub is configured for the project, use the issue number in the configured repository.
+Mainworthy refuses pull requests. For Jira, use the issue key in the configured project, for example `QA-42`.
+Record the returned URL as the optional reference in a **Defect in the product** answer.
+Creating or checking an issue does not answer the failure question. The answer still follows the project's policy.
 
-Reuse the same `cmd` when retrying a request after a lost reply. Its first receipt still says `queued`, so use `tracker-status` to read current delivery state. A failed request is not sent again automatically. After a timeout or a request left `sending` by a restart, check the tracker before creating another request: the issue may already exist. Link that issue if you find it.
+Reuse the same `cmd` when retrying a request after a lost reply.
+Its first receipt still says `queued`, so use `tracker-status` to read the current delivery state.
+The server does not retry a failed request automatically.
+After a timeout or a restart that leaves a request `sending`, check the tracker before creating another request.
+The issue may already exist. Link that issue if you find it.
 
-Delivery requests and their status stay on this instance and are left out of archives. Record the issue reference in a decision before archiving if you need to keep it. A restored archive keeps historical command receipts but has no corresponding tracker status and does not send those requests again. Requirement mirroring, Azure DevOps, and GitHub Enterprise remain planned.
+Delivery requests and their status stay on this instance. Archives leave them out.
+Record the issue reference in a decision before archiving if you need to keep it.
+A restored archive keeps historical command receipts but has no corresponding tracker status and does not send those requests again.
+Requirement mirroring, Azure DevOps, and GitHub Enterprise remain planned.
 
 ### End a defect hold when its issue closes
 
-A defect answer whose reference is an exact issue URL or tracker reference in the configured destination is checked automatically. GitHub uses `closed`. Jira uses status category `done`, regardless of the status's display name. The server records an ending decision with a reason naming the issue, removes the old excuse, and asks the failure again if it still appears. Closure does not count as a passing test. If the issue reopens, the old hold does not return.
+The server checks defect references that exactly match an issue URL or tracker reference in the configured destination.
+GitHub uses `closed`. Jira uses status category `done`, regardless of the status's display name.
+The server records an ending decision with a reason naming the issue and removes the old excuse.
+If the failure still appears, the server asks it again.
+Closure does not count as a passing test. If the issue reopens, the old hold does not return.
 
-Answering the reopened question as a defect again with the same closed issue ends the hold again at the next check. The server checks up to twenty due defect decisions each minute. After a failed read it keeps the hold and retries with increasing delays, up to an hour. The deadline survives a restart. A reference outside the configured destination, or a reference that is not the exact issue URL or tracker reference, is not polled. GitHub references look like `github:example/shop#42`. Jira references look like `jira:https://example.atlassian.net#QA-42`.
+Answering the reopened question as a defect with the same closed issue ends the hold again at the next check.
+The server checks up to twenty due defect decisions each minute.
+After a failed read, it keeps the hold and retries with increasing delays, up to an hour.
+The deadline survives a restart. The server does not poll references outside the configured destination or in another format.
+GitHub references look like `github:example/shop#42`. Jira references look like `jira:https://example.atlassian.net#QA-42`.
 
-An archive keeps the defect decision and its reference but leaves out polling state. After import, live defect holds are checked afresh if their destination is configured on that instance.
+An archive keeps the defect decision and its reference but leaves out polling state.
+After import, the server checks live defect holds afresh if their destination is configured on that instance.
 
-If a check fails, the defect decision in the queue and the failure's case history show when the tracker first became unreadable and a short reason. The same warning is in `decision.trackerError` in the question's `get` reply and the decided `inbox` reply. A successful read clears it. The server logs one warning per failing issue until a successful read clears the failure, including when several holds name that issue. Retries and restarts do not repeat the warning.
+If a check fails, the defect decision in the queue and the failure's case history show when the tracker first became unreadable.
+They also show a short reason. The question's `get` reply and the decided `inbox` reply carry the warning in `decision.trackerError`.
+A successful read clears it. The server logs one warning per failing issue until a successful read clears the failure.
+Several holds naming the same issue, retries, and restarts do not repeat the warning.
 
-For HTTP 401, ask the operator to renew the tracker token in the server configuration and restart the server. For HTTP 403 or 404, check the account's permissions and the issue key. If the issue moved to another key, withdraw the old defect answer and answer the failure again with the new key's canonical issue URL or tracker reference. If Jira returns status category `undefined`, set the issue's status category to `new`, `indeterminate`, or `done` in Jira. The hold stays until a successful check finds the referenced issue closed, or you withdraw or replace the answer.
+For HTTP 401, ask the operator to renew the tracker token in the server configuration and restart the server.
+For HTTP 403 or 404, check the account's permissions and the issue key.
+If the issue moved to another key, withdraw the old defect answer.
+Answer the failure again with the new key's canonical issue URL or tracker reference.
+If Jira returns status category `undefined`, set the issue's status category to `new`, `indeterminate`, or `done` in Jira.
+The hold stays until a successful check finds the referenced issue closed, or you withdraw or replace the answer.
 
 ## Check who may answer
 

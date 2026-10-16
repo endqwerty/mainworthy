@@ -31,17 +31,19 @@ stay in the ledger as outdated and failures are evaluated in the named scope.
 Every environment shares the same commit gate.
 
 The list says "Latest commit's verdict". The detail shows the gate's reason and
-nonzero counts, followed by "Open questions", "Settled and excused", "Results", "Impact",
-and "Uncovered files" when there are uncovered paths.
+nonzero counts, followed by "Open questions", "Settled and excused", and "Results".
+Once impact loads, "Impact" and "Uncovered files" show the related cases and paths,
+or say that there are none.
 Impact lists related cases and review information. It is not a code coverage measurement.
 
 ## Read the results behind the verdict
 
 "Results" lists every test the latest commit's gate counted, linked to a case or tracked
-without one, so the counts above are not taken on trust. Each row says how the gate
-counted the test, its name, file, job, attempt, duration and who reported it, and the
-failure message when it failed. A failure links to its question, and a row links to its
-case, to the CI build when the report named one, and to [the test's own page](./report-results.md#read-what-each-test-did).
+without one. Each row says how the gate counted the test and names who reported it.
+It also shows the file, job, duration, and failure message when present, and the attempt
+number after the first attempt. The test's name opens [its own page](./report-results.md#read-what-each-test-did).
+A row links to its case and failure question when available, and to the CI build
+when the report supplied an HTTP or HTTPS URL.
 
 | The row says | The gate counts it as | Why |
 | --- | --- | --- |
@@ -54,8 +56,8 @@ case, to the CI build when the report named one, and to [the test's own page](./
 
 Failures come first. Choose a count above the list, or one of the buttons over it, to show
 only the tests counted that way, and type in the filter to find a test by name or file.
-The rows add up to the counts: a test reported by two jobs is listed once for each, and a
-retried test is listed with the attempt the gate counts.
+The rows add up to the counts. Results from different producers, jobs, or environments
+have separate rows, even for the same test. A retried test shows the attempt the gate counts.
 
 The command line and the API give the same rows:
 
@@ -67,9 +69,9 @@ $ mainworthy find --in results --commit 1111111111111111111111111111111111111111
 `--state` takes the words in the second column. `--unlinked` keeps the tests with no
 case and `--text` filters by name or file. The reply's `tally` counts every row, whatever
 the filter. Pass the reply's `cursor`, with the same filter, to read the next page. A new
-result, a decision or a link to a case can move a row in the order or in and out of the
-filter, so a cursor given before any such change is refused with `conflict`: read again
-from the first page. The web UI then offers "Read the results again".
+result, decision, or case link can change which rows match or how the gate counts them.
+If the filtered list changes, the server refuses its earlier cursor with `conflict`.
+Read again from the first page. The web UI then offers "Read the results again".
 A planned run's results are its slots: `mainworthy find --in slots --run R-2`.
 
 The diagram follows the default policy, which requires counted evidence. A project can separately allow an explicit [CI declaration that no tests are required](./policy.md#reports-with-no-tests).
@@ -158,10 +160,9 @@ newest run in trunk, its unexplained failures raise trunk questions immediately,
 before another report arrives. An older gate can remain blocked without an open
 question. Planned runs that count the commit still ask about their unexplained failures.
 
-Migration 8 records scope moves locally. Archives keep the resulting target and run
-scopes but omit the move audit trail. That audit table does not change the archive schema.
-Slot-specific settlements and inherited result excuses require archive schema 17. To transfer older data, upgrade
-the source database and export it again as described in [data](./data.md).
+Archives keep the resulting target and run scopes but omit the history of scope moves.
+To transfer older data, upgrade the source database and export it again as described
+in [data](./data.md).
 
 A different merge or rebased hash leaves the original commit in its existing scope.
 Omitting `landing` ends the change and keeps its recorded head. You can supply the
@@ -178,7 +179,6 @@ as the head and places it on trunk.
 A change closed without merging continues to follow reports and code-host head
 observations. Explicitly reopening a merged change lets it follow reports again.
 A landed commit keeps its trunk scope.
-Migration 0009 stores head observations without changing archive schema 7.
 
 What stays as it was:
 
@@ -201,8 +201,8 @@ is asked about at once:
 $ mainworthy change --change pr:482 --state open
 ```
 
-A pipeline or a person says how a change ended. An agent's word about it is refused, as its
-word about where a commit belongs is. In Changes, an ended change is marked "merged" or
+A pipeline or a person says how a change ended. Mainworthy refuses an agent's report
+of a change ending or of a commit's scope. In Changes, an ended change is marked "merged" or
 "closed". See [report results](./report-results.md#say-when-a-pull-request-ends) for the
 workflow that sends this from GitHub Actions.
 

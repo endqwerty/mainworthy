@@ -1,12 +1,11 @@
 # <img src="src/web/icon.svg" alt="" width="32" height="32" align="top"> Mainworthy
 
-One place where manual, automated and agent testing land, and one queue of the decisions they leave for you.
-Then one answer for a change: is it worthy of `main`?
+Mainworthy keeps your test cases, the results from people, pipelines and agents, and one queue of questions
+about them. Its gate answers whether a change is worthy of `main`.
 
-A test case management system for software QA, built to fix what is annoying about TestRail, Qase, Jira
-(Xray, Zephyr) and Azure DevOps Test Plans. **Status: MVP (2026-10-12).** It runs, it is tested, and it is a
-preview: what is missing is listed in [decision 0012](docs/decisions/0012-mvp-scope-and-departures.md) and
-tracked in the GitHub milestones M1 to M7 and the separate `iOS app` milestone.
+Mainworthy is a test case management system for software QA. The MVP shipped on 2026-10-12 and remains a
+preview. [Decision 0012](docs/decisions/0012-mvp-scope-and-departures.md) records the MVP's scope. The GitHub
+milestones M1 to M7 and the separate `iOS app` milestone track the remaining work.
 [Issue #64](https://github.com/endqwerty/mainworthy/issues/64) keeps the current work order;
 [docs/roadmap.md](docs/roadmap.md) describes the phases and milestone goals.
 It was called Casebook until 2026-10-13 ([decision 0015](docs/decisions/0015-the-project-is-called-mainworthy.md)).
@@ -20,6 +19,8 @@ The other screens, in both themes, are in [docs/ui/screenshots](docs/ui/screensh
 
 ## Start (no account, no configuration)
 
+Install Bun 1.4 or newer, then run these commands from the source tree:
+
 ```
 $ bun install
 $ bun run start
@@ -27,18 +28,19 @@ Mainworthy 0.1.0 · local · data in ~/.mainworthy · http://127.0.0.1:7357
 project "scratch" · you are robin@this-machine · policy: loose
 ```
 
-Open the URL. On your own machine you are signed in as the owner with no step. To look around a filled
+Open the URL. Local mode signs you in as the owner. To look around a filled
 project first, `mainworthy seed demo` writes a shop's suite with two weeks of results and runs and a queue
 to work through.
 
-The documentation comes with the server, at `/docs` (http://127.0.0.1:7357/docs, or **Docs** at the bottom of the sidebar, which opens the page about the screen you are on):
-how it works, each workflow, what you can customize, and a reference of every key, command and operation. The
-sections below are the short version.
+The server includes the [documentation](http://127.0.0.1:7357/docs) at `/docs`. **Docs** at the bottom of the
+sidebar opens the page about your current screen. The guide covers workflows, settings, keys, commands and
+operations. The sections below are the short version.
 
 ## Write a case
 
 Press `c`. Type a title, Enter, then steps. ` > ` starts the expected result. Paste a list and it is split for
-you. There is no save button: your draft is kept as you type and becomes version 1 when you leave it.
+you. The app keeps your draft as you type. It becomes version 1 when you leave it, press `⌘ Enter`, or pause
+for 30 seconds.
 
 ```
 Checkout applies a percentage coupon #checkout
@@ -63,14 +65,21 @@ comes from the Git checkout; with neither, pass `--commit`. An error exits 4.
 ## Decide
 
 `g q` opens the queue. Each row is a question with its evidence, and each answer is one key with its
-consequence written beside it: `d` defect, `f` flaky, `i` infrastructure, `e` expected. Your answer is recorded
-with your name. `d` and `e` apply to later occurrences of the same cause until they are withdrawn or replaced,
-`f` for 14 days, and `i` excuses that build only. `u` undoes; both decisions stay in the ledger.
+consequence written beside it. For a failure, `d` means defect, `f` flaky, `i` infrastructure and `e` expected.
+Mainworthy records your answer with your name. `d` and `e` require a fix and apply to later occurrences of the
+same cause while their evidence still holds. By default, `f` excuses the cause for up to 14 days, and `i`
+excuses that build only. `u` withdraws an answer. Both decisions stay in the ledger.
+
+To answer several questions of one kind, select their boxes, then give one answer. Hold Shift to select a
+range, or press `*` to select all eligible rows of that kind in the loaded list, up to 500 questions.
 
 ## Run things by hand
 
 `g r`, `n`, pick cases by folder, tag or search. Then `p` pass, `f` fail, `b` blocked, `s` skip. Results from CI
 on the same commit fill the same run where the run allows it, so you only run what nothing else has shown.
+
+Open a change in **Changes** to see the results its gate counted. **Tests** (`g t`) lists automated tests,
+with or without a case, and each test's latest results.
 
 ## Let an agent in
 
@@ -92,12 +101,14 @@ $ mainworthy policy tests create   # a test with no case gets one: ask | track |
 $ mainworthy policy show           # the whole policy is one table
 ```
 
-A policy says who answers each kind of question. Under `loose`, the default, edits to cases take effect at once,
-a test needs no case, and a failure already present on the base is excused by rule while its evidence holds, and a person answers other failures and findings. Under `standard` an agent's edit waits
-for a person. Under `strict` a person, never an agent, answers each of those questions and gives a reason. What
-happens to a test with no case is a choice of its own: it is tracked without one, it gets a case made for it,
-or its file is a question in the queue. All three send a policy change to an admin and a conflicting edit back to
-its author. The web UI compares the three in Settings, under Policy and under Projects.
+A policy says who answers each kind of question. Under `loose`, the default, case edits take effect at once
+and a test needs no case. A rule excuses a failure already present on the base while its evidence holds.
+A person answers other failures and findings. Under `standard` an agent's edit waits for a person. Under
+`strict` a person approves case edits and answers failures and findings, with a reason.
+
+The policy also decides what happens to a test with no case. Mainworthy tracks it without one, creates a case
+for it, or raises a question for its file. All three presets send policy changes to an admin and conflicting
+edits back to their authors. The web UI compares the presets in Settings, under Policy and under Projects.
 
 ## Deploy (one container, one volume)
 
@@ -110,8 +121,10 @@ Coolify on a home server: [docs/deploy.md](docs/deploy.md).
 ## Leave whenever you like
 
 ```
-$ mainworthy export --out mainworthy.ndjson.gz     # every fact, decision and document, as text
+$ mainworthy export --out mainworthy.ndjson.gz     # cases, results and decisions, as text
 ```
+
+See [your data](docs/guide/data.md) for what an archive includes and leaves out.
 
 ## Develop
 

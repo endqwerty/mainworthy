@@ -1,6 +1,6 @@
 # Troubleshooting
 
-What the common messages mean and what to do about each. Find the message or the symptom you have, then follow the link for the background.
+Find your message or symptom, then follow the steps to resolve it. Each section links to more detail where needed.
 
 ## The gate
 
@@ -11,11 +11,13 @@ Evidence is missing. One of these is true:
 - Nothing has been reported for the commit yet. `mainworthy gate` prints `pending: nothing a gate counts has been reported for this commit`.
 - A report was just uploaded and is still being applied. Run `mainworthy gate --wait 60` to wait for it.
 - Only an agent reported the commit. An agent's report is shown and asked about, but it never gives a commit a gate.
-- A planned run has a slot nobody has filled, or a required job that has not reported.
+- A planned run has a slot nobody has filled, or a required job has not reported.
+- Every counted result was skipped or blocked, so no test proved anything. An empty report also stays pending unless the policy accepts an explicit declaration that no tests were required.
+- A decision's hold expired. The gate stays pending until the server reopens the question and computes the verdict again.
 
 ### The gate says `blocked`
 
-A failure has no explanation yet, or two results for the same thing disagree. Open the queue with <kbd>g</kbd> <kbd>q</kbd> and answer the question. The verdict is worked out again the moment you answer, without running the pipeline again. See [decide in the queue](./decide.md).
+A failure has no explanation yet, or two results for the same thing disagree. Open the queue with <kbd>g</kbd> <kbd>q</kbd> and answer the question. Mainworthy computes the verdict again the moment you answer, without another pipeline run. See [decide in the queue](./decide.md).
 
 ### The gate says `failed`
 
@@ -23,15 +25,17 @@ A decision said a failure is real: a defect, a wrong test, or behaviour that cha
 
 ### A test failed and no question appeared
 
-Someone already decided about that cause, and the decision still holds, so nobody is asked again. Look at the decided questions in the queue to find the decision and who made it. Withdraw it there if it no longer applies.
+A decision about that cause may still hold. Look at the decided questions in the queue to find who answered it, and withdraw the answer if it no longer applies.
+
+If the change has ended, Mainworthy records later reports without asking about their failures unless an open planned run needs an answer. Open the change in **Changes** to inspect the results its gate counted. See [report results](./report-results.md) and [changes and the gate](./changes.md).
 
 ### A result did not fill a slot in my planned run
 
-A result fills a slot only when three things are true. It is for that case at the pinned version. Its method is one the run asked for. And the method is admitted: a person or an agent must be among the methods the case declares, and an automated test must be linked to the case or name it. See [planned runs](./runs.md).
+Check that the result matches the run's accepted commit, build and environment, or names that run when it accepts only its own results. The result must identify the slot's case and meet its basis rule. Depending on the run, that means an exact version, an assumed version, or the same case content. Its method must be one the run accepts. The case must allow a person or an agent to exercise it, and an automated test must be linked to the case or name it. See [planned runs](./runs.md).
 
 ## Commands
 
-A command that could not run prints one line to standard error, the code and then the message, and exits with 4. The sections below are such messages. A command that ran and has bad news uses a code of its own: `mainworthy gate` exits 1, 2 or 3 for its verdicts, and `mainworthy check` and `mainworthy health` exit 1.
+A command that cannot run prints its error code and message to standard error and exits with 4. The sections below explain those messages. Commands that complete can use other exit codes for their results. `mainworthy gate` exits 1, 2 or 3 for a verdict that did not pass. `mainworthy check` and `mainworthy health` exit 1 when their checks fail.
 
 ### `connection: cannot connect to ...`
 
@@ -46,11 +50,13 @@ operation is sent after a failed health probe.
 
 ### `limited: too many failed attempts`
 
-Five wrong tokens came from your address, or five wrong tokens that begin as yours does, within 15 minutes. Wait the seconds the message names and try again with the right token. Each further wrong one doubles the wait, up to 15 minutes. If you share an address with whoever is guessing, a token the server generated still works. The owner token the server made from the value of `MAINWORTHY_OWNER_TOKEN` is one somebody chose, whatever it looks like, and waits with the rest.
+Within 15 minutes, the server received five wrong tokens from your address or five wrong tokens with the same prefix. Wait for the time the message names, then try the right token. Each further wrong attempt doubles the wait, up to 15 minutes.
 
-A person's sign-in gets this message too. Five wrong passwords for one name within 15 minutes block sign-in with a password for that name, from every address, and five from one address block that address. The right password waits like a wrong one, so wait and then type it once. If you have a passkey, it still signs you in. Somebody who keeps guessing at your name can keep it blocked. A passkey is the way round that. Mainworthy keeps no log of requests, so where the guesses come from is in the proxy's log, if anywhere.
+A valid token the server generated still works if you share an address with someone making wrong attempts. A token set through `MAINWORTHY_OWNER_TOKEN` counts as a chosen token and must wait, whatever it looks like.
 
-In the web UI the sign-in page, an invitation and "Your sign-in" in Settings say "Too many attempts. Try again in N seconds." under what you tried, and keep what you typed. What you typed is not sent again by itself: press the button after the wait.
+Password sign-in can return the same message. Five wrong passwords for one name within 15 minutes block sign-in with a password for that name, from every address, and five from one address block that address. The right password waits like a wrong one, so wait and then type it once. Someone who keeps trying wrong passwords for your name can keep password sign-in blocked. If you have a passkey, use it to sign in. Mainworthy keeps no log of requests, so where the guesses come from is in the proxy's log, if anywhere.
+
+In the web UI the sign-in page, an invitation and "Your sign-in" in Settings say "Too many attempts. Try again in N seconds." under what you tried, and keep what you typed. The page does not resend what you typed. Press the button after the wait.
 
 If everybody behind one proxy gets this message together, the server is counting the proxy as one address. Name the proxy with `MAINWORTHY_TRUSTED_PROXY` and `MAINWORTHY_CLIENT_ADDRESS_HEADER`: see [configuration](./configuration.md).
 
@@ -60,7 +66,7 @@ The server is in server mode, or the token is wrong or was revoked. Pass a token
 
 ### `forbidden: propose needs the produce capability on scratch`
 
-The token's actor holds a grant on that project and lacks the capability the message names. An admin can change the grant. A pipeline's token records results and reads the gate, and can be granted `read` besides. It can never edit a case, answer, plan or administer, whatever it is granted.
+The token identifies an actor with a grant on that project, but the grant lacks the named capability. An admin can change the grant. A pipeline's token records results and reads the gate, and can be granted `read` besides. It can never edit a case, answer, plan or administer, whatever it is granted.
 
 ### `not_found: no project named scratch, or no grant on it`
 
@@ -78,25 +84,25 @@ One report may be at most 64 MB. Split the results into several `mainworthy repo
 
 ### The page sends me back to sign in
 
-A browser's session ends after 14 days without use and after 90 days in any case, and when the token you signed in with is revoked or the password or passkey you signed in with is removed or replaced. Changing your password signs out your other browsers that used the old one. Sign in again, with your password, your passkey or a token that works. After an upgrade from a build in which the browser held the token itself, everyone signs in once more.
+By default, a browser's session ends after 14 days without use or 90 days in total. The operator can [change those lifetimes](./configuration.md). Revoking the token or removing the password or passkey used to sign in also ends its sessions. Changing your password signs out your other browsers that used the old one. Sign in again with a working password, passkey or token.
 
-Your session belongs to someone else now, usually because another tab signed in with a different token. Mainworthy refuses the request instead of recording your text under their name. Sign in again. Your drafts are kept per person and are still there.
+Another tab may have signed in as someone else. Mainworthy refuses requests from the earlier tab instead of recording your text under their name. Sign in again as yourself to recover your drafts.
 
 ### "This browser could not use a passkey here"
 
-A passkey belongs to one host name: the one in `MAINWORTHY_PUBLIC_URL`. The page was opened at another name of the same instance, such as an IP address, `127.0.0.1` in place of `localhost`, or a second name the proxy also answers at, and the browser refuses to make or use a passkey there. Open the instance at the address in that variable. If your browser has no passkeys at all, the page shows no passkey button. Sign in with your name and password, or a token.
+A passkey belongs to the host name in `MAINWORTHY_PUBLIC_URL`. If you open the instance at another address, the browser refuses to create or use a passkey there. For example, `127.0.0.1` in place of `localhost`, or another proxy host name, counts as a different address. Open the instance at the address in that variable. If your browser has no passkeys at all, the page shows no passkey button. Sign in with your name and password, or a token.
 
 "No passkey was used: the request was cancelled or ran out of time" means the browser's own dialog was closed or left open too long. Press the button again. "This passkey is already registered" means the device already holds one of your passkeys for this instance.
 
 ### "This invitation does not work any more"
 
-An invitation link works once and until the time it was made with, and a new invitation for the same person replaces the one before it. The page says the same for a link that was used, was revoked, has run out or was cut short when it was copied, and for all of them the way on is the same: ask whoever sent it for a new one. An admin makes it in Settings, People, or with `mainworthy invite new`.
+An invitation link works once, until its expiry time. A new invitation for the same person replaces the previous one. The page gives the same message for a used, revoked, expired or incomplete link. Ask whoever sent it for a new one. An admin makes it in Settings, People, or with `mainworthy invite new`.
 
 "This address holds no invitation" means the page was opened or reloaded without the part after the `#`. The page takes the code out of the address bar when it reads it. Open the link you were given again.
 
 ### I lost my password or my passkey
 
-With mail enabled, use **Forgot your password?** on the sign-in page and enter your verified email address. If no reset link arrives, check the address and ask for another. The reply never says whether the address belongs to an account. Reset retains an enrolled authenticator. Without mail, without a verified address, or after losing an authenticator too, ask the owner for a recovery link. An admin who is still signed in can make their own under Settings, People, **Recovery link**. See [people, agents and pipelines](./access.md#a-lost-password-or-passkey).
+With mail enabled, use **Forgot your password?** on the sign-in page and enter your verified email address. If no reset link arrives, check the address and ask for another. The reply never says whether the address belongs to an account. A password reset keeps the requirement to use an enrolled authenticator. Without mail, without a verified address, or after losing an authenticator too, ask the owner for a recovery link. An admin who is still signed in can make their own under Settings, People, **Recovery link**. See [people, agents and pipelines](./access.md#a-lost-password-or-passkey).
 
 ### The token is not accepted behind a proxy
 
@@ -108,7 +114,7 @@ In server mode the server prints a generated owner token on a start where the ow
 
 ### Revoke refuses the owner's token
 
-In server mode the last token the owner can sign in with is kept, whoever asks, because the owner is who repairs the instance. As the owner, make another token first with `mainworthy token new --human <owner>`, then revoke the old one.
+Server mode refuses to revoke the owner's last working token so the owner can still repair the instance. As the owner, make another token first with `mainworthy token new --human <owner>`, then revoke the old one.
 
 ## The web UI
 

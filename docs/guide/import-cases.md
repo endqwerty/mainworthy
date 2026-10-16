@@ -10,7 +10,7 @@ import dialog, and this operation is not an MCP tool.
 ## Preview the file
 
 Save the file as UTF-8 CSV with a header row. The file can contain up to 5,000
-cases and 8 MB. Each record is one case. Quoted cells can contain commas,
+cases and 8 MiB. Each record is one case. Quoted cells can contain commas,
 doubled quotes, and line breaks. A multiline steps cell becomes one action block.
 
 Every case needs a foreign id and a title. Map the destination names to your
@@ -25,8 +25,8 @@ mainworthy import-csv cases.csv --project checkout \
 
 The reply shows each record's alias, folder, mapped case body, and refusal reasons.
 `create` counts valid records and `refused` counts invalid records. A refused
-record has a null body. No cases, folders, proposals, or decisions are created
-by the preview. The request still advances the project sequence, and a supplied
+record has a null body. The preview creates no cases, folders, proposals, or decisions.
+The request still advances the project sequence, and a supplied
 `cmd` records its preview receipt like other write operations.
 
 Fix every refused record before importing. If any record is refused,
@@ -49,12 +49,14 @@ Use `fields` to map your project's custom field keys to source columns:
 Create the field definitions in **Settings**, **Fields** before importing.
 A missing definition, an invalid choice, or a missing required value refuses
 the record. The importer does not add definitions or invent priority values.
-Columns you do not map are ignored, including source history and dates.
+The importer ignores columns you do not map, including source history and dates.
 
 The execution values `manual` and `human` select the `human` method.
 `automated` and `auto` select `auto`. `to-be-automated` selects `human` with
-`wanted` intent. `not-applicable` selects `human` with `not-applicable` intent.
-An empty value selects `human` with no automation intent. Unknown values are refused.
+`wanted` intent. The value `wanted` has the same effect.
+`not-applicable` selects `human` with `not-applicable` intent.
+An empty value, `none`, or `is-not-automated` selects `human` with no automation intent.
+The importer refuses unknown values.
 
 ## Confirm the reviewed import
 
@@ -72,8 +74,8 @@ mapping, preset, or policy requires another preview. The server checks aliases
 and field values again inside the confirmed transaction.
 
 Confirmation proposes all cases together in one recorded write. The project's
-[policy](./policy.md) decides whether the proposal is adopted immediately or
-waits for acceptance in the queue. Check `proposal.status`, `proposal.question`,
+[policy](./policy.md) decides whether to adopt the proposal immediately or
+ask for acceptance in the queue. Check `proposal.status`, `proposal.question`,
 and `proposal.needs`. An open proposal has created no cases yet.
 
 A foreign id becomes a case alias, so `mainworthy get C1234` and tests annotated
@@ -107,8 +109,8 @@ when present. `Automation Type` takes precedence over `Type`. `Type` equal to
 such as priority. Without a custom mapping, priority and other extra columns
 are ignored.
 
-`Section Depth` reconstructs nested paths in source order. Parent sections must
-be represented. The export cannot name an empty parent that has no case row,
+`Section Depth` reconstructs nested paths in source order. Each parent section needs a row.
+The export cannot name an empty parent that has no case row,
 so inspect the preview's folder paths before confirming.
 
 This preset accepts one record per case. Separate-row steps are refused as

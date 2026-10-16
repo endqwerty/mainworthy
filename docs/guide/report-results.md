@@ -42,9 +42,9 @@ independently, so one upload can include different formats:
 $ mainworthy report playwright.json unit-results.json results.trx
 ```
 
-Use `--format junit|playwright|jest|vitest|pytest|trx` to select one format for
-every file in the command. The default is `--format auto`. Jest and Vitest use
-the same JSON structure. Detection reads the content; a `.trx` extension also
+Use `--format` with `junit`, `playwright`, `jest`, `vitest`, `pytest`, or `trx` to select
+one format for every file in the command. The default is `--format auto`. Jest and Vitest use
+the same JSON structure. Detection reads the content. A `.trx` extension also
 selects TRX, and a `.json` extension makes invalid JSON an input error.
 
 | Runner | Produce the report | Upload |
@@ -237,14 +237,15 @@ reports have named, the newest first, with its file and its case or "no case". T
 filter to find one by name or file, and check "Only tests with no case" to see the tests
 tracked without one. <kbd>j</kbd> and <kbd>k</kbd> move between tests.
 
-A test's page shows its file, its key and its case, how often it flipped between passing
-and failing on the same code, and its quarantine when one is in force. "Latest results"
-lists its last twenty results, newest first: the outcome, the commit and change it was
-reported for, the job, the attempt, how long it took, who reported it, and the failure
-message. "build" opens the CI build when the report named one.
+A test's page shows its file, key, and case. It also shows how often the test flipped
+between passing and failing on the same code, and any quarantine in force.
+"Latest results" lists its last twenty results, newest first. Each row shows the
+outcome, any commit and change reported with it, the job, duration, producer, and
+failure message when present. Attempts after the first show their number.
+"build" opens the CI build when the report supplied an HTTP or HTTPS URL.
 
 To see every result of one commit, open its change in [Changes](./changes.md#read-the-results-behind-the-verdict).
-From the command line, `mainworthy get T-12` prints the same page.
+From the command line, `mainworthy get T-12` prints the test's details as JSON.
 
 ## Read the result's basis
 
@@ -330,7 +331,7 @@ See [access](./access.md) for token scope and revocation.
 
 Set `MAINWORTHY_URL` to the server address, `MAINWORTHY_TOKEN` to this secret,
 and `MAINWORTHY_PROJECT` to the project key.
-The CLI can choose the project when the instance has only one project.
+The CLI can choose the project when the token can access exactly one project.
 
 ## Add GitHub Actions reporting
 
@@ -392,10 +393,10 @@ jobs:
 ```
 
 With `mainworthy` on the job's path, the step is `mainworthy change --change "pr:$PULL" --state "$STATE"`.
-For a merged change whose head reached trunk unchanged, use `change --json` with the
-same payload as the workflow. The workflow sends GitHub's merged hash and base branch;
-a matching head moves to trunk and its failures are evaluated there again. A different
-merge or rebased hash leaves the original head's scope alone.
+To include the landed commit, use `change --json` with the same payload as the workflow.
+The workflow sends GitHub's merged hash and base branch. Mainworthy sets that commit
+as the change's head and evaluates its failures on trunk. If the merge or rebase
+produced a different hash, the original commit keeps its scope.
 The call is answered `not_found` for a pull request that never sent a report.
 [Changes and the gate](./changes.md#when-a-change-ends) says what ending a change does.
 
@@ -456,9 +457,9 @@ line with its path and reason. An unavailable attachment directory skips the
 named files too. Skipped files consume no limit, and every parsed result still
 uploads. Links within the directory keep the name used in the report.
 The CLI receipt includes a skipped-attachments count, `skippedAttachments` in
-JSON. This count describes files skipped locally on this command; it is not
-part of the server's stored receipt. Embedded attachment bodies and native-report
-attachments are not read in this first version.
+JSON. This count describes files skipped locally on this command. It is not
+part of the server's stored receipt. The CLI does not read embedded attachment
+bodies from JUnit or attachments from native reports.
 
 A caller needs `record` to send attachments and `read` on the result's project to
 retrieve them. Only the original producer can append files through `attach`.
@@ -505,8 +506,8 @@ Choose one exit rule:
   normally. Earlier results stay excused.
 - One to 100 consecutive passing trunk commits whose first result for that test
   arrived after entry. Retrying a commit first reported before entry cannot count.
-  Every automated lane
-  seen for that test on a commit must pass. Retries count once per commit. Failures,
+  Every combination of producer, job, and environment reported for that test on
+  a commit must pass. Retries count once per commit. Failures,
   errors, skips and blocked results break the streak. Agent reports and change
   commits cannot satisfy it. After the streak succeeds, another failing commit
   does not restart quarantine, including a later failure on a commit in the
