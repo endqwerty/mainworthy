@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { GateStatus, InboxReply } from "../src/core/ops.ts";
-import { type Harness, harness } from "./helpers.ts";
+import { ciReport, type Harness, harness } from "./helpers.ts";
 
 // What a gate counted, test by test (issue #343): every row a commit's gate counts can be read back, and the
 // rows add up to the gate's tally.
@@ -184,6 +184,29 @@ describe("the results behind a gate", () => {
 		const again = results({ commit: COMMIT, limit: 500 });
 		expect(again.items.filter((row) => row.name === "cart adds")).toHaveLength(1);
 		expect(again.tally).toEqual(gate().tally);
+	});
+
+	test("a filtered cursor is refused once a row joins or leaves the filter (the verifier's finding)", () => {
+		const k = harness({ unlinked: "ask" });
+		try {
+			k.call("propose", { edits: [{ op: "create", outline: "A case" }] });
+			k.call("report", ciReport({ commit: "probe001", n: 3 }));
+			const q = k.call<InboxReply>("inbox", { kind: "map" }).items[0];
+			if (!q) throw new Error("no map question");
+			k.call("decide", { q: q.q, onEvidence: q.evidenceHash, answer: { is: "link", pairs: [["T-1", "C-1"]] } });
+			const read = (input: Record<string, unknown>) =>
+				k.call<Results>("find", { in: "results", commit: "probe001", unlinked: true, ...input });
+			const first = read({ limit: 1 });
+			expect(first.items.map((row) => row.test)).toEqual(["T-2"]);
+			// Undoing the link brings T-1 back into the filter, before the cursor.
+			k.call("decide", { undo: q.q });
+			expect(() => read({ limit: 500, cursor: first.cursor })).toThrow(/conflict: .*changed/);
+			// A cursor is for the query that gave it.
+			const fresh = read({ limit: 1 });
+			expect(() => read({ limit: 500, cursor: fresh.cursor, unlinked: false })).toThrow(/conflict/);
+		} finally {
+			k.close();
+		}
 	});
 
 	test("the list of tests finds a test by its file", () => {
