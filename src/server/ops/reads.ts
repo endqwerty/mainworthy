@@ -472,9 +472,10 @@ const isStanding = (text: string): text is CountedTest["standing"] => STANDINGS.
 
 /**
  * The tests a commit's gate counted, each as it counts it: one row per test and lane, so the rows add up to the
- * gate's tally. Ordered problems first, then by when the result arrived. A retry or a decision moves a row in that
- * order, so the cursor also names every row and how it counted: a page asked for after any of that changed is
- * refused, and the list is read again from the start, instead of skipping or repeating the row that moved.
+ * gate's tally. Ordered problems first, then by when the result arrived. A retry, a decision or a link moves a row
+ * in that order or in and out of a filter, so the cursor also carries a hash of the list it was taken from: a page
+ * asked for after that list changed is refused, and the list is read again from the start, instead of skipping or
+ * repeating the row that moved.
  */
 function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 	if (!input.commit && !input.change && !input.run) throw invalid("results need a commit, a change or a run");
@@ -502,7 +503,12 @@ function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 			return !text || `${test.name} ${test.key} ${test.file ?? ""}`.toLowerCase().includes(text);
 		})
 		.sort((a, b) => rank(a) - rank(b) || a.result - b.result);
-	const version = contentHash(counted.map((row) => [row.result, row.standing])).slice(0, 12);
+	// The list this query gives, and the query: a row that joins or leaves it, moves in it or changes how it counts
+	// makes a different version, and so does the same cursor sent with another filter.
+	const version = contentHash({
+		query: { state: wanted ?? null, unlinked: input.unlinked ?? false, text: text ?? null },
+		rows: matching.map((row) => [row.result, row.standing]),
+	}).slice(0, 12);
 	const after = input.cursor ? parseResultCursor(input.cursor) : null;
 	if (after && after.version !== version)
 		throw conflict("the results changed since this cursor was given: read them again from the first page");

@@ -18,10 +18,11 @@ and `find --in results` lists them. A second classifier in the read would drift 
 **One read in the registry.** `find --in results` takes a commit, a change (its head) or a commit's run, filters by
 standing (`state`), by `unlinked` and by `text`, and pages. Its reply carries the whole tally beside the page, so a
 client shows counts and rows from one reply. A planned run is refused with a pointer to its slots, which already
-list its results. Rows are ordered problems first and then by result. A retry or a decision moves a row in that
-order, so the cursor also carries a hash of every row and how it counted, and a page asked for after any such
-change is refused with `conflict`: the reader starts again rather than miss or repeat the row that moved (the
-verifier's finding of 2026-10-15). An order by test alone would not move, but it would scatter the failures
+list its results. Rows are ordered problems first and then by result. A retry, a decision or a link moves a row
+in that order or in and out of a filter, so the cursor also carries a hash of the query and of the list it gave,
+and a page asked for after that list changed is refused with `conflict`: the reader starts again rather than miss
+or repeat the row that moved (the verifier's findings of 2026-10-15; hashing every counted row missed a link
+undone under `unlinked`). An order by test alone would not move, but it would scatter the failures
 among thousands of passes.
 
 **A row says why it counts as it does.** An excused or attributed failure names the question its decision answered;
