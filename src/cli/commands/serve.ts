@@ -35,9 +35,11 @@ export function serveCommand(args: Args, ui: unknown): void {
 	for (const text of instance.warnings) warning(`mainworthy: ${text}`);
 	// The demo is seeded again after the server listens, so a start is not held up by it (`src/cli/demo.ts`).
 	const demo = process.env.MAINWORTHY_DEMO || undefined;
+	const refreshController = new AbortController();
+	let refreshing: Promise<void> = Promise.resolve();
 	if (demo) {
 		const began = performance.now();
-		void refreshDemo(instance, demo).then(
+		refreshing = refreshDemo(instance, demo, undefined, { signal: refreshController.signal }).then(
 			(seeded) =>
 				line(
 					`demo "${demo}" seeded again in ${((performance.now() - began) / 1000).toFixed(1)} s: ${seeded.cases.length} cases, ${seeded.questions.length} questions`,
@@ -52,15 +54,18 @@ export function serveCommand(args: Args, ui: unknown): void {
 	const stop = (): void => {
 		if (stopping) return;
 		stopping = true;
+		refreshController.abort(new Error("server stopping"));
 		// The process ends here and not when its event loop empties: under `bun --watch` (`bun run dev`) the file
 		// watcher keeps the loop alive for good, and a server that had stopped would sit there ignoring the signal.
-		void instance.stop().then(
-			() => process.exit(0),
-			(error: unknown) => {
-				printError(error);
-				process.exit(4);
-			},
-		);
+		void refreshing
+			.then(() => instance.stop())
+			.then(
+				() => process.exit(0),
+				(error: unknown) => {
+					printError(error);
+					process.exit(4);
+				},
+			);
 	};
 	process.once("SIGINT", stop);
 	process.once("SIGTERM", stop);

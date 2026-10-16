@@ -15,6 +15,11 @@ Add migration 24 with plain leading-column indexes for every foreign key into a 
 The schema audit includes self references and columns whose existing partial indexes serve some queries.
 The migration changes indexes only, so `archive` is false.
 
+The 34 indexes cost storage and maintenance on writes. In the reviewer's two-demo fixture with about
+195,000 results, they added 15.0 MB, about 25% of the compacted database. That is a fixture measurement,
+not a prediction for every instance. Keep the quarantine history query's commit-target lookup first with
+`CROSS JOIN`, so the new test index cannot make each result scan all earlier results of that test.
+
 Run provenance checks and the reset on a dedicated worker connection while the parent holds its write gate.
 Keep removal, recreation, the demo mark, and retained grants in one transaction, using `savepointSteps` to
 pause before recreation. Only a marked demo or a legacy demo whose seed command was its first write may be
@@ -22,11 +27,16 @@ emptied, as in decision 0020. A failed or interrupted transaction preserves the 
 commit, an interrupted start leaves the empty marked demo and its grants for the next seed.
 
 Reads use separate connections and see the old committed state until commit. Health checks keep answering.
-Other writes wait at the gate, then run between the seed's ordinary API requests. Seed preflight still happens
+Administration lists and sign-in wait too, because they write. Other writes wait at the gate, then run between
+the seed's ordinary API requests. The worker receives the server's configuration, including its admin MFA
+requirement, so restoring grants applies the same session rules. Seed preflight still happens
 before anything is removed. Revoke its token before reset, and make a separate fifteen-minute seed token
-after reset, revoked when seeding ends. Reset cannot consume that token's lifetime.
+after reset, revoked when seeding ends. Reset cannot consume that token's lifetime. On a graceful stop, skip
+making the seed token if reset is still running, and wait for refresh cleanup before closing the database.
 
-Stop a reset worker after ten minutes. Log the elapsed time for provenance, grants, table discovery, every
+After ten minutes, request that the reset worker stop. It can stop only between SQLite statements. A running
+statement must return before the worker stops, its transaction rolls back, and waiting writes proceed.
+Log the elapsed time for provenance, grants, table discovery, every
 count and delete, the foreign-key check, recreation, the whole reset transaction, and seeding. No credential
 or row contents enter those logs. Include the worker in both executable builds and licence discovery.
 

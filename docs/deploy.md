@@ -236,12 +236,15 @@ The project `demo` on this instance is seeded again on every start (`MAINWORTHY_
 `demo "demo" seeded again in <n> s: 2000 cases, 65 questions`, or a line that says why it was not. What anyone
 changed in `demo` is gone after the next deploy; keep work in another project.
 
-The reset holds the write gate on a worker thread. `/healthz` and reads keep answering, with reads seeing the
+The reset holds the write gate on a worker thread. `/healthz` and ordinary reads keep answering, with reads seeing the
 old committed demo until the reset commits. Removal, recreation, the demo mark, and retained grants share one
 transaction. A stop before commit preserves the old demo and grants; a stop afterwards leaves the empty demo
-and grants for the next start to fill. Writes wait for that transaction, then proceed alongside the seed's API
-requests. The reset worker has a ten-minute limit. The seed gets a fresh fifteen-minute token after removal,
-which is revoked when it ends.
+and grants for the next start to fill. Writes, including administration lists and sign-in, wait for that
+transaction, then proceed alongside the seed's API requests. After ten minutes the reset requests its worker
+to stop. It stops only between SQLite statements: a running statement must finish before rollback releases
+waiting writes. The seed gets a fresh fifteen-minute token after removal, which is revoked when seeding ends.
+A graceful stop during reset skips that token. If seeding has begun, the stop waits for its token cleanup
+before closing the database.
 
 Step timings go to stderr, for example `[mainworthy] demo "demo": delete results took 12.3 ms`. The log names
 the provenance check, grant capture, table discovery, every table count and delete, foreign-key check,

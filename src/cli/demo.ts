@@ -4,13 +4,14 @@ import { Worker } from "node:worker_threads";
 import { z } from "zod";
 import { Capability, type Role } from "../core/kinds.ts";
 import { createToken, manageTeams, orgId, revokeToken, setGrant } from "../server/identity/identity.ts";
-import type { App } from "../server/kernel/app.ts";
+import type { App, Config } from "../server/kernel/app.ts";
 import { type Actor, demoSince, findProject, markDemo } from "../server/kernel/ctx.ts";
 import { actorsWithGrants, createProject } from "../server/ops/admin.ts";
 import type { Instance } from "../server/start.ts";
 import { firstWrite, removeProject } from "../server/transfer/transfer.ts";
 import { Client } from "./client.ts";
 import { CliError } from "./errors.ts";
+import { warning } from "./output.ts";
 import { DEFAULT_SEED_CASES, DEMO_ACTORS, refuseProducers, type SeedResult, seed } from "./seed.ts";
 
 const Projects = z.array(z.object({ key: z.string() }));
@@ -23,6 +24,14 @@ type Grant = { holder: "actor" | "team"; name: string; can: readonly string[]; r
 
 /** How long the token the demo is seeded with works, at most. It is revoked when the seed ends. */
 const LASTS_MS = 15 * 60_000;
+
+export type DemoResetData = {
+	config: Config;
+	owner: string;
+	project: string;
+	legacySeq: number | null;
+	clockOffset: number;
+};
 
 /**
  * Empties `project` and seeds the demo there again, as the owner, through the instance's own HTTP surface. Only a
@@ -38,13 +47,14 @@ export async function refreshDemo(
 	instance: Instance,
 	project: string,
 	size: { cases: number; unlinkedFiles: number; days?: number } = { cases: DEFAULT_SEED_CASES, unlinkedFiles: 60 },
-	options: { step?: (name: string) => Promise<void> } = {},
+	options: { step?: (name: string) => Promise<void>; signal?: AbortSignal } = {},
 ): Promise<SeedResult> {
 	const { app, owner } = instance;
 	const token = (label: string) =>
 		app.gate.run(() =>
-			app.db.transaction(() =>
-				createToken(app, {
+			app.db.transaction(() => {
+				options.signal?.throwIfAborted();
+				return createToken(app, {
 					actor: owner.name,
 					kind: "human",
 					can: [],
@@ -52,8 +62,8 @@ export async function refreshDemo(
 					label,
 					lastsMs: LASTS_MS,
 					madeBy: owner.id,
-				}),
-			),
+				});
+			}),
 		);
 	const revoke = (id: number) => app.gate.run(() => revokeToken(app, id));
 	const preflight = await token(`demo preflight of ${project}`);
@@ -72,7 +82,11 @@ export async function refreshDemo(
 		await revoke(preflight.id);
 		logStep(project, "preflight", performance.now() - began);
 	}
-	if (exists) await app.gate.run(() => resetInWorker(instance, project, legacySeq, options));
+	if (exists)
+		await app.gate.run(() => {
+			options.signal?.throwIfAborted();
+			return resetInWorker(instance, project, legacySeq, options);
+		});
 	// Emptying can take longer than a token's lifetime. Make the seed's token only once it has ended.
 	const seeding = await token(`demo seed of ${project}`);
 	const since = performance.now();
@@ -91,7 +105,7 @@ const DemoMessage = z.discriminatedUnion("kind", [
 ]);
 
 function logStep(project: string, step: string, ms: number): void {
-	console.error(`[mainworthy] demo ${JSON.stringify(project)}: ${step} took ${ms.toFixed(1)} ms`);
+	warning(`[mainworthy] demo ${JSON.stringify(project)}: ${step} took ${ms.toFixed(1)} ms`);
 }
 
 async function resetInWorker(
@@ -104,12 +118,13 @@ async function resetInWorker(
 		new URL(Bun.isStandaloneExecutable ? "./cli/demo-worker.js" : "./demo-worker.ts", import.meta.url),
 		{
 			workerData: {
-				dataDir: instance.app.config.dataDir,
+				// The proxy matcher is a function used only by HTTP requests; it cannot cross a worker channel.
+				config: { ...instance.app.config, proxy: null },
 				owner: instance.owner.name,
 				project,
 				legacySeq,
 				clockOffset: instance.app.now() - Date.now(),
-			},
+			} satisfies DemoResetData,
 			name: "mainworthy-demo-reset",
 		},
 	);

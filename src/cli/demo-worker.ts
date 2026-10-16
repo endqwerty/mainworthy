@@ -1,21 +1,12 @@
 import { parentPort, workerData } from "node:worker_threads";
-import { z } from "zod";
 import { actorByName } from "../server/identity/identity.ts";
-import { defaultConfig, openApp } from "../server/kernel/app.ts";
-import { resetDemoSteps } from "./demo.ts";
+import { openApp } from "../server/kernel/app.ts";
+import { type DemoResetData, resetDemoSteps } from "./demo.ts";
 
-const data = z
-	.object({
-		dataDir: z.string(),
-		owner: z.string(),
-		project: z.string(),
-		legacySeq: z.number().nullable(),
-		clockOffset: z.number(),
-	})
-	.parse(workerData);
+const data: DemoResetData = workerData;
 if (!parentPort) throw new Error("a demo reset needs its parent thread");
 const port = parentPort;
-const app = openApp(defaultConfig({ MAINWORTHY_DATA: data.dataDir }), {
+const app = openApp(data.config, {
 	now: () => Date.now() + data.clockOffset,
 });
 try {
