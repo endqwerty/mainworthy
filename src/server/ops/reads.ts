@@ -23,7 +23,7 @@ import {
 	TimelineInput,
 } from "../../core/ops.ts";
 import { REPLIES } from "../../core/replies.ts";
-import { emptyTally } from "../../core/runs.ts";
+import { emptyTally, isResultStanding, RESULT_STANDINGS } from "../../core/runs.ts";
 import { openFailureQuestion, toItem, toItemFor } from "../decisions/decisions.ts";
 import {
 	decisionById,
@@ -459,17 +459,6 @@ type Found = {
 	tally?: Record<string, number>;
 };
 
-/** How a gate counts a result, problems first: the order `find --in results` lists them in. */
-const STANDINGS: readonly CountedTest["standing"][] = [
-	"unexplained",
-	"attributed",
-	"excused",
-	"missing",
-	"skipped",
-	"pass",
-];
-const isStanding = (text: string): text is CountedTest["standing"] => STANDINGS.some((standing) => standing === text);
-
 /**
  * The tests a commit's gate counted, each as it counts it: one row per test and lane, so the rows add up to the
  * gate's tally. Ordered problems first, then by when the result arrived. A retry, a decision or a link moves a row
@@ -480,8 +469,8 @@ const isStanding = (text: string): text is CountedTest["standing"] => STANDINGS.
 function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 	if (!input.commit && !input.change && !input.run) throw invalid("results need a commit, a change or a run");
 	const wanted = input.state;
-	if (wanted !== undefined && !isStanding(wanted))
-		throw invalid(`"${wanted}" is not how a gate counts a result: use one of ${STANDINGS.join(", ")}`);
+	if (wanted !== undefined && !isResultStanding(wanted))
+		throw invalid(`"${wanted}" is not how a gate counts a result: use one of ${RESULT_STANDINGS.join(", ")}`);
 	const run = gateRun(ctx, input);
 	if (run?.origin === "planned")
 		throw invalid(
@@ -491,7 +480,7 @@ function countedResults(ctx: Ctx, input: FindInput, limit: number): Found {
 	const tally: Record<string, number> = { ...emptyTally() };
 	for (const row of counted) tally[row.standing] = (tally[row.standing] ?? 0) + 1;
 
-	const rank = (row: CountedTest): number => STANDINGS.indexOf(row.standing);
+	const rank = (row: CountedTest): number => RESULT_STANDINGS.indexOf(row.standing);
 	const text = input.text?.toLowerCase();
 	const matching = counted
 		.filter((row) => {

@@ -2,13 +2,18 @@
 // reply and one copy of the queue's words:
 //
 // - `Wire.swift`: a type for each shape of `contract.ts`.
-// - `Vocabulary.swift`: the label and the consequence of every answer, from `src/core/kinds.ts`.
+// - `Vocabulary.swift`: the label and the consequence of every answer, from `src/core/kinds.ts`; how a gate counts
+//   a result and the ways a case is run, with their labels, and how many answers one request carries, from
+//   `src/core/runs.ts`, `src/core/model.ts` and `src/core/ops.ts`.
 // - `Parity.swift`: what the functions of `src/core` that the app wrote again in Swift return, for a list of
 //   inputs. The app's tests hold its own functions to it, so a sentence changed here fails there.
 //
 // `bun scripts/ios.ts gen` writes the files; `test/ios-contract.test.ts` fails when one is not what this prints.
 import { execFileSync } from "node:child_process";
 import { ANSWER_HELP, ANSWER_LABELS, KINDS } from "../../src/core/kinds.ts";
+import { METHOD_LABELS, MethodKind } from "../../src/core/model.ts";
+import { DECIDE_MAX } from "../../src/core/ops.ts";
+import { RESULT_STANDING_LABELS, RESULT_STANDINGS } from "../../src/core/runs.ts";
 import { stakes, waitingPhrase } from "../../src/core/stakes.ts";
 import { SHAPES } from "./contract.ts";
 import type { Struct } from "./shape.ts";
@@ -35,6 +40,9 @@ const name = (key: string): string => {
 	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error(`${key}: not a name Swift can give a field`);
 	return RESERVED.has(key) ? `\`${key}\`` : key;
 };
+
+/** A case of a Swift enum, for a word of the server that is a name Swift can give one. */
+const swiftCase = (word: string): string => name(word);
 
 /** A comment, wrapped at the width the repository's other files keep. */
 function comment(text: string, indent: string): string {
@@ -129,8 +137,23 @@ export function vocabulary(): string {
 		]),
 		"\t\t",
 	);
+	/** A Swift enum whose cases are these words, in this order, each with its label. */
+	const words = (name: string, doc: string, entries: readonly (readonly [string, string])[]): string[] => [
+		...comment(doc, "").trimEnd().split("\n"),
+		`public enum ${name}: String, CaseIterable, Sendable {`,
+		...entries.map(([word]) => `\tcase ${name === "" ? word : swiftCase(word)}`),
+		"",
+		"\t/// What every client calls it.",
+		"\tpublic var label: String {",
+		"\t\tswitch self {",
+		...entries.map(([word, label]) => `\t\tcase .${swiftCase(word)}: ${literal(label)}`),
+		"\t\t}",
+		"\t}",
+		"}",
+		"",
+	];
 	return [
-		HEADER("src/core/kinds.ts"),
+		HEADER("src/core/kinds.ts, src/core/runs.ts, src/core/model.ts and src/core/ops.ts"),
 		"/// The words of the queue: what each answer is called and what it does, as every other client says them.",
 		"enum Vocabulary {",
 		"\t/// The name of each answer, by the word the server knows it by.",
@@ -140,6 +163,19 @@ export function vocabulary(): string {
 		`\tstatic let answerHelp: [String: [String: String]] = [\n${help}\t]`,
 		"}",
 		"",
+		"/// How many answers one `decide` request carries: the most one saved answer, and so one selection, holds.",
+		`package let decideMax = ${DECIDE_MAX}`,
+		"",
+		...words(
+			"ResultStanding",
+			"How a commit's gate counts one result, problems first: the order `find --in results` lists them in.",
+			RESULT_STANDINGS.map((standing) => [standing, RESULT_STANDING_LABELS[standing]] as const),
+		),
+		...words(
+			"CaseMethod",
+			"A way a case is run: by a person, by a pipeline's automated test, or by an agent.",
+			MethodKind.options.map((method) => [method, METHOD_LABELS[method]] as const),
+		),
 	].join("\n");
 }
 

@@ -39,7 +39,7 @@ struct TestsListView: View {
 			} else if screen.loading == .done, screen.tests.isEmpty {
 				ContentUnavailableView(
 					"No tests", systemImage: "gearshape.2",
-					description: Text(screen.text.isEmpty && !screen.unlinked
+					description: Text(!screen.isFiltered
 						? "A pipeline's report adds the tests it ran."
 						: "No test matches.")
 				)
@@ -52,7 +52,7 @@ struct TestsListView: View {
 		.task(id: screen.text) {
 			guard screen.loading != .first else { return }
 			do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-			await screen.read()
+			await screen.search()
 		}
 		.refreshable { await screen.read() }
 	}
@@ -100,7 +100,7 @@ struct TestView: View {
 				ContentUnavailableView {
 					Label("The test could not be read", systemImage: "exclamationmark.triangle")
 				} description: { Text(why) } actions: {
-					Button("Try again") { Task { await screen.open(ref) } }
+					Button("Try again") { Task { await screen.readDetail(ref) } }
 				}
 			case .reading, nil: ProgressView()
 			}
@@ -115,6 +115,7 @@ struct TestView: View {
 			}
 		}
 		.task(id: ref) { await screen.open(ref) }
+		.onDisappear { screen.close(ref) }
 	}
 
 	private func page(_ test: TestDetail) -> some View {
@@ -162,7 +163,7 @@ struct TestView: View {
 			.padding(16)
 		}
 		.background(Color(.systemGroupedBackground))
-		.refreshable { await screen.open(ref) }
+		.refreshable { await screen.readDetail(ref) }
 	}
 }
 

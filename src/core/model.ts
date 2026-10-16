@@ -4,6 +4,8 @@ import { z } from "zod";
 
 export const MethodKind = z.enum(["human", "auto", "agent"]);
 export type MethodKind = z.infer<typeof MethodKind>;
+/** What each way of running a case is called, in every client. */
+export const METHOD_LABELS: Record<MethodKind, string> = { human: "Person", auto: "Pipeline", agent: "Agent" };
 
 /** A step id is short, unique within its case and never reused, so results, diffs and findings can anchor to it. */
 export const StepId = z.string().regex(/^[a-z0-9]{2,8}$/);

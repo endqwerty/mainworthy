@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { z } from "zod";
 import { ANSWER_LABELS } from "../../core/kinds.ts";
-import { Verdict } from "../../core/runs.ts";
+import { RESULT_STANDING_LABELS, type ResultStanding, Verdict } from "../../core/runs.ts";
 import { useQueryOp } from "../lib/data.ts";
 import { useBindings } from "../lib/keys.ts";
 import { navigate, refUrl, routeUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { age, EmptyState, ListRow, ProducerGlyph, SectionHeading } from "../ui/index.tsx";
-import { ChangeResults, STANDING_LABELS, type Standing, standingOf } from "./results.tsx";
+import { ChangeResults, standingOf } from "./results.tsx";
 import "./changes.css";
 
 const Change = z.object({
@@ -42,7 +42,7 @@ export function ChangesScreen() {
 function ChangesWorkbench() {
 	const { project, route, overlayOpen } = useApp();
 	const [cursor, setCursor] = useState<string | null>(null);
-	const [standing, setStanding] = useState<Standing | null>(null);
+	const [standing, setStanding] = useState<ResultStanding | null>(null);
 	const read = useQueryOp({ project, op: "find", input: { in: "changes", limit: 100 } });
 	const parsed = Change.array().safeParse(read.data?.items);
 	const changes = parsed.success ? parsed.data : [];
@@ -160,7 +160,7 @@ function ChangesWorkbench() {
 														document.getElementById("change-results")?.scrollIntoView({ block: "start" });
 													}}
 												>
-													{count} {STANDING_LABELS[shows]}
+													{count} {RESULT_STANDING_LABELS[shows]}
 												</button>
 											) : (
 												<span key={label}>

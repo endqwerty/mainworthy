@@ -23,10 +23,10 @@ struct ResultsScreensTests {
 		#expect(results.rows.map(\.name) == ["Shop check 1"] && results.total == 5)
 		await results.show(nil)
 		results.text = "shipping"
-		await results.read()
+		await results.search()
 		#expect(results.rows.map(\.caseRef) == [nil])
 		results.text = ""
-		await results.read()
+		await results.search()
 		let failure = try #require(screen.detail?.questions.first { $0.kind == .failure })
 		_ = try await client.answer(failure, with: try #require(failure.choices.first { $0.answer == "flaky" }))
 		await screen.refresh()
@@ -133,7 +133,7 @@ struct ResultsScreensTests {
 		await screen.open("T-999")
 		#expect(screen.detail("T-999") == .missing)
 		screen.text = "check"
-		await screen.read()
+		await screen.search()
 		#expect(screen.tests.isEmpty, "only tests with no case are shown, and none of them is a check")
 		await screen.showUnlinked(false)
 		#expect(screen.tests.count == 4)

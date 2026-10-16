@@ -1,26 +1,15 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useDeferredValue, useState } from "react";
 import { z } from "zod";
+import { isResultStanding, RESULT_STANDING_LABELS, RESULT_STANDINGS, type ResultStanding } from "../../core/runs.ts";
 import { call } from "../lib/api.ts";
 import { queryKey } from "../lib/data.ts";
 import { navigate, refUrl } from "../lib/router.ts";
 import { useApp } from "../ui/context.tsx";
 import { EmptyState, SectionHeading } from "../ui/index.tsx";
 
-/** How the gate counts a result, problems first: the order the server lists them in. */
-export const STANDINGS = ["unexplained", "attributed", "excused", "missing", "skipped", "pass"] as const;
-export type Standing = (typeof STANDINGS)[number];
-export const STANDING_LABELS: Record<Standing, string> = {
-	unexplained: "unexplained",
-	attributed: "needs a fix",
-	excused: "excused",
-	missing: "could not run",
-	skipped: "skipped",
-	pass: "passed",
-};
-const isStanding = (key: string): key is Standing => STANDINGS.some((standing) => standing === key);
 /** The tally key a gate counts a result under, when it is one a result can have. */
-export const standingOf = (key: string): Standing | null => (isStanding(key) ? key : null);
+export const standingOf = (key: string): ResultStanding | null => (isResultStanding(key) ? key : null);
 
 export const Counted = z.object({
 	result: z.number(),
@@ -29,7 +18,7 @@ export const Counted = z.object({
 	file: z.string().nullable(),
 	case: z.string().nullable(),
 	outcome: z.string(),
-	standing: z.enum(STANDINGS),
+	standing: z.enum(RESULT_STANDINGS),
 	quarantined: z.boolean(),
 	question: z.string().nullable(),
 	attempt: z.number(),
@@ -57,8 +46,8 @@ export function ChangeResults({
 	choose,
 }: {
 	change: string;
-	standing: Standing | null;
-	choose: (standing: Standing | null) => void;
+	standing: ResultStanding | null;
+	choose: (standing: ResultStanding | null) => void;
 }) {
 	const { project } = useApp();
 	const [typed, setTyped] = useState("");
@@ -92,7 +81,7 @@ export function ChangeResults({
 				<button type="button" aria-pressed={standing === null} onClick={() => choose(null)}>
 					All {total}
 				</button>
-				{STANDINGS.filter((key) => (tally[key] ?? 0) > 0).map((key) => (
+				{RESULT_STANDINGS.filter((key) => (tally[key] ?? 0) > 0).map((key) => (
 					<button
 						type="button"
 						key={key}
@@ -100,7 +89,7 @@ export function ChangeResults({
 						className={`s-${key}`}
 						onClick={() => choose(standing === key ? null : key)}
 					>
-						{tally[key]} {STANDING_LABELS[key]}
+						{tally[key]} {RESULT_STANDING_LABELS[key]}
 					</button>
 				))}
 			</fieldset>
@@ -159,7 +148,7 @@ function ResultRow({ row, project }: { row: Counted; project: string }) {
 	return (
 		<li className={`change-result s-${row.standing}`}>
 			<span className="result-standing">
-				{row.quarantined ? "quarantined" : STANDING_LABELS[row.standing]}
+				{row.quarantined ? "quarantined" : RESULT_STANDING_LABELS[row.standing]}
 				{row.outcome === "error" && " (error)"}
 			</span>
 			<span className="result-body">

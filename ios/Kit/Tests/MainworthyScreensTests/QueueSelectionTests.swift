@@ -53,7 +53,7 @@ struct QueueSelectionTests {
 		#expect(screen.selected == unlinked.map(\.ref))
 		// Linking needs a case for each test, on the question's own page.
 		#expect(screen.sharedChoices.map(\.answer).sorted() == ["create", "track"])
-		#expect(QueueScreen.tests(in: screen.selection) == 4)
+		#expect(QueueScreen.casesCreated(by: screen.selection) == 4)
 		screen.toggle(unlinked[1])
 		#expect(screen.selected.count == 3 && !screen.selected.contains(unlinked[1].ref))
 		// Another filter or the decided list is another selection.
@@ -64,7 +64,7 @@ struct QueueSelectionTests {
 		#expect(screen.selected.isEmpty && !screen.isSelecting)
 	}
 
-	@Test("one answer decides each selected question on its own, and Undo withdraws them together")
+	@Test("one answer to a selection is one saved command and one request, each question decided on its own")
 	func answerAndUndo() async throws {
 		let transport = SwitchableQueueTransport()
 		let screen = try await screen(try await project(), transport: transport)
@@ -75,15 +75,18 @@ struct QueueSelectionTests {
 		transport.commands.withLock { $0 = [] }
 		#expect(await screen.answerAll(screen.selection, with: track))
 		let sent = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
-		// Each on its own evidence, with its own command, refused if somebody decided it meanwhile.
-		#expect(sent.map { $0["q"]?.string } == unlinked.prefix(3).map(\.ref))
-		#expect(sent.map { $0["onEvidence"]?.string } == unlinked.prefix(3).map { Optional($0.evidenceHash) })
-		#expect(Set(sent.compactMap { $0["cmd"]?.string }).count == 3 && sent.allSatisfy { $0["ifOpen"] == true })
+		// One request under one command, each question on its own evidence, refused if somebody decided it meanwhile.
+		#expect(sent.count == 1 && sent[0]["cmd"]?.string == screen.outbox.entries.last?.id)
+		let carried = decisions(try #require(sent.first))
+		#expect(carried.map { $0["q"]?.string } == unlinked.prefix(3).map(\.ref))
+		#expect(carried.map { $0["onEvidence"]?.string } == unlinked.prefix(3).map { Optional($0.evidenceHash) })
+		#expect(carried.allSatisfy { $0["ifOpen"] == true })
 		#expect(screen.notice?.text == "3 unlinked: Track without a case." && screen.notice?.isProblem == false)
 		#expect(screen.notice?.undoesAll.map(\.ref) == unlinked.prefix(3).map(\.ref))
 		#expect(screen.selected.isEmpty && screen.isSelecting)
 		#expect(screen.questions.filter { $0.kind == .map }.map(\.ref) == [unlinked[3].ref])
-		#expect(screen.outbox.entries.suffix(3).map(\.status) == ["Recorded", "Recorded", "Recorded"])
+		#expect(screen.outbox.entries.count == 1 && screen.outbox.entries.last?.status == "Recorded")
+		#expect(screen.outbox.entries.last?.questions == unlinked.prefix(3).map(\.ref))
 		#expect(await screen.withdrawAll(try #require(screen.notice?.undoesAll)))
 		#expect(screen.notice?.text == "3 decisions are withdrawn.")
 		#expect(screen.questions.filter { $0.kind == .map }.count == 4)
@@ -105,6 +108,8 @@ struct QueueSelectionTests {
 		let text = try #require(screen.notice?.text)
 		#expect(text.hasPrefix("1 unlinked: Track without a case. Not recorded, read it again: \(first.ref): "))
 		#expect(screen.notice?.isProblem == true && screen.notice?.undoesAll.map(\.ref) == [unlinked[1].ref])
+		let entry = try #require(screen.outbox.entries.last)
+		#expect(entry.status == "Recorded 1 of 2" && entry.detail.hasPrefix("\(first.ref): Overtaken."))
 	}
 
 	@Test("an answer goes on the evidence shown when it was chosen, never on evidence read behind its dialog")
@@ -131,7 +136,7 @@ struct QueueSelectionTests {
 		transport.commands.withLock { $0 = [] }
 		#expect(await screen.answerAll(chosen, with: create) == false)
 		let sent = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
-		#expect(sent.map { $0["onEvidence"]?.string } == [shipping.evidenceHash])
+		#expect(sent.flatMap(decisions).map { $0["onEvidence"]?.string } == [shipping.evidenceHash])
 		#expect(screen.notice?.isProblem == true && screen.notice?.text.contains("Not recorded, read it again: \(shipping.ref)") == true)
 		let unseen: JSONValue = try await owner.read("find", in: key, ["in": "tests", "text": "A test nobody saw"])
 		#expect(unseen["items"]?.array?.first?["case"] == .null)
@@ -147,15 +152,63 @@ struct QueueSelectionTests {
 		screen.toggle(unlinked[1])
 		let track = try #require(screen.sharedChoices.first { $0.answer == "track" })
 		transport.offline.withLock { $0 = true }
+		transport.commands.withLock { $0 = [] }
 		#expect(await screen.answerAll(screen.selection, with: track) == false)
-		#expect(screen.notice?.text.hasPrefix("2 saved on this device, waiting to send.") == true)
+		#expect(screen.notice?.text == "2 unlinked: saved on this device, waiting to send. Open Unsent answers to see the outcome.")
 		#expect(screen.notice?.undoesAll.isEmpty == true && screen.outbox.pendingCount == 2)
+		// Every attempt was of the one saved command: a selection is not sent again for each of its questions.
+		let attempts = try transport.commands.withLock { try $0.map { try JSONDecoder().decode(JSONValue.self, from: $0) } }
+		#expect(!attempts.isEmpty && Set(attempts.compactMap { $0["cmd"]?.string }) == [screen.outbox.entries[0].id])
 		// A question with an answer waiting cannot be selected again.
 		screen.toggle(unlinked[0])
 		#expect(screen.selected.isEmpty && screen.notice?.text == "\(unlinked[0].ref) has an answer waiting to send.")
 		transport.offline.withLock { $0 = false }
 		await screen.refresh()
 		#expect(screen.outbox.pendingCount == 0 && screen.questions.filter { $0.kind == .map }.count == 2)
+	}
+
+	@Test("Create cases says how many cases it makes: every test of each file, not the fifty a question names")
+	func casesCreated() async throws {
+		let key = try await project()
+		let owner = Live.server()
+		_ = try await owner.signIn(Live.owner)
+		let _: JSONValue = try await owner.write("report", in: key, [
+			"target": ["commit": .string(String(repeating: "6", count: 40)), "repo": "acme/shop", "branch": "main"],
+			"job": "many",
+			"results": .array((1...60).map { number in
+				["test": ["key": .string("tests/many.spec.ts::case-\(number)"), "name": .string("Many \(number)"),
+					"file": "tests/many.spec.ts"], "outcome": "pass"]
+			}),
+		])
+		let screen = try await screen(key)
+		let many = try #require(screen.questions.first { $0.title.contains("tests/many.spec.ts") })
+		let search = try #require(screen.questions.first { $0.title.contains("tests/search.spec.ts") })
+		guard case .unlinked(let tests) = many.evidence else {
+			Issue.record("not an unlinked question")
+			return
+		}
+		#expect(tests.tests.count == 50 && tests.count == 60)
+		screen.select(true)
+		screen.toggle(many)
+		screen.toggle(search)
+		#expect(QueueScreen.casesCreated(by: screen.selection) == 61)
+		let create = try #require(screen.sharedChoices.first { $0.answer == "create" })
+		#expect(await screen.answerAll(screen.selection, with: create))
+		let made: JSONValue = try await owner.read("find", in: key, ["in": "tests", "unlinked": true, "limit": 100])
+		#expect(made["items"]?.array?.contains { $0["file"]?.string == "tests/many.spec.ts" } == false)
+		let cases: JSONValue = try await owner.read("find", in: key, ["in": "cases", "text": "Many", "limit": 100])
+		#expect(cases["items"]?.array?.count == 60)
+	}
+
+	@Test("a selection holds what one request carries, and an answer to more is not prepared")
+	func limit() async throws {
+		let screen = try await screen(try await project())
+		#expect(QueueScreen.selectionLimit == 500)
+		let question = try #require(screen.questions.first { $0.kind == .map })
+		let track = try #require(question.choices.first { $0.answer == "track" })
+		let project = try await Live.signedIn().project(try await Live.project())
+		#expect(project.prepareAnswer([question, question], with: track) == nil, "a question twice is not one answer")
+		#expect(project.prepareAnswer([], with: track) == nil)
 	}
 
 	@Test("a reason the policy asks for is asked before anything is sent")

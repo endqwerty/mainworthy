@@ -61,6 +61,23 @@ export const Tally = z.object({
 });
 export type Tally = z.infer<typeof Tally>;
 
+/**
+ * How a gate counts one result, problems first: the order `find --in results` lists them in. `disputed` is a
+ * count of the tally and not a standing of a result. Every client says them with these labels.
+ */
+export const RESULT_STANDINGS = ["unexplained", "attributed", "excused", "missing", "skipped", "pass"] as const;
+export type ResultStanding = (typeof RESULT_STANDINGS)[number];
+export const RESULT_STANDING_LABELS: Record<ResultStanding, string> = {
+	unexplained: "unexplained",
+	attributed: "needs a fix",
+	excused: "excused",
+	missing: "could not run",
+	skipped: "skipped",
+	pass: "passed",
+};
+export const isResultStanding = (text: string): text is ResultStanding =>
+	RESULT_STANDINGS.some((standing) => standing === text);
+
 export const emptyTally = (): Tally => ({
 	pass: 0,
 	excused: 0,
