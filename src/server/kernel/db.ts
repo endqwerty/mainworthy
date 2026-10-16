@@ -234,6 +234,36 @@ export class Db {
 		for (let step = steps.next(); ; step = steps.next()) if (step.done) return step.value;
 	}
 
+	/**
+	 * Checks a bulk replacement's foreign keys before commit. Only an outer transaction may turn off
+	 * per-row enforcement; nested calls preserve their caller's settings. Rollback and cancellation restore it.
+	 */
+	*checkedBulkSteps<T>(fn: () => Generator<undefined, T, void>): Generator<undefined, T, void> {
+		const raw = this.raw;
+		const disable =
+			!raw.inTransaction && raw.query<{ foreign_keys: number }, []>("PRAGMA foreign_keys").get()?.foreign_keys === 1;
+		if (disable) raw.exec("PRAGMA foreign_keys = OFF");
+		try {
+			return yield* this.savepointSteps(function* () {
+				const result = yield* fn();
+				const foreign = raw.query<{ table: string; parent: string }, []>("PRAGMA foreign_key_check").get();
+				if (foreign)
+					throw new Error(`bulk write foreign key violation in ${foreign.table}, referencing ${foreign.parent}`);
+				return result;
+			});
+		} finally {
+			if (disable) raw.exec("PRAGMA foreign_keys = ON");
+		}
+	}
+
+	checkedBulk<T>(fn: () => T): T {
+		// biome-ignore lint/correctness/useYield: synchronous callers drain the same checked transaction.
+		const steps = this.checkedBulkSteps(function* () {
+			return fn();
+		});
+		for (let step = steps.next(); ; step = steps.next()) if (step.done) return step.value;
+	}
+
 	/** Runs `fn` against one consistent snapshot, so a read that spans several statements never sees half a write. */
 	snapshot<T>(fn: () => T): T {
 		if (this.depth > 0) return fn();

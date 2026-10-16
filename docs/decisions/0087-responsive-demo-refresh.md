@@ -47,3 +47,87 @@ Yielding between row or table slices on the HTTP thread keeps a transaction atom
 SQLite statement, ownership scan, or foreign-key check can still prevent HTTP from answering. A worker
 isolates that cost even when an index is lost again. Committing table deletions separately would expose a
 partly removed project and require a durable recovery state. The existing transaction avoids that state.
+
+## Amendment, 2026-10-16: removal does not charge each report for its indexes
+
+[Issue #346](https://github.com/endqwerty/mainworthy/issues/346) began with three duplicate indexes.
+Dropping only those indexes still made ingestion slower than before migration 24. Instead, keep the worker
+and the atomic reset, but disable per-row foreign-key enforcement on its connection before the transaction.
+Delete rows selected through a parent before that parent, then order children before parents within each
+ownership group. Self references and cycles need the final check. `PRAGMA foreign_key_check` must find no
+violation before commit, including after recreation and grant restoration. Any violation refuses and rolls
+back the whole transaction.
+
+`Db.checkedBulkSteps` owns that transaction and restores enforcement on success, failure, or cancellation.
+The worker uses it through `resetDemoSteps`. Its synchronous form, `checkedBulk`, also backs the transfer
+module's import transaction, so standalone removal and archive import use the same rule. A nested call
+keeps its caller's enforcement and deferral settings; it cannot turn enforcement off inside a transaction.
+The existing deferred-constraint checks still apply to such callers. The only production caller of
+`removeProject` is the demo reset. There is no admin project removal operation. Archive import calls
+`importArchive` and `removeBootstrap`, not `removeProject`.
+
+Migration 25 drops 30 migration-24 indexes. Every one of the 353 declared statements was inspected with
+`EXPLAIN QUERY PLAN`, with enforcement enabled and the same null bindings on each side. Only six plans
+change, each replacing a duplicate index with the existing non-null partial index. No search becomes a scan.
+Keep the six indexes ordinary queries use: `deployments_build_fk`, `excuses_decision_fk`,
+`excuses_signature_fk`, `run_tests_target_fk`, `runs_change_fk`, and `slot_results_discounted_by_fk`.
+The dropped duplicates are `results_corrects_fk`, `results_quarantine_exit_fk`, and `result_excuses_slot_fk`.
+Their existing partial indexes cover equality lookups. The index test now checks those search plans and
+refuses remaining removal indexes that no declared statement uses. Migration 25 changes indexes only,
+so its `archive` flag is false and the archive version stays 23.
+
+### Measurements
+
+Bun 1.4.3 on the same ten-core Mac, without a concurrent test worker. For ingestion, every run executes the
+unchanged `test/budgets.test.ts` from the same working directory, so baseline and candidate databases are
+on the same SSD. `4afbb283` is the baseline before migration 24. There are five alternating pairs per
+comparison. Each run warms up five reports and measures five more, each containing 5,000 results. Its
+existing receipt, persisted-row, and gate checks pass, with zero measured or warmup errors. Values below
+are the median and range of the five per-run p50 values, in milliseconds. Separate comparisons have their
+own baselines because the machine's timing varies.
+
+| Comparison | Version | Median p50 | Range |
+| --- | --- | ---: | ---: |
+| Duplicate-only | `4afbb283` | 166.44 | 160.44 to 171.93 |
+| Duplicate-only | Migration 24 with just the three duplicates dropped | 179.75 | 176.28 to 182.35 |
+| Chosen change | `4afbb283` | 171.30 | 169.77 to 179.57 |
+| Chosen change | Migration 25 and checked bulk transactions | 170.92 | 168.28 to 185.06 |
+
+The duplicate-only candidate has a 13.31 ms median gap, larger than its baseline's 11.49 ms spread.
+The chosen change differs by 0.38 ms, within its baseline's 9.80 ms spread. Ingestion is back within
+measurement variation. The duplicate-only experiment changes only the indexes, which isolates index
+maintenance during report writes as the cost being removed; it does not change report processing.
+A separate, unreported ingest profile samples `sqlite3_step`, `sqlite3BtreeInsert`, and `sqlite3BtreeIndexMoveto`
+on the reporting thread. These calls maintain result indexes during `report`; profiling is excluded from the
+paired timings. The remaining report processing is unchanged, so removing these indexes cannot double ingestion speed.
+
+Removal uses the existing two-project fixture, with independent results and excuses in the retained
+project. All variants use the same disk and connection settings. Five runs alternate the four variants,
+first at 20,000 results per project, then through the unchanged 5,000-result budget test. The timer includes
+removal's transaction, counts, deletions, and final key check; fixture creation and correctness assertions
+are outside it. Each run verifies the removed result count, retained results and excuses, zero foreign-key
+violations, and restored enforcement.
+
+| Version | 20,000 results, median and range in ms | 5,000 results, median and range in ms |
+| --- | ---: | ---: |
+| `4afbb283`, before migration 24 | 5,144.22, 5,135.65 to 5,279.47 | 340.1, 335.4 to 343.6 |
+| Current migration 24 | 71.43, 70.28 to 77.60 | 55.8, 51.4 to 64.8 |
+| Only the three duplicates dropped | 67.38, 61.44 to 80.91 | 53.2, 39.2 to 62.4 |
+| Chosen change | 39.31, 36.10 to 42.99 | 11.5, 11.4 to 12.2 |
+
+The old baseline fails the existing 250 ms removal budget on all five runs. Every other variant passes;
+no budget changes. These are synthetic local fixtures, not a measurement of production's database.
+The worker and the read connections remain separate, so removing the indexes does not move reset work
+onto the HTTP thread.
+
+### Alternatives
+
+Dropping only the duplicates is smaller but does not meet the ingestion goal. Keeping every child index
+retains write and storage costs for a rare whole-project reset. A new public project-removal operation or
+committed deletion stages would add scope or expose a partly removed project. Keep one checked bulk
+transaction in the kernel so callers do not coordinate enforcement, rollback, and the final check themselves.
+Archive import already deletes children before parents and validates its full result; it shares this
+transaction rather than keeping removal-only indexes for import.
+
+A graceful stop during seeding waits for the seed to finish and then revokes its token. During reset it
+still skips making that seed token. Both the deployment notes and the user guide now say this.

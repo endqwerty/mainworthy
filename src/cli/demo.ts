@@ -163,7 +163,7 @@ export function resetDemoSteps(
 	legacySeq: number | null,
 	progress: (step: string, ms: number) => void,
 ): Generator<undefined, void, void> {
-	return app.db.savepointSteps(function* () {
+	return app.db.checkedBulkSteps(function* () {
 		const began = performance.now();
 		const found = findProject(app.db, project);
 		const marked = found !== null && demoSince(app.db, found.id) !== null;

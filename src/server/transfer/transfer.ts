@@ -402,7 +402,7 @@ function importTransaction<T>(db: Db, fn: () => T): T {
 		);
 	}
 	try {
-		return db.savepoint(fn);
+		return db.checkedBulk(fn);
 	} finally {
 		// Restore only after a failing savepoint has rolled back its pending references.
 		if (db.raw.inTransaction) {
@@ -632,10 +632,30 @@ export function removeProject(
 				const columns = Column.array()
 					.parse(db.raw.query(`PRAGMA table_info(${identifier(name)})`).all())
 					.map((column) => column.name);
-				return { name, rows: `FROM ${identifier(name)} ${ownedBy({ name, columns }, id, "removing a project")}` };
+				const parents = ForeignKey.array()
+					.parse(db.raw.query(`PRAGMA foreign_key_list(${identifier(name)})`).all())
+					.map((key) => key.table);
+				return {
+					name,
+					parents,
+					parentOwned: name in PROJECT_PARENT,
+					rows: `FROM ${identifier(name)} ${ownedBy({ name, columns }, id, "removing a project")}`,
+				};
 			})
 			// A table that finds its rows through a parent goes first, while the parent's rows are still there.
-			.sort((a, b) => Number(!(a.name in PROJECT_PARENT)) - Number(!(b.name in PROJECT_PARENT)));
+			.sort((a, b) => Number(!a.parentOwned) - Number(!b.parentOwned));
+		const remaining = new Map(statements.map((statement) => [statement.name, statement]));
+		const ordered: typeof statements = [];
+		const visit = (statement: (typeof statements)[number]): void => {
+			if (!remaining.delete(statement.name)) return;
+			for (const child of remaining.values()) {
+				// Ownership filters still need their parents. Within each group, children precede parents;
+				// self references and cycles are covered by the final foreign-key check.
+				if (child.parentOwned === statement.parentOwned && child.parents.includes(statement.name)) visit(child);
+			}
+			ordered.push(statement);
+		};
+		for (const statement of statements) visit(statement);
 		progress("discover tables", performance.now() - began);
 		// Counted before any row goes: a delete can take rows of another table with it (ON DELETE CASCADE).
 		const tables = Object.fromEntries(
@@ -647,7 +667,7 @@ export function removeProject(
 			}),
 		);
 		db.raw.exec("PRAGMA defer_foreign_keys = ON");
-		for (const { name, rows } of statements) {
+		for (const { name, rows } of ordered) {
 			const start = performance.now();
 			db.raw.exec(`DELETE ${rows}`);
 			progress(`delete ${name}`, performance.now() - start);
