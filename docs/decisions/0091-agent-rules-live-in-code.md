@@ -29,15 +29,16 @@ shell recipes. History goes in `CHANGELOG.md` and here.
 | "read back `closingIssuesReferences`"; "the closed #88" linked an issue nobody meant (pull request #172) | `pr-body`, run by the `description` job of `check.yml` | a closing word outside a line of its own, links GitHub made that the description did not, a milestone that is not the issue's. Pull request #327 had one: "Fixes #42" in a sentence closed issue 42 |
 | "ask for base and head alternately, twice each, and judge the spread"; "a rebase that leaves the tree needs no round" | `check-time <base> <head>` | the same tree needs no timing; a difference inside the spread between runs of one revision is not slower |
 | `git fetch && git reset --hard origin/main && git push --force-with-lease` after a merge | `sync-branch` | a branch with a commit that is not on `origin/main` is refused and keeps it |
-| `rm -rf node_modules ...` in `t3.json`, and two children that released the worktree under a builder that was still running (2026-10-12) | `release` | it refuses while a server or a test run works from the checkout |
+| `rm -rf node_modules ...` in `t3.json`, and two children that released the worktree under a builder that was still running (2026-10-12) | `release` | it refuses while a server, a test run or another bun or node process works from the checkout |
 | "one agent at a time runs the whole suite" | `bun run check` says when another run is going | `wait-tests` |
 | no tailnet name in a public repository | `test/architecture.test.ts`, "a public repository" | a file with a tailnet name other than `example.ts.net` fails |
 
 Also moved: how to land a stack, to `docs/landing-a-stack.md`; the CI jobs, the check's timing history
 and the dated state of the project, to `.github/workflows/check.yml`, `scripts/check-plan.ts`, `CHANGELOG.md` and the
-decisions that already held them; wording a verifier's brief, a child's findings file, a worker that ends with
-"Selected model is at capacity", a child leaving the worktree release to its parent, and scratch made with
-`mktemp -d`, to the owner's global agent rules.
+decisions that already held them. The rules for delegating (wording a verifier's brief, a child's findings file, a
+worker that ends with "Selected model is at capacity", a child leaving the worktree release to its parent, scratch
+made with `mktemp -d`) are not about this repository, and went to the owner's global agent rules in a change of the
+same day.
 
 ## What stays open
 

@@ -788,6 +788,9 @@ describe("the codes of a refusal", () => {
 	});
 });
 
+/** Files a machine makes and nobody commits; `.env.example` is committed and is read. */
+export const LOCAL = /^(\.env(?!\.example$)|bench\/results-.*\.json$|\.[0-9a-f]+-[0-9a-f]+\.bun-build$)/;
+
 /**
  * Every text file of the checkout, tracked or not: scratch left in the tree is read too. Bun writes an executable it
  * is building to `.<hash>-<number>.bun-build` in the directory it was started in, and removes it. `test/headers.test.ts`
@@ -797,13 +800,12 @@ describe("the codes of a refusal", () => {
 function wholeTree(): string[] {
 	const outside = new Set([".git", "node_modules", "dist", ".mainworthy", ".casebook", "test-results"]);
 	const binary = /\.(png|jpe?g|gif|ico|gz|db|db-wal|db-shm)$/;
-	const local = /^(\.env|bench\/results-.*\.json$|\.[0-9a-f]+-[0-9a-f]+\.bun-build$)/;
 	return readdirSync(".", { withFileTypes: true })
 		.filter((entry) => !outside.has(entry.name))
 		.flatMap((entry) =>
 			entry.isDirectory() ? [...new Glob(`${entry.name}/**/*`).scanSync({ cwd: ".", dot: true })] : [entry.name],
 		)
-		.filter((file) => !binary.test(file) && !local.test(file));
+		.filter((file) => !binary.test(file) && !LOCAL.test(file));
 }
 
 /** The tailnet names in `text` that are not under `example.ts.net`, the one name this repository may carry. */
@@ -845,6 +847,7 @@ describe("a public repository", () => {
 	test("no file names a tailnet: the owner's real one is written example.ts.net", () => {
 		// The repository has been public since 2026-10-13 (the owner); commits before that day still carry the
 		// real name, and the history was not rewritten.
+		expect([".env", ".env.local", ".env.example"].map((name) => LOCAL.test(name))).toEqual([true, true, false]);
 		expect(foreignTailnetNames("https://mainworthy.example.ts.net and example.ts.net")).toEqual([]);
 		// Built in two parts: this file is read by the check it runs.
 		const foreign = `casebook.tail1a2b3.${"ts"}.net`;

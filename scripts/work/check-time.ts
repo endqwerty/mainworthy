@@ -66,6 +66,11 @@ async function timeOne(rev: string, options: Options, log: (line: string) => voi
 		if (options.install) await read(["bun", "install", "--frozen-lockfile"], { cwd: tree });
 		log(`running ${options.command.join(" ")} on ${rev}`);
 		const done = await run(options.command, { cwd: tree });
+		// The check itself fails on a time over its limit and still prints the time; any other failure is no timing.
+		if (done.status !== 0 && !done.out.includes("OVER BUDGET"))
+			throw new Error(
+				`${rev}: ${options.command.join(" ")} failed (exit ${done.status}):\n${(done.out + done.err).slice(-600)}`,
+			);
 		const seconds = checkSeconds(done.out);
 		if (seconds === null)
 			throw new Error(`${rev}: the check printed no time (exit ${done.status}):\n${(done.out + done.err).slice(-600)}`);
@@ -81,6 +86,8 @@ export async function compare(
 	options: Options,
 	log: (line: string) => void,
 ): Promise<string> {
+	if (!Number.isInteger(options.rounds) || options.rounds < 1)
+		throw new Error("--rounds is a whole number of at least 1");
 	if (await sameTree(base, head, options.repo))
 		return `${base} and ${head} have the same tree: nothing to time, and a verdict on one holds for the other.`;
 	if (await (options.busy ?? otherTestRuns)())
