@@ -13,7 +13,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 /** The file `make` leaves in a directory; `remove` deletes only a directory that has it. */
 export const MARKER = ".mw-scratch";
@@ -40,7 +40,9 @@ const hasOwnMarker = (real: string): boolean => {
 };
 
 /** Why `directory` may not be deleted, or null when it may. */
-export function refusal(directory: string, root = defaultRoot()): string | null {
+export function refusal(given: string, root = defaultRoot()): string | null {
+	// `alias/` and `alias/.` name a link's target as far as the file system is concerned; `resolve` drops both.
+	const directory = resolve(given);
 	if (/[*?[\]{}]/.test(directory)) return `${directory} is a pattern; give the one directory \`scratch new\` printed`;
 	if (!existsSync(directory)) return `${directory} is not there`;
 	if (lstatSync(directory).isSymbolicLink()) return `${directory} is a link; give the directory itself`;
@@ -52,10 +54,10 @@ export function refusal(directory: string, root = defaultRoot()): string | null 
 }
 
 /** Deletes a directory `make` made, and nothing else. */
-export function remove(directory: string, root = defaultRoot()): string {
-	const why = refusal(directory, root);
+export function remove(given: string, root = defaultRoot()): string {
+	const why = refusal(given, root);
 	if (why !== null) throw new Error(why);
-	const real = realpathSync(directory);
+	const real = realpathSync(resolve(given));
 	rmSync(real, { recursive: true });
 	return real;
 }

@@ -17,7 +17,10 @@ const PART_OF = /^Part of #(\d+)$/gim;
  * taken for code (in a list it is not): a closing word there is read, and the way out is to write it differently.
  */
 const prose = (body: string): string =>
-	body.replace(/^ {0,3}(`{3,}|~{3,}).*?^ {0,3}\1[`~]*[ \t]*$/gms, "").replace(/`[^`\n]*`/g, "");
+	body
+		// A fence the description ends inside runs to the end of it.
+		.replace(/^ {0,3}(`{3,}|~{3,}).*?(?:^ {0,3}\1[`~]*[ \t]*$|(?![\s\S]))/gms, "")
+		.replace(/`[^`\n]*`/g, "");
 
 /** The issue numbers a line of their own closes, and the closing words that are anywhere else. */
 export function closing(body: string): { closes: number[]; stray: string[] } {
