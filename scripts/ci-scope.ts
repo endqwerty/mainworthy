@@ -97,8 +97,11 @@ export const NAMED: Paths = {
 	],
 };
 
-/** The tests that read every file of the tree: one looks for the former name, one for the owner's. */
-export const TREE = ["test/architecture.test.ts", "test/licences.test.ts"];
+/**
+ * The tests that read every file of the tree, or every entry at its top: one looks for the former name, one for the
+ * owner's, and one gives each top-level entry its jobs (a new file there fails it until it is placed).
+ */
+export const TREE = ["test/architecture.test.ts", "test/ci-scope.test.ts", "test/licences.test.ts"];
 
 export type Job = "static" | "image" | "ios";
 export type Plan = {
