@@ -44,6 +44,15 @@ public enum Kind: Hashable, Sendable {
 		}
 	}
 
+	/// How many, in words: "1 failure", "3 failures", "2 unlinked".
+	public func counted(_ count: Int) -> String {
+		guard count != 1 else { return "1 \(name)" }
+		return switch self {
+		case .map: "\(count) unlinked"
+		default: "\(count) \(plural.lowercased())"
+		}
+	}
+
 	/// What the queue calls several, for a filter.
 	public var plural: String {
 		switch self {

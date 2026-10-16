@@ -3,7 +3,7 @@ import MainworthyScreens
 import SwiftUI
 
 /// The queue: what waits for an answer, or what was decided. A question is answered from its own page, where
-/// its evidence is, and never from this list: nobody decides what they have not opened.
+/// its evidence is, or with others of its kind after Select (decision 0088).
 struct QueueView: View {
 	let screen: QueueScreen
 	let workspace: Workspace
@@ -24,6 +24,13 @@ struct QueueView: View {
 						}
 						.accessibilityIdentifier("unsent-answers")
 					}
+					if screen.showing == .open, workspace.project?.may(.produce) == true {
+						ToolbarItem(placement: .topBarTrailing) {
+							Button(screen.isSelecting ? "Done" : "Select") { screen.select(!screen.isSelecting) }
+								.fontWeight(screen.isSelecting ? .semibold : .regular)
+								.accessibilityIdentifier("queue-select")
+						}
+					}
 					ToolbarItem(placement: .principal) {
 						Picker("Show", selection: showing) {
 							Text("Open").tag(QueueScreen.Showing.open)
@@ -36,7 +43,12 @@ struct QueueView: View {
 				.navigationDestination(for: String.self) { ref in
 					QuestionView(ref: ref, screen: screen, workspace: workspace) { path.removeAll() }
 				}
-				.safeAreaInset(edge: .bottom) { NoticeBar(screen: screen) }
+				.safeAreaInset(edge: .bottom) {
+					VStack(spacing: 0) {
+						NoticeBar(screen: screen)
+						if screen.isSelecting { SelectionBar(screen: screen) }
+					}
+				}
 		}
 		.task { await screen.show(screen.showing, filter: screen.filter) }
 	}
@@ -64,8 +76,12 @@ struct QueueView: View {
 			List {
 				Section {
 					ForEach(screen.questions) { question in
-						NavigationLink(value: question.ref) { QuestionRow(question: question) }
-							.accessibilityIdentifier("question-\(question.ref)")
+						if screen.isSelecting {
+							SelectableRow(question: question, screen: screen)
+						} else {
+							NavigationLink(value: question.ref) { QuestionRow(question: question) }
+								.accessibilityIdentifier("question-\(question.ref)")
+						}
 					}
 					if screen.hasMore {
 						ProgressView()
@@ -163,11 +179,138 @@ private struct QuestionRow: View {
 	}
 }
 
+/// A row while the list selects: a press adds the question to the selection or takes it out, and a question
+/// that cannot join is drawn faint and says why when pressed.
+private struct SelectableRow: View {
+	let question: Question
+	let screen: QueueScreen
+
+	var body: some View {
+		let chosen = screen.selected.contains(question.ref)
+		let joins = chosen || screen.whyNotSelectable(question) == nil
+		Button {
+			screen.toggle(question)
+		} label: {
+			HStack(spacing: 12) {
+				Image(systemName: chosen ? "checkmark.circle.fill" : "circle")
+					.font(.title3)
+					.foregroundStyle(chosen ? Color.accentColor : Color.secondary)
+					.accessibilityHidden(true)
+				QuestionRow(question: question).opacity(joins ? 1 : 0.45)
+			}
+			.contentShape(.rect)
+		}
+		.buttonStyle(.plain)
+		.accessibilityAddTraits(chosen ? .isSelected : [])
+		.accessibilityIdentifier("select-\(question.ref)")
+	}
+}
+
+/// What is selected, and the answers every selected question takes.
+private struct SelectionBar: View {
+	let screen: QueueScreen
+	@State private var asking: Choice?
+	@State private var confirming: Choice?
+
+	var body: some View {
+		let selection = screen.selection
+		let all = screen.selectable
+		VStack(alignment: .leading, spacing: 10) {
+			HStack {
+				Text(selection.first.map { "\($0.kind.counted(selection.count)) selected" }
+					?? "Select questions of one kind to give them one answer.")
+					.font(.subheadline.weight(selection.isEmpty ? .regular : .semibold))
+					.foregroundStyle(selection.isEmpty ? .secondary : .primary)
+					.accessibilityIdentifier("selection-count")
+				Spacer(minLength: 8)
+				if all.count > selection.count, let kind = all.first?.kind {
+					Button("Select all \(kind.counted(all.count))") { screen.selectAll() }
+						.font(.subheadline)
+						.accessibilityIdentifier("select-all")
+				} else if !selection.isEmpty {
+					Button("Clear") { screen.clearSelection() }.font(.subheadline).accessibilityIdentifier("select-clear")
+				}
+			}
+			if !selection.isEmpty {
+				Menu {
+					ForEach(screen.sharedChoices) { choice in
+						Button(choice.label) { choose(choice) }.accessibilityIdentifier("bulk-\(choice.answer)")
+					}
+				} label: {
+					Label("Answer \(selection.count == 1 ? "it" : "all \(selection.count)")", systemImage: "checkmark.bubble")
+						.frame(maxWidth: .infinity)
+				}
+				.buttonStyle(.borderedProminent)
+				.disabled(screen.sharedChoices.isEmpty || !screen.busy.isDisjoint(with: screen.selected))
+				.accessibilityIdentifier("bulk-answer")
+				if screen.sharedChoices.isEmpty {
+					Text("No answer is taken by every selected question.").font(.footnote).foregroundStyle(.secondary)
+				}
+			}
+		}
+		.padding(12)
+		.background(.regularMaterial, in: .rect(cornerRadius: 14))
+		.padding(.horizontal, 12)
+		.padding(.bottom, 6)
+		.sheet(item: $asking) { choice in
+			let typing = screen.typing(QueueScreen.selectionTyping)
+			AnswerSheet(
+				title: choice.label, help: "\(choice.help) It goes to each of the \(what).", action: "Record",
+				wantsReference: choice.takes == .reference, wantsReason: screen.selection.contains(where: \.wantsReason),
+				reference: typing.reference, reason: typing.reason
+			) { reference, reason in
+				Task { await screen.answerSelection(with: choice, reference: reference, reason: reason) }
+			}
+		}
+		.confirmationDialog(
+			"\(confirming?.label ?? "Answer") for \(what)?", isPresented: isConfirming, titleVisibility: .visible,
+			presenting: confirming
+		) { choice in
+			Button(choice.label) {
+				confirming = nil
+				Task { await screen.answerSelection(with: choice) }
+			}
+			.accessibilityIdentifier("bulk-confirm")
+			Button("Cancel", role: .cancel) { confirming = nil }
+		} message: { choice in
+			Text(message(for: choice))
+		}
+	}
+
+	/// "12 failures", for the questions the answer goes to.
+	private var what: String {
+		let selection = screen.selection
+		return selection.first.map { $0.kind.counted(selection.count) } ?? "the selected questions"
+	}
+
+	private var isConfirming: Binding<Bool> {
+		Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
+	}
+
+	private func choose(_ choice: Choice) {
+		screen.dismissNotice()
+		if choice.takes == .reference || screen.selection.contains(where: \.wantsReason) {
+			asking = choice
+		} else {
+			confirming = choice
+		}
+	}
+
+	private func message(for choice: Choice) -> String {
+		let makes = choice.answer == "create"
+			? " The server makes and links one automated case for each of their \(screen.selectedTests) tests."
+			: ""
+		return "\(choice.help)\(makes) Each question gets its own decision, and Undo withdraws them together."
+	}
+}
+
 /// What the last action came to, with Undo where an answer can be withdrawn.
 private struct NoticeBar: View {
 	let screen: QueueScreen
 	/// The question whose withdrawal waits for a reason, where the policy asks for one.
 	@State private var asking: Question?
+	/// The questions of one answer to a selection, whose withdrawal waits for a reason.
+	@State private var askingAll: [Question]?
 
 	var body: some View {
 		if let notice = screen.notice {
@@ -184,6 +327,17 @@ private struct NoticeBar: View {
 					}
 					.fontWeight(.semibold)
 					.disabled(screen.busy.contains(question.ref))
+				} else if !notice.undoesAll.isEmpty {
+					Button("Undo") {
+						if notice.undoesAll.contains(where: \.wantsReason) {
+							askingAll = notice.undoesAll
+						} else {
+							Task { await screen.withdrawAll(notice.undoesAll) }
+						}
+					}
+					.fontWeight(.semibold)
+					.disabled(!screen.busy.isDisjoint(with: notice.undoesAll.map(\.ref)))
+					.accessibilityIdentifier("undo-all")
 				}
 				Button {
 					screen.dismissNotice()
@@ -205,6 +359,17 @@ private struct NoticeBar: View {
 					wantsReference: false, wantsReason: true, reference: typing.reference, reason: typing.reason
 				) { _, reason in
 					Task { await screen.withdraw(question, reason: reason) }
+				}
+			}
+			.sheet(isPresented: Binding(get: { askingAll != nil }, set: { if !$0 { askingAll = nil } })) {
+				let questions = askingAll ?? []
+				let typing = screen.typing(QueueScreen.withdrawing(QueueScreen.selectionTyping))
+				AnswerSheet(
+					title: "Withdraw \(questions.count) decisions", help: "Every decision stays in the ledger.",
+					action: "Withdraw", wantsReference: false, wantsReason: true, reference: typing.reference,
+					reason: typing.reason
+				) { _, reason in
+					Task { await screen.withdrawAll(questions, reason: reason) }
 				}
 			}
 		}

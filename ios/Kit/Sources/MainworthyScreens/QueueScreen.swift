@@ -26,6 +26,8 @@ public final class QueueScreen: ProjectScreen {
 		public let isProblem: Bool
 		/// The question whose answer "Undo" withdraws, when there is one to withdraw.
 		public let undoes: Question?
+		/// The questions one answer to a selection decided, which "Undo" withdraws together.
+		public var undoesAll: [Question] = []
 	}
 
 	/// What a proposed edit changes, as far as it was read.
@@ -53,6 +55,15 @@ public final class QueueScreen: ProjectScreen {
 
 	public var typed: [String: Typed] = [:]
 	private var mappings: [String: MappingScreen] = [:]
+
+	/// The most questions one selection holds. Each answer is saved and sent on its own (decision 0088).
+	public static let selectionLimit = 100
+	/// The key under which the reference and reason of an answer to the selection are kept in `typed`.
+	public static let selectionTyping = "selection"
+	/// Whether the list selects questions instead of opening them.
+	public private(set) var isSelecting = false
+	/// The questions selected to take one answer together, in the order they were selected.
+	public private(set) var selected: [String] = []
 
 	public func beginMapping(_ question: Question, creating: Bool) {
 		mapping(question, creating: creating).reopen(question)
@@ -127,6 +138,8 @@ public final class QueueScreen: ProjectScreen {
 	/// Reads the list, the first time and whenever the person changes what it shows.
 	public func show(_ showing: Showing, filter: Kind?) async {
 		guard showing != self.showing || filter != self.filter || loading != .done else { return }
+		if showing != self.showing || filter != self.filter { selected = [] }
+		if showing != .open { isSelecting = false }
 		self.showing = showing
 		self.filter = filter
 		questions = []
@@ -177,6 +190,7 @@ public final class QueueScreen: ProjectScreen {
 			next = page.next
 			hasMore = page.next != nil
 			loading = .done
+			dropUnlisted()
 			await readOpened()
 		} catch is CancellationError {
 		} catch {
@@ -289,6 +303,228 @@ public final class QueueScreen: ProjectScreen {
 			notice = Notice(text: error.shown, isProblem: true, undoes: nil)
 			return false
 		}
+	}
+
+	// MARK: Several questions, one answer (decision 0088)
+
+	/// The selected questions as the list holds them now.
+	public var selection: [Question] {
+		selected.compactMap { ref in questions.first { $0.ref == ref } }
+	}
+
+	/// Starts selecting, or stops and forgets the selection.
+	public func select(_ on: Bool) {
+		guard on != isSelecting else { return }
+		isSelecting = on && showing == .open
+		selected = []
+	}
+
+	/// Why this question cannot join the selection, or nil when it can. One answer is for one kind, and nobody
+	/// selects what they cannot settle or what has to be read on its own page before an answer counts.
+	public func whyNotSelectable(_ question: Question) -> String? {
+		let ref = question.ref
+		guard showing == .open, question.isOpen else { return "\(ref) is decided." }
+		if question.standing == .forbidden { return "You cannot settle \(ref)." }
+		if hasPendingAnswer(ref) { return "\(ref) has an answer waiting to send." }
+		switch question.evidence {
+		case .unreadable: return "\(ref) is answered in the web app: this build cannot show what it asks about."
+		case .proposal: return "\(ref) is answered on its own: its edits are read on its page before an answer counts."
+		case .finding(let finding) where finding.suggestion != nil:
+			return "\(ref) is answered on its own: its suggested edit is read on its page before an answer counts."
+		default: break
+		}
+		if let kind = selection.first?.kind, kind != question.kind {
+			return "\(ref) is \(question.kind == .map ? "unlinked" : "a \(question.kind.name)") and the selection is of \(kind.plural.lowercased()): one answer is for one kind."
+		}
+		return nil
+	}
+
+	/// Adds a question to the selection or takes it out. A question that cannot join says why.
+	public func toggle(_ question: Question) {
+		if let index = selected.firstIndex(of: question.ref) {
+			selected.remove(at: index)
+			return
+		}
+		if let why = whyNotSelectable(question) {
+			notice = Notice(text: why, isProblem: true, undoes: nil)
+			return
+		}
+		guard selected.count < QueueScreen.selectionLimit else {
+			notice = Notice(
+				text: "A selection holds at most \(QueueScreen.selectionLimit) questions. Answer these first.",
+				isProblem: true, undoes: nil
+			)
+			return
+		}
+		selected.append(question.ref)
+	}
+
+	/// The listed questions that "Select all" would select: of the selection's kind, or of the one kind the list
+	/// is filtered by, as many as a selection holds.
+	public var selectable: [Question] {
+		guard let kind = selection.first?.kind ?? filter else { return [] }
+		let chosen = Set(selected)
+		let more = questions.filter { $0.kind == kind && !chosen.contains($0.ref) && whyNotSelectable($0) == nil }
+		return selection + more.prefix(max(0, QueueScreen.selectionLimit - selected.count))
+	}
+
+	public func selectAll() {
+		selected = selectable.map(\.ref)
+	}
+
+	public func clearSelection() {
+		selected = []
+	}
+
+	/// The answers every selected question takes, in the order the first shows them. Linking a test asks for a
+	/// case for each test, so it is given to one question at a time on its page.
+	public var sharedChoices: [Choice] {
+		let chosen = selection
+		guard let first = chosen.first else { return [] }
+		return first.choices.filter { choice in
+			(choice.takes == .nothing || choice.takes == .reference)
+				&& chosen.allSatisfy { question in question.choices.contains { $0.answer == choice.answer } }
+		}
+	}
+
+	/// How many tests the selected unlinked questions name, for what "Create cases" makes.
+	public var selectedTests: Int {
+		selection.reduce(0) { sum, question in
+			if case .unlinked(let tests) = question.evidence { sum + tests.count } else { sum }
+		}
+	}
+
+	/// Gives one answer to every selected question. Each answer is saved on the device and sent on its own, on
+	/// the evidence its question was listed with, so each question gets its own decision and its own outcome.
+	/// Returns whether any of them was decided.
+	@discardableResult
+	public func answerSelection(with choice: Choice, reference: String = "", reason: String = "") async -> Bool {
+		let chosen = selection
+		guard let first = chosen.first, chosen.count == selected.count else {
+			notice = Notice(text: "Select the questions again: the list changed.", isProblem: true, undoes: nil)
+			return false
+		}
+		for question in chosen {
+			if let why = whyNotSelectable(question) {
+				notice = Notice(text: "Nothing was recorded. \(why)", isProblem: true, undoes: nil)
+				return false
+			}
+		}
+		guard sharedChoices.contains(where: { $0.answer == choice.answer }) else {
+			notice = Notice(text: "Nothing was recorded: not every selected question takes this answer.", isProblem: true, undoes: nil)
+			return false
+		}
+		if chosen.contains(where: \.wantsReason), reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+			notice = Notice(text: "Nothing was recorded: the policy asks for a reason.", isProblem: true, undoes: nil)
+			return false
+		}
+		let refs = Set(chosen.map(\.ref))
+		guard busy.isDisjoint(with: refs) else { return false }
+		busy.formUnion(refs)
+		defer { busy.subtract(refs) }
+		var prepared: [(question: Question, answer: PreparedAnswer)] = []
+		for question in chosen {
+			guard let own = question.choices.first(where: { $0.answer == choice.answer }),
+				let answer = project.prepareAnswer(question, with: own, reference: reference, reason: reason)
+			else {
+				notice = Notice(text: "Nothing was recorded: \(question.ref) needs the web app.", isProblem: true, undoes: nil)
+				return false
+			}
+			prepared.append((question, answer))
+		}
+		var saved: [(question: Question, id: String)] = []
+		var unsaved: String?
+		do {
+			for item in prepared { saved.append((item.question, try outbox.enqueue(item.answer))) }
+		} catch {
+			// What was saved before the failure is sent: it is on the device, and leaving it would hide it.
+			unsaved = "\(chosen.count - saved.count) of \(chosen.count) answers could not be saved and were not sent. \(error.shown)"
+			if saved.isEmpty {
+				notice = Notice(text: unsaved ?? "", isProblem: true, undoes: nil)
+				return false
+			}
+		}
+		for item in saved { await outbox.send(item.id) }
+		var decided: [Question] = []
+		var refused: [String] = []
+		var advised = 0
+		var waiting = 0
+		for item in saved {
+			switch outbox.entries.first(where: { $0.id == item.id })?.outcome {
+			case .decided(let decision)?:
+				typed[item.question.ref] = nil
+				var undoable = item.question
+				undoable.ifDecision = decision
+				decided.append(undoable)
+			case .advised?: advised += 1
+			case .overtaken(let why)?: refused.append("\(item.question.ref): \(why)")
+			case .notTaken(let why)?: refused.append("\(item.question.ref): the server asks for \(why)")
+			case nil: waiting += 1
+			}
+		}
+		if refused.isEmpty, waiting == 0 { typed[QueueScreen.selectionTyping] = nil }
+		var parts: [String] = []
+		if !decided.isEmpty {
+			parts.append("\(first.kind.counted(decided.count)): \(choice.label).")
+		}
+		if advised > 0 { parts.append("\(advised) recorded as advice.") }
+		if waiting > 0 {
+			parts.append("\(waiting) saved on this device, waiting to send. Open Unsent answers to see their outcome.")
+		}
+		if !refused.isEmpty {
+			parts.append("Not recorded, read \(refused.count == 1 ? "it" : "them") again: \(refused.joined(separator: "; ")).")
+		}
+		if let unsaved { parts.append(unsaved) }
+		selected = []
+		// The list is read again once the server answered: what it decided leaves the list. The notice is set after
+		// the read, which says nothing of a failure here: an answer still waiting is the reason the read fails.
+		if waiting < saved.count { await read() }
+		notice = Notice(
+			text: parts.joined(separator: " "), isProblem: !refused.isEmpty || unsaved != nil, undoes: nil, undoesAll: decided
+		)
+		return !decided.isEmpty
+	}
+
+	/// Withdraws every decision one answer to a selection made. Returns whether all of them were withdrawn.
+	@discardableResult
+	public func withdrawAll(_ questions: [Question], reason: String = "") async -> Bool {
+		let refs = Set(questions.map(\.ref))
+		guard !questions.isEmpty, busy.isDisjoint(with: refs) else { return false }
+		busy.formUnion(refs)
+		defer { busy.subtract(refs) }
+		var withdrawn = 0
+		var kept: [String] = []
+		for question in questions {
+			do {
+				switch try await project.withdraw(question, reason: reason) {
+				case .withdrawn: withdrawn += 1
+				case .notTaken(let asks): kept.append("\(question.ref): \(asks)")
+				}
+			} catch {
+				kept.append("\(question.ref): \(error.shown)")
+			}
+		}
+		if kept.isEmpty { typed[QueueScreen.withdrawing(QueueScreen.selectionTyping)] = nil }
+		let done = withdrawn == 1 ? "1 decision is withdrawn." : "\(withdrawn) decisions are withdrawn."
+		notice = Notice(
+			text: kept.isEmpty ? done : "\(done) Not confirmed: \(kept.joined(separator: "; ")).",
+			isProblem: !kept.isEmpty, undoes: nil
+		)
+		await read()
+		return kept.isEmpty
+	}
+
+	/// Takes out of the selection what the list no longer holds open, and says so.
+	private func dropUnlisted() {
+		let open = Set(questions.filter { $0.isOpen && !hasPendingAnswer($0.ref) }.map(\.ref))
+		let gone = selected.filter { !open.contains($0) }
+		guard !gone.isEmpty else { return }
+		selected.removeAll { gone.contains($0) }
+		if !isSelecting { return }
+		notice = Notice(
+			text: "\(gone.joined(separator: ", ")) left the selection: \(gone.count == 1 ? "it is" : "they are") no longer open here.",
+			isProblem: false, undoes: nil
+		)
 	}
 
 	/// The key under which the reason for withdrawing a question's decision is kept in `typed`.
