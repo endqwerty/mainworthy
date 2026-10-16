@@ -318,6 +318,13 @@ test("release gives the disk back, and refuses while a server or a test run work
 	await expect(release(root)).rejects.toThrow(`pid ${single.pid}`);
 	expect(existsSync(join(root, "node_modules", "inner"))).toBe(true);
 	single.kill();
+	// The Node helper an agent keeps in the checkout does not use its packages, and does not block the release.
+	const node = Bun.which("node");
+	if (node) {
+		const script = join(root, "helper.js");
+		writeFileSync(script, "setInterval(() => {}, 1000);\n");
+		children.push(Bun.spawn([node, script], { cwd: root, stdout: "ignore", stderr: "ignore" }));
+	}
 	await Bun.sleep(300);
 	expect(await release(root)).toContain("released node_modules");
 	expect(RELEASED.filter((name) => existsSync(join(root, name)))).toEqual([]);
