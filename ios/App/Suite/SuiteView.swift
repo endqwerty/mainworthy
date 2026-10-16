@@ -58,14 +58,14 @@ struct SuiteView: View {
 					}
 				}
 		}
-		.safeAreaInset(edge: .bottom) {
+		.safeAreaBar(edge: .bottom) {
 			if let notice = screen.notice {
 				HStack {
 					Text(notice).font(.subheadline).foregroundStyle(Color.fail)
 					Spacer()
 					Button("Dismiss") { screen.dismissNotice() }
 				}
-				.padding(12).background(.regularMaterial)
+				.floatingBar()
 			}
 		}
 		.sheet(isPresented: editing) {

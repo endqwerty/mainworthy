@@ -144,7 +144,7 @@ final class QueueUITests: XCTestCase {
 		app.buttons["queue-select"].tap()
 		let count = app.staticTexts["selection-count"]
 		XCTAssertTrue(count.waitForExistence(timeout: 5))
-		XCTAssertEqual(count.label, "Select questions of one kind to give them one answer.")
+		XCTAssertEqual(count.label, "Select questions of one kind")
 		let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'select-Q-'"))
 		let unlinked = rows.matching(NSPredicate(format: "label CONTAINS 'has no case'"))
 		XCTAssertEqual(unlinked.count, 4)

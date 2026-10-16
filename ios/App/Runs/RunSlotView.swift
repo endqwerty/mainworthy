@@ -31,7 +31,7 @@ struct RunSlotView: View {
 		// The outcome buttons are at the foot of the page, where the tab bar would lie over them.
 		.toolbar(.hidden, for: .tabBar)
 		.navigationBarTitleDisplayMode(.inline)
-		.safeAreaInset(edge: .bottom) {
+		.safeAreaBar(edge: .bottom) {
 			VStack(spacing: 10) {
 				if case .read(let execution) = screen.document {
 					if screen.mayRecord(execution) {
@@ -46,7 +46,7 @@ struct RunSlotView: View {
 								} label: {
 									Text(outcome.label).font(.headline).frame(maxWidth: .infinity, minHeight: 48)
 								}
-								.buttonStyle(.borderedProminent).tint(tint(outcome)).disabled(screen.busy)
+								.buttonStyle(.glassProminent).tint(tint(outcome)).disabled(screen.busy)
 								.accessibilityIdentifier("record-\(outcome.rawValue)")
 							}
 						}
@@ -74,7 +74,7 @@ struct RunSlotView: View {
 					}
 				}
 			}
-			.padding(12).background(.regularMaterial)
+			.floatingBar()
 		}
 		.toolbar {
 			if noting { ToolbarItem(placement: .keyboard) { Button("Done") { noting = false } } }
