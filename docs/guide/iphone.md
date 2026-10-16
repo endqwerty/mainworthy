@@ -92,7 +92,7 @@ If somebody replaced that answer meanwhile, their decision stays and the app say
 
 A question is answered from its page, where its evidence is, or with others of its kind from the list.
 
-**Decided** at the top shows what was decided and by whom. Open a question there to withdraw its decision.
+**Decided**, beside **Open** under the top bar, shows what was decided and by whom. Open a question there to withdraw its decision.
 The withdrawal names the decision shown. If that decision changed meanwhile, read the question again before withdrawing the decision.
 An unconfirmed withdrawal shows the server's response without claiming that the earlier decision still stands.
 
@@ -103,7 +103,7 @@ it to open another.
 
 To give one answer to several questions of one kind, follow these steps:
 
-1. In **Queue**, press **Select** at the end of the row of kinds. Each open question gets a circle.
+1. In **Queue**, press **Select** at the top right. Each open question gets a circle, and **Done** ends it.
 2. Press questions to select them. A selection holds one kind, such as unlinked tests or failures, and at most
    500 questions. Select a question or choose a kind's chip before pressing **Select all**. It selects eligible
    questions of that kind from the list, up to the limit. A question that cannot join appears faint.
