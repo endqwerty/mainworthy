@@ -465,6 +465,13 @@ test("a batch waiting for review refuses a case changed after the proposal was s
 		});
 	};
 	expect(decide(other.question)).toMatchObject({ ok: true });
+	// Read before it is answered, the batch says that accepting it is refused now, and why.
+	type Read = { edits: { case: string; refused: string | null }[] };
+	const [read] = h.call<Read[]>("get", { refs: [batch.proposal] });
+	expect(read?.edits.map((edit) => [edit.case, edit.refused])).toEqual([
+		["C-2", null],
+		["C-3", "C-3 changed; redo the fragment batch"],
+	]);
 	const result = decide(batch.question);
 	expect(result).toMatchObject({ ok: true, result: [{ status: "conflict" }] });
 	expect(view()).toMatchObject({ version: 1, steps: [{ action: "Enter a password" }, {}] });

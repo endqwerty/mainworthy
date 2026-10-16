@@ -61,6 +61,7 @@ const ProposalEdit = z.discriminatedUnion("op", [
 		current: CaseBody.nullable(),
 		mine: CaseBody,
 		conflicts: z.array(z.object({ path: z.string() }).passthrough()),
+		refused: z.string().nullable(),
 	}),
 	z.object({ op: z.literal("restore"), case: z.string().nullable(), to: z.number(), body: CaseBody }),
 	z.object({ op: z.literal("policy"), preset: z.string(), clauses: z.number() }),
@@ -152,11 +153,13 @@ function ProposalEvidence({ question }: { question: QuestionItem }) {
 											before={edit.current ?? emptyBody()}
 											after={edit.conflicts.length ? edit.mine : edit.body}
 										/>
-										{edit.conflicts.length > 0 && (
+										{edit.conflicts.length > 0 ? (
 											<p className="queue-warning">
 												Conflicting fields: {edit.conflicts.map((conflict) => conflict.path).join(", ")}. The author
 												must resolve both sides.
 											</p>
+										) : (
+											edit.refused && <p className="queue-warning">Accepting is refused now: {edit.refused}.</p>
 										)}
 									</div>
 								);

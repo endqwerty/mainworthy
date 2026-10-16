@@ -256,7 +256,7 @@ describe("what the iOS app reads", () => {
 		const [later] = (await op(project, "get", { refs: [ref] })) as unknown[];
 		holds(`get ${ref} after its case moved on`, Proposal, later);
 		expect(later).toMatchObject({
-			edits: [{ body: { title: "Retitled meanwhile" }, current: { title: "Retitled meanwhile" }, conflicts: [] }],
+			edits: [{ body: { title: "Retitled meanwhile" }, current: { title: "Retitled meanwhile" }, refused: null }],
 		});
 	});
 
@@ -665,9 +665,11 @@ describe("what the iPhone conflict resolver reads", () => {
 			.parse(await op(key, "propose", edit("Mine")));
 		const [proposal] = z.array(z.unknown()).parse(await op(key, "get", { refs: [overlap.proposal] }));
 		holds("get conflict proposal", ConflictProposal, proposal);
-		// The queue reads the same reply and says which fields stop it being accepted.
+		// The queue reads the same reply and says why it cannot be accepted as it is.
 		holds("get conflict proposal, as the queue reads it", Proposal, proposal);
-		expect(proposal).toMatchObject({ edits: [{ conflicts: [{ path: "title" }] }] });
+		expect(proposal).toMatchObject({
+			edits: [{ refused: `${ref} has an unresolved conflict; its author must resolve it` }],
+		});
 		holds("base custom fields", ConflictBaseFields, await op(key, "history", { ref, from: 1, to: 1 }));
 		expect(proposal).toMatchObject({ edits: [{ base: 1, mine: { title: "Mine" }, current: { title: "Current" } }] });
 		const [q] = z

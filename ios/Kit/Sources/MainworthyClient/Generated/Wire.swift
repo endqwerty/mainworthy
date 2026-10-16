@@ -269,11 +269,6 @@ enum Wire {
 		let fields: [String: String]
 	}
 
-	/// A field an edit cannot be merged on.
-	struct EditFieldConflict: Decodable, Equatable, Sendable {
-		let path: String
-	}
-
 	/// One edit of a proposal. Which fields it carries depends on `op`.
 	struct ProposalEdit: Decodable, Equatable, Sendable {
 		/// create, edit, restore, place, state, folder, cover or policy.
@@ -289,8 +284,8 @@ enum Wire {
 		let tags: JSONValue?
 		/// For create: the requirements the case covers.
 		let covers: [String]?
-		/// For edit: the fields both this edit and a newer version changed. Accepting is refused while there are any.
-		let conflicts: [EditFieldConflict]?
+		/// For edit, while the proposal waits: why accepting it is refused now, as a sentence. Null when it is not.
+		let refused: String?
 	}
 
 	/// `get` with a P- ref: a proposed edit with the documents it would change.
