@@ -277,7 +277,7 @@ enum Wire {
 		/// For create, edit and restore: the case as it would be. For an edit while the proposal waits: the edit applied
 		/// to the case as it is now, unless `refused`; then, and once decided, as it was proposed.
 		let body: CaseBody?
-		/// For edit: the case as it is now.
+		/// For edit and restore: the case as it is now.
 		let current: CaseBody?
 		/// For create: the path of the folder the case goes into.
 		let folder: String?

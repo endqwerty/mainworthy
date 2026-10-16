@@ -287,6 +287,20 @@ describe("what the iOS app reads", () => {
 		});
 	});
 
+	test("a proposal with a policy and a folder edit beside a new case", async () => {
+		// The app reads every edit of a proposal it lists. One whose fields it reads as a case body (`current`)
+		// must not carry a policy there: on 2026-10-16 that stopped the app reading such a proposal at all.
+		const proposed = (await op(strict, "propose", {
+			edits: [
+				{ op: "create", outline: "Returns are refunded\n  Return the item > The refund is shown" },
+				{ op: "folder", name: "Returns", archive: true },
+				{ op: "policy", unlinked: "ask" },
+			],
+		})) as { proposal: string };
+		const [made] = (await op(strict, "get", { refs: [proposed.proposal] })) as unknown[];
+		holds(`get ${proposed.proposal}`, Proposal, made);
+	});
+
 	test("every kind of question has an evidence shape", () => {
 		// A kind added to the server is one the app shows without its evidence until it is given a shape.
 		expect(Object.keys(EVIDENCE).sort(), WHAT_TO_DO).toEqual([...KINDS].sort());

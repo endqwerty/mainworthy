@@ -89,6 +89,8 @@ export function changed(project: string, change: z.infer<typeof Change>): void {
 		)
 			return true;
 		const input = JSON.stringify(query.queryKey[2]) ?? "";
+		// A proposal is read as accepting it would leave its cases now, so a change to a case can change it.
+		if (op === "get" && input.includes('"P-') && refs.some((ref) => ref.startsWith("C-"))) return true;
 		return refs.length === 0 || refs.some((ref) => input.includes(ref)) || refs.some((ref) => !/^[CQRPT]-/.test(ref));
 	});
 }

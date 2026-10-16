@@ -1008,15 +1008,18 @@ export function* adoptSteps(ctx: Ctx, witness: Witness, proposal: ProposalRow): 
 				const folder = edit.folder ? ensureFolder(ctx, edit.folder) : null;
 				// A move to another folder or an explicit position re-ranks; a retag alone leaves the order alone.
 				const rerank = folder !== null || edit.after !== undefined;
-				let cursor: string | null = null;
+				// Each folder's cases follow one another from where its first one lands. A rank is only an order within
+				// its own folder, so cases that stay in different folders keep one cursor each.
+				const cursors = new Map<number, string>();
 				for (const id of edit.caseIds) {
 					if (++work % SLICE === 0) yield;
 					const row = mustRow(id);
 					const to = folder ?? row.folder;
 					let rank = row.rank;
 					if (rerank) {
-						rank = cursor === null ? rankAfter(ctx, to, edit.after ?? null, id) : rankBetween(ctx, to, cursor);
-						cursor = rank;
+						const cursor = cursors.get(to);
+						rank = cursor === undefined ? rankAfter(ctx, to, edit.after ?? null, id) : rankBetween(ctx, to, cursor);
+						cursors.set(to, rank);
 					}
 					const current = json<string[]>(row.tags);
 					const remove = new Set(edit.tags?.remove ?? []);

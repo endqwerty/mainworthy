@@ -279,6 +279,7 @@ export function runView(ctx: Ctx, run: RunRow): Record<string, unknown> {
  * an edit's body is the edit applied to its case as it is now, or, when `refused` says why accepting that edit on its
  * own would be refused now, the edit as it was proposed. Accepting the whole proposal applies its edits in order and checks the proposal as a whole,
  * so it can still be refused when no edit is.
+ * The reply holds at most 200 edits, and `count` says how many the proposal has.
  */
 function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> {
 	const index = folderIndex(ctx.db, proposal.project);
@@ -291,6 +292,7 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 	);
 	const resolved = resolvedOf(proposal);
 	const policy = waiting ? adoptionPolicy(ctx.db, proposal.project, resolved) : null;
+	const inForce = currentPolicy(ctx.db, proposal.project);
 	const edits = resolved.slice(0, 200).map((edit) => {
 		switch (edit.op) {
 			case "create":
@@ -300,6 +302,7 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 					folder: "id" in edit.folder ? index.path(edit.folder.id) : edit.folder.path,
 					tags: edit.tags,
 					covers: edit.covers,
+					after: edit.after === null ? null : refOf(edit.after),
 				};
 			case "edit": {
 				const row = caseById(ctx.db, edit.caseId);
@@ -318,23 +321,59 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 					refused: now?.refused?.message ?? null,
 				};
 			}
-			case "restore":
-				return { op: edit.op, case: refOf(edit.caseId), to: edit.to, body: edit.body };
+			case "restore": {
+				const row = caseById(ctx.db, edit.caseId);
+				return {
+					op: edit.op,
+					case: refOf(edit.caseId),
+					to: edit.to,
+					body: edit.body,
+					current: row ? bodyOf(ctx.db, row.id, row.head) : null,
+				};
+			}
 			case "place":
+				// A move or an explicit position ranks the cases again. `after` is the case the edit asks them to follow,
+				// or "" for the end of the folder. Where they land then follows ranking (docs/guide/decide.md), which
+				// the read does not predict. A change of tags alone leaves the order as it is, and has no `after`.
 				return {
 					op: edit.op,
 					cases: edit.caseIds.map(refOf),
 					folder: edit.folder ? ("id" in edit.folder ? index.path(edit.folder.id) : edit.folder.path) : null,
 					tags: edit.tags,
+					...(edit.folder || edit.after !== undefined
+						? { after: typeof edit.after === "number" ? (refOf(edit.after) ?? "") : "" }
+						: {}),
 				};
 			case "state":
 				return { op: edit.op, cases: edit.caseIds.map(refOf), to: edit.to };
 			case "cover":
 				return { op: edit.op, case: refOf(edit.caseId), requirement: edit.key, on: edit.on };
 			case "folder":
-				return { op: edit.op, name: edit.name, archive: edit.archive };
+				return {
+					op: edit.op,
+					folder: edit.id === null ? null : index.path(edit.id),
+					name: edit.name,
+					parent:
+						edit.parent === undefined
+							? undefined
+							: edit.parent === null
+								? ""
+								: "id" in edit.parent
+									? index.path(edit.parent.id)
+									: edit.parent.path,
+					archive: edit.archive,
+				};
 			case "policy":
-				return { op: edit.op, preset: edit.policy.preset, clauses: edit.policy.clauses.length };
+				// The whole policy accepting writes, and the one it replaces. Accepting refuses when the policy has
+				// changed since the proposal was made (`stale`).
+				return {
+					op: edit.op,
+					preset: edit.policy.preset,
+					clauses: edit.policy.clauses.length,
+					policy: edit.policy,
+					inForce: { preset: inForce.preset, clauses: inForce.clauses, settings: inForce.settings },
+					stale: edit.base !== inForce.version,
+				};
 			case "quarantine":
 				return edit;
 			default: {
@@ -350,6 +389,8 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 		kind: label.kind,
 		reason: proposal.reason,
 		at: proposal.at,
+		// A reply holds at most 200 edits; `count` says how many the proposal has, so a reader can tell it is short.
+		count: resolved.length,
 		edits,
 	};
 }

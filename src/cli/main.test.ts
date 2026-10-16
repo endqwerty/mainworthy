@@ -41,13 +41,15 @@ test("get prints folder archive and placement proposals with nullable edit field
 		expect(reply.code).toBe(0);
 		expect(
 			outputWith(z.array(z.object({ ref: z.string(), edits: z.array(z.record(z.string(), z.unknown())) })), reply),
-		).toEqual([{ ref: archive.proposal, edits: [{ op: "folder", name: null, archive: true }] }]);
+		).toEqual([{ ref: archive.proposal, edits: [{ op: "folder", folder: "Empty", name: null, archive: true }] }]);
 		const moved = await run(["get", place.proposal, "--json"]);
 		expect(moved.code).toBe(0);
 		expect(moved.stderr).toBe("");
 		expect(
 			outputWith(z.array(z.object({ ref: z.string(), edits: z.array(z.record(z.string(), z.unknown())) })), moved),
-		).toEqual([{ ref: place.proposal, edits: [{ op: "place", cases: ["C-1"], folder: "Moved", tags: null }] }]);
+		).toEqual([
+			{ ref: place.proposal, edits: [{ op: "place", cases: ["C-1"], folder: "Moved", tags: null, after: "" }] },
+		]);
 	});
 });
 
