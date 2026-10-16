@@ -797,7 +797,6 @@ describe("the project's name", () => {
 			"AGENTS.md": "says what the project was called, and releases the `.casebook` of an older checkout",
 			"CHANGELOG.md": "the entry for the rename",
 			"README.md": "says what the project was called",
-			"compose.coolify.yaml": "carries the existing deployment's volume over to its new name",
 			"docs/decisions/0014-pipeline-token-and-ci-instance.md": "the address of the existing deployment",
 			"docs/decisions/0015-the-project-is-called-mainworthy.md": "the decision",
 			"docs/deploy.md": "the existing deployment's names, and how to move them",
@@ -812,7 +811,6 @@ describe("the project's name", () => {
 			"src/web/lib/former-name.test.ts": "what a browser kept under the former name",
 			"src/web/lib/former-name.ts": "what a browser kept under the former name",
 			"t3.json": "releases the `.casebook` of an older checkout",
-			"test/compose-coolify.test.ts": "the copy of the existing deployment's volume to its new name",
 			"test/architecture.test.ts": "this list",
 			"test/e2e/shell.test.ts": "what a browser kept under the former name",
 		};

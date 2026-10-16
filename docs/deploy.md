@@ -415,23 +415,20 @@ What you do once:
 
 The instance on Coolify kept its names from before the rename until 2026-10-16: the service and the tailnet
 node `casebook`, the volume `casebook-data` and the Coolify variables `CASEBOOK_OWNER_TOKEN` and
-`CASEBOOK_OWNER`. `compose.coolify.yaml` now names all of them `mainworthy`, and the deploy that first runs it
-carries the data over by itself: Coolify stops the old container, the one-shot service `carry-data` copies
-`casebook-data` into `mainworthy-data`, and the app starts once it has finished. A copy that is interrupted is
-made again from an empty volume at the next start; a copy that fails stops the deploy, and the app does not
-start until somebody looks. A later start finds a whole copy and copies nothing. Before that deploy, four things
-were changed in Coolify (on 2026-10-16), the first three because the file needs them:
+`CASEBOOK_OWNER`. Since then it is `mainworthy` everywhere. The deploy of 2026-10-16 (pull request #402) moved
+the data with a one-shot service, `carry-data`, that copied `casebook-data` into `mainworthy-data` after Coolify
+had stopped the old container and before the app started: 2.2 GB in about 70 s, and the public address answered
+again two minutes after the old container stopped. What was learned there, for the next deployment that moves:
 
-- the variables `MAINWORTHY_OWNER_TOKEN` and `MAINWORTHY_OWNER`, with the values of the old ones;
-- the domain `https://mainworthy.com` on the service `mainworthy` as well as on `casebook` (Coolify keys a
-  domain by the service's name; without it the public address would lose its route);
-- the variable `TS_HOSTNAME`, which held `casebook`, was emptied, so the file's default names the node;
-- the Coolify project and application were renamed `mainworthy`.
-
-After that deploy has run and `https://mainworthy.com` answers with the data, delete the old variables and the
-old domain in Coolify, remove `carry-data` and `casebook-data` from the file, and then delete the volume
-`<application>_casebook-data` on the server. The tailnet node takes the name `mainworthy` at that deploy (its
-identity is kept in `tailscale-state`), so its address becomes `https://mainworthy.example.ts.net`.
+- **Coolify keys a domain by the service's name.** Put the domain on the new service name before the deploy
+  that renames the service, or the public address loses its route.
+- **Coolify writes a stored variable into the file, an empty one too.** `${TS_HOSTNAME:-mainworthy}` became
+  `TS_HOSTNAME: ''` while Coolify held the variable empty, and the default did not apply. Plain
+  `docker compose` would have used the default. Change a stored variable to the new value; do not empty it.
+- **The sidecar does not rename a node by itself.** Its `tailscale up` refuses a hostname that differs from
+  the one in `tailscale-state`, and the sidecar restarts in a loop. Stop the sidecar, run
+  `tailscale set --hostname=<new name>` in a one-off `tailscaled` on the same state volume, and start it
+  again. The node keeps its identity and its address.
 
 ## The upgrade to sessions
 
