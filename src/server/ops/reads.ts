@@ -276,8 +276,8 @@ export function runView(ctx: Ctx, run: RunRow): Record<string, unknown> {
 /**
  * A proposal as a reviewer needs it: per edit, the case by ref, the body proposed, the body it would replace, and
  * for a conflict both sides of each field, so the diff can be drawn without another read. While the proposal waits,
- * an edit's body is the edit applied to its case as it is now, and `refused` says why accepting that edit on its own
- * would be refused now. Accepting the whole proposal applies its edits in order and checks the proposal as a whole,
+ * an edit's body is the edit applied to its case as it is now, or, when `refused` says why accepting that edit on its
+ * own would be refused now, the edit as it was proposed. Accepting the whole proposal applies its edits in order and checks the proposal as a whole,
  * so it can still be refused when no edit is.
  */
 function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> {
@@ -310,7 +310,8 @@ function proposalView(ctx: Ctx, proposal: ProposalRow): Record<string, unknown> 
 					case: refOf(edit.caseId),
 					base: edit.base,
 					head: row?.head ?? edit.head,
-					body: now?.body ?? edit.body,
+					// An edit that would be refused is shown as it was proposed: it applies to nothing.
+					body: now && now.refused === null ? now.body : edit.body,
 					mine: edit.mine,
 					current: row ? bodyOf(ctx.db, row.id, row.head) : null,
 					conflicts: edit.conflicts,
