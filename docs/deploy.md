@@ -424,11 +424,10 @@ again two minutes after the old container stopped. What was learned there, for t
   that renames the service, or the public address loses its route.
 - **Coolify writes a stored variable into the file, an empty one too.** `${TS_HOSTNAME:-mainworthy}` became
   `TS_HOSTNAME: ''` while Coolify held the variable empty, and the default did not apply. Plain
-  `docker compose` would have used the default. Change a stored variable to the new value; do not empty it.
-- **The sidecar does not rename a node by itself.** Its `tailscale up` refuses a hostname that differs from
-  the one in `tailscale-state`, and the sidecar restarts in a loop. Stop the sidecar, run
-  `tailscale set --hostname=<new name>` in a one-off `tailscaled` on the same state volume, and start it
-  again. The node keeps its identity and its address.
+  `docker compose` would have used the default. The sidecar then ran `tailscale up` with no `--hostname`, which
+  Tailscale refuses while the node's state holds a hostname that is not the default, and the sidecar restarted
+  in a loop. Change a stored variable to the new value; do not empty it. With `TS_HOSTNAME` set to the new name,
+  the node takes it and keeps its identity and its address.
 
 ## The upgrade to sessions
 
