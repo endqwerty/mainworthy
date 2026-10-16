@@ -110,13 +110,11 @@ export async function waitForTests(
 	}
 }
 
-const runsNode = (command: string): boolean => basename(words(command)[0] ?? "") === "node";
-
-/** The Bun and Node processes that run from `root` (a server, a test run, a single test file), other than the caller's. */
+/** The Bun processes that run from `root` (a server, a test run, a single test file), other than the caller's. */
 export async function runningIn(root: string, self = process.pid): Promise<Proc[]> {
 	const where = await directories();
 	return outsideLineage(await processTable(), self).filter(
-		(proc) => (runsBun(proc.command) || runsNode(proc.command)) && within(where.get(proc.pid) ?? "", root),
+		(proc) => runsBun(proc.command) && within(where.get(proc.pid) ?? "", root),
 	);
 }
 

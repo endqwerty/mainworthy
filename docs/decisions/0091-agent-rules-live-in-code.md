@@ -29,7 +29,7 @@ shell recipes. History goes in `CHANGELOG.md` and here.
 | "read back `closingIssuesReferences`"; "the closed #88" linked an issue nobody meant (pull request #172) | `pr-body`, run by the `description` job of `check.yml` | a closing word outside a line of its own, links GitHub made that the description did not, a milestone that is not the issue's. Pull request #327 had one: "Fixes #42" in a sentence closed issue 42 |
 | "ask for base and head alternately, twice each, and judge the spread"; "a rebase that leaves the tree needs no round" | `check-time <base> <head>` | the same tree needs no timing; a difference inside the spread between runs of one revision is not slower |
 | `git fetch && git reset --hard origin/main && git push --force-with-lease` after a merge | `sync-branch` | a branch with a commit that is not on `origin/main` is refused and keeps it |
-| `rm -rf node_modules ...` in `t3.json`, and two children that released the worktree under a builder that was still running (2026-10-12) | `release` | it refuses while a server, a test run or another bun or node process works from the checkout |
+| `rm -rf node_modules ...` in `t3.json`, and two children that released the worktree under a builder that was still running (2026-10-12) | `release` | it refuses while a server, a test run or another bun process works from the checkout |
 | "one agent at a time runs the whole suite" | `bun run check` says when another run is going | `wait-tests` |
 | no tailnet name in a public repository | `test/architecture.test.ts`, "a public repository" | a file with a tailnet name other than `example.ts.net` fails |
 
