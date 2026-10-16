@@ -12,19 +12,23 @@ const CLOSING = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b:?\s+(?:[\w.-]+\/[
 const OWN_LINE = /^(?:Closes|Fixes|Resolves) #(\d+)$/;
 const PART_OF = /^Part of #(\d+)$/gim;
 
-/** Code is not read by GitHub for links, and is not read here. */
-const prose = (body: string): string => body.replace(/^```.*?^```/gms, "").replace(/`[^`\n]*`/g, "");
+/**
+ * Fenced code and inline code are not read by GitHub for links, and are not read here. An indented line is not
+ * taken for code (in a list it is not): a closing word there is read, and the way out is to write it differently.
+ */
+const prose = (body: string): string =>
+	body.replace(/^ {0,3}(`{3,}|~{3,}).*?^ {0,3}\1[`~]*[ \t]*$/gms, "").replace(/`[^`\n]*`/g, "");
 
 /** The issue numbers a line of their own closes, and the closing words that are anywhere else. */
 export function closing(body: string): { closes: number[]; stray: string[] } {
 	const text = prose(body).replaceAll("\r", "");
 	const closes = text.split("\n").flatMap((line) => {
-		const match = OWN_LINE.exec(line.trim());
+		const match = OWN_LINE.exec(line.trimEnd());
 		return match?.[1] ? [Number(match[1])] : [];
 	});
 	const stray = text
 		.split("\n")
-		.filter((line) => !OWN_LINE.test(line.trim()))
+		.filter((line) => !OWN_LINE.test(line.trimEnd()))
 		.flatMap((line) => [...line.matchAll(CLOSING)].map((match) => match[0]));
 	return { closes, stray };
 }

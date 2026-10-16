@@ -3,7 +3,7 @@
 // shell that asked, a wait that never ends, a pull request that closes an issue by a stray word, a time compared
 // from one run.
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { addArgs, BOARD, drift, editArgs, isMove } from "../scripts/work/board.ts";
@@ -59,6 +59,7 @@ test("a scratch directory is made under the root and deleted by the same command
 
 test("a delete refuses a pattern, a directory nobody made with `scratch new` and a way out of the root", () => {
 	const root = directory();
+	const made1 = make("other", root);
 	const theirs = join(root, "mw-verify-1a2b3c");
 	mkdirSync(theirs);
 	writeFileSync(join(theirs, "report.md"), "an earlier verifier's findings");
@@ -70,7 +71,14 @@ test("a delete refuses a pattern, a directory nobody made with `scratch new` and
 	writeFileSync(join(outside, MARKER), "");
 	expect(() => remove(outside, root)).toThrow("is not directly under");
 	symlinkSync(outside, join(root, "mw-link"));
-	expect(() => remove(join(root, "mw-link"), root)).toThrow("is not directly under");
+	expect(() => remove(join(root, "mw-link"), root)).toThrow("is a link");
+	// A directory copied with its marker, and a link to a directory that is a scratch directory.
+	const copy = join(root, "mw-copy-1a2b3c");
+	cpSync(made1, copy, { recursive: true });
+	expect(() => remove(copy, root)).toThrow("was not made by `scratch new`");
+	symlinkSync(made1, join(root, "mw-alias"));
+	expect(() => remove(join(root, "mw-alias"), root)).toThrow("is a link");
+	expect(existsSync(copy) && existsSync(made1)).toBe(true);
 	expect(existsSync(join(theirs, "report.md"))).toBe(true);
 	expect(existsSync(outside)).toBe(true);
 	expect(() => make("Bad Name", root)).toThrow("lower-case words");
@@ -221,6 +229,9 @@ test("a closing word is allowed on a line of its own, and nowhere else", () => {
 	expect(stray[1]).toBe("GitHub links #12, #88; the description closes #12.");
 	expect(problems(facts({ body: "Closes #12\n\nIssue #88, which is closed, and `fixes #3` in code.\n" }))).toEqual([]);
 	expect(closing("Fixed: #7 and\nResolves #8\n```\ncloses #9\n```\n")).toEqual({ closes: [8], stray: ["Fixed: #7"] });
+	// Fenced code in tildes is code too; an indented line is read, and is not a line of its own.
+	expect(closing("~~~text\nCloses #12\n~~~\n")).toEqual({ closes: [], stray: [] });
+	expect(closing("    Closes #12\n").closes).toEqual([]);
 });
 
 test("the milestone of the pull request is the milestone of its issue; in a stack nothing is linked yet", () => {
@@ -289,6 +300,12 @@ test("release gives the disk back, and refuses while a server or a test run work
 	await expect(release(root)).rejects.toThrow(`pid ${server.pid}`);
 	expect(existsSync(join(root, "node_modules", "inner"))).toBe(true);
 	server.kill();
+	// A single test file, or any other bun program, is not a server and not a test worker, and is as much in use.
+	const single = decoy(root, ["running.test.ts"], root);
+	await Bun.sleep(300);
+	await expect(release(root)).rejects.toThrow(`pid ${single.pid}`);
+	expect(existsSync(join(root, "node_modules", "inner"))).toBe(true);
+	single.kill();
 	await Bun.sleep(300);
 	expect(await release(root)).toContain("released node_modules");
 	expect(RELEASED.filter((name) => existsSync(join(root, name)))).toEqual([]);
@@ -341,4 +358,56 @@ test("sync-branch moves a branch whose commits were merged by rebase, and refuse
 	expect(await git(clone, "rev-parse", "HEAD")).toBe(await git(clone, "rev-parse", "origin/main"));
 	await git(clone, "checkout", "-q", "main");
 	await expect(syncBranch(clone)).rejects.toThrow("main is not a thread's branch");
+});
+
+test("sync-branch keeps a merge commit's conflict resolution that main does not hold", async () => {
+	const { clone, git } = await clonePair();
+	const commit = async (content: string, message: string) => {
+		writeFileSync(join(clone, "x.txt"), content);
+		await git(clone, "add", ".");
+		await git(clone, "commit", "-q", "-m", message);
+	};
+	await git(clone, "checkout", "-q", "main");
+	await commit("base\n", "x");
+	await git(clone, "checkout", "-q", "-b", "b");
+	await commit("b\n", "b");
+	await git(clone, "checkout", "-q", "-b", "a", "main");
+	await commit("a\n", "a");
+	// The thread and main each merge b into a, with their own resolution of the conflict.
+	const merge = async (branch: string, resolution: string) => {
+		await git(clone, "checkout", "-q", "-B", branch, "a");
+		await run(["git", "merge", "b"], { cwd: clone });
+		await commit(resolution, `merge b: ${resolution.trim()}`);
+	};
+	await merge("t3/thread", "topic resolution\n");
+	await merge("elsewhere", "main resolution\n");
+	await git(clone, "push", "-q", "origin", "elsewhere:main");
+	await git(clone, "checkout", "-q", "t3/thread");
+	await git(clone, "fetch", "-q", "origin");
+	// Every ordinary commit of the thread is on main, so `git cherry` says nothing; its merge commit is not.
+	expect(await git(clone, "cherry", "origin/main", "HEAD")).toBe("");
+	const mine = await git(clone, "rev-parse", "HEAD");
+	await expect(syncBranch(clone, false)).rejects.toThrow("merge commit(s) that origin/main does not hold");
+	expect(await git(clone, "rev-parse", "HEAD")).toBe(mine);
+	// A branch that holds the same tree as main loses nothing.
+	await commit("main resolution\n", "the same content");
+	expect(await syncBranch(clone, false)).toBe("t3/thread is at origin/main");
+});
+
+test("check-time stops at a command that failed, and at no rounds", async () => {
+	const repo = await repository();
+	const options = {
+		rounds: 1,
+		install: false,
+		repo,
+		busy: async () => false,
+		command: ["sh", "-c", "echo 'tests 1.0 s'; echo broke >&2; exit 1"],
+	};
+	await expect(compare("HEAD~1", "HEAD", options, () => {})).rejects.toThrow("failed (exit 1)");
+	const over = {
+		...options,
+		command: ["sh", "-c", "echo 'tests 160.0 s'; echo 'OVER BUDGET: the tests took 160 s'; exit 1"],
+	};
+	expect(await compare("HEAD~1", "HEAD", over, () => {})).toContain("base: 160.0 s");
+	await expect(compare("HEAD~1", "HEAD", { ...options, rounds: 0 }, () => {})).rejects.toThrow("at least 1");
 });

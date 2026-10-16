@@ -40,6 +40,7 @@
     "test/e2e/docs.test.ts": 6389,
     "test/budgets.test.ts": 6082,
     "test/e2e/people-access.test.ts": 5644,
+    "test/work.test.ts": 5600,
     "test/e2e/shell.test.ts": 5293,
     "test/e2e/people-invite.test.ts": 5192,
     "src/server/transfer/transfer.test.ts": 4852,

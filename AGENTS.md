@@ -22,7 +22,7 @@ fixed in code, a check or a script, not noted here (decision 0091). This file st
 | `bun scripts/ci-scope.ts` | what CI would run for the branch (`.github/workflows/check.yml` says what each job does) |
 | `bun scripts/work.ts scratch new <name>`, `scratch rm <directory>` | scratch files go in `~/.cache`, never in the worktree (the architecture test reads every file of the tree); `rm` deletes only a directory `new` made. A reviewer works in a `git archive <rev>` export there |
 | `bun scripts/work.ts stop-server`, `wait-tests` | stop the servers you started; wait for another agent's test run (one agent at a time runs the whole suite; `bun run check` notes another run) |
-| `bun scripts/work.ts release` | last command of a task, and the `release worktree` script of `t3.json`; refuses while a server or test run still works from the checkout |
+| `bun scripts/work.ts release` | last command of a task, and the `release worktree` script of `t3.json`; refuses while a server, a test run or another bun or node process works from the checkout |
 | `bun scripts/work.ts board`, `pr-body`, `sync-branch`, `check-time` | below; `bun scripts/work.ts` alone lists every command, and `test/work.test.ts` holds each |
 
 ## Rules
